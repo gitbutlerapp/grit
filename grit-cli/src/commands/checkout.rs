@@ -11,8 +11,9 @@ use grit_lib::config::ConfigSet;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::resumable::{discard_download, download_resumable};
 use grit_lib::remote::snapshot_checkout::{
-    materialize, normalize_paths, suggest_work_branch, CheckoutClient, CheckoutMarker,
-    CheckoutRequest, CheckoutState, RefreshOutcome,
+    materialize, normalize_paths, suggest_work_branch, BranchInfo, BranchRefresh,
+    BranchRefreshResult, CheckoutClient, CheckoutMarker, CheckoutRequest, CheckoutState,
+    RefreshOutcome,
 };
 use grit_lib::remote::HttpClientFactory;
 use schemars::JsonSchema;
@@ -472,6 +473,67 @@ impl PullRefreshJson {
             followed: Vec::new(),
             behind: Vec::new(),
             gave_change_ids: 0,
+        }
+    }
+}
+
+/// What `grit pull <branch>` did in a checkout: the server's branch as the
+/// checkout sees it, and the local branch brought onto it.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct PullServerBranchJson {
+    /// The branch, as the server spells it (which can differ in case from the
+    /// name given, on a server that ignores case).
+    pub name: String,
+    /// The local ref holding the server's branch as this checkout sees it,
+    /// `refs/remotes/origin/<branch>`.
+    pub upstream_ref: String,
+    /// Where the server's branch is, on its real history.
+    pub tip: String,
+    /// What this checkout sees of it, now at `upstream_ref`.
+    pub projected: String,
+    /// The server branch's commits the target lacks, all shown to this
+    /// checkout (cut down to its paths).
+    pub commits: usize,
+    /// How many of them were made afresh for this checkout.
+    pub made: usize,
+    /// How many were commits that were there already: checkout commits on
+    /// the same snapshots that the server's are grafts of (this checkout's
+    /// own among them), and what it was shown before.
+    pub reused: usize,
+    /// Where the local branch was; null when it was created.
+    pub previous: Option<String>,
+    /// Commits of the local branch replayed onto the server's (its own
+    /// commits, without copies of the server's).
+    pub own: usize,
+    /// Whether `HEAD` was moved onto the branch to rebase it.
+    pub switched: bool,
+    /// The branch `HEAD` was on before, if any.
+    pub was_on: Option<String>,
+    /// Commits made with plain Git on the branch that were given a change id
+    /// first (the branch was rewritten with it).
+    pub gave_change_ids: usize,
+}
+
+impl PullServerBranchJson {
+    /// The JSON of a `grit pull <branch>` the library did.
+    #[must_use]
+    pub fn from_refresh(info: &BranchInfo, r: &BranchRefresh) -> Self {
+        Self {
+            name: r.name.clone(),
+            upstream_ref: r.upstream_ref.clone(),
+            tip: info.tip.clone(),
+            projected: r.projected.to_hex(),
+            commits: info.commits,
+            made: info.made,
+            reused: info.reused,
+            previous: r.previous.map(|p| p.to_hex()),
+            own: match r.result {
+                BranchRefreshResult::Rebased { own } => own,
+                _ => 0,
+            },
+            switched: r.switched,
+            was_on: r.was_on.clone(),
+            gave_change_ids: r.gave_change_ids,
         }
     }
 }

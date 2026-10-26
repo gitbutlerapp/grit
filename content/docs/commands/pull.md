@@ -15,6 +15,8 @@ grit pull --rebase
 grit pull --no-rebase
 grit pull --autostash
 grit pull --check [<remote>] [<refspec>…]
+grit pull <branch>                 # in a snapshot checkout
+grit pull origin <branch>          # the same
 ```
 
 ## Description
@@ -71,6 +73,36 @@ $ grit add src/a.rs && grit rebase --continue
 Rebased 1 commit(s)
 ```
 
+### A server branch in a snapshot checkout
+
+In a snapshot checkout, `grit pull <branch>` (or `grit pull origin <branch>`, naming the checkout's server) brings your `<branch>` onto the server's branch of that name, as your checkout sees it. That is how you pick up a teammate's branch, or work on one with someone whose checkout has other paths. `<branch>` must not be the name of a configured remote (then it is an ordinary pull from that remote); naming the branch the checkout follows (`grit pull main`) is just a refresh.
+
+1. The server **shows you its branch**: each of its commits that the target lacks is rewritten with its tree cut down to your checkout's paths, on top of your newest snapshot under it, at `refs/checkouts/<id>/in/heads/<branch>` (see [`grit serve`](../serve/#snapshot-checkouts)). Author, date and message are kept. A commit that only touched paths you don't have shows up as an empty commit, so the history still lines up with the server's. Your own commits that the server's are grafts of come back as they are, and files outside your paths that they added stay in the commits above them while they are still files there (one the server turned into a directory is dropped). Another checkout's commit is never shown to you as it is when it has files outside your paths, even on the same snapshot. On a server whose file system can't tell names apart by case, a name that differs from the server's branch only in case is that branch, and you get it under the server's spelling (`grit pull feature` creates `Feature`), so its check-ins aren't refused as a case conflict.
+2. It **fetches** that into `origin/<branch>` (`refs/remotes/origin/<branch>`) from the server the checkout came from, with no tags, and checks that what arrived is what the server described.
+3. It gives the branch's commits made with plain `git` a change id, as `grit checkin` does.
+4. It **brings your branch onto it**:
+   - a branch you don't have yet is **created** at the server's (`created`; switch to it with `grit switch <branch>`);
+   - a branch that has every commit already is left alone (`up_to_date`: `feature already has them.`);
+   - one with nothing of its own on top moves to it (`fast_forward`), keeping uncommitted changes when it is the current branch;
+   - otherwise **your own commits are rebased onto it** (`rebased`): those above the newer of where your branch meets the server's and the newest snapshot it builds on. Copies of the server's commits that your branch holds (made when a refresh rebased it onto a newer snapshot, say) are left out, recognized by change id or by patch, so only your work moves. A rebase that conflicts **stops** for you to resolve, then `grit rebase --continue` (or `--abort`), as a refresh's does (`rebase_stopped`). When the branch is not the current one, you are switched to it first, as `git rebase <upstream> <branch>` does, and switched back when the rebase can't go ahead (local changes it would overwrite, say). A branch that another worktree has checked out, or is rebasing or bisecting, is refused. A rebase of yours goes through cleanly when the server's branch turned a directory into a file (or the other way round) and your commits never touched it.
+
+Checking the branch in afterwards is a fast-forward on top of the server's: work you build on its commits is grafted onto the real commits they stand for (see [`grit checkin`](../checkin/#sharing-a-branch)). It always rebases, so `--ff-only`, `--no-rebase`, `--autostash` and `--dry-run` are refused; `--check` says what it would do to the branch without changing it (the server still shows the branch, and it is fetched).
+
+```console
+$ grit pull feature
+The server's feature is at bcd6c48: 2 commits on this checkout's snapshots, at origin/feature (19a3116).
+Rebased feature onto origin/feature (4c2d9e1), 1 commit of yours on top.
+feature builds on the server's now; `grit checkin feature` sends it.
+$ grit pull feature
+The server's feature is at bcd6c48: 2 commits on this checkout's snapshots, at origin/feature (19a3116).
+feature already has them.
+$ grit pull theirs
+The server's theirs is at 6f1c2d3: 1 commit on this checkout's snapshots, at origin/theirs (a2b3c4d).
+Created theirs at a2b3c4d, the server's; `grit switch theirs` to work on it.
+```
+
+The server refuses a branch it doesn't have, one the target already has every commit of, and one that builds on a commit from before your checkout's first snapshot (its author can rebase it onto a newer target first). A local branch by that name that shares nothing with the server's is refused too; rename it to get the server's.
+
 A merge commit a `--no-rebase` refresh makes checks in as a merge whose result keeps the target's changes outside your paths (see [`grit checkin`](../checkin/)). A later rebasing refresh drops the merge commits a `--no-rebase` refresh made and replays your own commits onto the new snapshot.
 
 `--dry-run` asks the server where the target is now and says whether a refresh would move, without the server making a snapshot, and without fetching or changing anything here. `--check` refreshes for real (the server makes the snapshot and it is fetched into `origin/<target>`), then reports what bringing the branch onto it would do, without changing the branch, the index or the worktree.
@@ -81,7 +113,7 @@ A merge commit a `--no-rebase` refresh makes checks in as a merge whose result k
 
 | Option | Description |
 | --- | --- |
-| `<remote>` | Remote to pull from (same rules as [`grit fetch`](../fetch/); defaults to the branch remote or `origin`). |
+| `<remote>` | Remote to pull from (same rules as [`grit fetch`](../fetch/); defaults to the branch remote or `origin`). In a snapshot checkout, a name that is not a configured remote is a branch: `grit pull <branch>` brings it onto the [server's branch](#a-server-branch-in-a-snapshot-checkout). |
 | `<refspec>…` | Refspecs to fetch before integrating (same as fetch); integration uses `FETCH_HEAD` when refspecs are given. |
 | `--tags` / `--no-tags` | Tag fetching policy (same as [`grit fetch`](../fetch/)). |
 | `--all` | Fetch all configured remotes before integrating (same as [`grit fetch`](../fetch/); cannot combine with `<remote>` or refspecs). |
@@ -154,11 +186,11 @@ Schema: [v2](/schemas/pull/v2.json) · [v1](/schemas/pull/v1.json)
 
 Pass `--json` for stable, scripting-friendly output:
 
-Exit codes (also apply to default human output): **0** on success (`up_to_date`, `fast_forward`, `merged`, `rebased`, `set_upstream`, `detached`, or `landed`) and on `--check` when `check.fast_forward_possible` is true; **1** when `--ff-only` refuses diverged history (`refused_not_ff`), integration stops with conflicts (`conflicts`, with `operation` `merge` or `rebase` in progress), a snapshot checkout's refresh stops in a rebase (`rebase_stopped`), `--check` when a merge or rebase would be required, or `autostash_conflict`.
+Exit codes (also apply to default human output): **0** on success (`up_to_date`, `fast_forward`, `merged`, `rebased`, `set_upstream`, `detached`, `landed`, or `created`) and on `--check` when `check.fast_forward_possible` is true; **1** when `--ff-only` refuses diverged history (`refused_not_ff`), integration stops with conflicts (`conflicts`, with `operation` `merge` or `rebase` in progress), a snapshot checkout's refresh stops in a rebase (`rebase_stopped`), `--check` when a merge or rebase would be required, or `autostash_conflict`.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `result` | string | `up_to_date`, `fast_forward`, `merged`, `rebased`, `refused_not_ff`, `conflicts`, `set_upstream`, `autostash_conflict`, `rebase_stopped` (a snapshot checkout's rebase stopped on a conflict and is in progress), `detached` (a snapshot checkout refreshed with `HEAD` detached: only `origin/<target>` moved), or `landed` (in a snapshot checkout, every commit of the branch was integrated, so it moved to the new snapshot, keeping uncommitted changes). |
+| `result` | string | `up_to_date`, `fast_forward`, `merged`, `rebased`, `refused_not_ff`, `conflicts`, `set_upstream`, `autostash_conflict`, `rebase_stopped` (a snapshot checkout's rebase stopped on a conflict and is in progress), `detached` (a snapshot checkout refreshed with `HEAD` detached: only `origin/<target>` moved), `landed` (in a snapshot checkout, every commit of the branch was integrated, so it moved to the new snapshot, keeping uncommitted changes), or `created` (`grit pull <branch>` in a snapshot checkout made the branch at the server's). |
 | `branch` | string | Remote branch label that was integrated (or checked). |
 | `oid` | string or null | Commit the current branch points at after the pull, when applicable (absent when a rebase stopped). |
 | `change_id` | string or null | Stored `change-id` on `oid` when present. |
@@ -186,6 +218,19 @@ Exit codes (also apply to default human output): **0** on success (`up_to_date`,
 | `refresh.followed` | array | Local branches with no commits of their own that moved along (the one named after the target, and any whose commits were all integrated): `name`, `from`, `to`. |
 | `refresh.behind` | array | Other branches with commits of their own still on an older snapshot: `name`, `tip`. |
 | `refresh.gave_change_ids` | integer | Commits made with plain `git` on the current branch that were given a change id before the rebase (the branch was rewritten); `0` when none needed one. |
+| `server_branch` | object or omitted | In a snapshot checkout, `grit pull <branch>`: the server's branch and what your branch did (fields below). `branch` is then `origin/<branch>` and `oid` where your branch is now. |
+| `server_branch.name` | string | The branch, as the server spells it (which can differ in case from the name you gave, on a server that ignores case). |
+| `server_branch.upstream_ref` | string | The local ref holding the server's branch as the checkout sees it, `refs/remotes/origin/<branch>`. |
+| `server_branch.tip` | string | Where the server's branch is, on its real history. |
+| `server_branch.projected` | string | What the checkout sees of it, now at `upstream_ref`. |
+| `server_branch.commits` | integer | The server branch's commits the target lacks, all shown to the checkout. |
+| `server_branch.made` | integer | How many of them were made afresh for this checkout. |
+| `server_branch.reused` | integer | How many were commits that were there already: checkout commits on the same snapshots that the server's are grafts of (your own among them), and what you were shown before. |
+| `server_branch.previous` | string or null | Where your branch was; null when it was `created`. |
+| `server_branch.own` | integer | Your commits replayed onto the server's (`rebased`), without the copies of the server's that were left out. |
+| `server_branch.switched` | boolean | Whether `HEAD` was moved onto the branch to rebase it. |
+| `server_branch.was_on` | string or null | The branch `HEAD` was on before. |
+| `server_branch.gave_change_ids` | integer | Commits made with plain `git` on the branch that were given a change id first. |
 
 Example:
 
@@ -244,6 +289,30 @@ In a snapshot checkout:
 }
 ```
 
+`grit pull feature` in a snapshot checkout, from another branch:
+
+```json
+{
+  "result": "rebased",
+  "branch": "origin/feature",
+  "oid": "4c2d9e1b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d",
+  "server_branch": {
+    "name": "feature",
+    "upstream_ref": "refs/remotes/origin/feature",
+    "tip": "bcd6c48a1f2e3d4c5b6a79881726354a5b6c7d8e",
+    "projected": "19a3116f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b",
+    "commits": 2,
+    "made": 1,
+    "reused": 1,
+    "previous": "8e2d26b0a1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6",
+    "own": 1,
+    "switched": true,
+    "was_on": "alice/elm-orchid",
+    "gave_change_ids": 1
+  }
+}
+```
+
 With `--check`:
 
 ```json
@@ -288,12 +357,23 @@ In a snapshot checkout, the refresh comes first, and branches it moved or left b
 - `side` still builds on an older snapshot → `grit switch side`, then `grit pull`
 ```
 
+`grit pull <branch>` in a snapshot checkout names the server's branch first:
+
+```text
+## Pull
+
+- Change ids: gave 1 commit made with git a change id
+- Server branch: **`feature`** at `bcd6c48` · 2 commits on this checkout's snapshots · at `refs/remotes/origin/feature` (`19a3116`)
+- Rebased **`feature`** onto **`origin/feature`** · `4c2d9e1` · 1 commit of yours on top → `grit checkin feature` sends it
+- Now on `feature` (was `alice/elm-orchid`)
+```
+
 ## Exit status
 
 | Code | Meaning |
 | ---: | --- |
-| `0` | Success (`up_to_date`, `fast_forward`, `merged`, `rebased`, `set_upstream`) or `--check` when fast-forward is possible. |
-| `1` | Conflicts, refused merge/rebase, a snapshot checkout's rebase stopped in progress (`rebase_stopped`), a refresh refused while a rebase or merge is in progress, `--check` when integration would be required, or `autostash_conflict`. |
+| `0` | Success (`up_to_date`, `fast_forward`, `merged`, `rebased`, `set_upstream`, `detached`, `landed`, `created`) or `--check` when fast-forward is possible. |
+| `1` | Conflicts, refused merge/rebase, a snapshot checkout's rebase stopped in progress (`rebase_stopped`), a refresh refused while a rebase or merge is in progress, `--check` when integration would be required, `autostash_conflict`, or a server branch `grit pull <branch>` can't take (the server has none, or it is already on the target or older than the checkout's first snapshot). |
 | `2` | Invalid flags ([`usage`](../exit-codes/)). |
 | `128` | `--ff-only` when history diverged ([`refused_not_ff`](../exit-codes/)). |
 | `128` | The fetch could not reach or read the remote ([`remote_unreadable`](../exit-codes/)). |

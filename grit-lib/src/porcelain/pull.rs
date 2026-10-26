@@ -108,6 +108,11 @@ pub struct FetchedUpstream {
     /// `git reset --keep` does ([`PullResult::Landed`]). Ignored unless it is in the
     /// branch's history.
     pub landed: Option<ObjectId>,
+    /// Commits of the current branch above [`Self::landed`] whose changes [`Self::oid`] already
+    /// has as other commits, which a patch-id can't match (a copy made on another base,
+    /// recognized by its change id): a rebase leaves them out, replaying the next commit onto
+    /// the one before.
+    pub copies: Vec<ObjectId>,
 }
 
 /// Dry-run result for [`PullOptions::check`].
@@ -548,6 +553,10 @@ where
                     oid: upstream_oid,
                     label: &label,
                     landed,
+                    copies: options
+                        .upstream
+                        .as_ref()
+                        .map_or(&[], |u| u.copies.as_slice()),
                 },
                 integration,
                 stop_on_conflict,
@@ -771,6 +780,8 @@ struct Upstream<'a> {
     label: &'a str,
     /// [`FetchedUpstream::landed`].
     landed: Option<ObjectId>,
+    /// [`FetchedUpstream::copies`].
+    copies: &'a [ObjectId],
 }
 
 fn integrate_fetched_upstream(
@@ -785,6 +796,7 @@ fn integrate_fetched_upstream(
         oid: upstream_oid,
         label,
         landed,
+        ..
     } = upstream;
     let diverged = diverged(repo, head_oid, upstream_oid)?;
 
@@ -841,6 +853,7 @@ fn rebase_fetched_upstream(
         oid: upstream_oid,
         label,
         landed,
+        copies,
     } = upstream;
     let fork = merge_bases_first_vs_rest(repo, head_oid, &[upstream_oid])
         .map_err(PullError::Repository)?
@@ -872,9 +885,12 @@ fn rebase_fetched_upstream(
         },
     };
 
+    let mut rebase = pull_rebase_options(repo)?;
+    // The upstream already has these commits: they are its copies of local ones.
+    rebase.drop = copies.to_vec();
     let start = StartRebaseOptions {
         request,
-        rebase: pull_rebase_options(repo)?,
+        rebase,
         apply: ApplyOptions {
             identity: repo
                 .identity(IdentRole::Committer, repo.identity_now())
@@ -1340,6 +1356,7 @@ mod tests {
             label: "origin/up".to_owned(),
             oid: tip,
             landed: None,
+            copies: Vec::new(),
         });
         let outcome = pull(&repo, &options, &mut NoProgress, &NeverCancel, None)
             .expect("pull without a fetch");
@@ -1368,6 +1385,7 @@ mod tests {
             label: "origin/main".to_owned(),
             oid: upstream,
             landed: None,
+            copies: Vec::new(),
         });
         options
     }

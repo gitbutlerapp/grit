@@ -12,6 +12,7 @@
 //! | `POST /.grit/checkouts/<repo>/<id>/update` | read | refresh: JSON [`CheckoutInfo`] |
 //! | `POST /.grit/checkouts/<repo>/<id>/checkin` | write | JSON [`CheckinResponse`] |
 //! | `POST /.grit/checkouts/<repo>/<id>/work` | read | a fresh work branch: JSON [`WorkBranchResponse`] |
+//! | `POST /.grit/checkouts/<repo>/<id>/branch` | read | a server branch as the checkout sees it, at `refs/checkouts/<id>/in/heads/<branch>`: JSON [`BranchInfo`](grit_lib::remote::snapshot_checkout::BranchInfo) |
 //! | `POST /.grit/checkouts/<repo>/integrate` | write | JSON [`IntegrateResponse`] |
 //! | `/.grit/checkouts/<repo>/slices…` | read / write | the slices on the target |
 //!
@@ -22,6 +23,11 @@
 //! the repository's [`CheckoutStore`] and points `refs/checkouts/<id>/target`
 //! at its snapshot, which keeps the snapshot's objects alive. A refresh
 //! snapshots the branch the checkout was made from.
+//!
+//! The repository's [`GraftLog`](grit_lib::remote::snapshot_checkout::GraftLog) records which real commit each checkout
+//! commit stands for: check-ins add the commits they graft, and showing a
+//! checkout one of the server's branches ([`project_branch`]) adds the
+//! commits it projects, so work built on those grafts onto the real ones.
 //!
 //! Requests on one checkout take turns, and so do check-ins setting the
 //! repository's branches and the requests that move its target branch
@@ -43,14 +49,14 @@ use grit_lib::bundle::BundleSpec;
 use grit_lib::ident::Signature;
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::snapshot_checkout::{
-    edit_slices, graft_checkin_branch, integrate, make_snapshot, normalize_paths, read_slices,
-    set_checked_in_branch, target_branch, target_ref, valid_checkout_id, CheckinBranch,
-    CheckinRefusal, CheckinRequest, CheckinResponse, CheckinResult, CheckinRule, CheckinStatus,
-    CheckoutError, CheckoutErrorBody, CheckoutInfo, CheckoutRecord, CheckoutRequest,
-    CheckoutServerInfo, CheckoutState, CheckoutStore, Ident, IntegrateRequest, IntegrateResponse,
-    Slice, SliceChange, SliceDeleteRequest, SliceEdit, SliceRequest, SlicesEdited, SlicesResponse,
-    SnapshotRoot, StoredCheckout, TargetChange, TargetRefusal, WorkBranchRequest,
-    WorkBranchResponse,
+    edit_slices, graft_checkin_branch, integrate, make_snapshot, normalize_paths, project_branch,
+    read_slices, set_checked_in_branch, target_branch, target_ref, valid_checkout_id,
+    BranchRequest, CheckinBranch, CheckinRefusal, CheckinRequest, CheckinResponse, CheckinResult,
+    CheckinRule, CheckinStatus, CheckoutError, CheckoutErrorBody, CheckoutInfo, CheckoutRecord,
+    CheckoutRequest, CheckoutServerInfo, CheckoutState, CheckoutStore, Ident, IntegrateRequest,
+    IntegrateResponse, ProjectError, Slice, SliceChange, SliceDeleteRequest, SliceEdit,
+    SliceRequest, SlicesEdited, SlicesResponse, SnapshotRoot, StoredCheckout, TargetChange,
+    TargetRefusal, WorkBranchRequest, WorkBranchResponse,
 };
 use grit_lib::repo::Repository;
 use grit_protocol::RepositoryOptions;
@@ -641,6 +647,83 @@ pub(crate) async fn work_branch(
     )
 }
 
+/// `POST /.grit/checkouts/<repo>/<id>/branch`: show the server's branch to
+/// the checkout, as its paths and snapshots see it, at
+/// `refs/checkouts/<id>/in/heads/<branch>` for it to fetch.
+pub(crate) async fn branch(
+    State(state): State<Arc<ServerState>>,
+    UrlPath((name, id)): UrlPath<(String, String)>,
+    headers: HeaderMap,
+    Json(request): Json<BranchRequest>,
+) -> Response<Body> {
+    respond(
+        with_checkout(
+            &state,
+            &headers,
+            &name,
+            id.clone(),
+            Access::Read,
+            move |served, _, options, _, slot| {
+                let repo = open(&served, &options)?;
+                let (_, stored) = load_held(slot, &repo, &id)?;
+                let log = CheckoutStore::for_repository(&repo).graft_log();
+                let shown = project_branch(&repo, &stored.info, &log, &request.name)
+                    .map_err(|e| internal(&e))?
+                    .map_err(|refusal| {
+                        eprintln!(
+                            "branch: {id} of {}: {} refused ({})",
+                            served.name,
+                            request.name,
+                            refusal.kind()
+                        );
+                        projection_refused(&request.name, &stored.info.branch, &refusal)
+                    })?;
+                eprintln!(
+                    "branch: {id} of {}: {} at {} → {} ({} commits; {} new, {} reused)",
+                    served.name,
+                    shown.name,
+                    shown.tip.get(..12).unwrap_or(&shown.tip),
+                    shown.projected.get(..12).unwrap_or(&shown.projected),
+                    shown.commits,
+                    shown.made,
+                    shown.reused
+                );
+                Ok(shown)
+            },
+        )
+        .await,
+    )
+}
+
+/// The answer to a projection the library refused, in words.
+fn projection_refused(name: &str, follows: &str, refusal: &ProjectError) -> Rejection {
+    let (status, message) = match refusal {
+        ProjectError::InvalidName => (
+            StatusCode::BAD_REQUEST,
+            format!("{name} is not a valid branch name"),
+        ),
+        ProjectError::TargetBranch { target } => (
+            StatusCode::BAD_REQUEST,
+            format!("{name} is the branch this checkout follows; `grit pull` refreshes onto the newest {target}"),
+        ),
+        ProjectError::NoSuchBranch => (
+            StatusCode::NOT_FOUND,
+            format!("the server has no branch {name}"),
+        ),
+        ProjectError::OnTarget => (
+            StatusCode::CONFLICT,
+            format!("{follows} already has every commit of {name}; `grit pull` brings them"),
+        ),
+        ProjectError::BeforeFirstSnapshot { commit } => (
+            StatusCode::CONFLICT,
+            format!(
+                "{name} builds on {commit} of {follows}, from before this checkout's first snapshot; rebase it onto a newer {follows} first"
+            ),
+        ),
+    };
+    error(status, message)
+}
+
 /// `POST /.grit/checkouts/<repo>/<id>/checkin`: graft pushed branches onto
 /// the real history and set the server's branches.
 pub(crate) async fn checkin(
@@ -690,17 +773,26 @@ fn checkin_blocking(
     targets.dedup();
     let who = signature(None, email)?;
     let reflog = format!("checkin: from checkout {id}");
+    let log = CheckoutStore::for_repository(repo).graft_log();
     let mut results = Vec::new();
     for branch in &request.branches {
-        let grafted = match graft_checkin_branch(repo, &stored.info, &target, branch)
-            .map_err(|e| internal(&e))?
-        {
-            Ok(grafted) => grafted,
-            Err(refusal) => {
-                results.push(refused(served, id, branch, &target, refusal));
-                continue;
-            }
-        };
+        let grafted =
+            match graft_checkin_branch(repo, &stored.info, &target, branch, Some(&log), &targets)
+                .map_err(|e| internal(&e))?
+            {
+                Ok(grafted) => grafted,
+                Err(refusal) => {
+                    results.push(refused(
+                        served,
+                        id,
+                        branch,
+                        &stored.info.branch,
+                        &target,
+                        refusal,
+                    ));
+                    continue;
+                }
+            };
         let set = {
             let _branches = locks.branches();
             set_checked_in_branch(
@@ -719,11 +811,34 @@ fn checkin_blocking(
         let set = match set {
             Ok(set) => set,
             Err(refusal) => {
-                results.push(refused(served, id, branch, &target, refusal));
+                results.push(refused(
+                    served,
+                    id,
+                    branch,
+                    &stored.info.branch,
+                    &target,
+                    refusal,
+                ));
                 continue;
             }
         };
-        stored.record_set(&branch.name, grafted.tip);
+        // A branch found ahead of the graft (one this checkout pulled, which
+        // moved on since) is not where this checkout set it.
+        if set.status != CheckinStatus::Unchanged || set.previous == Some(grafted.tip) {
+            stored.record_set(&branch.name, grafted.tip);
+        }
+        // The branch is set already, so a graft log that can't be written
+        // only costs later projections and grafts a walk; the check-in still
+        // succeeds and its record is saved.
+        if let Err(e) = log.record(&grafted.commits) {
+            eprintln!(
+                "checkin: {id} of {}: {}: could not record {} grafts in {}: {e}",
+                served.name,
+                branch.name,
+                grafted.commits.len(),
+                log.dir().display()
+            );
+        }
         eprintln!(
             "checkin: {id} of {}: {} {:?} at {} ({} commits{})",
             served.name,
@@ -763,11 +878,13 @@ fn rule_words(rule: CheckinRule) -> &'static str {
 }
 
 /// The result for `branch` of a check-in the server refused, with its reason
-/// in words.
+/// in words. `follows` is the branch the checkout snapshots, and `target` the
+/// repository's target now.
 fn refused(
     served: &ServedRepository,
     id: &str,
     branch: &CheckinBranch,
+    follows: &str,
     target: &str,
     refusal: CheckinRefusal,
 ) -> CheckinResult {
@@ -795,7 +912,7 @@ fn refused(
             short(&branch.raw)
         ),
         CheckinRefusal::NotOnSnapshot { commit } => format!(
-            "commit {commit} of {name} does not build on this checkout's snapshots; rebase {name} onto the checkout's snapshot (`grit pull`) and check in again"
+            "commit {commit} of {name} builds on none of this checkout's snapshots (on the server's own history, say, fetched with plain Git); for a branch of the server's, take it with `grit pull <branch>` and build on that, or put your commits on the snapshot with `grit switch -c <new branch> origin/{follows}` and `grit pick <commits>`, then check that in"
         ),
         CheckinRefusal::Conflict { commit, path, outside_paths: true } => format!(
             "commit {commit} changes {path}, which is outside this checkout's paths and which {target} holds differently; make that change from a checkout whose paths include {path}"

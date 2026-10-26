@@ -958,6 +958,7 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ("fetch_prune", &["fetch", "--prune"]),
         ("pull_ff", &["pull"]),
         ("pull_refresh_render", &["pull"]),
+        ("pull_branch_render", &["pull"]),
         ("push_ok", &["push"]),
         ("push_up_to_date", &["push"]),
         ("push_rejected", &["push"]),

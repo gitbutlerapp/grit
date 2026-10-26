@@ -1,6 +1,7 @@
 //! `grit pull` — fetch from the remote, then integrate the upstream into the
 //! current branch (fast-forward when possible, otherwise a merge). In a snapshot
-//! checkout it refreshes the checkout onto the server's newest snapshot.
+//! checkout it refreshes the checkout onto the server's newest snapshot, and
+//! `grit pull <branch>` brings a branch onto the server's branch of that name.
 
 #[path = "pull_outcome.rs"]
 mod pull_outcome;
@@ -17,14 +18,15 @@ use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch_request::resolve_pull_invocation;
 use grit_lib::remote::snapshot_checkout::{
-    ensure_refreshable, refresh, CheckoutClient, CheckoutError, CheckoutMarker,
+    ensure_refreshable, fetch_branch, refresh, refresh_branch, same_branch_name, valid_branch_name,
+    CheckoutClient, CheckoutError, CheckoutMarker,
 };
 use grit_lib::remote::transfer::{resolve_fetch_prune, resolve_fetch_tags, FetchOptions};
 use grit_lib::remote::HttpClientFactory;
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head_for_repository, InProgressOperation};
 
-pub(crate) use pull_outcome::{changes_phrase, gave_change_ids_phrase};
+pub(crate) use pull_outcome::{changes_phrase, commits_on_snapshots, gave_change_ids_phrase};
 pub use pull_outcome::{map_outcome, PullOutcome, PullResult};
 
 #[derive(Default)]
@@ -65,8 +67,14 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     let repo = context::discover()?;
     let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true)
         .context("could not load config")?;
-    if let Some(marker) = checkout_to_refresh(&repo, &config, args) {
-        return refresh_checkout(&repo, &config, &marker, args, mode);
+    match checkout_pull(&repo, &config, args) {
+        Some(CheckoutPull::Refresh(marker)) => {
+            return refresh_checkout(&repo, &config, &marker, args, mode)
+        }
+        Some(CheckoutPull::Branch(marker, name)) => {
+            return pull_server_branch(&repo, &config, &marker, &name, args, mode)
+        }
+        None => {}
     }
     let mut options =
         PullOptions::for_working_branch(&repo, context::environment(), cli_mode(args))
@@ -136,25 +144,107 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     Ok(outcome)
 }
 
-/// The checkout `grit pull` should refresh: in a snapshot checkout, a pull
-/// that names no refspecs and no remote, or names the checkout's own server
-/// (`origin`, or whatever it is called now).
-fn checkout_to_refresh(
+/// What `grit pull` does in a snapshot checkout.
+enum CheckoutPull {
+    /// Refresh it onto the server's newest snapshot.
+    Refresh(CheckoutMarker),
+    /// Bring the local branch onto the server's branch of this name.
+    Branch(CheckoutMarker, String),
+}
+
+/// What `grit pull` should do in a snapshot checkout, if it is one.
+///
+/// A pull that names no refspecs and no remote refreshes it, and so does one
+/// naming the checkout's own server (`origin`, or whatever it is called now).
+/// `grit pull <branch>`, where `<branch>` is not a configured remote, and
+/// `grit pull <server> <branch>` bring the branch onto the server's; naming
+/// the branch the checkout follows is a refresh. Anything else is a plain
+/// pull.
+fn checkout_pull(
     repo: &Repository,
     config: &ConfigSet,
     args: &PullRunArgs,
-) -> Option<CheckoutMarker> {
-    if !args.fetch.refspecs.is_empty() || args.fetch.all {
+) -> Option<CheckoutPull> {
+    if args.fetch.all {
         return None;
     }
     let marker = CheckoutMarker::read(repo.git_dir())?;
-    match args.fetch.remote.as_deref() {
-        None => Some(marker),
-        Some(remote) => {
-            let url = config.get(&format!("remote.{remote}.url"));
-            (remote == marker.url || url.as_deref() == Some(marker.url.as_str())).then_some(marker)
+    let remote_url = |remote: &str| config.get(&format!("remote.{remote}.url"));
+    let is_server =
+        |remote: &str| remote == marker.url || remote_url(remote).as_deref() == Some(&marker.url);
+    let branch = match (args.fetch.remote.as_deref(), args.fetch.refspecs.as_slice()) {
+        (None, []) => None,
+        (Some(remote), []) if is_server(remote) => None,
+        (Some(name), []) if remote_url(name).is_none() && valid_branch_name(name) => {
+            Some(name.to_owned())
         }
+        (Some(remote), [branch]) if is_server(remote) => {
+            let branch = branch.strip_prefix("refs/heads/").unwrap_or(branch);
+            if !valid_branch_name(branch) {
+                return None;
+            }
+            Some(branch.to_owned())
+        }
+        _ => return None,
+    };
+    Some(match branch {
+        Some(name) if !same_branch_name(&name, &marker.branch) => {
+            CheckoutPull::Branch(marker, name)
+        }
+        _ => CheckoutPull::Refresh(marker),
+    })
+}
+
+/// `grit pull <branch>` in a snapshot checkout: the server shows its branch
+/// as this checkout sees it, the projection is fetched into
+/// `origin/<branch>`, and the local branch is created, moved or rebased onto
+/// it. With `--check`, says what it would do to the branch.
+fn pull_server_branch(
+    repo: &Repository,
+    config: &ConfigSet,
+    marker: &CheckoutMarker,
+    name: &str,
+    args: &PullRunArgs,
+    mode: OutputMode,
+) -> Result<PullOutcome> {
+    if args.ff_only || args.no_rebase || args.autostash || args.fetch.dry_run {
+        anyhow::bail!(
+            "`grit pull {name}` in a snapshot checkout rebases {name} onto the server's; it takes no --ff-only, --no-rebase, --autostash or --dry-run"
+        );
     }
+    ensure_refreshable(repo).map_err(refresh_error)?;
+    let http = crate::context::http_client_factory()
+        .create(config)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let client = CheckoutClient::new(http.as_ref(), &marker.url)?;
+    let mut progress = args.fetch.quiet.progress(mode).with_overall(false);
+    if progress.is_drawing() {
+        eprintln!(
+            "{}",
+            transfer_header("Pulling", name, Some(&marker.url), progress.uses_color())
+        );
+    }
+    let info = client.branch(&marker.id, name)?;
+    let fetch = FetchOptions {
+        thread_policy: repo.thread_policy(),
+        environment: context::environment(),
+        ..Default::default()
+    };
+    let transfer = fetch_branch(
+        repo,
+        marker,
+        &info,
+        fetch,
+        &mut progress,
+        &NeverCancel,
+        Some(&crate::context::http_client_factory()),
+    )
+    .map_err(refresh_error)?;
+    let refreshed = refresh_branch(repo, marker, &info, args.check).map_err(refresh_error)?;
+    let mut outcome = PullOutcome::from_server_branch(&info, &refreshed, transfer);
+    outcome.transfer.records = progress.phases().to_vec();
+    outcome.transfer.elapsed = progress.elapsed();
+    Ok(outcome)
 }
 
 /// `grit pull` in a snapshot checkout: ask the server for a snapshot of the
@@ -242,6 +332,21 @@ fn refresh_error(err: CheckoutError) -> anyhow::Error {
         moved @ CheckoutError::SnapshotMoved { .. } => {
             anyhow::anyhow!("{moved}; run `grit pull` again")
         }
+        CheckoutError::BranchMoved {
+            name,
+            expected,
+            got,
+        } => anyhow::anyhow!(
+            "{}; run `grit pull {name}` again",
+            CheckoutError::BranchMoved {
+                name: name.clone(),
+                expected,
+                got
+            }
+        ),
+        CheckoutError::UnrelatedBranch { name } => anyhow::anyhow!(
+            "your {name} has nothing in common with the server's {name}; rename yours (`grit branch -m {name} <new name>`), then `grit pull {name}` gets the server's"
+        ),
         other => other.into(),
     }
 }

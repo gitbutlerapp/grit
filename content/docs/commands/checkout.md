@@ -47,9 +47,9 @@ error: https://example.com/demo.git offers no grit checkout (no https://example.
 
 Sign in to the server first with [`grit auth <url>`](../auth/).
 
-Work comes back with [`grit checkin`](../checkin/), which rebuilds your branches on the server's real history. [`grit integrate <branch>`](../integrate/) merges one into the target branch, and [`grit pull`](../pull/) refreshes the checkout: the server makes a snapshot of the newest commit of the branch the checkout was made from (even if the server's `HEAD` has since moved to another branch) on top of your last one, `grit pull` fetches just the changes in your paths and rebases the current branch onto it. Commits already in the target drop out. A rebase that conflicts stops for you to resolve, then `grit rebase --continue`; other branches still on an older snapshot are named (see [`grit pull`](../pull/#in-a-snapshot-checkout)).
+Work comes back with [`grit checkin`](../checkin/), which rebuilds your branches on the server's real history. [`grit integrate <branch>`](../integrate/) merges one into the target branch, and [`grit pull`](../pull/) refreshes the checkout: the server makes a snapshot of the newest commit of the branch the checkout was made from (even if the server's `HEAD` has since moved to another branch) on top of your last one, `grit pull` fetches just the changes in your paths and rebases the current branch onto it. Commits already in the target drop out. A rebase that conflicts stops for you to resolve, then `grit rebase --continue`; other branches still on an older snapshot are named (see [`grit pull`](../pull/#in-a-snapshot-checkout)). `grit pull <branch>` shows you a branch on the server as your checkout sees it and brings your branch onto it, so checkouts of different paths can work on one branch (see [`grit pull`](../pull/#a-server-branch-in-a-snapshot-checkout)).
 
-To switch branches, use [`grit switch`](../switch/) (also `grit co`).
+To switch branches, use [`grit switch`](../switch/) (also `grit co`). Out of Git habit, `grit checkout <branch>` with no URL (nothing with `://`) and no other arguments does the same as `grit switch <branch>`, hints included.
 
 ## Options
 

@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Gave 1 commit made with git a change id.\nThe server's feature is at bcd6c48: 2 commits on this checkout's snapshots, at origin/feature (19a3116).\nRebased feature onto origin/feature (4c2d9e1), 1 commit of yours on top.\nNow on feature; it was alice/elm-orchid.\nfeature builds on the server's now; `grit checkin feature` sends it.\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"result\":\"rebased\",\"branch\":\"origin/feature\",\"oid\":\"4c2d9e1b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d\",\"server_branch\":{\"name\":\"feature\",\"upstream_ref\":\"refs/remotes/origin/feature\",\"tip\":\"bcd6c48a1f2e3d4c5b6a79881726354a5b6c7d8e\",\"projected\":\"19a3116f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b\",\"commits\":2,\"made\":1,\"reused\":1,\"previous\":\"8e2d26b0a1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6\",\"own\":1,\"switched\":true,\"was_on\":\"alice/elm-orchid\",\"gave_change_ids\":1}}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Pull\n\n- Change ids: gave 1 commit made with git a change id\n- Server branch: **`feature`** at `bcd6c48` · 2 commits on this checkout's snapshots · at `refs/remotes/origin/feature` (`19a3116`)\n- Rebased **`feature`** onto **`origin/feature`** · `4c2d9e1` · 1 commit of yours on top → `grit checkin feature` sends it\n- Now on `feature` (was `alice/elm-orchid`)\n",
+    "stderr": ""
+  }
+}

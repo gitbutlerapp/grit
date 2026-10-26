@@ -91,6 +91,14 @@ pub struct RebaseOntoOptions {
     /// "ours" is the checked-out branch. [`MergeFavor::Ours`] therefore keeps upstream content;
     /// [`MergeFavor::Theirs`] keeps the replayed commit's changes.
     pub favor: MergeFavor,
+    /// In a linear replay ([`Self::flatten_leaf_merges`]), commits of the range to leave out,
+    /// as a dropped pick of `git rebase -i` is: the next commit is replayed onto the one before.
+    /// A caller that knows a commit's change is already on the onto side as another commit,
+    /// where a patch-id can't tell (a copy made on another base), lists it here. Ignored when
+    /// merges are replayed. Read when the replay is planned; a rebase that stops keeps the
+    /// drops in its saved plan, so the field is not saved with it.
+    #[serde(skip)]
+    pub drop: Vec<ObjectId>,
 }
 
 impl RebaseOntoOptions {
@@ -102,6 +110,7 @@ impl RebaseOntoOptions {
             skip_applied: true,
             flatten_leaf_merges: false,
             favor: MergeFavor::default(),
+            drop: Vec::new(),
         }
     }
 }
@@ -333,7 +342,7 @@ pub(crate) fn build_rebase_rewrite_inputs(
     };
 
     let edits = if opts.flatten_leaf_merges {
-        linear_rebase_edits(repo, onto, &range, &skip_map)?
+        linear_rebase_edits(repo, onto, &range, &skip_map, &opts.drop)?
     } else {
         merge_preserving_rebase_edits(repo, fork, onto, &range, &skip_map)?
     };
@@ -345,14 +354,16 @@ pub(crate) fn build_rebase_rewrite_inputs(
 /// Edits that replay `range` in one line onto `onto`, like `git rebase` without
 /// `--rebase-merges`.
 ///
-/// Merges are dropped, commits whose patch is already in `fork..onto` reuse that commit, and
-/// every other commit is reparented onto the previous replayed one. Planning with
-/// `linearize_onto` maps the dropped and reused entries to the tip of the line.
+/// Merges and the commits in `drop` are dropped, commits whose patch is already in
+/// `fork..onto` reuse that commit, and every other commit is reparented onto the previous
+/// replayed one. Planning with `linearize_onto` maps the dropped and reused entries to the tip
+/// of the line.
 fn linear_rebase_edits(
     repo: &Repository,
     onto: ObjectId,
     range: &[ObjectId],
     skip_map: &HashMap<ObjectId, ObjectId>,
+    drop: &[ObjectId],
 ) -> Result<HistoryEdits, HistoryError> {
     let mut edits = HistoryEdits::new();
     let mut previous = onto;
@@ -361,7 +372,7 @@ fn linear_rebase_edits(
             edits.insert(commit, CommitEdit::Reuse(existing));
             continue;
         }
-        if commit_parents(repo, commit)?.len() > 1 {
+        if drop.contains(&commit) || commit_parents(repo, commit)?.len() > 1 {
             edits.insert(commit, CommitEdit::Drop);
             continue;
         }
@@ -1142,12 +1153,68 @@ mod tests {
         let fx = merged_upstream_fixture(&repo, &id);
         let range = commits_in_rebase_range(&repo, fx.s2, &[fx.m]).expect("range");
         assert_eq!(range, vec![fx.a, fx.m]);
-        let edits = linear_rebase_edits(&repo, fx.s3, &range, &HashMap::new()).expect("edits");
+        let edits = linear_rebase_edits(&repo, fx.s3, &range, &HashMap::new(), &[]).expect("edits");
         assert_eq!(
             edits.get(&fx.a),
             Some(&CommitEdit::Reparent { parent: fx.s3 })
         );
         assert_eq!(edits.get(&fx.m), Some(&CommitEdit::Drop));
+    }
+
+    #[test]
+    fn a_linear_rebase_leaves_out_the_commits_it_is_told_to_drop() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repo(dir.path());
+        let id = ident(1);
+        let base = files_tree(&repo, &[("base.txt", b"base\n")]).expect("tree");
+        let root = write_commit(&repo, base, &[], "root", &id).expect("root");
+        let on_root = |files: &[(&str, &[u8])], parent: ObjectId, msg: &str| {
+            let mut all: Vec<(&str, &[u8])> = vec![("base.txt", b"base\n")];
+            all.extend_from_slice(files);
+            let tree = files_tree(&repo, &all).expect("tree");
+            write_commit(&repo, tree, &[parent], msg, &id).expect("commit")
+        };
+        let a = on_root(&[("a.txt", b"a\n")], root, "a");
+        // A copy of upstream's u, with other content than u's patch, so no patch-id matches.
+        let copy = on_root(&[("a.txt", b"a\n"), ("u.txt", b"mine\n")], a, "copy of u");
+        let c = on_root(
+            &[("a.txt", b"a\n"), ("u.txt", b"mine\n"), ("c.txt", b"c\n")],
+            copy,
+            "c",
+        );
+        let onto = on_root(&[("u.txt", b"u\n")], root, "u");
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &c).expect("main");
+        let mut opts = flatten_opts(&id);
+        opts.drop = vec![copy];
+
+        let plan = rebase_onto(&repo, root, onto, &[c], &opts).expect("plan");
+        let row = |old: ObjectId| {
+            plan.commits
+                .iter()
+                .find(|row| row.old == old)
+                .expect("row")
+                .new
+        };
+        assert_eq!(row(copy), None, "the copy is left out");
+        let new_a = row(a).expect("a is replayed");
+        let new_c = row(c).expect("c is replayed");
+        let replayed = repo.odb().read_commit(&new_c).expect("commit");
+        assert_eq!(replayed.parents, vec![new_a], "c follows a");
+        assert_eq!(
+            replayed.tree,
+            files_tree(
+                &repo,
+                &[
+                    ("a.txt", b"a\n"),
+                    ("base.txt", b"base\n"),
+                    ("c.txt", b"c\n"),
+                    ("u.txt", b"u\n"),
+                ],
+            )
+            .expect("tree"),
+            "upstream's u stays as upstream has it"
+        );
+        assert_eq!(plan.ref_updates[0].new, new_c);
     }
 
     #[test]

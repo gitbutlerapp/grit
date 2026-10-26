@@ -42,6 +42,7 @@ fn rebase_opts(scope: RefScope, empty: EmptyPolicy, skip: bool) -> RebaseOntoOpt
         skip_applied: skip,
         flatten_leaf_merges: false,
         favor: MergeFavor::default(),
+        drop: Vec::new(),
     }
 }
 

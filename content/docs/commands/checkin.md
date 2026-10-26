@@ -23,7 +23,7 @@ Check-ins need write access to the repository.
 
 ### Change ids
 
-Commits made with `grit commit` carry a `change-id` header, and `grit rebase` keeps it, so the server can tell a rebased copy of one of its commits from new work. Commits made with plain `git` (by an editor, an agent or a script) have none, so before anything is pushed, `grit checkin` gives every commit on the branches it checks in, above the snapshot, that lacks one the id derived from its own commit id: the id `grit log` already shows for it. The branch is rewritten with it (commits on top move to the new parents and keep their ids), and the output says so (`· gave 1 commit made with git a change id`). Only the header is added (a signature, which no longer holds, is dropped), so trees, the index and the worktree stay as they are. Nothing is rewritten under the snapshot, in remote-tracking refs, in commits that were already integrated, or when `grit.changeIds` is `false`, and nothing at all while a rebase, merge, cherry-pick or revert (one paused between its commits too) is in progress in any of the checkout's worktrees; the check-in then sends the commits as they are. The server gives a commit that reaches it without an id the same derived id when it grafts it. Plain `git rebase` drops the header, so when you share a branch, rebase it with `grit rebase`.
+Commits made with `grit commit` carry a `change-id` header, and `grit rebase` keeps it, so the server can tell a rebased copy of one of its commits from new work. Commits made with plain `git` (by an editor, an agent or a script) have none, so before anything is pushed, `grit checkin` gives every commit on the branches it checks in, above the snapshot, that lacks one the id derived from its own commit id: the id `grit log` already shows for it. The branch is rewritten with it (commits on top move to the new parents and keep their ids), and the output says so (`· gave 1 commit made with git a change id`). Only the header is added (a signature, which no longer holds, is dropped), so trees, the index and the worktree stay as they are. Nothing is rewritten under the snapshot, in remote-tracking refs, in commits that were already integrated, or when `grit.changeIds` is `false`, and nothing at all while a rebase, merge, cherry-pick or revert (one paused between its commits too) is in progress in any of the checkout's worktrees; the check-in then sends the commits as they are. The server gives a commit that reaches it without an id the same derived id when it grafts it. Plain `git rebase` drops the header, so when you share a branch, rebase it with `grit rebase`, or bring it up to date with [`grit pull <branch>`](../pull/#a-server-branch-in-a-snapshot-checkout).
 
 ### Refused branches
 
@@ -34,6 +34,7 @@ A branch is refused when:
 - **a merge commit's parents conflict outside your paths**, where your checkout can't resolve them.
 - **the server's branch has commits yours doesn't.** Rebase onto the server's branch with `grit pull <branch>` and check in again, or pass `--force` to replace it.
 - **its name differs only in case from a branch the server has**, on a server whose file system can't tell them apart.
+- **a commit builds on none of your checkout's snapshots**, such as one made on the server's own history fetched with plain Git (`not_on_snapshot`). Take a branch of the server's with `grit pull <branch>` and build on that, or put your commits on the snapshot: `grit switch -c <new branch> origin/<target>`, then `grit pick <commits>`.
 
 ### When a branch moves
 
@@ -43,6 +44,17 @@ A branch the server already has moves when one of these holds, checked in this o
 - **this checkout set it last** (`own_last_set`), so you are replacing your own work after an amend or rebase;
 - **it keeps every commit the server's branch had** (`keeps_every_commit`), matched by change id: every commit of the server's branch that the target doesn't have is in yours, as a copy with the same id, perhaps rebased and with more on top. Say a teammate rebased the shared branch onto a newer `main` with `grit rebase` and force-pushed it, and you then add a commit to your copy: your check-in has every commit theirs had, so it goes through without `--force`. A copy only counts when it also has what the server's commit changed outside your checkout's paths, which you can't see: if the teammate amended the commit to change `docs/` as well and your checkout is of `src`, your copy would put `docs/` back, so the branch is refused as diverged instead;
 - **`--force`** (`forced`), when none of the others holds.
+
+### Sharing a branch
+
+Checkouts of different paths can work on one branch. The server keeps a **graft log** of which real commit each checkout commit stands for: every check-in adds the commits it grafts, and so does [`grit pull <branch>`](../pull/#a-server-branch-in-a-snapshot-checkout), which shows you the server's branch cut down to your paths. A commit you build on one of those grafts onto the real commit it stands for, so files outside your paths keep the other checkout's changes. Say Alice has `builtin/` and `Documentation/`, and Bob has `Documentation/` and `t/`:
+
+1. Alice commits to `builtin/` and `Documentation/` on `blame-docs` and runs `grit checkin blame-docs`.
+2. Bob runs `grit pull blame-docs`. He sees her `Documentation/` change; her `builtin/` change is on the server but not in his files.
+3. Bob commits to `Documentation/` and `t/` on top and runs `grit checkin blame-docs`: a fast-forward, his commit on top of her real one, so `builtin/` keeps her change.
+4. Alice runs `grit pull blame-docs` and gets his `Documentation/` change on top of her own commit, which comes back as it is. His `t/` change stays out of her files.
+
+When someone else checks in to a branch you have too, your next check-in of it is refused as diverged; `grit pull <branch>` rebases your commits onto theirs, and the check-in after that is a fast-forward. A branch you pulled and haven't added to is left as it is (`unchanged`) when the server's has moved on since, so a plain `grit checkin` of your other work still succeeds (`· theirs has nothing new: the server's is ahead, at e32980a`); only `--force` would take the server's back to yours. The log also means checking a branch in again replays only its new commits. A check-in whose grafts the server can't record (say its disk is full) still sets the branch; the server logs the failure, and later grafts of those commits walk the history again.
 
 When several checkouts check in the same branch at once, they take turns: the first sets it, and the others are refused because the server's branch now has commits they don't. On a server whose repository keeps reflogs (Git's default when it has a worktree), every branch a check-in sets gets a `checkin: from checkout <id>` reflog entry.
 
@@ -88,7 +100,7 @@ Schema: [v1](/schemas/checkin/v1.json)
 | ----- | ---- | ------- |
 | `url` | string | The server repository. |
 | `gave_change_ids` | integer | Commits made with plain `git` that were given a change id before the check-in (their branches were rewritten); `0` when none needed one. |
-| `branches` | array | One entry per branch (empty when there was nothing to check in): `name`, `status` (`created`, `updated`, `unchanged` or `refused`), `grafted` (the server commit the branch became), `previous` (where the server's branch was), `commits` (commits replayed), `rule` for an updated branch, and for a refused branch `message` (why, in words) and `reason`. |
+| `branches` | array | One entry per branch (empty when there was nothing to check in): `name`, `status` (`created`, `updated`, `unchanged` or `refused`; `unchanged` when the server's branch was at the graft already or ahead of it), `grafted` (the server commit the branch became), `previous` (where the server's branch was), `commits` (commits replayed), `rule` for an updated branch, and for a refused branch `message` (why, in words) and `reason`. |
 | `branches[].rule` | string or omitted | What let an `updated` branch move: `fast_forward`, `own_last_set` (this checkout set it last), `keeps_every_commit` (a rebase that keeps every commit the server's branch had, by change id) or `forced`. |
 | `branches[].reason` | string | The kind of refusal: `target_branch`, `conflict` (a path the target holds differently), `merge_conflict`, `diverged` (the server's branch has commits yours doesn't), `case_conflict`, `not_on_snapshot`, `not_pushed`, `invalid_name` or `invalid_tip`. |
 | `refused` | boolean | Whether any branch was refused; the exit status is then `1`. |

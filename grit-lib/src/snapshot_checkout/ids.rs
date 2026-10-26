@@ -739,16 +739,30 @@ mod tests {
         .expect("tree");
         let plain = commit(&co.repo, tree, &[co.snapshot], "change a", None);
         co.branch("work", plain);
-        let raw = graft(&co.repo, &co.marker.roots, &co.marker.paths, plain)
-            .expect("graft")
-            .expect("grafted");
+        let raw = graft(
+            &co.repo,
+            &co.marker.roots,
+            &co.marker.paths,
+            None,
+            &[],
+            plain,
+        )
+        .expect("graft")
+        .expect("grafted");
 
         assert_eq!(co.give(None), 1);
         let given = co.tip("refs/heads/work");
         assert_ne!(given, plain);
-        let grafted = graft(&co.repo, &co.marker.roots, &co.marker.paths, given)
-            .expect("graft")
-            .expect("grafted");
+        let grafted = graft(
+            &co.repo,
+            &co.marker.roots,
+            &co.marker.paths,
+            None,
+            &[],
+            given,
+        )
+        .expect("graft")
+        .expect("grafted");
         assert_eq!(grafted.tip, raw.tip, "the same commit on the server");
         assert_eq!(
             change_id(&co.read(grafted.tip)),

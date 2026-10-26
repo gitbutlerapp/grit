@@ -16,6 +16,12 @@
 //! can still be matched with it. Replays are deterministic, so checking in
 //! the same commit twice gives the same commit.
 //!
+//! Commits a graft or a projection made before are in the repository's
+//! [`GraftLog`]: a commit it knows is not replayed again but stands for the
+//! real commit it records, so work built on a projected commit (another
+//! checkout's, or the server's, shown to this checkout by
+//! [`super::project`]) grafts onto the real commit it stands for.
+//!
 //! A change applies only where the full tree holds what the change started
 //! from. When it doesn't (a file outside the checkout's view that the target
 //! holds differently), the graft is refused for that commit. A file that
@@ -42,14 +48,15 @@ use crate::objects::{parse_commit, remove_header_lines, serialize_commit, Object
 use crate::odb::Odb;
 use crate::repo::Repository;
 
+use super::graft_log::GraftLog;
 use super::tree::{diff, edit, lookup, Change, TREE_MODE};
 use super::{in_view, view_tree, Result, SnapshotRoot};
 
 /// Why a branch could not be grafted.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GraftError {
-    /// A commit's parent is neither a snapshot of the checkout nor another of
-    /// the branch's commits.
+    /// A commit's parent is neither a snapshot of the checkout, nor a commit
+    /// the graft log knows, nor another of the branch's commits.
     #[error("commit {commit} does not build on this checkout's snapshots")]
     NotOnSnapshot {
         /// The commit (12 hex digits).
@@ -97,7 +104,13 @@ enum Refused {
 }
 
 /// Replay `tip` and the commits under it, down to the checkout's snapshot
-/// commits (`roots`), onto the real history.
+/// commits (`roots`) and the commits `known` records, onto the real history.
+///
+/// A commit `known` records stands for the real commit it records there and
+/// is not replayed: the tip itself, answered before anything is walked, or a
+/// commit under it, such as a projected commit the branch builds on. The walk
+/// stops at the snapshot commits and at `hide`, so a tip on the real history
+/// is refused without walking all of it.
 ///
 /// # Parameters
 ///
@@ -105,23 +118,31 @@ enum Refused {
 /// - `roots`: the checkout's snapshot commits and the real commits they stand for.
 /// - `paths`: the checkout's paths (empty: the whole tree), which decide
 ///   what a merge commit's tree is the answer for.
+/// - `known`: the repository's graft log, or `None` to graft from the
+///   snapshot commits alone. A real commit it names that the repository
+///   doesn't have is ignored.
+/// - `hide`: tips of real history to stop at (the target branch's).
 /// - `tip`: the branch tip the checkout pushed.
 ///
 /// # Returns
 ///
-/// `Ok(Err(..))` when the branch cannot be grafted (see [`GraftError`]).
+/// The graft, with the commits replayed (not those `known` answered); the
+/// caller records those once it has set a branch to it. `Ok(Err(..))` when
+/// the branch cannot be grafted (see [`GraftError`]).
 ///
 /// # Errors
 ///
-/// Object read and write failures.
+/// Object read and write failures, and graft log read failures.
 pub fn graft(
     repo: &Repository,
     roots: &[SnapshotRoot],
     paths: &[String],
+    known: Option<&GraftLog>,
+    hide: &[ObjectId],
     tip: ObjectId,
 ) -> Result<std::result::Result<Grafted, GraftError>> {
     let mut map: HashMap<ObjectId, ObjectId> = HashMap::new();
-    let mut hide = Vec::new();
+    let mut stop = hide.to_vec();
     for root in roots {
         let (Ok(commit), Ok(base)) = (
             ObjectId::from_hex(&root.commit),
@@ -130,24 +151,40 @@ pub fn graft(
             continue;
         };
         map.insert(commit, base);
-        hide.push(commit);
+        stop.push(commit);
     }
+    let odb = repo.odb();
+    let real_of = |commit: &ObjectId| -> Result<Option<ObjectId>> {
+        let Some(log) = known else {
+            return Ok(None);
+        };
+        Ok(log.grafted(commit)?.filter(|real| odb.exists(real)))
+    };
     if let Some(base) = map.get(&tip) {
         return Ok(Ok(Grafted {
             tip: *base,
             commits: Vec::new(),
         }));
     }
+    if let Some(real) = real_of(&tip)? {
+        return Ok(Ok(Grafted {
+            tip: real,
+            commits: Vec::new(),
+        }));
+    }
     let (_, newest_first) = walk_commits_reachable_excluding_ancestors_of(
         repo,
         &[tip],
-        &hide,
+        &stop,
         ReachableWalkLimit::Unlimited,
     )?;
-    let odb = repo.odb();
     let order = parents_first(repo, &newest_first)?;
     let mut made = Vec::new();
     for commit in order {
+        if let Some(real) = real_of(&commit)? {
+            map.insert(commit, real);
+            continue;
+        }
         let short = commit.to_hex()[..12].to_owned();
         let mut data = parse_commit(&odb.read(&commit)?.data)?;
         let Some(first) = data.parents.first().copied() else {
@@ -443,7 +480,7 @@ mod tests {
         .expect("t2");
         let c2 = commit(&repo, t2, &[c1], "add b");
 
-        let grafted = graft(&repo, &roots, &src, c2)
+        let grafted = graft(&repo, &roots, &src, None, &[], c2)
             .expect("graft")
             .expect("grafted");
         assert_eq!(grafted.commits.len(), 2);
@@ -467,14 +504,14 @@ mod tests {
 
         // Deterministic: grafting again gives the same commits.
         assert_eq!(
-            graft(&repo, &roots, &src, c2)
+            graft(&repo, &roots, &src, None, &[], c2)
                 .expect("graft")
                 .expect("grafted"),
             grafted
         );
         // The snapshot itself grafts to its base.
         assert_eq!(
-            graft(&repo, &roots, &src, snap.commit)
+            graft(&repo, &roots, &src, None, &[], snap.commit)
                 .expect("graft")
                 .expect("grafted")
                 .tip,
@@ -484,10 +521,90 @@ mod tests {
         // A commit not on the snapshot is refused.
         let stray = commit(&repo, t1, &[], "stray");
         assert!(matches!(
-            graft(&repo, &roots, &src, stray).expect("graft"),
+            graft(&repo, &roots, &src, None, &[], stray).expect("graft"),
             Err(GraftError::NotOnSnapshot { .. })
         ));
         let _ = CheckoutError::InvalidUrl(String::new());
+    }
+
+    #[test]
+    fn a_tip_on_the_real_history_is_refused_at_the_target_and_known_commits_are_not_replayed() {
+        let (dir, repo, base, snap) = fixture();
+        let odb = repo.odb();
+        let paths = vec!["src".to_owned()];
+        let roots = roots_of(&[&snap]);
+        // The target moves on twice; someone with a full clone builds on it.
+        let mut main = base;
+        for text in ["one", "two"] {
+            let t = edit(
+                odb,
+                Some(tree_of(&repo, main)),
+                &[(b"README".to_vec(), Some(blob(&repo, text)))],
+            )
+            .expect("tree");
+            main = commit(&repo, t, &[main], text);
+        }
+        let real = commit(&repo, tree_of(&repo, main), &[main], "real work");
+        // Without the target to stop at, the walk goes down to the real root.
+        assert_eq!(
+            graft(&repo, &roots, &paths, None, &[], real).expect("graft"),
+            Err(GraftError::NotOnSnapshot {
+                commit: base.to_hex()[..12].to_owned()
+            })
+        );
+        // Stopping at the target, the commit on it is named at once.
+        assert_eq!(
+            graft(&repo, &roots, &paths, None, &[main], real).expect("graft"),
+            Err(GraftError::NotOnSnapshot {
+                commit: real.to_hex()[..12].to_owned()
+            })
+        );
+
+        // A commit the log knows is not replayed again, and stands for the
+        // real commit it records; one whose real commit is gone is replayed.
+        let log = GraftLog::at(dir.path().join("grafts"));
+        let t1 = edit(
+            odb,
+            Some(snap.tree),
+            &[(b"src/a".to_vec(), Some(blob(&repo, "a2")))],
+        )
+        .expect("t1");
+        let c1 = commit(&repo, t1, &[snap.commit], "one");
+        let first = graft(&repo, &roots, &paths, Some(&log), &[main], c1)
+            .expect("graft")
+            .expect("grafted");
+        log.record(&first.commits).expect("record");
+        let t2 = edit(
+            odb,
+            Some(t1),
+            &[(b"src/b".to_vec(), Some(blob(&repo, "b")))],
+        )
+        .expect("t2");
+        let c2 = commit(&repo, t2, &[c1], "two");
+        let second = graft(&repo, &roots, &paths, Some(&log), &[main], c2)
+            .expect("graft")
+            .expect("grafted");
+        assert_eq!(second.commits.len(), 1, "only the new commit is replayed");
+        assert_eq!(
+            parse_commit(&odb.read(&second.tip).expect("read").data)
+                .expect("parse")
+                .parents,
+            vec![first.tip]
+        );
+        let missing = ObjectId::from_hex(&"e".repeat(40)).expect("oid");
+        let stale = GraftLog::at(dir.path().join("stale"));
+        stale.record(&[(c1, missing)]).expect("record");
+        let again = graft(&repo, &roots, &paths, Some(&stale), &[main], c2)
+            .expect("graft")
+            .expect("grafted");
+        assert_eq!(again.tip, second.tip);
+        assert_eq!(again.commits.len(), 2, "both are replayed");
+        assert_eq!(
+            graft(&repo, &roots, &paths, Some(&stale), &[main], c1)
+                .expect("graft")
+                .expect("grafted"),
+            first
+        );
     }
 
     /// A repository whose main has `README`, `src/a`, `src/lib/{x,y}`,
@@ -558,7 +675,7 @@ mod tests {
             .write(ObjectKind::Commit, signed.as_bytes())
             .expect("commit");
         let roots = roots_of(&[&snap]);
-        let grafted = graft(&repo, &roots, &["src".to_owned()], raw)
+        let grafted = graft(&repo, &roots, &["src".to_owned()], None, &[], raw)
             .expect("graft")
             .expect("grafted");
         let bytes = odb.read(&grafted.tip).expect("read").data;
@@ -574,7 +691,7 @@ mod tests {
         assert!(text.contains("author A <a@e> 1700000000 +0000\n"), "{text}");
         assert!(text.ends_with("\n\nSigned change\n"), "{text}");
         assert_eq!(
-            graft(&repo, &roots, &["src".to_owned()], raw)
+            graft(&repo, &roots, &["src".to_owned()], None, &[], raw)
                 .expect("graft")
                 .expect("grafted"),
             grafted,
@@ -595,7 +712,7 @@ mod tests {
         .expect("tree");
         let plain = commit(&repo, tree, &[snap.commit], "made with git");
         let roots = roots_of(&[&snap]);
-        let grafted = graft(&repo, &roots, &paths, plain)
+        let grafted = graft(&repo, &roots, &paths, None, &[], plain)
             .expect("graft")
             .expect("grafted");
         let data = parse_commit(&odb.read(&grafted.tip).expect("read").data).expect("parse");
@@ -607,7 +724,7 @@ mod tests {
         );
         assert_eq!(data.message, "made with git\n");
         assert_eq!(
-            graft(&repo, &roots, &paths, plain)
+            graft(&repo, &roots, &paths, None, &[], plain)
                 .expect("graft")
                 .expect("grafted"),
             grafted,
@@ -635,7 +752,7 @@ mod tests {
         .expect("tree");
         assert_eq!(lookup(odb, tree, b"src/lib").expect("lookup"), Some(file));
         let c = commit(&repo, tree, &[snap.commit], "lib becomes a file");
-        let grafted = graft(&repo, &roots, &paths, c)
+        let grafted = graft(&repo, &roots, &paths, None, &[], c)
             .expect("graft")
             .expect("grafted");
         let full = tree_of(&repo, grafted.tip);
@@ -647,7 +764,7 @@ mod tests {
 
         // And back: the file becomes a directory again.
         let back = commit(&repo, snap.tree, &[c], "lib is a directory again");
-        let grafted = graft(&repo, &roots, &paths, back)
+        let grafted = graft(&repo, &roots, &paths, None, &[], back)
             .expect("graft")
             .expect("grafted");
         assert_eq!(tree_of(&repo, grafted.tip), tree_of(&repo, base));
@@ -672,7 +789,15 @@ mod tests {
         .expect("tree");
         let c = commit(&repo, tree, &[deep.commit], "hide sub");
         assert_eq!(
-            graft(&repo, &roots_of(&[&deep]), &["src/lib/x".to_owned()], c).expect("graft"),
+            graft(
+                &repo,
+                &roots_of(&[&deep]),
+                &["src/lib/x".to_owned()],
+                None,
+                &[],
+                c
+            )
+            .expect("graft"),
             Err(GraftError::Conflict {
                 commit: c.to_hex()[..12].to_owned(),
                 path: "src/lib".to_owned(),
@@ -693,7 +818,15 @@ mod tests {
         .expect("tree");
         let c = commit(&repo, tree, &[snap.commit], "write docs");
         assert_eq!(
-            graft(&repo, &roots_of(&[&snap]), &["src".to_owned()], c).expect("graft"),
+            graft(
+                &repo,
+                &roots_of(&[&snap]),
+                &["src".to_owned()],
+                None,
+                &[],
+                c
+            )
+            .expect("graft"),
             Err(GraftError::Conflict {
                 commit: c.to_hex()[..12].to_owned(),
                 path: "docs/d".to_owned(),
@@ -736,7 +869,7 @@ mod tests {
         .expect("tree");
         let merge = commit(&repo, merged_view, &[work, s2.commit], "merge");
         let roots = roots_of(&[&s1, &s2]);
-        let grafted = graft(&repo, &roots, &paths, merge)
+        let grafted = graft(&repo, &roots, &paths, None, &[], merge)
             .expect("graft")
             .expect("grafted");
         let tip = parse_commit(&odb.read(&grafted.tip).expect("read").data).expect("parse");
@@ -766,7 +899,7 @@ mod tests {
         )
         .expect("tree");
         let merge = commit(&repo, resolved, &[work, s2.commit], "merge, keep x");
-        let grafted = graft(&repo, &roots, &paths, merge)
+        let grafted = graft(&repo, &roots, &paths, None, &[], merge)
             .expect("graft")
             .expect("grafted");
         let full = tree_of(&repo, grafted.tip);
@@ -802,7 +935,15 @@ mod tests {
         assert_eq!(mine.tree, bob.tree, "the checkout can't see the difference");
         let merge = commit(&repo, bob.tree, &[mine.commit, bob.commit], "merge");
         assert_eq!(
-            graft(&repo, &roots_of(&[&s1, &mine, &bob]), &paths, merge).expect("graft"),
+            graft(
+                &repo,
+                &roots_of(&[&s1, &mine, &bob]),
+                &paths,
+                None,
+                &[],
+                merge
+            )
+            .expect("graft"),
             Err(GraftError::MergeConflict {
                 commit: merge.to_hex()[..12].to_owned(),
                 paths: vec!["docs/d".to_owned()],

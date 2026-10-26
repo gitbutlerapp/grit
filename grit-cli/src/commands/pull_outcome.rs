@@ -1,6 +1,6 @@
 //! `--json` / human / markdown rendering for `grit pull`.
 
-use crate::commands::checkout::PullRefreshJson;
+use crate::commands::checkout::{PullRefreshJson, PullServerBranchJson};
 use crate::commands::merge::MergeConflictJson;
 use crate::markdown;
 use crate::operation_output::{render_rebase_conflict_footer_human, OperationConflictBlock};
@@ -14,8 +14,10 @@ use grit_lib::porcelain::pull::{
     PullCheck as LibPullCheck, PullOutcome as LibPullOutcome, PullResult as LibPullResult,
 };
 use grit_lib::remote::snapshot_checkout::{
-    CheckoutMarker, CheckoutState, RefreshOutcome, RefreshedHead,
+    BranchInfo, BranchRefresh, BranchRefreshResult, CheckoutMarker, CheckoutState, RefreshOutcome,
+    RefreshedHead,
 };
+use grit_lib::remote::transfer::TransferStats;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -39,6 +41,9 @@ pub enum PullResult {
     // In a snapshot checkout: the branch's commits landed in the target, so it moved to the
     // new snapshot (keeping uncommitted changes) instead of replaying them.
     Landed,
+    // In a snapshot checkout, `grit pull <branch>`: the checkout had no such branch, so it was
+    // created at the server's.
+    Created,
 }
 
 impl From<LibPullResult> for PullResult {
@@ -120,6 +125,11 @@ pub struct PullOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub refresh: Option<PullRefreshJson>,
+    /// In a snapshot checkout, `grit pull <branch>`: the server's branch as
+    /// the checkout sees it, and what the local branch did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub server_branch: Option<PullServerBranchJson>,
     /// What the fetch step received and where the time went, for the human summary.
     #[serde(skip)]
     #[schemars(skip)]
@@ -177,6 +187,7 @@ pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
         behind: outcome.behind,
         check: outcome.check.map(map_check),
         refresh: None,
+        server_branch: None,
         transfer: TransferSummary::new(outcome.transfer, Vec::new(), Default::default()),
     }
 }
@@ -211,6 +222,7 @@ impl PullOutcome {
             behind: None,
             check: None,
             refresh: None,
+            server_branch: None,
             transfer: TransferSummary::default(),
         }
     }
@@ -227,6 +239,52 @@ impl PullOutcome {
         };
         outcome.refresh = Some(refresh);
         outcome.transfer = TransferSummary::new(refreshed.transfer, Vec::new(), Default::default());
+        outcome
+    }
+
+    /// `grit pull <branch>` in a snapshot checkout: what the local branch did
+    /// with the server's branch `info`, fetched with `transfer`. With
+    /// `--check`, `result` and [`Self::check`] say what it would do.
+    pub fn from_server_branch(
+        info: &BranchInfo,
+        refreshed: &BranchRefresh,
+        transfer: TransferStats,
+    ) -> Self {
+        let label = format!("origin/{}", refreshed.name);
+        let (result, conflicts) = match &refreshed.result {
+            BranchRefreshResult::Created => (PullResult::Created, None),
+            BranchRefreshResult::UpToDate => (PullResult::UpToDate, None),
+            BranchRefreshResult::FastForwarded => (PullResult::FastForward, None),
+            BranchRefreshResult::Rebased { .. } => (PullResult::Rebased, None),
+            BranchRefreshResult::Stopped { conflicts } => {
+                (PullResult::RebaseStopped, Some(conflicts.as_slice()))
+            }
+            BranchRefreshResult::Conflicts { conflicts } => {
+                (PullResult::Conflicts, Some(conflicts.as_slice()))
+            }
+            BranchRefreshResult::AutostashConflict => (PullResult::AutostashConflict, None),
+        };
+        let mut outcome = Self::bare(result, label.clone());
+        outcome.oid = Some(refreshed.tip.to_hex());
+        if let Some(details) = conflicts {
+            (outcome.conflicts, outcome.conflict_details) =
+                map_conflicts(details, &label, result == PullResult::RebaseStopped);
+        }
+        if let Some((ahead, behind)) = refreshed.ahead_behind.filter(|_| refreshed.check) {
+            outcome.ahead = Some(ahead);
+            outcome.behind = Some(behind);
+            outcome.check = Some(PullCheckJson {
+                ahead,
+                behind,
+                fast_forward_possible: matches!(
+                    result,
+                    PullResult::UpToDate | PullResult::FastForward | PullResult::Created
+                ),
+                would: result,
+            });
+        }
+        outcome.server_branch = Some(PullServerBranchJson::from_refresh(info, refreshed));
+        outcome.transfer = TransferSummary::new(transfer, Vec::new(), Default::default());
         outcome
     }
 
@@ -273,6 +331,9 @@ impl HumanRender for PullOutcome {
             if r.dry_run {
                 return Ok(());
             }
+        }
+        if let Some(b) = &self.server_branch {
+            return render_server_branch(w, self, b);
         }
         if let Some(check) = &self.check {
             outln!(
@@ -361,6 +422,7 @@ impl HumanRender for PullOutcome {
                 "HEAD is detached, so only {} moved; the new snapshot is there.",
                 self.branch
             ),
+            PullResult::Created => outln!(w, "Created a branch at {} ({short}).", self.branch),
         }
         if let Some(r) = &self.refresh {
             render_refresh_branches(w, r)?;
@@ -432,6 +494,131 @@ fn render_refresh_head(w: &mut dyn Write, r: &PullRefreshJson) -> Result<()> {
     Ok(())
 }
 
+/// `grit pull <branch>` in a checkout: where the server's branch is and
+/// what the local branch did.
+fn render_server_branch(
+    w: &mut dyn Write,
+    outcome: &PullOutcome,
+    b: &PullServerBranchJson,
+) -> Result<()> {
+    if b.gave_change_ids > 0 {
+        outln!(w, "Gave {}.", gave_change_ids_phrase(b.gave_change_ids));
+    }
+    outln!(
+        w,
+        "The server's {} is at {}: {}, at {} ({}).",
+        b.name,
+        short_hex(&b.tip),
+        commits_on_snapshots(b.commits),
+        outcome.branch,
+        short_hex(&b.projected)
+    );
+    if let Some(check) = &outcome.check {
+        outln!(
+            w,
+            "Would {} ({} ahead, {} behind). Fast-forward {}possible.",
+            check_would_phrase(check.would),
+            check.ahead,
+            check.behind,
+            if check.fast_forward_possible {
+                ""
+            } else {
+                "not "
+            }
+        );
+        return Ok(());
+    }
+    let short = outcome.oid.as_deref().map(short_hex).unwrap_or_default();
+    match outcome.result {
+        PullResult::Created => outln!(
+            w,
+            "Created {} at {short}, the server's; `grit switch {}` to work on it.",
+            b.name,
+            b.name
+        ),
+        PullResult::UpToDate => outln!(w, "{} already has them.", b.name),
+        PullResult::FastForward => outln!(
+            w,
+            "Moved {} to {} ({short}); it had nothing of its own.",
+            b.name,
+            outcome.branch
+        ),
+        PullResult::Rebased => outln!(
+            w,
+            "Rebased {} onto {} ({short}), {} of yours on top.",
+            b.name,
+            outcome.branch,
+            plural(b.own, "commit", "commits")
+        ),
+        PullResult::RebaseStopped => {
+            for item in outcome.conflict_details.as_deref().unwrap_or(&[]) {
+                outln!(w, "CONFLICT ({}): {}", item.kind, item.path);
+            }
+            outln!(
+                w,
+                "Rebasing {} onto {} stopped on a conflict; the rebase is in progress.",
+                b.name,
+                outcome.branch
+            );
+            outln!(
+                w,
+                "Resolve the conflicts, `grit add` the files, then run `grit rebase --continue`; or run `grit rebase --abort` to put {} back where it was.",
+                b.name
+            );
+        }
+        PullResult::Conflicts => {
+            print_conflicts_to_stderr(outcome);
+            eprintln!(
+                "\nRebasing {} onto {} would stop on a conflict, and the index or worktree has changes of its own, so nothing changed.\nCommit or stash them, then run `grit pull {}` again to resolve the conflict in a rebase.",
+                b.name, outcome.branch, b.name
+            );
+        }
+        PullResult::AutostashConflict => outln!(
+            w,
+            "Rebased {} onto {}, but re-applying the stashed changes left conflicts; the stash entry was kept.",
+            b.name,
+            outcome.branch
+        ),
+        _ => {}
+    }
+    if b.switched {
+        match &b.was_on {
+            Some(was) => outln!(w, "Now on {}; it was {was}.", b.name),
+            None => outln!(w, "Now on {}; HEAD was detached.", b.name),
+        }
+    }
+    if outcome.result == PullResult::Rebased {
+        outln!(
+            w,
+            "{} builds on the server's now; `grit checkin {}` sends it.",
+            b.name,
+            b.name
+        );
+    }
+    if outcome.transfer.received_anything() {
+        outln!(w);
+        outcome.transfer.render_rows(w, stdout_color())?;
+    }
+    Ok(())
+}
+
+/// `N commit(s) on this checkout's snapshots`.
+pub(crate) fn commits_on_snapshots(n: usize) -> String {
+    format!(
+        "{} on this checkout's snapshots",
+        plural(n, "commit", "commits")
+    )
+}
+
+/// `n` and the word for it, one or many.
+fn plural(n: usize, one: &str, many: &str) -> String {
+    if n == 1 {
+        format!("{n} {one}")
+    } else {
+        format!("{n} {many}")
+    }
+}
+
 /// `N commit(s) made with git a change id`, after "gave".
 pub(crate) fn gave_change_ids_phrase(n: usize) -> String {
     format!(
@@ -487,6 +674,7 @@ fn check_would_phrase(result: PullResult) -> &'static str {
         PullResult::AutostashConflict => "conflict on autostash restore",
         PullResult::Detached => "leave HEAD detached",
         PullResult::Landed => "move to the upstream, which has this branch's commits",
+        PullResult::Created => "create the branch at the server's",
     }
 }
 

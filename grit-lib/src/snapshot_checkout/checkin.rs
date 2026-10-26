@@ -22,6 +22,7 @@ use crate::objects::ObjectId;
 use crate::repo::Repository;
 
 use super::graft::{graft, GraftError, Grafted};
+use super::graft_log::GraftLog;
 use super::ids::keeps_every_commit;
 use super::refs::{swap_ref, Swap};
 use super::{
@@ -141,7 +142,8 @@ impl CheckinRule {
 pub enum CheckinDecision {
     /// The branch does not exist yet.
     Create,
-    /// The branch already points at the graft.
+    /// The branch already has the graft: it points at it, or at commits on
+    /// top of it.
     Unchanged,
     /// The branch moves to the graft.
     Update {
@@ -160,7 +162,9 @@ pub enum CheckinDecision {
 /// replace its own work after an amend or rebase; when it keeps every commit
 /// of the server's branch that the target lacks, by change id, with what
 /// each changed outside `paths` ([`keeps_every_commit`]); and otherwise only
-/// when `force` is set.
+/// when `force` is set. A branch that already has the graft, with more on
+/// top (a server branch the checkout pulled, which moved on since), is left
+/// unchanged unless this checkout set it last or `force` is set.
 ///
 /// # Parameters
 ///
@@ -200,6 +204,8 @@ pub fn decide_checkin(
         CheckinRule::FastForward
     } else if set_last == Some(previous) {
         CheckinRule::OwnLastSet
+    } else if !force && crate::merge_base::is_ancestor(repo, grafted, previous)? {
+        return Ok(CheckinDecision::Unchanged);
     } else if keeps_every_commit(repo, previous, grafted, targets, paths)? {
         CheckinRule::KeepsEveryCommit
     } else if force {
@@ -242,19 +248,26 @@ impl From<GraftError> for CheckinRefusal {
 /// - `checkout`: the checkout checking in.
 /// - `target`: the repository's target branch now ([`super::target_branch`]).
 /// - `branch`: the branch and the tip the client pushed.
+/// - `known`: the repository's graft log ([`super::CheckoutStore::graft_log`]),
+///   so commits built on projected commits, or grafted before, graft onto the
+///   real commits they stand for; `None` to graft from the snapshots alone.
+/// - `targets`: the tips of the target branch, where the graft's walk stops.
 ///
 /// # Returns
 ///
-/// The graft, or `Ok(Err(..))` with why the branch is refused.
+/// The graft, or `Ok(Err(..))` with why the branch is refused. Once the
+/// branch is set, record [`Grafted::commits`] in `known`.
 ///
 /// # Errors
 ///
-/// Ref and object failures.
+/// Ref, object and graft log failures.
 pub fn graft_checkin_branch(
     repo: &Repository,
     checkout: &CheckoutInfo,
     target: &str,
     branch: &CheckinBranch,
+    known: Option<&GraftLog>,
+    targets: &[ObjectId],
 ) -> Result<std::result::Result<Grafted, CheckinRefusal>> {
     if !valid_branch_name(&branch.name) {
         return Ok(Err(CheckinRefusal::InvalidName));
@@ -274,7 +287,10 @@ pub fn graft_checkin_branch(
     if crate::refs::resolve_ref(repo.git_dir(), &pushed_to).ok() != Some(raw) {
         return Ok(Err(CheckinRefusal::NotPushed { out_ref: pushed_to }));
     }
-    Ok(graft(repo, &checkout.roots, &checkout.paths, raw)?.map_err(CheckinRefusal::from))
+    Ok(
+        graft(repo, &checkout.roots, &checkout.paths, known, targets, raw)?
+            .map_err(CheckinRefusal::from),
+    )
 }
 
 /// Where a check-in left one of the server's branches.
@@ -409,12 +425,7 @@ fn set_branch_reading(
 /// The server's branch whose name differs from `refname`'s only in case, when
 /// the repository's file system can't tell them apart (`core.ignorecase`).
 fn case_variant(repo: &Repository, refname: &str) -> Result<Option<String>> {
-    let ignorecase = repo
-        .config()?
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
-    if !ignorecase {
+    if !ignores_case(repo)? {
         return Ok(None);
     }
     let name = refname.trim_start_matches("refs/heads/");
@@ -422,6 +433,16 @@ fn case_variant(repo: &Repository, refname: &str) -> Result<Option<String>> {
         .into_iter()
         .filter_map(|(r, _)| r.strip_prefix("refs/heads/").map(str::to_owned))
         .find(|existing| existing != name && same_branch_name(existing, name)))
+}
+
+/// Whether the repository's file system can't tell names apart by case
+/// (`core.ignorecase`), so that two branches differing only in case are one.
+pub(crate) fn ignores_case(repo: &Repository) -> Result<bool> {
+    Ok(repo
+        .config()?
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
+        .unwrap_or(false))
 }
 
 #[cfg(test)]
@@ -564,6 +585,14 @@ mod tests {
         assert_eq!(
             decide(Some(b), other, None, true),
             update(CheckinRule::Forced)
+        );
+        // Behind the server's branch: nothing to check in, unless forced, or
+        // a checkout that set it last takes its own commit back.
+        assert_eq!(decide(Some(b), a, None, false), CheckinDecision::Unchanged);
+        assert_eq!(decide(Some(b), a, None, true), update(CheckinRule::Forced));
+        assert_eq!(
+            decide(Some(b), a, Some(b), false),
+            update(CheckinRule::OwnLastSet)
         );
         for (rule, kind) in [
             (CheckinRule::FastForward, "fast_forward"),
@@ -833,7 +862,7 @@ mod tests {
                 name: name.to_owned(),
                 raw: raw.to_owned(),
             };
-            graft_checkin_branch(&repo, &checkout, target, &branch).expect("check")
+            graft_checkin_branch(&repo, &checkout, target, &branch, None, &[]).expect("check")
         };
         let raw = work.to_hex();
         assert_eq!(

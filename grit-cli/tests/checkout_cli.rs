@@ -2326,3 +2326,397 @@ fn commits_with_subjects_in_a_legacy_encoding_get_change_ids_and_keep_their_log(
     let pulled = json(&home, &co, &["--json", "pull"]);
     assert_eq!(pulled["refresh"]["gave_change_ids"], 1, "{pulled}");
 }
+
+/// What `dir` holds at `path`, if anything.
+fn read_file(dir: &Path, path: &str) -> Option<String> {
+    std::fs::read_to_string(dir.join(path)).ok()
+}
+
+fn stdout_of(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn work_on_the_servers_branch_is_rebased_onto_it_with_grit_pull_branch() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let co = home.join("co");
+    ok(&home, &co, &["switch", "-c", "feature"]);
+    commit_file(&home, &co, "src/c.rs", "c\n", "Add c");
+    let created = json(&home, &co, &["--json", "checkin", "feature"]);
+    assert_eq!(created["branches"][0]["status"], "created", "{created}");
+
+    // Someone else adds to feature on the server, inside and outside src;
+    // checking in over it is refused, with the way out.
+    let other = home.join("other");
+    ok(&home, &home, &["clone", &repo_url, "other"]);
+    ok(
+        &home,
+        &other,
+        &["switch", "-c", "feature", "origin/feature"],
+    );
+    std::fs::write(other.join("src/other.rs"), "// theirs\n").expect("write");
+    std::fs::write(other.join("docs/d.md"), "d by theirs\n").expect("write");
+    ok(&home, &other, &["add", "src/other.rs", "docs/d.md"]);
+    ok(&home, &other, &["commit", "-m", "theirs"]);
+    ok(&home, &other, &["push", "origin", "feature"]);
+    let theirs = git(&other, &["rev-parse", "HEAD"]);
+    commit_file(&home, &co, "src/more.rs", "// mine\n", "mine");
+    let refused = run(&home, &co, &["--json", "checkin", "feature"]);
+    assert_eq!(refused.status.code(), Some(1));
+    let refused: Value = serde_json::from_slice(&refused.stdout).expect("JSON");
+    assert_eq!(refused["branches"][0]["reason"], "diverged", "{refused}");
+    assert!(
+        refused["branches"][0]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("grit pull feature"),
+        "{refused}"
+    );
+
+    // Rebasing onto the server's feature brings their commit, without what's
+    // outside src.
+    let pulled = ok(&home, &co, &["pull", "feature"]);
+    let text = stdout_of(&pulled);
+    assert!(text.contains("1 commit of yours on top"), "{text}");
+    assert_eq!(
+        read_file(&co, "src/other.rs").as_deref(),
+        Some("// theirs\n")
+    );
+    assert!(!co.join("docs").exists());
+    assert_eq!(git(&co, &["log", "-1", "--format=%s", "HEAD~1"]), "theirs");
+    assert_eq!(git(&co, &["status", "--porcelain"]), "");
+    let again = ok(&home, &co, &["pull", "feature"]);
+    assert!(
+        stdout_of(&again).contains("feature already has them"),
+        "{}",
+        stdout_of(&again)
+    );
+
+    // Checking in is now a fast-forward on top of their commit, which keeps
+    // its docs change.
+    let checkin = json(&home, &co, &["--json", "checkin", "feature"]);
+    assert_eq!(checkin["branches"][0]["status"], "updated", "{checkin}");
+    assert_eq!(checkin["branches"][0]["rule"], "fast_forward", "{checkin}");
+    assert_eq!(git(&demo, &["rev-parse", "feature~1"]), theirs);
+    assert_eq!(git(&demo, &["show", "feature:docs/d.md"]), "d by theirs");
+    assert_eq!(git(&demo, &["show", "feature:src/more.rs"]), "// mine");
+
+    // A branch the checkout doesn't have is created from the server's.
+    ok(&home, &other, &["push", "origin", "feature:theirs"]);
+    let made = json(&home, &co, &["--json", "pull", "theirs"]);
+    assert_eq!(made["result"], "created", "{made}");
+    assert_eq!(made["branch"], "origin/theirs");
+    assert_eq!(made["server_branch"]["previous"], Value::Null);
+    assert_eq!(made["server_branch"]["tip"], Value::String(theirs.clone()));
+    assert_eq!(git(&co, &["show", "theirs:src/other.rs"]), "// theirs");
+    assert_eq!(git(&co, &["symbolic-ref", "--short", "HEAD"]), "feature");
+
+    // Main moves, and the checkout follows, so feature is rebased onto a
+    // newer snapshot than the server's feature; someone adds to the server's.
+    // Only the commit made since moves.
+    ok(&home, &other, &["switch", "main"]);
+    ok(&home, &other, &["pull"]);
+    commit_file(
+        &home,
+        &other,
+        "docs/guide.md",
+        "guide, again\n",
+        "main again",
+    );
+    ok(&home, &other, &["push", "origin", "main:again"]);
+    let integrated = json(&home, &co, &["--json", "integrate", "again"]);
+    assert_eq!(integrated["status"], "merged", "{integrated}");
+    assert_eq!(integrated["refresh"]["result"], "rebased", "{integrated}");
+    ok(&home, &other, &["switch", "feature"]);
+    ok(&home, &other, &["pull", "origin", "feature"]);
+    commit_file(
+        &home,
+        &other,
+        "src/other.rs",
+        "// theirs, again\n",
+        "theirs again",
+    );
+    ok(&home, &other, &["push", "origin", "feature"]);
+    let theirs = git(&other, &["rev-parse", "HEAD"]);
+    commit_file(&home, &co, "src/last.rs", "// last\n", "last");
+    let pulled = json(&home, &co, &["--json", "pull", "origin", "feature"]);
+    assert_eq!(pulled["result"], "rebased", "{pulled}");
+    assert_eq!(pulled["server_branch"]["own"], 1, "{pulled}");
+    assert_eq!(pulled["server_branch"]["switched"], Value::Bool(false));
+    assert_eq!(
+        git(&co, &["log", "-1", "--format=%s", "HEAD~1"]),
+        "theirs again"
+    );
+    let checkin = json(&home, &co, &["--json", "checkin", "feature"]);
+    assert_eq!(checkin["branches"][0]["status"], "updated", "{checkin}");
+    assert_eq!(git(&demo, &["rev-parse", "feature~1"]), theirs);
+    assert_eq!(git(&demo, &["show", "feature:src/last.rs"]), "// last");
+
+    // What can't be shown is refused; the branch the checkout follows is a
+    // plain refresh.
+    let missing = run(&home, &co, &["pull", "nope"]);
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("the server has no branch nope"),
+        "{}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
+    let flags = run(&home, &co, &["pull", "feature", "--no-rebase"]);
+    assert_ne!(flags.status.code(), Some(0));
+    let refresh = json(&home, &co, &["--json", "pull", "main"]);
+    assert!(refresh["refresh"].is_object(), "{refresh}");
+    assert!(refresh.get("server_branch").is_none(), "{refresh}");
+}
+
+#[test]
+fn two_checkouts_of_different_paths_extend_one_branch() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    // The target gets a t/ directory first (a commit made on the server).
+    std::fs::create_dir_all(demo.join("t")).expect("mkdir");
+    std::fs::write(demo.join("t/test.sh"), "test\n").expect("write");
+    ok(&home, &demo, &["add", "t/test.sh"]);
+    ok(&home, &demo, &["commit", "-m", "Add a test"]);
+    for (into, paths) in [("alice", ["src", "docs"]), ("bob", ["docs", "t"])] {
+        json(
+            &home,
+            &home,
+            &[
+                "--json", "checkout", &repo_url, "-p", paths[0], "-p", paths[1], "--into", into,
+            ],
+        );
+    }
+    let (alice, bob) = (home.join("alice"), home.join("bob"));
+
+    // 1. Alice changes src/ and docs/ on shared and checks in.
+    ok(&home, &alice, &["switch", "-c", "shared"]);
+    std::fs::write(alice.join("src/a.rs"), "a by alice\n").expect("write");
+    std::fs::write(alice.join("docs/d.md"), "d by alice\n").expect("write");
+    ok(&home, &alice, &["add", "src/a.rs", "docs/d.md"]);
+    ok(&home, &alice, &["commit", "-m", "Alice"]);
+    let created = json(&home, &alice, &["--json", "checkin", "shared"]);
+    assert_eq!(created["branches"][0]["status"], "created", "{created}");
+    let hers = git(&demo, &["rev-parse", "shared"]);
+
+    // 2. Bob gets shared: her docs/ change, not her src/ one.
+    let got = json(&home, &bob, &["--json", "pull", "shared"]);
+    assert_eq!(got["result"], "created", "{got}");
+    ok(&home, &bob, &["switch", "shared"]);
+    assert_eq!(
+        read_file(&bob, "docs/d.md").as_deref(),
+        Some("d by alice\n")
+    );
+    assert!(!bob.join("src").exists());
+
+    // 3. Bob commits to docs/ and t/ and checks in: his commit lands on her
+    // real one, so src/ keeps her change.
+    std::fs::write(bob.join("docs/d.md"), "d by bob\n").expect("write");
+    std::fs::write(bob.join("t/test.sh"), "test by bob\n").expect("write");
+    ok(&home, &bob, &["add", "docs/d.md", "t/test.sh"]);
+    ok(&home, &bob, &["commit", "-m", "Bob"]);
+    let his = json(&home, &bob, &["--json", "checkin", "shared"]);
+    assert_eq!(his["branches"][0]["status"], "updated", "{his}");
+    assert_eq!(his["branches"][0]["rule"], "fast_forward", "{his}");
+    assert_eq!(git(&demo, &["rev-parse", "shared~1"]), hers);
+    assert_eq!(git(&demo, &["show", "shared:src/a.rs"]), "a by alice");
+    assert_eq!(git(&demo, &["show", "shared:docs/d.md"]), "d by bob");
+    assert_eq!(git(&demo, &["show", "shared:t/test.sh"]), "test by bob");
+
+    // 4. Alice gets his docs/ change on top of her own commit; t/ stays out.
+    let mine = git(&alice, &["rev-parse", "shared"]);
+    let back = json(&home, &alice, &["--json", "pull", "shared"]);
+    assert_eq!(back["result"], "fast_forward", "{back}");
+    assert_eq!(back["server_branch"]["reused"], 1, "her own commit: {back}");
+    assert_eq!(git(&alice, &["rev-parse", "shared~1"]), mine);
+    assert_eq!(
+        read_file(&alice, "docs/d.md").as_deref(),
+        Some("d by bob\n")
+    );
+    assert_eq!(
+        read_file(&alice, "src/a.rs").as_deref(),
+        Some("a by alice\n")
+    );
+    assert!(!alice.join("t").exists());
+    assert_eq!(git(&alice, &["status", "--porcelain"]), "");
+    // Her next check-in replays only what she adds.
+    commit_file(&home, &alice, "src/b.rs", "b\n", "Alice again");
+    let next = json(&home, &alice, &["--json", "checkin", "shared"]);
+    assert_eq!(next["branches"][0]["rule"], "fast_forward", "{next}");
+    assert_eq!(next["branches"][0]["commits"], 1, "{next}");
+    assert_eq!(git(&demo, &["show", "shared:t/test.sh"]), "test by bob");
+
+    // Markdown names the server's branch first.
+    let md = ok(&home, &bob, &["--markdown", "pull", "shared"]);
+    let md = stdout_of(&md);
+    assert!(md.contains("- Server branch: **`shared`**"), "{md}");
+}
+
+/// Check out `demo` once per `(into, paths)`.
+fn check_out_each(home: &Path, repo_url: &str, checkouts: &[(&str, &[&str])]) {
+    for (into, paths) in checkouts {
+        let mut args = vec!["--json", "checkout", repo_url];
+        for path in *paths {
+            args.extend(["-p", path]);
+        }
+        args.extend(["--into", into]);
+        json(home, home, &args);
+    }
+}
+
+#[test]
+fn a_server_branch_asked_for_in_another_case_is_pulled_under_its_own_name() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    check_out_each(&home, &repo_url, &[("alice", &["src"]), ("bob", &["src"])]);
+    let (alice, bob) = (home.join("alice"), home.join("bob"));
+    ok(&home, &alice, &["switch", "-c", "Feature"]);
+    commit_file(&home, &alice, "src/c.rs", "c\n", "Alice");
+    ok(&home, &alice, &["checkin", "Feature"]);
+
+    let ignores_case = Command::new("git")
+        .args(["config", "--bool", "core.ignorecase"])
+        .current_dir(&demo)
+        .output()
+        .expect("git")
+        .stdout
+        .starts_with(b"true");
+    let asked = run(&home, &bob, &["--json", "pull", "feature"]);
+    if !ignores_case {
+        // Where case matters, feature is another branch, which the server
+        // doesn't have.
+        assert_eq!(asked.status.code(), Some(1));
+        return;
+    }
+    let got: Value = serde_json::from_slice(&asked.stdout).expect("JSON");
+    assert_eq!(got["result"], "created", "{got}");
+    assert_eq!(got["server_branch"]["name"], "Feature", "{got}");
+    let branches = git(&bob, &["for-each-ref", "--format=%(refname)", "refs/heads"]);
+    assert!(
+        branches.lines().any(|b| b == "refs/heads/Feature"),
+        "{branches}"
+    );
+    assert!(
+        !branches.lines().any(|b| b == "refs/heads/feature"),
+        "{branches}"
+    );
+
+    // Work on it checks in under the server's name, with no case conflict.
+    ok(&home, &bob, &["switch", "Feature"]);
+    commit_file(&home, &bob, "src/d.rs", "d\n", "Bob");
+    let checkin = json(&home, &bob, &["--json", "checkin", "Feature"]);
+    assert_eq!(checkin["branches"][0]["rule"], "fast_forward", "{checkin}");
+    assert_eq!(git(&demo, &["show", "Feature:src/d.rs"]), "d");
+
+    // Packed, the server's branch is still found in any case.
+    git(&demo, &["pack-refs", "--all"]);
+    let again = json(&home, &bob, &["--json", "pull", "FEATURE"]);
+    assert_eq!(again["server_branch"]["name"], "Feature", "{again}");
+    assert_eq!(again["result"], "up_to_date", "{again}");
+}
+
+#[test]
+fn a_plain_checkin_leaves_a_pulled_branch_the_server_moved_on_as_it_is() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    check_out_each(&home, &repo_url, &[("alice", &["src"]), ("bob", &["src"])]);
+    let (alice, bob) = (home.join("alice"), home.join("bob"));
+    ok(&home, &alice, &["switch", "-c", "theirs"]);
+    commit_file(&home, &alice, "src/a.rs", "a1\n", "Alice 1");
+    ok(&home, &alice, &["checkin", "theirs"]);
+    let first = git(&demo, &["rev-parse", "theirs"]);
+    ok(&home, &bob, &["pull", "theirs"]);
+    commit_file(&home, &alice, "src/a.rs", "a2\n", "Alice 2");
+    ok(&home, &alice, &["checkin", "theirs"]);
+    let second = git(&demo, &["rev-parse", "theirs"]);
+
+    // Bob's check-in of everything has nothing new for theirs.
+    ok(&home, &bob, &["switch", "-c", "mine"]);
+    commit_file(&home, &bob, "src/m.rs", "m\n", "Mine");
+    let checkin = json(&home, &bob, &["--json", "checkin"]);
+    let status = |name: &str| {
+        checkin["branches"]
+            .as_array()
+            .expect("branches")
+            .iter()
+            .find(|b| b["name"] == name)
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    assert_eq!(status("mine")["status"], "created", "{checkin}");
+    let theirs = status("theirs");
+    assert_eq!(theirs["status"], "unchanged", "{checkin}");
+    assert_eq!(theirs["grafted"], Value::String(first), "{checkin}");
+    assert_eq!(
+        theirs["previous"],
+        Value::String(second.clone()),
+        "{checkin}"
+    );
+    assert_eq!(git(&demo, &["rev-parse", "theirs"]), second);
+    let again = ok(&home, &bob, &["checkin"]);
+    let text = stdout_of(&again);
+    assert!(
+        text.contains("theirs has nothing new: the server's is ahead"),
+        "{text}"
+    );
+    assert!(text.contains("`grit pull theirs` brings it"), "{text}");
+}
+
+#[test]
+fn a_checkin_succeeds_when_the_graft_log_cannot_be_written() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    check_out_each(&home, &repo_url, &[("alice", &["src"])]);
+    let alice = home.join("alice");
+    ok(&home, &alice, &["switch", "-c", "feature"]);
+    commit_file(&home, &alice, "src/a.rs", "a1\n", "Alice 1");
+    ok(&home, &alice, &["checkin", "feature"]);
+    let grafts = demo.join(".git/grit-serve/checkouts/grafts");
+    let set_mode = |mode: u32| {
+        let mut dirs = vec![grafts.clone()];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).expect("read dir") {
+                let path = entry.expect("entry").path();
+                if path.is_dir() {
+                    dirs.push(path.clone());
+                }
+                let file_mode = if path.is_dir() { mode } else { mode & 0o666 };
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(file_mode))
+                    .expect("chmod");
+            }
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).expect("chmod");
+        }
+    };
+    set_mode(0o555);
+
+    commit_file(&home, &alice, "src/a.rs", "a2\n", "Alice 2");
+    let checkin = run(&home, &alice, &["--json", "checkin", "feature"]);
+    set_mode(0o755);
+    assert_eq!(
+        checkin.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&checkin.stderr)
+    );
+    let checkin: Value = serde_json::from_slice(&checkin.stdout).expect("JSON");
+    assert_eq!(checkin["branches"][0]["status"], "updated", "{checkin}");
+    assert_eq!(
+        git(&demo, &["log", "-1", "--format=%s", "feature"]),
+        "Alice 2"
+    );
+    // The check-in was recorded, so replacing it after an amend needs no
+    // --force.
+    ok(
+        &home,
+        &alice,
+        &["commit", "--amend", "-m", "Alice 2, amended"],
+    );
+    let amended = json(&home, &alice, &["--json", "checkin", "feature"]);
+    assert_eq!(amended["branches"][0]["rule"], "own_last_set", "{amended}");
+}

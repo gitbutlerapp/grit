@@ -452,6 +452,7 @@ fn history_change_ids_survive_every_rewrite() {
             skip_applied: true,
             flatten_leaf_merges: false,
             favor: grit_lib::diff::merge_file::MergeFavor::default(),
+            drop: Vec::new(),
         },
     )
     .expect("rebase");

@@ -26,7 +26,8 @@ use crate::progress::TerminalProgress;
 pub struct CheckinBranchJson {
     /// The branch.
     pub name: String,
-    /// `created`, `updated`, `unchanged` or `refused`.
+    /// `created`, `updated`, `unchanged` or `refused`; `unchanged` when the
+    /// server's branch was at the graft already, or ahead of it.
     pub status: String,
     /// The commit on the server's history the branch became.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -135,7 +136,16 @@ impl HumanRender for CheckinOutcome {
                     b.name,
                     b.previous.as_deref().map(short).unwrap_or_default()
                 ),
-                "unchanged" => outln!(w, "· {} already at {at} on the server", b.name),
+                "unchanged" => match b.previous.as_deref() {
+                    Some(previous) if b.grafted.as_deref() != Some(previous) => outln!(
+                        w,
+                        "· {} has nothing new: the server's is ahead, at {} (`grit pull {}` brings it)",
+                        b.name,
+                        short(previous),
+                        b.name
+                    ),
+                    _ => outln!(w, "· {} already at {at} on the server", b.name),
+                },
                 _ => outln!(
                     w,
                     "✗ {}: {}",

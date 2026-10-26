@@ -14,8 +14,8 @@ use crate::transfer::{
 };
 
 use super::{
-    out_ref, snapshot_fetch_refspec, upstream_ref, CheckoutError, CheckoutInfo, CheckoutMarker,
-    Result, SnapshotRoot,
+    in_ref, out_ref, same_branch_name, snapshot_fetch_refspec, upstream_ref, valid_branch_name,
+    BranchInfo, CheckoutError, CheckoutInfo, CheckoutMarker, Result, SnapshotRoot,
 };
 
 impl CheckoutMarker {
@@ -180,4 +180,87 @@ pub fn fetch_snapshot(
         marker: updated,
         transfer,
     })
+}
+
+/// Fetch the server's branch as the checkout sees it, which `info` describes
+/// (the server's answer to [`super::CheckoutClient::branch`]), from
+/// [`in_ref`] into [`upstream_ref`]`(<name>)` (`refs/remotes/origin/<name>`)
+/// from the server at the marker's URL, and check that it is that
+/// projection.
+///
+/// Nothing is fetched when the projection is already there. No tags are
+/// fetched, and nothing else.
+///
+/// # Parameters
+///
+/// - `repo`: the checkout.
+/// - `marker`: its marker.
+/// - `info`: the projection the server described.
+/// - `fetch`: environment and thread settings for the fetch; its refspecs,
+///   tags, prune and dry-run settings are replaced.
+/// - `progress`, `cancel`, `http_factory`: as for [`Remote::fetch`].
+///
+/// # Returns
+///
+/// What the fetch received.
+///
+/// # Errors
+///
+/// [`CheckoutError::Protocol`] for an answer naming no valid branch, or the
+/// branch the checkout follows, or no commit; [`CheckoutError::Remote`] when
+/// the fetch fails; [`CheckoutError::BranchMoved`] when what arrived is not
+/// `info`'s projection.
+pub fn fetch_branch(
+    repo: &Repository,
+    marker: &CheckoutMarker,
+    info: &BranchInfo,
+    fetch: FetchOptions,
+    progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
+    http_factory: Option<&dyn HttpClientFactory>,
+) -> Result<TransferStats> {
+    let protocol = |detail: String| CheckoutError::Protocol {
+        url: marker.url.clone(),
+        detail,
+    };
+    if !valid_branch_name(&info.name) || same_branch_name(&info.name, &marker.branch) {
+        return Err(protocol(format!(
+            "the server answered with branch {:?}, which this checkout can't take",
+            info.name
+        )));
+    }
+    let projected = ObjectId::from_hex(&info.projected).map_err(|e| {
+        protocol(format!(
+            "the projection {:?} is not a commit id: {e}",
+            info.projected
+        ))
+    })?;
+    let upstream = upstream_ref(&info.name);
+    let local = || crate::refs::resolve_ref(repo.git_dir(), &upstream).ok();
+    if local() == Some(projected) && repo.odb().exists(&projected) {
+        return Ok(TransferStats::default());
+    }
+    let options = FetchOptions {
+        refspecs: vec![format!("+{}:{upstream}", in_ref(&marker.id, &info.name))],
+        tags: TagMode::None,
+        prune: false,
+        dry_run: false,
+        remote_name: None,
+        ..fetch
+    };
+    let transfer = marker
+        .remote()?
+        .fetch(repo, options, progress, cancel, http_factory)?
+        .transfer;
+    let got = local();
+    if got != Some(projected) {
+        return Err(CheckoutError::BranchMoved {
+            name: info.name.clone(),
+            expected: info.projected.clone(),
+            got: got
+                .map(|g| g.to_hex())
+                .unwrap_or_else(|| "nothing".to_owned()),
+        });
+    }
+    Ok(transfer)
 }

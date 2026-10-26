@@ -55,7 +55,7 @@
           "description": "For an `updated` branch, what allowed it."
         },
         "status": {
-          "description": "`created`, `updated`, `unchanged` or `refused`.",
+          "description": "`created`, `updated`, `unchanged` or `refused`; `unchanged` when the server's branch was at the graft already, or ahead of it.",
           "type": "string"
         }
       },

@@ -22,9 +22,10 @@
 //!
 //! - Wire types: [`CheckoutServerInfo`], [`CheckoutRequest`], [`CheckoutInfo`].
 //! - Server side: [`normalize_paths`], [`filtered_tree`], [`snapshot_object`],
-//!   [`make_snapshot`].
+//!   [`make_snapshot`], [`project_branch`].
 //! - Client side: [`CheckoutUrl`], [`CheckoutClient`], [`materialize`],
-//!   [`CheckoutMarker`], [`push_for_checkin`], [`fetch_snapshot`], [`refresh`].
+//!   [`CheckoutMarker`], [`push_for_checkin`], [`fetch_snapshot`], [`refresh`],
+//!   [`fetch_branch`], [`refresh_branch`].
 //!
 //! Work comes back with a **check-in**: the client gives commits made with
 //! plain Git a change id ([`give_change_ids`]), pushes its branches' raw tips
@@ -46,29 +47,46 @@
 //! never replay its commits onto snapshots that already have them, and
 //! [`Landing::move_off`] puts the user on a fresh work branch.
 //!
-//! The server keeps each checkout's record, and the work-branch names it has
-//! given out, in a [`CheckoutStore`].
+//! Checkouts share a branch through **projection**, the reverse of a graft:
+//! the server shows a checkout one of its branches cut down to the
+//! checkout's paths on its snapshots ([`project`], [`project_branch`], asked
+//! for with [`CheckoutClient::branch`]) at [`in_ref`], the client fetches it
+//! ([`fetch_branch`]) and brings its branch of that name onto it
+//! ([`refresh_branch`]). Grafts and projections record the pairs they make in
+//! the repository's [`GraftLog`], so work built on a projected commit grafts
+//! onto the real commit it stands for.
+//!
+//! The server keeps each checkout's record, the work-branch names it has
+//! given out, and the graft log in a [`CheckoutStore`].
 
+mod branch_refresh;
 mod checkin;
 mod graft;
+mod graft_log;
 mod guard;
 mod ids;
 mod landing;
+mod project;
 mod refresh;
 mod refs;
 mod store;
 mod target;
+#[cfg(test)]
+mod testing;
 mod transfer;
 mod tree;
 
+pub use branch_refresh::{refresh_branch, BranchRefresh, BranchRefreshResult};
 pub use checkin::{
     decide_checkin, graft_checkin_branch, set_checked_in_branch, BranchSet, CheckinDecision,
     CheckinRefusal, CheckinRule,
 };
 pub use graft::{graft, GraftError, Grafted};
+pub use graft_log::GraftLog;
 pub use guard::TargetGuard;
 pub use ids::{change_keys, give_change_ids, keeps_every_commit};
 pub use landing::{land_integration, move_off_landed_branch, record_landed, Landing, MovedOff};
+pub use project::{project, project_branch, ProjectError, ProjectedCommit, Projection};
 pub use refresh::{
     ensure_refreshable, refresh, BranchOnOldSnapshot, FollowedBranch, RefreshOutcome, RefreshedHead,
 };
@@ -78,7 +96,7 @@ pub use target::{
     same_branch_name, target_branch, valid_slice_name, Integration, SliceEdit, SlicesEdited,
     TargetChange, TargetRefusal, SLICES_PATH,
 };
-pub use transfer::{fetch_snapshot, push_for_checkin, FetchedSnapshot};
+pub use transfer::{fetch_branch, fetch_snapshot, push_for_checkin, FetchedSnapshot};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -209,6 +227,37 @@ pub struct WorkBranchResponse {
     pub work: String,
 }
 
+/// `POST /.grit/checkouts/<repo>/<id>/branch`: show the server's branch
+/// `name` to checkout `id` ([`project_branch`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BranchRequest {
+    /// The branch, without `refs/heads/`.
+    pub name: String,
+}
+
+/// The answer to a [`BranchRequest`]: the server's branch as the checkout
+/// sees it, at [`in_ref`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BranchInfo {
+    /// The branch, as the server spells it, which can differ in case from the
+    /// name asked for where the server ignores case.
+    pub name: String,
+    /// Where the server's branch is, on its real history.
+    pub tip: String,
+    /// Its projection for the checkout, at [`in_ref`].
+    pub projected: String,
+    /// The branch's commits the target lacks, all projected.
+    pub commits: usize,
+    /// How many of them were made afresh.
+    #[serde(default)]
+    pub made: usize,
+    /// How many were shown as commits that were there already: checkout
+    /// commits on the same snapshots that the server's are grafts of (the
+    /// checkout's own among them), and earlier projections.
+    #[serde(default)]
+    pub reused: usize,
+}
+
 /// The ref a checkout's newest snapshot is kept at on the server.
 #[must_use]
 pub fn target_ref(id: &str) -> String {
@@ -229,6 +278,13 @@ pub fn valid_branch_name(name: &str) -> bool {
 #[must_use]
 pub fn out_ref(id: &str, name: &str) -> String {
     format!("refs/checkouts/{id}/out/heads/{name}")
+}
+
+/// Where the server puts its branch `name` as checkout `id` sees it (its
+/// projection, [`project_branch`]) for the checkout to fetch.
+#[must_use]
+pub fn in_ref(id: &str, name: &str) -> String {
+    format!("refs/checkouts/{id}/in/heads/{name}")
 }
 
 /// The local ref a checkout keeps its newest snapshot of `branch` at:
@@ -287,7 +343,8 @@ pub enum CheckinStatus {
     Created,
     /// The server's branch moved to the graft.
     Updated,
-    /// The server's branch was already there.
+    /// The server's branch already had the branch's commits: it was at the
+    /// graft, or ahead of it.
     Unchanged,
     /// The branch was not set.
     Refused,
@@ -580,6 +637,34 @@ pub enum CheckoutError {
         expected: String,
         /// What the fetch brought into the checkout's upstream ref.
         got: String,
+    },
+    /// The projection of a server branch fetched is not the one the server
+    /// described: the branch was shown to the checkout again meanwhile.
+    #[error("the server's {name} moved again while fetching: expected {expected}, got {got}")]
+    BranchMoved {
+        /// The branch.
+        name: String,
+        /// The projection the server described.
+        expected: String,
+        /// What the fetch brought.
+        got: String,
+    },
+    /// A local branch shares no commit with the server's branch of its name,
+    /// as the checkout sees it, and builds on none of its snapshots.
+    #[error("{name} has nothing in common with the server's {name}")]
+    UnrelatedBranch {
+        /// The branch.
+        name: String,
+    },
+    /// A branch that `HEAD` was switched to for its rebase couldn't be
+    /// rebased, and `HEAD` couldn't be switched back: it is still on the
+    /// branch.
+    #[error("{failed}; HEAD is still on {branch}, which it was switched to for the rebase")]
+    StillSwitched {
+        /// The branch `HEAD` is on now.
+        branch: String,
+        /// Why the rebase failed.
+        failed: Box<CheckoutError>,
     },
     /// The checkout is in the middle of an operation (a stopped rebase, a
     /// merge) that has to be finished or aborted first.
@@ -1148,6 +1233,24 @@ impl<'a> CheckoutClient<'a> {
             },
         )?;
         Ok(reserved.work)
+    }
+
+    /// Ask the server to show its branch `name` to checkout `id`: its
+    /// projection, put at [`in_ref`] to fetch ([`fetch_branch`]).
+    ///
+    /// # Errors
+    ///
+    /// Request failures, and the server's refusal (no such branch, the
+    /// branch the checkout follows, a branch already on the target or older
+    /// than the checkout's first snapshot).
+    pub fn branch(&self, id: &str, name: &str) -> Result<BranchInfo> {
+        self.post_json(
+            HttpMethod::Post,
+            &format!("{}/{id}/branch", self.url.api),
+            &BranchRequest {
+                name: name.to_owned(),
+            },
+        )
     }
 
     /// Merge a branch into the target on the server.

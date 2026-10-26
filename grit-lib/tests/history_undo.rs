@@ -103,6 +103,7 @@ fn undo_after_rebase_restores_stacked_branches() {
             skip_applied: true,
             flatten_leaf_merges: false,
             favor: grit_lib::diff::merge_file::MergeFavor::default(),
+            drop: Vec::new(),
         },
     )
     .expect("rebase plan");

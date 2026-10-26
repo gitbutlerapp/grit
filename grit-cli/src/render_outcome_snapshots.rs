@@ -12,7 +12,8 @@ use crate::commands::checkin::{
     CheckinBranchJson, CheckinOutcome, CheckinRuleJson, IntegrateOutcome,
 };
 use crate::commands::checkout::{
-    CheckoutOutcome, PullRefreshJson, RefreshBehindJson, RefreshChangesJson, RefreshFollowedJson,
+    CheckoutOutcome, PullRefreshJson, PullServerBranchJson, RefreshBehindJson, RefreshChangesJson,
+    RefreshFollowedJson,
 };
 use crate::commands::pull::{PullOutcome, PullResult};
 use crate::commands::serve_http::{ServeGrantJson, ServeUserJson, ServeUsersOutcome};
@@ -272,6 +273,7 @@ fn sample_refresh() -> PullOutcome {
             }],
             gave_change_ids: 0,
         }),
+        server_branch: None,
         transfer: Default::default(),
     }
 }
@@ -285,6 +287,47 @@ fn pull_refresh_render() {
         r.gave_change_ids = 1;
     }
     snapshot_modes("pull_refresh_render", &outcome);
+}
+
+/// `grit pull feature` in a checkout, from another branch: the server's
+/// feature as the checkout sees it, with one commit of the user's (made with
+/// git, so it got a change id first) rebased on top.
+#[test]
+fn pull_branch_render() {
+    let outcome = PullOutcome {
+        result: PullResult::Rebased,
+        branch: "origin/feature".to_owned(),
+        oid: Some("4c2d9e1b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d".to_owned()),
+        change_id: None,
+        upstream: None,
+        conflicts: None,
+        conflict_details: None,
+        operation: None,
+        commit: None,
+        next_steps: None,
+        alternatives: None,
+        autostash: None,
+        ahead: None,
+        behind: None,
+        check: None,
+        refresh: None,
+        server_branch: Some(PullServerBranchJson {
+            name: "feature".to_owned(),
+            upstream_ref: "refs/remotes/origin/feature".to_owned(),
+            tip: "bcd6c48a1f2e3d4c5b6a79881726354a5b6c7d8e".to_owned(),
+            projected: "19a3116f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b".to_owned(),
+            commits: 2,
+            made: 1,
+            reused: 1,
+            previous: Some("8e2d26b0a1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6".to_owned()),
+            own: 1,
+            switched: true,
+            was_on: Some("alice/elm-orchid".to_owned()),
+            gave_change_ids: 1,
+        }),
+        transfer: Default::default(),
+    };
+    snapshot_modes("pull_branch_render", &outcome);
 }
 
 /// The branch HEAD was on, merged: it moved to the new snapshot and onto a

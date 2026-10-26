@@ -5,6 +5,7 @@
 //!   server told the client ([`CheckoutInfo`]) and which branches the
 //!   checkout set last. It is only ever replaced whole, through a temporary
 //!   file and a rename, so a reader never sees half of one.
+//! - `grafts/`: the [`GraftLog`] of the repository's checkouts.
 //! - `names/<xx>/<rest>`: the work-branch names given out to new checkouts
 //!   ([`CheckoutStore::reserve_work_branch`]), one file per name named by the
 //!   SHA-1 of the name, so a name is never handed out twice, even across
@@ -22,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::objects::{HashAlgo, ObjectId};
 use crate::repo::Repository;
 
-use super::{valid_branch_name, CheckoutError, CheckoutInfo, Result};
+use super::{valid_branch_name, CheckoutError, CheckoutInfo, GraftLog, Result};
 
 /// Whether `id` can name a checkout: the 20 lowercase hex digits a server
 /// makes, which keeps it a plain file name.
@@ -74,6 +75,14 @@ impl CheckoutStore {
     #[must_use]
     pub fn has_checkouts(&self) -> bool {
         self.dir.is_dir()
+    }
+
+    /// The repository's graft log ([`GraftLog`]), kept in `grafts/`: which
+    /// real commit each commit of its checkouts stands for, from check-ins
+    /// and projections.
+    #[must_use]
+    pub fn graft_log(&self) -> GraftLog {
+        GraftLog::at(self.dir.join("grafts"))
     }
 
     /// The record of checkout `id`, or `None` when `id` is not a valid id

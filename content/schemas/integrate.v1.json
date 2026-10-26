@@ -55,7 +55,7 @@
           "description": "For an `updated` branch, what allowed it."
         },
         "status": {
-          "description": "`created`, `updated`, `unchanged` or `refused`.",
+          "description": "`created`, `updated`, `unchanged` or `refused`; `unchanged` when the server's branch was at the graft already, or ahead of it.",
           "type": "string"
         }
       },
@@ -299,6 +299,17 @@
         "result": {
           "$ref": "#/definitions/PullResult"
         },
+        "server_branch": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PullServerBranchJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "In a snapshot checkout, `grit pull <branch>`: the server's branch as the checkout sees it, and what the local branch did."
+        },
         "upstream": {
           "type": [
             "string",
@@ -411,9 +422,92 @@
         "autostash_conflict",
         "rebase_stopped",
         "detached",
-        "landed"
+        "landed",
+        "created"
       ],
       "type": "string"
+    },
+    "PullServerBranchJson": {
+      "description": "What `grit pull <branch>` did in a checkout: the server's branch as the checkout sees it, and the local branch brought onto it.",
+      "properties": {
+        "commits": {
+          "description": "The server branch's commits the target lacks, all shown to this checkout (cut down to its paths).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "gave_change_ids": {
+          "description": "Commits made with plain Git on the branch that were given a change id first (the branch was rewritten with it).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "made": {
+          "description": "How many of them were made afresh for this checkout.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "The branch, as the server spells it (which can differ in case from the name given, on a server that ignores case).",
+          "type": "string"
+        },
+        "own": {
+          "description": "Commits of the local branch replayed onto the server's (its own commits, without copies of the server's).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "previous": {
+          "description": "Where the local branch was; null when it was created.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projected": {
+          "description": "What this checkout sees of it, now at `upstream_ref`.",
+          "type": "string"
+        },
+        "reused": {
+          "description": "How many were commits that were there already: checkout commits on the same snapshots that the server's are grafts of (this checkout's own among them), and what it was shown before.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "switched": {
+          "description": "Whether `HEAD` was moved onto the branch to rebase it.",
+          "type": "boolean"
+        },
+        "tip": {
+          "description": "Where the server's branch is, on its real history.",
+          "type": "string"
+        },
+        "upstream_ref": {
+          "description": "The local ref holding the server's branch as this checkout sees it, `refs/remotes/origin/<branch>`.",
+          "type": "string"
+        },
+        "was_on": {
+          "description": "The branch `HEAD` was on before, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "commits",
+        "gave_change_ids",
+        "made",
+        "name",
+        "own",
+        "projected",
+        "reused",
+        "switched",
+        "tip",
+        "upstream_ref"
+      ],
+      "type": "object"
     },
     "RefreshBehindJson": {
       "description": "A branch still building on an older snapshot after a refresh.",

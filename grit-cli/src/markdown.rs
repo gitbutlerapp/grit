@@ -777,6 +777,9 @@ pub fn print_pull_outcome(
             return Ok(());
         }
     }
+    if let Some(b) = &outcome.server_branch {
+        return print_pull_server_branch(w, outcome, b);
+    }
     if let Some(check) = &outcome.check {
         outln!(
             w,
@@ -919,6 +922,14 @@ pub fn print_pull_outcome(
                 outcome.branch
             );
         }
+        PullResult::Created => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            outln!(
+                w,
+                "- Created a branch at **`{}`** · `{short}`",
+                outcome.branch
+            );
+        }
     }
     if let Some(r) = &outcome.refresh {
         for f in &r.followed {
@@ -931,6 +942,121 @@ pub fn print_pull_outcome(
                 b.name,
                 b.name
             );
+        }
+    }
+    Ok(())
+}
+
+/// `grit pull <branch>` in a snapshot checkout: the server's branch as the
+/// checkout sees it, then what the local branch did.
+fn print_pull_server_branch(
+    w: &mut dyn Write,
+    outcome: &crate::commands::pull::PullOutcome,
+    b: &crate::commands::checkout::PullServerBranchJson,
+) -> anyhow::Result<()> {
+    use crate::commands::pull::PullResult;
+    if b.gave_change_ids > 0 {
+        outln!(
+            w,
+            "- Change ids: gave {}",
+            crate::commands::pull::gave_change_ids_phrase(b.gave_change_ids)
+        );
+    }
+    outln!(
+        w,
+        "- Server branch: **`{}`** at `{}` · {} · at `{}` (`{}`)",
+        b.name,
+        short_hex(&b.tip),
+        crate::commands::pull::commits_on_snapshots(b.commits),
+        b.upstream_ref,
+        short_hex(&b.projected)
+    );
+    if let Some(check) = &outcome.check {
+        outln!(
+            w,
+            "- Check: {ahead} ahead, {behind} behind · fast-forward {} · would `{would:?}`",
+            if check.fast_forward_possible {
+                "possible"
+            } else {
+                "not possible"
+            },
+            ahead = check.ahead,
+            behind = check.behind,
+            would = check.would
+        );
+        return Ok(());
+    }
+    let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+    match outcome.result {
+        PullResult::Created => outln!(
+            w,
+            "- Created **`{}`** at `{short}`, the server's → `grit switch {}` to work on it",
+            b.name,
+            b.name
+        ),
+        PullResult::UpToDate => outln!(w, "- **`{}`** already has them", b.name),
+        PullResult::FastForward => outln!(
+            w,
+            "- Moved **`{}`** to **`{}`** · `{short}`; it had nothing of its own",
+            b.name,
+            outcome.branch
+        ),
+        PullResult::Rebased => outln!(
+            w,
+            "- Rebased **`{}`** onto **`{}`** · `{short}` · {} of yours on top → `grit checkin {}` sends it",
+            b.name,
+            outcome.branch,
+            if b.own == 1 {
+                "1 commit".to_owned()
+            } else {
+                format!("{} commits", b.own)
+            },
+            b.name
+        ),
+        PullResult::RebaseStopped => {
+            outln!(
+                w,
+                "- Rebase of **`{}`** onto **`{}`** stopped on a conflict; the rebase is in progress",
+                b.name,
+                outcome.branch
+            );
+            outln!(w);
+            for item in outcome.conflict_details.as_deref().unwrap_or(&[]) {
+                outln!(w, "- **{}** — `{path}`", item.kind, path = item.path);
+            }
+            outln!(
+                w,
+                "→ resolve the conflicts, `grit add` the files, then `grit rebase --continue`; or `grit rebase --abort` to put the branch back"
+            );
+        }
+        PullResult::Conflicts => {
+            outln!(
+                w,
+                "- Rebasing **`{}`** onto **`{}`** would stop on a conflict",
+                b.name,
+                outcome.branch
+            );
+            outln!(w);
+            for item in outcome.conflict_details.as_deref().unwrap_or(&[]) {
+                outln!(w, "- **{}** — `{path}`", item.kind, path = item.path);
+            }
+            outln!(
+                w,
+                "→ the index or worktree has changes of its own, so nothing changed; commit or stash them, then `grit pull {}` again",
+                b.name
+            );
+        }
+        PullResult::AutostashConflict => outln!(
+            w,
+            "- Rebased **`{}`**, but re-applying the stashed changes left conflicts (stash kept)",
+            b.name
+        ),
+        _ => {}
+    }
+    if b.switched {
+        match &b.was_on {
+            Some(was) => outln!(w, "- Now on `{}` (was `{was}`)", b.name),
+            None => outln!(w, "- Now on `{}` (`HEAD` was detached)", b.name),
         }
     }
     Ok(())

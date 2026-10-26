@@ -1695,6 +1695,10 @@ enum Command {
         fetch: commands::fetch_args::FetchArgs,
     },
     /// Fetch from the remote and integrate it into the current branch.
+    ///
+    /// In a snapshot checkout, refresh it onto the server's newest snapshot;
+    /// `grit pull <branch>` brings `<branch>` onto the server's branch of that
+    /// name, as the checkout sees it.
     Pull {
         #[command(flatten)]
         fetch: commands::fetch_args::FetchArgs,
