@@ -114,6 +114,17 @@ Nothing to commit — working tree clean.
 → grit pull to update from origin/main
 ```
 
+On a local branch with no remote, when you are behind another local branch:
+
+```console
+$ grit status
+On old  ·  1 behind main
+
+Nothing to commit — working tree clean.
+
+→ grit merge main
+```
+
 Diverged from the target:
 
 ```console

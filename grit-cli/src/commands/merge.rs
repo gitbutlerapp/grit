@@ -64,6 +64,10 @@ pub struct MergeOutcome {
     pub result: MergeResult,
     /// The merge source label.
     pub branch: String,
+    /// Current branch whose tip moved after a fast-forward; omitted when it matches `branch`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub updated_branch: Option<String>,
     /// Resulting commit (fast-forward target or merge commit).
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
@@ -136,6 +140,7 @@ impl MergeOutcome {
             check: false,
             dry_run: None,
             parents: None,
+            updated_branch: None,
         }
     }
 
@@ -151,7 +156,12 @@ impl MergeOutcome {
         o
     }
 
-    fn fast_forward(label: &str, oid: ObjectId, change_id: Option<ChangeId>) -> Self {
+    fn fast_forward(
+        label: &str,
+        head_short: &str,
+        oid: ObjectId,
+        change_id: Option<ChangeId>,
+    ) -> Self {
         Self {
             result: MergeResult::FastForward,
             branch: label.to_owned(),
@@ -163,10 +173,16 @@ impl MergeOutcome {
             check: false,
             dry_run: None,
             parents: None,
+            updated_branch: fast_forward_updated_branch(head_short, label),
         }
     }
 
-    fn fast_forward_check(label: &str, oid: ObjectId, change_id: Option<ChangeId>) -> Self {
+    fn fast_forward_check(
+        label: &str,
+        head_short: &str,
+        oid: ObjectId,
+        change_id: Option<ChangeId>,
+    ) -> Self {
         Self {
             result: MergeResult::FastForward,
             branch: label.to_owned(),
@@ -178,11 +194,17 @@ impl MergeOutcome {
             check: true,
             dry_run: None,
             parents: None,
+            updated_branch: fast_forward_updated_branch(head_short, label),
         }
     }
 
-    fn fast_forward_dry_run(label: &str, oid: ObjectId, change_id: Option<ChangeId>) -> Self {
-        let mut o = Self::fast_forward(label, oid, change_id);
+    fn fast_forward_dry_run(
+        label: &str,
+        head_short: &str,
+        oid: ObjectId,
+        change_id: Option<ChangeId>,
+    ) -> Self {
+        let mut o = Self::fast_forward(label, head_short, oid, change_id);
         o.dry_run = Some(true);
         o
     }
@@ -199,6 +221,7 @@ impl MergeOutcome {
             check: false,
             dry_run: None,
             parents: None,
+            updated_branch: None,
         }
     }
 
@@ -214,6 +237,7 @@ impl MergeOutcome {
             check: false,
             dry_run: Some(true),
             parents: Some(parents.iter().map(ObjectId::to_hex).collect()),
+            updated_branch: None,
         }
     }
 
@@ -229,6 +253,7 @@ impl MergeOutcome {
             check: true,
             dry_run: None,
             parents: None,
+            updated_branch: None,
         }
     }
 
@@ -250,6 +275,7 @@ impl MergeOutcome {
             check: true,
             dry_run: None,
             parents: None,
+            updated_branch: None,
         }
     }
 
@@ -273,6 +299,7 @@ impl MergeOutcome {
             check: false,
             dry_run: None,
             parents: None,
+            updated_branch: None,
         }
     }
 
@@ -291,6 +318,7 @@ impl MergeOutcome {
             check: false,
             dry_run: None,
             parents: None,
+            updated_branch: None,
         }
     }
 
@@ -306,6 +334,7 @@ impl MergeOutcome {
             check: false,
             dry_run: None,
             parents: None,
+            updated_branch: None,
         }
     }
 
@@ -321,6 +350,7 @@ impl MergeOutcome {
             check: false,
             dry_run: None,
             parents: None,
+            updated_branch: None,
         }
     }
 
@@ -342,8 +372,32 @@ impl MergeOutcome {
             check: false,
             dry_run: None,
             parents: None,
+            updated_branch: None,
         }
     }
+}
+
+fn fast_forward_updated_branch(head_short: &str, merge_label: &str) -> Option<String> {
+    (head_short != merge_label).then(|| head_short.to_owned())
+}
+
+fn write_fast_forward_human(w: &mut dyn Write, outcome: &MergeOutcome, would: bool) -> Result<()> {
+    let short = outcome.oid.as_deref().map(short_hex).unwrap_or_default();
+    let head = outcome
+        .updated_branch
+        .as_deref()
+        .unwrap_or(outcome.branch.as_str());
+    let source = outcome
+        .updated_branch
+        .as_ref()
+        .map(|_| outcome.branch.as_str());
+    match (would, source) {
+        (true, Some(src)) => outln!(w, "Would fast-forward {head} → {short} ({src})"),
+        (true, None) => outln!(w, "Would fast-forward {head} → {short}"),
+        (false, Some(src)) => outln!(w, "Fast-forwarded {head} → {short} ({src})"),
+        (false, None) => outln!(w, "Fast-forwarded {head} → {short}"),
+    }
+    Ok(())
 }
 
 impl HumanRender for MergeOutcome {
@@ -359,9 +413,9 @@ impl HumanRender for MergeOutcome {
             }
             MergeResult::UpToDate => outln!(w, "Already up to date."),
             MergeResult::FastForward if self.check || self.dry_run == Some(true) => {
-                outln!(w, "Would fast-forward {} → {short}", self.branch);
+                write_fast_forward_human(w, self, true)?;
             }
-            MergeResult::FastForward => outln!(w, "Fast-forwarded {} → {short}", self.branch),
+            MergeResult::FastForward => write_fast_forward_human(w, self, false)?,
             MergeResult::Clean => outln!(w, "Would merge {} cleanly (tree {short})", self.branch),
             MergeResult::Merged if self.dry_run == Some(true) => {
                 outln!(
@@ -460,12 +514,13 @@ pub fn run(
 
     let branch = branch.context("branch name required unless using --abort or --continue")?;
 
-    let (refname, head_oid) = match resolve_head(repo.git_dir())? {
+    let (refname, head_short, head_oid) = match resolve_head(repo.git_dir())? {
         HeadState::Branch {
             refname,
+            short_name,
             oid: Some(oid),
             ..
-        } => (refname, oid),
+        } => (refname, short_name, oid),
         HeadState::Branch { .. } => bail!("no commits yet on this branch"),
         HeadState::Detached { .. } => bail!("HEAD is detached; grit merge needs a branch"),
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
@@ -476,12 +531,27 @@ pub fn run(
         .oid;
     let merge_options = build_merge_options(&options)?;
     if dry_run {
-        return dry_run_merge(&repo, head_oid, other_oid, branch, &merge_options);
+        return dry_run_merge(
+            &repo,
+            head_oid,
+            other_oid,
+            branch,
+            &head_short,
+            &merge_options,
+        );
     }
     if check {
-        return check_merge(&repo, head_oid, other_oid, branch);
+        return check_merge(&repo, head_oid, other_oid, branch, &head_short);
     }
-    integrate_with_options(&repo, &refname, head_oid, other_oid, branch, &merge_options)
+    integrate_with_options(
+        &repo,
+        &refname,
+        head_oid,
+        other_oid,
+        branch,
+        &head_short,
+        &merge_options,
+    )
 }
 
 fn build_merge_options(run: &MergeRunOptions) -> Result<MergeOptions> {
@@ -549,13 +619,14 @@ fn dry_run_merge(
     into_oid: ObjectId,
     other_oid: ObjectId,
     label: &str,
+    head_short: &str,
     options: &MergeOptions,
 ) -> Result<MergeOutcome> {
     match plan_branch_merge(repo, into_oid, other_oid, label, options)? {
         MergeDryRunPlan::UpToDate => Ok(MergeOutcome::up_to_date_dry_run(label)),
-        MergeDryRunPlan::FastForward { tip, change_id } => {
-            Ok(MergeOutcome::fast_forward_dry_run(label, tip, change_id))
-        }
+        MergeDryRunPlan::FastForward { tip, change_id } => Ok(MergeOutcome::fast_forward_dry_run(
+            label, head_short, tip, change_id,
+        )),
         MergeDryRunPlan::RefusedNotFf => Ok(MergeOutcome::refused_not_ff_dry_run(label)),
         MergeDryRunPlan::MergeCommit { parents } => {
             Ok(MergeOutcome::merged_dry_run(label, parents))
@@ -571,6 +642,7 @@ fn check_merge(
     into_oid: ObjectId,
     other_oid: ObjectId,
     label: &str,
+    head_short: &str,
 ) -> Result<MergeOutcome> {
     let options = MergePredictionOptions {
         theirs_label: label.to_owned(),
@@ -580,6 +652,7 @@ fn check_merge(
         MergePrediction::UpToDate => Ok(MergeOutcome::up_to_date_check(label)),
         MergePrediction::FastForward => Ok(MergeOutcome::fast_forward_check(
             label,
+            head_short,
             other_oid,
             stored_change_id(repo, other_oid)?,
         )),
@@ -606,20 +679,25 @@ fn integrate_with_options(
     into_oid: ObjectId,
     other_oid: ObjectId,
     label: &str,
+    head_short: &str,
     options: &MergeOptions,
 ) -> Result<MergeOutcome> {
     match integrate_branch_with(repo, into_ref, into_oid, other_oid, label, options) {
-        Ok(outcome) => Ok(map_integrate_outcome(outcome, label)),
+        Ok(outcome) => Ok(map_integrate_outcome(outcome, label, head_short)),
         Err(Error::NotFastForward) => Ok(MergeOutcome::refused_not_ff(label)),
         Err(err) => Err(err.into()),
     }
 }
 
-fn map_integrate_outcome(outcome: IntegrateBranchOutcome, label: &str) -> MergeOutcome {
+fn map_integrate_outcome(
+    outcome: IntegrateBranchOutcome,
+    label: &str,
+    head_short: &str,
+) -> MergeOutcome {
     match outcome {
         IntegrateBranchOutcome::UpToDate => MergeOutcome::up_to_date(label),
         IntegrateBranchOutcome::FastForward { oid, change_id } => {
-            MergeOutcome::fast_forward(label, oid, change_id)
+            MergeOutcome::fast_forward(label, head_short, oid, change_id)
         }
         IntegrateBranchOutcome::Merged { oid, change_id } => {
             MergeOutcome::merged(label, oid, change_id)
@@ -645,7 +723,7 @@ mod tests {
         let cases = [
             (MergeOutcome::up_to_date("topic"), "up_to_date"),
             (
-                MergeOutcome::fast_forward("topic", oid, None),
+                MergeOutcome::fast_forward("topic", "topic", oid, None),
                 "fast_forward",
             ),
             (MergeOutcome::merged("topic", oid, None), "merged"),

@@ -11,7 +11,7 @@ use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::branch_tracking::{
     status_ahead_behind_enabled, BranchStanding, Standing, StandingHeader, StandingOptions,
-    StatusHeader, TrackedComparison,
+    StatusHeader, StatusIntegrationAction, StatusIntegrationHint, TrackedComparison,
 };
 use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation, NextStep};
 use schemars::JsonSchema;
@@ -128,6 +128,9 @@ pub struct StatusOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     alternative_steps: Vec<NextStep>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    integration_hint: Option<StatusIntegrationHint>,
     #[serde(skip)]
     #[schemars(skip)]
     short_format: bool,
@@ -267,9 +270,8 @@ impl StatusOutcome {
         Ok(())
     }
 
-    /// Ref name for the `grit pull` hint (`pull` integrates the configured upstream).
-    fn pull_update_ref(&self) -> Option<&str> {
-        StatusHeader::pull_integration_ref(&self.standing)
+    fn integration_update_hint(&self) -> Option<&StatusIntegrationHint> {
+        self.integration_hint.as_ref()
     }
 
     fn render_header(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
@@ -445,8 +447,8 @@ impl StatusOutcome {
         if !self.staged_entries.is_empty() {
             hints.push("grit commit \"message\" to commit".to_owned());
         }
-        if let Some(base) = self.pull_update_ref() {
-            hints.push(format!("grit pull to update from {base}"));
+        if let Some(hint) = self.integration_update_hint() {
+            hints.push(integration_hint_command(hint, false));
         }
         if !hints.is_empty() {
             outln!(w, "→ {}", hints.join("  ·  "));
@@ -512,8 +514,8 @@ impl StatusOutcome {
         if !self.staged_entries.is_empty() {
             hints.push("grit commit `\"message\"` to commit".to_owned());
         }
-        if let Some(base) = self.pull_update_ref() {
-            hints.push(format!("grit pull to update from `{base}`"));
+        if let Some(hint) = self.integration_update_hint() {
+            hints.push(integration_hint_command(hint, true));
         }
         if !hints.is_empty() {
             outln!(w, "→ {}", hints.join("  ·  "));
@@ -824,6 +826,9 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
     let ignored_json = args.ignored.then(|| model.ignored.clone());
 
     let standing_for_outcome = standing.clone();
+    let integration_hint = standing.branch.as_deref().and_then(|branch| {
+        grit_lib::refs::branch_tracking::status_integration_hint(&standing, Some((&repo, branch)))
+    });
     Ok(StatusOutcome {
         branch,
         detached: matches!(model.head, HeadState::Detached { .. }),
@@ -853,9 +858,22 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         conflict_entries,
         next_steps,
         alternative_steps,
+        integration_hint,
         short_format: args.short,
         short_lines,
     })
+}
+
+fn integration_hint_command(hint: &StatusIntegrationHint, markdown: bool) -> String {
+    let ref_name = if markdown {
+        format!("`{}`", hint.ref_name)
+    } else {
+        hint.ref_name.clone()
+    };
+    match hint.action {
+        StatusIntegrationAction::Pull => format!("grit pull to update from {ref_name}"),
+        StatusIntegrationAction::Merge => format!("grit merge {ref_name}"),
+    }
 }
 
 fn format_short_lines(

@@ -613,6 +613,32 @@ pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyho
     Ok(())
 }
 
+fn write_merge_fast_forward_markdown(
+    w: &mut dyn Write,
+    outcome: &MergeOutcome,
+    would: bool,
+) -> anyhow::Result<()> {
+    let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+    let head = outcome
+        .updated_branch
+        .as_deref()
+        .unwrap_or(outcome.branch.as_str());
+    let source = outcome
+        .updated_branch
+        .as_ref()
+        .map(|_| outcome.branch.as_str());
+    match (would, source) {
+        (true, Some(src)) => outln!(
+            w,
+            "- Would fast-forward **`{head}`** → `{short}` (**`{src}`**)"
+        ),
+        (true, None) => outln!(w, "- Would fast-forward **`{head}`** → `{short}`"),
+        (false, Some(src)) => outln!(w, "- Fast-forwarded **`{head}`** → `{short}` (**`{src}`**)"),
+        (false, None) => outln!(w, "- Fast-forwarded **`{head}`** → `{short}`"),
+    }
+    Ok(())
+}
+
 /// Result of `grit merge` (and the merge half of `grit pull`).
 pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow::Result<()> {
     outln!(w, "## Merge");
@@ -622,18 +648,16 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
             outln!(w, "Already up to date with **`{}`**.", outcome.branch);
         }
         MergeResult::FastForward if outcome.check => {
-            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
-            outln!(
-                w,
-                "- Would fast-forward **`{}`** → `{short}`",
-                outcome.branch
-            );
+            write_merge_fast_forward_markdown(w, outcome, true)?;
         }
         MergeResult::FastForward => {
-            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
-            outln!(w, "- Fast-forwarded **`{}`** → `{short}`", outcome.branch);
+            write_merge_fast_forward_markdown(w, outcome, false)?;
             if let Some(id) = outcome.change_id.as_deref() {
-                outln!(w, "- change id `{short}`", short = short_change_id(id));
+                outln!(
+                    w,
+                    "- change id `{short}`",
+                    short = short_change_id(id)
+                );
             }
         }
         MergeResult::Clean => {

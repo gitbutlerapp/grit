@@ -398,6 +398,44 @@ fn status_markdown_upstream_line_without_target() -> TestResult {
 }
 
 #[test]
+fn status_merge_hint_for_local_branch_behind_target() -> TestResult {
+    let scratch = Scratch::new("issue-1990")?;
+    let repo = scratch.child("r");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "-b", "main"]);
+    write_file(&repo.join("a"), "1\n");
+    gs_ok(&repo, &["add", "a"]);
+    gs_ok(&repo, &["commit", "-m", "c1"]);
+    gs_ok(&repo, &["switch", "-c", "old"]);
+    gs_ok(&repo, &["switch", "main"]);
+    write_file(&repo.join("b"), "2\n");
+    gs_ok(&repo, &["add", "b"]);
+    gs_ok(&repo, &["commit", "-m", "c2"]);
+    gs_ok(&repo, &["switch", "old"]);
+
+    let human = gs(&repo, &["status"]);
+    assert!(human.status.success());
+    let stdout = String::from_utf8_lossy(&human.stdout);
+    assert!(
+        stdout.contains("grit merge main"),
+        "expected merge hint for local-only repo:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("grit pull to update from main"),
+        "pull hint must not appear without upstream:\n{stdout}"
+    );
+
+    let merge = gs(&repo, &["merge", "main"]);
+    assert!(merge.status.success());
+    let merge_out = String::from_utf8_lossy(&merge.stdout);
+    assert!(
+        merge_out.contains("Fast-forwarded old →") && merge_out.contains("(main)"),
+        "merge should name the branch that moved:\n{merge_out}"
+    );
+    Ok(())
+}
+
+#[test]
 fn status_ahead_behind_config_false() -> TestResult {
     let scratch = Scratch::new("config")?;
     let clone = setup_topic_vs_main(&scratch);

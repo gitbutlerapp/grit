@@ -70,8 +70,9 @@ Local edits are allowed when they only touch paths the merge does not change, or
 ## Examples
 
 ```console
-$ grit merge feature
-Fast-forwarded feature → cf18394
+$ grit switch old
+$ grit merge main
+Fast-forwarded old → cf18394 (main)
 
 $ grit merge origin/main
 Merged origin/main into the current branch (acd1d4b)
@@ -184,6 +185,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `check` | boolean | `true` when this outcome is from `--check` (nothing was merged). Omitted for real merges. |
 | `dry_run` | boolean | `true` when this outcome is from `--dry-run` (nothing was merged). Omitted for real merges. |
 | `branch` | string | The branch, tag or commit that was merged in, exactly as given on the command line. |
+| `updated_branch` | string or null | After a fast-forward, the current branch whose tip moved. Omitted when it matches `branch`. |
 | `oid` | string or null | Resulting commit after a real merge or fast-forward; for `--check` with `result: clean`, the predicted merge tree OID. Omitted for `--dry-run` when a new merge commit would be created. |
 | `parents` | array or null | For `--dry-run` with `result: merged`, the two parent commit ids of the merge commit that would be recorded. |
 | `change_id` | string or null | Stored `change-id` on `oid` when present (merge commit or fast-forward tip). |

@@ -780,6 +780,8 @@ impl StatusHeader {
     }
 
     /// Ref name for a `grit pull` hint: upstream when configured, otherwise target.
+    ///
+    /// Prefer [`status_integration_hint`] for status footers; pull is not always the right action.
     #[must_use]
     pub fn pull_integration_ref(standing: &BranchStanding) -> Option<&str> {
         if let Some(up) = &standing.upstream {
@@ -796,6 +798,73 @@ impl StatusHeader {
             }
         })
     }
+}
+
+/// Whether status should suggest `grit pull` or `grit merge` to catch up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatusIntegrationAction {
+    /// Integrate via configured upstream (`grit pull`).
+    Pull,
+    /// Integrate a local or non-upstream ref (`grit merge <ref>`).
+    Merge,
+}
+
+/// Footer hint for integrating commits the branch is behind.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatusIntegrationHint {
+    /// Suggested command kind.
+    pub action: StatusIntegrationAction,
+    /// Short ref name to pass to pull or merge (same ref shown in the status header).
+    pub ref_name: String,
+}
+
+/// Tracked comparison that is strictly behind its base (`ahead == 0`, `behind > 0`).
+#[must_use]
+pub fn integration_comparison_behind_only(standing: &BranchStanding) -> Option<&TrackedComparison> {
+    if let Some(up) = &standing.upstream {
+        if up.ahead == Some(0) && up.behind.is_some_and(|b| b > 0) {
+            return Some(up);
+        }
+        return None;
+    }
+    standing.target.as_ref().filter(|t| {
+        t.ahead == Some(0) && t.behind.is_some_and(|b| b > 0)
+    })
+}
+
+/// Resolve a status footer integration hint from branch standing and optional pull context.
+///
+/// When `pull_context` is `Some((repo, branch_short))`, pull is suggested only when
+/// [`resolve_pull_integration_base`] would integrate the same ref the branch is behind.
+/// Without context, pull is assumed when the behind-only comparison is upstream-only.
+#[must_use]
+pub fn status_integration_hint(
+    standing: &BranchStanding,
+    pull_context: Option<(&Repository, &str)>,
+) -> Option<StatusIntegrationHint> {
+    let cmp = integration_comparison_behind_only(standing)?;
+    let action = match pull_context {
+        Some((repo, branch_short)) => {
+            let config = repo.config().ok()?;
+            let remote =
+                crate::fetch_request::configured_remote_for_pull(&config, Some(branch_short));
+            match resolve_pull_integration_base(repo, branch_short, &remote, false) {
+                Some(base) if base.full_ref == cmp.full_ref => StatusIntegrationAction::Pull,
+                _ => StatusIntegrationAction::Merge,
+            }
+        }
+        None => {
+            if standing.upstream.is_some() {
+                StatusIntegrationAction::Pull
+            } else {
+                StatusIntegrationAction::Merge
+            }
+        }
+    };
+    Some(StatusIntegrationHint {
+        action,
+        ref_name: cmp.name.clone(),
+    })
 }
 
 impl BranchStanding {
@@ -1514,6 +1583,58 @@ mod tests {
             upstream_ref_for_merge(&config, ".", "refs/heads/dev").as_deref(),
             Some("refs/heads/dev")
         );
+    }
+
+    #[test]
+    fn status_integration_hint_merge_for_local_target() {
+        let tmp = TempDir::new().expect("tempdir");
+        git(tmp.path(), &["init", "-q", "-b", "main"]);
+        commit(tmp.path(), "a", "c1");
+        git(tmp.path(), &["switch", "-c", "old"]);
+        git(tmp.path(), &["switch", "main"]);
+        commit(tmp.path(), "b", "c2");
+        git(tmp.path(), &["switch", "old"]);
+
+        let repo = open(tmp.path());
+        let standing = BranchStanding::compute(
+            &repo,
+            &head_state(&repo),
+            StandingOptions {
+                newest_ahead_limit: 10,
+                counts: true,
+            },
+        )
+        .expect("standing");
+        let hint = status_integration_hint(&standing, Some((&repo, "old"))).expect("hint");
+        assert_eq!(hint.action, StatusIntegrationAction::Merge);
+        assert_eq!(hint.ref_name, "main");
+    }
+
+    #[test]
+    fn status_integration_hint_pull_when_upstream_matches() {
+        let tmp = TempDir::new().expect("tempdir");
+        let origin = tmp.path().join("origin");
+        std::fs::create_dir_all(&origin).expect("mkdir");
+        git(&origin, &["init", "-q", "-b", "main"]);
+        commit(&origin, "a", "m1");
+        git(tmp.path(), &["clone", "-q", "origin", "clone"]);
+        let clone = tmp.path().join("clone");
+        commit(&origin, "a", "m2");
+        git(&clone, &["fetch", "-q"]);
+
+        let repo = open(&clone);
+        let standing = BranchStanding::compute(
+            &repo,
+            &head_state(&repo),
+            StandingOptions {
+                newest_ahead_limit: 10,
+                counts: true,
+            },
+        )
+        .expect("standing");
+        let hint = status_integration_hint(&standing, Some((&repo, "main"))).expect("hint");
+        assert_eq!(hint.action, StatusIntegrationAction::Pull);
+        assert_eq!(hint.ref_name, "origin/main");
     }
 
     #[test]

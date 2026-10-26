@@ -123,6 +123,13 @@
     },
     "result": {
       "$ref": "#/definitions/MergeResult"
+    },
+    "updated_branch": {
+      "description": "Current branch whose tip moved after a fast-forward; omitted when it matches `branch`.",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
