@@ -9,6 +9,7 @@ use grit_lib::index::split_index::{
     format_dump_split_index_file, resolve_split_index_if_needed, WriteSplitIndexRequest,
 };
 use grit_lib::index::Index;
+use grit_lib::porcelain::paths::{move_path, remove_paths, RemoveOptions};
 use grit_lib::repo::Repository;
 use std::fs;
 use std::path::Path;
@@ -405,6 +406,100 @@ fn grit_dump_split_index_reports_base_and_bitmaps() {
 }
 
 #[test]
+/// Regression for <https://github.com/gitbutlerapp/grit/issues/2003>: locked index updates
+/// (`remove_paths`, `move_path`) must emit split-index delete/replace bitmaps, not a unified
+/// write that leaves shared-index paths behind.
+#[test]
+fn issue_2003_split_index_rm_mv_updates_index_for_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "user.name", "a"]);
+    git(root, &["config", "user.email", "a@b.c"]);
+    std::fs::write(root.join("a.txt"), "a\n").expect("write a");
+    std::fs::write(root.join("b.txt"), "b\n").expect("write b");
+    std::fs::write(root.join("c.txt"), "c\n").expect("write c");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "one"]);
+    git_update_index_split(root);
+
+    std::fs::write(root.join("n.txt"), "n\n").expect("write n");
+    git(root, &["add", "n.txt"]);
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    remove_paths(
+        &repo,
+        &RemoveOptions {
+            pathspecs: vec!["b.txt".into()],
+            pathspec_sources: vec!["b.txt".into()],
+            ..RemoveOptions::default()
+        },
+    )
+    .expect("rm b.txt");
+
+    assert!(
+        git(root, &["ls-files"])
+            .split_whitespace()
+            .all(|p| p != "b.txt"),
+        "git ls-files must drop b.txt after grit rm: {}",
+        git(root, &["ls-files"])
+    );
+    assert_eq!(
+        git(root, &["status", "--short"]),
+        "D  b.txt\nA  n.txt\n",
+        "git status after grit rm"
+    );
+    assert_index_matches_git(root, &repo);
+
+    move_path(&repo, "c.txt", "c2.txt", false).expect("mv c.txt -> c2.txt");
+    assert!(
+        git(root, &["ls-files"])
+            .split_whitespace()
+            .all(|p| p != "c.txt"),
+        "git ls-files must drop c.txt after grit mv: {}",
+        git(root, &["ls-files"])
+    );
+    assert!(
+        git(root, &["ls-files"]).contains("c2.txt"),
+        "git ls-files must list c2.txt"
+    );
+    assert_index_matches_git(root, &repo);
+    fsck_strict(root);
+}
+
+#[test]
+fn issue_2003_split_index_rm_mv_many_files_status_matches_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    init_repo_with_files(root, 65);
+    git_update_index_split(root);
+    std::fs::write(root.join("extra.txt"), "x\n").expect("write extra");
+    git(root, &["add", "extra.txt"]);
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    remove_paths(
+        &repo,
+        &RemoveOptions {
+            pathspecs: vec!["f0030.txt".into()],
+            pathspec_sources: vec!["f0030.txt".into()],
+            ..RemoveOptions::default()
+        },
+    )
+    .expect("rm one tracked file");
+    assert_index_matches_git(root, &repo);
+
+    move_path(&repo, "f0040.txt", "f0040-renamed.txt", false).expect("mv");
+    assert_index_matches_git(root, &repo);
+    assert!(
+        !git(root, &["ls-files"]).contains("f0040.txt"),
+        "old path must leave the merged index"
+    );
+    assert!(
+        git(root, &["ls-files"]).contains("f0040-renamed.txt"),
+        "renamed path must appear in merged index"
+    );
+}
+
 fn split_index_explicit_no_split_writes_unified_index() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();

@@ -588,14 +588,19 @@ fn split_index_remove_entries_emits_delete_bitmaps() {
     git(root, &["commit", "-qm", "c"]);
     git_update_index_split(root);
 
-    for i in (0..10).map(|n| format!("f{n:04}.txt")) {
-        git(root, &["rm", "--cached", &i]);
-    }
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let mut idx = repo.index_handle().load().expect("load");
-    repo.index_handle()
-        .write(&mut idx)
-        .expect("write split after deletes");
+    let to_remove: Vec<String> = (0..10).map(|n| format!("f{n:04}.txt")).collect();
+    grit_lib::porcelain::paths::remove_paths(
+        &repo,
+        &grit_lib::porcelain::paths::RemoveOptions {
+            pathspecs: to_remove.clone(),
+            pathspec_sources: to_remove,
+            cached: true,
+            ..grit_lib::porcelain::paths::RemoveOptions::default()
+        },
+    )
+    .expect("grit rm --cached through locked split write");
+    let idx = repo.index_handle().load().expect("load");
     let bytes = fs::read(repo.index_handle().path()).expect("read index");
     let parsed = Index::parse(&bytes).expect("parse");
     let dump = format_dump_split_index_file(&bytes, &parsed).expect("dump");

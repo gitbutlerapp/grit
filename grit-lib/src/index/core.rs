@@ -1490,26 +1490,6 @@ impl Index {
         )
     }
 
-    /// Like [`Self::write_to_path_with_config_and_lock`], but can leave the index uncommitted
-    /// when `commit` is false (bytes are written to an existing [`IndexLock`] only).
-    pub(crate) fn write_to_path_with_config_and_lock_mode(
-        &mut self,
-        path: &Path,
-        skip_hash: bool,
-        config: Option<&ConfigSet>,
-        existing_lock: Option<&mut IndexLock>,
-        commit: bool,
-    ) -> Result<()> {
-        self.write_to_path_with_config_and_lock_mode_policy(
-            path,
-            skip_hash,
-            config,
-            existing_lock,
-            commit,
-            crate::parallel::ThreadPolicy::default(),
-        )
-    }
-
     pub(crate) fn write_to_path_with_config_and_lock_mode_policy(
         &mut self,
         path: &Path,

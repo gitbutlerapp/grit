@@ -2047,38 +2047,16 @@ impl Repository {
         lock: &mut crate::index::IndexLock,
         index: &mut Index,
     ) -> Result<()> {
-        test_inject_index_write_fail()?;
-        index.hash_algo = self.odb.hash_algo();
-        self.finalize_sparse_index_if_needed(index)?;
         let path = self.index_path();
-        let prev_index_mtime = crate::index::index_file_mtime(&path);
-        let cfg = self.config()?;
-        if let Some(work_tree) = self.work_tree.as_deref() {
-            if !index.suppress_pre_write_index_housekeeping {
-                crate::untracked_cache::ensure_untracked_cache_shell(
-                    index,
-                    work_tree,
-                    cfg.as_ref(),
-                );
-                if !index.skip_racy_smudge_on_write {
-                    crate::diff::smudge_racily_clean_entries(
-                        &self.odb,
-                        &self.git_dir,
-                        index,
-                        work_tree,
-                        prev_index_mtime,
-                        Some(cfg.as_ref()),
-                        Some(self.caches().filters()),
-                    );
-                }
-            }
-        }
-        index.content_verified.clear();
-        let skip_hash = crate::index::index_skip_hash_for_write(Some(cfg.as_ref()));
-        index.write_to_path_with_config_and_lock_mode(
+        let (skip_hash, cfg) = self.prepare_index_for_disk_write(&path, index)?;
+        write_index_file_split(
             &path,
+            &self.git_dir,
+            index,
+            cfg.as_ref(),
+            WriteSplitIndexRequest::default(),
             skip_hash,
-            Some(cfg.as_ref()),
+            self.thread_policy(),
             Some(lock),
             false,
         )
@@ -2333,16 +2311,12 @@ impl Repository {
         Ok((lock, index))
     }
 
-    fn write_index_file(
+    /// Shared pre-write housekeeping for [`Self::write_index_file`] and [`Self::flush_index_update`].
+    fn prepare_index_for_disk_write(
         &self,
         path: &std::path::Path,
         index: &mut Index,
-        split: WriteSplitIndexRequest,
-        updated_workdir: bool,
-        updated_skipworktree: bool,
-        existing_lock: Option<&mut crate::index::IndexLock>,
-    ) -> Result<()> {
-        crate::trace::trace_span!("grit.index.write");
+    ) -> Result<(bool, Arc<ConfigSet>)> {
         test_inject_index_write_fail()?;
         // The on-disk index format (entry OID width and trailing checksum) is
         // fixed by the repository's hash algorithm. Stamp it here so every
@@ -2374,6 +2348,20 @@ impl Repository {
         }
         index.content_verified.clear();
         let skip_hash = crate::index::index_skip_hash_for_write(Some(cfg.as_ref()));
+        Ok((skip_hash, cfg))
+    }
+
+    fn write_index_file(
+        &self,
+        path: &std::path::Path,
+        index: &mut Index,
+        split: WriteSplitIndexRequest,
+        updated_workdir: bool,
+        updated_skipworktree: bool,
+        existing_lock: Option<&mut crate::index::IndexLock>,
+    ) -> Result<()> {
+        crate::trace::trace_span!("grit.index.write");
+        let (skip_hash, cfg) = self.prepare_index_for_disk_write(path, index)?;
         write_index_file_split(
             path,
             &self.git_dir,
@@ -2383,6 +2371,7 @@ impl Repository {
             skip_hash,
             self.thread_policy(),
             existing_lock,
+            true,
         )?;
         // Git `write_locked_index`: `post-index-change` after a successful index write (t1800).
         let updated_workdir_arg = if updated_workdir { "1" } else { "0" };

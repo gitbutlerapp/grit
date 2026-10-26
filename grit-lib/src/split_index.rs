@@ -578,8 +578,29 @@ fn load_shared_entries(
 
 /// Write split index to `path` under `git_dir`, updating `index` base positions and `split_link`.
 ///
-/// With `existing_lock`, the file at `path` is written through that already-held lock (which is
-/// committed) instead of acquiring a new one; it must be the lock for `path`.
+/// With `existing_lock`, the file at `path` is written through that already-held lock instead of
+/// acquiring a new one; it must be the lock for `path`. When `commit_lock` is true the lock is
+/// committed as part of the write; when false the caller must commit via [`IndexLock::commit_replace_index`].
+#[allow(clippy::too_many_arguments)]
+fn write_index_through_lock(
+    index: &mut Index,
+    path: &Path,
+    skip_hash: bool,
+    cfg: &ConfigSet,
+    existing_lock: Option<&mut crate::index::IndexLock>,
+    commit_lock: bool,
+    thread_policy: crate::parallel::ThreadPolicy,
+) -> Result<()> {
+    index.write_to_path_with_config_and_lock_mode_policy(
+        path,
+        skip_hash,
+        Some(cfg),
+        existing_lock,
+        commit_lock,
+        thread_policy,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_index_file_split(
     path: &Path,
@@ -590,6 +611,7 @@ pub(crate) fn write_index_file_split(
     skip_hash: bool,
     thread_policy: crate::parallel::ThreadPolicy,
     existing_lock: Option<&mut crate::index::IndexLock>,
+    commit_lock: bool,
 ) -> Result<()> {
     // Mirror upstream `write_locked_index`: under GIT_TEST_CHECK_CACHE_TREE, verify the cache-tree
     // against the index before persisting. A duplicate-entry tree (t4058) produces a cache-tree
@@ -608,11 +630,13 @@ pub(crate) fn write_index_file_split(
         for e in &mut index.entries {
             e.base_index_pos = 0;
         }
-        index.write_to_path_with_config_and_lock_policy(
+        write_index_through_lock(
+            index,
             path,
             skip_hash,
-            Some(cfg),
+            cfg,
             existing_lock,
+            commit_lock,
             thread_policy,
         )?;
         adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
@@ -633,11 +657,13 @@ pub(crate) fn write_index_file_split(
         for e in &mut index.entries {
             e.base_index_pos = 0;
         }
-        index.write_to_path_with_config_and_lock_policy(
+        write_index_through_lock(
+            index,
             path,
             skip_hash,
-            Some(cfg),
+            cfg,
             existing_lock,
+            commit_lock,
             thread_policy,
         )?;
         adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
@@ -721,11 +747,13 @@ pub(crate) fn write_index_file_split(
                 for e in &mut index.entries {
                     e.base_index_pos = 0;
                 }
-                index.write_to_path_with_config_and_lock_policy(
+                write_index_through_lock(
+                    index,
                     path,
                     skip_hash,
-                    Some(cfg),
+                    cfg,
                     existing_lock,
+                    commit_lock,
                     thread_policy,
                 )?;
                 adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
@@ -753,11 +781,13 @@ pub(crate) fn write_index_file_split(
                 for ent in &mut index.entries {
                     ent.base_index_pos = 0;
                 }
-                index.write_to_path_with_config_and_lock_policy(
+                write_index_through_lock(
+                    index,
                     path,
                     skip_hash,
-                    Some(cfg),
+                    cfg,
                     existing_lock,
+                    commit_lock,
                     thread_policy,
                 )?;
                 adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
@@ -869,11 +899,13 @@ pub(crate) fn write_index_file_split(
         suppress_pre_write_index_housekeeping: index.suppress_pre_write_index_housekeeping,
     };
 
-    out_index.write_to_path_with_config_and_lock_policy(
+    write_index_through_lock(
+        &mut out_index,
         path,
         skip_hash,
-        Some(cfg),
+        cfg,
         existing_lock,
+        commit_lock,
         thread_policy,
     )?;
     adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
