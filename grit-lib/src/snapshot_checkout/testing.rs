@@ -1,6 +1,8 @@
 //! Test helpers shared by the snapshot checkout's client-side tests: a
 //! served repository that makes snapshots of `src`, and checkouts of it.
 
+#![cfg(test)]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

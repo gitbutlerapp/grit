@@ -658,7 +658,7 @@ mod tests {
         let plain = co.on(co.snapshot, "Caf\u{e9}", None);
         co.branch("work", plain);
         // Plain Git logs a subject in a legacy encoding (here latin-1) as it is.
-        let log = co.repo.git_dir().join("logs/refs/heads/work");
+        let log = crate::reflog::reflog_path(co.repo.git_dir(), "refs/heads/work");
         std::fs::create_dir_all(log.parent().expect("parent")).expect("logs");
         let mut written = format!(
             "{} {} A <a@e> 1700000000 +0000\tcommit: Caf",

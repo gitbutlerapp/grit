@@ -527,6 +527,10 @@ mod tests {
         let _ = CheckoutError::InvalidUrl(String::new());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn a_tip_on_the_real_history_is_refused_at_the_target_and_known_commits_are_not_replayed() {
         let (dir, repo, base, snap) = fixture();
@@ -651,6 +655,10 @@ mod tests {
             .tree
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn grafts_drop_signatures_and_merge_tags_but_keep_other_headers() {
         let (_dir, repo, base, snap) = fixture();
@@ -699,6 +707,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn commits_made_with_git_are_grafted_with_the_change_id_derived_from_them() {
         let (_dir, repo, _base, snap) = fixture();
@@ -732,6 +744,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn a_directory_replaced_by_a_file_grafts_when_nothing_is_hidden_there() {
         let (_dir, repo, base, snap) = fixture();
@@ -806,6 +822,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn a_change_outside_the_paths_the_target_holds_differently_is_refused() {
         let (_dir, repo, _base, snap) = fixture();
@@ -835,6 +855,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn a_merge_of_a_newer_snapshot_keeps_the_targets_changes_outside_the_paths() {
         let (_dir, repo, base, s1) = fixture();
@@ -913,6 +937,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn a_merge_whose_parents_conflict_outside_the_paths_is_refused() {
         let (_dir, repo, base, s1) = fixture();

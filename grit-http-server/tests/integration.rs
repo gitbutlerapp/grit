@@ -12,6 +12,9 @@
 #[cfg(feature = "full-tests")]
 #[path = "git_smart_http.rs"]
 mod git_smart_http;
+#[cfg(feature = "full-tests")]
+#[path = "serve.rs"]
+mod serve;
 
 /// Fails when a file in `tests/` is neither a module above nor a `[[test]]`
 /// target in Cargo.toml: with `autotests = false` cargo would never build it.

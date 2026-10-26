@@ -204,6 +204,11 @@ fn walk_rs_files(
                 .replace('\\', "/");
             let source = fs::read_to_string(&path)
                 .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            // A test-only file (`#![cfg(test)]`, for a `#[cfg(test)] mod` declared
+            // in its parent) is all test code.
+            if is_test_only_file(&source) {
+                continue;
+            }
             let stripped = strip_cfg_test_modules(&source);
             let (file_counts, file_exempt) = count_patterns(&stripped, &source);
             if file_counts.values().any(|&n| n > 0) {
@@ -214,6 +219,15 @@ fn walk_rs_files(
             }
         }
     }
+}
+
+/// Whether `source` opens with `#![cfg(test)]` after its doc comments.
+fn is_test_only_file(source: &str) -> bool {
+    source
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("//"))
+        == Some("#![cfg(test)]")
 }
 
 /// Blank out `#[cfg(test)]` items but keep newlines so line numbers match the original file.

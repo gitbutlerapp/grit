@@ -585,6 +585,10 @@ mod tests {
         (base, snap)
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn branches_are_cut_to_the_paths_and_commits_on_other_paths_come_out_empty() {
         let (_dir, repo) = repo();
@@ -657,6 +661,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn a_checkouts_own_commits_show_as_they_are_with_their_files_outside_the_paths() {
         let (dir, repo) = repo();
@@ -725,6 +733,10 @@ mod tests {
         assert_eq!(read(&repo, again.tip).parents, vec![shown]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn an_outside_file_that_became_a_directory_is_not_carried() {
         let (dir, repo) = repo();

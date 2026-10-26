@@ -517,6 +517,10 @@ mod tests {
         git(co, &["ls-tree", "-r", "--name-only", rev])
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn a_server_branch_is_created_then_followed_then_rebased_under_own_commits() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -597,6 +601,10 @@ mod tests {
         assert!(!co.join("docs").exists());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn copies_of_the_servers_commits_are_left_out_by_change_id() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -661,6 +669,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn a_conflicting_branch_refresh_stops_in_a_rebase() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -763,6 +775,10 @@ mod tests {
         assert_eq!(git(&wt, &["symbolic-ref", "--short", "HEAD"]), "feature");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn a_branch_that_is_not_checked_out_is_switched_to_for_its_rebase() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -802,6 +818,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn a_rebase_that_refuses_after_the_switch_switches_back() {
         let tmp = tempfile::tempdir().expect("tempdir");

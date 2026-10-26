@@ -36,6 +36,8 @@ mod ambiguous_ref_warning;
 #[cfg(feature = "full-tests")]
 #[path = "auth_logout_cli.rs"]
 mod auth_logout_cli;
+#[path = "auth_server_cli.rs"]
+mod auth_server_cli;
 #[cfg(feature = "full-tests")]
 #[path = "blame_copy_cli.rs"]
 mod blame_copy_cli;
@@ -85,6 +87,9 @@ mod change_id_resolve;
 #[cfg(feature = "full-tests")]
 #[path = "change_ids_git_compat.rs"]
 mod change_ids_git_compat;
+#[cfg(feature = "full-tests")]
+#[path = "checkout_cli.rs"]
+mod checkout_cli;
 #[path = "cli_transport_hygiene.rs"]
 mod cli_transport_hygiene;
 #[cfg(feature = "full-tests")]
@@ -482,6 +487,9 @@ mod revert;
 #[cfg(feature = "full-tests")]
 #[path = "rm_mv_clean_cli.rs"]
 mod rm_mv_clean_cli;
+#[cfg(feature = "full-tests")]
+#[path = "serve_bundles_cli.rs"]
+mod serve_bundles_cli;
 #[cfg(feature = "full-tests")]
 #[path = "shallow_maintenance_cli.rs"]
 mod shallow_maintenance_cli;
