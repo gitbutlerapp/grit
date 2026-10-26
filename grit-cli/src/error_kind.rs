@@ -66,6 +66,8 @@ pub enum ErrorKind {
     DirtyWorktree,
     /// Worktree file I/O failed on a named path (`paths`, often one entry).
     WorktreePathIo,
+    /// Git directory I/O failed on a named path under `.git/` (`paths`, often one entry).
+    GitDirPathIo,
 }
 
 impl ErrorKind {
@@ -122,6 +124,7 @@ impl ErrorKind {
             Self::UnmergedPaths => "unmerged_paths",
             Self::DirtyWorktree => "dirty_worktree",
             Self::WorktreePathIo => "worktree_path_io",
+            Self::GitDirPathIo => "git_dir_path_io",
         }
     }
 
@@ -159,6 +162,7 @@ impl ErrorKind {
             Self::UnmergedPaths,
             Self::DirtyWorktree,
             Self::WorktreePathIo,
+            Self::GitDirPathIo,
         ]
     }
 }

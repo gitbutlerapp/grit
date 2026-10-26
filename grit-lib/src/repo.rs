@@ -43,6 +43,7 @@ use crate::config::{
 use crate::diagnostics::{self, DiagnosticsHandle};
 use crate::environment::{Environment, RepositoryOptions};
 use crate::error::{Error, Result};
+use crate::git_dir::io_error::map_index_write_error;
 use crate::git_path::path_for_error_message;
 use crate::hooks::run_hook;
 use crate::index::Index;
@@ -2376,7 +2377,8 @@ impl Repository {
             skip_hash,
             self.thread_policy(),
             existing_lock,
-        )?;
+        )
+        .map_err(|err| map_index_write_error(&self.git_dir, path, err))?;
         // Git `write_locked_index`: `post-index-change` after a successful index write (t1800).
         let updated_workdir_arg = if updated_workdir { "1" } else { "0" };
         let updated_skipworktree_arg = if updated_skipworktree { "1" } else { "0" };

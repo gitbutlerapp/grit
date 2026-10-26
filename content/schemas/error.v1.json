@@ -230,6 +230,13 @@
             "worktree_path_io"
           ],
           "type": "string"
+        },
+        {
+          "description": "Git directory I/O failed on a named path under `.git/` (`paths`, often one entry).",
+          "enum": [
+            "git_dir_path_io"
+          ],
+          "type": "string"
         }
       ]
     },

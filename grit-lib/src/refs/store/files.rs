@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::error::{Error, Result};
+use crate::git_dir::io_error::{io_with_git_path, map_git_dir_io, GitDirPathOperation};
 use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
 use crate::reflog::{self, ReflogEntry};
@@ -695,6 +696,28 @@ impl FilesRefStore {
             })
     }
 
+    fn acquire_ref_lock_mapped(
+        &self,
+        lock_path: &Path,
+        refname: &str,
+        wait: LockWait,
+    ) -> Result<()> {
+        use crate::lockfile::{LockError, LockFile};
+        LockFile::acquire(lock_path, wait)
+            .map(|guard| guard.detach())
+            .map_err(|err| match err {
+                LockError::Held { .. } => Error::RefStore(RefStoreError::LockHeld {
+                    name: refname.to_owned(),
+                }),
+                LockError::Io { source, path } => map_git_dir_io(
+                    &self.common_dir,
+                    path.as_path(),
+                    GitDirPathOperation::UpdateRef,
+                    source,
+                ),
+            })
+    }
+
     fn release_locks(batch: &PreparedFilesBatch) {
         for lock in batch.ref_locks.values() {
             let _ = fs::remove_file(lock);
@@ -704,17 +727,37 @@ impl FilesRefStore {
         }
     }
 
-    fn write_loose_value(path: &Path, lock: &Path, value: &RawRef) -> Result<()> {
+    fn write_loose_value(
+        storage_dir: &Path,
+        path: &Path,
+        lock: &Path,
+        value: &RawRef,
+    ) -> Result<()> {
         remove_empty_ref_directory(path);
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            io_with_git_path(
+                storage_dir,
+                parent,
+                GitDirPathOperation::CreateDir,
+                fs::create_dir_all(parent),
+            )?;
         }
         let content = match value {
             RawRef::Direct(oid) => format!("{oid}\n"),
             RawRef::Symbolic(target) => format!("ref: {target}\n"),
         };
-        fs::write(lock, content)?;
-        fs::rename(lock, path)?;
+        io_with_git_path(
+            storage_dir,
+            lock,
+            GitDirPathOperation::UpdateRef,
+            fs::write(lock, content),
+        )?;
+        io_with_git_path(
+            storage_dir,
+            path,
+            GitDirPathOperation::UpdateRef,
+            fs::rename(lock, path),
+        )?;
         Ok(())
     }
 
@@ -737,7 +780,8 @@ impl FilesRefStore {
         Self::acquire_ref_lock(&from_lock, &rename.from, ctx.ref_lock_wait).map_err(Error::from)?;
         if !from_path.is_file() {
             self.remove_packed_record(&rename.from, ctx)?;
-            FilesRefStore::write_loose_value(&from_path, &from_lock, value)?;
+            let route = self.route(&rename.from);
+            FilesRefStore::write_loose_value(&route.storage_dir, &from_path, &from_lock, value)?;
         }
         let (_, to_path, _) = self.ref_lock_paths(&rename.to);
         if from_path != to_path {
@@ -863,13 +907,28 @@ impl FilesRefStore {
         let path = self.reflog_path(name);
         if entries.is_empty() {
             if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)?;
+                io_with_git_path(
+                    &self.common_dir,
+                    parent,
+                    GitDirPathOperation::CreateDir,
+                    fs::create_dir_all(parent),
+                )?;
             }
-            fs::write(&path, "")?;
+            io_with_git_path(
+                &self.common_dir,
+                &path,
+                GitDirPathOperation::AppendReflog,
+                fs::write(&path, ""),
+            )?;
             return Ok(());
         }
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            io_with_git_path(
+                &self.common_dir,
+                parent,
+                GitDirPathOperation::CreateDir,
+                fs::create_dir_all(parent),
+            )?;
         }
         let mut body = String::new();
         for entry in entries {
@@ -884,7 +943,12 @@ impl FilesRefStore {
                 ));
             }
         }
-        fs::write(&path, body)?;
+        io_with_git_path(
+            &self.common_dir,
+            &path,
+            GitDirPathOperation::AppendReflog,
+            fs::write(&path, body),
+        )?;
         Ok(())
     }
 
@@ -966,10 +1030,11 @@ impl FilesRefStore {
         lock: &Path,
         ctx: CommitContext<'_>,
     ) -> Result<()> {
+        let route = self.route(name);
         let (_, path, _) = self.ref_lock_paths(name);
         match value {
             None => self.delete_loose_ref(name, lock, ctx),
-            Some(value) => FilesRefStore::write_loose_value(&path, lock, value),
+            Some(value) => FilesRefStore::write_loose_value(&route.storage_dir, &path, lock, value),
         }
     }
 
@@ -982,9 +1047,14 @@ impl FilesRefStore {
     ) -> Result<()> {
         let (_, _, lock_path) = self.ref_lock_paths(name);
         if let Some(parent) = lock_path.parent() {
-            fs::create_dir_all(parent).map_err(Error::Io)?;
+            io_with_git_path(
+                &self.common_dir,
+                parent,
+                GitDirPathOperation::CreateDir,
+                fs::create_dir_all(parent),
+            )?;
         }
-        Self::acquire_ref_lock(&lock_path, name, ctx.ref_lock_wait).map_err(Error::from)?;
+        self.acquire_ref_lock_mapped(&lock_path, name, ctx.ref_lock_wait)?;
         let write_result = self.persist_one_ref_change(name, value, &lock_path, ctx);
         let _ = fs::remove_file(&lock_path);
         write_result?;
@@ -1047,12 +1117,15 @@ impl FilesRefStore {
             }
             let (_, _, lock_path) = self.ref_lock_paths(name);
             let acquired = match lock_path.parent() {
-                Some(parent) => fs::create_dir_all(parent).map_err(Error::Io),
+                Some(parent) => io_with_git_path(
+                    &self.common_dir,
+                    parent,
+                    GitDirPathOperation::CreateDir,
+                    fs::create_dir_all(parent),
+                ),
                 None => Ok(()),
             }
-            .and_then(|()| {
-                Self::acquire_ref_lock(&lock_path, name, ctx.ref_lock_wait).map_err(Error::from)
-            });
+            .and_then(|()| self.acquire_ref_lock_mapped(&lock_path, name, ctx.ref_lock_wait));
             if let Err(err) = acquired {
                 release(&held);
                 return Err(err);
@@ -1449,13 +1522,19 @@ impl RefStore for FilesRefStore {
         validate_storable_refname(name).map_err(|e| Error::Message(e.to_string()))?;
         let path = self.reflog_path(name);
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            io_with_git_path(
+                &self.common_dir,
+                parent,
+                GitDirPathOperation::CreateDir,
+                fs::create_dir_all(parent),
+            )?;
         }
-        fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .map_err(Error::Io)?;
+        io_with_git_path(
+            &self.common_dir,
+            &path,
+            GitDirPathOperation::AppendReflog,
+            fs::OpenOptions::new().create(true).append(true).open(&path),
+        )?;
         Ok(())
     }
 

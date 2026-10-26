@@ -184,6 +184,16 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             Some("close programs that may have the file open, then try again".to_owned()),
             Some(vec![path.clone()]),
         )),
+        LibError::GitDirPathIo { path, .. } => Some(guided(
+            ErrorKind::GitDirPathIo,
+            err.to_string(),
+            Some(
+                "check permissions and ownership under .git (for example `ls -l .git`); \
+                 after running as root, fix ownership with `chown -R` for your user"
+                    .to_owned(),
+            ),
+            Some(vec![path.clone()]),
+        )),
         LibError::Branch(BranchError::NotFound { name }) => Some(guided(
             ErrorKind::BranchNotFound,
             format!("no branch named '{name}'"),

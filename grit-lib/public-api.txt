@@ -5531,6 +5531,10 @@ pub grit_lib::error::Error::IndexPathPrefixConflict
 pub grit_lib::error::Error::IndexPathPrefixConflict::directory: std::path::PathBuf
 pub grit_lib::error::Error::IndexPathPrefixConflict::file: std::path::PathBuf
 pub grit_lib::error::Error::IndexUnmerged
+pub grit_lib::error::Error::GitDirPathIo
+pub grit_lib::error::Error::GitDirPathIo::operation: grit_lib::error::GitDirPathOperation
+pub grit_lib::error::Error::GitDirPathIo::path: alloc::string::String
+pub grit_lib::error::Error::GitDirPathIo::source: core::io::error::Error
 pub grit_lib::error::Error::InitBareWithSeparateGitDir
 pub grit_lib::error::Error::InitObjectFormatChange
 pub grit_lib::error::Error::InvalidAttrPathspec
@@ -6159,6 +6163,31 @@ impl core::marker::Unpin for grit_lib::error::WorktreeOperation
 impl core::marker::UnsafeUnpin for grit_lib::error::WorktreeOperation
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::WorktreeOperation
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::WorktreeOperation
+#[non_exhaustive] pub enum grit_lib::error::GitDirPathOperation
+pub grit_lib::error::GitDirPathOperation::AppendReflog
+pub grit_lib::error::GitDirPathOperation::CreateDir
+pub grit_lib::error::GitDirPathOperation::GcPack
+pub grit_lib::error::GitDirPathOperation::UpdateRef
+pub grit_lib::error::GitDirPathOperation::WriteIndex
+pub grit_lib::error::GitDirPathOperation::WriteObject
+impl core::clone::Clone for grit_lib::error::GitDirPathOperation
+pub fn grit_lib::error::GitDirPathOperation::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::GitDirPathOperation
+impl core::cmp::PartialEq for grit_lib::error::GitDirPathOperation
+pub fn grit_lib::error::GitDirPathOperation::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::error::GitDirPathOperation
+pub fn grit_lib::error::GitDirPathOperation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::error::GitDirPathOperation
+pub fn grit_lib::error::GitDirPathOperation::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::error::GitDirPathOperation
+impl core::marker::StructuralPartialEq for grit_lib::error::GitDirPathOperation
+impl core::marker::Freeze for grit_lib::error::GitDirPathOperation
+impl core::marker::Send for grit_lib::error::GitDirPathOperation
+impl core::marker::Sync for grit_lib::error::GitDirPathOperation
+impl core::marker::Unpin for grit_lib::error::GitDirPathOperation
+impl core::marker::UnsafeUnpin for grit_lib::error::GitDirPathOperation
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::GitDirPathOperation
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::GitDirPathOperation
 #[non_exhaustive] pub enum grit_lib::error::WorktreePathOperation
 pub grit_lib::error::WorktreePathOperation::Create
 pub grit_lib::error::WorktreePathOperation::Metadata
@@ -15406,6 +15435,10 @@ pub grit_lib::prelude::Error::IndexPathPrefixConflict
 pub grit_lib::prelude::Error::IndexPathPrefixConflict::directory: std::path::PathBuf
 pub grit_lib::prelude::Error::IndexPathPrefixConflict::file: std::path::PathBuf
 pub grit_lib::prelude::Error::IndexUnmerged
+pub grit_lib::prelude::Error::GitDirPathIo
+pub grit_lib::prelude::Error::GitDirPathIo::operation: grit_lib::error::GitDirPathOperation
+pub grit_lib::prelude::Error::GitDirPathIo::path: alloc::string::String
+pub grit_lib::prelude::Error::GitDirPathIo::source: core::io::error::Error
 pub grit_lib::prelude::Error::InitBareWithSeparateGitDir
 pub grit_lib::prelude::Error::InitObjectFormatChange
 pub grit_lib::prelude::Error::InvalidAttrPathspec

@@ -12,6 +12,7 @@ use flate2::{Decompress, FlushDecompress, Status};
 
 use super::{BoundedRead, ObjectStore, ObjectStream, WritableObjectStore};
 use crate::error::{Error, Result};
+use crate::git_dir::io_error::{map_objects_dir_io, GitDirPathOperation};
 use crate::hash;
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
 use crate::odb::WriteOptions;
@@ -58,7 +59,14 @@ impl LooseStore {
     pub fn ensure_all_loose_prefix_dirs(&self) -> Result<()> {
         for i in 0u8..=255 {
             let prefix = self.objects_dir.join(format!("{i:02x}"));
-            fs::create_dir_all(prefix).map_err(Error::Io)?;
+            fs::create_dir_all(&prefix).map_err(|source| {
+                map_objects_dir_io(
+                    &self.objects_dir,
+                    &prefix,
+                    GitDirPathOperation::CreateDir,
+                    source,
+                )
+            })?;
         }
         Ok(())
     }
@@ -111,8 +119,15 @@ impl LooseStore {
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
         let zlib = zlib_compress_store_bytes(store_bytes, self.compression)?;
-        publish_loose_object(&path, prefix_dir, false, |mut file| {
-            file.write_all(&zlib).map_err(Error::Io)
+        publish_loose_object(&self.objects_dir, &path, prefix_dir, false, |mut file| {
+            file.write_all(&zlib).map_err(|source| {
+                map_objects_dir_io(
+                    &self.objects_dir,
+                    &path,
+                    GitDirPathOperation::WriteObject,
+                    source,
+                )
+            })
         })?;
         Ok(*oid)
     }
@@ -139,10 +154,20 @@ impl LooseStore {
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
         publish_loose_object(
+            &self.objects_dir,
             &path,
             prefix_dir,
             options.loose_prefix_dirs_ready,
-            |mut file| file.write_all(zlib_store).map_err(Error::Io),
+            |mut file| {
+                file.write_all(zlib_store).map_err(|source| {
+                    map_objects_dir_io(
+                        &self.objects_dir,
+                        &path,
+                        GitDirPathOperation::WriteObject,
+                        source,
+                    )
+                })
+            },
         )?;
         Ok(*oid)
     }
@@ -171,9 +196,13 @@ impl LooseStore {
         let prefix_dir = path
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        publish_loose_object(&path, prefix_dir, options.loose_prefix_dirs_ready, |file| {
-            deflate_object_into(file, kind, data, self.compression)
-        })?;
+        publish_loose_object(
+            &self.objects_dir,
+            &path,
+            prefix_dir,
+            options.loose_prefix_dirs_ready,
+            |file| deflate_object_into(file, kind, data, self.compression),
+        )?;
         Ok(*oid)
     }
 
@@ -321,7 +350,7 @@ impl WritableObjectStore for LooseStore {
         let prefix_dir = path
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        publish_loose_object(&path, prefix_dir, false, |file| {
+        publish_loose_object(&self.objects_dir, &path, prefix_dir, false, |file| {
             deflate_object_into(file, kind, data, self.compression)
         })?;
         Ok(oid)
@@ -618,6 +647,7 @@ fn deflate_object_into(
 /// Returns [`Error::Io`] when the temp file cannot be created or renamed after the
 /// retries, or whatever `fill` returns.
 fn publish_loose_object(
+    objects_dir: &Path,
     path: &Path,
     prefix_dir: &Path,
     prefix_dir_ready: bool,
@@ -629,7 +659,14 @@ fn publish_loose_object(
         attempt += 1;
         let can_retry = attempt < MAX_ATTEMPTS;
         if !prefix_dir_ready || attempt > 1 {
-            fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
+            fs::create_dir_all(prefix_dir).map_err(|source| {
+                map_objects_dir_io(
+                    objects_dir,
+                    prefix_dir,
+                    GitDirPathOperation::CreateDir,
+                    source,
+                )
+            })?;
         }
         let tmp_path = unique_loose_tmp_path(prefix_dir);
         let file = match fs::OpenOptions::new()
@@ -647,7 +684,14 @@ fn publish_loose_object(
             {
                 continue;
             }
-            Err(e) => return Err(Error::Io(e)),
+            Err(e) => {
+                return Err(map_objects_dir_io(
+                    objects_dir,
+                    &tmp_path,
+                    GitDirPathOperation::WriteObject,
+                    e,
+                ));
+            }
         };
         if let Err(e) = fill(file) {
             let _ = fs::remove_file(&tmp_path);
@@ -666,7 +710,12 @@ fn publish_loose_object(
                 if can_retry && e.kind() == io::ErrorKind::NotFound {
                     continue;
                 }
-                return Err(Error::Io(e));
+                return Err(map_objects_dir_io(
+                    objects_dir,
+                    path,
+                    GitDirPathOperation::WriteObject,
+                    e,
+                ));
             }
         }
     }

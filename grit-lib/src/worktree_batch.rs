@@ -226,7 +226,7 @@ fn with_path_context(index_relpath: &str, err: Error) -> Error {
             path: index_relpath.to_owned(),
             source,
         },
-        Error::WorktreePathIo { .. } => err,
+        Error::WorktreePathIo { .. } | Error::GitDirPathIo { .. } => err,
         other => other,
     }
 }
