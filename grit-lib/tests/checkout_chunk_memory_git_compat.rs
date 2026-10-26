@@ -138,4 +138,46 @@ fn checkout_bounds_medium_blob_buffers_for_serial_and_parallel_preparation() {
     assert_eq!(git(root, &["write-tree"], b"").trim(), tree.to_hex());
     assert!(git(root, &["status", "--porcelain"], b"").trim().is_empty());
     git(root, &["fsck", "--strict", "--no-progress"], b"");
+
+    git(root, &["checkout", "-q", "empty"], b"");
+    let large = git(
+        root,
+        &["hash-object", "-w", "--stdin"],
+        &vec![b'x'; 64 * 1024 * 1024],
+    );
+    let tree_input = format!("100644 blob {}\tlarge.dat\n", large.trim());
+    let large_tree = git(root, &["mktree"], tree_input.as_bytes());
+    let large_commit = git(
+        root,
+        &["commit-tree", large_tree.trim(), "-m", "cached large blob"],
+        b"",
+    );
+    git(
+        root,
+        &["update-ref", "refs/heads/cached-large", large_commit.trim()],
+        b"",
+    );
+    git(
+        root,
+        &["symbolic-ref", "HEAD", "refs/heads/cached-large"],
+        b"",
+    );
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("reopen");
+    let large = ObjectId::from_hex(large.trim()).expect("large blob oid");
+    // Retain the result as well as the ODB's cached copy, so another whole-object copy
+    // would raise the process high-water mark during the following checkout.
+    let retained = repo.odb().read(&large).expect("cache large blob");
+    let large_tree = ObjectId::from_hex(large_tree.trim()).expect("large tree oid");
+    let before = peak_rss_kib();
+    checkout_between_trees(&repo, None, &large_tree).expect("checkout cached large blob");
+    let growth = peak_rss_kib() - before;
+    eprintln!("cached large-blob checkout peak RSS growth: {growth} KiB");
+    assert!(
+        growth < 16 * 1024,
+        "checkout copied a cached large blob: peak RSS grew {growth} KiB"
+    );
+    assert_eq!(retained.data.len(), 64 * 1024 * 1024);
+    assert_eq!(git(root, &["write-tree"], b"").trim(), large_tree.to_hex());
+    assert!(git(root, &["status", "--porcelain"], b"").trim().is_empty());
+    git(root, &["fsck", "--strict", "--no-progress"], b"");
 }

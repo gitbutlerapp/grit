@@ -2431,11 +2431,16 @@ impl Odb {
     ///
     /// Same as [`Self::read`], including [`Error::ObjectNotFound`].
     pub(crate) fn read_unless_larger(&self, oid: &ObjectId, limit: u64) -> Result<BoundedRead> {
-        if let Some(obj) = self.session_cached_loose_read(oid) {
-            if obj.data.len() as u64 > limit {
-                return Ok(BoundedRead::Larger);
-            }
-            return Ok(BoundedRead::Object(obj));
+        if let Some(read) = self.session_loose_reads.lock().ok().and_then(|cache| {
+            cache.get(oid).map(|obj| {
+                if obj.data.len() as u64 > limit {
+                    BoundedRead::Larger
+                } else {
+                    BoundedRead::Object(obj.clone())
+                }
+            })
+        }) {
+            return Ok(read);
         }
         if self.custom_primary.is_none() && !self.multi_pack_index_reads_enabled() {
             if let Some(read) =
