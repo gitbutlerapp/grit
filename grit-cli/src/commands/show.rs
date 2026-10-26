@@ -25,8 +25,8 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::commands::diff::{
-    resolve_cli_diff_pathspecs, CommitDiffOptions, DiffOutcome, DiffPathspecMode, DiffTotalsJson,
-    FileDiff, ShowLogPatchTextParams,
+    resolve_commit_diff_pathspecs, CommitDiffOptions, DiffOutcome, DiffTotalsJson, FileDiff,
+    ShowLogPatchTextParams,
 };
 use crate::commits_json::CommitJsonLoader;
 use crate::context;
@@ -329,7 +329,7 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
         change_id_stored: commit_json.change_id_stored,
     };
 
-    let paths = resolve_cli_diff_pathspecs(&repo, &opts.pathspecs, &[], DiffPathspecMode::Commit)?;
+    let paths = resolve_commit_diff_pathspecs(&repo, &opts.pathspecs.pathspec_source_tokens(&[])?)?;
     let patch_text = if opts.format.log_patch_text() {
         Some(ShowLogPatchTextParams {
             oid: commit_oid,

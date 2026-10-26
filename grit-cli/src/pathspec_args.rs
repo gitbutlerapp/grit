@@ -79,13 +79,7 @@ impl TrailingPathspecArgs {
     /// `extra_argv_paths` supplies disambiguated path operands (for example diff revision/path
     /// parsing). When non-empty, they replace trailing `paths` so operands are not duplicated.
     pub fn pathspec_source_tokens(&self, extra_argv_paths: &[String]) -> Result<Vec<String>> {
-        let mut sources = Vec::new();
-        if let Some(path) = self.pathspec_from_file.as_deref() {
-            let data = read_pathspec_source(path)?;
-            let parsed = parse_pathspecs_from_source(&data, self.pathspec_file_nul)
-                .map_err(map_pathspec_from_file_parse)?;
-            sources.extend(parsed);
-        }
+        let mut sources = self.pathspec_file_entries()?.unwrap_or_default();
         if !extra_argv_paths.is_empty() {
             sources.extend(extra_argv_paths.iter().cloned());
         } else {
@@ -102,6 +96,17 @@ impl TrailingPathspecArgs {
             }
         }
         Ok(sources)
+    }
+
+    /// Entries of `--pathspec-from-file`, or `None` when it was not given.
+    pub fn pathspec_file_entries(&self) -> Result<Option<Vec<String>>> {
+        let Some(path) = self.pathspec_from_file.as_deref() else {
+            return Ok(None);
+        };
+        let data = read_pathspec_source(path)?;
+        parse_pathspecs_from_source(&data, self.pathspec_file_nul)
+            .map(Some)
+            .map_err(map_pathspec_from_file_parse)
     }
 
     /// Pathspec tokens for rev walks (`RevWalkListOptions::paths`): argv plus file lines.
