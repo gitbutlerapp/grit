@@ -4,6 +4,7 @@
 //! temporary workspace helpers, and cached filesystem fixtures used by
 //! integration tests in `grit` and `grit-lib`.
 
+pub mod binaries;
 pub mod blame;
 pub mod cli_fixture;
 pub mod objects;
@@ -12,6 +13,7 @@ pub mod parallel;
 pub mod refstore_conformance;
 pub mod sparse_scale;
 
+pub use binaries::{grit_http_server_binary, sibling_binary};
 pub use cli_fixture::{
     register_cli_snapshot_filters, register_common_cli_snapshot_filters,
     register_network_snapshot_filters, with_cli_snapshot_filters, CliFixture,

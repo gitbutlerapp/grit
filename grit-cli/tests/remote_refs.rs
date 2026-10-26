@@ -5,7 +5,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
 
 const GRIT: &str = env!("CARGO_BIN_EXE_grit");
 
@@ -160,24 +159,7 @@ fn bare_fixture_with_annotated_tag() -> (tempfile::TempDir, PathBuf) {
 }
 
 fn grit_http_server_bin() -> PathBuf {
-    static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| {
-        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let workspace = manifest.parent().expect("workspace root");
-        let status = Command::new("cargo")
-            .current_dir(workspace)
-            .args(["build", "-q", "-p", "grit-http-server"])
-            .status()
-            .expect("cargo build grit-http-server");
-        assert!(
-            status.success(),
-            "failed to build grit-http-server for tests"
-        );
-        let debug = workspace.join("target/debug/grit-http-server");
-        assert!(debug.is_file(), "missing {}", debug.display());
-        debug
-    })
-    .clone()
+    grit_test_support::grit_http_server_binary()
 }
 
 #[test]
