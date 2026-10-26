@@ -18,6 +18,8 @@ The `check` subcommand reports whether paths are ignored by `.gitignore`, `.git/
 
 By default only **ignored** paths are printed. Pass `--all` to also list paths that are not ignored.
 
+Paths are resolved from the current directory and normalized within the worktree. They do not need to exist; a trailing `/` marks a directory query. Batch queries reuse the resolved worktree root when normalizing paths.
+
 The command exits with status **0** when at least one path is ignored, and **1** when none are. Scripts can branch on this exit code.
 
 Human output uses a verbose-style line per ignored path:

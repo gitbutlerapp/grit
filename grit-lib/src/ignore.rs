@@ -1407,10 +1407,17 @@ pub fn normalize_repo_relative(repo: &Repository, cwd: &Path, path: &str) -> Res
         cwd.join(input)
     };
     let normalized = normalize_path(&combined);
-    let mut rel =
-        crate::git_path::strip_worktree_prefix(&normalized, work_tree).ok_or_else(|| {
-            Error::PathError(format!("path '{path}' is outside repository work tree"))
-        })?;
+    // Repository opening already resolves the worktree root. Most queries share that
+    // spelling, so avoid canonicalizing the same root again for every path in a batch.
+    // Keep the filesystem-alias fallback for spellings such as macOS /tmp and /private/tmp.
+    let mut rel = match normalized.strip_prefix(work_tree) {
+        Ok(relative) => crate::git_path::path_to_git_slash(relative),
+        Err(_) => {
+            crate::git_path::strip_worktree_prefix(&normalized, work_tree).ok_or_else(|| {
+                Error::PathError(format!("path '{path}' is outside repository work tree"))
+            })?
+        }
+    };
     if query_as_dir && !rel.is_empty() && !rel.ends_with('/') {
         rel.push('/');
     }
@@ -1429,6 +1436,28 @@ fn normalize_path(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod normalization_tests {
+    use super::*;
+
+    #[test]
+    fn bare_repository_queries_return_a_path_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = crate::repo::init_repository(
+            dir.path(),
+            true,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .unwrap();
+        assert!(matches!(
+            normalize_repo_relative(&repo, dir.path(), "missing/file"),
+            Err(Error::PathError(_))
+        ));
+    }
 }
 
 #[cfg(test)]

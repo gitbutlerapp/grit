@@ -15,6 +15,99 @@ fn grit_ignore_check(repo: &Repository, index: &Index, paths: &[String]) -> Vec<
 }
 
 #[test]
+fn normalize_ignore_paths_preserves_boundaries_and_directory_hints() {
+    use grit_lib::worktree::ignore::normalize_repo_relative;
+
+    let fx = T0008Repo::setup();
+    let repo = fx.open_grit();
+    let root = repo.work_tree().expect("work tree");
+    let cwd = root.join("a");
+    for (input, expected) in [
+        ("b/../missing.txt", "a/missing.txt"),
+        ("../new-dir/", "new-dir/"),
+        ("./b/./four", "a/b/four"),
+        ("../", ""),
+        ("../café/new.txt", "café/new.txt"),
+        (":literal", ":literal"),
+    ] {
+        assert_eq!(
+            normalize_repo_relative(&repo, &cwd, input).expect("normalize relative path"),
+            expected,
+            "{input}"
+        );
+    }
+    let absolute = root.join("missing/file");
+    assert_eq!(
+        normalize_repo_relative(&repo, &cwd, absolute.to_str().expect("path"))
+            .expect("normalize absolute path"),
+        "missing/file"
+    );
+    for input in ["../../outside", "../a/../../outside"] {
+        assert!(matches!(
+            normalize_repo_relative(&repo, &cwd, input),
+            Err(grit_lib::error::Error::PathError(_))
+        ));
+    }
+    let sibling = root.with_file_name(format!(
+        "{}-neighbor",
+        root.file_name().expect("root name").to_string_lossy()
+    ));
+    assert!(matches!(
+        normalize_repo_relative(&repo, &cwd, sibling.join("file").to_str().expect("path")),
+        Err(grit_lib::error::Error::PathError(_))
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn normalized_ignore_query_keeps_symlink_spelling_and_matches_git() {
+    use grit_lib::worktree::ignore::normalize_repo_relative;
+
+    let fx = T0008Repo::setup();
+    let repo = fx.open_grit();
+    let root = repo.work_tree().expect("work tree");
+    let outside = tempfile::tempdir().expect("outside directory");
+    std::os::unix::fs::symlink(outside.path(), root.join("ignored-link"))
+        .expect("directory symlink");
+    let path =
+        normalize_repo_relative(&repo, root, "ignored-link").expect("normalize symlink spelling");
+    assert_eq!(path, "ignored-link");
+    assert_eq!(
+        normalize_repo_relative(&repo, root, "ignored-link/missing.txt")
+            .expect("normalize missing descendant lexically"),
+        "ignored-link/missing.txt"
+    );
+    let index = repo.index_handle().load().expect("index");
+    let results = repo.ignore_check(&[path.clone()], &index).expect("check");
+    let git = git_check_ignore_verbose_batch(&fx.home, root, &[&path]);
+    assert_match_eq(&path, &git[&path], results[0].ignored, &results[0].matched);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn normalize_ignore_query_accepts_macos_tmp_alias() {
+    use grit_lib::worktree::ignore::normalize_repo_relative;
+
+    let dir = tempfile::tempdir_in("/tmp").expect("temporary directory");
+    let repo = grit_lib::repo::init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
+    let canonical = dir.path().canonicalize().expect("physical path");
+    let alias = std::path::Path::new("/tmp").join(dir.path().file_name().expect("name"));
+    for cwd in [&canonical, &alias] {
+        assert_eq!(
+            normalize_repo_relative(&repo, cwd, "missing/file/").expect("normalize alias"),
+            "missing/file/"
+        );
+    }
+}
+
+#[test]
 fn matches_git_check_ignore_verbose() {
     let fx = T0008Repo::setup();
     let repo = fx.open_grit();
