@@ -7616,7 +7616,7 @@ impl<'r> CommitGraph<'r> {
             return Ok(());
         }
 
-        let mut commit = load_commit_into(self.repo, oid, &mut self.read_buf)?;
+        let mut commit = load_commit(self.repo, oid)?;
         let mut parents = if self.shallow_boundaries.contains(&oid) {
             Vec::new()
         } else {
@@ -11662,6 +11662,35 @@ mod line_coverage_tests {
         assert_eq!(cache.component_cache_misses(), 1);
         assert_eq!(cache.component_tree_reads(), 1);
 
+        Ok(())
+    }
+
+    #[test]
+    fn commit_filter_reuses_object_read_during_graph_population() -> Result<()> {
+        let (_dir, repo, tip) = seed_repo(4, false);
+        let metrics = repo.odb().hot_path_metrics();
+        metrics.reset_loose_path_open_attempts();
+        metrics.set_loose_open_counting(true);
+        let _scope = crate::hot_path_test_metrics::HotPathMetricsScope::install(
+            repo.odb().hot_path_metrics_arc(),
+        );
+
+        let mut graph = CommitGraph::new(&repo, false);
+        graph.populate(tip)?;
+        let opens = metrics.loose_path_open_attempts();
+        assert!(opens > 0, "fixture must read its loose commit");
+
+        let filter = crate::revwalk::filter::CommitFilterBuilder::new()
+            .author("T")
+            .build()
+            .expect("author filter");
+        assert!(filter.matches(&repo, tip)?);
+        assert_eq!(
+            metrics.loose_path_open_attempts(),
+            opens,
+            "filtering must reuse the commit instead of reopening it"
+        );
+        metrics.set_loose_open_counting(false);
         Ok(())
     }
 

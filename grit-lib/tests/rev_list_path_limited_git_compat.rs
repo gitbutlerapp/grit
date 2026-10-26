@@ -629,7 +629,7 @@ fn import_packed_flip_repo(wt: &std::path::Path) {
     {
         let stdin = child.stdin.as_mut().expect("stdin");
         let mut t = 1_600_000_000i64;
-        let mut blob = |stdin: &mut std::process::ChildStdin, mode: &str, path: &str, i: usize| {
+        let blob = |stdin: &mut std::process::ChildStdin, mode: &str, path: &str, i: usize| {
             let data = format!("{path} {i}\n");
             writeln!(stdin, "M {mode} inline {path}").unwrap();
             writeln!(stdin, "data {}", data.len()).unwrap();
