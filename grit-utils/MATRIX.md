@@ -196,6 +196,8 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `fetch/dry-run@git-git` | Fetch dry-run reports updates without writing refs or objects |
 | `fetch/deepen@git-git` | Deepen a depth-1 client by 50 commits vs git fetch --deepen 50 |
 | `fetch/noop@git-git` | No-op fetch when client already matches remote (file:// git-git) |
+| `fetch/noop-local@many-refs` | No-op local fetch with 3,000 packed branches and 2,000 tags |
+| `fetch/noop-local-no-tags@many-refs` | The same local many-ref fetch with automatic tags disabled |
 | `fetch/one-branch@git-git` | Fetch one branch refspec vs git fetch origin main |
 | `ls-remote/all@many-refs` | List all refs on many-refs bare remote vs git ls-remote |
 | `remote/show@many-refs` | Remote show on many-refs client vs `git remote show origin` |

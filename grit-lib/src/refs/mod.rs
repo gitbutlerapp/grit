@@ -2092,44 +2092,6 @@ pub fn resolve_ref_cached(
     resolve_files_ref_cached(git_dir, refname, packed)
 }
 
-/// Resolves many refs of one repository with the storage format detected and
-/// `packed-refs` loaded once, instead of per ref as [`resolve_ref_cached`] does.
-pub(crate) struct CachedRefResolver<'a> {
-    git_dir: &'a Path,
-    /// `Some` for the files backend; `None` for reftable, which resolves directly.
-    packed: Option<PackedRefs>,
-}
-
-impl<'a> CachedRefResolver<'a> {
-    /// Open a resolver for `git_dir`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the ref store format cannot be detected or
-    /// `packed-refs` cannot be read.
-    pub(crate) fn open(git_dir: &'a Path) -> Result<Self> {
-        let packed = if open_ref_store(git_dir)?.format() == RefStorageFormat::Files {
-            Some(PackedRefs::load(git_dir)?)
-        } else {
-            None
-        };
-        Ok(Self { git_dir, packed })
-    }
-
-    /// Resolve `refname` with the same rules as [`resolve_ref_cached`].
-    /// Returns `Ok(None)` when the ref does not exist.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error on ref-file I/O failures other than "not found".
-    pub(crate) fn resolve(&self, refname: &str) -> Result<Option<ObjectId>> {
-        match &self.packed {
-            Some(packed) => resolve_files_ref_cached(self.git_dir, refname, packed),
-            None => Ok(resolve_ref(self.git_dir, refname).ok()),
-        }
-    }
-}
-
 fn resolve_files_ref_cached(
     git_dir: &Path,
     refname: &str,

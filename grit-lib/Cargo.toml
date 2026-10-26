@@ -242,6 +242,10 @@ harness = false
 name = "tree_sha256"
 harness = false
 
+[[bench]]
+name = "fetch_local_many_refs"
+harness = false
+
 [dev-dependencies]
 criterion.workspace = true
 grit-test-support = { path = "../grit-test-support" }
@@ -262,4 +266,3 @@ path = "tests/add_untr_80k_campaign.rs"
 name = "serde_models"
 path = "tests/serde_models.rs"
 required-features = ["serde-models"]
-

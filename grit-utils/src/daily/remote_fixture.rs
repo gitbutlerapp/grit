@@ -463,6 +463,74 @@ pub fn setup_many_refs_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlineCon
     })
 }
 
+/// Packed 3,000-branch / 2,000-tag local transport fixture from issue #2037.
+pub fn setup_local_fetch_many_refs(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    with_remote_scratch("local-fetch-many-refs", |scratch| {
+        std::fs::create_dir_all(scratch)?;
+        run_git(setup.git, scratch, &["init", "-q", "-b", "main", "seed"])?;
+        let seed = scratch.join("seed");
+        std::fs::write(seed.join("f"), "base\n")?;
+        run_git(setup.git, &seed, &["add", "f"])?;
+        run_git(setup.git, &seed, &["commit", "-qm", "base"])?;
+        run_git(
+            setup.git,
+            scratch,
+            &["clone", "-q", "--bare", "seed", "remote.git"],
+        )?;
+        let bare = scratch.join("remote.git");
+        let oid = ref_oid(setup.git, &bare, "HEAD")?;
+        let mut cmd = Command::new(setup.git);
+        cmd.args(["update-ref", "--stdin"])
+            .current_dir(&bare)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null());
+        git_env(&mut cmd);
+        let mut child = cmd.spawn().context("create many refs")?;
+        {
+            let mut input = child.stdin.take().context("update-ref stdin")?;
+            for i in 0..3000 {
+                writeln!(input, "update refs/heads/team/{i:04} {oid}")?;
+            }
+            for i in 0..2000 {
+                writeln!(input, "update refs/tags/v{i:04} {oid}")?;
+            }
+        }
+        if !child.wait()?.success() {
+            bail!("creating many-ref fixture failed");
+        }
+        run_git(setup.git, &bare, &["pack-refs", "--all"])?;
+        run_git(setup.git, scratch, &["clone", "-q", "remote.git", "client"])?;
+        Ok(DailyHeadlineContext::new(
+            scratch.join("client"),
+            setup.git,
+            setup.grit,
+            setup.bench,
+            setup.smoke,
+        ))
+    })
+}
+
+/// Check both tag modes leave the fixture's refs unchanged and pass system Git fsck.
+/// Returns an error if either client fails or changes a ref.
+pub fn verify_local_fetch_many_refs(ctx: &DailyHeadlineContext) -> Result<()> {
+    let before = bare_clone_for_each_ref(&ctx.git, &ctx.repo)?;
+    for args in [
+        ["fetch", "origin"].as_slice(),
+        ["fetch", "--no-tags", "origin"].as_slice(),
+    ] {
+        run_git(&ctx.git, &ctx.repo, args)?;
+        run_grit(&ctx.grit, &ctx.repo, args)?;
+    }
+    let after = bare_clone_for_each_ref(&ctx.git, &ctx.repo)?;
+    if before != after {
+        bail!("no-op local fetch changed refs");
+    }
+    run_git(&ctx.git, &ctx.repo, &["fsck", "--strict"])
+}
+
 /// Client repo with ~10k packed `refs/remotes/origin/*` after fetch from the many-refs bare remote.
 pub fn setup_remote_rename_many_refs(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     with_remote_scratch("remote-rename-many-refs", |scratch| {

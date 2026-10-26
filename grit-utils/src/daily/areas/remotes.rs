@@ -9,16 +9,16 @@ use super::super::remote_fixture::{
     clone_blobless_bench_script_git, clone_blobless_bench_script_grit,
     clone_shallow_bench_script_git, clone_shallow_bench_script_grit, setup_git_git_clone_remote,
     setup_git_git_grit_http_fetch_remote, setup_git_git_grit_http_push_remote,
-    setup_git_git_remote, setup_git_git_remote_blobless, setup_many_refs_remote,
-    setup_many_refs_remote_show, setup_remote_remove_many_refs, setup_remote_rename_many_refs,
-    setup_synth100k_path_remote, setup_synth10k_grit_http_remote,
+    setup_git_git_remote, setup_git_git_remote_blobless, setup_local_fetch_many_refs,
+    setup_many_refs_remote, setup_many_refs_remote_show, setup_remote_remove_many_refs,
+    setup_remote_rename_many_refs, setup_synth100k_path_remote, setup_synth10k_grit_http_remote,
     setup_synth10k_pull_rebase_remote, setup_synth10k_remote, verify_clone_bare,
     verify_clone_blobless, verify_clone_http, verify_clone_local, verify_clone_shallow,
     verify_clone_shallow_http, verify_fetch_deepen, verify_fetch_dry_run, verify_fetch_incremental,
     verify_fetch_incremental_http, verify_fetch_noop, verify_fetch_one_branch,
-    verify_ls_remote_all, verify_pull_check, verify_pull_fast_forward, verify_pull_rebase,
-    verify_push_force_with_lease, verify_push_incremental, verify_push_incremental_http,
-    verify_push_refspec,
+    verify_local_fetch_many_refs, verify_ls_remote_all, verify_pull_check,
+    verify_pull_fast_forward, verify_pull_rebase, verify_push_force_with_lease,
+    verify_push_incremental, verify_push_incremental_http, verify_push_refspec,
 };
 use super::super::runner::BenchArgv;
 use crate::shell::shell_quote;
@@ -140,6 +140,14 @@ fn fetch_incr_git(ctx: &DailyHeadlineContext) -> BenchArgv {
 
 fn fetch_incr_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
     sh_devnull(&ctx.grit, &["fetch", "origin"])
+}
+
+fn fetch_no_tags_git(ctx: &DailyHeadlineContext) -> BenchArgv {
+    sh_devnull(&ctx.git, &["fetch", "--no-tags", "origin"])
+}
+
+fn fetch_no_tags_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
+    sh_devnull(&ctx.grit, &["fetch", "--no-tags", "origin"])
 }
 
 fn default_remote_branch(ctx: &DailyHeadlineContext) -> &str {
@@ -463,6 +471,24 @@ fn headline_plans() -> Vec<DailyHeadlinePlan> {
 
 fn matrix_plans() -> Vec<DailyHeadlinePlan> {
     vec![
+        DailyHeadlinePlan {
+            spec: matrix_spec("fetch/noop-local@many-refs"),
+            pending: false,
+            setup: setup_local_fetch_many_refs,
+            prepare: prepare_none,
+            build_git: fetch_incr_git,
+            build_grit: fetch_incr_grit,
+            correctness: Some(verify_local_fetch_many_refs),
+        },
+        DailyHeadlinePlan {
+            spec: matrix_spec("fetch/noop-local-no-tags@many-refs"),
+            pending: false,
+            setup: setup_local_fetch_many_refs,
+            prepare: prepare_none,
+            build_git: fetch_no_tags_git,
+            build_grit: fetch_no_tags_grit,
+            correctness: Some(verify_local_fetch_many_refs),
+        },
         DailyHeadlinePlan {
             spec: matrix_spec("fetch/noop@git-git"),
             pending: false,

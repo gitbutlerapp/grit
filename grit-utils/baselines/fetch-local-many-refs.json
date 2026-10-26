@@ -1,0 +1,810 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-26T15:39:19.138602+00:00",
+  "machine": {
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "physical_cores": 2,
+    "logical_cores": 4,
+    "ram_bytes": 16766414848,
+    "os": "linux",
+    "kernel": "Linux 6.17.0-1022-azure",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "grit": "grit 0.5.21",
+    "grit_commit": "a61c6cf784d65e54c9f8105b0d8f66e0403dccee",
+    "hyperfine": "hyperfine 1.18.0"
+  },
+  "scenarios": [
+    {
+      "id": "fetch-local-single-default-before",
+      "group": "network-fetch",
+      "fixture": "one commit + 3000 heads / 2000 tags",
+      "description": "No-op local fetch default, before; release profile; three warmups and ten runs",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 41.26630130000001,
+        "median_ms": 39.305409,
+        "stddev_ms": 3.8501104062559928,
+        "min_ms": 38.95121,
+        "max_ms": 50.44374800000001,
+        "runs_ms": [
+          39.297023,
+          39.3048,
+          39.185425,
+          39.306018,
+          45.870972,
+          40.00897200000001,
+          38.998722,
+          41.296123,
+          50.44374800000001,
+          38.95121
+        ],
+        "peak_rss_bytes": 9240576
+      },
+      "grit": {
+        "mean_ms": 219.08155480000002,
+        "median_ms": 216.93764450000003,
+        "stddev_ms": 5.597997412968414,
+        "min_ms": 213.351598,
+        "max_ms": 229.522673,
+        "runs_ms": [
+          213.351598,
+          220.590012,
+          214.24421500000003,
+          214.853285,
+          220.189142,
+          227.917222,
+          216.27211200000002,
+          216.5814,
+          217.293889,
+          229.522673
+        ],
+        "peak_rss_bytes": 18169856
+      },
+      "ratio": 5.519282206171676
+    },
+    {
+      "id": "fetch-local-single-default-after",
+      "group": "network-fetch",
+      "fixture": "one commit + 3000 heads / 2000 tags",
+      "description": "No-op local fetch default, after; release profile; three warmups and ten runs",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 41.26630130000001,
+        "median_ms": 39.305409,
+        "stddev_ms": 3.8501104062559928,
+        "min_ms": 38.95121,
+        "max_ms": 50.44374800000001,
+        "runs_ms": [
+          39.297023,
+          39.3048,
+          39.185425,
+          39.306018,
+          45.870972,
+          40.00897200000001,
+          38.998722,
+          41.296123,
+          50.44374800000001,
+          38.95121
+        ],
+        "peak_rss_bytes": 9240576
+      },
+      "grit": {
+        "mean_ms": 35.517675100000005,
+        "median_ms": 35.356873500000006,
+        "stddev_ms": 0.3201258351552989,
+        "min_ms": 35.20616,
+        "max_ms": 36.07824,
+        "runs_ms": [
+          35.848903,
+          35.905879,
+          35.20616,
+          35.21839800000001,
+          35.613091,
+          35.326893000000005,
+          36.07824,
+          35.30883600000001,
+          35.386854,
+          35.283497000000004
+        ],
+        "peak_rss_bytes": 16850944
+      },
+      "ratio": 0.8995421851481054
+    },
+    {
+      "id": "fetch-local-single-no-tags-before",
+      "group": "network-fetch",
+      "fixture": "one commit + 3000 heads / 2000 tags",
+      "description": "No-op local fetch no-tags, before; release profile; three warmups and ten runs",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 37.173733199999994,
+        "median_ms": 36.0925765,
+        "stddev_ms": 3.4378820707074156,
+        "min_ms": 33.665758000000004,
+        "max_ms": 43.150948,
+        "runs_ms": [
+          33.665758000000004,
+          37.582187000000005,
+          43.150948,
+          34.540472,
+          40.724469,
+          34.300629,
+          40.811827,
+          34.111243,
+          34.602966,
+          38.246833
+        ],
+        "peak_rss_bytes": 8892416
+      },
+      "grit": {
+        "mean_ms": 210.55023680000002,
+        "median_ms": 211.66579350000004,
+        "stddev_ms": 4.759934970619915,
+        "min_ms": 202.59747000000002,
+        "max_ms": 217.24291200000002,
+        "runs_ms": [
+          217.24291200000002,
+          209.514061,
+          209.35646300000002,
+          214.71847000000002,
+          213.860201,
+          212.08543400000002,
+          211.48123900000002,
+          211.85034800000003,
+          202.79577,
+          202.59747000000002
+        ],
+        "peak_rss_bytes": 17600512
+      },
+      "ratio": 5.864524343392333
+    },
+    {
+      "id": "fetch-local-single-no-tags-after",
+      "group": "network-fetch",
+      "fixture": "one commit + 3000 heads / 2000 tags",
+      "description": "No-op local fetch no-tags, after; release profile; three warmups and ten runs",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 37.173733199999994,
+        "median_ms": 36.0925765,
+        "stddev_ms": 3.4378820707074156,
+        "min_ms": 33.665758000000004,
+        "max_ms": 43.150948,
+        "runs_ms": [
+          33.665758000000004,
+          37.582187000000005,
+          43.150948,
+          34.540472,
+          40.724469,
+          34.300629,
+          40.811827,
+          34.111243,
+          34.602966,
+          38.246833
+        ],
+        "peak_rss_bytes": 8892416
+      },
+      "grit": {
+        "mean_ms": 24.124675200000002,
+        "median_ms": 24.100977500000003,
+        "stddev_ms": 0.17083908015621682,
+        "min_ms": 23.883568,
+        "max_ms": 24.433321,
+        "runs_ms": [
+          23.883568,
+          24.066786000000004,
+          24.135169,
+          24.433321,
+          24.270014000000003,
+          24.257284000000002,
+          24.013985,
+          24.054587,
+          24.212756000000002,
+          23.919282
+        ],
+        "peak_rss_bytes": 16658432
+      },
+      "ratio": 0.6677544203584358
+    },
+    {
+      "id": "fetch-local-deep-default-before",
+      "group": "network-fetch",
+      "fixture": "git/git 82563 commits + 3000 heads / 2000 tags",
+      "description": "No-op local fetch default, before; release profile; three warmups and ten runs",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 47.937552800000006,
+        "median_ms": 47.75679100000001,
+        "stddev_ms": 0.4443880190001136,
+        "min_ms": 47.492842,
+        "max_ms": 48.808974000000006,
+        "runs_ms": [
+          47.787618,
+          48.808974000000006,
+          47.725964000000005,
+          48.242066,
+          47.55139500000001,
+          47.492842,
+          47.663685,
+          47.515305,
+          48.24962300000001,
+          48.338056
+        ],
+        "peak_rss_bytes": 44896256
+      },
+      "grit": {
+        "mean_ms": 219.5564767,
+        "median_ms": 219.75086850000002,
+        "stddev_ms": 2.656545889547594,
+        "min_ms": 213.071086,
+        "max_ms": 223.255966,
+        "runs_ms": [
+          219.636976,
+          223.255966,
+          218.75144600000002,
+          213.071086,
+          221.01420000000002,
+          220.610079,
+          218.51686800000002,
+          221.206409,
+          219.73704500000002,
+          219.76469200000003
+        ],
+        "peak_rss_bytes": 20168704
+      },
+      "ratio": 4.601458010442954
+    },
+    {
+      "id": "fetch-local-deep-default-after",
+      "group": "network-fetch",
+      "fixture": "git/git 82563 commits + 3000 heads / 2000 tags",
+      "description": "No-op local fetch default, after; release profile; three warmups and ten runs",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 47.937552800000006,
+        "median_ms": 47.75679100000001,
+        "stddev_ms": 0.4443880190001136,
+        "min_ms": 47.492842,
+        "max_ms": 48.808974000000006,
+        "runs_ms": [
+          47.787618,
+          48.808974000000006,
+          47.725964000000005,
+          48.242066,
+          47.55139500000001,
+          47.492842,
+          47.663685,
+          47.515305,
+          48.24962300000001,
+          48.338056
+        ],
+        "peak_rss_bytes": 44896256
+      },
+      "grit": {
+        "mean_ms": 40.9841408,
+        "median_ms": 41.004154,
+        "stddev_ms": 0.2299327071006262,
+        "min_ms": 40.66384,
+        "max_ms": 41.377528000000005,
+        "runs_ms": [
+          41.032987,
+          40.900418,
+          40.66384,
+          40.976312,
+          41.031996,
+          40.817372000000006,
+          40.687696,
+          41.377528000000005,
+          41.268644,
+          41.08461500000001
+        ],
+        "peak_rss_bytes": 19537920
+      },
+      "ratio": 0.8586036277018695
+    },
+    {
+      "id": "fetch-local-deep-no-tags-before",
+      "group": "network-fetch",
+      "fixture": "git/git 82563 commits + 3000 heads / 2000 tags",
+      "description": "No-op local fetch no-tags, before; release profile; three warmups and ten runs",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 40.73565820000001,
+        "median_ms": 40.693885,
+        "stddev_ms": 0.22171034000084194,
+        "min_ms": 40.336556,
+        "max_ms": 41.12758,
+        "runs_ms": [
+          40.738853000000006,
+          40.640395000000005,
+          40.605341,
+          40.89952600000001,
+          40.648917,
+          40.97572,
+          40.753495,
+          40.336556,
+          40.630199000000005,
+          41.12758
+        ],
+        "peak_rss_bytes": 44711936
+      },
+      "grit": {
+        "mean_ms": 203.70318420000004,
+        "median_ms": 203.0062005,
+        "stddev_ms": 1.7826688496737944,
+        "min_ms": 201.976693,
+        "max_ms": 207.22504800000002,
+        "runs_ms": [
+          204.39554600000002,
+          202.53948300000002,
+          202.69032,
+          207.22504800000002,
+          206.458841,
+          202.85280600000002,
+          203.15959500000002,
+          202.450874,
+          203.28263600000002,
+          201.976693
+        ],
+        "peak_rss_bytes": 19972096
+      },
+      "ratio": 4.988616852384578
+    },
+    {
+      "id": "fetch-local-deep-no-tags-after",
+      "group": "network-fetch",
+      "fixture": "git/git 82563 commits + 3000 heads / 2000 tags",
+      "description": "No-op local fetch no-tags, after; release profile; three warmups and ten runs",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 40.73565820000001,
+        "median_ms": 40.693885,
+        "stddev_ms": 0.22171034000084194,
+        "min_ms": 40.336556,
+        "max_ms": 41.12758,
+        "runs_ms": [
+          40.738853000000006,
+          40.640395000000005,
+          40.605341,
+          40.89952600000001,
+          40.648917,
+          40.97572,
+          40.753495,
+          40.336556,
+          40.630199000000005,
+          41.12758
+        ],
+        "peak_rss_bytes": 44711936
+      },
+      "grit": {
+        "mean_ms": 24.737035100000003,
+        "median_ms": 24.642449000000003,
+        "stddev_ms": 0.38455620836215626,
+        "min_ms": 24.334063000000004,
+        "max_ms": 25.405220000000003,
+        "runs_ms": [
+          24.542508,
+          24.375976,
+          24.334063000000004,
+          24.424555,
+          24.453914,
+          25.405220000000003,
+          24.742390000000004,
+          24.972087000000002,
+          24.822721,
+          25.296917
+        ],
+        "peak_rss_bytes": 19472384
+      },
+      "ratio": 0.6055565596649227
+    }
+  ],
+  "methodology": {
+    "baseline": "origin/main a61c6cf784d65e54c9f8105b0d8f66e0403dccee",
+    "after": "factory/local-fetch-refs working tree on the baseline commit",
+    "wall_time": "hyperfine -N --warmup 3 --runs 10; all three clients measured sequentially, builds/tests paused",
+    "memory": "one separate /usr/bin/time -v run for each command; maximum resident set size",
+    "opens": "separate strace -f -e trace=openat; count attempts for paths ending /config and /packed-refs, including failed opens",
+    "deep_fixture": "upstream git/git HEAD 7e34d8174dcda3435d1404c9a30bef46afe6c13e, 82563 commits plus 3000 heads and 2000 tags"
+  },
+  "openat_calls": {
+    "before": {
+      "single": {
+        "default": {
+          "git": {
+            "peak_rss_kib": 8972,
+            "openat_calls": {
+              "config": 35,
+              "packed-refs": 4
+            }
+          },
+          "before": {
+            "peak_rss_kib": 17744,
+            "openat_calls": {
+              "config": 9039,
+              "packed-refs": 3008
+            }
+          }
+        },
+        "no-tags": {
+          "git": {
+            "peak_rss_kib": 8684,
+            "openat_calls": {
+              "config": 35,
+              "packed-refs": 4
+            }
+          },
+          "before": {
+            "peak_rss_kib": 17188,
+            "openat_calls": {
+              "config": 9037,
+              "packed-refs": 3007
+            }
+          }
+        }
+      },
+      "deep": {
+        "default": {
+          "git": {
+            "peak_rss_kib": 43844,
+            "openat_calls": {
+              "config": 35,
+              "packed-refs": 4
+            }
+          },
+          "before": {
+            "peak_rss_kib": 19696,
+            "openat_calls": {
+              "config": 9061,
+              "packed-refs": 3015
+            }
+          }
+        },
+        "no-tags": {
+          "git": {
+            "peak_rss_kib": 43664,
+            "openat_calls": {
+              "config": 35,
+              "packed-refs": 4
+            }
+          },
+          "before": {
+            "peak_rss_kib": 19504,
+            "openat_calls": {
+              "config": 9059,
+              "packed-refs": 3014
+            }
+          }
+        }
+      }
+    },
+    "after": {
+      "single": {
+        "default": {
+          "git": {
+            "peak_rss_kib": 9024,
+            "openat_calls": {
+              "config": 35,
+              "packed-refs": 4
+            }
+          },
+          "after": {
+            "peak_rss_kib": 16456,
+            "openat_calls": {
+              "config": 34,
+              "packed-refs": 6
+            }
+          }
+        },
+        "no-tags": {
+          "git": {
+            "peak_rss_kib": 8616,
+            "openat_calls": {
+              "config": 35,
+              "packed-refs": 4
+            }
+          },
+          "after": {
+            "peak_rss_kib": 16268,
+            "openat_calls": {
+              "config": 34,
+              "packed-refs": 6
+            }
+          }
+        }
+      },
+      "deep": {
+        "default": {
+          "git": {
+            "peak_rss_kib": 43524,
+            "openat_calls": {
+              "config": 35,
+              "packed-refs": 4
+            }
+          },
+          "after": {
+            "peak_rss_kib": 19080,
+            "openat_calls": {
+              "config": 35,
+              "packed-refs": 6
+            }
+          }
+        },
+        "no-tags": {
+          "git": {
+            "peak_rss_kib": 43656,
+            "openat_calls": {
+              "config": 35,
+              "packed-refs": 4
+            }
+          },
+          "after": {
+            "peak_rss_kib": 19016,
+            "openat_calls": {
+              "config": 35,
+              "packed-refs": 6
+            }
+          }
+        }
+      }
+    }
+  },
+  "criterion": {
+    "following": {
+      "before": {
+        "mean": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 215111425.3275,
+            "upper_bound": 215818280.21499997
+          },
+          "point_estimate": 215425900.9,
+          "standard_error": 181168.12884095288
+        },
+        "median": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 215029355.0,
+            "upper_bound": 215458903.0
+          },
+          "point_estimate": 215324593.0,
+          "standard_error": 107589.87222711171
+        },
+        "median_abs_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 157646.33780121803,
+            "upper_bound": 671250.1032829285
+          },
+          "point_estimate": 398354.59782779217,
+          "standard_error": 130123.9029265659
+        },
+        "slope": null,
+        "std_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 311308.49948261474,
+            "upper_bound": 1171256.6813608848
+          },
+          "point_estimate": 832359.7309926759,
+          "standard_error": 227519.7556408003
+        }
+      },
+      "after": {
+        "mean": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 31586613.7505,
+            "upper_bound": 31695048.027000003
+          },
+          "point_estimate": 31640535.26,
+          "standard_error": 27540.48007249631
+        },
+        "median": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 31593965.7,
+            "upper_bound": 31677546.299999997
+          },
+          "point_estimate": 31650672.8,
+          "standard_error": 24868.186973338212
+        },
+        "median_abs_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 39539.755218027916,
+            "upper_bound": 210235.19668757805
+          },
+          "point_estimate": 105045.91463506222,
+          "standard_error": 44682.0039333592
+        },
+        "slope": null,
+        "std_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 85764.05261799999,
+            "upper_bound": 154885.2541012876
+          },
+          "point_estimate": 126328.42618590109,
+          "standard_error": 17687.39664765695
+        }
+      },
+      "measurement": "Criterion 20 samples, one-second warmup, three-second target; builds and tests paused"
+    },
+    "none": {
+      "before": {
+        "mean": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 202931212.13,
+            "upper_bound": 203511090.11375
+          },
+          "point_estimate": 203201811.5,
+          "standard_error": 147714.56589477984
+        },
+        "median": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 202854376.0,
+            "upper_bound": 203362136.0
+          },
+          "point_estimate": 203064627.5,
+          "standard_error": 141269.2687046295
+        },
+        "median_abs_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 250959.69754457474,
+            "upper_bound": 915357.2237491608
+          },
+          "point_estimate": 497494.5754677057,
+          "standard_error": 164795.65293223283
+        },
+        "slope": null,
+        "std_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 382103.12483115925,
+            "upper_bound": 911087.7374666501
+          },
+          "point_estimate": 675758.9679014334,
+          "standard_error": 140479.25283329195
+        }
+      },
+      "after": {
+        "mean": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 20706174.030972667,
+            "upper_bound": 20787966.179455563
+          },
+          "point_estimate": 20743349.80017113,
+          "standard_error": 20910.258903968348
+        },
+        "median": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 20710287.709150326,
+            "upper_bound": 20760261.538961038
+          },
+          "point_estimate": 20739504.583333336,
+          "standard_error": 14065.622885180774
+        },
+        "median_abs_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 22868.522144001392,
+            "upper_bound": 77664.25691592424
+          },
+          "point_estimate": 44033.39218824623,
+          "standard_error": 13670.568703201878
+        },
+        "slope": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 20703614.340247843,
+            "upper_bound": 20778321.380094443
+          },
+          "point_estimate": 20730775.21010453,
+          "standard_error": 19745.24960867593
+        },
+        "std_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 39518.374426466515,
+            "upper_bound": 140424.1417007328
+          },
+          "point_estimate": 95692.30921256462,
+          "standard_error": 27634.879635890953
+        }
+      },
+      "measurement": "Criterion 20 samples, one-second warmup, three-second target; builds and tests paused"
+    },
+    "all": {
+      "before": {
+        "mean": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 354367548.9375,
+            "upper_bound": 354947503.82875
+          },
+          "point_estimate": 354645923.05,
+          "standard_error": 148229.10689301603
+        },
+        "median": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 354190171.0,
+            "upper_bound": 354947097.5
+          },
+          "point_estimate": 354445161.0,
+          "standard_error": 200871.80446527683
+        },
+        "median_abs_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 290798.6414372921,
+            "upper_bound": 1051767.5408273935
+          },
+          "point_estimate": 675083.3655148745,
+          "standard_error": 196700.30488473419
+        },
+        "slope": null,
+        "std_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 454271.5929941002,
+            "upper_bound": 832611.953657967
+          },
+          "point_estimate": 680345.6819961356,
+          "standard_error": 96517.15400444377
+        }
+      },
+      "after": {
+        "mean": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 47650027.433749996,
+            "upper_bound": 47982640.8175
+          },
+          "point_estimate": 47789255.5375,
+          "standard_error": 86661.19046617529
+        },
+        "median": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 47610917.375,
+            "upper_bound": 47755093.25
+          },
+          "point_estimate": 47678609.25,
+          "standard_error": 36248.9499681288
+        },
+        "median_abs_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 64584.83472838998,
+            "upper_bound": 254549.2574058473
+          },
+          "point_estimate": 140686.50605231524,
+          "standard_error": 48583.50792085168
+        },
+        "slope": null,
+        "std_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 113846.00165497599,
+            "upper_bound": 609256.4009824097
+          },
+          "point_estimate": 398744.8761038411,
+          "standard_error": 145237.42669282024
+        }
+      },
+      "measurement": "Criterion 20 samples, one-second warmup, three-second target; builds and tests paused"
+    }
+  }
+}

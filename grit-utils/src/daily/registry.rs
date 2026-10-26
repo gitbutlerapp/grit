@@ -234,7 +234,21 @@ pub const HEADLINE_SCENARIOS: [HeadlineScenario; 22] = [
 ];
 
 /// Remote matrix scenarios (non-headline) for the daily census.
-pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 19] = [
+pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 21] = [
+    ScenarioSpec {
+        id: "fetch/noop-local@many-refs",
+        area: Area::Remotes,
+        headline: false,
+        name: None,
+        description: "No-op local fetch with 3,000 packed branches and 2,000 tags",
+    },
+    ScenarioSpec {
+        id: "fetch/noop-local-no-tags@many-refs",
+        area: Area::Remotes,
+        headline: false,
+        name: None,
+        description: "No-op local fetch without tags, 3,000 packed branches and 2,000 tags",
+    },
     ScenarioSpec {
         id: "fetch/noop@git-git",
         area: Area::Remotes,

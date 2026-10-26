@@ -35,6 +35,8 @@ By default grit follows tags, fetching every tag (lightweight or annotated) that
 
 `-q` / `--quiet` suppresses progress and human output (JSON and markdown are unchanged).
 
+Local fetches reuse the repository's ref store across tracking refs and tags. An up-to-date fetch skips object-copy preparation while still handling pruning, `FETCH_HEAD`, and the remote's default branch. See the [many-ref local fetch measurements](../../benchmarks/#local-fetch-with-many-refs).
+
 `--all` fetches every configured remote in config order. Remotes with `remote.<name>.skipFetchAll=true` are skipped. Each remote uses its own `remote.<name>.prune` and `remote.<name>.tagOpt` unless `--prune`, `--no-prune`, `--tags`, or `--no-tags` override on the command line. Failures on one remote do not stop the rest; the command exits **1** if any remote failed or any ref update was rejected. `--all` cannot be combined with `<remote>` or `<refspec>` arguments.
 
 ## Options

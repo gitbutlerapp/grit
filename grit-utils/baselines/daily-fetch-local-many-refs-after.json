@@ -1,0 +1,340 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-26T15:35:09.560812539Z",
+  "machine": {
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "physical_cores": 2,
+    "logical_cores": 4,
+    "ram_bytes": 16766414848,
+    "os": "linux",
+    "kernel": "Linux 6.17.0-1022-azure",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "grit": "grit 0.5.21",
+    "grit_commit": "a61c6cf784d65e54c9f8105b0d8f66e0403dccee"
+  },
+  "scenarios": [
+    {
+      "id": "fetch/noop-local-no-tags@many-refs",
+      "area": "remotes",
+      "description": "No-op local fetch without tags, 3,000 packed branches and 2,000 tags",
+      "git": {
+        "median_wall_ms": 37.293100499999994,
+        "peak_rss_bytes": 24330240,
+        "runs": 20,
+        "samples_ms": [
+          37.435,
+          37.4,
+          37.357,
+          37.281,
+          37.279,
+          37.244,
+          37.382,
+          37.148,
+          37.624,
+          38.238,
+          37.293,
+          37.074,
+          37.186,
+          37.278,
+          37.055,
+          37.293,
+          37.717,
+          37.274,
+          37.489,
+          37.708
+        ],
+        "min_ms": 37.055181,
+        "max_ms": 38.237966,
+        "stddev_ms": 0.27110466810423095
+      },
+      "grit": {
+        "median_wall_ms": 25.8525385,
+        "peak_rss_bytes": 19075072,
+        "runs": 20,
+        "samples_ms": [
+          25.8,
+          26.212,
+          25.821,
+          26.441,
+          25.953,
+          25.859,
+          25.82,
+          26.692,
+          25.659,
+          25.772,
+          25.643,
+          25.865,
+          25.672,
+          25.669,
+          25.684,
+          26.106,
+          26.154,
+          25.846,
+          26.471,
+          25.889
+        ],
+        "min_ms": 25.643323,
+        "max_ms": 26.691883999999998,
+        "stddev_ms": 0.3009197725555637
+      },
+      "ratio": 0.6932257751001424,
+      "detail": {
+        "commands": {
+          "git": "git fetch --no-tags origin",
+          "grit": "grit fetch --no-tags origin"
+        },
+        "correctness": "before timing, git and grit were each run once and their results compared",
+        "phases": {
+          "git": [
+            {
+              "name": "fetch: fetch-one",
+              "ms": 33.925,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "run: git-upload-pack",
+              "ms": 33.449,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "fetch: remote_refs",
+              "ms": 8.022,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "fetch: consume_refs",
+              "ms": 6.333,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "run: git rev-list",
+              "ms": 3.92,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "run: git maintenance",
+              "ms": 1.788,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "maintenance: detach",
+              "ms": 0.116,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "fetch: recurse-submodule",
+              "ms": 0.101,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "index: do_read_index",
+              "ms": 0.044,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "submodule: parallel/fetch",
+              "ms": 0.013,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "cache_tree: read",
+              "ms": 0.01,
+              "count": 1,
+              "depth": 0
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.534,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.159,
+              "count": 4,
+              "depth": 0
+            }
+          ]
+        },
+        "setup": "Local bare repository with one commit, 3000 team branches and 2000 tags; packed remote refs and system-Git-cloned client; no network server.",
+        "notes": "after ref-store reuse fix; source parent a61c6cf. Twenty ABAB samples with one warmup per tool. Daily runner RSS includes measurement-helper overhead; direct /usr/bin/time -v values are in fetch-local-many-refs.json."
+      }
+    },
+    {
+      "id": "fetch/noop-local@many-refs",
+      "area": "remotes",
+      "description": "No-op local fetch with 3,000 packed branches and 2,000 tags",
+      "git": {
+        "median_wall_ms": 39.579988,
+        "peak_rss_bytes": 23883776,
+        "runs": 20,
+        "samples_ms": [
+          39.906,
+          39.406,
+          39.119,
+          39.654,
+          39.971,
+          39.293,
+          39.678,
+          39.581,
+          39.085,
+          39.271,
+          40.099,
+          39.135,
+          39.609,
+          39.579,
+          39.445,
+          39.96,
+          39.514,
+          38.937,
+          39.914,
+          39.707
+        ],
+        "min_ms": 38.936772000000005,
+        "max_ms": 40.098693999999995,
+        "stddev_ms": 0.3315491792154862
+      },
+      "grit": {
+        "median_wall_ms": 37.792235000000005,
+        "peak_rss_bytes": 19087360,
+        "runs": 20,
+        "samples_ms": [
+          37.821,
+          37.894,
+          37.925,
+          37.682,
+          38.044,
+          37.68,
+          38.359,
+          37.552,
+          38.615,
+          37.701,
+          37.136,
+          37.327,
+          38.433,
+          38.542,
+          37.914,
+          37.196,
+          37.694,
+          37.763,
+          37.68,
+          38.477
+        ],
+        "min_ms": 37.135507999999994,
+        "max_ms": 38.61518,
+        "stddev_ms": 0.43157865881975727
+      },
+      "ratio": 0.9548318963613633,
+      "detail": {
+        "commands": {
+          "git": "git fetch origin",
+          "grit": "grit fetch origin"
+        },
+        "correctness": "before timing, git and grit were each run once and their results compared",
+        "phases": {
+          "git": [
+            {
+              "name": "fetch: fetch-one",
+              "ms": 35.547,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "run: git-upload-pack",
+              "ms": 35.074,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "fetch: remote_refs",
+              "ms": 7.766,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "fetch: consume_refs",
+              "ms": 6.097,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "run: git rev-list",
+              "ms": 3.842,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "run: git maintenance",
+              "ms": 1.795,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "maintenance: detach",
+              "ms": 0.142,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "fetch: recurse-submodule",
+              "ms": 0.097,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "index: do_read_index",
+              "ms": 0.041,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "submodule: parallel/fetch",
+              "ms": 0.01,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "cache_tree: read",
+              "ms": 0.008,
+              "count": 1,
+              "depth": 0
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.57,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.163,
+              "count": 4,
+              "depth": 0
+            }
+          ]
+        },
+        "setup": "Local bare repository with one commit, 3000 team branches and 2000 tags; packed remote refs and system-Git-cloned client; no network server.",
+        "notes": "after ref-store reuse fix; source parent a61c6cf. Twenty ABAB samples with one warmup per tool. Daily runner RSS includes measurement-helper overhead; direct /usr/bin/time -v values are in fetch-local-many-refs.json."
+      }
+    }
+  ]
+}

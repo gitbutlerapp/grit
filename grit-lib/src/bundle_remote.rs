@@ -398,7 +398,7 @@ fn complete_bundle_fetch(
     tag_shallow.extend(remote_shallow.iter().copied());
 
     let tags_present = if opts.tags == TagMode::Following {
-        crate::fetch::tags_already_local(local_git_dir, remote_refs)
+        crate::fetch::tags_already_local(local.refs(), remote_refs)
     } else {
         HashSet::new()
     };

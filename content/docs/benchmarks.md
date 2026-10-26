@@ -9,6 +9,43 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Each scenario runs **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; times are wall-clock milliseconds (mean and spread from timed runs).
 
+## Local fetch with many refs
+
+Local fetch reuses the repository's ref store for tag checks, tracking-ref classification, and object-copy exclusion tips. Exclusion tips are collected only when the finalized shallow/deepen request needs an object copy. Up-to-date fetches still perform pruning and fetch metadata maintenance; loose refs override packed refs, symbolic refs resolve through the store, and both files and reftable backends retain their freshness checks.
+
+Factory VM, 2026-10-26, 4 vCPU, Rust 1.99, `release` profile, system Git 2.55.0. The issue #2037 fixture contains one commit, 3,000 extra branches and 2,000 tags, with packed remote refs and a system-Git-cloned client. The deep-history fixture uses upstream `git/git` at `7e34d8174dcda3435d1404c9a30bef46afe6c13e` (82,563 commits), its original refs, and the same extra branches and tags. Every command fetches from a local bare repository without transferring objects or changing refs.
+
+| Fixture / command | Git mean ms | Grit main mean ms | Grit after mean ms | Git peak KiB | Grit main peak KiB | Grit after peak KiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| One commit, `fetch origin` | 41.3 | 219.1 | 35.5 | 9,024 | 17,744 | 16,456 |
+| One commit, `fetch --no-tags origin` | 37.2 | 210.6 | 24.1 | 8,684 | 17,188 | 16,268 |
+| Deep history, `fetch origin` | 47.9 | 219.6 | 41.0 | 43,844 | 19,696 | 19,080 |
+| Deep history, `fetch --no-tags origin` | 40.7 | 203.7 | 24.7 | 43,664 | 19,504 | 19,016 |
+
+The baseline is `origin/main` at `a61c6cf784d65e54c9f8105b0d8f66e0403dccee`. Frozen binaries for that revision and the working-tree fix were measured alongside stock Git in one session. Run `hyperfine -N --warmup 3 --runs 10` with those three binaries, first with `fetch origin`, then with `fetch --no-tags origin`, from each client. Builds and tests were paused for measurements. Peak RSS comes from separate `/usr/bin/time -v` runs; the table uses the larger of the two Git RSS samples. Individual wall-time samples, spread, and instrumentation are committed in `grit-utils/baselines/fetch-local-many-refs.json`.
+
+Separate `strace -f -e trace=openat` runs counted all open attempts, including missing files, for paths ending in `/config` or `/packed-refs`. On the one-commit fixture, default Grit fetch went from **9,039 config opens and 3,008 packed-refs opens to 34 and 6**. Git used 35 and 4. With `--no-tags`, Grit went from 9,037 and 3,007 to 34 and 6. Cache validation and loose-ref lookup remain enabled.
+
+The daily scenarios `fetch/noop-local@many-refs` and `fetch/noop-local-no-tags@many-refs` reproduce this shape with 20 alternating samples per tool, check unchanged refs and `git fsck --strict`, and require no cached network fixture. Their committed before/after daily reports include helper-inclusive RSS, which differs from the direct process measurements above. Reproduce them with:
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench --grit ./target/release/grit daily \
+  --only fetch/noop-local@many-refs,fetch/noop-local-no-tags@many-refs \
+  --output /tmp/fetch-local-many-refs.json
+cargo bench -p grit-lib --bench fetch_local_many_refs
+```
+
+Criterion mean library times (20 samples, one-second warmup, three-second measurement target):
+
+| Tag mode | Before ms | After ms |
+| --- | ---: | ---: |
+| Following | 215.43 | 31.64 |
+| None | 203.20 | 20.73 |
+| All | 354.65 | 47.79 |
+
+The Criterion suite exercises the public `fetch_local` API with `Following`, `None`, and `All` tags on a system-Git-created 5,000-ref fixture. Compatibility tests also cover changed remote tips, loose overrides, symbolic refs, pruning followed by a no-op fetch, linked worktrees, reftable, and explicit `FETCH_HEAD` maintenance. CI checks behavior rather than elapsed-time thresholds.
+
 ## grit-bench fixture cache
 
 Scenario suites reuse prepared repositories under **`GRIT_BENCH_CACHE`** (default `$XDG_CACHE_HOME/grit-bench`). **`grit-bench fixtures prepare`** clones upstream **git.git** at tag **`v2.47.0`** (bare, verified `HEAD` oid) and generates synthetic tiers **S**, **M**, and **L** with the grit-lib generator. **`grit-bench fixtures list`** prints identity (name, tier, `HEAD`, object/ref/file counts). Mutating runs take a **`git clone --local`** working copy so the cache stays read-only. JSON reports may include a top-level **`fixtures`** array with the same identity fields.

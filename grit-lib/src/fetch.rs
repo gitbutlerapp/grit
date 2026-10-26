@@ -1405,7 +1405,7 @@ pub(crate) fn fetch_remote_into(
     // wanting the tag itself would drag down its (otherwise unreachable) target
     // and incorrectly keep the tag. They are pruned by `retain_following_tags`.
     let tags_present = if opts.tags == crate::transfer::TagMode::Following {
-        tags_already_local(local_git_dir, &remote_refs)
+        tags_already_local(local.refs(), &remote_refs)
     } else {
         HashSet::new()
     };
@@ -2346,27 +2346,21 @@ pub(crate) fn retain_following_tags(
 ///
 /// # Parameters
 ///
-/// * `local_git_dir` — the fetching repository's git directory.
+/// * `local_refs` — the fetching repository's existing ref store.
 /// * `remote_refs` — advertised `(name, oid)` pairs (peeled `^{}` entries excluded).
 ///
 /// Unreadable local refs count as absent, so they still go through the regular
-/// tag-following path.
+/// tag-following path. Resolution retains the backend's loose/symbolic ref rules
+/// and cache freshness checks without reopening the store for each tag.
 pub(crate) fn tags_already_local(
-    local_git_dir: &Path,
+    local_refs: &dyn crate::refs::store::RefStore,
     remote_refs: &[(String, ObjectId)],
 ) -> HashSet<String> {
-    let mut remote_tags = remote_refs
+    remote_refs
         .iter()
-        .filter(|(name, _)| name.starts_with("refs/tags/"))
-        .peekable();
-    if remote_tags.peek().is_none() {
-        return HashSet::new();
-    }
-    let Ok(resolver) = crate::refs::CachedRefResolver::open(local_git_dir) else {
-        return HashSet::new();
-    };
-    remote_tags
-        .filter(|(name, oid)| resolver.resolve(name).ok().flatten() == Some(*oid))
+        .filter(|(name, oid)| {
+            name.starts_with("refs/tags/") && local_refs.resolve(name).ok() == Some(*oid)
+        })
         .map(|(name, _)| name.clone())
         .collect()
 }
@@ -3053,13 +3047,14 @@ mod fetch_advertised_ref_tests {
             ("refs/tags/moved".to_owned(), c),
             ("refs/tags/new".to_owned(), c),
         ];
-        let present = tags_already_local(&git_dir, &remote_refs);
+        let store = crate::refs::store::open_ref_store(&git_dir).unwrap();
+        let present = tags_already_local(store.as_ref(), &remote_refs);
         assert_eq!(
             present,
             HashSet::from(["refs/tags/loose".to_owned(), "refs/tags/packed".to_owned()]),
             "only tags stored locally at the advertised oid count as present"
         );
-        assert!(tags_already_local(&git_dir, &remote_refs[..1]).is_empty());
+        assert!(tags_already_local(store.as_ref(), &remote_refs[..1]).is_empty());
     }
 
     #[test]

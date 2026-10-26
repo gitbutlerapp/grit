@@ -1534,7 +1534,7 @@ pub(crate) fn fetch_local_into(
     let mut following_only = HashSet::new();
     if matches!(opts.tags, TagMode::All | TagMode::Following) {
         let tags_present = if opts.tags == TagMode::Following {
-            crate::fetch::tags_already_local(local_git_dir, &remote_refs)
+            crate::fetch::tags_already_local(local.refs(), &remote_refs)
         } else {
             HashSet::new()
         };
@@ -1595,18 +1595,6 @@ pub(crate) fn fetch_local_into(
         }
     }
     let shallow_wants: Vec<ObjectId> = shallow_wants_set.into_iter().collect();
-
-    let mut haves: Vec<ObjectId> = Vec::new();
-    let mut have_seen: HashSet<ObjectId> = HashSet::new();
-    for m in &matched {
-        if let Some(local_ref) = &m.local_ref {
-            if let Ok(old) = crate::refs::resolve_ref(local_git_dir, local_ref) {
-                if have_seen.insert(old) {
-                    haves.push(old);
-                }
-            }
-        }
-    }
 
     let mut pack_oids: HashSet<ObjectId> = HashSet::new();
     let mut transfer = TransferStats::default();
@@ -1691,6 +1679,19 @@ pub(crate) fn fetch_local_into(
         }
     }
     if !wants.is_empty() && !opts.dry_run {
+        // Resolve exclusion tips only once the final shallow/deepen wants need a copy.
+        let mut haves: Vec<ObjectId> = Vec::new();
+        let mut have_seen: HashSet<ObjectId> = HashSet::new();
+        for m in &matched {
+            if let Some(local_ref) = &m.local_ref {
+                if let Ok(old) = local.resolve_ref_oid(local_ref) {
+                    if have_seen.insert(old) {
+                        haves.push(old);
+                    }
+                }
+            }
+        }
+
         let remote_cfg = config_for_git_dir(remote_git_dir);
         let pack_opts = PackBuildOptions::for_local_copy(remote_cfg.as_ref());
         let (oids, fetch_transfer) = copy_objects_for_local_fetch(
@@ -1766,8 +1767,6 @@ pub(crate) fn fetch_local_into(
         crate::refs::commit_ref_store_batch(local_git_dir, &prune_batch)?;
     }
 
-    let packed = crate::refs::PackedRefs::load(local_git_dir)?;
-
     let mut store_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
     for m in &matched {
         let Some(local_ref) = &m.local_ref else {
@@ -1783,9 +1782,7 @@ pub(crate) fn fetch_local_into(
             continue;
         };
 
-        let old = crate::refs::resolve_ref_cached(local_git_dir, local_ref, &packed)
-            .ok()
-            .flatten();
+        let old = local.resolve_ref_oid(local_ref).ok();
         let mode = classify_update(
             old.as_ref(),
             &m.oid,
@@ -3182,6 +3179,46 @@ mod tests {
         for pair in counts.windows(2) {
             assert!(pair[1] >= pair[0], "progress counts must be monotonic");
         }
+    }
+
+    #[test]
+    fn local_fetch_classifies_through_repository_ref_store() {
+        use crate::refs::store::{MemoryRefStore, RawRef};
+        use std::sync::Arc;
+
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(git_ok(tmp.path(), &["init", "-q", "-b", "main"]));
+        assert!(git_ok(
+            tmp.path(),
+            &["commit", "--allow-empty", "-qm", "base"]
+        ));
+        let repo =
+            crate::repo::Repository::open(&tmp.path().join(".git"), &RepositoryOptions::empty())
+                .unwrap();
+        let tip = repo.resolve_ref_oid("HEAD").unwrap();
+        let store = Arc::new(MemoryRefStore::new());
+        store
+            .set_ref("refs/remotes/origin/main", RawRef::Direct(tip))
+            .unwrap();
+        let repo = repo.with_ref_store(store);
+        let opts = FetchOptions {
+            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
+            tags: TagMode::None,
+            dry_run: true,
+            ..Default::default()
+        };
+        let outcome = fetch_local_into(
+            &repo,
+            &tmp.path().join(".git"),
+            &opts,
+            &mut PhaseRecorder::default(),
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+        assert_eq!(outcome.transfer.objects, 0);
+        assert_eq!(outcome.updates.len(), 1);
+        assert_eq!(outcome.updates[0].old_oid, Some(tip));
+        assert_eq!(outcome.updates[0].mode, UpdateMode::UpToDate);
     }
 
     #[test]
