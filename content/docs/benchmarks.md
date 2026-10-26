@@ -1252,6 +1252,47 @@ cargo build --release -p grit-cli -p grit-utils
 ./target/release/grit-bench fsck --format json --output grit-utils/baselines/fsck-medium.json
 ```
 
+## Checkout cancellation batches (2026-10-26)
+
+Checkout now decides whether to use its worker pool before splitting planned jobs into cancellation batches. Batches grow from eight to 2,048 files, with a separate 1 MiB prepared-content threshold and bounded parallel read-ahead. Large files still stream; each write flush contains at most eight streams. Small loose-object cache reuse is limited to bulk checkout, while direct writes and a one-pass object walk avoid that bookkeeping.
+
+On the factory VM (AMD EPYC 7763, four available logical CPUs, ext4, Rust 1.99.0, system Git 2.55.0), the six regression scenarios improve **13–25%** from main snapshot `12b52a55c` to `caf6f64fa`. The table reports median wall time and maximum child RSS, using release builds, one warmup, and 12 timed runs per tool for the shared checkout cases; additional daily A/B cases use ten runs per tool. All six orders are cycled so trial predecessors are balanced, including boundaries. Additional A/B rows show their after-session Git control; both Git controls are retained in the data. Small differences around 1 ms should be read against the identical-binary control spread.
+
+| Scenario | Git ms | Grit before ms | Grit after ms | Peak RSS KiB before / after |
+| --- | ---: | ---: | ---: | ---: |
+| `switch/branch@synth-10k` | 46.9 | 33.4 | 33.6 | 22,824 / 22,736 |
+| `restore/paths@synth-10k` | 21.2 | 21.5 | 21.7 | 22,572 / 22,652 |
+| `reset/hard@synth-10k` | 42.6 | 45.6 | 45.0 | 25,196 / 25,208 |
+| `worktree/add@synth-10k` | 325.3 | 426.0 | 320.7 | 26,164 / 27,124 |
+| `merge/clean@synth-10k` | 169.0 | 184.1 | 145.6 | 28,148 / 27,400 |
+| `pick/one@synth-10k` | 182.5 | 185.1 | 161.8 | 27,620 / 27,992 |
+| `switch/branch@synth-100k` | 241.6 | 107.3 | 105.5 | 54,692 / 54,816 |
+| `switch/delete-heavy@wide-48k` | 227.6 | 207.3 | 196.3 | 35,376 / 35,784 |
+| `switch/large-blob@big-asset` | 843.2 | 478.6 | 474.2 | 18,648 / 18,508 |
+| `merge/clean@synth-100k` | 458.2 | 274.7 | 234.8 | 59,492 / 60,240 |
+| `revert/one@synth-10k` | 182.6 | 194.7 | 158.3 | 28,176 / 28,240 |
+| `pick/one@synth-100k` | 285.5 | 347.1 | 296.4 | 58,140 / 58,496 |
+| `clone/checkout@synth-100k` | 7077.6 | 5933.7 | 4473.5 | 79,072 / 81,128 |
+| `merge/content-both-sides@wide-20k` | 2113.5 | 3020.0 | 2679.7 | 112,440 / 114,052 |
+| `clone/local@synth-10k` | 1052.4 | 1364.6 | 1264.7 | 31,172 / 31,804 |
+| `clone/http@synth-10k` | 1139.6 | 1415.9 | 1308.9 | 31,964 / 32,260 |
+| `clone/bare@synth-10k` | 711.4 | 795.3 | 796.8 | 24,300 / 24,680 |
+| `clone/shallow-depth1@synth-10k` | 412.5 | 504.4 | 398.2 | 27,804 / 28,176 |
+| `clone/shallow-depth1-http@synth-10k` | 422.6 | 514.6 | 408.7 | 27,600 / 28,176 |
+| `worktree/remove@synth-10k` | 204.1 | 174.1 | 174.6 | 13,620 / 13,496 |
+| `worktree/list@synth-10k` | 2.9 | 3.7 | 3.6 | 12,648 / 12,752 |
+| `reset/hard-delete-heavy@wide-48k` | 380.8 | 421.3 | 410.3 | 59,296 / 62,828 |
+| `reset/mixed@synth-10k` | 15.7 | 18.9 | 18.7 | 20,208 / 20,480 |
+| `clone/full@git-git` | 20627.0 | 10821.3 | 10643.9 | 185,648 / 184,988 |
+| `clone/shallow@git-git` | 2147.0 | 2312.6 | 2241.0 | 73,308 / 72,148 |
+| `clone/blobless@git-git` | 12120.1 | 9740.9 | 9656.4 | 93,232 / 88,988 |
+
+Memory guards cover 256 distinct 512 KiB blobs under serial and parallel preparation and an already-cached 64 MiB blob. Prepared-buffer growth stays below 16 MiB; checking cached size before copying reduces the cached-large-blob guard's additional RSS from 65,176 KiB in the demonstrated failing version to 172 KiB. Round-trips use system Git (`write-tree`, clean status, and strict fsck). Cancellation and configured pool thresholds have Rust guards.
+
+Allocation profiling of `pick/one@synth-10k` drops from 312,599 to 287,497 calls (8.0%); reported peak heap is 7.34M in both. Instrumented wall time and RSS are excluded from the table.
+
+Data: **`grit-utils/baselines/daily-checkout-chunks-before.json`**, **`grit-utils/baselines/daily-checkout-chunks-after.json`**. The detailed investigation, exact commands, samples, historical endpoint/direct-parent probes, GNU time output, syscall summaries, controls and validation limitations are in **`grit-utils/baselines/checkout-chunks-4567-audit.json`** and **`grit-utils/baselines/checkout-chunks-4567.md`**. The first bad commit was `63ea7f3ef`: eight-file cancellation flushes repeatedly failed the parallelism threshold. Its cancellation behavior remains supported.
+
 ### Results
 
 <!-- grit:benchmark-tables -->
