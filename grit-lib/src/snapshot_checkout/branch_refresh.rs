@@ -697,6 +697,72 @@ mod tests {
         assert_eq!(git(&co, &["log", "-1", "--format=%s", "feature"]), "Mine");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn a_branch_being_rebased_in_another_worktree_is_left_to_that_rebase() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut served = Served::new(tmp.path());
+        let (co, repo) = check_out(&mut served, tmp.path());
+        served.commit_on("feature", "src/b.rs", "b by bob\n", "Bob changes b");
+        let info = fetched(&served, &repo, "feature");
+        pulled(&repo, &info);
+        git(&co, &["switch", "-q", "-c", "other", "feature"]);
+        commit(&co, "src/a.rs", "other\n", "Other");
+        git(&co, &["switch", "-q", "work"]);
+        let wt = tmp.path().join("wt");
+        git(
+            &co,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                wt.to_str().expect("path"),
+                "feature",
+            ],
+        );
+        commit(&wt, "src/a.rs", "mine\n", "Mine");
+        let ours = git(&co, &["rev-parse", "feature"]);
+        assert!(
+            git_output_fails(
+                &wt,
+                &[
+                    "-c",
+                    "user.name=T",
+                    "-c",
+                    "user.email=t@e",
+                    "rebase",
+                    "other"
+                ]
+            ),
+            "the rebase stops on a conflict"
+        );
+        assert!(co
+            .join(".git/worktrees/wt/rebase-merge/head-name")
+            .is_file());
+        served.commit_on("feature", "src/d.rs", "d by bob\n", "Bob adds d");
+        let info = fetched(&served, &repo, "feature");
+
+        let refused = refresh_branch(&repo, &marker(&repo), &info, false);
+        assert!(
+            matches!(
+                &refused,
+                Err(CheckoutError::Library(e))
+                    if matches!(**e, crate::error::Error::BranchCheckedOutInWorktree { .. })
+            ),
+            "{refused:?}"
+        );
+        assert_eq!(git(&co, &["rev-parse", "feature"]), ours);
+        assert_eq!(git(&co, &["symbolic-ref", "--short", "HEAD"]), "work");
+        // So the rebase there still finishes.
+        std::fs::write(wt.join("src/a.rs"), "mine\n").expect("write");
+        git(&wt, &["add", "src/a.rs"]);
+        git(&wt, &["-c", "core.editor=true", "rebase", "--continue"]);
+        assert_eq!(git(&wt, &["symbolic-ref", "--short", "HEAD"]), "feature");
+    }
+
     #[test]
     fn a_branch_that_is_not_checked_out_is_switched_to_for_its_rebase() {
         let tmp = tempfile::tempdir().expect("tempdir");

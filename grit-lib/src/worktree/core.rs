@@ -164,11 +164,35 @@ fn head_is_branch(head: &HeadState, branch_short_name: &str) -> bool {
     }
 }
 
+/// Whether a rebase or bisect in the worktree `entry` is working on
+/// `branch_short_name`: it detached `HEAD` and puts the branch back when it
+/// ends, so the branch counts as checked out there, as it does for Git.
+fn operation_holds_branch(entry: &WorktreeEntry, branch_short_name: &str) -> bool {
+    if !matches!(entry.head, HeadState::Detached { .. }) {
+        return false;
+    }
+    let refname = format!("refs/heads/{branch_short_name}");
+    let first_line = |file: &str| {
+        fs::read_to_string(entry.admin_dir.join(file))
+            .ok()
+            .and_then(|text| text.lines().next().map(|line| line.trim().to_owned()))
+    };
+    let rebasing = ["rebase-merge/head-name", "rebase-apply/head-name"]
+        .into_iter()
+        .any(|file| first_line(file).as_deref() == Some(refname.as_str()));
+    rebasing
+        || first_line("BISECT_START")
+            .is_some_and(|start| start == branch_short_name || start == refname)
+}
+
 pub(crate) fn admin_dirs_match(a: &Path, b: &Path) -> bool {
     path_for_disk_compare(a) == path_for_disk_compare(b) || a == b
 }
 
 /// Find a worktree that has `branch_short_name` checked out, optionally skipping one admin dir.
+///
+/// A worktree has the branch checked out when its `HEAD` is the branch, or when a rebase or
+/// bisect there is working on it (with `HEAD` detached until it ends).
 ///
 /// `exclude_admin_dir` is typically the current worktree's admin dir so a switch to the branch
 /// already checked out here is allowed.
@@ -181,7 +205,9 @@ pub fn find_worktree_with_branch_checked_out(
         if exclude_admin_dir.is_some_and(|ex| admin_dirs_match(&entry.admin_dir, ex)) {
             continue;
         }
-        if head_is_branch(&entry.head, branch_short_name) {
+        if head_is_branch(&entry.head, branch_short_name)
+            || operation_holds_branch(&entry, branch_short_name)
+        {
             return Ok(Some(BranchWorktreeCheckout {
                 branch: branch_short_name.to_owned(),
                 worktree_path: entry.path.clone(),
@@ -1396,6 +1422,72 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].path, path_for_disk_compare(&root));
         assert!(!list[0].is_bare);
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn a_branch_being_rebased_or_bisected_in_a_worktree_is_checked_out_there() {
+        let tmp = TempDir::new().unwrap();
+        let main = tmp.path().join("main");
+        fs::create_dir_all(&main).unwrap();
+        let git = |dir: &Path, args: &[&str]| grit_test_support::git(dir, args);
+        git(&main, &["init", "-q", "-b", "main"]);
+        fs::write(main.join("f"), "base\n").unwrap();
+        git(&main, &["add", "f"]);
+        git(&main, &["commit", "-q", "-m", "base"]);
+        git(&main, &["branch", "feature"]);
+        git(&main, &["branch", "other"]);
+        for n in 1..=3 {
+            fs::write(main.join("f"), format!("main {n}\n")).unwrap();
+            git(&main, &["commit", "-q", "-am", "main"]);
+        }
+        git(&main, &["switch", "-q", "feature"]);
+        fs::write(main.join("f"), "feature\n").unwrap();
+        git(&main, &["commit", "-q", "-am", "feature"]);
+        git(&main, &["switch", "-q", "main"]);
+        let linked = tmp.path().join("linked");
+        git(
+            &main,
+            &["worktree", "add", "-q", linked.to_str().unwrap(), "feature"],
+        );
+        // The rebase stops on a conflict with HEAD detached.
+        let rebase = grit_test_support::git_cmd(&["rebase", "main"])
+            .in_dir(&linked)
+            .exec();
+        assert!(!rebase.ok(), "the rebase stops on a conflict");
+        let repo = Repository::discover(Some(&main), &RepositoryOptions::empty()).unwrap();
+        let found = find_worktree_with_branch_checked_out(&repo, "feature", None)
+            .unwrap()
+            .expect("the rebase holds feature");
+        assert_eq!(found.worktree_path, path_for_disk_compare(&linked));
+        assert!(matches!(
+            ensure_branch_not_checked_out_in_any_worktree(&repo, "feature"),
+            Err(Error::BranchCheckedOutInWorktree { .. })
+        ));
+        git(&linked, &["rebase", "--abort"]);
+
+        // A bisect started on a branch holds it too.
+        git(&linked, &["switch", "-q", "other"]);
+        git(&linked, &["bisect", "start", "main", "other"]);
+        let head = list_worktrees(&repo).unwrap().remove(1).head;
+        assert!(matches!(head, HeadState::Detached { .. }), "{head:?}");
+        assert!(find_worktree_with_branch_checked_out(&repo, "other", None)
+            .unwrap()
+            .is_some());
+        git(&linked, &["bisect", "reset"]);
+        git(&linked, &["switch", "-q", "--detach", "HEAD"]);
+        assert_eq!(
+            find_worktree_with_branch_checked_out(&repo, "other", None).unwrap(),
+            None,
+            "a plain detached HEAD holds nothing"
+        );
+        assert_eq!(
+            find_worktree_with_branch_checked_out(&repo, "feature", None).unwrap(),
+            None
+        );
     }
 
     #[cfg_attr(
