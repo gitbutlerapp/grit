@@ -136,6 +136,34 @@ pub struct BinaryPatchPayload {
 }
 
 impl FilePatch {
+    fn empty() -> Self {
+        Self {
+            diff_old_path: None,
+            diff_new_path: None,
+            old_path: None,
+            new_path: None,
+            saw_old_header: false,
+            saw_new_header: false,
+            old_mode: None,
+            new_mode: None,
+            old_mode_line: None,
+            new_mode_line: None,
+            is_new: false,
+            is_deleted: false,
+            is_rename: false,
+            is_copy: false,
+            similarity_index: None,
+            dissimilarity_index: None,
+            old_oid: None,
+            new_oid: None,
+            binary_patch: None,
+            is_binary: false,
+            hunks: Vec::new(),
+            ws_rule: 0,
+            is_toplevel_relative: false,
+        }
+    }
+
     /// Effective path for the file.
     /// For deletions, use old_path (new is /dev/null).
     /// For additions, use new_path (old is /dev/null).
@@ -741,29 +769,9 @@ fn parse_traditional_patch_pair(
     let p_val = p_guess.unwrap_or(strip);
 
     let mut fp = FilePatch {
-        diff_old_path: None,
-        diff_new_path: None,
-        old_path: None,
-        new_path: None,
         saw_old_header: true,
         saw_new_header: true,
-        old_mode: None,
-        new_mode: None,
-        old_mode_line: None,
-        new_mode_line: None,
-        is_new: false,
-        is_deleted: false,
-        is_rename: false,
-        is_copy: false,
-        similarity_index: None,
-        dissimilarity_index: None,
-        old_oid: None,
-        new_oid: None,
-        binary_patch: None,
-        is_binary: false,
-        hunks: Vec::new(),
-        ws_rule: 0,
-        is_toplevel_relative: false,
+        ..FilePatch::empty()
     };
 
     if is_dev_null_nameline(old_p) {
@@ -913,268 +921,234 @@ pub fn parse_patch(
     let lines: Vec<&str> = input.lines().collect();
     let mut patches = Vec::new();
     let mut i = 0;
-    let mut p_guess_for_traditional: Option<usize> = None;
+    let mut p_guess_for_traditional = None;
     let setup_prefix_for_guess = setup_prefix.filter(|p| !p.is_empty());
 
-    let p_strip = strip;
-    let p_extended = strip.saturating_sub(1);
-
     while i < lines.len() {
-        // Look for "diff --git" header or a bare ---/+++ pair.
-        if lines[i].starts_with("diff --git ") {
-            let mut fp = FilePatch {
-                diff_old_path: None,
-                diff_new_path: None,
-                old_path: None,
-                new_path: None,
-                saw_old_header: false,
-                saw_new_header: false,
-                old_mode: None,
-                new_mode: None,
-                old_mode_line: None,
-                new_mode_line: None,
-                is_new: false,
-                is_deleted: false,
-                is_rename: false,
-                is_copy: false,
-                similarity_index: None,
-                dissimilarity_index: None,
-                old_oid: None,
-                new_oid: None,
-                binary_patch: None,
-                is_binary: false,
-                hunks: Vec::new(),
-                ws_rule: 0,
-                is_toplevel_relative: true,
-            };
-
-            let header_line = lines[i];
-            let def_name = git_header_def_name(header_line, p_strip);
-
-            // Parse "diff --git a/foo b/foo"
-            let rest = &header_line["diff --git ".len()..];
-            if let Some((a, b)) = split_diff_git_paths(rest) {
-                fp.diff_old_path = Some(a.clone());
-                fp.diff_new_path = Some(b.clone());
-                fp.old_path = Some(skip_tree_prefix_str(&a, p_strip).ok_or_else(|| {
-                    Error::Message(format!("malformed old path in diff --git header: {a}"))
-                })?);
-                fp.new_path = Some(skip_tree_prefix_str(&b, p_strip).ok_or_else(|| {
-                    Error::Message(format!("malformed new path in diff --git header: {b}"))
-                })?);
-            }
-            i += 1;
-
-            // Parse extended headers
-            while i < lines.len()
-                && !lines[i].starts_with("--- ")
-                && !lines[i].starts_with("diff --git ")
-                && !lines[i].starts_with("@@ ")
-            {
-                let line = lines[i];
-                let line_no = i + 1;
-                if let Some(val) = line.strip_prefix("old mode ") {
-                    let v = val.trim_end_matches('\r').trim_end();
-                    if v.is_empty() {
-                        return Err(Error::Message(format!(
-                            "invalid mode on line {line_no}: {line}"
-                        )));
-                    }
-                    fp.old_mode = Some(v.to_string());
-                    fp.old_mode_line = Some(line_no);
-                } else if let Some(val) = line.strip_prefix("new mode ") {
-                    let v = val.trim_end_matches('\r').trim_end();
-                    if v.is_empty() {
-                        return Err(Error::Message(format!(
-                            "invalid mode on line {line_no}: {line}"
-                        )));
-                    }
-                    fp.new_mode = Some(v.to_string());
-                    fp.new_mode_line = Some(line_no);
-                } else if let Some(val) = line.strip_prefix("new file mode ") {
-                    let v = val.trim_end_matches('\r').trim_end();
-                    if v.is_empty() {
-                        return Err(Error::Message(format!(
-                            "invalid mode on line {line_no}: {line}"
-                        )));
-                    }
-                    fp.is_new = true;
-                    fp.new_mode = Some(v.to_string());
-                    fp.new_mode_line = Some(line_no);
-                } else if let Some(val) = line.strip_prefix("deleted file mode ") {
-                    let v = val.trim_end_matches('\r').trim_end();
-                    if v.is_empty() {
-                        return Err(Error::Message(format!(
-                            "invalid mode on line {line_no}: {line}"
-                        )));
-                    }
-                    fp.is_deleted = true;
-                    fp.old_mode = Some(v.to_string());
-                    fp.old_mode_line = Some(line_no);
-                } else if let Some(val) = line.strip_prefix("rename from ") {
-                    fp.is_rename = true;
-                    if let Some(p) = find_name_extended_header(val, p_extended) {
-                        fp.old_path = Some(p);
-                    }
-                } else if let Some(val) = line.strip_prefix("rename to ") {
-                    fp.is_rename = true;
-                    if let Some(p) = find_name_extended_header(val, p_extended) {
-                        fp.new_path = Some(p);
-                    }
-                } else if let Some(val) = line.strip_prefix("copy from ") {
-                    fp.is_copy = true;
-                    if let Some(p) = find_name_extended_header(val, p_extended) {
-                        fp.old_path = Some(p);
-                    }
-                } else if let Some(val) = line.strip_prefix("copy to ") {
-                    fp.is_copy = true;
-                    if let Some(p) = find_name_extended_header(val, p_extended) {
-                        fp.new_path = Some(p);
-                    }
-                } else if let Some(val) = line.strip_prefix("similarity index ") {
-                    fp.similarity_index = val.trim_end_matches('%').parse().ok();
-                } else if let Some(val) = line.strip_prefix("dissimilarity index ") {
-                    fp.dissimilarity_index = val.trim_end_matches('%').parse().ok();
-                } else if let Some(val) = line.strip_prefix("index ") {
-                    // Parse "index abc123..def456 100644" or "index abc123..def456"
-                    let mut parts = val.split_whitespace();
-                    let hash_part = parts.next().unwrap_or("");
-                    if let Some((old, new)) = hash_part.split_once("..") {
-                        fp.old_oid = Some(old.to_string());
-                        fp.new_oid = Some(new.to_string());
-                    }
-                    if let Some(mode_tok) = parts.next() {
-                        let v = mode_tok.trim_end_matches('\r').trim_end();
-                        if !v.is_empty() {
-                            fp.old_mode = Some(v.to_string());
-                            fp.old_mode_line = Some(line_no);
-                        }
-                    }
-                } else if line == "GIT binary patch" {
-                    let (binary_patch, next_i) = parse_binary_patch(&lines, i + 1)?;
-                    fp.binary_patch = Some(binary_patch);
-                    fp.is_binary = true;
-                    i = next_i;
-                    break;
-                } else if line.starts_with("Binary files ") && line.ends_with(" differ") {
-                    // Plain (non --binary) diff of a binary change; no payload to
-                    // apply but stat/numstat must report it as binary.
-                    fp.is_binary = true;
-                }
-                // skip other extended headers
-                i += 1;
-            }
-
-            if let Some(dn) = def_name {
-                if fp.old_path.is_none() {
-                    fp.old_path = Some(dn.clone());
-                }
-                if fp.new_path.is_none() {
-                    fp.new_path = Some(dn);
-                }
-            }
-
-            // Parse ---/+++ headers if present
-            if i < lines.len() && lines[i].starts_with("--- ") {
-                let old_p = lines[i]["--- ".len()..].trim_end_matches(['\r', '\n']);
-                let old_b = old_p.as_bytes();
-                if is_dev_null_nameline(old_b) {
-                    fp.old_path = Some("/dev/null".to_string());
-                } else if let Some(p) = find_name_tab_terminated(old_b, p_strip) {
-                    fp.old_path = Some(bytes_to_path_string(&p)?);
-                }
-                fp.saw_old_header = true;
-                i += 1;
-                if i < lines.len() && lines[i].starts_with("+++ ") {
-                    let new_p = lines[i]["+++ ".len()..].trim_end_matches(['\r', '\n']);
-                    let new_b = new_p.as_bytes();
-                    if is_dev_null_nameline(new_b) {
-                        fp.new_path = Some("/dev/null".to_string());
-                    } else if let Some(p) = find_name_tab_terminated(new_b, p_strip) {
-                        fp.new_path = Some(bytes_to_path_string(&p)?);
-                    }
-                    fp.saw_new_header = true;
-                    i += 1;
-                }
-            }
-
-            while i < lines.len() && lines[i].starts_with("index ") {
-                let line = lines[i];
-                let val = line["index ".len()..].trim_end();
-                if let Some((old, new)) = val
-                    .split_whitespace()
-                    .next()
-                    .and_then(|h| h.split_once(".."))
-                {
-                    fp.old_oid = Some(old.to_string());
-                    fp.new_oid = Some(new.to_string());
-                }
-                i += 1;
-            }
-
-            if i < lines.len() && lines[i] == "GIT binary patch" {
-                let (binary_patch, next_i) = parse_binary_patch(&lines, i + 1)?;
-                fp.binary_patch = Some(binary_patch);
-                fp.is_binary = true;
-                i = next_i;
-                sanitize_file_patch_headers(&mut fp);
-                patches.push(fp);
-                continue;
-            }
-
-            // Parse hunks
-            while i < lines.len() && lines[i].starts_with("@@ ") {
-                let (hunk, next_i) = parse_hunk(&lines, i, input_name, recount)?;
-                fp.hunks.push(hunk);
-                i = next_i;
-            }
-
-            sanitize_file_patch_headers(&mut fp);
-            patches.push(fp);
+        let mut fp = if lines[i].starts_with("diff --git ") {
+            let (fp, next_i) = parse_git_patch_header(&lines, i, strip)?;
+            i = next_i;
+            fp
         } else if lines[i].starts_with("--- ")
             && i + 1 < lines.len()
             && lines[i + 1].starts_with("+++ ")
         {
-            let old_line = lines[i].as_bytes();
-            let new_line = lines[i + 1].as_bytes();
-            let mut fp = parse_traditional_patch_pair(
-                old_line,
-                new_line,
+            let fp = parse_traditional_patch_pair(
+                lines[i].as_bytes(),
+                lines[i + 1].as_bytes(),
                 strip,
                 &mut p_guess_for_traditional,
                 setup_prefix_for_guess,
             )?;
             i += 2;
-
             while i < lines.len() && lines[i].starts_with("index ") {
                 i += 1;
             }
+            fp
+        } else {
+            i += 1;
+            continue;
+        };
 
-            if i < lines.len() && lines[i] == "GIT binary patch" {
-                let (binary_patch, next_i) = parse_binary_patch(&lines, i + 1)?;
-                fp.binary_patch = Some(binary_patch);
-                fp.is_binary = true;
-                i = next_i;
-                sanitize_file_patch_headers(&mut fp);
-                patches.push(fp);
-                continue;
-            }
-
-            // Parse hunks
+        if i < lines.len() && lines[i] == "GIT binary patch" {
+            let (binary_patch, next_i) = parse_binary_patch(&lines, i + 1)?;
+            fp.binary_patch = Some(binary_patch);
+            fp.is_binary = true;
+            i = next_i;
+        } else {
             while i < lines.len() && lines[i].starts_with("@@ ") {
                 let (hunk, next_i) = parse_hunk(&lines, i, input_name, recount)?;
                 fp.hunks.push(hunk);
                 i = next_i;
             }
+        }
 
-            sanitize_file_patch_headers(&mut fp);
-            patches.push(fp);
-        } else {
+        sanitize_file_patch_headers(&mut fp);
+        patches.push(fp);
+    }
+
+    Ok(patches)
+}
+
+// Binary sections among extended headers are consumed here; those following
+// explicit file headers are consumed by the common patch-body loop.
+fn parse_git_patch_header(
+    lines: &[&str],
+    mut i: usize,
+    strip: usize,
+) -> Result<(FilePatch, usize)> {
+    let p_strip = strip;
+    let p_extended = strip.saturating_sub(1);
+    let mut fp = FilePatch {
+        is_toplevel_relative: true,
+        ..FilePatch::empty()
+    };
+
+    let header_line = lines[i];
+    let def_name = git_header_def_name(header_line, p_strip);
+
+    // Parse "diff --git a/foo b/foo"
+    let rest = &header_line["diff --git ".len()..];
+    if let Some((a, b)) = split_diff_git_paths(rest) {
+        fp.diff_old_path = Some(a.clone());
+        fp.diff_new_path = Some(b.clone());
+        fp.old_path = Some(skip_tree_prefix_str(&a, p_strip).ok_or_else(|| {
+            Error::Message(format!("malformed old path in diff --git header: {a}"))
+        })?);
+        fp.new_path = Some(skip_tree_prefix_str(&b, p_strip).ok_or_else(|| {
+            Error::Message(format!("malformed new path in diff --git header: {b}"))
+        })?);
+    }
+    i += 1;
+
+    // Parse extended headers
+    while i < lines.len()
+        && !lines[i].starts_with("--- ")
+        && !lines[i].starts_with("diff --git ")
+        && !lines[i].starts_with("@@ ")
+    {
+        let line = lines[i];
+        let line_no = i + 1;
+        if let Some(val) = line.strip_prefix("old mode ") {
+            let v = val.trim_end_matches('\r').trim_end();
+            if v.is_empty() {
+                return Err(Error::Message(format!(
+                    "invalid mode on line {line_no}: {line}"
+                )));
+            }
+            fp.old_mode = Some(v.to_string());
+            fp.old_mode_line = Some(line_no);
+        } else if let Some(val) = line.strip_prefix("new mode ") {
+            let v = val.trim_end_matches('\r').trim_end();
+            if v.is_empty() {
+                return Err(Error::Message(format!(
+                    "invalid mode on line {line_no}: {line}"
+                )));
+            }
+            fp.new_mode = Some(v.to_string());
+            fp.new_mode_line = Some(line_no);
+        } else if let Some(val) = line.strip_prefix("new file mode ") {
+            let v = val.trim_end_matches('\r').trim_end();
+            if v.is_empty() {
+                return Err(Error::Message(format!(
+                    "invalid mode on line {line_no}: {line}"
+                )));
+            }
+            fp.is_new = true;
+            fp.new_mode = Some(v.to_string());
+            fp.new_mode_line = Some(line_no);
+        } else if let Some(val) = line.strip_prefix("deleted file mode ") {
+            let v = val.trim_end_matches('\r').trim_end();
+            if v.is_empty() {
+                return Err(Error::Message(format!(
+                    "invalid mode on line {line_no}: {line}"
+                )));
+            }
+            fp.is_deleted = true;
+            fp.old_mode = Some(v.to_string());
+            fp.old_mode_line = Some(line_no);
+        } else if let Some(val) = line.strip_prefix("rename from ") {
+            fp.is_rename = true;
+            if let Some(p) = find_name_extended_header(val, p_extended) {
+                fp.old_path = Some(p);
+            }
+        } else if let Some(val) = line.strip_prefix("rename to ") {
+            fp.is_rename = true;
+            if let Some(p) = find_name_extended_header(val, p_extended) {
+                fp.new_path = Some(p);
+            }
+        } else if let Some(val) = line.strip_prefix("copy from ") {
+            fp.is_copy = true;
+            if let Some(p) = find_name_extended_header(val, p_extended) {
+                fp.old_path = Some(p);
+            }
+        } else if let Some(val) = line.strip_prefix("copy to ") {
+            fp.is_copy = true;
+            if let Some(p) = find_name_extended_header(val, p_extended) {
+                fp.new_path = Some(p);
+            }
+        } else if let Some(val) = line.strip_prefix("similarity index ") {
+            fp.similarity_index = val.trim_end_matches('%').parse().ok();
+        } else if let Some(val) = line.strip_prefix("dissimilarity index ") {
+            fp.dissimilarity_index = val.trim_end_matches('%').parse().ok();
+        } else if let Some(val) = line.strip_prefix("index ") {
+            // Parse "index abc123..def456 100644" or "index abc123..def456"
+            let mut parts = val.split_whitespace();
+            let hash_part = parts.next().unwrap_or("");
+            if let Some((old, new)) = hash_part.split_once("..") {
+                fp.old_oid = Some(old.to_string());
+                fp.new_oid = Some(new.to_string());
+            }
+            if let Some(mode_tok) = parts.next() {
+                let v = mode_tok.trim_end_matches('\r').trim_end();
+                if !v.is_empty() {
+                    fp.old_mode = Some(v.to_string());
+                    fp.old_mode_line = Some(line_no);
+                }
+            }
+        } else if line == "GIT binary patch" {
+            let (binary_patch, next_i) = parse_binary_patch(lines, i + 1)?;
+            fp.binary_patch = Some(binary_patch);
+            fp.is_binary = true;
+            i = next_i;
+            break;
+        } else if line.starts_with("Binary files ") && line.ends_with(" differ") {
+            // Plain (non --binary) diff of a binary change; no payload to
+            // apply but stat/numstat must report it as binary.
+            fp.is_binary = true;
+        }
+        // skip other extended headers
+        i += 1;
+    }
+
+    if let Some(dn) = def_name {
+        if fp.old_path.is_none() {
+            fp.old_path = Some(dn.clone());
+        }
+        if fp.new_path.is_none() {
+            fp.new_path = Some(dn);
+        }
+    }
+
+    // Parse ---/+++ headers if present
+    if i < lines.len() && lines[i].starts_with("--- ") {
+        let old_p = lines[i]["--- ".len()..].trim_end_matches(['\r', '\n']);
+        let old_b = old_p.as_bytes();
+        if is_dev_null_nameline(old_b) {
+            fp.old_path = Some("/dev/null".to_string());
+        } else if let Some(p) = find_name_tab_terminated(old_b, p_strip) {
+            fp.old_path = Some(bytes_to_path_string(&p)?);
+        }
+        fp.saw_old_header = true;
+        i += 1;
+        if i < lines.len() && lines[i].starts_with("+++ ") {
+            let new_p = lines[i]["+++ ".len()..].trim_end_matches(['\r', '\n']);
+            let new_b = new_p.as_bytes();
+            if is_dev_null_nameline(new_b) {
+                fp.new_path = Some("/dev/null".to_string());
+            } else if let Some(p) = find_name_tab_terminated(new_b, p_strip) {
+                fp.new_path = Some(bytes_to_path_string(&p)?);
+            }
+            fp.saw_new_header = true;
             i += 1;
         }
     }
 
-    Ok(patches)
+    while i < lines.len() && lines[i].starts_with("index ") {
+        let line = lines[i];
+        let val = line["index ".len()..].trim_end();
+        if let Some((old, new)) = val
+            .split_whitespace()
+            .next()
+            .and_then(|h| h.split_once(".."))
+        {
+            fp.old_oid = Some(old.to_string());
+            fp.new_oid = Some(new.to_string());
+        }
+        i += 1;
+    }
+
+    Ok((fp, i))
 }
 
 /// Parse a `GIT binary patch` payload.
@@ -1602,6 +1576,70 @@ pub use index_apply::{
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn binary_bodies_resume_at_following_git_patch() {
+        let old = b"before\0";
+        let new = b"after\0";
+        let body = write_git_binary_patch(old, new, "a/bin", "b/bin").expect("binary body");
+        for (header, git_style) in [
+            ("diff --git a/bin b/bin\n", true),
+            ("diff --git a/bin b/bin\n--- a/bin\n+++ b/bin\n", true),
+            ("--- a/bin\n+++ b/bin\n", false),
+        ] {
+            let input = format!(
+                "{header}{body}diff --git a/text b/text\n--- a/text\n+++ b/text\n@@ -1 +1 @@\n-old\n+new\n"
+            );
+            let files = parse_patch(&input, 1, "mixed", false, None).expect("parse mixed patch");
+            assert_eq!(files.len(), 2);
+            let binary = &files[0];
+            assert_eq!(binary.effective_path(), Some("bin"));
+            assert_eq!(binary.is_toplevel_relative, git_style);
+            assert_eq!(binary.old_oid.is_some(), git_style);
+            assert!(binary.is_binary);
+            assert!(binary.hunks.is_empty());
+            let payload = binary.binary_patch.as_ref().expect("binary payload");
+            assert_eq!(materialize_binary_patch_forward(payload, old).unwrap(), new);
+            assert_eq!(materialize_binary_patch_reverse(payload, new).unwrap(), old);
+            assert_eq!(files[1].effective_path(), Some("text"));
+            assert!(files[1].is_toplevel_relative);
+            assert!(!files[1].is_binary);
+            assert_eq!(files[1].hunks.len(), 1);
+            assert_eq!(files[1].hunks[0].first_body_line, input.lines().count() - 1);
+        }
+    }
+
+    #[test]
+    fn git_headers_keep_index_after_file_headers() {
+        let input = "diff --git a/f b/f\nold mode 100644\nnew mode 100755\n\
+                     --- a/f\n+++ b/f\nindex abc..def\nindex def..123\n";
+        let files = parse_patch(input, 1, "modes", false, None).expect("parse headers");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].old_oid.as_deref(), Some("def"));
+        assert_eq!(files[0].new_oid.as_deref(), Some("123"));
+        assert_eq!(files[0].old_mode.as_deref(), Some("100644"));
+        assert_eq!(files[0].new_mode.as_deref(), Some("100755"));
+        assert_eq!(files[0].old_mode_line, Some(2));
+        assert_eq!(files[0].new_mode_line, Some(3));
+        assert!(files[0].saw_old_header && files[0].saw_new_header);
+        assert!(files[0].hunks.is_empty());
+    }
+
+    #[test]
+    fn corrupt_hunks_keep_line_numbers_for_both_header_styles() {
+        for header in [
+            "--- a/f\n+++ b/f\n",
+            "diff --git a/f b/f\n--- a/f\n+++ b/f\n",
+        ] {
+            let input = format!("{header}@@ -1,3 +1,3 @@\n one\n");
+            let err = parse_patch(&input, 1, "mixed", false, None).unwrap_err();
+            assert!(matches!(
+                err,
+                Error::Apply(ApplyError::CorruptPatch { input, line })
+                    if input == "mixed" && line == header.lines().count() + 3
+            ));
+        }
+    }
 
     #[test]
     fn parses_simple_git_diff_into_one_file_patch() {

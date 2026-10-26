@@ -29,6 +29,23 @@ make bench-lib
 
 Each scenario `id` is derived from the path under `target/criterion/` (for example `criterion-hash_sha1-4KiB`).
 
+### Patch parsing and staging
+
+`apply_blob` includes `parse_patch_small`, which parses a valid traditional unified diff and fails if parsing fails. It measures parsing independently of repository discovery, object writes, and index updates:
+
+```bash
+cargo bench --profile dist -p grit-lib --bench apply_blob -- parse_patch_small
+```
+
+For a command-level comparison with system Git, `add/patch-file@synth-10k` applies a worktree patch to the index with `grit add --patch-file` and `git apply --cached`:
+
+```bash
+cargo build --profile dist -p grit-cli -p grit-utils
+./target/dist/grit-bench daily --only add/patch-file@synth-10k --output target/bench/patch-file.json
+```
+
+Use the same fixture, build profile, and system Git for before/after comparisons. Each timed mutation must start with the same index and worktree state; preparation runs outside the timed region.
+
 ## `make bench-scenarios`
 
 Prepares registry fixtures, runs **every grit-bench scenario group** for the chosen synthetic tier, and writes both JSON and a markdown table:

@@ -74,16 +74,13 @@ fn bench_apply_hunks_500_on_50k_lines(c: &mut Criterion) {
 }
 
 fn bench_parse_patch_sample(c: &mut Criterion) {
-    let base = fifty_k_line_blob();
     let mut patch = String::from("--- a/f\n+++ b/f\n");
     patch.push_str("@@ -11 +11 @@\n");
-    patch.push_str(" line-000010-padding\n");
     patch.push_str("-line-000010-padding\n");
     patch.push_str("+line-000010-padding edited\n");
     c.bench_function("parse_patch_small", |b| {
-        b.iter(|| black_box(parse_patch(black_box(&patch), 1, "p", false, None)));
+        b.iter(|| black_box(parse_patch(black_box(&patch), 1, "p", false, None).expect("parse")));
     });
-    let _ = base;
 }
 
 criterion_group!(
