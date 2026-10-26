@@ -82,7 +82,21 @@ fn linked_worktree(root: &Path) -> (PathBuf, PathBuf) {
         root.join("wt/.git").display().to_string(),
     )
     .expect("gitdir");
-    fs::write(wt_git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+    fs::write(wt_git_dir.join("HEAD"), "ref: refs/heads/.invalid\n").expect("HEAD stub");
+    let wt_store = ReftableRefStore::open(wt_git_dir.clone()).expect("worktree store");
+    commit(
+        &wt_store,
+        RefUpdate {
+            name: "HEAD".into(),
+            new_value: Some(RawRef::Symbolic("refs/heads/main".into())),
+            expected: Expected::Missing,
+            reflog: None,
+            flags: RefUpdateFlags {
+                no_deref: true,
+                log_only: false,
+            },
+        },
+    );
     (common, wt_git_dir)
 }
 

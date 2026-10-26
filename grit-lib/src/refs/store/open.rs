@@ -22,6 +22,41 @@ pub fn open_ref_store(git_dir: &Path) -> Result<Arc<dyn RefStore>> {
     open_ref_store_uncached(git_dir, &Environment::empty(), None)
 }
 
+/// Initialize a fresh repository or linked worktree HEAD using its configured backend.
+///
+/// The git directory and (for a linked worktree) its `commondir` must already exist.
+/// Reftable's loose files only support discovery and prevent legacy loose-ref writes.
+/// Ref values are committed through the same transaction path as later updates.
+pub(crate) fn initialize_head(git_dir: &Path, head: super::RawRef) -> Result<()> {
+    let store = open_ref_store(git_dir)?;
+    if store.format() == super::RefStorageFormat::Reftable {
+        std::fs::create_dir_all(git_dir.join("reftable"))?;
+        let tables = git_dir.join("reftable/tables.list");
+        if !tables.exists() {
+            std::fs::write(tables, "")?;
+        }
+        std::fs::create_dir_all(git_dir.join("refs"))?;
+        let heads = git_dir.join("refs/heads");
+        if heads.is_dir() {
+            std::fs::remove_dir(&heads)?;
+        }
+        std::fs::write(heads, "this repository uses the reftable format\n")?;
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/.invalid\n")?;
+    }
+    let txn = super::RefTransaction::new().update(super::RefUpdate {
+        name: "HEAD".to_owned(),
+        new_value: Some(head),
+        expected: super::Expected::Any,
+        reflog: None,
+        flags: super::RefUpdateFlags {
+            no_deref: true,
+            log_only: false,
+        },
+    })?;
+    store.prepare(txn)?.commit()?;
+    Ok(())
+}
+
 /// Open a ref store without per-repository caching (used by [`RepoCaches`]).
 pub(crate) fn open_ref_store_uncached(
     git_dir: &Path,

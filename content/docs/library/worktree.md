@@ -5,6 +5,42 @@ summary: Linked worktrees, ignore rules, attributes, and pathspec helpers under 
 
 Working-tree behavior lives under [`worktree`](rustdoc:grit_lib::worktree): ignore/attributes (`worktree::ignore`, `worktree::attributes`), pathspecs (`worktree::pathspec`), and checkout helpers. Porcelain commands (`status`, `add`, `checkout`, …) compose these modules with the index and ODB.
 
+## Reftable interoperability
+
+Linked worktree creation and branch switching use the repository's selected ref backend.
+In a reftable repository, each worktree has its own `reftable/tables.list` stack for
+`HEAD`, while branch tips remain in the shared stack. The admin directory's `HEAD`
+file is a discovery placeholder; the symbolic branch or detached commit is stored
+in reftable. Worktrees created by either grit or system Git can be reopened and
+switched by the other tool without converting ref storage.
+
+`AddLinkedWorktreeOptions::no_checkout` creates the same ref metadata while leaving
+the index and tracked files absent. Git can resolve that worktree's `HEAD` immediately;
+its status shows the missing tracked files until checkout materializes them.
+
+### Add and switch benchmark
+
+Local Linux x86_64 measurements against system Git 2.55.0, with release-profile
+Grit builds before and after the HEAD fix. Each repository has 2,000 files, 2,000
+refs and 31 commits. Add creates a detached worktree; switch alternates attached
+branches across distinct commits in a Git-created linked worktree. Reftable stacks
+are compacted before each build's run. Values are medians of 15 runs after two
+warmups: wall milliseconds / peak RSS in KiB (`/usr/bin/time -v`). Compaction
+compares `grit gc pack-refs` with `git pack-refs --all`.
+
+| Operation | Git | Grit before | Grit after |
+| --- | ---: | ---: | ---: |
+| Files: add | 95.34 / 5,964 | 93.81 / 15,812 | 92.55 / 17,028 |
+| Files: switch | 6.83 / 6,048 | 7.75 / 15,108 | 7.28 / 16,364 |
+| Reftable: add | 98.57 / 5,980 | 93.51 / 16,224 | 94.87 / 17,192 |
+| Reftable: switch | 7.69 / 6,332 | 12.18 / 15,672 | 11.89 / 16,932 |
+| Reftable: compact | 2.33 / 4,540 | 9.57 / 13,048 | 9.41 / 13,384 |
+
+The original reftable add/switch timings produced incorrect Git-visible HEAD
+state. Correct initialization writes a per-worktree table, adding about 1.4 ms to
+add in this fixture; switch and compaction are slightly faster. The release build's
+measured peak RSS rises by about 1.0–1.2 MiB for add/switch and 0.3 MiB for compaction.
+
 ## Matching paths against pathspecs
 
 To filter a path list by user-typed pathspecs, resolve each one with [`Repository::resolve_worktree_pathspec`](rustdoc:grit_lib::repo::Repository::resolve_worktree_pathspec), then build a [`PathspecMatcher`](rustdoc:grit_lib::pathspec::PathspecMatcher) once with [`Repository::pathspec_matcher`](rustdoc:grit_lib::repo::Repository::pathspec_matcher) and ask it about each path. It applies Git's list rules (any positive spec, no `:(exclude)` spec) and every magic word, including `:(attr:...)`. Attributes come from the repository's own `.gitattributes` stack (or `info/attributes` in a bare repository). `[attr]` macros are expanded, and `core.ignorecase` makes attribute patterns case-insensitive, as in Git. Attributes are only loaded when a spec asks for them, once per matcher rather than once per path. Building the matcher returns a `Result`: a malformed `attr:` clause, such as an empty `:(attr:)` or two `attr:` clauses in one spec, fails with [`Error::InvalidAttrPathspec`](rustdoc:grit_lib::error::Error::InvalidAttrPathspec) carrying an [`AttrPathspecError`](rustdoc:grit_lib::error::AttrPathspecError). `matches_change` also checks the old path of a rename. [`Repository::paths_match_pathspecs`](rustdoc:grit_lib::repo::Repository::paths_match_pathspecs) is the one-path shorthand. The free functions in `worktree::pathspec` (`matches_pathspec_list` and friends) have no attributes, so they never match a positive `:(attr:...)` spec. Use [`pathspec_has_attr_magic`](rustdoc:grit_lib::pathspec::pathspec_has_attr_magic) to detect those specs, or pass your own rules to [`matches_pathspec_list_for_object`](rustdoc:grit_lib::pathspec::matches_pathspec_list_for_object).

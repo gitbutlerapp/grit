@@ -4254,14 +4254,10 @@ fn ensure_git_directory_layout(
     ref_storage: crate::ref_storage::RefStorageFormat,
     skip_hooks_and_info: bool,
 ) -> Result<()> {
-    let mut subs = vec![
-        "objects",
-        "objects/info",
-        "objects/pack",
-        "refs",
-        "refs/heads",
-        "refs/tags",
-    ];
+    let mut subs = vec!["objects", "objects/info", "objects/pack", "refs"];
+    if !ref_storage.is_reftable() {
+        subs.extend(["refs/heads", "refs/tags"]);
+    }
     if !bare && !skip_hooks_and_info {
         subs.push("info");
         subs.push("hooks");
@@ -4297,9 +4293,6 @@ fn write_fresh_git_directory(
             copy_template(tmpl, git_dir)?;
         }
     }
-
-    let head_content = format!("ref: refs/heads/{initial_branch}\n");
-    fs::write(git_dir.join("HEAD"), head_content)?;
 
     let needs_extensions = ref_storage.is_reftable() || object_format != HashAlgo::Sha1;
     let repo_version = if needs_extensions { 1 } else { 0 };
@@ -4350,6 +4343,11 @@ fn write_fresh_git_directory(
             }
         }
     }
+
+    crate::refs::store::initialize_head(
+        git_dir,
+        crate::refs::store::RawRef::Symbolic(format!("refs/heads/{initial_branch}")),
+    )?;
 
     apply_init_filesystem_config(
         git_dir,

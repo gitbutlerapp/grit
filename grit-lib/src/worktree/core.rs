@@ -542,6 +542,11 @@ pub struct PrunedWorktreeEntry {
 
 /// Register and populate a linked worktree (Git `worktree add` layout).
 ///
+/// On-disk stores initialize `HEAD` through the repository's selected ref backend.
+/// Reftable worktrees keep their symbolic or detached HEAD in a separate stack,
+/// with discovery placeholders in the admin directory. `no_checkout` still creates
+/// this ref metadata, but leaves the index and tracked files absent.
+///
 /// # Errors
 ///
 /// Fails when the repository is bare, the path is occupied, the branch is already
@@ -623,10 +628,21 @@ pub fn add_linked_worktree(
         fs::write(admin.join("commondir"), "../..\n").map_err(Error::Io)?;
         fs::write(admin.join("gitdir"), format!("{wt_git_abs}\n")).map_err(Error::Io)?;
 
-        if let Some(ref branch_ref) = plan.head_ref {
-            fs::write(admin.join("HEAD"), format!("ref: {branch_ref}\n")).map_err(Error::Io)?;
+        let head = plan
+            .head_ref
+            .as_ref()
+            .map_or(crate::refs::store::RawRef::Direct(start_oid), |target| {
+                crate::refs::store::RawRef::Symbolic(target.clone())
+            });
+        if repo.refs_on_disk() {
+            crate::refs::store::initialize_head(&admin, head)?;
         } else {
-            fs::write(admin.join("HEAD"), format!("{start_oid}\n")).map_err(Error::Io)?;
+            // Injected stores share branches, with each linked HEAD kept in its admin file.
+            let content = match head {
+                crate::refs::store::RawRef::Symbolic(target) => format!("ref: {target}\n"),
+                crate::refs::store::RawRef::Direct(oid) => format!("{oid}\n"),
+            };
+            fs::write(admin.join("HEAD"), content).map_err(Error::Io)?;
         }
 
         copy_filtered_worktree_config(&common, &admin)?;

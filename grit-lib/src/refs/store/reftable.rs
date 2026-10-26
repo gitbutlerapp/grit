@@ -4,7 +4,6 @@ use std::borrow::ToOwned;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
-use std::io;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -58,7 +57,6 @@ pub struct ReftableRefStore {
 }
 
 struct PreparedReftableBatch {
-    logical_updates: Vec<RefUpdate>,
     stacks: Vec<LockedStackBatch>,
     reflog_renames: Vec<RefReflogRename>,
 }
@@ -118,11 +116,14 @@ impl ReftableRefStore {
         // Match [`MemoryRefStore`]: conformance seeds start from an empty namespace.
         let txn = RefTransaction::new()
             .update(RefUpdate {
-                name: "refs/heads/main".to_owned(),
+                name: "HEAD".to_owned(),
                 new_value: None,
                 expected: Expected::Any,
                 reflog: None,
-                flags: super::RefUpdateFlags::default(),
+                flags: super::RefUpdateFlags {
+                    no_deref: true,
+                    log_only: false,
+                },
             })
             .map_err(|e| Error::Message(e.to_string()))?;
         store
@@ -130,7 +131,6 @@ impl ReftableRefStore {
             .map_err(|e| Error::Message(e.to_string()))?
             .commit()
             .map_err(|e| Error::Message(e.to_string()))?;
-        let _ = fs::remove_file(git_dir.join("HEAD"));
         Ok(store)
     }
 
@@ -274,6 +274,7 @@ impl ReftableRefStore {
 
     fn merged_refs_from_locked_stack(
         git_dir: &Path,
+        stack_git_dir: &Path,
         stack: &ReftableStack,
     ) -> Result<BTreeMap<String, RawRef>> {
         let mut map = BTreeMap::new();
@@ -282,8 +283,13 @@ impl ReftableRefStore {
                 map.insert(rec.name, raw);
             }
         }
-        if let Some(head) = read_head_raw(git_dir)? {
-            map.insert("HEAD".to_owned(), head);
+        let (head_git_dir, _) = reftable_storage_location(git_dir, "HEAD");
+        if head_git_dir != stack_git_dir {
+            // A shared-stack snapshot must use this worktree's HEAD, not the main one's.
+            map.remove("HEAD");
+            if let Some(head) = read_head_raw(git_dir)? {
+                map.insert("HEAD".to_owned(), head);
+            }
         }
         Ok(map)
     }
@@ -319,77 +325,13 @@ fn read_reflog_entries_from_stack(git_dir: &Path, refname: &str) -> Result<Vec<R
     Ok(entries)
 }
 
-fn head_file_is_reftable_invalid_stub(git_dir: &Path) -> Result<bool> {
-    let head_path = git_dir.join("HEAD");
-    let content = match fs::read_to_string(&head_path) {
-        Ok(c) => c,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(Error::Io(e)),
-    };
-    Ok(content
-        .trim()
-        .strip_prefix("ref: ")
-        .is_some_and(|target| target.trim() == "refs/heads/.invalid"))
-}
-
-fn read_head_from_reftable_stack(git_dir: &Path) -> Result<Option<RawRef>> {
+/// HEAD is authoritative in this worktree's stack; its loose file is only a discovery stub.
+fn read_head_raw(git_dir: &Path) -> Result<Option<RawRef>> {
     let (store_git_dir, storage_refname) = reftable_storage_location(git_dir, "HEAD");
     let stack = ReftableStack::open(&store_git_dir)?;
     Ok(stack
         .lookup_ref(&storage_refname)?
         .and_then(|rec| record_to_raw(&rec)))
-}
-
-/// Read HEAD for a reftable repo: on-disk stub may point at `.invalid` while the symref lives in the stack.
-fn read_head_raw(git_dir: &Path) -> Result<Option<RawRef>> {
-    if head_file_is_reftable_invalid_stub(git_dir)? {
-        if let Some(raw) = read_head_from_reftable_stack(git_dir)? {
-            return Ok(Some(raw));
-        }
-    }
-    read_head_file_raw(git_dir)
-}
-
-fn read_head_file_raw(git_dir: &Path) -> Result<Option<RawRef>> {
-    let head_path = git_dir.join("HEAD");
-    let content = match fs::read_to_string(&head_path) {
-        Ok(c) => c,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(Error::Io(e)),
-    };
-    let content = content.trim();
-    if let Some(target) = content.strip_prefix("ref: ") {
-        return Ok(Some(RawRef::Symbolic(target.trim().to_owned())));
-    }
-    if content.len() >= 40 && content.chars().all(|c| c.is_ascii_hexdigit()) {
-        let oid: ObjectId = content.parse()?;
-        return Ok(Some(RawRef::Direct(oid)));
-    }
-    Err(Error::InvalidRef(format!("invalid HEAD: {content}")))
-}
-
-fn apply_head_file_side_effect(git_dir: &Path, update: &RefUpdate) -> Result<()> {
-    if update.name != "HEAD" || update.flags.log_only {
-        return Ok(());
-    }
-    let head_path = git_dir.join("HEAD");
-    match &update.new_value {
-        Some(RawRef::Symbolic(target)) => {
-            fs::write(head_path, format!("ref: {target}\n")).map_err(Error::Io)?;
-        }
-        Some(RawRef::Direct(oid)) => {
-            let current = read_head_file_raw(git_dir)?;
-            let deref_sym = matches!(current, Some(RawRef::Symbolic(_))) && !update.flags.no_deref;
-            if !deref_sym {
-                fs::write(head_path, format!("{oid}\n")).map_err(Error::Io)?;
-            }
-        }
-        None if update.flags.no_deref => {
-            fs::write(head_path, "ref: refs/heads/.invalid\n").map_err(Error::Io)?;
-        }
-        None => {}
-    }
-    Ok(())
 }
 
 fn empty_reflog_markers_path(git_dir: &Path) -> PathBuf {
@@ -488,10 +430,7 @@ fn build_reftable_updates_for_stack(
 
     for update in updates {
         let target = reftable_write_target(&trial, git_dir, update)?;
-        let mut value = target.value.clone();
-        if update.name == "HEAD" {
-            value = head_stack_value(git_dir, update, value);
-        }
+        let value = target.value.clone();
         let old_oid = reflog_old_oid_before(&trial, refs, update);
         let new_oid = reflog_new_oid_before(&trial, refs, update);
         let (_, log_refname) = reftable_storage_location(git_dir, &update.name);
@@ -540,29 +479,6 @@ fn build_reftable_updates_for_stack(
     Ok(out)
 }
 
-fn head_stack_value(
-    git_dir: &Path,
-    update: &RefUpdate,
-    value: Option<RefValue>,
-) -> Option<RefValue> {
-    if update.name != "HEAD" {
-        return value;
-    }
-    match &update.new_value {
-        Some(RawRef::Symbolic(_)) => None,
-        Some(RawRef::Direct(_)) => {
-            let current = read_head_file_raw(git_dir).ok().flatten();
-            if matches!(current, Some(RawRef::Symbolic(_))) && !update.flags.no_deref {
-                value
-            } else {
-                None
-            }
-        }
-        None if update.flags.no_deref => None,
-        None => value,
-    }
-}
-
 impl RefStore for ReftableRefStore {
     fn format(&self) -> RefStorageFormat {
         RefStorageFormat::Reftable
@@ -599,7 +515,8 @@ impl RefStore for ReftableRefStore {
             .read_refs()?
             .into_iter()
             .filter_map(|rec| {
-                if record_to_raw(&rec).is_some()
+                if rec.name != "HEAD"
+                    && record_to_raw(&rec).is_some()
                     && (rec.name.starts_with(prefix)
                         || (prefix.ends_with('/') && rec.name == prefix.trim_end_matches('/')))
                 {
@@ -644,7 +561,6 @@ impl RefStore for ReftableRefStore {
         }
 
         let updates = self.split_cross_stack_symref_updates(updates)?;
-        let logical_updates = updates.clone();
         let mut grouped: BTreeMap<PathBuf, Vec<RefUpdate>> = BTreeMap::new();
         for update in updates {
             let (store_git_dir, _) = reftable_storage_location(&self.git_dir, &update.name);
@@ -659,7 +575,7 @@ impl RefStore for ReftableRefStore {
                 .acquire_tables_list_lock_for_store()
                 .map_err(map_reftable_err)?;
             stack.reload_table_names();
-            let refs = Self::merged_refs_from_locked_stack(&self.git_dir, &stack)
+            let refs = Self::merged_refs_from_locked_stack(&self.git_dir, &store_git_dir, &stack)
                 .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
             let snapshot = RefBatchState {
                 refs,
@@ -679,7 +595,6 @@ impl RefStore for ReftableRefStore {
         }
 
         *guard_state = Some(PreparedReftableBatch {
-            logical_updates,
             stacks,
             reflog_renames,
         });
@@ -826,10 +741,6 @@ impl PreparedRefTransaction for ReftablePrepared<'_> {
                     .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
             }
         }
-        for update in &batch.logical_updates {
-            apply_head_file_side_effect(&self.store.git_dir, update)
-                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-        }
         self.committed = true;
         Ok(())
     }
@@ -896,5 +807,87 @@ mod tests {
 
         let corrupt = map_reftable_err(ReftableError::BadMagic.into());
         assert!(matches!(corrupt, RefStoreError::Corrupt(msg) if msg.contains("bad magic")));
+    }
+    #[test]
+    fn head_values_use_stack_transactions_and_ignore_loose_files() {
+        let store = ReftableRefStore::open_ephemeral().expect("store");
+        let update = |value, expected| {
+            RefTransaction::new()
+                .update(RefUpdate {
+                    name: "HEAD".into(),
+                    new_value: value,
+                    expected,
+                    reflog: None,
+                    flags: super::super::RefUpdateFlags {
+                        no_deref: true,
+                        log_only: false,
+                    },
+                })
+                .expect("transaction")
+        };
+        let symbolic = RawRef::Symbolic("refs/heads/topic".into());
+        store
+            .prepare(update(Some(symbolic.clone()), Expected::Missing))
+            .expect("prepare")
+            .commit()
+            .expect("commit");
+        let stub = fs::read(store.git_dir.join("HEAD")).expect("stub");
+        assert_eq!(stub, b"ref: refs/heads/.invalid\n");
+        assert_eq!(store.read_raw("HEAD").expect("read"), Some(symbolic));
+        let mut names = Vec::new();
+        store
+            .for_each_ref("", &mut |entry| {
+                names.push(entry.name.clone());
+                ControlFlow::Continue(())
+            })
+            .expect("list");
+        assert_eq!(names, ["HEAD"]);
+        let oid = ObjectId::from_bytes(&[0x31; 20]).expect("oid");
+        let detached = RawRef::Direct(oid);
+        let txn = update(
+            Some(detached.clone()),
+            Expected::Symref("refs/heads/topic".into()),
+        );
+        store
+            .prepare(txn.clone())
+            .expect("prepare")
+            .abort()
+            .expect("abort");
+        assert!(matches!(
+            store.read_raw("HEAD").expect("read"),
+            Some(RawRef::Symbolic(_))
+        ));
+        store
+            .prepare(txn)
+            .expect("prepare")
+            .commit()
+            .expect("commit");
+        fs::write(store.git_dir.join("HEAD"), "ref: refs/heads/stale\n").expect("stale HEAD");
+        assert_eq!(
+            store.read_raw("HEAD").expect("read"),
+            Some(detached.clone())
+        );
+        assert_eq!(
+            crate::reftable::reftable_resolve_ref(&store.git_dir, "HEAD").expect("resolve"),
+            oid
+        );
+        assert!(store
+            .prepare(update(None, Expected::Oid(ObjectId::zero())))
+            .is_err());
+        assert_eq!(store.read_raw("HEAD").expect("read"), Some(detached));
+        store
+            .prepare(update(None, Expected::Oid(oid)))
+            .expect("prepare")
+            .commit()
+            .expect("commit");
+        assert_eq!(store.read_raw("HEAD").expect("deleted"), None);
+        ReftableStack::open(&store.git_dir)
+            .expect("stack")
+            .compact()
+            .expect("compact");
+        assert_eq!(
+            store.read_raw("HEAD").expect("deleted after compaction"),
+            None
+        );
     }
 }

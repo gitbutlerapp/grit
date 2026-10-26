@@ -429,29 +429,40 @@ pub struct RepoState {
 ///
 /// Returns [`Error::Io`] if files cannot be read.
 pub fn resolve_head(git_dir: &Path) -> Result<HeadState> {
+    let store = crate::refs::store::open_ref_store(git_dir)?;
+    if store.format() == crate::refs::store::RefStorageFormat::Reftable {
+        return resolve_head_from_store(store.as_ref());
+    }
     resolve_head_impl(git_dir, None)
 }
 
 /// Resolve `HEAD` through the repository's ref store.
 ///
-/// Files and reftable repositories read the on-disk `HEAD` (symlinks and the reftable
-/// `.invalid` stub included) and resolve branch tips through the cached store. Any other store,
-/// such as one installed with [`Repository::with_ref_store`], is the only source of `HEAD`:
-/// nothing under the git directory is consulted.
+/// Files repositories read the on-disk `HEAD` (including symlinks) and resolve branch
+/// tips through the cached store. Reftable and injected stores are the only source
+/// of `HEAD`; a loose discovery placeholder or stale file cannot override them.
 ///
 /// # Errors
 ///
 /// Propagates ref store read and resolution failures.
 pub fn resolve_head_for_repository(repo: &crate::repo::Repository) -> Result<HeadState> {
-    use crate::refs::store::RawRef;
-    if repo.refs_on_disk() {
+    if repo.refs().format() == crate::refs::store::RefStorageFormat::Files {
         return resolve_head_impl(repo.git_dir(), Some(repo));
     }
-    match repo.refs().read_raw("HEAD")? {
+    resolve_head_from_store(repo.refs())
+}
+
+fn resolve_head_from_store(store: &dyn crate::refs::store::RefStore) -> Result<HeadState> {
+    use crate::refs::store::RawRef;
+    match store.read_raw("HEAD")? {
         None => Ok(HeadState::Invalid),
         Some(RawRef::Direct(oid)) => Ok(HeadState::Detached { oid }),
         Some(RawRef::Symbolic(refname)) => {
-            symbolic_head_state(refname, |name| repo.references().resolve_if_exists(name))
+            symbolic_head_state(refname, |name| match store.resolve(name) {
+                Ok(oid) => Ok(Some(oid)),
+                Err(Error::RefStore(RefStoreError::NotFound { .. })) => Ok(None),
+                Err(err) => Err(err),
+            })
         }
     }
 }

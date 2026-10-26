@@ -28,7 +28,7 @@ pub use files::{FilesRefStore, FilesRefStoreConfig};
 pub(crate) use linked_worktree::LinkedWorktreeRefStore;
 pub use memory::MemoryRefStore;
 pub use open::open_ref_store;
-pub(crate) use open::{open_files_ref_store, open_ref_store_uncached};
+pub(crate) use open::{initialize_head, open_files_ref_store, open_ref_store_uncached};
 pub use reftable::ReftableRefStore;
 pub(crate) use semantics::format_reflog_identity;
 pub use transaction::RefTransaction;

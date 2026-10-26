@@ -367,3 +367,93 @@ fn worktree_move_and_repair_json_schema() {
     assert!(!body.repairs.is_empty());
     assert!(body.repairs[0].kind.contains("git"));
 }
+
+#[test]
+fn reftable_add_and_switch_json_match_git_visible_head() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("repo");
+    git(
+        tmp.path(),
+        &["init", "-q", "-b", "main", "--ref-format=reftable", "repo"],
+    );
+    std::fs::write(dir.join("a"), "base\n").unwrap();
+    git(&dir, &["add", "a"]);
+    git(&dir, &["commit", "-qm", "base"]);
+    let base = git(&dir, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&dir, &["branch", "topic"]);
+    let wt = tmp.path().join("grit-wt");
+    let out = grit(
+        &dir,
+        &["worktree", "add", wt.to_str().unwrap(), "topic", "--json"],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let added: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(added["checked_out"], true);
+    assert_eq!(added["branch"], "topic");
+    assert_eq!(added["head"], base);
+    assert_eq!(git(&wt, &["rev-parse", "HEAD"]).trim(), base);
+    assert_eq!(
+        git(&wt, &["symbolic-ref", "HEAD"]).trim(),
+        "refs/heads/topic"
+    );
+    assert_eq!(git(&wt, &["status", "--short"]), "");
+
+    let git_wt = tmp.path().join("git-wt");
+    git(
+        &dir,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "git-topic",
+            git_wt.to_str().unwrap(),
+        ],
+    );
+    std::fs::write(git_wt.join("a"), "topic edit\n").unwrap();
+    git(&git_wt, &["commit", "-qam", "topic-edit"]);
+    let topic = git(&git_wt, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&dir, &["branch", "switch-target", "main"]);
+    let out = grit(&git_wt, &["switch", "switch-target", "--json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let switched: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(switched["branch"], "switch-target");
+    assert_eq!(
+        git(&git_wt, &["symbolic-ref", "HEAD"]).trim(),
+        "refs/heads/switch-target"
+    );
+    assert_eq!(git(&git_wt, &["rev-parse", "HEAD"]).trim(), base);
+    assert_eq!(git(&git_wt, &["status", "--short"]), "");
+    let out = grit(&git_wt, &["switch", "--detach", &topic, "--json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let detached: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(detached["commit"], topic);
+    assert!(detached["branch"].is_null());
+    assert_eq!(git(&git_wt, &["rev-parse", "HEAD"]).trim(), topic);
+    assert_eq!(git(&git_wt, &["status", "--short"]), "");
+    let out = grit(&git_wt, &["status", "--json"]);
+    assert!(out.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(status["head"], topic);
+    assert_eq!(status["clean"], true);
+    assert_eq!(
+        git(&dir, &["symbolic-ref", "HEAD"]).trim(),
+        "refs/heads/main"
+    );
+    assert_eq!(
+        git(&wt, &["symbolic-ref", "HEAD"]).trim(),
+        "refs/heads/topic"
+    );
+    git(&dir, &["fsck", "--strict"]);
+}

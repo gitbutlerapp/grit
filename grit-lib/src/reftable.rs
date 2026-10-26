@@ -2234,61 +2234,6 @@ impl ReftableStack {
         Ok(merged.keys().next().cloned())
     }
 
-    /// Inject the HEAD symbolic ref into the ref set being compacted, mirroring
-    /// git's reftable layout where HEAD lives inside the table.
-    ///
-    /// Returns a HEAD reflog record to add to the log section if the target
-    /// branch has a most-recent reflog entry (so HEAD@{0} mirrors it).
-    fn inject_head_ref(&self, refs: &mut Vec<RefRecord>, min_idx: u64) -> Option<LogRecord> {
-        let git_dir = self.reftable_dir.parent()?;
-        let head_path = git_dir.join("HEAD");
-        let content = fs::read_to_string(&head_path).ok()?;
-        let target = content.strip_prefix("ref: ")?.trim();
-        if target.is_empty() || target == "refs/heads/.invalid" {
-            return None;
-        }
-        // Only inject HEAD if it is not already present.
-        if refs.iter().any(|r| r.name == "HEAD") {
-            return None;
-        }
-        // HEAD takes the smallest update index (git assigns it the first one).
-        refs.push(RefRecord {
-            name: "HEAD".to_owned(),
-            update_index: min_idx,
-            value: RefValue::Symref(target.to_owned()),
-        });
-        refs.sort_by(|a, b| a.name.cmp(&b.name));
-
-        // HEAD reflog entries are already written separately by the commit /
-        // update-ref paths (`append_reflog("HEAD", …)`). Only synthesize a
-        // mirror of the branch's newest entry when HEAD has no reflog of its
-        // own — otherwise compaction would duplicate HEAD@{0} (yielding an
-        // extra log record and an oversized log block, t0613 'default write
-        // options').
-        if self
-            .read_logs_for_ref("HEAD")
-            .map(|logs| !logs.is_empty())
-            .unwrap_or(false)
-        {
-            return None;
-        }
-
-        // Mirror the target branch's newest reflog entry as HEAD@{0}.
-        let target_logs = self.read_logs_for_ref(target).ok()?;
-        let newest = target_logs.into_iter().next()?;
-        Some(LogRecord {
-            refname: "HEAD".to_owned(),
-            update_index: newest.update_index,
-            old_id: newest.old_id,
-            new_id: newest.new_id,
-            name: newest.name,
-            email: newest.email,
-            time_seconds: newest.time_seconds,
-            tz_offset: newest.tz_offset,
-            message: newest.message,
-        })
-    }
-
     /// Read the configured reftable write options from this repo's config.
     fn write_options(&self) -> WriteOptions {
         let git_dir = self
@@ -3004,6 +2949,13 @@ impl ReftableStack {
     /// `git pack-refs` always rewrites the whole stack into a single,
     /// canonically-laid-out table even when there is just one table, so that
     /// padding/block layout match the configured write options.
+    ///
+    /// Ref values and reflogs come from the stack, preserving an absent HEAD
+    /// without importing discovery-file contents.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if locking, reading tables, or publishing the compacted table fails.
     pub fn compact(&mut self) -> Result<()> {
         // Hold the stack lock across the whole compaction (read tables -> write
         // compacted table -> rewrite tables.list -> delete old tables) and work
@@ -3037,22 +2989,11 @@ impl ReftableStack {
         // object index, logAllRefUpdates) rather than defaults.
         let opts = self.write_options();
 
-        // Git stores HEAD as a symbolic ref inside the reftable (the on-disk
-        // `.git/HEAD` is only a `.invalid` stub). grit keeps the real HEAD in
-        // `.git/HEAD`, so inject it into the compacted table to match git's
-        // on-disk layout.
-        let mut refs = refs;
-        let head_log = self.inject_head_ref(&mut refs, min_idx);
-
         let mut writer = ReftableWriter::new(opts.clone(), min_idx, max_idx);
         for rec in refs {
             writer.add_ref(rec)?;
         }
         if opts.write_log {
-            let mut logs = logs;
-            if let Some(hl) = head_log {
-                logs.push(hl);
-            }
             for log in logs {
                 writer.add_log(log)?;
             }
@@ -3179,7 +3120,8 @@ impl ReftableStack {
 
 /// Resolve a ref in a reftable repo, following symbolic refs.
 pub fn reftable_resolve_ref(git_dir: &Path, refname: &str) -> Result<ObjectId> {
-    reftable_resolve_ref_depth(git_dir, refname, 0)
+    use crate::refs::store::RefStore;
+    crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?.resolve(refname)
 }
 
 pub(crate) fn reftable_storage_location(git_dir: &Path, refname: &str) -> (PathBuf, String) {
@@ -3207,45 +3149,6 @@ pub(crate) fn reftable_storage_location(git_dir: &Path, refname: &str) -> (PathB
         crate::refs::common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf()),
         refname.to_owned(),
     )
-}
-
-fn reftable_resolve_ref_depth(git_dir: &Path, refname: &str, depth: usize) -> Result<ObjectId> {
-    if depth >= crate::refs::SYMREF_MAXDEPTH {
-        return Err(RefStoreError::SymrefLoop.into());
-    }
-
-    // On-disk `.git/HEAD` is often a `.invalid` stub; the live symref or OID is in the stack.
-    if refname == "HEAD" {
-        let head_path = git_dir.join("HEAD");
-        if head_path.exists() {
-            let content = fs::read_to_string(&head_path).map_err(Error::Io)?;
-            let content = content.trim();
-            if let Some(target) = content.strip_prefix("ref: ") {
-                if target.trim() != "refs/heads/.invalid" {
-                    return reftable_resolve_ref_depth(git_dir, target.trim(), depth + 1);
-                }
-                // Git keeps a `.invalid` stub on disk; the symref lives in the reftable stack.
-            }
-            // Detached HEAD
-            if content.len() == 40 && content.chars().all(|c| c.is_ascii_hexdigit()) {
-                return content.parse();
-            }
-        }
-    }
-
-    let (store_git_dir, storage_refname) = reftable_storage_location(git_dir, refname);
-    let stack = ReftableStack::open(&store_git_dir)?;
-    match stack.lookup_ref(&storage_refname)? {
-        Some(rec) => match rec.value {
-            RefValue::Val1(oid) => Ok(oid),
-            RefValue::Val2(oid, _) => Ok(oid),
-            RefValue::Symref(target) => {
-                reftable_resolve_ref_depth(&store_git_dir, &target, depth + 1)
-            }
-            RefValue::Deletion => Err(RefStoreError::not_found(refname).into()),
-        },
-        None => Err(RefStoreError::not_found(refname).into()),
-    }
 }
 
 /// Write a ref to a reftable repo using config-derived [`WriteOptions`].
@@ -4197,6 +4100,12 @@ mod tests {
             &opts,
         )
         .expect("first ref");
+        let first_table = ReftableStack::open(&git_dir)
+            .expect("stack after first ref")
+            .table_names
+            .last()
+            .expect("first ref table")
+            .clone();
         reftable_write_ref_with_write_options(
             &git_dir,
             "refs/heads/only-in-second-table",
@@ -4214,10 +4123,7 @@ mod tests {
             stack.table_names.len()
         );
 
-        let subset = ReftableStack::subset_stack(
-            stack.reftable_dir.clone(),
-            vec![stack.table_names[0].clone()],
-        );
+        let subset = ReftableStack::subset_stack(stack.reftable_dir.clone(), vec![first_table]);
         let refs = subset.read_refs().expect("subset read");
         let names: Vec<&str> = refs.iter().map(|r| r.name.as_str()).collect();
         assert!(names.iter().any(|n| *n == "refs/heads/only-in-first-table"));
@@ -4226,7 +4132,9 @@ mod tests {
             .any(|n| *n == "refs/heads/only-in-second-table"));
 
         let full = stack.read_refs().expect("full read");
-        assert_eq!(full.len(), 2);
+        assert_eq!(full.len(), 3);
+        assert!(full.iter().any(|record| record.name == "HEAD"
+            && record.value == RefValue::Symref("refs/heads/main".into())));
     }
 
     #[test]

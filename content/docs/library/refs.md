@@ -19,6 +19,21 @@ To advance a checked-out branch from your own code, use [`update_branch_for_comm
 
 On-disk layout is chosen once from **repository-local** config (`extensions.refStorage`), never from global or system config. [`RefStorageFormat`](rustdoc:grit_lib::refs::ref_storage::RefStorageFormat) in [`ref_storage`](rustdoc:grit_lib::refs::ref_storage) reads that value via `detect` and returns `files` (loose refs plus `packed-refs`) or `reftable`. [`open_ref_store`](rustdoc:grit_lib::refs::store::open_ref_store) and [`RepoCaches`](rustdoc:grit_lib::repo::caches::RepoCaches) construct [`FilesRefStore`](rustdoc:grit_lib::refs::store::FilesRefStore) or [`ReftableRefStore`](rustdoc:grit_lib::refs::store::ReftableRefStore). The store's `format()` reports which backend is active (`files`, `reftable`, or `memory` for injected stores).
 
+### Reftable HEAD and linked worktrees
+
+Reftable stores both symbolic and detached `HEAD` values in the worktree's own stack.
+The common stack holds shared branches. The loose `HEAD` file serves repository
+discovery only and does not override a stack record. Fresh reftable repositories
+and linked worktrees initialize this layout before checkout, so system Git sees
+the same branch and commit as `Repository::refs()`. Compaction also uses stack
+refs and reflogs, so deleting HEAD cannot revive a stale loose value.
+
+HEAD changes use the ref store's transaction, compare-and-swap and reflog handling.
+Updating through an attached linked-worktree HEAD advances the shared branch and
+writes its branch reflog in the common stack, with the HEAD reflog in the worktree
+stack. These two stack commits have the partial-failure semantics documented on
+[`ReftableRefStore`](rustdoc:grit_lib::refs::store::ReftableRefStore).
+
 ### Reading `packed-refs`
 
 The files backend maps `packed-refs` and keeps one view per store, shared by lookups, listings and peel snapshots. Opening it checks what Git checks: the file ends in a newline and its last line can hold an object id. When the header carries the `sorted` trait (Git and grit always write it), lookups and prefix listings binary-search the mapped bytes in place. They read only the lines they probe and parse strictly the lines a listing covers, so a command on a repository with tens of thousands of packed refs touches a few pages of the file. As in Git, the trait is trusted rather than verified on every read. [`refs_fsck`](rustdoc:grit_lib::refs::refs_fsck::refs_fsck) (and `grit fsck`) reports a file whose records break it as `packedRefUnsorted`. A file without the trait is scanned in full on every lookup.
