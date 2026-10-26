@@ -63,6 +63,10 @@ fn grit_logout_json(home: &Path, dry_run: bool) -> Value {
 fn home_dir() -> (tempfile::TempDir, PathBuf) {
     let tmp = tempfile::tempdir().expect("tempdir");
     let home = tmp.path().to_path_buf();
+    // An empty helper clears the ones system git brings along, such as the
+    // osxkeychain helper Apple's git configures outside GIT_CONFIG_SYSTEM:
+    // without it, `git credential approve` writes to the real keychain.
+    std::fs::write(home.join(".gitconfig"), "[credential]\n\thelper =\n").expect("gitconfig");
     (tmp, home)
 }
 
@@ -87,7 +91,7 @@ fn logout_erases_token_that_git_credential_stored() {
     let helper = format!("store --file={}", store.display());
     let Some(out) = git(
         &home,
-        &["config", "--global", "credential.helper", &helper],
+        &["config", "--global", "--add", "credential.helper", &helper],
         None,
     ) else {
         eprintln!("skipping: system git unavailable");
