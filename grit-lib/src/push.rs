@@ -6,7 +6,7 @@
 //! reading the receive-pack advertisement (remote refs + `.have` lines +
 //! capabilities), deciding each ref update against the advertised remote refs
 //! (reusing the same fast-forward / force / force-with-lease rules as
-//! `push_local`), building the minimal pack with [`crate::transfer::build_pack`]
+//! `push_local`), building the minimal pack with [`crate::pack_objects::build_pack_for_push`]
 //! (using the advertised remote tips + `.have`s as the negotiation `haves`),
 //! streaming it, and parsing the `report-status` / `report-status-v2` reply into
 //! per-ref [`crate::push_report::PushRefResult`]s.
@@ -38,7 +38,7 @@ use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressUnit, Received
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::repo::Repository;
 use crate::sideband_lines::{RemoteLine, SidebandLines};
-use crate::transfer::{build_pack, PackBuildOptions, PushOptions, PushOutcome, PushRefSpec};
+use crate::transfer::{PackBuildOptions, PushOptions, PushOutcome, PushRefSpec};
 use crate::transport::Connection;
 
 fn finish_push_outcome(
@@ -161,7 +161,7 @@ const PUSH_CAPS_BASE: &str = "report-status report-status-v2 quiet";
 /// 3. Write the ref-update commands for the accepted, value-changing updates
 ///    (`<old> <new> <ref>\0<caps>\n` first, `<old> <new> <ref>\n` rest), then a
 ///    flush.
-/// 4. Build the minimal pack with [`build_pack`] (wants = new tips, haves =
+/// 4. Build the minimal pack with [`crate::pack_objects::build_pack_for_push`] (wants = new tips, haves =
 ///    advertised remote tips + `.have`s) and stream it; for deletion-only pushes
 ///    stream the empty pack.
 /// 5. Read + parse `report-status` / `report-status-v2` (demultiplexing the
@@ -612,7 +612,7 @@ fn build_push_pack(
         PackBuildOptions::for_local_push(local_cfg.as_ref())
     };
     pack_opts.use_ofs_delta = adv.server_ofs_delta;
-    build_pack(local_odb, &wants, &haves, &pack_opts).map(Some)
+    crate::pack_objects::build_pack_for_push(local_odb, &wants, &haves, &pack_opts).map(Some)
 }
 
 /// A client-side push decision for one ref, plus what to send over the wire.

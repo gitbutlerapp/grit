@@ -51,6 +51,19 @@ impl fmt::Debug for PackObjectSelection {
     }
 }
 
+/// How client `haves` bound the want-side object walk.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HaveBoundary {
+    /// Pre-walk all commits reachable from every `have` (upload-pack negotiation).
+    #[default]
+    CommitClosure,
+    /// Treat each `have` as a tip boundary only (`send-pack` / push thin packs).
+    ///
+    /// The want-side walk stops when it meets a `have` commit and seals that
+    /// snapshot, without walking history backward from every advertised ref first.
+    TipsOnly,
+}
+
 /// Parameters for [`enumerate_pack_objects`].
 #[derive(Clone, Copy, Debug)]
 pub struct PackEnumerateOptions<'a> {
@@ -69,6 +82,8 @@ pub struct PackEnumerateOptions<'a> {
     pub exclude_objects: Option<&'a HashSet<ObjectId>>,
     /// When `wants` are read from another ODB, objects already stored here are boundaries.
     pub peer_odb: Option<&'a Odb>,
+    /// Whether `haves` are expanded to a full commit closure before the want walk.
+    pub have_boundary: HaveBoundary,
 }
 
 /// Select pack objects using bitmap reachability when possible, otherwise the object walk.
@@ -235,7 +250,14 @@ fn walk_enumeration(
     name_trees: NameTrees,
 ) -> Result<PackObjectSelection> {
     let have_shallow = opts.have_shallow_grafts.unwrap_or(opts.shallow_grafts);
-    let have_commits = commits_reachable_from_haves(odb, haves, have_shallow, true)?;
+    let have_commits = match opts.have_boundary {
+        HaveBoundary::CommitClosure => {
+            commits_reachable_from_haves(odb, haves, have_shallow, true)?
+        }
+        HaveBoundary::TipsOnly => {
+            send_pack_uninteresting_commits(odb, wants, haves, have_shallow, true)?
+        }
+    };
     let mut boundary: HashSet<ObjectId> = HashSet::new();
     if let Some(extra) = opts.exclude_objects {
         boundary.extend(extra.iter().copied());
@@ -299,6 +321,208 @@ fn commits_reachable_from_haves(
         }
     }
     Ok(seen)
+}
+
+const SEND_PACK_INTERESTING: u8 = 1;
+const SEND_PACK_UNINTERESTING: u8 = 2;
+
+/// Test hook: commit parent reads performed by [`send_pack_uninteresting_commits`].
+pub(crate) mod send_pack_walk_test_hooks {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COMMIT_READS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    #[cfg(test)]
+    pub fn reset_commit_reads() {
+        COMMIT_READS.with(|c| c.set(0));
+    }
+
+    #[cfg(test)]
+    pub fn commit_reads() -> usize {
+        COMMIT_READS.with(|c| c.get())
+    }
+
+    pub(crate) fn record_commit_read() {
+        COMMIT_READS.with(|c| c.set(c.get().saturating_add(1)));
+    }
+}
+
+/// Commits queued in [`SendPackRevWalk`], newest committer date first.
+struct SendPackQueuedCommit {
+    time: i64,
+    seq: std::cmp::Reverse<u64>,
+    oid: ObjectId,
+    parents: Vec<ObjectId>,
+    /// When true, this commit was reached from the want side; otherwise from haves.
+    from_want: bool,
+}
+
+impl PartialEq for SendPackQueuedCommit {
+    fn eq(&self, other: &Self) -> bool {
+        (self.time, self.seq) == (other.time, other.seq)
+    }
+}
+
+impl Eq for SendPackQueuedCommit {}
+
+impl PartialOrd for SendPackQueuedCommit {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for SendPackQueuedCommit {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (self.time, self.seq).cmp(&(other.time, other.seq))
+    }
+}
+
+/// Paint-down walk for send-pack: mark commits uninteresting from `haves` until the
+/// interesting want frontier is exhausted, without walking every advertised have to root.
+struct SendPackRevWalk<'a> {
+    odb: &'a Odb,
+    shallow_grafts: &'a HashSet<ObjectId>,
+    skip_missing: bool,
+    heap: BinaryHeap<SendPackQueuedCommit>,
+    flags: HashMap<ObjectId, u8>,
+    uninteresting: HashSet<ObjectId>,
+    next_seq: u64,
+    /// Commits still queued or not yet expanded with the interesting flag.
+    interesting_pending: usize,
+}
+
+impl SendPackRevWalk<'_> {
+    fn can_stop_after(&self) -> bool {
+        self.interesting_pending == 0
+    }
+
+    fn mark_interesting(&mut self, oid: ObjectId) -> bool {
+        if self.flags.get(&oid) == Some(&SEND_PACK_INTERESTING) {
+            return false;
+        }
+        if self.flags.get(&oid) == Some(&SEND_PACK_UNINTERESTING) {
+            self.uninteresting.remove(&oid);
+        }
+        self.flags.insert(oid, SEND_PACK_INTERESTING);
+        true
+    }
+
+    fn mark_uninteresting(&mut self, oid: ObjectId) -> bool {
+        if self.flags.get(&oid) == Some(&SEND_PACK_INTERESTING) {
+            return false;
+        }
+        if self.flags.insert(oid, SEND_PACK_UNINTERESTING).is_some() {
+            return false;
+        }
+        self.uninteresting.insert(oid);
+        true
+    }
+
+    fn queue_commit(&mut self, oid: ObjectId, from_want: bool) -> Result<()> {
+        if self.shallow_grafts.contains(&oid) {
+            return Ok(());
+        }
+        let already = self.flags.get(&oid).copied();
+        if already == Some(SEND_PACK_INTERESTING) {
+            return Ok(());
+        }
+        if already == Some(SEND_PACK_UNINTERESTING) && !from_want {
+            return Ok(());
+        }
+        let obj = match self.odb.read(&oid) {
+            Ok(o) => o,
+            Err(_) if self.skip_missing => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        if obj.kind != ObjectKind::Commit {
+            if !from_want {
+                let _ = self.mark_uninteresting(oid);
+            }
+            return Ok(());
+        }
+        let parsed = CommitRef::parse(&obj.data)?;
+        send_pack_walk_test_hooks::record_commit_read();
+        let queued = SendPackQueuedCommit {
+            time: parsed.committer_unix_seconds_for_ordering(),
+            seq: std::cmp::Reverse(self.next_seq),
+            oid,
+            parents: parsed.parents().to_vec(),
+            from_want,
+        };
+        self.next_seq += 1;
+        if from_want {
+            if self.mark_interesting(oid) {
+                self.interesting_pending += 1;
+            }
+        } else {
+            let _ = self.mark_uninteresting(oid);
+        }
+        self.heap.push(queued);
+        Ok(())
+    }
+
+    fn run(mut self) -> Result<HashSet<ObjectId>> {
+        while !self.heap.is_empty() {
+            if self.can_stop_after() {
+                break;
+            }
+            let Some(commit) = self.heap.pop() else {
+                break;
+            };
+            if commit.from_want {
+                self.interesting_pending -= 1;
+            }
+            for parent in &commit.parents {
+                if self.shallow_grafts.contains(parent) {
+                    continue;
+                }
+                if commit.from_want {
+                    if self.flags.get(parent) == Some(&SEND_PACK_UNINTERESTING) {
+                        continue;
+                    }
+                    self.queue_commit(*parent, true)?;
+                } else if self.flags.get(parent) != Some(&SEND_PACK_INTERESTING) {
+                    self.queue_commit(*parent, false)?;
+                }
+            }
+        }
+        Ok(self.uninteresting)
+    }
+}
+
+/// Commits to treat as client `have` boundaries during send-pack enumeration.
+///
+/// Includes every advertised `have` plus ancestors painted uninteresting from haves
+/// until the walk from `wants` stops. Does not walk the full have history once the
+/// interesting want frontier is exhausted.
+pub(crate) fn send_pack_uninteresting_commits(
+    odb: &Odb,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    shallow_grafts: &HashSet<ObjectId>,
+    skip_missing: bool,
+) -> Result<HashSet<ObjectId>> {
+    let mut walk = SendPackRevWalk {
+        odb,
+        shallow_grafts,
+        skip_missing,
+        heap: BinaryHeap::new(),
+        flags: HashMap::new(),
+        uninteresting: HashSet::new(),
+        next_seq: 0,
+        interesting_pending: 0,
+    };
+    for &have in haves {
+        walk.queue_commit(have, false)?;
+    }
+    for &want in wants {
+        walk.queue_commit(want, true)?;
+    }
+    let mut out = walk.run()?;
+    out.extend(haves.iter().copied());
+    Ok(out)
 }
 
 /// Objects in a commit's root tree (the commit, its trees and blobs), for negotiation boundaries.
@@ -882,6 +1106,7 @@ mod tests {
                 use_bitmaps: false,
                 exclude_objects: None,
                 peer_odb: None,
+                have_boundary: HaveBoundary::CommitClosure,
             },
             name_trees,
         )
@@ -918,6 +1143,97 @@ mod tests {
         repo.odb()
             .write(ObjectKind::Commit, body.as_bytes())
             .expect("commit")
+    }
+
+    #[test]
+    fn send_pack_have_walk_stops_without_scanning_deep_haves() {
+        use super::send_pack_walk_test_hooks::{commit_reads, reset_commit_reads};
+
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let blob = |s: &str| repo.odb().write(ObjectKind::Blob, s.as_bytes()).unwrap();
+        let mut parent = write_commit(
+            &repo,
+            write_tree(&repo, &[(0o100644, "f", blob("0"))]),
+            &[],
+            0,
+        );
+        for i in 1..800 {
+            let tree = write_tree(&repo, &[(0o100644, "f", blob(&i.to_string()))]);
+            parent = write_commit(&repo, tree, &[parent], i);
+        }
+        let direct_parent = parent;
+        let new_tree = write_tree(&repo, &[(0o100644, "f", blob("new"))]);
+        let new_tip = write_commit(&repo, new_tree, &[direct_parent], 900);
+        let near_root = write_commit(
+            &repo,
+            write_tree(&repo, &[(0o100644, "f", blob("root"))]),
+            &[],
+            -100,
+        );
+        let empty = HashSet::new();
+        reset_commit_reads();
+        let have_commits = send_pack_uninteresting_commits(
+            repo.odb(),
+            &[new_tip],
+            &[direct_parent, near_root],
+            &empty,
+            true,
+        )
+        .expect("send-pack have walk");
+        assert!(have_commits.contains(&direct_parent));
+        assert!(have_commits.contains(&near_root));
+        let reads = commit_reads();
+        assert!(
+            reads < 20,
+            "send-pack have walk should not scan deep history, read {reads} commits"
+        );
+    }
+
+    #[test]
+    fn tips_only_boundary_matches_closure_on_linear_incremental_push() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let blob = |s: &str| repo.odb().write(ObjectKind::Blob, s.as_bytes()).unwrap();
+        let mut parent = write_commit(
+            &repo,
+            write_tree(&repo, &[(0o100644, "f", blob("0"))]),
+            &[],
+            0,
+        );
+        for i in 1..800 {
+            let tree = write_tree(&repo, &[(0o100644, "f", blob(&i.to_string()))]);
+            parent = write_commit(&repo, tree, &[parent], i);
+        }
+        let remote_tip = parent;
+        let new_tree = write_tree(&repo, &[(0o100644, "f", blob("new"))]);
+        let new_tip = write_commit(&repo, new_tree, &[remote_tip], 900);
+        let empty = HashSet::new();
+        let closure_opts = PackEnumerateOptions {
+            filter: None,
+            shallow_grafts: &empty,
+            have_shallow_grafts: Some(&empty),
+            use_bitmaps: false,
+            exclude_objects: None,
+            peer_odb: None,
+            have_boundary: HaveBoundary::CommitClosure,
+        };
+        let tips_opts = PackEnumerateOptions {
+            have_boundary: HaveBoundary::TipsOnly,
+            ..closure_opts
+        };
+        let closure = enumerate_pack_objects(repo.odb(), &[new_tip], &[remote_tip], &closure_opts)
+            .expect("closure");
+        let tips = enumerate_pack_objects(repo.odb(), &[new_tip], &[remote_tip], &tips_opts)
+            .expect("tips");
+        let closure_set: HashSet<ObjectId> = closure.send.iter().copied().collect();
+        let tips_set: HashSet<ObjectId> = tips.send.iter().copied().collect();
+        assert_eq!(closure_set, tips_set);
+        assert!(
+            tips.send.len() <= 8,
+            "one new commit should enumerate a handful of objects, got {}",
+            tips.send.len()
+        );
     }
 
     #[test]
@@ -1016,6 +1332,7 @@ mod tests {
                 use_bitmaps: false,
                 exclude_objects: None,
                 peer_odb: None,
+                have_boundary: HaveBoundary::CommitClosure,
             },
         )
         .unwrap();

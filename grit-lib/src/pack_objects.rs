@@ -25,7 +25,7 @@ use crate::objects::{
 use crate::odb::Odb;
 use crate::pack_bitmap::BitmapIndex;
 use crate::pack_name_hash::pack_name_hash;
-use crate::pack_object_select::NameTrees;
+use crate::pack_object_select::{HaveBoundary, NameTrees};
 use crate::parallel::{try_par_map_force, ParallelHashError};
 use crate::repo::Repository;
 use crate::rev_list::ObjectFilter;
@@ -327,6 +327,7 @@ impl<'a> PackObjects<'a> {
                 use_bitmaps: opts.use_bitmaps,
                 exclude_objects: None,
                 peer_odb,
+                have_boundary: HaveBoundary::CommitClosure,
             },
             NameTrees::for_delta_search(&opts),
         )?;
@@ -390,7 +391,7 @@ pub fn build_pack(
     haves: &[ObjectId],
     opts: &PackBuildOptions,
 ) -> Result<Vec<u8>> {
-    build_pack_with_shallow_and_filter(
+    build_pack_with_shallow_filter_and_boundary(
         odb,
         wants,
         haves,
@@ -398,6 +399,29 @@ pub fn build_pack(
         empty_object_id_hash_set(),
         None,
         opts,
+        HaveBoundary::CommitClosure,
+    )
+}
+
+/// Like [`build_pack`], but uses [`HaveBoundary::TipsOnly`] for send-pack pushes.
+///
+/// Avoids pre-walking the full commit closure of every advertised remote ref tip
+/// before enumerating objects to send.
+pub fn build_pack_for_push(
+    odb: &Odb,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    opts: &PackBuildOptions,
+) -> Result<Vec<u8>> {
+    build_pack_with_shallow_filter_and_boundary(
+        odb,
+        wants,
+        haves,
+        empty_object_id_hash_set(),
+        empty_object_id_hash_set(),
+        None,
+        opts,
+        HaveBoundary::TipsOnly,
     )
 }
 
@@ -414,6 +438,29 @@ pub fn build_pack_with_shallow_and_filter(
     filter: Option<&ObjectFilter>,
     opts: &PackBuildOptions,
 ) -> Result<Vec<u8>> {
+    build_pack_with_shallow_filter_and_boundary(
+        odb,
+        wants,
+        haves,
+        have_shallow,
+        source_shallow,
+        filter,
+        opts,
+        HaveBoundary::CommitClosure,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_pack_with_shallow_filter_and_boundary(
+    odb: &Odb,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    have_shallow: &HashSet<ObjectId>,
+    source_shallow: &HashSet<ObjectId>,
+    filter: Option<&ObjectFilter>,
+    opts: &PackBuildOptions,
+    have_boundary: HaveBoundary,
+) -> Result<Vec<u8>> {
     let mut pack = Vec::new();
     write_pack_with_shallow_and_filter(
         odb,
@@ -423,6 +470,7 @@ pub fn build_pack_with_shallow_and_filter(
         source_shallow,
         filter,
         opts,
+        have_boundary,
         &mut pack,
     )?;
     Ok(pack)
@@ -438,6 +486,7 @@ fn write_pack_with_shallow_and_filter(
     source_shallow: &HashSet<ObjectId>,
     filter: Option<&ObjectFilter>,
     opts: &PackBuildOptions,
+    have_boundary: HaveBoundary,
     w: &mut dyn Write,
 ) -> Result<PackStats> {
     let selection = crate::pack_object_select::enumerate_pack_objects_naming(
@@ -451,6 +500,7 @@ fn write_pack_with_shallow_and_filter(
             use_bitmaps: opts.use_bitmaps,
             exclude_objects: None,
             peer_odb: None,
+            have_boundary,
         },
         NameTrees::for_delta_search(opts),
     )?;
@@ -531,6 +581,7 @@ fn write_upload_pack_stream_in_context(
             source_shallow,
             filter,
             opts,
+            HaveBoundary::CommitClosure,
             w,
         );
     }
@@ -795,6 +846,7 @@ pub(crate) fn build_pack_with_write_threads_full(
             use_bitmaps: opts.use_bitmaps,
             exclude_objects: Some(&have_closure),
             peer_odb: None,
+            have_boundary: HaveBoundary::CommitClosure,
         },
         NameTrees::for_delta_search(opts),
     )?;
@@ -831,6 +883,7 @@ pub fn build_pack_with_parallel_threads(
             use_bitmaps: opts.use_bitmaps,
             exclude_objects: Some(&have_closure),
             peer_odb: None,
+            have_boundary: HaveBoundary::CommitClosure,
         },
         NameTrees::for_delta_search(opts),
     )?;
@@ -1880,6 +1933,7 @@ pub(crate) mod tests {
                 use_bitmaps: false,
                 exclude_objects: None,
                 peer_odb: None,
+                have_boundary: HaveBoundary::CommitClosure,
             },
         )
         .unwrap();
@@ -1973,6 +2027,7 @@ pub(crate) mod tests {
                 use_bitmaps: false,
                 exclude_objects: None,
                 peer_odb: None,
+                have_boundary: HaveBoundary::CommitClosure,
             },
             NameTrees::for_delta_search(&opts),
         )
