@@ -1797,6 +1797,7 @@ mod default_expire_tests {
         }
     }
 
+    #[test]
     fn expire_git_prunes_old_entry_and_reports_action() {
         let (tmp, repo) = seed_repo();
         let git_dir = &repo.git_dir();

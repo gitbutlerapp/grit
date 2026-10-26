@@ -382,20 +382,7 @@ pub(crate) mod midx_cache {
     }
 
     impl PreparedMidxLayer {
-        fn prepare(bytes: Arc<PackData>, view: MidxReadView, pack_dir: &Path) -> Self {
-            Self::prepare_inner(bytes, view, pack_dir)
-        }
-
-        #[cfg(test)]
-        pub(crate) fn prepare_for_test(
-            bytes: Arc<PackData>,
-            view: MidxReadView,
-            pack_dir: &Path,
-        ) -> Self {
-            Self::prepare_inner(bytes, view, pack_dir)
-        }
-
-        fn prepare_inner(bytes: Arc<PackData>, view: MidxReadView, pack_dir: &Path) -> Self {
+        pub(super) fn prepare(bytes: Arc<PackData>, view: MidxReadView, pack_dir: &Path) -> Self {
             let data = bytes.as_ref();
             let hash_len = if data.get(5) == Some(&2) { 32 } else { 20 };
             let mut fanout = [0u32; 256];
@@ -3697,9 +3684,9 @@ fn scrub_root_midx_sidecars_except(pack_dir: &Path, keep_hex: Option<&str>) -> R
 mod tests {
     use super::{
         clear_pack_midx_state, resolve_tip_midx_path, try_read_object_via_midx,
-        try_read_object_via_midx_with_diagnostics, write_multi_pack_index,
+        write_multi_pack_index,
     };
-    use crate::diagnostics::{CollectingDiagnostics, Warning};
+
     use crate::error::{Error, MidxError};
     use crate::hot_path_test_metrics::HotPathMetricsScope;
     use crate::objects::ObjectId;
@@ -4154,8 +4141,8 @@ mod tests {
                 super::MidxLoadResult::Ok(v) => v,
                 super::MidxLoadResult::Skip => panic!("owned midx skipped"),
             };
-        let layer_mapped = PreparedMidxLayer::prepare_for_test(mapped, view_mapped, &pack_dir);
-        let layer_owned = PreparedMidxLayer::prepare_for_test(owned, view_owned, &pack_dir);
+        let layer_mapped = PreparedMidxLayer::prepare(mapped, view_mapped, &pack_dir);
+        let layer_owned = PreparedMidxLayer::prepare(owned, view_owned, &pack_dir);
         let loc = layer_mapped
             .lookup_pack_and_offset(&oid)
             .expect("mapped lookup");

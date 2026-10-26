@@ -863,9 +863,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
-    use crate::porcelain::add::stage_for_commit;
-    use crate::porcelain::commit::{create_commit, CommitRequest};
-    use crate::progress::NullProgress;
+
     use crate::repo::{InitOptions, Repository};
     use tempfile::TempDir;
 

@@ -20,7 +20,7 @@ mod tests {
     use crate::objects::ObjectKind;
     use crate::porcelain::add::{stage, StageOptions};
     use crate::porcelain::checkout::checkout_between_trees;
-    use crate::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
+    use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::porcelain::status::{status, StatusOptions};
     use crate::progress::{NeverCancel, NullProgress};
     use crate::ref_storage::RefStorageFormat;

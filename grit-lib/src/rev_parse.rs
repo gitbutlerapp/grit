@@ -4005,7 +4005,7 @@ mod line_coverage_tests {
     use crate::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR};
     use crate::objects::ObjectId;
     use crate::objects::ObjectKind;
-    use crate::odb::Odb;
+
     use crate::ref_storage::RefStorageFormat;
     use crate::repo::{init_repository, InitOptions, Repository};
     use crate::write_tree::write_tree_from_index;
@@ -4830,9 +4830,6 @@ mod line_coverage_tests {
     fn tree_blob_peel_and_dwim_coverage() -> crate::error::Result<()> {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
         let repo = crate::repo::Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
-        let blob = repo
-            .odb()
-            .write_loose_materialize(ObjectKind::Blob, b"leaf\n")?;
         let sub_tree = repo
             .odb()
             .write_loose_materialize(ObjectKind::Tree, b"100644 blob {blob}\tleaf.txt\n")?;
@@ -5041,7 +5038,7 @@ mod line_coverage_tests {
 
     #[test]
     fn internal_private_api_sweep() -> crate::error::Result<()> {
-        use std::path::{Component, Path};
+        use std::path::Path;
         assert!(parse_oneline_pattern("needle").is_some());
         assert!(parse_oneline_pattern("!-skip").is_some());
         assert!(parse_oneline_pattern("!!literal").is_some());
@@ -5064,7 +5061,7 @@ mod line_coverage_tests {
         let blob = repo
             .odb()
             .write_loose_materialize(ObjectKind::Blob, b"payload\n")?;
-        let mut tree_body = format!("100644 blob {blob}\tfile.txt\n");
+        let tree_body = format!("100644 blob {blob}\tfile.txt\n");
         let tree = repo
             .odb()
             .write_loose_materialize(ObjectKind::Tree, tree_body.as_bytes())?;

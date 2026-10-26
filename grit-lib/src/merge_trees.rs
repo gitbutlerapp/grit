@@ -1953,7 +1953,7 @@ mod tests {
         let mut base = HashMap::new();
         let mut side = HashMap::new();
         let oid = zero_oid();
-        let mut old_e = IndexEntry {
+        let old_e = IndexEntry {
             ctime_sec: 0,
             ctime_nsec: 0,
             mtime_sec: 0,

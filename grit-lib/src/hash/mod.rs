@@ -926,6 +926,7 @@ mod tests {
             .expect("SHA-256 has no collision detection");
     }
 
+    #[test]
     fn sha256_backend_matches_sha2_dispatcher() {
         #[cfg(target_arch = "x86_64")]
         {

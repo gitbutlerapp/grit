@@ -3115,7 +3115,7 @@ mod tests {
         let local = tempfile::tempdir().expect("local");
         init_repository(local.path(), false, "main", None, RefStorageFormat::Files).expect("init");
 
-        let mut opts = FetchOptions {
+        let opts = FetchOptions {
             refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
             initial_remote_fetch: true,
             tags: TagMode::None,

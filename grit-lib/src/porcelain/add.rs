@@ -3474,7 +3474,7 @@ mod tests {
         }
         index.sort();
 
-        let mut modified: Vec<String> = (0..SORT_LEN)
+        let modified: Vec<String> = (0..SORT_LEN)
             .map(|i| format!("f/{:06}.txt", INDEX_LEN - 1 - i))
             .collect();
         let mut outcome = StageOutcome {

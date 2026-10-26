@@ -5285,7 +5285,6 @@ mod tests {
     use crate::transfer::{build_pack, PackBuildOptions};
     use flate2::write::ZlibEncoder;
     use flate2::Compression;
-    use std::io::Read;
     use std::io::Write;
     use std::process::Command;
 
@@ -5462,7 +5461,7 @@ mod tests {
         let idx_a = read_pack_index(&idx_a).expect("parse idx a");
         let idx_b = read_pack_index(&idx_b).expect("parse idx b");
 
-        let read_size = |objects: &Path, idx: &PackIndex, oid: &ObjectId| -> u64 {
+        let read_size = |objects: &Path, idx: &PackIndex| -> u64 {
             let store = crate::pack_store::PackStore::legacy_for_objects_dir(objects);
             crate::pack_store::PackStore::with_context(store, || {
                 super::read_object_info_from_pack_at_offset(idx, ENTRY_OFFSET)
@@ -5471,14 +5470,14 @@ mod tests {
             })
         };
 
-        let size_a = read_size(&objects_a, &idx_a, &oid_a);
-        let size_b = read_size(&objects_b, &idx_b, &oid_b);
+        let size_a = read_size(&objects_a, &idx_a);
+        let size_b = read_size(&objects_b, &idx_b);
         assert_eq!(size_a, 5);
         assert_eq!(size_b, 10);
         // A → B → A again: cache must not return B's size for A's pack entry.
-        assert_eq!(read_size(&objects_a, &idx_a, &oid_a), 5);
-        assert_eq!(read_size(&objects_b, &idx_b, &oid_b), 10);
-        assert_eq!(read_size(&objects_a, &idx_a, &oid_a), 5);
+        assert_eq!(read_size(&objects_a, &idx_a), 5);
+        assert_eq!(read_size(&objects_b, &idx_b), 10);
+        assert_eq!(read_size(&objects_a, &idx_a), 5);
     }
     /// Write a valid pack with one blob placed at `object_offset` so the on-disk file
     /// length exceeds the mmap owned-buffer threshold without storing huge compressed payloads.

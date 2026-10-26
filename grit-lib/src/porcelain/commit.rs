@@ -2613,8 +2613,6 @@ mod tests {
 
     #[test]
     fn no_verify_skips_pre_commit_and_commit_msg() {
-        use crate::hooks::HookName;
-
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         let repo = init_repo(root);

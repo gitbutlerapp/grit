@@ -9739,9 +9739,9 @@ mod tests {
     use super::*;
     use crate::environment::RepositoryOptions;
     use crate::objects::ObjectKind;
-    use crate::odb::Odb;
+
     use crate::repo::{InitOptions, Repository};
-    use std::path::PathBuf;
+
     use tempfile::{tempdir, TempDir};
 
     #[test]
@@ -10926,8 +10926,6 @@ mod line_coverage_tests {
             .odb()
             .write(ObjectKind::Commit, sub_commit_body.as_bytes())
             .expect("sub commit");
-        let link_target = repo.odb().write(ObjectKind::Blob, b"link\n").expect("link");
-        let tree = write_tree_entry(&repo.odb(), 0o120000, "symlink", link_target);
         let tree = {
             let mut body = format!("160000 submod\0").into_bytes();
             body.extend_from_slice(sub_commit.as_bytes());
@@ -11323,7 +11321,6 @@ mod line_coverage_tests {
         Ok(())
     }
 
-    #[test]
     #[test]
     fn mode_only_path_treesame_and_kept_pack_exclusion() -> Result<()> {
         use crate::maintenance::{repack_all, RepackOptions};

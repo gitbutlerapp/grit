@@ -14,7 +14,7 @@ use crate::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR, MODE_TREE};
 use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::porcelain::add::{stage, StageOptions};
-use crate::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
+use crate::porcelain::commit::{create_commit, CommitRequest};
 use crate::progress::NullProgress;
 use crate::repo::{init_repository, Repository};
 use crate::write_tree::{cache_tree_update, write_tree_update_index, WriteTreeFlags};

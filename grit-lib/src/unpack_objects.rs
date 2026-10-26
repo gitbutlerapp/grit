@@ -2248,7 +2248,7 @@ mod tests {
     fn test_unpack_objects_ref_delta_base_from_loose() {
         let base = b"loose-base";
         let target = b"loose-base-v2";
-        let (mut pack, base_oid, target_oid) = pack_with_ref_delta(base, target);
+        let (_, base_oid, target_oid) = pack_with_ref_delta(base, target);
 
         let tmp = tempfile::tempdir().unwrap();
         let odb = Odb::new(tmp.path());
@@ -2261,7 +2261,7 @@ mod tests {
             pb.add_ref_delta(base_oid.as_bytes(), &delta, delta.len());
             pb.build().bytes
         };
-        pack = delta_only;
+        let pack = delta_only;
 
         let opts = UnpackOptions::default();
         assert_eq!(

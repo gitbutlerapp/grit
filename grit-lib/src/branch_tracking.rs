@@ -1235,7 +1235,7 @@ mod tests {
     }
 
     use crate::config::environment::RepositoryOptions;
-    use crate::objects::ObjectId;
+
     use crate::repo::Repository;
     use std::path::Path;
     use std::process::Command;
