@@ -51,6 +51,8 @@ mod ui;
 mod unborn_errors;
 mod usage_hints;
 
+use std::ffi::OsString;
+
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
@@ -2035,7 +2037,7 @@ fn tag_verify_subarg_takes_value(arg: &str) -> bool {
 }
 
 /// Route verify tag names to `verify_names` by inserting `--` before bare arguments.
-fn normalize_tag_verify_argv(mut args: Vec<String>) -> Vec<String> {
+fn normalize_tag_verify_argv(mut args: Vec<OsString>) -> Vec<OsString> {
     let Some(tag_idx) = diff_args::subcommand_index(&args).filter(|&i| args[i] == "tag") else {
         return args;
     };
@@ -2043,7 +2045,7 @@ fn normalize_tag_verify_argv(mut args: Vec<String>) -> Vec<String> {
     if !sub.iter().any(|a| a == "--verify" || a == "-v") {
         return args;
     }
-    if sub.contains(&"--".to_owned()) {
+    if sub.iter().any(|arg| arg == "--") {
         return args;
     }
     let mut flags = Vec::new();
@@ -2051,7 +2053,7 @@ fn normalize_tag_verify_argv(mut args: Vec<String>) -> Vec<String> {
     let mut i = 0;
     while i < sub.len() {
         let arg = &sub[i];
-        if tag_verify_subarg_takes_value(arg) {
+        if arg.to_str().is_some_and(tag_verify_subarg_takes_value) {
             flags.push(arg.clone());
             if i + 1 < sub.len() {
                 flags.push(sub[i + 1].clone());
@@ -2061,7 +2063,7 @@ fn normalize_tag_verify_argv(mut args: Vec<String>) -> Vec<String> {
             i += 1;
             continue;
         }
-        if arg.starts_with('-') {
+        if arg.as_encoded_bytes().starts_with(b"-") {
             flags.push(arg.clone());
             i += 1;
             continue;
@@ -2093,27 +2095,14 @@ fn main() {
 }
 
 fn run() -> Result<ExitStatus, anyhow::Error> {
-    let parse_argv =
-        normalize_tag_verify_argv(diff_args::normalize_diff_argv(std::env::args().collect()));
-    usage_hints::capture_argv(parse_argv.clone());
-    let cli = match Cli::try_parse_from(&parse_argv) {
-        Ok(cli) => {
-            if let Err(err) = validate_cli(&cli) {
-                let json = std::env::args().any(|a| a == "--json");
-                if json {
-                    let opts = OutputOptions {
-                        mode: OutputMode::Json,
-                        filter: extract_filter_flag(),
-                    };
-                    let message = clap_json_error_message(&err);
-                    output::emit_error(&anyhow::anyhow!(message), &opts);
-                    return Ok(ExitStatus::from_clap_code(err.exit_code()));
-                }
-                let _ = err.print();
-                return Ok(ExitStatus::from_clap_code(err.exit_code()));
-            }
-            cli
-        }
+    let parse_argv = normalize_tag_verify_argv(diff_args::normalize_diff_argv(
+        std::env::args_os().collect(),
+    ));
+    let cli = match Cli::try_parse_from(&parse_argv).and_then(|cli| {
+        validate_cli(&cli)?;
+        Ok(cli)
+    }) {
+        Ok(cli) => cli,
         Err(err) if is_help_request(&err) => {
             let bin_name = parse_argv
                 .first()
@@ -2135,7 +2124,7 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
                 }
                 return Ok(ExitStatus::from_clap_code(err.exit_code()));
             }
-            if opts.mode == OutputMode::Json {
+            if opts.mode != OutputMode::Human {
                 let message = clap_json_error_message(&err);
                 let payload = json_error::StructuredJsonError::new(
                     message.clone(),
@@ -2158,6 +2147,8 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
             return Ok(ExitStatus::from_clap_code(err.exit_code()));
         }
     };
+    // Parse failures use the local argv; runtime hints can take ownership now.
+    usage_hints::capture_argv(parse_argv);
     let opts = OutputOptions {
         mode: if cli.json {
             OutputMode::Json
@@ -2310,7 +2301,7 @@ fn clap_json_error_message(err: &clap::Error) -> String {
     }
 }
 
-fn clap_failure_output_options(argv: &[String]) -> OutputOptions {
+fn clap_failure_output_options(argv: &[OsString]) -> OutputOptions {
     let mode = if argv.iter().any(|a| a == "--json") {
         OutputMode::Json
     } else if argv.iter().any(|a| a == "--markdown") {
@@ -2324,17 +2315,13 @@ fn clap_failure_output_options(argv: &[String]) -> OutputOptions {
     }
 }
 
-fn extract_filter_flag() -> Option<String> {
-    extract_filter_flag_from(&std::env::args().collect::<Vec<_>>())
-}
-
-fn extract_filter_flag_from(argv: &[String]) -> Option<String> {
+fn extract_filter_flag_from(argv: &[OsString]) -> Option<String> {
     let mut args = argv.iter();
     while let Some(arg) = args.next() {
         if arg == "--filter" {
-            return args.next().cloned();
+            return args.next().and_then(|arg| arg.to_str()).map(str::to_owned);
         }
-        if let Some(expr) = arg.strip_prefix("--filter=") {
+        if let Some(expr) = arg.to_str().and_then(|arg| arg.strip_prefix("--filter=")) {
             return Some(expr.to_owned());
         }
     }
@@ -4917,6 +4904,37 @@ The keys are `initialized`, `path`, `bare`, `branch`, `object_format`, and optio
         assert!(!markdown_section_has_schema_link(md_section, "pull"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn normalize_tag_verify_preserves_raw_names_and_global_values() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let raw = OsString::from_vec(b"raw\xff".to_vec());
+        let args = vec![
+            "grit".into(),
+            "-C".into(),
+            raw.clone(),
+            "tag".into(),
+            "--verify".into(),
+            raw.clone(),
+            "--json".into(),
+        ];
+        assert_eq!(
+            super::normalize_tag_verify_argv(args),
+            vec![
+                "grit".into(),
+                "-C".into(),
+                raw.clone(),
+                "tag".into(),
+                "--verify".into(),
+                "--json".into(),
+                "--".into(),
+                raw,
+            ]
+        );
+    }
+
     #[test]
     fn normalize_tag_verify_argv_two_names_and_globals() {
         let out = super::normalize_tag_verify_argv(vec![
@@ -4984,10 +5002,10 @@ The keys are `initialized`, `path`, `bare`, `branch`, `object_format`, and optio
 
     #[test]
     fn normalize_tag_verify_argv_skips_leading_repo_globals() {
-        let args: Vec<String> = [
+        let args: Vec<std::ffi::OsString> = [
             "grit", "-C", "tag", "-c", "a.b=tag", "tag", "--verify", "v1",
         ]
-        .map(String::from)
+        .map(std::ffi::OsString::from)
         .to_vec();
         assert_eq!(
             super::normalize_tag_verify_argv(args),

@@ -20,6 +20,8 @@ Blame visits commits newest first (by committer date) and keeps one entry per co
 
 When a commit renamed or moved the file (including rename-and-edit in the same commit), blame follows the predecessor path using rename detection with Git's default similarity threshold (50%, like `git blame` with `-M`). This behavior is independent of `diff.renames` (system Git blame still follows renames when that diff setting is off). Git's `diff.renameLimit` and `status.renameLimit` cap how many rename pairings diff/status consider; they do not change blame's similarity percentage.
 
+On Unix, explicit file operands must be valid UTF-8. An operand containing invalid UTF-8 bytes is rejected before the command runs, with exit status **2** and no changes to the repository. Human output reports the usage error on stderr; `--json` writes an error object with `kind: "usage"` on stdout, and `--markdown` writes `**Error:**` on stdout. The argument is never replaced with a similar Unicode filename.
+
 ## Options
 
 | Option | Description |

@@ -5,6 +5,7 @@
 //! switch to a branch named `-b`). When we recognize a pattern, emit a `hint:` and
 //! show usage under the subcommand name the user typed (`checkout`, not `switch`).
 
+use std::ffi::OsString;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -14,15 +15,15 @@ use clap::error::ErrorKind;
 use crate::error_kind::ErrorKind as CliErrorKind;
 use crate::json_error::{StructuredCliError, StructuredJsonError};
 
-static ARGV: OnceLock<Vec<String>> = OnceLock::new();
+static ARGV: OnceLock<Vec<OsString>> = OnceLock::new();
 
 /// Remember argv for the rest of the process (runtime hints after successful parse).
-pub fn capture_argv(argv: Vec<String>) {
+pub fn capture_argv(argv: Vec<OsString>) {
     let _ = ARGV.set(argv);
 }
 
 /// Original process argv, or empty when not captured yet.
-pub fn argv() -> &'static [String] {
+pub fn argv() -> &'static [OsString] {
     ARGV.get().map(Vec::as_slice).unwrap_or(&[])
 }
 
@@ -43,7 +44,7 @@ pub fn checkout_restore_hint(name: &str) -> Option<String> {
 }
 
 /// Turn a clap usage failure into a structured error when we recognize Git habits.
-pub fn clap_failure(argv: &[String], err: &clap::Error) -> Option<Error> {
+pub fn clap_failure(argv: &[OsString], err: &clap::Error) -> Option<Error> {
     let hint = migration_hint(argv, err)?;
     let human = clap_human_message(err, Some(hint.as_str()));
     Some(Error::new(StructuredCliError {
@@ -56,7 +57,7 @@ pub fn clap_failure(argv: &[String], err: &clap::Error) -> Option<Error> {
 }
 
 /// Usage and help trailer lines after a mapped clap failure (human mode only).
-pub fn eprint_clap_trailer(argv: &[String], err: &clap::Error) {
+pub fn eprint_clap_trailer(argv: &[OsString], err: &clap::Error) {
     for line in clap_usage_lines(argv, err) {
         eprintln!("{line}");
     }
@@ -67,7 +68,7 @@ pub fn eprint_clap_trailer(argv: &[String], err: &clap::Error) {
     }
 }
 
-fn migration_hint(argv: &[String], err: &clap::Error) -> Option<String> {
+fn migration_hint(argv: &[OsString], err: &clap::Error) -> Option<String> {
     match err.kind() {
         ErrorKind::UnknownArgument => {}
         ErrorKind::TooManyValues => {}
@@ -103,7 +104,7 @@ fn migration_hint(argv: &[String], err: &clap::Error) -> Option<String> {
     None
 }
 
-fn reset_unstage_hint(argv: &[String], path: &str) -> Option<String> {
+fn reset_unstage_hint(argv: &[OsString], path: &str) -> Option<String> {
     if path.starts_with('-') {
         return None;
     }
@@ -141,7 +142,7 @@ fn clap_human_message(err: &clap::Error, hint: Option<&str>) -> String {
     }
 }
 
-pub(crate) fn clap_usage_lines(argv: &[String], err: &clap::Error) -> Vec<String> {
+pub(crate) fn clap_usage_lines(argv: &[OsString], err: &clap::Error) -> Vec<String> {
     err.to_string()
         .lines()
         .filter(|line| line.trim_start().starts_with("Usage:"))
@@ -149,7 +150,7 @@ pub(crate) fn clap_usage_lines(argv: &[String], err: &clap::Error) -> Vec<String
         .collect()
 }
 
-fn rewrite_usage_line(argv: &[String], line: &str) -> String {
+fn rewrite_usage_line(argv: &[OsString], line: &str) -> String {
     let Some(display) = user_switch_display(argv) else {
         return line.to_owned();
     };
@@ -173,43 +174,12 @@ fn unexpected_argument(err: &clap::Error) -> Option<String> {
     Some(token.to_owned())
 }
 
-fn user_subcommand(argv: &[String]) -> Option<String> {
-    let mut i = 1;
-    while i < argv.len() {
-        let arg = &argv[i];
-        if arg == "--" {
-            break;
-        }
-        if arg.starts_with('-') {
-            i = index_after_flag(i, argv);
-            continue;
-        }
-        return Some(arg.clone());
-    }
-    None
+fn user_subcommand(argv: &[OsString]) -> Option<String> {
+    let i = crate::diff_args::subcommand_index(argv)?;
+    argv[i].to_str().map(str::to_owned)
 }
 
-/// Index of the argv slot after `argv[i]` (a flag), consuming an attached or following value.
-fn index_after_flag(i: usize, argv: &[String]) -> usize {
-    let arg = &argv[i];
-    if arg.contains('=') {
-        return i + 1;
-    }
-    if flag_takes_value(arg) {
-        return (i + 2).min(argv.len());
-    }
-    i + 1
-}
-
-/// Flags that consume the next argv word (keep in sync with [`crate::Cli`] globals and `-C`/`-c`).
-fn flag_takes_value(arg: &str) -> bool {
-    matches!(
-        arg,
-        "--filter" | "--threads" | "--git-dir" | "--work-tree" | "-C" | "-c"
-    )
-}
-
-fn user_switch_display(argv: &[String]) -> Option<&'static str> {
+fn user_switch_display(argv: &[OsString]) -> Option<&'static str> {
     for arg in argv.iter().skip(1) {
         if arg == "checkout" {
             return Some("checkout");
@@ -221,18 +191,21 @@ fn user_switch_display(argv: &[String]) -> Option<&'static str> {
     None
 }
 
-fn branch_name_after_git_create_flag(argv: &[String]) -> Option<String> {
+fn branch_name_after_git_create_flag(argv: &[OsString]) -> Option<String> {
     for (i, arg) in argv.iter().enumerate() {
         if arg == "-b" || arg == "--branch" {
-            return argv.get(i + 1).cloned();
+            return argv
+                .get(i + 1)
+                .and_then(|arg| arg.to_str())
+                .map(str::to_owned);
         }
     }
     None
 }
 
-fn tokens_after_separator(argv: &[String]) -> impl Iterator<Item = &str> {
+fn tokens_after_separator(argv: &[OsString]) -> impl Iterator<Item = &str> {
     let pos = argv.iter().position(|a| a == "--");
-    pos.map(|i| argv[i + 1..].iter().map(String::as_str))
+    pos.map(|i| argv[i + 1..].iter().filter_map(|arg| arg.to_str()))
         .into_iter()
         .flatten()
 }
@@ -294,7 +267,7 @@ mod tests {
     }
 
     fn hint_for(argv: &[&str]) -> String {
-        let owned: Vec<String> = argv.iter().map(|s| (*s).to_owned()).collect();
+        let owned: Vec<OsString> = argv.iter().map(OsString::from).collect();
         let err = parse_err(argv);
         let structured = clap_failure(&owned, &err).expect("hint");
         structured_json_payload(&structured)

@@ -1,5 +1,7 @@
 //! Shared diff formatting flags for porcelain commands.
 
+use std::ffi::{OsStr, OsString};
+
 use anyhow::{Context, Result};
 use clap::Args;
 use grit_lib::diff::{
@@ -81,7 +83,7 @@ impl DiffCompareArgs {
 ///
 /// Applies to porcelain commands that flatten [`DiffCompareArgs`] and `crate::diff_format::DiffFormatArgs` (`diff`, `show`, `log`), after global flags and before `--`.
 #[must_use]
-pub fn normalize_diff_argv(mut args: Vec<String>) -> Vec<String> {
+pub fn normalize_diff_argv(mut args: Vec<OsString>) -> Vec<OsString> {
     let Some(cmd_idx) = locate_porcelain_diff_command(&args) else {
         return args;
     };
@@ -93,17 +95,21 @@ pub fn normalize_diff_argv(mut args: Vec<String>) -> Vec<String> {
         }
     }
     for arg in args.iter_mut().take(end).skip(cmd_idx + 1) {
-        if let Some(replacement) = rewrite_attached_find_renames(arg) {
-            *arg = replacement;
-        } else if let Some(replacement) = rewrite_attached_unified(arg) {
-            *arg = replacement;
+        let Some(token) = arg.to_str() else {
+            continue;
+        };
+        if let Some(replacement) =
+            rewrite_attached_find_renames(token).or_else(|| rewrite_attached_unified(token))
+        {
+            *arg = replacement.into();
         }
     }
     args
 }
 
-fn locate_porcelain_diff_command(args: &[String]) -> Option<usize> {
-    subcommand_index(args).filter(|&i| matches!(args[i].as_str(), "add" | "diff" | "show" | "log"))
+fn locate_porcelain_diff_command(args: &[OsString]) -> Option<usize> {
+    subcommand_index(args)
+        .filter(|&i| matches!(args[i].to_str(), Some("add" | "diff" | "show" | "log")))
 }
 
 fn rewrite_attached_unified(token: &str) -> Option<String> {
@@ -127,27 +133,28 @@ const VALUE_GLOBAL_FLAGS: &[&str] = &[
     "--work-tree",
 ];
 
-fn is_leading_global_flag(token: &str) -> bool {
+fn is_leading_global_flag(token: &OsStr) -> bool {
     matches!(
-        token,
-        "--json" | "--markdown" | "-v" | "-V" | "--version" | "-h" | "--help"
+        token.to_str(),
+        Some("--json" | "--markdown" | "-v" | "-V" | "--version" | "-h" | "--help")
     ) || VALUE_GLOBAL_FLAGS.iter().any(|flag| {
         token == *flag
             || token
-                .strip_prefix(flag)
-                .is_some_and(|rest| !flag.starts_with("--") || rest.starts_with('='))
+                .as_encoded_bytes()
+                .strip_prefix(flag.as_bytes())
+                .is_some_and(|rest| !flag.starts_with("--") || rest.starts_with(b"="))
     })
 }
 
-fn skip_global_flag(args: &[String], i: usize) -> usize {
-    if VALUE_GLOBAL_FLAGS.contains(&args[i].as_str()) && i + 1 < args.len() {
+fn skip_global_flag(args: &[OsString], i: usize) -> usize {
+    if VALUE_GLOBAL_FLAGS.iter().any(|flag| args[i] == *flag) && i + 1 < args.len() {
         return i + 2;
     }
     i + 1
 }
 
 /// Index of the subcommand word in `args` (after `argv[0]` and any leading global flags).
-pub fn subcommand_index(args: &[String]) -> Option<usize> {
+pub fn subcommand_index(args: &[OsString]) -> Option<usize> {
     let mut i = 1;
     while i < args.len() {
         if !is_leading_global_flag(&args[i]) {
@@ -172,6 +179,36 @@ fn rewrite_attached_find_renames(token: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn normalization_preserves_raw_tokens_and_recognizes_raw_global_values() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let raw = OsString::from_vec(b"raw\xff".to_vec());
+        for globals in [
+            vec!["-C".into(), raw.clone()],
+            vec![OsString::from_vec(b"-Craw\xff".to_vec())],
+            vec![OsString::from_vec(b"--git-dir=raw\xff".to_vec())],
+        ] {
+            let mut args = vec!["grit".into()];
+            args.extend(globals);
+            args.extend(["diff".into(), "-M30".into(), raw.clone()]);
+            let mut expected = args.clone();
+            let flag = expected.len() - 2;
+            expected[flag] = "-M=30".into();
+            assert_eq!(normalize_diff_argv(args), expected);
+        }
+        let args = vec![
+            "grit".into(),
+            "diff".into(),
+            OsString::from_vec(b"-M\xff".to_vec()),
+            "--".into(),
+            raw,
+            "-U0".into(),
+        ];
+        assert_eq!(normalize_diff_argv(args.clone()), args);
+    }
 
     #[test]
     fn normalize_attached_m_threshold_after_diff() {
@@ -218,7 +255,7 @@ mod tests {
             "-M30".into(),
         ];
         let out = normalize_diff_argv(args);
-        assert_eq!(out.last().map(String::as_str), Some("-M30"));
+        assert_eq!(out.last().and_then(|arg| arg.to_str()), Some("-M30"));
     }
 
     #[test]

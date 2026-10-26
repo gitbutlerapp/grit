@@ -25,6 +25,8 @@ On filesystems where Grit sets `core.filemode=false` (typical on Windows), every
 
 [`grit commit`](../commit/) stages every change before it records a commit, so you don't need `grit add` to commit. It's useful for starting to track a new file and checking what will be committed.
 
+On Unix, explicit path operands must be valid UTF-8. An operand containing invalid UTF-8 bytes is rejected before the command runs, with exit status **2** and no changes to the repository. Human output reports the usage error on stderr; `--json` writes an error object with `kind: "usage"` on stdout, and `--markdown` writes `**Error:**` on stdout. The argument is never replaced with a similar Unicode filename.
+
 ## Options
 
 | Option | Description |

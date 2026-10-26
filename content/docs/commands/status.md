@@ -49,6 +49,8 @@ $ grit config target.branch origin/develop
 
 When the current branch has a configured upstream (`branch.<name>.remote` and `branch.<name>.merge`) that differs from the target, human output adds a second line (`↑n ↓m origin/topic`) and JSON includes an `upstream` object with the same counts relative to that tracking ref. When upstream and target resolve to the same ref, `upstream` is `null`.
 
+On Unix, explicit path operands must be valid UTF-8. An operand containing invalid UTF-8 bytes is rejected before the command runs, with exit status **2** and no changes to the repository. Human output reports the usage error on stderr; `--json` writes an error object with `kind: "usage"` on stdout, and `--markdown` writes `**Error:**` on stdout. The argument is never replaced with a similar Unicode filename. Without a path filter, status still reports non-UTF-8 filenames using reversible `grit+pathhex:` encoding in JSON path fields.
+
 ## Options
 
 | Flag | Description |
