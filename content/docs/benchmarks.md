@@ -418,6 +418,28 @@ On 2026-10-26, release builds at upstream `818de8006` and the path-walk optimiza
 
 Path-limited history now scans the requested entries directly in reusable tree buffers, retains packed delta bases, and stops comparing merge parents once the selected path is unchanged. Commit-object caching remains available to author filters. The [full results](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-log-path-4526.json) include all eleven log scenarios and related operations, with individual samples and the original build recorded as `baseline_grit`. The `revs/count-path-head` row uses pinned `HEAD`; the daily row’s historical revision `7e34d81` is absent from this fixture.
 
+## Branch inventory and packed refs
+
+Branch inventory shares one configuration snapshot across upstream lookups and reuses the repository's ref store when reading the main worktree's `HEAD`. This avoids validating configuration files once per branch. Full packed-ref scans build the sorted cache from records in file order, avoiding an intermediate hash table. Sorted prefix scans check the records they visit and their neighbours; an ordering violation triggers a full scan. See the [refs guide](library/refs.md#reading-packed-refs) for the trust model.
+
+The October 26 comparison uses the repository's `release` profile, system **Git 2.55.0**, and a four-vCPU Xeon Platinum 8573C VM. `daily-branch-inventory-before.json` and `daily-branch-inventory-after.json` record the branch/tag matrix with **20 alternating runs per tool** and per-process peak RSS. `branch-inventory-scale-before.json` and `branch-inventory-scale-after.json` add **40 hyperfine runs** after ten warmups; their RSS is the maximum of ten `/usr/bin/time -v` runs.
+
+The daily fixture is a clone with one local branch and roughly 10k packed remote refs and tags. The local-branch comparison lists the fixture source itself (6,667 branches). The 100k-ref fixtures retain its objects and history, with sorted refs pointing at `HEAD`: one has 66,666 remote refs and 33,333 tags, plus `main`; the other has 99,999 local refs and one remote ref. Both pass system `git fsck --strict`.
+
+| Operation | Git ms | Grit before ms | Grit after ms |
+| --- | ---: | ---: | ---: |
+| Daily branch listing | 1.463 | 2.536 | 2.438 |
+| List 6,667 local branches | 19.687 | 38.317 | 9.467 |
+| List 100k local refs | 304.423 | 544.343 | 145.506 |
+| List all 100k refs through the library driver | 56.235 | 118.910 | 97.857 |
+
+Short-command results also depend on process startup and binary layout. The daily headline improves by 4%, while the direct hyperfine check moves from 1.757 to 1.823 ms. Separate **60-run interleaved** checks (`branch-inventory-confirm-*.json`) show the merged-ref driver moving from 2.145 to 2.209 ms and small-repository status from 2.662 to 2.866 ms. These regressions remain visible in the committed results; this capture does not establish a regression-free CLI improvement. Peak RSS is recorded in every report rather than inferred from allocation counts.
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench daily --only branch/list@many-refs,branch/list-json@many-refs,branch/merged@many-refs,branch/create@many-refs,branch/delete@many-refs,branch/rename@many-refs,branch/list@many-refs-loose,branch/merged-ref@many-refs,tag/list@many-refs,tag/create@many-refs --output /tmp/branch-inventory.json
+```
+
 ## grit-lib: parallel object hashing
 
 Criterion group `hash/batch_parallel` (`cargo bench -p grit-lib --bench objects hash/batch_parallel`) hashes **20 000** Git blob objects of **16 KiB** each using [`hash_objects_parallel`](rustdoc:grit_lib::objects::hash::hash_objects_parallel) (SHA-1, release build).
