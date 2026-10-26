@@ -6014,6 +6014,49 @@ mod tests {
     }
 
     #[test]
+    fn repository_odb_read_into_caching_delta_bases_fills_cache_through_files_primary() {
+        use crate::repo::{InitOptions, Repository};
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let Some((tmp, idx, tip, _odb)) = build_ofs_delta_chain_pack(12) else {
+            return;
+        };
+        let expected = read_object_from_pack(&idx, &tip)
+            .expect("baseline read")
+            .data;
+        Repository::init(
+            tmp.path(),
+            &InitOptions {
+                bare: true,
+                ..InitOptions::default()
+            },
+        )
+        .expect("init over packed objects");
+        let repo = Repository::open(tmp.path(), &crate::environment::RepositoryOptions::empty())
+            .expect("open");
+        let odb = repo.odb();
+        let store = Arc::clone(odb.pack_store().expect("pack store"));
+        store.invalidate_packs();
+
+        let mut buf = Vec::new();
+        assert_eq!(
+            odb.read_into(&tip, &mut buf).expect("read_into"),
+            ObjectKind::Blob
+        );
+        assert_eq!(buf, expected);
+        assert_eq!(store.delta_bases().bytes_used(), 0);
+
+        let mut cached = Vec::new();
+        assert_eq!(
+            odb.read_into_caching_delta_bases(&tip, &mut cached)
+                .expect("caching read"),
+            ObjectKind::Blob
+        );
+        assert_eq!(cached, expected);
+        assert!(store.delta_bases().bytes_used() > 0);
+    }
+
+    #[test]
     fn odb_read_into_caching_delta_bases_falls_back_outside_packs() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let odb = Odb::new(&tmp.path().join("objects"));

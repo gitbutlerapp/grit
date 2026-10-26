@@ -163,6 +163,7 @@ impl FilesSource {
     fn try_read_object_into(
         &self,
         oid: &ObjectId,
+        populate_delta_lru: bool,
         buf: &mut Vec<u8>,
     ) -> Result<Option<ObjectKind>> {
         if empty_tree_oid_matches(self.hash_algo(), oid) {
@@ -190,7 +191,7 @@ impl FilesSource {
             &self.objects_dir,
             oid,
             pack_opts,
-            false,
+            populate_delta_lru,
             buf,
         ) {
             Ok(kind) => return Ok(Some(kind)),
@@ -203,7 +204,7 @@ impl FilesSource {
                 &self.objects_dir,
                 oid,
                 PackLookupOptions::MIDX_COVERED_PACKS,
-                false,
+                populate_delta_lru,
                 buf,
             ) {
                 Ok(kind) => return Ok(Some(kind)),
@@ -359,13 +360,14 @@ impl FilesSource {
     fn read_with_pack_retry_into(
         &self,
         oid: &ObjectId,
+        populate_delta_lru: bool,
         buf: &mut Vec<u8>,
     ) -> Result<Option<ObjectKind>> {
-        match self.try_read_object_into(oid, buf) {
+        match self.try_read_object_into(oid, populate_delta_lru, buf) {
             Ok(Some(kind)) => Ok(Some(kind)),
             Ok(None) => {
                 if pack::reprepare_pack_directory_on_miss(&self.objects_dir)? {
-                    self.try_read_object_into(oid, buf)
+                    self.try_read_object_into(oid, populate_delta_lru, buf)
                 } else {
                     Ok(None)
                 }
@@ -423,6 +425,24 @@ impl FilesSource {
     }
 }
 
+impl FilesSource {
+    /// [`ObjectStore::read_into`], keeping delta bases resolved from packs in the delta-base
+    /// cache when `populate_delta_lru` is set.
+    pub(crate) fn read_into_with_delta_policy(
+        &self,
+        oid: &ObjectId,
+        populate_delta_lru: bool,
+        buf: &mut Vec<u8>,
+    ) -> Result<Option<ObjectKind>> {
+        let mut read = || self.read_with_pack_retry_into(oid, populate_delta_lru, buf);
+        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
+            read()
+        } else {
+            PackStore::with_context(self.packs.pack_store().clone(), read)
+        }
+    }
+}
+
 impl ObjectStore for FilesSource {
     fn hash_algo(&self) -> HashAlgo {
         ObjectStore::hash_algo(&self.loose)
@@ -438,12 +458,7 @@ impl ObjectStore for FilesSource {
     }
 
     fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
-        let mut read = || self.read_with_pack_retry_into(oid, buf);
-        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
-            read()
-        } else {
-            PackStore::with_context(self.packs.pack_store().clone(), read)
-        }
+        self.read_into_with_delta_policy(oid, false, buf)
     }
 
     fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {

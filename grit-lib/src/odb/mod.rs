@@ -2117,8 +2117,9 @@ impl Odb {
     /// delta-base cache, as [`Self::read`] does.
     ///
     /// For walks that read many objects sharing delta chains (successive root trees) and do
-    /// not want the per-session object copy [`Self::read`] makes. Reads that cannot use the
-    /// pack batch context fall back to [`Self::read`].
+    /// not want the per-session object copy [`Self::read`] makes. Objects outside the local
+    /// object directory (overlay, alternates, promisor fetches) and any local read failure go
+    /// through [`Self::read`], so errors and fallbacks match it.
     ///
     /// # Errors
     ///
@@ -2130,6 +2131,21 @@ impl Odb {
     ) -> Result<ObjectKind> {
         if let Some(kind) = self.try_read_packed_in_batch_context_into(oid, true, buf)? {
             return Ok(kind);
+        }
+        if self.custom_primary.is_none() && !self.is_empty_tree(oid) {
+            if let Ok(files) = self.primary() {
+                self.ensure_midx_prepared();
+                self.sync_delta_base_cache_limit();
+                let mut read = || files.read_into_with_delta_policy(oid, true, buf);
+                let local = if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
+                    read()
+                } else {
+                    self.with_pack_store_for(&self.objects_dir, read)
+                };
+                if let Ok(Some(kind)) = local {
+                    return Ok(kind);
+                }
+            }
         }
         let object = self.read(oid)?;
         buf.clear();
