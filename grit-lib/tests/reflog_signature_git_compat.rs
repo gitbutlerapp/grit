@@ -8,6 +8,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use grit_lib::refs::append_reflog;
 use grit_lib::refs::reflog::{read_reflog, ReflogEntry};
 use grit_lib::refs::reflog_file_path;
 
@@ -235,6 +236,55 @@ fn grit_writes_git_reads() {
 #[test]
 fn grit_writes_git_reads_reflog_signatures() {
     grit_writes_git_reads();
+}
+
+/// Reftable log records keep the `±HHMM` timezone digits as a decimal number; grit must
+/// write them the way git reads them back (and vice versa) for every offset.
+#[test]
+fn grit_written_reflog_timezones_read_back_by_git() {
+    each_backend(|backend, repo| {
+        if !git_interop_available(backend) {
+            eprintln!("SKIP: git lacks reftable interop");
+            return;
+        }
+        let oid = support::empty_commit_oid(repo);
+        for (i, tz) in ["+0530", "-0800", "+1245", "-0330"].into_iter().enumerate() {
+            let when = 1_700_000_000 + i64::try_from(i).unwrap();
+            append_reflog(
+                &repo.git_dir(),
+                "refs/heads/main",
+                &oid,
+                &oid,
+                &format!("{AUTHOR_NAME} <{AUTHOR_EMAIL}> {when} {tz}"),
+                &format!("grit tz {tz}"),
+                true,
+            )
+            .expect("append reflog");
+            let shown = git(
+                repo.worktree(),
+                &[
+                    "log",
+                    "-g",
+                    "-1",
+                    "--date=raw",
+                    "--format=%gD",
+                    "refs/heads/main",
+                ],
+            );
+            assert_eq!(
+                shown.trim(),
+                format!("refs/heads/main@{{{when} {tz}}}"),
+                "{backend:?} timezone {tz}"
+            );
+            let entries = read_reflog(&repo.git_dir(), "refs/heads/main").expect("read");
+            let last = entries.last().expect("entry");
+            assert!(
+                last.identity.ends_with(&format!("{when} {tz}")),
+                "{}",
+                last.identity
+            );
+        }
+    });
 }
 
 #[test]

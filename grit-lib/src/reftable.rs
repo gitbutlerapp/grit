@@ -366,7 +366,8 @@ pub struct LogRecord {
     pub email: String,
     /// Time in seconds since epoch.
     pub time_seconds: u64,
-    /// Timezone offset in minutes (signed).
+    /// Timezone offset as Git stores it on disk: the `±HHMM` identity field read as a
+    /// signed decimal number (`+0530` is `530`, `-0800` is `-800`), not minutes.
     pub tz_offset: i16,
     /// Log message.
     pub message: String,
@@ -3911,12 +3912,13 @@ pub(crate) fn parse_identity_string(identity: &str) -> (String, String, u64, i16
 
     let time_secs = time_str.parse::<u64>().unwrap_or(0);
 
-    // Parse timezone: +HHMM or -HHMM
-    let tz_minutes = if tz_str.len() >= 5 {
+    // Parse timezone: +HHMM or -HHMM. Reftable log records keep the HHMM digits as a
+    // decimal number (`+0530` -> 530), matching what Git writes.
+    let tz_hhmm = if tz_str.len() >= 5 {
         let sign = if tz_str.starts_with('-') { -1i16 } else { 1 };
         let hours = tz_str[1..3].parse::<i16>().unwrap_or(0);
         let mins = tz_str[3..5].parse::<i16>().unwrap_or(0);
-        sign * (hours * 60 + mins)
+        sign * (hours * 100 + mins)
     } else {
         0
     };
@@ -3934,7 +3936,7 @@ pub(crate) fn parse_identity_string(identity: &str) -> (String, String, u64, i16
         (name_email.to_owned(), String::new())
     };
 
-    (name, email, time_secs, tz_minutes)
+    (name, email, time_secs, tz_hhmm)
 }
 
 // ---------------------------------------------------------------------------
@@ -4283,7 +4285,7 @@ mod tests {
                 name: "Test User".to_owned(),
                 email: "test@example.com".to_owned(),
                 time_seconds: 1700000000,
-                tz_offset: -480,
+                tz_offset: -800,
                 message: "initial commit".to_owned(),
             })
             .unwrap();
@@ -4298,7 +4300,7 @@ mod tests {
         assert_eq!(logs[0].name, "Test User");
         assert_eq!(logs[0].email, "test@example.com");
         assert_eq!(logs[0].time_seconds, 1700000000);
-        assert_eq!(logs[0].tz_offset, -480);
+        assert_eq!(logs[0].tz_offset, -800);
         // The reftable writer cleans messages the way git does: it appends a
         // trailing newline. `read_logs` returns the raw on-disk message (the
         // newline is only stripped when converting to a `ReflogEntry`).
@@ -4344,7 +4346,10 @@ mod tests {
         assert_eq!(name, "Test User");
         assert_eq!(email, "test@example.com");
         assert_eq!(ts, 1700000000);
-        assert_eq!(tz, -480);
+        // Git stores the HHMM digits as a decimal number, not minutes.
+        assert_eq!(tz, -800);
+        let (_, _, _, tz) = parse_identity_string("Test User <test@example.com> 1700000000 +0530");
+        assert_eq!(tz, 530);
     }
 
     #[test]
