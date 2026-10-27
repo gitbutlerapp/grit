@@ -133,7 +133,13 @@ pub struct Environment {
 }
 
 impl Environment {
-    /// No overrides; [`Self::cwd`] is `"."` (canonicalized by callers when needed).
+    /// No variables at all; [`Self::cwd`] is `"."` (canonicalized by callers when needed).
+    ///
+    /// Config loaded with this environment has no home directory, so `~/.gitconfig` and
+    /// `$XDG_CONFIG_HOME/git/config` are not read, and on Windows the Git for Windows system
+    /// gitconfig is not found. On Unix `/etc/gitconfig` still loads unless
+    /// [`Self::git_config_nosystem`] is set. Use it for hermetic work (tests, repositories the
+    /// caller created); use [`Self::capture_process`] to match `git` on a user's machine.
     #[must_use]
     pub fn empty() -> Self {
         Self {
@@ -431,7 +437,14 @@ impl Environment {
         }
     }
 
-    /// Snapshot discovery/config variables from the current process (CLI and legacy call sites).
+    /// Snapshot the calling process's variables and working directory.
+    ///
+    /// This is the environment `git` and the `grit` CLI run with: `HOME` (global config,
+    /// `core.excludesFile`), `GIT_CONFIG_*`, Windows `ProgramFiles` (the Git for Windows system
+    /// gitconfig), identity variables and the rest. Embedders working on a user's repositories
+    /// call it once at their process boundary, usually through
+    /// [`RepositoryOptions::from_process`]. Library code never calls it; it takes an
+    /// [`Environment`] argument instead.
     #[must_use]
     pub fn capture_process() -> Self {
         // hygiene: CLI boundary — snapshot process environment into [`Environment`].
@@ -1008,13 +1021,34 @@ impl Default for RepositoryOptions {
 }
 
 impl RepositoryOptions {
-    /// Shorthand for [`Environment::empty`].
+    /// Options with [`Environment::empty`]: no home directory, no global config and, on
+    /// Windows, no system config.
+    ///
+    /// Operations then ignore settings such as `core.autocrlf`, `user.name`, `safe.directory`
+    /// and `core.excludesFile` from the user's system and global config, so results can differ
+    /// from `git` on the same repository. Meant for tests and repositories the caller created;
+    /// use [`Self::from_process`] for a user's repositories.
     #[must_use]
     pub fn empty() -> Self {
         Self::default()
     }
 
-    /// Build options around an explicit [`Environment`] snapshot.
+    /// Options with [`Environment::capture_process`]: the embedder equivalent of running `git`
+    /// or `grit` in this process.
+    ///
+    /// System and global config apply (`core.autocrlf`, identity, `safe.directory`,
+    /// `core.excludesFile`, credential helpers), found through `HOME`, `GIT_CONFIG_*` and, on
+    /// Windows, `ProgramFiles`. Call it at the program boundary, not from library code.
+    #[must_use]
+    pub fn from_process() -> Self {
+        // hygiene: embedder boundary — the documented way to snapshot the process environment.
+        Self::with_environment(Environment::capture_process())
+    }
+
+    /// Options around an explicit [`Environment`] snapshot.
+    ///
+    /// This is an associated constructor, not a builder method: write
+    /// `RepositoryOptions::with_environment(env).with_command_runner(runner)`.
     #[must_use]
     pub fn with_environment(environment: Environment) -> Self {
         Self {
@@ -1436,5 +1470,29 @@ mod tests {
             env.default_xdg_config_git_file("ignore"),
             Some(PathBuf::from("/home/u/.config/git/ignore"))
         );
+    }
+
+    #[test]
+    fn empty_options_have_no_home_or_system_config_roots() {
+        let env = RepositoryOptions::empty().environment;
+        assert!(env.home.is_none());
+        assert!(env.userprofile.is_none());
+        assert!(env.homedrive.is_none() && env.homepath.is_none());
+        assert!(env.xdg_config_home.is_none());
+        assert!(env.program_files.is_none() && env.program_files_x86.is_none());
+        assert!(env.git_install_root.is_none());
+        assert!(env.git_config_system.is_none() && env.git_config_global.is_none());
+        assert!(env.captured_vars.is_none());
+    }
+
+    #[test]
+    fn from_process_snapshots_the_process_environment() {
+        let options = RepositoryOptions::from_process();
+        let process = Environment::capture_process();
+        assert_eq!(options.environment.home, process.home);
+        assert_eq!(options.environment.program_files, process.program_files);
+        assert_eq!(options.environment.cwd, process.cwd);
+        assert_eq!(options.environment.home, std::env::var_os("HOME"));
+        assert!(options.environment.captured_vars.is_some());
     }
 }

@@ -1616,6 +1616,8 @@ mod status_scan_memory;
 #[cfg(feature = "full-tests")]
 #[path = "status_symlink_ancestor_git_compat.rs"]
 mod status_symlink_ancestor_git_compat;
+#[path = "status_system_autocrlf_git_compat.rs"]
+mod status_system_autocrlf_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "status_unmerged_kinds_git_compat.rs"]
 mod status_unmerged_kinds_git_compat;

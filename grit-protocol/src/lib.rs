@@ -10,7 +10,6 @@ pub mod upload_pack;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use grit_lib::config::environment::Environment;
 use grit_lib::config::git_path::path_for_error_message;
 use grit_lib::config::ConfigSet;
 
@@ -137,7 +136,8 @@ fn target_push_advice(target: &str) -> String {
     )
 }
 
-/// Build [`RepositoryOptions`] from the current process environment.
+/// Build [`RepositoryOptions`] from the current process environment
+/// ([`RepositoryOptions::from_process`]).
 ///
 /// Captures `HOME`, `GIT_CONFIG_*`, and the other variables [`ConfigSet::load`]
 /// uses for global and system config. Call once at server startup and pass the
@@ -145,7 +145,7 @@ fn target_push_advice(target: &str) -> String {
 /// a `grit receive-pack` / `grit upload-pack` subprocess.
 #[must_use]
 pub fn repository_options_from_process() -> RepositoryOptions {
-    RepositoryOptions::with_environment(Environment::capture_process())
+    RepositoryOptions::from_process()
 }
 
 /// Map an explicit smart-HTTP protocol version header to a wire version.

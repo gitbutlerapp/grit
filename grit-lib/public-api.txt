@@ -1992,6 +1992,7 @@ pub grit_lib::config::environment::RepositoryOptions::work_tree: core::option::O
 impl grit_lib::config::environment::RepositoryOptions
 pub fn grit_lib::config::environment::RepositoryOptions::empty() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::for_serving(self) -> Self
+pub fn grit_lib::config::environment::RepositoryOptions::from_process() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_change_id_generator(self, alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_diagnostics(self, grit_lib::diagnostics::DiagnosticsHandle) -> Self
@@ -16909,6 +16910,7 @@ pub grit_lib::prelude::RepositoryOptions::work_tree: core::option::Option<std::p
 impl grit_lib::config::environment::RepositoryOptions
 pub fn grit_lib::config::environment::RepositoryOptions::empty() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::for_serving(self) -> Self
+pub fn grit_lib::config::environment::RepositoryOptions::from_process() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_change_id_generator(self, alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_diagnostics(self, grit_lib::diagnostics::DiagnosticsHandle) -> Self
