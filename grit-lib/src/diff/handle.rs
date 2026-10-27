@@ -30,6 +30,10 @@ impl<'repo> Diff<'repo> {
 
     /// Diff two tree oids (either side may be `None` for an empty tree).
     ///
+    /// Reads tree metadata without loading blobs and skips identical subtree ids.
+    /// The walk retains active directory frames alongside the ODB's bounded tree
+    /// cache; the returned vector owns metadata for every changed path.
+    ///
     /// # Errors
     ///
     /// Propagates ODB read and tree walk errors.

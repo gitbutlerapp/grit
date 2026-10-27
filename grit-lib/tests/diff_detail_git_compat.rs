@@ -108,3 +108,199 @@ fn identical_binary_rename_keeps_binary_flag_in_stat_mode() {
         new: new_tree,
     };
 }
+
+fn metadata_tree(repo: &Repository, mut entries: Vec<TreeEntry>) -> grit_lib::objects::ObjectId {
+    entries.sort_by(|a, b| {
+        grit_lib::objects::tree_entry_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000)
+    });
+    repo.odb()
+        .write(
+            ObjectKind::Tree,
+            &grit_lib::objects::serialize_tree(&entries),
+        )
+        .expect("tree")
+}
+
+fn git_metadata(repo: &Repository, args: &[&str]) -> Vec<u8> {
+    let out = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(repo.git_dir())
+        .args(args)
+        .output()
+        .expect("system git");
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    out.stdout
+}
+
+#[test]
+fn tree_metadata_matrix_matches_git_without_reading_blobs() {
+    use grit_lib::objects::{HashAlgo, ObjectId};
+    use std::sync::atomic::Ordering;
+
+    for algo in [HashAlgo::Sha1, HashAlgo::Sha256] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default().with_object_format(algo))
+            .expect("init");
+        let a = write_blob(&repo, b"before\n");
+        let b = write_blob(&repo, b"after\n");
+        let entry = |name: &[u8], mode, oid: ObjectId| TreeEntry {
+            name: name.to_vec(),
+            mode,
+            oid,
+        };
+        let child_a = metadata_tree(&repo, vec![entry(b"leaf", 0o100644, a)]);
+        let child_b = metadata_tree(&repo, vec![entry(b"leaf", 0o100644, b)]);
+        let old = metadata_tree(
+            &repo,
+            vec![
+                entry(b"deleted", 0o100644, a),
+                entry(b"exec", 0o100644, a),
+                entry(b"left", 0o040000, child_a),
+                entry(b"node", 0o100644, a),
+                entry(b"raw-\xff", 0o100644, a),
+                entry(b"right", 0o040000, child_a),
+                entry(b"type", 0o100644, a),
+            ],
+        );
+        let new = metadata_tree(
+            &repo,
+            vec![
+                entry(b"added", 0o100644, b),
+                entry(b"exec", 0o100755, a),
+                entry(b"left", 0o040000, child_b),
+                entry(b"node", 0o040000, child_b),
+                entry(b"raw-\xff", 0o100644, b),
+                entry(b"right", 0o040000, child_b),
+                entry(b"type", 0o120000, b),
+            ],
+        );
+        let empty = metadata_tree(&repo, vec![]);
+        git_metadata(&repo, &["fsck", "--strict", &old.to_hex(), &new.to_hex()]);
+        // Have Git write the index/tree too, then read that tree through the API.
+        git_metadata(&repo, &["read-tree", &new.to_hex()]);
+        let git_tree = String::from_utf8(git_metadata(&repo, &["write-tree"]))
+            .expect("oid")
+            .trim()
+            .parse::<ObjectId>()
+            .expect("git-written tree");
+        assert_eq!(git_tree, new);
+
+        let cases = [
+            (Some(old), Some(git_tree)),
+            (Some(new), Some(old)),
+            (None, Some(new)),
+            (Some(old), None),
+            (Some(old), Some(old)),
+            (Some(empty), Some(empty)),
+            (None, None),
+        ];
+        let expected: Vec<_> = cases
+            .iter()
+            .map(|(old, new)| {
+                git_metadata(
+                    &repo,
+                    &[
+                        "diff",
+                        "--no-renames",
+                        "--name-status",
+                        "-z",
+                        &old.unwrap_or(empty).to_hex(),
+                        &new.unwrap_or(empty).to_hex(),
+                    ],
+                )
+            })
+            .collect();
+        let expected_trees = git_metadata(
+            &repo,
+            &[
+                "diff-tree",
+                "-r",
+                "-t",
+                "--no-commit-id",
+                "--no-renames",
+                "--name-status",
+                "-z",
+                &old.to_hex(),
+                &new.to_hex(),
+            ],
+        );
+        // Missing blobs make any accidental content read fail, including reads
+        // outside the optional instrumentation in DiffOptions.
+        std::fs::remove_file(repo.odb().object_path(&a)).expect("remove old blob");
+        std::fs::remove_file(repo.odb().object_path(&b)).expect("remove new blob");
+        for ((old, new), expected) in cases.into_iter().zip(expected) {
+            let entries = repo
+                .diff()
+                .tree_to_tree(old.as_ref(), new.as_ref())
+                .expect("metadata diff");
+            for detail in [DiffDetail::NameOnly, DiffDetail::NameStatus] {
+                let counter = Arc::new(AtomicUsize::new(0));
+                let mut opts = DiffOptions::default();
+                opts.blob_read_counter = Some(Arc::clone(&counter));
+                let out = build_file_diffs(
+                    repo.odb(),
+                    entries.clone(),
+                    detail,
+                    opts,
+                    &grit_lib::config::ConfigSet::new(),
+                    &ThreadPolicy::default(),
+                )
+                .expect("names");
+                let actual: Vec<u8> = out
+                    .files
+                    .iter()
+                    .flat_map(|file| {
+                        assert!(file.stat.is_none() && file.structured.is_none());
+                        let mut row = vec![file.status.letter() as u8, 0];
+                        row.extend_from_slice(&grit_lib::repo_relpath::storage_bytes(&file.path));
+                        row.push(0);
+                        row
+                    })
+                    .collect();
+                assert_eq!(actual, expected, "{algo:?} {detail:?}");
+                assert_eq!(counter.load(Ordering::Relaxed), 0);
+                for (entry, file) in entries.iter().zip(&out.files) {
+                    assert_eq!(
+                        file.old_mode.as_deref(),
+                        (entry.old_mode != "000000").then_some(entry.old_mode.as_str())
+                    );
+                    assert_eq!(
+                        file.new_mode.as_deref(),
+                        (entry.new_mode != "000000").then_some(entry.new_mode.as_str())
+                    );
+                }
+            }
+        }
+        let shown =
+            grit_lib::diff::diff_trees_show_tree_entries(repo.odb(), Some(&old), Some(&new), "")
+                .expect("tree entries without blobs");
+        let shown: Vec<u8> = shown
+            .iter()
+            .flat_map(|entry| {
+                let mut row = vec![entry.status.letter() as u8, 0];
+                row.extend_from_slice(&grit_lib::repo_relpath::storage_bytes(entry.path()));
+                row.push(0);
+                row
+            })
+            .collect();
+        assert_eq!(shown, expected_trees, "show tree entries {algo:?}");
+        let malformed = repo
+            .odb()
+            .write(ObjectKind::Tree, b"100644 truncated\0")
+            .expect("malformed tree");
+        assert!(matches!(
+            repo.diff().tree_to_tree(None, Some(&malformed)),
+            Err(grit_lib::error::Error::CorruptObject(_))
+        ));
+        // Identical-tree pruning does not attempt to parse even an unreadable tree.
+        assert!(repo
+            .diff()
+            .tree_to_tree(Some(&malformed), Some(&malformed))
+            .expect("equal OIDs")
+            .is_empty());
+    }
+}

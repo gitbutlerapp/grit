@@ -35,16 +35,23 @@ fn old_path_from_entry(entry: &DiffEntry, path: &str) -> Option<String> {
         .cloned()
 }
 
-fn file_diff_name_only(entry: &DiffEntry) -> FileDiff {
-    let path = path_from_entry(entry);
+fn file_diff_name_only(entry: DiffEntry) -> FileDiff {
+    let similarity = entry.rename_similarity();
+    let (path, old_path) = match (entry.new_path, entry.old_path) {
+        (Some(path), old) => {
+            let old = old.filter(|old| old != &path);
+            (path, old)
+        }
+        (None, old) => (old.unwrap_or_default(), None),
+    };
     FileDiff {
-        path: path.clone(),
-        old_path: old_path_from_entry(entry, &path),
+        path,
+        old_path,
         status: entry.status,
-        old_mode: mode_display(&entry.old_mode),
-        new_mode: mode_display(&entry.new_mode),
+        old_mode: Some(entry.old_mode).filter(|mode| mode != "000000"),
+        new_mode: Some(entry.new_mode).filter(|mode| mode != "000000"),
         binary: false,
-        similarity: entry.rename_similarity(),
+        similarity,
         stat: None,
         structured: None,
         combined: None,
@@ -113,7 +120,7 @@ pub fn build_file_diffs(
 ) -> Result<DiffFilesOutput> {
     match detail {
         DiffDetail::NameOnly | DiffDetail::NameStatus => {
-            let files: Vec<FileDiff> = entries.iter().map(file_diff_name_only).collect();
+            let files: Vec<FileDiff> = entries.into_iter().map(file_diff_name_only).collect();
             Ok(DiffFilesOutput {
                 files,
                 totals: None,
@@ -190,5 +197,72 @@ pub fn name_status_line(entry: &DiffEntry) -> String {
         DiffStatus::Modified => format!("M\t{path}"),
         DiffStatus::TypeChanged => format!("T\t{path}"),
         DiffStatus::Unmerged => format!("U\t{path}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objects::ObjectId;
+
+    #[test]
+    fn metadata_rows_preserve_selected_paths_modes_and_similarity() {
+        for status in [
+            DiffStatus::Added,
+            DiffStatus::Deleted,
+            DiffStatus::Modified,
+            DiffStatus::Renamed,
+            DiffStatus::Copied,
+        ] {
+            let entry = DiffEntry {
+                status,
+                old_path: (status != DiffStatus::Added).then(|| "old".to_owned()),
+                new_path: (status != DiffStatus::Deleted).then(|| {
+                    if status == DiffStatus::Modified {
+                        "old"
+                    } else {
+                        "new"
+                    }
+                    .to_owned()
+                }),
+                old_mode: if status == DiffStatus::Added {
+                    "000000"
+                } else {
+                    "100644"
+                }
+                .to_owned(),
+                new_mode: if status == DiffStatus::Deleted {
+                    "000000"
+                } else {
+                    "100755"
+                }
+                .to_owned(),
+                old_oid: ObjectId::zero(),
+                new_oid: ObjectId::zero(),
+                score: Some(75),
+            };
+            let file = file_diff_name_only(entry);
+            assert_eq!(file.status, status);
+            assert_eq!(
+                file.path,
+                if matches!(status, DiffStatus::Deleted | DiffStatus::Modified) {
+                    "old"
+                } else {
+                    "new"
+                }
+            );
+            let renamed = matches!(status, DiffStatus::Renamed | DiffStatus::Copied);
+            assert_eq!(file.old_path.as_deref(), renamed.then_some("old"));
+            assert_eq!(file.similarity, renamed.then_some(75));
+            assert_eq!(
+                file.old_mode.as_deref(),
+                (status != DiffStatus::Added).then_some("100644")
+            );
+            assert_eq!(
+                file.new_mode.as_deref(),
+                (status != DiffStatus::Deleted).then_some("100755")
+            );
+            assert!(file.stat.is_none() && file.structured.is_none());
+        }
     }
 }

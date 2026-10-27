@@ -9,6 +9,62 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
 
+## Tree metadata diff (2026-10-27)
+
+Issue [#2083](https://github.com/gitbutlerapp/grit/issues/2083) exposed a second,
+unbounded parsed-tree cache in the tree diff walker. It pinned completed sibling
+trees even after the ODB’s 65,536-entry cache evicted them. The walker now uses
+that existing budget and retains only active recursion frames. Name-only and
+name-status file records consume their input paths and modes instead of cloning
+them. The public `DiffEntry` representation and owned result vector are unchanged.
+
+The exact reproduction has 120,000 files across 400 directories, each initially
+containing 20 lines; the second commit appends one line to 20,000 files. The
+public API consumer opens the repository, resolves both commits, calls
+`Diff::tree_to_tree`, and prints each status/path directly. CLI rows use
+`grit diff --name-status base HEAD`, with default rename detection and with
+`--no-renames`. Both are compared with system Git; every result contains the same
+20,000 modified paths. A second copy stores all objects in a Git-written pack
+(`git repack -ad` followed by `git prune-packed`). Both repositories pass
+`git fsck --strict`.
+
+Measurements use Rust 1.99.0 `release` builds on a four-vCPU AMD EPYC 7763 Linux VM
+with 16 GiB RAM and stock Git 2.55.0. Frozen main is `b4e048f1c`.
+After one warmup per tool, five interleaved runs alternate Git, frozen main, and
+the fix, reversing order on alternate rounds. Builds and tests are idle.
+Wall time is the median from Python `perf_counter` around `/usr/bin/time -v`;
+RSS is the maximum process peak across the five runs, in KiB.
+
+| Storage / operation | Git ms | Main ms | Fixed ms | Git RSS KiB | Main RSS KiB | Fixed RSS KiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| loose / public tree_to_tree consumer | 37.79 | 67.05 | 58.45 | 11,496 | 41,040 | 21,308 |
+| loose / CLI default renames | 38.68 | 54.76 | 44.94 | 11,496 | 53,656 | 32,964 |
+| loose / CLI --no-renames | 38.26 | 53.14 | 43.62 | 11,500 | 51,764 | 33,044 |
+| packed / public tree_to_tree consumer | 25.74 | 60.02 | 51.01 | 22,760 | 50,852 | 30,224 |
+| packed / CLI default renames | 26.51 | 50.32 | 39.41 | 22,752 | 64,668 | 43,888 |
+| packed / CLI --no-renames | 25.98 | 48.09 | 37.71 | 22,744 | 63,132 | 41,864 |
+
+The loose public API uses **48% less peak RSS** and the loose default CLI uses
+**39% less**. Packed reductions are **41%** and **32%**, respectively. All six
+end-to-end cases are **13–22% faster than main**. Git still uses less memory.
+Raw samples, GNU time output, and Criterion estimates are committed in
+[`tree-metadata-2083.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/tree-metadata-2083.json).
+
+The isolated public-API allocation regression holds changed paths at 400 and
+increases unchanged tree metadata from 51,200 to 204,800 files. Main’s peak live
+heap grows from 11,528,650 to 44,477,899 bytes; the fix grows from 8,084,206 to
+12,246,185 bytes. Result storage remains 111,712 bytes in both fixed cases. The
+remaining peak includes the ODB’s bounded caches, larger individual loose tree
+objects, and active directory frames. The owned result vector also scales with
+changed paths, so these measurements do not imply a fixed RSS ceiling.
+
+Criterion’s `diff/tree_diff_siblings` covers the same 120k/20k shape with distinct
+sibling OIDs and with repeated child OIDs, using both cold and warm ODB handles.
+With 1 s warmup, 2 s measurement, and 20 samples per case, distributed cold/warm
+estimates change from 20.620/24.655 ms to 19.828/23.989 ms. Repeated cold/warm
+estimates are 3.392/3.991 ms before and 3.493/3.932 ms after; Criterion detects no
+significant change in either repeated-subtree case.
+
 ## Inexact rename detection (2026-10-27)
 
 Issue [#1683](https://github.com/gitbutlerapp/grit/issues/1683) reproduced on

@@ -273,3 +273,93 @@ fn diff_name_only_path_limit() {
     let lines: Vec<_> = out.stdout.lines().collect();
     assert_eq!(lines, ["only.txt"], "stdout={:?}", out.stdout);
 }
+
+#[cfg(unix)]
+#[test]
+fn revision_metadata_matches_git_with_missing_blob_content() {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    for format in ["sha1", "sha256"] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        git(root, &["init", &format!("--object-format={format}")]);
+        let raw = std::ffi::OsStr::from_bytes(b"raw-\xff");
+        for name in [
+            std::ffi::OsStr::new("deleted"),
+            std::ffi::OsStr::new("exec"),
+            std::ffi::OsStr::new("type"),
+            raw,
+        ] {
+            std::fs::write(root.join(name), b"before\n").expect("write");
+        }
+        for d in ["left", "right"] {
+            std::fs::create_dir(root.join(d)).expect("mkdir");
+            std::fs::write(root.join(d).join("leaf"), b"before\n").expect("write leaf");
+        }
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "before"]);
+        std::fs::remove_file(root.join("deleted")).expect("delete");
+        std::fs::set_permissions(root.join("exec"), std::fs::Permissions::from_mode(0o755))
+            .expect("chmod");
+        std::fs::remove_file(root.join("type")).expect("remove");
+        symlink("target", root.join("type")).expect("symlink");
+        for name in [std::ffi::OsStr::new("added"), raw] {
+            std::fs::write(root.join(name), b"after\n").expect("edit");
+        }
+        for d in ["left", "right"] {
+            std::fs::write(root.join(d).join("leaf"), b"after\n").expect("edit leaf");
+        }
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "after"]);
+        git(root, &["fsck", "--strict"]);
+        let expected: Vec<_> = ["--name-only", "--name-status"]
+            .into_iter()
+            .map(|flag| {
+                let out = git(root, &["diff", "--no-renames", flag, "HEAD~1", "HEAD"]);
+                (flag, out)
+            })
+            .collect();
+        // Delete all blob objects after taking the Git oracle. Tree-only name
+        // formats must still succeed, even through CLI argument/rendering glue.
+        let objects = git(
+            root,
+            &[
+                "cat-file",
+                "--batch-all-objects",
+                "--batch-check=%(objectname) %(objecttype)",
+            ],
+        );
+        for row in objects.lines() {
+            let (oid, kind) = row.split_once(' ').expect("object row");
+            if kind == "blob" {
+                std::fs::remove_file(root.join(".git/objects").join(&oid[..2]).join(&oid[2..]))
+                    .expect("remove blob");
+            }
+        }
+        for (flag, expected) in expected {
+            let out = grit(root, &["diff", "--no-renames", flag, "HEAD~1", "HEAD"]);
+            assert!(out.ok(), "{}", out.dump("metadata without blobs"));
+            // The CLI orders encoded non-UTF8 paths differently from Git;
+            // compare records while preserving every status and quoted path.
+            let mut actual: Vec<_> = out.stdout.lines().collect();
+            let mut expected: Vec<_> = expected.lines().collect();
+            actual.sort_unstable();
+            expected.sort_unstable();
+            assert_eq!(actual, expected, "{format} {flag}");
+            let json = grit(
+                root,
+                &["diff", "--no-renames", flag, "HEAD~1", "HEAD", "--json"],
+            );
+            assert!(json.ok(), "{}", json.dump("metadata JSON"));
+            let value: serde_json::Value = serde_json::from_str(&json.stdout).expect("JSON");
+            assert_eq!(value["files"].as_array().expect("files").len(), 7);
+            let md = grit(
+                root,
+                &["diff", "--no-renames", flag, "HEAD~1", "HEAD", "--markdown"],
+            );
+            assert!(md.ok(), "{}", md.dump("metadata Markdown"));
+            assert!(md.stdout.contains("exec"));
+        }
+    }
+}

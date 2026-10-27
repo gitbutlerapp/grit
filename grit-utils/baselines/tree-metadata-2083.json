@@ -1,0 +1,1009 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-27T02:46:59.313789+00:00",
+  "machine": {
+    "logical_cores": 4,
+    "os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+    "cargo_profile": "release",
+    "ram_bytes": 16766414848
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "rust": "1.99.0",
+    "baseline_grit_commit": "b4e048f1c41be036583703d579c70ec44bca169f",
+    "grit_commit": "factory/tree-metadata-memory (this change)",
+    "grit": "grit 0.5.22 with bounded tree metadata"
+  },
+  "methodology": "Exact issue #2083 fixture: 120000 files in 400 directories, 20 lines each, 20000 files appended with edited\\n. One warmup per tool then five interleaved runs, reversing order each round, with builds/tests idle. Python perf_counter around /usr/bin/time -v; median wall time and maximum peak RSS. API consumer prints each returned DiffEntry, without collecting output. All 20000 rows checked against system Git. Packed copy uses git repack -ad and prune-packed.",
+  "verification": "Every measured tool returns exactly the same 20000 modified status/path rows as system Git; both 140804-object fixtures pass git fsck --strict.",
+  "live_allocation_regression": {
+    "changed_paths": 400,
+    "files": [
+      51200,
+      204800
+    ],
+    "main_peak_bytes": [
+      11528650,
+      44477899
+    ],
+    "fixed_peak_bytes": [
+      8084206,
+      12246185
+    ],
+    "fixed_result_bytes": [
+      111712,
+      111712
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "tree-metadata-loose-api",
+      "group": "tree-metadata",
+      "fixture": "120000 files, 400 directories, 20000 modified paths; loose",
+      "description": "public tree_to_tree consumer",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD",
+          "--no-renames"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4757/consumer-main",
+          "/tmp/grit-4757/tree-diff"
+        ],
+        "grit": [
+          "/tmp/grit-4757/consumer-fixed",
+          "/tmp/grit-4757/tree-diff"
+        ]
+      },
+      "git": {
+        "median_ms": 37.79210399989097,
+        "stddev_ms": 0.5452447068165835,
+        "peak_rss_bytes": 11771904,
+        "runs_ms": [
+          38.37235900004998,
+          37.79210399989097,
+          37.08915500010335,
+          37.99790399989433,
+          37.18269499995586
+        ],
+        "samples": [
+          {
+            "wall_ms": 38.37235900004998,
+            "peak_rss_kib": 11360,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11360\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2604\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 3\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 37.79210399989097,
+            "peak_rss_kib": 11264,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11264\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2605\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 4\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 37.08915500010335,
+            "peak_rss_kib": 11372,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 94%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11372\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2606\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 5\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 37.99790399989433,
+            "peak_rss_kib": 11496,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11496\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2605\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 6\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 37.18269499995586,
+            "peak_rss_kib": 11428,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11428\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2605\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 11\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "baseline_grit": {
+        "median_ms": 67.05372200008242,
+        "stddev_ms": 0.46589985378427673,
+        "peak_rss_bytes": 42024960,
+        "runs_ms": [
+          67.31816000001345,
+          67.70277999999053,
+          66.501960000096,
+          67.05372200008242,
+          66.78132199999709
+        ],
+        "samples": [
+          {
+            "wall_ms": 67.31816000001345,
+            "peak_rss_kib": 39636,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-main /tmp/grit-4757/tree-diff\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.03\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.06\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 39636\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 8862\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 67.70277999999053,
+            "peak_rss_kib": 41040,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-main /tmp/grit-4757/tree-diff\"\n\tUser time (seconds): 0.04\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.06\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 41040\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 8735\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 66.501960000096,
+            "peak_rss_kib": 39396,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-main /tmp/grit-4757/tree-diff\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.06\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 39396\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 8860\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 4\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 67.05372200008242,
+            "peak_rss_kib": 39376,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-main /tmp/grit-4757/tree-diff\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.06\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 39376\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 8861\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 66.78132199999709,
+            "peak_rss_kib": 39396,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-main /tmp/grit-4757/tree-diff\"\n\tUser time (seconds): 0.04\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.06\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 39396\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 8859\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 3\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "grit": {
+        "median_ms": 58.45036699997763,
+        "stddev_ms": 0.6409747433514092,
+        "peak_rss_bytes": 21819392,
+        "runs_ms": [
+          59.13523799995346,
+          58.058305000031396,
+          58.45036699997763,
+          57.998985999802244,
+          59.42510499994569
+        ],
+        "samples": [
+          {
+            "wall_ms": 59.13523799995346,
+            "peak_rss_kib": 19604,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-fixed /tmp/grit-4757/tree-diff\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 19604\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3830\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 58.058305000031396,
+            "peak_rss_kib": 19664,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-fixed /tmp/grit-4757/tree-diff\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 19664\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3835\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 58.45036699997763,
+            "peak_rss_kib": 19680,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-fixed /tmp/grit-4757/tree-diff\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 19680\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3834\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 57.998985999802244,
+            "peak_rss_kib": 21308,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-fixed /tmp/grit-4757/tree-diff\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 21308\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3705\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 59.42510499994569,
+            "peak_rss_kib": 19668,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-fixed /tmp/grit-4757/tree-diff\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 19668\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3834\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "ratio": 1.5466290789246946
+    },
+    {
+      "id": "tree-metadata-loose-cli",
+      "group": "tree-metadata",
+      "fixture": "120000 files, 400 directories, 20000 modified paths; loose",
+      "description": "CLI default renames",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4757/grit-main",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD"
+        ],
+        "grit": [
+          "/tmp/grit-4757/grit-fixed",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD"
+        ]
+      },
+      "git": {
+        "median_ms": 38.682225999991715,
+        "stddev_ms": 0.5252111847245368,
+        "peak_rss_bytes": 11771904,
+        "runs_ms": [
+          38.682225999991715,
+          39.303451000023415,
+          38.12180099998841,
+          38.74124399999346,
+          38.00199000011162
+        ],
+        "samples": [
+          {
+            "wall_ms": 38.682225999991715,
+            "peak_rss_kib": 11492,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11492\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2620\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 3\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 39.303451000023415,
+            "peak_rss_kib": 11368,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11368\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2620\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 38.12180099998841,
+            "peak_rss_kib": 11372,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 94%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11372\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2620\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 5\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 38.74124399999346,
+            "peak_rss_kib": 11432,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11432\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2620\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 3\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 38.00199000011162,
+            "peak_rss_kib": 11496,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11496\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2619\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 3\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "baseline_grit": {
+        "median_ms": 54.756149000013465,
+        "stddev_ms": 1.9379049097633414,
+        "peak_rss_bytes": 54943744,
+        "runs_ms": [
+          59.14226899994901,
+          54.70456100010779,
+          54.756149000013465,
+          55.120948999956454,
+          54.72213799998826
+        ],
+        "samples": [
+          {
+            "wall_ms": 59.14226899994901,
+            "peak_rss_kib": 53312,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 53312\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 10699\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 54.70456100010779,
+            "peak_rss_kib": 51484,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 51484\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 10625\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 54.756149000013465,
+            "peak_rss_kib": 51612,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 51612\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 10752\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 55.120948999956454,
+            "peak_rss_kib": 53656,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 53656\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 11206\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 54.72213799998826,
+            "peak_rss_kib": 51632,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 51632\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 10750\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 2\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "grit": {
+        "median_ms": 44.94417199998679,
+        "stddev_ms": 0.8359721981038628,
+        "peak_rss_bytes": 33755136,
+        "runs_ms": [
+          44.94417199998679,
+          44.023153999887654,
+          46.03264200000012,
+          44.85707100002401,
+          45.93661800004156
+        ],
+        "samples": [
+          {
+            "wall_ms": 44.94417199998679,
+            "peak_rss_kib": 31180,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 31180\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 5712\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 44.023153999887654,
+            "peak_rss_kib": 31592,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 31592\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 5717\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 46.03264200000012,
+            "peak_rss_kib": 32964,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 32964\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 6174\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 44.85707100002401,
+            "peak_rss_kib": 32916,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 32916\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 5656\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 45.93661800004156,
+            "peak_rss_kib": 31328,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 31328\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 5719\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "ratio": 1.1618817386568296
+    },
+    {
+      "id": "tree-metadata-loose-cli-no-renames",
+      "group": "tree-metadata",
+      "fixture": "120000 files, 400 directories, 20000 modified paths; loose",
+      "description": "CLI --no-renames",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD",
+          "--no-renames"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4757/grit-main",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD",
+          "--no-renames"
+        ],
+        "grit": [
+          "/tmp/grit-4757/grit-fixed",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD",
+          "--no-renames"
+        ]
+      },
+      "git": {
+        "median_ms": 38.25705500003096,
+        "stddev_ms": 2.290574454713587,
+        "peak_rss_bytes": 11776000,
+        "runs_ms": [
+          38.482204000047204,
+          38.25705500003096,
+          37.3736630001531,
+          42.796545999863156,
+          37.19177900006798
+        ],
+        "samples": [
+          {
+            "wall_ms": 38.482204000047204,
+            "peak_rss_kib": 11428,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 94%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11428\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2604\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 4\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 38.25705500003096,
+            "peak_rss_kib": 11432,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11432\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2605\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 4\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 37.3736630001531,
+            "peak_rss_kib": 11344,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11344\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2605\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 8\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 42.796545999863156,
+            "peak_rss_kib": 11500,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11500\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2604\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 4\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 37.19177900006798,
+            "peak_rss_kib": 11428,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 94%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 11428\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 2606\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 6\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "baseline_grit": {
+        "median_ms": 53.138161000106265,
+        "stddev_ms": 0.4828394467011415,
+        "peak_rss_bytes": 53006336,
+        "runs_ms": [
+          53.258592000020144,
+          53.475197999887314,
+          52.34997299999122,
+          53.138161000106265,
+          52.542473000130485
+        ],
+        "samples": [
+          {
+            "wall_ms": 53.258592000020144,
+            "peak_rss_kib": 51236,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 96%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 51236\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 9372\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 4\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 53.475197999887314,
+            "peak_rss_kib": 51332,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.04\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 51332\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 9894\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 52.34997299999122,
+            "peak_rss_kib": 51352,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 51352\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 9376\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 3\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 53.138161000106265,
+            "peak_rss_kib": 51340,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 51340\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 9893\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 52.542473000130485,
+            "peak_rss_kib": 51764,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 51764\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 9390\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 3\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "grit": {
+        "median_ms": 43.61930499999289,
+        "stddev_ms": 0.5650420824228614,
+        "peak_rss_bytes": 33837056,
+        "runs_ms": [
+          43.102516999852014,
+          42.77285000011943,
+          43.61930499999289,
+          44.1638760000842,
+          43.86814100007541
+        ],
+        "samples": [
+          {
+            "wall_ms": 43.102516999852014,
+            "peak_rss_kib": 33044,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 33044\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 4216\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 42.77285000011943,
+            "peak_rss_kib": 31304,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 31304\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 4860\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 43.61930499999289,
+            "peak_rss_kib": 31360,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 31360\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 4857\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 44.1638760000842,
+            "peak_rss_kib": 31424,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 31424\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 4350\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 43.86814100007541,
+            "peak_rss_kib": 31308,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 31308\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 4860\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "ratio": 1.1401636900686054
+    },
+    {
+      "id": "tree-metadata-packed-api",
+      "group": "tree-metadata",
+      "fixture": "120000 files, 400 directories, 20000 modified paths; packed",
+      "description": "public tree_to_tree consumer",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD",
+          "--no-renames"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4757/consumer-main",
+          "/tmp/grit-4757/tree-packed"
+        ],
+        "grit": [
+          "/tmp/grit-4757/consumer-fixed",
+          "/tmp/grit-4757/tree-packed"
+        ]
+      },
+      "git": {
+        "median_ms": 25.740140000152678,
+        "stddev_ms": 1.7582271884535021,
+        "peak_rss_bytes": 23306240,
+        "runs_ms": [
+          29.13119100003314,
+          25.943278000113423,
+          24.8947570000837,
+          25.740140000152678,
+          24.846490999834714
+        ],
+        "samples": [
+          {
+            "wall_ms": 29.13119100003314,
+            "peak_rss_kib": 22644,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.01\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 95%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22644\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3035\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 25.943278000113423,
+            "peak_rss_kib": 22760,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.01\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 95%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22760\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3037\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 24.8947570000837,
+            "peak_rss_kib": 22756,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 95%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22756\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3036\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 25.740140000152678,
+            "peak_rss_kib": 22628,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.01\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 95%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22628\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3035\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 24.846490999834714,
+            "peak_rss_kib": 22608,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.01\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 95%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22608\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3036\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "baseline_grit": {
+        "median_ms": 60.02415800003291,
+        "stddev_ms": 0.271760709466663,
+        "peak_rss_bytes": 52072448,
+        "runs_ms": [
+          60.22930700009965,
+          60.02415800003291,
+          59.595043999934205,
+          60.18711299998358,
+          59.77554199989754
+        ],
+        "samples": [
+          {
+            "wall_ms": 60.22930700009965,
+            "peak_rss_kib": 50852,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-main /tmp/grit-4757/tree-packed\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 50852\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 10094\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 60.02415800003291,
+            "peak_rss_kib": 50712,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-main /tmp/grit-4757/tree-packed\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 50712\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 10091\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 59.595043999934205,
+            "peak_rss_kib": 50760,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-main /tmp/grit-4757/tree-packed\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 50760\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 10094\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 60.18711299998358,
+            "peak_rss_kib": 50804,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-main /tmp/grit-4757/tree-packed\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 96%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 50804\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 10093\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 59.77554199989754,
+            "peak_rss_kib": 50844,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-main /tmp/grit-4757/tree-packed\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.03\n\tPercent of CPU this job got: 98%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 50844\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 10095\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 2\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "grit": {
+        "median_ms": 51.00767499993708,
+        "stddev_ms": 0.426804931692367,
+        "peak_rss_bytes": 30949376,
+        "runs_ms": [
+          51.409375000048385,
+          50.58760700012499,
+          51.290421999965474,
+          50.433108000106586,
+          51.00767499993708
+        ],
+        "samples": [
+          {
+            "wall_ms": 51.409375000048385,
+            "peak_rss_kib": 30112,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-fixed /tmp/grit-4757/tree-packed\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 30112\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 4864\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 50.58760700012499,
+            "peak_rss_kib": 30224,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-fixed /tmp/grit-4757/tree-packed\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 30224\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 4871\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 51.290421999965474,
+            "peak_rss_kib": 30112,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-fixed /tmp/grit-4757/tree-packed\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 30112\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 4863\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 2\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 50.433108000106586,
+            "peak_rss_kib": 30116,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-fixed /tmp/grit-4757/tree-packed\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 30116\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 4865\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 51.00767499993708,
+            "peak_rss_kib": 29952,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/consumer-fixed /tmp/grit-4757/tree-packed\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 29952\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 4858\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "ratio": 1.9816393772386058
+    },
+    {
+      "id": "tree-metadata-packed-cli",
+      "group": "tree-metadata",
+      "fixture": "120000 files, 400 directories, 20000 modified paths; packed",
+      "description": "CLI default renames",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4757/grit-main",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD"
+        ],
+        "grit": [
+          "/tmp/grit-4757/grit-fixed",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD"
+        ]
+      },
+      "git": {
+        "median_ms": 26.509832000101596,
+        "stddev_ms": 0.5214673033843227,
+        "peak_rss_bytes": 23298048,
+        "runs_ms": [
+          26.94668100002673,
+          26.509832000101596,
+          25.787300000047253,
+          26.69186600019202,
+          25.82782100012082
+        ],
+        "samples": [
+          {
+            "wall_ms": 26.94668100002673,
+            "peak_rss_kib": 22564,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22564\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3075\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 26.509832000101596,
+            "peak_rss_kib": 22628,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22628\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3073\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 25.787300000047253,
+            "peak_rss_kib": 22752,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD\"\n\tUser time (seconds): 0.01\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 95%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22752\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3077\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 26.69186600019202,
+            "peak_rss_kib": 22492,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD\"\n\tUser time (seconds): 0.01\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22492\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3073\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 25.82782100012082,
+            "peak_rss_kib": 22484,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 95%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22484\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3073\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "baseline_grit": {
+        "median_ms": 50.32383200000368,
+        "stddev_ms": 0.4094549850488648,
+        "peak_rss_bytes": 66220032,
+        "runs_ms": [
+          50.65916900002776,
+          50.32383200000368,
+          49.770417999980054,
+          50.437223000017184,
+          49.74791300014658
+        ],
+        "samples": [
+          {
+            "wall_ms": 50.65916900002776,
+            "peak_rss_kib": 64668,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 64668\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 12436\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 50.32383200000368,
+            "peak_rss_kib": 62852,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 62852\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 12493\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 49.770417999980054,
+            "peak_rss_kib": 62996,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 62996\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 11979\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 50.437223000017184,
+            "peak_rss_kib": 64388,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 64388\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 12427\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 49.74791300014658,
+            "peak_rss_kib": 64424,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 64424\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 11917\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "grit": {
+        "median_ms": 39.40668099994582,
+        "stddev_ms": 0.5822734719275834,
+        "peak_rss_bytes": 44941312,
+        "runs_ms": [
+          39.30477699987023,
+          38.67774099990129,
+          39.40668099994582,
+          39.500112000041554,
+          40.307251000058386
+        ],
+        "samples": [
+          {
+            "wall_ms": 39.30477699987023,
+            "peak_rss_kib": 41816,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 41816\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 6741\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 38.67774099990129,
+            "peak_rss_kib": 41912,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 41912\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 6756\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 39.40668099994582,
+            "peak_rss_kib": 41992,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 41992\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 6760\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 39.500112000041554,
+            "peak_rss_kib": 41792,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 41792\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 7254\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 40.307251000058386,
+            "peak_rss_kib": 43888,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 43888\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 7219\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "ratio": 1.4864930490617518
+    },
+    {
+      "id": "tree-metadata-packed-cli-no-renames",
+      "group": "tree-metadata",
+      "fixture": "120000 files, 400 directories, 20000 modified paths; packed",
+      "description": "CLI --no-renames",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD",
+          "--no-renames"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4757/grit-main",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD",
+          "--no-renames"
+        ],
+        "grit": [
+          "/tmp/grit-4757/grit-fixed",
+          "diff",
+          "--name-status",
+          "base",
+          "HEAD",
+          "--no-renames"
+        ]
+      },
+      "git": {
+        "median_ms": 25.982464999970034,
+        "stddev_ms": 1.291658857928643,
+        "peak_rss_bytes": 23289856,
+        "runs_ms": [
+          26.18665299996792,
+          25.982464999970034,
+          25.979771000038454,
+          28.53141300010975,
+          25.07872099999986
+        ],
+        "samples": [
+          {
+            "wall_ms": 26.18665299996792,
+            "peak_rss_kib": 22744,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.01\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 95%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22744\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3035\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 25.982464999970034,
+            "peak_rss_kib": 22616,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.01\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 95%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22616\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3032\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 25.979771000038454,
+            "peak_rss_kib": 22628,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22628\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3034\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 28.53141300010975,
+            "peak_rss_kib": 22692,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.01\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 95%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22692\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3035\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 25.07872099999986,
+            "peak_rss_kib": 22688,
+            "gnu_time_v": "\tCommand being timed: \"git diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.02\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 22688\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3035\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "baseline_grit": {
+        "median_ms": 48.085983999953896,
+        "stddev_ms": 0.3520600977812707,
+        "peak_rss_bytes": 64647168,
+        "runs_ms": [
+          47.637557000143715,
+          48.26226099999076,
+          48.085983999953896,
+          48.25598100001116,
+          47.51577299998644
+        ],
+        "samples": [
+          {
+            "wall_ms": 47.637557000143715,
+            "peak_rss_kib": 62808,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 62808\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 11117\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 48.26226099999076,
+            "peak_rss_kib": 63132,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 95%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 63132\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 10614\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 48.085983999953896,
+            "peak_rss_kib": 62784,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 62784\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 11111\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 48.25598100001116,
+            "peak_rss_kib": 62984,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 95%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 62984\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 11123\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 2\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 47.51577299998644,
+            "peak_rss_kib": 63032,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-main diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 63032\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 11122\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "grit": {
+        "median_ms": 37.71148200007701,
+        "stddev_ms": 0.2566776327856052,
+        "peak_rss_bytes": 42868736,
+        "runs_ms": [
+          37.55516599994735,
+          37.74686500014468,
+          37.97479900003964,
+          37.71148200007701,
+          37.28127299996231
+        ],
+        "samples": [
+          {
+            "wall_ms": 37.55516599994735,
+            "peak_rss_kib": 41576,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 41576\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 5373\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 37.74686500014468,
+            "peak_rss_kib": 41588,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 41588\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 5893\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 37.97479900003964,
+            "peak_rss_kib": 41864,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 97%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 41864\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 5375\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 37.71148200007701,
+            "peak_rss_kib": 41576,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.01\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 41576\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 5373\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 0\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          },
+          {
+            "wall_ms": 37.28127299996231,
+            "peak_rss_kib": 41848,
+            "gnu_time_v": "\tCommand being timed: \"/tmp/grit-4757/grit-fixed diff --name-status base HEAD --no-renames\"\n\tUser time (seconds): 0.02\n\tSystem time (seconds): 0.00\n\tPercent of CPU this job got: 94%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 41848\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 5376\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 1\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+          }
+        ]
+      },
+      "ratio": 1.4514204868599074
+    },
+    {
+      "id": "tree-metadata-criterion-distributed-cold",
+      "group": "tree-metadata-criterion",
+      "fixture": "120000 files, 400 directories, 20000 modifications; distributed subtree OIDs",
+      "description": "cold ODB; 1s warmup, 2s measurement, 20 samples",
+      "driver": "criterion",
+      "baseline_grit": {
+        "confidence_interval_ms": [
+          20.511,
+          20.741
+        ],
+        "mean_ms": 20.62
+      },
+      "grit": {
+        "confidence_interval_ms": [
+          19.185,
+          20.651
+        ],
+        "mean_ms": 19.828
+      }
+    },
+    {
+      "id": "tree-metadata-criterion-distributed-warm",
+      "group": "tree-metadata-criterion",
+      "fixture": "120000 files, 400 directories, 20000 modifications; distributed subtree OIDs",
+      "description": "warm ODB; 1s warmup, 2s measurement, 20 samples",
+      "driver": "criterion",
+      "baseline_grit": {
+        "confidence_interval_ms": [
+          24.486,
+          24.911
+        ],
+        "mean_ms": 24.655
+      },
+      "grit": {
+        "confidence_interval_ms": [
+          23.919,
+          24.057
+        ],
+        "mean_ms": 23.989
+      }
+    },
+    {
+      "id": "tree-metadata-criterion-repeated-cold",
+      "group": "tree-metadata-criterion",
+      "fixture": "120000 files, 400 directories, 20000 modifications; repeated subtree OIDs",
+      "description": "cold ODB; 1s warmup, 2s measurement, 20 samples",
+      "driver": "criterion",
+      "baseline_grit": {
+        "confidence_interval_ms": [
+          3.3566,
+          3.4098
+        ],
+        "mean_ms": 3.392
+      },
+      "grit": {
+        "confidence_interval_ms": [
+          3.3875,
+          3.5658
+        ],
+        "mean_ms": 3.4934
+      }
+    },
+    {
+      "id": "tree-metadata-criterion-repeated-warm",
+      "group": "tree-metadata-criterion",
+      "fixture": "120000 files, 400 directories, 20000 modifications; repeated subtree OIDs",
+      "description": "warm ODB; 1s warmup, 2s measurement, 20 samples",
+      "driver": "criterion",
+      "baseline_grit": {
+        "confidence_interval_ms": [
+          3.8937,
+          4.1263
+        ],
+        "mean_ms": 3.9906
+      },
+      "grit": {
+        "confidence_interval_ms": [
+          3.9205,
+          3.9498
+        ],
+        "mean_ms": 3.9317
+      }
+    }
+  ]
+}

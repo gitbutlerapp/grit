@@ -15,7 +15,7 @@ use grit_lib::diff::{
 use grit_lib::index::write_tree::{build_cache_tree_from_index, write_tree_from_index};
 use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::objects::{ObjectId, ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
 use similar::Algorithm;
 
@@ -31,10 +31,83 @@ fn bench_tree_diff_wide(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(name), &(old, new), |b, pair| {
             b.iter(|| {
                 black_box(
-                    diff_trees(&fx.repo.odb(), Some(&pair.0), Some(&pair.1), "")
-                        .expect("tree diff"),
+                    diff_trees(fx.repo.odb(), Some(&pair.0), Some(&pair.1), "").expect("tree diff"),
                 )
             });
+        });
+    }
+    group.finish();
+}
+
+/// A monorepo-shaped metadata walk, plus reuse of the same child OIDs at
+/// hundreds of paths. Cold handles exercise bounded cache eviction; warm
+/// handles expose regressions in repeated-subtree reuse.
+fn bench_tree_diff_siblings(c: &mut Criterion) {
+    let mut group = c.benchmark_group("diff/tree_diff_siblings");
+    for repeated in [false, true] {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let odb = Odb::new(temp.path());
+        let old_blob = odb.write(ObjectKind::Blob, b"old\n").expect("blob");
+        let new_blob = odb.write(ObjectKind::Blob, b"new\n").expect("blob");
+        let mut old_root = Vec::new();
+        let mut new_root = Vec::new();
+        for d in 0..400 {
+            let mut entries: Vec<_> = (0..300)
+                .map(|f| TreeEntry {
+                    mode: 0o100644,
+                    name: format!("f{:03}-{f:04}", if repeated { 0 } else { d }).into_bytes(),
+                    oid: old_blob,
+                })
+                .collect();
+            let old = odb
+                .write(
+                    ObjectKind::Tree,
+                    &grit_lib::objects::serialize_tree(&entries),
+                )
+                .expect("tree");
+            for entry in &mut entries[..50] {
+                entry.oid = new_blob;
+            }
+            let new = odb
+                .write(
+                    ObjectKind::Tree,
+                    &grit_lib::objects::serialize_tree(&entries),
+                )
+                .expect("tree");
+            old_root.push(TreeEntry {
+                mode: 0o040000,
+                name: format!("d{d:03}").into_bytes(),
+                oid: old,
+            });
+            new_root.push(TreeEntry {
+                mode: 0o040000,
+                name: format!("d{d:03}").into_bytes(),
+                oid: new,
+            });
+        }
+        let old = odb
+            .write(
+                ObjectKind::Tree,
+                &grit_lib::objects::serialize_tree(&old_root),
+            )
+            .expect("root");
+        let new = odb
+            .write(
+                ObjectKind::Tree,
+                &grit_lib::objects::serialize_tree(&new_root),
+            )
+            .expect("root");
+        let shape = if repeated { "repeated" } else { "distributed" };
+        group.throughput(Throughput::Elements(120_000));
+        group.bench_function(BenchmarkId::new(shape, "cold"), |b| {
+            b.iter_batched(
+                || Odb::new(temp.path()),
+                |odb| black_box(diff_trees(&odb, Some(&old), Some(&new), "").expect("diff")),
+                criterion::BatchSize::SmallInput,
+            );
+        });
+        group.bench_function(BenchmarkId::new(shape, "warm"), |b| {
+            b.iter(|| black_box(diff_trees(&odb, Some(&old), Some(&new), "").expect("diff")));
         });
     }
     group.finish();
@@ -112,7 +185,7 @@ fn bench_blob_myers_10k_lines(c: &mut Criterion) {
 fn bench_diff_stat_vs_patch(c: &mut Criterion) {
     let fx = HistoryBenchFixtures::global();
     let entries = diff_trees(
-        &fx.repo.odb(),
+        fx.repo.odb(),
         Some(&fx.wide_tree),
         Some(&fx.wide_tree_few_changes),
         "",
@@ -159,6 +232,7 @@ fn bench_diff_stat_vs_patch(c: &mut Criterion) {
 criterion_group!(
     diff_benches,
     bench_tree_diff_wide,
+    bench_tree_diff_siblings,
     bench_index_to_tree_wide_root,
     bench_blob_myers_10k_lines,
     bench_diff_stat_vs_patch

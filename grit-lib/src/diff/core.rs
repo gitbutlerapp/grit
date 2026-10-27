@@ -26,7 +26,6 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use crate::config::ConfigSet;
 use crate::diff_indent_heuristic;
@@ -2677,31 +2676,8 @@ pub fn diff_trees_show_tree_entries(
     diff_trees_opts(odb, old_tree_oid, new_tree_oid, prefix, true, None)
 }
 
-struct TreeReadCache<'a> {
-    odb: &'a Odb,
-    parsed: std::collections::HashMap<ObjectId, Arc<Vec<TreeEntry>>>,
-}
-
-impl<'a> TreeReadCache<'a> {
-    fn new(odb: &'a Odb) -> Self {
-        Self {
-            odb,
-            parsed: std::collections::HashMap::new(),
-        }
-    }
-
-    fn entries_arc(&mut self, oid: &ObjectId) -> Result<Arc<Vec<TreeEntry>>> {
-        if let Some(e) = self.parsed.get(oid) {
-            return Ok(Arc::clone(e));
-        }
-        let arc = self.odb.cached_tree_entries(oid)?;
-        self.parsed.insert(*oid, Arc::clone(&arc));
-        Ok(arc)
-    }
-}
-
 fn diff_subtrees_in_place(
-    cache: &mut TreeReadCache<'_>,
+    odb: &Odb,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
     prefix: &str,
@@ -2716,19 +2692,24 @@ fn diff_subtrees_in_place(
             }
         }
     }
-    let empty: Arc<Vec<TreeEntry>> = Arc::new(Vec::new());
-    let old_entries = match old_tree_oid {
-        Some(oid) => cache.entries_arc(oid)?,
-        None => Arc::clone(&empty),
-    };
-    let new_entries = match new_tree_oid {
-        Some(oid) => cache.entries_arc(oid)?,
-        None => Arc::clone(&empty),
-    };
+    // The ODB already budgets parsed trees. Keep only active recursion frames
+    // here so completing siblings can release entries evicted from that cache.
+    let old_entries = old_tree_oid
+        .map(|oid| odb.cached_tree_entries(oid))
+        .transpose()?;
+    let new_entries = new_tree_oid
+        .map(|oid| odb.cached_tree_entries(oid))
+        .transpose()?;
     diff_tree_entries_opts(
-        cache,
-        old_entries.as_slice(),
-        new_entries.as_slice(),
+        odb,
+        old_entries
+            .as_deref()
+            .map(Vec::as_slice)
+            .unwrap_or_default(),
+        new_entries
+            .as_deref()
+            .map(Vec::as_slice)
+            .unwrap_or_default(),
         prefix,
         show_trees,
         index_hint,
@@ -2745,9 +2726,8 @@ fn diff_trees_opts(
     index_hint: Option<&DiffTreesIndexHint<'_>>,
 ) -> Result<Vec<DiffEntry>> {
     let mut result = Vec::new();
-    let mut cache = TreeReadCache::new(odb);
     diff_subtrees_in_place(
-        &mut cache,
+        odb,
         old_tree_oid,
         new_tree_oid,
         prefix,
@@ -2899,7 +2879,7 @@ fn emit_added_count(
 
 /// Compare two sorted lists of tree entries, recursing into subtrees.
 fn diff_tree_entries_opts(
-    cache: &mut TreeReadCache<'_>,
+    odb: &Odb,
     old: &[TreeEntry],
     new: &[TreeEntry],
     prefix: &str,
@@ -2922,12 +2902,12 @@ fn diff_tree_entries_opts(
                 match cmp {
                     std::cmp::Ordering::Less => {
                         // Old entry not in new → deleted
-                        emit_deleted_opts(cache, o, prefix, show_trees, index_hint, result)?;
+                        emit_deleted_opts(odb, o, prefix, show_trees, index_hint, result)?;
                         oi += 1;
                     }
                     std::cmp::Ordering::Greater => {
                         // New entry not in old → added
-                        emit_added_opts(cache, n, prefix, show_trees, result)?;
+                        emit_added_opts(odb, n, prefix, show_trees, result)?;
                         ni += 1;
                     }
                     std::cmp::Ordering::Equal => {
@@ -2949,7 +2929,7 @@ fn diff_tree_entries_opts(
                                     });
                                 }
                                 diff_subtrees_in_place(
-                                    cache,
+                                    odb,
                                     Some(&o.oid),
                                     Some(&n.oid),
                                     &path,
@@ -2959,16 +2939,12 @@ fn diff_tree_entries_opts(
                                 )?;
                             } else if is_tree_mode(o.mode) && !is_tree_mode(n.mode) {
                                 // Tree → blob: delete tree contents, add blob
-                                emit_deleted_opts(
-                                    cache, o, prefix, show_trees, index_hint, result,
-                                )?;
-                                emit_added_opts(cache, n, prefix, show_trees, result)?;
+                                emit_deleted_opts(odb, o, prefix, show_trees, index_hint, result)?;
+                                emit_added_opts(odb, n, prefix, show_trees, result)?;
                             } else if !is_tree_mode(o.mode) && is_tree_mode(n.mode) {
                                 // Blob → tree: delete blob, add tree contents
-                                emit_deleted_opts(
-                                    cache, o, prefix, show_trees, index_hint, result,
-                                )?;
-                                emit_added_opts(cache, n, prefix, show_trees, result)?;
+                                emit_deleted_opts(odb, o, prefix, show_trees, index_hint, result)?;
+                                emit_added_opts(odb, n, prefix, show_trees, result)?;
                             } else {
                                 result.push(DiffEntry {
                                     status: DiffStatus::for_content_change(o.mode, n.mode),
@@ -2988,11 +2964,11 @@ fn diff_tree_entries_opts(
                 }
             }
             (Some(o), None) => {
-                emit_deleted_opts(cache, o, prefix, show_trees, index_hint, result)?;
+                emit_deleted_opts(odb, o, prefix, show_trees, index_hint, result)?;
                 oi += 1;
             }
             (None, Some(n)) => {
-                emit_added_opts(cache, n, prefix, show_trees, result)?;
+                emit_added_opts(odb, n, prefix, show_trees, result)?;
                 ni += 1;
             }
             (None, None) => break,
@@ -3072,7 +3048,7 @@ fn emit_deleted_tree_from_index(index: &Index, dir_prefix: &str, result: &mut Ve
 }
 
 fn emit_deleted_opts(
-    cache: &mut TreeReadCache<'_>,
+    odb: &Odb,
     entry: &TreeEntry,
     prefix: &str,
     show_trees: bool,
@@ -3097,15 +3073,7 @@ fn emit_deleted_opts(
             emit_deleted_tree_from_index(hint.index, &path, result);
             return Ok(());
         }
-        diff_subtrees_in_place(
-            cache,
-            Some(&entry.oid),
-            None,
-            &path,
-            show_trees,
-            None,
-            result,
-        )?;
+        diff_subtrees_in_place(odb, Some(&entry.oid), None, &path, show_trees, None, result)?;
     } else {
         result.push(DiffEntry {
             status: DiffStatus::Deleted,
@@ -3122,7 +3090,7 @@ fn emit_deleted_opts(
 }
 
 fn emit_added_opts(
-    cache: &mut TreeReadCache<'_>,
+    odb: &Odb,
     entry: &TreeEntry,
     prefix: &str,
     show_trees: bool,
@@ -3142,15 +3110,7 @@ fn emit_added_opts(
                 score: None,
             });
         }
-        diff_subtrees_in_place(
-            cache,
-            None,
-            Some(&entry.oid),
-            &path,
-            show_trees,
-            None,
-            result,
-        )?;
+        diff_subtrees_in_place(odb, None, Some(&entry.oid), &path, show_trees, None, result)?;
     } else {
         result.push(DiffEntry {
             status: DiffStatus::Added,

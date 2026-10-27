@@ -13,6 +13,8 @@ Diffing in grit-lib centers on the [`diff`](rustdoc:grit_lib::diff) domain modul
 
 `diff_trees` compares two tree objects recursively and returns changed paths. Pass `None` for either side to diff against an empty tree. `diff_trees_show_tree_entries` can emit tree objects themselves (Git’s `diff-tree -t` behavior).
 
+`Diff::tree_to_tree` reads tree metadata only and prunes identical subtree object ids without opening them. The walk retains active directory frames and the ODB’s bounded parsed-tree cache; completed siblings do not accumulate in a second cache. The returned `Vec<DiffEntry>` owns changed paths, modes and ids, so result memory still grows with the number of changes. `build_file_diffs` consumes these entries for `NameOnly` and `NameStatus`, reusing their path and mode strings without reading blob content. Rename detection is separate and may read blobs for similarity scoring. See the [tree metadata measurements](../../benchmarks/#tree-metadata-diff-2026-10-27).
+
 Commit-to-commit diffs resolve each commit’s tree with [`Odb::commit_tree`](rustdoc:grit_lib::objects::odb::Odb::commit_tree), then call `diff_trees` on the parent and child trees.
 
 ## Index-to-worktree
