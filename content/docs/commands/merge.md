@@ -130,6 +130,15 @@ $ grit merge --continue
 Merged topic into the current branch (b3e1fe8)
 ```
 
+When the branches put two different files at the same path (each renamed a different file to it, or one renamed a file onto a path the other added), grit reports an `add_add` conflict at that path, like Git. Both versions stay in the index and the work-tree file shows them between conflict markers; a renamed file already carries the other branch's edits to it. The old names are gone, so nothing is lost until you resolve the path.
+
+```console
+$ grit merge topic
+CONFLICT (add_add): c
+
+Automatic merge failed; fix conflicts and run `grit merge --continue`, or run `grit merge --abort`.
+```
+
 After resolving markers (staging is optional when `commit.autoStage` is true):
 
 ```console

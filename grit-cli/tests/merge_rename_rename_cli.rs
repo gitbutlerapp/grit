@@ -1,4 +1,5 @@
-//! `grit merge` on a file both branches renamed to different names (issue #1878).
+//! `grit merge` on a file both branches renamed to different names (issue #1878), and on two
+//! files renamed to the same name (issue #2112).
 
 use serde_json::Value;
 use std::error::Error;
@@ -168,6 +169,42 @@ fn merge_human_output_names_both_destinations_once() -> TestResult {
         ],
         "{stderr}"
     );
+    Ok(())
+}
+
+#[test]
+fn merge_check_reports_two_files_renamed_to_one_name() -> TestResult {
+    let tmp = tempfile::tempdir()?;
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    fs::write(root.join("a"), "a1\na2\na3\na4\n")?;
+    fs::write(root.join("b"), "b1\nb2\nb3\nb4\n")?;
+    git(root, &["add", "a", "b"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["switch", "-qc", "topic"]);
+    git(root, &["mv", "b", "c"]);
+    git(root, &["commit", "-qm", "b->c"]);
+    git(root, &["switch", "-q", "main"]);
+    git(root, &["mv", "a", "c"]);
+    git(root, &["commit", "-qm", "a->c"]);
+    let head = git(root, &["rev-parse", "HEAD"]);
+
+    let out = grit(root, &["merge", "--check", "--json", "topic"]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "--check must answer 'conflicts'"
+    );
+    let json: Value = serde_json::from_slice(&out.stdout)?;
+    assert_eq!(json["result"], "conflicts");
+    assert_eq!(
+        conflict_rows(&json),
+        vec![("c".to_owned(), "add_add".to_owned())]
+    );
+    assert_eq!(git(root, &["rev-parse", "HEAD"]), head);
+    assert!(git(root, &["status", "--porcelain"]).is_empty());
     Ok(())
 }
 
