@@ -299,7 +299,8 @@ fn area_filter_selects_area() {
     let grit = build_grit_executable();
     let cache = TempDir::new().expect("cache");
     std::env::set_var("GRIT_BENCH_CACHE", cache.path());
-    prepare_fixtures(&git, &[FixtureKind::Synth10kSmoke]);
+    // The worktree area includes `reset/undo-commit@git-git`, which needs git.git offline.
+    prepare_fixtures(&git, &[FixtureKind::Synth10kSmoke, FixtureKind::GitGitWt]);
 
     let out_path = cache.path().join("daily-area.json");
     let out = run_daily_smoke(&git, &grit, &out_path, &["--area", "worktree,diff"]);
