@@ -55,6 +55,7 @@ fn git_commit_dated(dir: &Path, when: &str, message: &str) {
         .args(["commit", "--allow-empty", "-m", message])
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .envs(NO_AUTO_MAINTENANCE_ENV.iter().copied())
         .env("GIT_AUTHOR_NAME", "t")
         .env("GIT_AUTHOR_EMAIL", "t@example.com")
         .env("GIT_COMMITTER_NAME", "t")
@@ -75,12 +76,23 @@ fn clear_pack_cache_after_disk_maintenance() {
     clear_pack_cache();
 }
 
+/// Keeps system `git` from starting detached `maintenance run --auto` after commits:
+/// newer Git repacks geometrically and writes a multi-pack-index in the background,
+/// changing the pack set while a test counts or reads it. `gc --auto` and explicit
+/// `maintenance run` are unaffected.
+const NO_AUTO_MAINTENANCE_ENV: &[(&str, &str)] = &[
+    ("GIT_CONFIG_COUNT", "1"),
+    ("GIT_CONFIG_KEY_0", "maintenance.auto"),
+    ("GIT_CONFIG_VALUE_0", "false"),
+];
+
 fn git(dir: &std::path::Path, args: &[&str]) {
     let out = Command::new("git")
         .current_dir(dir)
         .args(args)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .envs(NO_AUTO_MAINTENANCE_ENV.iter().copied())
         .env("GIT_AUTHOR_NAME", "t")
         .env("GIT_AUTHOR_EMAIL", "t@example.com")
         .env("GIT_COMMITTER_NAME", "t")
@@ -829,6 +841,7 @@ fn git_verify_pack_delta_chain_count(dir: &Path) -> usize {
         .expect("pack file")
         .path();
     let out = Command::new("git")
+        .current_dir(dir)
         .args(["verify-pack", "-v"])
         .arg(&pack)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -926,6 +939,7 @@ fn git_verify_pack_delta_count(dir: &Path) -> usize {
         .expect("pack file")
         .path();
     let out = Command::new("git")
+        .current_dir(dir)
         .args(["verify-pack", "-v"])
         .arg(&pack)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -1334,6 +1348,7 @@ fn repack_materializes_delta_when_base_unreachable() {
         .expect("pack")
         .path();
     let verify_before = Command::new("git")
+        .current_dir(dir.path())
         .args(["verify-pack", "-v"])
         .arg(&pack_path)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")

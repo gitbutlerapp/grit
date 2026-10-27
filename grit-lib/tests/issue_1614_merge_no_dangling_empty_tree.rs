@@ -8,24 +8,13 @@ use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::objects::git_supports_sha256;
 
 const EMPTY_TREE_SHA1: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const EMPTY_TREE_SHA256: &str = "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321";
 
 fn empty_tree_loose(git_dir: &Path, hex: &str) -> std::path::PathBuf {
     git_dir.join(format!("objects/{}/{}", &hex[..2], &hex[2..]))
-}
-
-fn git_supports_sha256() -> bool {
-    Command::new("git")
-        .args(["init", "--object-format=sha256"])
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
 }
 
 fn git_fsck_strict(worktree: &Path) {

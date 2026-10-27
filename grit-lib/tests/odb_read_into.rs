@@ -101,7 +101,9 @@ fn pack_has_delta_objects(objects: &Path) -> bool {
     for entry in rd.flatten() {
         let path = entry.path();
         if path.extension().is_some_and(|e| e == "pack") {
+            // Run inside the repository so `git` uses its hash algorithm.
             let out = Command::new("git")
+                .current_dir(objects)
                 .args(["verify-pack", "-v"])
                 .arg(&path)
                 .output()
@@ -128,6 +130,7 @@ fn deepest_deltified_oid(objects: &Path) -> ObjectId {
         .find(|p| p.extension().is_some_and(|e| e == "pack"))
         .expect("pack");
     let out = Command::new("git")
+        .current_dir(objects)
         .args(["verify-pack", "-v"])
         .arg(&pack)
         .output()

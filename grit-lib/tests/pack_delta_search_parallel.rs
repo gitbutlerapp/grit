@@ -43,7 +43,12 @@ fn open_odb(dir: &Path) -> Odb {
 }
 
 fn git_validate_pack(pack: &[u8]) {
+    // `index-pack --stdin` stores the pack in the current repository: give it a scratch
+    // SHA-1 repository rather than whatever repository the test process runs in.
+    let scratch = tempfile::tempdir().expect("index-pack scratch");
+    git(scratch.path(), &["init", "-q", "--bare", "."]);
     let mut child = Command::new("git")
+        .current_dir(scratch.path())
         .args(["index-pack", "--stdin", "--strict"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())

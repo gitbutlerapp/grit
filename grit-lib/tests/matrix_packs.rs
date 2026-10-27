@@ -701,6 +701,7 @@ fn git_verify_pack_max_chain(pack: &[u8]) -> u64 {
     let pack_path = scratch.path().join("in.pack");
     std::fs::write(&pack_path, pack).expect("write pack");
     let idx = Command::new("git")
+        .current_dir(scratch.path())
         .args(["index-pack", &pack_path.to_string_lossy()])
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
@@ -712,6 +713,7 @@ fn git_verify_pack_max_chain(pack: &[u8]) -> u64 {
         String::from_utf8_lossy(&idx.stderr)
     );
     let out = Command::new("git")
+        .current_dir(scratch.path())
         .args(["verify-pack", "-v"])
         .arg(&pack_path)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
