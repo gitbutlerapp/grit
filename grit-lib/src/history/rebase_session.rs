@@ -63,7 +63,14 @@ pub enum RebaseOutcome {
         /// Ref movements performed on completion.
         applied: AppliedRewrite,
         /// Final rewrite plan (commits and ref updates).
-        plan: RewritePlan,
+        plan: Box<RewritePlan>,
+        /// `HEAD` commit OIDs before this invocation and after completion, as `(old, new)`.
+        ///
+        /// For [`continue_rebase`] and [`skip_rebase`], `old` is the stopped, detached
+        /// `HEAD` at the start of that call and `new` is `applied.head` after branch
+        /// reattachment. `None` means the OID is unchanged, including when only reattaching
+        /// `HEAD`. Unlike [`RewritePlan::head_change`], this covers the entire session call.
+        head_change: Option<(ObjectId, ObjectId)>,
     },
     /// Replay stopped on conflicts; `.git/rebase-merge/` and grit state were written.
     Stopped(RebaseStop),
@@ -153,16 +160,17 @@ pub fn start_rebase(
     let (head_ref, orig_head) = branch_head(repo)?;
     match plan_rebase_resumable(repo, &opts.request, &opts.rebase)? {
         Err(RebasePlan::UpToDate) => Ok(RebaseOutcome::Done {
+            head_change: None,
             applied: AppliedRewrite {
                 ref_updates: Vec::new(),
                 head: orig_head,
                 hooks_run: Vec::new(),
             },
-            plan: RewritePlan {
+            plan: Box::new(RewritePlan {
                 commits: Vec::new(),
                 ref_updates: Vec::new(),
                 head: super::types::HeadEffect::default(),
-            },
+            }),
         }),
         Err(RebasePlan::Plan(_) | RebasePlan::Conflict { .. }) => Err(HistoryError::Planning {
             message: "unexpected non-resumable rebase plan".into(),
@@ -177,8 +185,9 @@ pub fn start_rebase(
                 &crate::progress::NeverCancel,
             )?;
             Ok(RebaseOutcome::Done {
+                head_change: (orig_head != applied.head).then_some((orig_head, applied.head)),
                 applied,
-                plan: *plan,
+                plan,
             })
         }
         Ok(ResumablePlanOutcome::Partial(partial)) => {
@@ -257,7 +266,7 @@ pub fn continue_rebase(
         Some(seed),
         Some(state.scoped_refs.clone()),
     )?;
-    advance_after_plan(repo, &state, &opts.apply, outcome, edits)
+    advance_after_plan(repo, &state, &opts.apply, outcome, head_oid)
 }
 
 /// Skip the current todo commit and replay the rest.
@@ -302,7 +311,7 @@ pub fn skip_rebase(
         Some((mapping, rewritten)),
         Some(state.scoped_refs.clone()),
     )?;
-    advance_after_plan(repo, &state, &opts.apply, outcome, state.edits.clone())
+    advance_after_plan(repo, &state, &opts.apply, outcome, head_oid)
 }
 
 /// Cancel the in-progress rebase and restore the branch to `orig-head`.
@@ -764,7 +773,7 @@ fn advance_after_plan(
     prev: &LoadedState,
     apply: &ApplyOptions,
     outcome: ResumablePlanOutcome,
-    edits: HistoryEdits,
+    head_before: ObjectId,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
     match outcome {
         ResumablePlanOutcome::Complete(mut plan) => {
@@ -800,8 +809,9 @@ fn advance_after_plan(
                 applied.hooks_run.push(HookName::PostRewrite);
             }
             Ok(RebaseOutcome::Done {
+                head_change: (head_before != applied.head).then_some((head_before, applied.head)),
                 applied,
-                plan: *plan,
+                plan,
             })
         }
         ResumablePlanOutcome::Partial(partial) => {
@@ -819,7 +829,6 @@ fn advance_after_plan(
                 apply,
                 *partial,
             )?;
-            let _ = edits;
             Ok(RebaseOutcome::Stopped(stop))
         }
     }

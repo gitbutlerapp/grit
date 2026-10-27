@@ -343,7 +343,9 @@ pub struct RebaseCliOutcome {
     pub rewritten: Vec<RewrittenPair>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub refs: Vec<RefPair>,
-    /// Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes.
+    /// Previous and new `HEAD` commit OIDs for a completed invocation; null when unchanged.
+    /// On continue/skip, compares the stopped HEAD with HEAD after branch reattachment.
+    /// Dry runs describe the planned change; conflict and abort outcomes use null.
     #[serde(default)]
     pub head: Option<HeadPair>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1273,9 +1275,16 @@ fn reflog_identity(repo: &Repository) -> Result<grit_lib::ident::Signature> {
 
 fn map_rebase_outcome(outcome: RebaseOutcome) -> Result<RebaseCliOutcome> {
     match outcome {
-        RebaseOutcome::Done { plan, .. } => Ok(RebaseCliOutcome::from_rewrite(
-            HistoryRewriteOutcome::new("rebase", &plan, false),
-        )),
+        RebaseOutcome::Done {
+            plan, head_change, ..
+        } => {
+            let mut outcome = HistoryRewriteOutcome::new("rebase", &plan, false);
+            outcome.head = head_change.map(|(old, new)| HeadPair {
+                old: old.to_hex(),
+                new: new.to_hex(),
+            });
+            Ok(RebaseCliOutcome::from_rewrite(outcome))
+        }
         RebaseOutcome::Stopped(stop) => {
             Ok(RebaseCliOutcome::from_stop(stop.commit, &stop.conflicts))
         }

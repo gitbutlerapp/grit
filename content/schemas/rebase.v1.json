@@ -184,7 +184,7 @@
         }
       ],
       "default": null,
-      "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes."
+      "description": "Previous and new `HEAD` commit OIDs for a completed invocation; null when unchanged. On continue/skip, compares the stopped HEAD with HEAD after branch reattachment. Dry runs describe the planned change; conflict and abort outcomes use null."
     },
     "next_steps": {
       "items": {

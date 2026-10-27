@@ -195,22 +195,53 @@ fn rebase_stops_on_conflict_json() -> TestResult {
 
 #[test]
 fn rebase_continue_finishes_and_moves_refs() -> TestResult {
-    let scratch = Scratch::new("continue")?;
-    let dir = scratch.path();
-    let (upstream, onto, topic_tip, _) = init_conflict_rebase(dir)?;
-    gs(dir, ["config", "grit.changeIds", "false"])?;
-    gs(dir, ["rebase", "--onto", &onto, &upstream])?;
-    fs::write(dir.join("f.txt"), "resolved\n")?;
-    git(dir, &["add", "f.txt"])?;
-    let out = gs(dir, ["rebase", "--continue", "--json"])?;
-    assert_eq!(out.status, Some(0), "{}\n{}", out.stdout, out.stderr);
-    let json = parse_json(&out.stdout)?;
-    assert_eq!(json["result"], "completed");
-    assert_ne!(git(dir, &["rev-parse", "HEAD"])?.trim(), topic_tip);
-    assert!(
-        !dir.join(".git/rebase-merge/grit-plan").exists(),
-        "session should be cleared"
-    );
+    for command in [&["rebase"][..], &["history", "rebase"][..]] {
+        for output in ["--json", "--markdown"] {
+            let scratch = Scratch::new("continue")?;
+            let dir = scratch.path();
+            let (_, _, topic_tip, _) = init_conflict_rebase(dir)?;
+            let start = gs(dir, ["rebase", "main", "--json"])?;
+            assert_eq!(start.status, Some(1), "{}", start.stderr);
+            fs::write(dir.join("f.txt"), "resolved\n")?;
+            git(dir, &["add", "f.txt"])?;
+            let before = git(dir, &["rev-parse", "HEAD"])?.trim().to_owned();
+            let args = [command, &["--continue", output]].concat();
+            let out = gs(dir, args)?;
+            assert_eq!(out.status, Some(0), "{}\n{}", out.stdout, out.stderr);
+            let after = git(dir, &["rev-parse", "HEAD"])?.trim().to_owned();
+            assert_ne!(before, after);
+            assert_ne!(after, topic_tip);
+            if output == "--json" {
+                let json = parse_json(&out.stdout)?;
+                assert_eq!(json["result"], "completed");
+                assert_eq!(json["head"]["old"], before);
+                assert_eq!(json["head"]["new"], after);
+                assert_eq!(json["rewritten"][0]["old"], topic_tip);
+                assert_eq!(json["rewritten"][0]["new"], after);
+                assert_eq!(json["refs"][0]["old"], topic_tip);
+                assert_eq!(json["refs"][0]["new"], after);
+            } else {
+                assert!(
+                    out.stdout
+                        .contains(&format!("- HEAD `{}` → `{}`", &before[..7], &after[..7])),
+                    "{}",
+                    out.stdout
+                );
+            }
+            assert_eq!(
+                git(dir, &["symbolic-ref", "HEAD"])?.trim(),
+                "refs/heads/topic"
+            );
+            assert_eq!(fs::read_to_string(dir.join("f.txt"))?, "resolved\n");
+            assert_eq!(git(dir, &["show", "HEAD:f.txt"])?, "resolved\n");
+            assert!(git(dir, &["status", "--porcelain"])?.trim().is_empty());
+            assert!(
+                !dir.join(".git/rebase-merge").exists(),
+                "session should be cleared"
+            );
+            git(dir, &["fsck", "--strict"])?;
+        }
+    }
     Ok(())
 }
 
@@ -221,10 +252,23 @@ fn rebase_skip_json() -> TestResult {
     let (upstream, onto, topic_tip, _) = init_conflict_rebase(dir)?;
     gs(dir, ["config", "grit.changeIds", "false"])?;
     gs(dir, ["rebase", "--onto", &onto, &upstream])?;
+    let before = git(dir, &["rev-parse", "HEAD"])?.trim().to_owned();
     let out = gs(dir, ["rebase", "--skip", "--json"])?;
     assert_eq!(out.status, Some(0), "{}\n{}", out.stdout, out.stderr);
     let json = parse_json(&out.stdout)?;
     assert_eq!(json["result"], "completed");
+    let after = git(dir, &["rev-parse", "HEAD"])?.trim().to_owned();
+    assert_eq!(before, after);
+    assert_eq!(after, onto);
+    assert!(json["head"].is_null());
+    assert_eq!(
+        git(dir, &["symbolic-ref", "HEAD"])?.trim(),
+        "refs/heads/topic"
+    );
+    assert_eq!(fs::read_to_string(dir.join("f.txt"))?, "main\n");
+    assert!(git(dir, &["status", "--porcelain"])?.trim().is_empty());
+    assert!(!dir.join(".git/rebase-merge").exists());
+    git(dir, &["fsck", "--strict"])?;
     assert_ne!(git(dir, &["rev-parse", "HEAD"])?.trim(), topic_tip);
     Ok(())
 }
@@ -323,5 +367,42 @@ fn restore_ours_theirs_works_during_rebase_stop() -> TestResult {
         theirs_out.stdout,
         theirs_out.stderr
     );
+    Ok(())
+}
+
+#[test]
+fn rebase_skip_with_remaining_replay_reports_head_change() -> TestResult {
+    for command in [&["rebase"][..], &["history", "rebase"][..]] {
+        let scratch = Scratch::new("skip-remaining")?;
+        let dir = scratch.path();
+        let (upstream, onto, _, _) = init_conflict_rebase(dir)?;
+        fs::write(dir.join("note.txt"), "later note\n")?;
+        git(dir, &["add", "note.txt"])?;
+        git(dir, &["commit", "-m", "later commit"])?;
+        let tip = git(dir, &["rev-parse", "HEAD"])?.trim().to_owned();
+        let start = gs(dir, ["rebase", "--onto", &onto, &upstream, "--json"])?;
+        assert_eq!(start.status, Some(1), "{}", start.stderr);
+        let before = git(dir, &["rev-parse", "HEAD"])?.trim().to_owned();
+        let args = [command, &["--skip", "--json"]].concat();
+        let out = gs(dir, args)?;
+        assert_eq!(out.status, Some(0), "{}\n{}", out.stdout, out.stderr);
+        let json = parse_json(&out.stdout)?;
+        let after = git(dir, &["rev-parse", "HEAD"])?.trim().to_owned();
+        assert_ne!(before, after);
+        assert_eq!(json["head"]["old"], before);
+        assert_eq!(json["head"]["new"], after);
+        assert_eq!(json["refs"][0]["old"], tip);
+        assert_eq!(json["refs"][0]["new"], after);
+        assert!(json["rewritten"][0]["new"].is_null());
+        assert_eq!(
+            git(dir, &["symbolic-ref", "HEAD"])?.trim(),
+            "refs/heads/topic"
+        );
+        assert_eq!(git(dir, &["show", "HEAD:f.txt"])?, "main\n");
+        assert_eq!(fs::read_to_string(dir.join("note.txt"))?, "later note\n");
+        assert!(git(dir, &["status", "--porcelain"])?.trim().is_empty());
+        assert!(!dir.join(".git/rebase-merge").exists());
+        git(dir, &["fsck", "--strict"])?;
+    }
     Ok(())
 }

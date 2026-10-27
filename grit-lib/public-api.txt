@@ -23355,7 +23355,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::Rebase
 pub enum grit_lib::revwalk::history::RebaseOutcome
 pub grit_lib::revwalk::history::RebaseOutcome::Done
 pub grit_lib::revwalk::history::RebaseOutcome::Done::applied: grit_lib::revwalk::history::AppliedRewrite
-pub grit_lib::revwalk::history::RebaseOutcome::Done::plan: grit_lib::revwalk::history::RewritePlan
+pub grit_lib::revwalk::history::RebaseOutcome::Done::head_change: core::option::Option<(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)>
+pub grit_lib::revwalk::history::RebaseOutcome::Done::plan: alloc::boxed::Box<grit_lib::revwalk::history::RewritePlan>
 pub grit_lib::revwalk::history::RebaseOutcome::Stopped(grit_lib::revwalk::history::RebaseStop)
 impl core::clone::Clone for grit_lib::revwalk::history::RebaseOutcome
 pub fn grit_lib::revwalk::history::RebaseOutcome::clone(&self) -> Self

@@ -90,7 +90,7 @@ Pass `--json` on `grit rebase` or `grit history rebase`:
 | `operation` | string | `rebase` when present. |
 | `rewritten` | array | `{old,new,change_id,subject}` per replayed commit when `result` is `completed`. |
 | `refs` | array | `{ref,old,new}` for each ref that moved. |
-| `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes. |
+| `head` | object or null | `{old,new}` for the completed invocation's `HEAD` OID change; `null` when unchanged. Dry runs show the planned change; conflict and abort outcomes use `null`. |
 | `dry_run` | boolean | Whether refs were left unchanged. |
 | `exec` | array | When `--exec` was used and the rebase succeeded: `{commit, command, exit_code}` per invocation (full hex `commit`). |
 | `commit` | string | Source commit that stopped replay when `result` is `conflicts`. |
@@ -98,7 +98,38 @@ Pass `--json` on `grit rebase` or `grit history rebase`:
 | `next_steps` | array | Ordered `grit` commands after a stop. |
 | `alternatives` | array | `grit rebase --abort` and `grit rebase --skip` when paused. |
 
-On conflict:
+For completed results, `head.old` is the OID immediately before this command and `head.new` is the final OID. On `--continue` and `--skip`, this compares the stopped, detached `HEAD` with the completed branch tip after reattachment. `refs` and `rewritten` still describe the whole rebase, so their old OIDs can differ from `head.old`. Skipping the final conflicting commit can reattach `HEAD` without changing its OID; then `head` is `null`.
+
+After resolving and staging a conflict, `grit rebase --continue --json` reports:
+
+```json
+{
+  "result": "completed",
+  "operation": "rebase",
+  "rewritten": [
+    {
+      "old": "420bacbf7a90d30965b669336667fc144be897c1",
+      "new": "77fc7445860c1cc5a111ddd9bc9e0be97884522c",
+      "change_id": "rwlqysmxxrwkltttnnqttmptqznozqul",
+      "subject": "feature"
+    }
+  ],
+  "refs": [
+    {
+      "ref": "refs/heads/feature",
+      "name": "refs/heads/feature",
+      "old": "420bacbf7a90d30965b669336667fc144be897c1",
+      "new": "77fc7445860c1cc5a111ddd9bc9e0be97884522c"
+    }
+  ],
+  "head": {
+    "old": "8f302b0a5bc73aecb1c2f23b8a00953c7c64ed6c",
+    "new": "77fc7445860c1cc5a111ddd9bc9e0be97884522c"
+  }
+}
+```
+
+With `--check` when already up to date:
 
 ```json
 {

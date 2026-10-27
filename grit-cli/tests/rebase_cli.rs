@@ -215,11 +215,17 @@ fn rebase_upstream_default_uses_tracking_branch() -> TestResult {
     assert_eq!(json["operation"], "rebase");
     let after = git(dir, &["rev-parse", "HEAD"])?.trim().to_string();
     assert_ne!(after, before);
+    assert_eq!(json["head"]["old"], before);
+    assert_eq!(json["head"]["new"], after);
     assert_eq!(
         git(dir, &["merge-base", &after, &main_tip])?.trim(),
         main_tip,
         "topic tip should sit on main after rebase"
     );
+    let out = gs(dir, ["rebase", "--json"])?;
+    assert!(out.success(), "{}\n{}", out.stdout, out.stderr);
+    assert!(parse_json(&out.stdout)?["head"].is_null());
+    assert_eq!(git(dir, &["rev-parse", "HEAD"])?.trim(), after);
     git_fsck_strict(dir)?;
     Ok(())
 }
@@ -284,6 +290,17 @@ fn rebase_dry_run_moves_nothing() -> TestResult {
     )?;
     assert!(out.success(), "{}\n{}", out.stdout, out.stderr);
     assert_eq!(git(dir, &["rev-parse", "HEAD"])?.trim(), tip);
+    let json = parse_json(&out.stdout)?;
+    assert_eq!(json["head"]["old"], tip);
+    assert_ne!(json["head"]["new"], json["head"]["old"]);
+    assert_eq!(
+        json["head"]["new"],
+        json["rewritten"]
+            .as_array()
+            .ok_or("rewritten array")?
+            .last()
+            .ok_or("rewritten tip")?["new"]
+    );
     Ok(())
 }
 
