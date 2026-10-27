@@ -315,6 +315,11 @@ Commands present in `grit` without a daily registry row (plumbing, agent-only, o
 | `skill` | Agent documentation export; no timed git work. |
 | `repack` | Top-level repack; daily matrix uses `grit gc repack` (`repack/full@git-git`). |
 | `ahead` | Alias of `shortlog`; covered by `shortlog/ahead@git-git`. |
+| `serve` | Long-running HTTP server with a web view; not a single timed repo operation. |
+| `checkout` | Snapshot checkout from a `grit serve` server; needs a running server, no daily row yet. |
+| `checkin` | Sends a snapshot checkout's branches back to a `grit serve` server; no daily row yet. |
+| `integrate` | Merges into the server's target branch from a snapshot checkout; no daily row yet. |
+| `slice` | Path-set metadata for snapshot checkouts on a `grit serve` server; no daily row yet. |
 
 ## Gaps
 
