@@ -337,13 +337,23 @@ fn send_pack_uninteresting_commits(
         on_heap: HashSet<ObjectId>,
         processed: HashSet<ObjectId>,
         uninteresting: HashSet<ObjectId>,
+        interesting_on_heap: usize,
         next_seq: u64,
     }
 
     impl<'a> SendPackRevWalk<'a> {
         fn note_reach(&mut self, oid: ObjectId, flag: u8) {
             let entry = self.reach.entry(oid).or_insert(0);
+            let was_interesting = send_pack_reach_interesting(*entry);
             *entry |= flag;
+            let is_interesting = send_pack_reach_interesting(*entry);
+            if self.on_heap.contains(&oid) {
+                match (was_interesting, is_interesting) {
+                    (false, true) => self.interesting_on_heap += 1,
+                    (true, false) => self.interesting_on_heap -= 1,
+                    _ => {}
+                }
+            }
             if send_pack_reach_uninteresting(*entry) {
                 self.uninteresting.insert(oid);
             }
@@ -354,11 +364,9 @@ fn send_pack_uninteresting_commits(
         /// Unlike waiting for every uninteresting commit's parents to be marked, this
         /// matches Git's `still_interesting` cutoff and avoids walking all haves to root.
         fn can_stop_after(&self) -> bool {
-            !self.heap.is_empty()
-                && self.heap.iter().all(|c| {
-                    let flags = *self.reach.get(&c.oid).unwrap_or(&0);
-                    !send_pack_reach_interesting(flags)
-                })
+            // Counting reach transitions avoids revisiting every queued have after each
+            // commit, especially when a new commit is dated before advertised history.
+            !self.heap.is_empty() && self.interesting_on_heap == 0
         }
 
         fn try_enqueue(&mut self, oid: ObjectId, flag: u8) -> Result<()> {
@@ -380,6 +388,9 @@ fn send_pack_uninteresting_commits(
             #[cfg(test)]
             send_pack_walk_test_hooks::record_commit_read();
             self.on_heap.insert(oid);
+            if send_pack_reach_interesting(*self.reach.get(&oid).unwrap_or(&0)) {
+                self.interesting_on_heap += 1;
+            }
             self.heap.push(QueuedCommit {
                 time: parsed.committer_unix_seconds_for_ordering(),
                 seq: std::cmp::Reverse(self.next_seq),
@@ -400,6 +411,7 @@ fn send_pack_uninteresting_commits(
         on_heap: HashSet::new(),
         processed: HashSet::new(),
         uninteresting: HashSet::new(),
+        interesting_on_heap: 0,
         next_seq: 0,
     };
 
@@ -419,6 +431,9 @@ fn send_pack_uninteresting_commits(
 
     while let Some(commit) = walk.heap.pop() {
         walk.on_heap.remove(&commit.oid);
+        if send_pack_reach_interesting(*walk.reach.get(&commit.oid).unwrap_or(&0)) {
+            walk.interesting_on_heap -= 1;
+        }
         if !walk.processed.insert(commit.oid) {
             continue;
         }
@@ -1190,6 +1205,44 @@ mod tests {
             "send-pack hide must stay coupled to the want walk ({} parent lookups)",
             commit_parent_lookups()
         );
+    }
+
+    #[test]
+    fn duplicated_wants_already_on_peer_balance_the_frontier() {
+        use super::send_pack_walk_test_hooks::{commit_reads, reset_commit_reads};
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let tree = write_tree(&repo, &[]);
+        let mut tip = write_commit(&repo, tree, &[], 0);
+        for time in 1..100 {
+            tip = write_commit(&repo, tree, &[tip], time);
+        }
+        reset_commit_reads();
+        let hidden =
+            send_pack_uninteresting_commits(repo.odb(), &[tip, tip], &[tip, tip], &HashSet::new())
+                .unwrap();
+        assert!(hidden.contains(&tip));
+        assert!(
+            commit_reads() <= 2,
+            "shared want/have must stop at the frontier"
+        );
+        let empty = HashSet::new();
+        let selection = enumerate_pack_objects(
+            repo.odb(),
+            &[tip, tip],
+            &[tip, tip],
+            &PackEnumerateOptions {
+                filter: None,
+                shallow_grafts: &empty,
+                have_shallow_grafts: None,
+                use_bitmaps: false,
+                exclude_objects: None,
+                peer_odb: None,
+                have_boundary: HaveBoundary::TipsOnly,
+            },
+        )
+        .unwrap();
+        assert!(selection.send.is_empty());
     }
 
     #[test]
