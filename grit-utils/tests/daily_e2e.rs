@@ -319,7 +319,7 @@ fn area_filter_selects_area() {
 }
 
 /// Matrix ids for step 7 (worktree + history areas in smoke).
-const MATRIX_SMOKE_IDS: [&str; 42] = [
+const MATRIX_SMOKE_IDS: [&str; 43] = [
     "status/clean@synth-100k",
     "status/clean@deep-tree",
     "status/clean@small",
@@ -354,6 +354,7 @@ const MATRIX_SMOKE_IDS: [&str; 42] = [
     "blame/file@deep-tree",
     "revs/count@git-git",
     "revs/count-path@git-git",
+    "revs/count-range-commit-graph@git-git",
     "log/limit-path@git-git",
     "merge-base/branches@git-git",
     "resolve/head-n@git-git",

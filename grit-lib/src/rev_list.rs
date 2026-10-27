@@ -6193,29 +6193,23 @@ fn try_commit_graph_count_only(
     let Some(chain) = repo.caches().commit_graph_chain(repo.odb().objects_dir()) else {
         return Ok(None);
     };
-    let shallow = crate::shallow::load_shallow_boundaries(repo.git_dir());
-    let Some(n) = chain.count_reachable_commits(include, exclude, false, &shallow) else {
-        return Ok(None);
+    let n = if exclude.is_empty() {
+        let shallow = crate::shallow::load_shallow_boundaries(repo.git_dir());
+        let Some(n) = chain.count_reachable_commits(include, exclude, false, &shallow) else {
+            return Ok(None);
+        };
+        n
+    } else {
+        crate::merge_base::count_commits_reachable_excluding_ancestors_of(
+            repo,
+            include,
+            exclude,
+            crate::merge_base::ReachableCountFilter::default(),
+        )?
     };
-    Ok(Some(RevListResult {
-        commits: Vec::new(),
-        objects: Vec::new(),
-        omitted_objects: Vec::new(),
-        missing_objects: Vec::new(),
-        boundary_commits: Vec::new(),
-        left_right_map: HashMap::new(),
-        cherry_equivalent: HashSet::new(),
-        per_commit_object_counts: Vec::new(),
-        object_walk_tips: Vec::new(),
-        objects_print_commit: Vec::new(),
-        object_segments: Vec::new(),
-        bitmap_object_format: false,
-        reachable_commit_count: Some(n),
-        reachable_non_commit_object_count: None,
-        tip_annotated_tag_by_commit: HashMap::new(),
-        log_graph_linkage: None,
-        commit_data: OidHashMap::default(),
-    }))
+    let mut result = rev_list_result_from_commits(Vec::new());
+    result.reachable_commit_count = Some(n);
+    Ok(Some(result))
 }
 
 fn try_rev_list_accelerated(

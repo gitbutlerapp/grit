@@ -1177,6 +1177,8 @@ fn try_count_diff_via_stored_commit_bitmaps(
 /// Traverses through commits filtered out by parent count (Git `rev-list` parent
 /// filters still walk the full graph). Uses the commit-graph when loaded and no
 /// parent or date filters are active.
+/// Unfiltered ranges use generation-ordered hiding and stop at the resolved
+/// frontier rather than materializing ancestor closures.
 ///
 /// # Errors
 ///
@@ -1192,6 +1194,23 @@ pub fn count_commits_reachable_excluding_ancestors_of(
     }
     let mut cache = CommitGraphCache::new(repo);
 
+    let unfiltered = filter.min_parents.is_none()
+        && filter.max_parents.is_none()
+        && filter.since.is_none()
+        && filter.until.is_none();
+    if unfiltered
+        && cache.graph.is_some()
+        && !hide.is_empty()
+        && !filter.first_parent_only
+        && !cache.has_parent_rewrites()?
+    {
+        // Generations resolve the included side without visiting older hidden ancestry.
+        return Ok(
+            SidePaint::compute_hiding(&mut cache, tips, hide, HidePaintStop::TipsResolved)?
+                .count_only(PAINT_LEFT),
+        );
+    }
+
     let single_relation = if tips.len() == 1 && hide.len() == 1 {
         let relation = first_parent_chain_relation(&mut cache, tips[0], hide[0]);
         if matches!(
@@ -1205,11 +1224,7 @@ pub fn count_commits_reachable_excluding_ancestors_of(
         None
     };
 
-    if filter.min_parents.is_none()
-        && filter.max_parents.is_none()
-        && filter.since.is_none()
-        && filter.until.is_none()
-    {
+    if unfiltered {
         if let Some(graph) = &cache.graph {
             let shallow: HashSet<ObjectId> = cache.shallow_boundaries.iter().copied().collect();
             if let Some(n) =
@@ -3463,6 +3478,56 @@ mod tests {
         assert_eq!(
             relation_with_lookups(&repo, merge, tip_a).0,
             FirstParentRelation::SecondIsAncestor
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn graph_range_counts_are_bounded_by_distance() -> Result<()> {
+        use super::intersect_walk_test_hooks::{
+            commit_parent_lookups, reset_commit_parent_lookups,
+        };
+        use crate::rev_list::{rev_list, RevListOptions};
+
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let chain = write_chain(&repo, 3000, |i| 100 + i as i64)?;
+        std::fs::write(
+            repo.git_dir().join("refs/heads/main"),
+            format!("{}\n", chain[2999]),
+        )?;
+        crate::maintenance::write_commit_graph(
+            &repo,
+            &crate::maintenance::CommitGraphOptions::default(),
+        )?;
+        let mut lookups = Vec::new();
+        for low_level in [false, true] {
+            clear_commit_linkage(&repo);
+            reset_commit_parent_lookups();
+            let count = if low_level {
+                rev_list(
+                    &repo,
+                    &[chain[2999].to_hex()],
+                    &[chain[2979].to_hex()],
+                    &RevListOptions {
+                        count: true,
+                        use_commit_graph: true,
+                        ..Default::default()
+                    },
+                )?
+                .commit_count()
+            } else {
+                repo.rev_walk().count(
+                    &["main~20..main"],
+                    &crate::revwalk::RevWalkListOptions::default(),
+                )?
+            };
+            assert_eq!(count, 20);
+            lookups.push(commit_parent_lookups());
+        }
+        assert!(
+            lookups.iter().all(|&n| n <= 60),
+            "graph-backed range counts must stay near the range, parent lookups: {lookups:?}"
         );
         Ok(())
     }

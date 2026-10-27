@@ -47,6 +47,129 @@ fn open_bare(dir: &Path) -> grit_lib::error::Result<Repository> {
 }
 
 #[test]
+fn deep_range_count_with_git_and_grit_commit_graphs_matches_git() {
+    let dir = tempdir().expect("tempdir");
+    let repo = open_bare(dir.path()).expect("repo");
+    let mut tip = write_commit(repo.odb(), &[], "root", 100, 100).expect("root");
+    for i in 1..1024 {
+        tip = write_commit(repo.odb(), &[tip], "chain", 100 + i, 100 + i).expect("commit");
+    }
+    support::git(
+        dir.path(),
+        &["update-ref", "refs/heads/main", &tip.to_hex()],
+    );
+
+    for grit_graph in [false, true] {
+        if grit_graph {
+            grit_lib::maintenance::write_commit_graph(
+                &repo,
+                &grit_lib::maintenance::CommitGraphOptions::default(),
+            )
+            .expect("grit commit-graph");
+        } else {
+            support::git(dir.path(), &["commit-graph", "write", "--reachable"]);
+        }
+        support::git(dir.path(), &["commit-graph", "verify"]);
+        support::git(dir.path(), &["fsck", "--strict"]);
+        // Open a fresh handle for each writer so a cached graph cannot mask an incompatibility.
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+        for (range, expected) in [
+            ("HEAD~20..HEAD", 20),
+            ("HEAD..HEAD~20", 0),
+            ("HEAD..HEAD", 0),
+            ("HEAD~40..HEAD~20", 20),
+        ] {
+            let from_git: usize = support::git(dir.path(), &["rev-list", "--count", range])
+                .trim()
+                .parse()
+                .expect("git count");
+            assert_eq!(from_git, expected);
+            assert_eq!(
+                repo.rev_walk()
+                    .count(&[range], &RevWalkListOptions::default())
+                    .expect("count"),
+                from_git,
+                "{range}, grit graph: {grit_graph}"
+            );
+            let (positive, negative) = grit_lib::revwalk::rev_list::split_revision_token(range);
+            let result = rev_list(
+                &repo,
+                &positive,
+                &negative,
+                &RevListOptions {
+                    count: true,
+                    use_commit_graph: true,
+                    ..Default::default()
+                },
+            )
+            .expect("rev-list count");
+            assert_eq!(result.commit_count(), from_git);
+        }
+        assert_eq!(
+            repo.rev_walk()
+                .count(&["HEAD"], &RevWalkListOptions::default())
+                .expect("full count"),
+            1024
+        );
+    }
+}
+
+#[test]
+fn graph_range_counts_across_merges_and_skewed_dates_match_git() {
+    let dir = tempdir().expect("tempdir");
+    let repo = open_bare(dir.path()).expect("repo");
+    let root = write_commit(repo.odb(), &[], "root", 100, 100).expect("root");
+    let a = write_commit(repo.odb(), &[root], "a", 300, 300).expect("a");
+    let b = write_commit(repo.odb(), &[root], "b", 200, 200).expect("b");
+    let merge = write_commit(repo.odb(), &[a, b], "merge", 50, 50).expect("merge");
+    let tip = write_commit(repo.odb(), &[merge], "tip", 40, 40).expect("tip");
+    support::git(
+        dir.path(),
+        &["update-ref", "refs/heads/main", &tip.to_hex()],
+    );
+    support::git(dir.path(), &["commit-graph", "write", "--reachable"]);
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    for include in [vec![tip], vec![a], vec![a, b], vec![root]] {
+        for exclude in [vec![root], vec![a], vec![a, b], vec![tip]] {
+            let positive: Vec<_> = include.iter().map(|oid| oid.to_hex()).collect();
+            let negative: Vec<_> = exclude.iter().map(|oid| oid.to_hex()).collect();
+            let mut tokens = positive.clone();
+            tokens.extend(negative.iter().map(|s| format!("^{s}")));
+            let tokens: Vec<_> = tokens.iter().map(String::as_str).collect();
+            let mut git_args = vec!["rev-list", "--count"];
+            git_args.extend_from_slice(&tokens);
+            let expected: usize = support::git(dir.path(), &git_args)
+                .trim()
+                .parse()
+                .expect("git count");
+            assert_eq!(
+                repo.rev_walk()
+                    .count(&tokens, &RevWalkListOptions::default())
+                    .expect("count"),
+                expected,
+                "{tokens:?}"
+            );
+            assert_eq!(
+                rev_list(
+                    &repo,
+                    &positive,
+                    &negative,
+                    &RevListOptions {
+                        count: true,
+                        use_commit_graph: true,
+                        ..Default::default()
+                    },
+                )
+                .expect("rev-list count")
+                .commit_count(),
+                expected,
+                "{tokens:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn bounded_log_on_depth_one_shallow_does_not_emit_missing_parent() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");

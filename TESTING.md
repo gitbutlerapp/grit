@@ -487,6 +487,7 @@ Shared harness: [`grit-lib/tests/support/diff_harness.rs`](grit-lib/tests/suppor
 | t4217-log-limit.sh | `--since` / `--until` committer-date cutoffs; `--boundary` with date filters | `rev_list_ordering.rs` (`t4217_log_limit_since_until_match_git`, `t4217_boundary_since_until_match_git`) | covered |
 | — | Symmetric `A...B` with `--left-right` / `--cherry-mark` / `--cherry-pick` (patch-id equivalence) | `rev_list_ordering.rs` (`symmetric_diff_left_right_cherry_mark_match_git`) | covered |
 | — | `RevListOptions::use_commit_graph` on/off vs `git commit-graph write` for ordering walks | `rev_list_ordering.rs` (`ordering_identical_with_and_without_commit_graph`, `t6003_topo_date_author_date_order_match_git`, `t6019_ancestry_path_matches_git`, `t6100_in_order_matches_git`) | covered |
+| — | Two-dot counts with Git- and grit-written commit-graphs, empty/reversed ranges, merges, multiple tips and clock skew | `bounded_limit_list.rs` (`deep_range_count_with_git_and_grit_commit_graphs_matches_git`, `graph_range_counts_across_merges_and_skewed_dates_match_git`); `merge_base::tests::graph_range_counts_are_bounded_by_distance` bounds parent lookups for both public count paths | covered |
 
 #### Revwalk: simplification and objects
 

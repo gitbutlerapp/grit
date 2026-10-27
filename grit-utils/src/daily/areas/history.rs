@@ -9,11 +9,11 @@ use super::super::helpers::{
     revs_count_literal_path_git_git_bench, scenario_spec, setup_big_blobs, setup_git_git_history,
     setup_git_git_loose_tags, setup_git_git_no_commit_graph, setup_git_git_packed_tags,
     setup_git_git_worktree, setup_registry_worktree, setup_shape_worktree, setup_synth100k,
-    shortlog_ahead_bench, shortlog_behind_bench, show_head_bench, synth10k_kind,
+    sh_devnull, shortlog_ahead_bench, shortlog_behind_bench, show_head_bench, synth10k_kind,
 };
 use super::super::matrix_helpers::{
     prepare_rebase_git_git_reset, rebase_onto_bench, rebase_onto_git_git_bench,
-    setup_history_reword,
+    setup_history_reword, verify_git_commit_graph_in_repo, write_git_commit_graph_reachable,
 };
 use super::super::plan::{DailyHeadlinePlan, DailySetup};
 use super::super::registry::RepoShape;
@@ -35,6 +35,15 @@ fn setup_synth10k(
 ) -> anyhow::Result<super::super::plan::DailyHeadlineContext> {
     let repo = setup_registry_worktree(setup, synth10k_kind(setup.smoke))?;
     Ok(ctx(repo, setup))
+}
+
+fn setup_git_git_commit_graph(
+    setup: &DailySetup<'_>,
+) -> anyhow::Result<super::super::plan::DailyHeadlineContext> {
+    let headline = setup_git_git_history(setup)?;
+    write_git_commit_graph_reachable(setup.git, &headline.repo)?;
+    verify_git_commit_graph_in_repo(setup.git, &headline.repo)?;
+    Ok(headline)
 }
 
 fn setup_deep_tree_blame(
@@ -204,6 +213,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             correctness: None,
             build_git: |c| revs_count_literal_path_git_git_bench(c).1,
             build_grit: |c| revs_count_literal_path_git_git_bench(c).0,
+        },
+        DailyHeadlinePlan {
+            spec: scenario_spec("revs/count-range-commit-graph@git-git"),
+            pending: false,
+            setup: setup_git_git_commit_graph,
+            prepare: prepare_none,
+            correctness: None,
+            build_git: |c| sh_devnull(&c.git, &["rev-list", "--count", "HEAD~20..HEAD"]),
+            build_grit: |c| sh_devnull(&c.grit, &["revs", "--count", "HEAD~20..HEAD"]),
         },
         DailyHeadlinePlan {
             spec: scenario_spec("log/limit-path@git-git"),

@@ -449,6 +449,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Literal path count without commit-graph: grit revs --count 7e34d81 -- Documentation/git-log.txt vs git rev-list (issue #1517)",
     },
     ScenarioSpec {
+        id: "revs/count-range-commit-graph@git-git",
+        area: Area::Revwalk,
+        headline: false,
+        name: None,
+        description: "Bounded range count with a git-written commit-graph: HEAD~20..HEAD (issue #1669)",
+    },
+    ScenarioSpec {
         id: "log/limit-path@git-git",
         area: Area::Revwalk,
         headline: false,

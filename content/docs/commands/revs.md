@@ -23,7 +23,12 @@ grit revs <RANGE>... [-n <N>] [--count] [--left-right]
 
 Walks commits reachable from one or more revision ranges and prints each commit’s full object id and subject (first line of the message), one commit per line. Ranges use the same syntax as Git’s `rev-list`: plain tips, `A..B`, symmetric difference `A...B`, and `^tip` exclusions.
 
-Use `--count` to print only the number of reachable commits (no subject lines). With `--left-right` and exactly one `A...B` range, `--count` prints left and right counts (same as `git rev-list --left-right --count`). When a commit-graph file is present, the walk takes parents and commit dates from it instead of reading commit objects: counting reads no commits at all, and listing reads each listed commit once, only to render its row.
+Use `--count` to print only the number of reachable commits (no subject lines). With `--left-right` and exactly one `A...B` range, `--count` prints left and right counts (same as `git rev-list --left-right --count`). When a commit-graph file is present, the walk takes parents and commit dates from it instead of reading commit objects. Unfiltered counts use that graph linkage, and listings read each listed commit once to render its row.
+
+Unfiltered `A..B` counts use hidden ancestry boundaries. With a commit-graph,
+generation numbers let the count stop when the included side is resolved,
+without building ancestor sets for the shared history. A small range therefore
+stays bounded even in a repository with a deep history.
 
 Path arguments after `--` limit history to commits that touched those paths. Operands use Git pathspec cwd rules (same as [`grit diff`](../diff/)): from a subdirectory, `.` limits to that directory, and bare filenames are relative to the current directory, not the repository root.
 

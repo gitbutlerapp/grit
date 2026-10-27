@@ -1461,6 +1461,8 @@ impl CommitGraphChain {
             if pos >= total || !seen.insert(pos) {
                 continue;
             }
+            #[cfg(test)]
+            crate::merge_base::intersect_walk_test_hooks::record_commit_parent_lookup();
             let oid = self.oid_at_global_position(pos)?;
             let parents = if shallow.contains(&oid) {
                 Vec::new()
