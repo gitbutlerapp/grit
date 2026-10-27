@@ -24,7 +24,7 @@ use crate::index::{
 use crate::objects::ObjectId;
 use crate::odb::BULK_NEW_LOOSE_WRITE;
 use crate::path_icase::{
-    paths_equal, worktree_dentry_spelling, IcaseIndexCollisionGroups, Stage0IcasePathMap,
+    paths_equal, DentrySpellingCache, IcaseIndexCollisionGroups, Stage0IcasePathMap,
 };
 use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
 use crate::pathspec::{
@@ -954,51 +954,34 @@ fn stage_ignorecase_spelling_updates(
     index: &mut Index,
     dry_run: bool,
 ) -> Result<Vec<String>> {
-    let mut updated = Vec::new();
-    let stage0: Vec<Vec<u8>> = index
+    let collision_groups = IcaseIndexCollisionGroups::from_index(index, true);
+    let mut spellings = DentrySpellingCache::new(work_tree);
+    let respelled: Vec<(Vec<u8>, String)> = index
         .entries
         .iter()
         .filter(|e| e.stage() == 0 && e.mode != MODE_GITLINK && e.mode != MODE_TREE)
-        .map(|e| e.path.clone())
+        .filter_map(|e| {
+            let index_rel = std::str::from_utf8(&e.path).ok()?;
+            if !matches(index_rel) || collision_groups.has_collision_sibling(index_rel) {
+                return None;
+            }
+            let actual_rel = spellings.spelling(index_rel)?;
+            (actual_rel != index_rel && paths_equal(&e.path, actual_rel.as_bytes(), true))
+                .then(|| (e.path.clone(), actual_rel))
+        })
         .collect();
-    let collision_groups = IcaseIndexCollisionGroups::from_index(index, true);
+    if dry_run {
+        return Ok(respelled.into_iter().map(|(_, actual)| actual).collect());
+    }
 
-    for raw_path in stage0 {
-        let index_rel = match std::str::from_utf8(&raw_path) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        if !matches(index_rel) {
-            continue;
-        }
-        if collision_groups.has_collision_sibling(index_rel) {
-            continue;
-        }
-        let Some(actual_rel) = worktree_dentry_spelling(work_tree, index_rel) else {
-            continue;
-        };
-        if actual_rel == index_rel {
-            continue;
-        }
-        if !paths_equal(raw_path.as_slice(), actual_rel.as_bytes(), true) {
-            continue;
-        }
-        if dry_run {
-            updated.push(actual_rel);
-            continue;
-        }
-        let Some(entry) = index
-            .entries
-            .iter()
-            .find(|e| e.path == raw_path && e.stage() == 0)
-            .cloned()
-        else {
+    let mut updated = Vec::with_capacity(respelled.len());
+    for (raw_path, actual_rel) in respelled {
+        let Some(mut entry) = index.get(&raw_path, 0).cloned() else {
             continue;
         };
         icase_map.remove_alias_of(index, actual_rel.as_bytes());
-        let mut refreshed = entry;
-        refreshed.path = actual_rel.as_bytes().to_vec();
-        index.stage_file(refreshed);
+        entry.path = actual_rel.as_bytes().to_vec();
+        index.stage_file(entry);
         mark_fsmonitor_staged(index, &actual_rel);
         updated.push(actual_rel);
     }

@@ -140,20 +140,6 @@ impl Stage0IcasePathMap {
     }
 }
 
-/// Whether two repository-relative paths can refer to the same on-disk file (Git `paths_collide`).
-#[must_use]
-pub fn paths_collide(a: &str, b: &str, ignorecase: bool) -> bool {
-    if a.len() == b.len() {
-        return paths_equal(a.as_bytes(), b.as_bytes(), ignorecase);
-    }
-    if a.len() < b.len() {
-        return b.as_bytes().get(a.len()) == Some(&b'/')
-            && paths_equal(a.as_bytes(), &b.as_bytes()[..a.len()], ignorecase);
-    }
-    a.as_bytes().get(b.len()) == Some(&b'/')
-        && paths_equal(&a.as_bytes()[..b.len()], b.as_bytes(), ignorecase)
-}
-
 /// Compare two repository-relative paths for identity.
 #[must_use]
 pub fn paths_equal(path_a: &[u8], path_b: &[u8], ignorecase: bool) -> bool {
@@ -163,73 +149,136 @@ pub fn paths_equal(path_a: &[u8], path_b: &[u8], ignorecase: bool) -> bool {
     ignorecase && path_a.eq_ignore_ascii_case(path_b)
 }
 
-type ReadDirFn = fn(&Path) -> Option<std::io::Result<std::fs::ReadDir>>;
+fn cmp_ignore_ascii_case(a: &str, b: &str) -> std::cmp::Ordering {
+    a.bytes()
+        .map(|c| c.to_ascii_lowercase())
+        .cmp(b.bytes().map(|c| c.to_ascii_lowercase()))
+}
 
-fn icase_dentry_candidates(parent_abs: &Path, want: &str, read_dir: ReadDirFn) -> Vec<String> {
-    let Some(Ok(entries)) = read_dir(parent_abs) else {
-        return Vec::new();
+/// Entry names of one work-tree directory, sorted ASCII case-insensitively and then by
+/// bytes, so the case variants of a name form one sorted run.
+#[derive(Debug, Default)]
+struct DirListing(Vec<Box<str>>);
+
+impl DirListing {
+    fn read(dir_abs: &Path) -> Self {
+        let Ok(entries) = std::fs::read_dir(dir_abs) else {
+            return Self::default();
+        };
+        let mut names: Vec<Box<str>> = entries
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into())
+            .collect();
+        names.sort_unstable_by(|a, b| cmp_ignore_ascii_case(a, b).then_with(|| a.cmp(b)));
+        Self(names)
+    }
+
+    /// Every entry equal to `want` ignoring ASCII case, in byte order.
+    fn case_variants(&self, want: &str) -> &[Box<str>] {
+        let start = self
+            .0
+            .partition_point(|name| cmp_ignore_ascii_case(name, want).is_lt());
+        let len = self.0[start..].partition_point(|name| cmp_ignore_ascii_case(name, want).is_eq());
+        &self.0[start..start + len]
+    }
+}
+
+/// The `nth` entry of `variants` in lookup order: the exact spelling `want` first, then
+/// the other case variants in byte order.
+fn nth_dentry_candidate<'b>(variants: &'b [Box<str>], want: &str, nth: usize) -> Option<&'b str> {
+    let exact = variants.iter().position(|name| &**name == want);
+    let pos = match (exact, nth) {
+        (Some(exact), 0) => exact,
+        (Some(exact), n) if n <= exact => n - 1,
+        (_, n) => n,
     };
-    let mut names = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.eq_ignore_ascii_case(want) {
-            names.push(name);
+    variants.get(pos).map(|name| &**name)
+}
+
+/// Resolves on-disk dentry spellings of repository-relative paths, reading each work-tree
+/// directory at most once.
+///
+/// [`worktree_dentry_spelling`] answers a single lookup; use this cache when resolving many
+/// paths in one pass so the cost is one `readdir` per directory instead of one per path
+/// component.
+#[derive(Debug)]
+pub(crate) struct DentrySpellingCache<'w> {
+    work_tree: &'w Path,
+    /// Listings keyed by the directory's on-disk spelling relative to the work tree (`""`
+    /// for the root).
+    dirs: hashbrown::HashMap<String, DirListing>,
+}
+
+impl<'w> DentrySpellingCache<'w> {
+    pub(crate) fn new(work_tree: &'w Path) -> Self {
+        Self {
+            work_tree,
+            dirs: hashbrown::HashMap::new(),
         }
     }
-    names.sort_by(|a, b| {
-        let a_exact = a.as_str() == want;
-        let b_exact = b.as_str() == want;
-        b_exact.cmp(&a_exact).then_with(|| a.cmp(b))
-    });
-    names
-}
 
-fn icase_dentry_spelling_from(
-    parent_abs: &Path,
-    components: &[&str],
-    read_dir: ReadDirFn,
-) -> Option<String> {
-    let [head, tail @ ..] = components else {
-        return Some(String::new());
-    };
-    for actual in icase_dentry_candidates(parent_abs, head, read_dir) {
-        let mut child_abs = parent_abs.to_path_buf();
-        child_abs.push(&actual);
-        let Some(suffix) = icase_dentry_spelling_from(&child_abs, tail, read_dir) else {
-            continue;
-        };
-        return Some(if suffix.is_empty() {
-            actual
-        } else {
-            format!("{actual}/{suffix}")
-        });
+    /// Repository-relative path using each component's on-disk spelling, or `None` when
+    /// no case variant of `index_rel` exists in the work tree.
+    pub(crate) fn spelling(&mut self, index_rel: &str) -> Option<String> {
+        let mut resolved = String::with_capacity(index_rel.len());
+        (self.resolve_into(&mut resolved, index_rel) && !resolved.is_empty()).then_some(resolved)
     }
-    None
-}
 
-fn read_dir_default(parent_abs: &Path) -> Option<std::io::Result<std::fs::ReadDir>> {
-    Some(std::fs::read_dir(parent_abs))
+    /// Append the on-disk spelling of the `/`-separated `rest` below directory `prefix` to
+    /// `prefix`, skipping empty components.
+    ///
+    /// Tries every case variant of each component (exact spelling first) so an empty
+    /// `Dir/` next to `dir/a.txt` on a case-sensitive volume still resolves `Dir/a.txt`.
+    fn resolve_into(&mut self, prefix: &mut String, rest: &str) -> bool {
+        let rest = rest.trim_start_matches('/');
+        if rest.is_empty() {
+            return true;
+        }
+        let (head, tail) = rest.split_once('/').unwrap_or((rest, ""));
+        let base_len = prefix.len();
+        for nth in 0.. {
+            let variants = self.listing(prefix).case_variants(head);
+            let Some(actual) = nth_dentry_candidate(variants, head, nth) else {
+                return false;
+            };
+            if !prefix.is_empty() {
+                prefix.push('/');
+            }
+            prefix.push_str(actual);
+            if self.resolve_into(prefix, tail) {
+                return true;
+            }
+            prefix.truncate(base_len);
+        }
+        false
+    }
+
+    fn listing(&mut self, dir_rel: &str) -> &DirListing {
+        let work_tree = self.work_tree;
+        self.dirs
+            .entry_ref(dir_rel)
+            .or_insert_with(|| DirListing::read(&work_tree.join(dir_rel)))
+    }
 }
 
 /// Repository-relative path using each parent directory entry's on-disk spelling.
 ///
 /// On case-insensitive volumes this reflects the dentry spelling from `readdir`, not the
 /// index's lexical path (Git's `core.ignorecase` behavior).
+///
+/// # Parameters
+///
+/// - `work_tree`: root of the work tree.
+/// - `index_rel`: `/`-separated path relative to `work_tree`, compared ASCII
+///   case-insensitively against directory entries.
+///
+/// # Returns
+///
+/// The on-disk spelling of every component (the exact spelling wins when several case
+/// variants exist), or `None` when no case variant of the path exists.
 #[must_use]
 pub fn worktree_dentry_spelling(work_tree: &Path, index_rel: &str) -> Option<String> {
-    worktree_dentry_spelling_with(work_tree, index_rel, read_dir_default)
-}
-
-fn worktree_dentry_spelling_with(
-    work_tree: &Path,
-    index_rel: &str,
-    read_dir: ReadDirFn,
-) -> Option<String> {
-    let components: Vec<&str> = index_rel.split('/').filter(|c| !c.is_empty()).collect();
-    if components.is_empty() {
-        return None;
-    }
-    icase_dentry_spelling_from(work_tree, &components, read_dir).filter(|s| !s.is_empty())
+    DentrySpellingCache::new(work_tree).spelling(index_rel)
 }
 
 /// Resolve a worktree path for an index entry, honoring case-insensitive filesystems.
@@ -255,26 +304,12 @@ pub fn icase_checkout_collision_paths(index: &Index, ignorecase: bool) -> Vec<St
     if !ignorecase {
         return Vec::new();
     }
-    let paths: Vec<String> = index
-        .entries
-        .iter()
-        .filter(|e| e.stage() == 0 && e.mode != MODE_TREE && e.mode != MODE_GITLINK)
-        .filter_map(|e| std::str::from_utf8(&e.path).ok().map(str::to_owned))
+    let paths = stage0_blob_paths(index);
+    let collided: BTreeSet<String> = icase_collision_groups(&paths, false)
+        .into_iter()
+        .flatten()
         .collect();
-    let groups = icase_collision_groups(&paths, ignorecase);
-    let mut collided = BTreeSet::new();
-    for group in groups {
-        if group.len() > 1 {
-            collided.extend(group);
-        }
-    }
     collided.into_iter().collect()
-}
-
-/// Whether `index_rel` is the spelling that exists on disk (not a case alias).
-#[must_use]
-pub fn index_path_matches_worktree_dentry(work_tree: &Path, index_rel: &str) -> bool {
-    worktree_dentry_spelling(work_tree, index_rel).is_some_and(|spelling| spelling == index_rel)
 }
 
 /// Stage-0 checkout collision groups keyed by a stable group id (built once per pass).
@@ -290,7 +325,7 @@ impl IcaseIndexCollisionGroups {
             return Self::default();
         }
         let paths = stage0_blob_paths(index);
-        let grouped = icase_collision_groups(&paths, true);
+        let grouped = icase_collision_groups(&paths, false);
         let mut path_to_group = HashMap::new();
         let mut members_by_group = HashMap::new();
         for (key, group) in grouped.into_iter().enumerate() {
@@ -330,11 +365,12 @@ impl IcaseCheckoutCollisionMap {
             };
         }
         let mut winner_by_group = HashMap::new();
+        let mut spellings = DentrySpellingCache::new(work_tree);
         for (key, members) in &groups.members_by_group {
             if members.len() <= 1 {
                 continue;
             }
-            let winner = resolve_collision_group_dentry_winner(work_tree, members);
+            let winner = resolve_collision_group_dentry_winner(&mut spellings, members);
             winner_by_group.insert(*key, winner);
         }
         Self {
@@ -366,22 +402,21 @@ impl IcaseCheckoutCollisionMap {
     }
 }
 
-fn stage0_blob_paths(index: &Index) -> Vec<String> {
+fn stage0_blob_paths(index: &Index) -> Vec<&str> {
     index
         .entries
         .iter()
         .filter(|e| e.stage() == 0 && e.mode != MODE_TREE && e.mode != MODE_GITLINK)
-        .filter_map(|e| std::str::from_utf8(&e.path).ok().map(str::to_owned))
+        .filter_map(|e| std::str::from_utf8(&e.path).ok())
         .collect()
 }
 
-fn resolve_collision_group_dentry_winner(work_tree: &Path, members: &[String]) -> String {
-    if let Some(dentry) = members
-        .iter()
-        .find_map(|p| worktree_dentry_spelling(work_tree, p))
-    {
+fn resolve_collision_group_dentry_winner(
+    spellings: &mut DentrySpellingCache<'_>,
+    members: &[String],
+) -> String {
+    if let Some(dentry) = members.iter().find_map(|p| spellings.spelling(p)) {
         if let Some(exact) = members.iter().find(|m| **m == dentry) {
-            debug_assert!(index_path_matches_worktree_dentry(work_tree, exact));
             return exact.clone();
         }
     }
@@ -446,13 +481,14 @@ pub fn icase_worktree_file_stats(
         return (files, bytes);
     }
     let paths = stage0_blob_paths(index);
-    let groups = icase_collision_groups(&paths, ignorecase);
+    let groups = icase_collision_groups(&paths, true);
+    let mut spellings = work_tree.map(DentrySpellingCache::new);
     for group in groups {
         files += 1;
         let mut group_bytes = 0u64;
-        if let Some(wt) = work_tree {
+        if let (Some(wt), Some(spellings)) = (work_tree, spellings.as_mut()) {
             let probe = if group.len() > 1 {
-                resolve_collision_group_dentry_winner(wt, &group)
+                resolve_collision_group_dentry_winner(spellings, &group)
             } else {
                 group[0].clone()
             };
@@ -475,86 +511,72 @@ pub fn icase_worktree_file_stats(
     (files, bytes)
 }
 
-fn icase_collision_groups(paths: &[String], ignorecase: bool) -> Vec<Vec<String>> {
-    let n = paths.len();
-    if n == 0 {
-        return Vec::new();
-    }
-    if !ignorecase {
-        return paths.iter().map(|p| vec![p.clone()]).collect();
-    }
-    let normalized: Vec<Vec<u8>> = paths
-        .iter()
-        .map(|p| p.to_ascii_lowercase().into_bytes())
-        .collect();
-    let mut parent: Vec<usize> = (0..n).collect();
+/// Group `paths` that share one worktree slot when ASCII case is ignored: equal paths, or
+/// one path naming a leading directory of the other (Git's `paths_collide`), closed
+/// transitively.
+///
+/// Each group and the list of groups are sorted. Paths that collide with nothing form
+/// single-path groups, returned only when `singletons` is set.
+fn icase_collision_groups(paths: &[&str], singletons: bool) -> Vec<Vec<String>> {
     fn find(parent: &mut [usize], i: usize) -> usize {
-        if parent[i] != i {
-            let root = find(parent, parent[i]);
-            parent[i] = root;
+        let mut root = i;
+        while parent[root] != root {
+            root = parent[root];
         }
-        parent[i]
-    }
-    fn union(parent: &mut [usize], a: usize, b: usize) {
-        let ra = find(parent, a);
-        let rb = find(parent, b);
-        if ra != rb {
-            parent[rb] = ra;
+        let mut node = i;
+        while parent[node] != root {
+            let next = parent[node];
+            parent[node] = root;
+            node = next;
         }
+        root
     }
 
-    let mut by_full: HashMap<u32, Vec<usize>> = HashMap::new();
-    for (i, key) in normalized.iter().enumerate() {
-        by_full.entry(memihash(key)).or_default().push(i);
-    }
-    for indices in by_full.values() {
-        for a in 0..indices.len() {
-            for b in (a + 1)..indices.len() {
-                let i = indices[a];
-                let j = indices[b];
-                if paths_collide(&paths[i], &paths[j], true) {
-                    union(&mut parent, i, j);
-                }
-            }
-        }
+    // Paths bucketed by case-folded hash as singly linked chains: `head` holds the first
+    // path of each bucket and `next` the following one, so building costs no per-bucket
+    // allocation.
+    let mut head: HashMap<u32, usize> = HashMap::with_capacity(paths.len());
+    let mut next: Vec<Option<usize>> = Vec::with_capacity(paths.len());
+    for (i, path) in paths.iter().enumerate() {
+        next.push(head.insert(memihash(path.as_bytes()), i));
     }
 
-    let full_path_set: std::collections::HashSet<u32> =
-        normalized.iter().map(|p| memihash(p)).collect();
-    for (i, key) in normalized.iter().enumerate() {
-        let mut prefix = Vec::new();
-        for (part_idx, part) in key.split(|&b| b == b'/').enumerate() {
-            if part_idx > 0 {
-                prefix.push(b'/');
-            }
-            prefix.extend_from_slice(part);
-            if prefix == *key {
-                break;
-            }
-            let prefix_hash = memihash(&prefix);
-            if !full_path_set.contains(&prefix_hash) {
-                continue;
-            }
-            if let Some(others) = by_full.get(&prefix_hash) {
-                for &j in others {
-                    if normalized[j] == prefix {
-                        union(&mut parent, i, j);
+    let mut parent: Vec<usize> = (0..paths.len()).collect();
+    for (i, path) in paths.iter().enumerate() {
+        let bytes = path.as_bytes();
+        let leading_dirs = bytes
+            .iter()
+            .enumerate()
+            .filter(|&(_, &b)| b == b'/')
+            .map(|(slash, _)| &bytes[..slash]);
+        for key in leading_dirs.chain(std::iter::once(bytes)) {
+            let mut cursor = head.get(&memihash(key)).copied();
+            while let Some(j) = cursor {
+                cursor = next[j];
+                if j != i && paths[j].as_bytes().eq_ignore_ascii_case(key) {
+                    let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
+                    if ri != rj {
+                        parent[rj] = ri;
                     }
                 }
             }
         }
     }
 
+    let roots: Vec<usize> = (0..paths.len()).map(|i| find(&mut parent, i)).collect();
+    let mut sizes = vec![0usize; paths.len()];
+    for &root in &roots {
+        sizes[root] += 1;
+    }
     let mut by_root: HashMap<usize, Vec<String>> = HashMap::new();
-    for (i, path) in paths.iter().enumerate() {
-        by_root
-            .entry(find(&mut parent, i))
-            .or_default()
-            .push(path.clone());
+    for (path, &root) in paths.iter().zip(&roots) {
+        if singletons || sizes[root] > 1 {
+            by_root.entry(root).or_default().push((*path).to_owned());
+        }
     }
     let mut groups: Vec<Vec<String>> = by_root.into_values().collect();
-    for g in &mut groups {
-        g.sort();
+    for group in &mut groups {
+        group.sort();
     }
     groups.sort();
     groups
@@ -587,12 +609,32 @@ mod tests {
     }
 
     #[test]
-    fn paths_collide_dir_and_file() {
-        assert!(paths_collide("a", "a/b", false));
-        assert!(paths_collide("A/B", "a", true));
-        assert!(!paths_collide("a/b", "a/c", false));
-        assert!(paths_collide("File.txt", "file.txt", true));
-        assert!(paths_collide("Dir/a.txt", "dir/A.txt", true));
+    fn collision_groups_join_case_aliases_and_dir_file_pairs() {
+        let paths = [
+            "A/B",
+            "a",
+            "a/c",
+            "File.txt",
+            "file.txt",
+            "Dir/a.txt",
+            "dir/A.txt",
+            "dir/b.txt",
+            "lone",
+            "a.txt",
+        ];
+        assert_eq!(
+            icase_collision_groups(&paths, false),
+            vec![
+                vec!["A/B".to_owned(), "a".to_owned(), "a/c".to_owned()],
+                vec!["Dir/a.txt".to_owned(), "dir/A.txt".to_owned()],
+                vec!["File.txt".to_owned(), "file.txt".to_owned()],
+            ]
+        );
+        let all = icase_collision_groups(&paths, true);
+        assert_eq!(all.len(), 6);
+        assert!(all.contains(&vec!["lone".to_owned()]));
+        assert!(all.contains(&vec!["dir/b.txt".to_owned()]));
+        assert!(icase_collision_groups(&["a/b", "a/c", "b"], false).is_empty());
     }
 
     #[test]
@@ -649,8 +691,14 @@ mod tests {
             worktree_dentry_spelling(wt, "File.txt").as_deref(),
             Some("file.txt")
         );
-        assert!(index_path_matches_worktree_dentry(wt, "file.txt"));
-        assert!(!index_path_matches_worktree_dentry(wt, "File.txt"));
+        assert_eq!(
+            worktree_dentry_spelling(wt, "file.txt").as_deref(),
+            Some("file.txt")
+        );
+        assert_ne!(
+            worktree_dentry_spelling(wt, "File.txt").as_deref(),
+            Some("File.txt")
+        );
     }
 
     fn worktree_has_distinct_icase_dentries(base: &Path) -> bool {
@@ -678,7 +726,10 @@ mod tests {
                 worktree_dentry_spelling(wt, "Dir/a.txt").as_deref(),
                 Some("dir/A.txt")
             );
-            assert!(!index_path_matches_worktree_dentry(wt, "Dir/a.txt"));
+            assert_ne!(
+                worktree_dentry_spelling(wt, "Dir/a.txt").as_deref(),
+                Some("Dir/a.txt")
+            );
             return;
         }
         std::fs::create_dir(wt.join("Dir")).expect("Dir");
@@ -688,7 +739,101 @@ mod tests {
             worktree_dentry_spelling(wt, "Dir/a.txt").as_deref(),
             Some("dir/A.txt")
         );
-        assert!(!index_path_matches_worktree_dentry(wt, "Dir/a.txt"));
+        assert_ne!(
+            worktree_dentry_spelling(wt, "Dir/a.txt").as_deref(),
+            Some("Dir/a.txt")
+        );
+    }
+
+    #[test]
+    fn dentry_cache_reads_each_directory_once() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        for d in 0..3 {
+            std::fs::create_dir_all(wt.join(format!("d{d}/sub"))).expect("mkdir");
+            for f in 0..20 {
+                std::fs::write(wt.join(format!("d{d}/sub/f{f}.txt")), b"x").expect("write");
+            }
+        }
+        let mut cache = DentrySpellingCache::new(wt);
+        for d in 0..3 {
+            for f in 0..20 {
+                let rel = format!("d{d}/sub/f{f}.txt");
+                assert_eq!(cache.spelling(&rel).as_deref(), Some(rel.as_str()));
+            }
+        }
+        assert_eq!(cache.dirs.len(), 1 + 3 + 3, "root, d*, d*/sub");
+        assert_eq!(cache.spelling("d0/sub/missing.txt"), None);
+        assert_eq!(cache.spelling("nope/f0.txt"), None);
+        assert_eq!(cache.spelling(""), None);
+        assert_eq!(cache.dirs.len(), 1 + 3 + 3, "missing paths reuse listings");
+    }
+
+    #[test]
+    fn dentry_cache_matches_one_off_lookup() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        std::fs::create_dir_all(wt.join("Src/Deep")).expect("mkdir");
+        std::fs::write(wt.join("Src/Deep/Main.rs"), b"x").expect("write");
+        std::fs::write(wt.join("README"), b"x").expect("write");
+        let mut cache = DentrySpellingCache::new(wt);
+        for rel in [
+            "src/deep/main.rs",
+            "SRC/DEEP/MAIN.RS",
+            "Src/Deep/Main.rs",
+            "readme",
+            "src/deep",
+            "src/other.rs",
+            "/src//deep/main.rs",
+        ] {
+            assert_eq!(
+                cache.spelling(rel),
+                worktree_dentry_spelling(wt, rel),
+                "{rel}"
+            );
+        }
+        assert_eq!(
+            cache.spelling("src/deep/main.rs").as_deref(),
+            Some("Src/Deep/Main.rs")
+        );
+    }
+
+    #[test]
+    fn dentry_candidates_put_exact_spelling_first() {
+        let bucket: Vec<Box<str>> = ["A.txt", "a.TXT", "a.txt"]
+            .into_iter()
+            .map(Box::from)
+            .collect();
+        let order: Vec<&str> = (0..)
+            .map_while(|n| nth_dentry_candidate(&bucket, "a.TXT", n))
+            .collect();
+        assert_eq!(order, ["a.TXT", "A.txt", "a.txt"]);
+        let order: Vec<&str> = (0..)
+            .map_while(|n| nth_dentry_candidate(&bucket, "A.TXT", n))
+            .collect();
+        assert_eq!(order, ["A.txt", "a.TXT", "a.txt"]);
+        let order: Vec<&str> = (0..)
+            .map_while(|n| nth_dentry_candidate(&bucket, "a.txt", n))
+            .collect();
+        assert_eq!(order, ["a.txt", "A.txt", "a.TXT"]);
+    }
+
+    #[test]
+    fn dir_listing_case_variants_are_one_sorted_run() {
+        let mut names: Vec<Box<str>> = ["b", "a.txt", "A.TXT", "a.txtx", "a", "A.txt", "_"]
+            .into_iter()
+            .map(Box::from)
+            .collect();
+        names.sort_unstable_by(|a, b| cmp_ignore_ascii_case(a, b).then_with(|| a.cmp(b)));
+        let listing = DirListing(names);
+        let variants: Vec<&str> = listing
+            .case_variants("a.Txt")
+            .iter()
+            .map(|n| &**n)
+            .collect();
+        assert_eq!(variants, ["A.TXT", "A.txt", "a.txt"]);
+        assert!(listing.case_variants("c").is_empty());
+        assert_eq!(listing.case_variants("A").len(), 1);
     }
 
     #[test]
@@ -722,8 +867,14 @@ mod tests {
             worktree_dentry_spelling(wt, "dir/A.txt").as_deref(),
             Some("dir/A.txt")
         );
-        assert!(!index_path_matches_worktree_dentry(wt, "Dir/a.txt"));
-        assert!(index_path_matches_worktree_dentry(wt, "dir/A.txt"));
+        assert_ne!(
+            worktree_dentry_spelling(wt, "Dir/a.txt").as_deref(),
+            Some("Dir/a.txt")
+        );
+        assert_eq!(
+            worktree_dentry_spelling(wt, "dir/A.txt").as_deref(),
+            Some("dir/A.txt")
+        );
     }
 
     #[test]
