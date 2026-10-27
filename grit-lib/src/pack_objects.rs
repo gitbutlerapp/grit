@@ -1338,6 +1338,7 @@ pub(crate) fn plan_deltas(
     let search = opts.window > 0 && opts.max_depth > 0;
     let thin = opts.thin && search;
     let infos = read_object_infos(odb, send, search_threads)?;
+    let mut peer_blobs = LazyPeerTreeBlobs::default();
     let in_pack: HashSet<ObjectId> = if reuse_on_disk || thin || opts.respect_islands {
         send.iter().copied().collect()
     } else {
@@ -1363,11 +1364,7 @@ pub(crate) fn plan_deltas(
         // written as `REF_DELTA` and completed by the receiver.
         let mut reusable_bases = in_pack.clone();
         if opts.thin && !have_tips.is_empty() {
-            for &tip in have_tips {
-                if odb.read_info(&tip)?.kind == ObjectKind::Commit {
-                    reusable_bases.extend(blob_oids_in_commit(odb, tip)?);
-                }
-            }
+            reusable_bases.extend(peer_blobs.get(odb, have_tips)?.oids());
         }
         let reusable_bases = Cow::Owned(reusable_bases);
         let empty_resolved: HashMap<ObjectId, Object> = HashMap::new();
@@ -1439,6 +1436,11 @@ pub(crate) fn plan_deltas(
         let in_pack_oid: OidHashSet = in_pack.iter().copied().collect();
         let window = opts.window.max(opts.max_depth).max(1);
         let bitmap_index = peer_held.map(ReachableSet::bitmap_index);
+        let opened_index = match (bitmap_index, thin_targets.is_empty()) {
+            (None, false) => open_pack_bitmap_index(odb),
+            _ => None,
+        };
+        let bitmap_index = bitmap_index.or(opened_index.as_ref());
         for t in thin_targets {
             let t_data = odb.read(&t)?.data;
             let path_key = name_hashes.get(&t).copied().unwrap_or(0);
@@ -1449,6 +1451,7 @@ pub(crate) fn plan_deltas(
                 path_key,
                 &in_pack_oid,
                 have_tips,
+                &mut peer_blobs,
                 peer_held,
                 bitmap_index,
                 &islands,
@@ -1642,6 +1645,7 @@ fn find_thin_pack_peer_blob_base(
     name_hash: u32,
     in_send: &OidHashSet,
     have_tips: &HashSet<ObjectId>,
+    peer_blobs: &mut LazyPeerTreeBlobs,
     peer_held: Option<&ReachableSet>,
     bitmap_index: Option<&std::sync::Arc<BitmapIndex>>,
     islands: &DeltaIslands,
@@ -1695,9 +1699,7 @@ fn find_thin_pack_peer_blob_base(
         }
     }
     if best.is_none() {
-        let opened = open_pack_bitmap_index(odb);
-        let index = bitmap_index.or(opened.as_ref());
-        if let Some(index) = index {
+        if let Some(index) = bitmap_index {
             let count = index.object_count();
             let mut seen_same_path = 0usize;
             for pos in (0..count).rev() {
@@ -1745,7 +1747,15 @@ fn find_thin_pack_peer_blob_base(
         }
     }
     if best.is_none() {
-        for (oid, data) in peer_blobs_from_have_commits(odb, have_tips, name_hash)? {
+        let candidates = peer_blobs.get(odb, have_tips)?.with_name_hash(name_hash);
+        for &oid in candidates {
+            let Ok(blob) = odb.read(&oid) else {
+                continue;
+            };
+            if blob.kind != ObjectKind::Blob || blob.data.is_empty() {
+                continue;
+            }
+            let data = blob.data;
             record_thin_peer_candidate(
                 &mut best,
                 target,
@@ -1765,81 +1775,100 @@ fn find_thin_pack_peer_blob_base(
     Ok(best.map(|(oid, _, data)| (oid, data)))
 }
 
-fn blob_oids_in_commit(odb: &Odb, commit_oid: ObjectId) -> Result<HashSet<ObjectId>> {
-    let mut out = HashSet::new();
-    let commit_obj = odb.read(&commit_oid)?;
-    if commit_obj.kind != ObjectKind::Commit {
-        return Ok(out);
-    }
-    let commit = parse_commit(&commit_obj.data)?;
-    let oid_len = odb.hash_algo().len();
-    let mut queue = VecDeque::from([commit.tree]);
-    while let Some(tree_oid) = queue.pop_front() {
-        let tree_obj = odb.read(&tree_oid)?;
-        for entry in TreeRefIter::with_oid_len(&tree_obj.data, oid_len) {
-            let entry = entry?;
-            if entry.mode == 0o160000 {
-                continue;
-            }
-            if entry.mode & 0o170000 == 0o040000 {
-                queue.push_back(entry.oid);
-            } else {
-                out.insert(entry.oid);
-            }
-        }
-    }
-    Ok(out)
+/// Blobs in the trees of peer-held commits, keyed by the pack name hash of their path.
+///
+/// Thin packs may delta against these without sending them. Trees shared between
+/// commits are walked once, at the first path they are found at.
+#[derive(Default)]
+struct PeerTreeBlobs {
+    by_name_hash: HashMap<u32, Vec<ObjectId>>,
+    /// Blobs at paths without a name hash (non-regular modes).
+    unnamed: Vec<ObjectId>,
 }
 
-fn peer_blobs_from_have_commits(
-    odb: &Odb,
-    have_tips: &HashSet<ObjectId>,
-    name_hash: u32,
-) -> Result<Vec<(ObjectId, Vec<u8>)>> {
-    let oid_len = odb.hash_algo().len();
-    let mut out = Vec::new();
-    for &commit_oid in have_tips {
-        let commit_obj = match odb.read(&commit_oid) {
-            Ok(o) => o,
-            Err(_) => continue,
-        };
-        if commit_obj.kind != ObjectKind::Commit {
-            continue;
-        }
-        let commit = parse_commit(&commit_obj.data)?;
-        let mut queue = VecDeque::from([(commit.tree, String::new())]);
-        while let Some((tree_oid, path)) = queue.pop_front() {
-            let tree_obj = match odb.read(&tree_oid) {
-                Ok(o) => o,
-                Err(_) => continue,
+impl PeerTreeBlobs {
+    /// Walk the root trees of the commits in `commits`; other objects and missing
+    /// objects are skipped.
+    fn collect(odb: &Odb, commits: &HashSet<ObjectId>) -> Result<Self> {
+        let oid_len = odb.hash_algo().len();
+        let mut out = Self::default();
+        let mut seen: OidHashSet = oid_hash_set();
+        let mut queue: VecDeque<(ObjectId, String)> = VecDeque::new();
+        for &commit_oid in commits {
+            let Ok(commit_obj) = odb.read(&commit_oid) else {
+                continue;
             };
+            if commit_obj.kind != ObjectKind::Commit {
+                continue;
+            }
+            queue.push_back((parse_commit(&commit_obj.data)?.tree, String::new()));
+        }
+        while let Some((tree_oid, path)) = queue.pop_front() {
+            if !seen.insert(tree_oid) {
+                continue;
+            }
+            let Ok(tree_obj) = odb.read(&tree_oid) else {
+                continue;
+            };
+            if tree_obj.kind != ObjectKind::Tree {
+                out.unnamed.push(tree_oid);
+                continue;
+            }
             for entry in TreeRefIter::with_oid_len(&tree_obj.data, oid_len) {
                 let entry = entry?;
                 if entry.mode == 0o160000 {
                     continue;
                 }
-                let child_path = if path.is_empty() {
-                    String::from_utf8_lossy(entry.name).into_owned()
-                } else {
-                    format!("{}/{}", path, String::from_utf8_lossy(entry.name))
+                let child_path = || {
+                    let name = String::from_utf8_lossy(entry.name);
+                    if path.is_empty() {
+                        name.into_owned()
+                    } else {
+                        format!("{path}/{name}")
+                    }
                 };
                 match entry.mode & 0o170000 {
-                    0o040000 => queue.push_back((entry.oid, child_path)),
-                    0o100000 | 0o120000 => {
-                        if pack_name_hash(&child_path) != name_hash {
-                            continue;
-                        }
-                        let blob = odb.read(&entry.oid)?;
-                        if blob.kind == ObjectKind::Blob && !blob.data.is_empty() {
-                            out.push((entry.oid, blob.data));
-                        }
-                    }
-                    _ => queue.push_back((entry.oid, child_path)),
+                    0o100000 | 0o120000 => out
+                        .by_name_hash
+                        .entry(pack_name_hash(&child_path()))
+                        .or_default()
+                        .push(entry.oid),
+                    _ => queue.push_back((entry.oid, child_path())),
                 }
             }
         }
+        Ok(out)
     }
-    Ok(out)
+
+    /// Every blob found.
+    fn oids(&self) -> impl Iterator<Item = ObjectId> + '_ {
+        self.by_name_hash
+            .values()
+            .flatten()
+            .chain(&self.unnamed)
+            .copied()
+    }
+
+    /// Blobs found at paths with name hash `name_hash`.
+    fn with_name_hash(&self, name_hash: u32) -> &[ObjectId] {
+        self.by_name_hash
+            .get(&name_hash)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+}
+
+/// [`PeerTreeBlobs`] for one pack's have tips, collected on first use.
+#[derive(Default)]
+struct LazyPeerTreeBlobs(Option<PeerTreeBlobs>);
+
+impl LazyPeerTreeBlobs {
+    fn get(&mut self, odb: &Odb, have_tips: &HashSet<ObjectId>) -> Result<&PeerTreeBlobs> {
+        if self.0.is_none() {
+            self.0 = Some(PeerTreeBlobs::collect(odb, have_tips)?);
+        }
+        Ok(self.0.get_or_insert_default())
+    }
 }
 
 fn open_pack_bitmap_index(odb: &Odb) -> Option<std::sync::Arc<BitmapIndex>> {
@@ -2139,5 +2168,72 @@ pub(crate) mod tests {
             (10, crate::pack::DEFAULT_PACK_DEPTH)
         );
         assert!(defaults.reuse_deltas && defaults.reuse_objects && !defaults.thin);
+    }
+
+    #[test]
+    fn peer_tree_blobs_walk_shared_trees_once_and_key_blobs_by_path() {
+        use crate::objects::{serialize_tree, TreeEntry};
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo =
+            Repository::init(dir.path(), &crate::repo::InitOptions::default()).expect("init");
+        let odb = repo.odb();
+        let tree = |entries: &[(u32, &str, ObjectId)]| {
+            let entries: Vec<TreeEntry> = entries
+                .iter()
+                .map(|&(mode, name, oid)| TreeEntry {
+                    mode,
+                    name: name.as_bytes().to_vec(),
+                    oid,
+                })
+                .collect();
+            odb.write(ObjectKind::Tree, &serialize_tree(&entries))
+                .unwrap()
+        };
+        let commit = |tree: ObjectId| {
+            let body = format!(
+                "tree {}\nauthor A <a@example.com> 0 +0000\ncommitter A <a@example.com> 0 +0000\n\nc\n",
+                tree.to_hex()
+            );
+            odb.write(ObjectKind::Commit, body.as_bytes()).unwrap()
+        };
+        let shared_blob = odb.write(ObjectKind::Blob, b"shared").unwrap();
+        let readme = odb.write(ObjectKind::Blob, b"readme").unwrap();
+        let other = odb.write(ObjectKind::Blob, b"other").unwrap();
+        let shared = tree(&[(0o100644, "lib.rs", shared_blob)]);
+        let gitlink = ObjectId::from_hex("1234567890123456789012345678901234567890").unwrap();
+        let first = commit(tree(&[
+            (0o100644, "README", readme),
+            (0o040000, "src", shared),
+            (0o160000, "module", gitlink),
+        ]));
+        let second = commit(tree(&[
+            (0o100644, "README", other),
+            (0o040000, "src", shared),
+        ]));
+        let blob_tag = ObjectId::from_hex("abcdefabcdefabcdefabcdefabcdefabcdefabcd").unwrap();
+
+        let blobs = PeerTreeBlobs::collect(odb, &HashSet::from([first, second, blob_tag])).unwrap();
+        let mut readmes = blobs.with_name_hash(pack_name_hash("README")).to_vec();
+        readmes.sort();
+        let mut expected = vec![readme, other];
+        expected.sort();
+        assert_eq!(readmes, expected);
+        assert_eq!(
+            blobs.with_name_hash(pack_name_hash("src/lib.rs")),
+            &[shared_blob],
+            "a tree both commits share is walked once"
+        );
+        let all: HashSet<ObjectId> = blobs.oids().collect();
+        assert_eq!(all, HashSet::from([readme, other, shared_blob]));
+        assert!(blobs.with_name_hash(pack_name_hash("missing")).is_empty());
+
+        let mut lazy = LazyPeerTreeBlobs::default();
+        let tips = HashSet::from([second]);
+        assert_eq!(lazy.get(odb, &tips).unwrap().oids().count(), 2);
+        assert_eq!(
+            lazy.get(odb, &HashSet::new()).unwrap().oids().count(),
+            2,
+            "collected once per pack"
+        );
     }
 }

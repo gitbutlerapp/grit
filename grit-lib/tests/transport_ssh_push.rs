@@ -403,3 +403,89 @@ fn incremental_ssh_push_with_advertised_blob_and_tree_tags() {
     }
     git(&bare, &["fsck", "--strict", "--no-dangling"]);
 }
+
+/// One new commit pushed to a remote that advertises many unrelated branches and tags
+/// travels as a thin pack of exactly that commit, its tree and the changed blob, deltified
+/// against the version the remote already has.
+#[test]
+fn one_commit_ssh_push_over_many_advertised_tips_sends_a_thin_pack() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let big: String = (0..400).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(local.join("big.txt"), &big).unwrap();
+    git(&local, &["add", "big.txt"]);
+    git(&local, &["commit", "-q", "-m", "base"]);
+    for i in 0..30 {
+        git(
+            &local,
+            &["checkout", "-q", "-b", &format!("side{i}"), "main"],
+        );
+        std::fs::write(local.join(format!("side{i}.txt")), format!("{i}\n{big}")).unwrap();
+        git(&local, &["add", "."]);
+        git(&local, &["commit", "-q", "-m", &format!("side {i}")]);
+        git(&local, &["tag", "-a", &format!("v{i}"), "-m", "release"]);
+    }
+    git(&local, &["checkout", "-q", "main"]);
+    let bare = tmp.path().join("remote.git");
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            local.to_str().unwrap(),
+            "remote.git",
+        ],
+    );
+    git(&bare, &["config", "transfer.unpackLimit", "1"]);
+    std::fs::write(local.join("big.txt"), format!("{big}one more line\n")).unwrap();
+    git(&local, &["commit", "-q", "-am", "edit"]);
+    let tip = rev_parse(&local, "HEAD");
+
+    let packs = |dir: &Path| -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(dir.join("objects/pack"))
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|x| x == "idx"))
+            .collect()
+    };
+    let before = packs(&bare);
+    let script = write_fake_ssh(tmp.path()).expect("executable fake ssh");
+    let transport = SshTransport::with_program(script.as_os_str());
+    let url = format!("ssh://git@fakehost{}", bare.display());
+    let mut conn = transport
+        .connect(&url, Service::ReceivePack, &ConnectOptions::default())
+        .expect("receive-pack connection");
+    assert_eq!(conn.advertised_refs().len(), 61);
+    let outcome = push_remote(
+        &local.join(".git"),
+        &mut *conn,
+        &[spec_update(tip, "refs/heads/main", false)],
+        &PushOptions::default(),
+        &mut NoProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("push one commit");
+    drop(conn);
+    assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
+    assert_eq!(rev_parse(&bare, "refs/heads/main"), tip);
+    git(&bare, &["fsck", "--strict", "--no-dangling"]);
+
+    let received: Vec<_> = packs(&bare)
+        .into_iter()
+        .filter(|p| !before.contains(p))
+        .collect();
+    assert_eq!(received.len(), 1, "the push kept one pack");
+    let verify = git(&bare, &["verify-pack", "-v", received[0].to_str().unwrap()]);
+    let objects = verify
+        .lines()
+        .filter(|l| l.len() > 40 && l.as_bytes()[40] == b' ')
+        .count();
+    // `index-pack --fix-thin` appends the delta base the remote already had.
+    assert_eq!(
+        objects, 4,
+        "commit, tree and a blob delta plus the appended base:\n{verify}"
+    );
+}

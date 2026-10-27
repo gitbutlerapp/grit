@@ -8,8 +8,8 @@ use crate::bitmap_walk::{BitmapWalkError, ReachabilityQuery, ReachableSet};
 use crate::environment::RepositoryOptions;
 use crate::error::Result;
 use crate::objects::{
-    oid_hash_map, oid_hash_set, parse_tag, CommitRef, Object, ObjectId, ObjectKind, OidHashMap,
-    OidHashSet, TreeRefIter,
+    oid_hash_map, oid_hash_set, parse_tag, tag_object_line_oid, CommitRef, Object, ObjectId,
+    ObjectKind, OidHashMap, OidHashSet, TreeRefIter,
 };
 use crate::odb::Odb;
 use crate::pack_bitmap::BitmapIndex;
@@ -23,7 +23,9 @@ use crate::rev_list::{MissingAction, ObjectFilter};
 pub struct PackObjectSelection {
     /// Objects reachable from `wants` but not from `haves`, in valid pack order.
     pub send: Vec<ObjectId>,
-    /// Negotiation boundary tips (`haves`), not the full peer object closure.
+    /// Peer-held commits whose trees seed thin-pack delta bases, not the full peer
+    /// object closure: the negotiation `haves`, or with [`HaveBoundary::TipsOnly`] the
+    /// edge commits where the want walk reached the peer's history.
     pub have_closure: HashSet<ObjectId>,
     /// Peer-held objects when pack reachability bitmaps are available (thin-pack bases).
     pub peer_held: Option<Arc<ReachableSet>>,
@@ -259,24 +261,34 @@ fn walk_enumeration(
     if let Some(extra) = opts.exclude_objects {
         boundary.extend(extra.iter().copied());
     }
-    let have_closure: HashSet<ObjectId> = haves.iter().copied().collect();
     let peer_held = try_peer_held_bitmap(odb, haves, opts)?;
-    let (send, name_hashes) = match opts.filter {
+    let (send, name_hashes, edges) = match opts.filter {
         Some(filter) if filter.uses_paths() => {
-            rev_list_filtered_objects(odb, wants, haves, filter, &have_commits)?
+            let (send, name_hashes) =
+                rev_list_filtered_objects(odb, wants, haves, filter, &have_commits)?;
+            (send, name_hashes, None)
         }
-        filter => collect_reachable_excluding_with_name_hashes(
-            odb,
-            wants,
-            &HashSet::new(),
-            &mut boundary,
-            &have_commits,
-            opts.peer_odb,
-            false,
-            opts.shallow_grafts,
-            filter,
-            name_trees,
-        )?,
+        filter => {
+            let (send, name_hashes, edges) = collect_reachable_excluding_with_name_hashes(
+                odb,
+                wants,
+                &HashSet::new(),
+                &mut boundary,
+                &have_commits,
+                opts.peer_odb,
+                false,
+                opts.shallow_grafts,
+                filter,
+                name_trees,
+            )?;
+            (send, name_hashes, Some(edges))
+        }
+    };
+    // Send-pack seeds thin bases only from the edge commits where the walk met the
+    // peer's history, as Git's `--thin` does, not from every advertised tip.
+    let have_closure = match (opts.have_boundary, edges) {
+        (HaveBoundary::TipsOnly, Some(edges)) => edges,
+        _ => haves.iter().copied().collect(),
     };
     Ok(PackObjectSelection {
         send,
@@ -369,18 +381,56 @@ fn send_pack_uninteresting_commits(
             !self.heap.is_empty() && self.interesting_on_heap == 0
         }
 
-        fn try_enqueue(&mut self, oid: ObjectId, flag: u8) -> Result<()> {
+        /// Note `oid` as reached with `flag`; true when it still has to be read and queued.
+        fn reach_unqueued(&mut self, oid: ObjectId, flag: u8) -> bool {
             self.note_reach(oid, flag);
-            if self.processed.contains(&oid)
+            !(self.processed.contains(&oid)
                 || self.on_heap.contains(&oid)
-                || self.shallow_grafts.contains(&oid)
-            {
+                || self.shallow_grafts.contains(&oid))
+        }
+
+        fn try_enqueue(&mut self, oid: ObjectId, flag: u8) -> Result<()> {
+            if !self.reach_unqueued(oid, flag) {
                 return Ok(());
             }
-            let obj = match self.odb.read(&oid) {
-                Ok(o) => o,
-                Err(_) => return Ok(()),
-            };
+            match self.odb.read(&oid) {
+                Ok(obj) => self.queue_commit(oid, &obj),
+                Err(_) => Ok(()),
+            }
+        }
+
+        /// Queue the commit a ref tip names, following annotated tags.
+        ///
+        /// Each object of the chain is read once; missing objects and tags that end at a
+        /// tree or blob are skipped.
+        fn enqueue_tip(&mut self, tip: ObjectId, flag: u8) -> Result<()> {
+            let mut oid = tip;
+            let mut tags_seen: Option<HashSet<ObjectId>> = None;
+            loop {
+                let Ok(obj) = self.odb.read(&oid) else {
+                    return Ok(());
+                };
+                if obj.kind != ObjectKind::Tag {
+                    if obj.kind != ObjectKind::Commit || !self.reach_unqueued(oid, flag) {
+                        return Ok(());
+                    }
+                    return self.queue_commit(oid, &obj);
+                }
+                if !tags_seen.get_or_insert_with(HashSet::new).insert(oid) {
+                    return Ok(());
+                }
+                let Some(target) = tag_object_line_oid(&obj.data) else {
+                    return Ok(());
+                };
+                if self.processed.contains(&target) || self.on_heap.contains(&target) {
+                    self.note_reach(target, flag);
+                    return Ok(());
+                }
+                oid = target;
+            }
+        }
+
+        fn queue_commit(&mut self, oid: ObjectId, obj: &Object) -> Result<()> {
             if obj.kind != ObjectKind::Commit {
                 return Ok(());
             }
@@ -416,17 +466,10 @@ fn send_pack_uninteresting_commits(
     };
 
     for &want in wants {
-        if let Ok(Some(commit)) = odb.peel_to_commit(want) {
-            walk.try_enqueue(commit, SEND_PACK_REACH_WANT)?;
-        }
+        walk.enqueue_tip(want, SEND_PACK_REACH_WANT)?;
     }
     for &have in haves {
-        if odb.read_info(&have).is_err() {
-            continue;
-        }
-        if let Ok(Some(commit)) = odb.peel_to_commit(have) {
-            walk.try_enqueue(commit, SEND_PACK_REACH_HAVE)?;
-        }
+        walk.enqueue_tip(have, SEND_PACK_REACH_HAVE)?;
     }
 
     while let Some(commit) = walk.heap.pop() {
@@ -616,7 +659,8 @@ fn rev_list_filtered_objects(
 }
 
 /// Walk objects reachable from `roots`, with the path name hash of every blob
-/// (and, with [`NameTrees::Yes`], every tree) below a root tree.
+/// (and, with [`NameTrees::Yes`], every tree) below a root tree, and the
+/// `have_commits` the walk stopped at (its edge commits).
 ///
 /// Commits are walked newest committer date first (the order Git's revision walk
 /// uses), all of them before any tree is expanded, so the versions of one path are
@@ -644,7 +688,7 @@ fn collect_reachable_excluding_with_name_hashes(
     shallow_grafts: &HashSet<ObjectId>,
     filter: Option<&ObjectFilter>,
     name_trees: NameTrees,
-) -> Result<(Vec<ObjectId>, HashMap<ObjectId, u32>)> {
+) -> Result<(Vec<ObjectId>, HashMap<ObjectId, u32>, HashSet<ObjectId>)> {
     let oid_len = odb.hash_algo().len();
     let mut walk = EnumerationWalk {
         odb,
@@ -664,6 +708,7 @@ fn collect_reachable_excluding_with_name_hashes(
         next_seq: 0,
         queue: VecDeque::new(),
         name_hashes: HashMap::new(),
+        edges: HashSet::new(),
     };
     // Commit root trees the filter drops, even where a root or tag names them.
     let mut dropped_root_trees: Option<OidHashSet> = filter
@@ -752,7 +797,7 @@ fn collect_reachable_excluding_with_name_hashes(
     if let Some(dropped) = dropped_root_trees.filter(|d| !d.is_empty()) {
         walk.ordered.retain(|oid| !dropped.contains(oid));
     }
-    Ok((walk.ordered, walk.name_hashes))
+    Ok((walk.ordered, walk.name_hashes, walk.edges))
 }
 
 fn child_path(parent: &str, name: &[u8]) -> String {
@@ -796,6 +841,8 @@ struct EnumerationWalk<'a> {
     /// while [`Self::commits`] is empty.
     queue: VecDeque<(ObjectId, String, u64)>,
     name_hashes: HashMap<ObjectId, u32>,
+    /// Have-side commits the walk stopped at (Git's edge commits).
+    edges: HashSet<ObjectId>,
 }
 
 /// A commit waiting in [`EnumerationWalk::commits`], ordered newest first and,
@@ -850,6 +897,7 @@ impl<'a> EnumerationWalk<'a> {
         if !self.visited.insert(oid) {
             return Ok(());
         }
+        self.edges.insert(oid);
         self.boundary
             .extend(objects_in_commit_snapshot(self.odb, oid)?);
         Ok(())
@@ -1462,6 +1510,114 @@ mod tests {
         assert_eq!(
             selection.name_hashes.get(&odd),
             Some(&pack_name_hash("odd.txt"))
+        );
+    }
+
+    fn tips_only_options(empty: &HashSet<ObjectId>) -> PackEnumerateOptions<'_> {
+        PackEnumerateOptions {
+            filter: None,
+            shallow_grafts: empty,
+            have_shallow_grafts: Some(empty),
+            use_bitmaps: false,
+            exclude_objects: None,
+            peer_odb: None,
+            have_boundary: HaveBoundary::TipsOnly,
+        }
+    }
+
+    fn write_tag(repo: &Repository, target: ObjectId, kind: &str, name: &str) -> ObjectId {
+        let body = format!(
+            "object {}\ntype {kind}\ntag {name}\ntagger A <a@example.com> 0 +0000\n\n{name}\n",
+            target.to_hex()
+        );
+        repo.odb().write(ObjectKind::Tag, body.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn tips_only_thin_bases_come_from_edge_commits_not_every_advertised_tip() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let blob = |s: &str| repo.odb().write(ObjectKind::Blob, s.as_bytes()).unwrap();
+        let base_tree = write_tree(&repo, &[(0o100644, "f", blob("base"))]);
+        let root = write_commit(&repo, base_tree, &[], 0);
+        let main = write_commit(
+            &repo,
+            write_tree(&repo, &[(0o100644, "f", blob("main"))]),
+            &[root],
+            10,
+        );
+        let mut haves = vec![main];
+        for i in 0..40 {
+            let tree = write_tree(&repo, &[(0o100644, "f", blob(&format!("side {i}")))]);
+            let side = write_commit(&repo, tree, &[root], 20 + i);
+            haves.push(write_tag(&repo, side, "commit", &format!("t{i}")));
+            haves.push(side);
+        }
+        let new_tip = write_commit(
+            &repo,
+            write_tree(&repo, &[(0o100644, "f", blob("main\nmore"))]),
+            &[main],
+            100,
+        );
+        let empty = HashSet::new();
+        let selection =
+            enumerate_pack_objects(repo.odb(), &[new_tip], &haves, &tips_only_options(&empty))
+                .unwrap();
+        assert_eq!(selection.send.len(), 3, "commit, tree and the changed blob");
+        assert_eq!(
+            selection.have_closure,
+            HashSet::from([main]),
+            "thin bases come from the commit the walk stopped at"
+        );
+
+        let closure = enumerate_pack_objects(
+            repo.odb(),
+            &[new_tip],
+            &haves,
+            &PackEnumerateOptions {
+                have_boundary: HaveBoundary::CommitClosure,
+                ..tips_only_options(&empty)
+            },
+        )
+        .unwrap();
+        assert_eq!(closure.send, selection.send);
+        assert_eq!(closure.have_closure.len(), haves.len());
+    }
+
+    #[test]
+    fn send_pack_walk_peels_tag_haves_and_ignores_non_commit_targets() {
+        use super::send_pack_walk_test_hooks::{commit_reads, reset_commit_reads};
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let blob = repo.odb().write(ObjectKind::Blob, b"x").unwrap();
+        let tree = write_tree(&repo, &[(0o100644, "f", blob)]);
+        let old = write_commit(&repo, tree, &[], 0);
+        let tip = write_commit(&repo, tree, &[old], 1);
+        let tag = write_tag(&repo, tip, "commit", "v1");
+        let nested = write_tag(&repo, tag, "tag", "v1-nested");
+        let tree_tag = write_tag(&repo, tree, "tree", "tree-tag");
+        let blob_tag = write_tag(&repo, blob, "blob", "blob-tag");
+        let missing = ObjectId::from_hex("1234567890123456789012345678901234567890").unwrap();
+        let new_tip = write_commit(&repo, tree, &[tip], 2);
+
+        reset_commit_reads();
+        let hidden = send_pack_uninteresting_commits(
+            repo.odb(),
+            &[new_tip],
+            &[nested, tag, tree_tag, blob_tag, missing],
+            &HashSet::new(),
+        )
+        .unwrap();
+        assert!(hidden.contains(&tip), "tags peel to the commit they name");
+        for oid in [
+            tag, nested, tree_tag, blob_tag, tree, blob, missing, new_tip,
+        ] {
+            assert!(!hidden.contains(&oid), "{oid} is not a have-side commit");
+        }
+        assert_eq!(
+            commit_reads(),
+            2,
+            "the want and the tag-named commit, each queued once"
         );
     }
 }
