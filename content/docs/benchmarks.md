@@ -32,9 +32,17 @@ sets that peak earlier. Human, JSON and Markdown output remained byte-identical.
 Reproduce the library measurement with `cargo bench -p grit-lib --bench environment`.
 It covers clones with 0, 64, 256 and 1,024 inherited variables. The accompanying daily
 baselines and measurement notes are recorded under `grit-utils/baselines/` for task 4643.
-Tag RSS was 2.1–2.8% higher across repetitions, despite lower peak heap usage. This
-control regression remains under review against the zero-regression requirement.
-See the measurement ledger for the complete results and limits.
+Tag RSS was 2.1–2.8% higher across repetitions, despite lower peak heap usage and fewer
+allocations. Clean-status RSS increased 0.6% and config-get RSS increased 0.5%. The
+maintainer approved proceeding to review with these trade-offs documented; this is not a
+zero-regression result. Allocator and startup residency work is tracked under
+[#4626](https://github.com/gitbutlerapp/grit/issues/4626).
+A second VM check on 2026-10-27 measured 2.677 → 2.590 ms for branch JSON in 600 runs
+per executable (system Git: 1.903 ms). A lifetime probe found that the shared map is released
+with the repository, even while config and tag results remain alive. Removing a redundant
+discovery clone did not flatten tag RSS, so that candidate was discarded. Fresh status RSS
+samples rose 0.3–0.9%; config samples ranged from −0.3% to +1.9%.
+See the measurement ledger and `branch-json-4643-recheck.json` for complete results and limits.
 
 ## grit-bench fixture cache
 

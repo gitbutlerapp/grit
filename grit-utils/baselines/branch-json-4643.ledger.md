@@ -40,8 +40,9 @@ Control RSS needs care: tag listing increased 258 KiB (+2.1%) in the repeated sa
 (354 KiB / +2.8% initially), clean status increased 100 KiB (+0.6%), and config get
 increased 50 KiB (+0.5%). Tag heaptrack peak live heap decreased from about 1.24 MB
 to 1.22 MB and allocations decreased 22,030 → 20,928. A delayed-exit residency sample also showed higher retained anonymous pages, so this
-is not attributed solely to code-page residency. These process-RSS shifts conflict with the
-strict zero-regression requirement and need a maintainer decision before this is called done.
+is not attributed solely to code-page residency. The maintainer approved proceeding to
+review with these process-RSS trade-offs documented. This is not a zero-regression result;
+allocator and startup residency work is tracked under #4626.
 A compact boxed-string variant was measured and discarded because it did not resolve the
 control RSS increase. The retained implementation is the smaller, fully tested change above.
 
@@ -101,6 +102,70 @@ were visible. `strace -c` confirms the work is process/config setup, not bulk ob
   the required rustdoc output. Site tests: 36 passed, 1 failed, 8 skipped, plus the rustdoc
   suite initialization failure; both failures follow missing rustdoc. No test assertions or
   lint levels were changed.
+
+## Bounded lifetime check and review handoff (2026-10-27)
+
+Restored on mesh machine `grit-perf-4643-r2`, branch `factory/branch-json-4643`.
+The maintainer approved review with the RSS trade-off disclosed. No additional production
+change was retained from this check, and this is not a zero-regression claim.
+
+A temporary weak-reference probe found two captured-map owners after discovery: the
+repository replaces its environment clone while the ODB retains the earlier clone. The
+count stayed at two through names, kind and annotation tag listing, then fell to zero when
+the repository was dropped, while config and tag results remained alive. Neither those
+results nor the config cache extended the map's lifetime beyond the repository. The probe
+was removed after the check.
+
+One candidate removed the redundant discovery clone. In 40 alternating `time -v` samples,
+tag RSS was 12,548 KiB before, 12,840 with the accepted change, and 12,834 with the candidate.
+The candidate therefore did not flatten the +2.3% tag increase. Its branch JSON direct-spawn
+median was 2.978 ms versus 2.961 before and 2.874 with the accepted change, so it was discarded.
+Allocator and startup residency work remains under #4626; no allocator cause is asserted here.
+
+Fresh hyperfine runs in both command orders (600 samples per executable) measured median
+branch JSON times of **2.677 ms before → 2.590 ms after**, with system Git at **1.903 ms**.
+Heaptrack again measured **5,552 → 4,447 allocations** for branch JSON, with peak live heap
+323.21 → 323.20 KB. Tag allocations fell **22,035 → 20,919**, and tag peak live heap fell
+**1.24 → 1.22 MB**. Strace recorded 357 syscalls for each branch JSON executable.
+Human, JSON and Markdown branch output remained byte-identical.
+
+The repeated full matrix below pools two 20-run batches per revision in opposite revision
+orders; RSS is the median of 20 additional alternating `time -v` runs per executable. Both
+versions of the library helpers were rebuilt. Source paths differ between archived baseline
+and checkout builds; executable hashes were checked, and heaptrack independently confirmed
+the expected allocation reduction. Small positive daily timing shifts remain visible for
+create (+2.1%), merged-ref (+2.8%), rename (+0.6%) and tag (+2.4%); the separate 600-run
+headline check gives the clearer measurement of the target benefit.
+
+| Scenario | Git ms | Grit before ms | Grit after ms | Peak RSS before KiB | Peak RSS after KiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| branch/create@many-refs | 2.368 | 3.548 | 3.623 | 13,662 | 13,322 |
+| branch/delete@many-refs | 2.580 | 9.782 | 9.765 | 14,716 | 14,418 |
+| branch/list-json@many-refs | 2.417 | 3.304 | 3.300 | 14,022 | 13,902 |
+| branch/list@many-refs | 2.083 | 3.095 | 3.003 | 12,416 | 12,070 |
+| branch/list@many-refs-loose | 2.072 | 3.087 | 3.002 | 12,292 | 12,028 |
+| branch/merged-ref@many-refs | 1.493 | 3.192 | 3.280 | 9,998 | 9,860 |
+| branch/merged@many-refs | 2.365 | 3.579 | 3.470 | 13,992 | 13,708 |
+| branch/rename@many-refs | 2.563 | 9.162 | 9.215 | 12,206 | 11,858 |
+| config/get@small | 1.827 | 2.963 | 2.814 | 10,800 | 10,768 |
+| status/clean@synth-10k | 18.014 | 19.047 | 18.533 | 17,470 | 17,622 |
+| tag/list@many-refs | 5.345 | 6.237 | 6.388 | 12,408 | 12,750 |
+
+The initial control RSS deltas remain part of the review description: tag **+2.1–2.8%**,
+status **+0.6%**, config **+0.5%**. On this VM the 20-run table gives tag **+2.8%**, status
+**+0.9%**, config **−0.3%**; an independent 40-run control set gave tag **+2.3%**, status
+**+0.3%**, config **+1.9%** (10,692 → 10,900 KiB). These variations do not justify claiming
+flat control RSS. Raw samples, methodology and the discarded candidate's numbers are in
+`branch-json-4643-recheck.json`.
+
+Revalidation: formatting and workspace clippy passed; library units passed **2,582 / 0 failed /
+3 ignored**; focused library integration suites passed **22**, and CLI branch suites passed
+**24**. The restored full `cargo test -p grit-lib -p grit-cli` attempt reproduced the existing
+`serve_upload_pack_inprocess` compile failure (14 obsolete `ServeOptions` errors). That test
+file is unchanged from the original main baseline, and the failure is unrelated to this change.
+The final full-command retry stopped at the other existing baseline error,
+`history_injected_ref_store` constructing `Signature` from `&str` (`TS.into()`). Both
+fixtures are unchanged; the earlier validation limits above remain disclosed.
 
 ## Reproduction
 
