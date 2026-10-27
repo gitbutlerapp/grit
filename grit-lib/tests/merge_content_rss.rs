@@ -129,7 +129,11 @@ fn wide_content_merge_memory_and_git_compatibility() {
         for tree_only in [true, false] {
             let mut child = Command::new(std::env::current_exe().expect("test binary"));
             child
-                .args(["--exact", "content_merge_child", "--nocapture"])
+                .args([
+                    "--exact",
+                    "merge_content_rss::content_merge_child",
+                    "--nocapture",
+                ])
                 .env("GRIT_CONTENT_MERGE_RSS_ROOT", root);
             child.env_remove("GRIT_CONTENT_MERGE_RSS_TREE_ONLY");
             child.env_remove("GRIT_CONTENT_MERGE_RSS_PACKED");

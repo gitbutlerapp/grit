@@ -82,7 +82,10 @@ fn pack_has_blob(pack_dir: &Path) -> bool {
     let Some(pack) = first_pack_path(pack_dir) else {
         return false;
     };
+    // Run inside the clone so git uses its hash algorithm, not that of whatever
+    // repository the test process runs in.
     let out = Command::new("git")
+        .current_dir(pack_dir)
         .args(["verify-pack", "-v"])
         .arg(&pack)
         .output()
@@ -113,6 +116,8 @@ fn git_config_value(git_dir: &Path, key: &str) -> Option<String> {
     cfg.get(key)
 }
 
+/// `git clone --no-checkout --filter=<filter>`: the clone installs no promisor
+/// fetcher, so a checkout would have to read blobs the filter left on the server.
 fn grit_clone_filtered(url: &str, dest: &Path, filter: ObjectFilterSpec) -> PathBuf {
     fs::create_dir_all(dest).expect("dest");
     clone(
@@ -120,6 +125,7 @@ fn grit_clone_filtered(url: &str, dest: &Path, filter: ObjectFilterSpec) -> Path
             url: url.to_owned(),
             dest: dest.to_path_buf(),
             filter: Some(filter),
+            checkout: false,
             ..CloneOptions::new(url, dest.to_path_buf())
         },
         &mut NoProgress,
@@ -435,6 +441,7 @@ mod http_v2 {
                 url: url.clone(),
                 dest: dest.path().to_path_buf(),
                 filter: Some(ObjectFilterSpec::BlobNone),
+                checkout: false,
                 ..CloneOptions::new(&url, dest.path().to_path_buf())
             },
             &mut NoProgress,

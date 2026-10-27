@@ -1083,7 +1083,10 @@ fn build_deep_history_repo(dir: &Path, commits: usize) {
 
 /// Count delta entries in a pack index the way `git verify-pack -v` reports them.
 fn verify_pack_delta_count(pack_idx: &Path) -> usize {
+    // Run inside the pack's repository so git uses its hash algorithm, not that of
+    // whatever repository the test process runs in.
     let out = Command::new("git")
+        .current_dir(pack_idx.parent().expect("pack dir"))
         .args(["verify-pack", "-v"])
         .arg(pack_idx)
         .output()
@@ -1795,7 +1798,7 @@ fn http_clone_peak_rss_bounded_for_large_pack() {
     let url = format!("http://127.0.0.1:{port}/repo.git");
     let work = tmp.path().join("fetch-work");
     let measure_cmd = format!(
-        "{} http_fetch_rss_child_process --ignored --exact --nocapture",
+        "{} transport_http::http_fetch_rss_child_process --ignored --exact --nocapture",
         test_exe.display()
     );
     let tmp_cwd = tmp.path().to_path_buf();

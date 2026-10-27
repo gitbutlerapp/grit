@@ -15,7 +15,11 @@ fn many_mapped_packs_under_reduced_descriptor_limit() {
     let exe = std::env::current_exe().unwrap();
     for mode in ["objects", "decorations", "pressure"] {
         let output = Command::new(&exe)
-            .args(["--exact", "descriptor_pressure_child", "--nocapture"])
+            .args([
+                "--exact",
+                "pack_descriptor_pressure::descriptor_pressure_child",
+                "--nocapture",
+            ])
             .env("GRIT_PACK_DESCRIPTOR_TEST", mode)
             .output()
             .unwrap();
