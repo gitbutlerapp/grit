@@ -111,6 +111,15 @@ struct ArgItem {
     conf: ConfInfo,
 }
 
+impl ArgItem {
+    fn into_item(self) -> TrailerItem {
+        TrailerItem {
+            token: Some(self.token),
+            value: self.value,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct TrailerBlock {
     blank_line_before: bool,
@@ -121,20 +130,6 @@ struct TrailerBlock {
 
 /// Parse `trailer.where` / `--where` values (Git spelling).
 pub fn trailer_where_from_str(s: &str) -> Option<TrailerWhere> {
-    set_where(s)
-}
-
-/// Parse `trailer.ifexists` / `--if-exists` values.
-pub fn trailer_if_exists_from_str(s: &str) -> Option<TrailerIfExists> {
-    set_if_exists(s)
-}
-
-/// Parse `trailer.ifmissing` / `--if-missing` values.
-pub fn trailer_if_missing_from_str(s: &str) -> Option<TrailerIfMissing> {
-    set_if_missing(s)
-}
-
-fn set_where(s: &str) -> Option<TrailerWhere> {
     match s.to_ascii_lowercase().as_str() {
         "after" => Some(TrailerWhere::After),
         "before" => Some(TrailerWhere::Before),
@@ -144,7 +139,8 @@ fn set_where(s: &str) -> Option<TrailerWhere> {
     }
 }
 
-fn set_if_exists(s: &str) -> Option<TrailerIfExists> {
+/// Parse `trailer.ifexists` / `--if-exists` values.
+pub fn trailer_if_exists_from_str(s: &str) -> Option<TrailerIfExists> {
     match s.to_ascii_lowercase().as_str() {
         "addifdifferent" => Some(TrailerIfExists::AddIfDifferent),
         "addifdifferentneighbor" => Some(TrailerIfExists::AddIfDifferentNeighbor),
@@ -155,7 +151,8 @@ fn set_if_exists(s: &str) -> Option<TrailerIfExists> {
     }
 }
 
-fn set_if_missing(s: &str) -> Option<TrailerIfMissing> {
+/// Parse `trailer.ifmissing` / `--if-missing` values.
+pub fn trailer_if_missing_from_str(s: &str) -> Option<TrailerIfMissing> {
     match s.to_ascii_lowercase().as_str() {
         "add" => Some(TrailerIfMissing::Add),
         "donothing" => Some(TrailerIfMissing::DoNothing),
@@ -186,12 +183,8 @@ fn same_token(a_token: Option<&str>, b_token: &str) -> bool {
     a[..min_len].eq_ignore_ascii_case(&b_token[..min_len])
 }
 
-fn same_value(a: &TrailerItem, b_val: &str) -> bool {
-    a.value.eq_ignore_ascii_case(b_val)
-}
-
 fn same_trailer(a: &TrailerItem, b: &ArgItem) -> bool {
-    same_token(a.token.as_deref(), &b.token) && same_value(a, &b.value)
+    same_token(a.token.as_deref(), &b.token) && a.value.eq_ignore_ascii_case(&b.value)
 }
 
 fn is_blank_line(s: &str) -> bool {
@@ -215,36 +208,24 @@ fn after_line(buf: &str, bol: usize, limit: usize) -> usize {
     }
 }
 
+/// Start of the line that ends at `len` (`None` when `len` is 0).
 fn last_line_start(buf: &str, len: usize) -> Option<usize> {
-    if len == 0 {
-        return None;
-    }
-    if len == 1 {
-        return Some(0);
-    }
-    let slice = &buf.as_bytes()[..len];
-    let mut i = len - 2;
-    loop {
-        if slice[i] == b'\n' {
-            return Some(i + 1);
-        }
-        if i == 0 {
-            return Some(0);
-        }
-        i -= 1;
-    }
+    let before_last_byte = buf.as_bytes().get(..len.checked_sub(1)?)?;
+    Some(
+        before_last_byte
+            .iter()
+            .rposition(|&b| b == b'\n')
+            .map_or(0, |i| i + 1),
+    )
 }
 
-fn starts_with_comment_line(line: &str, prefix: &str) -> bool {
-    line.starts_with(prefix)
-}
-
-fn wt_status_locate_end(s: &str, len: usize, comment_prefix: &str) -> usize {
-    let pattern = format!("\n{comment_prefix} {CUT_LINE}\n");
+/// Offset of the scissors line (`# --- >8 ---`) within `s[..len]`, or `len` when there is none.
+fn cut_line_start(s: &str, len: usize, comment_prefix: &str) -> usize {
     let head = format!("{comment_prefix} {CUT_LINE}\n");
-    if s.len() >= head.len() && s[..head.len()] == head {
+    if s.starts_with(&head) {
         return 0;
     }
+    let pattern = format!("\n{head}");
     if let Some(p) = s[..len].find(&pattern) {
         let newlen = p + 1;
         if newlen < len {
@@ -255,7 +236,7 @@ fn wt_status_locate_end(s: &str, len: usize, comment_prefix: &str) -> usize {
 }
 
 fn ignored_log_message_bytes(buf: &str, len: usize, comment_prefix: &str) -> usize {
-    let cutoff = wt_status_locate_end(buf, len, comment_prefix);
+    let cutoff = cut_line_start(buf, len, comment_prefix);
     let mut bol = 0usize;
     let mut boc = 0usize;
     let mut in_old_conflicts = false;
@@ -264,7 +245,7 @@ fn ignored_log_message_bytes(buf: &str, len: usize, comment_prefix: &str) -> usi
         let le = line_end(buf, bol, cutoff);
         let line = &buf[bol..le];
 
-        let is_comment = starts_with_comment_line(line, comment_prefix) || line.is_empty();
+        let is_comment = line.starts_with(comment_prefix) || line.is_empty();
         if is_comment {
             if boc == 0 {
                 boc = bol;
@@ -281,7 +262,7 @@ fn ignored_log_message_bytes(buf: &str, len: usize, comment_prefix: &str) -> usi
             in_old_conflicts = false;
         }
 
-        bol = if le < cutoff { le + 1 } else { cutoff };
+        bol = after_line(buf, bol, cutoff);
     }
 
     if boc != 0 {
@@ -292,23 +273,18 @@ fn ignored_log_message_bytes(buf: &str, len: usize, comment_prefix: &str) -> usi
 }
 
 fn find_end_of_log_message(input: &str, no_divider: bool, comment_prefix: &str) -> usize {
+    let is_divider = |line: &str| {
+        line.strip_prefix("---")
+            .is_some_and(|rest| rest.chars().next().is_none_or(|c| c.is_ascii_whitespace()))
+    };
     let mut end = input.len();
-    if !no_divider {
-        let mut pos = 0usize;
-        while pos < input.len() {
-            let rest = &input[pos..];
-            if rest.len() >= 3 && rest.as_bytes().get(0..3) == Some(b"---") {
-                let after = rest.as_bytes().get(3).copied();
-                if after.is_none() || after.is_some_and(|c| c.is_ascii_whitespace()) {
-                    end = pos;
-                    break;
-                }
-            }
-            pos = after_line(input, pos, input.len());
-            if pos >= input.len() {
-                break;
-            }
+    let mut pos = 0usize;
+    while !no_divider && pos < input.len() {
+        if is_divider(&input[pos..]) {
+            end = pos;
+            break;
         }
+        pos = after_line(input, pos, input.len());
     }
     end - ignored_log_message_bytes(input, end, comment_prefix)
 }
@@ -331,21 +307,40 @@ fn find_separator(line: &str, separators: &str) -> Option<usize> {
     None
 }
 
-fn token_matches_item(line: &str, item: &ConfInfo, sep_pos: usize) -> bool {
-    let tok = line[..sep_pos].trim_end();
-    let name = &item.name;
-    let name_len = name.len();
-    let tok_len = token_len_without_separator(tok);
-    if tok_len >= name_len && tok[..name_len].eq_ignore_ascii_case(name) {
-        return true;
+impl ConfInfo {
+    /// Whether `token` (text before the separator) starts with this trailer's alias name or with
+    /// its configured key, compared case-insensitively and ignoring the key's trailing separator.
+    fn matches_token(&self, token: &str) -> bool {
+        let token_len = token_len_without_separator(token);
+        let has_prefix =
+            |want: &str| token_len >= want.len() && token[..want.len()].eq_ignore_ascii_case(want);
+        has_prefix(&self.name)
+            || self
+                .key
+                .as_deref()
+                .is_some_and(|key| has_prefix(&key[..token_len_without_separator(key)]))
     }
-    if let Some(ref key) = item.key {
-        let key_len = token_len_without_separator(key);
-        if tok_len >= key_len && tok[..key_len].eq_ignore_ascii_case(&key[..key_len]) {
-            return true;
+
+    /// Applies a `where`, `ifexists` or `ifmissing` setting; unparsable values are ignored.
+    /// Returns `false` when `var` is not one of those settings.
+    fn apply_placement_setting(&mut self, var: &str, value: Option<&str>) -> bool {
+        if var.eq_ignore_ascii_case("where") {
+            if let Some(v) = value.and_then(trailer_where_from_str) {
+                self.where_ = v;
+            }
+        } else if var.eq_ignore_ascii_case("ifexists") {
+            if let Some(v) = value.and_then(trailer_if_exists_from_str) {
+                self.if_exists = v;
+            }
+        } else if var.eq_ignore_ascii_case("ifmissing") {
+            if let Some(v) = value.and_then(trailer_if_missing_from_str) {
+                self.if_missing = v;
+            }
+        } else {
+            return false;
         }
+        true
     }
-    false
 }
 
 fn find_trailer_block_start(
@@ -358,115 +353,69 @@ fn find_trailer_block_start(
     let mut end_of_title = len;
     let mut pos = 0usize;
     while pos < len {
-        let le = line_end(buf, pos, len);
-        let line = &buf[pos..le];
-        if starts_with_comment_line(line, comment_prefix) {
-            pos = if le < len { le + 1 } else { len };
-            continue;
-        }
-        if is_blank_line(line) {
+        let line = &buf[pos..line_end(buf, pos, len)];
+        if !line.starts_with(comment_prefix) && is_blank_line(line) {
             end_of_title = pos;
             break;
         }
-        pos = if le < len { le + 1 } else { len };
+        pos = after_line(buf, pos, len);
     }
 
-    let mut l = last_line_start(buf, len);
     let mut only_spaces = true;
     let mut recognized_prefix = false;
     let mut trailer_lines = 0i32;
     let mut non_trailer_lines = 0i32;
     let mut possible_continuation = 0i32;
 
-    while let Some(bol) = l {
+    let mut next = last_line_start(buf, len);
+    while let Some(bol) = next {
         if bol < end_of_title {
             break;
         }
-        let le = line_end(buf, bol, len);
-        let line = &buf[bol..le];
+        next = last_line_start(buf, bol);
+        let line = &buf[bol..line_end(buf, bol, len)];
 
-        if starts_with_comment_line(line, comment_prefix) {
+        if line.starts_with(comment_prefix) {
             non_trailer_lines += possible_continuation;
             possible_continuation = 0;
-            l = if bol == 0 {
-                None
-            } else {
-                last_line_start(buf, bol)
-            };
             continue;
         }
 
         if is_blank_line(line) {
             if only_spaces {
-                l = if bol == 0 {
-                    None
-                } else {
-                    last_line_start(buf, bol)
-                };
                 continue;
             }
             non_trailer_lines += possible_continuation;
-            if recognized_prefix && trailer_lines * 3 >= non_trailer_lines {
-                return after_line(buf, bol, len);
-            }
-            if trailer_lines > 0 && non_trailer_lines == 0 {
-                return after_line(buf, bol, len);
-            }
-            return len;
+            let is_trailer_block = (recognized_prefix && trailer_lines * 3 >= non_trailer_lines)
+                || (trailer_lines > 0 && non_trailer_lines == 0);
+            return if is_trailer_block {
+                after_line(buf, bol, len)
+            } else {
+                len
+            };
         }
         only_spaces = false;
 
-        let mut matched_gen = false;
-        for p in GIT_GENERATED_PREFIXES {
-            if line.starts_with(p) {
-                trailer_lines += 1;
-                possible_continuation = 0;
-                recognized_prefix = true;
-                matched_gen = true;
-                break;
-            }
-        }
-        if matched_gen {
-            l = if bol == 0 {
-                None
-            } else {
-                last_line_start(buf, bol)
-            };
-            continue;
-        }
-
-        if let Some(sep_pos) = find_separator(line, separators) {
-            if sep_pos >= 1 && !line.starts_with(|c: char| c.is_whitespace()) {
-                trailer_lines += 1;
-                possible_continuation = 0;
-                if !recognized_prefix {
-                    for item in conf {
-                        if token_matches_item(line, item, sep_pos) {
-                            recognized_prefix = true;
-                            break;
-                        }
-                    }
-                }
-            } else if line.starts_with(|c: char| c.is_whitespace()) {
-                possible_continuation += 1;
-            } else {
-                non_trailer_lines += 1;
-                non_trailer_lines += possible_continuation;
-                possible_continuation = 0;
-            }
-        } else if line.starts_with(|c: char| c.is_whitespace()) {
+        let indented = line.starts_with(char::is_whitespace);
+        if GIT_GENERATED_PREFIXES.iter().any(|p| line.starts_with(p)) {
+            trailer_lines += 1;
+            possible_continuation = 0;
+            recognized_prefix = true;
+        } else if let Some(sep_pos) =
+            find_separator(line, separators).filter(|&p| p >= 1 && !indented)
+        {
+            trailer_lines += 1;
+            possible_continuation = 0;
+            recognized_prefix = recognized_prefix
+                || conf
+                    .iter()
+                    .any(|item| item.matches_token(line[..sep_pos].trim_end()));
+        } else if indented {
             possible_continuation += 1;
         } else {
-            non_trailer_lines += 1;
-            non_trailer_lines += possible_continuation;
+            non_trailer_lines += 1 + possible_continuation;
             possible_continuation = 0;
         }
-
-        l = if bol == 0 {
-            None
-        } else {
-            last_line_start(buf, bol)
-        };
     }
 
     len
@@ -512,79 +461,24 @@ impl Default for ConfInfo {
     }
 }
 
-fn duplicate_conf(src: &ConfInfo) -> ConfInfo {
-    ConfInfo {
-        name: src.name.clone(),
-        key: src.key.clone(),
-        command: src.command.clone(),
-        cmd: src.cmd.clone(),
-        where_: src.where_,
-        if_exists: src.if_exists,
-        if_missing: src.if_missing,
-    }
+fn token_from_item(item: &ConfInfo, fallback: &str) -> String {
+    item.key.clone().unwrap_or_else(|| fallback.to_string())
 }
 
-fn token_from_item(item: &ConfInfo, tok_from_arg: Option<&str>) -> String {
-    if let Some(k) = &item.key {
-        return k.clone();
-    }
-    tok_from_arg.map_or_else(|| item.name.clone(), str::to_string)
-}
-
-fn parse_trailer_into(
+/// Splits `trailer` into token and value. When the token matches a configured alias, the token
+/// is replaced by the alias key and the matching configuration is returned alongside.
+fn parse_trailer<'c>(
     trailer: &str,
     separators: &str,
-    conf: &[ConfInfo],
-    apply_conf: bool,
-) -> (String, String, ConfInfo) {
-    let sep_pos = find_separator(trailer, separators);
-    let (mut tok, val, mut picked) = if let Some(pos) = sep_pos {
-        (
-            trailer[..pos].trim().to_string(),
-            trailer[pos + 1..].trim().to_string(),
-            ConfInfo {
-                name: String::new(),
-                ..Default::default()
-            },
-        )
-    } else {
-        (
-            trailer.trim().to_string(),
-            String::new(),
-            ConfInfo {
-                name: String::new(),
-                ..Default::default()
-            },
-        )
+    conf: &'c [ConfInfo],
+) -> (String, String, Option<&'c ConfInfo>) {
+    let (tok, val) = match find_separator(trailer, separators) {
+        Some(pos) => (trailer[..pos].trim(), trailer[pos + 1..].trim()),
+        None => (trailer.trim(), ""),
     };
-
-    if apply_conf {
-        let tok_len = token_len_without_separator(&tok);
-        for item in conf {
-            if tok_len >= item.name.len() && tok[..item.name.len()].eq_ignore_ascii_case(&item.name)
-            {
-                let tbuf = std::mem::take(&mut tok);
-                tok = token_from_item(item, Some(&tbuf));
-                picked = duplicate_conf(item);
-                break;
-            }
-            if let Some(ref key) = item.key {
-                let kl = token_len_without_separator(key);
-                if tok_len >= kl && tok[..kl].eq_ignore_ascii_case(&key[..kl]) {
-                    let tbuf = std::mem::take(&mut tok);
-                    tok = token_from_item(item, Some(&tbuf));
-                    picked = duplicate_conf(item);
-                    break;
-                }
-            }
-        }
-    }
-
-    (tok, val, picked)
-}
-
-fn var_ci_eq(s: &str, lit: &str) -> bool {
-    s.eq_ignore_ascii_case(lit)
+    let picked = conf.iter().find(|item| item.matches_token(tok));
+    let tok = picked.map_or_else(|| tok.to_string(), |item| token_from_item(item, tok));
+    (tok, val.to_string(), picked)
 }
 
 fn comment_line_prefix(cfg: &ConfigSet) -> String {
@@ -604,43 +498,31 @@ fn comment_line_prefix(cfg: &ConfigSet) -> String {
 fn load_trailer_config(cfg: &ConfigSet) -> (ConfInfo, Vec<ConfInfo>, String) {
     // Git reads `trailer.*` globals first (`git_trailer_default_config`), then per-alias keys.
     // Each `trailer.<alias>.*` entry inherits the current global defaults at creation time.
-    let hardcoded = ConfInfo::default();
-    let mut default_conf = duplicate_conf(&hardcoded);
+    let mut default_conf = ConfInfo::default();
     let mut map: HashMap<String, ConfInfo> = HashMap::new();
     let mut separators = ":".to_string();
 
-    for e in cfg.entries() {
-        let ConfigEntry { key, value, .. } = e;
-        let Some(rest) = key.strip_prefix("trailer.") else {
+    for ConfigEntry { key, value, .. } in cfg.entries() {
+        let Some(var) = key
+            .strip_prefix("trailer.")
+            .filter(|rest| !rest.contains('.'))
+        else {
             continue;
         };
-        if rest.rsplit_once('.').is_none() {
-            if var_ci_eq(rest, "where") {
-                if let Some(v) = value.as_deref().and_then(set_where) {
-                    default_conf.where_ = v;
-                }
-            } else if var_ci_eq(rest, "ifexists") {
-                if let Some(v) = value.as_deref().and_then(set_if_exists) {
-                    default_conf.if_exists = v;
-                }
-            } else if var_ci_eq(rest, "ifmissing") {
-                if let Some(v) = value.as_deref().and_then(set_if_missing) {
-                    default_conf.if_missing = v;
-                }
-            } else if var_ci_eq(rest, "separators") {
-                if let Some(v) = value {
-                    separators = v.clone();
-                }
+        if !default_conf.apply_placement_setting(var, value.as_deref())
+            && var.eq_ignore_ascii_case("separators")
+        {
+            if let Some(v) = value {
+                separators = v.clone();
             }
         }
     }
 
-    for e in cfg.entries() {
-        let ConfigEntry { key, value, .. } = e;
-        let Some(rest) = key.strip_prefix("trailer.") else {
-            continue;
-        };
-        let Some((name_part, var)) = rest.rsplit_once('.') else {
+    for ConfigEntry { key, value, .. } in cfg.entries() {
+        let Some((name_part, var)) = key
+            .strip_prefix("trailer.")
+            .and_then(|rest| rest.rsplit_once('.'))
+        else {
             continue;
         };
 
@@ -648,33 +530,22 @@ fn load_trailer_config(cfg: &ConfigSet) -> (ConfInfo, Vec<ConfInfo>, String) {
             .entry(name_part.to_string())
             .or_insert_with(|| ConfInfo {
                 name: name_part.to_string(),
-                ..duplicate_conf(&default_conf)
+                ..default_conf.clone()
             });
-
-        if var_ci_eq(var, "key") {
-            if let Some(v) = value {
-                entry.key = Some(v.clone());
-            }
-        } else if var_ci_eq(var, "command") {
-            if let Some(v) = value {
-                entry.command = Some(v.clone());
-            }
-        } else if var_ci_eq(var, "cmd") {
-            if let Some(v) = value {
-                entry.cmd = Some(v.clone());
-            }
-        } else if var_ci_eq(var, "where") {
-            if let Some(v) = value.as_deref().and_then(set_where) {
-                entry.where_ = v;
-            }
-        } else if var_ci_eq(var, "ifexists") {
-            if let Some(v) = value.as_deref().and_then(set_if_exists) {
-                entry.if_exists = v;
-            }
-        } else if var_ci_eq(var, "ifmissing") {
-            if let Some(v) = value.as_deref().and_then(set_if_missing) {
-                entry.if_missing = v;
-            }
+        if entry.apply_placement_setting(var, value.as_deref()) {
+            continue;
+        }
+        let slot = if var.eq_ignore_ascii_case("key") {
+            &mut entry.key
+        } else if var.eq_ignore_ascii_case("command") {
+            &mut entry.command
+        } else if var.eq_ignore_ascii_case("cmd") {
+            &mut entry.cmd
+        } else {
+            continue;
+        };
+        if let Some(v) = value {
+            *slot = Some(v.clone());
         }
     }
 
@@ -691,37 +562,19 @@ fn trailer_block_get(
     let end_of_log = find_end_of_log_message(input, opts.no_divider, comment_prefix);
     let trailer_start =
         find_trailer_block_start(input, end_of_log, conf, separators, comment_prefix);
-    let slice = &input[trailer_start..end_of_log];
     let mut lines: Vec<String> = Vec::new();
-    let mut pos = 0usize;
-    let mut last_trailer_idx: Option<usize> = None;
-
-    while pos < slice.len() {
-        let le = line_end(slice, pos, slice.len());
-        let line = slice[pos..le].to_string();
-        pos = if le < slice.len() {
-            le + 1
-        } else {
-            slice.len()
-        };
-
-        if let Some(idx) = last_trailer_idx {
-            if !line.is_empty() && line.chars().next().is_some_and(|c| c == ' ' || c == '\t') {
-                lines[idx].push('\n');
-                lines[idx].push_str(&line);
-                continue;
+    let mut continues_trailer = false;
+    for line in input[trailer_start..end_of_log].split_terminator('\n') {
+        if continues_trailer && line.starts_with([' ', '\t']) {
+            if let Some(last) = lines.last_mut() {
+                last.push('\n');
+                last.push_str(line);
             }
+            continue;
         }
-
-        let is_trailer_line = find_separator(&line, separators)
-            .is_some_and(|p| p >= 1 && !line.starts_with(|c: char| c.is_whitespace()));
-        last_trailer_idx = if is_trailer_line {
-            lines.push(line);
-            Some(lines.len() - 1)
-        } else {
-            lines.push(line);
-            None
-        };
+        continues_trailer = find_separator(line, separators)
+            .is_some_and(|p| p >= 1 && !line.starts_with(char::is_whitespace));
+        lines.push(line.to_string());
     }
 
     TrailerBlock {
@@ -739,30 +592,25 @@ fn parse_trailers_from_input(
     separators: &str,
     comment_prefix: &str,
 ) -> Vec<TrailerItem> {
-    let mut out = Vec::new();
-    for line in &block.lines {
-        if starts_with_comment_line(line, comment_prefix) {
-            continue;
-        }
-        if let Some(sep) = find_separator(line, separators) {
-            if sep >= 1 {
-                let (tok, mut val, _) = parse_trailer_into(line, separators, conf, true);
-                if opts.unfold {
-                    val = unfold_value(&val);
-                }
-                out.push(TrailerItem {
+    block
+        .lines
+        .iter()
+        .filter(|line| !line.starts_with(comment_prefix))
+        .filter_map(|line| match find_separator(line, separators) {
+            Some(0) => None,
+            Some(_) => {
+                let (tok, val, _) = parse_trailer(line, separators, conf);
+                Some(TrailerItem {
                     token: Some(tok),
-                    value: val,
-                });
+                    value: if opts.unfold { unfold_value(&val) } else { val },
+                })
             }
-        } else if !opts.only_trailers {
-            out.push(TrailerItem {
+            None => (!opts.only_trailers).then(|| TrailerItem {
                 token: None,
                 value: line.clone(),
-            });
-        }
-    }
-    out
+            }),
+        })
+        .collect()
 }
 
 fn apply_command(conf: &ConfInfo, arg: Option<&str>, cwd: Option<&Path>) -> String {
@@ -813,54 +661,38 @@ fn apply_command(conf: &ConfInfo, arg: Option<&str>, cwd: Option<&Path>) -> Stri
     }
 }
 
-/// Git `check_if_different`: walk the trailer list in placement direction; return false if any
-/// visited line is the same trailer (token + value) as `arg`.
+/// Whether `arg` differs from every trailer visited from `start_idx`: only that trailer when
+/// `check_all` is false, otherwise every trailer from it towards the placement end.
 fn check_if_different(
     head: &[TrailerItem],
     start_idx: usize,
     arg: &ArgItem,
     check_all: bool,
 ) -> bool {
-    let where_ = arg.conf.where_;
-    let mut idx = start_idx;
-    loop {
-        if same_trailer(&head[idx], arg) {
-            return false;
-        }
-        let next = if after_or_end(where_) {
-            idx.checked_sub(1)
-        } else if idx + 1 < head.len() {
-            Some(idx + 1)
-        } else {
-            None
-        };
-        let Some(ni) = next else {
-            return true;
-        };
-        idx = ni;
-        if !check_all {
-            return true;
-        }
-    }
+    let visited = if !check_all {
+        &head[start_idx..=start_idx]
+    } else if after_or_end(arg.conf.where_) {
+        &head[..=start_idx]
+    } else {
+        &head[start_idx..]
+    };
+    !visited.iter().any(|item| same_trailer(item, arg))
 }
 
+/// Inserts `item` after (`after` / `end`) or before `head[anchor_idx]` and returns its index.
 fn insert_relative_to(
     head: &mut Vec<TrailerItem>,
     anchor_idx: usize,
     item: TrailerItem,
     where_: TrailerWhere,
-) {
-    if head.is_empty() {
-        head.push(item);
-        return;
-    }
-    let anchor_idx = anchor_idx.min(head.len().saturating_sub(1));
-    let at = if after_or_end(where_) {
-        (anchor_idx + 1).min(head.len())
-    } else {
-        anchor_idx.min(head.len())
+) -> usize {
+    let at = match head.len().checked_sub(1) {
+        None => 0,
+        Some(last) if after_or_end(where_) => anchor_idx.min(last) + 1,
+        Some(last) => anchor_idx.min(last),
     };
     head.insert(at, item);
+    at
 }
 
 fn apply_item_command(
@@ -872,17 +704,14 @@ fn apply_item_command(
     if arg.conf.command.is_none() && arg.conf.cmd.is_none() {
         return;
     }
-    let in_val = in_idx.and_then(|i| head.get(i)).and_then(|t| {
-        if t.token.is_some() {
-            Some(t.value.as_str())
-        } else {
-            None
-        }
-    });
-    let arg_for_cmd = if !arg.value.is_empty() {
-        Some(arg.value.as_str())
-    } else {
+    let in_val = in_idx
+        .and_then(|i| head.get(i))
+        .filter(|t| t.token.is_some())
+        .map(|t| t.value.as_str());
+    let arg_for_cmd = if arg.value.is_empty() {
         in_val
+    } else {
+        Some(arg.value.as_str())
     };
     arg.value = apply_command(&arg.conf, arg_for_cmd, cwd);
 }
@@ -895,79 +724,40 @@ fn apply_arg_if_exists(
     cwd: Option<&Path>,
 ) {
     let if_exists = arg.conf.if_exists;
-    match if_exists {
-        TrailerIfExists::DoNothing => {}
-        TrailerIfExists::Replace => {
-            apply_item_command(head, Some(in_idx), &mut arg, cwd);
-            let where_for_insert = arg.conf.where_;
-            let new_item = TrailerItem {
-                token: Some(arg.token),
-                value: arg.value,
-            };
-            // Git adds the new trailer next to `on_tok`, then deletes `in_tok`.
-            let on_idx = on_idx.min(head.len().saturating_sub(1));
-            let insert_pos = if after_or_end(where_for_insert) {
-                (on_idx + 1).min(head.len())
-            } else {
-                on_idx.min(head.len())
-            };
-            head.insert(insert_pos, new_item);
-            let del = if insert_pos <= in_idx {
-                in_idx + 1
-            } else {
-                in_idx
-            };
-            head.remove(del);
-        }
-        TrailerIfExists::Add => {
-            apply_item_command(head, Some(in_idx), &mut arg, cwd);
-            let new_item = TrailerItem {
-                token: Some(arg.token),
-                value: arg.value,
-            };
-            insert_relative_to(head, on_idx, new_item, arg.conf.where_);
-        }
-        TrailerIfExists::AddIfDifferent => {
-            apply_item_command(head, Some(in_idx), &mut arg, cwd);
-            if check_if_different(head, in_idx, &arg, true) {
-                let new_item = TrailerItem {
-                    token: Some(arg.token.clone()),
-                    value: arg.value.clone(),
-                };
-                insert_relative_to(head, on_idx, new_item, arg.conf.where_);
-            }
-        }
-        TrailerIfExists::AddIfDifferentNeighbor => {
-            apply_item_command(head, Some(in_idx), &mut arg, cwd);
-            if check_if_different(head, on_idx, &arg, false) {
-                let new_item = TrailerItem {
-                    token: Some(arg.token.clone()),
-                    value: arg.value.clone(),
-                };
-                insert_relative_to(head, on_idx, new_item, arg.conf.where_);
-            }
-        }
-        TrailerIfExists::Default => {}
+    if matches!(
+        if_exists,
+        TrailerIfExists::DoNothing | TrailerIfExists::Default
+    ) {
+        return;
+    }
+    apply_item_command(head, Some(in_idx), &mut arg, cwd);
+    let add = match if_exists {
+        TrailerIfExists::AddIfDifferent => check_if_different(head, in_idx, &arg, true),
+        TrailerIfExists::AddIfDifferentNeighbor => check_if_different(head, on_idx, &arg, false),
+        _ => true,
+    };
+    if !add {
+        return;
+    }
+    let where_ = arg.conf.where_;
+    let at = insert_relative_to(head, on_idx, arg.into_item(), where_);
+    if if_exists == TrailerIfExists::Replace {
+        // The replacement is placed relative to the anchor before the old trailer is removed.
+        head.remove(if at <= in_idx { in_idx + 1 } else { in_idx });
     }
 }
 
 fn apply_arg_if_missing(head: &mut Vec<TrailerItem>, mut arg: ArgItem, cwd: Option<&Path>) {
-    match arg.conf.if_missing {
-        TrailerIfMissing::DoNothing => {}
-        TrailerIfMissing::Add | TrailerIfMissing::Default => {
-            apply_item_command(head, None, &mut arg, cwd);
-            let where_ = arg.conf.where_;
-            let item = TrailerItem {
-                token: Some(arg.token),
-                value: arg.value,
-            };
-            if after_or_end(where_) {
-                head.push(item);
-            } else {
-                head.insert(0, item);
-            }
-        }
+    if arg.conf.if_missing == TrailerIfMissing::DoNothing {
+        return;
     }
+    apply_item_command(head, None, &mut arg, cwd);
+    let at = if after_or_end(arg.conf.where_) {
+        head.len()
+    } else {
+        0
+    };
+    head.insert(at, arg.into_item());
 }
 
 /// Returns `None` if `arg` was applied to an existing trailer, `Some(arg)` if no match.
@@ -977,62 +767,48 @@ fn find_same_and_apply_arg(
     cwd: Option<&Path>,
 ) -> Option<ArgItem> {
     let where_ = arg.conf.where_;
-    let middle = matches!(where_, TrailerWhere::After | TrailerWhere::Before);
     let backwards = after_or_end(where_);
-
-    if head.is_empty() {
-        return Some(arg);
-    }
-
-    let start_idx = if backwards { head.len() - 1 } else { 0 };
-
-    let mut i: isize = if backwards {
-        head.len() as isize - 1
+    let same = |item: &TrailerItem| same_token(item.token.as_deref(), &arg.token);
+    let found = if backwards {
+        head.iter().rposition(same)
     } else {
-        0
+        head.iter().position(same)
     };
-
-    loop {
-        if i < 0 || (i as usize) >= head.len() {
-            break;
-        }
-        let idx = i as usize;
-        if same_token(head[idx].token.as_deref(), &arg.token) {
-            let on_idx = if middle { idx } else { start_idx };
-            apply_arg_if_exists(head, idx, arg, on_idx, cwd);
-            return None;
-        }
-        i = if backwards { i - 1 } else { i + 1 };
-    }
-    Some(arg)
+    let Some(idx) = found else {
+        return Some(arg);
+    };
+    let on_idx = match where_ {
+        TrailerWhere::After | TrailerWhere::Before => idx,
+        _ if backwards => head.len() - 1,
+        _ => 0,
+    };
+    apply_arg_if_exists(head, idx, arg, on_idx, cwd);
+    None
 }
 
-fn merge_arg_conf(base: &ConfInfo, new_arg: &NewTrailerArg) -> ConfInfo {
-    let mut c = duplicate_conf(base);
+fn merge_arg_conf(mut conf: ConfInfo, new_arg: &NewTrailerArg) -> ConfInfo {
     if new_arg.where_ != TrailerWhere::Default {
-        c.where_ = new_arg.where_;
+        conf.where_ = new_arg.where_;
     }
     if new_arg.if_exists != TrailerIfExists::Default {
-        c.if_exists = new_arg.if_exists;
+        conf.if_exists = new_arg.if_exists;
     }
     if new_arg.if_missing != TrailerIfMissing::Default {
-        c.if_missing = new_arg.if_missing;
+        conf.if_missing = new_arg.if_missing;
     }
-    c
+    conf
 }
 
 fn parse_trailers_from_config(conf_list: &[ConfInfo]) -> Vec<ArgItem> {
-    let mut v = Vec::new();
-    for item in conf_list {
-        if item.command.is_some() {
-            v.push(ArgItem {
-                token: token_from_item(item, None),
-                value: String::new(),
-                conf: duplicate_conf(item),
-            });
-        }
-    }
-    v
+    conf_list
+        .iter()
+        .filter(|item| item.command.is_some())
+        .map(|item| ArgItem {
+            token: token_from_item(item, &item.name),
+            value: String::new(),
+            conf: item.clone(),
+        })
+        .collect()
 }
 
 fn parse_command_line_trailers(
@@ -1041,27 +817,22 @@ fn parse_command_line_trailers(
     conf_list: &[ConfInfo],
     separators: &str,
 ) -> Vec<ArgItem> {
-    let cl_separators: String = format!("={separators}");
-    let mut out = Vec::new();
-    for nt in new_args {
-        let sep = find_separator(&nt.text, &cl_separators);
-        if sep == Some(0) {
-            continue;
-        }
-        let (tok, val, picked) = parse_trailer_into(&nt.text, &cl_separators, conf_list, true);
-        let base = if !picked.name.is_empty() {
-            picked
-        } else {
-            duplicate_conf(default_conf)
-        };
-        let conf = merge_arg_conf(&base, nt);
-        out.push(ArgItem {
-            token: tok,
-            value: val,
-            conf,
-        });
-    }
-    out
+    let cl_separators = format!("={separators}");
+    new_args
+        .iter()
+        .filter(|nt| find_separator(&nt.text, &cl_separators) != Some(0))
+        .map(|nt| {
+            let (token, value, picked) = parse_trailer(&nt.text, &cl_separators, conf_list);
+            let base = picked
+                .filter(|item| !item.name.is_empty())
+                .unwrap_or(default_conf);
+            ArgItem {
+                token,
+                value,
+                conf: merge_arg_conf(base.clone(), nt),
+            }
+        })
+        .collect()
 }
 
 fn process_trailers_lists(head: &mut Vec<TrailerItem>, args: Vec<ArgItem>, cwd: Option<&Path>) {
@@ -1072,35 +843,6 @@ fn process_trailers_lists(head: &mut Vec<TrailerItem>, args: Vec<ArgItem>, cwd: 
     }
 }
 
-fn format_one_trailer(
-    item: &TrailerItem,
-    trim_empty: bool,
-    only_trailers: bool,
-    separators: &str,
-    out: &mut String,
-) {
-    let Some(ref tok) = item.token else {
-        if only_trailers {
-            return;
-        }
-        out.push_str(&item.value);
-        out.push('\n');
-        return;
-    };
-    if trim_empty && item.value.is_empty() {
-        return;
-    }
-    out.push_str(tok);
-    let c = last_non_space_char(tok);
-    let need_sep = c.is_none_or(|ch| !separators.contains(ch));
-    if need_sep {
-        out.push(separators.chars().next().unwrap_or(':'));
-        out.push(' ');
-    }
-    out.push_str(&item.value);
-    out.push('\n');
-}
-
 fn format_trailers_list(
     items: &[TrailerItem],
     opts: &ProcessTrailerOptions,
@@ -1108,7 +850,20 @@ fn format_trailers_list(
     out: &mut String,
 ) {
     for item in items {
-        format_one_trailer(item, opts.trim_empty, opts.only_trailers, separators, out);
+        match &item.token {
+            None if opts.only_trailers => continue,
+            None => {}
+            Some(_) if opts.trim_empty && item.value.is_empty() => continue,
+            Some(tok) => {
+                out.push_str(tok);
+                if last_non_space_char(tok).is_none_or(|ch| !separators.contains(ch)) {
+                    out.push(separators.chars().next().unwrap_or(':'));
+                    out.push(' ');
+                }
+            }
+        }
+        out.push_str(&item.value);
+        out.push('\n');
     }
 }
 
@@ -1159,12 +914,10 @@ pub fn process_trailers(
 
 /// Complete stdin/file input with a trailing newline when missing (Git `strbuf_complete_line`).
 pub fn complete_line(s: &str) -> String {
-    if s.is_empty() || !s.ends_with('\n') {
-        let mut o = s.to_string();
-        o.push('\n');
-        o
-    } else {
+    if s.ends_with('\n') {
         s.to_string()
+    } else {
+        format!("{s}\n")
     }
 }
 
@@ -1172,6 +925,18 @@ pub fn complete_line(s: &str) -> String {
 mod line_coverage_tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn last_line_start_finds_the_line_ending_at_len() {
+        let buf = "ab\ncd\n\né\n";
+        assert_eq!(last_line_start(buf, 0), None);
+        assert_eq!(last_line_start(buf, 1), Some(0));
+        assert_eq!(last_line_start(buf, 3), Some(0));
+        assert_eq!(last_line_start(buf, 6), Some(3));
+        assert_eq!(last_line_start(buf, 7), Some(6));
+        assert_eq!(last_line_start(buf, buf.len()), Some(7));
+        assert_eq!(last_line_start("é", "é".len()), Some(0));
+    }
 
     #[test]
     fn trailer_enum_parsers_and_process_trailers_matrix() {
