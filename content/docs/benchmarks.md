@@ -420,20 +420,30 @@ Path-limited history now scans the requested entries directly in reusable tree b
 
 ## Branch inventory and packed refs
 
-Branch inventory shares one configuration snapshot across upstream lookups and reuses the repository's ref store when reading the main worktree's `HEAD`. This avoids validating configuration files once per branch. Full packed-ref scans build the sorted cache from records in file order, avoiding an intermediate hash table. Sorted prefix scans check the records they visit and their neighbours; an ordering violation triggers a full scan. See the [refs guide](library/refs.md#reading-packed-refs) for the trust model.
+Branch inventory shares one validated configuration snapshot across upstream lookups and reuses the repository's ref store for the main worktree's `HEAD`. Full packed-ref scans collect records in file order before building the sorted cache, avoiding an intermediate hash table. Ranged scans validate the records they visit and both neighbours, falling back to a full scan when they encounter an ordering violation. The [refs guide](library/refs.md#reading-packed-refs) describes the approved trust model.
 
-The October 26 comparison uses the repository's `release` profile, system **Git 2.55.0**, and a four-vCPU Xeon Platinum 8573C VM. `daily-branch-inventory-before.json` and `daily-branch-inventory-after.json` record the branch/tag matrix with **20 alternating runs per tool** and per-process peak RSS. `branch-inventory-scale-before.json` and `branch-inventory-scale-after.json` add **40 hyperfine runs** after ten warmups; their RSS is the maximum of ten `/usr/bin/time -v` runs.
+The October 27 comparison freezes main at `aa1964221` and applies only the branch-inventory changes. It uses Rust 1.99.0's unchanged `release` profile, stock **Git 2.55.0**, and a four-vCPU **AMD EPYC 9V74** VM. The binaries remain PIE executables. Each row has **60 shuffled, interleaved runs per tool**, ten warmups, matched executable basenames and path lengths, and no concurrent builds or tests. Peak RSS is the maximum of ten `/usr/bin/time -v` runs. Preparation stays outside timed regions.
 
-The daily fixture is a clone with one local branch and roughly 10k packed remote refs and tags. The local-branch comparison lists the fixture source itself (6,667 branches). The 100k-ref fixtures retain its objects and history, with sorted refs pointing at `HEAD`: one has 66,666 remote refs and 33,333 tags, plus `main`; the other has 99,999 local refs and one remote ref. Both pass system `git fsck --strict`.
+The authoritative samples are `branch-inventory-4184-before.json` and `branch-inventory-4184-after.json`. Separate `daily-branch-inventory-4184-*.json` files exercise the registered daily scenarios with `grit-bench`; those sequential report captures are supplementary to the interleaved comparison.
 
-| Operation | Git ms | Grit before ms | Grit after ms |
-| --- | ---: | ---: | ---: |
-| Daily branch listing | 1.463 | 2.536 | 2.438 |
-| List 6,667 local branches | 19.687 | 38.317 | 9.467 |
-| List 100k local refs | 304.423 | 544.343 | 145.506 |
-| List all 100k refs through the library driver | 56.235 | 118.910 | 97.857 |
+| Operation | Git ms | Grit before ms | Grit after ms | RSS before KiB | RSS after KiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Daily branch listing | 1.402 | 2.168 | 2.120 | 12,604 | 12,756 |
+| List 6,667 packed local branches | 22.574 | 69.599 | 11.343 | 16,432 | 16,312 |
+| List 99,999 local branches in a 100k-ref repo | 351.659 | 949.174 | 151.917 | 83,040 | 82,952 |
+| List all 100k refs through the library driver | 58.567 | 152.284 | 127.940 | 54,548 | 51,028 |
+| List 6,667 loose local branches | 86.359 | 199.979 | 140.001 | 16,196 | 16,092 |
+| Clean status, small repo | 1.902 | 2.809 | 2.813 | 15,252 | 15,340 |
 
-Short-command results also depend on process startup and binary layout. The daily headline improves by 4%, while the direct hyperfine check moves from 1.757 to 1.823 ms. Separate **60-run interleaved** checks (`branch-inventory-confirm-*.json`) show the merged-ref driver moving from 2.145 to 2.209 ms and small-repository status from 2.662 to 2.866 ms. These regressions remain visible in the committed results; this capture does not establish a regression-free CLI improvement. Peak RSS is recorded in every report rather than inferred from allocation counts.
+The daily clone has one local branch and roughly 10k remote refs and tags. The local-branch rows use the fixture sources themselves; the loose source really retains loose files. The two 100k-ref repositories retain the source's objects and history, with sorted refs pointing at `HEAD`: one has 66,666 remote refs, 33,333 tags and `main`; the other has 99,999 local refs and one remote ref. System `git fsck --strict --no-dangling` checks both.
+
+The profile explains the large-repository gains: listing 6,667 local branches reduces **33,410 → 61 `statx` calls**, **419,065 → 118,849 allocations**, and **44.0 → 11.7 MB of requested allocation bytes**. Small status also does less work: **6,930 → 6,621 allocations** and **526 → 515 syscalls**. The file-order collector reduces requested allocation bytes for the 100k full scan from **86.8 to 80.1 MB**; peak RSS falls about **6%** there.
+
+Short-command differences need caution. `branch-inventory-4184-bisection.json` records independent config-reuse, file-order and hybrid-validation builds, plus executable-file controls. Reordering two helpers produced a **byte-identical** baseline executable, yet separate files differed by about **9%** on status; a hard link stayed within **1%**. Copying the current baseline changed status by about **4%**.
+
+The hybrid and file-order pieces add no allocations or syscalls to small status, and the combined current-main status result is flat. The small positive deltas in create and tag rows include zero in paired bootstrap 95% intervals. Treat the headline's 2% lower median as near-flat; the large-repository gains are much larger than these controls.
+
+A separate merged-ref control changed by about 6% when copying an identical baseline, while its hard link stayed flat; the after binary was about 4% slower in that control capture. Short-row RSS also remains sensitive to executable mapping: the same baseline varied by about 0.4 MiB between captures. All values are retained in the evidence, including the small RSS increases on short rows. Startup/file-placement investigation belongs to #2028; this change does not alter release profiles or ASLR.
 
 ```bash
 cargo build --release -p grit-cli -p grit-utils

@@ -1,0 +1,172 @@
+{
+  "source_before": "aa1964221e0493bdd9c49a2c7326424f5d768c57",
+  "source_after": "ddcdee9ef0ebe7cb48765929399816767c24df96",
+  "test_environment": {
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_INCREMENTAL": "0",
+    "note": "Only test/debug artifacts omit debug symbols to fit disk; release profile unchanged."
+  },
+  "commands": {
+    "full": "cargo test -p grit-lib -p grit-cli --no-fail-fast",
+    "unit": "cargo test -p grit-lib --lib",
+    "cli": "cargo test -p grit-cli --no-fail-fast",
+    "related": "cargo test -p grit-lib --no-fail-fast plus all 54 refs/refstore/branch/worktree/repository integration targets (exact selection script included)"
+  },
+  "results": {
+    "before": {
+      "suites": {
+        "unit": {
+          "passed": 2636,
+          "failed": 2,
+          "ignored": 3,
+          "targets": 1,
+          "fully_passing_targets": 0,
+          "failures": [
+            "porcelain::reset::tests::hard_reset_keeps_recorded_stat_rows_for_unchanged_files",
+            "porcelain::reset::tests::hard_reset_removes_staged_only_paths_and_keeps_untracked_under_deleted_dirs"
+          ]
+        },
+        "cli": {
+          "passed": 1198,
+          "failed": 5,
+          "ignored": 0,
+          "targets": 196,
+          "fully_passing_targets": 192,
+          "failures": [
+            "tests::command_pages_follow_template",
+            "bad_filter_and_missing_revision_errors_are_clean",
+            "push_surfaces_pre_receive_hook_stderr_on_sideband",
+            "push_surfaces_post_receive_hook_stderr_on_success",
+            "remote_refs_smart_http_matches_git"
+          ]
+        },
+        "related": {
+          "passed": 302,
+          "failed": 4,
+          "ignored": 0,
+          "targets": 54,
+          "fully_passing_targets": 51,
+          "failures": [
+            "no_ad_hoc_ref_backend_probes_outside_store_layer",
+            "t1401_head_detached_vs_symbolic_both_backends",
+            "repository_injected_head_reflog_uses_ref_store",
+            "repository_with_memory_ref_store"
+          ]
+        }
+      },
+      "total_passed": 4136,
+      "total_failed": 11,
+      "total_ignored": 3,
+      "targets": 251,
+      "fully_passing_targets": 243
+    },
+    "after": {
+      "suites": {
+        "unit": {
+          "passed": 2641,
+          "failed": 1,
+          "ignored": 3,
+          "targets": 1,
+          "fully_passing_targets": 0,
+          "failures": [
+            "porcelain::reset::tests::hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once"
+          ]
+        },
+        "cli": {
+          "passed": 1198,
+          "failed": 5,
+          "ignored": 0,
+          "targets": 196,
+          "fully_passing_targets": 192,
+          "failures": [
+            "tests::command_pages_follow_template",
+            "bad_filter_and_missing_revision_errors_are_clean",
+            "push_surfaces_pre_receive_hook_stderr_on_sideband",
+            "push_surfaces_post_receive_hook_stderr_on_success",
+            "remote_refs_smart_http_matches_git"
+          ]
+        },
+        "related": {
+          "passed": 304,
+          "failed": 4,
+          "ignored": 0,
+          "targets": 54,
+          "fully_passing_targets": 51,
+          "failures": [
+            "no_ad_hoc_ref_backend_probes_outside_store_layer",
+            "t1401_head_detached_vs_symbolic_both_backends",
+            "repository_injected_head_reflog_uses_ref_store",
+            "repository_with_memory_ref_store"
+          ]
+        }
+      },
+      "total_passed": 4143,
+      "total_failed": 10,
+      "total_ignored": 3,
+      "targets": 251,
+      "fully_passing_targets": 243
+    }
+  },
+  "full_gate": {
+    "before": {
+      "exit_code": 101,
+      "compile_error": "error[E0277]: the trait bound `Signature: From<&str>` is not satisfied\n  --> grit-lib/tests/history_injected_ref_store.rs:45:22\n   |\n45 |         identity: TS.into(),\n   |                      ^^^^ the trait `From<&str>` is not implemented for `Signature`\n   |\n   = note: required for `&str` to implement `Into<Signature>`\n\nFor more information about this error, try `rustc --explain E0277`.\nerror: could not compile `grit-lib` (test \"history_injected_ref_store\") due to 1 previous error"
+    },
+    "after": {
+      "exit_code": 101,
+      "compile_error": "error[E0277]: the trait bound `Signature: From<&str>` is not satisfied\n  --> grit-lib/tests/history_injected_ref_store.rs:45:22\n   |\n45 |         identity: TS.into(),\n   |                      ^^^^ the trait `From<&str>` is not implemented for `Signature`\n   |\n   = note: required for `&str` to implement `Into<Signature>`\n\nFor more information about this error, try `rustc --explain E0277`.\nerror: could not compile `grit-lib` (test \"history_injected_ref_store\") due to 1 previous error"
+    }
+  },
+  "checks": {
+    "fmt": "passed: cargo fmt --all --check",
+    "clippy": "passed: cargo clippy --workspace -- -D warnings",
+    "rustdoc": "passed: RUSTDOCFLAGS=-D warnings cargo doc -p grit-lib --no-deps --all-features",
+    "docs": "passed: npm run --prefix site check (93 pages, 50 commands, 7 posts)"
+  },
+  "fsck": {
+    "many-refs": {
+      "exit_code": 0,
+      "output": ""
+    },
+    "many-refs-loose": {
+      "exit_code": 0,
+      "output": ""
+    },
+    "100k": {
+      "exit_code": 0,
+      "output": ""
+    },
+    "100k-local": {
+      "exit_code": 0,
+      "output": ""
+    }
+  },
+  "related_selection_script": "import subprocess,pathlib,json,os\nroot='/tmp/4184-tests';env=dict(os.environ,CARGO_TARGET_DIR='/home/runner/grit/target',CARGO_BUILD_JOBS='2',CARGO_PROFILE_DEV_DEBUG='0',CARGO_PROFILE_TEST_DEBUG='0',CARGO_INCREMENTAL='0')\nphase=os.environ.get('PHASE','before')\n# The unmodified full gate is recorded separately; this runs the same compilable targets\n# on both trees without editing or hiding the upstream compilation failure.\nmeta=json.loads(subprocess.check_output(['cargo','metadata','--no-deps','--format-version','1'],cwd=root,env=env))\ntests=[]\nfor pkg in meta['packages']:\n if pkg['name']!='grit-lib':continue\n for t in pkg['targets']:\n  name=t['name']\n  if t['kind']==['test'] and (name.startswith(('refs_','refstore_','branch_','worktree_','repository_')) or name in ['config_includeif_onbranch','config_cascade_session','reftable_worktree_git_compat']):tests += ['--test',name]\ncommands=[('cli',['cargo','test','-p','grit-cli','--no-fail-fast']),('related',['cargo','test','-p','grit-lib','--no-fail-fast',*tests])]\nresult={}\nfor name,args in commands:\n with open('/tmp/4184-'+name+'-'+phase+'.log','w') as log:r=subprocess.run(args,cwd=root,env=env,stdout=log,stderr=subprocess.STDOUT)\n result[name]=r.returncode;print(name,r.returncode,flush=True)\npathlib.Path('/tmp/4184-supplemental-'+phase+'.json').write_text(json.dumps(result)+'\\n')\n",
+  "reset_baseline_repro": {
+    "source": "aa1964221 (clean archive, no branch changes)",
+    "command": "cargo test -p grit-lib --lib porcelain::reset::tests::hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once -- --exact --nocapture",
+    "log_tail": "warning: `grit-lib` (lib test) generated 5 warnings (run `cargo fix --lib -p grit-lib --tests` to apply 3 suggestions)\n    Finished `test` profile [unoptimized] target(s) in 0.09s\n     Running unittests src/lib.rs (target/debug/deps/grit_lib-6d9005bd823c058c)\n\nrunning 1 test\n\nthread 'porcelain::reset::tests::hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once' (209994) panicked at grit-lib/src/porcelain/reset.rs:1286:9:\ngit [\"fsck\", \"--no-progress\"]: error: packfile .git/objects/pack/.tmp-210000-pack-1acc177b70e3e3b7e2dc7c9337816e1342fb9014.pack cannot be accessed\nerror: packfile .git/objects/pack/.tmp-210000-pack-dcfa22d5c88858486a0622cb2606810f52d25ffd.pack index not opened\nerror: unable to load rev-index for pack '.git/objects/pack/.tmp-210000-pack-dcfa22d5c88858486a0622cb2606810f52d25ffd.pack'\n\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\ntest porcelain::reset::tests::hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once ... FAILED\n\nfailures:\n\nfailures:\n    porcelain::reset::tests::hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2640 filtered out; finished in 0.17s\n\nerror: test failed, to rerun pass `-p grit-lib --lib`",
+    "stress": {
+      "default": {
+        "runs": 1,
+        "failures": [
+          {
+            "run": 0,
+            "output": "\nrunning 1 test\n\nthread 'porcelain::reset::tests::hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once' (209626) panicked at grit-lib/src/porcelain/reset.rs:1286:9:\ngit [\"fsck\", \"--no-progress\"]: error: packfile .git/objects/pack/.tmp-209632-pack-eb7a65469a575fc5062a7b290d7d354a36b812fc.pack cannot be accessed\n\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\ntest porcelain::reset::tests::hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once ... FAILED\n\nfailures:\n\nfailures:\n    porcelain::reset::tests::hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2640 filtered out; finished in 0.17s\n\n"
+          }
+        ]
+      },
+      "low-auto-gc": {
+        "runs": 1,
+        "failures": [
+          {
+            "run": 0,
+            "output": "\nrunning 1 test\n\nthread 'porcelain::reset::tests::hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once' (209651) panicked at grit-lib/src/porcelain/reset.rs:1286:9:\ngit [\"fsck\", \"--no-progress\"]: error: packfile .git/objects/pack/.tmp-209657-pack-eb7a65469a575fc5062a7b290d7d354a36b812fc.pack cannot be accessed\nerror: packfile .git/objects/pack/.tmp-209657-pack-49329dae6ecc349d77a1a1750a100578a4ca2a9c.pack index not opened\nerror: unable to load rev-index for pack '.git/objects/pack/.tmp-209657-pack-49329dae6ecc349d77a1a1750a100578a4ca2a9c.pack'\n\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\ntest porcelain::reset::tests::hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once ... FAILED\n\nfailures:\n\nfailures:\n    porcelain::reset::tests::hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2640 filtered out; finished in 0.17s\n\n"
+          }
+        ]
+      }
+    }
+  },
+  "previous_issue": "#2030 was already filed by an earlier run and is closed; its branch deletion regression passes on current main and this branch."
+}
