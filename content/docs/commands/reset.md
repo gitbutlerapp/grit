@@ -149,6 +149,8 @@ Resetting to default `HEAD` on an unborn branch reports `branch_no_commits` (sam
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 
+When another process holds `.git/index.lock`, `--hard`, `--keep` and the default mixed reset fail with exit `1` (`kind` `lock_held` under `--json`) before touching anything: `HEAD`, the branch, the index and the worktree are unchanged. Retry once the other process finishes.
+
 
 ## See also
 

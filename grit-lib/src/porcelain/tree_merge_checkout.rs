@@ -5,9 +5,12 @@
 
 use crate::diff::{diff_trees, diff_trees_with_index, DiffEntry};
 use crate::error::{Error, Result};
+use crate::index::IndexLock;
 use crate::merge_trees::{apply_tree_merge_output_to_worktree_index, TreeMergeOutput};
 use crate::objects::ObjectId;
-use crate::porcelain::checkout::{checkout_tree_changes_with_index_opts, CheckoutApplyOptions};
+use crate::porcelain::checkout::{
+    checkout_tree_changes_with_index_opts, CheckoutApplyOptions, CheckoutIndexWrite,
+};
 use crate::porcelain::worktree_guard::{
     collect_untracked_for_tree_changes, ensure_no_untracked_overwrite, load_worktree_snapshot,
     WorktreeSnapshot,
@@ -72,6 +75,7 @@ pub(crate) fn apply_clean_tree_merge_to_worktree_with_snapshot(
         collect_untracked_for_tree_changes(repo, &mut snapshot.index, work_tree, &tree_changes)?;
     ensure_no_untracked_overwrite(&untracked, &tree_changes)?;
 
+    let mut lock = repo.lock_index()?;
     checkout_tree_changes_with_index_opts(
         repo,
         &tree_changes,
@@ -81,28 +85,31 @@ pub(crate) fn apply_clean_tree_merge_to_worktree_with_snapshot(
         CheckoutApplyOptions {
             parallel_prepare_blobs: true,
             checkout_result_tree: Some(merged.result_tree),
-            defer_index_disk_write: true,
             ..CheckoutApplyOptions::default()
         },
         None,
+        CheckoutIndexWrite::Defer(&lock),
     )?;
     finalize_clean_tree_merge_index(repo, &mut snapshot.index, merged)?;
     snapshot.head_tree = Some(merged.result_tree);
-    write_index_after_merge_checkout(repo, &mut snapshot.index)
+    write_index_after_merge_checkout(repo, &mut snapshot.index, &mut lock)
 }
 
 /// Single index write for a merge checkout, with the same racy-entry policy as checkout's own
 /// write: the clean-worktree guard already verified untouched entries and checkout just stat'ed
 /// the entries it wrote, so re-hashing every same-second entry would only repeat that work.
+///
+/// `lock` is the `index.lock` taken before the checkout touched the work tree.
 pub(crate) fn write_index_after_merge_checkout(
     repo: &Repository,
     index: &mut crate::index::Index,
+    lock: &mut IndexLock,
 ) -> Result<()> {
+    let index_path = lock.index_path.clone();
     index.skip_racy_smudge_on_write = true;
-    let result = repo.write_index_with_post_index_change(index, true, false);
+    let result = repo.write_index_with_lock(lock, index, true);
     index.skip_racy_smudge_on_write = false;
     result?;
-    let index_path = repo.index_path_for_env()?;
     crate::index::advance_index_file_mtime_past_entries(index, &index_path, None)?;
     index.source_mtime = crate::index::index_file_mtime(&index_path);
     Ok(())

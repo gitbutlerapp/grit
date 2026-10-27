@@ -152,13 +152,16 @@ pub fn preview_reset(repo: &Repository, opts: &ResetOptions) -> Result<ResetPrev
 /// Move `HEAD` to `opts.target` according to `opts.mode`.
 ///
 /// Index and worktree updates run before the branch or detached `HEAD` moves.
-/// When [`ResetOptions::dry_run`] is true, nothing is written and the returned
+/// Hard and keep resets take `index.lock` before reading the index or touching the
+/// worktree. When [`ResetOptions::dry_run`] is true, nothing is written and the returned
 /// [`ResetOutcome::target`] is still the requested commit.
 ///
 /// # Errors
 ///
-/// Returns an error when there is no current commit, the work tree is required but
-/// missing (hard/keep reset), local edits block keep reset, or ref/index/checkout I/O fails.
+/// Returns [`Error::LockHeld`] when another process holds `index.lock`, with `HEAD`,
+/// refs, index and worktree unchanged. Returns an error when there is no current commit,
+/// the work tree is required but missing (hard/keep reset), local edits block keep reset,
+/// or ref/index/checkout I/O fails.
 /// An invalid [`ResetOptions::identity`] returns [`Error::InvalidSignature`] before
 /// changing HEAD, branch refs, index, worktree, reflogs, or operation state (including
 /// merge autostashes). This also applies to dry runs, resets to the current HEAD,

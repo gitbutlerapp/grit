@@ -12,7 +12,9 @@ use crate::diff::{
 };
 use crate::error::{Error, Result};
 use crate::index::index_file_mtime;
-use crate::index::{entry_from_metadata, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK};
+use crate::index::{
+    entry_from_metadata, Index, IndexEntry, IndexLock, MODE_EXECUTABLE, MODE_GITLINK,
+};
 use crate::merge_file::{is_binary, merge, ConflictStyle, MergeFavor, MergeInput};
 use crate::objects::ObjectKind;
 use crate::objects::{parse_commit, ObjectId};
@@ -92,7 +94,9 @@ pub struct RestoreOutcome {
 /// return [`Error::RestoreConflictWithStaged`], [`Error::RestoreConflictWithSource`],
 /// [`Error::RestoreConflictMissingOurs`], [`Error::RestoreConflictMissingTheirs`],
 /// or [`Error::RestoreConflictNotUnmerged`] when the index shape does not allow
-/// the requested checkout. Other failures are I/O or object-store errors.
+/// the requested checkout. [`Error::LockHeld`] means another process holds `index.lock`;
+/// the lock is taken before the index is read, so nothing was changed. Other failures are
+/// I/O or object-store errors.
 pub fn restore_paths(repo: &Repository, opts: &RestoreOptions) -> Result<RestoreOutcome> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
 
@@ -105,7 +109,19 @@ pub fn restore_paths(repo: &Repository, opts: &RestoreOptions) -> Result<Restore
         return restore_conflict_paths(repo, work_tree, opts);
     }
 
-    let mut index = repo.load_index()?;
+    let (mut lock, index) = repo.lock_and_load_index()?;
+    restore_paths_with_lock(repo, opts, &mut lock, index)
+}
+
+/// [`restore_paths`] without conflict options, for a caller that already holds `index.lock`
+/// and read `index` under it. A changed index is written through `lock`.
+pub(crate) fn restore_paths_with_lock(
+    repo: &Repository,
+    opts: &RestoreOptions,
+    lock: &mut IndexLock,
+    mut index: Index,
+) -> Result<RestoreOutcome> {
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let pathspec_ctx = repo.pathspec_match_context();
     let restore_staged = opts.staged;
     if !restore_staged && matches!(opts.source, RestoreSource::Index) {
@@ -201,7 +217,7 @@ pub fn restore_paths(repo: &Repository, opts: &RestoreOptions) -> Result<Restore
             refresh_restored_index_stats(repo, work_tree, &mut index, &outcome)?;
         }
         if index_dirty {
-            repo.write_index(&mut index)?;
+            repo.write_index_with_lock(lock, &mut index, false)?;
         }
     }
 
@@ -236,7 +252,7 @@ fn restore_conflict_paths(
     work_tree: &Path,
     opts: &RestoreOptions,
 ) -> Result<RestoreOutcome> {
-    let index = repo.load_index()?;
+    let (mut lock, index) = repo.lock_and_load_index()?;
     let pathspec_ctx = repo.pathspec_match_context();
     let include_resolved_undo = opts.remerge.is_some();
     let matched = collect_conflict_matched_paths(
@@ -275,7 +291,7 @@ fn restore_conflict_paths(
         )?;
     }
     if index_dirty {
-        repo.write_index(&mut index)?;
+        repo.write_index_with_lock(&mut lock, &mut index, false)?;
     }
     Ok(outcome)
 }

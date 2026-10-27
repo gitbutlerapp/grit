@@ -262,6 +262,8 @@ Keep it with `grit branch <name> 85ffcb090615556eb238400c577de383ca034213`.
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 
+When another process holds `.git/index.lock`, a switch that would update the worktree fails with exit `1` (`kind` `lock_held` under `--json`) before touching anything: the worktree, index, `HEAD` and branches are unchanged. `--dry-run` never takes the lock.
+
 
 ## See also
 

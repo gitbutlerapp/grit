@@ -27,8 +27,8 @@ use crate::diff::{
 use crate::error::{Error, Result};
 use crate::filter_process::{DelayedCheckoutError, DelayedProcessCheckout, FilterSmudgeMeta};
 use crate::index::{
-    entry_from_metadata, entry_from_stat, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK,
-    MODE_REGULAR, MODE_SYMLINK, MODE_TREE,
+    entry_from_metadata, entry_from_stat, Index, IndexEntry, IndexLock, MODE_EXECUTABLE,
+    MODE_GITLINK, MODE_REGULAR, MODE_SYMLINK, MODE_TREE,
 };
 use crate::objects::{Object, ObjectId, TreeEntry};
 use crate::odb::{BoundedRead, Odb};
@@ -297,14 +297,13 @@ fn checkout_populated_tree(
         .unwrap_or(false);
     let precompose = repo.pathspec_precompose_enabled();
 
+    let (mut lock, mut loaded_index) = repo.lock_and_load_index()?;
+    let index_mut = &mut loaded_index;
     let total = diff_tree_path_change_count(repo.odb(), None, Some(tree_oid), "")?;
     progress.start(
         ProgressPhase::CheckingOutFiles,
         Some(u64::try_from(total).unwrap_or(u64::MAX)),
     );
-
-    let mut loaded_index = repo.load_index()?;
-    let index_mut = &mut loaded_index;
 
     let rules = Rc::new(
         if tree_contains_dot_gitattributes(repo.odb(), tree_oid, "", protect)? {
@@ -327,7 +326,6 @@ fn checkout_populated_tree(
     let mut apply = CheckoutApplyOptions {
         parallel_prepare_blobs: false,
         checkout_result_tree: None,
-        defer_index_disk_write: true,
         precomputed_worktree_rules: Some(Rc::clone(&rules)),
         sparse_paths_applied: true,
         ..CheckoutApplyOptions::default()
@@ -367,6 +365,7 @@ fn checkout_populated_tree(
                 ignorecase,
                 &mut chunk_progress,
                 cancel,
+                CheckoutIndexWrite::Defer(&lock),
             )?;
         } else {
             apply.skip_bulk_checkout_fast_path = true;
@@ -378,6 +377,7 @@ fn checkout_populated_tree(
                 Some(index_mut),
                 apply.clone(),
                 None,
+                CheckoutIndexWrite::Defer(&lock),
             )?;
             apply.skip_bulk_checkout_fast_path = false;
         }
@@ -385,7 +385,7 @@ fn checkout_populated_tree(
     }
 
     attach_checkout_result_cache_tree(repo, index_mut, tree_oid)?;
-    write_checkout_index(repo, index_mut, bulk_index_rewrite, None)?;
+    write_checkout_index(repo, index_mut, &mut lock, bulk_index_rewrite, None)?;
 
     progress.finish();
     crate::progress::poll_cancel(progress, cancel)?;
@@ -398,22 +398,34 @@ fn checkout_populated_tree(
     Ok(CheckoutOutcome { path_collisions })
 }
 
-fn checkout_between_trees_slow(
+/// Apply the tree diff `from` → `to` under a lock the caller already holds.
+///
+/// `index` is the index read under that lock (loaded here when `None`). With
+/// [`CheckoutIndexWrite::Defer`] the updated rows stay in `index` for the caller to write.
+pub(crate) fn checkout_between_trees_locked(
     repo: &Repository,
-    from: Option<&ObjectId>,
-    to: Option<&ObjectId>,
+    from: &ObjectId,
+    to: &ObjectId,
+    index: Option<&mut Index>,
+    index_write: CheckoutIndexWrite<'_>,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<()> {
-    let changes = diff_trees(repo.odb(), from, to, "")?;
-    let mut apply = CheckoutApplyOptions::default();
-    if let Some(tree) = to {
-        apply.checkout_result_tree = Some(*tree);
-        if from.is_none() {
-            apply.parallel_prepare_blobs = true;
-        }
-    }
-    checkout_tree_changes_with_progress(repo, &changes, progress, cancel, None, apply, None)
+    let changes = diff_trees(repo.odb(), Some(from), Some(to), "")?;
+    let apply = CheckoutApplyOptions {
+        checkout_result_tree: Some(*to),
+        ..CheckoutApplyOptions::default()
+    };
+    checkout_tree_changes_with_progress(
+        repo,
+        &changes,
+        progress,
+        cancel,
+        index,
+        apply,
+        None,
+        index_write,
+    )
 }
 
 /// Apply the change from tree `from` to tree `to` onto the working tree and
@@ -428,6 +440,13 @@ fn checkout_between_trees_slow(
 /// working tree is **clean** relative to `from` (no staged or unstaged changes
 /// that would be silently overwritten) and that no untracked file sits where an
 /// added path needs to land. It performs the mechanical apply only.
+///
+/// `index.lock` is taken before the index is read and before any work-tree change.
+///
+/// # Errors
+///
+/// Returns [`Error::LockHeld`] without touching the work tree or index when another process
+/// holds `index.lock`, and propagates object, checkout I/O and index write failures.
 pub fn checkout_between_trees(
     repo: &Repository,
     from: Option<&ObjectId>,
@@ -442,6 +461,10 @@ pub fn checkout_between_trees(
 /// Populated-tree checkouts emit [`ProgressPhase::CheckingOutFiles`] with the
 /// exact blob count from the destination tree; tree-to-tree diffs report the
 /// number of path changes.
+///
+/// # Errors
+///
+/// Same as [`checkout_between_trees`], plus [`Error::Cancelled`] when `cancel` fires.
 pub fn checkout_between_trees_with_progress(
     repo: &Repository,
     from: Option<&ObjectId>,
@@ -449,10 +472,19 @@ pub fn checkout_between_trees_with_progress(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<CheckoutOutcome> {
-    if from.is_none() {
+    let Some(from) = from else {
         return checkout_populated_tree(repo, to, progress, cancel);
-    }
-    checkout_between_trees_slow(repo, from, Some(to), progress, cancel)?;
+    };
+    let mut lock = repo.lock_index()?;
+    checkout_between_trees_locked(
+        repo,
+        from,
+        to,
+        None,
+        CheckoutIndexWrite::Commit(&mut lock),
+        progress,
+        cancel,
+    )?;
     Ok(CheckoutOutcome::default())
 }
 
@@ -468,10 +500,14 @@ pub fn checkout_between_trees_with_progress(
 /// Tracked paths absent from `target_tree` are removed and the index is
 /// rebuilt without unmerged stages.
 ///
+/// `index.lock` is taken before the index is read and held until the rebuilt index
+/// replaces it, so no file is touched when the lock is unavailable.
+///
 /// # Errors
 ///
-/// Returns an error when the repository has no work tree, required promised objects
-/// cannot be fetched, or checkout I/O fails.
+/// Returns [`Error::LockHeld`] without touching the work tree or index when another process
+/// holds `index.lock`, and an error when the repository has no work tree, required promised
+/// objects cannot be fetched, or checkout I/O fails.
 pub fn checkout_hard_to_tree_from_head_tree(
     repo: &Repository,
     head_tree: &ObjectId,
@@ -485,6 +521,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
 
+    let mut lock = repo.lock_index()?;
     let mut pre_reset_index =
         crate::porcelain::index_from_tree::load_index_for_tree_transition(repo, target_tree)?;
     let trees_differ = head_tree != target_tree;
@@ -635,7 +672,6 @@ pub fn checkout_hard_to_tree_from_head_tree(
     } else {
         Some(CheckoutApplyOptions {
             parallel_prepare_blobs: true,
-            defer_index_disk_write: true,
             ..CheckoutApplyOptions::default()
         })
     };
@@ -650,6 +686,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
             Some(&mut index),
             apply,
             None,
+            CheckoutIndexWrite::Defer(&lock),
         )?;
     }
 
@@ -858,9 +895,9 @@ pub fn checkout_hard_to_tree_from_head_tree(
         new_index.set_cache_tree(cache_tree);
     }
     if trees_differ && !written_by_tree_diff.is_empty() {
-        write_checkout_index(repo, &mut new_index, false, mtime_hint)?;
+        write_checkout_index(repo, &mut new_index, &mut lock, false, mtime_hint)?;
     } else {
-        repo.write_index(&mut new_index)?;
+        repo.write_index_with_lock(&mut lock, &mut new_index, false)?;
     }
     Ok(())
 }
@@ -1119,7 +1156,13 @@ fn remove_index_paths_outside_tree_diff(
 ///
 /// Callers such as `grit switch` can reuse one [`diff_trees`] result for both
 /// untracked guards and the mechanical apply.
+///
+/// # Errors
+///
+/// Returns [`Error::LockHeld`] without touching the work tree or index when another process
+/// holds `index.lock`, and propagates object, checkout I/O and index write failures.
 pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result<()> {
+    let mut lock = repo.lock_index()?;
     checkout_tree_changes_with_progress(
         repo,
         changes,
@@ -1128,6 +1171,7 @@ pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result
         None,
         CheckoutApplyOptions::default(),
         None,
+        CheckoutIndexWrite::Commit(&mut lock),
     )
 }
 
@@ -1152,8 +1196,6 @@ pub(crate) struct CheckoutApplyOptions {
     pub skip_bulk_checkout_fast_path: bool,
     /// When set, the index should match this tree after checkout (updates cache-tree root).
     pub checkout_result_tree: Option<crate::objects::ObjectId>,
-    /// Apply checkout to the worktree but defer index disk writes until the caller finishes.
-    pub defer_index_disk_write: bool,
     /// Pre-built attribute/conversion context (populated-tree checkout with `.gitattributes`).
     pub precomputed_worktree_rules: Option<Rc<WorktreeRules>>,
     /// The caller already split off sparse-checkout skipped paths; every change left is
@@ -1168,14 +1210,30 @@ pub(crate) struct CheckoutApplyOptions {
     pub skip_parallel_write_ramp: bool,
 }
 
+/// How a checkout persists the index it updates.
+///
+/// Both modes borrow an [`IndexLock`] the caller took before the checkout's first work-tree
+/// change, so a held `index.lock` refuses the checkout before any file is touched.
+pub(crate) enum CheckoutIndexWrite<'a> {
+    /// Write the updated index through this lock and replace the on-disk index.
+    Commit(&'a mut IndexLock),
+    /// Leave the updated index in memory; the caller writes it through this lock afterwards.
+    Defer(&'a IndexLock),
+}
+
 /// Like [`checkout_tree_changes`], but updates `index` in place instead of loading from disk.
 ///
 /// Callers such as `grit switch` use this after a tree-diff guard pass that already loaded the index.
+///
+/// # Errors
+///
+/// Same as [`checkout_tree_changes`]: a held `index.lock` fails before any work-tree change.
 pub fn checkout_tree_changes_with_index(
     repo: &Repository,
     changes: &[DiffEntry],
     index: &mut Index,
 ) -> Result<()> {
+    let mut lock = repo.lock_index()?;
     checkout_tree_changes_with_index_opts(
         repo,
         changes,
@@ -1184,10 +1242,13 @@ pub fn checkout_tree_changes_with_index(
         &NeverCancel,
         CheckoutApplyOptions::default(),
         None,
+        CheckoutIndexWrite::Commit(&mut lock),
     )
 }
 
-/// Like [`checkout_tree_changes_with_index`], with apply-time tuning for trusted callers.
+/// Like [`checkout_tree_changes_with_index`], with apply-time tuning for trusted callers that
+/// already hold `index.lock`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn checkout_tree_changes_with_index_opts(
     repo: &Repository,
     changes: &[DiffEntry],
@@ -1196,6 +1257,7 @@ pub(crate) fn checkout_tree_changes_with_index_opts(
     cancel: &dyn Cancel,
     apply: CheckoutApplyOptions,
     attribute_changes: Option<&[DiffEntry]>,
+    index_write: CheckoutIndexWrite<'_>,
 ) -> Result<()> {
     checkout_tree_changes_with_progress(
         repo,
@@ -1205,6 +1267,7 @@ pub(crate) fn checkout_tree_changes_with_index_opts(
         Some(index),
         apply,
         attribute_changes,
+        index_write,
     )
 }
 
@@ -1602,7 +1665,7 @@ fn checkout_commit_index_update(
     skip_worktree_rows: &[IndexEntry],
     bulk_index_rewrite: bool,
     checkout_result_tree: Option<crate::objects::ObjectId>,
-    defer_index_disk_write: bool,
+    index_write: CheckoutIndexWrite<'_>,
 ) -> Result<()> {
     new_entries.extend_from_slice(skip_worktree_rows);
     let change_count = paths_to_remove.len() + new_entries.len();
@@ -1653,10 +1716,15 @@ fn checkout_commit_index_update(
         attach_checkout_result_cache_tree(repo, index_mut, &tree)?;
     }
     index_mut.defer_untracked_cache_invalidation = false;
-    if defer_index_disk_write {
-        return Ok(());
+    match index_write {
+        CheckoutIndexWrite::Commit(lock) => {
+            write_checkout_index(repo, index_mut, lock, bulk_index_rewrite, index_mtime_hint)
+        }
+        CheckoutIndexWrite::Defer(lock) => {
+            debug_assert!(!lock.committed, "deferred checkout needs a held index lock");
+            Ok(())
+        }
     }
-    write_checkout_index(repo, index_mut, bulk_index_rewrite, index_mtime_hint)
 }
 
 /// Record that `index_mut` now matches `tree`: keep a still-valid cache tree and point its
@@ -1694,13 +1762,14 @@ fn attach_checkout_result_cache_tree(
 fn write_checkout_index(
     repo: &Repository,
     index_mut: &mut Index,
+    lock: &mut IndexLock,
     bulk_index_rewrite: bool,
     index_mtime_hint: Option<(u32, u32)>,
 ) -> Result<()> {
-    let index_path = repo.index_path_for_env()?;
+    let index_path = lock.index_path.clone();
     index_mut.suppress_pre_write_index_housekeeping = bulk_index_rewrite;
     index_mut.skip_racy_smudge_on_write = true;
-    let result = repo.write_index_at_with_post_index_change(&index_path, index_mut, true, false);
+    let result = repo.write_index_with_lock(lock, index_mut, true);
     index_mut.skip_racy_smudge_on_write = false;
     index_mut.suppress_pre_write_index_housekeeping = false;
     result?;
@@ -1848,6 +1917,7 @@ fn checkout_bulk_added_tree_changes(
     ignorecase: bool,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
+    index_write: CheckoutIndexWrite<'_>,
 ) -> Result<()> {
     let checkout_smudge_ctx = crate::filter_process::checkout_smudge_context(repo);
     let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
@@ -1931,7 +2001,7 @@ fn checkout_bulk_added_tree_changes(
         &apply.skip_worktree_rows,
         true,
         apply.checkout_result_tree,
-        apply.defer_index_disk_write,
+        index_write,
     )?;
     progress.finish();
     Ok(())
@@ -1952,6 +2022,7 @@ fn checkout_bulk_mod_delete_tree_changes(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
     delete_rollback: SharedCheckoutDeleteRollback,
+    index_write: CheckoutIndexWrite<'_>,
 ) -> Result<()> {
     let index: &Index = index_mut;
     let delete_changes: Vec<&DiffEntry> = changes
@@ -2126,7 +2197,7 @@ fn checkout_bulk_mod_delete_tree_changes(
         &apply.skip_worktree_rows,
         true,
         apply.checkout_result_tree,
-        apply.defer_index_disk_write,
+        index_write,
     )?;
     progress.finish();
     Ok(())
@@ -2145,6 +2216,7 @@ fn checkout_bulk_deleted_tree_changes(
     cancel: &dyn Cancel,
     apply: &CheckoutApplyOptions,
     delete_rollback: SharedCheckoutDeleteRollback,
+    index_write: CheckoutIndexWrite<'_>,
 ) -> Result<()> {
     let mut parallel_deleted_paths: HashSet<String> = HashSet::new();
     let mut per_file_deletes: Vec<String> = Vec::new();
@@ -2217,7 +2289,7 @@ fn checkout_bulk_deleted_tree_changes(
         &apply.skip_worktree_rows,
         true,
         apply.checkout_result_tree,
-        apply.defer_index_disk_write,
+        index_write,
     )?;
     progress.finish();
     Ok(())
@@ -2263,6 +2335,7 @@ fn prefetch_promisor_blobs(
     repo.prefetch_promised(&missing)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn checkout_tree_changes_with_progress(
     repo: &Repository,
     changes: &[DiffEntry],
@@ -2271,6 +2344,7 @@ fn checkout_tree_changes_with_progress(
     reuse_index: Option<&mut Index>,
     apply: CheckoutApplyOptions,
     attribute_changes: Option<&[DiffEntry]>,
+    index_write: CheckoutIndexWrite<'_>,
 ) -> Result<()> {
     let mut progress = CancelProgress::new(progress, cancel);
     let work_tree = repo
@@ -2347,6 +2421,7 @@ fn checkout_tree_changes_with_progress(
                 &mut progress,
                 cancel,
                 delete_rollback.clone_handle(),
+                index_write,
             )?;
             delete_guard.commit_success();
             return progress.finish_poll();
@@ -2368,6 +2443,7 @@ fn checkout_tree_changes_with_progress(
                 ignorecase,
                 &mut progress,
                 cancel,
+                index_write,
             )?;
             delete_guard.commit_success();
             return progress.finish_poll();
@@ -2430,6 +2506,7 @@ fn checkout_tree_changes_with_progress(
                 cancel,
                 &apply,
                 delete_rollback.clone_handle(),
+                index_write,
             )?;
             delete_guard.commit_success();
             return progress.finish_poll();
@@ -2741,7 +2818,7 @@ fn checkout_tree_changes_with_progress(
         &apply.skip_worktree_rows,
         bulk_index_rewrite,
         apply.checkout_result_tree,
-        apply.defer_index_disk_write,
+        index_write,
     )?;
     progress.finish();
     delete_guard.commit_success();
@@ -3920,6 +3997,7 @@ mod tests {
         index.entries.shrink_to_fit();
         let capacity = index.entries.capacity();
         let untouched = index.get(b"f099", 0).expect("untouched").clone();
+        let lock = repo.lock_index().expect("lock");
         checkout_commit_index_update(
             &repo,
             &mut index,
@@ -3929,7 +4007,7 @@ mod tests {
             &[],
             true,
             None,
-            true,
+            CheckoutIndexWrite::Defer(&lock),
         )
         .expect("update");
         assert_eq!(index.entries.len(), 100);
@@ -4382,10 +4460,10 @@ mod tests {
                 wholesale_safety_precomputed: true,
                 skip_bulk_checkout_fast_path: false,
                 checkout_result_tree: None,
-                defer_index_disk_write: false,
                 ..CheckoutApplyOptions::default()
             },
             None,
+            CheckoutIndexWrite::Commit(&mut repo.lock_index().expect("lock")),
         )
         .expect("checkout");
         assert!(
@@ -4465,10 +4543,10 @@ mod tests {
                 wholesale_safety_precomputed: true,
                 skip_bulk_checkout_fast_path: false,
                 checkout_result_tree: None,
-                defer_index_disk_write: false,
                 ..CheckoutApplyOptions::default()
             },
             None,
+            CheckoutIndexWrite::Commit(&mut repo.lock_index().expect("lock")),
         )
         .expect("checkout");
         assert!(

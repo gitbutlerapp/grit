@@ -346,6 +346,8 @@ hint: save local changes with `grit stash push`
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 
+When another process holds `.git/index.lock`, `grit stash`, `stash push`, `apply`, `pop` and `branch` fail with exit `1` (`kind` `lock_held` under `--json`) before writing anything: no stash commit or `refs/stash` entry is created, and the worktree and index are unchanged. Retry once the other process finishes. If a push fails after `refs/stash` was updated (for example an I/O error while resetting the worktree), the entry stays on the stash so the saved changes are never only a dangling object.
+
 
 ## See also
 

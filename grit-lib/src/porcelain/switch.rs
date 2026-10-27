@@ -7,14 +7,14 @@ use crate::check_ref_format::validate_branch_short_name;
 use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, OverwriteReason, Result};
 use crate::hooks::{run_post_checkout, HookName, PostOperationHooks};
-use crate::index::{Index, MODE_GITLINK};
+use crate::index::{Index, IndexLock, MODE_GITLINK};
 use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::branch::resolve_create_tracking;
 use crate::porcelain::branch_error::{BranchError, TrackMode};
 use crate::porcelain::checkout::{
     checkout_tree_changes_with_index_opts, precompute_wholesale_safe_directories,
-    trusted_wholesale_directories_for_switch, CheckoutApplyOptions, WholesalePrecomputeResult,
-    WholesaleWorktreeScan,
+    trusted_wholesale_directories_for_switch, CheckoutApplyOptions, CheckoutIndexWrite,
+    WholesalePrecomputeResult, WholesaleWorktreeScan,
 };
 use crate::porcelain::checkout_reflog::{
     append_head_checkout_reflog, checkout_reflog_from_label, finish_switch_ref_updates,
@@ -327,11 +327,16 @@ pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> 
 /// paths remain protected. A valid empty index instead preserves staged deletions. Dry runs
 /// report all paths to materialize without writing the index, worktree, refs, or reflogs.
 ///
+/// A real switch takes `index.lock` before reading the index and holds it through the
+/// checkout; refs move only after the index is written.
+///
 /// # Errors
 ///
 /// Returns [`Error::OperationInProgress`] (also for [`SwitchOptions::dry_run`]) while a merge,
-/// rebase, am, cherry-pick or revert is paused, whichever tool started it; overwrite refusals
-/// and ref/object failures otherwise. On error the hook does not run.
+/// rebase, am, cherry-pick or revert is paused, whichever tool started it;
+/// [`Error::LockHeld`] when another process holds `index.lock`, with the work tree, index,
+/// `HEAD` and branch refs unchanged; overwrite refusals and ref/object failures otherwise.
+/// On error the hook does not run.
 pub fn switch_repository(
     repo: &Repository,
     opts: &SwitchOptions,
@@ -466,10 +471,14 @@ fn switch_without_hooks(
         ));
     }
 
+    // A real switch reads the index under `index.lock`, so a held lock refuses it before any
+    // work-tree change; a dry run never locks.
+    let mut lock = (!opts.dry_run).then(|| repo.lock_index()).transpose()?;
     let index = repo.load_index_preserving_sparse()?;
     switch_to_target(
         repo,
         index,
+        lock.as_mut(),
         &branch_ref,
         target_oid,
         created,
@@ -494,6 +503,7 @@ fn needs_initial_checkout(index: &Index) -> bool {
 fn switch_to_target(
     repo: &Repository,
     mut index: Index,
+    index_lock: Option<&mut IndexLock>,
     branch_ref: &str,
     target_oid: ObjectId,
     created: bool,
@@ -555,7 +565,7 @@ fn switch_to_target(
         )
         .with_stranded(stranded));
     }
-    checkout_prepared_tree_transition(repo, prepared, progress, cancel)?;
+    checkout_prepared_tree_transition(repo, prepared, index_lock, progress, cancel)?;
 
     if let Some(from_label) = checkout_reflog_from_label(&head_before) {
         finish_switch_ref_updates(
@@ -1028,7 +1038,7 @@ pub(crate) fn checkout_tree_transition_allow_local_reset(
     let prepared = prepare_tree_transition_allow_local(repo, from_tree, to_tree, &HashSet::new())
         .map_err(map_switch_tree_transition_prepare_error)?;
     verify_prepared_switch_no_untracked_overwrite(&prepared.plan)?;
-    checkout_prepared_tree_transition(repo, prepared, progress, cancel)
+    checkout_prepared_tree_transition(repo, prepared, None, progress, cancel)
 }
 
 /// Like [`checkout_tree_transition_allow_local`], but always keeps worktree bytes on `force_preserve_worktree`.
@@ -1043,7 +1053,7 @@ pub(crate) fn checkout_tree_transition_allow_local_with_preserved(
     let prepared =
         prepare_tree_transition_allow_local(repo, from_tree, to_tree, force_preserve_worktree)
             .map_err(tree_transition_prepare_to_error)?;
-    checkout_prepared_tree_transition(repo, prepared, progress, cancel)
+    checkout_prepared_tree_transition(repo, prepared, None, progress, cancel)
 }
 
 /// Run the checkout half of a prepared allow-local transition (for merge integration).
@@ -1054,17 +1064,26 @@ pub(crate) fn checkout_prepared_tree_transition_for_merge(
     checkout_prepared_tree_transition(
         repo,
         prepared,
+        None,
         &mut crate::progress::NullProgress,
         &crate::progress::NeverCancel,
     )
 }
 
+/// Apply a prepared transition, writing the index through `index_lock` or, when `None`,
+/// through a lock taken here before the first work-tree change.
 fn checkout_prepared_tree_transition(
     repo: &Repository,
     mut prepared: PreparedSwitch,
+    index_lock: Option<&mut IndexLock>,
     progress: &mut dyn crate::progress::ProgressSink,
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<()> {
+    let mut owned_lock = None;
+    let index_lock = match index_lock {
+        Some(lock) => lock,
+        None => owned_lock.insert(repo.lock_index()?),
+    };
     let overwrite_untracked = if tree_changes_contain_additions(&prepared.plan.tree_changes) {
         prepared.plan.untracked.as_slice()
     } else {
@@ -1122,10 +1141,10 @@ fn checkout_prepared_tree_transition(
             wholesale_safety_precomputed: prepared.wholesale_safety_precomputed,
             skip_bulk_checkout_fast_path: false,
             checkout_result_tree: Some(prepared.target_tree),
-            defer_index_disk_write: false,
             ..CheckoutApplyOptions::default()
         },
         attribute_changes,
+        CheckoutIndexWrite::Commit(index_lock),
     )
 }
 

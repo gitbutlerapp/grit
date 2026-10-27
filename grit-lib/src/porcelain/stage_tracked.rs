@@ -130,7 +130,7 @@ pub fn stage_tracked_modifications_with_thresholds(
     }
     if summary.change_count() > 0 {
         index.ensure_canonical_order();
-        repo.write_index_with_lock(&mut lock, &mut index)?;
+        repo.write_index_with_lock(&mut lock, &mut index, false)?;
     }
 
     Ok(summary)

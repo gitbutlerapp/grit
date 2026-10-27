@@ -1505,7 +1505,7 @@ fn create_commit_with_index(
                 )?;
             }
         }
-        repo.write_index_with_lock(&mut lock, persist)?;
+        repo.write_index_with_lock(&mut lock, persist, false)?;
     }
 
     let post_commit_env = CommitHookEnv {

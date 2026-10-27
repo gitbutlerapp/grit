@@ -2257,9 +2257,12 @@ impl Repository {
         )
     }
 
-    /// Persist `index` through `lock` (from [`Self::begin_index_update`]) and replace the
-    /// on-disk index, with the same sparse/split-index handling and `post-index-change` hook as
-    /// [`Self::write_index`].
+    /// Persist `index` through `lock` (from [`Self::lock_index`] or [`Self::begin_index_update`])
+    /// and replace the on-disk index, with the same sparse/split-index handling and
+    /// `post-index-change` hook as [`Self::write_index`].
+    ///
+    /// `updated_workdir` is reported to the hook: set it when the write follows a working-tree
+    /// update made under the same lock.
     ///
     /// # Errors
     ///
@@ -2269,16 +2272,34 @@ impl Repository {
         &self,
         lock: &mut crate::index::IndexLock,
         index: &mut Index,
+        updated_workdir: bool,
     ) -> Result<()> {
         let path = lock.index_path.clone();
         self.write_index_file(
             &path,
             index,
             WriteSplitIndexRequest::default(),
-            false,
+            updated_workdir,
             false,
             Some(lock),
         )
+    }
+
+    /// Lock the index selected by `GIT_INDEX_FILE` (or `$GIT_DIR/index`) without reading it.
+    ///
+    /// Commands that change the working tree together with the index take this lock before
+    /// their first visible write, so a held lock refuses the whole command instead of failing
+    /// after files were already rewritten. Persist with [`Self::write_index_with_lock`];
+    /// dropping the lock without writing leaves the index as is.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::LockHeld`] when another process still holds the lock after the
+    /// `core.filesRefLockTimeout` wait, or [`Error::Io`] when the lock cannot be created.
+    pub(crate) fn lock_index(&self) -> Result<crate::index::IndexLock> {
+        let path = self.index_path_for_env()?;
+        let cfg = self.config()?;
+        crate::index::IndexLock::acquire(&path, Some(cfg.as_ref()))
     }
 
     /// Lock the index selected by `GIT_INDEX_FILE` (or `$GIT_DIR/index`), then load it.
@@ -2296,10 +2317,8 @@ impl Repository {
     /// `core.filesRefLockTimeout` wait, and propagates index read and parse failures
     /// (including [`std::io::ErrorKind::NotFound`] when there is no index file yet).
     pub(crate) fn lock_and_load_index(&self) -> Result<(crate::index::IndexLock, Index)> {
-        let path = self.index_path_for_env()?;
-        let cfg = self.config()?;
-        let lock = crate::index::IndexLock::acquire(&path, Some(cfg.as_ref()))?;
-        let index = self.load_index_at(&path)?;
+        let lock = self.lock_index()?;
+        let index = self.load_index_at(&lock.index_path)?;
         Ok((lock, index))
     }
 

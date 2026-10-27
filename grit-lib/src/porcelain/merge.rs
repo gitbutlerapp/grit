@@ -856,9 +856,10 @@ fn integrate_branch_without_hooks(
     };
 
     merge_checkout_tree_transition(repo, Some(&into_tree), &merged.result_tree)?;
+    let mut lock = repo.lock_index()?;
     let mut snapshot = crate::porcelain::worktree_guard::load_worktree_snapshot(repo)?;
     finalize_clean_tree_merge_index(repo, &mut snapshot.index, &merged)?;
-    write_index_after_merge_checkout(repo, &mut snapshot.index)?;
+    write_index_after_merge_checkout(repo, &mut snapshot.index, &mut lock)?;
 
     match options.commit {
         MergeCommitMode::Squash => {

@@ -145,6 +145,8 @@ Pass `--markdown` for agent-friendly bullet lists of restored and removed paths.
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 
+When another process holds `.git/index.lock`, `grit restore` fails with exit `1` (`kind` `lock_held` under `--json`) before restoring any path, so the worktree and index are unchanged.
+
 
 ## See also
 

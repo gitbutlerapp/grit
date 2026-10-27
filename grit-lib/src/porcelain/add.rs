@@ -570,7 +570,7 @@ fn stage_inner_on_index(
             sort_outcome_paths_in_index_order(&mut outcome, index);
             index.ensure_canonical_order();
             if let Some(lock) = lock {
-                repo.write_index_with_lock(lock, index)?;
+                repo.write_index_with_lock(lock, index, false)?;
             }
         }
         return Ok(outcome);
@@ -696,7 +696,7 @@ fn stage_inner_on_index(
         }
         index.ensure_canonical_order();
         if let Some(lock) = lock {
-            repo.write_index_with_lock(lock, index)?;
+            repo.write_index_with_lock(lock, index, false)?;
         }
     }
 

@@ -22,7 +22,9 @@ use crate::diff::{
     DiffEntry, DiffIndexToWorktreeOptions, DiffStatus,
 };
 use crate::error::{ApplyError, Error, Result};
-use crate::index::{index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_SYMLINK, MODE_TREE};
+use crate::index::{
+    index_file_mtime, Index, IndexEntry, IndexLock, MODE_GITLINK, MODE_SYMLINK, MODE_TREE,
+};
 use crate::worktree::{map_worktree_io, WorktreePathOperation};
 // `MODE_EXECUTABLE` only drives the Unix executable-bit application below.
 use crate::apply::{apply_patch_to_index, FilePatch, IndexApplyOptions};
@@ -41,9 +43,9 @@ use crate::pathspec::{
     has_glob_chars, matches_pathspec_list, pathspec_is_exclude, PathspecListMatcher,
 };
 use crate::porcelain::branch_error::BranchError;
-use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::checkout::is_eligible_for_parallel_checkout;
 use crate::porcelain::checkout::smudge_bytes_for_worktree_path;
+use crate::porcelain::checkout::{checkout_between_trees_locked, CheckoutIndexWrite};
 use crate::porcelain::clean::{is_nested_git_worktree, path_in_nested_git_worktree};
 use crate::porcelain::commit::write_commit_object;
 use crate::porcelain::hunk_select::{
@@ -54,12 +56,13 @@ use crate::porcelain::index_from_tree::{
     index_from_tree_with_seeded_stats, index_from_tree_with_seeded_worktree_stats,
     index_from_tree_with_worktree_stats,
 };
-use crate::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
+use crate::porcelain::restore::{restore_paths_with_lock, RestoreOptions, RestoreSource};
 use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, IgnoredMode, UntrackedCacheMissAction, UntrackedScan,
 };
 use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use crate::porcelain::worktree_guard::untracked_would_be_overwritten_by_tree_changes;
+use crate::progress::{NeverCancel, NullProgress};
 use crate::reflog::{delete_reflog_entries_rechain_on_store, read_reflog_on_store};
 use crate::refs::{append_reflog_on_store, delete_ref_on_store, update_direct_ref_on_store};
 use crate::repo::Repository;
@@ -969,6 +972,7 @@ fn apply_staged_only_reset(
     work_tree: &Path,
     head_tree: &ObjectId,
     staged_paths: &[String],
+    lock: &mut IndexLock,
 ) -> Result<()> {
     if staged_paths.is_empty() {
         return Ok(());
@@ -995,8 +999,7 @@ fn apply_staged_only_reset(
             }
         }
     }
-    repo.write_index(&mut index)?;
-    Ok(())
+    repo.write_index_with_lock(lock, &mut index, false)
 }
 
 fn tracked_stash_preview_paths(
@@ -1277,6 +1280,7 @@ fn reset_stash_push_pathspecs_to_head(
     repo: &Repository,
     head_tree: &ObjectId,
     pathspecs: &[String],
+    lock: &mut IndexLock,
 ) -> Result<()> {
     if pathspecs.is_empty() {
         return Ok(());
@@ -1290,7 +1294,7 @@ fn reset_stash_push_pathspecs_to_head(
         stage: None,
         remerge: None,
     };
-    restore_paths(repo, &opts)?;
+    restore_paths_with_lock(repo, &opts, lock, repo.load_index()?)?;
     Ok(())
 }
 
@@ -1558,9 +1562,16 @@ pub struct StashPushResult {
 /// the stash are removed from the worktree after the reset. Like
 /// [`create_stash`], the stash commits are written unsigned.
 ///
+/// `index.lock` is held from before the index is read until the reset index is written, so
+/// a lock held by another process refuses the push before any object, ref or file is written.
+/// Once `refs/stash` is updated, the entry stays there even if the reset fails, so the saved
+/// changes remain reachable.
+///
 /// # Errors
 ///
-/// Same as [`create_stash`] and [`store_stash`], plus checkout failures.
+/// [`Error::LockHeld`] when another process holds `index.lock`, with the repository
+/// unchanged; otherwise the same as [`create_stash`] and [`store_stash`], plus checkout
+/// failures.
 pub(crate) fn push_stash(
     repo: &Repository,
     options: &StashPushOptions,
@@ -1571,13 +1582,9 @@ pub(crate) fn push_stash(
         ));
     }
     let work_tree = repo.work_tree().ok_or(Error::StashBareRepository)?;
+    let mut lock = repo.lock_index()?;
     let Some(built) = build_stash_commit(repo, work_tree, options)? else {
         return Ok(None);
-    };
-    let result = StashPushResult {
-        oid: built.w_commit,
-        message: built.message.clone(),
-        w_tree: built.w_tree,
     };
     store_stash(
         repo,
@@ -1585,75 +1592,83 @@ pub(crate) fn push_stash(
         &built.message,
         &options.identity.header_line(),
     )?;
-    let reset = (|| -> Result<()> {
-        if let Some(ref patches) = built.partial_patches {
-            if !built.untracked_paths.is_empty() {
-                remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
-            }
-            reverse_apply_patches_to_worktree(
-                repo,
-                patches,
-                &WorktreeReverseApplyOptions { dry_run: false },
-            )
-            .map_err(stash_worktree_step_error)?;
-        } else {
-            let head = resolve_head_for_repository(repo)?;
-            let head_oid = head_commit_oid(&head)?;
-            let head_tree = repo.odb().commit_tree(&head_oid)?;
-            if !built.untracked_paths.is_empty() {
-                remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
-            }
-            if !built.push_pathspecs.is_empty() {
-                let reset_specs =
-                    pathspecs_for_push_reset(repo, &head_tree, &built.push_pathspecs)?;
-                reset_stash_push_pathspecs_to_head(repo, &head_tree, &reset_specs)?;
-                if built.mode == StashMode::StagedOnly {
-                    let index = repo.load_index()?;
-                    let all_staged = staged_change_paths(repo, &index, &head_tree)?;
-                    let stashed_set: HashSet<&str> =
-                        built.staged_only_paths.iter().map(String::as_str).collect();
-                    let worktree_only: Vec<String> = all_staged
-                        .into_iter()
-                        .filter(|path| !stashed_set.contains(path.as_str()))
-                        .collect();
-                    apply_staged_worktree_only_reset(repo, work_tree, &head_tree, &worktree_only)?;
-                }
-            } else {
-                match built.mode {
-                    StashMode::StagedOnly => {
-                        apply_staged_only_reset(
-                            repo,
-                            work_tree,
-                            &head_tree,
-                            &built.staged_only_paths,
-                        )?;
-                    }
-                    StashMode::KeepIndex => {
-                        checkout_between_trees(repo, Some(&built.w_tree), &built.i_tree)?;
-                    }
-                    StashMode::All => {
-                        checkout_between_trees(repo, Some(&built.w_tree), &head_tree)?;
-                        // The checkout left fresh stat data for every path it rewrote; reuse it so
-                        // the refresh only hashes files whose stat does not match.
-                        let checked_out = repo.load_index()?;
-                        let mut head_index = index_from_tree_with_seeded_worktree_stats(
-                            repo,
-                            &head_tree,
-                            &checked_out,
-                        )?;
-                        drop(checked_out);
-                        repo.write_index(&mut head_index)?;
-                    }
-                }
-            }
-        }
-        Ok(())
-    })();
-    if reset.is_err() {
-        let _ = drop_stash_commit(repo, &built.w_commit);
+    reset_after_stash_push(repo, work_tree, &built, &mut lock)?;
+    Ok(Some(StashPushResult {
+        oid: built.w_commit,
+        message: built.message,
+        w_tree: built.w_tree,
+    }))
+}
+
+/// Remove the stashed changes from the worktree and index, writing the index through `lock`.
+fn reset_after_stash_push(
+    repo: &Repository,
+    work_tree: &Path,
+    built: &BuiltStash,
+    lock: &mut IndexLock,
+) -> Result<()> {
+    if !built.untracked_paths.is_empty() {
+        remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
     }
-    reset?;
-    Ok(Some(result))
+    if let Some(ref patches) = built.partial_patches {
+        return reverse_apply_patches_to_worktree(
+            repo,
+            patches,
+            &WorktreeReverseApplyOptions { dry_run: false },
+        )
+        .map_err(stash_worktree_step_error);
+    }
+    let head = resolve_head_for_repository(repo)?;
+    let head_oid = head_commit_oid(&head)?;
+    let head_tree = repo.odb().commit_tree(&head_oid)?;
+    if !built.push_pathspecs.is_empty() {
+        let reset_specs = pathspecs_for_push_reset(repo, &head_tree, &built.push_pathspecs)?;
+        reset_stash_push_pathspecs_to_head(repo, &head_tree, &reset_specs, lock)?;
+        if built.mode == StashMode::StagedOnly {
+            let index = repo.load_index()?;
+            let all_staged = staged_change_paths(repo, &index, &head_tree)?;
+            let stashed_set: HashSet<&str> =
+                built.staged_only_paths.iter().map(String::as_str).collect();
+            let worktree_only: Vec<String> = all_staged
+                .into_iter()
+                .filter(|path| !stashed_set.contains(path.as_str()))
+                .collect();
+            apply_staged_worktree_only_reset(repo, work_tree, &head_tree, &worktree_only)?;
+        }
+        return Ok(());
+    }
+    match built.mode {
+        StashMode::StagedOnly => {
+            apply_staged_only_reset(repo, work_tree, &head_tree, &built.staged_only_paths, lock)
+        }
+        StashMode::KeepIndex => checkout_between_trees_locked(
+            repo,
+            &built.w_tree,
+            &built.i_tree,
+            None,
+            CheckoutIndexWrite::Commit(lock),
+            &mut NullProgress,
+            &NeverCancel,
+        ),
+        StashMode::All => {
+            let mut checked_out = repo.load_index()?;
+            checkout_between_trees_locked(
+                repo,
+                &built.w_tree,
+                &head_tree,
+                Some(&mut checked_out),
+                CheckoutIndexWrite::Defer(lock),
+                &mut NullProgress,
+                &NeverCancel,
+            )?;
+            // The checkout left fresh stat data for every path it rewrote; reuse it so the
+            // refresh only hashes files whose stat does not match.
+            let mut head_index =
+                index_from_tree_with_seeded_worktree_stats(repo, &head_tree, &checked_out)?;
+            drop(checked_out);
+            repo.write_index_with_lock(lock, &mut head_index, true)
+        }
+    }
 }
 
 fn stash_worktree_step_error(err: ApplyError) -> Error {
@@ -2291,6 +2306,7 @@ fn apply_stash_commit(
     let head_at_stash = &stash_commit.parents[0];
     let index_commit_oid = &stash_commit.parents[1];
 
+    let mut lock = repo.lock_index()?;
     let mut new_index = load_stash_index(repo)?;
     let head_at_stash_tree = repo.odb().commit_tree(head_at_stash)?;
     let idx_tree = repo.odb().commit_tree(index_commit_oid)?;
@@ -2621,10 +2637,10 @@ fn apply_stash_commit(
             &crate::progress::NeverCancel,
             crate::porcelain::checkout::CheckoutApplyOptions {
                 parallel_prepare_blobs: true,
-                defer_index_disk_write: true,
                 ..crate::porcelain::checkout::CheckoutApplyOptions::default()
             },
             None,
+            CheckoutIndexWrite::Defer(&lock),
         )?;
     }
     drop(parallel_writes);
@@ -2827,7 +2843,7 @@ fn apply_stash_commit(
     drop(base_tree_entries);
     drop(idx_tree_loaded);
     drop(current_head_loaded);
-    repo.write_index(&mut new_index)
+    repo.write_index_with_lock(&mut lock, &mut new_index, false)
         .map_err(|e| Error::StashIndexWrite(e.to_string()))?;
 
     // Apply untracked files if present (3rd parent)
