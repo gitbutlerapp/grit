@@ -897,6 +897,8 @@ pub fn verify_pull_fast_forward(ctx: &DailyHeadlineContext, cwd: &Path) -> Resul
 pub fn verify_push_refspec(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
     let remote = remote_state(ctx)?;
     configure_client_remote(&ctx.git, cwd, remote)?;
+    // Each prepare commits fresh client tips, so compare each push with the client HEAD
+    // it pushed rather than the two pushed oids with each other.
     prepare_network_push(&ctx.git, &remote.bare)?;
     run_git(
         &ctx.git,
@@ -904,11 +906,16 @@ pub fn verify_push_refspec(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()>
         &["push", "-q", "origin", "HEAD:refs/heads/bench"],
     )?;
     let git_oid = ref_oid(&ctx.git, &remote.bare, "refs/heads/bench")?;
+    let git_head = ref_oid(&ctx.git, cwd, "HEAD")?;
+    if git_oid != git_head {
+        bail!("git push refspec: bare bench {git_oid} != client HEAD {git_head}");
+    }
     prepare_network_push(&ctx.git, &remote.bare)?;
     run_grit(&ctx.grit, cwd, &["push", "origin", "HEAD:refs/heads/bench"])?;
     let grit_oid = ref_oid(&ctx.git, &remote.bare, "refs/heads/bench")?;
-    if git_oid != grit_oid {
-        bail!("push refspec: git {git_oid} != grit {grit_oid}");
+    let grit_head = ref_oid(&ctx.git, cwd, "HEAD")?;
+    if grit_oid != grit_head {
+        bail!("grit push refspec: bare bench {grit_oid} != client HEAD {grit_head}");
     }
     Ok(())
 }
@@ -1203,9 +1210,11 @@ fn bare_clone_for_each_ref(git: &Path, repo: &Path) -> Result<Vec<String>> {
     Ok(lines)
 }
 
-pub fn verify_clone_shallow(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
+pub fn verify_clone_shallow(ctx: &DailyHeadlineContext, _cwd: &Path) -> Result<()> {
     let remote = remote_state(ctx)?;
     let dest = remote.meta.clone_dest.clone();
+    // Clone next to the bare, where `dest` is: the client repo is not its parent.
+    let cwd = dest.parent().context("clone dest parent directory")?;
     let dest_name = dest
         .file_name()
         .and_then(|s| s.to_str())
@@ -1413,27 +1422,15 @@ pub fn verify_ls_remote_all(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()
 }
 
 pub fn clone_bench_script(tool: &Path, url: &str, dest: &Path) -> String {
-    let tool_q = shell_quote(&tool.to_string_lossy());
-    let url_q = shell_quote(url);
-    let dest_q = shell_quote(&dest.to_string_lossy());
-    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
-    format!("rm -rf {dest_q} && {tool_q} clone -q {url_q} {dest_name}")
+    clone_bench_script_in_dest_parent(tool, url, dest, "-q")
 }
 
 pub fn clone_shallow_bench_script_git(tool: &Path, url: &str, dest: &Path) -> String {
-    let tool_q = shell_quote(&tool.to_string_lossy());
-    let url_q = shell_quote(url);
-    let dest_q = shell_quote(&dest.to_string_lossy());
-    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
-    format!("rm -rf {dest_q} && {tool_q} clone --depth 1 -q {url_q} {dest_name}")
+    clone_bench_script_in_dest_parent(tool, url, dest, "--depth 1 -q")
 }
 
 pub fn clone_shallow_bench_script_grit(tool: &Path, url: &str, dest: &Path) -> String {
-    let tool_q = shell_quote(&tool.to_string_lossy());
-    let url_q = shell_quote(url);
-    let dest_q = shell_quote(&dest.to_string_lossy());
-    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
-    format!("rm -rf {dest_q} && {tool_q} clone --shallow {url_q} {dest_name}")
+    clone_bench_script_in_dest_parent(tool, url, dest, "--shallow")
 }
 
 /// Ensure the smart HTTP server is running and the client remote URL is current.
@@ -1458,37 +1455,24 @@ pub fn refresh_grit_http_server(ctx: &mut DailyHeadlineContext) -> Result<()> {
 }
 
 pub fn clone_bench_script_grit(tool: &Path, url: &str, dest: &Path) -> String {
-    let tool_q = shell_quote(&tool.to_string_lossy());
-    let url_q = shell_quote(url);
-    let dest_q = shell_quote(&dest.to_string_lossy());
-    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
-    format!("rm -rf {dest_q} && {tool_q} clone {url_q} {dest_name}")
+    clone_bench_script_in_dest_parent(tool, url, dest, "")
 }
 
 pub fn clone_bare_bench_script(tool: &Path, url: &str, dest: &Path) -> String {
-    let tool_q = shell_quote(&tool.to_string_lossy());
-    let url_q = shell_quote(url);
-    let dest_q = shell_quote(&dest.to_string_lossy());
-    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
-    format!("rm -rf {dest_q} && {tool_q} clone -q --bare --no-local {url_q} {dest_name}")
+    clone_bench_script_in_dest_parent(tool, url, dest, "-q --bare --no-local")
 }
 
 pub fn clone_bare_bench_script_grit(tool: &Path, url: &str, dest: &Path) -> String {
-    let tool_q = shell_quote(&tool.to_string_lossy());
-    let url_q = shell_quote(url);
-    let dest_q = shell_quote(&dest.to_string_lossy());
-    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
-    format!("rm -rf {dest_q} && {tool_q} clone --bare {url_q} {dest_name}")
+    clone_bench_script_in_dest_parent(tool, url, dest, "--bare")
 }
 
 pub fn clone_bench_script_shallow(tool: &Path, url: &str, dest: &Path) -> String {
-    let tool_q = shell_quote(&tool.to_string_lossy());
-    let url_q = shell_quote(url);
-    let dest_q = shell_quote(&dest.to_string_lossy());
-    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
-    format!("rm -rf {dest_q} && {tool_q} clone -q --depth 1 {url_q} {dest_name}")
+    clone_bench_script_in_dest_parent(tool, url, dest, "-q --depth 1")
 }
 
+/// `rm -rf <dest> && cd <dest parent> && <tool> clone <args> <url> <dest name>`: hyperfine
+/// runs in the client repo, so a relative clone there would nest under it and the next
+/// iteration's `rm -rf <dest>` would not clear it.
 fn clone_bench_script_in_dest_parent(
     tool: &Path,
     url: &str,
@@ -1536,9 +1520,5 @@ mod blobless_path_tests {
 }
 
 pub fn clone_bench_script_grit_shallow(tool: &Path, url: &str, dest: &Path) -> String {
-    let tool_q = shell_quote(&tool.to_string_lossy());
-    let url_q = shell_quote(url);
-    let dest_q = shell_quote(&dest.to_string_lossy());
-    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
-    format!("rm -rf {dest_q} && {tool_q} clone --depth 1 {url_q} {dest_name}")
+    clone_bench_script_in_dest_parent(tool, url, dest, "--depth 1")
 }

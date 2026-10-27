@@ -906,6 +906,9 @@ pub fn prepare_network_pull_rebase(git: &Path, bare: &Path) -> Result<()> {
 }
 
 /// Reset push scenario: client ahead of bare by `push_commits`.
+/// Branch the `push/refspec` scenarios push to (`HEAD:refs/heads/bench`).
+pub const PUSH_REFSPEC_BENCH_REF: &str = "refs/heads/bench";
+
 pub fn prepare_network_push(git: &Path, bare: &Path) -> Result<()> {
     let meta = load_meta(bare)?;
     prepare_network_fetch_noop(git, bare)?;
@@ -914,6 +917,13 @@ pub fn prepare_network_push(git: &Path, bare: &Path) -> Result<()> {
         git,
         Some(bare),
         &["update-ref", &branch_ref, &meta.fetch_base_oid],
+    )?;
+    // `push/refspec` pushes to this ref; each prepare commits new client tips, so a ref
+    // left by the previous push would make the next one a rejected non-fast-forward.
+    run_git_cmd(
+        git,
+        Some(bare),
+        &["update-ref", "-d", PUSH_REFSPEC_BENCH_REF],
     )?;
     reset_client_branch_and_tracking(git, &meta, &meta.fetch_base_oid)?;
     let prepare_seq = bump_push_prepare_seq(bare)?;
