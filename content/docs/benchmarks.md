@@ -1398,6 +1398,30 @@ Factory VM, 2026-10-26, 4 vCPU, Rust 1.99, `release` profile, system Git 2.55.0:
 
 The cutoff reduces median push time by **18.2×**, with about **30% lower peak RSS**; Grit remains about **2.0×** slower than Git on this fixture. Every push updated the expected ref. `git fsck --strict --no-dangling` succeeded on the receiver, with warnings for historical upstream tag/tree objects. The small SSH regression fixture passes strict fsck without those historical objects.
 
+### One new commit over ssh, git:// and smart HTTP (2026-10-27, #1975)
+
+After the walk cutoff, the cost of a one-commit push still grew with the number of branches the remote advertises. Three changes remove that cost:
+
+- **Thin-pack bases.** As with Git's `--thin`, these now come only from the edge commits where the walk met the remote's history. Before, they came from every advertised branch, and delta planning walked each of those trees once for on-disk delta reuse and again for every thin target.
+- **Advertised tips.** Each tip is read once while its tags are followed.
+- **Bitmaps.** Opening a pack bitmap no longer reads and checksums every `.idx` when the pack has no `.bitmap`.
+
+Two smaller fixes follow. Pack placement and delta reuse look up a few objects instead of scanning the whole pack index. The git:// and ssh readers are buffered, so the advertisement takes a handful of reads instead of two per ref.
+
+Factory VM, 4 vCPU Xeon, Linux 6.12, Rust 1.99, `release` profile, system Git 2.43.0. The fixture is a `git clone --bare` of upstream `git/git` (82k commits, about 1,000 refs), reached through a fake-ssh wrapper, `git daemon --enable=receive-pack` and `grit-http-server`. The worktree is a `grit clone` over git://. Each push sends a new branch holding one commit that appends a line to `README.md`. One warmup is followed by 9 runs per client, interleaved across clients and transports. Wall time is Python `perf_counter`; RSS is the client's `wait4` peak. Every push adds a branch to the remote, which grew from 137 to 257 branches during the run. Main's time grows with the branch count (0.17 s on a fresh clone); this branch's does not. Samples are in `grit-utils/baselines/push-one-commit-1975.json`.
+
+| Transport | System Git | Grit 2a0f003c1 | Grit main (b3a18044a) | Grit after |
+| --- | ---: | ---: | ---: | ---: |
+| fake SSH | 64.6 ms / 43.7 MiB | 1,833.6 ms / 93.6 MiB | 437.9 ms / 58.2 MiB | 68.3 ms / 43.7 MiB |
+| git daemon (git://) | 86.4 ms / 17.7 MiB | 1,854.4 ms / 93.3 MiB | 485.9 ms / 57.9 MiB | 132.5 ms / 33.8 MiB |
+| grit-http-server smart HTTP | 49.8 ms / 17.6 MiB | 1,785.2 ms / 94.9 MiB | 467.4 ms / 59.2 MiB | 45.3 ms / 35.0 MiB |
+
+The branch matches Git over ssh and smart HTTP. Over ssh, peak RSS includes the server's `git receive-pack`, since the fake-ssh wrapper runs it as a child of the client.
+
+The dashboard's `push/incremental`, `push/incremental-http` and `push/force-with-lease` scenarios on `git-git` (`daily-push-1975-before.json` / `-after.json`) improve by 6–9% in median wall time and 1–6% in peak RSS. Git's own time dominates those scenarios.
+
+One known gap remains: `grit push` lists the remote's refs over a separate upload-pack connection before it connects to receive-pack. Git uses one connection. On git:// that second connection accounts for most of the remaining difference.
+
 ## grit-lib: pack write (100k reuse vs fresh)
 
 Criterion group **`pack`** (`cargo bench -p grit-lib --bench pack_write`) rebuilds the full closure of the repacked **`pack_100k`** fixture (~100 000 objects) via [`build_pack_with_parallel_threads`](rustdoc:grit_lib::objects::pack_objects::build_pack_with_parallel_threads):

@@ -1,0 +1,461 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-27T09:09:23.279586276Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.22",
+    "grit_commit": "b3a18044acf708de432a40be0c30f516c52f8941"
+  },
+  "scenarios": [
+    {
+      "id": "push/force-with-lease@git-git",
+      "area": "remotes",
+      "headline": true,
+      "name": "push",
+      "description": "Amended commit force-with-lease push vs git push --force-with-lease",
+      "git": {
+        "median_wall_ms": 2598.691379,
+        "peak_rss_bytes": 333533184,
+        "runs": 10,
+        "samples_ms": [
+          2600.142,
+          2789.659,
+          2597.241,
+          2556.852,
+          2529.208,
+          2586.789,
+          2587.544,
+          2607.133,
+          2753.338,
+          2635.113
+        ],
+        "min_ms": 2529.207789,
+        "max_ms": 2789.658571,
+        "stddev_ms": 83.04719045327684
+      },
+      "grit": {
+        "median_wall_ms": 1263.3061575000002,
+        "peak_rss_bytes": 77062144,
+        "runs": 10,
+        "samples_ms": [
+          1257.563,
+          1264.086,
+          1295.847,
+          1254.688,
+          1259.337,
+          1292.866,
+          1241.676,
+          1262.527,
+          1282.238,
+          1320.884
+        ],
+        "min_ms": 1241.67623,
+        "max_ms": 1320.884488,
+        "stddev_ms": 24.09530479373518
+      },
+      "ratio": 0.4861316613849436,
+      "detail": {
+        "setup": "remote http://127.0.0.1:46173/remote.git served by git http-backend (git's own smart HTTP server)",
+        "prepare": "grit-bench prepare-network-force-with-lease --git git --bare /tmp/daily-root/daily-remote-git-git/remote.git",
+        "commands": {
+          "git": "git push --force-with-lease -q origin master",
+          "grit": "grit push --force-with-lease"
+        },
+        "correctness": "before timing, git and grit were each run once and their results compared",
+        "phases": {
+          "git": [
+            {
+              "name": "run: git remote-http",
+              "ms": 2561.911,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "run: git-remote-http",
+              "ms": 2560.694,
+              "count": 1,
+              "depth": 2
+            },
+            {
+              "name": "push: transport_push",
+              "ms": 2556.155,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "transport_pu: push_refs",
+              "ms": 1907.355,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "run: git send-pack",
+              "ms": 1906.916,
+              "count": 1,
+              "depth": 3
+            },
+            {
+              "name": "run: git pack-objects",
+              "ms": 631.002,
+              "count": 1,
+              "depth": 4
+            },
+            {
+              "name": "pack-objects: enumerate-objects",
+              "ms": 622.147,
+              "count": 1,
+              "depth": 4
+            },
+            {
+              "name": "transport_pu: get_refs_list",
+              "ms": 6.453,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "pack-objects: write-pack-file",
+              "ms": 0.269,
+              "count": 1,
+              "depth": 4
+            },
+            {
+              "name": "pack-objects: prepare-pack",
+              "ms": 0.045,
+              "count": 1,
+              "depth": 4
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.push",
+              "ms": 1283.67,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.repository.open",
+              "ms": 0.637,
+              "count": 3,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.245,
+              "count": 4,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.1,
+              "count": 2,
+              "depth": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "push/incremental-http@git-git",
+      "area": "remotes",
+      "description": "Incremental push over grit smart HTTP (git-git bare remote)",
+      "git": {
+        "median_wall_ms": 1813.418618,
+        "peak_rss_bytes": 322031616,
+        "runs": 10,
+        "samples_ms": [
+          1814.13,
+          1925.331,
+          1766.454,
+          1761.079,
+          1684.225,
+          1730.614,
+          1812.707,
+          1897.85,
+          1831.242,
+          1946.94
+        ],
+        "min_ms": 1684.224923,
+        "max_ms": 1946.9396049999998,
+        "stddev_ms": 85.73859023484175
+      },
+      "grit": {
+        "median_wall_ms": 1162.5669460000001,
+        "peak_rss_bytes": 94875648,
+        "runs": 10,
+        "samples_ms": [
+          1227.203,
+          1166.826,
+          1139.608,
+          1092.058,
+          1124.897,
+          1126.678,
+          1158.308,
+          1184.833,
+          1236.209,
+          1254.435
+        ],
+        "min_ms": 1092.0582379999998,
+        "max_ms": 1254.434633,
+        "stddev_ms": 53.79926074095907
+      },
+      "ratio": 0.6410913257757235,
+      "detail": {
+        "setup": "remote http://127.0.0.1:33507/fixture.git served by grit-http-server",
+        "prepare": "grit-bench prepare-network-push --git git --bare /tmp/daily-root/daily-remote-git-git-http-push/remote.git",
+        "commands": {
+          "git": "git push -q origin master",
+          "grit": "grit push"
+        },
+        "correctness": "before timing, git and grit were each run once and their results compared; the starting state is verified before every timed run; the result is verified after every timed run",
+        "phases": {
+          "git": [
+            {
+              "name": "run: git remote-http",
+              "ms": 1940.984,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "run: git-remote-http",
+              "ms": 1939.502,
+              "count": 1,
+              "depth": 2
+            },
+            {
+              "name": "push: transport_push",
+              "ms": 1934.651,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "transport_pu: push_refs",
+              "ms": 1288.029,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "run: git send-pack",
+              "ms": 1287.372,
+              "count": 1,
+              "depth": 3
+            },
+            {
+              "name": "run: git pack-objects",
+              "ms": 631.868,
+              "count": 1,
+              "depth": 4
+            },
+            {
+              "name": "pack-objects: enumerate-objects",
+              "ms": 622.028,
+              "count": 1,
+              "depth": 4
+            },
+            {
+              "name": "transport_pu: get_refs_list",
+              "ms": 2.479,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "pack-objects: prepare-pack",
+              "ms": 1.993,
+              "count": 1,
+              "depth": 4
+            },
+            {
+              "name": "pack-objects: write-pack-file",
+              "ms": 0.694,
+              "count": 1,
+              "depth": 4
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.push",
+              "ms": 1241.96,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.repository.open",
+              "ms": 0.693,
+              "count": 3,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.261,
+              "count": 4,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.069,
+              "count": 2,
+              "depth": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "push/incremental@git-git",
+      "area": "remotes",
+      "headline": true,
+      "name": "push",
+      "description": "Incremental push vs git push",
+      "git": {
+        "median_wall_ms": 2596.3892775,
+        "peak_rss_bytes": 334249984,
+        "runs": 10,
+        "samples_ms": [
+          2575.753,
+          2490.057,
+          2593.317,
+          2593.059,
+          2573.736,
+          2644.87,
+          2599.461,
+          2844.403,
+          2637.947,
+          2632.195
+        ],
+        "min_ms": 2490.0566710000003,
+        "max_ms": 2844.40274,
+        "stddev_ms": 90.83922901174029
+      },
+      "grit": {
+        "median_wall_ms": 1877.628217,
+        "peak_rss_bytes": 95268864,
+        "runs": 10,
+        "samples_ms": [
+          1966.482,
+          1839.946,
+          1834.866,
+          1885.789,
+          1816.618,
+          1959.372,
+          1869.467,
+          2010.295,
+          1837.783,
+          1905.616
+        ],
+        "min_ms": 1816.618199,
+        "max_ms": 2010.2948039999999,
+        "stddev_ms": 66.16796874903521
+      },
+      "ratio": 0.7231689921350787,
+      "detail": {
+        "setup": "remote http://127.0.0.1:42853/remote.git served by git http-backend (git's own smart HTTP server)",
+        "prepare": "grit-bench prepare-network-push --git git --bare /tmp/daily-root/daily-remote-git-git/remote.git",
+        "commands": {
+          "git": "git push -q origin master",
+          "grit": "grit push"
+        },
+        "correctness": "before timing, git and grit were each run once and their results compared; the starting state is verified before every timed run; the result is verified after every timed run",
+        "phases": {
+          "git": [
+            {
+              "name": "run: git remote-http",
+              "ms": 2563.077,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "run: git-remote-http",
+              "ms": 2561.896,
+              "count": 1,
+              "depth": 2
+            },
+            {
+              "name": "push: transport_push",
+              "ms": 2556.328,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "transport_pu: push_refs",
+              "ms": 1909.732,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "run: git send-pack",
+              "ms": 1909.32,
+              "count": 1,
+              "depth": 3
+            },
+            {
+              "name": "run: git pack-objects",
+              "ms": 616.917,
+              "count": 1,
+              "depth": 4
+            },
+            {
+              "name": "pack-objects: enumerate-objects",
+              "ms": 607.093,
+              "count": 1,
+              "depth": 4
+            },
+            {
+              "name": "transport_pu: get_refs_list",
+              "ms": 5.509,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "pack-objects: prepare-pack",
+              "ms": 1.992,
+              "count": 1,
+              "depth": 4
+            },
+            {
+              "name": "pack-objects: write-pack-file",
+              "ms": 0.786,
+              "count": 1,
+              "depth": 4
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.push",
+              "ms": 1848.75,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.repository.open",
+              "ms": 0.726,
+              "count": 3,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.266,
+              "count": 4,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.081,
+              "count": 2,
+              "depth": 1
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

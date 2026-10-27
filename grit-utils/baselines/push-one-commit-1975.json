@@ -1,0 +1,436 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-27T11:34:59Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.22",
+    "grit_commit": "e6825a2f44917cef7075753bfefc32aef5a75230"
+  },
+  "scenarios": [
+    {
+      "id": "push-one-commit-ssh-2a0f003c1",
+      "group": "network-push",
+      "fixture": "git/git bare clone (82k commits, ~1,000 refs plus 137-257 pushed branches)",
+      "description": "One new commit pushed as a new branch over fake SSH; one warmup, 9 interleaved runs, Python perf_counter + wait4 peak RSS; grit 2a0f003c1",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 64.03529400045551,
+        "median_ms": 64.60580700149876,
+        "stddev_ms": 3.473599929481123,
+        "min_ms": 58.67702400064445,
+        "max_ms": 68.5668149999401,
+        "runs_ms": [
+          58.67702400064445,
+          59.58490500051994,
+          66.36613299997407,
+          68.5668149999401,
+          61.804262000805466,
+          63.10739400032617,
+          67.33280399930663,
+          66.27250200108392,
+          64.60580700149876
+        ],
+        "peak_rss_bytes": 45809664
+      },
+      "grit": {
+        "mean_ms": 1794.0926440001526,
+        "median_ms": 1833.5552500011545,
+        "stddev_ms": 65.02673643916766,
+        "min_ms": 1695.902264000324,
+        "max_ms": 1864.6982810005284,
+        "runs_ms": [
+          1702.3508570000558,
+          1695.902264000324,
+          1841.2307759990654,
+          1779.0799329995934,
+          1746.6925459993945,
+          1839.7098700006609,
+          1864.6982810005284,
+          1833.5552500011545,
+          1843.6140190005972
+        ],
+        "peak_rss_bytes": 98168832
+      },
+      "ratio": 28.380657019865392
+    },
+    {
+      "id": "push-one-commit-ssh-main",
+      "group": "network-push",
+      "fixture": "git/git bare clone (82k commits, ~1,000 refs plus 137-257 pushed branches)",
+      "description": "One new commit pushed as a new branch over fake SSH; one warmup, 9 interleaved runs, Python perf_counter + wait4 peak RSS; grit b3a18044a",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 64.03529400045551,
+        "median_ms": 64.60580700149876,
+        "stddev_ms": 3.473599929481123,
+        "min_ms": 58.67702400064445,
+        "max_ms": 68.5668149999401,
+        "runs_ms": [
+          58.67702400064445,
+          59.58490500051994,
+          66.36613299997407,
+          68.5668149999401,
+          61.804262000805466,
+          63.10739400032617,
+          67.33280399930663,
+          66.27250200108392,
+          64.60580700149876
+        ],
+        "peak_rss_bytes": 45809664
+      },
+      "grit": {
+        "mean_ms": 452.7168888889719,
+        "median_ms": 437.8617359998316,
+        "stddev_ms": 60.666113089971816,
+        "min_ms": 367.85135799982527,
+        "max_ms": 521.3008860009722,
+        "runs_ms": [
+          367.85135799982527,
+          385.285775999364,
+          411.36460899906524,
+          422.604974000933,
+          437.8617359998316,
+          521.3008860009722,
+          490.8578110007511,
+          519.0918419993977,
+          518.2330080006068
+        ],
+        "peak_rss_bytes": 61067264
+      },
+      "ratio": 6.777436213894423
+    },
+    {
+      "id": "push-one-commit-ssh-branch",
+      "group": "network-push",
+      "fixture": "git/git bare clone (82k commits, ~1,000 refs plus 137-257 pushed branches)",
+      "description": "One new commit pushed as a new branch over fake SSH; one warmup, 9 interleaved runs, Python perf_counter + wait4 peak RSS; grit e6825a2f4",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 64.03529400045551,
+        "median_ms": 64.60580700149876,
+        "stddev_ms": 3.473599929481123,
+        "min_ms": 58.67702400064445,
+        "max_ms": 68.5668149999401,
+        "runs_ms": [
+          58.67702400064445,
+          59.58490500051994,
+          66.36613299997407,
+          68.5668149999401,
+          61.804262000805466,
+          63.10739400032617,
+          67.33280399930663,
+          66.27250200108392,
+          64.60580700149876
+        ],
+        "peak_rss_bytes": 45809664
+      },
+      "grit": {
+        "mean_ms": 70.31198566659845,
+        "median_ms": 68.28995599971677,
+        "stddev_ms": 4.5014818799123395,
+        "min_ms": 65.81918899973971,
+        "max_ms": 79.49308900060714,
+        "runs_ms": [
+          67.81088999923668,
+          66.56396299877088,
+          68.28533100087952,
+          68.28995599971677,
+          65.81918899973971,
+          73.72393200057559,
+          74.15609800045786,
+          79.49308900060714,
+          68.66542299940193
+        ],
+        "peak_rss_bytes": 45838336
+      },
+      "ratio": 1.0570250441749383
+    },
+    {
+      "id": "push-one-commit-git-2a0f003c1",
+      "group": "network-push",
+      "fixture": "git/git bare clone (82k commits, ~1,000 refs plus 137-257 pushed branches)",
+      "description": "One new commit pushed as a new branch over git daemon (git://); one warmup, 9 interleaved runs, Python perf_counter + wait4 peak RSS; grit 2a0f003c1",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 90.62529533326193,
+        "median_ms": 86.43519200086303,
+        "stddev_ms": 17.352442143563575,
+        "min_ms": 80.35701900007552,
+        "max_ms": 136.20184700084792,
+        "runs_ms": [
+          87.2452309995424,
+          81.26087699929485,
+          87.8471569994872,
+          84.3506269993668,
+          80.35701900007552,
+          89.04668399918592,
+          86.43519200086303,
+          136.20184700084792,
+          82.8830240006937
+        ],
+        "peak_rss_bytes": 18513920
+      },
+      "grit": {
+        "mean_ms": 1840.1172216666357,
+        "median_ms": 1854.4001259997458,
+        "stddev_ms": 65.31196971509067,
+        "min_ms": 1735.1069769993046,
+        "max_ms": 1912.4634729996615,
+        "runs_ms": [
+          1749.6639040000446,
+          1735.1069769993046,
+          1828.6839899992628,
+          1878.8003910012776,
+          1808.528119001494,
+          1912.4634729996615,
+          1854.4001259997458,
+          1881.717595999362,
+          1911.6904189995694
+        ],
+        "peak_rss_bytes": 97869824
+      },
+      "ratio": 21.454225797071523
+    },
+    {
+      "id": "push-one-commit-git-main",
+      "group": "network-push",
+      "fixture": "git/git bare clone (82k commits, ~1,000 refs plus 137-257 pushed branches)",
+      "description": "One new commit pushed as a new branch over git daemon (git://); one warmup, 9 interleaved runs, Python perf_counter + wait4 peak RSS; grit b3a18044a",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 90.62529533326193,
+        "median_ms": 86.43519200086303,
+        "stddev_ms": 17.352442143563575,
+        "min_ms": 80.35701900007552,
+        "max_ms": 136.20184700084792,
+        "runs_ms": [
+          87.2452309995424,
+          81.26087699929485,
+          87.8471569994872,
+          84.3506269993668,
+          80.35701900007552,
+          89.04668399918592,
+          86.43519200086303,
+          136.20184700084792,
+          82.8830240006937
+        ],
+        "peak_rss_bytes": 18513920
+      },
+      "grit": {
+        "mean_ms": 498.773226000291,
+        "median_ms": 485.9395549992769,
+        "stddev_ms": 56.25870293318702,
+        "min_ms": 411.9592040005955,
+        "max_ms": 568.4570749999693,
+        "runs_ms": [
+          411.9592040005955,
+          431.79099900044093,
+          473.67481400033284,
+          485.9395549992769,
+          485.20007700062706,
+          516.562934999456,
+          568.4570749999693,
+          547.5838700003806,
+          567.7905050015397
+        ],
+        "peak_rss_bytes": 60690432
+      },
+      "ratio": 5.622010476871792
+    },
+    {
+      "id": "push-one-commit-git-branch",
+      "group": "network-push",
+      "fixture": "git/git bare clone (82k commits, ~1,000 refs plus 137-257 pushed branches)",
+      "description": "One new commit pushed as a new branch over git daemon (git://); one warmup, 9 interleaved runs, Python perf_counter + wait4 peak RSS; grit e6825a2f4",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 90.62529533326193,
+        "median_ms": 86.43519200086303,
+        "stddev_ms": 17.352442143563575,
+        "min_ms": 80.35701900007552,
+        "max_ms": 136.20184700084792,
+        "runs_ms": [
+          87.2452309995424,
+          81.26087699929485,
+          87.8471569994872,
+          84.3506269993668,
+          80.35701900007552,
+          89.04668399918592,
+          86.43519200086303,
+          136.20184700084792,
+          82.8830240006937
+        ],
+        "peak_rss_bytes": 18513920
+      },
+      "grit": {
+        "mean_ms": 142.22599100018365,
+        "median_ms": 132.49360800000431,
+        "stddev_ms": 19.780996092027877,
+        "min_ms": 129.60704299985082,
+        "max_ms": 177.9741529990133,
+        "runs_ms": [
+          129.60704299985082,
+          131.21930500165035,
+          135.34598800106323,
+          134.56756500090705,
+          132.49360800000431,
+          175.94642900075996,
+          130.56403799964755,
+          132.31578999875637,
+          177.9741529990133
+        ],
+        "peak_rss_bytes": 35426304
+      },
+      "ratio": 1.5328664740940405
+    },
+    {
+      "id": "push-one-commit-http-2a0f003c1",
+      "group": "network-push",
+      "fixture": "git/git bare clone (82k commits, ~1,000 refs plus 137-257 pushed branches)",
+      "description": "One new commit pushed as a new branch over grit-http-server smart HTTP; one warmup, 9 interleaved runs, Python perf_counter + wait4 peak RSS; grit 2a0f003c1",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 48.69131111121937,
+        "median_ms": 49.79390200060152,
+        "stddev_ms": 2.3853214122984037,
+        "min_ms": 43.72426699956122,
+        "max_ms": 51.36709500038705,
+        "runs_ms": [
+          47.96446799991827,
+          43.72426699956122,
+          47.479157999987365,
+          47.06044600061432,
+          50.21020800086262,
+          51.36709500038705,
+          50.67099900043104,
+          49.79390200060152,
+          49.951256998610916
+        ],
+        "peak_rss_bytes": 18460672
+      },
+      "grit": {
+        "mean_ms": 1798.0430896669632,
+        "median_ms": 1785.1937399991584,
+        "stddev_ms": 59.02626772056006,
+        "min_ms": 1712.8794249983912,
+        "max_ms": 1909.8815090001153,
+        "runs_ms": [
+          1783.3996050012502,
+          1735.2011450002465,
+          1793.2581790009863,
+          1712.8794249983912,
+          1782.7619730014703,
+          1785.1937399991584,
+          1836.586535000606,
+          1909.8815090001153,
+          1843.2256960004452
+        ],
+        "peak_rss_bytes": 99512320
+      },
+      "ratio": 35.851653882790565
+    },
+    {
+      "id": "push-one-commit-http-main",
+      "group": "network-push",
+      "fixture": "git/git bare clone (82k commits, ~1,000 refs plus 137-257 pushed branches)",
+      "description": "One new commit pushed as a new branch over grit-http-server smart HTTP; one warmup, 9 interleaved runs, Python perf_counter + wait4 peak RSS; grit b3a18044a",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 48.69131111121937,
+        "median_ms": 49.79390200060152,
+        "stddev_ms": 2.3853214122984037,
+        "min_ms": 43.72426699956122,
+        "max_ms": 51.36709500038705,
+        "runs_ms": [
+          47.96446799991827,
+          43.72426699956122,
+          47.479157999987365,
+          47.06044600061432,
+          50.21020800086262,
+          51.36709500038705,
+          50.67099900043104,
+          49.79390200060152,
+          49.951256998610916
+        ],
+        "peak_rss_bytes": 18460672
+      },
+      "grit": {
+        "mean_ms": 453.60887255547925,
+        "median_ms": 467.38513899981626,
+        "stddev_ms": 53.6104005180821,
+        "min_ms": 361.33048800002143,
+        "max_ms": 524.4658339997841,
+        "runs_ms": [
+          361.33048800002143,
+          401.96391999961634,
+          406.738581999889,
+          468.3813440005906,
+          454.29494899872225,
+          467.38513899981626,
+          504.9041549991671,
+          493.0154420017061,
+          524.4658339997841
+        ],
+        "peak_rss_bytes": 62099456
+      },
+      "ratio": 9.386393116855356
+    },
+    {
+      "id": "push-one-commit-http-branch",
+      "group": "network-push",
+      "fixture": "git/git bare clone (82k commits, ~1,000 refs plus 137-257 pushed branches)",
+      "description": "One new commit pushed as a new branch over grit-http-server smart HTTP; one warmup, 9 interleaved runs, Python perf_counter + wait4 peak RSS; grit e6825a2f4",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 48.69131111121937,
+        "median_ms": 49.79390200060152,
+        "stddev_ms": 2.3853214122984037,
+        "min_ms": 43.72426699956122,
+        "max_ms": 51.36709500038705,
+        "runs_ms": [
+          47.96446799991827,
+          43.72426699956122,
+          47.479157999987365,
+          47.06044600061432,
+          50.21020800086262,
+          51.36709500038705,
+          50.67099900043104,
+          49.79390200060152,
+          49.951256998610916
+        ],
+        "peak_rss_bytes": 18460672
+      },
+      "grit": {
+        "mean_ms": 45.16196944455765,
+        "median_ms": 45.30380200048967,
+        "stddev_ms": 1.7322715890803908,
+        "min_ms": 41.858904000037,
+        "max_ms": 48.143422000066494,
+        "runs_ms": [
+          41.858904000037,
+          45.30380200048967,
+          44.55855500054895,
+          43.85262299911119,
+          48.143422000066494,
+          44.89805100092781,
+          45.93143300007796,
+          45.64952699911373,
+          46.26140800064604
+        ],
+        "peak_rss_bytes": 36712448
+      },
+      "ratio": 0.9098263076459119
+    }
+  ]
+}
