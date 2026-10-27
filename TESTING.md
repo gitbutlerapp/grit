@@ -592,6 +592,8 @@ Shared harness: [`grit-lib/tests/support/diff_harness.rs`](grit-lib/tests/suppor
 | — | `git blame --porcelain` vs `blame_file` | `blame_git_compat.rs` (`blame_matches_git_porcelain_after_adcb_permutation`) | covered |
 | — | unified diff parse on git worktree diff | `apply_git_compat.rs` (`apply_parse_accepts_git_worktree_diff`) | partial |
 | — | `git interpret-trailers --parse` | `interpret_trailers_git_compat.rs` (`interpret_trailers_parse_matches_git`) | covered |
+| — | `git interpret-trailers --trailer` placement (`--where` / `--if-exists` / `--if-missing`), `trailer.*` config, output options | `interpret_trailers_git_compat.rs` (`trailer_placement_matrix_*`, `trailer_command_config_matches_git`, `trailer_output_options_match_git`) | covered |
+| — | `git commit --signoff` / `git cherry-pick -x [-s]` message rewriting | `commit_trailers_git_compat.rs` | partial (single-line trailer-only subject differs under `cherry-pick -x`) |
 | — | `git log --date=<mode>` vs `show_date` | `git_date_git_compat.rs` (`git_log_date_iso_matches_show_date`) | partial |
 
 ### Documentation site and rustdoc jobs
