@@ -400,6 +400,13 @@ name = "diff_tree_metadata_memory"
 path = "tests/diff_tree_metadata_memory.rs"
 required-features = ["full-tests"]
 
+# Asserts an absolute peak-RSS budget in a re-executed child, so the measured
+# process must be this file's small binary, not the whole integration suite.
+[[test]]
+name = "merge_content_rss"
+path = "tests/merge_content_rss.rs"
+required-features = ["full-tests"]
+
 [[bench]]
 name = "pack_frontier"
 harness = false

@@ -879,9 +879,6 @@ mod merge_check_git_compat;
 #[path = "merge_conflicts_git_compat.rs"]
 mod merge_conflicts_git_compat;
 #[cfg(feature = "full-tests")]
-#[path = "merge_content_rss.rs"]
-mod merge_content_rss;
-#[cfg(feature = "full-tests")]
 #[path = "merge_continue_git_compat.rs"]
 mod merge_continue_git_compat;
 #[path = "merge_diff_line_coverage.rs"]

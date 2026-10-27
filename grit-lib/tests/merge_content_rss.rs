@@ -1,6 +1,9 @@
 //! Issue #2036: wide clean content merges must not retain duplicate path/entry maps.
 //! Each measured operation runs after exec so fixture construction and other tests cannot
-//! hide growth behind an earlier process high-water mark.
+//! hide growth behind an earlier process high-water mark. The budgets are absolute, so this
+//! file is its own test binary (`[[test]]` in Cargo.toml): run inside the whole integration
+//! suite, the child's peak also counts that much larger binary's resident code and test
+//! table, about 15 MiB more for the same merge.
 
 #![cfg(target_os = "linux")]
 
@@ -83,6 +86,11 @@ fn content_merge_child() {
     };
     let rss = peak_rss_kib();
     println!("tree={tree} peak_rss_kib={rss}");
+    if cfg!(coverage) || std::env::var_os("CARGO_LLVM_COV").is_some() {
+        // Instrumented code and its counters inflate the peak several-fold.
+        eprintln!("SKIP: peak RSS budget under llvm-cov instrumentation");
+        return;
+    }
     assert!(
         rss < max_rss,
         "20k content merge peaked at {rss} KiB; budget {max_rss} KiB"
@@ -129,11 +137,7 @@ fn wide_content_merge_memory_and_git_compatibility() {
         for tree_only in [true, false] {
             let mut child = Command::new(std::env::current_exe().expect("test binary"));
             child
-                .args([
-                    "--exact",
-                    "merge_content_rss::content_merge_child",
-                    "--nocapture",
-                ])
+                .args(["--exact", "content_merge_child", "--nocapture"])
                 .env("GRIT_CONTENT_MERGE_RSS_ROOT", root);
             child.env_remove("GRIT_CONTENT_MERGE_RSS_TREE_ONLY");
             child.env_remove("GRIT_CONTENT_MERGE_RSS_PACKED");
