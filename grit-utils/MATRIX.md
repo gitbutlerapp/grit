@@ -126,6 +126,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `resolve/change-id@git-git` | Resolve change-id prefix: grit resolve \<cid\> vs git log --all --format=%H |
 | `revs/count@git-git` | Count commits at HEAD: grit revs --count HEAD vs git rev-list --count HEAD |
 | `revs/count-path@git-git` | Literal path count without commit-graph: grit revs --count 7e34d81 -- Documentation/git-log.txt vs git rev-list |
+| `revs/count-range-commit-graph@git-git` | Count HEAD~20..HEAD with a verified Git-written commit-graph; catches full-ancestry regressions in small ranges |
 | `shortlog/ahead@git-git` | Ahead-of-target commits: grit shortlog vs git log <target>..HEAD --oneline |
 | `shortlog/behind@git-git` | Behind-target listing: grit shortlog --behind -n 20 vs git rev-list --left-right --count and git log -n 20 HEAD..target |
 | `show/head@big-blobs` | Show HEAD on big-blobs: grit show vs git show |

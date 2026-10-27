@@ -1,0 +1,136 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-27T07:54:23.741820443Z",
+  "machine": {
+    "cpu_model": "AMD EPYC 7763 64-Core Processor",
+    "physical_cores": 2,
+    "logical_cores": 4,
+    "ram_bytes": 16766414848,
+    "os": "linux",
+    "kernel": "Linux 6.17.0-1022-azure",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "grit": "grit 0.5.22",
+    "grit_commit": "9a30c347e"
+  },
+  "scenarios": [
+    {
+      "id": "revs/count-range-commit-graph@git-git",
+      "area": "revwalk",
+      "description": "Bounded range count with a git-written commit-graph: HEAD~20..HEAD (issue #1669)",
+      "git": {
+        "median_wall_ms": 2.8511580000000003,
+        "peak_rss_bytes": 12697600,
+        "runs": 30,
+        "samples_ms": [
+          2.896,
+          2.909,
+          2.895,
+          2.763,
+          2.797,
+          0.778,
+          2.784,
+          2.981,
+          0.887,
+          2.8,
+          2.975,
+          2.907,
+          2.873,
+          2.802,
+          2.826,
+          2.81,
+          2.877,
+          2.907,
+          2.94,
+          2.909,
+          2.768,
+          2.792,
+          2.909,
+          2.878,
+          0.758,
+          2.933,
+          2.83,
+          2.781,
+          2.927,
+          2.824
+        ],
+        "min_ms": 0.758262,
+        "max_ms": 2.980711,
+        "stddev_ms": 0.6302668929083212
+      },
+      "grit": {
+        "median_wall_ms": 4.051024,
+        "peak_rss_bytes": 16707584,
+        "runs": 30,
+        "samples_ms": [
+          4.079,
+          4.061,
+          4.007,
+          3.971,
+          4.054,
+          3.985,
+          4.18,
+          4.322,
+          4.191,
+          4.004,
+          4.053,
+          4.021,
+          4.128,
+          3.984,
+          4.084,
+          3.98,
+          4.011,
+          3.962,
+          4.11,
+          4.095,
+          4.063,
+          1.723,
+          3.956,
+          3.927,
+          4.165,
+          4.333,
+          4.008,
+          4.062,
+          4.049,
+          4.011
+        ],
+        "min_ms": 1.722601,
+        "max_ms": 4.332977,
+        "stddev_ms": 0.4383577931999261
+      },
+      "ratio": 1.4208346222832966,
+      "detail": {
+        "commands": {
+          "git": "git rev-list --count HEAD~20..HEAD",
+          "grit": "grit revs --count HEAD~20..HEAD"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.324,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.092,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.025,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
