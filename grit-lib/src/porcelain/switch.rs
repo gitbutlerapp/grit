@@ -328,15 +328,20 @@ pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> 
 /// report all paths to materialize without writing the index, worktree, refs, or reflogs.
 ///
 /// A real switch takes `index.lock` before reading the index and holds it through the
-/// checkout; refs move only after the index is written.
+/// checkout; refs move only after the index is written. The switch is all or nothing: when
+/// `cancel` fires (or any step fails) before the switch completes, refs, the index and the
+/// work tree are left as they were: files the checkout already wrote are removed or
+/// rewritten, and files it deleted are restored.
 ///
 /// # Errors
 ///
 /// Returns [`Error::OperationInProgress`] (also for [`SwitchOptions::dry_run`]) while a merge,
 /// rebase, am, cherry-pick or revert is paused, whichever tool started it;
 /// [`Error::LockHeld`] when another process holds `index.lock`, with the work tree, index,
-/// `HEAD` and branch refs unchanged; overwrite refusals and ref/object failures otherwise.
-/// On error the hook does not run.
+/// `HEAD` and branch refs unchanged; overwrite refusals and ref/object failures otherwise;
+/// [`Error::Cancelled`] when `cancel` or `progress` asked to stop;
+/// [`Error::CheckoutRollbackIncomplete`] (wrapping the cause) when some work-tree paths could
+/// not be put back. On error the hook does not run.
 pub fn switch_repository(
     repo: &Repository,
     opts: &SwitchOptions,

@@ -484,9 +484,15 @@ pub fn checkout_between_trees(
 /// exact blob count from the destination tree; tree-to-tree diffs report the
 /// number of path changes.
 ///
+/// When `cancel` fires, or any step fails, before the index is written, the index and work
+/// tree are left as they were: written files are removed or rewritten from the index, and
+/// deleted files and directories are restored.
+///
 /// # Errors
 ///
-/// Same as [`checkout_between_trees`], plus [`Error::Cancelled`] when `cancel` fires.
+/// Same as [`checkout_between_trees`], plus [`Error::Cancelled`] when `cancel` or `progress`
+/// asked to stop, and [`Error::CheckoutRollbackIncomplete`] (wrapping the cause) when some
+/// paths could not be put back.
 pub fn checkout_between_trees_with_progress(
     repo: &Repository,
     from: Option<&ObjectId>,
@@ -525,11 +531,17 @@ pub fn checkout_between_trees_with_progress(
 /// `index.lock` is taken before the index is read and held until the rebuilt index
 /// replaces it, so no file is touched when the lock is unavailable.
 ///
+/// The reset is all or nothing: on cancellation or any failure before the index is written,
+/// the work tree is put back as it was (including files only the index tracked), and the
+/// index is not touched. Tree-diff paths are restored from the index, so unstaged edits in
+/// them are not recovered; the reset was discarding them anyway.
+///
 /// # Errors
 ///
 /// Returns [`Error::LockHeld`] without touching the work tree or index when another process
 /// holds `index.lock`, and an error when the repository has no work tree, required promised
-/// objects cannot be fetched, or checkout I/O fails.
+/// objects cannot be fetched, or checkout I/O fails; [`Error::Cancelled`] when `cancel`
+/// fires; and [`Error::CheckoutRollbackIncomplete`] when some paths could not be put back.
 pub fn checkout_hard_to_tree_from_head_tree(
     repo: &Repository,
     head_tree: &ObjectId,
