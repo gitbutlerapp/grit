@@ -1,16 +1,26 @@
 //! Smoke test for `grit-bench tag-tree-sha256` JSON schema.
 
+use std::path::PathBuf;
 use std::process::Command;
+
+/// Build the workspace `grit` binary and return its path. `CARGO_BIN_EXE_grit` is never
+/// set for this crate (the binary lives in `grit-cli`), and `grit` is not on PATH in CI.
+fn build_grit_executable() -> PathBuf {
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    let status = Command::new(env!("CARGO"))
+        .args(["build", "-p", "grit-cli", "--bin", "grit", "-q"])
+        .current_dir(&workspace)
+        .status()
+        .expect("spawn cargo build grit-cli");
+    assert!(status.success(), "cargo build grit-cli failed");
+    let grit = workspace.join("target/debug/grit");
+    grit.canonicalize().unwrap_or(grit)
+}
 
 #[test]
 fn tag_tree_sha256_smoke_report_schema() {
     let bench = env!("CARGO_BIN_EXE_grit-bench");
-    let grit = std::env::var("CARGO_BIN_EXE_grit").unwrap_or_else(|_| {
-        grit_utils::binary::resolve_binary("grit", None)
-            .expect("grit binary")
-            .display()
-            .to_string()
-    });
+    let grit = build_grit_executable().display().to_string();
     let out = Command::new(bench)
         .args([
             "tag-tree-sha256",
