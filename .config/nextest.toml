@@ -5,6 +5,13 @@
 # so a test that changes the working directory or environment cannot disturb
 # another, and the ~900 test binaries no longer run one after another.
 
+# grit-utils integration tests and the grit-bench processes they start share one
+# scratch root (/tmp/grit-bench-scratch, or $GRIT_BENCH_SCRATCH) and its cached
+# fixtures, which each test removes and rebuilds. Their in-process Mutex guards do
+# nothing when nextest runs every test in its own process, so run them one at a time.
+[test-groups]
+grit-bench-scratch = { max-threads = 1 }
+
 [profile.default]
 # Report tests slower than a minute; stop one that hangs (a credential helper
 # waiting on a prompt, a server that never answers) after four.
@@ -17,6 +24,16 @@ fail-fast = false
 filter = 'test(status_skips_index_rewrite_within_the_second_of_racy_entries)'
 retries = 2
 
+[[profile.default.overrides]]
+filter = 'package(grit-utils)'
+test-group = 'grit-bench-scratch'
+
+# The daily end-to-end tests and the tag-tree-sha256 smoke clone git/git.git and run many
+# scenarios; give them up to ten minutes before nextest stops them.
+[[profile.default.overrides]]
+filter = 'package(grit-utils) & (binary(daily_e2e) | binary(daily_remotes_e2e) | test(/^tag_tree_sha256_scenario_e2e::/))'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
 [profile.ci]
 fail-fast = false
 slow-timeout = { period = "60s", terminate-after = 4 }
@@ -24,6 +41,14 @@ slow-timeout = { period = "60s", terminate-after = 4 }
 [[profile.ci.overrides]]
 filter = 'test(status_skips_index_rewrite_within_the_second_of_racy_entries)'
 retries = 2
+
+[[profile.ci.overrides]]
+filter = 'package(grit-utils)'
+test-group = 'grit-bench-scratch'
+
+[[profile.ci.overrides]]
+filter = 'package(grit-utils) & (binary(daily_e2e) | binary(daily_remotes_e2e) | test(/^tag_tree_sha256_scenario_e2e::/))'
+slow-timeout = { period = "60s", terminate-after = 10 }
 
 [profile.ci.junit]
 path = "junit.xml"
