@@ -43,7 +43,8 @@ impl CheckoutDeleteRollback {
 
     /// Move `rel_path` out of the worktree into the spool, or no-op when absent.
     pub(crate) fn spool_remove(&mut self, work_tree: &Path, rel_path: &str) -> Result<()> {
-        let abs = work_tree.join(rel_path);
+        // Stored paths hex-encode non-UTF-8 names; decode them to the on-disk bytes.
+        let abs = crate::repo_relpath::worktree_abs(work_tree, rel_path);
         let meta = match fs::symlink_metadata(&abs) {
             Ok(m) => m,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -183,7 +184,7 @@ fn cross_device_move_to_spool(
 }
 
 fn restore_spooled_entry(work_tree: &Path, entry: &SpooledCheckoutDelete) -> std::io::Result<()> {
-    let abs = work_tree.join(&entry.rel);
+    let abs = crate::repo_relpath::worktree_abs(work_tree, &entry.rel);
     if let Some(parent) = abs.parent() {
         fs::create_dir_all(parent)?;
     }

@@ -112,7 +112,9 @@ pub fn resolve_worktree_path_for_staging(
         }
     };
 
-    let abs = work_tree.join(rel);
+    // `rel` is a stored path: non-UTF-8 names arrive hex-encoded (`repo_relpath`), so decode
+    // it to the on-disk bytes instead of joining the encoded spelling.
+    let abs = crate::repo_relpath::worktree_abs(work_tree, rel);
     // An ASCII path is its own NFC and NFD spelling, so no other directory entry can be it.
     if !precompose_unicode || !has_non_ascii_utf8(rel) {
         return WorktreePathForStaging {
@@ -160,7 +162,7 @@ pub fn resolve_worktree_path_for_staging(
         }
         let Some(name) = found else {
             return WorktreePathForStaging {
-                abs: work_tree.join(rel),
+                abs,
                 index_relpath: index_rel(rel),
             };
         };
