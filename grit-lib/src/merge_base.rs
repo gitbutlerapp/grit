@@ -200,6 +200,15 @@ pub fn merge_bases_all(repo: &Repository, commits: &[ObjectId]) -> Result<Vec<Ob
     }
     let mut cache = CommitGraphCache::new(repo);
     if commits.len() == 2 {
+        // A tip that is an ancestor of the other is the only merge base: every other common
+        // ancestor is one of its own ancestors.
+        match direct_ancestor_relation(&mut cache, commits[0], commits[1])? {
+            FirstParentRelation::Same | FirstParentRelation::FirstIsAncestor => {
+                return Ok(vec![commits[0]]);
+            }
+            FirstParentRelation::SecondIsAncestor => return Ok(vec![commits[1]]),
+            FirstParentRelation::Unrelated => {}
+        }
         let walked = walk_intersecting_histories(&mut cache, commits[0], &[commits[1]], true)?;
         let candidates: OidHashSet = walked.into_iter().collect();
         let mut bases = reduce_to_best(candidates, &mut cache)?;
@@ -2170,11 +2179,8 @@ fn dequeue_commit_for_intersect_walk(
     labels.insert(node.oid, before & !MARK_QUEUED);
     if tally.open_on_both == 0 {
         if tally.open_on_a == 0 && tally.open_on_b == 0 {
-            if pending.is_empty() {
-                tally.apply_label(before, -1);
-                return Some(node.oid);
-            }
-            // Queue holds only stale commits: no new merge-base candidates can appear.
+            // Queue holds only stale commits (the popped one included): no new merge-base
+            // candidates can appear, and walking on would follow the stale tail to the root.
             // `reduce_to_best` removes redundant bases afterward (Git paint_down_to_common).
             return None;
         } else if allow_rank_stop
@@ -3345,6 +3351,55 @@ mod tests {
             parent_reads >= 1400,
             "sanity: should walk from tip toward merge base (parent lookups {parent_reads})"
         );
+        Ok(())
+    }
+
+    /// Two short branches forking from the middle of a long chain: once only stale commits
+    /// are queued the walk stops instead of following the shared tail to the root.
+    #[test]
+    fn merge_base_of_short_branches_stops_above_the_shared_tail() -> Result<()> {
+        use super::intersect_walk_test_hooks::{intersect_walk_steps, reset_intersect_walk_steps};
+
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let chain = write_chain(&repo, 2000, |i| 100 + i as i64)?;
+        let fork = chain[1000];
+        let mut sides = [fork, fork];
+        for (side, tip) in sides.iter_mut().enumerate() {
+            for i in 0..3 {
+                *tip = write_commit_same_time(
+                    &repo.odb(),
+                    &[*tip],
+                    &format!("side{side}-{i}"),
+                    5_000 + i,
+                )?;
+            }
+        }
+        for all in [false, true] {
+            clear_commit_linkage(&repo);
+            reset_intersect_walk_steps();
+            let bases = if all {
+                merge_bases_all(&repo, &sides)?
+            } else {
+                merge_bases_first_vs_rest(&repo, sides[0], &sides[1..])?
+            };
+            assert_eq!(bases, vec![fork], "all={all}");
+            let steps = intersect_walk_steps();
+            assert!(
+                steps <= 16,
+                "all={all}: walk dequeued {steps} commits for a 7-commit fork"
+            );
+        }
+        let tip = chain[chain.len() - 1];
+        for pair in [[tip, fork], [fork, tip]] {
+            reset_intersect_walk_steps();
+            assert_eq!(merge_bases_all(&repo, &pair)?, vec![fork]);
+            assert_eq!(
+                intersect_walk_steps(),
+                0,
+                "an ancestor tip is the only merge base, found on the first-parent chain"
+            );
+        }
         Ok(())
     }
 
