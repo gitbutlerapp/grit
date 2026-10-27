@@ -737,24 +737,57 @@ pub fn verify_fetch_deepen(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()>
     let remote = remote_state(ctx)?;
     configure_client_remote(&ctx.git, cwd, remote)?;
     let branch = remote.meta.default_branch.as_str();
+    let shallow = cwd.join(".git/shallow");
+    let prepare = || -> Result<()> {
+        match std::fs::remove_file(&shallow) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+        run_git(
+            &ctx.git,
+            cwd,
+            &["fetch", "--depth", "1", "--no-tags", "-q", "origin", branch],
+        )?;
+        anyhow::ensure!(
+            std::fs::read_to_string(&shallow)?.lines().count() == 1,
+            "deepen fixture must start at one branch boundary"
+        );
+        Ok(())
+    };
+    let boundaries = || -> Result<Vec<String>> {
+        let mut lines: Vec<_> = std::fs::read_to_string(&shallow)?
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        lines.sort_unstable();
+        Ok(lines)
+    };
+    prepare()?;
     run_git(
         &ctx.git,
         cwd,
-        &["fetch", "--depth", "1", "-q", "origin", branch],
+        &[
+            "fetch",
+            "--deepen",
+            "50",
+            "--no-tags",
+            "-q",
+            "origin",
+            branch,
+        ],
     )?;
-    run_grit(&ctx.grit, cwd, &["fetch", "--depth", "1", "origin", branch])?;
-    prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
-    run_git(
-        &ctx.git,
-        cwd,
-        &["fetch", "--deepen", "50", "-q", "origin", branch],
-    )?;
-    prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
+    let expected = boundaries()?;
+    prepare()?;
     run_grit(
         &ctx.grit,
         cwd,
-        &["fetch", "--deepen", "50", "origin", branch],
+        &["fetch", "--deepen", "50", "--no-tags", "origin", branch],
     )?;
+    anyhow::ensure!(
+        boundaries()? == expected,
+        "Git and grit produced different shallow boundaries"
+    );
     verify_client_fetch_tip(&ctx.git, &remote.bare, cwd, branch)?;
     Ok(())
 }

@@ -477,3 +477,41 @@ fn baseline_grit_records_headlines() {
     assert!(row.baseline_grit_ratio.is_some());
     assert!(report.tools.baseline_grit.is_some());
 }
+
+#[test]
+fn daily_honors_min_runs_above_the_default_cap() {
+    let _guard = lock_e2e();
+    let git = resolve_git();
+    let grit = build_grit_executable();
+    let cache = TempDir::new().expect("cache");
+    std::env::set_var("GRIT_BENCH_CACHE", cache.path());
+    std::env::set_var("GRIT_BENCH_DAILY_ROOT", cache.path().join("daily"));
+    prepare_fixtures(&git, &[FixtureKind::Small]);
+    let output = cache.path().join("minimum-runs.json");
+    let result = Command::new(bench_exe())
+        .args([
+            "daily",
+            "--only",
+            "status/clean@small",
+            "--min-runs",
+            "30",
+            "--offline",
+        ])
+        .arg("--git")
+        .arg(&git)
+        .arg("--grit")
+        .arg(&grit)
+        .arg("--output")
+        .arg(&output)
+        .output()
+        .expect("daily");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report = grit_utils::validate_daily_report(&output).expect("valid report");
+    let row = &report.scenarios[0];
+    assert_eq!(row.git.runs, Some(30));
+    assert_eq!(row.grit.runs, Some(30));
+}

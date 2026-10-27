@@ -32,6 +32,8 @@ pub struct DailyRunOptions {
     pub git: PathBuf,
     pub grit: PathBuf,
     pub baseline_grit: Option<PathBuf>,
+    /// Minimum timed runs per tool; smoke mode always uses one.
+    pub min_runs: Option<u32>,
     pub measure_helper: PathBuf,
     pub smoke: bool,
     pub offline: bool,
@@ -50,8 +52,13 @@ fn smoke_policy() -> RunPolicy {
     }
 }
 
-fn default_policy() -> RunPolicy {
-    RunPolicy::default()
+fn default_policy(min_runs: Option<u32>) -> RunPolicy {
+    let mut policy = RunPolicy::default();
+    if let Some(min_runs) = min_runs {
+        policy.min_runs_per_tool = min_runs.max(1);
+        policy.max_runs_per_tool = policy.max_runs_per_tool.max(policy.min_runs_per_tool);
+    }
+    policy
 }
 
 fn tool_run(stats: &crate::schema::TimingStats, runs: u32) -> DailyToolRun {
@@ -235,13 +242,22 @@ fn correctness_note(once: bool, before_each: bool, after_each: bool) -> Option<S
     (!parts.is_empty()).then(|| parts.join("; "))
 }
 
+fn validate_plan_commands(id: &str, git: &BenchArgv, grit: &BenchArgv) -> Result<()> {
+    let noop = |cmd: &BenchArgv| cmd.program == Path::new("true") && cmd.args.is_empty();
+    anyhow::ensure!(
+        !(noop(git) && noop(grit)),
+        "daily scenario `{id}` has no operation to measure"
+    );
+    Ok(())
+}
+
 /// Execute headline scenarios and write a daily census JSON report.
 pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<DailyBenchReport> {
     pin_daily_scratch_root();
     let policy = if opts.smoke {
         smoke_policy()
     } else {
-        default_policy()
+        default_policy(opts.min_runs)
     };
     let limits = RunLimits::default();
     let setup = DailySetup {
@@ -276,6 +292,7 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
             .with_context(|| format!("refresh HTTP server for {}", plan.spec.id))?;
         let git_cmd = (plan.build_git)(&headline_ctx);
         let grit_cmd = (plan.build_grit)(&headline_ctx);
+        validate_plan_commands(plan.spec.id, &git_cmd, &grit_cmd)?;
         let prepare_spec = (plan.prepare)(&headline_ctx);
         let prepare = prepare_argv(&opts.measure_helper, &opts.git, &prepare_spec);
         let checked_after = post_timed_for(plan.spec.id).is_some();
@@ -423,11 +440,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn requested_minimum_runs_can_exceed_the_default_cap() {
+        let policy = default_policy(Some(30));
+        assert_eq!(policy.min_runs_per_tool, 30);
+        assert_eq!(policy.max_runs_per_tool, 30);
+        assert_eq!(
+            default_policy(None).min_runs_per_tool,
+            RunPolicy::default().min_runs_per_tool
+        );
+        assert_eq!(smoke_policy().min_runs_per_tool, 1);
+    }
+
+    #[test]
+    fn missing_fixture_commands_cannot_publish_noop_timings() {
+        let noop = BenchArgv::new("true", Vec::<String>::new());
+        assert!(validate_plan_commands("resolve/change-id@git-git", &noop, &noop).is_err());
+        let real = BenchArgv::new("grit", ["resolve", "HEAD"]);
+        assert!(validate_plan_commands("resolve/head@git-git", &real, &real).is_ok());
+    }
+
+    #[test]
     fn only_filter_narrows_plans() {
         let opts = DailyRunOptions {
             git: PathBuf::from("/usr/bin/git"),
             grit: PathBuf::from("/usr/bin/grit"),
             baseline_grit: None,
+            min_runs: None,
             measure_helper: PathBuf::from("/usr/bin/grit-bench"),
             smoke: true,
             offline: true,
@@ -489,6 +527,7 @@ mod tests {
             git: PathBuf::from("/usr/bin/git"),
             grit: PathBuf::from("/usr/bin/grit"),
             baseline_grit: None,
+            min_runs: None,
             measure_helper: PathBuf::from("/usr/bin/grit-bench"),
             smoke: true,
             offline: true,
@@ -528,6 +567,7 @@ mod tests {
             git: PathBuf::from("/usr/bin/git"),
             grit: PathBuf::from("/usr/bin/grit"),
             baseline_grit: None,
+            min_runs: None,
             measure_helper: PathBuf::from("/usr/bin/grit-bench"),
             smoke: true,
             offline: true,

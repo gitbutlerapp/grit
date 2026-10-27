@@ -232,3 +232,38 @@ fn http_cases_smoke() {
         assert!(row.grit.peak_rss_bytes > 0, "{id} grit rss");
     }
 }
+
+#[test]
+fn reword_and_change_id_smoke_measure_real_operations() {
+    let _guard = lock_e2e();
+    let git = resolve_git();
+    let (grit, _http, _bench) = build_binaries();
+    let cache = TempDir::new().expect("cache");
+    std::env::set_var("GRIT_BENCH_CACHE", cache.path());
+    std::env::set_var("GRIT_BENCH_DAILY_ROOT", cache.path().join("daily"));
+    prepare_fixtures(&git, &[FixtureKind::GitGit]);
+    let output = cache.path().join("reword-change-id.json");
+    let result = run_daily(
+        &git,
+        &grit,
+        &output,
+        &[
+            "--only",
+            "history/reword@synth-10k,resolve/change-id@git-git",
+        ],
+    );
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report = grit_utils::validate_daily_report(&output).expect("valid report");
+    assert_eq!(report.scenarios.len(), 2);
+    for row in report.scenarios {
+        let detail = row.detail.expect("commands");
+        assert_ne!(detail.commands.git.as_deref(), Some("true"));
+        assert_ne!(detail.commands.grit.as_deref(), Some("true"));
+        assert!(row.git.runs.is_some_and(|runs| runs > 0));
+        assert!(row.grit.runs.is_some_and(|runs| runs > 0));
+    }
+}

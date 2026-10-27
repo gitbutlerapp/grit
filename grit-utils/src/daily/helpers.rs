@@ -164,6 +164,13 @@ pub fn finish_git_git_matrix_ctx(headline: &mut DailyHeadlineContext, git: &Path
         .unwrap_or("README.md");
     let blob_spec = format!("HEAD:{path}");
     headline.cat_blob = Some(git_rev_parse(git, &headline.repo, &blob_spec)?);
+    let commit = git_rev_parse(git, &headline.repo, "HEAD~1000")?;
+    let oid = grit_lib::objects::ObjectId::from_hex(commit.trim())?;
+    headline.change_id_bench_prefix = Some(
+        grit_lib::objects::ChangeId::derived_from_commit_id(&oid)
+            .short(12)
+            .to_owned(),
+    );
     run_git(
         git,
         &headline.repo,

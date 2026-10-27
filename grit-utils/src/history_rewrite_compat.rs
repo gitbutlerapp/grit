@@ -83,13 +83,16 @@ pub fn reword_scenario(
 ) -> (Vec<String>, Vec<String>) {
     let msg = meta.bench_message.trim();
     let mut grit_parts = vec!["reword", &meta.reword, "-m", msg];
-    let mut git_parts = vec!["reword", &meta.reword, "-m", msg];
+    let mut git_parts = vec!["reword", &meta.reword];
     if update_refs_head {
         grit_parts.push("--update-refs=head");
         git_parts.push("--update-refs=head");
     }
     let grit_cmd = grit_history_cmd(grit, &grit_parts);
-    let git_cmd = git_history_cmd(git, &git_parts);
+    let git_cmd = format!(
+        "GIT_EDITOR=./.grit-bench-git-editor.sh {}",
+        git_history_cmd(git, &git_parts)
+    );
     (
         vec!["-c".into(), format!("set -eu; {grit_cmd} >/dev/null")],
         vec!["-c".into(), format!("set -eu; {git_cmd} >/dev/null")],

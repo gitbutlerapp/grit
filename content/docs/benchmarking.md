@@ -103,6 +103,16 @@ See also [Benchmarks](benchmarks.md) for committed baselines and acceptance rati
 
 ## `grit-bench daily` (factory census)
 
+Use `--min-runs 10` for performance investigations that require at least ten
+samples per tool. Daily runs honor this common option, raising the usual run cap
+when the requested minimum is larger. `--smoke` still uses one sample, and the
+scenario time budget can stop expensive scenarios early; inspect each row's `runs`.
+Daily reports reject a plan whose two commands are placeholders instead of an
+operation. Reword uses a scripted editor with `git history` on supporting Git
+versions; deepen starts from one branch boundary with tags excluded and checks
+that Git and grit produce identical new shallow boundaries.
+
+
 Headline scenarios compare **`grit`** and system **`git`** with the direct-spawn runner (wall time + peak RSS per run). Reports use the [`grit-daily-bench/1`](../grit-utils/DAILY-SCHEMA.md) schema (distinct from hyperfine v1).
 
 ```bash

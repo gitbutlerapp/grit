@@ -92,22 +92,45 @@ fn correctness_fetch_deepen(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
 }
 
 fn prepare_fetch_deepen_client(ctx: &DailyHeadlineContext) -> DailyPrepare {
-    let branch = default_remote_branch(ctx);
+    let branch = shell_quote(default_remote_branch(ctx));
+    let repo = shell_quote(&ctx.repo.to_string_lossy());
+    let git = shell_quote(&ctx.git.to_string_lossy());
     DailyPrepare::Shell(sh_script(format!(
-        "set -e\ncd {}\ngit fetch --depth 1 -q origin {}\n{} fetch --depth 1 origin {}\n",
-        ctx.repo.display(),
-        branch,
-        ctx.grit.display(),
-        branch,
+        r#"set -eu
+cd {repo}
+rm -f "$({git} rev-parse --git-path shallow)"
+{git} fetch --depth 1 --no-tags -q origin {branch}
+"#
     )))
 }
 
 fn fetch_deepen_git(ctx: &DailyHeadlineContext) -> BenchArgv {
-    sh_devnull(&ctx.git, &["fetch", "--deepen", "50", "-q", "origin"])
+    sh_devnull(
+        &ctx.git,
+        &[
+            "fetch",
+            "--deepen",
+            "50",
+            "--no-tags",
+            "-q",
+            "origin",
+            default_remote_branch(ctx),
+        ],
+    )
 }
 
 fn fetch_deepen_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
-    sh_devnull(&ctx.grit, &["fetch", "--deepen", "50", "origin"])
+    sh_devnull(
+        &ctx.grit,
+        &[
+            "fetch",
+            "--deepen",
+            "50",
+            "--no-tags",
+            "origin",
+            default_remote_branch(ctx),
+        ],
+    )
 }
 
 fn correctness_pull_check(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {

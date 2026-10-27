@@ -1358,6 +1358,7 @@ fn main() -> Result<()> {
                         git,
                         grit,
                         baseline_grit: run.baseline_grit.clone(),
+                        min_runs: Some(cli.min_runs),
                         measure_helper,
                         smoke: run.smoke,
                         offline: run.offline,
