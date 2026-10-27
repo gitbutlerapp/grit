@@ -1978,17 +1978,23 @@ fn a_worktree_detached_on_integrated_commits_replays_only_its_own() {
 /// Commit everything changed in `dir` with system `git`, which writes no
 /// change id; the new commit.
 fn git_commit_all(dir: &Path, message: &str) -> String {
-    git(
-        dir,
-        &[
-            "-c",
-            "user.name=Plain Git",
-            "-c",
-            "user.email=plain@example.com",
-            "commit",
-            "-qam",
-            message,
-        ],
+    // The identity goes in the environment: `GIT_AUTHOR_*` (set in CI) would win over
+    // `-c user.name`.
+    let out = Command::new("git")
+        .args(["commit", "-qam", message])
+        .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "Plain Git")
+        .env("GIT_AUTHOR_EMAIL", "plain@example.com")
+        .env("GIT_COMMITTER_NAME", "Plain Git")
+        .env("GIT_COMMITTER_EMAIL", "plain@example.com")
+        .output()
+        .expect("git");
+    assert!(
+        out.status.success(),
+        "git commit: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
     git(dir, &["rev-parse", "HEAD"])
 }
