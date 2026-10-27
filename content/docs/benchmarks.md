@@ -9,6 +9,84 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
 
+## Sparse stash apply/pop (2026-10-27)
+
+Issue [#2082](https://github.com/gitbutlerapp/grit/issues/2082) reproduced with
+120,000 unique tracked files across 400 directories, 20 lines per file, and 3,000
+appended edits saved by system Git. Stash apply/pop now shares one changed-path
+plan between overwrite checks and application, skips identical subtree OIDs,
+and mutates one loaded index. Moved-HEAD metadata is looked up only for affected
+paths through the bounded tree cache. Sparse checkout replacements reuse existing
+index slots, and stash scratch data is released before index serialization.
+
+Measured on a four-vCPU AMD EPYC 7763 Linux VM with 16 GiB RAM, Rust 1.99.0 and
+stock Git 2.55.0. Frozen main is `02e8900b78ea`. The original copy-and-edit
+reproduction first confirmed 85,368–86,132 KiB on main versus Git's
+37,468–37,752 KiB on warm runs. The fix uses 49,068–49,348 KiB and takes
+223–246 ms versus main's 490–525 ms and Git's 640–694 ms in those warm runs.
+Worktree diffs match byte for byte and strict fsck succeeds for both tools.
+
+The scaling comparison below keeps the same 3,000 edits while selecting 100,
+200, or 400 directories from that fixture. The smaller fixtures reuse the
+original loose objects through Git alternates; compare tools within each row,
+since alternate lookups add a fixed per-edit cost to the smaller fixtures.
+Git, frozen main, and the fix run in alternating order on the same checkout. Each tool/output gets one warmup and
+three recorded runs with builds and tests paused. Times are medians of Python
+`perf_counter` around `/usr/bin/time -v`; RSS is the maximum recorded peak, in
+KiB. Git controls use ordinary `git stash pop` for every output format. Worktree
+and staged diffs, index stages, status, empty stash state, and strict fsck are
+checked against Git. These are `release` builds:
+
+| Tree / output | Git ms | Main ms | Fixed ms | Git RSS KiB | Main RSS KiB | Fixed RSS KiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 30k / human | 401.95 | 336.29 | 293.72 | 13,460 | 37,128 | 27,760 |
+| 60k / human | 473.44 | 391.12 | 277.92 | 21,612 | 53,816 | 36,112 |
+| 120k / human | 606.98 | 439.17 | 245.69 | 37,772 | 89,308 | 49,312 |
+| 120k / json | 600.74 | 481.24 | 226.77 | 37,772 | 89,340 | 49,320 |
+| 120k / markdown | 593.41 | 448.21 | 213.78 | 37,900 | 89,432 | 49,436 |
+
+The same three-way comparison with shipped `dist` builds:
+
+| Tree / output | Git ms | Main ms | Fixed ms | Git RSS KiB | Main RSS KiB | Fixed RSS KiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 30k / human | 401.29 | 320.43 | 267.41 | 13,520 | 33,784 | 23,896 |
+| 60k / human | 475.79 | 365.38 | 284.92 | 21,796 | 50,380 | 30,296 |
+| 120k / human | 615.53 | 444.33 | 217.25 | 37,708 | 85,356 | 45,152 |
+| 120k / json | 614.14 | 454.24 | 224.51 | 37,584 | 85,324 | 45,004 |
+| 120k / markdown | 603.32 | 459.39 | 229.27 | 37,772 | 85,292 | 44,872 |
+
+A sparse-switch control over the same 120k-file tree (3k changed paths) also
+improves median time: release **175.70 → 170.30 ms**, dist **187.19 → 170.21 ms**,
+versus Git **409.22 / 412.13 ms**. Maximum RSS is **48,152 → 50,004 KiB**
+(release) and **44,404 → 45,320 KiB** (dist), small process/allocator-residency
+differences that remain in the raw samples. No worktree/index mismatch occurs.
+
+Raw samples, GNU time output, binary hashes and reproduction scripts:
+[`stash-pop-2082.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/stash-pop-2082.json).
+
+Heaptrack on the original loose-object fixture measures peak live heap falling
+from **69.53 to 29.28 MB**, with allocation calls falling from **2,558,667 to
+373,732**. At the old peak, flattened-tree allocations account for 11.79 MB,
+the separately retained parsed index for 15.36 MB, and checkout's entry-vector
+growth for 26.88 MB. The serializer still needs its output buffer; one index and
+process/allocator overhead remain, so total RSS remains above Git.
+
+The Linux Rust RSS regression exercises human, JSON, and Markdown pop in fresh
+processes at 4k and 120k files with the same 3k edits. It bounds tree-size memory
+growth against Git to control for debug/process overhead, retains an absolute
+Git-relative bound in optimized builds, and compares state and bytes. Library
+compatibility tests cover staged additions/deletions, moved HEAD, conflicts,
+untouched local changes, filters, symlinks and overwrite protection. Criterion
+adds `stash/pop_sparse_wide/100k_files_3k_edits`; the daily matrix adds
+`stash/pop-sparse@wide-120k` (120k files/3k edits; 4k/100 in smoke mode).
+
+```bash
+cargo test -p grit-cli --test stash_pop_memory -- --nocapture
+cargo test -p grit-lib --test stash_git_compat --test stash_apply_git_compat \
+  --test stash_apply_outcome_git_compat --test stash_apply_autocrlf
+cargo bench -p grit-lib --bench hot_paths -- stash/pop_sparse_wide --test
+```
+
 ## Inexact rename detection (2026-10-27)
 
 Issue [#1683](https://github.com/gitbutlerapp/grit/issues/1683) reproduced on

@@ -223,6 +223,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Stash ~1% pathspec: grit stash push -- <paths> vs git stash push -- <paths>",
     },
     ScenarioSpec {
+        id: "stash/pop-sparse@wide-120k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Pop 3k edits in a mostly unchanged 120k-file tree vs git stash pop",
+    },
+    ScenarioSpec {
         id: "stash/pop-index@synth-10k",
         area: Area::Worktree,
         headline: false,

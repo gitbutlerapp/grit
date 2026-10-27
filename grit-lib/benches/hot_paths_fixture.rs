@@ -379,7 +379,7 @@ fn hard_reset_to_main(repo: &Repository, main_head_oid: ObjectId) {
         &ResetOptions::new(
             main_head_oid,
             ResetMode::Hard,
-            BENCH_IDENT,
+            BENCH_IDENT.parse().expect("signature"),
             "bench: reset to main",
         ),
         &mut grit_lib::progress::NullProgress,
@@ -497,11 +497,10 @@ pub fn bench_push_stash(fx: &HotPathsFixture) {
 }
 
 pub fn bench_apply_stash(fx: &HotPathsFixture, stash_oid: &ObjectId) {
-    let wt = fx.repo.work_tree().expect("work tree");
     let _ = fx
         .repo
         .stash()
-        .apply_commit(&stash_oid, &StashApplyOptions::default())
+        .apply_commit(stash_oid, &StashApplyOptions::default())
         .expect("apply_stash");
 }
 

@@ -258,6 +258,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         correctness: None,
     });
     plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("stash/pop-sparse@wide-120k"),
+        pending: false,
+        setup: super::super::matrix_helpers::setup_sparse_stash_pop,
+        prepare: super::super::matrix_helpers::prepare_sparse_stash_pop,
+        build_git: |c| super::super::matrix_helpers::sparse_stash_pop_bench(c).1,
+        build_grit: |c| super::super::matrix_helpers::sparse_stash_pop_bench(c).0,
+        correctness: Some(super::super::matrix_helpers::verify_sparse_stash_pop),
+    });
+    plans.push(DailyHeadlinePlan {
         spec: scenario_spec("reset/hard-delete-heavy@wide-48k"),
         pending: false,
         setup: super::super::matrix_helpers::setup_delete_heavy_wide,

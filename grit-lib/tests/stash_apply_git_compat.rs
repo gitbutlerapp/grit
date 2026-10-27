@@ -133,3 +133,93 @@ fn apply_stash_with_index_matches_git_staged_porcelain() {
         b"staged stash\n"
     );
 }
+
+/// Exercise sparse deltas over many identical subtrees, including index-only changes.
+#[test]
+fn wide_sparse_apply_preserves_index_and_untouched_changes_like_git() {
+    let base = tempfile::tempdir().expect("base");
+    init_repo(base.path());
+    for d in 0..40 {
+        let dir = base.path().join(format!("d{d:03}"));
+        std::fs::create_dir(&dir).expect("directory");
+        for f in 0..100 {
+            std::fs::write(dir.join(format!("f{f:03}")), format!("base {d} {f}\n")).expect("file");
+        }
+    }
+    git_cmd(base.path(), &["add", "."]);
+    git_cmd(base.path(), &["commit", "-qm", "wide base"]);
+    let head = git_cmd(base.path(), &["rev-parse", "HEAD"]);
+    for f in 0..30 {
+        std::fs::write(
+            base.path().join(format!("d000/f{f:03}")),
+            format!("stash {f}\n"),
+        )
+        .expect("edit");
+    }
+    std::fs::write(base.path().join("d001/added"), "staged addition\n").expect("add");
+    git_cmd(base.path(), &["add", "d001/added", "d000/f000"]);
+    git_cmd(base.path(), &["rm", "-q", "d002/f000"]);
+    // Worktree and index versions differ, and one staged addition has no worktree delta.
+    std::fs::write(base.path().join("d000/f000"), "unstaged after staged\n").expect("edit");
+    std::fs::write(base.path().join("d001/index-only"), "index only\n").expect("add");
+    git_cmd(base.path(), &["add", "d001/index-only"]);
+    std::fs::remove_file(base.path().join("d001/index-only")).expect("remove");
+    git_cmd(base.path(), &["stash", "push", "-qm", "sparse"]);
+    let stash = ObjectId::from_hex(git_cmd(base.path(), &["rev-parse", "refs/stash"]).trim())
+        .expect("stash");
+
+    for moved in [false, true] {
+        for restore_index in [false, true] {
+            let grit_dir = tempfile::tempdir().expect("grit");
+            copy_repo(base.path(), grit_dir.path());
+            if moved {
+                std::fs::write(grit_dir.path().join("d010/f000"), "new head\n").expect("head edit");
+                git_cmd(grit_dir.path(), &["add", "d010/f000"]);
+                git_cmd(grit_dir.path(), &["commit", "-qm", "moved head"]);
+            }
+            std::fs::write(grit_dir.path().join("d039/f099"), "untouched local\n").expect("local");
+            if !restore_index {
+                std::fs::write(grit_dir.path().join("d039/f098"), "untouched staged\n")
+                    .expect("local staged");
+                git_cmd(grit_dir.path(), &["add", "d039/f098"]);
+            }
+            let git_dir = tempfile::tempdir().expect("git");
+            copy_repo(grit_dir.path(), git_dir.path());
+            let repo = Repository::open(
+                &grit_dir.path().join(".git"),
+                &RepositoryOptions::empty().with_work_tree(grit_dir.path()),
+            )
+            .expect("open");
+            let outcome = repo
+                .stash()
+                .apply_commit(&stash, &StashApplyOptions { restore_index })
+                .expect("apply");
+            assert!(!outcome.has_conflicts());
+            let mut args = vec!["stash", "apply"];
+            if restore_index {
+                args.push("--index");
+            }
+            git_cmd(git_dir.path(), &args);
+            for args in [
+                &["diff", "--binary"][..],
+                &["diff", "--cached", "--binary"][..],
+                &["ls-files", "--stage"][..],
+                &["status", "--porcelain"][..],
+            ] {
+                assert_eq!(
+                    git_cmd(grit_dir.path(), args),
+                    git_cmd(git_dir.path(), args),
+                    "moved={moved}, index={restore_index}, {args:?}"
+                );
+            }
+            for root in [grit_dir.path(), git_dir.path()] {
+                git_cmd(root, &["fsck", "--strict"]);
+                assert_eq!(
+                    std::fs::read(root.join("d039/f099")).expect("local"),
+                    b"untouched local\n"
+                );
+            }
+        }
+    }
+    assert_eq!(git_cmd(base.path(), &["rev-parse", "HEAD"]), head);
+}

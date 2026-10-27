@@ -71,6 +71,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `restore/hunks@large-file` | Discard half of 500 hunks in a 50k-line file: grit restore --hunks vs git apply -R |
 | `rm/dir@synth-10k` | Remove tracked directory: grit rm -r <dir> vs git rm -r <dir> |
 | `rm/dry-run@synth-10k` | Preview remove directory: grit rm --dry-run <dir> vs git rm -n -r <dir> |
+| `stash/pop-sparse@wide-120k` | Pop 3k edits in a mostly unchanged 120k-file tree vs git stash pop |
 | `stash/pop-index@synth-10k` | Restore index from stash: grit stash pop --index vs git stash pop --index |
 | `stash/push-paths@synth-10k` | Stash ~1% pathspec: grit stash push -- \<paths\> vs git stash push -- \<paths\> |
 | `stash/push-pop@synth-10k` | Stash push and pop vs git stash |

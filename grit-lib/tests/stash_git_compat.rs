@@ -1580,3 +1580,67 @@ fn stash_pop_many_files_without_index_matches_git() {
     );
     assert_fsck_strict(grit_dir.path());
 }
+
+#[test]
+fn wide_sparse_pop_keeps_conflicts_and_unrelated_local_content() {
+    let grit_dir = tempfile::tempdir().expect("grit");
+    init_repo(grit_dir.path());
+    for d in 0..30 {
+        let dir = grit_dir.path().join(format!("d{d:03}"));
+        std::fs::create_dir(&dir).expect("directory");
+        for f in 0..100 {
+            std::fs::write(dir.join(format!("f{f:03}")), "base\n").expect("file");
+        }
+    }
+    git_cmd(grit_dir.path(), &["add", "."]);
+    git_cmd(grit_dir.path(), &["commit", "-qm", "base"]);
+    std::fs::write(grit_dir.path().join("d000/f000"), "stash\n").expect("stash edit");
+    git_cmd(grit_dir.path(), &["stash", "push", "-qm", "conflict"]);
+    std::fs::write(grit_dir.path().join("d000/f000"), "head\n").expect("head edit");
+    git_cmd(grit_dir.path(), &["add", "d000/f000"]);
+    #[cfg(unix)]
+    git_cmd(
+        grit_dir.path(),
+        &["update-index", "--chmod=+x", "d000/f000"],
+    );
+    git_cmd(grit_dir.path(), &["commit", "-qm", "moved"]);
+    // Make the physical mode agree with the moved HEAD's executable index entry.
+    git_cmd(grit_dir.path(), &["reset", "--hard", "HEAD"]);
+    std::fs::write(grit_dir.path().join("d029/f099"), "untouched\n").expect("local");
+    let git_dir = tempfile::tempdir().expect("git");
+    copy_repo(grit_dir.path(), git_dir.path());
+    let outcome = open_grit(grit_dir.path())
+        .stash()
+        .pop(0, &StashApplyOptions::default())
+        .expect("pop");
+    assert_eq!(outcome.conflicted_paths, ["d000/f000"]);
+    let mut cmd = Command::new("git");
+    grit_test_support::configure_git_env(&mut cmd);
+    let out = cmd
+        .current_dir(git_dir.path())
+        .args(["stash", "pop"])
+        .output()
+        .expect("git pop");
+    assert!(!out.status.success(), "Git must report the conflict");
+    for args in [
+        &["ls-files", "--stage"][..],
+        &["status", "--porcelain"][..],
+        &["stash", "list"][..],
+    ] {
+        assert_eq!(
+            git_cmd(grit_dir.path(), args),
+            git_cmd(git_dir.path(), args)
+        );
+    }
+    for root in [grit_dir.path(), git_dir.path()] {
+        assert_eq!(
+            std::fs::read(root.join("d029/f099")).expect("local"),
+            b"untouched\n"
+        );
+        assert_fsck_strict(root);
+    }
+    assert_eq!(
+        std::fs::read(grit_dir.path().join("d000/f000")).expect("grit conflict"),
+        std::fs::read(git_dir.path().join("d000/f000")).expect("git conflict")
+    );
+}

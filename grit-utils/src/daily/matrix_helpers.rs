@@ -1346,6 +1346,98 @@ pub fn prepare_stash_push_paths(ctx: &DailyHeadlineContext) -> DailyPrepare {
     DailyPrepare::Shell(BenchArgv::new("/bin/sh", ["-c", script.as_str()]))
 }
 
+/// Build a mostly unchanged wide tree and save a fixed-size edit set for `setup`'s tools.
+/// Returns the repository context; smoke mode uses a smaller fixture.
+///
+/// # Errors
+/// Returns filesystem and Git setup failures.
+pub fn setup_sparse_stash_pop(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    use crate::hot_path_fixture::{list_tracked_files, populate_tree, rev_parse};
+    use std::io::Write;
+    with_scratch("stash-pop-sparse", |_scratch| {
+        let repo = crate::fixture::scratch_dir();
+        crate::fixture::remove_dir_robust(&repo);
+        std::fs::create_dir_all(&repo)?;
+        run_git(setup.git, &repo, &["init", "-q"])?;
+        run_git(setup.git, &repo, &["config", "gc.auto", "0"])?;
+        let files = if setup.smoke { 4_000 } else { 120_000 };
+        populate_tree(&repo, files, 400)?;
+        run_git(setup.git, &repo, &["add", "."])?;
+        run_git(setup.git, &repo, &["commit", "-qm", "wide stash base"])?;
+        let edits = if setup.smoke { 100 } else { 3000 };
+        for path in list_tracked_files(&repo)?.into_iter().take(edits) {
+            writeln!(
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(repo.join(path))?,
+                "stash repeat"
+            )?;
+        }
+        run_git(setup.git, &repo, &["stash", "push", "-qm", "sparse edits"])?;
+        let oid = rev_parse(setup.git, &repo, "refs/stash")?;
+        run_git(
+            setup.git,
+            &repo,
+            &["update-ref", "refs/grit-bench/stash-sparse", &oid],
+        )?;
+        set_worktree_bench_cwd(&repo)?;
+        Ok(ctx(repo, setup))
+    })
+}
+
+/// Return the reset/store command that restores `ctx`'s saved stash before each run.
+pub fn prepare_sparse_stash_pop(ctx: &DailyHeadlineContext) -> DailyPrepare {
+    let reset = shell_command(&ctx.git, &["reset", "--hard", "-q", "HEAD"]);
+    let clear = shell_command(&ctx.git, &["stash", "clear"]);
+    let oid = shell_command(&ctx.git, &["rev-parse", "refs/grit-bench/stash-sparse"]);
+    let store = shell_command(&ctx.git, &["stash", "store", "-m", "sparse edits"]);
+    let repo = shell_quote_path(&ctx.repo);
+    let script = format!("set -eu\ncd {repo}\n{reset}\n{clear}\n{store} \"$({oid})\" ");
+    DailyPrepare::Shell(BenchArgv::new("/bin/sh", ["-c", script.as_str()]))
+}
+
+/// Check `ctx`'s tools against the saved stash tree before timing mutations.
+///
+/// # Errors
+/// Returns command failures, byte/index/stash-state mismatches, and strict fsck errors.
+pub fn verify_sparse_stash_pop(ctx: &DailyHeadlineContext) -> Result<()> {
+    let expected_index = tool_stdout(&ctx.git, &ctx.repo, &["ls-files", "--stage"])?;
+    let expected_diff = tool_stdout(
+        &ctx.git,
+        &ctx.repo,
+        &["diff", "--binary", "HEAD", "refs/grit-bench/stash-sparse"],
+    )?;
+    for tool in [&ctx.git, &ctx.grit] {
+        if let DailyPrepare::Shell(prepare) = prepare_sparse_stash_pop(ctx) {
+            let args: Vec<_> = prepare.args.iter().map(String::as_str).collect();
+            tool_stdout(&prepare.program, &ctx.repo, &args)?;
+        }
+        tool_stdout(tool, &ctx.repo, &["stash", "pop"])?;
+        anyhow::ensure!(
+            tool_stdout(&ctx.git, &ctx.repo, &["diff", "--binary"])? == expected_diff,
+            "sparse stash pop changed worktree bytes"
+        );
+        anyhow::ensure!(
+            tool_stdout(&ctx.git, &ctx.repo, &["ls-files", "--stage"])? == expected_index,
+            "sparse stash pop changed index state"
+        );
+        anyhow::ensure!(
+            tool_stdout(&ctx.git, &ctx.repo, &["stash", "list"])?.is_empty(),
+            "sparse stash pop kept the stash entry"
+        );
+        tool_stdout(&ctx.git, &ctx.repo, &["fsck", "--strict"])?;
+    }
+    Ok(())
+}
+
+/// Return grit and Git pop invocations for `ctx`, with presentation output discarded.
+pub fn sparse_stash_pop_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["stash", "pop"]),
+        sh_devnull(&ctx.git, &["stash", "pop"]),
+    )
+}
+
 pub fn prepare_stash_pop_index(ctx: &DailyHeadlineContext) -> DailyPrepare {
     let reset = prepare_daily_reset_script(&ctx.git);
     let staged = shell_command(

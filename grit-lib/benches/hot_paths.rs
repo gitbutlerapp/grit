@@ -96,6 +96,41 @@ fn bench_apply_stash_group(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_sparse_stash_pop(c: &mut Criterion) {
+    let fx = HotPathsFixture::heavy();
+    let stash_oid = fx.build_stash_touching_fraction(3000.0 / fx.file_paths.len() as f64);
+    let mut group = c.benchmark_group("stash/pop_sparse_wide");
+    group.bench_function("100k_files_3k_edits", |b| {
+        b.iter_batched(
+            || {
+                fx.reset_worktree_to_head();
+                grit_lib::refs::write_ref(fx.repo.git_dir(), "refs/stash", &stash_oid)
+                    .expect("restore stash ref");
+                grit_lib::refs::append_reflog(
+                    fx.repo.git_dir(),
+                    "refs/stash",
+                    &grit_lib::objects::ObjectId::zero(),
+                    &stash_oid,
+                    "Bench <bench@grit-scm.test> 1700000000 +0000",
+                    "sparse stash",
+                    true,
+                )
+                .expect("restore stash reflog");
+            },
+            |_| {
+                black_box(
+                    fx.repo
+                        .stash()
+                        .pop(0, &grit_lib::stash::StashApplyOptions::default())
+                        .expect("pop"),
+                )
+            },
+            BatchSize::PerIteration,
+        );
+    });
+    group.finish();
+}
+
 fn bench_pick_paths(c: &mut Criterion) {
     let fx = HotPathsFixture::large();
     let mut group = c.benchmark_group("pick_paths");
@@ -114,7 +149,7 @@ fn bench_status_clean_100k(c: &mut Criterion) {
     fx.ensure_clean_stat_cache();
     let mut group = c.benchmark_group("status/clean_100k");
     group.bench_function("grit_lib", |b| {
-        b.iter(|| black_box(fx.bench_status_clean()));
+        b.iter(|| fx.bench_status_clean());
     });
     group.finish();
 }
@@ -124,7 +159,7 @@ fn bench_diff_worktree_clean_10k(c: &mut Criterion) {
     fx.ensure_clean_stat_cache();
     let mut group = c.benchmark_group("diff/worktree_clean_10k");
     group.bench_function("grit_lib", |b| {
-        b.iter(|| black_box(fx.bench_diff_worktree_clean()));
+        b.iter(|| fx.bench_diff_worktree_clean());
     });
     group.finish();
 }
@@ -197,6 +232,7 @@ criterion_group!(
     bench_staging_scan,
     bench_push_stash_group,
     bench_apply_stash_group,
+    bench_sparse_stash_pop,
     bench_pick_paths,
     bench_merge_trees_three_way_2000,
     bench_tree_merge_group

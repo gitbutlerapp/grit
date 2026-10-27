@@ -1584,11 +1584,20 @@ fn checkout_commit_index_update(
             index_mut.drop_derived_index_extensions();
         }
     }
-    index_mut.remove_prefixes_paths_and_insert(
-        wholesale_dirs_removed,
-        paths_to_remove.iter().map(|p| p.as_slice()),
-        new_entries,
-    );
+    if wholesale_dirs_removed.is_empty()
+        && paths_to_remove.is_empty()
+        && new_entries.len() <= index_mut.entries.len() / 2
+    {
+        // Sparse replacements already have index slots. Reuse them instead of growing the
+        // full entry vector for an append/merge, which doubles its capacity on a wide tree.
+        index_mut.overwrite_stage0_entries(new_entries);
+    } else {
+        index_mut.remove_prefixes_paths_and_insert(
+            wholesale_dirs_removed,
+            paths_to_remove.iter().map(|p| p.as_slice()),
+            new_entries,
+        );
+    }
     index_mut.ensure_canonical_order();
     if let Some(tree) = checkout_result_tree {
         attach_checkout_result_cache_tree(repo, index_mut, &tree)?;
@@ -3817,6 +3826,58 @@ mod tests {
             .expect("commit");
         refs::write_ref(repo.git_dir(), "HEAD", &commit_oid).expect("head");
         tree
+    }
+
+    #[test]
+    fn sparse_checkout_index_update_reuses_entries_and_defers_disk_write() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let oid = repo.odb().write(ObjectKind::Blob, b"base").expect("blob");
+        let changed = repo
+            .odb()
+            .write(ObjectKind::Blob, b"changed")
+            .expect("changed");
+        let mut index = repo.load_index().expect("index");
+        for i in 0..100 {
+            index.push_entry_unsorted(prospective_index_entry(
+                &format!("f{i:03}"),
+                oid,
+                MODE_REGULAR,
+            ));
+        }
+        index.sort();
+        repo.write_index(&mut index).expect("index");
+        let saved = fs::read(repo.git_dir().join("index")).expect("saved index");
+        index.entries.shrink_to_fit();
+        let capacity = index.entries.capacity();
+        let untouched = index.get(b"f099", 0).expect("untouched").clone();
+        checkout_commit_index_update(
+            &repo,
+            &mut index,
+            &BTreeSet::new(),
+            &[],
+            vec![prospective_index_entry("f000", changed, MODE_REGULAR)],
+            &[],
+            true,
+            None,
+            true,
+        )
+        .expect("update");
+        assert_eq!(index.entries.len(), 100);
+        assert_eq!(index.entries.capacity(), capacity);
+        assert_eq!(index.get(b"f000", 0).expect("updated").oid, changed);
+        assert_eq!(index.get(b"f099", 0).expect("untouched"), &untouched);
+        assert_eq!(
+            fs::read(repo.git_dir().join("index")).expect("disk index"),
+            saved
+        );
     }
 
     #[test]
