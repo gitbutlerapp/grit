@@ -24,7 +24,7 @@ use crate::index::{
 use crate::objects::ObjectId;
 use crate::odb::BULK_NEW_LOOSE_WRITE;
 use crate::path_icase::{
-    paths_equal, worktree_dentry_spelling, IcaseIndexCollisionGroups, Stage0IcasePathMap,
+    paths_equal, DentrySpellingCache, IcaseIndexCollisionGroups, Stage0IcasePathMap,
 };
 use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
 use crate::pathspec::{
@@ -962,6 +962,7 @@ fn stage_ignorecase_spelling_updates(
         .map(|e| e.path.clone())
         .collect();
     let collision_groups = IcaseIndexCollisionGroups::from_index(index, true);
+    let mut dentries = DentrySpellingCache::default();
 
     for raw_path in stage0 {
         let index_rel = match std::str::from_utf8(&raw_path) {
@@ -974,7 +975,7 @@ fn stage_ignorecase_spelling_updates(
         if collision_groups.has_collision_sibling(index_rel) {
             continue;
         }
-        let Some(actual_rel) = worktree_dentry_spelling(work_tree, index_rel) else {
+        let Some(actual_rel) = dentries.spelling(work_tree, index_rel) else {
             continue;
         };
         if actual_rel == index_rel {
@@ -987,12 +988,7 @@ fn stage_ignorecase_spelling_updates(
             updated.push(actual_rel);
             continue;
         }
-        let Some(entry) = index
-            .entries
-            .iter()
-            .find(|e| e.path == raw_path && e.stage() == 0)
-            .cloned()
-        else {
+        let Some(entry) = index.get(&raw_path, 0).cloned() else {
             continue;
         };
         icase_map.remove_alias_of(index, actual_rel.as_bytes());

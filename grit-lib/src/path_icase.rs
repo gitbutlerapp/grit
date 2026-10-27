@@ -163,73 +163,120 @@ pub fn paths_equal(path_a: &[u8], path_b: &[u8], ignorecase: bool) -> bool {
     ignorecase && path_a.eq_ignore_ascii_case(path_b)
 }
 
-type ReadDirFn = fn(&Path) -> Option<std::io::Result<std::fs::ReadDir>>;
+type ReadDirFn<'r> = dyn FnMut(&Path) -> std::io::Result<std::fs::ReadDir> + 'r;
 
-fn icase_dentry_candidates(parent_abs: &Path, want: &str, read_dir: ReadDirFn) -> Vec<String> {
-    let Some(Ok(entries)) = read_dir(parent_abs) else {
-        return Vec::new();
-    };
-    let mut names = Vec::new();
+/// On-disk entry names of one directory, keyed by ASCII-lowercased name; each bucket is
+/// sorted lexicographically.
+type DentryListing = HashMap<String, Vec<String>>;
+
+/// Directory listings memoized for one pass over the work tree.
+///
+/// Resolving the on-disk spelling of a path needs each parent's entries; reading them once per
+/// directory keeps a pass over `n` paths linear instead of `n × files-per-directory`. The cache
+/// does not observe later work tree changes, so build a fresh one for every pass.
+#[derive(Debug, Default)]
+pub(crate) struct DentrySpellingCache {
+    /// `None` when the directory could not be read (missing, not a directory).
+    dirs: HashMap<PathBuf, Option<DentryListing>>,
+}
+
+impl DentrySpellingCache {
+    /// Repository-relative path using each parent directory entry's on-disk spelling, as
+    /// [`worktree_dentry_spelling`] does, reading every directory at most once per cache.
+    pub(crate) fn spelling(&mut self, work_tree: &Path, index_rel: &str) -> Option<String> {
+        self.spelling_with(work_tree, index_rel, &mut |dir: &Path| {
+            std::fs::read_dir(dir)
+        })
+    }
+
+    fn spelling_with(
+        &mut self,
+        work_tree: &Path,
+        index_rel: &str,
+        read_dir: &mut ReadDirFn<'_>,
+    ) -> Option<String> {
+        let components: Vec<&str> = index_rel.split('/').filter(|c| !c.is_empty()).collect();
+        if components.is_empty() {
+            return None;
+        }
+        self.spelling_from(work_tree, &components, read_dir)
+            .filter(|s| !s.is_empty())
+    }
+
+    /// Entries of `parent_abs` matching `want` ignoring ASCII case: the exact spelling first,
+    /// then the rest lexicographically.
+    fn candidates(
+        &mut self,
+        parent_abs: &Path,
+        want: &str,
+        read_dir: &mut ReadDirFn<'_>,
+    ) -> Vec<String> {
+        let listing = self
+            .dirs
+            .entry(parent_abs.to_path_buf())
+            .or_insert_with(|| read_listing(parent_abs, read_dir));
+        let Some(names) = listing
+            .as_ref()
+            .and_then(|l| l.get(&want.to_ascii_lowercase()))
+        else {
+            return Vec::new();
+        };
+        let mut out = Vec::with_capacity(names.len());
+        out.extend(names.iter().filter(|n| n.as_str() == want).cloned());
+        out.extend(names.iter().filter(|n| n.as_str() != want).cloned());
+        out
+    }
+
+    fn spelling_from(
+        &mut self,
+        parent_abs: &Path,
+        components: &[&str],
+        read_dir: &mut ReadDirFn<'_>,
+    ) -> Option<String> {
+        let [head, tail @ ..] = components else {
+            return Some(String::new());
+        };
+        for actual in self.candidates(parent_abs, head, read_dir) {
+            let child_abs = parent_abs.join(&actual);
+            let Some(suffix) = self.spelling_from(&child_abs, tail, read_dir) else {
+                continue;
+            };
+            return Some(if suffix.is_empty() {
+                actual
+            } else {
+                format!("{actual}/{suffix}")
+            });
+        }
+        None
+    }
+}
+
+fn read_listing(parent_abs: &Path, read_dir: &mut ReadDirFn<'_>) -> Option<DentryListing> {
+    let entries = read_dir(parent_abs).ok()?;
+    let mut listing = DentryListing::new();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.eq_ignore_ascii_case(want) {
-            names.push(name);
-        }
+        listing
+            .entry(name.to_ascii_lowercase())
+            .or_default()
+            .push(name);
     }
-    names.sort_by(|a, b| {
-        let a_exact = a.as_str() == want;
-        let b_exact = b.as_str() == want;
-        b_exact.cmp(&a_exact).then_with(|| a.cmp(b))
-    });
-    names
-}
-
-fn icase_dentry_spelling_from(
-    parent_abs: &Path,
-    components: &[&str],
-    read_dir: ReadDirFn,
-) -> Option<String> {
-    let [head, tail @ ..] = components else {
-        return Some(String::new());
-    };
-    for actual in icase_dentry_candidates(parent_abs, head, read_dir) {
-        let mut child_abs = parent_abs.to_path_buf();
-        child_abs.push(&actual);
-        let Some(suffix) = icase_dentry_spelling_from(&child_abs, tail, read_dir) else {
-            continue;
-        };
-        return Some(if suffix.is_empty() {
-            actual
-        } else {
-            format!("{actual}/{suffix}")
-        });
+    for names in listing.values_mut() {
+        names.sort_unstable();
     }
-    None
-}
-
-fn read_dir_default(parent_abs: &Path) -> Option<std::io::Result<std::fs::ReadDir>> {
-    Some(std::fs::read_dir(parent_abs))
+    Some(listing)
 }
 
 /// Repository-relative path using each parent directory entry's on-disk spelling.
 ///
 /// On case-insensitive volumes this reflects the dentry spelling from `readdir`, not the
-/// index's lexical path (Git's `core.ignorecase` behavior).
+/// index's lexical path (Git's `core.ignorecase` behavior). Each call reads every parent
+/// directory; passes over many paths use a shared listing cache internally instead.
+///
+/// Returns `None` when no on-disk entry matches some component of `index_rel`.
 #[must_use]
 pub fn worktree_dentry_spelling(work_tree: &Path, index_rel: &str) -> Option<String> {
-    worktree_dentry_spelling_with(work_tree, index_rel, read_dir_default)
-}
-
-fn worktree_dentry_spelling_with(
-    work_tree: &Path,
-    index_rel: &str,
-    read_dir: ReadDirFn,
-) -> Option<String> {
-    let components: Vec<&str> = index_rel.split('/').filter(|c| !c.is_empty()).collect();
-    if components.is_empty() {
-        return None;
-    }
-    icase_dentry_spelling_from(work_tree, &components, read_dir).filter(|s| !s.is_empty())
+    DentrySpellingCache::default().spelling(work_tree, index_rel)
 }
 
 /// Resolve a worktree path for an index entry, honoring case-insensitive filesystems.
@@ -269,12 +316,6 @@ pub fn icase_checkout_collision_paths(index: &Index, ignorecase: bool) -> Vec<St
         }
     }
     collided.into_iter().collect()
-}
-
-/// Whether `index_rel` is the spelling that exists on disk (not a case alias).
-#[must_use]
-pub fn index_path_matches_worktree_dentry(work_tree: &Path, index_rel: &str) -> bool {
-    worktree_dentry_spelling(work_tree, index_rel).is_some_and(|spelling| spelling == index_rel)
 }
 
 /// Stage-0 checkout collision groups keyed by a stable group id (built once per pass).
@@ -330,11 +371,12 @@ impl IcaseCheckoutCollisionMap {
             };
         }
         let mut winner_by_group = HashMap::new();
+        let mut dentries = DentrySpellingCache::default();
         for (key, members) in &groups.members_by_group {
             if members.len() <= 1 {
                 continue;
             }
-            let winner = resolve_collision_group_dentry_winner(work_tree, members);
+            let winner = resolve_collision_group_dentry_winner(work_tree, members, &mut dentries);
             winner_by_group.insert(*key, winner);
         }
         Self {
@@ -375,13 +417,13 @@ fn stage0_blob_paths(index: &Index) -> Vec<String> {
         .collect()
 }
 
-fn resolve_collision_group_dentry_winner(work_tree: &Path, members: &[String]) -> String {
-    if let Some(dentry) = members
-        .iter()
-        .find_map(|p| worktree_dentry_spelling(work_tree, p))
-    {
+fn resolve_collision_group_dentry_winner(
+    work_tree: &Path,
+    members: &[String],
+    dentries: &mut DentrySpellingCache,
+) -> String {
+    if let Some(dentry) = members.iter().find_map(|p| dentries.spelling(work_tree, p)) {
         if let Some(exact) = members.iter().find(|m| **m == dentry) {
-            debug_assert!(index_path_matches_worktree_dentry(work_tree, exact));
             return exact.clone();
         }
     }
@@ -447,12 +489,13 @@ pub fn icase_worktree_file_stats(
     }
     let paths = stage0_blob_paths(index);
     let groups = icase_collision_groups(&paths, ignorecase);
+    let mut dentries = DentrySpellingCache::default();
     for group in groups {
         files += 1;
         let mut group_bytes = 0u64;
         if let Some(wt) = work_tree {
             let probe = if group.len() > 1 {
-                resolve_collision_group_dentry_winner(wt, &group)
+                resolve_collision_group_dentry_winner(wt, &group, &mut dentries)
             } else {
                 group[0].clone()
             };
@@ -586,6 +629,10 @@ mod tests {
         }
     }
 
+    fn spelled_as_on_disk(wt: &Path, rel: &str) -> bool {
+        worktree_dentry_spelling(wt, rel).as_deref() == Some(rel)
+    }
+
     #[test]
     fn paths_collide_dir_and_file() {
         assert!(paths_collide("a", "a/b", false));
@@ -649,8 +696,8 @@ mod tests {
             worktree_dentry_spelling(wt, "File.txt").as_deref(),
             Some("file.txt")
         );
-        assert!(index_path_matches_worktree_dentry(wt, "file.txt"));
-        assert!(!index_path_matches_worktree_dentry(wt, "File.txt"));
+        assert!(spelled_as_on_disk(wt, "file.txt"));
+        assert!(!spelled_as_on_disk(wt, "File.txt"));
     }
 
     fn worktree_has_distinct_icase_dentries(base: &Path) -> bool {
@@ -678,7 +725,7 @@ mod tests {
                 worktree_dentry_spelling(wt, "Dir/a.txt").as_deref(),
                 Some("dir/A.txt")
             );
-            assert!(!index_path_matches_worktree_dentry(wt, "Dir/a.txt"));
+            assert!(!spelled_as_on_disk(wt, "Dir/a.txt"));
             return;
         }
         std::fs::create_dir(wt.join("Dir")).expect("Dir");
@@ -688,7 +735,68 @@ mod tests {
             worktree_dentry_spelling(wt, "Dir/a.txt").as_deref(),
             Some("dir/A.txt")
         );
-        assert!(!index_path_matches_worktree_dentry(wt, "Dir/a.txt"));
+        assert!(!spelled_as_on_disk(wt, "Dir/a.txt"));
+    }
+
+    #[test]
+    fn dentry_cache_reads_each_directory_once_per_pass() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        std::fs::create_dir_all(wt.join("d/sub")).expect("mkdir");
+        let n = 200;
+        for i in 0..n {
+            std::fs::write(wt.join(format!("d/f{i:05}.txt")), b"x").expect("write");
+        }
+        std::fs::write(wt.join("d/sub/Leaf.txt"), b"x").expect("write");
+        let mut reads: HashMap<PathBuf, usize> = HashMap::new();
+        let mut counting = |dir: &Path| {
+            *reads.entry(dir.to_path_buf()).or_default() += 1;
+            std::fs::read_dir(dir)
+        };
+        let mut cache = DentrySpellingCache::default();
+        for i in 0..n {
+            let rel = format!("d/f{i:05}.txt");
+            assert_eq!(
+                cache.spelling_with(wt, &rel, &mut counting).as_deref(),
+                Some(rel.as_str())
+            );
+        }
+        assert_eq!(
+            cache
+                .spelling_with(wt, "D/SUB/leaf.TXT", &mut counting)
+                .as_deref(),
+            Some("d/sub/Leaf.txt")
+        );
+        assert_eq!(
+            cache.spelling_with(wt, "d/missing.txt", &mut counting),
+            None
+        );
+        assert_eq!(cache.spelling_with(wt, "nope/x", &mut counting), None);
+        assert_eq!(reads.len(), 3, "{reads:?}");
+        assert!(reads.values().all(|&count| count == 1), "{reads:?}");
+    }
+
+    #[test]
+    fn dentry_cache_prefers_exact_spelling_then_lexicographic() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        if !worktree_has_distinct_icase_dentries(wt) {
+            return;
+        }
+        for name in ["b", "B", "cC", "Cc"] {
+            std::fs::create_dir(wt.join(name)).expect("mkdir");
+            std::fs::write(wt.join(name).join("x"), b"x").expect("write");
+        }
+        std::fs::create_dir(wt.join("Empty")).expect("mkdir");
+        std::fs::create_dir(wt.join("empty")).expect("mkdir");
+        std::fs::write(wt.join("empty/y"), b"y").expect("write");
+        let mut cache = DentrySpellingCache::default();
+        assert_eq!(cache.spelling(wt, "b/x").as_deref(), Some("b/x"));
+        assert_eq!(cache.spelling(wt, "B/x").as_deref(), Some("B/x"));
+        assert_eq!(cache.spelling(wt, "cc/x").as_deref(), Some("Cc/x"));
+        assert_eq!(cache.spelling(wt, "Empty/y").as_deref(), Some("empty/y"));
+        assert_eq!(cache.spelling(wt, "b/X").as_deref(), Some("b/x"));
+        assert_eq!(cache.spelling(wt, "b/z"), None);
     }
 
     #[test]
@@ -722,8 +830,8 @@ mod tests {
             worktree_dentry_spelling(wt, "dir/A.txt").as_deref(),
             Some("dir/A.txt")
         );
-        assert!(!index_path_matches_worktree_dentry(wt, "Dir/a.txt"));
-        assert!(index_path_matches_worktree_dentry(wt, "dir/A.txt"));
+        assert!(!spelled_as_on_disk(wt, "Dir/a.txt"));
+        assert!(spelled_as_on_disk(wt, "dir/A.txt"));
     }
 
     #[test]
