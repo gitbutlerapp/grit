@@ -1,4 +1,4 @@
-//! Rename detection throughput at 2000×2000 candidate matrix.
+//! Rename detection throughput for wide matrices and similar documents.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -121,29 +121,36 @@ fn bench_diff_renames(c: &mut Criterion) {
     group.finish();
 }
 
-fn adoc_like_body(seed: usize, lines: usize) -> Vec<u8> {
+fn adoc_like_body(seed: usize, lines: usize, unique: bool) -> Vec<u8> {
     let mut out = format!("= Documentation chapter {seed}\n\n").into_bytes();
     for line in 0..lines {
-        out.extend_from_slice(
-            format!("Paragraph {line}: lorem ipsum dolor sit amet.\n").as_bytes(),
-        );
+        let paragraph = if unique {
+            format!("Chapter {seed:04} paragraph {line:03}: documentation content.\n")
+        } else {
+            format!("Paragraph {line}: lorem ipsum dolor sit amet.\n")
+        };
+        out.extend_from_slice(paragraph.as_bytes());
     }
     out
 }
 
-fn bench_diff_renames_adoc_similar(c: &mut Criterion) {
+fn adoc_fixture(count: usize, lines: usize, unique: bool) -> RenameBenchFixture {
     let root = TempDir::new().expect("tempdir");
     let git_dir = root.path().join(".git");
     std::fs::create_dir_all(git_dir.join("objects")).expect("objects");
     let odb = Odb::new(&git_dir.join("objects"));
 
-    const N: usize = 64;
-    const LINES: usize = 400;
-    let mut entries: Vec<DiffEntry> = Vec::with_capacity(N * 2);
-    for i in 0..N {
-        let old_data = adoc_like_body(i, LINES);
-        let mut new_data = adoc_like_body(i, LINES);
-        new_data.extend_from_slice(b"\n== Added section\n\nNew content.\n");
+    let mut entries: Vec<DiffEntry> = Vec::with_capacity(count * 2);
+    for i in 0..count {
+        let old_data = adoc_like_body(i, lines, unique);
+        let mut new_data = adoc_like_body(i, lines, unique);
+        if unique {
+            // A one-line edit after moving uniquely named documents forces the
+            // full inexact matrix, rather than exact or basename matching.
+            new_data[0] = b'#';
+        } else {
+            new_data.extend_from_slice(b"\n== Added section\n\nNew content.\n");
+        }
         let old_oid = odb.write(ObjectKind::Blob, &old_data).expect("write old");
         let new_oid = odb.write(ObjectKind::Blob, &new_data).expect("write new");
         entries.push(DiffEntry {
@@ -168,25 +175,45 @@ fn bench_diff_renames_adoc_similar(c: &mut Criterion) {
         });
     }
 
-    let config = bench_config();
+    RenameBenchFixture {
+        _root: root,
+        odb,
+        entries,
+        config: bench_config(),
+    }
+}
+
+fn bench_diff_renames_adoc_similar(c: &mut Criterion) {
     let policy = ThreadPolicy::with_threads_override(Some(4))
         .min_items_override(Some(0))
         .min_total_bytes_override(Some(0));
-
     let mut group = c.benchmark_group("diff_renames_adoc_similar");
-    group.throughput(Throughput::Elements(u64::try_from(N * 2).expect("count")));
-    group.bench_function("detect_64_similar_doc_pairs", |b| {
-        b.iter(|| {
-            black_box(detect_renames_with_policy(
-                &odb,
-                None,
-                entries.clone(),
-                50,
-                &config,
-                &policy,
-            ));
+    group.sample_size(10);
+    for (name, count, lines, unique) in [
+        ("common_64", 64, 400, false),
+        ("unique_256", 256, 100, true),
+    ] {
+        let fx = adoc_fixture(count, lines, unique);
+        group.throughput(Throughput::Elements(
+            u64::try_from(count * 2).expect("count"),
+        ));
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                black_box(
+                    detect_renames_with_policy(
+                        &fx.odb,
+                        None,
+                        fx.entries.clone(),
+                        50,
+                        &fx.config,
+                        &policy,
+                        None,
+                    )
+                    .expect("detect renames"),
+                );
+            });
         });
-    });
+    }
     group.finish();
 }
 

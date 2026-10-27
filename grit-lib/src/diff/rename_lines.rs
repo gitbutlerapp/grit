@@ -3,13 +3,13 @@
 //! Each blob body is scanned once into [`RenameLineTable`]; pairing many candidates
 //! reuses those tables instead of re-hashing every line for every pair.
 
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 /// Per-blob line hashes and byte weights for rename similarity scoring.
 #[derive(Debug, Clone)]
 pub(crate) struct RenameLineTable {
     byte_len: usize,
+    // Sorted by hash, with one accumulated byte weight per distinct hash.
     lines: Vec<(u64, usize)>,
 }
 
@@ -33,9 +33,6 @@ impl RenameLineTable {
     /// Similarity percentage (0–100) between two tables (Git line-hash intersection).
     #[must_use]
     pub(crate) fn similarity_score(a: &Self, b: &Self) -> u32 {
-        if a.byte_len == 0 && b.byte_len == 0 {
-            return 100;
-        }
         let max_size = a.byte_len.max(b.byte_len);
         if max_size == 0 {
             return 100;
@@ -71,28 +68,30 @@ fn line_weights(data: &[u8]) -> Vec<(u64, usize)> {
         let line = &data[start..];
         out.push((hash_rename_line(line), data.len() - start));
     }
+    out.sort_unstable_by_key(|&(hash, _)| hash);
+    out.dedup_by(|later, first| {
+        if later.0 != first.0 {
+            return false;
+        }
+        first.1 += later.1;
+        true
+    });
     out
 }
 
 fn count_copied_line_bytes_between(a: &RenameLineTable, b: &RenameLineTable) -> usize {
-    let (short, long) = if a.byte_len <= b.byte_len {
-        (a, b)
-    } else {
-        (b, a)
-    };
-    let mut counts: HashMap<u64, usize> = HashMap::new();
-    for (hash, weight) in &short.lines {
-        *counts.entry(*hash).or_default() += weight;
-    }
     let mut copied = 0usize;
-    for (hash, weight) in &long.lines {
-        if let Some(slot) = counts.get_mut(hash) {
-            if *slot > 0 {
-                let take = (*weight).min(*slot);
-                copied += take;
-                *slot -= take;
-            }
+    let (mut left, mut right) = (0, 0);
+    while let (Some(&(left_hash, left_weight)), Some(&(right_hash, right_weight))) =
+        (a.lines.get(left), b.lines.get(right))
+    {
+        if left_hash == right_hash {
+            copied += left_weight.min(right_weight);
         }
+        // Advance both on a match, otherwise just the smaller hash. Boolean
+        // increments avoid an unpredictable ordering branch for unrelated files.
+        left += usize::from(left_hash <= right_hash);
+        right += usize::from(right_hash <= left_hash);
     }
     copied
 }
@@ -100,6 +99,66 @@ fn count_copied_line_bytes_between(a: &RenameLineTable, b: &RenameLineTable) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_scores_match_byte_weighted_line_intersection() {
+        // The reference works on complete lines, independently of table order
+        // and compaction. Repeats contribute bytes only up to their multiplicity
+        // in the other blob; a final unterminated line is a distinct value.
+        fn reference(old: &[u8], new: &[u8]) -> u32 {
+            let mut weights = std::collections::HashMap::<&[u8], usize>::new();
+            for line in old.split_inclusive(|&byte| byte == b'\n') {
+                *weights.entry(line).or_default() += line.len();
+            }
+            let mut copied = 0;
+            for line in new.split_inclusive(|&byte| byte == b'\n') {
+                if let Some(remaining) = weights.get_mut(line) {
+                    let take = line.len().min(*remaining);
+                    copied += take;
+                    *remaining -= take;
+                }
+            }
+            let max_len = old.len().max(new.len());
+            if max_len == 0 {
+                100
+            } else {
+                (copied * 100 / max_len) as u32
+            }
+        }
+
+        let fixtures: &[&[u8]] = &[
+            b"",
+            b"\n",
+            b"a",
+            b"a\n",
+            b"a\na\na\nb\n",
+            b"b\na\na\n",
+            b"a\nb\na",
+            b"\0binary\n\xff\n",
+            b"= Chapter\n\nparagraph one\nparagraph two\n",
+            b"= Changed\n\nparagraph two\nparagraph one\n",
+        ];
+        let tables: Vec<_> = fixtures
+            .iter()
+            .map(|data| RenameLineTable::from_normalized_blob(data))
+            .collect();
+        for (i, old) in fixtures.iter().enumerate() {
+            assert_eq!(
+                tables[i].lines.iter().map(|line| line.1).sum::<usize>(),
+                old.len()
+            );
+            assert!(tables[i].lines.windows(2).all(|pair| pair[0].0 < pair[1].0));
+            for (j, new) in fixtures.iter().enumerate() {
+                let expected = reference(old, new);
+                // Reusing a table across pairs must not consume its weights.
+                assert_eq!(
+                    RenameLineTable::similarity_score(&tables[i], &tables[j]),
+                    expected
+                );
+                assert_eq!(crate::diff::rename_similarity_score(old, new), expected);
+            }
+        }
+    }
 
     #[test]
     fn similarity_scores_are_stable_and_symmetric() {

@@ -9,6 +9,67 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
 
+## Inexact rename detection (2026-10-27)
+
+Issue [#1683](https://github.com/gitbutlerapp/grit/issues/1683) reproduced on
+`git/git`: line hashes were cached per blob, but every inexact candidate pair
+still allocated and populated a new hash map. Rename and copy detection now
+sort and combine byte weights once per blob and intersect the immutable tables
+without allocating per pair. Index advancement avoids unpredictable hash-order
+branches. Line hashing, CRLF normalization, scores, thresholds and tie-breaking
+are unchanged.
+
+Measured on a four-vCPU AMD EPYC 7763 64-Core Processor Linux VM with 16 GiB RAM, Rust 1.99.0 `release`
+builds and stock Git 2.55.0. Frozen `origin/main` is `80dc322f7c2f`.
+The upstream fixture is `git/git` at `37b3475fb530` (82,605 commits), comparing
+`v2.40.0` with `master`. The second fixture moves 1,000 documents containing
+100 unique lines each and edits one line per document, with
+`diff.renameLimit=2000`.
+
+After one warmup per tool, five interleaved runs alternate system Git, frozen
+main and the fix, reversing order on alternate rounds. Builds and tests are
+paused. Wall time is the median measured with Python `perf_counter` around
+`/usr/bin/time -v`; RSS is the maximum process peak across those runs, in KiB.
+The name-status cases use `-M`; the other tag cases use the listed output mode
+with default rename detection unless marked `no-renames`.
+
+| Scenario | Git ms | Main ms | Fixed ms | Git RSS KiB | Main RSS KiB | Fixed RSS KiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| name-status | 313.5 | 1248.9 | 180.1 | 56,616 | 79,828 | 79,620 |
+| name-only | 312.7 | 1594.8 | 208.4 | 56,560 | 80,320 | 80,508 |
+| numstat | 898.9 | 2308.4 | 944.0 | 118,724 | 171,336 | 170,220 |
+| stat | 900.2 | 2312.8 | 922.6 | 118,896 | 171,064 | 169,916 |
+| patch | 1179.0 | 2730.9 | 1352.4 | 118,528 | 203,728 | 203,992 |
+| name-only-no-renames | 8.8 | 13.8 | 14.2 | 26,852 | 38,164 | 38,292 |
+| numstat-no-renames | 662.6 | 728.9 | 721.5 | 119,188 | 158,940 | 159,096 |
+| inexact-1000 | 319.8 | 5549.2 | 642.8 | 13,996 | 47,024 | 46,836 |
+
+The tag name-status comparison is **6.9× faster than main** and **0.57× Git's
+time**. The 1,000-file case improves **8.6×**, to **2.01× Git's time**. Rename-only
+peak RSS remains essentially unchanged. The candidate matrix still uses more
+memory than Git on the 1,000-file fixture; this change removes per-comparison
+allocations without changing candidate storage. No-renames times differ by at
+most 0.4 ms for name-only and 1.1% for numstat in this run.
+
+Every output mode is byte-for-byte identical between main and the fix. Both
+grit builds report 937 renames for the tag pair versus Git's 936, preserving the
+existing similarity heuristic. All 1,000 synthetic rename path pairs match Git.
+Rust tests check weighted line multiplicities, unterminated lines, binary bytes,
+symmetry, table reuse and CRLF handling. An allocation regression covers both
+rename and copy matrices against Git-written objects and checks rename mappings
+with system Git.
+
+Raw samples, complete GNU time output, commands, fixture generation and output
+hashes: [`rename-scoring-1683.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/rename-scoring-1683.json).
+Criterion mean estimates improve from **90.79 to 9.42 ms** for 64 documents
+with shared paragraphs and **394.72 to 46.67 ms** for 256 documents with unique
+paragraphs. Both binaries run with builds and tests paused (3-second warmup,
+10 samples). The existing 2,000 × 2,000 matrix remains in the suite:
+
+```bash
+cargo bench -p grit-lib --features http-ureq,tracing --bench diff_renames -- diff_renames_adoc_similar
+```
+
 ## Multi-pack-index preparation and clean status (2026-10-26)
 
 Issue [#2064](https://github.com/gitbutlerapp/grit/issues/2064) exposed three MIDX
