@@ -824,11 +824,31 @@ fn refresh_present_tracked_path(
             enum RestagePayload {
                 Bytes(Vec<u8>),
                 Stream { file: fs::File, size: u64 },
+                Stored,
             }
             let (staged_oid, payload) = match content {
                 WorktreeBlobContent::Bytes(data) => {
                     let staged_oid = repo.odb().hash(ObjectKind::Blob, &data)?;
                     (staged_oid, RestagePayload::Bytes(data))
+                }
+                WorktreeBlobContent::Stream { mut file, size }
+                    if idx_intent_to_add
+                        || (size != u64::from(idx_e.size)
+                            && repo
+                                .odb()
+                                .read_info_without_fetch(&idx_oid)
+                                .is_ok_and(|info| info.size != size)) =>
+                {
+                    // The canonical blob size proves these bytes cannot match the index.
+                    // Store and hash together; unchanged streams still take the hash-only
+                    // path below, without creating another loose object or pack.
+                    let oid = repo.odb().write_stream(
+                        ObjectKind::Blob,
+                        size,
+                        &mut file,
+                        SERIAL_RESTAGE_WRITE,
+                    )?;
+                    (oid, RestagePayload::Stored)
                 }
                 WorktreeBlobContent::Stream { mut file, size } => {
                     let staged_oid = repo.odb().hash_stream(ObjectKind::Blob, size, &mut file)?;
@@ -850,6 +870,7 @@ fn refresh_present_tracked_path(
                 return Ok(false);
             }
             match payload {
+                RestagePayload::Stored => {}
                 RestagePayload::Bytes(data) => {
                     repo.odb()
                         .write_blob_prehashed(&staged_oid, &data, SERIAL_RESTAGE_WRITE)?;
@@ -1263,6 +1284,107 @@ mod tests {
                 size,
             })
             .collect()
+    }
+
+    #[test]
+    fn size_changed_stream_hashes_only_during_storage() {
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree().unwrap();
+        let data = vec![b'x'; 2 * 1024 * 1024];
+        write_and_index(&repo, b"large", &data);
+        fs::OpenOptions::new()
+            .append(true)
+            .open(wt.join("large"))
+            .unwrap()
+            .write_all(b"changed")
+            .unwrap();
+        let mut index = repo.load_index().unwrap();
+        let before = repo.odb().hot_path_metrics().stream_hash_calls();
+        let writes_before = repo.odb().hot_path_metrics().stream_write_calls();
+        stage_tracked_modifications_in_index(&repo, wt, &repo.index_path(), &mut index).unwrap();
+        assert_eq!(repo.odb().hot_path_metrics().stream_hash_calls(), before);
+        assert_eq!(
+            repo.odb().hot_path_metrics().stream_write_calls(),
+            writes_before + 1
+        );
+        let stored = repo.odb().read(&index.entries[0].oid).unwrap();
+        assert_eq!(stored.data.len(), data.len() + 7);
+        assert!(stored.data.ends_with(b"changed"));
+    }
+
+    #[test]
+    fn stale_stat_size_does_not_materialize_unchanged_stream() {
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree().unwrap();
+        let data = vec![b'x'; 2 * 1024 * 1024];
+        write_and_index(&repo, b"large", &data);
+        let mut index = repo.load_index().unwrap();
+        let oid = index.entries[0].oid;
+        index.entries[0].size = 0;
+        let before = repo.odb().hot_path_metrics().stream_hash_calls();
+        let writes_before = repo.odb().hot_path_metrics().stream_write_calls();
+        stage_tracked_modifications_in_index(&repo, wt, &repo.index_path(), &mut index).unwrap();
+        assert_eq!(
+            repo.odb().hot_path_metrics().stream_hash_calls(),
+            before + 1
+        );
+        assert_eq!(
+            repo.odb().hot_path_metrics().stream_write_calls(),
+            writes_before
+        );
+        assert_eq!(index.entries[0].oid, oid);
+        assert_eq!(index.entries[0].size as usize, data.len());
+    }
+
+    #[test]
+    fn size_changed_stream_can_repair_a_missing_index_object() {
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree().unwrap();
+        write_and_index(&repo, b"large", b"old");
+        let mut index = repo.load_index().unwrap();
+        fs::remove_file(repo.odb().object_path(&index.entries[0].oid)).unwrap();
+        let data = vec![b'x'; 2 * 1024 * 1024];
+        fs::write(wt.join("large"), &data).unwrap();
+        stage_tracked_modifications_in_index(&repo, wt, &repo.index_path(), &mut index).unwrap();
+        assert_eq!(repo.odb().read(&index.entries[0].oid).unwrap().data, data);
+    }
+
+    #[test]
+    fn changed_stream_does_not_fetch_a_missing_previous_blob() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        struct FetchCounter(AtomicUsize);
+        impl crate::promisor_fetch::PromisorFetcher for FetchCounter {
+            fn fetch_missing(&self, _: &Repository, _: &[ObjectId]) -> Result<()> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Err(Error::Message("unexpected fetch".into()))
+            }
+        }
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree().unwrap();
+        write_and_index(&repo, b"large", b"old");
+        let mut index = repo.load_index().unwrap();
+        fs::remove_file(repo.odb().object_path(&index.entries[0].oid)).unwrap();
+        fs::OpenOptions::new()
+            .append(true)
+            .open(repo.git_dir().join("config"))
+            .unwrap()
+            .write_all(b"[remote \"origin\"]\n promisor = true\n partialclonefilter = blob:none\n")
+            .unwrap();
+        let fetcher = Arc::new(FetchCounter(AtomicUsize::new(0)));
+        let opts = crate::environment::RepositoryOptions::empty()
+            .with_work_tree(wt)
+            .with_promisor_fetcher(Some(fetcher.clone()));
+        let repo = Repository::open(repo.git_dir(), &opts).unwrap();
+        fs::write(wt.join("large"), vec![b'x'; 2 * 1024 * 1024]).unwrap();
+        stage_tracked_modifications_in_index(&repo, wt, &repo.index_path(), &mut index).unwrap();
+        assert_eq!(fetcher.0.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            repo.odb().read(&index.entries[0].oid).unwrap().data.len(),
+            2 * 1024 * 1024
+        );
     }
 
     #[test]

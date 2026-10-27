@@ -2373,11 +2373,11 @@ impl Odb {
         self.read_info_after_promisor_miss(oid)
     }
 
-    /// Object metadata for upload-pack v2 `object-info` and similar serve paths.
+    /// Object metadata for local-only probes, serving, and maintenance.
     ///
     /// Like [`Self::read_info`], but does not resolve promisor misses by fetching
     /// from a remote; missing local objects return [`Error::ObjectNotFound`].
-    pub(crate) fn read_info_for_serve(&self, oid: &ObjectId) -> Result<ObjectInfo> {
+    pub(crate) fn read_info_without_fetch(&self, oid: &ObjectId) -> Result<ObjectInfo> {
         self.try_read_info_once(oid)?
             .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))
     }
@@ -2732,6 +2732,8 @@ impl Odb {
         size: u64,
         reader: &mut dyn std::io::Read,
     ) -> Result<ObjectId> {
+        #[cfg(test)]
+        self.hot_path_metrics().record_stream_hash();
         stream::hash_stream(self.hash_algo(), kind, size, reader)
     }
 
@@ -2762,6 +2764,8 @@ impl Odb {
         reader: &mut dyn std::io::Read,
         options: WriteOptions,
     ) -> Result<ObjectId> {
+        #[cfg(test)]
+        self.hot_path_metrics().record_stream_write();
         if let Some(primary) = &self.custom_primary {
             if !self.overlay_active() {
                 let oid = primary.write_stream(kind, size, reader, options)?;

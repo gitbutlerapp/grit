@@ -14,6 +14,9 @@ pub struct HotPathTestMetrics {
     cache_tree_builds: AtomicUsize,
     freshen_calls: AtomicUsize,
     blob_content_reads: AtomicUsize,
+    stream_hash_calls: AtomicUsize,
+    staging_passes: AtomicUsize,
+    stream_write_calls: AtomicUsize,
     blob_read_threads: Mutex<HashSet<ThreadId>>,
     pack_signature_stats: AtomicUsize,
     midx_stamp_stats: AtomicUsize,
@@ -76,6 +79,30 @@ impl HotPathTestMetrics {
         if self.freshen_counting.load(Ordering::Relaxed) {
             self.freshen_calls.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    pub(crate) fn record_stream_write(&self) {
+        self.stream_write_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn stream_write_calls(&self) -> usize {
+        self.stream_write_calls.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn record_staging_pass(&self) {
+        self.staging_passes.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn staging_passes(&self) -> usize {
+        self.staging_passes.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn record_stream_hash(&self) {
+        self.stream_hash_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn stream_hash_calls(&self) -> usize {
+        self.stream_hash_calls.load(Ordering::Relaxed)
     }
 
     /// Clear worktree blob read count.

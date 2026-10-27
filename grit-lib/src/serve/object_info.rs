@@ -50,7 +50,7 @@ fn format_object_info_line(
     want_type: bool,
 ) -> Result<String> {
     let hex = oid.to_hex();
-    let info = match repo.odb().read_info_for_serve(oid) {
+    let info = match repo.odb().read_info_without_fetch(oid) {
         Ok(info) => info,
         Err(Error::ObjectNotFound(_)) => return Ok(format!("{hex} ")),
         Err(err) => return Err(ServeError::Repository(err)),

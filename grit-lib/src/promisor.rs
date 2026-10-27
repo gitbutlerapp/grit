@@ -162,7 +162,7 @@ pub(crate) fn maintenance_promise_boundary(odb: &Odb) -> Result<HashSet<ObjectId
         if !set.insert(oid) {
             continue;
         }
-        match odb.read_info_for_serve(&oid) {
+        match odb.read_info_without_fetch(&oid) {
             Ok(info) if info.kind == ObjectKind::Blob => continue,
             Err(crate::error::Error::ObjectNotFound(_)) => continue,
             Err(err) => return Err(err),
