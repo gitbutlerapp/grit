@@ -9,6 +9,40 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
 
+## Range counts on merge-heavy history (2026-10-27)
+
+`grit revs --count A..B` (and `RevWalk::count`) used to decide, commit by
+commit, whether each commit in the range was hidden, with a fresh ancestry walk
+per merged commit. Counting a range is now one walk that marks the excluded side
+down to the common frontier, with `--since`, `--until`, `--merges`,
+`--no-merges` and `--first-parent` applied while counting. This was the path for
+every count without a commit-graph and for every filtered count with one.
+
+Measured on rust-lang/cargo (23,585 commits) and a bare clone of git/git, with
+system Git 2.43.0 on Ubuntu, four vCPUs, release build. Each cell is the median
+of three runs, with peak RSS from `/usr/bin/time`. Main is `6be9ffe0a`.
+
+| Count | Graph | Git (s / MB) | Main (s / MB) | Fixed (s / MB) |
+| --- | --- | ---: | ---: | ---: |
+| cargo `0.50.0..HEAD` (13,489) | none | 0.13 / 25 | 18.60 / 37 | 0.13 / 36 |
+| cargo `0.30.0..0.60.0` (5,280) | none | 0.03 / 13 | 0.38 / 25 | 0.03 / 25 |
+| cargo `--since 2023-01-01 0.50.0..HEAD` | none | 0.07 / 20 | 18.80 / 36 | 0.14 / 36 |
+| cargo `--merges 0.50.0..HEAD` | none | 0.12 / 25 | 18.91 / 37 | 0.13 / 36 |
+| cargo `--first-parent 0.50.0..HEAD` | none | 0.03 / 19 | 5.81 / 30 | 0.13 / 36 |
+| cargo `--left-right 0.50.0...HEAD` | none | 0.14 / 40 | 19.25 / 40 | 0.16 / 40 |
+| git/git `v2.30.0..v2.56.0` (20,852) | none | 0.35 / 51 | 7.57 / 82 | 0.34 / 63 |
+| git/git `--since 2024-01-01 v2.30.0..v2.56.0` | none | 0.22 / 36 | 7.53 / 82 | 0.33 / 63 |
+| cargo `--since 2023-01-01 0.50.0..HEAD` | Git-written | 0.00 / 13 | 17.64 / 32 | 0.03 / 22 |
+| cargo `--merges 0.50.0..HEAD` | Git-written | 0.01 / 14 | 17.62 / 32 | 0.03 / 22 |
+| git/git `--since 2024-01-01 v2.30.0..v2.56.0` | Git-written | 0.02 / 24 | 6.90 / 52 | 0.06 / 33 |
+| git/git `--first-parent v2.30.0..v2.56.0` | Git-written | 0.00 / 21 | 0.02 / 19 | 0.00 / 20 |
+
+Unfiltered counts with a commit-graph, full-history counts and range listings
+stayed within noise of main (cargo `0.50.0..HEAD` listing: 149 ms on both over
+15 runs). Graph-backed `--first-parent` counts with an excluded tip also used to
+follow only first parents from the excluded side, so they could include commits
+that tip reaches through a merge's second parent; they now match Git.
+
 ## Bounded revision counts with a commit-graph (2026-10-27)
 
 Unfiltered two-dot counts now reuse the generation-aware hide walk instead of

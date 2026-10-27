@@ -25,10 +25,16 @@ Walks commits reachable from one or more revision ranges and prints each commitâ
 
 Use `--count` to print only the number of reachable commits (no subject lines). With `--left-right` and exactly one `A...B` range, `--count` prints left and right counts (same as `git rev-list --left-right --count`). When a commit-graph file is present, the walk takes parents and commit dates from it instead of reading commit objects. Unfiltered counts use that graph linkage, and listings read each listed commit once to render its row.
 
-Unfiltered `A..B` counts use hidden ancestry boundaries. With a commit-graph,
-generation numbers let the count stop when the included side is resolved,
-without building ancestor sets for the shared history. A small range therefore
-stays bounded even in a repository with a deep history.
+`A..B` and `A...B` counts walk the range once: the excluded side is marked down
+to where it meets the included side, and the walk stops there instead of
+building ancestor sets for the shared history. `--since`, `--until`,
+`--merges`, `--no-merges` and `--first-parent` only decide which of those
+commits are counted, so counting a range costs about the same as listing it.
+With a commit-graph, generation numbers let the walk stop as soon as the
+included side is resolved, so a small range stays bounded even in a repository
+with a deep history. As in Git, `--first-parent` follows first parents from the
+included tips only; everything an excluded tip reaches through any parent stays
+excluded.
 
 Path arguments after `--` limit history to commits that touched those paths. Operands use Git pathspec cwd rules (same as [`grit diff`](../diff/)): from a subdirectory, `.` limits to that directory, and bare filenames are relative to the current directory, not the repository root.
 
