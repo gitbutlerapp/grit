@@ -678,14 +678,15 @@ pub fn branch_delete_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv)
 }
 
 pub fn prepare_remote_rename_reset(ctx: &DailyHeadlineContext) -> DailyPrepare {
-    let reset = prepare_daily_reset_script(&ctx.git);
+    // Only undo the timed rename: the client is a fresh clone of the served remote, not a
+    // registry worktree, so `prepare-daily-reset` has no fixture base to reset it to.
     let undo = shell_command(
         &ctx.git,
         &["remote", "rename", REMOTE_RENAME_TARGET, "origin"],
     );
     let script = format!(
-        "{reset}\ncd {} && ({undo} 2>/dev/null || true)\n",
-        ctx.repo.display()
+        "set -eu\ncd {} && ({undo} 2>/dev/null || true)\n",
+        shell_quote_path(&ctx.repo)
     );
     DailyPrepare::Shell(BenchArgv::new("/bin/sh", ["-c", script.as_str()]))
 }
@@ -906,8 +907,9 @@ pub fn ignore_check_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) 
     let grit_q = shell_quote_path(&ctx.grit);
     let repo_q = shell_quote_path(&ctx.repo);
     let list_q = shell_quote_path(&list_path);
+    // Feed xargs on stdin: `xargs -a` is GNU-only and fails on macOS.
     let grit_cmd = format!(
-        "set -eu\ncd {repo_q} && xargs -a {list_q} {grit_q} ignore check --all > /dev/null 2>&1"
+        "set -eu\ncd {repo_q} && xargs {grit_q} ignore check --all < {list_q} > /dev/null 2>&1"
     );
     (
         sh_script(grit_cmd),
