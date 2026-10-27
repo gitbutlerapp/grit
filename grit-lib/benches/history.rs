@@ -206,6 +206,20 @@ fn bench_revwalk_filter(c: &mut Criterion) {
             });
         }
     }
+    group.throughput(Throughput::Elements(1));
+    for (label, pattern) in [("build_dot", "."), ("build_dotted_email", "jane.doe@")] {
+        group.bench_function(label, |b| {
+            b.iter(|| {
+                black_box(
+                    CommitFilterBuilder::new()
+                        .author(pattern)
+                        .grep(pattern)
+                        .build()
+                        .expect("filter"),
+                )
+            });
+        });
+    }
     group.finish();
 }
 

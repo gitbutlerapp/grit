@@ -29,6 +29,8 @@ similar = "3"
 imara-diff = { version = "0.2", features = ["unified_diff"] }
 merge3 = "0.2"
 regex = "1"
+# Same engine and feature set `regex` already enables; listed so filters can set meta options.
+regex-automata = { version = "0.4.16", default-features = false, features = ["std", "syntax", "meta", "nfa-pikevm", "nfa-backtrack", "hybrid", "dfa-onepass", "perf-inline", "perf-literal", "unicode"] }
 unicode-width = "0.2"
 libc = "0.2"
 ureq = { version = "3.3", default-features = false }

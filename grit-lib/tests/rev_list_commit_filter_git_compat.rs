@@ -454,6 +454,56 @@ fn bre_metachars_match_git() {
 }
 
 #[test]
+fn dot_patterns_match_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let a = commit_tree_with_identities(
+        wt,
+        "a",
+        &[],
+        ("José", "jose@x.com"),
+        ("José", "jose@x.com"),
+        "fix bug",
+    );
+    let b = commit_tree_with_identities(
+        wt,
+        "b",
+        &[a],
+        ("李雷", "li@y.org"),
+        ("Bob", "bob@x.com"),
+        "big change",
+    );
+    let c = commit_tree_with_identities(
+        wt,
+        "c",
+        &[b],
+        ("Ann", "ann@xycom"),
+        ("Bob", "bob@x.com"),
+        "bag of tricks\n\nbody line bog",
+    );
+    git(wt, &["update-ref", "refs/heads/main", &c.to_hex()]);
+    let repo = open_grit_repo(wt);
+    for args in [
+        &["--author=.", "main"][..],
+        &["--author=Jos.", "main"],
+        &["--author=x.com", "main"],
+        &["--author=^.*@", "main"],
+        &["--author=@y.org>$", "main"],
+        &["-i", "--author=jos.", "main"],
+        &["--committer=b.b", "main"],
+        &["--grep=b.g", "main"],
+        &["--grep=^b.g$", "main"],
+        &["--grep=^body.*bog$", "main"],
+        &["--grep=b[.]g", "main"],
+        &["--grep=b\\.g", "main"],
+        &["--author=.", "-n", "2", "main"],
+        &["--count", "--author=.", "main"],
+    ] {
+        assert_rev_list_filter_matches_git(wt, &repo, args);
+    }
+}
+
+#[test]
 fn fixed_strings_match_git() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();

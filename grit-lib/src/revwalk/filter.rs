@@ -27,7 +27,10 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use regex::bytes::{Regex, RegexBuilder, RegexSet, RegexSetBuilder};
+use regex_automata::meta::{self, Regex};
+use regex_automata::nfa::thompson::WhichCaptures;
+use regex_automata::util::syntax;
+use regex_automata::MatchKind;
 
 use crate::config::mailmap::{map_contact_table, parse_contact, MailmapTable};
 use crate::error::{Error, Result};
@@ -85,8 +88,8 @@ pub struct CommitFilter {
 
 #[derive(Debug)]
 struct CommitFilterInner {
-    author: Option<RegexSet>,
-    committer: Option<RegexSet>,
+    author: Option<Regex>,
+    committer: Option<Regex>,
     grep: Vec<Regex>,
     all_match: bool,
     invert_grep: bool,
@@ -128,16 +131,16 @@ impl CommitFilter {
         let inner = &self.inner;
         let headers = scan_commit_headers(raw);
 
-        if let Some(set) = &inner.author {
+        if let Some(re) = &inner.author {
             let ident = ident_for_pattern_match(headers.author, inner.mailmap.as_ref());
-            if !set.is_match(ident.as_ref()) {
+            if !re.is_match(ident.as_ref()) {
                 return false;
             }
         }
 
-        if let Some(set) = &inner.committer {
+        if let Some(re) = &inner.committer {
             let ident = ident_for_pattern_match(headers.committer, inner.mailmap.as_ref());
-            if !set.is_match(ident.as_ref()) {
+            if !re.is_match(ident.as_ref()) {
                 return false;
             }
         }
@@ -241,15 +244,14 @@ impl CommitFilterBuilder {
     ///
     /// Returns [`CommitFilterError::InvalidPattern`] when any pattern fails to compile.
     pub fn build(self) -> std::result::Result<CommitFilter, CommitFilterError> {
-        let author = compile_pattern_set(&self.author, self.ignore_case, self.fixed_strings)?;
-        let committer = compile_pattern_set(&self.committer, self.ignore_case, self.fixed_strings)?;
+        let compile = |patterns: &[Pattern], group| {
+            compile_patterns(patterns, group, self.ignore_case, self.fixed_strings)
+        };
+        let author = compile(&self.author, PatternGroup::Identity)?;
+        let committer = compile(&self.committer, PatternGroup::Identity)?;
         let mut grep = Vec::with_capacity(self.grep.len());
         for pat in &self.grep {
-            grep.push(compile_grep_pattern(
-                pat.as_str(),
-                self.ignore_case,
-                self.fixed_strings,
-            )?);
+            grep.extend(compile(std::slice::from_ref(pat), PatternGroup::Message)?);
         }
         Ok(CommitFilter {
             inner: Arc::new(CommitFilterInner {
@@ -339,49 +341,74 @@ fn ident_for_pattern_match<'a>(
     }
 }
 
-fn compile_pattern_set(
+/// Cache slots for concurrent matching; an explicit value keeps the engine from querying the
+/// CPU count (cgroup files on Linux) every time a filter is built.
+const MATCHER_POOL_CAPACITY: usize = 8;
+
+/// What a compiled pattern group is matched against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PatternGroup {
+    /// One `Name <email>` identity line; any pattern of the set may match.
+    Identity,
+    /// A whole commit message, where `^` / `$` match at line boundaries.
+    Message,
+}
+
+/// Compile `patterns` into one byte matcher that reports whether any of them matches.
+///
+/// Limits and match semantics follow `regex::bytes` (`RegexSet` for identities, `Regex` for
+/// messages).
+fn compile_patterns(
     patterns: &[Pattern],
+    group: PatternGroup,
     ignore_case: bool,
     fixed_strings: bool,
-) -> std::result::Result<Option<RegexSet>, CommitFilterError> {
+) -> std::result::Result<Option<Regex>, CommitFilterError> {
     if patterns.is_empty() {
         return Ok(None);
     }
-    let mut rust_patterns = Vec::with_capacity(patterns.len());
-    for pat in patterns {
-        rust_patterns.push(pattern_to_rust_regex(
-            pat.as_str(),
-            ignore_case,
-            fixed_strings,
-        )?);
-    }
-    RegexSetBuilder::new(&rust_patterns)
-        .case_insensitive(ignore_case)
-        .build()
+    let rust_patterns = patterns
+        .iter()
+        .map(|pat| pattern_to_rust_regex(pat.as_str(), ignore_case, fixed_strings))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    meta::Builder::new()
+        .configure(
+            meta::Config::new()
+                .nfa_size_limit(Some(10 * (1 << 20)))
+                .hybrid_cache_capacity(2 * (1 << 20))
+                .match_kind(match group {
+                    PatternGroup::Identity => MatchKind::All,
+                    PatternGroup::Message => MatchKind::LeftmostFirst,
+                })
+                .utf8_empty(false)
+                .which_captures(WhichCaptures::None)
+                .pool_capacity(MATCHER_POOL_CAPACITY),
+        )
+        .syntax(
+            syntax::Config::new()
+                .utf8(false)
+                .case_insensitive(ignore_case)
+                .multi_line(group == PatternGroup::Message),
+        )
+        .build_many(&rust_patterns)
         .map(Some)
-        .map_err(|e| CommitFilterError::InvalidPattern {
-            pattern: patterns
-                .first()
-                .map_or_else(String::new, |p| p.as_str().to_owned()),
-            detail: e.to_string(),
+        .map_err(|e| {
+            let failed = e.pattern().map_or(0, |id| id.as_usize());
+            CommitFilterError::InvalidPattern {
+                pattern: patterns
+                    .get(failed)
+                    .map_or_else(String::new, |p| p.as_str().to_owned()),
+                detail: e.to_string(),
+            }
         })
 }
 
-fn compile_grep_pattern(
-    pattern: &str,
-    ignore_case: bool,
-    fixed_strings: bool,
-) -> std::result::Result<Regex, CommitFilterError> {
-    let rust_pat = pattern_to_rust_regex(pattern, ignore_case, fixed_strings)?;
-    let with_newline = format!("(?m){rust_pat}");
-    RegexBuilder::new(&with_newline)
-        .case_insensitive(ignore_case)
-        .build()
-        .map_err(|e| CommitFilterError::InvalidPattern {
-            pattern: pattern.to_owned(),
-            detail: e.to_string(),
-        })
-}
+/// A BRE `.` outside brackets: one well-formed UTF-8 scalar other than `\n` (RFC 3629 byte
+/// ranges, surrogates excluded), so invalid bytes never match.
+///
+/// Matches the same inputs as Unicode `.`, but compiles to byte classes; Unicode `.` makes
+/// the regex compiler allocate a large UTF-8 suffix cache on every build.
+const BRE_DOT: &str = r"(?-u:[\x00-\x09\x0B-\x7F]|[\xC2-\xDF][\x80-\xBF]|\xE0[\xA0-\xBF][\x80-\xBF]|[\xE1-\xEC\xEE\xEF][\x80-\xBF][\x80-\xBF]|\xED[\x80-\x9F][\x80-\xBF]|\xF0[\x90-\xBF][\x80-\xBF][\x80-\xBF]|[\xF1-\xF3][\x80-\xBF][\x80-\xBF][\x80-\xBF]|\xF4[\x80-\x8F][\x80-\xBF][\x80-\xBF])";
 
 fn pattern_to_rust_regex(
     pattern: &str,
@@ -491,6 +518,12 @@ pub(crate) fn bre_translate_to_rust_regex(pattern: &str) -> std::result::Result<
             continue;
         }
 
+        if chars[i] == '.' {
+            out.push_str(BRE_DOT);
+            i += 1;
+            continue;
+        }
+
         out.push(chars[i]);
         i += 1;
     }
@@ -514,6 +547,119 @@ mod tests {
         );
         assert_eq!(bre_translate_to_rust_regex("a+b").unwrap(), r"a\+b");
         assert_eq!(bre_translate_to_rust_regex(r"\(x\|y\)").unwrap(), "(x|y)");
+    }
+
+    #[test]
+    fn bre_dot_matches_like_unicode_dot_on_any_bytes() {
+        let haystacks: &[&[u8]] = &[
+            b"",
+            b"a",
+            b"\n",
+            b"\n\n",
+            b"ab",
+            b"axb",
+            b"a\nb",
+            b"Jos\xc3\xa9",
+            b"a\xc3\xa9b",
+            b"a\xe2\x82\xacb",
+            b"a\xf0\x9f\x98\x80b",
+            b"a\xf4\x8f\xbf\xbfb",
+            b"a\xf4\x90\x80\x80b",
+            b"a\xed\x9f\xbfb",
+            b"a\xed\xa0\x80b",
+            b"a\xc0\x80b",
+            b"a\xc1\xbfb",
+            b"a\xe0\x80\xafb",
+            b"a\xf0\x80\x80\xafb",
+            b"a\xf5\x80\x80\x80b",
+            b"a\xffb",
+            b"a\x80b",
+            b"a\xc3b",
+            b"\xc3",
+            b"\xff\n\xfe",
+            b"x\x00y",
+            b"a\rb",
+        ];
+        let patterns = [
+            ".",
+            "..",
+            "a.b",
+            "^.$",
+            "^a.*b$",
+            ".\\{2\\}",
+            "a.\\{1,3\\}b",
+            "^J.s.$",
+            "[.]",
+            "a\\.b",
+        ];
+        for ignore_case in [false, true] {
+            for group in [PatternGroup::Identity, PatternGroup::Message] {
+                let multi_line = group == PatternGroup::Message;
+                for pat in patterns {
+                    let ours = compile_patterns(&[Pattern::new(pat)], group, ignore_case, false)
+                        .unwrap()
+                        .unwrap();
+                    let unicode_dot = bre_translate_to_rust_regex(pat)
+                        .unwrap()
+                        .replace(BRE_DOT, ".");
+                    let reference = regex::bytes::RegexBuilder::new(&unicode_dot)
+                        .case_insensitive(ignore_case)
+                        .multi_line(multi_line)
+                        .build()
+                        .unwrap();
+                    for hay in haystacks {
+                        assert_eq!(
+                            ours.is_match(*hay),
+                            reference.is_match(hay),
+                            "pattern {pat:?} on {hay:?} (ignore_case={ignore_case}, multi_line={multi_line})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dot_patterns_filter_identities_and_grep_lines() {
+        let filter = CommitFilterBuilder::new().author("^Jos.$").build().unwrap();
+        let named = |ident: &[u8]| {
+            let mut raw = b"tree t\nauthor ".to_vec();
+            raw.extend_from_slice(ident);
+            raw.extend_from_slice(b" 1 +0000\ncommitter C <c> 1 +0000\n\nm\n");
+            raw
+        };
+        assert!(!filter.matches_bytes(&named(b"Jos\xc3\xa9 <j@x>")));
+        let filter = CommitFilterBuilder::new()
+            .author("^Jos. <")
+            .build()
+            .unwrap();
+        assert!(filter.matches_bytes(&named(b"Jos\xc3\xa9 <j@x>")));
+        assert!(!filter.matches_bytes(&named(b"Jos\xff <j@x>")));
+        assert!(!filter.matches_bytes(&named(b"Jos <j@x>")));
+
+        let grep = CommitFilterBuilder::new()
+            .grep("^fix.$")
+            .ignore_case(true)
+            .build()
+            .unwrap();
+        let msg = |body: &[u8]| {
+            let mut raw = b"tree t\nauthor A <a> 1 +0000\ncommitter A <a> 1 +0000\n\n".to_vec();
+            raw.extend_from_slice(body);
+            raw
+        };
+        assert!(grep.matches_bytes(&msg(b"subject\n\nFIX!\n")));
+        assert!(!grep.matches_bytes(&msg(b"fix\n!\n")));
+    }
+
+    #[test]
+    fn invalid_pattern_names_the_failing_pattern() {
+        let err = CommitFilterBuilder::new()
+            .author("ok")
+            .author("a\\{2")
+            .build()
+            .unwrap_err();
+        let CommitFilterError::InvalidPattern { pattern, .. } = err;
+        assert_eq!(pattern, "a\\{2");
     }
 
     #[test]

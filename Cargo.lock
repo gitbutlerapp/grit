@@ -911,6 +911,7 @@ dependencies = [
  "merge3",
  "nix",
  "regex",
+ "regex-automata",
  "rustix",
  "serde",
  "serde_json",
