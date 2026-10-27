@@ -36,7 +36,8 @@ git rebase -i {reword_parent}
     )?;
     fs::write(
         work.join(".grit-bench-seq-reword.sh"),
-        "#!/bin/sh\nsed -i '1s/^pick/reword/' \"$1\"\n",
+        // BSD sed (macOS) needs a suffix argument after `-i`; write through a temp file instead.
+        "#!/bin/sh\nset -eu\nsed '1s/^pick/reword/' \"$1\" > \"$1.grit-bench\"\nmv \"$1.grit-bench\" \"$1\"\n",
     )?;
     fs::write(
         work.join(".grit-bench-git-editor.sh"),
@@ -65,7 +66,7 @@ git rebase --onto {drop_parent} {drop} {drop_tip}
             r#"#!/bin/sh
 set -eu
 git commit --fixup {fixup} -m "bench fixup" >/dev/null
-export GIT_SEQUENCE_EDITOR=/bin/true
+export GIT_SEQUENCE_EDITOR=true
 git rebase -i --autosquash {fixup_parent}
 "#,
             fixup = meta.fixup,
