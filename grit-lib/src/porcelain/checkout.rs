@@ -485,16 +485,22 @@ pub fn checkout_hard_to_tree_from_head_tree(
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
 
-    let pre_reset_index = repo.load_index()?;
-    let mut target = index_from_tree_reusing_cache_tree(repo, target_tree, &pre_reset_index)?;
-    let target_cache_tree = target.cache_tree.take();
-    let target_entries = std::mem::take(&mut target.entries);
+    let mut pre_reset_index =
+        crate::porcelain::index_from_tree::load_index_for_tree_transition(repo, target_tree)?;
     let trees_differ = head_tree != target_tree;
     let changes = if trees_differ {
         diff_trees(repo.odb(), Some(head_tree), Some(target_tree), "")?
     } else {
         Vec::new()
     };
+    crate::porcelain::index_from_tree::expand_sparse_for_tree_changes(
+        repo,
+        &mut pre_reset_index,
+        &changes,
+    )?;
+    let mut target = index_from_tree_reusing_cache_tree(repo, target_tree, &pre_reset_index)?;
+    let target_cache_tree = target.cache_tree.take();
+    let target_entries = std::mem::take(&mut target.entries);
     // Raciness is judged against the index as it was before the reset: the tree-diff checkout
     // below rewrites the index, which would make racily clean entries look settled.
     let pre_reset_index_mtime = crate::diff::index_mtime_for_diff(&pre_reset_index, None);
@@ -538,12 +544,10 @@ pub fn checkout_hard_to_tree_from_head_tree(
     let mut actions: Vec<HardResetEntryAction> = target_entries
         .iter()
         .map(|te| {
-            if sparse.as_ref().is_some_and(|sparse| {
-                sparse.checkout_skips(
-                    &pre_reset_index,
-                    &crate::repo_relpath::storage_string(&te.path),
-                )
-            }) {
+            if sparse
+                .as_ref()
+                .is_some_and(|sparse| !sparse.includes_index_path(&te.path))
+            {
                 return HardResetEntryAction::SkipWorktree;
             }
             if te.mode == MODE_GITLINK {
@@ -606,22 +610,57 @@ pub fn checkout_hard_to_tree_from_head_tree(
         })
         .map(|entry| entry.oid);
     prefetch_promisor_blobs(repo, blobs.chain(attributes))?;
+    // Hard reset reapplies the sparse definition. Tracked files that caused skip-worktree
+    // to be cleared are removed again; paths still marked skip-worktree (including the
+    // expectFilesOutsideOfPatterns opt-out) and untracked files are left alone.
+    let sparse_removals: Vec<_> = pre_reset_index
+        .entries
+        .iter()
+        .filter(|entry| {
+            !entry.skip_worktree()
+                && !entry.is_sparse_directory_placeholder()
+                && sparse
+                    .as_ref()
+                    .is_some_and(|s| !s.includes_index_path(&entry.path))
+        })
+        .map(|entry| (entry.path.clone(), entry.mode))
+        .collect();
     let hard_reset_apply = if changes.is_empty() {
         None
     } else {
         Some(CheckoutApplyOptions {
             parallel_prepare_blobs: true,
-            checkout_result_tree: Some(*target_tree),
+            defer_index_disk_write: true,
             ..CheckoutApplyOptions::default()
         })
     };
-    drop(pre_reset_index);
+    let mut index = pre_reset_index;
 
     if let Some(apply) = hard_reset_apply {
-        checkout_tree_changes_with_progress(repo, &changes, progress, cancel, None, apply, None)?;
+        checkout_tree_changes_with_progress(
+            repo,
+            &changes,
+            progress,
+            cancel,
+            Some(&mut index),
+            apply,
+            None,
+        )?;
     }
 
-    let mut index = repo.load_index()?;
+    for (path, mode) in sparse_removals {
+        let abs = crate::index::worktree_path_from_index_rel(work_tree, &path);
+        if mode == MODE_GITLINK {
+            remove_uninitialized_gitlink_worktree(&abs);
+        } else {
+            match fs::remove_file(&abs) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => return Err(Error::Io(err)),
+            }
+        }
+        remove_empty_parent_dirs_batch(work_tree, &[abs]);
+    }
     index.source_mtime = pre_reset_index_mtime;
     let mut delayed = DelayedProcessCheckout::default();
     let mut pending_delayed: Vec<DelayedCheckoutTarget> = Vec::new();
@@ -802,6 +841,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
     let mut new_index = Index::new();
     new_index.entries = new_entries;
     new_index.sort();
+    new_index.sparse_directories = new_index.has_sparse_directory_placeholders();
     if let Some(cache_tree) = target_cache_tree
         .filter(|ct| usize::try_from(ct.entry_count).ok() == Some(new_index.entries.len()))
     {
@@ -1611,9 +1651,21 @@ fn attach_checkout_result_cache_tree(
         index_mut.cache_tree_root = Some(*tree);
         return Ok(());
     }
-    let cache_tree = crate::write_tree::build_cache_tree_from_tree(repo.odb(), tree)?;
-    if usize::try_from(cache_tree.entry_count).ok() == Some(index_mut.entries.len()) {
-        index_mut.set_cache_tree(cache_tree);
+    if index_mut.has_sparse_directory_placeholders() {
+        let target = crate::porcelain::index_from_tree::index_from_tree_reusing_cache_tree(
+            repo, tree, index_mut,
+        )?;
+        if let Some(cache_tree) = target
+            .cache_tree
+            .filter(|_| target.entries.len() == index_mut.entries.len())
+        {
+            index_mut.set_cache_tree(cache_tree);
+        }
+    } else {
+        let cache_tree = crate::write_tree::build_cache_tree_from_tree(repo.odb(), tree)?;
+        if usize::try_from(cache_tree.entry_count).ok() == Some(index_mut.entries.len()) {
+            index_mut.set_cache_tree(cache_tree);
+        }
     }
     Ok(())
 }

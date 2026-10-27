@@ -25,8 +25,8 @@ use crate::porcelain::orphans::{
 };
 use crate::porcelain::worktree_guard::{
     collect_untracked_and_wholesale_trust_for_tree_changes, ensure_no_untracked_overwrite,
-    load_worktree_index, load_worktree_snapshot, untracked_would_be_overwritten_by_tree_changes,
-    TreeSwitchPlan, WorktreeSnapshot,
+    load_worktree_snapshot, untracked_would_be_overwritten_by_tree_changes, TreeSwitchPlan,
+    WorktreeSnapshot,
 };
 use crate::refs;
 use crate::repo::Repository;
@@ -464,7 +464,7 @@ fn switch_without_hooks(
         ));
     }
 
-    let index = load_worktree_index(repo)?;
+    let index = repo.load_index_preserving_sparse()?;
     switch_to_target(
         repo,
         index,
@@ -491,7 +491,7 @@ fn needs_initial_checkout(index: &Index) -> bool {
 #[allow(clippy::too_many_arguments)]
 fn switch_to_target(
     repo: &Repository,
-    index: Index,
+    mut index: Index,
     branch_ref: &str,
     target_oid: ObjectId,
     created: bool,
@@ -532,6 +532,11 @@ fn switch_to_target(
             )
         }
     };
+    crate::porcelain::index_from_tree::prepare_index_for_tree_transition(
+        repo,
+        &target_tree,
+        &mut index,
+    )?;
     let snapshot = WorktreeSnapshot { index, head_tree };
 
     let prepared = prepare_tree_switch_allow_local_with_snapshot(repo, &target_tree, snapshot)?;
@@ -1231,10 +1236,12 @@ mod tests {
     #[test]
     fn initial_checkout_distinguishes_missing_from_existing_empty_index() {
         let (_dir, repo) = init_repo();
-        let mut index = load_worktree_index(&repo).expect("missing index");
+        let mut index =
+            crate::porcelain::worktree_guard::load_worktree_index(&repo).expect("missing index");
         assert!(needs_initial_checkout(&index));
         repo.write_index(&mut index).expect("write empty index");
-        let index = load_worktree_index(&repo).expect("existing empty index");
+        let index = crate::porcelain::worktree_guard::load_worktree_index(&repo)
+            .expect("existing empty index");
         assert!(index.entries.is_empty());
         assert!(!needs_initial_checkout(&index));
     }

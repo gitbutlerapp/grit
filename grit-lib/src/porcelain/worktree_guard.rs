@@ -83,6 +83,10 @@ pub(crate) fn local_change_diffs(
     index: &mut Index,
     head_tree: Option<ObjectId>,
 ) -> Result<(Vec<DiffEntry>, Vec<DiffEntry>, bool)> {
+    index.expand_sparse_directory_placeholders(
+        repo.odb(),
+        crate::path_validate::ProtectOptions::from_config(&*repo.config()?),
+    )?;
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let index_path = repo.index_path_for_env()?;
     let index_mtime = index_file_mtime(&index_path);
@@ -128,7 +132,7 @@ pub(crate) fn local_change_diffs_for_tree_changes(
     tree_changes: &[DiffEntry],
     skip_worktree_stat_paths: Option<&BTreeSet<String>>,
 ) -> Result<(Vec<DiffEntry>, Vec<DiffEntry>, bool)> {
-    let _ = head_tree;
+    crate::porcelain::index_from_tree::expand_sparse_for_tree_changes(repo, index, tree_changes)?;
     if index.entries.iter().any(|e| e.stage() != 0) {
         return local_change_diffs(repo, index, head_tree);
     }

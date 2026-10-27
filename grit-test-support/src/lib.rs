@@ -9,6 +9,7 @@ pub mod objects;
 pub mod odb_conformance;
 pub mod parallel;
 pub mod refstore_conformance;
+pub mod sparse_scale;
 
 pub use cli_fixture::{
     register_cli_snapshot_filters, register_common_cli_snapshot_filters,

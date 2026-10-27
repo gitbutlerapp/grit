@@ -11,6 +11,7 @@ use std::thread::ThreadId;
 #[derive(Default)]
 pub struct HotPathTestMetrics {
     tree_writes: AtomicUsize,
+    sparse_expanded_rows: AtomicUsize,
     cache_tree_builds: AtomicUsize,
     freshen_calls: AtomicUsize,
     blob_content_reads: AtomicUsize,
@@ -31,6 +32,15 @@ impl HotPathTestMetrics {
     #[must_use]
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    pub fn sparse_expanded_rows(&self) -> usize {
+        self.sparse_expanded_rows.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn record_sparse_expanded_rows(&self, count: usize) {
+        self.sparse_expanded_rows
+            .fetch_add(count, Ordering::Relaxed);
     }
 
     /// Clear tree-write count.

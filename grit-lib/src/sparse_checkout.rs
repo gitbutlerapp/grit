@@ -668,6 +668,12 @@ impl SparseCheckout {
         self.includes(&String::from_utf8_lossy(path))
     }
 
+    /// Only cone definitions can keep an excluded directory as an opaque index row.
+    pub(crate) fn excludes_directory(&self, path: &[u8]) -> bool {
+        matches!(&self.rules, SparseRules::Cone(cone)
+            if !cone.path_included(&String::from_utf8_lossy(path)))
+    }
+
     /// Whether a checkout that gives `path` new content keeps it out of the work tree.
     ///
     /// True when `path` is outside the definition and `index` (the index before the checkout)

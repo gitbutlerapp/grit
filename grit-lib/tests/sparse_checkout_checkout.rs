@@ -680,3 +680,222 @@ fn non_sparse_reset_hard_still_writes_every_path() {
     assert!(!root.join("b/g").exists());
     assert_eq!(git(&root, &["status", "--porcelain"]), "");
 }
+
+/// Rust equivalents of t1092's hard-reset and checkout sparse-directory cases.
+#[test]
+fn git_sparse_index_nested_transitions_and_dirty_head_reset() {
+    let root = unique_tmp("sparse-checkout-writes", "nested-transitions");
+    let seed = root.join("seed");
+    fs::create_dir_all(&seed).expect("mkdir");
+    git(&seed, &["init", "-q", "-b", "main"]);
+    identity(&seed);
+    for path in ["deep/visible/f", "deep/hidden/f", "excluded/f", "top"] {
+        put(&seed, path, "base\n");
+    }
+    commit_all(&seed, "base");
+    git(&seed, &["tag", "base"]);
+    put(&seed, "deep/visible/f", "edited\n");
+    put(&seed, "deep/hidden/f", "edited\n");
+    fs::remove_dir_all(seed.join("excluded")).expect("delete excluded subtree");
+    put(&seed, "new-excluded/f", "new\n");
+    commit_all(&seed, "edited");
+    git(&seed, &["tag", "edited"]);
+    git(
+        &seed,
+        &[
+            "sparse-checkout",
+            "set",
+            "--cone",
+            "--sparse-index",
+            "deep/visible",
+        ],
+    );
+    let pair = Pair {
+        git_dir: root.join("git"),
+        grit_dir: root.join("grit"),
+    };
+    copy_dir(&seed, &pair.git_dir);
+    copy_dir(&seed, &pair.grit_dir);
+    for target in ["base", "edited", "base"] {
+        git(&pair.git_dir, &["reset", "--hard", target]);
+        reset(
+            &open(&pair.grit_dir),
+            rev(&pair.grit_dir, target),
+            ResetMode::Hard,
+        );
+        assert_matches_git(&pair);
+        git(
+            &pair.git_dir,
+            &[
+                "switch",
+                "--detach",
+                if target == "base" { "edited" } else { "base" },
+            ],
+        );
+        let other = if target == "base" { "edited" } else { "base" };
+        switch_repository(
+            &open(&pair.grit_dir),
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: rev(&pair.grit_dir, other),
+                    reflog_to_label: other.into(),
+                },
+                dry_run: false,
+                hooks: grit_lib::PostOperationHooks::Skip,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &NeverCancel,
+        )
+        .expect("switch");
+        assert_matches_git(&pair);
+    }
+    for dir in [&pair.git_dir, &pair.grit_dir] {
+        put(dir, "deep/visible/f", "staged\n");
+        git(dir, &["add", "deep/visible/f"]);
+        put(dir, "deep/visible/f", "unstaged\n");
+        put(dir, "deep/hidden/f", "present outside cone\n");
+    }
+    git(&pair.git_dir, &["reset", "--hard", "HEAD"]);
+    reset(
+        &open(&pair.grit_dir),
+        rev(&pair.grit_dir, "HEAD"),
+        ResetMode::Hard,
+    );
+    assert_matches_git(&pair);
+    for dir in [&pair.git_dir, &pair.grit_dir] {
+        assert_eq!(
+            git(dir, &["write-tree"]).trim(),
+            rev(dir, "HEAD^{tree}").to_string()
+        );
+        git(dir, &["reset", "--hard", "edited"]);
+        git(dir, &["switch", "--detach", "base"]);
+        git(dir, &["fsck", "--strict"]);
+    }
+    assert_matches_git(&pair);
+}
+
+#[test]
+fn sparse_index_switch_preserves_staged_and_unstaged_excluded_changes() {
+    let pair = sparse_pair("staged-excluded-switch", true);
+    for dir in [&pair.git_dir, &pair.grit_dir] {
+        put(dir, "b/f", "staged outside cone\n");
+        git(dir, &["add", "--sparse", "b/f"]);
+        put(dir, "b/f", "unstaged outside cone\n");
+    }
+    git(&pair.git_dir, &["switch", "--detach", "HEAD~1"]);
+    switch_repository(
+        &open(&pair.grit_dir),
+        &SwitchOptions {
+            mode: SwitchMode::Detached {
+                commit: rev(&pair.grit_dir, "HEAD~1"),
+                reflog_to_label: "HEAD~1".into(),
+            },
+            dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Skip,
+        },
+        &mut grit_lib::progress::NullProgress,
+        &NeverCancel,
+    )
+    .expect("switch");
+    assert_matches_git(&pair);
+    assert_eq!(
+        fs::read(pair.grit_dir.join("b/f")).expect("present file"),
+        b"unstaged outside cone\n"
+    );
+}
+
+#[test]
+fn sparse_index_file_directory_and_gitlink_transitions_match_git() {
+    let root = unique_tmp("sparse-checkout-writes", "sparse-types");
+    let seed = root.join("seed");
+    fs::create_dir_all(&seed).expect("mkdir");
+    git(&seed, &["init", "-q", "-b", "main"]);
+    identity(&seed);
+    put(&seed, "a/f", "visible\n");
+    put(&seed, "hidden/nested/f", "hidden\n");
+    commit_all(&seed, "base");
+    let link = rev(&seed, "HEAD").to_string();
+    git(
+        &seed,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{link},modules/sub"),
+        ],
+    );
+    git(&seed, &["commit", "-q", "-m", "gitlink"]);
+    git(&seed, &["tag", "base"]);
+    fs::remove_dir_all(seed.join("hidden")).expect("remove hidden directory");
+    put(&seed, "hidden", "replacement file\n");
+    put(&seed, "a/f", "changed visible\n");
+    // Leave the uninitialized gitlink unchanged in both commits.
+    git(&seed, &["add", "-A", "--", "a", "hidden"]);
+    git(&seed, &["commit", "-q", "-m", "types"]);
+    git(&seed, &["tag", "types"]);
+    git(
+        &seed,
+        &["sparse-checkout", "set", "--cone", "--sparse-index", "a"],
+    );
+    // Start from a Git-written sparse index that includes an opaque gitlink subtree.
+    git(&seed, &["read-tree", "--empty"]);
+    git(&seed, &["reset", "--hard", "HEAD"]);
+    assert!(git(&seed, &["ls-files", "--sparse"]).contains("modules/\n"));
+    let pair = Pair {
+        git_dir: root.join("git"),
+        grit_dir: root.join("grit"),
+    };
+    copy_dir(&seed, &pair.git_dir);
+    copy_dir(&seed, &pair.grit_dir);
+    for target in ["base", "types", "base"] {
+        git(&pair.git_dir, &["reset", "--hard", target]);
+        reset(
+            &open(&pair.grit_dir),
+            rev(&pair.grit_dir, target),
+            ResetMode::Hard,
+        );
+        assert_matches_git(&pair);
+    }
+    git(&pair.git_dir, &["switch", "--detach", "types"]);
+    switch_repository(
+        &open(&pair.grit_dir),
+        &SwitchOptions {
+            mode: SwitchMode::Detached {
+                commit: rev(&pair.grit_dir, "types"),
+                reflog_to_label: "types".into(),
+            },
+            dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Skip,
+        },
+        &mut grit_lib::progress::NullProgress,
+        &NeverCancel,
+    )
+    .expect("switch");
+    assert_matches_git(&pair);
+    for dir in [&pair.git_dir, &pair.grit_dir] {
+        git(dir, &["fsck", "--strict"]);
+    }
+}
+
+#[test]
+fn sparse_head_reset_honors_expect_files_outside_patterns() {
+    let pair = sparse_pair("expect-outside-patterns", true);
+    for dir in [&pair.git_dir, &pair.grit_dir] {
+        git(
+            dir,
+            &["config", "sparse.expectFilesOutsideOfPatterns", "true"],
+        );
+        put(dir, "b/f", "left outside cone\n");
+    }
+    git(&pair.git_dir, &["reset", "--hard", "HEAD"]);
+    reset(
+        &open(&pair.grit_dir),
+        rev(&pair.grit_dir, "HEAD"),
+        ResetMode::Hard,
+    );
+    assert_matches_git(&pair);
+    assert_eq!(
+        fs::read(pair.grit_dir.join("b/f")).expect("present file"),
+        b"left outside cone\n"
+    );
+}

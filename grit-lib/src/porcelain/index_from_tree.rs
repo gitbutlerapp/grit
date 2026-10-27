@@ -178,18 +178,15 @@ pub(crate) fn index_from_tree_with_seeded_stats(
 /// [`crate::write_tree::build_cache_tree_from_tree`], but subtrees whose `seed` cache-tree node is valid and
 /// records the same tree id are taken from `seed`'s rows instead of being read from the object
 /// database. Rows taken from `seed` carry only path, mode and oid (stat data and flags are reset
-/// exactly as a tree read would leave them). The cache-tree is attached only when its entry
-/// count matches the rows (a tree with duplicate entries yields more tree entries than rows).
+/// exactly as a tree read would leave them). Matching sparse-directory rows stay opaque and
+/// retain skip-worktree; their cache-tree nodes count one index row. The cache-tree is attached
+/// only when its entry count matches the rows (duplicate tree entries can yield more entries).
 pub(crate) fn index_from_tree_reusing_cache_tree(
     repo: &Repository,
     tree_oid: &ObjectId,
     seed: &Index,
 ) -> Result<Index> {
-    // Sparse-directory placeholders stand for whole subtrees, so their rows cannot be copied.
-    let seed_root = seed
-        .cache_tree
-        .as_ref()
-        .filter(|_| !seed.has_sparse_directory_placeholders());
+    let seed_root = seed.cache_tree.as_ref();
     let mut walk = TreeIndexWalk {
         repo,
         protect: ProtectOptions::from_config(&*repo.config()?),
@@ -201,10 +198,139 @@ pub(crate) fn index_from_tree_reusing_cache_tree(
     index.entries = walk.entries;
     index.mark_entries_unsorted();
     index.sort();
+    index.sparse_directories = index.has_sparse_directory_placeholders();
     if usize::try_from(cache_tree.entry_count).ok() == Some(index.entries.len()) {
         index.set_cache_tree(cache_tree);
     }
     Ok(index)
+}
+
+/// Load a transition seed, keeping matching absent excluded directories opaque. Changed trees,
+/// directories present on disk, and definitions that no longer exclude a directory use the
+/// ordinary expanded representation so overwrite guards and staged-content checks stay precise.
+pub(crate) fn load_index_for_tree_transition(
+    repo: &Repository,
+    target: &ObjectId,
+) -> Result<Index> {
+    let mut index = repo.load_index_preserving_sparse()?;
+    prepare_index_for_tree_transition(repo, target, &mut index)?;
+    Ok(index)
+}
+
+/// Prepare loaded rows once the transition's target tree has been resolved.
+pub(crate) fn prepare_index_for_tree_transition(
+    repo: &Repository,
+    target: &ObjectId,
+    index: &mut Index,
+) -> Result<()> {
+    let config = repo.config()?;
+    if !index.has_sparse_directory_placeholders() {
+        repo.clear_present_skip_worktree(index, config.as_ref());
+        return Ok(());
+    }
+    let protect = ProtectOptions::from_config(config.as_ref());
+    let sparse = SparseCheckout::load(repo)?;
+    let worktree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let mut candidates = std::collections::BTreeMap::new();
+    for row in &index.entries {
+        if row.is_sparse_directory_placeholder()
+            && config
+                .get_bool("index.sparse")
+                .and_then(|v| v.ok())
+                .unwrap_or(false)
+            && sparse
+                .as_ref()
+                .is_some_and(|s| s.excludes_directory(&row.path))
+            && std::fs::symlink_metadata(crate::index::worktree_path_from_index_rel(
+                worktree,
+                row.path.strip_suffix(b"/").unwrap_or(&row.path),
+            ))
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+        {
+            candidates.insert(row.path.clone(), row.oid);
+        }
+    }
+    let mut keep = std::collections::BTreeSet::new();
+    if !candidates.is_empty() {
+        matching_sparse_trees(repo, target, b"", &candidates, &mut keep, protect)?;
+    }
+    index
+        .expand_sparse_directories_matching(repo.odb(), protect, |row| !keep.contains(&row.path))?;
+    repo.clear_present_skip_worktree(index, config.as_ref());
+    Ok(())
+}
+
+fn matching_sparse_trees(
+    repo: &Repository,
+    tree: &ObjectId,
+    prefix: &[u8],
+    candidates: &std::collections::BTreeMap<Vec<u8>, ObjectId>,
+    keep: &mut std::collections::BTreeSet<Vec<u8>>,
+    protect: ProtectOptions,
+) -> Result<()> {
+    let obj = repo.odb().read(tree)?;
+    if obj.kind != ObjectKind::Tree {
+        return Err(Error::UnexpectedObjectKind {
+            oid: *tree,
+            expected: ObjectKind::Tree,
+            actual: obj.kind,
+        });
+    }
+    for entry in parse_tree(&obj.data)? {
+        validate_tree_walk_entry(prefix, &entry.name, entry.mode, protect)?;
+        if entry.mode != MODE_TREE {
+            continue;
+        }
+        let mut path = join_rel(prefix, &entry.name);
+        path.push(b'/');
+        if let Some(oid) = candidates.get(&path) {
+            if *oid == entry.oid {
+                keep.insert(path);
+            }
+        } else if candidates
+            .range(path.clone()..)
+            .next()
+            .is_some_and(|(key, _)| key.starts_with(&path))
+        {
+            path.pop();
+            matching_sparse_trees(repo, &entry.oid, &path, candidates, keep, protect)?;
+        }
+    }
+    Ok(())
+}
+
+/// Expose rows needed by a tree delta, including a directory/file replacement at its root.
+pub(crate) fn expand_sparse_for_tree_changes(
+    repo: &Repository,
+    index: &mut Index,
+    changes: &[crate::diff::DiffEntry],
+) -> Result<()> {
+    if !index.has_sparse_directory_placeholders() {
+        return Ok(());
+    }
+    let paths: Vec<Vec<u8>> = changes
+        .iter()
+        .flat_map(|change| {
+            [change.old_path.as_deref(), change.new_path.as_deref()]
+                .into_iter()
+                .flatten()
+        })
+        .map(|path| crate::repo_relpath::storage_bytes(path).into_owned())
+        .collect();
+    index.expand_sparse_directories_matching(
+        repo.odb(),
+        ProtectOptions::from_config(&*repo.config()?),
+        |row| {
+            let dir = row.path.strip_suffix(b"/").unwrap_or(&row.path);
+            paths.iter().any(|path| {
+                path.starts_with(&row.path)
+                    || path == dir
+                    || dir
+                        .strip_prefix(path.as_slice())
+                        .is_some_and(|tail| tail.starts_with(b"/"))
+            })
+        },
+    )
 }
 
 /// Depth-first tree flattening for [`index_from_tree_reusing_cache_tree`].
@@ -226,6 +352,17 @@ impl TreeIndexWalk<'_> {
         name: Vec<u8>,
         seed_node: Option<&CacheTreeNode>,
     ) -> Result<CacheTreeNode> {
+        if !prefix.is_empty() {
+            let mut path = prefix.to_vec();
+            path.push(b'/');
+            let pos = self.seed.partition_point(|row| row.path < path);
+            if let Some(row) = self.seed.get(pos).filter(|row| {
+                row.path == path && row.is_sparse_directory_placeholder() && row.oid == *tree_oid
+            }) {
+                self.entries.push(row.clone());
+                return Ok(CacheTreeNode::valid(name, 1, *tree_oid, Vec::new()));
+            }
+        }
         if let Some(node) = seed_node.filter(|n| n.entry_count >= 0 && n.oid == Some(*tree_oid)) {
             if let Some(rows) = seed_rows_under(self.seed, prefix, node.entry_count) {
                 self.entries.extend(
@@ -607,6 +744,113 @@ mod tests {
             let reused = index_from_tree_reusing_cache_tree(&repo, &target, seed).expect("walk");
             assert_same_index(&reused, &plain_tree_index(&repo, &target));
         }
+    }
+
+    #[test]
+    fn sparse_reset_and_switch_do_not_expand_unchanged_monorepo_directories() {
+        use crate::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+        use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+        use crate::progress::NeverCancel;
+        for paths in [120_000, 240_000] {
+            let dir = TempDir::new().expect("tempdir");
+            grit_test_support::sparse_scale::create(Path::new("git"), dir.path(), paths, false, 0)
+                .expect("sparse fixture");
+            let mut env = crate::environment::Environment::empty();
+            env.cwd = dir.path().to_path_buf();
+            let repo =
+                Repository::discover(Some(dir.path()), &RepositoryOptions::with_environment(env))
+                    .expect("repo");
+            let resolve = |name: &str| {
+                grit_test_support::git(dir.path(), &["rev-parse", name])
+                    .trim()
+                    .parse::<ObjectId>()
+                    .expect("oid")
+            };
+            let base = resolve("sparse-base");
+            let edited = resolve("sparse-edited");
+            for target in [base, edited] {
+                reset_to_commit(
+                    &repo,
+                    &ResetOptions::new(
+                        target,
+                        ResetMode::Hard,
+                        "T <t@example.com> 1700000020 +0000"
+                            .parse()
+                            .expect("signature"),
+                        "reset",
+                    ),
+                    &mut NullProgress,
+                    &NeverCancel,
+                )
+                .expect("reset");
+                let index = Index::load(&repo.index_path()).expect("raw index");
+                assert_eq!(index.entries.len(), 700);
+                assert_eq!(
+                    index
+                        .entries
+                        .iter()
+                        .filter(|e| e.is_sparse_directory_placeholder())
+                        .count(),
+                    400
+                );
+                assert_eq!(repo.odb().hot_path_metrics().sparse_expanded_rows(), 0);
+            }
+            for target in [base, edited] {
+                switch_repository(
+                    &repo,
+                    &SwitchOptions {
+                        mode: SwitchMode::Detached {
+                            commit: target,
+                            reflog_to_label: target.to_string(),
+                        },
+                        dry_run: false,
+                        hooks: crate::PostOperationHooks::Skip,
+                    },
+                    &mut NullProgress,
+                    &NeverCancel,
+                )
+                .expect("switch");
+                assert_eq!(repo.odb().hot_path_metrics().sparse_expanded_rows(), 0);
+                let index = Index::load(&repo.index_path()).expect("raw index");
+                assert_eq!(index.entries.len(), 700);
+                crate::write_tree::verify_cache_tree(&index).expect("sparse cache-tree");
+                assert_eq!(
+                    grit_test_support::git(dir.path(), &["write-tree"]).trim(),
+                    resolve("HEAD^{tree}").to_string()
+                );
+                assert!(grit_test_support::git(dir.path(), &["status", "--porcelain"]).is_empty());
+            }
+            grit_test_support::git(dir.path(), &["fsck", "--strict"]);
+        }
+    }
+
+    #[test]
+    fn sparse_tree_walk_keeps_matching_excluded_subtree_opaque() {
+        let (dir, repo, t1, _) = two_commit_repo();
+        let unchanged = subtree_oid(&repo, &t1, b"a");
+        let mut placeholder = entry("a/", unchanged, MODE_TREE, 0);
+        placeholder.set_skip_worktree(true);
+        let seed = index_of(vec![placeholder]);
+        // An unchanged sparse tree must not need any descendant objects or rows.
+        fs::remove_file(loose_object_path(&repo, &unchanged)).expect("drop excluded tree");
+        drop(repo);
+        let repo =
+            Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("reopen");
+        let target = index_from_tree_reusing_cache_tree(&repo, &t1, &seed)
+            .expect("unchanged excluded tree stays opaque");
+        assert!(target
+            .get(b"a/", 0)
+            .expect("placeholder")
+            .is_sparse_directory_placeholder());
+        assert!(!target
+            .entries
+            .iter()
+            .any(|e| e.path.starts_with(b"a/") && e.path != b"a/"));
+        assert_eq!(target.cache_tree_root, Some(t1));
+        assert_eq!(
+            target.cache_tree.as_ref().expect("cache tree").entry_count as usize,
+            target.entries.len()
+        );
     }
 
     #[test]

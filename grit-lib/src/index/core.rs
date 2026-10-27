@@ -1053,8 +1053,25 @@ impl Index {
         config: Option<&ConfigSet>,
         parse_context: IndexParseContext,
     ) -> Result<Self> {
+        let mut idx =
+            Self::load_preserving_sparse_optional_with_context(path, odb, config, parse_context)?;
+        let protect = config
+            .map(crate::path_validate::ProtectOptions::from_config)
+            .unwrap_or_default();
+        idx.expand_sparse_directory_placeholders(odb, protect)?;
+        Ok(idx)
+    }
+
+    /// Read index rows without expanding tree placeholders. Callers must resolve split indexes
+    /// and expand any directories their operation needs before examining individual paths.
+    pub(crate) fn load_preserving_sparse_optional_with_context(
+        path: &Path,
+        odb: &Odb,
+        config: Option<&ConfigSet>,
+        parse_context: IndexParseContext,
+    ) -> Result<Self> {
         let algo = odb.hash_algo();
-        let mut idx = match read_index_file(path) {
+        let idx = match read_index_file(path) {
             Ok((data, mtime)) => Self {
                 source_mtime: Some(mtime),
                 ..Self::parse_with_algo_and_config(&data, algo, config, parse_context)?
@@ -1065,10 +1082,6 @@ impl Index {
             },
             Err(e) => return Err(Error::Io(e)),
         };
-        let protect = config
-            .map(crate::path_validate::ProtectOptions::from_config)
-            .unwrap_or_default();
-        idx.expand_sparse_directory_placeholders(odb, protect)?;
         Ok(idx)
     }
 
@@ -1089,21 +1102,34 @@ impl Index {
         odb: &Odb,
         protect: crate::path_validate::ProtectOptions,
     ) -> Result<()> {
+        self.expand_sparse_directories_matching(odb, protect, |_| true)
+    }
+
+    /// Expand only the selected sparse directories, leaving other subtrees opaque.
+    pub(crate) fn expand_sparse_directories_matching(
+        &mut self,
+        odb: &Odb,
+        protect: crate::path_validate::ProtectOptions,
+        mut expand: impl FnMut(&IndexEntry) -> bool,
+    ) -> Result<()> {
         if !self.has_sparse_directory_placeholders() {
             return Ok(());
         }
         let mut out: Vec<IndexEntry> = Vec::with_capacity(self.entries.len());
         for entry in self.entries.drain(..) {
-            if entry.is_sparse_directory_placeholder() {
+            if entry.is_sparse_directory_placeholder() && expand(&entry) {
                 let prefix = trim_trailing_slash_bytes(&entry.path);
                 let blobs = flatten_tree_blobs(odb, &entry.oid, prefix, protect)?;
+                #[cfg(test)]
+                odb.hot_path_metrics()
+                    .record_sparse_expanded_rows(blobs.len());
                 out.extend(blobs);
             } else {
                 out.push(entry);
             }
         }
         self.entries = out;
-        self.sparse_directories = false;
+        self.sparse_directories = self.has_sparse_directory_placeholders();
         self.sort();
         Ok(())
     }
@@ -1127,6 +1153,7 @@ impl Index {
             return Ok(());
         }
 
+        self.ensure_canonical_order();
         let mut prefixes = BTreeSet::<Vec<u8>>::new();
         for e in &self.entries {
             if e.stage() != 0 || e.mode == MODE_TREE || !e.skip_worktree() {
@@ -1160,15 +1187,20 @@ impl Index {
             if expected.is_empty() {
                 continue;
             }
-            let mut matched = Vec::new();
-            for e in &self.entries {
-                if e.stage() != 0 {
-                    continue;
-                }
-                if path_under_prefix(&e.path, &pref) && e.mode != MODE_TREE {
-                    matched.push(e.clone());
-                }
+            let mut directory = pref.clone();
+            directory.push(b'/');
+            let start = self.entries.partition_point(|e| e.path < directory);
+            let end =
+                start + self.entries[start..].partition_point(|e| e.path.starts_with(&directory));
+            let rows = &self.entries[start..end];
+            if rows.iter().any(|e| e.stage() != 0) {
+                continue;
             }
+            let mut matched: Vec<_> = rows
+                .iter()
+                .filter(|e| e.mode != MODE_TREE)
+                .cloned()
+                .collect();
             if matched.len() != expected.len() {
                 continue;
             }
@@ -1225,9 +1257,8 @@ impl Index {
         if collapsed_any {
             self.sort();
             self.sparse_directories = true;
-        } else {
-            self.sparse_directories = false;
         }
+        self.sparse_directories = self.has_sparse_directory_placeholders();
         Ok(())
     }
 

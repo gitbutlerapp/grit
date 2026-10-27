@@ -153,3 +153,12 @@ See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind`
 ## See also
 
 [grit switch](../switch/), [grit restore](../restore/), [grit commit](../commit/)
+Sparse indexes keep unchanged excluded directory trees compact during checkout.
+Only affected directories or directories present outside the sparse cone need
+individual index rows. Performance and scaling methodology are documented in
+[Benchmarks](../benchmarks.md).
+
+Hard reset reapplies the sparse definition: tracked files that appeared outside
+the cone are removed again. `sparse.expectFilesOutsideOfPatterns=true` preserves
+outside files whose index entries still have skip-worktree set. Keep-reset uses
+the full worktree guard checks for unmerged indexes.

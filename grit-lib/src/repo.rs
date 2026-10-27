@@ -1968,12 +1968,35 @@ impl Repository {
         path: &std::path::Path,
         parse_ctx: crate::index::IndexParseContext,
     ) -> Result<Index> {
+        let mut idx = self.load_index_at_preserving_sparse(path, parse_ctx)?;
+        let cfg = self.config().unwrap_or_else(|_| Arc::new(ConfigSet::new()));
+        idx.expand_sparse_directory_placeholders(
+            &self.odb,
+            crate::path_validate::ProtectOptions::from_config(cfg.as_ref()),
+        )?;
+        self.clear_present_skip_worktree(&mut idx, cfg.as_ref());
+        Ok(idx)
+    }
+
+    /// Load rows for a sparse-aware operation, with the same repository context as `load_index`.
+    pub(crate) fn load_index_preserving_sparse(&self) -> Result<Index> {
+        self.load_index_at_preserving_sparse(
+            &self.index_path_for_env()?,
+            crate::index::IndexParseContext::from_policy(self.thread_policy()),
+        )
+    }
+
+    fn load_index_at_preserving_sparse(
+        &self,
+        path: &std::path::Path,
+        parse_ctx: crate::index::IndexParseContext,
+    ) -> Result<Index> {
         crate::trace::trace_span!("grit.index.read");
         let cfg = self.config().unwrap_or_else(|_| Arc::new(ConfigSet::new()));
         if let Some(res) = cfg.as_ref().get_bool("index.sparse") {
             res.map_err(|s| Error::Config(s.into()))?;
         }
-        let mut idx = Index::load_expand_sparse_optional_with_context(
+        let mut idx = Index::load_preserving_sparse_optional_with_context(
             path,
             &self.odb,
             Some(cfg.as_ref()),
@@ -1983,15 +2006,18 @@ impl Repository {
         if idx.source_mtime.is_none() {
             idx.source_mtime = crate::index::index_file_mtime(path);
         }
+        Ok(idx)
+    }
+
+    pub(crate) fn clear_present_skip_worktree(&self, index: &mut Index, cfg: &ConfigSet) {
         if let Some(ref wt) = self.work_tree {
             crate::sparse_checkout::clear_skip_worktree_from_present_files(
                 &self.git_dir,
                 wt,
-                &mut idx,
-                Some(cfg.as_ref()),
+                index,
+                Some(cfg),
             );
         }
-        Ok(idx)
     }
 
     /// Write the index to the default path after optionally collapsing skip-worktree

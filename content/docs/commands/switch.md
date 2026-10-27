@@ -266,3 +266,9 @@ See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind`
 ## See also
 
 [grit branch](../branch/), [grit reset](../reset/), [grit merge](../merge/), [grit status](../status/)
+Sparse indexes keep unchanged excluded directory trees compact during checkout.
+Only affected directories or directories present outside the sparse cone need
+individual index rows. Performance and scaling methodology are documented in
+[Benchmarks](../benchmarks.md).
+
+Unmerged indexes use the full worktree guard checks.

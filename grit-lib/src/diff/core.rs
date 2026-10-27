@@ -3093,7 +3093,9 @@ fn emit_deleted_opts(
                 score: None,
             });
         }
-        if let Some(hint) = index_hint {
+        if let Some(hint) =
+            index_hint.filter(|hint| !hint.index.has_sparse_directory_placeholders())
+        {
             emit_deleted_tree_from_index(hint.index, &path, result);
             return Ok(());
         }
