@@ -210,7 +210,25 @@ fn undo_survives_git_gc_with_reflog_updates_disabled() {
     commit_file(wt, "track.t", "3\n", "c");
     let dropped_tip = git_rev_parse(wt, "HEAD").expect("tip");
     let grit = open_grit(wt);
-    drop_and_apply(&grit, dropped_tip);
+    // `git gc` expires reflog entries for unreachable commits older than
+    // `gc.reflogExpireUnreachable` (30 days), so the forced reflog entry that keeps the
+    // dropped tip alive must carry a current timestamp, not the fixed test epoch.
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let drop_opts = ApplyOptions {
+        identity: format!("Undo Tester <undo@grit.test> {now} +0000")
+            .parse()
+            .expect("signature"),
+        ..apply_opts("drop")
+    };
+    let plan = history_drop(&grit, dropped_tip, &rewrite_opts()).expect("drop plan");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &drop_opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply drop");
     assert_ne!(git_rev_parse(wt, "HEAD"), Some(dropped_tip));
 
     let gc = Command::new("git")
