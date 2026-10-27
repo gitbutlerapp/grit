@@ -6731,6 +6731,10 @@ fn bounded_limit_list_common_inner(options: &RevListOptions, graph_topo: bool) -
 /// closure path: no output filters, paths, objects, side or ancestry classification, or
 /// boundary bookkeeping. `graph_topo` admits the graph-rendering flags the incremental topo
 /// walk understands.
+///
+/// A symmetric range is already expanded to both tips and their merge bases, so in date order
+/// it walks like any other range. The topo walk cannot take one: Git lists the right side
+/// first there, which only the full sort reproduces.
 fn plain_commit_walk(options: &RevListOptions, graph_topo: bool) -> bool {
     options
         .commit_filter
@@ -6753,8 +6757,7 @@ fn plain_commit_walk(options: &RevListOptions, graph_topo: bool) -> bool {
         && options.min_parents.is_none()
         && options.max_parents.is_none()
         && !options.maximal_only
-        && options.symmetric_left.is_none()
-        && options.symmetric_right.is_none()
+        && (!graph_topo || (options.symmetric_left.is_none() && options.symmetric_right.is_none()))
         && !options.boundary
         && !options.no_kept_objects
         && !options.unpacked_only
