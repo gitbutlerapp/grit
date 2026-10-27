@@ -129,6 +129,33 @@ impl SharedCheckoutDeleteRollback {
     }
 }
 
+/// Repository-relative paths packed into one buffer: a populated checkout records every path
+/// it creates, so avoid a separate allocation per path.
+#[derive(Default)]
+struct PathList {
+    bytes: String,
+    ends: Vec<usize>,
+}
+
+impl PathList {
+    fn push(&mut self, path: &str) {
+        self.bytes.push_str(path);
+        self.ends.push(self.bytes.len());
+    }
+
+    fn len(&self) -> usize {
+        self.ends.len()
+    }
+
+    /// Paths, newest first.
+    fn iter_rev(&self) -> impl Iterator<Item = &str> {
+        self.ends.iter().enumerate().rev().map(|(i, &end)| {
+            let start = i.checked_sub(1).map_or(0, |prev| self.ends[prev]);
+            &self.bytes[start..end]
+        })
+    }
+}
+
 /// A path whose previous content a checkout overwrote.
 struct ReplacedPath {
     path: String,
@@ -144,7 +171,7 @@ pub(crate) struct CheckoutJournal {
     work_tree: PathBuf,
     spool: Arc<Mutex<CheckoutDeleteSpool>>,
     /// Paths that did not exist before the checkout wrote them.
-    created: Vec<String>,
+    created: PathList,
     /// Paths whose tracked content the checkout overwrote.
     replaced: Vec<ReplacedPath>,
     /// Wholesale-removed directories (whose index entries rollback writes back).
@@ -162,7 +189,7 @@ impl CheckoutJournal {
         Ok(Self {
             work_tree: work_tree.to_path_buf(),
             spool: Arc::new(Mutex::new(CheckoutDeleteSpool::new()?)),
-            created: Vec::new(),
+            created: PathList::default(),
             replaced: Vec::new(),
             removed_dirs: BTreeSet::new(),
             removed_gitlinks: Vec::new(),
@@ -190,7 +217,7 @@ impl CheckoutJournal {
             return;
         };
         if change.status == DiffStatus::Added {
-            self.created.push(path.to_owned());
+            self.created.push(path);
         } else {
             self.replaced.push(ReplacedPath {
                 path: path.to_owned(),
@@ -208,7 +235,7 @@ impl CheckoutJournal {
 
     /// Record that the checkout is about to create `rel_path`, which does not exist yet.
     pub(crate) fn record_created(&mut self, rel_path: &str) {
-        self.created.push(rel_path.to_owned());
+        self.created.push(rel_path);
     }
 
     /// Record that the checkout is about to remove the whole tracked directory `dir`.
@@ -245,7 +272,7 @@ impl CheckoutJournal {
     /// The checkout's index is on disk: keep every change and drop the spool.
     pub(crate) fn commit(&mut self) {
         self.committed = true;
-        self.created = Vec::new();
+        self.created = PathList::default();
         self.replaced = Vec::new();
         self.removed_dirs = BTreeSet::new();
         self.removed_gitlinks = Vec::new();
@@ -288,12 +315,13 @@ impl CheckoutJournal {
     /// Undo every recorded change; returns the paths left in a different state.
     fn rollback(&mut self, repo: &Repository) -> Vec<String> {
         let mut unrestored = Vec::new();
-        let mut removed = Vec::with_capacity(self.created.len());
-        for rel in self.created.drain(..).rev() {
-            let abs = crate::repo_relpath::worktree_abs(&self.work_tree, &rel);
+        let created = std::mem::take(&mut self.created);
+        let mut removed = Vec::with_capacity(created.len());
+        for rel in created.iter_rev() {
+            let abs = crate::repo_relpath::worktree_abs(&self.work_tree, rel);
             match remove_created_path(&abs) {
                 Ok(()) => removed.push(abs),
-                Err(_) => unrestored.push(rel),
+                Err(_) => unrestored.push(rel.to_owned()),
             }
         }
         removed.extend(
@@ -547,6 +575,25 @@ fn create_symlink_at(target: &Path, link: &Path) -> std::io::Result<()> {
         } else {
             symlink_file(target, link)
         }
+    }
+}
+
+#[cfg(test)]
+mod path_list_tests {
+    use super::PathList;
+
+    #[test]
+    fn paths_come_back_newest_first_and_intact() {
+        let mut list = PathList::default();
+        for path in ["a", "dir/b.txt", "dir/sub/ünï.txt", "c"] {
+            list.push(path);
+        }
+        assert_eq!(list.len(), 4);
+        assert_eq!(
+            list.iter_rev().collect::<Vec<_>>(),
+            ["c", "dir/sub/ünï.txt", "dir/b.txt", "a"]
+        );
+        assert_eq!(PathList::default().iter_rev().count(), 0);
     }
 }
 
