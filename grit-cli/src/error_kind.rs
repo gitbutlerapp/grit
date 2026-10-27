@@ -74,6 +74,9 @@ pub enum ErrorKind {
     DirtyWorktree,
     /// Worktree file I/O failed on a named path (`paths`, often one entry).
     WorktreePathIo,
+    /// A checkout stopped part way and could not put some worktree paths back (`paths`);
+    /// `HEAD` and the index are unchanged.
+    CheckoutIncomplete,
     /// Git directory I/O failed on a named path under `.git/` (`paths`, often one entry).
     GitDirPathIo,
     /// Index-only commit while the work tree has unstaged or untracked changes.
@@ -138,6 +141,7 @@ impl ErrorKind {
             Self::UnmergedPaths,
             Self::DirtyWorktree,
             Self::WorktreePathIo,
+            Self::CheckoutIncomplete,
             Self::GitDirPathIo,
             Self::NothingStaged,
             Self::NothingToCommit,

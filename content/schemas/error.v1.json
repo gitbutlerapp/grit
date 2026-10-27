@@ -246,6 +246,13 @@
           "type": "string"
         },
         {
+          "description": "A checkout stopped part way and could not put some worktree paths back (`paths`); `HEAD` and the index are unchanged.",
+          "enum": [
+            "checkout_incomplete"
+          ],
+          "type": "string"
+        },
+        {
           "description": "Git directory I/O failed on a named path under `.git/` (`paths`, often one entry).",
           "enum": [
             "git_dir_path_io"

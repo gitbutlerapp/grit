@@ -30,6 +30,8 @@ Use `--dry-run` to run the same overwrite checks and report how many paths would
 
 On the first switch after `clone --no-checkout`, the dry-run count includes every path to materialize, including files unchanged between the old and new commits.
 
+A switch either completes or changes nothing. Pressing Ctrl+C while files are being checked out stops the switch with `error: operation cancelled`; `HEAD`, the index and the work tree are left exactly as they were, so `grit status` stays clean and the same switch can simply be run again. A second Ctrl+C terminates grit at once, without that cleanup. In the rare case that a path cannot be put back (for example a directory that became read-only), the error has kind `checkout_incomplete` and lists those paths in `paths`; `HEAD` and the index still did not move.
+
 Switching is refused while a merge, rebase, pick, revert or `am` is paused, whether grit or `git` started it: those operations finish by committing onto the current `HEAD`, so moving it would land their result on the wrong branch. When grit knows how the operation finishes or is cancelled (merge, rebase, pick, revert), the error names those commands. `--dry-run` is refused too. A bisect does not block a switch.
 
 A local branch can only be checked out in one worktree at a time (including linked worktrees created with `git worktree add`). Switching to a branch that is already checked out elsewhere fails.

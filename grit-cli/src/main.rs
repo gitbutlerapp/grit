@@ -27,6 +27,7 @@ mod error_kind;
 mod exit_status;
 mod global_args;
 mod grit_trace;
+mod interrupt;
 mod json_error;
 mod json_filter;
 #[cfg(test)]

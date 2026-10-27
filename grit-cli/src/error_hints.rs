@@ -186,6 +186,18 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             Some("close programs that may have the file open, then try again".to_owned()),
             Some(vec![path.clone()]),
         )),
+        LibError::CheckoutRollbackIncomplete { unrestored, .. } => Some(Error::new(
+            StructuredCliError {
+                human: format!("{err}{}", indented_paths(unrestored)),
+                payload: StructuredJsonError {
+                    hint: Some(
+                        "HEAD and the index did not move; `grit status` shows the listed paths, and `grit reset --hard` plus `grit clean -f` put them back".to_owned(),
+                    ),
+                    paths: Some(unrestored.clone()),
+                    ..StructuredJsonError::new(err.to_string(), ErrorKind::CheckoutIncomplete)
+                },
+            },
+        )),
         LibError::GitDirPathIo { path, .. } => Some(guided(
             ErrorKind::GitDirPathIo,
             err.to_string(),
