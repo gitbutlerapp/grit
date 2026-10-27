@@ -1,0 +1,110 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-27T02:43:40.111081Z",
+  "machine": {
+    "cpu_model": "AMD EPYC 7763 64-Core Processor",
+    "physical_cores": 2,
+    "logical_cores": 4,
+    "ram_bytes": 16770748416,
+    "os": "linux",
+    "kernel": "Linux 6.17.0-1022-azure",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "grit": "grit 0.5.22",
+    "grit_commit": "e9dc7444602ebd5211c2014df2c0c24294cb5ffc"
+  },
+  "scenarios": [
+    {
+      "id": "log/json-n10-loose-tags@git-git",
+      "area": "revwalk",
+      "description": "Last ten commits with equivalent author/committer/parent/decoration/message metadata; loose tag refs; nine /usr/bin/time samples",
+      "git": {
+        "median_wall_ms": 21.770252999885997,
+        "peak_rss_bytes": 17301504,
+        "runs": 9,
+        "samples_ms": [
+          22.690114000397443,
+          21.46324299974367,
+          22.22453600006702,
+          21.95088799999212,
+          21.619192000798648,
+          22.837526999865077,
+          21.701516000575793,
+          21.36665299985907,
+          21.770252999885997
+        ],
+        "min_ms": 21.36665299985907,
+        "max_ms": 22.837526999865077,
+        "stddev_ms": 0.5233246918387223
+      },
+      "grit": {
+        "median_wall_ms": 38.08392199971422,
+        "peak_rss_bytes": 24813568,
+        "runs": 9,
+        "samples_ms": [
+          38.57803099981538,
+          38.38485199958086,
+          38.4524680002869,
+          38.08392199971422,
+          38.07280099954369,
+          37.98465900035808,
+          38.10351899937814,
+          37.966023000080895,
+          37.8303399993456
+        ],
+        "min_ms": 37.8303399993456,
+        "max_ms": 38.57803099981538,
+        "stddev_ms": 0.2511085637997743
+      },
+      "ratio": 1.7493559675174033
+    },
+    {
+      "id": "log/json-n10-packed-tags@git-git",
+      "area": "revwalk",
+      "description": "Last ten commits with equivalent author/committer/parent/decoration/message metadata; packed tag refs; nine /usr/bin/time samples",
+      "git": {
+        "median_wall_ms": 13.997862999531208,
+        "peak_rss_bytes": 17272832,
+        "runs": 9,
+        "samples_ms": [
+          14.079645000492746,
+          13.701942999432504,
+          14.03107500027545,
+          14.507843000501452,
+          13.997862999531208,
+          13.927543000136211,
+          14.110372000686766,
+          13.70125200082839,
+          13.98688300014328
+        ],
+        "min_ms": 13.70125200082839,
+        "max_ms": 14.507843000501452,
+        "stddev_ms": 0.2399716722330391
+      },
+      "grit": {
+        "median_wall_ms": 5.328807000296365,
+        "peak_rss_bytes": 16891904,
+        "runs": 9,
+        "samples_ms": [
+          5.170722999537247,
+          5.309731000124884,
+          5.343863000234705,
+          5.079333000139741,
+          6.2756850002188,
+          5.441154999971332,
+          5.328807000296365,
+          5.189708000216342,
+          5.398946999775944
+        ],
+        "min_ms": 5.079333000139741,
+        "max_ms": 6.2756850002188,
+        "stddev_ms": 0.35072738361661765
+      },
+      "ratio": 0.3806871806414185
+    }
+  ]
+}

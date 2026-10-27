@@ -9,6 +9,66 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
 
+## Bounded log and loose clone tags (2026-10-27)
+
+Issue [#2080](https://github.com/gitbutlerapp/grit/issues/2080) exposed pack mmap
+residency from scattered tag and terminal-object probes. Whole-object info now uses
+bounded positioned reads; small whole tags use the same sparse read path in both
+general and single-pack readers. Delta, oversized, and malformed entries retain
+the existing readers. Clone packs imported tags and remote-tracking refs with the
+shared ref writer and CAS pruning, while retaining symbolic refs and reflogs.
+Directory cleanup is batched, and lock configuration is loaded once per pack.
+
+Measured on a 4-vCPU AMD EPYC 7763 Linux VM with 16 GiB RAM, Ubuntu 24.04.5,
+Rust 1.99.0 `release` builds, and stock Git 2.55.0. The full git/git source is
+`37b3475f`, with 1,012 tags. Frozen main is `d99b149b`; the implementation is
+`e9dc7444`. Each log cell is the median of nine rotated, interleaved fresh
+processes after one warmup per tool, with builds and tests idle. Python
+`perf_counter` wraps `/usr/bin/time -v`; memory is median process peak RSS in KiB.
+Git uses the issue's full author/committer/parent/decoration/message format, and
+grit uses `log -n 10 --json`. Both representations have identical objects and refs;
+the loose state has no cached packed tag peel records.
+
+| Ref representation | Git ms | Main ms | Fixed ms | Git RSS | Main RSS | Fixed RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Loose tags | 21.77 | 37.26 | 38.08 | 16,772 | 45,556 | 24,124 |
+| Packed tags | 14.00 | 5.46 | 5.33 | 16,736 | 16,980 | 16,412 |
+
+Loose-tag RSS falls **47.0%**, to **1.44× Git**, and the representation gap falls
+from 2.68× to 1.47×. The loose-tag median is 0.82 ms higher (2.2%); the packed
+median is slightly lower. The Linux regression uses a deterministic 96 MiB pack
+with 768 scattered annotated tags and checks equal bounded JSON output before and
+after packing. Its loose-only increase falls from **48,940 KiB to 452 KiB**.
+
+Clone measurements use one warmup and three rotated fresh local clones per tool.
+Ref listings match system Git, and the fixed clone passes `git fsck --strict`
+(with the historical upstream warnings). Clone memory is not the destination of
+the log savings:
+
+| Local clone | ms | Peak RSS KiB | Loose tags afterward |
+| --- | ---: | ---: | ---: |
+| Git | 461.56 | 87,484 | 0 |
+| Main | 661.15 | 111,344 | 1,012 |
+| Fixed | 872.39 | 113,556 | 0 |
+
+Safe tag packing adds about **0.21 s** to this local clone (32%), with about
+**2.2 MiB** more clone RSS. The resulting daily log uses the packed row above.
+Avoiding the temporary loose tag writes during initial ref import remains a
+possible clone optimization; this change retains the existing lock/CAS semantics.
+Existing loose-tag repositories benefit from the sparse reads immediately.
+
+A packed-ref 1,000-commit metadata control checks the shared object-read path:
+main **23.28 ms / 29,208 KiB**, fixed
+**23.58 ms / 28,444 KiB**, and Git
+**27.68 ms / 18,596 KiB** (the same nine-sample method).
+
+The daily matrix tracks `log/json-n10-loose-tags@git-git` and
+`log/json-n10-packed-tags@git-git`. The committed before/after daily baselines use
+maximum sampled RSS for their schema's `peak_rss_bytes`; the table above uses the
+median required by the issue. All raw samples, initial reproduction, clone
+measurements, and fixture details are in
+[`log-loose-tags-2080-study.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/log-loose-tags-2080-study.json).
+
 ## Multi-pack-index preparation and clean status (2026-10-26)
 
 Issue [#2064](https://github.com/gitbutlerapp/grit/issues/2064) exposed three MIDX
