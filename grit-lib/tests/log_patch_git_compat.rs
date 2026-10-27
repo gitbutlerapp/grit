@@ -104,6 +104,41 @@ fn log_patch_corpus_matches_git_default_algorithm() {
     assert_eq!(grit_out, git_out);
 }
 
+#[test]
+fn log_patch_full_header_separates_commits_like_git() {
+    let dir = TempDir::new().expect("tempdir");
+    init_corpus_repo(std::path::Path::new("git"), dir.path());
+    let git_out = git_in(dir.path(), &["log", "-p", "--no-color", "-15"]);
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+    let result = rev_list(
+        &repo,
+        &["HEAD".to_owned()],
+        &[],
+        &RevListOptions {
+            max_count: Some(15),
+            ..Default::default()
+        },
+    )
+    .expect("rev-list");
+    let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+    let patch_opts = LogPatchOptions::git_default(&config);
+    assert_eq!(patch_opts.commit_header, LogPatchCommitHeader::Full);
+    let mut out = Cursor::new(Vec::new());
+    repo.odb()
+        .with_pack_read_context(|| {
+            write_commits_log_patch(&repo, &mut out, &result.commits, &patch_opts)
+        })
+        .expect("patch");
+    let grit_out = out.into_inner();
+    assert_eq!(
+        grit_out,
+        git_out,
+        "patch mismatch:\ngrit:\n{}\ngit:\n{}",
+        String::from_utf8_lossy(&grit_out),
+        String::from_utf8_lossy(&git_out)
+    );
+}
+
 fn assert_last_log_patch_matches_git(dir: &std::path::Path) {
     let git_out = git_in(dir, &["log", "-p", "--no-color", "--format=%H", "-1"]);
     let repo = Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("open");

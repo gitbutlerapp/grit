@@ -493,6 +493,10 @@ pub fn write_commit_log_patch<W: Write>(
 
 /// Like [`write_commit_log_patch`] for many commits (avoids re-reading parent commits).
 ///
+/// With [`LogPatchCommitHeader::Full`] a blank line separates consecutive commits, as in
+/// `git log -p`; [`LogPatchCommitHeader::FormatPercentH`] writes none, as in
+/// `git log -p --format=%H`.
+///
 /// # Errors
 ///
 /// Propagates ODB read, tree diff, and I/O errors.
@@ -516,7 +520,10 @@ pub fn write_commits_log_patch<W: Write>(
     }
     let opts = effective_log_patch_options(repo, opts)?;
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
-    for (oid, commit) in &parsed {
+    for (i, (oid, commit)) in parsed.iter().enumerate() {
+        if i > 0 && opts.commit_header == LogPatchCommitHeader::Full {
+            writeln!(out)?;
+        }
         let parent_tree = parent_tree_for_commit(odb, commit, Some(&trees_by_commit))?;
         write_parsed_commit_log_patch(
             out,
