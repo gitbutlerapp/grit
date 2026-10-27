@@ -234,6 +234,8 @@ GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 **Caching:** [`Swatinem/rust-cache@v2`](https://github.com/Swatinem/rust-cache) with a distinct **`shared-key`** per job; caches are saved only on **`main`**, also when the job fails (`cache-on-failure`), so a red `main` still refreshes them.
 
+Pushes and pull requests run only the fast jobs, the merge status. The nightly jobs run on the schedule, or on a branch with `gh workflow run ci.yml --ref <branch> -f full=true`; without `-f full=true` a dispatch runs the fast jobs only.
+
 | Job | What it runs | Reproduce locally |
 | --- | --- | --- |
 | **scripts** | Python tests for repo scripts (coverage floors, upstream mapping) | `python3 -m unittest discover scripts/tests` |
@@ -245,7 +247,7 @@ GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 | **test** | The fast run: `cargo nextest run --workspace --profile ci` (every test binary, in parallel, without stopping at the first failure) and `cargo test --workspace --doc` | `make test` |
 | **test-full** | Nightly and on demand only: the same with `full-tests` on every crate (system `git` comparisons, heavy fixtures, `grit-bench` scenarios), the transport tests and Criterion smoke runs | `make test-full`; see [Transport tests](#transport-tests-fetch-and-push-over-smart-http) |
 | **test-threaded** | Nightly and on demand only (the release build of every test binary takes ~26 min): `cargo test --release --workspace` with `GIT_CONFIG_COUNT` pairs forcing parallel config (`index.threads`, `pack.threads`, `checkout.workers`, `checkout.thresholdForParallelism=0`) | Same env vars as the workflow step in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
-| **miri** | `cargo +nightly miri test -p grit-lib --lib parallel::` over the scoped ordered pool unit tests | `rustup toolchain install nightly -c miri` then the command above |
+| **miri** | Nightly and on demand only: `cargo +nightly miri test -p grit-lib --lib parallel::` over the scoped ordered pool unit tests | `rustup toolchain install nightly -c miri` then the command above |
 
 ### test-threaded (release workspace with parallel config)
 
@@ -683,7 +685,7 @@ make bench-scenarios TIER=S SMOKE=1         # CI smoke: one iteration per scenar
 
 **Tiers:** `TIER=S|M|L` selects the registry synthetic fixture (`synth-s` / `synth-m` / `synth-l`). **`SMOKE=1`** passes `--smoke` to `grit-bench scenarios` (exactly one hyperfine run, tiny network/parallel fixtures, skips ODB backend / bitmaps / refs).
 
-CI job **`bench-scenarios-smoke`** installs hyperfine and runs `make bench-scenarios TIER=S SMOKE=1`. Failures mean a scenario argv or prepare hook broke; wall times are not compared to baselines.
+CI job **`bench-scenarios-smoke`** (nightly and on demand only, as is **`bench-daily-smoke`**) installs hyperfine and runs `make bench-scenarios TIER=S SMOKE=1`. Failures mean a scenario argv or prepare hook broke; wall times are not compared to baselines.
 
 Detail: [Benchmark harness](content/docs/benchmarking.md).
 

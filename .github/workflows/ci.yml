@@ -4,10 +4,15 @@ on:
   push:
     branches: [main]
   pull_request:
-  # test-threaded (release build of every test binary) runs nightly and on demand.
+  # test-full, test-threaded, coverage, miri and the bench smokes run nightly and on demand.
   schedule:
     - cron: "17 4 * * *"
   workflow_dispatch:
+    inputs:
+      full:
+        description: Also run the nightly jobs (test-full, test-threaded, coverage, miri, bench smokes)
+        type: boolean
+        default: false
 
 # Every commit on main gets its own complete run: agents land on main every few minutes,
 # faster than the test job finishes, so cancelling in-progress main runs meant no commit
@@ -29,7 +34,7 @@ jobs:
     name: coverage
     # The floors are measured over every grit-lib test, including those that start the
     # system git (full-tests), one test at a time: nightly and on demand, like test-full.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || inputs.full
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -214,6 +219,8 @@ jobs:
   bench-scenarios-smoke:
     name: bench-scenarios-smoke
     runs-on: ubuntu-latest
+    # Nightly and on demand only, so per-push status stays the fast checks.
+    if: github.event_name == 'schedule' || inputs.full
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -247,6 +254,8 @@ jobs:
   bench-daily-smoke:
     name: bench-daily-smoke
     runs-on: ubuntu-latest
+    # Nightly and on demand only, so per-push status stays the fast checks.
+    if: github.event_name == 'schedule' || inputs.full
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -284,7 +293,7 @@ jobs:
     name: test-threaded
     # Building every test binary in release mode takes ~26 min on its own, so this
     # never finished within a per-push 30 min budget; run it nightly and on demand.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || inputs.full
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -341,6 +350,8 @@ jobs:
   miri:
     name: miri
     runs-on: ubuntu-latest
+    # Nightly and on demand only, so per-push status stays the fast checks.
+    if: github.event_name == 'schedule' || inputs.full
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -370,9 +381,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
-      - name: Free disk space (workspace tests link many binaries)
-        run: ./scripts/ci-free-disk-space.sh
 
       - name: Install reftable-capable Git (>= 2.45)
         run: ./scripts/ci-install-git.sh
@@ -419,7 +427,7 @@ jobs:
     name: test-full
     # Everything, including tests that start the system git and heavy fixtures
     # (make test-full): nightly and on demand, not on every branch.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || inputs.full
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
