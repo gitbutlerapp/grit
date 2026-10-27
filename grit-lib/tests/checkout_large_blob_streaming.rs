@@ -24,15 +24,24 @@ fn streamed_files_keep_cancellation_bounded_after_checkout_chunks_grow() {
     use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
     use grit_lib::progress::{FlagCancel, ProgressSink};
 
-    struct StopAfterNine {
+    /// Cancels on the ninth file and records how many files were on disk at that moment (the
+    /// checkout rolls them back before it returns).
+    struct StopAfterNine<'a> {
         completed: u64,
         cancel: FlagCancel,
+        root: &'a Path,
+        written_at_cancel: Option<usize>,
     }
 
-    impl ProgressSink for StopAfterNine {
+    impl ProgressSink for StopAfterNine<'_> {
         fn inc(&mut self, units: u64) {
             self.completed += units;
-            if self.completed >= 9 {
+            if self.completed >= 9 && self.written_at_cancel.is_none() {
+                self.written_at_cancel = Some(
+                    (0..64)
+                        .filter(|i| self.root.join(format!("f{i:03}.dat")).is_file())
+                        .count(),
+                );
                 self.cancel.cancel();
             }
         }
@@ -59,17 +68,26 @@ fn streamed_files_keep_cancellation_bounded_after_checkout_chunks_grow() {
     let mut progress = StopAfterNine {
         completed: 0,
         cancel: cancel.clone(),
+        root,
+        written_at_cancel: None,
     };
     let err = checkout_between_trees_with_progress(&repo, None, &tree, &mut progress, &cancel)
         .expect_err("cancel after the initial eight-file chunk");
     assert!(matches!(err, grit_lib::error::Error::Cancelled), "{err:?}");
     assert_eq!(progress.completed, 9);
-    let written = (0..64)
-        .filter(|i| root.join(format!("f{i:03}.dat")).is_file())
-        .count();
+    let written = progress
+        .written_at_cancel
+        .expect("cancelled on the ninth file");
     assert!(
         (9..=16).contains(&written),
         "streamed writes must stop within another eight files, wrote {written}"
+    );
+    let left = (0..64)
+        .filter(|i| root.join(format!("f{i:03}.dat")).exists())
+        .count();
+    assert_eq!(
+        left, 0,
+        "a cancelled checkout must remove the files it wrote"
     );
     git(root, &["fsck", "--strict", "--no-progress"]);
 }

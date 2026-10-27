@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::config::ConfigSet;
@@ -22,7 +23,8 @@ use crate::worktree_rules::WorktreeRules;
 
 use super::{
     read_blob_unless_streamed, stream_checkout_entry, worktree_bytes_from_index_blob,
-    write_checkout_entry, DelayedCheckoutTarget, LeadingDirCache, WorktreeFileContent,
+    write_checkout_entry, CheckoutJournal, DelayedCheckoutTarget, LeadingDirCache,
+    WorktreeFileContent,
 };
 
 /// Parallel-eligible checkout jobs buffered before the first flush, so a cancellation that
@@ -47,6 +49,34 @@ pub(crate) struct CheckoutWriteJob<'a> {
     pub change: &'a crate::diff::DiffEntry,
     pub file_attrs: FileAttrs,
     pub smudge_meta: FilterSmudgeMeta,
+    /// Set just before the job first touches its work-tree path, so a failed checkout knows
+    /// which paths to roll back.
+    touched: AtomicBool,
+}
+
+impl<'a> CheckoutWriteJob<'a> {
+    /// Job writing `change`'s new blob to `path` with `mode`.
+    pub(crate) fn new(
+        path: String,
+        mode: u32,
+        change: &'a crate::diff::DiffEntry,
+        file_attrs: FileAttrs,
+        smudge_meta: FilterSmudgeMeta,
+    ) -> Self {
+        Self {
+            path,
+            mode,
+            oid: change.new_oid,
+            change,
+            file_attrs,
+            smudge_meta,
+            touched: AtomicBool::new(false),
+        }
+    }
+
+    fn mark_touched(&self) {
+        self.touched.store(true, Ordering::Relaxed);
+    }
 }
 
 /// Planned slot for one diff entry (input order preserved).
@@ -325,6 +355,7 @@ fn write_prepared_job(
     bytes: Option<&[u8]>,
     dir_cache: &mut LeadingDirCache,
 ) -> Result<IndexEntry> {
+    job.mark_touched();
     let Some(bytes) = bytes else {
         return stream_checkout_entry(
             repo, work_tree, &job.path, job.mode, job.change, dir_cache, job.oid,
@@ -412,6 +443,7 @@ fn materialize_write_job_serial(
     job: &CheckoutWriteJob<'_>,
     delayed: &mut DelayedProcessCheckout,
 ) -> Result<WriteJobOutcome> {
+    job.mark_touched();
     let Some(object) = read_blob_unless_streamed(
         repo,
         rules.conversion(),
@@ -591,9 +623,55 @@ fn flush_prepared_batch(
 /// Parallel-eligible jobs are batched, but each batch is flushed before the next serial job runs
 /// so missing blobs and filter errors match the historical serial checkout behavior. Batches are
 /// also flushed at [`ChunkSizes`] boundaries so cancellation is polled between them; with
-/// `skip_chunk_ramp` they start at full size.
+/// `skip_chunk_ramp` they start at full size. Every job is recorded in `journal`, including on
+/// failure: those that touched their path (a delayed job counts: its filter writes it later)
+/// and those whose leading directories were prepared but which were never written.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_write_jobs(
+    repo: &Repository,
+    rules: &WorktreeRules,
+    config: &Arc<ConfigSet>,
+    conv: &ConversionConfig,
+    work_tree: &Path,
+    dir_cache: &mut LeadingDirCache,
+    delayed: &mut DelayedProcessCheckout,
+    jobs: &[CheckoutWriteJob<'_>],
+    parallel_indices: &HashSet<usize>,
+    parallel_prepare_blobs: bool,
+    checkout_parallel_threshold: Option<i64>,
+    skip_chunk_ramp: bool,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
+    journal: &mut CheckoutJournal,
+) -> Result<Vec<WriteJobOutcome>> {
+    let result = execute_write_jobs_unrecorded(
+        repo,
+        rules,
+        config,
+        conv,
+        work_tree,
+        dir_cache,
+        delayed,
+        jobs,
+        parallel_indices,
+        parallel_prepare_blobs,
+        checkout_parallel_threshold,
+        skip_chunk_ramp,
+        progress,
+        cancel,
+    );
+    for job in jobs {
+        if job.touched.load(Ordering::Relaxed) {
+            journal.record_write(job.change);
+        } else {
+            journal.record_unwritten(&job.path);
+        }
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_write_jobs_unrecorded(
     repo: &Repository,
     rules: &WorktreeRules,
     config: &Arc<ConfigSet>,

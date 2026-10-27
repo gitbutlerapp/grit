@@ -490,8 +490,9 @@ fn ignorecase_collision_uses_serial_path_and_matches() {
     assert_serial_parallel_match(root, from, to, true, false);
 }
 
+/// A checkout that fails part way removes every file it wrote before returning the error.
 #[test]
-fn parallel_pool_error_does_not_write_jobs_after_failure() {
+fn parallel_pool_error_rolls_back_every_job() {
     use grit_lib::diff::{DiffEntry, DiffStatus};
     const N: usize = 128;
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -546,36 +547,34 @@ fn parallel_pool_error_does_not_write_jobs_after_failure() {
 
     let err =
         checkout_tree_changes(&open_with_policy(root, 1, None), &changes).expect_err("serial fail");
-    assert!(wt.join("f0.txt").is_file(), "serial must write f0: {err}");
-    assert!(!wt.join("f1.txt").exists());
-    for i in 2..N {
+    assert!(
+        matches!(&err, grit_lib::error::Error::ObjectNotFound(oid) if *oid == missing.to_hex()),
+        "serial: {err:?}"
+    );
+    for i in 0..N {
         assert!(
             !wt.join(format!("f{i}.txt")).exists(),
-            "serial must not write f{i} after missing blob"
+            "serial must roll back f{i} after the missing blob"
         );
-    }
-
-    for i in 0..N {
-        let _ = fs::remove_file(wt.join(format!("f{i}.txt")));
     }
 
     let err_parallel = checkout_tree_changes(&open_with_forced_parallel_pool(root, 4), &changes)
         .expect_err("parallel fail");
     assert!(
-        wt.join("f0.txt").is_file(),
-        "parallel must write f0 before error: {err_parallel}"
+        matches!(&err_parallel, grit_lib::error::Error::ObjectNotFound(oid) if *oid == missing.to_hex()),
+        "parallel: {err_parallel:?}"
     );
-    assert!(!wt.join("f1.txt").exists());
-    for i in 2..N {
+    for i in 0..N {
         assert!(
             !wt.join(format!("f{i}.txt")).exists(),
-            "parallel must not write f{i} after error (got side effects from later chunk)"
+            "parallel must roll back f{i} after the error"
         );
     }
+    assert!(!repo.git_dir().join("index").exists(), "index written");
 }
 
 #[test]
-fn missing_blob_errors_after_earlier_write() {
+fn missing_blob_error_rolls_back_earlier_write() {
     use grit_lib::diff::{DiffEntry, DiffStatus};
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
@@ -616,15 +615,23 @@ fn missing_blob_errors_after_earlier_write() {
     let err = checkout_tree_changes(&open_with_policy(root, 1, None), &changes)
         .expect_err("missing object must fail");
     assert!(
-        wt.join("first.txt").is_file(),
-        "first path must be written before error: {err}"
+        matches!(&err, grit_lib::error::Error::ObjectNotFound(oid) if *oid == missing.to_hex()),
+        "serial: {err:?}"
+    );
+    assert!(
+        !wt.join("first.txt").exists(),
+        "first path must be rolled back after the error"
     );
 
-    fs::remove_file(wt.join("first.txt")).ok();
     let err_parallel = checkout_tree_changes(&open_with_policy(root, 4, Some(0)), &changes)
         .expect_err("parallel path must fail the same way");
     assert!(
-        wt.join("first.txt").is_file(),
-        "parallel path must write first file before error: {err_parallel}"
+        matches!(&err_parallel, grit_lib::error::Error::ObjectNotFound(oid) if *oid == missing.to_hex()),
+        "parallel: {err_parallel:?}"
     );
+    assert!(
+        !wt.join("first.txt").exists(),
+        "parallel path must roll back the first file after the error"
+    );
+    assert!(!wt.join("second.txt").exists());
 }

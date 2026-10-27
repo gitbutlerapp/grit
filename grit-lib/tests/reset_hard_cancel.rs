@@ -114,6 +114,42 @@ fn commit_file(
     co
 }
 
+/// Bytes of the branch ref and the index, which a cancelled reset must not change.
+fn ref_and_index(repo: &Repository) -> (Vec<u8>, Vec<u8>) {
+    let read = |rel: &str| std::fs::read(repo.git_dir().join(rel)).expect(rel);
+    (read("refs/heads/main"), read("index"))
+}
+
+/// The system `git` sees no staged, unstaged or untracked change.
+fn assert_git_status_clean(repo: &Repository) {
+    let out = std::process::Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=all"])
+        .current_dir(repo.work_tree().expect("work tree"))
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .output()
+        .expect("git status");
+    assert!(out.status.success());
+    let status = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        status.is_empty(),
+        "git status after cancelled reset:\n{status}"
+    );
+}
+
+/// Paths `f<i>.txt` present in the work tree, with their contents.
+fn worktree_files(repo: &Repository, files: usize) -> Vec<(usize, String)> {
+    let wt = repo.work_tree().expect("work tree");
+    (0..files)
+        .filter_map(|i| {
+            std::fs::read_to_string(wt.join(format!("f{i}.txt")))
+                .ok()
+                .map(|contents| (i, contents))
+        })
+        .collect()
+}
+
 fn seed_many_file_repo(repo: &Repository, files: usize) -> ObjectId {
     let mut parent: Option<ObjectId> = None;
     for i in 0..files {
@@ -153,6 +189,7 @@ fn hard_reset_returns_cancelled_and_stops_checkout_early() {
     )
     .expect("reset to first");
 
+    let before = ref_and_index(&repo);
     let mut progress = CancelHardResetOnFiles::new(5);
     let cancel = progress.flag.clone();
     let err = reset_to_commit(
@@ -171,14 +208,17 @@ fn hard_reset_returns_cancelled_and_stops_checkout_early() {
         checkout_incs <= 15,
         "expected bounded checkout progress after cancel, saw {checkout_incs} file increments"
     );
-    let wt = repo.work_tree().expect("work tree");
-    let present = (0..FILES)
-        .filter(|i| wt.join(format!("f{i}.txt")).exists())
-        .count();
-    assert!(
-        present < FILES,
-        "hard reset should stop before writing every file, found {present}/{FILES}"
+    assert_eq!(
+        ref_and_index(&repo),
+        before,
+        "cancelled reset moved the branch or index"
     );
+    assert_eq!(
+        worktree_files(&repo, FILES),
+        vec![(0, "0\n".to_owned())],
+        "cancelled reset must leave the pre-reset tree (only f0.txt)"
+    );
+    assert_git_status_clean(&repo);
 }
 
 #[test]
@@ -198,6 +238,7 @@ fn hard_reset_backward_returns_cancelled_and_stops_deletes_early() {
     )
     .expect("first commit");
 
+    let before = ref_and_index(&repo);
     let mut progress = CancelHardResetOnFiles::new(5);
     let cancel = progress.flag.clone();
     let err = reset_to_commit(
@@ -216,12 +257,16 @@ fn hard_reset_backward_returns_cancelled_and_stops_deletes_early() {
         checkout_incs <= 15,
         "expected bounded delete progress, saw {checkout_incs} increments"
     );
-    let wt = repo.work_tree().expect("work tree");
-    let present = (0..FILES)
-        .filter(|i| wt.join(format!("f{i}.txt")).exists())
-        .count();
-    assert!(
-        present > 1 && present < FILES,
-        "backward reset should stop deleting early, found {present}/{FILES} files"
+    assert_eq!(
+        ref_and_index(&repo),
+        before,
+        "cancelled reset moved the branch or index"
     );
+    let expected: Vec<(usize, String)> = (0..FILES).map(|i| (i, format!("{i}\n"))).collect();
+    assert_eq!(
+        worktree_files(&repo, FILES),
+        expected,
+        "cancelled reset must restore every file it deleted"
+    );
+    assert_git_status_clean(&repo);
 }

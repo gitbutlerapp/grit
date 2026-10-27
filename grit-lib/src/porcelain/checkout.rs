@@ -44,11 +44,11 @@ use crate::sparse_checkout::SparseCheckout;
 use crate::worktree::{io_with_path, WorktreePathOperation};
 use crate::worktree_rules::WorktreeRules;
 
-#[path = "checkout_delete_rollback.rs"]
-mod checkout_delete_rollback;
+#[path = "checkout_journal.rs"]
+mod checkout_journal;
 #[path = "checkout_parallel.rs"]
 mod checkout_parallel;
-use checkout_delete_rollback::{CheckoutDeleteGuard, SharedCheckoutDeleteRollback};
+use checkout_journal::{CheckoutJournal, SharedCheckoutDeleteRollback};
 pub(crate) use checkout_parallel::is_eligible_for_parallel_checkout;
 use checkout_parallel::{
     cancellable_chunks, execute_write_jobs, paths_needing_serial_checkout, CheckoutPlanSlot,
@@ -57,15 +57,6 @@ use checkout_parallel::{
 
 const PARALLEL_PER_FILE_DELETE_MIN: usize = 32;
 const POPULATED_TREE_CHECKOUT_CHUNK: usize = 2048;
-
-/// Remove one tracked file during checkout, surfacing [`Error::WorktreePathIo`] on failure.
-fn remove_checkout_worktree_file(
-    work_tree: &Path,
-    rel_path: &str,
-    delete_rollback: &SharedCheckoutDeleteRollback,
-) -> Result<()> {
-    delete_rollback.spool_remove(work_tree, rel_path)
-}
 
 fn remove_checkout_files_parallel_cancellable(
     work_tree: &Path,
@@ -105,6 +96,7 @@ fn remove_wholesale_dirs_parallel_cancellable(
     options: ParallelOptions,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
+    journal: &mut CheckoutJournal,
 ) -> Result<Vec<(String, PathBuf)>> {
     let mut removed = Vec::new();
     if dirs.is_empty() {
@@ -114,6 +106,7 @@ fn remove_wholesale_dirs_parallel_cancellable(
         for dir in dirs {
             crate::progress::poll_cancel(progress, cancel)?;
             let abs = work_tree.join(dir);
+            journal.record_removed_dir(dir);
             if remove_wholesale_dir(&abs) {
                 removed.push((dir.clone(), abs));
             }
@@ -124,6 +117,9 @@ fn remove_wholesale_dirs_parallel_cancellable(
     let (chunks, options) = cancellable_chunks(dirs, options);
     for chunk in chunks {
         crate::progress::poll_cancel(progress, cancel)?;
+        for dir in chunk {
+            journal.record_removed_dir(dir);
+        }
         let removed_chunk = try_par_map(chunk, options, 0, |dir| {
             let abs = wt.join(dir);
             Ok(remove_wholesale_dir(&abs).then_some((dir.clone(), abs)))
@@ -288,7 +284,46 @@ fn checkout_populated_tree(
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
+    let (mut lock, mut loaded_index) = repo.lock_and_load_index()?;
+    let total = diff_tree_path_change_count(repo.odb(), None, Some(tree_oid), "")?;
+    progress.start(
+        ProgressPhase::CheckingOutFiles,
+        Some(u64::try_from(total).unwrap_or(u64::MAX)),
+    );
 
+    let mut journal = CheckoutJournal::new(work_tree)?;
+    let result = checkout_populated_tree_journaled(
+        repo,
+        tree_oid,
+        progress,
+        cancel,
+        &mut loaded_index,
+        &mut lock,
+        &mut journal,
+    );
+    let ignorecase = journal.finish(repo, result)?;
+
+    let path_collisions = if ignorecase {
+        crate::path_icase::icase_checkout_collision_paths(&loaded_index, true)
+    } else {
+        Vec::new()
+    };
+    Ok(CheckoutOutcome { path_collisions })
+}
+
+/// Body of [`checkout_populated_tree`]; returns `core.ignorecase`.
+fn checkout_populated_tree_journaled(
+    repo: &Repository,
+    tree_oid: &ObjectId,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+    index_mut: &mut Index,
+    lock: &mut IndexLock,
+    journal: &mut CheckoutJournal,
+) -> Result<bool> {
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
     let config = repo.config()?;
     let protect = ProtectOptions::from_config(config.as_ref());
     let ignorecase = config
@@ -296,14 +331,6 @@ fn checkout_populated_tree(
         .and_then(|r| r.ok())
         .unwrap_or(false);
     let precompose = repo.pathspec_precompose_enabled();
-
-    let (mut lock, mut loaded_index) = repo.lock_and_load_index()?;
-    let index_mut = &mut loaded_index;
-    let total = diff_tree_path_change_count(repo.odb(), None, Some(tree_oid), "")?;
-    progress.start(
-        ProgressPhase::CheckingOutFiles,
-        Some(u64::try_from(total).unwrap_or(u64::MAX)),
-    );
 
     let rules = Rc::new(
         if tree_contains_dot_gitattributes(repo.odb(), tree_oid, "", protect)? {
@@ -337,7 +364,7 @@ fn checkout_populated_tree(
         crate::progress::poll_cancel(progress, cancel)?;
         let chunk_changes: Vec<DiffEntry> =
             chunk.iter().map(populated_blob_to_added_diff).collect();
-        let changes = apply_sparse_tree_changes_to_index(
+        let changes = split_sparse_tree_changes(
             sparse.as_ref(),
             work_tree,
             index_mut,
@@ -365,19 +392,21 @@ fn checkout_populated_tree(
                 ignorecase,
                 &mut chunk_progress,
                 cancel,
-                CheckoutIndexWrite::Defer(&lock),
+                CheckoutIndexWrite::Defer(lock),
+                journal,
             )?;
         } else {
             apply.skip_bulk_checkout_fast_path = true;
-            checkout_tree_changes_with_progress(
+            apply_tree_changes(
                 repo,
                 &changes,
                 &mut chunk_progress,
                 cancel,
-                Some(index_mut),
+                index_mut,
                 apply.clone(),
                 None,
-                CheckoutIndexWrite::Defer(&lock),
+                CheckoutIndexWrite::Defer(lock),
+                journal,
             )?;
             apply.skip_bulk_checkout_fast_path = false;
         }
@@ -385,17 +414,10 @@ fn checkout_populated_tree(
     }
 
     attach_checkout_result_cache_tree(repo, index_mut, tree_oid)?;
-    write_checkout_index(repo, index_mut, &mut lock, bulk_index_rewrite, None)?;
-
-    progress.finish();
     crate::progress::poll_cancel(progress, cancel)?;
-
-    let path_collisions = if ignorecase {
-        crate::path_icase::icase_checkout_collision_paths(index_mut, true)
-    } else {
-        Vec::new()
-    };
-    Ok(CheckoutOutcome { path_collisions })
+    write_checkout_index(repo, index_mut, lock, bulk_index_rewrite, None, journal)?;
+    progress.finish();
+    Ok(ignorecase)
 }
 
 /// Apply the tree diff `from` → `to` under a lock the caller already holds.
@@ -515,13 +537,37 @@ pub fn checkout_hard_to_tree_from_head_tree(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<()> {
-    use crate::porcelain::index_from_tree::index_from_tree_reusing_cache_tree;
-
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
-
     let mut lock = repo.lock_index()?;
+    let mut journal = CheckoutJournal::new(work_tree)?;
+    let result = checkout_hard_to_tree_journaled(
+        repo,
+        work_tree,
+        head_tree,
+        target_tree,
+        progress,
+        cancel,
+        &mut lock,
+        &mut journal,
+    );
+    journal.finish(repo, result)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn checkout_hard_to_tree_journaled(
+    repo: &Repository,
+    work_tree: &Path,
+    head_tree: &ObjectId,
+    target_tree: &ObjectId,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+    lock: &mut IndexLock,
+    journal: &mut CheckoutJournal,
+) -> Result<()> {
+    use crate::porcelain::index_from_tree::index_from_tree_reusing_cache_tree;
+
     let mut pre_reset_index =
         crate::porcelain::index_from_tree::load_index_for_tree_transition(repo, target_tree)?;
     let trees_differ = head_tree != target_tree;
@@ -546,6 +592,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
         work_tree,
         &target_entries,
         &changes,
+        journal,
     );
 
     let mut written_by_tree_diff: BTreeSet<Vec<u8>> = BTreeSet::new();
@@ -678,15 +725,16 @@ pub fn checkout_hard_to_tree_from_head_tree(
     let mut index = pre_reset_index;
 
     if let Some(apply) = hard_reset_apply {
-        checkout_tree_changes_with_progress(
+        apply_tree_changes(
             repo,
             &changes,
             progress,
             cancel,
-            Some(&mut index),
+            &mut index,
             apply,
             None,
-            CheckoutIndexWrite::Defer(&lock),
+            CheckoutIndexWrite::Defer(lock),
+            journal,
         )?;
     }
 
@@ -696,16 +744,13 @@ pub fn checkout_hard_to_tree_from_head_tree(
         if sparse_parent_symlinks.has_symlink_in_path_bytes(work_tree, &path, false, false) {
             continue;
         }
-        let abs = crate::index::worktree_path_from_index_rel(work_tree, &path);
-        if mode == MODE_GITLINK {
-            remove_uninitialized_gitlink_worktree(&abs);
+        let rel = crate::repo_relpath::storage_string(&path);
+        let abs = if mode == MODE_GITLINK {
+            journal.remove_uninitialized_gitlink(&rel)
         } else {
-            match fs::remove_file(&abs) {
-                Ok(()) => {}
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-                Err(err) => return Err(Error::Io(err)),
-            }
-        }
+            journal.spool_remove(&rel)?;
+            crate::index::worktree_path_from_index_rel(work_tree, &path)
+        };
         remove_empty_parent_dirs_batch(work_tree, &[abs]);
     }
     index.source_mtime = pre_reset_index_mtime;
@@ -803,6 +848,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
                 }
             }
             let path = crate::repo_relpath::storage_string(&te.path);
+            journal.preserve_before_write(&path)?;
             materialize_gitlink_worktree(work_tree, &path, &mut dir_cache)?;
             let abs = abs.clone();
             let mut entry = entry_from_stat(&abs, te.path.as_slice(), te.oid, MODE_GITLINK)?;
@@ -816,6 +862,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
             empty => empty.insert(WorktreeRules::from_parts(repo, &index, config.clone())?),
         };
         let path = crate::repo_relpath::storage_string(&te.path);
+        journal.preserve_before_write(&path)?;
         let change = diff_entry_for_worktree_blob_refresh(work_tree, &path, te.oid, mode);
         let Some(object) = read_blob_unless_streamed(
             repo,
@@ -894,10 +941,12 @@ pub fn checkout_hard_to_tree_from_head_tree(
     {
         new_index.set_cache_tree(cache_tree);
     }
+    crate::progress::poll_cancel(progress, cancel)?;
     if trees_differ && !written_by_tree_diff.is_empty() {
-        write_checkout_index(repo, &mut new_index, &mut lock, false, mtime_hint)?;
+        write_checkout_index(repo, &mut new_index, lock, false, mtime_hint, journal)?;
     } else {
-        repo.write_index_with_lock(&mut lock, &mut new_index, false)?;
+        repo.write_index_with_lock(lock, &mut new_index, false)?;
+        journal.commit();
     }
     Ok(())
 }
@@ -1114,13 +1163,14 @@ fn verify_hard_reset_candidates(
 ///
 /// Tree-diff deletions of plain blobs are left to the tree-diff checkout, which removes whole
 /// directories at once and cleans up empty parents in one batch. Paths that only exist in the
-/// index (staged additions), gitlinks and unmerged paths are removed here. Returns the
-/// removed paths for empty-parent cleanup.
+/// index (staged additions), gitlinks and unmerged paths are removed here, through `journal` so
+/// a failed reset can put them back. Returns the removed paths for empty-parent cleanup.
 fn remove_index_paths_outside_tree_diff(
     index: &Index,
     work_tree: &Path,
     target_entries: &[IndexEntry],
     changes: &[DiffEntry],
+    journal: &mut CheckoutJournal,
 ) -> Vec<PathBuf> {
     let target_paths: HashSet<&[u8]> = target_entries.iter().map(|e| e.path.as_slice()).collect();
     let tree_deleted: HashSet<Vec<u8>> = changes
@@ -1141,13 +1191,13 @@ fn remove_index_paths_outside_tree_diff(
         if tree_deleted.contains(path) && stage0.is_some_and(|e| e.mode != MODE_GITLINK) {
             continue;
         }
-        let abs = crate::index::worktree_path_from_index_rel(work_tree, path);
+        let rel = crate::repo_relpath::storage_string(path);
         if stage0.is_some_and(|e| e.mode == MODE_GITLINK) {
-            remove_uninitialized_gitlink_worktree(&abs);
+            removed.push(journal.remove_uninitialized_gitlink(&rel));
         } else {
-            let _ = fs::remove_file(&abs);
+            let _ = journal.spool_remove(&rel);
+            removed.push(crate::index::worktree_path_from_index_rel(work_tree, path));
         }
-        removed.push(abs);
     }
     removed
 }
@@ -1204,6 +1254,9 @@ pub(crate) struct CheckoutApplyOptions {
     /// Index rows (with `skip-worktree` set) for sparse-checkout skipped paths, merged into the
     /// index together with the rows checkout writes.
     pub skip_worktree_rows: Vec<IndexEntry>,
+    /// Index paths of sparse-checkout skipped deletions, removed from the index together with
+    /// the paths checkout deletes.
+    pub sparse_removed_index_paths: Vec<Vec<u8>>,
     /// Flush parallel writes in full-size chunks from the start instead of ramping up from a
     /// few files. Set by callers that already observed cancellation between earlier calls, so
     /// only their first call needs the small chunks that stop quickly after a cancel.
@@ -1624,10 +1677,14 @@ fn remove_wholesale_directories_on_disk(
     work_tree: &Path,
     wholesale_index_prefixes: &BTreeSet<String>,
     config: &std::sync::Arc<ConfigSet>,
+    journal: &mut CheckoutJournal,
 ) -> Result<BTreeSet<String>> {
     let mut wholesale_dirs_removed = BTreeSet::new();
     if wholesale_index_prefixes.is_empty() {
         return Ok(wholesale_dirs_removed);
+    }
+    for dir in wholesale_index_prefixes {
+        journal.record_removed_dir(dir);
     }
     if wholesale_index_prefixes.len() >= 2 {
         let policy = repo.thread_policy();
@@ -1655,19 +1712,22 @@ fn remove_wholesale_directories_on_disk(
     Ok(wholesale_dirs_removed)
 }
 
+/// Merge one checkout pass into `index_mut` and, unless the caller defers it, write the index
+/// (committing `journal`).
 #[allow(clippy::too_many_arguments)]
 fn checkout_commit_index_update(
     repo: &Repository,
     index_mut: &mut Index,
     wholesale_dirs_removed: &BTreeSet<String>,
-    paths_to_remove: &[Vec<u8>],
+    mut paths_to_remove: Vec<Vec<u8>>,
     mut new_entries: Vec<IndexEntry>,
-    skip_worktree_rows: &[IndexEntry],
     bulk_index_rewrite: bool,
-    checkout_result_tree: Option<crate::objects::ObjectId>,
+    apply: &CheckoutApplyOptions,
     index_write: CheckoutIndexWrite<'_>,
+    journal: &mut CheckoutJournal,
 ) -> Result<()> {
-    new_entries.extend_from_slice(skip_worktree_rows);
+    new_entries.extend_from_slice(&apply.skip_worktree_rows);
+    paths_to_remove.extend_from_slice(&apply.sparse_removed_index_paths);
     let change_count = paths_to_remove.len() + new_entries.len();
     let pre_mtime_max = crate::index::stage0_mtime_max(&index_mut.entries);
     let new_mtime_max = crate::index::stage0_mtime_max(&new_entries);
@@ -1712,14 +1772,19 @@ fn checkout_commit_index_update(
         );
     }
     index_mut.ensure_canonical_order();
-    if let Some(tree) = checkout_result_tree {
+    if let Some(tree) = apply.checkout_result_tree {
         attach_checkout_result_cache_tree(repo, index_mut, &tree)?;
     }
     index_mut.defer_untracked_cache_invalidation = false;
     match index_write {
-        CheckoutIndexWrite::Commit(lock) => {
-            write_checkout_index(repo, index_mut, lock, bulk_index_rewrite, index_mtime_hint)
-        }
+        CheckoutIndexWrite::Commit(lock) => write_checkout_index(
+            repo,
+            index_mut,
+            lock,
+            bulk_index_rewrite,
+            index_mtime_hint,
+            journal,
+        ),
         CheckoutIndexWrite::Defer(lock) => {
             debug_assert!(!lock.committed, "deferred checkout needs a held index lock");
             Ok(())
@@ -1759,12 +1824,15 @@ fn attach_checkout_result_cache_tree(
 
 /// Write the index after a checkout, with fresh stat data trusted (no racy smudging), then
 /// move the index file mtime past the newest entry so later status checks stay fast.
+///
+/// Once the index is on disk the checkout is the repository state, so `journal` commits.
 fn write_checkout_index(
     repo: &Repository,
     index_mut: &mut Index,
     lock: &mut IndexLock,
     bulk_index_rewrite: bool,
     index_mtime_hint: Option<(u32, u32)>,
+    journal: &mut CheckoutJournal,
 ) -> Result<()> {
     let index_path = lock.index_path.clone();
     index_mut.suppress_pre_write_index_housekeeping = bulk_index_rewrite;
@@ -1773,6 +1841,7 @@ fn write_checkout_index(
     index_mut.skip_racy_smudge_on_write = false;
     index_mut.suppress_pre_write_index_housekeeping = false;
     result?;
+    journal.commit();
     crate::index::advance_index_file_mtime_past_entries(index_mut, &index_path, index_mtime_hint)?;
     index_mut.source_mtime = crate::index::index_file_mtime(&index_path);
     Ok(())
@@ -1780,16 +1849,17 @@ fn write_checkout_index(
 
 /// Split off the changes that sparse checkout keeps out of the work tree.
 ///
-/// Those paths get no work-tree I/O: deleted ones lose their index row here, and the others get
-/// a row in [`CheckoutApplyOptions::skip_worktree_rows`], which the index commit merges after any
-/// wholesale directory removal. The row has `skip-worktree` set unless the path is new to the
-/// index and a file already sits there: that file is left untouched and tracked, like Git.
-/// Returns the changes that still have to be applied to the work tree; when sparse checkout is
-/// off this is `changes` itself.
-fn apply_sparse_tree_changes_to_index<'a>(
+/// Those paths get no work-tree I/O. Deleted ones go to
+/// [`CheckoutApplyOptions::sparse_removed_index_paths`] and the others get a row in
+/// [`CheckoutApplyOptions::skip_worktree_rows`]; the index commit applies both after any
+/// wholesale directory removal, so a checkout that fails first leaves the index alone. The row
+/// has `skip-worktree` set unless the path is new to the index and a file already sits there:
+/// that file is left untouched and tracked, like Git. Returns the changes that still have to be
+/// applied to the work tree; when sparse checkout is off this is `changes` itself.
+fn split_sparse_tree_changes<'a>(
     sparse: Option<&SparseCheckout>,
     work_tree: &Path,
-    index: &mut Index,
+    index: &Index,
     changes: &'a [DiffEntry],
     apply: &mut CheckoutApplyOptions,
 ) -> Cow<'a, [DiffEntry]> {
@@ -1797,6 +1867,7 @@ fn apply_sparse_tree_changes_to_index<'a>(
         return Cow::Borrowed(changes);
     };
     apply.skip_worktree_rows.clear();
+    apply.sparse_removed_index_paths.clear();
     let skipped_path = |change: &'a DiffEntry| -> Option<&'a str> {
         let path = match change.status {
             DiffStatus::Deleted => change.old_path.as_deref(),
@@ -1812,14 +1883,15 @@ fn apply_sparse_tree_changes_to_index<'a>(
         return Cow::Borrowed(changes);
     }
     let mut worktree = Vec::with_capacity(changes.len());
-    let mut removed: Vec<Vec<u8>> = Vec::new();
     for (change, path) in changes.iter().zip(skipped) {
         let Some(path) = path else {
             worktree.push(change.clone());
             continue;
         };
         if change.status == DiffStatus::Deleted {
-            removed.push(checkout_stored_index_path_bytes(path));
+            apply
+                .sparse_removed_index_paths
+                .push(checkout_stored_index_path_bytes(path));
             continue;
         }
         let mut entry =
@@ -1829,13 +1901,6 @@ fn apply_sparse_tree_changes_to_index<'a>(
             && fs::symlink_metadata(checkout_stored_worktree_abs(work_tree, path)).is_ok();
         entry.set_skip_worktree(!untracked_file_present);
         apply.skip_worktree_rows.push(entry);
-    }
-    if !removed.is_empty() {
-        index.remove_prefixes_paths_and_insert(
-            &BTreeSet::new(),
-            removed.iter().map(Vec::as_slice),
-            Vec::new(),
-        );
     }
     Cow::Owned(worktree)
 }
@@ -1918,6 +1983,7 @@ fn checkout_bulk_added_tree_changes(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
     index_write: CheckoutIndexWrite<'_>,
+    journal: &mut CheckoutJournal,
 ) -> Result<()> {
     let checkout_smudge_ctx = crate::filter_process::checkout_smudge_context(repo);
     let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
@@ -1929,17 +1995,16 @@ fn checkout_bulk_added_tree_changes(
         };
         let mode = parse_git_mode(&change.new_mode);
         let file_attrs = rules.file_attrs(path, false);
-        write_jobs.push(CheckoutWriteJob {
-            path: path.to_owned(),
+        write_jobs.push(CheckoutWriteJob::new(
+            path.to_owned(),
             mode,
-            oid: change.new_oid,
             change,
             file_attrs,
-            smudge_meta: crate::filter_process::smudge_meta_for_checkout_blob(
+            crate::filter_process::smudge_meta_for_checkout_blob(
                 &checkout_smudge_ctx,
                 &change.new_oid.to_hex(),
             ),
-        });
+        ));
     }
     let write_paths: Vec<String> = write_jobs.iter().map(|j| j.path.clone()).collect();
     let serial_paths = paths_needing_serial_checkout(&write_paths, ignorecase, precompose);
@@ -1975,6 +2040,7 @@ fn checkout_bulk_added_tree_changes(
         apply.skip_parallel_write_ramp,
         progress,
         cancel,
+        journal,
     )?;
     let new_entries = finish_bulk_write_jobs(
         repo,
@@ -1990,18 +2056,20 @@ fn checkout_bulk_added_tree_changes(
             work_tree,
             &apply.preverified_wholesale_dirs,
             config,
+            journal,
         )?;
     }
+    crate::progress::poll_cancel(progress, cancel)?;
     checkout_commit_index_update(
         repo,
         index_mut,
         &apply.preverified_wholesale_dirs,
-        &[],
+        Vec::new(),
         new_entries,
-        &apply.skip_worktree_rows,
         true,
-        apply.checkout_result_tree,
+        &apply,
         index_write,
+        journal,
     )?;
     progress.finish();
     Ok(())
@@ -2021,9 +2089,10 @@ fn checkout_bulk_mod_delete_tree_changes(
     ignorecase: bool,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-    delete_rollback: SharedCheckoutDeleteRollback,
     index_write: CheckoutIndexWrite<'_>,
+    journal: &mut CheckoutJournal,
 ) -> Result<()> {
+    let delete_rollback = journal.shared();
     let index: &Index = index_mut;
     let delete_changes: Vec<&DiffEntry> = changes
         .iter()
@@ -2069,21 +2138,25 @@ fn checkout_bulk_mod_delete_tree_changes(
         };
         let mode = parse_git_mode(&change.new_mode);
         let file_attrs = rules.file_attrs(path, false);
-        write_jobs.push(CheckoutWriteJob {
-            path: path.to_owned(),
+        write_jobs.push(CheckoutWriteJob::new(
+            path.to_owned(),
             mode,
-            oid: change.new_oid,
             change,
             file_attrs,
-            smudge_meta: crate::filter_process::smudge_meta_for_checkout_blob(
+            crate::filter_process::smudge_meta_for_checkout_blob(
                 &checkout_smudge_ctx,
                 &change.new_oid.to_hex(),
             ),
-        });
+        ));
     }
 
-    let wholesale_dirs_removed =
-        remove_wholesale_directories_on_disk(repo, work_tree, wholesale_index_prefixes, config)?;
+    let wholesale_dirs_removed = remove_wholesale_directories_on_disk(
+        repo,
+        work_tree,
+        wholesale_index_prefixes,
+        config,
+        journal,
+    )?;
     let mut deleted_abs_paths: Vec<PathBuf> = wholesale_dirs_removed
         .iter()
         .map(|dir| work_tree.join(dir))
@@ -2126,11 +2199,9 @@ fn checkout_bulk_mod_delete_tree_changes(
             || !path_under_wholesale_directory(path, &wholesale_dirs_removed)
         {
             if old_mode == MODE_GITLINK {
-                let abs = checkout_stored_worktree_abs(work_tree, path);
-                remove_uninitialized_gitlink_worktree(&abs);
-                deleted_abs_paths.push(abs);
+                deleted_abs_paths.push(journal.remove_uninitialized_gitlink(path));
             } else if !parallel_deleted_paths.contains(path) {
-                remove_checkout_worktree_file(work_tree, path, &delete_rollback)?;
+                journal.spool_remove(path)?;
                 deleted_abs_paths.push(checkout_stored_worktree_abs(work_tree, path));
             }
         }
@@ -2178,6 +2249,7 @@ fn checkout_bulk_mod_delete_tree_changes(
         apply.skip_parallel_write_ramp,
         progress,
         cancel,
+        journal,
     )?;
     let new_entries = finish_bulk_write_jobs(
         repo,
@@ -2188,16 +2260,17 @@ fn checkout_bulk_mod_delete_tree_changes(
         write_outcomes,
     )?;
 
+    crate::progress::poll_cancel(progress, cancel)?;
     checkout_commit_index_update(
         repo,
         index_mut,
         wholesale_index_prefixes,
-        &paths_to_remove,
+        paths_to_remove,
         new_entries,
-        &apply.skip_worktree_rows,
         true,
-        apply.checkout_result_tree,
+        &apply,
         index_write,
+        journal,
     )?;
     progress.finish();
     Ok(())
@@ -2215,9 +2288,10 @@ fn checkout_bulk_deleted_tree_changes(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
     apply: &CheckoutApplyOptions,
-    delete_rollback: SharedCheckoutDeleteRollback,
     index_write: CheckoutIndexWrite<'_>,
+    journal: &mut CheckoutJournal,
 ) -> Result<()> {
+    let delete_rollback = journal.shared();
     let mut parallel_deleted_paths: HashSet<String> = HashSet::new();
     let mut per_file_deletes: Vec<String> = Vec::new();
     for change in changes {
@@ -2263,11 +2337,9 @@ fn checkout_bulk_deleted_tree_changes(
         if old_mode == MODE_GITLINK || !path_under_wholesale_directory(path, wholesale_dirs_removed)
         {
             if old_mode == MODE_GITLINK {
-                let abs = checkout_stored_worktree_abs(work_tree, path);
-                remove_uninitialized_gitlink_worktree(&abs);
-                deleted_abs_paths.push(abs);
+                deleted_abs_paths.push(journal.remove_uninitialized_gitlink(path));
             } else if !parallel_deleted_paths.contains(path) {
-                remove_checkout_worktree_file(work_tree, path, &delete_rollback)?;
+                journal.spool_remove(path)?;
                 deleted_abs_paths.push(checkout_stored_worktree_abs(work_tree, path));
             }
         }
@@ -2280,16 +2352,17 @@ fn checkout_bulk_deleted_tree_changes(
         }
     }
     remove_empty_parent_dirs_batch(work_tree, deleted_abs_paths);
+    crate::progress::poll_cancel(progress, cancel)?;
     checkout_commit_index_update(
         repo,
         index_mut,
         wholesale_index_prefixes,
-        &paths_to_remove,
+        paths_to_remove,
         Vec::new(),
-        &apply.skip_worktree_rows,
         true,
-        apply.checkout_result_tree,
+        apply,
         index_write,
+        journal,
     )?;
     progress.finish();
     Ok(())
@@ -2335,6 +2408,10 @@ fn prefetch_promisor_blobs(
     repo.prefetch_promised(&missing)
 }
 
+/// Apply `changes` to the work tree and index as one pass that is undone on failure.
+///
+/// On any error before the index reaches disk, including [`Error::Cancelled`], the work tree is
+/// put back as it was (see [`CheckoutJournal`]).
 #[allow(clippy::too_many_arguments)]
 fn checkout_tree_changes_with_progress(
     repo: &Repository,
@@ -2346,13 +2423,9 @@ fn checkout_tree_changes_with_progress(
     attribute_changes: Option<&[DiffEntry]>,
     index_write: CheckoutIndexWrite<'_>,
 ) -> Result<()> {
-    let mut progress = CancelProgress::new(progress, cancel);
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
-    let mut delete_guard = CheckoutDeleteGuard::new(work_tree.to_path_buf())?;
-    let delete_rollback = delete_guard.shared();
-
     let mut loaded_index;
     let index_mut: &mut Index = if let Some(index) = reuse_index {
         index
@@ -2360,6 +2433,41 @@ fn checkout_tree_changes_with_progress(
         loaded_index = repo.load_index()?;
         &mut loaded_index
     };
+    let mut journal = CheckoutJournal::new(work_tree)?;
+    let result = apply_tree_changes(
+        repo,
+        changes,
+        progress,
+        cancel,
+        index_mut,
+        apply,
+        attribute_changes,
+        index_write,
+        &mut journal,
+    );
+    journal.finish(repo, result)
+}
+
+/// Body of [`checkout_tree_changes_with_progress`], recording work-tree changes in `journal`.
+///
+/// Callers that run several passes before writing the index share one journal across them.
+#[allow(clippy::too_many_arguments)]
+fn apply_tree_changes(
+    repo: &Repository,
+    changes: &[DiffEntry],
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+    index_mut: &mut Index,
+    apply: CheckoutApplyOptions,
+    attribute_changes: Option<&[DiffEntry]>,
+    index_write: CheckoutIndexWrite<'_>,
+    journal: &mut CheckoutJournal,
+) -> Result<()> {
+    let mut progress = CancelProgress::new(progress, cancel);
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
+    let delete_rollback = journal.shared();
     let config = repo.config()?;
     let protect = ProtectOptions::from_config(config.as_ref());
     validate_diff_changes_for_worktree(changes, protect)?;
@@ -2369,13 +2477,8 @@ fn checkout_tree_changes_with_progress(
     } else {
         SparseCheckout::load(repo)?
     };
-    let worktree_changes = apply_sparse_tree_changes_to_index(
-        sparse.as_ref(),
-        work_tree,
-        index_mut,
-        changes,
-        &mut apply,
-    );
+    let worktree_changes =
+        split_sparse_tree_changes(sparse.as_ref(), work_tree, index_mut, changes, &mut apply);
     let changes: &[DiffEntry] = &worktree_changes;
 
     prefetch_promisor_blobs_for_checkout(repo, changes)?;
@@ -2420,11 +2523,10 @@ fn checkout_tree_changes_with_progress(
                 ignorecase,
                 &mut progress,
                 cancel,
-                delete_rollback.clone_handle(),
                 index_write,
+                journal,
             )?;
-            delete_guard.commit_success();
-            return progress.finish_poll();
+            return Ok(());
         }
         if bulk_write_checkout_eligible(changes, bulk_rules)
             && (tree_changes_are_all_additions(changes)
@@ -2444,9 +2546,9 @@ fn checkout_tree_changes_with_progress(
                 &mut progress,
                 cancel,
                 index_write,
+                journal,
             )?;
-            delete_guard.commit_success();
-            return progress.finish_poll();
+            return Ok(());
         }
         if changes.len() >= BULK_DELETE_CHECKOUT_MIN && tree_changes_are_all_deletions(changes) {
             let index: &Index = index_mut;
@@ -2489,6 +2591,7 @@ fn checkout_tree_changes_with_progress(
                     options,
                     &mut progress,
                     cancel,
+                    journal,
                 )? {
                     wholesale_dirs_removed.insert(dir);
                     deleted_abs_paths.push(abs);
@@ -2505,11 +2608,10 @@ fn checkout_tree_changes_with_progress(
                 &mut progress,
                 cancel,
                 &apply,
-                delete_rollback.clone_handle(),
                 index_write,
+                journal,
             )?;
-            delete_guard.commit_success();
-            return progress.finish_poll();
+            return Ok(());
         }
     }
 
@@ -2566,6 +2668,7 @@ fn checkout_tree_changes_with_progress(
             options,
             &mut progress,
             cancel,
+            journal,
         )? {
             wholesale_dirs_removed.insert(dir);
             deleted_abs_paths.push(abs);
@@ -2614,11 +2717,9 @@ fn checkout_tree_changes_with_progress(
                         || !path_under_wholesale_directory(path, &wholesale_dirs_removed)
                     {
                         if old_mode == MODE_GITLINK {
-                            let abs = checkout_stored_worktree_abs(work_tree, path);
-                            remove_uninitialized_gitlink_worktree(&abs);
-                            deleted_abs_paths.push(abs);
+                            deleted_abs_paths.push(journal.remove_uninitialized_gitlink(path));
                         } else if !parallel_deleted_paths.contains(path) {
-                            remove_checkout_worktree_file(work_tree, path, &delete_rollback)?;
+                            journal.spool_remove(path)?;
                             deleted_abs_paths.push(checkout_stored_worktree_abs(work_tree, path));
                         }
                     }
@@ -2673,6 +2774,7 @@ fn checkout_tree_changes_with_progress(
                         continue;
                     }
                 }
+                journal.record_write(change);
                 materialize_gitlink_worktree(work_tree, path, &mut dir_cache)?;
                 let mut entry = entry_from_stat(&abs, &index_path, change.new_oid, MODE_GITLINK)?;
                 entry.size = 0;
@@ -2711,14 +2813,13 @@ fn checkout_tree_changes_with_progress(
                 &checkout_smudge_ctx,
                 &change.new_oid.to_hex(),
             );
-            write_jobs.push(CheckoutWriteJob {
-                path: path.clone(),
+            write_jobs.push(CheckoutWriteJob::new(
+                path.clone(),
                 mode,
-                oid: change.new_oid,
                 change,
                 file_attrs,
                 smudge_meta,
-            });
+            ));
             plan.push(CheckoutPlanSlot::Write);
         }
     }
@@ -2768,6 +2869,7 @@ fn checkout_tree_changes_with_progress(
             apply.skip_parallel_write_ramp,
             &mut progress,
             cancel,
+            journal,
         )?
     };
 
@@ -2809,20 +2911,20 @@ fn checkout_tree_changes_with_progress(
     remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
     drop(rules);
     let bulk_index_rewrite = changes.len() >= BULK_INDEX_REWRITE_MIN;
+    crate::progress::poll_cancel(&mut progress, cancel)?;
     checkout_commit_index_update(
         repo,
         index_mut,
         &wholesale_dirs_removed,
-        &paths_to_remove,
+        paths_to_remove,
         new_entries,
-        &apply.skip_worktree_rows,
         bulk_index_rewrite,
-        apply.checkout_result_tree,
+        &apply,
         index_write,
+        journal,
     )?;
     progress.finish();
-    delete_guard.commit_success();
-    progress.finish_poll()
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -3998,16 +4100,18 @@ mod tests {
         let capacity = index.entries.capacity();
         let untouched = index.get(b"f099", 0).expect("untouched").clone();
         let lock = repo.lock_index().expect("lock");
+        let mut journal =
+            CheckoutJournal::new(repo.work_tree().expect("work tree")).expect("journal");
         checkout_commit_index_update(
             &repo,
             &mut index,
             &BTreeSet::new(),
-            &[],
+            Vec::new(),
             vec![prospective_index_entry("f000", changed, MODE_REGULAR)],
-            &[],
             true,
-            None,
+            &CheckoutApplyOptions::default(),
             CheckoutIndexWrite::Defer(&lock),
+            &mut journal,
         )
         .expect("update");
         assert_eq!(index.entries.len(), 100);

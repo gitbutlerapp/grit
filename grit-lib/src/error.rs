@@ -1403,6 +1403,20 @@ pub enum Error {
     #[error("operation cancelled")]
     Cancelled,
 
+    /// A checkout failed or was cancelled before it finished, and putting the work tree back
+    /// failed for some paths.
+    ///
+    /// Refs and the index are unchanged, as after any failed checkout; only `unrestored`
+    /// differ from the index. Use [`Error::is_cancelled`] to see whether `source` was a
+    /// cancellation.
+    #[error("{source}; {} work-tree path(s) could not be restored", unrestored.len())]
+    CheckoutRollbackIncomplete {
+        /// Why the checkout stopped.
+        source: Box<Error>,
+        /// Repository-relative paths left different from the index (sorted, deduplicated).
+        unrestored: Vec<String>,
+    },
+
     /// No usable author or committer identity is configured
     /// ([`crate::repo::Repository::identity`]).
     #[error(transparent)]
@@ -1845,6 +1859,7 @@ impl Error {
         match self {
             Self::Cancelled => true,
             Self::History(e) => e.is_cancelled(),
+            Self::CheckoutRollbackIncomplete { source, .. } => source.is_cancelled(),
             _ => false,
         }
     }
