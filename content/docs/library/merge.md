@@ -9,6 +9,8 @@ Merge **orchestration** (sequencer state, hooks, editors, messages) stays in `gr
 - [`diff::merge_trees`](rustdoc:grit_lib::diff::merge_trees) — rename-aware three-way tree merge ([`merge_trees_three_way`](rustdoc:grit_lib::diff::merge_trees::merge_trees_three_way)), conflict-marker blobs, and [`TreeMergeOutput`](rustdoc:grit_lib::diff::merge_trees::TreeMergeOutput).
 - [`porcelain::merge`](rustdoc:grit_lib::porcelain::merge) — fast-forward/octopus index composition, [`predict_merge`](rustdoc:grit_lib::porcelain::merge::predict_merge) (in-memory conflict check via the ODB overlay), [`write_merge_tree`](rustdoc:grit_lib::porcelain::merge::write_merge_tree) (stored merge tree), and checkout helpers the CLI calls.
 
+When two commits have several merge bases (criss-cross history), [`predict_merge`](rustdoc:grit_lib::porcelain::merge::predict_merge), [`write_merge_tree`](rustdoc:grit_lib::porcelain::merge::write_merge_tree) and [`integrate_branch`](rustdoc:grit_lib::porcelain::merge::integrate_branch) merge the bases into one virtual base and merge against that, as Git's recursive and ort strategies do. The bases are taken oldest first, in the order [`merge_bases_all`](rustdoc:grit_lib::revwalk::merge_base::merge_bases_all) reports them (equal commit dates keep Git's order). Content conflicts between the bases stay in the virtual base as nested conflict markers. Binary, modify/delete and symlink conflicts keep the older version, and the caller's `MergeFavor` applies only to the final merge. A single merge base is a plain three-way merge. `merge_trees_three_way` itself always takes one explicit base tree.
+
 Pass explicit [`MergeFavor`](rustdoc:grit_lib::diff::merge_file::MergeFavor) and [`WhitespaceMergeOptions`](rustdoc:grit_lib::diff::merge_trees::WhitespaceMergeOptions) into tree merges; pass identity and timestamps into commit-writing porcelain.
 
 ## Predicting versus writing a merge
@@ -22,7 +24,7 @@ Both functions take two commits and [`MergePredictionOptions`](rustdoc:grit_lib:
 
 The tree id in [`MergePrediction::Clean`](rustdoc:grit_lib::porcelain::merge::MergePrediction) is the id `git merge-tree --write-tree` prints, but the tree is **not stored**: committing, diffing or reading it fails with `ObjectNotFound`. Use `predict_merge` to answer "would this merge cleanly?" cheaply (merge queues, `grit merge --check`). Use `write_merge_tree` when you need the result itself: it is the library form of `git merge-tree --write-tree`. A clean result can be committed straight away with `NewCommit::new(tree, ..).with_parents(vec![ours, theirs])`. On conflicts the stored tree holds conflict markers in the conflicted files, and [`WrittenMergeTree::stages`](rustdoc:grit_lib::porcelain::merge::WrittenMergeTree) lists the `mode`, `oid`, `stage` and `path` rows Git prints after the tree id. Set `ours_label` and `theirs_label` to choose the conflict-marker labels.
 
-`write_merge_tree` always merges (the fast-forward option is ignored), uses the first merge base when there are several, and refuses commits with no common ancestor with `Error::UnrelatedHistories` unless `allow_unrelated_histories` is set.
+`write_merge_tree` always merges (the fast-forward option is ignored), merges several merge bases into a virtual base first (stage 1 entries then come from it, as with `git merge-tree`), and refuses commits with no common ancestor with `Error::UnrelatedHistories` unless `allow_unrelated_histories` is set.
 
 ## Directory renames
 

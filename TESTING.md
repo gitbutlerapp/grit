@@ -593,7 +593,7 @@ Shared harness: [`grit-lib/tests/support/diff_harness.rs`](grit-lib/tests/suppor
 | t6425-merge-rename-delete.sh | rename/delete | `merge_ort_git_compat.rs` (`t6422_rename_corner_cases_match_git_merge_tree`) | partial |
 | t6427-diff3-conflict-markers.sh | diff3 / zdiff3 markers | `merge_file_git_compat.rs` (`t6427_diff3_and_zdiff3_markers_match_git_merge_file`) | covered |
 | t6423-merge-rename-detection.sh | directory rename detection | — | gap (directory renames not implemented in merge-ort path) |
-| t6401/t6404/t6431 | criss-cross / virtual merge bases | — | gap (virtual bases not implemented) |
+| t6401/t6404/t6431 | criss-cross / virtual merge bases | `merge_ort_git_compat.rs` (`t6401_criss_cross_merge_matches_git`, `t6404_recursive_merge_matches_git`, `t6431_criss_cross_rename_delete_matches_git`, `criss_cross_*_matches_git`); `merge_check_git_compat.rs` (`criss_cross_*`) | partial (rename/rename and directory/file conflicts between the merge bases are not settled the way Git's inner merges are) |
 | t4301-merge-tree-write-tree.sh | `--write-tree` oracle | `merge_ort_git_compat.rs` (`t4301_merge_tree_write_tree_clean_merge_matches_git`) | covered |
 | t7603 | octopus parent reduction | `grit-lib/src/porcelain/merge.rs` (`reduce_octopus_merge_heads_drops_ancestor`) | covered |
 | — | cherry-pick tree vs `git cherry-pick --no-commit` | `merge_ort_git_compat.rs` (`cherry_pick_tree_remap_matches_git`) | covered |
