@@ -28,6 +28,7 @@
 //! - [`resolve_merge_source`] — turn a merge argument (branch, tag, object id or any
 //!   revision expression) into the commit to merge.
 
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -42,13 +43,14 @@ use crate::ident::{parse_signature_times, Signature};
 use crate::ident_resolve::{resolve_loose_committer_identity_with, IdentRole};
 use crate::index::{Index, IndexEntry};
 use crate::merge_base::{
-    is_ancestor, merge_bases_first_vs_rest, walk_commits_reachable_excluding_ancestors_of,
-    ReachableWalkLimit,
+    is_ancestor, merge_bases_all, merge_bases_all_vs_union,
+    walk_commits_reachable_excluding_ancestors_of, ReachableWalkLimit,
 };
 use crate::merge_file::{ConflictStyle, MergeFavor};
 use crate::merge_trees::{
-    apply_tree_merge_output_to_index, materialized_merge_result_tree, merge_trees_three_way,
-    DirectoryRenameMode, TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
+    apply_tree_merge_output_to_index, materialized_merge_result_tree, merge_trees_at_depth,
+    merge_trees_three_way, DirectoryRenameMode, MergeTreeCache, TheirsConflictLabel,
+    TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::operation::{conflicts_from_tree_merge, tree_merge_has_conflicts, Conflict};
@@ -409,6 +411,8 @@ pub enum MergePrediction {
 /// Object writes from the merge are routed through the ODB in-memory overlay and
 /// discarded before return, so the on-disk object store is unchanged. That includes the
 /// tree reported by [`MergePrediction::Clean`]; call [`write_merge_tree`] to store it.
+/// With several merge bases the prediction merges them into a virtual base first, exactly
+/// as [`write_merge_tree`] and [`integrate_branch`] do, so they cannot disagree.
 ///
 /// # Errors
 ///
@@ -427,13 +431,12 @@ pub fn predict_merge(
         return Ok(MergePrediction::FastForward);
     }
 
-    let Some(base_oid) = first_merge_base(repo, into_oid, other_oid)? else {
+    let _overlay = MemOverlayGuard::enter(repo.odb());
+    let Some(base) = merge_base_for_commits(repo, into_oid, other_oid, options.whitespace, None)?
+    else {
         return Ok(MergePrediction::Unrelated);
     };
-    let base_tree = repo.odb().commit_tree(&base_oid)?;
-
-    let _overlay = MemOverlayGuard::enter(repo.odb());
-    let merged = merge_commit_trees(repo, base_tree, into_oid, other_oid, options)?;
+    let merged = merge_commit_trees(repo, &base, into_oid, other_oid, options)?;
     if tree_merge_has_conflicts(&merged) {
         return Ok(MergePrediction::Conflicts {
             conflicts: conflicts_from_tree_merge(&merged),
@@ -489,7 +492,9 @@ impl WrittenMergeTree {
 ///
 /// A merge is always computed: [`MergePredictionOptions::allow_fast_forward`] is ignored, and
 /// when one commit contains the other the result is the newer commit's tree. With several merge
-/// bases (criss-cross history) the first one is used, as in [`predict_merge`]. When `options`
+/// bases (criss-cross history) they are merged into one virtual base first, as in
+/// [`predict_merge`] and `git merge-tree`; stage 1 entries then come from that virtual base and
+/// its blobs and trees are stored too. When `options`
 /// allows unrelated histories, a missing merge base is treated as the empty tree. If the
 /// repository handle already has an in-memory write overlay active, the new objects stay in
 /// that outer overlay instead of being written to disk.
@@ -512,9 +517,9 @@ pub fn write_merge_tree(
     other_oid: ObjectId,
     options: &MergePredictionOptions,
 ) -> Result<WrittenMergeTree> {
-    let base_tree = match first_merge_base(repo, into_oid, other_oid)? {
-        Some(base_oid) => repo.odb().commit_tree(&base_oid)?,
-        None if options.allow_unrelated_histories => repo.odb().empty_tree_oid()?,
+    let base = match merge_base_for_commits(repo, into_oid, other_oid, options.whitespace, None)? {
+        Some(base) => base,
+        None if options.allow_unrelated_histories => MergeBase::empty(repo)?,
         None => {
             return Err(Error::UnrelatedHistories {
                 ours: into_oid,
@@ -523,7 +528,7 @@ pub fn write_merge_tree(
         }
     };
 
-    let merged = merge_commit_trees(repo, base_tree, into_oid, other_oid, options)?;
+    let merged = merge_commit_trees(repo, &base, into_oid, other_oid, options)?;
     let tree = materialized_merge_result_tree(repo.odb(), &merged)?;
 
     let stages = merged
@@ -545,21 +550,11 @@ pub fn write_merge_tree(
     })
 }
 
-fn first_merge_base(
-    repo: &Repository,
-    into_oid: ObjectId,
-    other_oid: ObjectId,
-) -> Result<Option<ObjectId>> {
-    Ok(merge_bases_first_vs_rest(repo, into_oid, &[other_oid])?
-        .into_iter()
-        .next())
-}
-
-/// Three-way merge the trees of `into_oid` and `other_oid` over `base_tree`, labelling conflicts
+/// Three-way merge the trees of `into_oid` and `other_oid` over `base`, labelling conflicts
 /// from `options`. New objects go wherever the ODB currently writes (disk, or an active overlay).
 fn merge_commit_trees(
     repo: &Repository,
-    base_tree: ObjectId,
+    base: &MergeBase,
     into_oid: ObjectId,
     other_oid: ObjectId,
     options: &MergePredictionOptions,
@@ -569,13 +564,14 @@ fn merge_commit_trees(
     let presentation = TreeMergeConflictPresentation {
         label_ours: &options.ours_label,
         label_theirs: crate::merge_trees::TheirsConflictLabel::Fixed(&options.theirs_label),
+        label_base: &base.label,
         df_directory_ours_commit: Some(into_oid),
         df_directory_theirs_commit: Some(other_oid),
         ..TreeMergeConflictPresentation::default()
     };
     merge_trees_three_way(
         repo,
-        base_tree,
+        base.tree,
         into_tree,
         other_tree,
         options.favor,
@@ -790,6 +786,110 @@ impl Drop for MemOverlayGuard<'_> {
     }
 }
 
+/// The tree a merge of two commits uses as its base, and the name conflict markers give it.
+pub(crate) struct MergeBase {
+    /// Base tree: the merge base's tree, or a virtual tree when there are several merge bases.
+    pub(crate) tree: ObjectId,
+    /// Ancestor label: the abbreviated merge base, `merged common ancestors` or `empty tree`.
+    pub(crate) label: Cow<'static, str>,
+}
+
+impl MergeBase {
+    /// The empty tree, used when histories are unrelated.
+    fn empty(repo: &Repository) -> Result<Self> {
+        Ok(Self {
+            tree: empty_tree_oid(repo)?,
+            label: Cow::Borrowed("empty tree"),
+        })
+    }
+}
+
+/// Base for merging the commits `ours` and `theirs`, or `None` when they share no history.
+///
+/// One merge base is used as is. Several (criss-cross history) are merged into one virtual
+/// base the way Git's recursive strategies do, so the outcome does not depend on which of the
+/// equally good bases is listed first: the bases are taken oldest first (the reverse of
+/// [`merge_bases_all`]), and each next base is merged into the running result with the merge
+/// bases of the two as its own (recursively virtual) base. Inner merges never apply the
+/// caller's ours/theirs preference; their content conflicts stay in the virtual tree as
+/// markers labelled `Temporary merge branch 1` / `Temporary merge branch 2`, in `style`
+/// (read from config when `None`). Blobs and trees of the virtual base are written to the
+/// object database like any merge result.
+pub(crate) fn merge_base_for_commits(
+    repo: &Repository,
+    ours: ObjectId,
+    theirs: ObjectId,
+    ws: WhitespaceMergeOptions,
+    style: Option<ConflictStyle>,
+) -> Result<Option<MergeBase>> {
+    let mut bases = merge_bases_all(repo, &[ours, theirs])?;
+    match bases.as_slice() {
+        [] => return Ok(None),
+        [single] => return single_merge_base(repo, *single).map(Some),
+        _ => {}
+    }
+    bases.reverse();
+    let style = style.unwrap_or_else(|| conflict_style_from_config(repo));
+    merge_bases_into_one(repo, &bases, 1, ws, style).map(Some)
+}
+
+fn single_merge_base(repo: &Repository, base: ObjectId) -> Result<MergeBase> {
+    Ok(MergeBase {
+        tree: repo.odb().commit_tree(&base)?,
+        label: Cow::Owned(crate::commit_pretty::abbrev_hex(&base, 7)),
+    })
+}
+
+/// Fold `bases` (oldest first) into one base tree; the merges run at `call_depth`.
+fn merge_bases_into_one(
+    repo: &Repository,
+    bases: &[ObjectId],
+    call_depth: usize,
+    ws: WhitespaceMergeOptions,
+    style: ConflictStyle,
+) -> Result<MergeBase> {
+    let Some((&first, rest)) = bases.split_first() else {
+        return MergeBase::empty(repo);
+    };
+    if rest.is_empty() {
+        return single_merge_base(repo, first);
+    }
+    let mut tree = repo.odb().commit_tree(&first)?;
+    // The virtual commit's history is the union of the histories of every base folded so far.
+    let mut folded = vec![first];
+    for &next in rest {
+        let mut inner_bases = merge_bases_all_vs_union(repo, next, &folded)?;
+        inner_bases.reverse();
+        let inner_base = merge_bases_into_one(repo, &inner_bases, call_depth + 1, ws, style)?;
+        let presentation = TreeMergeConflictPresentation {
+            label_ours: "Temporary merge branch 1",
+            label_theirs: TheirsConflictLabel::Fixed("Temporary merge branch 2"),
+            label_base: &inner_base.label,
+            style,
+            ..TreeMergeConflictPresentation::default()
+        };
+        let merged = merge_trees_at_depth(
+            repo,
+            &mut MergeTreeCache::default(),
+            inner_base.tree,
+            tree,
+            repo.odb().commit_tree(&next)?,
+            MergeFavor::None,
+            ws,
+            None,
+            presentation,
+            DirectoryRenameMode::Off,
+            call_depth,
+        )?;
+        tree = materialized_merge_result_tree(repo.odb(), &merged)?;
+        folded.push(next);
+    }
+    Ok(MergeBase {
+        tree,
+        label: Cow::Borrowed("merged common ancestors"),
+    })
+}
+
 impl From<IntegrateBranchOptions> for MergeOptions {
     fn from(options: IntegrateBranchOptions) -> Self {
         Self {
@@ -840,6 +940,10 @@ pub enum IntegrateBranchOutcome {
 /// On success without conflicts, updates the branch ref, index, and worktree. On
 /// conflicts, records `MERGE_HEAD` / `ORIG_HEAD` / `MERGE_MSG`, writes conflict
 /// markers and a partially merged index, and leaves the branch ref unchanged.
+///
+/// When the commits have several merge bases (criss-cross history), the bases are first
+/// merged into one virtual base, like Git's recursive strategies; stage 1 of a conflicted
+/// path then holds the virtual base's version.
 ///
 /// The work-tree update reports [`crate::progress::ProgressPhase::CheckingOutFiles`] to
 /// `progress`. `cancel` (or [`ProgressSink::should_cancel`]) is checked before the work tree is
@@ -987,26 +1091,21 @@ fn integrate_branch_without_hooks(
         });
     }
 
-    let merge_base = merge_bases_first_vs_rest(repo, into_oid, &[other_oid])?;
-    let label_base = if let Some(base_oid) = merge_base.first().copied() {
-        crate::commit_pretty::abbrev_hex(&base_oid, 7)
-    } else if options.allow_unrelated {
-        "empty tree".to_owned()
-    } else {
-        return Err(Error::Message(format!(
-            "'{label}' has no common history with the current branch"
-        )));
-    };
-    let base_tree = if let Some(base_oid) = merge_base.into_iter().next() {
-        repo.odb().commit_tree(&base_oid)?
-    } else {
-        empty_tree_oid(repo)?
+    let style = resolve_merge_conflict_style(repo, options.conflict_style);
+    let ws = WhitespaceMergeOptions::default();
+    let base = match merge_base_for_commits(repo, into_oid, other_oid, ws, Some(style))? {
+        Some(base) => base,
+        None if options.allow_unrelated => MergeBase::empty(repo)?,
+        None => {
+            return Err(Error::Message(format!(
+                "'{label}' has no common history with the current branch"
+            )));
+        }
     };
 
-    let style = resolve_merge_conflict_style(repo, options.conflict_style);
     let presentation = TreeMergeConflictPresentation {
         label_theirs: crate::merge_trees::TheirsConflictLabel::Fixed(label),
-        label_base: &label_base,
+        label_base: &base.label,
         df_directory_ours_commit: Some(into_oid),
         df_directory_theirs_commit: Some(other_oid),
         style,
@@ -1014,11 +1113,11 @@ fn integrate_branch_without_hooks(
     };
     let merged = merge_trees_three_way(
         repo,
-        base_tree,
+        base.tree,
         into_tree,
         other_tree,
         options.favor,
-        WhitespaceMergeOptions::default(),
+        ws,
         None,
         presentation,
         resolve_directory_renames(repo, options.directory_renames)?,

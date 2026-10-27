@@ -19,8 +19,9 @@ use grit_test_support::{git, git_cmd};
 use time::OffsetDateTime;
 
 use support::{
-    assert_git_fsck_strict, git_merge_tree_oracle, git_merge_tree_oracle_with_options,
-    git_version_at_least, GitUnmergedRow,
+    assert_git_fsck_strict, criss_cross_conflicting_resolutions, criss_cross_repo,
+    git_merge_tree_oracle, git_merge_tree_oracle_with_options, git_version_at_least,
+    CrissCrossSpec, GitMergeTreeOracle, GitUnmergedRow,
 };
 fn grit_repo(root: &Path) -> Repository {
     Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open grit repo")
@@ -614,4 +615,208 @@ fn issue_2259_predict_and_write_merge_tree_match_git() {
         rows, oracle.unmerged,
         "unmerged index stages must match git merge-tree"
     );
+}
+
+/// Assert `predict_merge` agrees with `git merge-tree --write-tree` (no `--merge-base`, so git
+/// builds the virtual merge base itself): same tree when clean, same paths when conflicted.
+fn assert_prediction_matches_git(
+    root: &Path,
+    ours: ObjectId,
+    theirs: ObjectId,
+    favor: MergeFavor,
+) -> MergePrediction {
+    let oracle: GitMergeTreeOracle = git_merge_tree_oracle(root, None, &ours, &theirs, favor);
+    let repo = grit_repo(root);
+    let options = MergePredictionOptions {
+        favor,
+        ..MergePredictionOptions::default()
+    };
+    let prediction = predict_merge(&repo, ours, theirs, &options).expect("predict_merge");
+    match &prediction {
+        MergePrediction::Clean { tree } => {
+            assert!(
+                oracle.unmerged.is_empty(),
+                "git reports conflicts but grit predicted a clean merge:\n{}",
+                oracle.stdout
+            );
+            assert_eq!(*tree, oracle.result_tree, "clean tree must match git");
+        }
+        MergePrediction::Conflicts { conflicts } => {
+            let grit_paths: Vec<&str> = conflicts.iter().map(|c| c.path.as_str()).collect();
+            let git_paths: Vec<&str> = oracle
+                .unmerged
+                .iter()
+                .map(|r| r.path.as_str())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            assert_eq!(grit_paths, git_paths, "conflicted paths must match git");
+        }
+        other => panic!("expected a three-way prediction, got {other:?}"),
+    }
+    prediction
+}
+
+#[test]
+fn criss_cross_conflicting_resolutions_predict_conflicts_both_directions() {
+    if !git_version_at_least(2, 38) {
+        eprintln!("SKIP: git merge-tree --write-tree requires git >= 2.38");
+        return;
+    }
+    let cc = criss_cross_conflicting_resolutions();
+    for (ours, theirs) in [(cc.ours, cc.theirs), (cc.theirs, cc.ours)] {
+        let prediction =
+            assert_prediction_matches_git(cc.dir.path(), ours, theirs, MergeFavor::None);
+        assert!(
+            matches!(prediction, MergePrediction::Conflicts { .. }),
+            "two different resolutions of the same conflict must conflict, got {prediction:?}"
+        );
+    }
+}
+
+#[test]
+fn criss_cross_outer_favor_matches_git() {
+    if !git_version_at_least(2, 38) {
+        eprintln!("SKIP: git merge-tree --write-tree requires git >= 2.38");
+        return;
+    }
+    let cc = criss_cross_conflicting_resolutions();
+    for favor in [MergeFavor::Ours, MergeFavor::Theirs] {
+        let prediction = assert_prediction_matches_git(cc.dir.path(), cc.ours, cc.theirs, favor);
+        assert!(
+            matches!(prediction, MergePrediction::Clean { .. }),
+            "-X on the outer merge resolves the conflict, got {prediction:?}"
+        );
+    }
+}
+
+#[test]
+fn criss_cross_same_resolution_predicts_clean_git_tree() {
+    if !git_version_at_least(2, 38) {
+        eprintln!("SKIP: git merge-tree --write-tree requires git >= 2.38");
+        return;
+    }
+    let root_spec = CrissCrossSpec {
+        file: "f",
+        base: "1\n",
+        a1: "2\n",
+        b1: "3\n",
+        ours_resolution: Some("ours"),
+        theirs_resolution: Some("theirs"),
+        ours_after: None,
+        theirs_after: None,
+    };
+    let cc = criss_cross_repo(&root_spec);
+    let root = cc.dir.path();
+    // Give each side an unrelated change so the merge is not trivially one tree.
+    fs::write(root.join("g"), "ours only\n").expect("write g");
+    git(root, &["add", "g"]);
+    git(root, &["commit", "-q", "-m", "ours adds g"]);
+    let ours: ObjectId = git(root, &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .expect("ours");
+    for (a, b) in [(ours, cc.theirs), (cc.theirs, ours)] {
+        let prediction = assert_prediction_matches_git(root, a, b, MergeFavor::None);
+        assert!(
+            matches!(prediction, MergePrediction::Clean { .. }),
+            "both sides picked the same resolution, got {prediction:?}"
+        );
+    }
+}
+
+#[test]
+fn criss_cross_non_overlapping_edits_match_git() {
+    if !git_version_at_least(2, 38) {
+        eprintln!("SKIP: git merge-tree --write-tree requires git >= 2.38");
+        return;
+    }
+    let lines = |edits: &[(usize, &str)]| -> String {
+        (1..=10)
+            .map(|n| {
+                edits
+                    .iter()
+                    .find(|(line, _)| *line == n)
+                    .map_or_else(|| format!("{n}\n"), |(_, text)| format!("{text}\n"))
+            })
+            .collect()
+    };
+    let base = lines(&[]);
+    let a1 = lines(&[(2, "two from a1")]);
+    let b1 = lines(&[(9, "nine from b1")]);
+    let ours_after = lines(&[(2, "two from a1"), (9, "nine from b1"), (5, "five ours")]);
+    let theirs_after = lines(&[(2, "two from a1"), (9, "nine from b1"), (6, "six theirs")]);
+    let cc = criss_cross_repo(&CrissCrossSpec {
+        file: "f",
+        base: &base,
+        a1: &a1,
+        b1: &b1,
+        ours_resolution: None,
+        theirs_resolution: None,
+        ours_after: Some(&ours_after),
+        theirs_after: Some(&theirs_after),
+    });
+    for (ours, theirs) in [(cc.ours, cc.theirs), (cc.theirs, cc.ours)] {
+        assert_prediction_matches_git(cc.dir.path(), ours, theirs, MergeFavor::None);
+    }
+}
+
+#[test]
+fn criss_cross_prediction_writes_no_objects() {
+    if !git_version_at_least(2, 38) {
+        eprintln!("SKIP: git merge-tree --write-tree requires git >= 2.38");
+        return;
+    }
+    let cc = criss_cross_conflicting_resolutions();
+    let repo = grit_repo(cc.dir.path());
+    let loose_before = count_loose_objects(repo.git_dir());
+    predict_merge(
+        &repo,
+        cc.ours,
+        cc.theirs,
+        &MergePredictionOptions::default(),
+    )
+    .expect("predict");
+    assert_eq!(
+        count_loose_objects(repo.git_dir()),
+        loose_before,
+        "the virtual merge base must stay in memory"
+    );
+}
+
+#[test]
+fn write_merge_tree_criss_cross_matches_git_merge_tree() {
+    if !git_version_at_least(2, 38) {
+        eprintln!("SKIP: git merge-tree --write-tree requires git >= 2.38");
+        return;
+    }
+    let cc = criss_cross_conflicting_resolutions();
+    let root = cc.dir.path();
+    let repo = grit_repo(root);
+    for (ours, theirs) in [(cc.ours, cc.theirs), (cc.theirs, cc.ours)] {
+        let options = MergePredictionOptions {
+            ours_label: ours.to_hex(),
+            theirs_label: theirs.to_hex(),
+            ..MergePredictionOptions::default()
+        };
+        let written = write_merge_tree(&repo, ours, theirs, &options).expect("write_merge_tree");
+        let oracle = git_merge_tree_oracle(root, None, &ours, &theirs, MergeFavor::None);
+        assert_eq!(
+            written.tree, oracle.result_tree,
+            "tree must match git merge-tree"
+        );
+        let rows: Vec<GitUnmergedRow> = written
+            .stages
+            .iter()
+            .map(|s| GitUnmergedRow {
+                mode: s.mode,
+                oid: s.oid,
+                stage: u32::from(s.stage),
+                path: String::from_utf8(s.path.clone()).expect("utf-8 path"),
+            })
+            .collect();
+        assert_eq!(rows, oracle.unmerged, "stages must match git merge-tree");
+        assert_eq!(rows.len(), 3, "f must be unmerged in stages 1, 2 and 3");
+    }
+    assert_git_fsck_strict(root);
 }

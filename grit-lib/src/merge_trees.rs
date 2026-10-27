@@ -351,6 +351,49 @@ pub(crate) fn merge_trees_three_way_cached(
     presentation: TreeMergeConflictPresentation<'_>,
     directory_renames: DirectoryRenameMode,
 ) -> crate::error::Result<TreeMergeOutput> {
+    merge_trees_at_depth(
+        repo,
+        cache,
+        base_tree,
+        ours_tree,
+        theirs_tree,
+        favor,
+        ws,
+        diff_algorithm,
+        presentation,
+        directory_renames,
+        0,
+    )
+}
+
+/// Three-way tree merge at recursion level `call_depth` of a multi-base merge.
+///
+/// Level 0 is the merge the caller asked for. Higher levels merge merge bases into a
+/// virtual base, and their result tree (not their conflict state) is what matters: every
+/// conflict is settled to a single stage-0 entry, as Git's recursive merge does. Content
+/// conflicts keep their markers (each level two characters wider, so nested markers stay
+/// distinct), while modify/delete, binary, symlink, submodule and type-change conflicts keep
+/// the base version. `favor` should be [`MergeFavor::None`] for levels above 0, where
+/// directory renames are never applied.
+#[expect(clippy::too_many_arguments)]
+pub(crate) fn merge_trees_at_depth(
+    repo: &Repository,
+    cache: &mut MergeTreeCache,
+    base_tree: ObjectId,
+    ours_tree: ObjectId,
+    theirs_tree: ObjectId,
+    favor: MergeFavor,
+    ws: WhitespaceMergeOptions,
+    diff_algorithm: Option<&str>,
+    presentation: TreeMergeConflictPresentation<'_>,
+    directory_renames: DirectoryRenameMode,
+    call_depth: usize,
+) -> crate::error::Result<TreeMergeOutput> {
+    let directory_renames = if call_depth > 0 {
+        DirectoryRenameMode::Off
+    } else {
+        directory_renames
+    };
     let odb = &repo.odb();
     let ours_diff = diff_trees(odb, Some(&base_tree), Some(&ours_tree), "")?;
     let theirs_diff = diff_trees(odb, Some(&base_tree), Some(&theirs_tree), "")?;
@@ -483,6 +526,7 @@ pub(crate) fn merge_trees_three_way_cached(
         ws,
         diff_algorithm,
         presentation,
+        call_depth,
     )?;
     for orig in &df_escapes.relocated_from {
         output.index.remove_path_all_stages(orig);
@@ -518,7 +562,7 @@ pub(crate) fn merge_trees_three_way_cached(
             directory_renames,
             &mut renamed_away,
             &merge_dir_renames::DestinationMerge {
-                ctx: &PathMergeContext::new(repo),
+                ctx: &PathMergeContext::new(repo, call_depth),
                 favor,
                 ws,
                 diff_algorithm,
@@ -693,6 +737,9 @@ fn renamed_file_content(
         || binary(ours_path, &ours_obj.data)
         || binary(theirs_path, &theirs_obj.data)
     {
+        if ctx.virtual_base() {
+            return Ok(Some(base.clone()));
+        }
         return Ok(match favor {
             MergeFavor::Ours => Some(ours.clone()),
             MergeFavor::Theirs => Some(theirs.clone()),
@@ -724,7 +771,7 @@ fn renamed_file_content(
         label_theirs: &label_theirs,
         favor,
         style: presentation.style,
-        marker_size: 8,
+        marker_size: 8 + 2 * ctx.call_depth,
         diff_algorithm: diff_algorithm.map(str::to_owned),
         ignore_all_space: ws.ignore_all_space,
         ignore_space_change: ws.ignore_space_change,
@@ -1024,7 +1071,9 @@ pub(crate) fn merge_one_path(
                 && oe.mode == te.mode
                 && matches!(be.mode, 0o120000 | 0o160000) =>
         {
-            if same_blob(oe, te) {
+            if ctx.virtual_base() {
+                push_stage0(index, out_path, be);
+            } else if same_blob(oe, te) {
                 let mut e = oe.clone();
                 e.path = out_path.to_vec();
                 e.flags = path_len_flags(out_path);
@@ -1100,6 +1149,9 @@ pub(crate) fn merge_one_path(
         (Some(_), None, None) => {}
         (Some(be), Some(oe), None) if same_blob(be, oe) && be.path.as_slice() == out_path => {}
         (Some(be), None, Some(te)) if same_blob(be, te) => {}
+        (Some(be), Some(_), None) | (Some(be), None, Some(_)) if ctx.virtual_base() => {
+            push_stage0(index, out_path, be);
+        }
         (Some(be), Some(oe), None) => {
             stage_entry(index, out_path, be, 1);
             stage_entry(index, out_path, oe, 2);
@@ -1121,6 +1173,32 @@ fn path_len_flags(path: &[u8]) -> u16 {
     path.len().min(0xFFF) as u16
 }
 
+/// Record `src` as the merged (stage-0) entry at `path`.
+fn push_stage0(index: &mut Index, path: &[u8], src: &IndexEntry) {
+    let mut e = src.clone();
+    e.path = path.to_vec();
+    e.flags = path_len_flags(path);
+    index.push_entry_unsorted(e);
+}
+
+/// Record merged `content` at `path` as a stage-0 entry with `mode`.
+fn push_merged_blob(
+    repo: &Repository,
+    index: &mut Index,
+    path: &[u8],
+    template: &IndexEntry,
+    mode: u32,
+    content: &[u8],
+) -> crate::error::Result<()> {
+    let mut e = template.clone();
+    e.path = path.to_vec();
+    e.flags = path_len_flags(path);
+    e.oid = repo.odb().write(ObjectKind::Blob, content)?;
+    e.mode = mode;
+    index.push_entry_unsorted(e);
+    Ok(())
+}
+
 fn same_blob(a: &IndexEntry, b: &IndexEntry) -> bool {
     a.oid == b.oid && a.mode == b.mode
 }
@@ -1132,13 +1210,36 @@ fn same_blob(a: &IndexEntry, b: &IndexEntry) -> bool {
 pub(crate) struct PathMergeContext<'r> {
     repo: &'r Repository,
     rules: OnceCell<Option<WorktreeRules>>,
+    /// Recursion level of a multi-base merge (see [`merge_trees_at_depth`]); 0 for the real merge.
+    call_depth: usize,
 }
 
 impl<'r> PathMergeContext<'r> {
-    pub(crate) fn new(repo: &'r Repository) -> Self {
+    pub(crate) fn new(repo: &'r Repository, call_depth: usize) -> Self {
         Self {
             repo,
             rules: OnceCell::new(),
+            call_depth,
+        }
+    }
+
+    /// True while building a virtual merge base, where every conflict settles to one entry.
+    fn virtual_base(&self) -> bool {
+        self.call_depth > 0
+    }
+
+    /// Conflict marker width for `attrs`, widened by two per recursion level.
+    fn marker_size(&self, attrs: &FileAttrs) -> usize {
+        attrs.effective_conflict_marker_size() + 2 * self.call_depth
+    }
+
+    /// A virtual base keeps a driver's conflicted output as its content.
+    fn settle_driver_outcome(&self, outcome: MergeDriverOutcome) -> MergeDriverOutcome {
+        match outcome {
+            MergeDriverOutcome::ConflictWithMarkers(content) if self.virtual_base() => {
+                MergeDriverOutcome::Clean(content)
+            }
+            other => other,
         }
     }
 
@@ -1252,6 +1353,10 @@ fn content_merge_or_conflict(
         || matches!(ours.mode, 0o120000 | 0o160000)
         || matches!(theirs.mode, 0o120000 | 0o160000)
     {
+        if ctx.virtual_base() {
+            push_stage0(index, path, base);
+            return Ok(());
+        }
         stage_entry(index, path, base, 1);
         stage_entry(index, path, ours, 2);
         stage_entry(index, path, theirs, 3);
@@ -1304,7 +1409,7 @@ fn content_merge_or_conflict(
             Some(base),
             ours,
             theirs,
-            outcome,
+            ctx.settle_driver_outcome(outcome),
         );
     }
 
@@ -1313,6 +1418,10 @@ fn content_merge_or_conflict(
         || is_binary(&ours_obj.data)
         || is_binary(&theirs_obj.data)
     {
+        if ctx.virtual_base() {
+            push_stage0(index, path, base);
+            return Ok(());
+        }
         match favor {
             MergeFavor::Theirs => {
                 let mut e = theirs.clone();
@@ -1346,7 +1455,7 @@ fn content_merge_or_conflict(
         label_theirs: &label_theirs,
         favor,
         style: presentation.style,
-        marker_size: file_attrs.effective_conflict_marker_size(),
+        marker_size: ctx.marker_size(&file_attrs),
         diff_algorithm: diff_algorithm.map(str::to_owned),
         ignore_all_space: ws.ignore_all_space,
         ignore_space_change: ws.ignore_space_change,
@@ -1356,7 +1465,7 @@ fn content_merge_or_conflict(
 
     let result = merge(&input)?;
 
-    if result.conflicts > 0 {
+    if result.conflicts > 0 && !ctx.virtual_base() {
         let conflict_oid = repo.odb().write(ObjectKind::Blob, &result.content)?;
         conflict_content.insert(path.to_vec(), conflict_oid);
         stage_entry(index, path, base, 1);
@@ -1397,8 +1506,12 @@ fn add_add_content_conflict(
     diff_algorithm: Option<&str>,
     presentation: TreeMergeConflictPresentation<'_>,
 ) -> crate::error::Result<()> {
-    // Gitlink add/add: no textual merge is possible; leave unmerged stages.
+    // Gitlink add/add: no textual merge is possible; leave unmerged stages. A virtual base keeps
+    // the (absent) base version, so the path is left out.
     if matches!(ours.mode, 0o120000 | 0o160000) || matches!(theirs.mode, 0o120000 | 0o160000) {
+        if ctx.virtual_base() {
+            return Ok(());
+        }
         stage_entry(index, path, ours, 2);
         stage_entry(index, path, theirs, 3);
         return Ok(());
@@ -1436,7 +1549,8 @@ fn add_add_content_conflict(
         ws.ignore_cr_at_eol,
         driver_labels,
     )? {
-        if add_add_executable_mode_conflict(ours, theirs, favor) {
+        let outcome = ctx.settle_driver_outcome(outcome);
+        if !ctx.virtual_base() && add_add_executable_mode_conflict(ours, theirs, favor) {
             let worktree_bytes = match &outcome {
                 MergeDriverOutcome::Clean(c) | MergeDriverOutcome::ConflictWithMarkers(c) => {
                     c.as_slice()
@@ -1461,11 +1575,15 @@ fn add_add_content_conflict(
         );
     }
 
-    // Binary add/add: honour an explicit favour, else leave unmerged stages.
+    // Binary add/add: honour an explicit favour, else leave unmerged stages. A virtual base
+    // takes the empty base content.
     if attrs_force_binary(attrs.as_ref())
         || is_binary(&ours_obj.data)
         || is_binary(&theirs_obj.data)
     {
+        if ctx.virtual_base() {
+            return push_merged_blob(repo, index, path, ours, ours.mode, b"");
+        }
         match favor {
             MergeFavor::Theirs => {
                 let mut e = theirs.clone();
@@ -1496,7 +1614,7 @@ fn add_add_content_conflict(
         label_theirs: &label_theirs,
         favor,
         style: presentation.style,
-        marker_size: file_attrs.effective_conflict_marker_size(),
+        marker_size: ctx.marker_size(&file_attrs),
         diff_algorithm: diff_algorithm.map(str::to_owned),
         ignore_all_space: ws.ignore_all_space,
         ignore_space_change: ws.ignore_space_change,
@@ -1505,6 +1623,9 @@ fn add_add_content_conflict(
     };
 
     let result = merge(&input)?;
+    if ctx.virtual_base() {
+        return push_merged_blob(repo, index, path, ours, ours.mode, &result.content);
+    }
 
     // Git treats an add/add as a conflict whenever the two sides cannot be reconciled to a single
     // stage-0 entry. With no merge base there is nothing to disambiguate a mode clash, so when both

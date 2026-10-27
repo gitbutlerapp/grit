@@ -632,11 +632,12 @@ pub(crate) fn three_way_on_touched_paths(
     ws: WhitespaceMergeOptions,
     diff_algorithm: Option<&str>,
     presentation: TreeMergeConflictPresentation<'_>,
+    call_depth: usize,
 ) -> crate::error::Result<TreeMergeOutput> {
     use std::collections::HashSet as HSet;
 
     let odb = repo.odb();
-    let ctx = PathMergeContext::new(repo);
+    let ctx = PathMergeContext::new(repo, call_depth);
     let mut out = crate::index::Index::new();
     let mut conflict_content = BTreeMap::new();
     let mut handled_base: HSet<&[u8]> = HSet::new();

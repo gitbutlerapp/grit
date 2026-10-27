@@ -354,6 +354,113 @@ pub fn git_hash_object(worktree: &Path, path: &str) -> ObjectId {
         .expect("hash-object")
 }
 
+/// Shape of a criss-cross history built by [`criss_cross_repo`].
+///
+/// `a1` and `b1` each change `file` from `base`. Branch `ours` merges `b1` into `a1` and
+/// branch `theirs` merges `a1` into `b1`, so `a1` and `b1` are both merge bases of the two.
+pub struct CrissCrossSpec<'a> {
+    pub file: &'a str,
+    pub base: &'a str,
+    pub a1: &'a str,
+    pub b1: &'a str,
+    /// `-X` option used when `ours` merges `b1` (`None`: plain merge).
+    pub ours_resolution: Option<&'a str>,
+    /// `-X` option used when `theirs` merges `a1` (`None`: plain merge).
+    pub theirs_resolution: Option<&'a str>,
+    /// Content of `file` committed on `ours` after its merge, when set.
+    pub ours_after: Option<&'a str>,
+    /// Content of `file` committed on `theirs` after its merge, when set.
+    pub theirs_after: Option<&'a str>,
+}
+
+/// A criss-cross repository with `ours` checked out.
+pub struct CrissCross {
+    pub dir: tempfile::TempDir,
+    pub ours: ObjectId,
+    pub theirs: ObjectId,
+}
+
+/// Run `git` with a distinct, increasing commit date per `step`.
+///
+/// Distinct dates keep the merge-base order (newest first) independent of tie-breaking.
+fn git_at_step(dir: &Path, step: u32, args: &[&str]) {
+    let date = format!("{} +0000", 1_700_000_000 + u64::from(step) * 3600);
+    grit_test_support::git_cmd(args)
+        .in_dir(dir)
+        .env("GIT_AUTHOR_DATE", &date)
+        .env("GIT_COMMITTER_DATE", &date)
+        .suc();
+}
+
+/// Build the criss-cross history described by `spec` with system `git`.
+pub fn criss_cross_repo(spec: &CrissCrossSpec<'_>) -> CrissCross {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "Test"]);
+    let commit_file = |step: u32, content: &str, msg: &str| {
+        std::fs::write(root.join(spec.file), content).expect("write fixture file");
+        git(root, &["add", spec.file]);
+        git_at_step(root, step, &["commit", "-q", "-m", msg]);
+    };
+    let merge = |step: u32, other: &str, resolution: Option<&str>, msg: &str| {
+        let option = resolution.map(|r| format!("-X{r}"));
+        let mut args = vec!["merge", "-q", "--no-edit", "-m", msg];
+        args.extend(option.as_deref());
+        args.push(other);
+        git_at_step(root, step, &args);
+    };
+
+    commit_file(1, spec.base, "base");
+    git(root, &["switch", "-q", "-c", "a1"]);
+    commit_file(2, spec.a1, "a1");
+    git(root, &["switch", "-q", "-c", "b1", "main"]);
+    commit_file(3, spec.b1, "b1");
+    git(root, &["switch", "-q", "-c", "ours", "a1"]);
+    merge(4, "b1", spec.ours_resolution, "ours: merge b1");
+    git(root, &["switch", "-q", "-c", "theirs", "b1"]);
+    merge(5, "a1", spec.theirs_resolution, "theirs: merge a1");
+    if let Some(content) = spec.theirs_after {
+        commit_file(6, content, "theirs after merge");
+    }
+    git(root, &["switch", "-q", "ours"]);
+    if let Some(content) = spec.ours_after {
+        commit_file(7, content, "ours after merge");
+    }
+    let rev = |name: &str| -> ObjectId {
+        git(root, &["rev-parse", name])
+            .trim()
+            .parse()
+            .expect("rev-parse")
+    };
+    let bases = git(root, &["merge-base", "--all", "ours", "theirs"]);
+    assert_eq!(
+        bases.lines().count(),
+        2,
+        "fixture must have two merge bases"
+    );
+    CrissCross {
+        ours: rev("ours"),
+        theirs: rev("theirs"),
+        dir,
+    }
+}
+
+/// Issue #2114: `a1` and `b1` conflict on `f`; `ours` kept `a1`'s line, `theirs` kept `b1`'s.
+pub fn criss_cross_conflicting_resolutions() -> CrissCross {
+    criss_cross_repo(&CrissCrossSpec {
+        file: "f",
+        base: "1\n",
+        a1: "2\n",
+        b1: "3\n",
+        ours_resolution: Some("ours"),
+        theirs_resolution: Some("ours"),
+        ours_after: None,
+        theirs_after: None,
+    })
+}
+
 pub fn skip_merge_tree_git() -> bool {
     skip_unless_git_at_least(2, 38)
 }

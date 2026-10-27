@@ -53,9 +53,10 @@ pub use index_harness::{
 #[allow(unused_imports)]
 pub use merge_harness::{
     assert_merge_commits_match_git, assert_merge_commits_match_git_with_favor,
-    assert_merge_output_matches_oracle, commit_tree, empty_tree, git_commit_tree, git_hash_object,
-    git_merge_tree_oracle, git_merge_tree_oracle_with_options, grit_merge_result_tree,
-    skip_merge_tree_git, CommitMergeLabels, GitMergeTreeOracle, GitUnmergedRow,
+    assert_merge_output_matches_oracle, commit_tree, criss_cross_conflicting_resolutions,
+    criss_cross_repo, empty_tree, git_commit_tree, git_hash_object, git_merge_tree_oracle,
+    git_merge_tree_oracle_with_options, grit_merge_result_tree, skip_merge_tree_git,
+    CommitMergeLabels, CrissCross, CrissCrossSpec, GitMergeTreeOracle, GitUnmergedRow,
 };
 #[allow(unused_imports)]
 pub use refs_harness::*;
