@@ -57,8 +57,7 @@ use crate::error::{Error, Result};
 use crate::hash;
 use crate::midx::validate_midx_referenced_packs_with_diagnostics;
 use crate::objects::{
-    oid_hash_map, oid_hash_set, HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind, OidHashMap,
-    OidHashSet,
+    oid_hash_set, HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind, OidHashMap, OidHashSet,
 };
 use crate::pack;
 use crate::pack_store::PackStore;
@@ -258,7 +257,7 @@ pub struct Odb {
     /// When false, alternate object directories are not consulted ([`OdbBuilder::alternates`]).
     alternates_enabled: bool,
     /// Avoid re-reading the same loose object repeatedly during one repository session.
-    session_loose_reads: Arc<std::sync::Mutex<OidHashMap<Object>>>,
+    session_loose_reads: Arc<std::sync::Mutex<SessionLooseReads>>,
     /// Parsed tree entries reused for the lifetime of this [`Odb`] handle (Git object cache).
     session_tree_entries: Arc<Mutex<SessionTreeEntries>>,
 }
@@ -267,6 +266,54 @@ pub struct Odb {
 /// (checkout) promise bounded memory, so a cache of up to a few hundred entries must not be
 /// able to pin hundreds of near-limit blobs.
 const SESSION_BOUNDED_LOOSE_CACHE_MAX: usize = 64 * 1024;
+
+/// Largest blob a general [`Odb::read`] keeps in the session read cache. Tiny blobs that are
+/// read again and again (attributes, submodule and mailmap files) stay cached, while the
+/// blobs a diff or merge reads once each pin at most this much per cache entry.
+const SESSION_READ_BLOB_CACHE_MAX: usize = 4 * 1024;
+
+/// Objects the session read cache holds before it starts over.
+const SESSION_LOOSE_CACHE_MAX_ENTRIES: usize = 256;
+
+/// Payload bytes the session read cache holds before it starts over, so no mix of reads can
+/// make it pin more than this however large the objects are.
+const SESSION_LOOSE_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// Recently read objects reused within one [`Odb`] session, bounded by entry count and by
+/// total payload bytes. When either bound would be exceeded the cache starts over.
+#[derive(Default)]
+struct SessionLooseReads {
+    objects: OidHashMap<Object>,
+    bytes: usize,
+}
+
+impl SessionLooseReads {
+    fn get(&self, oid: &ObjectId) -> Option<&Object> {
+        self.objects.get(oid)
+    }
+
+    fn insert(&mut self, oid: ObjectId, obj: &Object) {
+        let len = obj.data.len();
+        if len > SESSION_LOOSE_CACHE_MAX_BYTES {
+            return;
+        }
+        if self.objects.len() > SESSION_LOOSE_CACHE_MAX_ENTRIES
+            || self.bytes.saturating_add(len) > SESSION_LOOSE_CACHE_MAX_BYTES
+        {
+            self.objects.clear();
+            self.bytes = 0;
+        }
+        if let Some(old) = self.objects.insert(oid, obj.clone()) {
+            self.bytes = self.bytes.saturating_sub(old.data.len());
+        }
+        self.bytes += len;
+    }
+
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.objects.is_empty()
+    }
+}
 
 /// Recently parsed trees for [`Odb::cached_tree_entries`], bounded by total entry count.
 #[derive(Default)]
@@ -425,7 +472,7 @@ impl Odb {
             custom_primary: None,
             extra_read_sources: Vec::new(),
             alternates_enabled: true,
-            session_loose_reads: Arc::new(Mutex::new(oid_hash_map())),
+            session_loose_reads: Arc::new(Mutex::new(SessionLooseReads::default())),
             session_tree_entries: Arc::new(Mutex::new(SessionTreeEntries::default())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
@@ -478,7 +525,7 @@ impl Odb {
             custom_primary: None,
             extra_read_sources: Vec::new(),
             alternates_enabled: true,
-            session_loose_reads: Arc::new(Mutex::new(oid_hash_map())),
+            session_loose_reads: Arc::new(Mutex::new(SessionLooseReads::default())),
             session_tree_entries: Arc::new(Mutex::new(SessionTreeEntries::default())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
@@ -516,22 +563,30 @@ impl Odb {
         self.session_loose_reads.lock().ok()?.get(oid).cloned()
     }
 
+    /// Keep `obj` in the session read cache. Bounded checkout reads call this directly for
+    /// the small blobs they reuse; general reads go through [`Self::finish_session_loose_read`].
     fn remember_session_loose_read(&self, oid: &ObjectId, obj: &Object) {
         if let Ok(mut guard) = self.session_loose_reads.lock() {
-            if guard.len() > 256 {
-                guard.clear();
-            }
-            guard.insert(*oid, obj.clone());
+            guard.insert(*oid, obj);
         }
     }
 
+    /// Return a freshly read object, caching commits, trees, tags and tiny blobs for reuse
+    /// when `remember` is set.
+    ///
+    /// Larger blobs are not cached here (see [`SESSION_READ_BLOB_CACHE_MAX`]): diffs, merges
+    /// and blame read each blob about once, so a cached copy only costs an extra allocation
+    /// and keeps every blob of an operation resident until the cache starts over. Callers
+    /// that do re-read small blobs opt in through [`Self::read_unless_larger`].
     fn finish_session_loose_read(
         &self,
         oid: &ObjectId,
         obj: Object,
         remember: bool,
     ) -> Result<Object> {
-        if remember {
+        if remember
+            && (obj.kind != ObjectKind::Blob || obj.data.len() <= SESSION_READ_BLOB_CACHE_MAX)
+        {
             self.remember_session_loose_read(oid, &obj);
         }
         Ok(obj)
@@ -1105,7 +1160,7 @@ impl Odb {
         let mut odb = self.clone();
         odb.pack_store = Arc::new(PackStore::for_bounded_reads(self.objects_dir.clone()));
         odb.primary_source = Arc::new(OnceLock::new());
-        odb.session_loose_reads = Arc::new(Mutex::new(oid_hash_map()));
+        odb.session_loose_reads = Arc::new(Mutex::new(SessionLooseReads::default()));
         odb.alternate_pack_stores = Arc::new(Mutex::new(HashMap::new()));
         odb.alternate_sources_cache = Arc::new(RwLock::new(AlternateSourcesCache {
             file_generation: 0,
@@ -3563,6 +3618,78 @@ mod tests {
             &crate::index_pack::IngestPackOptions::default(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn general_reads_cache_trees_and_tiny_blobs_but_not_larger_blobs() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob = odb
+            .write(
+                ObjectKind::Blob,
+                &vec![b'x'; SESSION_READ_BLOB_CACHE_MAX + 1],
+            )
+            .unwrap();
+        let tiny = odb.write(ObjectKind::Blob, b"tiny\n").unwrap();
+        let tree = odb
+            .write(
+                ObjectKind::Tree,
+                &crate::objects::serialize_tree(&[crate::objects::TreeEntry {
+                    mode: 0o100644,
+                    name: b"f".to_vec(),
+                    oid: blob,
+                }]),
+            )
+            .unwrap();
+        assert_eq!(
+            odb.read(&blob).unwrap().data.len(),
+            SESSION_READ_BLOB_CACHE_MAX + 1
+        );
+        assert!(odb.session_loose_reads.lock().unwrap().is_empty());
+        let tree_bytes = odb.read(&tree).unwrap().data;
+        assert_eq!(odb.read(&tiny).unwrap().data, b"tiny\n");
+        for oid in [blob, tree, tiny] {
+            let hex = oid.to_hex();
+            fs::remove_file(dir.path().join(&hex[..2]).join(&hex[2..])).unwrap();
+        }
+        assert_eq!(odb.read(&tree).unwrap().data, tree_bytes, "tree reused");
+        assert_eq!(odb.read(&tiny).unwrap().data, b"tiny\n", "tiny blob reused");
+        assert!(odb.read(&blob).is_err(), "blob was not retained");
+    }
+
+    #[test]
+    fn session_read_cache_is_bounded_by_bytes_and_entries() {
+        let mut cache = SessionLooseReads::default();
+        let chunk = SESSION_LOOSE_CACHE_MAX_BYTES / 4;
+        let object = |len: usize| Object {
+            kind: ObjectKind::Tree,
+            data: vec![0; len],
+        };
+        let oid = |n: u32| {
+            let mut raw = [0u8; 20];
+            raw[..4].copy_from_slice(&n.to_be_bytes());
+            ObjectId::from_bytes(&raw).unwrap()
+        };
+        for n in 0..4 {
+            cache.insert(oid(n), &object(chunk));
+        }
+        assert_eq!(cache.bytes, SESSION_LOOSE_CACHE_MAX_BYTES);
+        cache.insert(oid(4), &object(1));
+        assert_eq!(cache.bytes, 1, "exceeding the byte budget starts over");
+        assert!(cache.get(&oid(0)).is_none());
+        cache.insert(oid(4), &object(10));
+        assert_eq!(cache.bytes, 10, "replacing an entry drops its old size");
+        cache.insert(oid(5), &object(SESSION_LOOSE_CACHE_MAX_BYTES + 1));
+        assert!(
+            cache.get(&oid(5)).is_none(),
+            "oversized objects are never kept"
+        );
+        assert!(cache.get(&oid(4)).is_some());
+        for n in 10..(10 + SESSION_LOOSE_CACHE_MAX_ENTRIES as u32 + 2) {
+            cache.insert(oid(n), &object(1));
+        }
+        assert!(cache.objects.len() <= SESSION_LOOSE_CACHE_MAX_ENTRIES + 1);
+        assert!(cache.bytes <= SESSION_LOOSE_CACHE_MAX_BYTES);
     }
 
     fn bounded_read_fixture() -> (TempDir, PathBuf, ObjectId, ObjectId) {
