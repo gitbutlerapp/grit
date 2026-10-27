@@ -232,6 +232,19 @@ pub(crate) fn stage_on_index_with_pathspec_ignore_exempt(
     )
 }
 
+/// Validate explicit pathspecs against the real index without hashing or staging files.
+/// Path-scoped commits use this before constructing their parent-tree index; already
+/// indexed paths remain eligible even when an ignore rule now matches them.
+pub(crate) fn validate_commit_staging_pathspecs(
+    repo: &Repository,
+    index: &Index,
+    opts: &StageOptions,
+) -> Result<()> {
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let rules = WorktreeRules::from_repository(repo, index)?;
+    validate_pathspecs(repo, index, work_tree, &[], &[], opts, &rules, Some(index))
+}
+
 /// Stage paths matching `opts` into the index.
 ///
 /// Takes `index.lock`, loads the index while holding it, compares it to the work tree
@@ -386,6 +399,8 @@ fn stage_inner_on_index(
     lock: Option<&mut IndexLock>,
     ignore_exempt_index: Option<&Index>,
 ) -> Result<StageOutcome> {
+    #[cfg(test)]
+    repo.odb().hot_path_metrics().record_staging_pass();
     let dry_run = opts.dry_run;
     let dry_run_list_only = dry_run && on_disk;
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
@@ -1716,6 +1731,35 @@ mod tests {
     fn write_index(repo: &Repository, index: &mut Index) {
         index.sort();
         repo.write_index(index).unwrap();
+    }
+
+    #[test]
+    fn commit_pathspec_validation_does_not_hash_or_stage_contents() {
+        let dir = TempDir::new().unwrap();
+        let repo = init_repo(dir.path());
+        let mut index = Index::new();
+        stage_file_in_index(&repo, &mut index, "large.bin", &vec![b'x'; 2 * 1024 * 1024]);
+        write_index(&repo, &mut index);
+        fs::write(dir.path().join("large.bin"), b"changed").unwrap();
+        fs::write(dir.path().join("new.bin"), b"ignored").unwrap();
+        fs::write(dir.path().join(".gitignore"), "*.bin\n").unwrap();
+        let opts = StageOptions {
+            pathspecs: vec!["large.bin".into()],
+            ..StageOptions::default()
+        };
+        let hashes = repo.odb().hot_path_metrics().stream_hash_calls();
+        let writes = repo.odb().hot_path_metrics().stream_write_calls();
+        validate_commit_staging_pathspecs(&repo, &index, &opts).unwrap();
+        assert_eq!(repo.odb().hot_path_metrics().stream_hash_calls(), hashes);
+        assert_eq!(repo.odb().hot_path_metrics().stream_write_calls(), writes);
+        let opts = StageOptions {
+            pathspecs: vec!["new.bin".into()],
+            ..opts
+        };
+        assert!(matches!(
+            validate_commit_staging_pathspecs(&repo, &index, &opts),
+            Err(Error::PathspecIgnored { .. })
+        ));
     }
 
     #[test]

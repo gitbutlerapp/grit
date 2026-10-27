@@ -35,7 +35,7 @@ use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use crate::pathspec::{matches_pathspec_list_with_context, pathspec_is_exclude, ResolvedPathspecs};
 use crate::porcelain::add::{
-    stage_on_index, stage_on_index_with_pathspec_ignore_exempt, StageMode, StageOptions,
+    stage_on_index, validate_commit_staging_pathspecs, StageMode, StageOptions,
 };
 use crate::porcelain::hunk_select::{
     diff_options_for_hunk_select, resolve_selection, HunkSelectError, HunkSelection,
@@ -550,18 +550,7 @@ fn commit_paths_scope(
         ..StageOptions::default()
     };
 
-    {
-        let mut validate_opts = stage_opts.clone();
-        validate_opts.dry_run = true;
-        let mut probe = real_index.clone();
-        stage_on_index_with_pathspec_ignore_exempt(
-            repo,
-            &mut probe,
-            &validate_opts,
-            progress,
-            Some(&real_index),
-        )?;
-    }
+    validate_commit_staging_pathspecs(repo, &real_index, &stage_opts)?;
     stage_opts.skip_pathspec_ignore_check = true;
 
     let mut commit_index = match parent_tree.as_ref() {
@@ -2089,6 +2078,38 @@ mod tests {
         let b_oid = index.get(b"b.txt", 0).unwrap().oid;
         let b_blob = repo.odb().read(&b_oid).unwrap();
         assert_eq!(b_blob.data, b"1\n", "unstaged paths stay in the index");
+    }
+
+    #[test]
+    fn scope_paths_does_not_hash_a_throwaway_validation_index() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let mut bytes = vec![b'x'; 2 * 1024 * 1024];
+        fs::write(root.join("large"), &bytes).unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("initial"), &mut NullProgress).unwrap();
+        bytes.push(b'y');
+        fs::write(root.join("large"), &bytes).unwrap();
+        let passes = repo.odb().hot_path_metrics().staging_passes();
+        let result = commit_with_scope(
+            &repo,
+            &commit_req("selected path"),
+            CommitScope::Paths(ResolvedPathspecs {
+                specs: vec!["large".into()],
+                sources: vec!["large".into()],
+                scoped: true,
+            }),
+            &mut NullProgress,
+        )
+        .unwrap();
+        assert_eq!(result.changes, 1);
+        // The commit view and repository view each stage once. Validation must not
+        // add a third pass, regardless of extra hashing needed for racy stat rows.
+        assert_eq!(repo.odb().hot_path_metrics().staging_passes(), passes + 2);
+        let index = repo.load_index().unwrap();
+        let oid = index.get(b"large", 0).unwrap().oid;
+        assert_eq!(repo.odb().read(&oid).unwrap().data, bytes);
     }
 
     #[test]
