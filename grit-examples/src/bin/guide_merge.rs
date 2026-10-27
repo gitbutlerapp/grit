@@ -1,16 +1,14 @@
-//! Three-way tree merge compared with `git merge-tree --write-tree`.
+//! Stored three-way merge (`write_merge_tree`) compared with `git merge-tree --write-tree`.
 //!
 //! Source for the library guide "Merge" page (included in the docs site).
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::merge_file::MergeFavor;
-use grit_lib::diff::merge_trees::{
-    merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
-};
-use grit_lib::objects::ObjectId;
+use grit_lib::ident::Signature;
+use grit_lib::objects::{NewCommit, ObjectId};
+use grit_lib::porcelain::merge::{write_merge_tree, MergePredictionOptions};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
 use std::path::{Path, PathBuf};
+use time::OffsetDateTime;
 
 fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
     let git_dir = if root.join(".git").is_dir() {
@@ -40,29 +38,30 @@ fn main() -> Result<(), grit_lib::error::Error> {
 
     let ours: ObjectId = repo.rev_walk().resolve("ours")?;
     let theirs: ObjectId = repo.rev_walk().resolve("theirs")?;
-    let base = merge_bases_first_vs_rest(&repo, ours, &[theirs])?
-        .into_iter()
-        .next()
-        .ok_or_else(|| grit_lib::error::Error::Message("no merge base".into()))?;
 
-    let base_tree = repo.objects().commit_tree(&base)?;
-    let ours_tree = repo.objects().commit_tree(&ours)?;
-    let theirs_tree = repo.objects().commit_tree(&theirs)?;
+    // Merges over the first merge base and stores the result, like `git merge-tree --write-tree`.
+    let merged = write_merge_tree(&repo, ours, theirs, &MergePredictionOptions::default())?;
 
-    let merged = merge_trees_three_way(
-        &repo,
-        base_tree,
-        ours_tree,
-        theirs_tree,
-        MergeFavor::default(),
-        WhitespaceMergeOptions::default(),
-        None,
-        TreeMergeConflictPresentation::default(),
-    )?;
-
-    let result_tree = merged.result_tree;
-    println!("merged_tree={}", result_tree.to_hex());
-    println!("unmerged_paths={}", merged.conflict_content.len());
+    println!("merged_tree={}", merged.tree.to_hex());
+    println!("conflicted_paths={}", merged.conflicts.len());
+    if merged.is_clean() {
+        let committer = Signature::new(
+            "Guide",
+            "guide@example.com",
+            OffsetDateTime::from_unix_timestamp(1_700_000_000)
+                .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?,
+        )?;
+        let commit = repo.objects().write_commit(
+            &NewCommit::new(
+                merged.tree,
+                committer.clone(),
+                committer,
+                "Merge theirs into ours",
+            )
+            .with_parents(vec![ours, theirs]),
+        )?;
+        println!("merge_commit={}", commit.to_hex());
+    }
 
     Ok(())
 }

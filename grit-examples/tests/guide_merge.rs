@@ -116,5 +116,27 @@ fn guide_merge_tree_matches_git_merge_tree() -> Result<()> {
         .to_owned();
     assert_eq!(grit_merged, git_merged);
 
+    let merge_commit = stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("merge_commit="))
+        .context("merge_commit")?
+        .trim()
+        .to_owned();
+    let tree_of_commit = Command::new("git")
+        .args(["rev-parse", &format!("{merge_commit}^{{tree}}")])
+        .current_dir(repo)
+        .output()?;
+    assert!(tree_of_commit.status.success());
+    assert_eq!(String::from_utf8(tree_of_commit.stdout)?.trim(), git_merged);
+    let fsck = Command::new("git")
+        .args(["fsck", "--strict"])
+        .current_dir(repo)
+        .output()?;
+    assert!(
+        fsck.status.success(),
+        "git fsck failed: {}",
+        String::from_utf8_lossy(&fsck.stderr)
+    );
+
     Ok(())
 }
