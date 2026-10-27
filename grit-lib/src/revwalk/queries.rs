@@ -4,7 +4,7 @@ use crate::git_date::parse::DateParseError;
 use crate::git_date::parse_date_cutoff;
 use crate::merge_base::{
     count_commits_reachable_excluding_ancestors_of, is_ancestor as merge_base_is_ancestor,
-    merge_bases_first_vs_rest, ReachableCountFilter,
+    merge_bases_all, merge_bases_first_vs_rest, ReachableCountFilter,
 };
 use crate::objects::ObjectId;
 use crate::refs::{list_refs_for_repository, list_refs_glob_for_repository};
@@ -116,9 +116,10 @@ pub struct RevWalkParsedSpecs {
 /// Parse user revision tokens into positive/negative specs for [`rev_list`].
 ///
 /// Supports plain tips, `A..B`, `A...B`, and `^X` exclusions across multiple tokens. An empty
-/// side of a range defaults to `HEAD`. `A...B` expands to both tips as positive specs and their
-/// merge bases as negative specs. Dots inside `{…}` selectors or after a `:` are literal, so
-/// `:/fix...up`, `main^{/fix...up}` and `HEAD:a...b` stay single revisions, as in Git.
+/// side of a range defaults to `HEAD`. `A...B` expands to both tips as positive specs and all
+/// of their merge bases as negative specs. Dots inside `{…}` selectors or after a `:` are
+/// literal, so `:/fix...up`, `main^{/fix...up}` and `HEAD:a...b` stay single revisions, as in
+/// Git.
 ///
 /// # Errors
 ///
@@ -166,11 +167,10 @@ fn symmetric_rev_list_specs(
     let right_tip = resolve_walk_range_end(repo, right_spec)?;
     let left = peel_to_commit_for_merge_base(repo, left_tip)?;
     let right = peel_to_commit_for_merge_base(repo, right_tip)?;
-    let bases = merge_bases_first_vs_rest(repo, left, &[right])?;
-    let mut negative = Vec::new();
-    for base in bases {
-        negative.push(base.to_hex());
-    }
+    let negative = merge_bases_all(repo, &[left, right])?
+        .iter()
+        .map(ObjectId::to_hex)
+        .collect();
     Ok((vec![left.to_hex(), right.to_hex()], negative, left, right))
 }
 
@@ -567,7 +567,7 @@ impl<'repo> RevWalk<'repo> {
         let a_commit = peel_to_commit_for_merge_base(repo, a_tip)?;
         let b_commit = peel_to_commit_for_merge_base(repo, b_tip)?;
         if all {
-            crate::merge_base::merge_bases_all(repo, &[a_commit, b_commit])
+            merge_bases_all(repo, &[a_commit, b_commit])
         } else {
             merge_bases_first_vs_rest(repo, a_commit, &[b_commit])
         }
