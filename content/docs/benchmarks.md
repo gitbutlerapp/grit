@@ -1747,6 +1747,26 @@ The graph-backed author range count improves by 86% against the reviewed branch 
 
 This build records about 0.7–1.3 MiB more peak RSS on several unchanged paths than the reviewed build. A separate five-run `/proc/<pid>/smaps_rollup` sample of full-history author counting shows essentially unchanged peak anonymous memory (6,748 → 6,740 KiB), with the extra residency in file-backed mappings. Those samples are included in the baseline JSON; the RSS increases remain visible in the table rather than being treated as heap growth or omitted. No measured scenario slowed relative to main or the reviewed branch.
 
+## Ranged blame pack residency
+
+Issue #2079 measures `grit blame --rev 7e34d8174d -L 1,3 --json git-gui/git-gui.sh` on an unmodified clone of `git/git` (one 326 MB pack). The Git control is the system binary running `git blame --line-porcelain -L 1,3 7e34d8174d -- git-gui/git-gui.sh`.
+
+Ranged blame now reads individual pack entries through positioned IO, including commit prefixes and delta bases, and keeps a private 16 MiB delta-base cache per object directory. Eight reusable 16 KiB compressed windows per pack coalesce nearby reads; larger entries bypass those windows. This covers ordinary ODB fallbacks, alternate stores and multiple packs as well as the session reader. Full-file blame and other ODB users retain their existing read/cache policy. Visited metadata, indexes and reconstructed objects still consume memory; the change bounds retained pack pages and delta bases rather than imposing a fixed total RSS limit.
+
+The deterministic Linux regression uses 1,800 commits, 1,000 changing root-tree entries, a rename and a merge. It varies unrelated blob payloads from 8 KiB to 64 KiB per commit without changing the three requested lines. Before the fix, peak RSS increased from 81,488 to 128,816 KiB; positioned reads kept it near 57–58 MiB. `grit-bench history` includes the larger fixture as `history-blame-packed-range`. Tests create all objects locally with system Git and also check blame compatibility with and without a commit graph, single/multiple packs, and alternates.
+
+Measured on a 4-core AMD EPYC 9V74 Linux VM using release builds, with one warmup per tool followed by seven rotated interleaved triplets (three for full-file blame). Builds and tests were paused during timing. Wall time includes fresh-process launch around `/usr/bin/time -v`; RSS is the median of each process's maximum. The frozen main build is `80dc322f7c2fafae948c30b9e6de159f884504e0`. Raw samples and commands are in `grit-utils/baselines/blame-range-memory-2079.json`.
+
+| Operation | Main ms / KiB | Fixed ms / KiB | System Git ms / KiB |
+| --- | ---: | ---: | ---: |
+| Three-line blame | 449.52 / 331,872 | 434.26 / 135,744 | 171.61 / 83,468 |
+| Full-file blame | 1248.65 / 389,408 | 1243.52 / 390,644 | 221.26 / 87,680 |
+| Read commit | 3.46 / 13,408 | 3.22 / 13,576 | 2.30 / 5,308 |
+| Read root tree | 9.17 / 28,720 | 8.90 / 28,696 | 2.59 / 5,392 |
+| Read blob | 3.93 / 14,136 | 3.71 / 14,148 | 2.76 / 5,604 |
+
+The ranged request uses **1.63× Git's RSS**, down **59.1%** from main, and is **3.4% faster** than main. Full-file blame and the object-read controls show no timing regression. The object-read controls have RSS differences below 0.2 MiB; raw samples retain these differences.
+
 ## Parallel worktree symlinks (2026-10-27)
 
 Parallel worktree scans now compare physical symlinks through the same link-target reader and file-type classifier as serial scans. Regular files retain parallel hashing and streaming. Commit previews also use symlink metadata when loading a new link blob into their temporary object overlay.

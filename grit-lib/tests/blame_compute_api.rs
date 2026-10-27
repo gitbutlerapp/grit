@@ -308,3 +308,63 @@ fn compute_blame_final_newline_changes_preserve_bodies_and_ranges() {
     }
     git_run(root, &["fsck", "--strict"]);
 }
+
+#[test]
+fn ranged_blame_preserves_custom_primary_and_read_source_fallback() {
+    use grit_lib::objects::odb::{MemoryStore, OdbBuilder, WritableObjectStore};
+    use grit_lib::objects::{serialize_tree, HashAlgo, ObjectKind, TreeEntry};
+    use std::sync::Arc;
+
+    for primary in [false, true] {
+        let root = tempfile::tempdir().expect("dir");
+        let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
+        let blob = store
+            .write(
+                ObjectKind::Blob,
+                b"one\ntwo\nthree\nfour\n",
+                Default::default(),
+            )
+            .expect("blob");
+        let tree = serialize_tree(&[TreeEntry {
+            mode: 0o100644,
+            name: b"target.txt".to_vec(),
+            oid: blob,
+        }]);
+        let tree = store
+            .write(ObjectKind::Tree, &tree, Default::default())
+            .expect("tree");
+        let commit = format!("tree {tree}\nauthor T <t@example.com> 1234567890 +0000\ncommitter T <t@example.com> 1234567890 +0000\n\nx\n");
+        let commit = store
+            .write(ObjectKind::Commit, commit.as_bytes(), Default::default())
+            .expect("commit");
+        let builder = OdbBuilder::files(root.path()).alternates(false);
+        let odb = if primary {
+            builder.primary(store).build()
+        } else {
+            builder.push_read_source(store).build()
+        };
+        let lines = compute_blame(
+            &odb,
+            commit,
+            "target.txt",
+            &HashSet::new(),
+            BlameDiffAlgorithm::Myers,
+            None,
+            false,
+            0,
+            false,
+            &HashMap::new(),
+            false,
+            Some(1..=3),
+            grit_lib::diff::WhitespaceMode::default(),
+            &grit_lib::parallel::ThreadPolicy::default(),
+        )
+        .expect("custom blame");
+        assert_eq!(lines.len(), 3);
+        for (index, line) in lines.iter().enumerate() {
+            assert_eq!(line.oid, commit);
+            assert_eq!(line.original_path, "target.txt");
+            assert_eq!(line.orig_lineno, index + 1);
+        }
+    }
+}

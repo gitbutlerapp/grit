@@ -2160,26 +2160,35 @@ pub fn compute_blame(
     whitespace: crate::diff::WhitespaceMode,
     thread_policy: &ThreadPolicy,
 ) -> Result<Vec<BlameLine>> {
+    let bounded_odb = line_range.as_ref().map(|_| odb.with_bounded_pack_cache());
+    let odb = bounded_odb.as_ref().unwrap_or(odb);
     let mut session = BlameSession::new(odb, textconv_ctx, use_textconv, thread_policy);
     session.whitespace = whitespace;
     session.cache_pair_maps = !ignore_revs.is_empty() || copy_depth > 0;
     let revision_label = start_oid.to_hex();
-    compute_blame_with_session(
-        odb,
-        start_oid,
-        &revision_label,
-        file_path,
-        ignore_revs,
-        diff_algorithm,
-        textconv_ctx,
-        use_textconv,
-        copy_depth,
-        first_parent_only,
-        grafts,
-        indent_heuristic,
-        line_range,
-        &mut session,
-    )
+    let run = || {
+        compute_blame_with_session(
+            odb,
+            start_oid,
+            &revision_label,
+            file_path,
+            ignore_revs,
+            diff_algorithm,
+            textconv_ctx,
+            use_textconv,
+            copy_depth,
+            first_parent_only,
+            grafts,
+            indent_heuristic,
+            line_range,
+            &mut session,
+        )
+    };
+    if bounded_odb.is_some() {
+        odb.with_pack_read_context(run)
+    } else {
+        run()
+    }
 }
 
 fn blame_path_missing_in_revision(path: &str, revision: &str) -> LibError {
@@ -3962,6 +3971,9 @@ pub struct BlameOptions {
     /// Commit to blame at. When `None`, uses the current `HEAD` commit.
     pub start: Option<ObjectId>,
     /// When set, only include lines whose 1-based final line number lies in this range.
+    /// Packed history uses positioned entry reads and private, bounded delta-base caches;
+    /// repository caches and their configured limits are left unchanged. Complete blobs
+    /// and tree delta chains still need to be reconstructed to attribute these lines.
     pub line_range: Option<RangeInclusive<usize>>,
     /// When true, follow only the first parent at merge commits (Git's `--first-parent`).
     pub first_parent_only: bool,
@@ -4106,8 +4118,13 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
     let indent_heuristic = crate::diff::indent_heuristic_from_config(&config);
     let ignore_revs: HashSet<ObjectId> = options.ignore.as_set().clone();
 
+    let bounded_odb = options
+        .line_range
+        .as_ref()
+        .map(|_| repo.odb().with_bounded_pack_cache());
+    let odb = bounded_odb.as_ref().unwrap_or(repo.odb());
     let thread_policy = repo.thread_policy();
-    let mut session = BlameSession::new(repo.odb(), None, false, &thread_policy);
+    let mut session = BlameSession::new(odb, None, false, &thread_policy);
     session.whitespace = options.whitespace;
     session.commit_graph = repo.caches().commit_graph_chain(repo.odb().objects_dir());
     let revision_label = if options.start.is_some() {
@@ -4117,10 +4134,10 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
     };
     let copy_depth = options.copy_detection.depth();
     session.cache_pair_maps = !ignore_revs.is_empty() || copy_depth > 0;
-    let (lines, commits) = repo.odb().with_pack_read_context(
+    let (lines, commits) = odb.with_pack_read_context(
         || -> Result<(Vec<BlameAttributedLine>, HashMap<ObjectId, BlameCommitInfo>)> {
             let raw = compute_blame_with_session(
-                repo.odb(),
+                odb,
                 start_oid,
                 &revision_label,
                 &file_path,
@@ -4153,7 +4170,7 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
             for line in &lines {
                 commits
                     .entry(line.commit)
-                    .or_insert_with(|| load_blame_commit_info(repo.odb(), line.commit));
+                    .or_insert_with(|| load_blame_commit_info(odb, line.commit));
             }
             Ok((lines, commits))
         },

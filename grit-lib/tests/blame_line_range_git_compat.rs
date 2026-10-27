@@ -299,3 +299,73 @@ fn blame_line_range_parser_errors() {
     let err = resolve_line_range("9,9", content, "f", &cfg, None, 1).unwrap_err();
     assert!(matches!(err, LineRangeError::OutOfRange { .. }));
 }
+
+#[test]
+fn packed_deep_history_range_matches_git_across_pack_layouts() {
+    let dir = tempfile::tempdir().expect("repo");
+    let root = dir.path();
+    grit_test_support::blame::packed_history(root, 180, 256).expect("packed history");
+    let mut path_mismatches = Vec::new();
+    for multiple in [false, true] {
+        if multiple {
+            git_run(root, &["commit", "--allow-empty", "-qm", "another pack"]);
+            git_run(root, &["repack", "-d"]);
+            git_run(root, &["multi-pack-index", "write"]);
+        }
+        for graph in [false, true] {
+            if graph {
+                git_run(root, &["commit-graph", "write", "--reachable"]);
+            }
+            let repo = open_repo(root);
+            assert_range_matches_git(&repo, root, "target.txt", head_oid(root), "1,3");
+            let result = blame_file(
+                &repo,
+                "target.txt",
+                &BlameOptions {
+                    line_range: Some(1..=3),
+                    ..Default::default()
+                },
+            )
+            .expect("blame");
+            let porcelain = git_output(
+                root,
+                &[
+                    "blame",
+                    "--line-porcelain",
+                    "-L",
+                    "1,3",
+                    "HEAD",
+                    "--",
+                    "target.txt",
+                ],
+            );
+            let paths: Vec<_> = porcelain
+                .lines()
+                .filter_map(|l| l.strip_prefix("filename "))
+                .collect();
+            let contents: Vec<_> = porcelain
+                .lines()
+                .filter_map(|l| l.strip_prefix('\t'))
+                .collect();
+            for (n, line) in result.lines.iter().enumerate() {
+                if line.original_path != paths[n] {
+                    path_mismatches.push((
+                        multiple,
+                        graph,
+                        line.original_path.clone(),
+                        paths[n].to_owned(),
+                    ));
+                }
+                assert_eq!(line.content.trim_end_matches('\n'), contents[n]);
+            }
+            if graph {
+                std::fs::remove_file(root.join(".git/objects/info/commit-graph"))
+                    .expect("remove graph");
+            }
+        }
+    }
+    assert!(
+        path_mismatches.is_empty(),
+        "origin paths differ from Git: {path_mismatches:?}"
+    );
+}

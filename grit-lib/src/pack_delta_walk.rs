@@ -110,12 +110,20 @@ impl PackBytes<'_> {
 }
 
 #[cfg(unix)]
-fn read_exact_at(file: &std::fs::File, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+pub(crate) fn read_exact_at(
+    file: &std::fs::File,
+    buf: &mut [u8],
+    offset: u64,
+) -> std::io::Result<()> {
     std::os::unix::fs::FileExt::read_exact_at(file, buf, offset)
 }
 
 #[cfg(windows)]
-fn read_exact_at(file: &std::fs::File, mut buf: &mut [u8], mut offset: u64) -> std::io::Result<()> {
+pub(crate) fn read_exact_at(
+    file: &std::fs::File,
+    mut buf: &mut [u8],
+    mut offset: u64,
+) -> std::io::Result<()> {
     while !buf.is_empty() {
         match std::os::windows::fs::FileExt::seek_read(file, buf, offset) {
             Ok(0) => return Err(std::io::ErrorKind::UnexpectedEof.into()),
@@ -131,7 +139,11 @@ fn read_exact_at(file: &std::fs::File, mut buf: &mut [u8], mut offset: u64) -> s
 }
 
 #[cfg(not(any(unix, windows)))]
-fn read_exact_at(_file: &std::fs::File, _buf: &mut [u8], _offset: u64) -> std::io::Result<()> {
+pub(crate) fn read_exact_at(
+    _file: &std::fs::File,
+    _buf: &mut [u8],
+    _offset: u64,
+) -> std::io::Result<()> {
     Err(std::io::ErrorKind::Unsupported.into())
 }
 

@@ -1,0 +1,569 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-27T01:57:29.776334+00:00",
+  "machine": {
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "logical_cores": 4,
+    "ram_bytes": 16766414848,
+    "os": "linux",
+    "kernel": "6.17.0-1022-azure",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "grit": "grit 0.5.22",
+    "grit_commit": "factory/blame-pack-memory"
+  },
+  "baseline_commit": "80dc322f7c2fafae948c30b9e6de159f884504e0",
+  "change_branch": "factory/blame-pack-memory",
+  "method": "One warmup per tool, then seven rotated interleaved triplets (three for full-file blame), fresh subprocesses timed by perf_counter around /usr/bin/time -v. Running Rust builds and tests paused during sampling. before is the frozen origin/main release binary built before edits. RSS prose uses the median of per-process maxima; peak_rss_bytes is the maximum sample. No concurrent profiling in this run.",
+  "repository": {
+    "url": "https://github.com/git/git",
+    "commit": "7e34d8174dcda3435d1404c9a30bef46afe6c13e",
+    "reachable_commits": 82563,
+    "packed_objects": 422431,
+    "pack_bytes": 325876531
+  },
+  "read_policy": {
+    "delta_base_bytes_per_object_directory": 16777216,
+    "compressed_windows_per_pack": 8,
+    "compressed_window_bytes": 16384
+  },
+  "scenarios": [
+    {
+      "id": "blame-pack-2079-range",
+      "group": "history",
+      "fixture": "git/git 7e34d8174dcda3435d1404c9a30bef46afe6c13e",
+      "description": "Three-line packed blame of git-gui/git-gui.sh",
+      "driver": "cli",
+      "commands": {
+        "before": [
+          "/tmp/grit-origin-main",
+          "blame",
+          "--rev",
+          "7e34d8174dcda3435d1404c9a30bef46afe6c13e",
+          "-L",
+          "1,3",
+          "--json",
+          "git-gui/git-gui.sh"
+        ],
+        "grit": [
+          "/home/runner/grit/target/release/grit",
+          "blame",
+          "--rev",
+          "7e34d8174dcda3435d1404c9a30bef46afe6c13e",
+          "-L",
+          "1,3",
+          "--json",
+          "git-gui/git-gui.sh"
+        ],
+        "git": [
+          "git",
+          "blame",
+          "--line-porcelain",
+          "-L",
+          "1,3",
+          "7e34d8174dcda3435d1404c9a30bef46afe6c13e",
+          "--",
+          "git-gui/git-gui.sh"
+        ]
+      },
+      "before": {
+        "mean_ms": 449.393123428568,
+        "median_ms": 449.5187480001732,
+        "stddev_ms": 2.3048057845869474,
+        "min_ms": 446.1123849996511,
+        "max_ms": 452.35518899971794,
+        "runs_ms": [
+          452.35518899971794,
+          447.63645600005475,
+          447.77381400035665,
+          446.1123849996511,
+          451.52613700020083,
+          449.5187480001732,
+          450.8291349998217
+        ],
+        "peak_rss_bytes": 340123648,
+        "median_peak_rss_kib": 331872,
+        "peak_rss_samples_kb": [
+          331872,
+          331888,
+          331376,
+          331452,
+          332152,
+          331828,
+          331984
+        ]
+      },
+      "grit": {
+        "mean_ms": 435.6451909999513,
+        "median_ms": 434.2633709998154,
+        "stddev_ms": 4.97222013512515,
+        "min_ms": 432.21011199966597,
+        "max_ms": 446.3203089999297,
+        "runs_ms": [
+          446.3203089999297,
+          434.78495799990924,
+          432.27174499998,
+          434.2633709998154,
+          436.7343410003741,
+          432.93150099998456,
+          432.21011199966597
+        ],
+        "peak_rss_bytes": 139681792,
+        "median_peak_rss_kib": 135744,
+        "peak_rss_samples_kb": [
+          135744,
+          135828,
+          135392,
+          135884,
+          135604,
+          136408,
+          135108
+        ]
+      },
+      "git": {
+        "mean_ms": 172.0224515713978,
+        "median_ms": 171.610931000032,
+        "stddev_ms": 1.3188733930785435,
+        "min_ms": 170.7808890000706,
+        "max_ms": 174.70599799980846,
+        "runs_ms": [
+          172.2810619999109,
+          170.945816999847,
+          171.54493199996068,
+          171.610931000032,
+          170.7808890000706,
+          172.2875320001549,
+          174.70599799980846
+        ],
+        "peak_rss_bytes": 85643264,
+        "median_peak_rss_kib": 83468,
+        "peak_rss_samples_kb": [
+          83384,
+          83428,
+          83468,
+          83472,
+          83636,
+          83528,
+          83420
+        ]
+      },
+      "ratio": 2.5305111304345433
+    },
+    {
+      "id": "blame-pack-2079-full",
+      "group": "history",
+      "fixture": "git/git 7e34d8174dcda3435d1404c9a30bef46afe6c13e",
+      "description": "Full-file packed blame of git-gui/git-gui.sh",
+      "driver": "cli",
+      "commands": {
+        "before": [
+          "/tmp/grit-origin-main",
+          "blame",
+          "--rev",
+          "7e34d8174dcda3435d1404c9a30bef46afe6c13e",
+          "--json",
+          "git-gui/git-gui.sh"
+        ],
+        "grit": [
+          "/home/runner/grit/target/release/grit",
+          "blame",
+          "--rev",
+          "7e34d8174dcda3435d1404c9a30bef46afe6c13e",
+          "--json",
+          "git-gui/git-gui.sh"
+        ],
+        "git": [
+          "git",
+          "blame",
+          "--line-porcelain",
+          "7e34d8174dcda3435d1404c9a30bef46afe6c13e",
+          "--",
+          "git-gui/git-gui.sh"
+        ]
+      },
+      "before": {
+        "mean_ms": 1247.9982603334367,
+        "median_ms": 1248.653325000305,
+        "stddev_ms": 1.232323071381367,
+        "min_ms": 1246.5767500002585,
+        "max_ms": 1248.764705999747,
+        "runs_ms": [
+          1248.764705999747,
+          1246.5767500002585,
+          1248.653325000305
+        ],
+        "peak_rss_bytes": 398786560,
+        "median_peak_rss_kib": 389408,
+        "peak_rss_samples_kb": [
+          388916,
+          389440,
+          389408
+        ]
+      },
+      "grit": {
+        "mean_ms": 1242.7691163334202,
+        "median_ms": 1243.515791000391,
+        "stddev_ms": 1.572637220129173,
+        "min_ms": 1240.9622360000867,
+        "max_ms": 1243.8293219997831,
+        "runs_ms": [
+          1240.9622360000867,
+          1243.515791000391,
+          1243.8293219997831
+        ],
+        "peak_rss_bytes": 400592896,
+        "median_peak_rss_kib": 390644,
+        "peak_rss_samples_kb": [
+          391204,
+          390644,
+          388380
+        ]
+      },
+      "git": {
+        "mean_ms": 221.46903733346335,
+        "median_ms": 221.2580160003199,
+        "stddev_ms": 0.781471753164975,
+        "min_ms": 220.8147450000979,
+        "max_ms": 222.33435099997223,
+        "runs_ms": [
+          221.2580160003199,
+          222.33435099997223,
+          220.8147450000979
+        ],
+        "peak_rss_bytes": 89821184,
+        "median_peak_rss_kib": 87680,
+        "peak_rss_samples_kb": [
+          87716,
+          87600,
+          87680
+        ]
+      },
+      "ratio": 5.620206731848273
+    },
+    {
+      "id": "blame-pack-2079-cat-commit",
+      "group": "odb",
+      "fixture": "git/git 7e34d8174dcda3435d1404c9a30bef46afe6c13e",
+      "description": "Read packed commit by object ID",
+      "driver": "cli",
+      "commands": {
+        "before": [
+          "/tmp/grit-origin-main",
+          "cat",
+          "7e34d8174dcda3435d1404c9a30bef46afe6c13e"
+        ],
+        "grit": [
+          "/home/runner/grit/target/release/grit",
+          "cat",
+          "7e34d8174dcda3435d1404c9a30bef46afe6c13e"
+        ],
+        "git": [
+          "git",
+          "cat-file",
+          "-p",
+          "7e34d8174dcda3435d1404c9a30bef46afe6c13e"
+        ]
+      },
+      "before": {
+        "mean_ms": 3.4898700000667304,
+        "median_ms": 3.46115499996813,
+        "stddev_ms": 0.13239051184790215,
+        "min_ms": 3.3402830003979034,
+        "max_ms": 3.7594860000353947,
+        "runs_ms": [
+          3.7594860000353947,
+          3.511311000238493,
+          3.3402830003979034,
+          3.418159999910131,
+          3.5069340001427918,
+          3.4317609997742693,
+          3.46115499996813
+        ],
+        "peak_rss_bytes": 14057472,
+        "median_peak_rss_kib": 13408,
+        "peak_rss_samples_kb": [
+          13664,
+          13408,
+          13408,
+          13408,
+          13728,
+          13152,
+          13408
+        ]
+      },
+      "grit": {
+        "mean_ms": 3.2374905714667483,
+        "median_ms": 3.224457999749575,
+        "stddev_ms": 0.07532726944813602,
+        "min_ms": 3.1415429998560285,
+        "max_ms": 3.387544000361231,
+        "runs_ms": [
+          3.261633999954938,
+          3.2091450002553756,
+          3.2256600002256164,
+          3.212449999864475,
+          3.1415429998560285,
+          3.387544000361231,
+          3.224457999749575
+        ],
+        "peak_rss_bytes": 14098432,
+        "median_peak_rss_kib": 13576,
+        "peak_rss_samples_kb": [
+          13676,
+          13448,
+          13576,
+          13576,
+          13768,
+          13448,
+          13384
+        ]
+      },
+      "git": {
+        "mean_ms": 2.3337802856206378,
+        "median_ms": 2.2994910000306845,
+        "stddev_ms": 0.06294793540775047,
+        "min_ms": 2.2581690000151866,
+        "max_ms": 2.4291370000355528,
+        "runs_ms": [
+          2.3809039998923254,
+          2.2945839996282302,
+          2.2581690000151866,
+          2.4291370000355528,
+          2.2994910000306845,
+          2.3818659997232317,
+          2.2923110000192537
+        ],
+        "peak_rss_bytes": 5484544,
+        "median_peak_rss_kib": 5308,
+        "peak_rss_samples_kb": [
+          5308,
+          5072,
+          5348,
+          5100,
+          5052,
+          5356,
+          5344
+        ]
+      },
+      "ratio": 1.402248584450449
+    },
+    {
+      "id": "blame-pack-2079-cat-tree",
+      "group": "odb",
+      "fixture": "git/git 7e34d8174dcda3435d1404c9a30bef46afe6c13e",
+      "description": "Read packed root tree by object ID",
+      "driver": "cli",
+      "commands": {
+        "before": [
+          "/tmp/grit-origin-main",
+          "cat",
+          "2b6ab95d4c8ad3596b437a54b9e1ef9cd566c805"
+        ],
+        "grit": [
+          "/home/runner/grit/target/release/grit",
+          "cat",
+          "2b6ab95d4c8ad3596b437a54b9e1ef9cd566c805"
+        ],
+        "git": [
+          "git",
+          "cat-file",
+          "-p",
+          "2b6ab95d4c8ad3596b437a54b9e1ef9cd566c805"
+        ]
+      },
+      "before": {
+        "mean_ms": 9.206401714306724,
+        "median_ms": 9.166659000129584,
+        "stddev_ms": 0.0820760267548216,
+        "min_ms": 9.124956000050588,
+        "max_ms": 9.324687000116683,
+        "runs_ms": [
+          9.280931999910536,
+          9.26783200020509,
+          9.124956000050588,
+          9.14399399971444,
+          9.324687000116683,
+          9.166659000129584,
+          9.135752000020148
+        ],
+        "peak_rss_bytes": 29605888,
+        "median_peak_rss_kib": 28720,
+        "peak_rss_samples_kb": [
+          28912,
+          28720,
+          28656,
+          28720,
+          28720,
+          28720,
+          28656
+        ]
+      },
+      "grit": {
+        "mean_ms": 8.90959528572109,
+        "median_ms": 8.904202999929112,
+        "stddev_ms": 0.05575966771973968,
+        "min_ms": 8.868449000146938,
+        "max_ms": 9.026075999827299,
+        "runs_ms": [
+          8.86944100011533,
+          8.913437000046542,
+          9.026075999827299,
+          8.868568999787385,
+          8.904202999929112,
+          8.916992000195023,
+          8.868449000146938
+        ],
+        "peak_rss_bytes": 29712384,
+        "median_peak_rss_kib": 28696,
+        "peak_rss_samples_kb": [
+          28568,
+          28696,
+          28568,
+          28696,
+          28568,
+          29016,
+          28760
+        ]
+      },
+      "git": {
+        "mean_ms": 2.5977017143564547,
+        "median_ms": 2.5945270003830956,
+        "stddev_ms": 0.03167727893209907,
+        "min_ms": 2.554677000262018,
+        "max_ms": 2.644972999860329,
+        "runs_ms": [
+          2.5904809999701683,
+          2.5945270003830956,
+          2.5980320001508517,
+          2.631071999985579,
+          2.554677000262018,
+          2.5701499998831423,
+          2.644972999860329
+        ],
+        "peak_rss_bytes": 5713920,
+        "median_peak_rss_kib": 5392,
+        "peak_rss_samples_kb": [
+          5308,
+          5392,
+          5444,
+          5348,
+          5448,
+          5580,
+          5344
+        ]
+      },
+      "ratio": 3.431917647653834
+    },
+    {
+      "id": "blame-pack-2079-cat-blob",
+      "group": "odb",
+      "fixture": "git/git 7e34d8174dcda3435d1404c9a30bef46afe6c13e",
+      "description": "Read packed blob by object ID",
+      "driver": "cli",
+      "commands": {
+        "before": [
+          "/tmp/grit-origin-main",
+          "cat",
+          "15dd2b3a84ccd11f5379c731127fef88c15a7362"
+        ],
+        "grit": [
+          "/home/runner/grit/target/release/grit",
+          "cat",
+          "15dd2b3a84ccd11f5379c731127fef88c15a7362"
+        ],
+        "git": [
+          "git",
+          "cat-file",
+          "-p",
+          "15dd2b3a84ccd11f5379c731127fef88c15a7362"
+        ]
+      },
+      "before": {
+        "mean_ms": 3.975082571352167,
+        "median_ms": 3.92741899986504,
+        "stddev_ms": 0.1269774536434225,
+        "min_ms": 3.8515349997396697,
+        "max_ms": 4.175043000032019,
+        "runs_ms": [
+          3.9562120000482537,
+          3.92741899986504,
+          4.175043000032019,
+          3.8966930001151923,
+          4.1325689999212045,
+          3.8515349997396697,
+          3.886106999743788
+        ],
+        "peak_rss_bytes": 14708736,
+        "median_peak_rss_kib": 14136,
+        "peak_rss_samples_kb": [
+          14232,
+          14364,
+          14136,
+          14044,
+          14108,
+          13788,
+          14172
+        ]
+      },
+      "grit": {
+        "mean_ms": 3.7036885714769596,
+        "median_ms": 3.7129760003153933,
+        "stddev_ms": 0.0475077139958583,
+        "min_ms": 3.6491490000116755,
+        "max_ms": 3.7892410000495147,
+        "runs_ms": [
+          3.6942870001439587,
+          3.7147379998714314,
+          3.7148979999983567,
+          3.7892410000495147,
+          3.650530999948387,
+          3.7129760003153933,
+          3.6491490000116755
+        ],
+        "peak_rss_bytes": 14651392,
+        "median_peak_rss_kib": 14148,
+        "peak_rss_samples_kb": [
+          14212,
+          14308,
+          14020,
+          14148,
+          14148,
+          14148,
+          14020
+        ]
+      },
+      "git": {
+        "mean_ms": 2.8936172856057447,
+        "median_ms": 2.757813999778591,
+        "stddev_ms": 0.3379899580981025,
+        "min_ms": 2.7179740000065067,
+        "max_ms": 3.6540659998536285,
+        "runs_ms": [
+          2.757813999778591,
+          2.7179740000065067,
+          2.7415489998929843,
+          2.851675999863801,
+          2.751062999777787,
+          3.6540659998536285,
+          2.7811790000669134
+        ],
+        "peak_rss_bytes": 5808128,
+        "median_peak_rss_kib": 5604,
+        "peak_rss_samples_kb": [
+          5572,
+          5444,
+          5604,
+          5668,
+          5460,
+          5672,
+          5664
+        ]
+      },
+      "ratio": 1.3463475058917993
+    }
+  ],
+  "positioned_read_syscalls": 9035
+}

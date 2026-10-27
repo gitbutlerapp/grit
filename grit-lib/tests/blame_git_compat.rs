@@ -1905,3 +1905,41 @@ fn blame_copy_matching_preserves_final_newline() {
         }
     }
 }
+
+#[test]
+fn packed_churning_trees_full_blame_matches_git_and_alternate() {
+    let source = tempfile::tempdir().expect("source");
+    grit_test_support::blame::packed_history(source.path(), 180, 256).expect("history");
+    let repo =
+        Repository::discover(Some(source.path()), &RepositoryOptions::empty()).expect("open");
+    assert_blame_matches(&repo, source.path(), "target.txt", Some("HEAD"), None);
+    assert_blame_matches(
+        &repo,
+        source.path(),
+        "target.txt",
+        Some("HEAD"),
+        Some((1, 3)),
+    );
+    let alternate = tempfile::tempdir().expect("alternate");
+    git_run(
+        alternate.path(),
+        &[
+            "clone",
+            "-q",
+            "--shared",
+            source.path().to_str().expect("path"),
+            ".",
+        ],
+    );
+    let repo = Repository::discover(Some(alternate.path()), &RepositoryOptions::empty())
+        .expect("alternate open");
+    assert_blame_matches(&repo, alternate.path(), "target.txt", Some("HEAD"), None);
+    assert_blame_matches(
+        &repo,
+        alternate.path(),
+        "target.txt",
+        Some("HEAD"),
+        Some((1, 3)),
+    );
+    git_run(alternate.path(), &["fsck", "--strict"]);
+}

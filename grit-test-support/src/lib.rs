@@ -4,6 +4,7 @@
 //! temporary workspace helpers, and cached filesystem fixtures used by
 //! integration tests in `grit` and `grit-lib`.
 
+pub mod blame;
 pub mod cli_fixture;
 pub mod objects;
 pub mod odb_conformance;

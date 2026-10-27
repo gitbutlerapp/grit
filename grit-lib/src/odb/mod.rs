@@ -1085,7 +1085,28 @@ impl Odb {
         Ok(threshold)
     }
 
+    /// An operation-local view with bounded pack residency and tree delta bases.
+    /// Custom stores and overlays are preserved; file sources and alternates are rebuilt
+    /// against private caches so this view cannot evict or reconfigure a caller's caches.
+    pub(crate) fn with_bounded_pack_cache(&self) -> Self {
+        let mut odb = self.clone();
+        odb.pack_store = Arc::new(PackStore::for_bounded_reads(self.objects_dir.clone()));
+        odb.primary_source = Arc::new(OnceLock::new());
+        odb.session_loose_reads = Arc::new(Mutex::new(oid_hash_map()));
+        odb.alternate_pack_stores = Arc::new(Mutex::new(HashMap::new()));
+        odb.alternate_sources_cache = Arc::new(RwLock::new(AlternateSourcesCache {
+            file_generation: 0,
+            env_fingerprint: 0,
+            submodule_generation: 0,
+            sources: None,
+        }));
+        odb
+    }
+
     fn sync_delta_base_cache_limit(&self) {
+        if self.pack_store.bounded_reads() {
+            return;
+        }
         self.delta_base_cache_sync.get_or_init(|| {
             if self.config_git_dir.is_some() {
                 let cfg = self.load_config_cascade().unwrap_or_default();
@@ -1098,15 +1119,21 @@ impl Odb {
         if objects_dir == self.objects_dir.as_path() {
             return Arc::clone(&self.pack_store);
         }
+        let new_store = || {
+            Arc::new(if self.pack_store.bounded_reads() {
+                PackStore::for_bounded_reads(objects_dir.to_path_buf())
+            } else {
+                PackStore::new(objects_dir.to_path_buf())
+            })
+        };
         if let Ok(mut guard) = self.alternate_pack_stores.lock() {
-            if let Some(store) = guard.get(objects_dir) {
-                return Arc::clone(store);
-            }
-            let store = Arc::new(PackStore::new(objects_dir.to_path_buf()));
-            guard.insert(objects_dir.to_path_buf(), Arc::clone(&store));
-            return store;
+            return Arc::clone(
+                guard
+                    .entry(objects_dir.to_path_buf())
+                    .or_insert_with(new_store),
+            );
         }
-        Arc::new(PackStore::new(objects_dir.to_path_buf()))
+        new_store()
     }
 
     /// Pack/MIDX read cache shared by this handle and its [`Clone`]s.

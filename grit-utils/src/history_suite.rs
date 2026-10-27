@@ -315,6 +315,28 @@ pub fn run_history_suite(
         )?);
     }
 
+    if !smoke {
+        let packed = tempfile::tempdir().context("packed blame directory")?;
+        grit_test_support::blame::packed_history(packed.path(), 1800, 64 * 1024)
+            .context("packed deep-history blame fixture")?;
+        verify_blame_porcelain_line_range(git, bench_exe, packed.path(), "target.txt", 1, 3)?;
+        scenarios.push(run_scenario(
+            hyperfine, git, grit_cli, cfg,
+            &Scenario {
+                id: "history-blame-packed-range".into(),
+                group: "history".into(),
+                fixture: "packed-blame-1800x1000".into(),
+                description: "three-line blame through wide changing trees, a rename and a merge in a large pack".into(),
+                grit_argv: vec!["blame".into(), "--json".into(), "-L".into(), "1,3".into(), "target.txt".into()],
+                git_argv: vec!["blame".into(), "--line-porcelain".into(), "-L".into(), "1,3".into(), "HEAD".into(), "--".into(), "target.txt".into()],
+                driver: Driver::Cli,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            }, packed.path(),
+        )?);
+    }
+
     let show_batch = HISTORY_SHOW_SAMPLE_BATCH;
     scenarios.push(run_scenario(
         hyperfine,

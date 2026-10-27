@@ -52,6 +52,7 @@ pub mod test_hooks {
 /// Alternate object directories get separate stores retained on the parent [`Odb`](crate::odb::Odb).
 pub struct PackStore {
     objects_dir: PathBuf,
+    bounded_reads: bool,
     /// Bumped on every invalidation so other threads drop trusted thread-local pack caches.
     cache_epoch: AtomicU64,
     catalog: RwLock<crate::pack::pack_cache::CatalogState>,
@@ -60,6 +61,9 @@ pub struct PackStore {
     /// Repository-scoped config cache for MIDX chain parsing (paired with [`crate::odb::Odb`]).
     repo_caches: RwLock<Option<Arc<crate::repo_caches::RepoCaches>>>,
 }
+
+/// Tree delta working set for an operation that reads scattered historical entries.
+pub(crate) const BOUNDED_DELTA_BASE_BYTES: usize = 16 * 1024 * 1024;
 
 const _: () = {
     fn assert_send_sync<T: Send + Sync>() {}
@@ -81,12 +85,25 @@ impl PackStore {
     pub fn new(objects_dir: PathBuf) -> Self {
         Self {
             objects_dir,
+            bounded_reads: false,
             cache_epoch: AtomicU64::new(0),
             catalog: RwLock::new(crate::pack::pack_cache::CatalogState::default()),
             delta_bases: crate::pack::pack_cache::ShardedDeltaBaseLru::new(),
             midx: Mutex::new(crate::midx::midx_cache::State::default()),
             repo_caches: RwLock::new(None),
         }
+    }
+
+    /// Private cache for a random-access history operation. Never changes a shared store.
+    pub(crate) fn for_bounded_reads(objects_dir: PathBuf) -> Self {
+        let mut store = Self::new(objects_dir);
+        store.bounded_reads = true;
+        store.delta_bases.set_byte_limit(BOUNDED_DELTA_BASE_BYTES);
+        store
+    }
+
+    pub(crate) fn bounded_reads(&self) -> bool {
+        self.bounded_reads
     }
 
     /// Share the open repository's config cache for pack/MIDX reads on this store.
@@ -357,6 +374,11 @@ impl PackReadContextGuard {
 
 impl Drop for PackReadContextGuard {
     fn drop(&mut self) {
+        if CURRENT.with(|c| c.borrow().as_ref().is_some_and(|s| s.bounded_reads())) {
+            // Operation-local pack bytes/indexes must not outlive their cache through
+            // thread-local fast paths, including when the allocator reuses a store address.
+            crate::pack::pack_cache::clear_thread_local_after_invalidation(0);
+        }
         crate::pack::clear_pack_read_info_cache();
         ACTIVE_OBJECTS_DIR.with(|d| *d.borrow_mut() = self.prev_dir.take());
         CURRENT.with(|c| *c.borrow_mut() = self.prev_store.take());
