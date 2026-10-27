@@ -763,10 +763,6 @@ mod tests {
         assert!(!map.is_auto_stage_loser(b"file.txt"));
     }
 
-    #[cfg_attr(
-        not(feature = "full-tests"),
-        ignore = "starts system git or is heavy; run with --features full-tests"
-    )]
     #[test]
     #[ignore = "manual perf probe for maintainer reports"]
     fn icase_collision_map_large_index_timing() {

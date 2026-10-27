@@ -145,7 +145,10 @@ def mark_unit_tests(path: Path, shared: set[str]) -> int:
             fm = FN.search(lines[j]) if j < len(lines) else None
             name = fm.group(1) if fm else None
             body = bodies.get(name, "") if name else ""
-            already = "full-tests" in "\n".join(lines[max(0, i - 3) : j])
+            attrs = "\n".join(lines[max(0, i - 3) : j])
+            # Already tagged, or ignored outright (a manual harness): a second
+            # ignore would be an unused attribute.
+            already = "full-tests" in attrs or re.search(r"^\s*#\[ignore\b", attrs, re.M)
             needs = bool(GIT_SPAWN.search(body) or (call and call.search(body)) or HEAVY_BODY.search(body)
                          or (name and HEAVY_NAME.search(name)))
             if needs and not already:

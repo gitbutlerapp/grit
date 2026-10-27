@@ -918,10 +918,6 @@ mod tests {
     }
 
     /// Manual RSS: `GRIT_CARGO_PACK=/path/to.pack cargo test -p grit-lib --release rss_mmap_index_records -- --ignored --exact`
-    #[cfg_attr(
-        not(feature = "full-tests"),
-        ignore = "starts system git or is heavy; run with --features full-tests"
-    )]
     #[test]
     #[ignore = "manual RSS harness (GRIT_CARGO_PACK)"]
     fn rss_mmap_index_records() {
