@@ -215,4 +215,5 @@ baseline = [
   "grit-utils/baselines/daily-checkout-chunks-before.json",
   "grit-utils/baselines/daily-checkout-chunks-after.json",
   "grit-utils/baselines/daily/latest.json",
+  "grit-utils/baselines/add-ignorecase-1682.json",
 ]

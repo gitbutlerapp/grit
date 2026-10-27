@@ -2880,3 +2880,32 @@ One warmup precedes seven interleaved runs per tool, reversing tool order on alt
 Regular-file timings stay within 1% of main and peak RSS within 0.5%. Mixed-fixture main results are directory-read errors; their time and RSS measure early failure and cannot be compared as successful scans. Fixed mixed diffs succeed; clean previews return `nothing_to_commit`, and edited previews succeed. Raw samples, exit codes, command arguments and fixture details are in `grit-utils/baselines/diff-parallel-symlinks-2076.json`.
 
 The existing 50,000-file performance suite also passes all four checks with the fixed release CLI: warm clean diff is 148.49 ms versus Git 95.56 ms (1.55×), 100 edits are 150.88 versus 156.11 ms (0.97×), and mtime-only touches are 146.03 versus 94.83 ms (1.54×). The deletion parity check passes. These existing fixtures include deep paths and retain their original 3× timing limit.
+
+## Staging with case-insensitive path settings (issue #1682, 2026-10-27)
+
+`git init` on macOS writes `core.ignorecase=true` and `core.precomposeunicode=true`, and Windows sets `core.ignorecase=true`. With those settings every `grit add` checks whether a tracked path was renamed on disk only by case, which needs each parent directory's listing. The listing cache now answers a path that exists exactly as indexed from its parent's listing without allocating, reads every parent directory up front in parallel, and stores listing names in one buffer. Case-collision groups keep only paths that actually collide. ASCII paths skip the precompose lookup, which stat'ed every path before returning it unchanged. Directory pruning for literal pathspecs no longer allocates per directory and pathspec.
+
+Factory VM: Intel Xeon, 4 vCPUs, Rust 1.99.0, `release` profile, stock Git 2.43.0. The fixture is the issue's tree: `d{0..6}/e{0..6}/f{0..6}/g{0..6}` with 20 files per leaf, 48,020 tracked files, 98 of them modified. The baseline is origin/main `1dea9fde5`, which already caches directory listings per pass ([#2102](https://github.com/gitbutlerapp/grit/issues/2102)). Every command starts from an index reset to the base commit; commit rows also run `git add -A` first and compare `grit commit -m x` with `git commit -m x`. One warmup per tool precedes seven interleaved runs, reversing tool order every other run. Wall time is the median measured with Python `perf_counter` around `/usr/bin/time -v`, and RSS is the maximum peak across runs. Builds and tests were idle. Raw samples are in `grit-utils/baselines/add-ignorecase-1682.json`.
+
+| Config / operation | Git ms | Main ms | Fixed ms | Git RSS KiB | Main RSS KiB | Fixed RSS KiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| ignorecase, add 1 path | 28.0 | 143.9 | 53.5 | 16,384 | 58,196 | 38,232 |
+| ignorecase, add 10 paths | 31.2 | 142.1 | 50.6 | 16,380 | 57,824 | 36,512 |
+| ignorecase, add 98 paths | 72.6 | 166.8 | 60.8 | 16,404 | 60,648 | 40,744 |
+| ignorecase, `add .` vs `git add -A` | 56.4 | 290.0 | 107.8 | 15,920 | 61,688 | 36,956 |
+| ignorecase, `add -u` | 39.2 | 252.3 | 66.8 | 15,920 | 61,160 | 35,736 |
+| ignorecase, `add --dry-run .` | 59.6 | 234.8 | 87.6 | 15,920 | 63,176 | 30,856 |
+| ignorecase, commit | 54.2 | 323.7 | 138.6 | 17,236 | 61,492 | 37,544 |
+| ignorecase, status (control) | 39.4 | 53.4 | 46.4 | 16,672 | 32,688 | 32,844 |
+| default, add 1 path | 25.5 | 30.0 | 30.5 | 15,920 | 27,520 | 27,308 |
+| default, add 10 paths | 28.0 | 29.8 | 28.7 | 15,928 | 27,352 | 27,512 |
+| default, add 98 paths | 70.4 | 51.0 | 36.5 | 15,888 | 30,120 | 29,708 |
+| default, `add .` vs `git add -A` | 50.8 | 81.5 | 83.0 | 15,920 | 32,852 | 32,488 |
+| default, `add -u` | 34.0 | 41.5 | 41.5 | 15,876 | 29,620 | 29,276 |
+| default, `add --dry-run .` | 53.9 | 59.7 | 59.1 | 15,916 | 26,312 | 26,252 |
+| default, commit | 49.8 | 117.8 | 110.6 | 17,256 | 34,744 | 35,164 |
+| default, status (control) | 38.2 | 41.9 | 43.2 | 16,672 | 32,148 | 32,364 |
+
+With the macOS settings, staging and commit are 2.3–3.8× faster than main and use 34–51% less peak memory. Extra paths now cost little: 98 paths take 60.8 ms against 53.5 ms for one, faster than Git's 72.6 ms, though a single path is still 1.9× Git. `add .` and `add -u` remain 1.7–1.9× Git. Default-config rows stay within run-to-run noise, apart from 98 explicit paths (28% faster, from the pathspec pruning). `grit commit` still stats every tracked file and walks the tree for untracked files because it stages everything by default; `git commit` writes the existing index only. Before this change on the earlier main `ad7f51066`, the same `add .` took 1,102 ms and `add -u` 1,026 ms.
+
+On a 48k-file tree, `add_many_pathspec_perf_git_compat` checks that explicit paths, `add .` and `add -u` under these settings stay within 5× of system Git. Daily scenarios `add/all-ignorecase@synth-100k` and `add/update-ignorecase@synth-100k` follow the same path on the standard 100k fixture.

@@ -1,0 +1,1780 @@
+{
+ "schema_version": 1,
+ "timestamp": "2026-10-27T12:28:30.103964+00:00",
+ "machine": {
+  "cpu_model": "Intel Xeon Processor (4 vCPUs)",
+  "logical_cores": 4,
+  "os": "linux",
+  "kernel": "6.12.94+",
+  "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "cargo_profile": "release"
+ },
+ "tools": {
+  "git": "git version 2.43.0",
+  "baseline_grit_commit": "1dea9fde5",
+  "grit": "factory/add-pathspec-scaling (issue #1682)"
+ },
+ "methodology": "Issue #1682 reproduction tree (d{0..6}/e{0..6}/f{0..6}/g{0..6}, 20 files per leaf, 48,020 tracked, 98 modified). Each scenario resets the index to the base commit before every command (commit rows also run git add -A first). One warmup per tool, then seven interleaved runs rotating git, grit main and grit branch, reversing order on odd runs; wall time is the median of Python perf_counter around /usr/bin/time -v, peak RSS is the maximum across runs. Builds and tests were idle.",
+ "scenarios": [
+  {
+   "id": "add-ignorecase-1682-default-add-1-path",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (default config)",
+   "description": "add 1 path",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "add",
+     "d0/e0/f3/g3/file17.txt"
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "add",
+     "d0/e0/f3/g3/file17.txt"
+    ],
+    "grit": [
+     "grit",
+     "add",
+     "d0/e0/f3/g3/file17.txt"
+    ]
+   },
+   "git": {
+    "median_ms": 25.5,
+    "min_ms": 23.97,
+    "max_ms": 29.08,
+    "runs_ms": [
+     29.08,
+     26.31,
+     27.84,
+     25.5,
+     24.76,
+     24.01,
+     23.97
+    ],
+    "peak_rss_bytes": 16302080,
+    "runs_rss_kb": [
+     15852,
+     15784,
+     15716,
+     15872,
+     15920,
+     15832,
+     15920
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 29.96,
+    "min_ms": 27.66,
+    "max_ms": 32.21,
+    "runs_ms": [
+     28.43,
+     31.55,
+     31.72,
+     32.21,
+     29.96,
+     27.78,
+     27.66
+    ],
+    "peak_rss_bytes": 28180480,
+    "runs_rss_kb": [
+     27360,
+     27260,
+     27520,
+     27260,
+     27248,
+     27308,
+     27432
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 30.48,
+    "min_ms": 24.35,
+    "max_ms": 32.92,
+    "runs_ms": [
+     30.48,
+     31.65,
+     32.11,
+     32.92,
+     24.35,
+     29.25,
+     26.09
+    ],
+    "peak_rss_bytes": 27963392,
+    "runs_rss_kb": [
+     26876,
+     26952,
+     27064,
+     26892,
+     26924,
+     27308,
+     27236
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-default-add-10-paths",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (default config)",
+   "description": "add 10 paths",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "add",
+     "d0/e0/f3/g3/file17.txt",
+     "d0/e0/f6/g6/file9.txt",
+     "d0/e1/f3/g3/file17.txt",
+     "d0/e1/f6/g6/file9.txt",
+     "d0/e2/f3/g3/file17.txt",
+     "d0/e2/f6/g6/file9.txt",
+     "..."
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "add",
+     "d0/e0/f3/g3/file17.txt",
+     "d0/e0/f6/g6/file9.txt",
+     "d0/e1/f3/g3/file17.txt",
+     "d0/e1/f6/g6/file9.txt",
+     "d0/e2/f3/g3/file17.txt",
+     "d0/e2/f6/g6/file9.txt",
+     "..."
+    ],
+    "grit": [
+     "grit",
+     "add",
+     "d0/e0/f3/g3/file17.txt",
+     "d0/e0/f6/g6/file9.txt",
+     "d0/e1/f3/g3/file17.txt",
+     "d0/e1/f6/g6/file9.txt",
+     "d0/e2/f3/g3/file17.txt",
+     "d0/e2/f6/g6/file9.txt",
+     "..."
+    ]
+   },
+   "git": {
+    "median_ms": 28.02,
+    "min_ms": 23.86,
+    "max_ms": 29.09,
+    "runs_ms": [
+     28.89,
+     28.01,
+     26.63,
+     28.9,
+     23.86,
+     28.02,
+     29.09
+    ],
+    "peak_rss_bytes": 16310272,
+    "runs_rss_kb": [
+     15712,
+     15916,
+     15876,
+     15852,
+     15928,
+     15764,
+     15872
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 29.84,
+    "min_ms": 28.15,
+    "max_ms": 31.2,
+    "runs_ms": [
+     28.73,
+     30.93,
+     30.36,
+     28.15,
+     28.91,
+     29.84,
+     31.2
+    ],
+    "peak_rss_bytes": 28008448,
+    "runs_rss_kb": [
+     27288,
+     27352,
+     27320,
+     27296,
+     27328,
+     27116,
+     27352
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 28.71,
+    "min_ms": 27.12,
+    "max_ms": 30.4,
+    "runs_ms": [
+     28.71,
+     27.7,
+     28.26,
+     29.4,
+     29.29,
+     27.12,
+     30.4
+    ],
+    "peak_rss_bytes": 28172288,
+    "runs_rss_kb": [
+     26936,
+     27512,
+     27236,
+     27176,
+     27012,
+     27324,
+     27196
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-default-add-98-paths",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (default config)",
+   "description": "add 98 paths",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "add",
+     "d0/e0/f3/g3/file17.txt",
+     "d0/e0/f6/g6/file9.txt",
+     "d0/e1/f3/g3/file17.txt",
+     "d0/e1/f6/g6/file9.txt",
+     "d0/e2/f3/g3/file17.txt",
+     "d0/e2/f6/g6/file9.txt",
+     "..."
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "add",
+     "d0/e0/f3/g3/file17.txt",
+     "d0/e0/f6/g6/file9.txt",
+     "d0/e1/f3/g3/file17.txt",
+     "d0/e1/f6/g6/file9.txt",
+     "d0/e2/f3/g3/file17.txt",
+     "d0/e2/f6/g6/file9.txt",
+     "..."
+    ],
+    "grit": [
+     "grit",
+     "add",
+     "d0/e0/f3/g3/file17.txt",
+     "d0/e0/f6/g6/file9.txt",
+     "d0/e1/f3/g3/file17.txt",
+     "d0/e1/f6/g6/file9.txt",
+     "d0/e2/f3/g3/file17.txt",
+     "d0/e2/f6/g6/file9.txt",
+     "..."
+    ]
+   },
+   "git": {
+    "median_ms": 70.42,
+    "min_ms": 67.94,
+    "max_ms": 74.28,
+    "runs_ms": [
+     70.34,
+     71.5,
+     74.28,
+     67.94,
+     70.4,
+     70.55,
+     70.42
+    ],
+    "peak_rss_bytes": 16269312,
+    "runs_rss_kb": [
+     15836,
+     15716,
+     15848,
+     15876,
+     15888,
+     15876,
+     15832
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 51.01,
+    "min_ms": 48.68,
+    "max_ms": 52.07,
+    "runs_ms": [
+     50.97,
+     52.07,
+     51.22,
+     51.95,
+     48.68,
+     49.76,
+     51.01
+    ],
+    "peak_rss_bytes": 30842880,
+    "runs_rss_kb": [
+     29532,
+     30120,
+     29836,
+     29724,
+     29528,
+     29788,
+     29812
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 36.53,
+    "min_ms": 35.14,
+    "max_ms": 38.33,
+    "runs_ms": [
+     36.6,
+     36.53,
+     35.14,
+     36.71,
+     38.33,
+     35.8,
+     35.49
+    ],
+    "peak_rss_bytes": 30420992,
+    "runs_rss_kb": [
+     29408,
+     29360,
+     29380,
+     29548,
+     29440,
+     29708,
+     29316
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-default-add-add-a",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (default config)",
+   "description": "add . / add -A",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "add",
+     "-A"
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "add",
+     "."
+    ],
+    "grit": [
+     "grit",
+     "add",
+     "."
+    ]
+   },
+   "git": {
+    "median_ms": 50.84,
+    "min_ms": 50.13,
+    "max_ms": 68.43,
+    "runs_ms": [
+     51.1,
+     50.84,
+     68.43,
+     50.67,
+     53.13,
+     50.8,
+     50.13
+    ],
+    "peak_rss_bytes": 16302080,
+    "runs_rss_kb": [
+     15784,
+     15820,
+     15756,
+     15876,
+     15920,
+     15864,
+     15852
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 81.48,
+    "min_ms": 80.67,
+    "max_ms": 85.29,
+    "runs_ms": [
+     84.77,
+     80.67,
+     85.29,
+     81.48,
+     82.49,
+     80.94,
+     81.18
+    ],
+    "peak_rss_bytes": 33640448,
+    "runs_rss_kb": [
+     32312,
+     32224,
+     32384,
+     32728,
+     32488,
+     32852,
+     32584
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 83.03,
+    "min_ms": 81.1,
+    "max_ms": 86.3,
+    "runs_ms": [
+     84.49,
+     81.1,
+     84.0,
+     82.82,
+     86.3,
+     83.03,
+     81.25
+    ],
+    "peak_rss_bytes": 33267712,
+    "runs_rss_kb": [
+     32488,
+     32008,
+     32376,
+     32128,
+     32336,
+     32304,
+     32400
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-default-add-u",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (default config)",
+   "description": "add -u",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "add",
+     "-u"
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "add",
+     "-u"
+    ],
+    "grit": [
+     "grit",
+     "add",
+     "-u"
+    ]
+   },
+   "git": {
+    "median_ms": 33.95,
+    "min_ms": 32.39,
+    "max_ms": 35.25,
+    "runs_ms": [
+     34.65,
+     33.95,
+     33.65,
+     34.75,
+     32.39,
+     35.25,
+     33.0
+    ],
+    "peak_rss_bytes": 16257024,
+    "runs_rss_kb": [
+     15876,
+     15872,
+     15716,
+     15784,
+     15852,
+     15872,
+     15820
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 41.54,
+    "min_ms": 40.27,
+    "max_ms": 42.54,
+    "runs_ms": [
+     42.33,
+     41.53,
+     41.54,
+     42.54,
+     40.27,
+     40.79,
+     41.54
+    ],
+    "peak_rss_bytes": 30330880,
+    "runs_rss_kb": [
+     29336,
+     29412,
+     29496,
+     29512,
+     29452,
+     29620,
+     29244
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 41.52,
+    "min_ms": 40.28,
+    "max_ms": 42.84,
+    "runs_ms": [
+     42.56,
+     40.28,
+     41.49,
+     41.52,
+     42.35,
+     40.58,
+     42.84
+    ],
+    "peak_rss_bytes": 29978624,
+    "runs_rss_kb": [
+     29188,
+     29140,
+     28732,
+     28904,
+     29276,
+     28780,
+     29124
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-default-add-dry-run",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (default config)",
+   "description": "add --dry-run .",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "add",
+     "--dry-run",
+     "."
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "add",
+     "--dry-run",
+     "."
+    ],
+    "grit": [
+     "grit",
+     "add",
+     "--dry-run",
+     "."
+    ]
+   },
+   "git": {
+    "median_ms": 53.86,
+    "min_ms": 50.3,
+    "max_ms": 62.75,
+    "runs_ms": [
+     53.86,
+     52.91,
+     50.3,
+     54.02,
+     51.75,
+     57.68,
+     62.75
+    ],
+    "peak_rss_bytes": 16297984,
+    "runs_rss_kb": [
+     15784,
+     15916,
+     15832,
+     15716,
+     15912,
+     15716,
+     15864
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 59.72,
+    "min_ms": 58.93,
+    "max_ms": 61.82,
+    "runs_ms": [
+     61.82,
+     59.32,
+     58.93,
+     59.72,
+     61.01,
+     59.24,
+     60.05
+    ],
+    "peak_rss_bytes": 26943488,
+    "runs_rss_kb": [
+     26204,
+     26312,
+     26152,
+     26244,
+     26076,
+     26028,
+     26124
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 59.06,
+    "min_ms": 58.61,
+    "max_ms": 63.75,
+    "runs_ms": [
+     58.78,
+     58.69,
+     58.61,
+     63.75,
+     59.81,
+     59.43,
+     59.06
+    ],
+    "peak_rss_bytes": 26882048,
+    "runs_rss_kb": [
+     26088,
+     26252,
+     25740,
+     25896,
+     26040,
+     25884,
+     26228
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-default-commit-m-x-after-add-a",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (default config)",
+   "description": "commit -m x (after add -A)",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "commit",
+     "-qm",
+     "x"
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "commit",
+     "-m",
+     "x"
+    ],
+    "grit": [
+     "grit",
+     "commit",
+     "-m",
+     "x"
+    ]
+   },
+   "git": {
+    "median_ms": 49.8,
+    "min_ms": 46.89,
+    "max_ms": 117.58,
+    "runs_ms": [
+     51.03,
+     47.54,
+     46.89,
+     48.88,
+     49.8,
+     52.79,
+     117.58
+    ],
+    "peak_rss_bytes": 17670144,
+    "runs_rss_kb": [
+     17092,
+     17076,
+     17152,
+     17152,
+     17144,
+     17256,
+     17068
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 117.77,
+    "min_ms": 106.58,
+    "max_ms": 27185.52,
+    "runs_ms": [
+     117.77,
+     106.58,
+     170.19,
+     108.24,
+     27185.52,
+     107.54,
+     122.27
+    ],
+    "peak_rss_bytes": 35577856,
+    "runs_rss_kb": [
+     34484,
+     34344,
+     34572,
+     34676,
+     34536,
+     34744,
+     34548
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 110.64,
+    "min_ms": 106.85,
+    "max_ms": 124.78,
+    "runs_ms": [
+     109.59,
+     106.85,
+     110.86,
+     110.29,
+     115.25,
+     124.78,
+     110.64
+    ],
+    "peak_rss_bytes": 36007936,
+    "runs_rss_kb": [
+     34664,
+     34756,
+     35124,
+     34716,
+     35164,
+     34888,
+     34696
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-default-status-control",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (default config)",
+   "description": "status (control)",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "status",
+     "--porcelain"
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "status"
+    ],
+    "grit": [
+     "grit",
+     "status"
+    ]
+   },
+   "git": {
+    "median_ms": 38.25,
+    "min_ms": 35.55,
+    "max_ms": 39.36,
+    "runs_ms": [
+     38.25,
+     37.99,
+     38.39,
+     38.7,
+     39.36,
+     38.14,
+     35.55
+    ],
+    "peak_rss_bytes": 17072128,
+    "runs_rss_kb": [
+     16616,
+     16644,
+     16672,
+     16572,
+     16592,
+     16616,
+     16520
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 41.9,
+    "min_ms": 39.49,
+    "max_ms": 42.79,
+    "runs_ms": [
+     42.79,
+     41.38,
+     42.28,
+     41.0,
+     39.49,
+     41.9,
+     42.01
+    ],
+    "peak_rss_bytes": 32919552,
+    "runs_rss_kb": [
+     32072,
+     31960,
+     31904,
+     32136,
+     32040,
+     32148,
+     31996
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 43.16,
+    "min_ms": 41.06,
+    "max_ms": 44.95,
+    "runs_ms": [
+     42.12,
+     41.06,
+     44.95,
+     43.16,
+     44.58,
+     42.44,
+     44.04
+    ],
+    "peak_rss_bytes": 33140736,
+    "runs_rss_kb": [
+     32280,
+     32112,
+     31764,
+     32360,
+     32324,
+     32364,
+     32292
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-macos-path-config-add-1-path",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (core.ignorecase + core.precomposeunicode)",
+   "description": "add 1 path",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "add",
+     "d0/e0/f3/g3/file17.txt"
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "add",
+     "d0/e0/f3/g3/file17.txt"
+    ],
+    "grit": [
+     "grit",
+     "add",
+     "d0/e0/f3/g3/file17.txt"
+    ]
+   },
+   "git": {
+    "median_ms": 27.98,
+    "min_ms": 26.19,
+    "max_ms": 30.53,
+    "runs_ms": [
+     27.98,
+     28.88,
+     26.19,
+     30.01,
+     27.72,
+     30.53,
+     27.61
+    ],
+    "peak_rss_bytes": 16777216,
+    "runs_rss_kb": [
+     16364,
+     16332,
+     16368,
+     16368,
+     16384,
+     16280,
+     16316
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 143.88,
+    "min_ms": 141.51,
+    "max_ms": 148.91,
+    "runs_ms": [
+     143.88,
+     143.07,
+     147.49,
+     142.15,
+     148.91,
+     141.51,
+     147.13
+    ],
+    "peak_rss_bytes": 59592704,
+    "runs_rss_kb": [
+     58196,
+     55636,
+     55932,
+     57716,
+     56232,
+     55768,
+     55808
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 53.45,
+    "min_ms": 51.33,
+    "max_ms": 55.9,
+    "runs_ms": [
+     55.9,
+     51.6,
+     53.45,
+     51.33,
+     54.6,
+     54.78,
+     51.46
+    ],
+    "peak_rss_bytes": 39149568,
+    "runs_rss_kb": [
+     38172,
+     35988,
+     35972,
+     38024,
+     35828,
+     38232,
+     37984
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-macos-path-config-add-10-paths",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (core.ignorecase + core.precomposeunicode)",
+   "description": "add 10 paths",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "add",
+     "d0/e0/f3/g3/file17.txt",
+     "d0/e0/f6/g6/file9.txt",
+     "d0/e1/f3/g3/file17.txt",
+     "d0/e1/f6/g6/file9.txt",
+     "d0/e2/f3/g3/file17.txt",
+     "d0/e2/f6/g6/file9.txt",
+     "..."
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "add",
+     "d0/e0/f3/g3/file17.txt",
+     "d0/e0/f6/g6/file9.txt",
+     "d0/e1/f3/g3/file17.txt",
+     "d0/e1/f6/g6/file9.txt",
+     "d0/e2/f3/g3/file17.txt",
+     "d0/e2/f6/g6/file9.txt",
+     "..."
+    ],
+    "grit": [
+     "grit",
+     "add",
+     "d0/e0/f3/g3/file17.txt",
+     "d0/e0/f6/g6/file9.txt",
+     "d0/e1/f3/g3/file17.txt",
+     "d0/e1/f6/g6/file9.txt",
+     "d0/e2/f3/g3/file17.txt",
+     "d0/e2/f6/g6/file9.txt",
+     "..."
+    ]
+   },
+   "git": {
+    "median_ms": 31.17,
+    "min_ms": 29.96,
+    "max_ms": 33.14,
+    "runs_ms": [
+     32.75,
+     33.14,
+     31.17,
+     30.69,
+     30.45,
+     31.66,
+     29.96
+    ],
+    "peak_rss_bytes": 16773120,
+    "runs_rss_kb": [
+     16328,
+     16380,
+     16380,
+     16312,
+     16312,
+     16380,
+     16184
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 142.09,
+    "min_ms": 135.09,
+    "max_ms": 146.77,
+    "runs_ms": [
+     146.77,
+     145.63,
+     139.66,
+     144.17,
+     142.09,
+     135.09,
+     141.92
+    ],
+    "peak_rss_bytes": 59211776,
+    "runs_rss_kb": [
+     57824,
+     57808,
+     55660,
+     55668,
+     55980,
+     56240,
+     55984
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 50.62,
+    "min_ms": 48.15,
+    "max_ms": 55.08,
+    "runs_ms": [
+     52.59,
+     55.08,
+     50.62,
+     51.17,
+     48.24,
+     48.15,
+     48.84
+    ],
+    "peak_rss_bytes": 37388288,
+    "runs_rss_kb": [
+     36260,
+     36512,
+     36048,
+     36124,
+     36196,
+     35644,
+     36268
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-macos-path-config-add-98-paths",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (core.ignorecase + core.precomposeunicode)",
+   "description": "add 98 paths",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "add",
+     "d0/e0/f3/g3/file17.txt",
+     "d0/e0/f6/g6/file9.txt",
+     "d0/e1/f3/g3/file17.txt",
+     "d0/e1/f6/g6/file9.txt",
+     "d0/e2/f3/g3/file17.txt",
+     "d0/e2/f6/g6/file9.txt",
+     "..."
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "add",
+     "d0/e0/f3/g3/file17.txt",
+     "d0/e0/f6/g6/file9.txt",
+     "d0/e1/f3/g3/file17.txt",
+     "d0/e1/f6/g6/file9.txt",
+     "d0/e2/f3/g3/file17.txt",
+     "d0/e2/f6/g6/file9.txt",
+     "..."
+    ],
+    "grit": [
+     "grit",
+     "add",
+     "d0/e0/f3/g3/file17.txt",
+     "d0/e0/f6/g6/file9.txt",
+     "d0/e1/f3/g3/file17.txt",
+     "d0/e1/f6/g6/file9.txt",
+     "d0/e2/f3/g3/file17.txt",
+     "d0/e2/f6/g6/file9.txt",
+     "..."
+    ]
+   },
+   "git": {
+    "median_ms": 72.6,
+    "min_ms": 71.65,
+    "max_ms": 73.94,
+    "runs_ms": [
+     72.34,
+     71.94,
+     72.6,
+     73.04,
+     73.94,
+     71.65,
+     72.78
+    ],
+    "peak_rss_bytes": 16797696,
+    "runs_rss_kb": [
+     16388,
+     16388,
+     16244,
+     16196,
+     16204,
+     16356,
+     16404
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 166.76,
+    "min_ms": 160.18,
+    "max_ms": 172.46,
+    "runs_ms": [
+     166.76,
+     163.04,
+     164.54,
+     160.18,
+     172.46,
+     167.68,
+     167.15
+    ],
+    "peak_rss_bytes": 62103552,
+    "runs_rss_kb": [
+     58504,
+     58192,
+     58480,
+     60648,
+     58156,
+     60508,
+     60532
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 60.78,
+    "min_ms": 56.88,
+    "max_ms": 62.8,
+    "runs_ms": [
+     58.39,
+     62.8,
+     60.87,
+     60.78,
+     58.83,
+     62.79,
+     56.88
+    ],
+    "peak_rss_bytes": 41721856,
+    "runs_rss_kb": [
+     40328,
+     40584,
+     40744,
+     40672,
+     38128,
+     40724,
+     38632
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-macos-path-config-add-add-a",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (core.ignorecase + core.precomposeunicode)",
+   "description": "add . / add -A",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "add",
+     "-A"
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "add",
+     "."
+    ],
+    "grit": [
+     "grit",
+     "add",
+     "."
+    ]
+   },
+   "git": {
+    "median_ms": 56.39,
+    "min_ms": 52.28,
+    "max_ms": 59.48,
+    "runs_ms": [
+     52.28,
+     59.48,
+     59.33,
+     56.6,
+     54.93,
+     56.39,
+     55.97
+    ],
+    "peak_rss_bytes": 16302080,
+    "runs_rss_kb": [
+     15896,
+     15876,
+     15716,
+     15920,
+     15836,
+     15920,
+     15836
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 290.0,
+    "min_ms": 284.59,
+    "max_ms": 330.11,
+    "runs_ms": [
+     284.59,
+     330.11,
+     294.36,
+     287.35,
+     296.22,
+     288.11,
+     290.0
+    ],
+    "peak_rss_bytes": 63168512,
+    "runs_rss_kb": [
+     61688,
+     61328,
+     61608,
+     61260,
+     61412,
+     61380,
+     61604
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 107.81,
+    "min_ms": 105.33,
+    "max_ms": 119.66,
+    "runs_ms": [
+     119.66,
+     116.0,
+     110.54,
+     107.81,
+     106.87,
+     106.38,
+     105.33
+    ],
+    "peak_rss_bytes": 37842944,
+    "runs_rss_kb": [
+     36240,
+     36728,
+     36736,
+     36416,
+     36956,
+     36440,
+     36588
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-macos-path-config-add-u",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (core.ignorecase + core.precomposeunicode)",
+   "description": "add -u",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "add",
+     "-u"
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "add",
+     "-u"
+    ],
+    "grit": [
+     "grit",
+     "add",
+     "-u"
+    ]
+   },
+   "git": {
+    "median_ms": 39.22,
+    "min_ms": 37.0,
+    "max_ms": 39.79,
+    "runs_ms": [
+     39.69,
+     39.28,
+     37.0,
+     39.22,
+     37.51,
+     39.79,
+     37.88
+    ],
+    "peak_rss_bytes": 16302080,
+    "runs_rss_kb": [
+     15920,
+     15916,
+     15820,
+     15820,
+     15708,
+     15784,
+     15708
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 252.28,
+    "min_ms": 248.68,
+    "max_ms": 262.14,
+    "runs_ms": [
+     262.14,
+     253.8,
+     249.05,
+     248.68,
+     252.28,
+     251.77,
+     253.64
+    ],
+    "peak_rss_bytes": 62627840,
+    "runs_rss_kb": [
+     61076,
+     61160,
+     61152,
+     61036,
+     60960,
+     60888,
+     60936
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 66.77,
+    "min_ms": 64.82,
+    "max_ms": 68.56,
+    "runs_ms": [
+     66.77,
+     64.82,
+     66.23,
+     67.01,
+     68.56,
+     66.14,
+     67.15
+    ],
+    "peak_rss_bytes": 36593664,
+    "runs_rss_kb": [
+     35536,
+     35456,
+     35532,
+     35464,
+     35396,
+     35392,
+     35736
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-macos-path-config-add-dry-run",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (core.ignorecase + core.precomposeunicode)",
+   "description": "add --dry-run .",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "add",
+     "--dry-run",
+     "."
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "add",
+     "--dry-run",
+     "."
+    ],
+    "grit": [
+     "grit",
+     "add",
+     "--dry-run",
+     "."
+    ]
+   },
+   "git": {
+    "median_ms": 59.61,
+    "min_ms": 57.3,
+    "max_ms": 64.14,
+    "runs_ms": [
+     64.14,
+     59.61,
+     58.56,
+     60.19,
+     62.55,
+     57.94,
+     57.3
+    ],
+    "peak_rss_bytes": 16302080,
+    "runs_rss_kb": [
+     15832,
+     15888,
+     15784,
+     15784,
+     15920,
+     15892,
+     15836
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 234.76,
+    "min_ms": 232.72,
+    "max_ms": 254.48,
+    "runs_ms": [
+     232.72,
+     234.76,
+     254.48,
+     249.51,
+     238.37,
+     233.35,
+     234.46
+    ],
+    "peak_rss_bytes": 64692224,
+    "runs_rss_kb": [
+     62272,
+     63116,
+     63176,
+     63096,
+     62368,
+     62940,
+     62864
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 87.63,
+    "min_ms": 84.77,
+    "max_ms": 96.87,
+    "runs_ms": [
+     90.68,
+     84.77,
+     94.08,
+     96.87,
+     87.63,
+     85.7,
+     84.98
+    ],
+    "peak_rss_bytes": 31596544,
+    "runs_rss_kb": [
+     30784,
+     30676,
+     30540,
+     30828,
+     30676,
+     30856,
+     30488
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-macos-path-config-commit-m-x-after-add-a",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (core.ignorecase + core.precomposeunicode)",
+   "description": "commit -m x (after add -A)",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "commit",
+     "-qm",
+     "x"
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "commit",
+     "-m",
+     "x"
+    ],
+    "grit": [
+     "grit",
+     "commit",
+     "-m",
+     "x"
+    ]
+   },
+   "git": {
+    "median_ms": 54.16,
+    "min_ms": 47.5,
+    "max_ms": 119.78,
+    "runs_ms": [
+     51.78,
+     52.97,
+     54.16,
+     56.84,
+     54.6,
+     47.5,
+     119.78
+    ],
+    "peak_rss_bytes": 17649664,
+    "runs_rss_kb": [
+     17096,
+     17176,
+     17228,
+     17092,
+     17172,
+     17156,
+     17236
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 323.71,
+    "min_ms": 315.55,
+    "max_ms": 25915.94,
+    "runs_ms": [
+     318.6,
+     320.33,
+     324.34,
+     326.11,
+     25915.94,
+     315.55,
+     323.71
+    ],
+    "peak_rss_bytes": 62967808,
+    "runs_rss_kb": [
+     61396,
+     61132,
+     61192,
+     61300,
+     61092,
+     61492,
+     61212
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 138.62,
+    "min_ms": 135.87,
+    "max_ms": 312.02,
+    "runs_ms": [
+     138.11,
+     135.87,
+     140.24,
+     138.62,
+     312.02,
+     136.89,
+     145.59
+    ],
+    "peak_rss_bytes": 38445056,
+    "runs_rss_kb": [
+     37284,
+     37544,
+     37320,
+     37216,
+     37396,
+     37328,
+     36928
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  },
+  {
+   "id": "add-ignorecase-1682-macos-path-config-status-control",
+   "group": "add-ignorecase-1682",
+   "fixture": "48,020 tracked files, 98 modified (core.ignorecase + core.precomposeunicode)",
+   "description": "status (control)",
+   "driver": "cli",
+   "commands": {
+    "git": [
+     "git",
+     "status",
+     "--porcelain"
+    ],
+    "baseline_grit": [
+     "grit-main",
+     "status"
+    ],
+    "grit": [
+     "grit",
+     "status"
+    ]
+   },
+   "git": {
+    "median_ms": 39.43,
+    "min_ms": 36.82,
+    "max_ms": 40.3,
+    "runs_ms": [
+     40.3,
+     39.74,
+     39.43,
+     37.95,
+     37.32,
+     39.53,
+     36.82
+    ],
+    "peak_rss_bytes": 17072128,
+    "runs_rss_kb": [
+     16544,
+     16616,
+     16484,
+     16520,
+     16536,
+     16672,
+     16548
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "baseline_grit": {
+    "median_ms": 53.36,
+    "min_ms": 50.5,
+    "max_ms": 55.24,
+    "runs_ms": [
+     55.24,
+     54.66,
+     51.73,
+     51.31,
+     53.36,
+     50.5,
+     53.9
+    ],
+    "peak_rss_bytes": 33472512,
+    "runs_rss_kb": [
+     32588,
+     32688,
+     32572,
+     32396,
+     32624,
+     32672,
+     32644
+    ],
+    "exit_codes": [
+     0
+    ]
+   },
+   "grit": {
+    "median_ms": 46.35,
+    "min_ms": 44.17,
+    "max_ms": 47.79,
+    "runs_ms": [
+     47.79,
+     46.26,
+     45.29,
+     47.71,
+     47.28,
+     46.35,
+     44.17
+    ],
+    "peak_rss_bytes": 33632256,
+    "runs_rss_kb": [
+     32708,
+     32828,
+     32524,
+     32640,
+     32756,
+     32844,
+     32700
+    ],
+    "exit_codes": [
+     0
+    ]
+   }
+  }
+ ]
+}
