@@ -774,9 +774,9 @@ pub struct RevListResult {
     pub log_graph_linkage: Option<LogGraphLinkage>,
     /// Parsed listed commits, keyed by id, when [`RevListOptions::retain_commit_data`] is set.
     ///
-    /// Only walks that parse commit objects fill this, and only for commits they parsed (a
-    /// commit-graph walk reads parents and dates without parsing), so it may cover some, all,
-    /// or none of [`Self::commits`].
+    /// Only walks that parse commit objects fill this, and only for commits they parsed, so
+    /// it may cover some, all, or none of [`Self::commits`]. Bounded identity/message filters
+    /// retain selected matches even with a commit-graph, since filtering reads their objects.
     pub commit_data: OidHashMap<CommitData>,
 }
 
@@ -1093,9 +1093,8 @@ pub fn rev_list(
         HashSet::new()
     };
 
-    if let Some(ordered) = try_bounded_commit_filter_limit_list(repo, &include, &exclude, options)?
-    {
-        return Ok(rev_list_result_from_commits(ordered));
+    if let Some(result) = try_bounded_commit_filter_limit_list(repo, &include, &exclude, options)? {
+        return Ok(result);
     }
 
     if let Some(result) = try_bounded_limit_list(repo, &include, &exclude, options)? {
@@ -6601,7 +6600,7 @@ fn try_bounded_commit_filter_limit_list(
     include: &[ObjectId],
     exclude: &[ObjectId],
     options: &RevListOptions,
-) -> Result<Option<Vec<ObjectId>>> {
+) -> Result<Option<RevListResult>> {
     let filter = options.commit_filter.as_ref().filter(|f| f.is_active());
     let pickaxe = options.pickaxe.as_ref();
     if filter.is_none() && pickaxe.is_none() {
@@ -6614,6 +6613,11 @@ fn try_bounded_commit_filter_limit_list(
         return Ok(None);
     };
 
+    let mut commit_data = if options.retain_commit_data {
+        crate::objects::oid_hash_map_with_capacity(max_count.min(64))
+    } else {
+        oid_hash_map()
+    };
     let mut ordered = repo
         .odb()
         .with_pack_read_context(|| -> Result<Vec<ObjectId>> {
@@ -6627,6 +6631,9 @@ fn try_bounded_commit_filter_limit_list(
             } else {
                 walk_closure(&mut graph, exclude)?
             };
+            // Reuse traversal bytes for filters and output, without keeping every
+            // nonmatching commit when a selective filter scans a long history.
+            graph.keep_unreleased_commit_bytes();
 
             let author_dates = options.ordering == OrderingMode::AuthorDateWalk;
             let mut matched_seen = 0usize;
@@ -6651,7 +6658,7 @@ fn try_bounded_commit_filter_limit_list(
                     if consider {
                         let mut passes = true;
                         if let Some(filter) = filter {
-                            passes = filter.matches(repo, oid)?;
+                            passes = filter.matches_bytes(graph.commit_bytes(oid)?);
                         }
                         if passes {
                             if let Some(px) = pickaxe {
@@ -6669,9 +6676,14 @@ fn try_bounded_commit_filter_limit_list(
                             matched_seen += 1;
                             if matched_seen > options.skip && ordered.len() < max_count {
                                 ordered.push(oid);
+                                if options.retain_commit_data {
+                                    commit_data
+                                        .insert(oid, parse_commit(graph.commit_bytes(oid)?)?);
+                                }
                             }
                         }
                     }
+                    graph.release_commit_bytes(oid);
 
                     Ok(if ordered.len() >= max_count {
                         WalkControl::Stop
@@ -6687,7 +6699,9 @@ fn try_bounded_commit_filter_limit_list(
     if options.reverse {
         ordered.reverse();
     }
-    Ok(Some(ordered))
+    let mut result = rev_list_result_from_commits(ordered);
+    result.commit_data = commit_data;
+    Ok(Some(result))
 }
 
 /// `--date-order` is left to the full path: Git topo-sorts the whole range there, which a walk
@@ -7488,8 +7502,29 @@ pub(crate) struct CommitGraph<'r> {
     /// Retained commits are the only record of their tree and author time; those side maps
     /// stay empty for them.
     retained: Option<OidHashMap<CommitData>>,
-    /// Inflate buffer reused across retained commit loads.
+    /// Scratch buffer for retained commit loads and [`Self::commit_bytes`] reads.
     read_buf: Vec<u8>,
+    /// Raw commits traversal read but that are not yet released, once
+    /// [`Self::keep_unreleased_commit_bytes`] is called.
+    ///
+    /// A date-ordered walk reads a commit when it is queued and visits it later; keeping the
+    /// bytes until the visit lets filters and output reuse them instead of inflating again.
+    /// Only the queued frontier is held, not every visited commit.
+    unreleased_bytes: Option<OidHashMap<Vec<u8>>>,
+    /// Commit whose bytes [`Self::commit_bytes`] last read into `read_buf`.
+    read_buf_oid: Option<ObjectId>,
+}
+
+/// Raw bytes of commit `oid`.
+///
+/// Goes through [`crate::odb::Odb::read`] so loose commits land in the ODB's session cache
+/// and resolved pack delta bases stay cached, as for every other commit read in a walk.
+fn read_commit_bytes(repo: &Repository, oid: ObjectId) -> Result<Vec<u8>> {
+    let object = repo.odb().read(&oid)?;
+    if object.kind != ObjectKind::Commit {
+        return Err(rev_list_unexpected_kind(oid, "commit"));
+    }
+    Ok(object.data)
 }
 
 impl<'r> CommitGraph<'r> {
@@ -7530,6 +7565,8 @@ impl<'r> CommitGraph<'r> {
             subjects: HashMap::new(),
             retained: None,
             read_buf: Vec::new(),
+            unreleased_bytes: None,
+            read_buf_oid: None,
         }
     }
 
@@ -7651,6 +7688,51 @@ impl<'r> CommitGraph<'r> {
         Ok(())
     }
 
+    /// Keep raw commits that traversal reads from here on until [`Self::release_commit_bytes`].
+    fn keep_unreleased_commit_bytes(&mut self) {
+        self.unreleased_bytes
+            .get_or_insert_with(|| crate::objects::oid_hash_map_with_capacity(16));
+    }
+
+    /// Raw bytes of commit `oid`.
+    ///
+    /// Bytes traversal kept are borrowed; otherwise the commit is read into a scratch buffer
+    /// that stays valid until the next read.
+    fn commit_bytes(&mut self, oid: ObjectId) -> Result<&[u8]> {
+        if let Some(unreleased) = &self.unreleased_bytes {
+            if unreleased.contains_key(&oid) {
+                return Ok(&unreleased[&oid]);
+            }
+        }
+        if self.read_buf_oid != Some(oid) {
+            self.read_buf_oid = None;
+            self.read_buf = read_commit_bytes(self.repo, oid)?;
+            self.read_buf_oid = Some(oid);
+        }
+        Ok(&self.read_buf)
+    }
+
+    /// Read commit `oid` for traversal and keep its bytes until it is released.
+    fn read_and_keep_commit_bytes(&mut self, oid: ObjectId) -> Result<&[u8]> {
+        let repo = self.repo;
+        let unreleased = self
+            .unreleased_bytes
+            .get_or_insert_with(crate::objects::oid_hash_map);
+        match unreleased.entry(oid) {
+            hashbrown::hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
+            hashbrown::hash_map::Entry::Vacant(entry) => {
+                Ok(entry.insert(read_commit_bytes(repo, oid)?))
+            }
+        }
+    }
+
+    /// Drop the kept bytes of a visited commit.
+    fn release_commit_bytes(&mut self, oid: ObjectId) {
+        if let Some(unreleased) = self.unreleased_bytes.as_mut() {
+            unreleased.remove(&oid);
+        }
+    }
+
     fn populate(&mut self, oid: ObjectId) -> Result<()> {
         if self.parents.contains_key(&oid) {
             return Ok(());
@@ -7672,6 +7754,7 @@ impl<'r> CommitGraph<'r> {
             }
         }
         if self.retained.is_some() {
+            self.read_buf_oid = None;
             let commit = load_commit_into(self.repo, oid, &mut self.read_buf)?;
             let mut parents = if self.shallow_boundaries.contains(&oid) {
                 Vec::new()
@@ -7693,26 +7776,41 @@ impl<'r> CommitGraph<'r> {
             return Ok(());
         }
 
-        let mut commit = load_commit(self.repo, oid)?;
-        let mut parents = if self.shallow_boundaries.contains(&oid) {
-            Vec::new()
+        let (mut parents, ctime, atime, tree, subject) = if self.unreleased_bytes.is_some() {
+            let commit = CommitRef::parse(self.read_and_keep_commit_bytes(oid)?)?;
+            (
+                commit.parents().to_vec(),
+                commit.committer_unix_seconds_for_ordering(),
+                commit.author_unix_seconds_for_ordering(),
+                commit.tree(),
+                None,
+            )
         } else {
-            std::mem::take(&mut commit.parents)
+            let mut commit = load_commit(self.repo, oid)?;
+            (
+                std::mem::take(&mut commit.parents),
+                committer_unix_seconds_for_ordering(&commit.committer),
+                committer_unix_seconds_for_ordering(&commit.author),
+                commit.tree,
+                Some(subject_line_from_commit_message(&commit.message)),
+            )
         };
+        if self.shallow_boundaries.contains(&oid) {
+            parents.clear();
+        }
         if let Some(graft_parents) = self.graft_parents.get(&oid) {
             parents = graft_parents.clone();
         }
         if self.first_parent_only && parents.len() > 1 {
             parents.truncate(1);
         }
-        self.committer_time
-            .insert(oid, committer_unix_seconds_for_ordering(&commit.committer));
-        self.author_time
-            .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
-        self.commit_trees.insert(oid, commit.tree);
+        self.committer_time.insert(oid, ctime);
+        self.author_time.insert(oid, atime);
+        self.commit_trees.insert(oid, tree);
         self.parents.insert(oid, parents);
-        self.subjects
-            .insert(oid, subject_line_from_commit_message(&commit.message));
+        if let Some(subject) = subject {
+            self.subjects.insert(oid, subject);
+        }
         Ok(())
     }
 }
@@ -11697,6 +11795,75 @@ mod line_coverage_tests {
         let retained = graph.take_retained_commits(&[tip]);
         assert_eq!(retained.len(), 1);
         assert_eq!(retained.get(&tip), Some(&expected));
+        Ok(())
+    }
+
+    #[test]
+    fn bounded_filter_keeps_traversal_bytes_until_released() -> Result<()> {
+        let (_dir, repo, tip) = seed_repo(4, false);
+        let metrics = repo.odb().hot_path_metrics_arc();
+        metrics.set_loose_open_counting(true);
+        metrics.set_commit_parse_counting(true);
+        let _scope = crate::hot_path_test_metrics::HotPathMetricsScope::install(metrics.clone());
+
+        let mut graph = CommitGraph::new(&repo, false);
+        graph.keep_unreleased_commit_bytes();
+        let parents = graph.parents_of(tip)?;
+        let opens = metrics.loose_path_open_attempts();
+        assert!(opens > 0, "traversal must read the loose commit");
+        let tip_bytes = graph.commit_bytes(tip)?.to_vec();
+        let filter = crate::revwalk::filter::CommitFilterBuilder::new()
+            .author("T")
+            .build()
+            .expect("filter");
+        assert!(filter.matches_bytes(graph.commit_bytes(tip)?));
+        assert_eq!(metrics.loose_path_open_attempts(), opens);
+        assert_eq!(
+            metrics.commit_parse_calls(),
+            0,
+            "traversal borrows metadata"
+        );
+        assert!(graph.subject_of(tip).is_none());
+
+        graph.parents_of(parents[0])?;
+        assert_ne!(graph.commit_bytes(parents[0])?, tip_bytes);
+        assert_eq!(
+            graph.commit_bytes(tip)?,
+            tip_bytes,
+            "reading another commit must not evict an unreleased one"
+        );
+        assert_eq!(metrics.loose_path_open_attempts(), opens + 1);
+
+        graph.release_commit_bytes(tip);
+        assert_eq!(graph.commit_bytes(tip)?, tip_bytes);
+        assert_eq!(
+            metrics.loose_path_open_attempts(),
+            opens + 1,
+            "a released loose commit is read again from the ODB session cache"
+        );
+        assert!(
+            !graph
+                .unreleased_bytes
+                .as_ref()
+                .is_some_and(|u| u.contains_key(&tip)),
+            "reads outside traversal use the scratch buffer"
+        );
+
+        let blob = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Blob, b"not a commit")?;
+        assert!(matches!(graph.commit_bytes(blob), Err(Error::RevList(_))));
+        let unreleased = graph.unreleased_bytes.as_ref().expect("kept bytes");
+        assert!(!unreleased.contains_key(&blob), "failed reads keep nothing");
+        assert_eq!(graph.commit_bytes(tip)?, tip_bytes);
+
+        graph.release_commit_bytes(tip);
+        graph.release_commit_bytes(parents[0]);
+        assert!(graph
+            .unreleased_bytes
+            .as_ref()
+            .is_some_and(|u| u.is_empty()));
+        metrics.disable_all_counting();
         Ok(())
     }
 

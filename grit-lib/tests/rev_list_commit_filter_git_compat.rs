@@ -607,6 +607,136 @@ fn count_with_filter_matches_git() {
 }
 
 #[test]
+fn bounded_filters_retain_only_selected_rows_across_git_storage_formats() {
+    use grit_lib::objects::{parse_commit, ObjectKind};
+    use grit_lib::porcelain::log::{
+        load_commits_with_decorations, load_commits_with_decorations_reusing,
+    };
+
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let base = commit_tree_with_identities(
+        wt,
+        "base",
+        &[],
+        ("Alice", "a@x.com"),
+        ("Bob", "b@x.com"),
+        "base",
+    );
+    let repo = open_grit_repo(wt);
+    let tree = git(wt, &["mktree"]);
+    let write = |parents: &[ObjectId], author: &str, message: &[u8], time: i64| {
+        let mut raw = format!("tree {}\n", tree.trim());
+        for parent in parents {
+            raw.push_str(&format!("parent {parent}\n"));
+        }
+        raw.push_str(&format!(
+            "author {author} <a@x.com> {time} +0000\ncommitter Bob <b@x.com> {time} +0000\nencoding ISO-8859-1\nchange-id zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\ngpgsig test signature\n continuation\n\n"
+        ));
+        let mut raw = raw.into_bytes();
+        raw.extend_from_slice(message);
+        repo.odb()
+            .write_loose_materialize(ObjectKind::Commit, &raw)
+            .expect("grit commit")
+    };
+    let left = write(&[base], "Alice", b"chosen caf\xe9\n", 1100);
+    let right = write(&[base], "Bob", b"other\n", 1200);
+    let merge = write(&[left, right], "Alice", b"chosen merge\n", 1300);
+    let tip = write(&[merge], "Bob", b"chosen tip\n", 1400);
+    git(wt, &["update-ref", "refs/heads/main", &tip.to_hex()]);
+    git(wt, &["fsck", "--strict"]);
+
+    for storage in ["loose", "packed", "commit-graph"] {
+        match storage {
+            "packed" => {
+                git(wt, &["repack", "-adq"]);
+            }
+            "commit-graph" => git_commit_graph_write(wt),
+            _ => {}
+        }
+        let repo = open_grit_repo(wt);
+        for (builder, git_filter) in [
+            (
+                CommitFilterBuilder::new().author("Alice"),
+                vec!["--author=Alice"],
+            ),
+            (
+                CommitFilterBuilder::new().grep("chosen"),
+                vec!["--grep=chosen"],
+            ),
+            (
+                CommitFilterBuilder::new().author("nobody"),
+                vec!["--author=nobody"],
+            ),
+            (
+                CommitFilterBuilder::new().committer("Bob"),
+                vec!["--committer=Bob"],
+            ),
+        ] {
+            let filter = Arc::new(builder.build().expect("filter"));
+            for skip in [0, 1] {
+                for reverse in [false, true] {
+                    let skip_arg = format!("--skip={skip}");
+                    let exclude_arg = format!("^{base}");
+                    let mut args = vec!["-n", "2", &skip_arg, "main", &exclude_arg];
+                    args.extend_from_slice(&git_filter);
+                    if reverse {
+                        args.push("--reverse");
+                    }
+                    let expected = git_rev_list(wt, &args);
+                    for retain in [false, true] {
+                        let mut result = rev_list(
+                            &repo,
+                            &["main".to_owned()],
+                            &[base.to_hex()],
+                            &RevListOptions {
+                                max_count: Some(2),
+                                skip,
+                                reverse,
+                                commit_filter: Some(Arc::clone(&filter)),
+                                retain_commit_data: retain,
+                                use_commit_graph: storage == "commit-graph",
+                                ..Default::default()
+                            },
+                        )
+                        .expect("bounded walk");
+                        assert_eq!(
+                            result.commits, expected,
+                            "{storage}, skip={skip}, reverse={reverse}"
+                        );
+                        assert_eq!(
+                            result.commit_data.len(),
+                            if retain { expected.len() } else { 0 }
+                        );
+                        for (oid, commit) in &result.commit_data {
+                            assert!(expected.contains(oid));
+                            assert_eq!(
+                                *commit,
+                                parse_commit(&repo.odb().read(oid).expect("read").data)
+                                    .expect("parse")
+                            );
+                        }
+                        let decorations = Default::default();
+                        let loaded = load_commits_with_decorations_reusing(
+                            &repo,
+                            &result.commits,
+                            &decorations,
+                            &mut result.commit_data,
+                        )
+                        .expect("reused rows");
+                        assert_eq!(
+                            loaded,
+                            load_commits_with_decorations(&repo, &expected, &decorations)
+                                .expect("rows")
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn filtered_counts_across_shared_ancestry_and_exclusions_match_git() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();

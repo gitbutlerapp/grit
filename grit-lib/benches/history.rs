@@ -174,6 +174,38 @@ fn bench_revwalk_filter(c: &mut Criterion) {
             black_box(result.commits.len())
         });
     });
+    group.throughput(Throughput::Elements(50));
+    for (storage, fixture) in [("loose", fx), ("packed", HistoryBenchFixtures::packed())] {
+        for use_commit_graph in [false, true] {
+            let graph = if use_commit_graph {
+                "with_graph"
+            } else {
+                "without_graph"
+            };
+            group.bench_function(format!("author_limit_50_{storage}_{graph}"), |b| {
+                b.iter(|| {
+                    let opts = RevListOptions {
+                        max_count: Some(50),
+                        commit_filter: Some(Arc::clone(&filter)),
+                        use_commit_graph,
+                        retain_commit_data: true,
+                        ..Default::default()
+                    };
+                    let mut result = rev_list(&fixture.repo, &[String::from("HEAD")], &[], &opts)
+                        .expect("rev-list");
+                    black_box(
+                        grit_lib::porcelain::log::load_commits_with_decorations_reusing(
+                            &fixture.repo,
+                            &result.commits,
+                            &Default::default(),
+                            &mut result.commit_data,
+                        )
+                        .expect("log metadata"),
+                    )
+                });
+            });
+        }
+    }
     group.finish();
 }
 
