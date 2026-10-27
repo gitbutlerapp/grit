@@ -191,6 +191,9 @@ pub fn merge_bases_octopus(repo: &Repository, commits: &[ObjectId]) -> Result<Ve
 ///
 /// This is the same intersection-and-reduction as [`merge_bases_octopus`]; the name
 /// documents the `git merge-base A B C ...` calling convention.
+///
+/// For two commits the bases come newest committer date first, and bases with equal
+/// dates in the order Git reports them (the order its history walk reaches them).
 pub fn merge_bases_all(repo: &Repository, commits: &[ObjectId]) -> Result<Vec<ObjectId>> {
     if commits.is_empty() {
         return Ok(Vec::new());
@@ -198,8 +201,8 @@ pub fn merge_bases_all(repo: &Repository, commits: &[ObjectId]) -> Result<Vec<Ob
     if commits.len() == 1 {
         return Ok(vec![commits[0]]);
     }
-    let mut cache = CommitGraphCache::new(repo);
     if commits.len() == 2 {
+        let mut cache = CommitGraphCache::new(repo);
         // A tip that is an ancestor of the other is the only merge base: every other common
         // ancestor is one of its own ancestors.
         match direct_ancestor_relation(&mut cache, commits[0], commits[1])? {
@@ -209,13 +212,39 @@ pub fn merge_bases_all(repo: &Repository, commits: &[ObjectId]) -> Result<Vec<Ob
             FirstParentRelation::SecondIsAncestor => return Ok(vec![commits[1]]),
             FirstParentRelation::Unrelated => {}
         }
-        let walked = walk_intersecting_histories(&mut cache, commits[0], &[commits[1]], true)?;
-        let candidates: OidHashSet = walked.into_iter().collect();
-        let mut bases = reduce_to_best(candidates, &mut cache)?;
-        sort_merge_bases_for_git_output(&mut cache, &mut bases)?;
-        return Ok(bases);
+        return all_merge_bases_vs_union(&mut cache, commits[0], &commits[1..2]);
     }
     merge_bases_octopus(repo, commits)
+}
+
+/// Every merge base of `one` and a hypothetical merge of all `others`, newest committer first.
+///
+/// The hypothetical merge's history is the union of the histories of `others`, so this is
+/// also the merge-base set of `one` and an in-memory commit whose parents are `others`
+/// (what a recursive merge needs after merging several merge bases into a virtual one).
+/// Unlike [`merge_bases_first_vs_rest`] the result is not truncated to one base.
+pub(crate) fn merge_bases_all_vs_union(
+    repo: &Repository,
+    one: ObjectId,
+    others: &[ObjectId],
+) -> Result<Vec<ObjectId>> {
+    all_merge_bases_vs_union(&mut CommitGraphCache::new(repo), one, others)
+}
+
+fn all_merge_bases_vs_union(
+    cache: &mut CommitGraphCache<'_>,
+    one: ObjectId,
+    others: &[ObjectId],
+) -> Result<Vec<ObjectId>> {
+    // The walk yields bases newest first and, among equal dates, in discovery order (Git's
+    // order); dropping redundant ones keeps that order, which a set would lose.
+    let mut walked = walk_intersecting_histories(cache, one, others, true)?;
+    if walked.len() > 1 {
+        let candidates: OidHashSet = walked.iter().copied().collect();
+        let best: OidHashSet = reduce_to_best(candidates, cache)?.into_iter().collect();
+        walked.retain(|oid| best.contains(oid));
+    }
+    Ok(walked)
 }
 
 /// Check whether `ancestor` is reachable from `descendant`.
@@ -1826,15 +1855,18 @@ pub(crate) mod intersect_walk_test_hooks {
 struct RankedCommit {
     rank: u64,
     committed_at: i64,
+    /// Queue insertion counter: among equal rank and date, the earlier queued commit pops
+    /// first, so merge bases with equal dates come out in Git's discovery order.
+    queued_at: u64,
     oid: ObjectId,
 }
 
 impl Ord for RankedCommit {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match self.rank.cmp(&other.rank) {
-            std::cmp::Ordering::Equal => self.committed_at.cmp(&other.committed_at),
-            ord => ord,
-        }
+        self.rank
+            .cmp(&other.rank)
+            .then_with(|| self.committed_at.cmp(&other.committed_at))
+            .then_with(|| other.queued_at.cmp(&self.queued_at))
     }
 }
 
@@ -1850,6 +1882,8 @@ struct OpenQueueTally {
     open_on_both: isize,
     newest_rank_seen: u64,
     rank_stop: u64,
+    /// Commits queued so far; stamps [`RankedCommit::queued_at`].
+    queued: u64,
 }
 
 impl OpenQueueTally {
@@ -2366,9 +2400,11 @@ fn enqueue_commit_for_intersect_walk(
     *slot = merged | MARK_QUEUED;
     let rank = commit_rank_for_walk(cache, oid);
     let committed_at = cache.commit_time(oid)?;
+    tally.queued += 1;
     pending.push(RankedCommit {
         rank,
         committed_at,
+        queued_at: tally.queued,
         oid,
     });
     tally.apply_label(merged | MARK_QUEUED, 1);
@@ -2418,6 +2454,7 @@ fn walk_intersecting_histories(
         open_on_both: 0,
         newest_rank_seen: UNRANKED_COMMIT,
         rank_stop: LEGACY_RANK_CAP,
+        queued: 0,
     };
     let mut discovered: Vec<ObjectId> = Vec::new();
 
@@ -3636,6 +3673,52 @@ mod tests {
         assert_eq!(cache.parents_of(tag)?, vec![mid]);
         let _ = repo.odb().read(&mid)?;
         assert!(repo.odb().session_read_is_cached(&mid));
+        Ok(())
+    }
+
+    #[test]
+    fn merge_bases_all_vs_union_matches_a_real_merge_of_the_others() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let odb = repo.odb();
+        let root = write_commit_same_time(&odb, &[], "root", 100)?;
+        let a1 = write_commit_same_time(&odb, &[root], "a1", 200)?;
+        let b1 = write_commit_same_time(&odb, &[root], "b1", 300)?;
+        let ours = write_commit_same_time(&odb, &[a1, b1], "ours", 400)?;
+        let theirs = write_commit_same_time(&odb, &[b1, a1], "theirs", 500)?;
+        let c1 = write_commit_same_time(&odb, &[root], "c1", 600)?;
+        let merged = write_commit_same_time(&odb, &[ours, c1], "virtual", 700)?;
+        let other = write_commit_same_time(&odb, &[theirs, c1], "other", 800)?;
+
+        assert_eq!(merge_bases_all(&repo, &[ours, theirs])?, vec![b1, a1]);
+        assert_eq!(
+            merge_bases_all_vs_union(&repo, other, &[ours, c1])?,
+            merge_bases_all(&repo, &[other, merged])?,
+        );
+        assert_eq!(
+            merge_bases_all_vs_union(&repo, other, &[ours, c1])?,
+            vec![c1, b1, a1]
+        );
+        assert_eq!(merge_bases_all_vs_union(&repo, a1, &[a1, b1])?, vec![a1]);
+        Ok(())
+    }
+
+    #[test]
+    fn merge_bases_with_equal_dates_keep_discovery_order() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let odb = repo.odb();
+        let root = write_commit_same_time(&odb, &[], "root", 100)?;
+        let sides: Vec<ObjectId> = (0..4)
+            .map(|i| write_commit_same_time(&odb, &[root], &format!("side {i}"), 100))
+            .collect::<Result<_>>()?;
+        let left = write_commit_same_time(&odb, &sides, "left", 100)?;
+        let mut reversed = sides.clone();
+        reversed.reverse();
+        let right = write_commit_same_time(&odb, &reversed, "right", 100)?;
+        // Same dates: the walk visits `left`'s parents in parent order first.
+        assert_eq!(merge_bases_all(&repo, &[left, right])?, sides);
+        assert_eq!(merge_bases_all(&repo, &[right, left])?, reversed);
         Ok(())
     }
 
