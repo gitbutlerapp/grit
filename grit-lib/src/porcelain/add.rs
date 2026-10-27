@@ -641,7 +641,12 @@ fn stage_inner_on_index(
 
     if ignorecase {
         outcome.modified.extend(stage_ignorecase_spelling_updates(
-            work_tree, &icase_map, &matches, index, dry_run,
+            work_tree,
+            &icase_map,
+            &matches,
+            index,
+            dry_run,
+            parallelism.threads(),
         )?);
     }
 
@@ -953,46 +958,38 @@ fn stage_ignorecase_spelling_updates(
     matches: &impl Fn(&str) -> bool,
     index: &mut Index,
     dry_run: bool,
+    threads: std::num::NonZeroUsize,
 ) -> Result<Vec<String>> {
-    let mut updated = Vec::new();
-    let stage0: Vec<Vec<u8>> = index
+    let collision_groups = IcaseIndexCollisionGroups::from_index(index, true);
+    let candidates: Vec<&str> = index
         .entries
         .iter()
         .filter(|e| e.stage() == 0 && e.mode != MODE_GITLINK && e.mode != MODE_TREE)
-        .map(|e| e.path.clone())
+        .filter_map(|e| std::str::from_utf8(&e.path).ok())
+        .filter(|path| matches(path) && !collision_groups.has_collision_sibling(path))
         .collect();
-    let collision_groups = IcaseIndexCollisionGroups::from_index(index, true);
-    let mut dentries = DentrySpellingCache::default();
+    let mut spellings = DentrySpellingCache::new(work_tree);
+    spellings.prefetch_parent_dirs(candidates.iter().copied(), threads);
+    let respelled: Vec<(Vec<u8>, String)> = candidates
+        .into_iter()
+        .filter_map(|index_rel| {
+            let actual_rel = spellings.spelling(index_rel)?;
+            (actual_rel != index_rel
+                && paths_equal(index_rel.as_bytes(), actual_rel.as_bytes(), true))
+            .then(|| (index_rel.as_bytes().to_vec(), actual_rel.into_owned()))
+        })
+        .collect();
 
-    for raw_path in stage0 {
-        let index_rel = match std::str::from_utf8(&raw_path) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        if !matches(index_rel) {
-            continue;
-        }
-        if collision_groups.has_collision_sibling(index_rel) {
-            continue;
-        }
-        let Some(actual_rel) = dentries.spelling(work_tree, index_rel) else {
-            continue;
-        };
-        if actual_rel == index_rel {
-            continue;
-        }
-        if !paths_equal(raw_path.as_slice(), actual_rel.as_bytes(), true) {
-            continue;
-        }
+    let mut updated = Vec::with_capacity(respelled.len());
+    for (raw_path, actual_rel) in respelled {
         if dry_run {
             updated.push(actual_rel);
             continue;
         }
-        let Some(entry) = index.get(&raw_path, 0).cloned() else {
+        let Some(mut refreshed) = index.get(&raw_path, 0).cloned() else {
             continue;
         };
         icase_map.remove_alias_of(index, actual_rel.as_bytes());
-        let mut refreshed = entry;
         refreshed.path = actual_rel.as_bytes().to_vec();
         index.stage_file(refreshed);
         mark_fsmonitor_staged(index, &actual_rel);
