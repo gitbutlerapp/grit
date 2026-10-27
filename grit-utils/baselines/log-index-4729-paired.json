@@ -1,0 +1,8037 @@
+{
+  "method": "20 interleaved rotated runs after 3 warmups; Python perf_counter around /usr/bin/time -v; milliseconds and KiB",
+  "main": "7cc7979535ce08aa17183fd30e285114cae38e63",
+  "scenarios": [
+    {
+      "id": "log/all@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "--oneline",
+          "-5000"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "log",
+          "--limit",
+          "5000"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "log",
+          "--limit",
+          "5000"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 52.939736,
+            "rss_kb": 18616,
+            "minor_faults": 828
+          },
+          {
+            "ms": 62.138937,
+            "rss_kb": 18412,
+            "minor_faults": 826
+          },
+          {
+            "ms": 53.227353,
+            "rss_kb": 18616,
+            "minor_faults": 828
+          },
+          {
+            "ms": 53.283037,
+            "rss_kb": 18656,
+            "minor_faults": 829
+          },
+          {
+            "ms": 53.964258,
+            "rss_kb": 18472,
+            "minor_faults": 828
+          },
+          {
+            "ms": 53.195885,
+            "rss_kb": 18548,
+            "minor_faults": 828
+          },
+          {
+            "ms": 52.549638,
+            "rss_kb": 18480,
+            "minor_faults": 826
+          },
+          {
+            "ms": 53.523817,
+            "rss_kb": 18488,
+            "minor_faults": 829
+          },
+          {
+            "ms": 52.778646,
+            "rss_kb": 18660,
+            "minor_faults": 829
+          },
+          {
+            "ms": 53.156771,
+            "rss_kb": 18556,
+            "minor_faults": 828
+          },
+          {
+            "ms": 53.969538,
+            "rss_kb": 18488,
+            "minor_faults": 828
+          },
+          {
+            "ms": 53.759687,
+            "rss_kb": 18608,
+            "minor_faults": 829
+          },
+          {
+            "ms": 53.194041,
+            "rss_kb": 18548,
+            "minor_faults": 828
+          },
+          {
+            "ms": 53.11339,
+            "rss_kb": 18528,
+            "minor_faults": 829
+          },
+          {
+            "ms": 52.106691,
+            "rss_kb": 18600,
+            "minor_faults": 829
+          },
+          {
+            "ms": 52.169048,
+            "rss_kb": 18480,
+            "minor_faults": 829
+          },
+          {
+            "ms": 52.748941,
+            "rss_kb": 18520,
+            "minor_faults": 828
+          },
+          {
+            "ms": 52.194186,
+            "rss_kb": 18492,
+            "minor_faults": 830
+          },
+          {
+            "ms": 52.334869,
+            "rss_kb": 18544,
+            "minor_faults": 828
+          },
+          {
+            "ms": 51.974506,
+            "rss_kb": 18492,
+            "minor_faults": 827
+          }
+        ],
+        "before": [
+          {
+            "ms": 78.653032,
+            "rss_kb": 35648,
+            "minor_faults": 4811
+          },
+          {
+            "ms": 74.105043,
+            "rss_kb": 35520,
+            "minor_faults": 4808
+          },
+          {
+            "ms": 75.101724,
+            "rss_kb": 35196,
+            "minor_faults": 4838
+          },
+          {
+            "ms": 75.097967,
+            "rss_kb": 35772,
+            "minor_faults": 4843
+          },
+          {
+            "ms": 75.203663,
+            "rss_kb": 35772,
+            "minor_faults": 4843
+          },
+          {
+            "ms": 73.265406,
+            "rss_kb": 35520,
+            "minor_faults": 4808
+          },
+          {
+            "ms": 72.665717,
+            "rss_kb": 34944,
+            "minor_faults": 4803
+          },
+          {
+            "ms": 72.839701,
+            "rss_kb": 35516,
+            "minor_faults": 4839
+          },
+          {
+            "ms": 74.615737,
+            "rss_kb": 35148,
+            "minor_faults": 4839
+          },
+          {
+            "ms": 72.873183,
+            "rss_kb": 35196,
+            "minor_faults": 4803
+          },
+          {
+            "ms": 73.994987,
+            "rss_kb": 35560,
+            "minor_faults": 4332
+          },
+          {
+            "ms": 75.059184,
+            "rss_kb": 35584,
+            "minor_faults": 4840
+          },
+          {
+            "ms": 73.729963,
+            "rss_kb": 35324,
+            "minor_faults": 4804
+          },
+          {
+            "ms": 75.257103,
+            "rss_kb": 35328,
+            "minor_faults": 4838
+          },
+          {
+            "ms": 71.840499,
+            "rss_kb": 35328,
+            "minor_faults": 4806
+          },
+          {
+            "ms": 73.517617,
+            "rss_kb": 35068,
+            "minor_faults": 4836
+          },
+          {
+            "ms": 73.131756,
+            "rss_kb": 35644,
+            "minor_faults": 4843
+          },
+          {
+            "ms": 72.328339,
+            "rss_kb": 35200,
+            "minor_faults": 4838
+          },
+          {
+            "ms": 72.154003,
+            "rss_kb": 34944,
+            "minor_faults": 4835
+          },
+          {
+            "ms": 72.41446,
+            "rss_kb": 35580,
+            "minor_faults": 4838
+          }
+        ],
+        "after": [
+          {
+            "ms": 73.316788,
+            "rss_kb": 33564,
+            "minor_faults": 4805
+          },
+          {
+            "ms": 76.012527,
+            "rss_kb": 34104,
+            "minor_faults": 4807
+          },
+          {
+            "ms": 78.199897,
+            "rss_kb": 34060,
+            "minor_faults": 4808
+          },
+          {
+            "ms": 73.708953,
+            "rss_kb": 33848,
+            "minor_faults": 4840
+          },
+          {
+            "ms": 73.904318,
+            "rss_kb": 33856,
+            "minor_faults": 4808
+          },
+          {
+            "ms": 74.769834,
+            "rss_kb": 33896,
+            "minor_faults": 4840
+          },
+          {
+            "ms": 72.432532,
+            "rss_kb": 33564,
+            "minor_faults": 4805
+          },
+          {
+            "ms": 73.410757,
+            "rss_kb": 33752,
+            "minor_faults": 4839
+          },
+          {
+            "ms": 72.021474,
+            "rss_kb": 33756,
+            "minor_faults": 4296
+          },
+          {
+            "ms": 73.994627,
+            "rss_kb": 34076,
+            "minor_faults": 4809
+          },
+          {
+            "ms": 74.657735,
+            "rss_kb": 34076,
+            "minor_faults": 4841
+          },
+          {
+            "ms": 74.818234,
+            "rss_kb": 33964,
+            "minor_faults": 4840
+          },
+          {
+            "ms": 73.932922,
+            "rss_kb": 34076,
+            "minor_faults": 4809
+          },
+          {
+            "ms": 74.622699,
+            "rss_kb": 33984,
+            "minor_faults": 4838
+          },
+          {
+            "ms": 72.454252,
+            "rss_kb": 33892,
+            "minor_faults": 4841
+          },
+          {
+            "ms": 72.129946,
+            "rss_kb": 33980,
+            "minor_faults": 4839
+          },
+          {
+            "ms": 71.986529,
+            "rss_kb": 33872,
+            "minor_faults": 4297
+          },
+          {
+            "ms": 72.21148,
+            "rss_kb": 33568,
+            "minor_faults": 4838
+          },
+          {
+            "ms": 72.265591,
+            "rss_kb": 33980,
+            "minor_faults": 4804
+          },
+          {
+            "ms": 71.660262,
+            "rss_kb": 33852,
+            "minor_faults": 4840
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 53.1350805,
+          "rss_kb": 18536.0
+        },
+        "before": {
+          "ms": 73.62379,
+          "rss_kb": 35422.0
+        },
+        "after": {
+          "ms": 73.559855,
+          "rss_kb": 33894.0
+        }
+      }
+    },
+    {
+      "id": "log/author-n50@deep-history",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-no-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--format=%H"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--json"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--json"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 3.173724,
+            "rss_kb": 6696,
+            "minor_faults": 226
+          },
+          {
+            "ms": 3.152755,
+            "rss_kb": 6696,
+            "minor_faults": 225
+          },
+          {
+            "ms": 3.142115,
+            "rss_kb": 6760,
+            "minor_faults": 226
+          },
+          {
+            "ms": 3.070803,
+            "rss_kb": 6700,
+            "minor_faults": 226
+          },
+          {
+            "ms": 3.120405,
+            "rss_kb": 6700,
+            "minor_faults": 226
+          },
+          {
+            "ms": 3.057567,
+            "rss_kb": 6764,
+            "minor_faults": 226
+          },
+          {
+            "ms": 3.142375,
+            "rss_kb": 6752,
+            "minor_faults": 227
+          },
+          {
+            "ms": 3.088335,
+            "rss_kb": 6552,
+            "minor_faults": 225
+          },
+          {
+            "ms": 3.10737,
+            "rss_kb": 6616,
+            "minor_faults": 224
+          },
+          {
+            "ms": 3.179926,
+            "rss_kb": 6700,
+            "minor_faults": 226
+          },
+          {
+            "ms": 3.153056,
+            "rss_kb": 6696,
+            "minor_faults": 227
+          },
+          {
+            "ms": 3.091531,
+            "rss_kb": 6696,
+            "minor_faults": 227
+          },
+          {
+            "ms": 3.049872,
+            "rss_kb": 6700,
+            "minor_faults": 227
+          },
+          {
+            "ms": 3.0592,
+            "rss_kb": 6696,
+            "minor_faults": 227
+          },
+          {
+            "ms": 3.034665,
+            "rss_kb": 6620,
+            "minor_faults": 225
+          },
+          {
+            "ms": 3.062928,
+            "rss_kb": 6616,
+            "minor_faults": 226
+          },
+          {
+            "ms": 3.185596,
+            "rss_kb": 6700,
+            "minor_faults": 226
+          },
+          {
+            "ms": 3.183723,
+            "rss_kb": 6696,
+            "minor_faults": 228
+          },
+          {
+            "ms": 3.288198,
+            "rss_kb": 6684,
+            "minor_faults": 226
+          },
+          {
+            "ms": 3.348911,
+            "rss_kb": 6824,
+            "minor_faults": 228
+          }
+        ],
+        "before": [
+          {
+            "ms": 5.475681,
+            "rss_kb": 17104,
+            "minor_faults": 656
+          },
+          {
+            "ms": 5.775772,
+            "rss_kb": 17156,
+            "minor_faults": 655
+          },
+          {
+            "ms": 5.674933,
+            "rss_kb": 17112,
+            "minor_faults": 657
+          },
+          {
+            "ms": 5.445104,
+            "rss_kb": 17124,
+            "minor_faults": 657
+          },
+          {
+            "ms": 5.445324,
+            "rss_kb": 16972,
+            "minor_faults": 654
+          },
+          {
+            "ms": 5.433201,
+            "rss_kb": 17120,
+            "minor_faults": 656
+          },
+          {
+            "ms": 5.385523,
+            "rss_kb": 17280,
+            "minor_faults": 656
+          },
+          {
+            "ms": 5.573193,
+            "rss_kb": 17124,
+            "minor_faults": 655
+          },
+          {
+            "ms": 5.418263,
+            "rss_kb": 16972,
+            "minor_faults": 654
+          },
+          {
+            "ms": 5.38971,
+            "rss_kb": 17108,
+            "minor_faults": 655
+          },
+          {
+            "ms": 5.447568,
+            "rss_kb": 17444,
+            "minor_faults": 660
+          },
+          {
+            "ms": 5.709267,
+            "rss_kb": 17524,
+            "minor_faults": 659
+          },
+          {
+            "ms": 5.471974,
+            "rss_kb": 17584,
+            "minor_faults": 661
+          },
+          {
+            "ms": 5.494265,
+            "rss_kb": 17468,
+            "minor_faults": 660
+          },
+          {
+            "ms": 5.596517,
+            "rss_kb": 17448,
+            "minor_faults": 661
+          },
+          {
+            "ms": 5.545853,
+            "rss_kb": 17104,
+            "minor_faults": 656
+          },
+          {
+            "ms": 5.487333,
+            "rss_kb": 17104,
+            "minor_faults": 655
+          },
+          {
+            "ms": 6.108091,
+            "rss_kb": 17156,
+            "minor_faults": 656
+          },
+          {
+            "ms": 5.771473,
+            "rss_kb": 17524,
+            "minor_faults": 660
+          },
+          {
+            "ms": 5.7109,
+            "rss_kb": 16972,
+            "minor_faults": 654
+          }
+        ],
+        "after": [
+          {
+            "ms": 5.399128,
+            "rss_kb": 15868,
+            "minor_faults": 659
+          },
+          {
+            "ms": 5.394429,
+            "rss_kb": 15900,
+            "minor_faults": 658
+          },
+          {
+            "ms": 5.418033,
+            "rss_kb": 15916,
+            "minor_faults": 659
+          },
+          {
+            "ms": 5.471232,
+            "rss_kb": 15944,
+            "minor_faults": 658
+          },
+          {
+            "ms": 5.433211,
+            "rss_kb": 15924,
+            "minor_faults": 658
+          },
+          {
+            "ms": 5.354304,
+            "rss_kb": 15868,
+            "minor_faults": 660
+          },
+          {
+            "ms": 5.403236,
+            "rss_kb": 15936,
+            "minor_faults": 661
+          },
+          {
+            "ms": 5.352161,
+            "rss_kb": 15880,
+            "minor_faults": 657
+          },
+          {
+            "ms": 5.375384,
+            "rss_kb": 15896,
+            "minor_faults": 657
+          },
+          {
+            "ms": 5.435325,
+            "rss_kb": 15880,
+            "minor_faults": 657
+          },
+          {
+            "ms": 5.483486,
+            "rss_kb": 16096,
+            "minor_faults": 661
+          },
+          {
+            "ms": 5.390252,
+            "rss_kb": 16092,
+            "minor_faults": 661
+          },
+          {
+            "ms": 5.547725,
+            "rss_kb": 15768,
+            "minor_faults": 660
+          },
+          {
+            "ms": 5.479789,
+            "rss_kb": 15876,
+            "minor_faults": 659
+          },
+          {
+            "ms": 5.467295,
+            "rss_kb": 15916,
+            "minor_faults": 659
+          },
+          {
+            "ms": 5.486742,
+            "rss_kb": 15772,
+            "minor_faults": 658
+          },
+          {
+            "ms": 5.43217,
+            "rss_kb": 15868,
+            "minor_faults": 660
+          },
+          {
+            "ms": 5.545951,
+            "rss_kb": 15868,
+            "minor_faults": 660
+          },
+          {
+            "ms": 5.890245,
+            "rss_kb": 15852,
+            "minor_faults": 661
+          },
+          {
+            "ms": 5.58251,
+            "rss_kb": 15900,
+            "minor_faults": 658
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 3.13126,
+          "rss_kb": 6696.0
+        },
+        "before": {
+          "ms": 5.490799,
+          "rss_kb": 17124.0
+        },
+        "after": {
+          "ms": 5.434267999999999,
+          "rss_kb": 15888.0
+        }
+      }
+    },
+    {
+      "id": "log/author-n50@deep-history-cg",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-commit-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--format=%H"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--json"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--json"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 3.591614,
+            "rss_kb": 9904,
+            "minor_faults": 397
+          },
+          {
+            "ms": 3.849226,
+            "rss_kb": 9940,
+            "minor_faults": 397
+          },
+          {
+            "ms": 3.511755,
+            "rss_kb": 9904,
+            "minor_faults": 397
+          },
+          {
+            "ms": 3.496897,
+            "rss_kb": 9904,
+            "minor_faults": 398
+          },
+          {
+            "ms": 3.468324,
+            "rss_kb": 9904,
+            "minor_faults": 395
+          },
+          {
+            "ms": 3.518127,
+            "rss_kb": 9900,
+            "minor_faults": 395
+          },
+          {
+            "ms": 3.457805,
+            "rss_kb": 9876,
+            "minor_faults": 396
+          },
+          {
+            "ms": 3.556459,
+            "rss_kb": 9904,
+            "minor_faults": 396
+          },
+          {
+            "ms": 3.495344,
+            "rss_kb": 10028,
+            "minor_faults": 398
+          },
+          {
+            "ms": 3.55717,
+            "rss_kb": 9900,
+            "minor_faults": 397
+          },
+          {
+            "ms": 3.521974,
+            "rss_kb": 9924,
+            "minor_faults": 396
+          },
+          {
+            "ms": 3.487299,
+            "rss_kb": 9856,
+            "minor_faults": 396
+          },
+          {
+            "ms": 3.441845,
+            "rss_kb": 9936,
+            "minor_faults": 396
+          },
+          {
+            "ms": 3.49275,
+            "rss_kb": 9900,
+            "minor_faults": 397
+          },
+          {
+            "ms": 3.472793,
+            "rss_kb": 9900,
+            "minor_faults": 396
+          },
+          {
+            "ms": 3.531903,
+            "rss_kb": 9884,
+            "minor_faults": 396
+          },
+          {
+            "ms": 3.564313,
+            "rss_kb": 9880,
+            "minor_faults": 395
+          },
+          {
+            "ms": 3.481068,
+            "rss_kb": 10008,
+            "minor_faults": 399
+          },
+          {
+            "ms": 3.559863,
+            "rss_kb": 9900,
+            "minor_faults": 397
+          },
+          {
+            "ms": 3.64264,
+            "rss_kb": 9904,
+            "minor_faults": 396
+          }
+        ],
+        "before": [
+          {
+            "ms": 5.650066,
+            "rss_kb": 19672,
+            "minor_faults": 704
+          },
+          {
+            "ms": 5.686414,
+            "rss_kb": 19588,
+            "minor_faults": 702
+          },
+          {
+            "ms": 5.728292,
+            "rss_kb": 19176,
+            "minor_faults": 694
+          },
+          {
+            "ms": 5.609029,
+            "rss_kb": 18852,
+            "minor_faults": 691
+          },
+          {
+            "ms": 5.527297,
+            "rss_kb": 18984,
+            "minor_faults": 693
+          },
+          {
+            "ms": 5.667088,
+            "rss_kb": 19712,
+            "minor_faults": 706
+          },
+          {
+            "ms": 5.646059,
+            "rss_kb": 19720,
+            "minor_faults": 704
+          },
+          {
+            "ms": 5.61991,
+            "rss_kb": 19284,
+            "minor_faults": 697
+          },
+          {
+            "ms": 5.633696,
+            "rss_kb": 19344,
+            "minor_faults": 699
+          },
+          {
+            "ms": 5.638505,
+            "rss_kb": 19168,
+            "minor_faults": 698
+          },
+          {
+            "ms": 5.651429,
+            "rss_kb": 18968,
+            "minor_faults": 694
+          },
+          {
+            "ms": 5.685172,
+            "rss_kb": 19712,
+            "minor_faults": 705
+          },
+          {
+            "ms": 5.669813,
+            "rss_kb": 19176,
+            "minor_faults": 695
+          },
+          {
+            "ms": 5.612606,
+            "rss_kb": 18968,
+            "minor_faults": 694
+          },
+          {
+            "ms": 5.623035,
+            "rss_kb": 18992,
+            "minor_faults": 695
+          },
+          {
+            "ms": 5.600955,
+            "rss_kb": 19340,
+            "minor_faults": 699
+          },
+          {
+            "ms": 5.770592,
+            "rss_kb": 19660,
+            "minor_faults": 702
+          },
+          {
+            "ms": 5.753469,
+            "rss_kb": 19720,
+            "minor_faults": 703
+          },
+          {
+            "ms": 5.650026,
+            "rss_kb": 19176,
+            "minor_faults": 696
+          },
+          {
+            "ms": 5.647562,
+            "rss_kb": 18992,
+            "minor_faults": 696
+          }
+        ],
+        "after": [
+          {
+            "ms": 5.669202,
+            "rss_kb": 18236,
+            "minor_faults": 699
+          },
+          {
+            "ms": 5.557374,
+            "rss_kb": 18296,
+            "minor_faults": 706
+          },
+          {
+            "ms": 5.660034,
+            "rss_kb": 18000,
+            "minor_faults": 700
+          },
+          {
+            "ms": 5.604281,
+            "rss_kb": 18120,
+            "minor_faults": 697
+          },
+          {
+            "ms": 5.570958,
+            "rss_kb": 18000,
+            "minor_faults": 701
+          },
+          {
+            "ms": 5.595553,
+            "rss_kb": 18076,
+            "minor_faults": 698
+          },
+          {
+            "ms": 5.571429,
+            "rss_kb": 18000,
+            "minor_faults": 700
+          },
+          {
+            "ms": 5.542055,
+            "rss_kb": 18000,
+            "minor_faults": 703
+          },
+          {
+            "ms": 5.592509,
+            "rss_kb": 18296,
+            "minor_faults": 704
+          },
+          {
+            "ms": 5.580056,
+            "rss_kb": 18240,
+            "minor_faults": 701
+          },
+          {
+            "ms": 5.626383,
+            "rss_kb": 18236,
+            "minor_faults": 701
+          },
+          {
+            "ms": 5.610444,
+            "rss_kb": 18124,
+            "minor_faults": 698
+          },
+          {
+            "ms": 5.602127,
+            "rss_kb": 18248,
+            "minor_faults": 699
+          },
+          {
+            "ms": 5.595414,
+            "rss_kb": 18076,
+            "minor_faults": 699
+          },
+          {
+            "ms": 5.564207,
+            "rss_kb": 17972,
+            "minor_faults": 700
+          },
+          {
+            "ms": 5.710089,
+            "rss_kb": 18184,
+            "minor_faults": 701
+          },
+          {
+            "ms": 5.813632,
+            "rss_kb": 18204,
+            "minor_faults": 700
+          },
+          {
+            "ms": 5.594723,
+            "rss_kb": 18196,
+            "minor_faults": 701
+          },
+          {
+            "ms": 5.607127,
+            "rss_kb": 18112,
+            "minor_faults": 701
+          },
+          {
+            "ms": 5.592419,
+            "rss_kb": 18112,
+            "minor_faults": 701
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 3.514941,
+          "rss_kb": 9904.0
+        },
+        "before": {
+          "ms": 5.6487940000000005,
+          "rss_kb": 19230.0
+        },
+        "after": {
+          "ms": 5.5954835,
+          "rss_kb": 18122.0
+        }
+      }
+    },
+    {
+      "id": "log/author@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--format=%H"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--json"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--json"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 4.036695,
+            "rss_kb": 10236,
+            "minor_faults": 303
+          },
+          {
+            "ms": 3.999075,
+            "rss_kb": 10352,
+            "minor_faults": 306
+          },
+          {
+            "ms": 3.939023,
+            "rss_kb": 10236,
+            "minor_faults": 306
+          },
+          {
+            "ms": 3.927531,
+            "rss_kb": 10216,
+            "minor_faults": 305
+          },
+          {
+            "ms": 4.074154,
+            "rss_kb": 10276,
+            "minor_faults": 304
+          },
+          {
+            "ms": 3.994276,
+            "rss_kb": 10288,
+            "minor_faults": 306
+          },
+          {
+            "ms": 4.021868,
+            "rss_kb": 10296,
+            "minor_faults": 305
+          },
+          {
+            "ms": 3.972926,
+            "rss_kb": 10400,
+            "minor_faults": 306
+          },
+          {
+            "ms": 3.969339,
+            "rss_kb": 10216,
+            "minor_faults": 305
+          },
+          {
+            "ms": 4.004304,
+            "rss_kb": 10296,
+            "minor_faults": 303
+          },
+          {
+            "ms": 4.023711,
+            "rss_kb": 10300,
+            "minor_faults": 304
+          },
+          {
+            "ms": 3.972355,
+            "rss_kb": 10296,
+            "minor_faults": 307
+          },
+          {
+            "ms": 3.934775,
+            "rss_kb": 10292,
+            "minor_faults": 304
+          },
+          {
+            "ms": 4.026977,
+            "rss_kb": 10292,
+            "minor_faults": 305
+          },
+          {
+            "ms": 3.966163,
+            "rss_kb": 10272,
+            "minor_faults": 305
+          },
+          {
+            "ms": 3.940896,
+            "rss_kb": 10408,
+            "minor_faults": 305
+          },
+          {
+            "ms": 4.028209,
+            "rss_kb": 10236,
+            "minor_faults": 303
+          },
+          {
+            "ms": 3.960002,
+            "rss_kb": 10272,
+            "minor_faults": 304
+          },
+          {
+            "ms": 3.935706,
+            "rss_kb": 10296,
+            "minor_faults": 304
+          },
+          {
+            "ms": 4.356773,
+            "rss_kb": 10360,
+            "minor_faults": 305
+          }
+        ],
+        "before": [
+          {
+            "ms": 6.651135,
+            "rss_kb": 21248,
+            "minor_faults": 749
+          },
+          {
+            "ms": 6.643301,
+            "rss_kb": 21468,
+            "minor_faults": 756
+          },
+          {
+            "ms": 6.605791,
+            "rss_kb": 21132,
+            "minor_faults": 748
+          },
+          {
+            "ms": 6.590212,
+            "rss_kb": 21232,
+            "minor_faults": 749
+          },
+          {
+            "ms": 6.720174,
+            "rss_kb": 21472,
+            "minor_faults": 756
+          },
+          {
+            "ms": 7.153262,
+            "rss_kb": 21228,
+            "minor_faults": 748
+          },
+          {
+            "ms": 6.576336,
+            "rss_kb": 21264,
+            "minor_faults": 751
+          },
+          {
+            "ms": 6.592946,
+            "rss_kb": 21232,
+            "minor_faults": 747
+          },
+          {
+            "ms": 6.91155,
+            "rss_kb": 21112,
+            "minor_faults": 747
+          },
+          {
+            "ms": 6.673327,
+            "rss_kb": 21544,
+            "minor_faults": 752
+          },
+          {
+            "ms": 6.620467,
+            "rss_kb": 21364,
+            "minor_faults": 752
+          },
+          {
+            "ms": 6.817596,
+            "rss_kb": 21132,
+            "minor_faults": 750
+          },
+          {
+            "ms": 6.507136,
+            "rss_kb": 21208,
+            "minor_faults": 751
+          },
+          {
+            "ms": 6.626589,
+            "rss_kb": 21116,
+            "minor_faults": 748
+          },
+          {
+            "ms": 6.779985,
+            "rss_kb": 21544,
+            "minor_faults": 754
+          },
+          {
+            "ms": 6.603787,
+            "rss_kb": 21132,
+            "minor_faults": 750
+          },
+          {
+            "ms": 6.545988,
+            "rss_kb": 21124,
+            "minor_faults": 746
+          },
+          {
+            "ms": 6.815442,
+            "rss_kb": 21140,
+            "minor_faults": 749
+          },
+          {
+            "ms": 6.672545,
+            "rss_kb": 21232,
+            "minor_faults": 749
+          },
+          {
+            "ms": 6.785626,
+            "rss_kb": 21332,
+            "minor_faults": 753
+          }
+        ],
+        "after": [
+          {
+            "ms": 6.452144,
+            "rss_kb": 19152,
+            "minor_faults": 736
+          },
+          {
+            "ms": 6.46594,
+            "rss_kb": 19152,
+            "minor_faults": 739
+          },
+          {
+            "ms": 6.419012,
+            "rss_kb": 19040,
+            "minor_faults": 735
+          },
+          {
+            "ms": 6.634354,
+            "rss_kb": 19300,
+            "minor_faults": 742
+          },
+          {
+            "ms": 6.576816,
+            "rss_kb": 18856,
+            "minor_faults": 738
+          },
+          {
+            "ms": 6.489693,
+            "rss_kb": 18872,
+            "minor_faults": 735
+          },
+          {
+            "ms": 6.60551,
+            "rss_kb": 19120,
+            "minor_faults": 740
+          },
+          {
+            "ms": 6.470888,
+            "rss_kb": 19060,
+            "minor_faults": 737
+          },
+          {
+            "ms": 6.479445,
+            "rss_kb": 18732,
+            "minor_faults": 733
+          },
+          {
+            "ms": 6.743137,
+            "rss_kb": 19020,
+            "minor_faults": 740
+          },
+          {
+            "ms": 6.527835,
+            "rss_kb": 19176,
+            "minor_faults": 738
+          },
+          {
+            "ms": 6.463755,
+            "rss_kb": 19288,
+            "minor_faults": 739
+          },
+          {
+            "ms": 6.529027,
+            "rss_kb": 18836,
+            "minor_faults": 733
+          },
+          {
+            "ms": 6.430443,
+            "rss_kb": 18836,
+            "minor_faults": 734
+          },
+          {
+            "ms": 6.451081,
+            "rss_kb": 18880,
+            "minor_faults": 734
+          },
+          {
+            "ms": 6.506425,
+            "rss_kb": 18964,
+            "minor_faults": 734
+          },
+          {
+            "ms": 6.448287,
+            "rss_kb": 18732,
+            "minor_faults": 733
+          },
+          {
+            "ms": 6.534557,
+            "rss_kb": 18884,
+            "minor_faults": 738
+          },
+          {
+            "ms": 6.730273,
+            "rss_kb": 18980,
+            "minor_faults": 736
+          },
+          {
+            "ms": 6.563021,
+            "rss_kb": 19172,
+            "minor_faults": 742
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 3.983601,
+          "rss_kb": 10292.0
+        },
+        "before": {
+          "ms": 6.6472180000000005,
+          "rss_kb": 21232.0
+        },
+        "after": {
+          "ms": 6.498059,
+          "rss_kb": 19000.0
+        }
+      }
+    },
+    {
+      "id": "log/json-100@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "-100",
+          "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%s%x00%b%x00"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "log",
+          "--limit",
+          "100",
+          "--json"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "log",
+          "--limit",
+          "100",
+          "--json"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 4.887152,
+            "rss_kb": 12664,
+            "minor_faults": 348
+          },
+          {
+            "ms": 4.784641,
+            "rss_kb": 12720,
+            "minor_faults": 348
+          },
+          {
+            "ms": 4.628208,
+            "rss_kb": 12656,
+            "minor_faults": 349
+          },
+          {
+            "ms": 4.595228,
+            "rss_kb": 12668,
+            "minor_faults": 347
+          },
+          {
+            "ms": 4.595238,
+            "rss_kb": 12664,
+            "minor_faults": 349
+          },
+          {
+            "ms": 4.595158,
+            "rss_kb": 12700,
+            "minor_faults": 350
+          },
+          {
+            "ms": 5.13234,
+            "rss_kb": 12772,
+            "minor_faults": 348
+          },
+          {
+            "ms": 4.710222,
+            "rss_kb": 12576,
+            "minor_faults": 348
+          },
+          {
+            "ms": 4.710282,
+            "rss_kb": 12728,
+            "minor_faults": 348
+          },
+          {
+            "ms": 4.811491,
+            "rss_kb": 12712,
+            "minor_faults": 349
+          },
+          {
+            "ms": 4.895818,
+            "rss_kb": 12528,
+            "minor_faults": 348
+          },
+          {
+            "ms": 4.81118,
+            "rss_kb": 12728,
+            "minor_faults": 347
+          },
+          {
+            "ms": 4.755266,
+            "rss_kb": 12664,
+            "minor_faults": 348
+          },
+          {
+            "ms": 4.766437,
+            "rss_kb": 12596,
+            "minor_faults": 347
+          },
+          {
+            "ms": 4.670588,
+            "rss_kb": 12728,
+            "minor_faults": 348
+          },
+          {
+            "ms": 4.782287,
+            "rss_kb": 12732,
+            "minor_faults": 349
+          },
+          {
+            "ms": 4.815298,
+            "rss_kb": 12576,
+            "minor_faults": 347
+          },
+          {
+            "ms": 4.649959,
+            "rss_kb": 12728,
+            "minor_faults": 348
+          },
+          {
+            "ms": 4.59634,
+            "rss_kb": 12648,
+            "minor_faults": 350
+          },
+          {
+            "ms": 4.636765,
+            "rss_kb": 12672,
+            "minor_faults": 350
+          }
+        ],
+        "before": [
+          {
+            "ms": 6.982183,
+            "rss_kb": 22932,
+            "minor_faults": 755
+          },
+          {
+            "ms": 6.977724,
+            "rss_kb": 22988,
+            "minor_faults": 770
+          },
+          {
+            "ms": 6.994306,
+            "rss_kb": 22752,
+            "minor_faults": 755
+          },
+          {
+            "ms": 6.891324,
+            "rss_kb": 22628,
+            "minor_faults": 767
+          },
+          {
+            "ms": 6.920057,
+            "rss_kb": 22648,
+            "minor_faults": 770
+          },
+          {
+            "ms": 7.031395,
+            "rss_kb": 22780,
+            "minor_faults": 771
+          },
+          {
+            "ms": 6.883949,
+            "rss_kb": 23100,
+            "minor_faults": 773
+          },
+          {
+            "ms": 6.935065,
+            "rss_kb": 22648,
+            "minor_faults": 768
+          },
+          {
+            "ms": 7.42494,
+            "rss_kb": 22984,
+            "minor_faults": 755
+          },
+          {
+            "ms": 7.225547,
+            "rss_kb": 22504,
+            "minor_faults": 763
+          },
+          {
+            "ms": 7.423376,
+            "rss_kb": 22616,
+            "minor_faults": 765
+          },
+          {
+            "ms": 7.469631,
+            "rss_kb": 23104,
+            "minor_faults": 772
+          },
+          {
+            "ms": 7.017789,
+            "rss_kb": 22616,
+            "minor_faults": 768
+          },
+          {
+            "ms": 6.92166,
+            "rss_kb": 22988,
+            "minor_faults": 756
+          },
+          {
+            "ms": 7.384053,
+            "rss_kb": 22648,
+            "minor_faults": 772
+          },
+          {
+            "ms": 7.054859,
+            "rss_kb": 22768,
+            "minor_faults": 768
+          },
+          {
+            "ms": 7.056141,
+            "rss_kb": 22752,
+            "minor_faults": 768
+          },
+          {
+            "ms": 7.096236,
+            "rss_kb": 22628,
+            "minor_faults": 766
+          },
+          {
+            "ms": 6.971843,
+            "rss_kb": 23108,
+            "minor_faults": 775
+          },
+          {
+            "ms": 6.925336,
+            "rss_kb": 22616,
+            "minor_faults": 765
+          }
+        ],
+        "after": [
+          {
+            "ms": 6.890502,
+            "rss_kb": 20672,
+            "minor_faults": 758
+          },
+          {
+            "ms": 6.850697,
+            "rss_kb": 20524,
+            "minor_faults": 739
+          },
+          {
+            "ms": 6.840879,
+            "rss_kb": 20464,
+            "minor_faults": 755
+          },
+          {
+            "ms": 6.896293,
+            "rss_kb": 20556,
+            "minor_faults": 758
+          },
+          {
+            "ms": 6.777511,
+            "rss_kb": 20608,
+            "minor_faults": 759
+          },
+          {
+            "ms": 6.774496,
+            "rss_kb": 20636,
+            "minor_faults": 757
+          },
+          {
+            "ms": 6.882167,
+            "rss_kb": 20440,
+            "minor_faults": 754
+          },
+          {
+            "ms": 6.768835,
+            "rss_kb": 20644,
+            "minor_faults": 756
+          },
+          {
+            "ms": 6.815692,
+            "rss_kb": 20440,
+            "minor_faults": 756
+          },
+          {
+            "ms": 7.615926,
+            "rss_kb": 20408,
+            "minor_faults": 753
+          },
+          {
+            "ms": 7.15186,
+            "rss_kb": 20536,
+            "minor_faults": 755
+          },
+          {
+            "ms": 7.079925,
+            "rss_kb": 20528,
+            "minor_faults": 755
+          },
+          {
+            "ms": 7.043868,
+            "rss_kb": 20684,
+            "minor_faults": 739
+          },
+          {
+            "ms": 7.01231,
+            "rss_kb": 20628,
+            "minor_faults": 757
+          },
+          {
+            "ms": 6.877618,
+            "rss_kb": 20644,
+            "minor_faults": 756
+          },
+          {
+            "ms": 7.139927,
+            "rss_kb": 20728,
+            "minor_faults": 755
+          },
+          {
+            "ms": 6.952197,
+            "rss_kb": 20636,
+            "minor_faults": 754
+          },
+          {
+            "ms": 6.840689,
+            "rss_kb": 20556,
+            "minor_faults": 758
+          },
+          {
+            "ms": 6.752424,
+            "rss_kb": 20472,
+            "minor_faults": 739
+          },
+          {
+            "ms": 6.796737,
+            "rss_kb": 20636,
+            "minor_faults": 741
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 4.732774,
+          "rss_kb": 12670.0
+        },
+        "before": {
+          "ms": 7.006047499999999,
+          "rss_kb": 22752.0
+        },
+        "after": {
+          "ms": 6.8798925,
+          "rss_kb": 20582.0
+        }
+      }
+    },
+    {
+      "id": "log/json-filter@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "-50",
+          "--format=%H"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "log",
+          "--limit",
+          "50",
+          "--json",
+          "--filter",
+          ".commits[].oid"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "log",
+          "--limit",
+          "50",
+          "--json",
+          "--filter",
+          ".commits[].oid"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 4.198507,
+            "rss_kb": 10224,
+            "minor_faults": 297
+          },
+          {
+            "ms": 4.21612,
+            "rss_kb": 10296,
+            "minor_faults": 297
+          },
+          {
+            "ms": 4.063856,
+            "rss_kb": 10420,
+            "minor_faults": 299
+          },
+          {
+            "ms": 4.175901,
+            "rss_kb": 10296,
+            "minor_faults": 298
+          },
+          {
+            "ms": 4.210983,
+            "rss_kb": 10160,
+            "minor_faults": 297
+          },
+          {
+            "ms": 4.433395,
+            "rss_kb": 10296,
+            "minor_faults": 296
+          },
+          {
+            "ms": 3.972385,
+            "rss_kb": 10300,
+            "minor_faults": 296
+          },
+          {
+            "ms": 3.756642,
+            "rss_kb": 10228,
+            "minor_faults": 297
+          },
+          {
+            "ms": 3.738658,
+            "rss_kb": 10228,
+            "minor_faults": 296
+          },
+          {
+            "ms": 3.863491,
+            "rss_kb": 10424,
+            "minor_faults": 298
+          },
+          {
+            "ms": 3.978095,
+            "rss_kb": 10272,
+            "minor_faults": 298
+          },
+          {
+            "ms": 3.922252,
+            "rss_kb": 10356,
+            "minor_faults": 298
+          },
+          {
+            "ms": 3.831382,
+            "rss_kb": 10296,
+            "minor_faults": 296
+          },
+          {
+            "ms": 3.737296,
+            "rss_kb": 10324,
+            "minor_faults": 296
+          },
+          {
+            "ms": 3.831962,
+            "rss_kb": 10296,
+            "minor_faults": 296
+          },
+          {
+            "ms": 3.721346,
+            "rss_kb": 10236,
+            "minor_faults": 297
+          },
+          {
+            "ms": 3.913986,
+            "rss_kb": 10280,
+            "minor_faults": 298
+          },
+          {
+            "ms": 3.720074,
+            "rss_kb": 10264,
+            "minor_faults": 296
+          },
+          {
+            "ms": 3.73909,
+            "rss_kb": 10212,
+            "minor_faults": 297
+          },
+          {
+            "ms": 3.758405,
+            "rss_kb": 10296,
+            "minor_faults": 297
+          }
+        ],
+        "before": [
+          {
+            "ms": 7.688671,
+            "rss_kb": 21472,
+            "minor_faults": 767
+          },
+          {
+            "ms": 8.048286,
+            "rss_kb": 21752,
+            "minor_faults": 769
+          },
+          {
+            "ms": 8.161521,
+            "rss_kb": 21472,
+            "minor_faults": 763
+          },
+          {
+            "ms": 8.54269,
+            "rss_kb": 21620,
+            "minor_faults": 772
+          },
+          {
+            "ms": 8.040779,
+            "rss_kb": 21620,
+            "minor_faults": 770
+          },
+          {
+            "ms": 7.753132,
+            "rss_kb": 21652,
+            "minor_faults": 768
+          },
+          {
+            "ms": 7.228963,
+            "rss_kb": 21356,
+            "minor_faults": 767
+          },
+          {
+            "ms": 7.075417,
+            "rss_kb": 21476,
+            "minor_faults": 765
+          },
+          {
+            "ms": 7.124027,
+            "rss_kb": 21480,
+            "minor_faults": 769
+          },
+          {
+            "ms": 7.178159,
+            "rss_kb": 21616,
+            "minor_faults": 770
+          },
+          {
+            "ms": 7.403629,
+            "rss_kb": 22080,
+            "minor_faults": 775
+          },
+          {
+            "ms": 7.439847,
+            "rss_kb": 21480,
+            "minor_faults": 770
+          },
+          {
+            "ms": 7.174592,
+            "rss_kb": 21480,
+            "minor_faults": 767
+          },
+          {
+            "ms": 7.138515,
+            "rss_kb": 21776,
+            "minor_faults": 771
+          },
+          {
+            "ms": 7.099101,
+            "rss_kb": 22084,
+            "minor_faults": 777
+          },
+          {
+            "ms": 7.022839,
+            "rss_kb": 21752,
+            "minor_faults": 771
+          },
+          {
+            "ms": 7.023199,
+            "rss_kb": 21756,
+            "minor_faults": 770
+          },
+          {
+            "ms": 7.326806,
+            "rss_kb": 21652,
+            "minor_faults": 770
+          },
+          {
+            "ms": 7.113809,
+            "rss_kb": 21472,
+            "minor_faults": 767
+          },
+          {
+            "ms": 7.025504,
+            "rss_kb": 21652,
+            "minor_faults": 768
+          }
+        ],
+        "after": [
+          {
+            "ms": 7.685887,
+            "rss_kb": 19736,
+            "minor_faults": 756
+          },
+          {
+            "ms": 8.263017,
+            "rss_kb": 19632,
+            "minor_faults": 758
+          },
+          {
+            "ms": 7.620224,
+            "rss_kb": 19716,
+            "minor_faults": 761
+          },
+          {
+            "ms": 10.08233,
+            "rss_kb": 19596,
+            "minor_faults": 759
+          },
+          {
+            "ms": 7.911187,
+            "rss_kb": 19632,
+            "minor_faults": 756
+          },
+          {
+            "ms": 7.939825,
+            "rss_kb": 19628,
+            "minor_faults": 758
+          },
+          {
+            "ms": 7.248601,
+            "rss_kb": 19624,
+            "minor_faults": 757
+          },
+          {
+            "ms": 6.977724,
+            "rss_kb": 19664,
+            "minor_faults": 759
+          },
+          {
+            "ms": 7.032858,
+            "rss_kb": 19640,
+            "minor_faults": 762
+          },
+          {
+            "ms": 7.213795,
+            "rss_kb": 19628,
+            "minor_faults": 758
+          },
+          {
+            "ms": 7.238681,
+            "rss_kb": 19780,
+            "minor_faults": 762
+          },
+          {
+            "ms": 7.154134,
+            "rss_kb": 19336,
+            "minor_faults": 755
+          },
+          {
+            "ms": 7.227301,
+            "rss_kb": 19764,
+            "minor_faults": 760
+          },
+          {
+            "ms": 6.984517,
+            "rss_kb": 19628,
+            "minor_faults": 758
+          },
+          {
+            "ms": 6.95362,
+            "rss_kb": 19624,
+            "minor_faults": 757
+          },
+          {
+            "ms": 7.008071,
+            "rss_kb": 19500,
+            "minor_faults": 757
+          },
+          {
+            "ms": 7.1628,
+            "rss_kb": 19364,
+            "minor_faults": 756
+          },
+          {
+            "ms": 7.075798,
+            "rss_kb": 19632,
+            "minor_faults": 762
+          },
+          {
+            "ms": 7.07708,
+            "rss_kb": 19740,
+            "minor_faults": 757
+          },
+          {
+            "ms": 6.969469,
+            "rss_kb": 19364,
+            "minor_faults": 752
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 3.8887384999999997,
+          "rss_kb": 10296.0
+        },
+        "before": {
+          "ms": 7.2035610000000005,
+          "rss_kb": 21620.0
+        },
+        "after": {
+          "ms": 7.1882975,
+          "rss_kb": 19630.0
+        }
+      }
+    },
+    {
+      "id": "log/limit-path@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "-n",
+          "200",
+          "--format=%H",
+          "--",
+          "Documentation"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "log",
+          "-n",
+          "200",
+          "--",
+          "Documentation"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "log",
+          "-n",
+          "200",
+          "--",
+          "Documentation"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 26.587999,
+            "rss_kb": 30872,
+            "minor_faults": 2953
+          },
+          {
+            "ms": 25.288804,
+            "rss_kb": 30812,
+            "minor_faults": 2953
+          },
+          {
+            "ms": 25.386246,
+            "rss_kb": 30940,
+            "minor_faults": 2955
+          },
+          {
+            "ms": 25.293894,
+            "rss_kb": 30680,
+            "minor_faults": 2952
+          },
+          {
+            "ms": 25.794679,
+            "rss_kb": 30936,
+            "minor_faults": 2956
+          },
+          {
+            "ms": 25.139185,
+            "rss_kb": 30924,
+            "minor_faults": 2955
+          },
+          {
+            "ms": 25.158802,
+            "rss_kb": 30732,
+            "minor_faults": 2953
+          },
+          {
+            "ms": 35.139964,
+            "rss_kb": 30940,
+            "minor_faults": 2954
+          },
+          {
+            "ms": 25.849301,
+            "rss_kb": 30916,
+            "minor_faults": 2955
+          },
+          {
+            "ms": 24.759439,
+            "rss_kb": 30684,
+            "minor_faults": 2950
+          },
+          {
+            "ms": 25.22211,
+            "rss_kb": 30796,
+            "minor_faults": 2953
+          },
+          {
+            "ms": 24.884109,
+            "rss_kb": 30872,
+            "minor_faults": 2953
+          },
+          {
+            "ms": 24.957416,
+            "rss_kb": 30744,
+            "minor_faults": 2953
+          },
+          {
+            "ms": 25.572313,
+            "rss_kb": 30868,
+            "minor_faults": 2955
+          },
+          {
+            "ms": 26.555619,
+            "rss_kb": 30716,
+            "minor_faults": 2955
+          },
+          {
+            "ms": 25.942355,
+            "rss_kb": 30852,
+            "minor_faults": 2954
+          },
+          {
+            "ms": 25.836657,
+            "rss_kb": 30816,
+            "minor_faults": 2954
+          },
+          {
+            "ms": 26.197931,
+            "rss_kb": 30748,
+            "minor_faults": 2952
+          },
+          {
+            "ms": 25.454534,
+            "rss_kb": 30940,
+            "minor_faults": 2954
+          },
+          {
+            "ms": 25.992538,
+            "rss_kb": 30728,
+            "minor_faults": 2954
+          }
+        ],
+        "before": [
+          {
+            "ms": 22.899865,
+            "rss_kb": 36380,
+            "minor_faults": 2846
+          },
+          {
+            "ms": 21.87929,
+            "rss_kb": 36344,
+            "minor_faults": 2844
+          },
+          {
+            "ms": 21.878248,
+            "rss_kb": 36344,
+            "minor_faults": 2844
+          },
+          {
+            "ms": 21.743797,
+            "rss_kb": 36216,
+            "minor_faults": 2843
+          },
+          {
+            "ms": 22.257577,
+            "rss_kb": 36152,
+            "minor_faults": 2842
+          },
+          {
+            "ms": 22.012028,
+            "rss_kb": 36348,
+            "minor_faults": 2843
+          },
+          {
+            "ms": 21.854904,
+            "rss_kb": 36160,
+            "minor_faults": 2844
+          },
+          {
+            "ms": 21.922862,
+            "rss_kb": 36224,
+            "minor_faults": 2843
+          },
+          {
+            "ms": 22.019762,
+            "rss_kb": 36348,
+            "minor_faults": 2845
+          },
+          {
+            "ms": 22.126832,
+            "rss_kb": 36188,
+            "minor_faults": 2843
+          },
+          {
+            "ms": 21.770718,
+            "rss_kb": 36380,
+            "minor_faults": 2848
+          },
+          {
+            "ms": 21.84686,
+            "rss_kb": 36084,
+            "minor_faults": 2839
+          },
+          {
+            "ms": 21.697211,
+            "rss_kb": 36344,
+            "minor_faults": 2843
+          },
+          {
+            "ms": 21.621028,
+            "rss_kb": 36352,
+            "minor_faults": 2844
+          },
+          {
+            "ms": 23.14916,
+            "rss_kb": 36380,
+            "minor_faults": 2846
+          },
+          {
+            "ms": 22.665167,
+            "rss_kb": 36088,
+            "minor_faults": 2841
+          },
+          {
+            "ms": 22.542137,
+            "rss_kb": 36096,
+            "minor_faults": 2841
+          },
+          {
+            "ms": 22.663765,
+            "rss_kb": 36224,
+            "minor_faults": 2844
+          },
+          {
+            "ms": 22.432833,
+            "rss_kb": 36416,
+            "minor_faults": 2847
+          },
+          {
+            "ms": 22.299034,
+            "rss_kb": 36096,
+            "minor_faults": 2841
+          }
+        ],
+        "after": [
+          {
+            "ms": 22.188838,
+            "rss_kb": 35432,
+            "minor_faults": 2846
+          },
+          {
+            "ms": 21.670681,
+            "rss_kb": 35636,
+            "minor_faults": 2848
+          },
+          {
+            "ms": 22.303192,
+            "rss_kb": 35460,
+            "minor_faults": 2848
+          },
+          {
+            "ms": 21.615878,
+            "rss_kb": 35628,
+            "minor_faults": 2847
+          },
+          {
+            "ms": 22.290798,
+            "rss_kb": 35440,
+            "minor_faults": 2846
+          },
+          {
+            "ms": 21.685709,
+            "rss_kb": 35432,
+            "minor_faults": 2845
+          },
+          {
+            "ms": 21.982453,
+            "rss_kb": 35336,
+            "minor_faults": 2849
+          },
+          {
+            "ms": 22.557356,
+            "rss_kb": 35328,
+            "minor_faults": 2847
+          },
+          {
+            "ms": 23.267301,
+            "rss_kb": 35328,
+            "minor_faults": 2846
+          },
+          {
+            "ms": 22.670096,
+            "rss_kb": 35428,
+            "minor_faults": 2846
+          },
+          {
+            "ms": 21.524427,
+            "rss_kb": 35628,
+            "minor_faults": 2846
+          },
+          {
+            "ms": 21.585301,
+            "rss_kb": 35676,
+            "minor_faults": 2850
+          },
+          {
+            "ms": 21.793981,
+            "rss_kb": 35420,
+            "minor_faults": 2845
+          },
+          {
+            "ms": 21.562037,
+            "rss_kb": 35584,
+            "minor_faults": 2848
+          },
+          {
+            "ms": 22.704751,
+            "rss_kb": 35232,
+            "minor_faults": 2844
+          },
+          {
+            "ms": 22.330202,
+            "rss_kb": 35272,
+            "minor_faults": 2844
+          },
+          {
+            "ms": 22.260372,
+            "rss_kb": 35404,
+            "minor_faults": 2847
+          },
+          {
+            "ms": 22.662331,
+            "rss_kb": 35336,
+            "minor_faults": 2847
+          },
+          {
+            "ms": 22.470304,
+            "rss_kb": 35316,
+            "minor_faults": 2845
+          },
+          {
+            "ms": 22.205549,
+            "rss_kb": 35248,
+            "minor_faults": 2844
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 25.513423500000002,
+          "rss_kb": 30834.0
+        },
+        "before": {
+          "ms": 22.015895,
+          "rss_kb": 36284.0
+        },
+        "after": {
+          "ms": 22.2329605,
+          "rss_kb": 35424.0
+        }
+      }
+    },
+    {
+      "id": "log/oneline-100@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "--oneline",
+          "-100"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "log",
+          "--limit",
+          "100"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "log",
+          "--limit",
+          "100"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 4.75175,
+            "rss_kb": 12708,
+            "minor_faults": 340
+          },
+          {
+            "ms": 4.693261,
+            "rss_kb": 12720,
+            "minor_faults": 341
+          },
+          {
+            "ms": 4.692609,
+            "rss_kb": 12604,
+            "minor_faults": 339
+          },
+          {
+            "ms": 4.976115,
+            "rss_kb": 12660,
+            "minor_faults": 340
+          },
+          {
+            "ms": 4.710332,
+            "rss_kb": 12600,
+            "minor_faults": 338
+          },
+          {
+            "ms": 4.792205,
+            "rss_kb": 12664,
+            "minor_faults": 340
+          },
+          {
+            "ms": 4.72471,
+            "rss_kb": 12660,
+            "minor_faults": 341
+          },
+          {
+            "ms": 4.822996,
+            "rss_kb": 12564,
+            "minor_faults": 339
+          },
+          {
+            "ms": 4.733305,
+            "rss_kb": 12660,
+            "minor_faults": 340
+          },
+          {
+            "ms": 4.732634,
+            "rss_kb": 12724,
+            "minor_faults": 342
+          },
+          {
+            "ms": 4.705844,
+            "rss_kb": 12604,
+            "minor_faults": 341
+          },
+          {
+            "ms": 4.669396,
+            "rss_kb": 12656,
+            "minor_faults": 342
+          },
+          {
+            "ms": 4.707236,
+            "rss_kb": 12600,
+            "minor_faults": 340
+          },
+          {
+            "ms": 4.776406,
+            "rss_kb": 12572,
+            "minor_faults": 341
+          },
+          {
+            "ms": 4.849468,
+            "rss_kb": 12856,
+            "minor_faults": 342
+          },
+          {
+            "ms": 4.810709,
+            "rss_kb": 12660,
+            "minor_faults": 341
+          },
+          {
+            "ms": 5.003961,
+            "rss_kb": 12580,
+            "minor_faults": 340
+          },
+          {
+            "ms": 4.762681,
+            "rss_kb": 12712,
+            "minor_faults": 342
+          },
+          {
+            "ms": 4.866298,
+            "rss_kb": 12600,
+            "minor_faults": 339
+          },
+          {
+            "ms": 4.97702,
+            "rss_kb": 12588,
+            "minor_faults": 340
+          }
+        ],
+        "before": [
+          {
+            "ms": 6.215712,
+            "rss_kb": 22360,
+            "minor_faults": 714
+          },
+          {
+            "ms": 6.165549,
+            "rss_kb": 22100,
+            "minor_faults": 709
+          },
+          {
+            "ms": 7.250601,
+            "rss_kb": 21912,
+            "minor_faults": 708
+          },
+          {
+            "ms": 6.265245,
+            "rss_kb": 21912,
+            "minor_faults": 705
+          },
+          {
+            "ms": 6.249585,
+            "rss_kb": 21784,
+            "minor_faults": 706
+          },
+          {
+            "ms": 6.237042,
+            "rss_kb": 21912,
+            "minor_faults": 706
+          },
+          {
+            "ms": 6.23066,
+            "rss_kb": 21912,
+            "minor_faults": 707
+          },
+          {
+            "ms": 6.188451,
+            "rss_kb": 21912,
+            "minor_faults": 707
+          },
+          {
+            "ms": 6.231191,
+            "rss_kb": 21784,
+            "minor_faults": 703
+          },
+          {
+            "ms": 6.203059,
+            "rss_kb": 22104,
+            "minor_faults": 711
+          },
+          {
+            "ms": 6.251419,
+            "rss_kb": 22168,
+            "minor_faults": 710
+          },
+          {
+            "ms": 6.192108,
+            "rss_kb": 21912,
+            "minor_faults": 707
+          },
+          {
+            "ms": 6.272478,
+            "rss_kb": 22360,
+            "minor_faults": 713
+          },
+          {
+            "ms": 6.297515,
+            "rss_kb": 22032,
+            "minor_faults": 709
+          },
+          {
+            "ms": 6.63765,
+            "rss_kb": 21940,
+            "minor_faults": 709
+          },
+          {
+            "ms": 6.306933,
+            "rss_kb": 21784,
+            "minor_faults": 704
+          },
+          {
+            "ms": 6.569422,
+            "rss_kb": 22360,
+            "minor_faults": 714
+          },
+          {
+            "ms": 6.570385,
+            "rss_kb": 22360,
+            "minor_faults": 714
+          },
+          {
+            "ms": 6.46086,
+            "rss_kb": 22040,
+            "minor_faults": 709
+          },
+          {
+            "ms": 6.428971,
+            "rss_kb": 22104,
+            "minor_faults": 709
+          }
+        ],
+        "after": [
+          {
+            "ms": 6.057808,
+            "rss_kb": 20212,
+            "minor_faults": 694
+          },
+          {
+            "ms": 6.056064,
+            "rss_kb": 20060,
+            "minor_faults": 692
+          },
+          {
+            "ms": 6.116858,
+            "rss_kb": 20112,
+            "minor_faults": 693
+          },
+          {
+            "ms": 6.256217,
+            "rss_kb": 20176,
+            "minor_faults": 693
+          },
+          {
+            "ms": 6.079348,
+            "rss_kb": 20112,
+            "minor_faults": 691
+          },
+          {
+            "ms": 6.147586,
+            "rss_kb": 20176,
+            "minor_faults": 694
+          },
+          {
+            "ms": 6.148577,
+            "rss_kb": 20164,
+            "minor_faults": 695
+          },
+          {
+            "ms": 6.131365,
+            "rss_kb": 20204,
+            "minor_faults": 694
+          },
+          {
+            "ms": 6.187329,
+            "rss_kb": 20128,
+            "minor_faults": 694
+          },
+          {
+            "ms": 6.106057,
+            "rss_kb": 20216,
+            "minor_faults": 696
+          },
+          {
+            "ms": 6.148527,
+            "rss_kb": 20144,
+            "minor_faults": 692
+          },
+          {
+            "ms": 6.080449,
+            "rss_kb": 20204,
+            "minor_faults": 695
+          },
+          {
+            "ms": 6.175938,
+            "rss_kb": 20244,
+            "minor_faults": 695
+          },
+          {
+            "ms": 6.285392,
+            "rss_kb": 20200,
+            "minor_faults": 696
+          },
+          {
+            "ms": 6.156973,
+            "rss_kb": 20164,
+            "minor_faults": 694
+          },
+          {
+            "ms": 6.52531,
+            "rss_kb": 20204,
+            "minor_faults": 695
+          },
+          {
+            "ms": 6.440702,
+            "rss_kb": 20112,
+            "minor_faults": 692
+          },
+          {
+            "ms": 6.26269,
+            "rss_kb": 20204,
+            "minor_faults": 695
+          },
+          {
+            "ms": 6.459677,
+            "rss_kb": 20212,
+            "minor_faults": 694
+          },
+          {
+            "ms": 6.475648,
+            "rss_kb": 20212,
+            "minor_faults": 694
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 4.7572155,
+          "rss_kb": 12658.0
+        },
+        "before": {
+          "ms": 6.258332,
+          "rss_kb": 21986.0
+        },
+        "after": {
+          "ms": 6.152775,
+          "rss_kb": 20188.0
+        }
+      }
+    },
+    {
+      "id": "log/oneline-100@synth-100k",
+      "cwd": "/tmp/grit-bench-scratch/daily-synth-100k/worktree-run-synth-100k",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "--oneline",
+          "-100"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "log",
+          "--limit",
+          "100"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "log",
+          "--limit",
+          "100"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 4.132414,
+            "rss_kb": 7672,
+            "minor_faults": 243
+          },
+          {
+            "ms": 3.999676,
+            "rss_kb": 7732,
+            "minor_faults": 247
+          },
+          {
+            "ms": 3.969029,
+            "rss_kb": 7608,
+            "minor_faults": 244
+          },
+          {
+            "ms": 3.972826,
+            "rss_kb": 7592,
+            "minor_faults": 244
+          },
+          {
+            "ms": 3.98586,
+            "rss_kb": 7672,
+            "minor_faults": 247
+          },
+          {
+            "ms": 4.010616,
+            "rss_kb": 7672,
+            "minor_faults": 246
+          },
+          {
+            "ms": 4.029211,
+            "rss_kb": 7736,
+            "minor_faults": 247
+          },
+          {
+            "ms": 3.965311,
+            "rss_kb": 7672,
+            "minor_faults": 244
+          },
+          {
+            "ms": 3.991039,
+            "rss_kb": 7668,
+            "minor_faults": 246
+          },
+          {
+            "ms": 3.946787,
+            "rss_kb": 7672,
+            "minor_faults": 245
+          },
+          {
+            "ms": 3.985459,
+            "rss_kb": 7672,
+            "minor_faults": 244
+          },
+          {
+            "ms": 3.999095,
+            "rss_kb": 7672,
+            "minor_faults": 244
+          },
+          {
+            "ms": 4.02912,
+            "rss_kb": 7544,
+            "minor_faults": 242
+          },
+          {
+            "ms": 4.015695,
+            "rss_kb": 7660,
+            "minor_faults": 245
+          },
+          {
+            "ms": 3.934655,
+            "rss_kb": 7672,
+            "minor_faults": 246
+          },
+          {
+            "ms": 3.947538,
+            "rss_kb": 7680,
+            "minor_faults": 244
+          },
+          {
+            "ms": 4.115342,
+            "rss_kb": 7736,
+            "minor_faults": 246
+          },
+          {
+            "ms": 4.053316,
+            "rss_kb": 7660,
+            "minor_faults": 246
+          },
+          {
+            "ms": 3.993795,
+            "rss_kb": 7608,
+            "minor_faults": 244
+          },
+          {
+            "ms": 3.957296,
+            "rss_kb": 7672,
+            "minor_faults": 244
+          }
+        ],
+        "before": [
+          {
+            "ms": 5.246373,
+            "rss_kb": 16320,
+            "minor_faults": 569
+          },
+          {
+            "ms": 5.213301,
+            "rss_kb": 16384,
+            "minor_faults": 571
+          },
+          {
+            "ms": 5.171343,
+            "rss_kb": 16832,
+            "minor_faults": 576
+          },
+          {
+            "ms": 5.107744,
+            "rss_kb": 16320,
+            "minor_faults": 570
+          },
+          {
+            "ms": 5.200798,
+            "rss_kb": 16512,
+            "minor_faults": 572
+          },
+          {
+            "ms": 5.20214,
+            "rss_kb": 16640,
+            "minor_faults": 575
+          },
+          {
+            "ms": 5.152718,
+            "rss_kb": 16640,
+            "minor_faults": 575
+          },
+          {
+            "ms": 5.172515,
+            "rss_kb": 16256,
+            "minor_faults": 569
+          },
+          {
+            "ms": 5.203933,
+            "rss_kb": 16256,
+            "minor_faults": 569
+          },
+          {
+            "ms": 5.122562,
+            "rss_kb": 16636,
+            "minor_faults": 573
+          },
+          {
+            "ms": 5.171203,
+            "rss_kb": 16576,
+            "minor_faults": 573
+          },
+          {
+            "ms": 5.152067,
+            "rss_kb": 16512,
+            "minor_faults": 572
+          },
+          {
+            "ms": 5.181953,
+            "rss_kb": 16320,
+            "minor_faults": 568
+          },
+          {
+            "ms": 5.348744,
+            "rss_kb": 16384,
+            "minor_faults": 571
+          },
+          {
+            "ms": 5.203613,
+            "rss_kb": 16576,
+            "minor_faults": 574
+          },
+          {
+            "ms": 5.119376,
+            "rss_kb": 16832,
+            "minor_faults": 578
+          },
+          {
+            "ms": 5.165101,
+            "rss_kb": 16576,
+            "minor_faults": 573
+          },
+          {
+            "ms": 5.273834,
+            "rss_kb": 16320,
+            "minor_faults": 569
+          },
+          {
+            "ms": 5.153289,
+            "rss_kb": 16512,
+            "minor_faults": 573
+          },
+          {
+            "ms": 5.169038,
+            "rss_kb": 16832,
+            "minor_faults": 578
+          }
+        ],
+        "after": [
+          {
+            "ms": 5.2288,
+            "rss_kb": 15344,
+            "minor_faults": 570
+          },
+          {
+            "ms": 5.146236,
+            "rss_kb": 15728,
+            "minor_faults": 575
+          },
+          {
+            "ms": 5.063963,
+            "rss_kb": 15660,
+            "minor_faults": 572
+          },
+          {
+            "ms": 5.14315,
+            "rss_kb": 15604,
+            "minor_faults": 571
+          },
+          {
+            "ms": 5.118174,
+            "rss_kb": 15528,
+            "minor_faults": 571
+          },
+          {
+            "ms": 5.065014,
+            "rss_kb": 15520,
+            "minor_faults": 572
+          },
+          {
+            "ms": 5.147267,
+            "rss_kb": 15728,
+            "minor_faults": 574
+          },
+          {
+            "ms": 5.107142,
+            "rss_kb": 15604,
+            "minor_faults": 572
+          },
+          {
+            "ms": 5.108726,
+            "rss_kb": 15692,
+            "minor_faults": 573
+          },
+          {
+            "ms": 5.120919,
+            "rss_kb": 15556,
+            "minor_faults": 571
+          },
+          {
+            "ms": 5.157006,
+            "rss_kb": 15608,
+            "minor_faults": 572
+          },
+          {
+            "ms": 5.063922,
+            "rss_kb": 15556,
+            "minor_faults": 575
+          },
+          {
+            "ms": 5.153881,
+            "rss_kb": 15604,
+            "minor_faults": 574
+          },
+          {
+            "ms": 5.157998,
+            "rss_kb": 15604,
+            "minor_faults": 571
+          },
+          {
+            "ms": 5.123934,
+            "rss_kb": 15448,
+            "minor_faults": 571
+          },
+          {
+            "ms": 5.16416,
+            "rss_kb": 15608,
+            "minor_faults": 575
+          },
+          {
+            "ms": 5.426722,
+            "rss_kb": 15344,
+            "minor_faults": 570
+          },
+          {
+            "ms": 5.215646,
+            "rss_kb": 15528,
+            "minor_faults": 572
+          },
+          {
+            "ms": 5.13208,
+            "rss_kb": 15616,
+            "minor_faults": 573
+          },
+          {
+            "ms": 5.090441,
+            "rss_kb": 15660,
+            "minor_faults": 571
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 3.9924169999999997,
+          "rss_kb": 7672.0
+        },
+        "before": {
+          "ms": 5.171929,
+          "rss_kb": 16512.0
+        },
+        "after": {
+          "ms": 5.137615,
+          "rss_kb": 15604.0
+        }
+      }
+    },
+    {
+      "id": "log/path@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "--oneline",
+          "--",
+          "README.md"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "log",
+          "--",
+          "README.md"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "log",
+          "--",
+          "README.md"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 368.961149,
+            "rss_kb": 223720,
+            "minor_faults": 32716
+          },
+          {
+            "ms": 368.332888,
+            "rss_kb": 223848,
+            "minor_faults": 32719
+          },
+          {
+            "ms": 367.077826,
+            "rss_kb": 223976,
+            "minor_faults": 32720
+          },
+          {
+            "ms": 367.546091,
+            "rss_kb": 223904,
+            "minor_faults": 32718
+          },
+          {
+            "ms": 368.787693,
+            "rss_kb": 223820,
+            "minor_faults": 32720
+          },
+          {
+            "ms": 365.941589,
+            "rss_kb": 223820,
+            "minor_faults": 32719
+          },
+          {
+            "ms": 364.170092,
+            "rss_kb": 223960,
+            "minor_faults": 32720
+          },
+          {
+            "ms": 367.137442,
+            "rss_kb": 223784,
+            "minor_faults": 32719
+          },
+          {
+            "ms": 367.073552,
+            "rss_kb": 223884,
+            "minor_faults": 32719
+          },
+          {
+            "ms": 366.854544,
+            "rss_kb": 223836,
+            "minor_faults": 32720
+          },
+          {
+            "ms": 363.666963,
+            "rss_kb": 223776,
+            "minor_faults": 32717
+          },
+          {
+            "ms": 367.726798,
+            "rss_kb": 223964,
+            "minor_faults": 32720
+          },
+          {
+            "ms": 364.220594,
+            "rss_kb": 223764,
+            "minor_faults": 32718
+          },
+          {
+            "ms": 366.82232,
+            "rss_kb": 223824,
+            "minor_faults": 32719
+          },
+          {
+            "ms": 363.244383,
+            "rss_kb": 223848,
+            "minor_faults": 32718
+          },
+          {
+            "ms": 364.874194,
+            "rss_kb": 223844,
+            "minor_faults": 32719
+          },
+          {
+            "ms": 366.482796,
+            "rss_kb": 223948,
+            "minor_faults": 32720
+          },
+          {
+            "ms": 364.801527,
+            "rss_kb": 223888,
+            "minor_faults": 32717
+          },
+          {
+            "ms": 365.31544,
+            "rss_kb": 223976,
+            "minor_faults": 32718
+          },
+          {
+            "ms": 366.078054,
+            "rss_kb": 223972,
+            "minor_faults": 32721
+          }
+        ],
+        "before": [
+          {
+            "ms": 451.801852,
+            "rss_kb": 244844,
+            "minor_faults": 37658
+          },
+          {
+            "ms": 452.323217,
+            "rss_kb": 244360,
+            "minor_faults": 38698
+          },
+          {
+            "ms": 454.654471,
+            "rss_kb": 244560,
+            "minor_faults": 38661
+          },
+          {
+            "ms": 451.298266,
+            "rss_kb": 244568,
+            "minor_faults": 38172
+          },
+          {
+            "ms": 453.005474,
+            "rss_kb": 244532,
+            "minor_faults": 37664
+          },
+          {
+            "ms": 450.085764,
+            "rss_kb": 244664,
+            "minor_faults": 37681
+          },
+          {
+            "ms": 453.382118,
+            "rss_kb": 244696,
+            "minor_faults": 37681
+          },
+          {
+            "ms": 449.414973,
+            "rss_kb": 244288,
+            "minor_faults": 37647
+          },
+          {
+            "ms": 452.044922,
+            "rss_kb": 244324,
+            "minor_faults": 38164
+          },
+          {
+            "ms": 450.421311,
+            "rss_kb": 244208,
+            "minor_faults": 37662
+          },
+          {
+            "ms": 451.745643,
+            "rss_kb": 244508,
+            "minor_faults": 38628
+          },
+          {
+            "ms": 447.262688,
+            "rss_kb": 244260,
+            "minor_faults": 38671
+          },
+          {
+            "ms": 448.749112,
+            "rss_kb": 244696,
+            "minor_faults": 38122
+          },
+          {
+            "ms": 452.365604,
+            "rss_kb": 244376,
+            "minor_faults": 38657
+          },
+          {
+            "ms": 449.250013,
+            "rss_kb": 244280,
+            "minor_faults": 38677
+          },
+          {
+            "ms": 449.574132,
+            "rss_kb": 244136,
+            "minor_faults": 37659
+          },
+          {
+            "ms": 451.256263,
+            "rss_kb": 244560,
+            "minor_faults": 37628
+          },
+          {
+            "ms": 449.918496,
+            "rss_kb": 244916,
+            "minor_faults": 38694
+          },
+          {
+            "ms": 450.03958,
+            "rss_kb": 244196,
+            "minor_faults": 38704
+          },
+          {
+            "ms": 450.599124,
+            "rss_kb": 244232,
+            "minor_faults": 38688
+          }
+        ],
+        "after": [
+          {
+            "ms": 450.247498,
+            "rss_kb": 243696,
+            "minor_faults": 38161
+          },
+          {
+            "ms": 449.450137,
+            "rss_kb": 243916,
+            "minor_faults": 38696
+          },
+          {
+            "ms": 445.529006,
+            "rss_kb": 243600,
+            "minor_faults": 38721
+          },
+          {
+            "ms": 451.336958,
+            "rss_kb": 243516,
+            "minor_faults": 38678
+          },
+          {
+            "ms": 448.840538,
+            "rss_kb": 244132,
+            "minor_faults": 38728
+          },
+          {
+            "ms": 447.599603,
+            "rss_kb": 243788,
+            "minor_faults": 38185
+          },
+          {
+            "ms": 450.435096,
+            "rss_kb": 243516,
+            "minor_faults": 38672
+          },
+          {
+            "ms": 447.818909,
+            "rss_kb": 243584,
+            "minor_faults": 38649
+          },
+          {
+            "ms": 443.453774,
+            "rss_kb": 243908,
+            "minor_faults": 38714
+          },
+          {
+            "ms": 447.00317,
+            "rss_kb": 243708,
+            "minor_faults": 38638
+          },
+          {
+            "ms": 442.238876,
+            "rss_kb": 243608,
+            "minor_faults": 38631
+          },
+          {
+            "ms": 441.765147,
+            "rss_kb": 243668,
+            "minor_faults": 37679
+          },
+          {
+            "ms": 444.736702,
+            "rss_kb": 243664,
+            "minor_faults": 38702
+          },
+          {
+            "ms": 447.211762,
+            "rss_kb": 243812,
+            "minor_faults": 37672
+          },
+          {
+            "ms": 442.604372,
+            "rss_kb": 243832,
+            "minor_faults": 38694
+          },
+          {
+            "ms": 443.432318,
+            "rss_kb": 243872,
+            "minor_faults": 38680
+          },
+          {
+            "ms": 442.90895,
+            "rss_kb": 243632,
+            "minor_faults": 38693
+          },
+          {
+            "ms": 440.913715,
+            "rss_kb": 243520,
+            "minor_faults": 38140
+          },
+          {
+            "ms": 444.900426,
+            "rss_kb": 243668,
+            "minor_faults": 38691
+          },
+          {
+            "ms": 449.934393,
+            "rss_kb": 243748,
+            "minor_faults": 38680
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 366.652558,
+          "rss_kb": 223848.0
+        },
+        "before": {
+          "ms": 450.92769350000003,
+          "rss_kb": 244442.0
+        },
+        "after": {
+          "ms": 446.26608799999997,
+          "rss_kb": 243682.0
+        }
+      }
+    },
+    {
+      "id": "log/stat-n50@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "--stat",
+          "-50"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "log",
+          "--limit",
+          "50",
+          "--stat"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "log",
+          "--limit",
+          "50",
+          "--stat"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 103.520915,
+            "rss_kb": 36232,
+            "minor_faults": 12892
+          },
+          {
+            "ms": 102.067911,
+            "rss_kb": 36436,
+            "minor_faults": 12893
+          },
+          {
+            "ms": 101.832962,
+            "rss_kb": 36252,
+            "minor_faults": 12893
+          },
+          {
+            "ms": 101.99232,
+            "rss_kb": 36352,
+            "minor_faults": 12893
+          },
+          {
+            "ms": 101.838704,
+            "rss_kb": 36352,
+            "minor_faults": 12892
+          },
+          {
+            "ms": 102.120339,
+            "rss_kb": 36300,
+            "minor_faults": 12892
+          },
+          {
+            "ms": 102.607158,
+            "rss_kb": 36308,
+            "minor_faults": 12892
+          },
+          {
+            "ms": 102.480261,
+            "rss_kb": 36340,
+            "minor_faults": 12894
+          },
+          {
+            "ms": 102.611516,
+            "rss_kb": 36372,
+            "minor_faults": 12893
+          },
+          {
+            "ms": 101.680298,
+            "rss_kb": 36440,
+            "minor_faults": 12894
+          },
+          {
+            "ms": 102.198304,
+            "rss_kb": 36368,
+            "minor_faults": 12892
+          },
+          {
+            "ms": 101.952194,
+            "rss_kb": 36308,
+            "minor_faults": 12891
+          },
+          {
+            "ms": 101.802996,
+            "rss_kb": 36304,
+            "minor_faults": 12892
+          },
+          {
+            "ms": 103.347759,
+            "rss_kb": 36288,
+            "minor_faults": 12893
+          },
+          {
+            "ms": 102.275237,
+            "rss_kb": 36308,
+            "minor_faults": 12892
+          },
+          {
+            "ms": 102.41102,
+            "rss_kb": 36344,
+            "minor_faults": 12895
+          },
+          {
+            "ms": 100.823537,
+            "rss_kb": 36412,
+            "minor_faults": 12894
+          },
+          {
+            "ms": 101.217502,
+            "rss_kb": 36376,
+            "minor_faults": 12891
+          },
+          {
+            "ms": 105.306966,
+            "rss_kb": 36360,
+            "minor_faults": 12893
+          },
+          {
+            "ms": 103.075238,
+            "rss_kb": 36220,
+            "minor_faults": 12891
+          }
+        ],
+        "before": [
+          {
+            "ms": 386.051214,
+            "rss_kb": 109352,
+            "minor_faults": 31043
+          },
+          {
+            "ms": 397.709044,
+            "rss_kb": 114336,
+            "minor_faults": 35554
+          },
+          {
+            "ms": 395.078844,
+            "rss_kb": 114204,
+            "minor_faults": 34324
+          },
+          {
+            "ms": 382.603409,
+            "rss_kb": 108016,
+            "minor_faults": 28792
+          },
+          {
+            "ms": 383.680149,
+            "rss_kb": 109212,
+            "minor_faults": 31828
+          },
+          {
+            "ms": 404.297071,
+            "rss_kb": 117640,
+            "minor_faults": 36214
+          },
+          {
+            "ms": 384.129168,
+            "rss_kb": 109736,
+            "minor_faults": 28750
+          },
+          {
+            "ms": 392.014273,
+            "rss_kb": 112108,
+            "minor_faults": 31511
+          },
+          {
+            "ms": 391.792797,
+            "rss_kb": 112212,
+            "minor_faults": 31215
+          },
+          {
+            "ms": 399.308851,
+            "rss_kb": 113820,
+            "minor_faults": 36163
+          },
+          {
+            "ms": 392.33787,
+            "rss_kb": 113924,
+            "minor_faults": 34980
+          },
+          {
+            "ms": 400.349172,
+            "rss_kb": 119940,
+            "minor_faults": 36558
+          },
+          {
+            "ms": 389.508206,
+            "rss_kb": 113384,
+            "minor_faults": 34780
+          },
+          {
+            "ms": 399.367392,
+            "rss_kb": 112020,
+            "minor_faults": 32935
+          },
+          {
+            "ms": 393.377324,
+            "rss_kb": 113648,
+            "minor_faults": 35015
+          },
+          {
+            "ms": 391.901736,
+            "rss_kb": 113480,
+            "minor_faults": 34271
+          },
+          {
+            "ms": 390.039558,
+            "rss_kb": 112996,
+            "minor_faults": 35726
+          },
+          {
+            "ms": 388.928367,
+            "rss_kb": 112484,
+            "minor_faults": 31013
+          },
+          {
+            "ms": 403.76658,
+            "rss_kb": 120360,
+            "minor_faults": 38022
+          },
+          {
+            "ms": 395.352725,
+            "rss_kb": 114952,
+            "minor_faults": 36587
+          }
+        ],
+        "after": [
+          {
+            "ms": 395.558062,
+            "rss_kb": 108384,
+            "minor_faults": 26940
+          },
+          {
+            "ms": 392.860291,
+            "rss_kb": 111352,
+            "minor_faults": 31666
+          },
+          {
+            "ms": 387.250725,
+            "rss_kb": 110776,
+            "minor_faults": 32081
+          },
+          {
+            "ms": 389.038412,
+            "rss_kb": 108064,
+            "minor_faults": 26399
+          },
+          {
+            "ms": 389.115749,
+            "rss_kb": 112692,
+            "minor_faults": 34595
+          },
+          {
+            "ms": 392.061495,
+            "rss_kb": 110716,
+            "minor_faults": 31302
+          },
+          {
+            "ms": 394.234405,
+            "rss_kb": 110868,
+            "minor_faults": 34166
+          },
+          {
+            "ms": 387.770051,
+            "rss_kb": 112636,
+            "minor_faults": 34073
+          },
+          {
+            "ms": 391.618257,
+            "rss_kb": 112520,
+            "minor_faults": 35506
+          },
+          {
+            "ms": 378.391297,
+            "rss_kb": 107608,
+            "minor_faults": 28747
+          },
+          {
+            "ms": 392.426947,
+            "rss_kb": 112600,
+            "minor_faults": 34251
+          },
+          {
+            "ms": 385.898227,
+            "rss_kb": 107976,
+            "minor_faults": 30802
+          },
+          {
+            "ms": 387.184949,
+            "rss_kb": 108604,
+            "minor_faults": 30222
+          },
+          {
+            "ms": 393.325932,
+            "rss_kb": 113824,
+            "minor_faults": 35982
+          },
+          {
+            "ms": 387.746287,
+            "rss_kb": 107932,
+            "minor_faults": 28295
+          },
+          {
+            "ms": 390.994687,
+            "rss_kb": 111140,
+            "minor_faults": 33795
+          },
+          {
+            "ms": 385.423361,
+            "rss_kb": 108388,
+            "minor_faults": 26657
+          },
+          {
+            "ms": 387.444334,
+            "rss_kb": 108492,
+            "minor_faults": 26880
+          },
+          {
+            "ms": 392.730821,
+            "rss_kb": 112772,
+            "minor_faults": 35392
+          },
+          {
+            "ms": 383.845586,
+            "rss_kb": 108464,
+            "minor_faults": 29938
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 102.1593215,
+          "rss_kb": 36342.0
+        },
+        "before": {
+          "ms": 392.17607150000003,
+          "rss_kb": 113432.0
+        },
+        "after": {
+          "ms": 389.07708049999997,
+          "rss_kb": 110746.0
+        }
+      }
+    },
+    {
+      "id": "show/head@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "show"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "show"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "show"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 3.44216,
+            "rss_kb": 6900,
+            "minor_faults": 262
+          },
+          {
+            "ms": 3.376377,
+            "rss_kb": 6892,
+            "minor_faults": 264
+          },
+          {
+            "ms": 3.392668,
+            "rss_kb": 7008,
+            "minor_faults": 265
+          },
+          {
+            "ms": 3.396885,
+            "rss_kb": 6752,
+            "minor_faults": 262
+          },
+          {
+            "ms": 3.345309,
+            "rss_kb": 6900,
+            "minor_faults": 264
+          },
+          {
+            "ms": 3.335581,
+            "rss_kb": 6912,
+            "minor_faults": 262
+          },
+          {
+            "ms": 3.403878,
+            "rss_kb": 6896,
+            "minor_faults": 264
+          },
+          {
+            "ms": 3.407305,
+            "rss_kb": 6820,
+            "minor_faults": 262
+          },
+          {
+            "ms": 3.352703,
+            "rss_kb": 6900,
+            "minor_faults": 263
+          },
+          {
+            "ms": 3.352362,
+            "rss_kb": 6900,
+            "minor_faults": 263
+          },
+          {
+            "ms": 3.433494,
+            "rss_kb": 6900,
+            "minor_faults": 265
+          },
+          {
+            "ms": 3.382628,
+            "rss_kb": 6900,
+            "minor_faults": 262
+          },
+          {
+            "ms": 3.30804,
+            "rss_kb": 6892,
+            "minor_faults": 262
+          },
+          {
+            "ms": 3.357702,
+            "rss_kb": 6884,
+            "minor_faults": 264
+          },
+          {
+            "ms": 3.321324,
+            "rss_kb": 6832,
+            "minor_faults": 264
+          },
+          {
+            "ms": 3.335982,
+            "rss_kb": 6820,
+            "minor_faults": 262
+          },
+          {
+            "ms": 3.373311,
+            "rss_kb": 7024,
+            "minor_faults": 265
+          },
+          {
+            "ms": 3.313941,
+            "rss_kb": 6872,
+            "minor_faults": 263
+          },
+          {
+            "ms": 3.422464,
+            "rss_kb": 6888,
+            "minor_faults": 265
+          },
+          {
+            "ms": 3.42621,
+            "rss_kb": 6844,
+            "minor_faults": 262
+          }
+        ],
+        "before": [
+          {
+            "ms": 4.706802,
+            "rss_kb": 16532,
+            "minor_faults": 593
+          },
+          {
+            "ms": 4.666106,
+            "rss_kb": 16240,
+            "minor_faults": 588
+          },
+          {
+            "ms": 4.669572,
+            "rss_kb": 16124,
+            "minor_faults": 589
+          },
+          {
+            "ms": 4.648914,
+            "rss_kb": 16256,
+            "minor_faults": 590
+          },
+          {
+            "ms": 4.643193,
+            "rss_kb": 16220,
+            "minor_faults": 589
+          },
+          {
+            "ms": 4.672168,
+            "rss_kb": 16356,
+            "minor_faults": 591
+          },
+          {
+            "ms": 4.643073,
+            "rss_kb": 16356,
+            "minor_faults": 593
+          },
+          {
+            "ms": 4.636892,
+            "rss_kb": 16480,
+            "minor_faults": 593
+          },
+          {
+            "ms": 4.646079,
+            "rss_kb": 16256,
+            "minor_faults": 590
+          },
+          {
+            "ms": 4.624709,
+            "rss_kb": 16220,
+            "minor_faults": 588
+          },
+          {
+            "ms": 4.653463,
+            "rss_kb": 16532,
+            "minor_faults": 593
+          },
+          {
+            "ms": 4.733101,
+            "rss_kb": 16592,
+            "minor_faults": 594
+          },
+          {
+            "ms": 4.664433,
+            "rss_kb": 16240,
+            "minor_faults": 589
+          },
+          {
+            "ms": 4.643153,
+            "rss_kb": 16232,
+            "minor_faults": 590
+          },
+          {
+            "ms": 4.783666,
+            "rss_kb": 16588,
+            "minor_faults": 596
+          },
+          {
+            "ms": 4.731649,
+            "rss_kb": 16248,
+            "minor_faults": 591
+          },
+          {
+            "ms": 4.660666,
+            "rss_kb": 16248,
+            "minor_faults": 592
+          },
+          {
+            "ms": 4.669763,
+            "rss_kb": 16476,
+            "minor_faults": 593
+          },
+          {
+            "ms": 4.722231,
+            "rss_kb": 16356,
+            "minor_faults": 592
+          },
+          {
+            "ms": 4.771733,
+            "rss_kb": 16240,
+            "minor_faults": 589
+          }
+        ],
+        "after": [
+          {
+            "ms": 4.668751,
+            "rss_kb": 15476,
+            "minor_faults": 592
+          },
+          {
+            "ms": 4.667529,
+            "rss_kb": 15456,
+            "minor_faults": 593
+          },
+          {
+            "ms": 4.636601,
+            "rss_kb": 15500,
+            "minor_faults": 594
+          },
+          {
+            "ms": 4.73264,
+            "rss_kb": 15624,
+            "minor_faults": 596
+          },
+          {
+            "ms": 4.613107,
+            "rss_kb": 15624,
+            "minor_faults": 595
+          },
+          {
+            "ms": 4.631902,
+            "rss_kb": 15604,
+            "minor_faults": 593
+          },
+          {
+            "ms": 4.697424,
+            "rss_kb": 15468,
+            "minor_faults": 591
+          },
+          {
+            "ms": 4.646579,
+            "rss_kb": 15504,
+            "minor_faults": 595
+          },
+          {
+            "ms": 4.574265,
+            "rss_kb": 15320,
+            "minor_faults": 589
+          },
+          {
+            "ms": 4.760543,
+            "rss_kb": 15680,
+            "minor_faults": 596
+          },
+          {
+            "ms": 4.645407,
+            "rss_kb": 15456,
+            "minor_faults": 593
+          },
+          {
+            "ms": 4.603198,
+            "rss_kb": 15504,
+            "minor_faults": 594
+          },
+          {
+            "ms": 4.675563,
+            "rss_kb": 15488,
+            "minor_faults": 595
+          },
+          {
+            "ms": 4.648243,
+            "rss_kb": 15536,
+            "minor_faults": 592
+          },
+          {
+            "ms": 4.652781,
+            "rss_kb": 15608,
+            "minor_faults": 594
+          },
+          {
+            "ms": 4.660506,
+            "rss_kb": 15488,
+            "minor_faults": 595
+          },
+          {
+            "ms": 4.664333,
+            "rss_kb": 15604,
+            "minor_faults": 593
+          },
+          {
+            "ms": 4.664403,
+            "rss_kb": 15488,
+            "minor_faults": 595
+          },
+          {
+            "ms": 4.675193,
+            "rss_kb": 15620,
+            "minor_faults": 595
+          },
+          {
+            "ms": 4.660176,
+            "rss_kb": 15608,
+            "minor_faults": 594
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 3.3748440000000004,
+          "rss_kb": 6894.0
+        },
+        "before": {
+          "ms": 4.6652695,
+          "rss_kb": 16256.0
+        },
+        "after": {
+          "ms": 4.660341,
+          "rss_kb": 15504.0
+        }
+      }
+    },
+    {
+      "id": "blame/file@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "blame",
+          "--porcelain",
+          "README.md"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "blame",
+          "README.md"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "blame",
+          "README.md"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 313.208897,
+            "rss_kb": 208700,
+            "minor_faults": 29848
+          },
+          {
+            "ms": 310.719487,
+            "rss_kb": 208740,
+            "minor_faults": 29850
+          },
+          {
+            "ms": 312.019134,
+            "rss_kb": 208680,
+            "minor_faults": 29848
+          },
+          {
+            "ms": 312.291783,
+            "rss_kb": 208748,
+            "minor_faults": 29851
+          },
+          {
+            "ms": 314.397548,
+            "rss_kb": 208636,
+            "minor_faults": 29848
+          },
+          {
+            "ms": 312.106039,
+            "rss_kb": 208724,
+            "minor_faults": 29850
+          },
+          {
+            "ms": 311.641882,
+            "rss_kb": 208716,
+            "minor_faults": 29847
+          },
+          {
+            "ms": 313.627791,
+            "rss_kb": 208708,
+            "minor_faults": 29847
+          },
+          {
+            "ms": 317.328821,
+            "rss_kb": 208748,
+            "minor_faults": 29851
+          },
+          {
+            "ms": 316.660382,
+            "rss_kb": 208852,
+            "minor_faults": 29849
+          },
+          {
+            "ms": 314.509262,
+            "rss_kb": 208448,
+            "minor_faults": 29848
+          },
+          {
+            "ms": 312.226534,
+            "rss_kb": 208640,
+            "minor_faults": 29849
+          },
+          {
+            "ms": 314.512813,
+            "rss_kb": 208708,
+            "minor_faults": 29849
+          },
+          {
+            "ms": 312.343264,
+            "rss_kb": 208624,
+            "minor_faults": 29848
+          },
+          {
+            "ms": 312.126562,
+            "rss_kb": 208744,
+            "minor_faults": 29851
+          },
+          {
+            "ms": 312.895663,
+            "rss_kb": 208724,
+            "minor_faults": 29852
+          },
+          {
+            "ms": 314.216706,
+            "rss_kb": 208708,
+            "minor_faults": 29849
+          },
+          {
+            "ms": 314.78251,
+            "rss_kb": 208740,
+            "minor_faults": 29848
+          },
+          {
+            "ms": 312.693556,
+            "rss_kb": 208708,
+            "minor_faults": 29849
+          },
+          {
+            "ms": 314.627899,
+            "rss_kb": 208704,
+            "minor_faults": 29849
+          }
+        ],
+        "before": [
+          {
+            "ms": 307.60575,
+            "rss_kb": 234832,
+            "minor_faults": 33992
+          },
+          {
+            "ms": 307.980951,
+            "rss_kb": 234400,
+            "minor_faults": 33963
+          },
+          {
+            "ms": 306.941269,
+            "rss_kb": 234840,
+            "minor_faults": 33997
+          },
+          {
+            "ms": 308.04466,
+            "rss_kb": 234596,
+            "minor_faults": 33966
+          },
+          {
+            "ms": 309.276556,
+            "rss_kb": 234476,
+            "minor_faults": 33962
+          },
+          {
+            "ms": 308.780009,
+            "rss_kb": 234780,
+            "minor_faults": 33978
+          },
+          {
+            "ms": 307.606749,
+            "rss_kb": 234236,
+            "minor_faults": 33943
+          },
+          {
+            "ms": 308.858466,
+            "rss_kb": 234432,
+            "minor_faults": 33955
+          },
+          {
+            "ms": 307.286641,
+            "rss_kb": 234136,
+            "minor_faults": 33464
+          },
+          {
+            "ms": 306.323302,
+            "rss_kb": 234244,
+            "minor_faults": 33446
+          },
+          {
+            "ms": 308.778717,
+            "rss_kb": 234784,
+            "minor_faults": 33467
+          },
+          {
+            "ms": 306.58456,
+            "rss_kb": 234488,
+            "minor_faults": 33940
+          },
+          {
+            "ms": 308.091374,
+            "rss_kb": 234296,
+            "minor_faults": 33961
+          },
+          {
+            "ms": 307.416797,
+            "rss_kb": 234496,
+            "minor_faults": 33976
+          },
+          {
+            "ms": 307.854587,
+            "rss_kb": 234924,
+            "minor_faults": 33992
+          },
+          {
+            "ms": 308.315014,
+            "rss_kb": 234688,
+            "minor_faults": 33951
+          },
+          {
+            "ms": 308.809396,
+            "rss_kb": 234216,
+            "minor_faults": 33991
+          },
+          {
+            "ms": 309.535169,
+            "rss_kb": 234612,
+            "minor_faults": 33946
+          },
+          {
+            "ms": 308.035704,
+            "rss_kb": 234692,
+            "minor_faults": 33973
+          },
+          {
+            "ms": 309.405319,
+            "rss_kb": 234784,
+            "minor_faults": 33987
+          }
+        ],
+        "after": [
+          {
+            "ms": 301.203,
+            "rss_kb": 233576,
+            "minor_faults": 33986
+          },
+          {
+            "ms": 303.089143,
+            "rss_kb": 233668,
+            "minor_faults": 33441
+          },
+          {
+            "ms": 304.333027,
+            "rss_kb": 233504,
+            "minor_faults": 33466
+          },
+          {
+            "ms": 301.804584,
+            "rss_kb": 233664,
+            "minor_faults": 33963
+          },
+          {
+            "ms": 303.96278,
+            "rss_kb": 233596,
+            "minor_faults": 33984
+          },
+          {
+            "ms": 306.401609,
+            "rss_kb": 233608,
+            "minor_faults": 33959
+          },
+          {
+            "ms": 301.557023,
+            "rss_kb": 233708,
+            "minor_faults": 33449
+          },
+          {
+            "ms": 302.284492,
+            "rss_kb": 233620,
+            "minor_faults": 33996
+          },
+          {
+            "ms": 302.184692,
+            "rss_kb": 233928,
+            "minor_faults": 33480
+          },
+          {
+            "ms": 303.382575,
+            "rss_kb": 233856,
+            "minor_faults": 33433
+          },
+          {
+            "ms": 304.561162,
+            "rss_kb": 233564,
+            "minor_faults": 33983
+          },
+          {
+            "ms": 302.882468,
+            "rss_kb": 233588,
+            "minor_faults": 33450
+          },
+          {
+            "ms": 301.779248,
+            "rss_kb": 233640,
+            "minor_faults": 33961
+          },
+          {
+            "ms": 303.487466,
+            "rss_kb": 233448,
+            "minor_faults": 33469
+          },
+          {
+            "ms": 305.79646,
+            "rss_kb": 233456,
+            "minor_faults": 33965
+          },
+          {
+            "ms": 307.828257,
+            "rss_kb": 233348,
+            "minor_faults": 33437
+          },
+          {
+            "ms": 303.440929,
+            "rss_kb": 233916,
+            "minor_faults": 33465
+          },
+          {
+            "ms": 304.275345,
+            "rss_kb": 233948,
+            "minor_faults": 33993
+          },
+          {
+            "ms": 303.687537,
+            "rss_kb": 233764,
+            "minor_faults": 33948
+          },
+          {
+            "ms": 305.698379,
+            "rss_kb": 233756,
+            "minor_faults": 33999
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 313.05228,
+          "rss_kb": 208708.0
+        },
+        "before": {
+          "ms": 308.040182,
+          "rss_kb": 234546.0
+        },
+        "after": {
+          "ms": 303.46419749999995,
+          "rss_kb": 233630.0
+        }
+      }
+    },
+    {
+      "id": "revs/count@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "rev-list",
+          "--count",
+          "HEAD"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "revs",
+          "--count",
+          "HEAD"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "revs",
+          "--count",
+          "HEAD"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 535.401724,
+            "rss_kb": 60568,
+            "minor_faults": 7094
+          },
+          {
+            "ms": 542.096029,
+            "rss_kb": 60456,
+            "minor_faults": 7095
+          },
+          {
+            "ms": 541.251654,
+            "rss_kb": 60556,
+            "minor_faults": 7093
+          },
+          {
+            "ms": 536.315662,
+            "rss_kb": 60632,
+            "minor_faults": 7097
+          },
+          {
+            "ms": 540.808869,
+            "rss_kb": 60452,
+            "minor_faults": 7094
+          },
+          {
+            "ms": 535.689758,
+            "rss_kb": 60612,
+            "minor_faults": 7097
+          },
+          {
+            "ms": 543.365312,
+            "rss_kb": 60728,
+            "minor_faults": 7099
+          },
+          {
+            "ms": 539.43635,
+            "rss_kb": 60548,
+            "minor_faults": 7093
+          },
+          {
+            "ms": 538.814008,
+            "rss_kb": 60404,
+            "minor_faults": 7092
+          },
+          {
+            "ms": 537.155674,
+            "rss_kb": 60604,
+            "minor_faults": 7097
+          },
+          {
+            "ms": 538.795037,
+            "rss_kb": 60524,
+            "minor_faults": 7094
+          },
+          {
+            "ms": 540.593747,
+            "rss_kb": 60524,
+            "minor_faults": 7094
+          },
+          {
+            "ms": 541.124257,
+            "rss_kb": 60728,
+            "minor_faults": 7098
+          },
+          {
+            "ms": 541.230684,
+            "rss_kb": 60320,
+            "minor_faults": 7094
+          },
+          {
+            "ms": 539.986933,
+            "rss_kb": 60608,
+            "minor_faults": 7095
+          },
+          {
+            "ms": 542.075923,
+            "rss_kb": 60652,
+            "minor_faults": 7096
+          },
+          {
+            "ms": 541.90449,
+            "rss_kb": 60728,
+            "minor_faults": 7097
+          },
+          {
+            "ms": 540.31893,
+            "rss_kb": 60456,
+            "minor_faults": 7093
+          },
+          {
+            "ms": 538.976173,
+            "rss_kb": 60460,
+            "minor_faults": 7095
+          },
+          {
+            "ms": 542.281093,
+            "rss_kb": 60480,
+            "minor_faults": 7094
+          }
+        ],
+        "before": [
+          {
+            "ms": 763.710543,
+            "rss_kb": 125456,
+            "minor_faults": 16262
+          },
+          {
+            "ms": 768.651193,
+            "rss_kb": 126636,
+            "minor_faults": 18122
+          },
+          {
+            "ms": 763.136894,
+            "rss_kb": 125404,
+            "minor_faults": 16261
+          },
+          {
+            "ms": 765.320898,
+            "rss_kb": 126460,
+            "minor_faults": 16683
+          },
+          {
+            "ms": 766.655659,
+            "rss_kb": 126536,
+            "minor_faults": 16187
+          },
+          {
+            "ms": 767.367754,
+            "rss_kb": 127092,
+            "minor_faults": 16203
+          },
+          {
+            "ms": 796.388855,
+            "rss_kb": 127112,
+            "minor_faults": 17205
+          },
+          {
+            "ms": 767.864751,
+            "rss_kb": 126576,
+            "minor_faults": 18109
+          },
+          {
+            "ms": 767.906929,
+            "rss_kb": 125192,
+            "minor_faults": 17238
+          },
+          {
+            "ms": 770.274841,
+            "rss_kb": 126600,
+            "minor_faults": 17601
+          },
+          {
+            "ms": 766.609744,
+            "rss_kb": 125836,
+            "minor_faults": 18030
+          },
+          {
+            "ms": 766.429006,
+            "rss_kb": 126356,
+            "minor_faults": 17008
+          },
+          {
+            "ms": 772.196137,
+            "rss_kb": 125720,
+            "minor_faults": 17997
+          },
+          {
+            "ms": 769.286029,
+            "rss_kb": 126092,
+            "minor_faults": 17598
+          },
+          {
+            "ms": 765.932449,
+            "rss_kb": 125180,
+            "minor_faults": 16772
+          },
+          {
+            "ms": 766.190871,
+            "rss_kb": 125012,
+            "minor_faults": 16284
+          },
+          {
+            "ms": 770.494977,
+            "rss_kb": 124956,
+            "minor_faults": 16820
+          },
+          {
+            "ms": 790.920366,
+            "rss_kb": 127068,
+            "minor_faults": 17071
+          },
+          {
+            "ms": 763.944743,
+            "rss_kb": 126224,
+            "minor_faults": 16935
+          },
+          {
+            "ms": 763.861888,
+            "rss_kb": 125464,
+            "minor_faults": 16928
+          }
+        ],
+        "after": [
+          {
+            "ms": 758.369968,
+            "rss_kb": 125688,
+            "minor_faults": 17272
+          },
+          {
+            "ms": 755.97053,
+            "rss_kb": 127140,
+            "minor_faults": 16204
+          },
+          {
+            "ms": 762.450596,
+            "rss_kb": 126608,
+            "minor_faults": 18208
+          },
+          {
+            "ms": 752.628663,
+            "rss_kb": 125384,
+            "minor_faults": 16733
+          },
+          {
+            "ms": 757.263472,
+            "rss_kb": 126588,
+            "minor_faults": 17630
+          },
+          {
+            "ms": 754.194158,
+            "rss_kb": 126272,
+            "minor_faults": 17599
+          },
+          {
+            "ms": 760.486732,
+            "rss_kb": 125216,
+            "minor_faults": 17338
+          },
+          {
+            "ms": 751.775274,
+            "rss_kb": 125012,
+            "minor_faults": 15745
+          },
+          {
+            "ms": 755.035058,
+            "rss_kb": 125284,
+            "minor_faults": 16887
+          },
+          {
+            "ms": 761.090224,
+            "rss_kb": 126448,
+            "minor_faults": 18152
+          },
+          {
+            "ms": 750.545696,
+            "rss_kb": 126016,
+            "minor_faults": 17398
+          },
+          {
+            "ms": 786.45659,
+            "rss_kb": 125452,
+            "minor_faults": 17335
+          },
+          {
+            "ms": 758.533145,
+            "rss_kb": 126504,
+            "minor_faults": 17638
+          },
+          {
+            "ms": 756.139186,
+            "rss_kb": 126352,
+            "minor_faults": 17635
+          },
+          {
+            "ms": 759.403069,
+            "rss_kb": 125600,
+            "minor_faults": 17940
+          },
+          {
+            "ms": 759.85385,
+            "rss_kb": 126240,
+            "minor_faults": 18055
+          },
+          {
+            "ms": 754.898526,
+            "rss_kb": 125588,
+            "minor_faults": 17474
+          },
+          {
+            "ms": 756.69038,
+            "rss_kb": 125496,
+            "minor_faults": 16820
+          },
+          {
+            "ms": 761.738855,
+            "rss_kb": 126828,
+            "minor_faults": 17181
+          },
+          {
+            "ms": 755.947463,
+            "rss_kb": 126708,
+            "minor_faults": 17707
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 540.4563385,
+          "rss_kb": 60552.0
+        },
+        "before": {
+          "ms": 767.0117065,
+          "rss_kb": 126158.0
+        },
+        "after": {
+          "ms": 756.976926,
+          "rss_kb": 126128.0
+        }
+      }
+    },
+    {
+      "id": "cat/blob@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "cat-file",
+          "-p",
+          "665ce5f5a83647619fba9157fa9b0141ae8b228b"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "cat",
+          "665ce5f5a83647619fba9157fa9b0141ae8b228b"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "cat",
+          "665ce5f5a83647619fba9157fa9b0141ae8b228b"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 2.855381,
+            "rss_kb": 5060,
+            "minor_faults": 190
+          },
+          {
+            "ms": 2.743332,
+            "rss_kb": 5092,
+            "minor_faults": 193
+          },
+          {
+            "ms": 2.821347,
+            "rss_kb": 5216,
+            "minor_faults": 193
+          },
+          {
+            "ms": 2.805849,
+            "rss_kb": 5088,
+            "minor_faults": 193
+          },
+          {
+            "ms": 2.749884,
+            "rss_kb": 5276,
+            "minor_faults": 194
+          },
+          {
+            "ms": 2.834211,
+            "rss_kb": 5344,
+            "minor_faults": 195
+          },
+          {
+            "ms": 2.739304,
+            "rss_kb": 5304,
+            "minor_faults": 194
+          },
+          {
+            "ms": 2.755104,
+            "rss_kb": 5276,
+            "minor_faults": 194
+          },
+          {
+            "ms": 2.77434,
+            "rss_kb": 5092,
+            "minor_faults": 192
+          },
+          {
+            "ms": 2.677959,
+            "rss_kb": 5220,
+            "minor_faults": 193
+          },
+          {
+            "ms": 2.728865,
+            "rss_kb": 5304,
+            "minor_faults": 196
+          },
+          {
+            "ms": 2.713896,
+            "rss_kb": 5092,
+            "minor_faults": 193
+          },
+          {
+            "ms": 2.728134,
+            "rss_kb": 5332,
+            "minor_faults": 194
+          },
+          {
+            "ms": 2.695553,
+            "rss_kb": 5204,
+            "minor_faults": 195
+          },
+          {
+            "ms": 2.696774,
+            "rss_kb": 5204,
+            "minor_faults": 194
+          },
+          {
+            "ms": 2.658012,
+            "rss_kb": 5092,
+            "minor_faults": 192
+          },
+          {
+            "ms": 2.749022,
+            "rss_kb": 5020,
+            "minor_faults": 191
+          },
+          {
+            "ms": 2.724917,
+            "rss_kb": 5200,
+            "minor_faults": 194
+          },
+          {
+            "ms": 2.715059,
+            "rss_kb": 5224,
+            "minor_faults": 193
+          },
+          {
+            "ms": 2.724577,
+            "rss_kb": 5224,
+            "minor_faults": 192
+          }
+        ],
+        "before": [
+          {
+            "ms": 4.15608,
+            "rss_kb": 13180,
+            "minor_faults": 479
+          },
+          {
+            "ms": 4.038079,
+            "rss_kb": 13308,
+            "minor_faults": 481
+          },
+          {
+            "ms": 4.198739,
+            "rss_kb": 13180,
+            "minor_faults": 480
+          },
+          {
+            "ms": 4.04384,
+            "rss_kb": 13340,
+            "minor_faults": 479
+          },
+          {
+            "ms": 4.175195,
+            "rss_kb": 13592,
+            "minor_faults": 483
+          },
+          {
+            "ms": 4.031587,
+            "rss_kb": 13308,
+            "minor_faults": 480
+          },
+          {
+            "ms": 4.049931,
+            "rss_kb": 13180,
+            "minor_faults": 478
+          },
+          {
+            "ms": 4.020647,
+            "rss_kb": 13500,
+            "minor_faults": 484
+          },
+          {
+            "ms": 3.987545,
+            "rss_kb": 13340,
+            "minor_faults": 481
+          },
+          {
+            "ms": 3.979559,
+            "rss_kb": 13164,
+            "minor_faults": 478
+          },
+          {
+            "ms": 4.345924,
+            "rss_kb": 13296,
+            "minor_faults": 481
+          },
+          {
+            "ms": 4.015126,
+            "rss_kb": 13340,
+            "minor_faults": 479
+          },
+          {
+            "ms": 4.055762,
+            "rss_kb": 13596,
+            "minor_faults": 483
+          },
+          {
+            "ms": 3.984468,
+            "rss_kb": 13308,
+            "minor_faults": 480
+          },
+          {
+            "ms": 4.009305,
+            "rss_kb": 13340,
+            "minor_faults": 479
+          },
+          {
+            "ms": 3.989067,
+            "rss_kb": 13172,
+            "minor_faults": 478
+          },
+          {
+            "ms": 3.997533,
+            "rss_kb": 13180,
+            "minor_faults": 479
+          },
+          {
+            "ms": 4.021368,
+            "rss_kb": 13340,
+            "minor_faults": 479
+          },
+          {
+            "ms": 4.013954,
+            "rss_kb": 13308,
+            "minor_faults": 481
+          },
+          {
+            "ms": 4.065821,
+            "rss_kb": 13596,
+            "minor_faults": 483
+          }
+        ],
+        "after": [
+          {
+            "ms": 4.165927,
+            "rss_kb": 13396,
+            "minor_faults": 482
+          },
+          {
+            "ms": 4.059398,
+            "rss_kb": 13456,
+            "minor_faults": 481
+          },
+          {
+            "ms": 4.090267,
+            "rss_kb": 13456,
+            "minor_faults": 480
+          },
+          {
+            "ms": 4.182058,
+            "rss_kb": 13680,
+            "minor_faults": 487
+          },
+          {
+            "ms": 4.137154,
+            "rss_kb": 13652,
+            "minor_faults": 487
+          },
+          {
+            "ms": 4.001951,
+            "rss_kb": 13328,
+            "minor_faults": 479
+          },
+          {
+            "ms": 4.100806,
+            "rss_kb": 13424,
+            "minor_faults": 482
+          },
+          {
+            "ms": 4.016398,
+            "rss_kb": 13528,
+            "minor_faults": 484
+          },
+          {
+            "ms": 4.055231,
+            "rss_kb": 13660,
+            "minor_faults": 485
+          },
+          {
+            "ms": 4.09245,
+            "rss_kb": 13680,
+            "minor_faults": 487
+          },
+          {
+            "ms": 4.147974,
+            "rss_kb": 13552,
+            "minor_faults": 485
+          },
+          {
+            "ms": 4.085758,
+            "rss_kb": 13360,
+            "minor_faults": 480
+          },
+          {
+            "ms": 4.041435,
+            "rss_kb": 13664,
+            "minor_faults": 487
+          },
+          {
+            "ms": 3.994338,
+            "rss_kb": 13456,
+            "minor_faults": 481
+          },
+          {
+            "ms": 4.02771,
+            "rss_kb": 13488,
+            "minor_faults": 483
+          },
+          {
+            "ms": 4.004937,
+            "rss_kb": 13480,
+            "minor_faults": 483
+          },
+          {
+            "ms": 4.034192,
+            "rss_kb": 13456,
+            "minor_faults": 481
+          },
+          {
+            "ms": 4.004536,
+            "rss_kb": 13424,
+            "minor_faults": 481
+          },
+          {
+            "ms": 4.052406,
+            "rss_kb": 13484,
+            "minor_faults": 483
+          },
+          {
+            "ms": 4.00118,
+            "rss_kb": 13704,
+            "minor_faults": 485
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 2.7340845,
+          "rss_kb": 5210.0
+        },
+        "before": {
+          "ms": 4.0264775,
+          "rss_kb": 13308.0
+        },
+        "after": {
+          "ms": 4.0538185,
+          "rss_kb": 13482.0
+        }
+      }
+    },
+    {
+      "id": "status/clean@synth-100k",
+      "cwd": "/tmp/grit-bench-scratch/daily-synth-100k/worktree-run-synth-100k",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "status",
+          "--porcelain"
+        ],
+        "before": [
+          "/tmp/4729/base/grit",
+          "status"
+        ],
+        "after": [
+          "/tmp/4729/idxo/grit",
+          "status"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 125.254892,
+            "rss_kb": 27460,
+            "minor_faults": 905
+          },
+          {
+            "ms": 124.081711,
+            "rss_kb": 27524,
+            "minor_faults": 907
+          },
+          {
+            "ms": 122.930713,
+            "rss_kb": 27448,
+            "minor_faults": 907
+          },
+          {
+            "ms": 124.492038,
+            "rss_kb": 27560,
+            "minor_faults": 905
+          },
+          {
+            "ms": 126.954313,
+            "rss_kb": 27580,
+            "minor_faults": 909
+          },
+          {
+            "ms": 127.593289,
+            "rss_kb": 27528,
+            "minor_faults": 908
+          },
+          {
+            "ms": 123.167545,
+            "rss_kb": 27512,
+            "minor_faults": 908
+          },
+          {
+            "ms": 124.916791,
+            "rss_kb": 27452,
+            "minor_faults": 908
+          },
+          {
+            "ms": 124.53113,
+            "rss_kb": 27568,
+            "minor_faults": 908
+          },
+          {
+            "ms": 125.240295,
+            "rss_kb": 27580,
+            "minor_faults": 908
+          },
+          {
+            "ms": 122.0025,
+            "rss_kb": 27652,
+            "minor_faults": 907
+          },
+          {
+            "ms": 123.226465,
+            "rss_kb": 27524,
+            "minor_faults": 906
+          },
+          {
+            "ms": 123.72697,
+            "rss_kb": 27584,
+            "minor_faults": 909
+          },
+          {
+            "ms": 124.320527,
+            "rss_kb": 27580,
+            "minor_faults": 909
+          },
+          {
+            "ms": 125.397722,
+            "rss_kb": 27464,
+            "minor_faults": 904
+          },
+          {
+            "ms": 122.836938,
+            "rss_kb": 27460,
+            "minor_faults": 908
+          },
+          {
+            "ms": 126.336702,
+            "rss_kb": 27464,
+            "minor_faults": 909
+          },
+          {
+            "ms": 125.471056,
+            "rss_kb": 27528,
+            "minor_faults": 904
+          },
+          {
+            "ms": 126.294704,
+            "rss_kb": 27628,
+            "minor_faults": 909
+          },
+          {
+            "ms": 122.595575,
+            "rss_kb": 27524,
+            "minor_faults": 909
+          }
+        ],
+        "before": [
+          {
+            "ms": 106.182757,
+            "rss_kb": 33944,
+            "minor_faults": 3027
+          },
+          {
+            "ms": 104.643904,
+            "rss_kb": 34392,
+            "minor_faults": 3035
+          },
+          {
+            "ms": 103.805859,
+            "rss_kb": 34260,
+            "minor_faults": 3030
+          },
+          {
+            "ms": 105.149709,
+            "rss_kb": 33940,
+            "minor_faults": 3033
+          },
+          {
+            "ms": 105.120173,
+            "rss_kb": 34260,
+            "minor_faults": 3033
+          },
+          {
+            "ms": 104.820183,
+            "rss_kb": 33944,
+            "minor_faults": 3036
+          },
+          {
+            "ms": 105.079308,
+            "rss_kb": 33944,
+            "minor_faults": 3036
+          },
+          {
+            "ms": 107.117061,
+            "rss_kb": 33944,
+            "minor_faults": 3029
+          },
+          {
+            "ms": 105.58316,
+            "rss_kb": 34264,
+            "minor_faults": 3036
+          },
+          {
+            "ms": 105.846169,
+            "rss_kb": 34068,
+            "minor_faults": 3023
+          },
+          {
+            "ms": 108.085157,
+            "rss_kb": 34064,
+            "minor_faults": 3032
+          },
+          {
+            "ms": 106.056031,
+            "rss_kb": 34584,
+            "minor_faults": 3039
+          },
+          {
+            "ms": 105.277938,
+            "rss_kb": 33948,
+            "minor_faults": 3026
+          },
+          {
+            "ms": 105.453666,
+            "rss_kb": 34200,
+            "minor_faults": 3035
+          },
+          {
+            "ms": 107.365505,
+            "rss_kb": 34328,
+            "minor_faults": 3034
+          },
+          {
+            "ms": 108.636869,
+            "rss_kb": 34068,
+            "minor_faults": 3030
+          },
+          {
+            "ms": 104.890375,
+            "rss_kb": 33880,
+            "minor_faults": 2520
+          },
+          {
+            "ms": 104.646179,
+            "rss_kb": 34336,
+            "minor_faults": 2525
+          },
+          {
+            "ms": 105.116687,
+            "rss_kb": 34264,
+            "minor_faults": 3046
+          },
+          {
+            "ms": 105.928613,
+            "rss_kb": 34712,
+            "minor_faults": 3035
+          }
+        ],
+        "after": [
+          {
+            "ms": 106.059588,
+            "rss_kb": 34352,
+            "minor_faults": 2516
+          },
+          {
+            "ms": 103.977991,
+            "rss_kb": 34388,
+            "minor_faults": 2518
+          },
+          {
+            "ms": 105.265164,
+            "rss_kb": 34448,
+            "minor_faults": 3037
+          },
+          {
+            "ms": 106.064246,
+            "rss_kb": 34128,
+            "minor_faults": 2515
+          },
+          {
+            "ms": 105.100207,
+            "rss_kb": 34324,
+            "minor_faults": 3034
+          },
+          {
+            "ms": 106.615635,
+            "rss_kb": 34452,
+            "minor_faults": 3035
+          },
+          {
+            "ms": 104.601025,
+            "rss_kb": 34448,
+            "minor_faults": 3027
+          },
+          {
+            "ms": 103.309253,
+            "rss_kb": 34320,
+            "minor_faults": 2525
+          },
+          {
+            "ms": 104.614068,
+            "rss_kb": 34512,
+            "minor_faults": 2523
+          },
+          {
+            "ms": 103.431381,
+            "rss_kb": 34260,
+            "minor_faults": 2012
+          },
+          {
+            "ms": 105.599639,
+            "rss_kb": 34508,
+            "minor_faults": 3036
+          },
+          {
+            "ms": 103.944569,
+            "rss_kb": 34388,
+            "minor_faults": 2525
+          },
+          {
+            "ms": 104.868904,
+            "rss_kb": 34320,
+            "minor_faults": 3025
+          },
+          {
+            "ms": 104.490067,
+            "rss_kb": 34392,
+            "minor_faults": 2524
+          },
+          {
+            "ms": 104.804758,
+            "rss_kb": 34452,
+            "minor_faults": 2524
+          },
+          {
+            "ms": 104.26108,
+            "rss_kb": 34140,
+            "minor_faults": 2522
+          },
+          {
+            "ms": 106.171593,
+            "rss_kb": 34448,
+            "minor_faults": 3029
+          },
+          {
+            "ms": 112.854964,
+            "rss_kb": 34128,
+            "minor_faults": 2521
+          },
+          {
+            "ms": 104.717555,
+            "rss_kb": 34208,
+            "minor_faults": 2525
+          },
+          {
+            "ms": 104.051228,
+            "rss_kb": 34444,
+            "minor_faults": 3031
+          }
+        ]
+      },
+      "median": {
+        "git": {
+          "ms": 124.511584,
+          "rss_kb": 27526.0
+        },
+        "before": {
+          "ms": 105.365802,
+          "rss_kb": 34134.0
+        },
+        "after": {
+          "ms": 104.7611565,
+          "rss_kb": 34388.0
+        }
+      }
+    }
+  ],
+  "candidate": "factory/log-compact-walk",
+  "hyperfine_headline": {
+    "results": [
+      {
+        "command": "/usr/bin/git log --oneline -100",
+        "mean": 0.003609591106666667,
+        "stddev": 4.0578377405355425e-05,
+        "median": 0.0036055805000000003,
+        "user": 0.0016028866666666659,
+        "system": 0.0019079566666666673,
+        "min": 0.003530079,
+        "max": 0.003812984,
+        "times": [
+          0.0036043280000000004,
+          0.0036274420000000003,
+          0.003611051,
+          0.003640767,
+          0.003576576,
+          0.0035935280000000003,
+          0.0035911830000000004,
+          0.0035990180000000003,
+          0.0035875470000000004,
+          0.0035738610000000002,
+          0.0035829480000000003,
+          0.00358932,
+          0.0036127840000000004,
+          0.0035761050000000004,
+          0.003577569,
+          0.003624546,
+          0.0035324740000000003,
+          0.003604318,
+          0.003625858,
+          0.00356797,
+          0.0036132050000000004,
+          0.003538855,
+          0.0035982160000000004,
+          0.003652909,
+          0.003597465,
+          0.0035598960000000003,
+          0.0035551460000000003,
+          0.003608636,
+          0.003578621,
+          0.003656555,
+          0.0035772580000000003,
+          0.0035645840000000004,
+          0.00360003,
+          0.003608946,
+          0.0035645140000000004,
+          0.0036262390000000003,
+          0.0035453480000000002,
+          0.003643882,
+          0.003631168,
+          0.0037127400000000004,
+          0.0035576920000000003,
+          0.00363736,
+          0.0035674400000000003,
+          0.0035774480000000004,
+          0.0035768170000000004,
+          0.003581536,
+          0.0036991050000000003,
+          0.0036033360000000004,
+          0.003619647,
+          0.0035671490000000004,
+          0.0036031770000000004,
+          0.0035534230000000004,
+          0.00354088,
+          0.003597395,
+          0.0035530130000000003,
+          0.0036209700000000003,
+          0.003630897,
+          0.0036041380000000002,
+          0.0035822270000000003,
+          0.0036194060000000004,
+          0.00358973,
+          0.003588037,
+          0.0035591840000000004,
+          0.003632661,
+          0.003549977,
+          0.0035909130000000003,
+          0.003590282,
+          0.003559434,
+          0.003738739,
+          0.003622001,
+          0.003631038,
+          0.0036149880000000004,
+          0.003587437,
+          0.00357332,
+          0.0035793720000000004,
+          0.003572459,
+          0.003559665,
+          0.003647429,
+          0.003611913,
+          0.0036098180000000003,
+          0.003603166,
+          0.0036126440000000004,
+          0.0036484100000000004,
+          0.003579652,
+          0.003620448,
+          0.0035680100000000004,
+          0.0035842010000000004,
+          0.003603086,
+          0.0035820160000000004,
+          0.003628764,
+          0.0036192660000000003,
+          0.003614397,
+          0.003582347,
+          0.0036448540000000003,
+          0.003610439,
+          0.0035432140000000003,
+          0.003623233,
+          0.0035739810000000004,
+          0.0036123630000000004,
+          0.0036638490000000003,
+          0.0036144470000000002,
+          0.0035815960000000003,
+          0.0036191960000000003,
+          0.0036831950000000002,
+          0.003634996,
+          0.003675671,
+          0.003812984,
+          0.0037292510000000003,
+          0.0036361770000000004,
+          0.0036227230000000004,
+          0.0035785900000000004,
+          0.003661655,
+          0.0037074300000000003,
+          0.0036618560000000002,
+          0.0036186240000000004,
+          0.0036643110000000004,
+          0.0036135950000000003,
+          0.003647669,
+          0.0035881180000000004,
+          0.003568461,
+          0.00365356,
+          0.0035485440000000003,
+          0.0036523410000000004,
+          0.0035764860000000002,
+          0.003569333,
+          0.0035812450000000003,
+          0.003604649,
+          0.0036170620000000003,
+          0.0036002010000000004,
+          0.003536071,
+          0.003555257,
+          0.003595271,
+          0.003598467,
+          0.0036576480000000003,
+          0.0035350480000000003,
+          0.0036039580000000004,
+          0.0035610370000000004,
+          0.00361071,
+          0.0036331820000000004,
+          0.003590082,
+          0.0035923760000000004,
+          0.003555106,
+          0.003654932,
+          0.003611922,
+          0.003544436,
+          0.0036041280000000003,
+          0.0036100790000000004,
+          0.0035990980000000002,
+          0.0036103190000000003,
+          0.003551329,
+          0.003614597,
+          0.003606082,
+          0.0035734900000000003,
+          0.003640065,
+          0.003580053,
+          0.0035914640000000004,
+          0.003559515,
+          0.003602084,
+          0.003582818,
+          0.0035937490000000002,
+          0.0036727360000000002,
+          0.003595252,
+          0.003598768,
+          0.0035602460000000004,
+          0.003537283,
+          0.0036289240000000004,
+          0.003608416,
+          0.0035398580000000003,
+          0.0035972240000000004,
+          0.0036421590000000003,
+          0.003624856,
+          0.0036047490000000004,
+          0.003586595,
+          0.003651005,
+          0.003530079,
+          0.003585843,
+          0.00354638,
+          0.003577006,
+          0.003588378,
+          0.00357865,
+          0.003565967,
+          0.003635496,
+          0.0035981760000000002,
+          0.003570886,
+          0.0035464890000000003,
+          0.0036589200000000004,
+          0.0036200090000000004,
+          0.003732748,
+          0.003595922,
+          0.003659962,
+          0.00356746,
+          0.0036015120000000003,
+          0.0036934650000000004,
+          0.0035560680000000003,
+          0.0035862850000000003,
+          0.003591023,
+          0.0035969540000000003,
+          0.0035896200000000004,
+          0.0035806540000000004,
+          0.003617312,
+          0.003550988,
+          0.003603376,
+          0.0036111510000000004,
+          0.003656325,
+          0.003568341,
+          0.003635577,
+          0.003641257,
+          0.0036274920000000004,
+          0.0035850720000000003,
+          0.003591504,
+          0.0036163500000000004,
+          0.003559865,
+          0.003661956,
+          0.003583409,
+          0.003669971,
+          0.0036697810000000004,
+          0.0035889900000000002,
+          0.003681662,
+          0.003673748,
+          0.003644192,
+          0.003717419,
+          0.0036669650000000003,
+          0.003620929,
+          0.003617653,
+          0.003681943,
+          0.0036223320000000002,
+          0.003633953,
+          0.0036394440000000004,
+          0.0036518770000000004,
+          0.003619615,
+          0.003619877,
+          0.003681643,
+          0.003639003,
+          0.003651015,
+          0.0035755950000000004,
+          0.003636448,
+          0.003568892,
+          0.003738799,
+          0.0036931940000000003,
+          0.003641137,
+          0.003636658,
+          0.0036297050000000004,
+          0.0035716370000000003,
+          0.00361609,
+          0.003663308,
+          0.0036086860000000003,
+          0.003627982,
+          0.0036158400000000004,
+          0.003558573,
+          0.003605079,
+          0.003602725,
+          0.0036549620000000003,
+          0.0036038270000000004,
+          0.0036222510000000004,
+          0.0036187050000000003,
+          0.003606843,
+          0.003619526,
+          0.0036362580000000003,
+          0.003628904,
+          0.0036383920000000003,
+          0.0036365480000000003,
+          0.003603667,
+          0.003622352,
+          0.0035904020000000004,
+          0.003597626,
+          0.003618715,
+          0.003597555,
+          0.0035899820000000002,
+          0.003612043,
+          0.003634364,
+          0.003660233,
+          0.003632361,
+          0.0035623800000000004,
+          0.0036526180000000003,
+          0.0035694330000000003,
+          0.0036329310000000003,
+          0.0035919650000000003,
+          0.0036511150000000003,
+          0.003673557,
+          0.0036343540000000002,
+          0.0036190460000000003,
+          0.0036233130000000004,
+          0.0036215400000000003,
+          0.003577919,
+          0.0036123030000000003,
+          0.003604017,
+          0.0036547330000000003,
+          0.00358967,
+          0.0035769670000000003,
+          0.0036152690000000004,
+          0.003619216,
+          0.003623404,
+          0.003599469,
+          0.003621921,
+          0.0035998400000000004,
+          0.0036303570000000003,
+          0.003586946,
+          0.003630537,
+          0.0035884090000000003,
+          0.003562691
+        ],
+        "exit_codes": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "command": "/tmp/4729/base/grit log --limit 100",
+        "mean": 0.005144894626666669,
+        "stddev": 7.477710454621123e-05,
+        "median": 0.0051316535000000005,
+        "user": 0.00228139,
+        "system": 0.002753956666666667,
+        "min": 0.004972842,
+        "max": 0.00548009,
+        "times": [
+          0.005306555,
+          0.005203182000000001,
+          0.005203654,
+          0.005157587,
+          0.005107033,
+          0.005178577,
+          0.00516434,
+          0.005128843,
+          0.005245291,
+          0.005315562,
+          0.00548009,
+          0.0052804770000000004,
+          0.005242035,
+          0.005140165,
+          0.005139514,
+          0.005132229,
+          0.005139213,
+          0.0050962130000000005,
+          0.005185781,
+          0.0051857000000000006,
+          0.005077758,
+          0.005082387000000001,
+          0.0053139400000000005,
+          0.005246324,
+          0.005082668,
+          0.005135586,
+          0.0051088060000000005,
+          0.005121991,
+          0.005165893,
+          0.005175010000000001,
+          0.005127862,
+          0.005150714000000001,
+          0.005131078000000001,
+          0.005166274,
+          0.005141698,
+          0.005120588000000001,
+          0.0051353860000000005,
+          0.005218512000000001,
+          0.005075114,
+          0.005087136,
+          0.005122652,
+          0.005105861000000001,
+          0.005080223,
+          0.005138782000000001,
+          0.005167967000000001,
+          0.0051200080000000005,
+          0.005303449,
+          0.005235473,
+          0.005154622,
+          0.0050729500000000005,
+          0.005091274000000001,
+          0.005000455,
+          0.005041591000000001,
+          0.004998881,
+          0.005057631,
+          0.0050605070000000005,
+          0.005073862,
+          0.005028718000000001,
+          0.005033737,
+          0.005112193,
+          0.005009231,
+          0.00505188,
+          0.005060556,
+          0.005066527,
+          0.005073701,
+          0.005064844000000001,
+          0.005074553000000001,
+          0.004972842,
+          0.0050750330000000005,
+          0.005118835,
+          0.005106883,
+          0.004997779,
+          0.0050132480000000005,
+          0.005015281,
+          0.005016484000000001,
+          0.0050962130000000005,
+          0.005026954,
+          0.0049988310000000005,
+          0.004982652000000001,
+          0.005273614,
+          0.0050489540000000005,
+          0.0051245760000000005,
+          0.005113956,
+          0.005152378,
+          0.005161485,
+          0.005165112,
+          0.005159151000000001,
+          0.005118304000000001,
+          0.005126559,
+          0.005091053,
+          0.005107264,
+          0.0051685080000000005,
+          0.0050480130000000005,
+          0.005170722,
+          0.005115359000000001,
+          0.005106292,
+          0.005095872,
+          0.005108957,
+          0.005023026,
+          0.0051014630000000005,
+          0.00507838,
+          0.005072799,
+          0.00511043,
+          0.005266431,
+          0.005389841,
+          0.005408856,
+          0.005318107000000001,
+          0.005255229,
+          0.0051847690000000005,
+          0.005132631,
+          0.005082988,
+          0.005065826000000001,
+          0.005172495,
+          0.005160062,
+          0.0051607630000000005,
+          0.005124907000000001,
+          0.005092015,
+          0.005073961,
+          0.005117623,
+          0.005138381,
+          0.005128403,
+          0.005093498,
+          0.005089341000000001,
+          0.005150445,
+          0.005114478,
+          0.005097835,
+          0.005087798,
+          0.00506757,
+          0.0050424020000000005,
+          0.005057590000000001,
+          0.005124956,
+          0.005130226000000001,
+          0.005154813,
+          0.005175571,
+          0.005054014,
+          0.005183185000000001,
+          0.0050806340000000005,
+          0.0051068120000000005,
+          0.005107764000000001,
+          0.005151677,
+          0.005196239,
+          0.005198073,
+          0.005154642,
+          0.005090472,
+          0.005087686,
+          0.005127531,
+          0.005099519,
+          0.005109527,
+          0.005089079000000001,
+          0.0051092870000000006,
+          0.005106221,
+          0.005092145,
+          0.0051434110000000005,
+          0.005118244,
+          0.005190780000000001,
+          0.005104919,
+          0.005120859,
+          0.005155093,
+          0.005146177,
+          0.005049526,
+          0.005093397,
+          0.005100100000000001,
+          0.005170651,
+          0.005123994000000001,
+          0.005186411,
+          0.005179217000000001,
+          0.005147939000000001,
+          0.005112683000000001,
+          0.005116621,
+          0.005113095000000001,
+          0.005031632,
+          0.0051163910000000005,
+          0.005119186,
+          0.005095281,
+          0.005069823,
+          0.0051351650000000006,
+          0.005265710000000001,
+          0.005156225,
+          0.005256592,
+          0.005243538000000001,
+          0.005229702,
+          0.0052153550000000005,
+          0.005166885,
+          0.00518559,
+          0.005173166000000001,
+          0.005132581000000001,
+          0.005221517,
+          0.005148570000000001,
+          0.0051024040000000005,
+          0.005103366000000001,
+          0.00509459,
+          0.005235753,
+          0.005225154,
+          0.005251633,
+          0.005257564,
+          0.0052409430000000005,
+          0.005167136,
+          0.005187623000000001,
+          0.005235653000000001,
+          0.00521779,
+          0.00523378,
+          0.005163218000000001,
+          0.005267583,
+          0.005236355000000001,
+          0.005183947,
+          0.005263164000000001,
+          0.005277881000000001,
+          0.005252465,
+          0.0051879840000000005,
+          0.005266782,
+          0.005213762,
+          0.005211198,
+          0.005216747000000001,
+          0.005303119,
+          0.005194616,
+          0.005256632000000001,
+          0.005155634,
+          0.005247074,
+          0.005227478000000001,
+          0.005218421,
+          0.005104899,
+          0.005192232000000001,
+          0.005162095,
+          0.005159351,
+          0.005199114,
+          0.005100932000000001,
+          0.005161335,
+          0.005143741,
+          0.005255901,
+          0.005211338,
+          0.005074232000000001,
+          0.0051264890000000006,
+          0.005312156,
+          0.005351249000000001,
+          0.005193173000000001,
+          0.005124496,
+          0.005076346000000001,
+          0.005281298,
+          0.005165653,
+          0.005095922,
+          0.005091905000000001,
+          0.0051699400000000005,
+          0.005156686000000001,
+          0.005105289000000001,
+          0.005075635,
+          0.00506803,
+          0.0050837090000000005,
+          0.005114297,
+          0.005067379,
+          0.005016715000000001,
+          0.00508964,
+          0.005143491,
+          0.0051206690000000004,
+          0.005147398,
+          0.0051268500000000005,
+          0.005088799000000001,
+          0.005116371000000001,
+          0.005119937000000001,
+          0.0050672090000000005,
+          0.005104899,
+          0.005087045,
+          0.005118896,
+          0.00507882,
+          0.005123624,
+          0.005061498,
+          0.0051188250000000005,
+          0.0051308180000000005,
+          0.005103707000000001,
+          0.005253777,
+          0.005154001,
+          0.005163789,
+          0.005099218,
+          0.005124626,
+          0.0051291950000000005,
+          0.005181863,
+          0.005170301,
+          0.005212911000000001,
+          0.005162517,
+          0.005145946,
+          0.005183355000000001,
+          0.005194627,
+          0.005182043,
+          0.005214002000000001,
+          0.005149642,
+          0.005152708000000001,
+          0.005260750000000001,
+          0.005183996000000001,
+          0.00521775,
+          0.005114276,
+          0.005200627,
+          0.005093518,
+          0.005145775,
+          0.00518594,
+          0.0051017630000000005,
+          0.005133732,
+          0.005212099,
+          0.005124456,
+          0.00523964,
+          0.005211358,
+          0.005178205
+        ],
+        "exit_codes": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "command": "/tmp/4729/idxo/grit log --limit 100",
+        "mean": 0.005139866766666667,
+        "stddev": 8.328873665635474e-05,
+        "median": 0.0051263490000000005,
+        "user": 0.0021816200000000013,
+        "system": 0.0028486033333333344,
+        "min": 0.004959738,
+        "max": 0.005529752000000001,
+        "times": [
+          0.005353112,
+          0.005203272,
+          0.005099488,
+          0.005168688,
+          0.0052581550000000005,
+          0.005149352,
+          0.005182694000000001,
+          0.005163949,
+          0.00517528,
+          0.005120538,
+          0.005054184000000001,
+          0.005264396,
+          0.005093739,
+          0.0050937280000000005,
+          0.005109307,
+          0.005136207,
+          0.005180781000000001,
+          0.005133863000000001,
+          0.005282441000000001,
+          0.0051614750000000004,
+          0.005126529,
+          0.005217509,
+          0.005178888,
+          0.005184066,
+          0.005165322,
+          0.0051621060000000005,
+          0.005216106000000001,
+          0.005190402,
+          0.00520728,
+          0.005173517000000001,
+          0.005203834,
+          0.005173827000000001,
+          0.0051291240000000005,
+          0.005147227000000001,
+          0.0050758850000000005,
+          0.004990556,
+          0.005137209,
+          0.005039226,
+          0.005065776,
+          0.005061328,
+          0.00498775,
+          0.005082828,
+          0.005043875000000001,
+          0.005000664,
+          0.004959738,
+          0.005141036000000001,
+          0.005492302,
+          0.0053883080000000005,
+          0.005387637000000001,
+          0.005343474,
+          0.005245141,
+          0.005351750000000001,
+          0.005323918,
+          0.0053354890000000006,
+          0.005296116,
+          0.00526626,
+          0.005284414,
+          0.005256432,
+          0.005304782,
+          0.005230864,
+          0.005267783000000001,
+          0.005251012,
+          0.005158109,
+          0.005147719,
+          0.005120068,
+          0.005149942,
+          0.0051296350000000004,
+          0.005115659000000001,
+          0.005114968,
+          0.005161725000000001,
+          0.005158248000000001,
+          0.00511612,
+          0.00506267,
+          0.005114798,
+          0.005064774,
+          0.005061719,
+          0.005115268,
+          0.005131208,
+          0.0051154780000000006,
+          0.005096123,
+          0.005155894,
+          0.005242216,
+          0.0052358430000000004,
+          0.005121289,
+          0.005166053,
+          0.005142669000000001,
+          0.0051316190000000005,
+          0.005037143,
+          0.005060266,
+          0.005068912,
+          0.005134804000000001,
+          0.005118766,
+          0.005104509,
+          0.005066227,
+          0.0050613970000000005,
+          0.0051805,
+          0.00514842,
+          0.005053864,
+          0.005129435,
+          0.0050729600000000005,
+          0.005138422,
+          0.005097275,
+          0.005099569,
+          0.005180761000000001,
+          0.005123053000000001,
+          0.005128213,
+          0.005124686000000001,
+          0.005199706,
+          0.005150344,
+          0.005109557000000001,
+          0.0051525780000000005,
+          0.005156596,
+          0.00506267,
+          0.005174418,
+          0.005146506,
+          0.005268645000000001,
+          0.00519105,
+          0.005166273000000001,
+          0.005073881000000001,
+          0.0050807940000000005,
+          0.005050418,
+          0.005123153,
+          0.005118895,
+          0.005113305,
+          0.0051289230000000005,
+          0.005178156000000001,
+          0.005104709000000001,
+          0.005117572,
+          0.005047292,
+          0.0050601150000000004,
+          0.005242316,
+          0.005145315,
+          0.005109919,
+          0.005089831,
+          0.005179208,
+          0.005107975000000001,
+          0.005133583000000001,
+          0.0051642500000000004,
+          0.005130306,
+          0.0052029220000000004,
+          0.005113905,
+          0.0050938780000000005,
+          0.005158789,
+          0.005186331000000001,
+          0.00527147,
+          0.0054170220000000005,
+          0.005415498,
+          0.005150844,
+          0.005177003,
+          0.005150725,
+          0.00511624,
+          0.005119747,
+          0.0052338,
+          0.005174639,
+          0.005152769000000001,
+          0.005090913000000001,
+          0.0051451840000000006,
+          0.005126169000000001,
+          0.005110239,
+          0.00508926,
+          0.0052291410000000005,
+          0.005291046000000001,
+          0.005297218,
+          0.00527165,
+          0.00519642,
+          0.0051493220000000004,
+          0.005121570000000001,
+          0.005184888,
+          0.0051406460000000005,
+          0.00510008,
+          0.005130286,
+          0.005141467,
+          0.005088689,
+          0.005102013000000001,
+          0.005109017,
+          0.005153771000000001,
+          0.005122853,
+          0.005242646,
+          0.005219984,
+          0.005307367,
+          0.005090843,
+          0.005405691000000001,
+          0.005158299000000001,
+          0.005255671,
+          0.0052238300000000005,
+          0.005095271,
+          0.005134354000000001,
+          0.005151977,
+          0.005102545,
+          0.005143982,
+          0.005048543,
+          0.00515917,
+          0.005229262,
+          0.005104268,
+          0.005138471,
+          0.005139624000000001,
+          0.005108476000000001,
+          0.005132861000000001,
+          0.005155924,
+          0.005176132,
+          0.005240812,
+          0.005529752000000001,
+          0.005183385,
+          0.005131208,
+          0.00516983,
+          0.0051149870000000005,
+          0.005086836,
+          0.005228008,
+          0.0052513920000000006,
+          0.005131007,
+          0.005088869,
+          0.005181482,
+          0.005148321,
+          0.005065095,
+          0.0050683,
+          0.005087206,
+          0.005029869,
+          0.005102945,
+          0.0050925860000000005,
+          0.005047332000000001,
+          0.005025460000000001,
+          0.005075915,
+          0.005233289,
+          0.005069252000000001,
+          0.005020241,
+          0.005032013,
+          0.005085613,
+          0.0051314690000000005,
+          0.005071417,
+          0.0051289940000000004,
+          0.005094029,
+          0.005041671,
+          0.005149432000000001,
+          0.005104508000000001,
+          0.005073931,
+          0.005074993000000001,
+          0.005019319,
+          0.005125697,
+          0.005098277,
+          0.0051178740000000006,
+          0.0051476690000000005,
+          0.005101984,
+          0.005149903,
+          0.005079542,
+          0.005049045,
+          0.005084351,
+          0.005020612000000001,
+          0.005058923,
+          0.005096693,
+          0.005082306,
+          0.005049055,
+          0.005086605,
+          0.005066136000000001,
+          0.00507313,
+          0.005111391000000001,
+          0.005034969,
+          0.005167476000000001,
+          0.005203292,
+          0.005108105,
+          0.005225835000000001,
+          0.005210025,
+          0.005138041,
+          0.005176612000000001,
+          0.005106983000000001,
+          0.005111621,
+          0.0050155220000000006,
+          0.005123854000000001,
+          0.005041390000000001,
+          0.005072819,
+          0.005031512,
+          0.005026012000000001,
+          0.005050818,
+          0.0051530180000000005,
+          0.005117302000000001,
+          0.005053704,
+          0.005076947,
+          0.005094961,
+          0.005155263,
+          0.005075454,
+          0.005138782000000001,
+          0.0050824170000000005,
+          0.005030641000000001,
+          0.005086074,
+          0.005028697,
+          0.005104609,
+          0.005077738,
+          0.005092386,
+          0.005058623,
+          0.005033977,
+          0.005102153,
+          0.0050834090000000005,
+          0.005093888,
+          0.005108115000000001,
+          0.0050708360000000004,
+          0.005068952000000001,
+          0.005089701,
+          0.005072859000000001,
+          0.005074503,
+          0.0050901520000000006,
+          0.005128213
+        ],
+        "exit_codes": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "hyperfine_path_check": {
+    "results": [
+      {
+        "command": "/tmp/4729/base/grit log -n 200 -- Documentation",
+        "mean": 0.022331096149999997,
+        "stddev": 0.0007703042572316078,
+        "median": 0.022367202000000003,
+        "user": 0.0144257,
+        "system": 0.00775168,
+        "min": 0.0209629,
+        "max": 0.025644302,
+        "times": [
+          0.0209629,
+          0.021599469,
+          0.021408803,
+          0.02185174,
+          0.022003112000000002,
+          0.021961885,
+          0.021900581000000002,
+          0.021604718000000002,
+          0.021325788000000002,
+          0.021050033000000003,
+          0.021289641,
+          0.021017192,
+          0.021469717000000003,
+          0.021462984,
+          0.021252251,
+          0.022603383,
+          0.022986669,
+          0.023163238000000003,
+          0.023312917000000002,
+          0.022914784,
+          0.022241978000000003,
+          0.022213024,
+          0.022411264,
+          0.022713719,
+          0.022904154000000003,
+          0.02253188,
+          0.022385516,
+          0.022410913,
+          0.022836069,
+          0.023374281,
+          0.023410981,
+          0.022812062,
+          0.022899706000000002,
+          0.022681278000000003,
+          0.022948747000000002,
+          0.022440148,
+          0.022395995000000002,
+          0.025644302,
+          0.024890572000000003,
+          0.022680878,
+          0.023153267,
+          0.023916353,
+          0.022943748,
+          0.022244293000000002,
+          0.022404873000000002,
+          0.023030751000000002,
+          0.022130941,
+          0.021768174,
+          0.021716277000000003,
+          0.021769096,
+          0.022348888,
+          0.022579428000000002,
+          0.021811765,
+          0.021488191,
+          0.022068464000000003,
+          0.022807153,
+          0.022436351,
+          0.022149596,
+          0.021906722,
+          0.021096609000000002,
+          0.021402862,
+          0.022461488,
+          0.022122506,
+          0.022681829,
+          0.021837283000000002,
+          0.021261919,
+          0.021516894,
+          0.021870575,
+          0.02266038,
+          0.022671651,
+          0.022480644,
+          0.023056679,
+          0.022108399,
+          0.021943771,
+          0.021663067,
+          0.022426112,
+          0.023251402,
+          0.023235423,
+          0.022150958000000002,
+          0.023093247,
+          0.022329051000000003,
+          0.022271523,
+          0.022071409,
+          0.022390345000000002,
+          0.022004134,
+          0.021619797,
+          0.02289128,
+          0.023086695,
+          0.022556936000000003,
+          0.022542319,
+          0.022672983,
+          0.023391103,
+          0.02282143,
+          0.0229822,
+          0.021955012000000003,
+          0.021473413,
+          0.021508379,
+          0.021637019,
+          0.021421367,
+          0.021845919000000002
+        ],
+        "exit_codes": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "command": "/tmp/4729/idxo/grit log -n 200 -- Documentation",
+        "mean": 0.021938545850000008,
+        "stddev": 0.0006049250347335793,
+        "median": 0.021926469500000004,
+        "user": 0.01372523,
+        "system": 0.008064640000000003,
+        "min": 0.020483495,
+        "max": 0.023262623000000003,
+        "times": [
+          0.022195222,
+          0.021703152,
+          0.021770879,
+          0.021890852000000002,
+          0.021806716,
+          0.021918154000000002,
+          0.021967976,
+          0.022349459000000002,
+          0.022333930000000002,
+          0.022289477000000002,
+          0.022152571000000003,
+          0.022074025,
+          0.021934785000000002,
+          0.021594910000000002,
+          0.021536752000000003,
+          0.021937179,
+          0.022099432000000002,
+          0.022881803000000003,
+          0.023048654000000002,
+          0.023163628000000002,
+          0.023138802,
+          0.022994393000000002,
+          0.022982931,
+          0.023146166000000003,
+          0.022417967,
+          0.022345541,
+          0.022133686000000003,
+          0.02220375,
+          0.022628609,
+          0.022170896000000002,
+          0.021828697,
+          0.021599339000000002,
+          0.021998333000000002,
+          0.02232852,
+          0.022244814,
+          0.022412286,
+          0.022233492,
+          0.02168072,
+          0.021463485,
+          0.022126773000000002,
+          0.02182521,
+          0.021164898,
+          0.021078055000000002,
+          0.02202321,
+          0.021561788000000002,
+          0.021628794,
+          0.021067817000000003,
+          0.020875277,
+          0.021477671,
+          0.021363829,
+          0.021379608,
+          0.022220558,
+          0.022024842000000003,
+          0.021977985000000002,
+          0.020885085,
+          0.021397943000000003,
+          0.021534117000000002,
+          0.021569803000000002,
+          0.022421193000000002,
+          0.023126035000000003,
+          0.021826182000000003,
+          0.02142302,
+          0.021561699,
+          0.021571787000000002,
+          0.021329886000000003,
+          0.021514881000000003,
+          0.021457534,
+          0.021406358,
+          0.021686732,
+          0.022236488000000002,
+          0.022535787,
+          0.022323861,
+          0.021555557000000003,
+          0.021811525000000002,
+          0.021718501,
+          0.022009004000000002,
+          0.022425921,
+          0.023178887000000002,
+          0.023262623000000003,
+          0.022574389,
+          0.022217192,
+          0.022961852,
+          0.022923911,
+          0.022364207,
+          0.021984667000000003,
+          0.021952618,
+          0.021638632,
+          0.021565887000000002,
+          0.022068223,
+          0.021760369,
+          0.021376893,
+          0.021505573,
+          0.021682654000000003,
+          0.021577668,
+          0.021203249,
+          0.020642442,
+          0.021472432,
+          0.021134501,
+          0.020595024,
+          0.020483495
+        ],
+        "exit_codes": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "library_probe": {
+    "method": "one million warm find_position calls over 100 real commit ids, identical release-linked drivers",
+    "before_ns_per_lookup": 78,
+    "after_ns_per_lookup": 24
+  },
+  "criterion_fixed": {
+    "scattered_hits": {
+      "mean": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 258234.78290602783,
+          "upper_bound": 260888.0429690972
+        },
+        "point_estimate": 259472.43325923738,
+        "standard_error": 679.9565259292222
+      },
+      "median": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 257379.06319444443,
+          "upper_bound": 261081.28680555557
+        },
+        "point_estimate": 258013.6163602941,
+        "standard_error": 894.2681676705001
+      },
+      "median_abs_dev": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 780.2364518531767,
+          "upper_bound": 4414.081742320652
+        },
+        "point_estimate": 1699.3931548297492,
+        "standard_error": 943.0112939125742
+      },
+      "slope": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 258579.86718345454,
+          "upper_bound": 261817.3456178001
+        },
+        "point_estimate": 260273.97654181183,
+        "standard_error": 832.6843871692085
+      },
+      "std_dev": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 1764.9264109921576,
+          "upper_bound": 4113.341160050833
+        },
+        "point_estimate": 3127.9419375976354,
+        "standard_error": 619.2659829808968
+      }
+    },
+    "scattered_misses": {
+      "mean": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 287742.9653938004,
+          "upper_bound": 290521.36307206337
+        },
+        "point_estimate": 288980.9530261718,
+        "standard_error": 716.9358881061281
+      },
+      "median": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 287318.9995238095,
+          "upper_bound": 288526.5770562771
+        },
+        "point_estimate": 287655.2889795918,
+        "standard_error": 414.6359905670537
+      },
+      "median_abs_dev": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 465.5610008775418,
+          "upper_bound": 2736.138801553735
+        },
+        "point_estimate": 1144.9468793095298,
+        "standard_error": 546.6868778221834
+      },
+      "slope": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 287408.84225447755,
+          "upper_bound": 291051.4123051912
+        },
+        "point_estimate": 289454.7951518168,
+        "standard_error": 905.6741647750265
+      },
+      "std_dev": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 1432.7583334255457,
+          "upper_bound": 4629.7595840459935
+        },
+        "point_estimate": 3281.515913783043,
+        "standard_error": 886.67573072176
+      }
+    },
+    "single_hit": {
+      "mean": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 7.981520796655627,
+          "upper_bound": 8.1111171783837
+        },
+        "point_estimate": 8.042627664860923,
+        "standard_error": 0.03309749451144108
+      },
+      "median": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 7.988472551179326,
+          "upper_bound": 8.020167381602011
+        },
+        "point_estimate": 8.000853121480231,
+        "standard_error": 0.008714017266010603
+      },
+      "median_abs_dev": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 0.010696556262136506,
+          "upper_bound": 0.07287246829771288
+        },
+        "point_estimate": 0.032017479152197714,
+        "standard_error": 0.020368027225475836
+      },
+      "slope": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 8.000938685820262,
+          "upper_bound": 8.235922705923398
+        },
+        "point_estimate": 8.134924279295584,
+        "standard_error": 0.0570278035524826
+      },
+      "std_dev": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 0.07671091526943388,
+          "upper_bound": 0.20025553893647818
+        },
+        "point_estimate": 0.15227740100989348,
+        "standard_error": 0.03265317607733293
+      }
+    },
+    "single_miss": {
+      "mean": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 22.248426307058427,
+          "upper_bound": 25.20871217983436
+        },
+        "point_estimate": 23.763051217887472,
+        "standard_error": 0.7782140642946821
+      },
+      "median": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 25.009348499813107,
+          "upper_bound": 25.328788787063637
+        },
+        "point_estimate": 25.19537318133586,
+        "standard_error": 0.1389472299413613
+      },
+      "median_abs_dev": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 0.09284276618872511,
+          "upper_bound": 0.4819305474496001
+        },
+        "point_estimate": 0.26197162788867995,
+        "standard_error": 0.15458075646966724
+      },
+      "slope": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 18.84057703494068,
+          "upper_bound": 25.121344313047036
+        },
+        "point_estimate": 21.493606202669636,
+        "standard_error": 1.5193985110778154
+      },
+      "std_dev": {
+        "confidence_interval": {
+          "confidence_level": 0.95,
+          "lower_bound": 0.206736566470836,
+          "upper_bound": 4.611462372979215
+        },
+        "point_estimate": 3.5662151586617905,
+        "standard_error": 0.9524462784248265
+      }
+    }
+  }
+}

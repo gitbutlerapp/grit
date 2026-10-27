@@ -9,6 +9,69 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
 
+## Scattered pack-index lookups and log memory (2026-10-27)
+
+Large pack indexes now predict an object's row from its hash prefix, then bracket
+it with exponentially growing steps and finish with binary search. This avoids
+reading both ends of a fanout bucket and dividing wide integers on each probe.
+Every result still compares the complete object id; clustered hashes, missing ids,
+SHA-1/SHA-256 and v1/v2 indexes retain their existing behavior. Bracketing and
+binary search bound the probe count logarithmically.
+
+On a 4-vCPU AMD EPYC 7763 Linux VM with 16 GiB RAM, Rust 1.99.0 `release` builds
+and system Git 2.55.0, the pinned git/git fixture's 100-commit log uses **1,798 KiB
+less peak RSS (8.2%)**. Headline elapsed time is essentially unchanged: a separate
+300-run Hyperfine check measured 5.132 → 5.126 ms (Git: 3.606 ms). Startup and object decompression remain larger costs.
+
+The table uses 20 rotated, interleaved runs per binary after three warmups, with
+builds and tests stopped. Frozen main is `7cc7979535ce`; fixed output matches it
+byte for byte in every row. Python `perf_counter` wraps `/usr/bin/time -v`, so these
+wall times include that helper's launch; RSS is median peak RSS in KiB. Executables
+were copied with the same buffered-write method and warmed equally. Mapped code
+and file pages introduce RSS variation; the small cat/status differences are below
+0.3 MiB. The path-limited row's roughly 1% timing difference did not persist in a
+separate 100-run check (22.3 → 21.9 ms).
+
+| Scenario | Git ms | Main ms | Fixed ms | Main KiB | Fixed KiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `log/all@git-git` | 53.14 | 73.62 | 73.56 | 35,422 | 33,894 |
+| `log/author-n50@deep-history` | 3.13 | 5.49 | 5.43 | 17,124 | 15,888 |
+| `log/author-n50@deep-history-cg` | 3.51 | 5.65 | 5.60 | 19,230 | 18,122 |
+| `log/author@git-git` | 3.98 | 6.65 | 6.50 | 21,232 | 19,000 |
+| `log/json-100@git-git` | 4.73 | 7.01 | 6.88 | 22,752 | 20,582 |
+| `log/json-filter@git-git` | 3.89 | 7.20 | 7.19 | 21,620 | 19,630 |
+| `log/limit-path@git-git` | 25.51 | 22.02 | 22.23 | 36,284 | 35,424 |
+| `log/oneline-100@git-git` | 4.76 | 6.26 | 6.15 | 21,986 | 20,188 |
+| `log/oneline-100@synth-100k` | 3.99 | 5.17 | 5.14 | 16,512 | 15,604 |
+| `log/path@git-git` | 366.65 | 450.93 | 446.27 | 244,442 | 243,682 |
+| `log/stat-n50@git-git` | 102.16 | 392.18 | 389.08 | 113,432 | 110,746 |
+| `show/head@git-git` | 3.37 | 4.67 | 4.66 | 16,256 | 15,504 |
+| `blame/file@git-git` | 313.05 | 308.04 | 303.46 | 234,546 | 233,630 |
+| `revs/count@git-git` | 540.46 | 767.01 | 756.98 | 126,158 | 126,128 |
+| `cat/blob@git-git` | 2.73 | 4.03 | 4.05 | 13,308 | 13,482 |
+| `status/clean@synth-100k` | 124.51 | 105.37 | 104.76 | 34,134 | 34,388 |
+
+Raw samples and argv are in
+[`log-index-4729-paired.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/log-index-4729-paired.json).
+The standard daily captures are `daily-log-index-4729-before.json` and
+`daily-log-index-4729-after.json`; the latter also includes the runner's paired
+headline baseline. Its extra baseline has three samples, so use the 20-run table
+and 300-run Hyperfine check above for the before/after comparison.
+
+A warm loop over the same 100 real commit ids, repeated 10,000 times, measured
+about **78 → 24 ns per lookup**. The standalone Criterion target covers a broader
+4,096-id scattered working set, plus hot hit/miss controls, without preparing the
+objects suite's unrelated pack fixtures. On the real index, the fixed scattered
+hit/miss batches measured 260/289 µs per 4,096 lookups (about 64/71 ns per lookup).
+
+```bash
+# Default: deterministic 200k-object index.
+cargo bench -p grit-lib --bench pack_index
+# Real repository: choose one of its .idx files.
+GRIT_PACK_INDEX_BENCH=/path/to/repo/.git/objects/pack/pack-HASH.idx \
+  cargo bench -p grit-lib --features http-ureq,tracing --bench pack_index
+```
+
 ## Multi-pack-index preparation and clean status (2026-10-26)
 
 Issue [#2064](https://github.com/gitbutlerapp/grit/issues/2064) exposed three MIDX

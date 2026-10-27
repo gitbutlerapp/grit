@@ -41,6 +41,102 @@ fn run_both_algos(f: impl Fn(HashAlgo)) {
     }
 }
 
+#[test]
+fn large_fanout_lookup_roundtrips_git_and_grit_indexes() {
+    run_both_algos(|algo| {
+        let repo = RepoFixture::init(fixture_algo(algo)).expect("init");
+        let mut builder = PackBuilder::new(fixture_algo(algo));
+        let mut objects = Vec::new();
+        // Real object ids in one bucket exercise prediction rather than the small-table path.
+        for candidate in 0u32.. {
+            let payload = format!("fanout lookup payload {candidate}\n").into_bytes();
+            let oid = algo.hash_object(ObjectKind::Blob, &payload).expect("hash");
+            if oid.as_bytes()[0] != 0x55 {
+                continue;
+            }
+            builder.add_full(FixtureKind::Blob, &payload);
+            objects.push((oid, payload));
+            if objects.len() == 128 {
+                break;
+            }
+        }
+        let built = builder.build();
+        let hash_bytes = algo.len();
+        let trailer = &built.bytes[built.bytes.len() - hash_bytes..];
+        let stem = format!("pack-{}", hex::encode(trailer));
+        let rewritten = RepoFixture::init(fixture_algo(algo)).expect("rewrite repository");
+        let grit_pack_dir = rewritten.objects_dir().join("pack");
+        std::fs::create_dir_all(&grit_pack_dir).expect("pack directory");
+        std::fs::write(grit_pack_dir.join(format!("{stem}.pack")), &built.bytes).expect("pack");
+        let grit_index_path = grit_pack_dir.join(format!("{stem}.idx"));
+        let versions = if algo == HashAlgo::Sha1 {
+            vec![IndexVersion::V1, IndexVersion::V2]
+        } else {
+            vec![IndexVersion::V2]
+        };
+        for version in versions {
+            let installed = write_pack_and_index(
+                &repo.objects_dir(),
+                &stem,
+                &built.bytes,
+                fixture_algo(algo),
+                &IndexPackOptions {
+                    index_version: Some(version),
+                    ..IndexPackOptions::default()
+                },
+            );
+            assert!(installed.index_ok, "{}", installed.index_stderr);
+            let path = installed.idx_path.expect("index path");
+            let index = read_pack_index(&path).expect("Git index");
+            for (i, (oid, payload)) in objects.iter().enumerate() {
+                assert_eq!(
+                    index.find_offset(oid).expect("lookup"),
+                    Some(built.entry_offsets[i] as u64)
+                );
+                assert_eq!(
+                    read_object_from_pack(&index, oid).expect("blob").data,
+                    *payload
+                );
+            }
+            let entries: Vec<_> = objects
+                .iter()
+                .enumerate()
+                .map(|(i, (oid, _))| {
+                    let start = built.entry_offsets[i];
+                    let end = built
+                        .entry_offsets
+                        .get(i + 1)
+                        .copied()
+                        .unwrap_or(built.bytes.len() - hash_bytes);
+                    (
+                        *oid,
+                        start as u64,
+                        crc32fast::hash(&built.bytes[start..end]),
+                    )
+                })
+                .collect();
+            grit_lib::objects::pack::write_v2_pack_index_with_trailer(
+                &grit_index_path,
+                &entries,
+                trailer,
+                hash_bytes,
+                None,
+            )
+            .expect("grit index");
+            assert_eq!(
+                git_show_index_lines(&grit_index_path, hash_bytes == 32).len(),
+                128
+            );
+            assert!(
+                rewritten
+                    .git(&["verify-pack", grit_index_path.to_str().expect("path")])
+                    .ok
+            );
+            assert!(rewritten.git(&["fsck", "--full"]).ok);
+        }
+    });
+}
+
 fn git_show_index_lines(idx_path: &Path, sha256: bool) -> Vec<(String, u64, Option<u32>)> {
     let bytes = std::fs::read(idx_path).expect("read idx");
     let mut child = Command::new("git")

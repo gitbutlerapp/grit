@@ -459,12 +459,57 @@ impl PackIndex {
         })
     }
 
-    fn find_position_in_bucket(&self, lo: usize, hi: usize, needle: &[u8]) -> Option<usize> {
-        if hi - lo >= 64 {
-            if let Some(pos) = self.interpolation_search(lo, hi, needle) {
-                return Some(pos);
+    fn find_position_in_bucket(
+        &self,
+        mut lo: usize,
+        mut hi: usize,
+        needle: &[u8],
+    ) -> Option<usize> {
+        if hi - lo < 64 {
+            return self.binary_search(lo, hi, needle);
+        }
+
+        // Hashes normally spread evenly within a fanout bucket. Predict a row from the
+        // next three bytes without touching either end of the mapped OID table: those
+        // extra probes otherwise fault in unrelated pages on short, scattered reads.
+        let fraction = u32::from_be_bytes([0, needle[1], needle[2], needle[3]]);
+        let guess = lo + ((u64::from(fraction) * (hi - lo) as u64) >> 24) as usize;
+        let mut step = 1usize;
+        match compare_oid_bytes(self.oid_at(guess), needle) {
+            Ordering::Equal => return Some(guess),
+            Ordering::Less => {
+                lo = guess + 1;
+                while lo < hi {
+                    let pos = guess.saturating_add(step).min(hi - 1);
+                    match compare_oid_bytes(self.oid_at(pos), needle) {
+                        Ordering::Equal => return Some(pos),
+                        Ordering::Greater => {
+                            hi = pos;
+                            break;
+                        }
+                        Ordering::Less => lo = pos + 1,
+                    }
+                    step = step.saturating_mul(2);
+                }
+            }
+            Ordering::Greater => {
+                hi = guess;
+                while lo < hi {
+                    let pos = guess.saturating_sub(step).max(lo);
+                    match compare_oid_bytes(self.oid_at(pos), needle) {
+                        Ordering::Equal => return Some(pos),
+                        Ordering::Less => {
+                            lo = pos + 1;
+                            break;
+                        }
+                        Ordering::Greater => hi = pos,
+                    }
+                    step = step.saturating_mul(2);
+                }
             }
         }
+        // Exponential bracketing followed by binary search stays logarithmic even
+        // for clustered, nonuniform hashes or many OIDs sharing the same prefix.
         self.binary_search(lo, hi, needle)
     }
 
@@ -475,36 +520,6 @@ impl PackIndex {
                 Ordering::Less => lo = mid + 1,
                 Ordering::Greater => hi = mid,
                 Ordering::Equal => return Some(mid),
-            }
-        }
-        None
-    }
-
-    fn interpolation_search(&self, lo: usize, hi: usize, needle: &[u8]) -> Option<usize> {
-        let mut lo = lo;
-        let mut hi = hi;
-        while lo < hi && needle >= self.oid_at(lo) && needle <= self.oid_at(hi - 1) {
-            let lo_oid = self.oid_at(lo);
-            let hi_oid = self.oid_at(hi - 1);
-            if lo_oid == hi_oid {
-                return if lo_oid == needle { Some(lo) } else { None };
-            }
-            let span = hi - lo - 1;
-            let num = oid_interp_prefix_u64(needle);
-            let lo_val = oid_interp_prefix_u64(lo_oid);
-            let hi_val = oid_interp_prefix_u64(hi_oid);
-            let guess = if hi_val <= lo_val {
-                lo + span / 2
-            } else {
-                let num = u128::from(num.saturating_sub(lo_val));
-                let den = u128::from(hi_val - lo_val);
-                lo.saturating_add(((num * u128::from(span as u64)) / den) as usize)
-            };
-            let pos = guess.min(hi - 1);
-            match compare_oid_bytes(self.oid_at(pos), needle) {
-                Ordering::Equal => return Some(pos),
-                Ordering::Less => lo = pos + 1,
-                Ordering::Greater => hi = pos,
             }
         }
         None
@@ -993,6 +1008,89 @@ mod tests {
         }
         let miss = ObjectId::from_bytes(&[0x06; 20]).unwrap();
         assert!(idx.find_position(&miss).is_none());
+    }
+
+    #[test]
+    fn predicted_lookup_matches_sorted_oracle_across_index_layouts() {
+        for hash_bytes in [20, 32] {
+            // Include empty buckets, evenly spread hashes, and clusters at both extremes.
+            let rows: Vec<_> = [0u8, 0x55, 0xfe, 0xff]
+                .into_iter()
+                .flat_map(|first| {
+                    (0..1024u32).map(move |i| {
+                        let mut bytes = vec![0; hash_bytes];
+                        bytes[..4].copy_from_slice(&i.wrapping_mul(2_654_435_761).to_be_bytes());
+                        bytes[0] = first;
+                        bytes[hash_bytes - 4..].copy_from_slice(&(i * 2).to_be_bytes());
+                        (bytes, 12 + u64::from(i) * 40)
+                    })
+                })
+                .collect();
+            assert_lookup_oracle(&rows, hash_bytes);
+        }
+    }
+
+    #[test]
+    fn predicted_lookup_handles_identical_prefixes_and_bucket_edges() {
+        for hash_bytes in [20, 32] {
+            for count in [0, 1, 63, 64, 65, 1025] {
+                for prefix in [0, 0xff] {
+                    let rows: Vec<_> = (0..count)
+                        .map(|i: u32| {
+                            let mut bytes = vec![prefix; hash_bytes];
+                            bytes[hash_bytes - 4..].copy_from_slice(&(2 * i + 2).to_be_bytes());
+                            (bytes, 12 + u64::from(i) * 40)
+                        })
+                        .collect();
+                    assert_lookup_oracle(&rows, hash_bytes);
+                }
+            }
+        }
+    }
+
+    fn assert_lookup_oracle(rows: &[(Vec<u8>, u64)], hash_bytes: usize) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("lookup.idx");
+        let entries: Vec<_> = rows
+            .iter()
+            .map(|(bytes, offset)| (ObjectId::from_bytes(bytes).expect("oid"), *offset, 0))
+            .collect();
+        crate::pack::write_v2_pack_index_with_trailer(
+            &path,
+            &entries,
+            &vec![0; hash_bytes],
+            hash_bytes,
+            None,
+        )
+        .expect("write v2");
+        let mut indexes = vec![open_pack_index_file(&path, true).expect("v2")];
+        if hash_bytes == 20 {
+            indexes
+                .push(parse_pack_index_bytes(&path, build_v1_idx_bytes(rows), true).expect("v1"));
+        }
+        let mut sorted: Vec<_> = entries.iter().map(|(oid, _, _)| *oid).collect();
+        sorted.sort();
+        let probes = sorted.iter().flat_map(|oid| {
+            let mut missing = oid.as_bytes().to_vec();
+            missing[hash_bytes - 1] ^= 1;
+            [*oid, ObjectId::from_bytes(&missing).expect("nearby oid")]
+        });
+        let edges = (0..=255).flat_map(|first| {
+            let mut low = vec![0; hash_bytes];
+            low[0] = first;
+            let mut high = vec![0xff; hash_bytes];
+            high[0] = first;
+            [
+                ObjectId::from_bytes(&low).expect("low oid"),
+                ObjectId::from_bytes(&high).expect("high oid"),
+            ]
+        });
+        for probe in probes.chain(edges) {
+            let expected = sorted.binary_search(&probe).ok();
+            for index in &indexes {
+                assert_eq!(index.find_position(&probe), expected, "probe {probe}");
+            }
+        }
     }
 
     #[test]
