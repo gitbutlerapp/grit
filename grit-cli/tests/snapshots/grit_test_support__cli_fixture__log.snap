@@ -5,7 +5,7 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "  83352a6  change xzyqzyyz  Test  [TIME_AGO]  second\n  062ca6e  change prkwwuwr  Test  [TIME_AGO]  first\n",
+    "stdout": "  83352a6  xzyqzyyz  Test  [TIME_AGO]  second\n  062ca6e  prkwwuwr  Test  [TIME_AGO]  first\n",
     "stderr": ""
   },
   "json": {
@@ -15,7 +15,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "- `83352a6` change xzyqzyyz second (Test, [TIME_AGO])\n- `062ca6e` change prkwwuwr first (Test, [TIME_AGO])\n",
+    "stdout": "- `83352a6` `xzyqzyyz` second (Test, [TIME_AGO])\n- `062ca6e` `prkwwuwr` first (Test, [TIME_AGO])\n",
     "stderr": ""
   }
 }

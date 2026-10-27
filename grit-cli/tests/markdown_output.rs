@@ -86,16 +86,27 @@ fn log_human_continuation_emits_full_opaque_cursor() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("→ more: grit log\n") || stdout.contains("→ more: grit log\r\n"),
+        "default hint omits cursor token: {stdout}"
+    );
+    let with_cursor = Command::new(GRIT)
+        .args(["log", "--cursor"])
+        .current_dir(dir.path())
+        .output()
+        .expect("log --cursor");
+    assert!(with_cursor.status.success());
+    let stdout = String::from_utf8_lossy(&with_cursor.stdout);
     let line = stdout
         .lines()
         .find(|l| l.contains("→ more: grit log --cursor="))
         .expect("continuation line");
     let cursor = line.split("--cursor=").nth(1).expect("cursor suffix");
     assert!(
-        cursor.starts_with("lw1."),
-        "expected opaque cursor, got: {cursor}"
+        cursor.starts_with("lw1.s."),
+        "expected short cursor, got: {cursor}"
     );
-    assert!(cursor.len() > 20, "cursor must not be truncated: {cursor}");
+    assert_eq!(cursor.len(), "lw1.s.".len() + 8, "cursor length: {cursor}");
     let next_page = Command::new(GRIT)
         .args(["log", &format!("--cursor={cursor}")])
         .current_dir(dir.path())
@@ -113,7 +124,7 @@ fn log_markdown_continuation_emits_full_opaque_cursor() {
     let dir = tempfile::tempdir().expect("tempdir");
     eleven_commit_repo(dir.path());
     let out = Command::new(GRIT)
-        .args(["log", "--markdown"])
+        .args(["log", "--markdown", "--cursor"])
         .current_dir(dir.path())
         .output()
         .expect("log");
@@ -127,8 +138,8 @@ fn log_markdown_continuation_emits_full_opaque_cursor() {
     let start = stdout.find(prefix).expect("markdown continuation");
     let rest = &stdout[start + prefix.len()..];
     let cursor = rest.split('`').next().expect("closing backtick");
-    assert!(cursor.starts_with("lw1."), "got: {cursor}");
-    assert!(cursor.len() > 20, "cursor must not be truncated: {cursor}");
+    assert!(cursor.starts_with("lw1.s."), "got: {cursor}");
+    assert_eq!(cursor.len(), "lw1.s.".len() + 8, "cursor length: {cursor}");
     let next_page = Command::new(GRIT)
         .args(["log", &format!("--cursor={cursor}")])
         .current_dir(dir.path())

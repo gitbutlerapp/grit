@@ -152,10 +152,10 @@ const AUTHOR_MAX: usize = 15;
 
 const CHANGE_ID_DISPLAY_LEN: usize = 8;
 
-/// Short change-id label for human log/show (`change` + eight reverse-hex digits).
+/// Short change-id label for human log/show (eight reverse-hex digits).
 #[must_use]
 pub fn change_display_segment(change_id: &str) -> String {
-    format!("change {}", change_short_code(change_id))
+    change_short_code(change_id)
 }
 
 /// First eight reverse-hex digits of a change id (no `change` prefix).

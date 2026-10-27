@@ -8,9 +8,9 @@ order: 1
 ## Synopsis
 
 ```text
-grit log [<REV>…] [-n <N>] [--cursor <token>]
+grit log [<REV>…] [-n <N>] [--cursor [<token>]]
   [-p] [--stat | --numstat | --shortstat | --name-only | --name-status] [-U<N>]
-  [--oneline] [--decorate] [--graph] [--graph-unicode] [--group-by author] [--count]
+  [--oneline] [--decorate] [--graph] [--graph-ascii] [--graph-unicode] [--group-by author] [--count]
   [--skip <N>] [--since|--after <date>] [--until|--before <date>]
   [--first-parent] [--merges | --no-merges] [--reverse]
   [--author <pat>] [--committer <pat>] [--grep <pat>]
@@ -27,7 +27,7 @@ Lists commits reachable from the selected revisions (default `HEAD`), newest fir
 
 Revision selection matches [`grit revs`](../revs/): plain tips, `A..B`, `A...B`, `^tip`, and the same ref-set flags (`--all`, `--branches`, and so on). Path operands after `--` limit to commits that touch those paths (same cwd rules as [`grit diff`](../diff/)). Path filters use the same author/date output as the default log, not the bare oid list from `grit revs`. Without `-n`, every matching commit is listed when paths are set (not capped at ten).
 
-When there's more history on a cursor-eligible walk, the last line shows the command for the next page. Path filters, commit filters (`--author`, `--grep`, …), pickaxe filters (`-S`, `-G`), `--reverse`, `--first-parent`, merge filters, `--skip`, and a one-shot `-n` without `--cursor` do not emit a continuation cursor.
+When there's more history on a cursor-eligible walk, the last line shows how to fetch the next page. By default the hint is `→ more: grit log` (revision operands from the current walk are omitted because the cursor encodes them). Pass `--cursor` with no value on the same command to include a short repository-local token on that line (`--cursor=lw1.s.` + eight characters). Path filters, commit filters (`--author`, `--grep`, …), pickaxe filters (`-S`, `-G`), `--reverse`, `--first-parent`, merge filters, `--skip`, and a one-shot `-n` without `--cursor` do not emit a continuation cursor.
 
 Pickaxe filters match Git's `-S` and `-G`: `-S` keeps commits where the number of occurrences of a string changed in the diff against the first parent (literal string unless `--pickaxe-regex`); `-G` keeps commits where added or removed lines match a BRE. `-i` applies to both. Binary files are skipped for `-G` (not for `-S`). `-S` and `-G` cannot be combined.
 Author, committer, and message filters match [`grit revs`](../revs/): patterns use Git's default POSIX BRE rules unless `-F` / `--fixed-strings` is set; multiple `--author` or `--committer` patterns OR together; multiple `--grep` patterns OR together unless `--all-match`; `--invert-grep` negates only the grep group; `-i` applies to all. When `log.mailmap` is unset or true (and `--no-mailmap` is not passed), `.mailmap` is applied before matching author or committer (same sources as Git). Invalid patterns exit **129** with `kind: "invalid_pattern"` in `--json` output.
@@ -36,7 +36,7 @@ Diff detail flags (same family as [`grit diff`](../diff/)) append output under e
 
 With `--stat`, each commit is also summarized in JSON under `stat` (legacy shape matching [`grit show`](../show/)). Merge commits show the change against their first parent for stat and name modes; `-p` skips merge patches (like `git log -p`). Path operands limit both which commits appear and the paths included in each patch.
 
-With `--graph`, human output draws a commit graph in the left margin (ASCII by default, or Unicode box-drawing with `--graph-unicode`). Graph mode uses topological ordering like Git's `log --graph`, including with path and author/committer/grep filters (filtered commits are skipped while keeping lane connectivity). `--json` rejects `--graph` (exit **1**, `kind: "incompatible_flags"`) because graph columns are human-only; `--markdown` lists commits without graph columns and includes a note that `--graph` is human-only. `--graph` cannot be combined with diff format flags, `--group-by`, or `--cursor`.
+With `--graph`, human output draws a commit graph in the left margin (Unicode box-drawing by default, or ASCII `*|` with `--graph-ascii`). `--graph-unicode` is accepted as an alias for the default Unicode graph and implies `--graph`. Graph mode uses topological ordering like Git's `log --graph`, including with path and author/committer/grep filters (filtered commits are skipped while keeping lane connectivity). `--json` rejects `--graph` (exit **1**, `kind: "incompatible_flags"`) because graph columns are human-only; `--markdown` lists commits without graph columns and includes a note that `--graph` is human-only. `--graph` cannot be combined with diff format flags, `--group-by`, or `--cursor`.
 
 ## Options
 
@@ -44,7 +44,7 @@ With `--graph`, human output draws a commit graph in the left margin (ASCII by d
 | --- | --- |
 | `<REV>…` | Tips and ranges to walk (default `HEAD`). |
 | `-n`, `--limit <N>` | Stop after `N` commits. On the default walk, this is the page size (including when continuing with `--cursor`). With path filters, caps how many matching commits are returned; omit it to list all matches. A one-shot `-n` without `--cursor` and without paths lists `N` commits with no `next` cursor. `--max-count` is Git’s well-known alias. |
-| `--cursor <token>` | Continue a paged walk using the opaque `next` cursor from a previous `--json` page (or the `→ more` line). The cursor encodes the original revision selection, date cutoffs, and walk queue—pass `--cursor` alone (optional `-n` for page size). Revision operands, date filters, and ref-set flags are rejected with `--cursor`. Cannot be combined with path operands. |
+| `--cursor [<token>]` | With `token`, continue a paged walk using `next` from `--json` or the `→ more` line (short `lw1.s.` tokens are stored under `.git/grit/log-walk/`; long `lw1.` base64 tokens still work). With no value, include the short continuation token on the `→ more` line for this page. The cursor encodes the original revision selection, date cutoffs, and walk queue—when resuming, pass `--cursor=<token>` alone (optional `-n` for page size). Revision operands, date filters, and ref-set flags are rejected when continuing. Cannot be combined with path operands. |
 | `--before <date>` | Alias for `--until` (date cutoff on committer date). |
 | `--skip <N>` | Skip `N` commits after ordering (cursor walks do not support `--skip`). |
 | `--since`, `--after <date>` | Exclude commits older than this date (committer date). Accepts Git approxidate strings (for example `2024-01-01`, `1 week ago`, `yesterday`) as well as ISO/RFC forms. |
@@ -68,8 +68,9 @@ With `--graph`, human output draws a commit graph in the left margin (ASCII by d
 | `-U`, `--unified <N>` | Context lines for `-p` (Git `-U`). |
 | `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries when `-p` is set. |
 | `--oneline` | One line per commit: short oid and subject (`--json` unchanged). With `--decorate`, refs appear in parentheses after the oid. |
-| `--graph` | Draw a commit graph beside each commit in human output only (implies topological order). |
-| `--graph-unicode` | Use Unicode box-drawing characters in `--graph` output (human only). |
+| `--graph` | Draw a commit graph beside each commit in human output only (implies topological order; Unicode lanes by default). |
+| `--graph-ascii` | Use ASCII `*|` lane characters in `--graph` output instead of Unicode. |
+| `--graph-unicode` | Same as `--graph` with Unicode lanes (default); implies `--graph`. Conflicts with `--graph-ascii`. |
 | `--decorate` | Show branch/tag/`HEAD` labels on each commit in human and Markdown output (refs are always in `--json`). |
 | `--group-by author` | Aggregate by author (mailmap-aware, sorted like `git shortlog -sne`). Uses the rev walk for the full selection (no cursor paging). |
 | `--count` | With `--group-by`, omit per-commit lists in `--json` (counts and author names only). |
@@ -99,15 +100,21 @@ $ grit log
   ...
   2efcc2d  Ada Lovelace  3 days ago     Start the project
 
-→ more: grit log --cursor=lw1.R0x…
+→ more: grit log
 ```
 
-(`lw1.` cursors are opaque; copy the full token from `--json` `next` when scripting.)
+Add `--cursor` with no value to print a short token on the `→ more` line, or read `next` from `--json` when scripting:
+
+```console
+→ more: grit log --cursor=lw1.s.a1b2c3d4
+```
+
+Short tokens live under `.git/grit/log-walk/` in the repository that issued them.
 
 Show the next page:
 
 ```console
-$ grit log --cursor=lw1.R0x…
+$ grit log --cursor=lw1.s.a1b2c3d4
 ```
 
 See which files each recent commit touched:

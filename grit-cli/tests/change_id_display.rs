@@ -312,7 +312,14 @@ fn log_human_shows_short_change_id() -> TestResult {
         .chars()
         .take(8)
         .collect();
-    assert!(out.contains(&format!("change {short}")));
+    assert!(
+        out.contains(&short),
+        "log row should show eight-char change id without 'change' prefix: {out}"
+    );
+    assert!(
+        !out.contains(&format!("change {short}")),
+        "log row should not prefix change id with 'change': {out}"
+    );
     Ok(())
 }
 

@@ -62,9 +62,9 @@ pub fn commit_bullet_with_decorations(
     } else {
         format!(" {deco}")
     };
-    let change = ui::change_display_segment(&c.change_id);
+    let change = ui::change_short_code(&c.change_id);
     format!(
-        "- `{short}` {change}{decoration} {} ({}, {date})",
+        "- `{short}` `{change}`{decoration} {} ({}, {date})",
         c.subject, c.author
     )
 }

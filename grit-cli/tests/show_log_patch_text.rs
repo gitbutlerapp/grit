@@ -332,7 +332,11 @@ fn log_patch_text_continuation_follows_patch_and_resumes() {
         git_in(root, &["commit", "-m", &format!("commit {i}")]);
     }
 
-    let mut args = vec!["log".to_owned(), "--patch-text".to_owned()];
+    let mut args = vec![
+        "log".to_owned(),
+        "--patch-text".to_owned(),
+        "--cursor".to_owned(),
+    ];
     for expected in [10, 10, 2] {
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
         let bytes = grit_patch_stdout(root, &arg_refs);
@@ -356,8 +360,8 @@ fn log_patch_text_continuation_follows_patch_and_resumes() {
         }
         let cursor = continuation.expect("patch page continuation");
         assert!(
-            cursor.starts_with("lw1."),
-            "expected full opaque cursor: {cursor}"
+            cursor.starts_with("lw1.s."),
+            "expected short cursor: {cursor}"
         );
         let last_diff = out
             .lines()

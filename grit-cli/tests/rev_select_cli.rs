@@ -464,7 +464,7 @@ fn log_cursor_continuation_hint_is_cursor_only_and_runs() -> TestResult {
             .status
             .success());
     }
-    let out = grit_run(&dir, &["log", "base..HEAD"]);
+    let out = grit_run(&dir, &["log", "base..HEAD", "--cursor"]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     let prefix = "→ more: grit log --cursor=";
@@ -479,6 +479,7 @@ fn log_cursor_continuation_hint_is_cursor_only_and_runs() -> TestResult {
     let token = cursor_line
         .strip_prefix(prefix)
         .expect("cursor token after prefix");
+    assert!(token.starts_with("lw1.s."), "short cursor token: {token}");
     let page2 = grit_json(&dir, &["log", &format!("--cursor={token}")]);
     assert!(!page2["commits"].as_array().expect("commits").is_empty());
     Ok(())

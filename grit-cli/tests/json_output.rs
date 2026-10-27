@@ -600,8 +600,8 @@ fn log_json_pages_with_next_cursor() -> TestResult {
     // Last page: follow `next`, expect no further cursor.
     let next = v["next"].as_str().unwrap().to_owned();
     assert!(
-        next.starts_with("lw1."),
-        "next must be an opaque walk cursor, got {next}"
+        next.starts_with("lw1.s."),
+        "next must be a short walk cursor, got {next}"
     );
     let v2 = gs_json(&repo, &["log", &format!("--cursor={next}")]);
     assert_eq!(v2["next"], Value::Null);

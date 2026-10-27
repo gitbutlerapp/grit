@@ -910,8 +910,13 @@ enum Command {
         rev: rev_select::RevSelectArgs,
         #[command(flatten)]
         pathspecs: pathspec_args::TrailingPathspecArgs,
-        /// Continue a paged walk using the opaque `next` token from a previous page.
-        #[arg(long = "cursor", value_name = "TOKEN")]
+        /// Continue a paged walk (`TOKEN`), or with no value include a short cursor on the `→ more` line.
+        #[arg(
+            long = "cursor",
+            value_name = "TOKEN",
+            num_args = 0..=1,
+            default_missing_value = ""
+        )]
         cursor: Option<String>,
         #[command(flatten)]
         format: diff_format::DiffFormatArgs,
@@ -927,11 +932,14 @@ enum Command {
         /// With `--group-by`, omit per-commit lists in `--json` output.
         #[arg(long)]
         count: bool,
-        /// Draw an ASCII commit graph in human output (implies topological order).
+        /// Draw a commit graph in human output (implies topological order; Unicode by default).
         #[arg(long)]
         graph: bool,
-        /// Use Unicode box-drawing characters in `--graph` output (human only).
-        #[arg(long = "graph-unicode")]
+        /// Use ASCII `*|` lane characters in `--graph` output instead of Unicode box-drawing.
+        #[arg(long = "graph-ascii")]
+        graph_ascii: bool,
+        /// Draw `--graph` with Unicode box-drawing (default when `--graph` is set).
+        #[arg(long = "graph-unicode", conflicts_with = "graph_ascii")]
         graph_unicode: bool,
     },
     /// List or count commits matching revision ranges.
@@ -2786,11 +2794,13 @@ fn dispatch(
             group_by,
             count,
             graph,
+            graph_ascii,
             graph_unicode,
         } => {
             if count && group_by.is_none() {
                 bail!("`--count` requires `--group-by`");
             }
+            let graph = graph || graph_unicode;
             let display = commands::log::LogDisplayOptions {
                 oneline,
                 decorate,
@@ -2799,7 +2809,7 @@ fn dispatch(
                 }),
                 group_count_only: count,
                 graph,
-                graph_unicode,
+                graph_ascii: graph_ascii && !graph_unicode,
             };
             if format.patch_text && opts.mode != OutputMode::Human {
                 bail!("`--patch-text` cannot be used with --json or --markdown");

@@ -5,7 +5,7 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "*   71953de merge\n| \\\n| * b42cdc2 topic\n* | 4dad34b mainline\n|/\n* b37bbe8 root\n* 83352a6 second\n* 062ca6e first\n",
+    "stdout": "●   71953de merge\n│ ╲\n│ ● b42cdc2 topic\n● │ 4dad34b mainline\n│╱\n● b37bbe8 root\n● 83352a6 second\n● 062ca6e first\n",
     "stderr": ""
   },
   "json": {

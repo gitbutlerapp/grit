@@ -5,6 +5,7 @@
 
 use std::io::{Cursor, Read, Write};
 use std::ops::Range;
+use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::merge_base::{ReachableWalkCommitterCutoffs, ReachableWalkSnapshot, ReachableWalkState};
@@ -14,6 +15,9 @@ use crate::repo::Repository;
 use crate::revwalk::queries::{resolve_log_walk_tips_and_hide, MergeFilter, RevWalkListOptions};
 
 const CURSOR_PREFIX: &str = "lw1.";
+/// Repository-local short continuation token (`lw1.s.` + eight id chars).
+const SHORT_CURSOR_PREFIX: &str = "lw1.s.";
+const SHORT_CURSOR_ID_LEN: usize = 8;
 const MAGIC_V2: &[u8; 4] = b"GLW2";
 const MAGIC_V3: &[u8; 4] = b"GLW3";
 const NO_CUTOFF: i64 = i64::MIN;
@@ -246,12 +250,52 @@ impl LogWalkCursor {
         Ok(format!("{CURSOR_PREFIX}{}", base64_encode(&buf)))
     }
 
-    /// Decode a `--cursor` token produced by [`Self::encode`].
+    /// Store this cursor under `.git/grit/log-walk/` and return a short `--cursor` token.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptObject`] if internal serialization fails, or [`Error::Io`] when
+    /// the snapshot cannot be written.
+    pub fn encode_short(&self, repo: &Repository) -> Result<String> {
+        let mut buf = Vec::new();
+        write_snapshot_v3(&mut buf, &self.query, &self.walk)?;
+        let id = random_short_cursor_id()?;
+        write_short_cursor_file(repo.git_dir(), &id, &buf)?;
+        Ok(format!("{SHORT_CURSOR_PREFIX}{id}"))
+    }
+
+    /// Decode a `--cursor` token produced by [`Self::encode`] or [`Self::encode_short`].
+    ///
+    /// Short tokens (`lw1.s.…`) require `git_dir` for the repository that issued them.
     ///
     /// # Errors
     ///
     /// Returns [`Error::CorruptObject`] when the token is malformed.
     pub fn decode(token: &str) -> Result<Self> {
+        Self::decode_with_git_dir(token, None)
+    }
+
+    /// Decode a `--cursor` token, resolving short tokens from `git_dir` when needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptObject`] when the token is malformed.
+    pub fn decode_with_git_dir(token: &str, git_dir: Option<&Path>) -> Result<Self> {
+        if let Some(id) = token.strip_prefix(SHORT_CURSOR_PREFIX) {
+            if id.len() != SHORT_CURSOR_ID_LEN || !id.bytes().all(is_short_cursor_id_byte) {
+                return Err(Error::CorruptObject(
+                    "malformed short log walk cursor".to_owned(),
+                ));
+            }
+            let git_dir = git_dir.ok_or_else(|| {
+                Error::CorruptObject("short log walk cursor requires an open repository".to_owned())
+            })?;
+            let path = log_walk_store_dir(git_dir).join(id);
+            let bytes = std::fs::read(&path).map_err(|e| {
+                Error::CorruptObject(format!("short log walk cursor not found: {e}"))
+            })?;
+            return read_snapshot(&bytes);
+        }
         let payload = token
             .strip_prefix(CURSOR_PREFIX)
             .ok_or_else(|| Error::CorruptObject("unrecognized log walk cursor".to_owned()))?;
@@ -259,6 +303,34 @@ impl LogWalkCursor {
             .map_err(|_| Error::CorruptObject("log walk cursor base64 decode failed".to_owned()))?;
         read_snapshot(&bytes)
     }
+}
+
+fn is_short_cursor_id_byte(b: u8) -> bool {
+    b.is_ascii_lowercase() || b.is_ascii_digit()
+}
+
+fn log_walk_store_dir(git_dir: &Path) -> PathBuf {
+    git_dir.join("grit/log-walk")
+}
+
+fn random_short_cursor_id() -> Result<String> {
+    const ALPHABET: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut buf = [0u8; SHORT_CURSOR_ID_LEN];
+    getrandom::getrandom(&mut buf)
+        .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
+    Ok(buf
+        .iter()
+        .map(|&b| ALPHABET[(b as usize) % ALPHABET.len()] as char)
+        .collect())
+}
+
+fn write_short_cursor_file(git_dir: &Path, id: &str, snapshot: &[u8]) -> Result<()> {
+    let dir = log_walk_store_dir(git_dir);
+    std::fs::create_dir_all(&dir).map_err(Error::Io)?;
+    let path = dir.join(id);
+    let tmp = dir.join(format!("{id}.tmp"));
+    std::fs::write(&tmp, snapshot).map_err(Error::Io)?;
+    std::fs::rename(&tmp, &path).map_err(Error::Io)
 }
 
 fn write_snapshot_v3(
@@ -582,6 +654,27 @@ mod tests {
 
         let git_order = git_log_oids(&repo, 20);
         assert_eq!(paged, git_order);
+        Ok(())
+    }
+
+    #[test]
+    fn short_cursor_roundtrip_via_repo_store() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_repo(&dir)?;
+        let base = write_commit(&repo.odb(), &[], "base", 100)?;
+        let tip = write_commit(&repo.odb(), &[base], "tip", 200)?;
+        let query = LogWalkQuery {
+            tips: vec![tip],
+            hide: Vec::new(),
+            cutoffs: ReachableWalkCommitterCutoffs::default(),
+        };
+        let page = LogWalkCursor::step(&repo, &query, None, 1)?;
+        let next = page.next.expect("continuation");
+        let short = next.encode_short(&repo)?;
+        assert!(short.starts_with(SHORT_CURSOR_PREFIX));
+        assert_eq!(short.len(), SHORT_CURSOR_PREFIX.len() + SHORT_CURSOR_ID_LEN);
+        let decoded = LogWalkCursor::decode_with_git_dir(&short, Some(repo.git_dir()))?;
+        assert_eq!(decoded, next);
         Ok(())
     }
 

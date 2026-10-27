@@ -58,7 +58,8 @@ pub struct LogDisplayOptions {
     pub group_by: Option<LogGroupBy>,
     pub group_count_only: bool,
     pub graph: bool,
-    pub graph_unicode: bool,
+    /// When set with `--graph`, draw the graph with ASCII `*|` instead of Unicode box-drawing.
+    pub graph_ascii: bool,
 }
 
 /// Result of `grit log`: one page of commits, plus the next page's start (if any).
@@ -98,6 +99,9 @@ pub struct LogOutcome {
     continuation_args: Option<String>,
     #[serde(skip)]
     #[schemars(skip)]
+    show_continuation_cursor: bool,
+    #[serde(skip)]
+    #[schemars(skip)]
     format: DiffFormatArgs,
     #[serde(skip)]
     #[schemars(skip)]
@@ -111,6 +115,13 @@ pub struct LogOutcome {
 struct LogPatchTextParams {
     oids: Vec<ObjectId>,
     pathspecs: Vec<String>,
+}
+
+fn format_log_more_command(rev_args: Option<&str>) -> String {
+    match rev_args.filter(|s| !s.is_empty()) {
+        Some(revs) => format!("grit log {revs}"),
+        None => "grit log".to_owned(),
+    }
 }
 
 fn format_log_cursor_command(rev_args: Option<&str>, cursor: &str) -> String {
@@ -196,11 +207,12 @@ impl LogOutcome {
     fn render_continuation(&self, w: &mut dyn Write) -> Result<()> {
         if let Some(next) = &self.next {
             outln!(w);
-            outln!(
-                w,
-                "→ more: {}",
+            let cmd = if self.show_continuation_cursor {
                 format_log_cursor_command(self.continuation_args.as_deref(), next)
-            );
+            } else {
+                format_log_more_command(self.continuation_args.as_deref())
+            };
+            outln!(w, "→ more: {cmd}");
         }
         Ok(())
     }
@@ -265,7 +277,11 @@ impl MarkdownRender for LogOutcome {
         }
         if let Some(next) = &self.next {
             outln!(w);
-            let cmd = format_log_cursor_command(self.continuation_args.as_deref(), next);
+            let cmd = if self.show_continuation_cursor {
+                format_log_cursor_command(self.continuation_args.as_deref(), next)
+            } else {
+                format_log_more_command(self.continuation_args.as_deref())
+            };
             outln!(w, "More history: run `{cmd}`");
         }
         Ok(())
@@ -307,7 +323,8 @@ pub fn run(
     let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
     let path_args = walk_paths.as_slice();
     let opts = rev.to_rev_walk_options(&repo, env, &["HEAD"], path_args)?;
-    let continuation = cursor;
+    let show_continuation_cursor = cursor.is_some();
+    let continuation = cursor.filter(|token| !token.is_empty());
     if display.group_by.is_some() && continuation.is_some() {
         bail!("`grit log` cannot combine `--cursor` with `--group-by`");
     }
@@ -338,13 +355,14 @@ pub fn run(
                  `--merges`, `--no-merges`, `--skip`, or commit filters (`--author`, `--grep`, …)"
             );
         }
-        let resume = LogWalkCursor::decode(token).context("invalid log continuation cursor")?;
+        let resume = LogWalkCursor::decode_with_git_dir(token, Some(repo.git_dir()))
+            .context("invalid log continuation cursor")?;
         let query = resume.query().clone();
         let page_size = rev.max_count().unwrap_or(PAGE);
         let page = LogWalkCursor::step(&repo, &query, Some(&resume), page_size)
             .context("could not list commits")?;
         let truncated = page.next.is_some();
-        let next = page.next.map(|c| c.encode()).transpose()?;
+        let next = page.next.map(|c| c.encode_short(&repo)).transpose()?;
         return build_commit_outcome(
             &repo,
             &page.commits,
@@ -356,6 +374,7 @@ pub fn run(
             display,
             output_mode,
             None,
+            show_continuation_cursor,
             LogGraphBuild::default(),
         );
     }
@@ -446,6 +465,7 @@ pub fn run(
             display,
             output_mode,
             None,
+            show_continuation_cursor,
             LogGraphBuild {
                 parent_rewrite: graph_needs_parent_rewrite(pathspecs.has_any(), &walk_opts),
                 linkage: graph_linkage,
@@ -459,7 +479,7 @@ pub fn run(
     let next = if rev.max_count().is_some() {
         None
     } else {
-        page.next.map(|c| c.encode()).transpose()?
+        page.next.map(|c| c.encode_short(&repo)).transpose()?
     };
     build_commit_outcome(
         &repo,
@@ -472,6 +492,7 @@ pub fn run(
         display,
         output_mode,
         None,
+        show_continuation_cursor,
         LogGraphBuild::default(),
     )
 }
@@ -516,6 +537,7 @@ fn empty_outcome(display: LogDisplayOptions) -> Result<LogOutcome> {
         graph_lines: Vec::new(),
         graph_note: None,
         continuation_args: None,
+        show_continuation_cursor: false,
         format: DiffFormatArgs::default(),
         commit_diffs: Vec::new(),
         patch_text: None,
@@ -587,6 +609,7 @@ fn build_author_group_outcome_from_groups(
         graph_lines: Vec::new(),
         graph_note: None,
         continuation_args: None,
+        show_continuation_cursor: false,
         format: DiffFormatArgs::default(),
         commit_diffs: Vec::new(),
         patch_text: None,
@@ -717,6 +740,7 @@ fn build_commit_outcome(
     display: LogDisplayOptions,
     output_mode: OutputMode,
     continuation_args: Option<String>,
+    show_continuation_cursor: bool,
     graph: LogGraphBuild,
 ) -> Result<LogOutcome> {
     let env = repo.environment();
@@ -754,6 +778,7 @@ fn build_commit_outcome(
             graph_lines: Vec::new(),
             graph_note: None,
             continuation_args,
+            show_continuation_cursor,
             format,
             commit_diffs: Vec::new(),
             patch_text: Some(LogPatchTextParams {
@@ -778,6 +803,7 @@ fn build_commit_outcome(
             graph_lines,
             graph_note: None,
             continuation_args,
+            show_continuation_cursor,
             format,
             commit_diffs: Vec::new(),
             patch_text: None,
@@ -850,6 +876,7 @@ fn build_commit_outcome(
         graph_lines,
         graph_note,
         continuation_args,
+        show_continuation_cursor,
         format,
         commit_diffs,
         patch_text: None,
@@ -879,10 +906,10 @@ fn build_graph_oneline_lines(
     display: LogDisplayOptions,
     graph: &LogGraphBuild,
 ) -> Result<Vec<String>> {
-    let charset = if display.graph_unicode {
-        GraphCharset::UNICODE
-    } else {
+    let charset = if display.graph_ascii {
         GraphCharset::ASCII
+    } else {
+        GraphCharset::UNICODE
     };
     let (parent_map, subjects) = if let Some(linkage) = graph.linkage.clone() {
         (linkage.parents, linkage.subjects)
@@ -928,10 +955,10 @@ fn build_graph_text_lines(
     now: i64,
     graph: &LogGraphBuild,
 ) -> Result<Vec<String>> {
-    let charset = if display.graph_unicode {
-        GraphCharset::UNICODE
-    } else {
+    let charset = if display.graph_ascii {
         GraphCharset::ASCII
+    } else {
+        GraphCharset::UNICODE
     };
     let visible: HashSet<ObjectId> = oids.iter().copied().collect();
     let parent_map = if let Some(linkage) = graph.linkage.as_ref() {
