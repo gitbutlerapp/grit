@@ -23,6 +23,48 @@ Maintenance APIs split into **repository fsck**, **object validation**, and **ho
 
 The `grit` CLI maps fsck and hook failures to its own exit codes and messages; the library returns typed results only.
 
+## Fsck diagnostic summaries
+
+Call [`FsckReport::summary`](rustdoc:grit_lib::maintenance::repository_fsck::FsckReport::summary)
+with the configuration, fsck options, and an `include_info` boolean to classify a
+report for display. The returned
+[`FsckSummary`](rustdoc:grit_lib::maintenance::repository_fsck::FsckSummary) keeps
+all findings in discovery order as borrowed
+[`FsckDiagnostic`](rustdoc:grit_lib::maintenance::repository_fsck::FsckDiagnostic)
+values, each with its resolved severity and listing visibility. No objects are
+read or changed by classification.
+
+`summary.ok` is false if any finding has error severity. `summary.has_warnings`
+records warnings independently of errors; visible informational findings do not
+count as warnings. `include_info` changes visibility only. By default, most
+informational findings are hidden, while `missingTaggerEntry` remains visible.
+The CLI uses this policy for human listings and summary messages; JSON and
+Markdown retain every finding, including hidden informational findings.
+
+## Benchmarking
+
+The October 2026 diagnostic-summary extraction was checked against main
+`7cc7979535ce` and system Git 2.55.0 on a Linux factory VM with four AMD EPYC 7763
+vCPUs, using Rust 1.99.0 and the `dist` profile. Builds and tests were idle during
+measurement. Times below are median milliseconds.
+
+| Repository and operation | Git | Grit before | Grit after |
+| --- | ---: | ---: | ---: |
+| 20,000 files, 50,000 commits: `fsck --no-dangling` | 267.38 | 221.36 | 221.76 |
+| 1,001 warning trees and an informational tag finding: `fsck --no-dangling` | 23.75 | 15.72 | 15.37 |
+
+The large-repository row uses 30 interleaved rounds with randomized tool order,
+after three warmups per tool. Maximum process RSS was 60,960 KiB before and
+60,724 KiB after, versus 28,444 KiB for Git. The diagnostic-heavy row uses
+hyperfine with five warmups and at least 30 runs per tool; it exercises severity
+and visibility classification rather than an empty report.
+
+The standard `grit-bench fsck --warmup 3 --min-runs 10` scenario also ran on both
+builds: 207.99 to 214.31 ms for grit, with Git at 265.00 and 261.92 ms respectively.
+The subsequent interleaved comparison put grit's medians within 0.2%, with the
+paired sample variability including no change. Summary classification performs
+no additional object reads and resolves severity once per finding.
+
 ## Example
 
 <!-- include: grit-examples/src/bin/guide_maintenance.rs -->

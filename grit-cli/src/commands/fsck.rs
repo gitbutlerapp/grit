@@ -6,8 +6,7 @@ use std::io::Write;
 use anyhow::Result;
 use grit_lib::config::ConfigSet;
 use grit_lib::maintenance::repository_fsck::{
-    issue_msg_id, issue_severity, issue_visible_by_default, FsckIssue, FsckOptions, FsckReport,
-    FsckSeverity,
+    issue_msg_id, FsckDiagnostic, FsckOptions, FsckReport, FsckSeverity,
 };
 use grit_lib::progress::{NeverCancel, ProgressSink};
 use schemars::JsonSchema;
@@ -42,9 +41,9 @@ pub struct FsckOutcome {
     pub objects_checked: usize,
     pub issues: Vec<FsckIssueJson>,
     pub dangling: Vec<DanglingJson>,
-    /// Include info-level issues in human listing (not serialized).
+    /// Whether the library classified any findings as warnings (not serialized).
     #[serde(skip)]
-    pub verbose: bool,
+    pub has_warnings: bool,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -58,9 +57,9 @@ pub struct FsckIssueJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     pub detail: String,
-    /// Whether default human output lists this issue (not serialized).
+    /// Whether the library includes this issue in human listings (not serialized).
     #[serde(skip)]
-    pub show_in_human_default: bool,
+    pub visible: bool,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -76,14 +75,11 @@ impl FsckOutcome {
         options: &FsckOptions,
         verbose: bool,
     ) -> Self {
+        let summary = report.summary(config, options, verbose);
         Self {
-            ok: report.ok(config, options),
+            ok: summary.ok,
             objects_checked: report.objects_checked,
-            issues: report
-                .issues
-                .iter()
-                .map(|issue| issue_to_json(issue, config, options.strict))
-                .collect(),
+            issues: summary.diagnostics.into_iter().map(issue_to_json).collect(),
             dangling: report
                 .dangling
                 .iter()
@@ -92,22 +88,9 @@ impl FsckOutcome {
                     oid: oid.to_hex(),
                 })
                 .collect(),
-            verbose,
+            has_warnings: summary.has_warnings,
         }
     }
-
-    fn issues_for_human(&self) -> Vec<&FsckIssueJson> {
-        self.issues
-            .iter()
-            .filter(|issue| self.verbose || issue.show_in_human_default)
-            .collect()
-    }
-}
-
-fn visible_has_warning_or_error(issues: &[&FsckIssueJson]) -> bool {
-    issues
-        .iter()
-        .any(|issue| issue.severity != FsckSeverity::Info)
 }
 
 fn severity_label(severity: FsckSeverity) -> &'static str {
@@ -122,20 +105,21 @@ fn serialize_severity<S: Serializer>(severity: &FsckSeverity, ser: S) -> Result<
     ser.serialize_str(severity_label(*severity))
 }
 
-fn issue_to_json(issue: &FsckIssue, config: &ConfigSet, strict: bool) -> FsckIssueJson {
+fn issue_to_json(diagnostic: FsckDiagnostic<'_>) -> FsckIssueJson {
+    let issue = diagnostic.issue;
     FsckIssueJson {
         kind: issue_msg_id(issue).to_owned(),
-        severity: issue_severity(issue, config, strict),
+        severity: diagnostic.severity,
         oid: issue.oid().map(|o| o.to_hex()),
         path: issue.location().map(|p| p.into_owned()),
         detail: issue.detail(),
-        show_in_human_default: issue_visible_by_default(issue, config, strict),
+        visible: diagnostic.visible,
     }
 }
 
 impl HumanRender for FsckOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let visible = self.issues_for_human();
+        let visible: Vec<_> = self.issues.iter().filter(|issue| issue.visible).collect();
 
         outln!(
             w,
@@ -177,7 +161,7 @@ impl HumanRender for FsckOutcome {
 
         if !self.ok {
             outln!(w, "\nIntegrity check failed.");
-        } else if visible_has_warning_or_error(&visible) {
+        } else if self.has_warnings {
             outln!(w, "\nCompleted with warnings only.");
         }
 
@@ -222,7 +206,7 @@ impl MarkdownRender for FsckOutcome {
         }
         if !self.ok {
             outln!(w, "\n**Integrity check failed.**");
-        } else if visible_has_warning_or_error(&self.issues_for_human()) {
+        } else if self.has_warnings {
             outln!(w, "\n**Completed with warnings only.**");
         }
         Ok(())
@@ -268,7 +252,9 @@ pub fn exit_code(outcome: &FsckOutcome) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use grit_lib::maintenance::repository_fsck::MissingObjectReferrer;
+    use grit_lib::maintenance::repository_fsck::{
+        issue_severity, issue_visible_by_default, FsckIssue, MissingObjectReferrer,
+    };
     use grit_lib::objects::ObjectId;
 
     #[test]
@@ -280,7 +266,11 @@ mod tests {
             ),
         };
         let config = ConfigSet::default();
-        let json = issue_to_json(&issue, &config, false);
+        let json = issue_to_json(FsckDiagnostic {
+            issue: &issue,
+            severity: issue_severity(&issue, &config, false),
+            visible: issue_visible_by_default(&issue, &config, false),
+        });
         assert_eq!(json.kind, "missingObject");
         assert_eq!(json.severity, FsckSeverity::Error);
         assert!(json.oid.is_some());

@@ -1661,3 +1661,68 @@ fn fsck_reports_every_descendant_of_a_corrupt_delta_base() {
     assert!(!corrupt.contains(&unrelated));
     assert_eq!(report.objects_checked, pack.contents.len());
 }
+
+#[test]
+fn diagnostic_summary_matches_git_for_grit_objects_and_git_tag() {
+    let (dir, repo) = init_repo();
+    let commit = one_commit(&repo);
+    assert!(
+        git_fsck(dir.path(), true).ok,
+        "Git reads grit-written objects"
+    );
+
+    let tag_body = format!(
+        "object {}\ntype commit\ntag summary-probe\n\nsummary probe\n",
+        commit.to_hex()
+    );
+    let tag = git_hash_object_literally(dir.path(), FixtureAlgo::Sha1, "tag", tag_body.as_bytes())
+        .expect("Git writes tag without tagger");
+    git(dir.path(), &["update-ref", "refs/tags/summary-probe", &tag]);
+    let config = repo.config().expect("config");
+    for strict in [false, true] {
+        let options = FsckOptions::full_repository(strict);
+        let report = grit_fsck(&repo, &options);
+        let summary = report.summary(&config, &options, false);
+        let git_out = git_fsck(dir.path(), strict);
+        assert!(git_out.ok);
+        assert_eq!(summary.ok, git_out.ok);
+        assert!(
+            !summary.has_warnings,
+            "visible info does not count as a warning"
+        );
+        let diagnostic = summary
+            .diagnostics
+            .iter()
+            .find(|d| fsck::issue_msg_id(d.issue) == "missingTaggerEntry")
+            .expect("grit reads Git-written tag");
+        assert_eq!(
+            diagnostic.issue.oid().map(|oid| oid.to_hex()),
+            Some(tag.clone())
+        );
+        assert_eq!(diagnostic.severity, fsck::FsckSeverity::Info);
+        assert!(diagnostic.visible);
+        let args: &[&str] = if strict {
+            &["fsck", "--no-dangling", "--strict"]
+        } else {
+            &["fsck", "--no-dangling"]
+        };
+        assert!(git(dir.path(), args).contains("missingTaggerEntry:"));
+    }
+
+    git(dir.path(), &["config", "fsck.missingTaggerEntry", "error"]);
+    let config = repo.config().expect("updated config");
+    let options = FsckOptions::full_repository(false);
+    let report = grit_fsck(&repo, &options);
+    let summary = report.summary(&config, &options, false);
+    let git_out = git_fsck(dir.path(), false);
+    assert!(!git_out.ok);
+    assert_eq!(summary.ok, git_out.ok);
+    assert!(!summary.has_warnings);
+    let diagnostic = summary
+        .diagnostics
+        .iter()
+        .find(|d| fsck::issue_msg_id(d.issue) == "missingTaggerEntry")
+        .expect("promoted tag diagnostic");
+    assert_eq!(diagnostic.severity, fsck::FsckSeverity::Error);
+    assert!(diagnostic.visible);
+}

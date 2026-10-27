@@ -23,6 +23,7 @@
 //! # }
 //! ```
 
+mod diagnostics;
 mod roots;
 
 use std::borrow::Cow;
@@ -50,6 +51,7 @@ use crate::progress::{cancel_watch_arc, Cancel, ProgressPhase, ProgressSink};
 use crate::refs_fsck::{refs_fsck, RefsFsckIssue};
 use crate::repo::Repository;
 
+pub use diagnostics::{FsckDiagnostic, FsckSummary};
 pub use roots::{index_object_roots, reachability_roots};
 
 /// Controls which fsck phases run and how strictly diagnostics are treated.
@@ -307,7 +309,10 @@ fn object_buffer_fsck_severity(msg_id: &str, config: &ConfigSet, strict: bool) -
 /// Whether default human fsck output should list this issue (matches Git omitting most INFO by default).
 #[must_use]
 pub fn issue_visible_by_default(issue: &FsckIssue, config: &ConfigSet, strict: bool) -> bool {
-    let severity = issue_severity(issue, config, strict);
+    issue_visible_at_severity(issue, issue_severity(issue, config, strict))
+}
+
+fn issue_visible_at_severity(issue: &FsckIssue, severity: FsckSeverity) -> bool {
     if severity != FsckSeverity::Info {
         return true;
     }
