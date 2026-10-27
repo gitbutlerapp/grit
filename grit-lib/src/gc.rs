@@ -335,8 +335,7 @@ fn reachable_closure(
 /// [`Odb::exists`] or [`Odb::read_info`] per object revalidates the pack directory
 /// or probes for a loose file each time, which dominates prune on large trees.
 fn require_objects_exist(odb: &Odb, oids: &[ObjectId], promised: &HashSet<ObjectId>) -> Result<()> {
-    let indexes =
-        crate::pack::read_local_pack_indexes_cached(odb.objects_dir()).unwrap_or_default();
+    let indexes = odb.local_pack_indexes().unwrap_or_default();
     for oid in oids {
         if promised.contains(oid) {
             continue;

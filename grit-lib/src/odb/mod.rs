@@ -1425,6 +1425,25 @@ impl Odb {
         oid.loose_path_in(&self.objects_dir)
     }
 
+    /// Pack indexes in this database's own `objects/pack` (not alternates), from
+    /// the shared index cache.
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack directory listing and index parse failures.
+    pub(crate) fn local_pack_indexes(&self) -> Result<Vec<Arc<pack::PackIndex>>> {
+        pack::read_local_pack_indexes_cached(&self.objects_dir)
+    }
+
+    /// Size in bytes of `oid`'s loose file in this database's own `objects/`,
+    /// or `None` when it is not stored loose here.
+    pub(crate) fn local_loose_file_size(&self, oid: &ObjectId) -> Option<u64> {
+        fs::metadata(self.object_path(oid))
+            .ok()
+            .filter(fs::Metadata::is_file)
+            .map(|meta| meta.len())
+    }
+
     /// Whether the object exists under this database directory only (loose or local packs).
     ///
     /// Unlike [`Self::exists`], this ignores `info/alternates` and

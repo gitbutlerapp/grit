@@ -1342,7 +1342,7 @@ mod tests {
         let wt = repo.work_tree().unwrap();
         write_and_index(&repo, b"large", b"old");
         let mut index = repo.load_index().unwrap();
-        fs::remove_file(repo.odb().object_path(&index.entries[0].oid)).unwrap();
+        repo.odb().test_remove_loose_object(&index.entries[0].oid);
         let data = vec![b'x'; 2 * 1024 * 1024];
         fs::write(wt.join("large"), &data).unwrap();
         stage_tracked_modifications_in_index(&repo, wt, &repo.index_path(), &mut index).unwrap();
@@ -1366,7 +1366,7 @@ mod tests {
         let wt = repo.work_tree().unwrap();
         write_and_index(&repo, b"large", b"old");
         let mut index = repo.load_index().unwrap();
-        fs::remove_file(repo.odb().object_path(&index.entries[0].oid)).unwrap();
+        repo.odb().test_remove_loose_object(&index.entries[0].oid);
         fs::OpenOptions::new()
             .append(true)
             .open(repo.git_dir().join("config"))

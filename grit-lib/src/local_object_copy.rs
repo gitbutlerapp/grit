@@ -13,10 +13,6 @@ use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::{BoundedRead, Odb};
 use crate::pack;
 
-fn is_stored_loose(objects_dir: &Path, oid: &ObjectId) -> bool {
-    oid.loose_path_in(objects_dir).is_file()
-}
-
 fn pack_entry_name_ok(name: &str) -> bool {
     if name.starts_with("tmp_") || name.starts_with(".") {
         return false;
@@ -116,7 +112,6 @@ pub(crate) fn link_loose_objects(
 /// only the small loose tip set.
 pub(crate) fn loose_reachable_from_roots(
     odb: &Odb,
-    objects_dir: &Path,
     roots: &[ObjectId],
     shallow_grafts: &HashSet<ObjectId>,
     cancel: &dyn crate::progress::Cancel,
@@ -134,7 +129,7 @@ pub(crate) fn loose_reachable_from_roots(
             let mut sink = crate::progress::NullProgress;
             crate::progress::poll_cancel(&mut sink, cancel)?;
         }
-        if !is_stored_loose(objects_dir, &oid) {
+        if odb.local_loose_file_size(&oid).is_none() {
             continue;
         }
         reachable.insert(oid);

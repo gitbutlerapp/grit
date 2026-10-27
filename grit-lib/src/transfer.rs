@@ -575,17 +575,14 @@ fn object_kind_counts_for_oids(
     Ok(kinds)
 }
 
-fn loose_transfer_stats(objects_dir: &Path, oids: &HashSet<ObjectId>) -> Result<(u64, u64)> {
+fn loose_transfer_stats(odb: &Odb, oids: &HashSet<ObjectId>) -> (u64, u64) {
     let mut objects = 0u64;
     let mut bytes = 0u64;
-    for oid in oids {
-        let path = oid.loose_path_in(objects_dir);
-        if path.is_file() {
-            objects += 1;
-            bytes += fs::metadata(&path).map_err(Error::Io)?.len();
-        }
+    for size in oids.iter().filter_map(|oid| odb.local_loose_file_size(oid)) {
+        objects += 1;
+        bytes += size;
     }
-    Ok((objects, bytes))
+    (objects, bytes)
 }
 
 fn pack_file_basenames(pack_dir: &Path) -> HashSet<String> {
@@ -693,7 +690,7 @@ fn transfer_stats_for_local_operation(
             }
         }
     }
-    let (loose_objects, loose_bytes) = loose_transfer_stats(objects_dir, installed)?;
+    let (loose_objects, loose_bytes) = loose_transfer_stats(local_odb, installed);
     bytes = bytes.saturating_add(loose_bytes);
     let installed_count = u64::try_from(installed.len()).unwrap_or(u64::MAX);
     let objects = if objects_from_new_packs > 0 {
@@ -932,7 +929,6 @@ fn copy_objects_for_local_fetch(
             } else {
                 crate::local_object_copy::loose_reachable_from_roots(
                     local_odb,
-                    local_objects,
                     wants,
                     source_shallow,
                     cancel,

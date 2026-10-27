@@ -1165,7 +1165,7 @@ fn skipping_repack_would_retain_prunable_packed_objects(
     } else {
         UnreachablePackRetention::DropAll
     };
-    let indexes = crate::pack::read_local_pack_indexes_cached(odb.objects_dir())?;
+    let indexes = odb.local_pack_indexes()?;
     for idx in indexes {
         if idx.is_promisor || pack_has_keep_marker(pack_dir, &idx.pack_path) {
             continue;
@@ -1867,7 +1867,7 @@ fn packs_holding_available_promises(
     if promised.is_empty() {
         return Ok(HashSet::new());
     }
-    let indexes = crate::pack::read_local_pack_indexes_cached(odb.objects_dir())?;
+    let indexes = odb.local_pack_indexes()?;
     let promisor_indexes: Vec<_> = indexes.iter().filter(|idx| idx.is_promisor).collect();
     let mut retained = HashSet::new();
     for idx in indexes.iter().filter(|idx| !idx.is_promisor) {

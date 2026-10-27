@@ -13118,7 +13118,7 @@ mod smudge_racily_clean_tests {
             materialize_worktree_blob(&odb, &path, &meta, &conv, &attrs, "big.bin", None, None)
                 .expect("materialize");
         assert!(
-            !odb.object_path(&oid).exists(),
+            !odb.test_loose_object_path(&oid).exists(),
             "big binary under autocrlf should pack, not write loose"
         );
         let pack_dir = git_dir.join("objects/pack");

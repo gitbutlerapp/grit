@@ -712,8 +712,6 @@ fn grit_bin() -> OsString {
 /// Only regular files under `objects/`, `refs/`, and `logs/` are included, sorted by relative path.
 #[must_use]
 pub fn git_dir_state_digest(git_dir: &Path) -> String {
-    use sha1::{Digest, Sha1};
-
     let mut paths = Vec::new();
     for sub in ["objects", "refs", "logs"] {
         let root = git_dir.join(sub);
@@ -722,18 +720,18 @@ pub fn git_dir_state_digest(git_dir: &Path) -> String {
         }
     }
     paths.sort();
-    let mut hasher = Sha1::new();
+    let mut hasher = grit_lib::objects::HashAlgo::Sha1.checksum_hasher();
     for path in paths {
         let rel = path
             .strip_prefix(git_dir)
             .unwrap_or(&path)
             .to_string_lossy();
         hasher.update(rel.as_bytes());
-        hasher.update([0u8]);
+        hasher.update(&[0u8]);
         if let Ok(bytes) = fs::read(&path) {
-            hasher.update(bytes);
+            hasher.update(&bytes);
         }
-        hasher.update([0u8]);
+        hasher.update(&[0u8]);
     }
     hex::encode(hasher.finalize())
 }

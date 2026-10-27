@@ -10,8 +10,6 @@ use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
-use sha1::{Digest, Sha1};
-
 use crate::lockfile::{LockFile, LockWait};
 use crate::objects::ObjectId;
 use crate::repo::Repository;
@@ -435,7 +433,9 @@ fn validate_repo_relative_path(path: &str) -> Result<(), HistoryError> {
 
 fn snapshot_blob_name(repo_path: &str) -> Result<String, HistoryError> {
     validate_repo_relative_path(repo_path)?;
-    Ok(hex::encode(Sha1::digest(repo_path.as_bytes())))
+    Ok(hex::encode(
+        crate::objects::HashAlgo::Sha1.checksum_digest(repo_path.as_bytes()),
+    ))
 }
 
 fn encode_snapshot_path(path: &str) -> Result<String, HistoryError> {

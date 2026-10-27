@@ -32,8 +32,7 @@ use crate::objects::{oid_hash_map, ObjectId, ObjectKind, OidHashMap};
 use crate::odb::Odb;
 use crate::pack::{
     parse_ofs_delta_base, parse_pack_object_header, read_delta_result_size_from_pack_zlib,
-    read_local_pack_indexes_cached, read_pack_bytes_cached, sort_pack_indexes_oldest_first,
-    PackData, PackIndex, PackedType,
+    read_pack_bytes_cached, sort_pack_indexes_oldest_first, PackData, PackIndex, PackedType,
 };
 use crate::pack_objects::{encode_ofs_delta_distance, encode_pack_object_header, pack_type_code};
 
@@ -213,7 +212,7 @@ pub(crate) fn write_repack_pack(
 
 fn open_source_packs(odb: &Odb) -> Result<Vec<SourcePack>> {
     let hash_len = odb.hash_algo().len();
-    let mut indexes = read_local_pack_indexes_cached(odb.objects_dir())?;
+    let mut indexes = odb.local_pack_indexes()?;
     sort_pack_indexes_oldest_first(&mut indexes);
     indexes
         .into_iter()
