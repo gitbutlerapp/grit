@@ -15,7 +15,7 @@ use crate::repo::Repository;
 
 use super::error::BitmapError;
 use super::order::BitmapOrder;
-use crate::pack::read_local_pack_indexes;
+use crate::pack::read_pack_index;
 
 const BITMAP_MAGIC: &[u8; 4] = b"BITM";
 const BITMAP_VERSION: u16 = 1;
@@ -378,19 +378,9 @@ fn try_open_bitmap(
             Err(err) => warn_bitmap(repo, &bitmap_path, &err),
         }
     }
-    let mut pack_indexes =
-        read_local_pack_indexes(objects_dir).map_err(|e| BitmapError::Io(e.to_string()))?;
-    pack_indexes.sort_by_key(|idx| std::cmp::Reverse(idx.len()));
-    for idx in pack_indexes {
-        let stem = idx
-            .idx_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("pack");
-        let bitmap_path = pack_dir.join(format!("{stem}.bitmap"));
-        if !bitmap_path.is_file() {
-            continue;
-        }
+    let mut bitmapped = bitmapped_pack_indexes(&pack_dir)?;
+    bitmapped.sort_by_key(|(idx, _)| std::cmp::Reverse(idx.len()));
+    for (idx, bitmap_path) in bitmapped {
         let index_arc = Arc::new(idx);
         match open_bitmap_file(
             &bitmap_path,
@@ -405,6 +395,33 @@ fn try_open_bitmap(
         }
     }
     Ok(None)
+}
+
+/// Indexes of the packs in `pack_dir` that carry a `.bitmap` sidecar, with that path.
+///
+/// Packs without a bitmap are never opened, so a repository without bitmaps pays for
+/// one directory listing instead of reading and checksumming every `.idx`. Unreadable
+/// indexes and indexes whose `.pack` is missing are skipped.
+fn bitmapped_pack_indexes(pack_dir: &Path) -> Result<Vec<(PackIndex, PathBuf)>, BitmapError> {
+    let entries = match std::fs::read_dir(pack_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(BitmapError::Io(err.to_string())),
+    };
+    let mut out = Vec::new();
+    for entry in entries {
+        let bitmap_path = entry.map_err(|e| BitmapError::Io(e.to_string()))?.path();
+        if bitmap_path.extension().and_then(|e| e.to_str()) != Some("bitmap") {
+            continue;
+        }
+        let Ok(idx) = read_pack_index(&bitmap_path.with_extension("idx")) else {
+            continue;
+        };
+        if idx.pack_path.is_file() && bitmap_path.is_file() {
+            out.push((idx, bitmap_path));
+        }
+    }
+    Ok(out)
 }
 
 enum BitmapSource {
@@ -682,7 +699,45 @@ impl BitmapIndexCache {
 
 #[cfg(test)]
 mod tests {
-    use super::read_file_trailer;
+    use super::{bitmapped_pack_indexes, read_file_trailer, BitmapIndex};
+    use crate::environment::RepositoryOptions;
+    use crate::repo::Repository;
+    use grit_test_support::git;
+
+    #[test]
+    fn only_packs_with_a_bitmap_are_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path();
+        git(work, &["init", "-q", "-b", "main", "."]);
+        git(work, &["commit", "-q", "--allow-empty", "-m", "one"]);
+        let pack_dir = work.join(".git/objects/pack");
+        git(work, &["repack", "-q", "-ad"]);
+        assert!(bitmapped_pack_indexes(&pack_dir).unwrap().is_empty());
+        assert!(bitmapped_pack_indexes(&work.join("absent"))
+            .unwrap()
+            .is_empty());
+        let repo = Repository::open(&work.join(".git"), &RepositoryOptions::empty()).unwrap();
+        assert!(BitmapIndex::open(&repo).unwrap().is_none());
+
+        git(work, &["repack", "-q", "-adb"]);
+        git(work, &["commit", "-q", "--allow-empty", "-m", "two"]);
+        git(work, &["repack", "-q", "-d"]);
+        let packs = std::fs::read_dir(&pack_dir)
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .is_ok_and(|e| e.path().extension().is_some_and(|x| x == "pack"))
+            })
+            .count();
+        assert_eq!(packs, 2);
+        let bitmapped = bitmapped_pack_indexes(&pack_dir).unwrap();
+        assert_eq!(bitmapped.len(), 1);
+        let (idx, bitmap_path) = &bitmapped[0];
+        assert!(bitmap_path.is_file());
+        assert_eq!(idx.idx_path, bitmap_path.with_extension("idx"));
+        let repo = Repository::open(&work.join(".git"), &RepositoryOptions::empty()).unwrap();
+        assert!(BitmapIndex::open(&repo).unwrap().is_some());
+    }
 
     #[test]
     fn read_file_trailer_returns_last_bytes_only() -> std::io::Result<()> {
