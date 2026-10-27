@@ -14,6 +14,7 @@ use crate::hash::{hash_object, verify_trailer};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use crate::odb::BoundedRead;
 pub use crate::pack_map::PackData;
+use crate::pack_map::ResidentBudget;
 use crate::unpack_objects::apply_delta_into;
 use crate::zlib_inflate::ZlibInflateScratch;
 use std::cell::RefCell;
@@ -5169,8 +5170,13 @@ pub(crate) fn locate_packed_whole_object(
         let Ok(kind) = packed_type_to_kind(packed_type) else {
             continue;
         };
-        if verify_crc && !packed_entry_matches_index_crc(idx, &pack, entry_offset)? {
-            continue;
+        if verify_crc {
+            if !packed_entry_matches_index_crc(idx, &pack, entry_offset)? {
+                continue;
+            }
+            // The CRC pass read the whole compressed entry; leave none of it resident so a
+            // caller streaming the object starts from a clean resident set.
+            pack.release_resident();
         }
         return Ok(PackedEntry::Whole(PackedWholeObject {
             pack,
@@ -5187,7 +5193,15 @@ pub(crate) fn locate_packed_whole_object(
 ///
 /// Version 1 indexes record no CRC; their entries are accepted (the zlib checksum still
 /// guards the payload).
-fn packed_entry_matches_index_crc(idx: &PackIndex, pack: &[u8], entry_offset: u64) -> Result<bool> {
+///
+/// A large entry is hashed with a bounded window of the pack mapping resident (see
+/// [`VERIFY_RESIDENT_PACK_BYTES`]), so checking a big blob before streaming it does not pull
+/// its whole compressed size into the resident set.
+fn packed_entry_matches_index_crc(
+    idx: &PackIndex,
+    pack: &PackData,
+    entry_offset: u64,
+) -> Result<bool> {
     let Some(recorded) = idx.crc32_for_pack_offset(entry_offset)? else {
         return Ok(true);
     };
@@ -5196,8 +5210,16 @@ fn packed_entry_matches_index_crc(idx: &PackIndex, pack: &[u8], entry_offset: u6
     };
     let start = usize::try_from(entry_offset)
         .map_err(|_| Error::CorruptObject(format!("pack offset {entry_offset} overflows")))?;
-    Ok(start < end && crc32fast::hash(&pack[start..end]) == recorded)
+    if start >= end {
+        return Ok(false);
+    }
+    let budget = ResidentBudget::new(pack, VERIFY_RESIDENT_PACK_BYTES);
+    Ok(budget.crc32(&pack[start..end]) == recorded)
 }
+
+/// Mapped pack bytes [`packed_entry_matches_index_crc`] lets stay resident while it hashes
+/// one entry before dropping the mapping's pages.
+const VERIFY_RESIDENT_PACK_BYTES: usize = 4 * 1024 * 1024;
 
 /// When `oid` is stored as a full (non-delta) object in a local pack, return its verbatim packed
 /// bytes: the varint type+size header followed by the zlib stream.

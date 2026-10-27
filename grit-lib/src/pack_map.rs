@@ -430,6 +430,18 @@ impl<'a> ResidentBudget<'a> {
         }
         hasher.finalize()
     }
+
+    /// CRC-32 of `bytes` (as recorded in pack index v2), charging as it goes so hashing a
+    /// large entry keeps at most about the budget's limit of the pack resident.
+    pub(crate) fn crc32(&self, bytes: &[u8]) -> u32 {
+        const CHUNK: usize = 1024 * 1024;
+        let mut hasher = crc32fast::Hasher::new();
+        for chunk in bytes.chunks(CHUNK) {
+            hasher.update(chunk);
+            self.charge(chunk.len());
+        }
+        hasher.finalize()
+    }
 }
 
 fn map_read_only(file: &File, len: usize) -> std::io::Result<Mmap> {
@@ -875,6 +887,29 @@ mod tests {
             mapping_rss_kib(data.as_ptr()) > 20 << 10,
             "unbounded never releases"
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn resident_budget_bounds_a_crc_pass() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (data, bytes, _files) = mapped_test_pack(dir.path(), 24 << 20);
+        data.release_resident();
+        let budget = ResidentBudget::new(&data, 4 << 20);
+        assert_eq!(budget.crc32(&data), crc32fast::hash(&bytes));
+        let rss = mapping_rss_kib(data.as_ptr());
+        assert!(rss <= 6 << 10, "budgeted CRC left {rss} KiB resident");
+    }
+
+    #[test]
+    fn resident_budget_crc_matches_on_owned_bytes() {
+        let bytes: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+        let data = PackData::from_owned(bytes.clone());
+        assert_eq!(
+            ResidentBudget::new(&data, 1).crc32(&data),
+            crc32fast::hash(&bytes)
+        );
+        assert_eq!(ResidentBudget::unbounded().crc32(&[]), crc32fast::hash(&[]));
     }
 
     #[test]
