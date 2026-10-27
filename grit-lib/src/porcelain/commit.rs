@@ -812,7 +812,8 @@ pub fn create_commit(
 /// When staging changed the index but the result matches the parent tree (for example a new
 /// file that was staged and then deleted from the work tree), the staged index is still written
 /// before [`Error::NothingToCommit`] is returned, so the on-disk index matches `HEAD` afterwards.
-/// [`CommitRequest::dry_run`] never writes the index.
+/// [`CommitRequest::dry_run`] never writes the index, refs, or stored objects. Symlinks are
+/// compared and previewed as link-target bytes, including directory and dangling links.
 ///
 /// # Errors
 ///
@@ -938,7 +939,7 @@ fn materialize_missing_index_blobs_for_overlay(repo: &Repository, index: &Index)
         }
         let rel = String::from_utf8_lossy(&entry.path);
         let abs = crate::index::worktree_path_from_index_rel(work_tree, &entry.path);
-        let meta = fs::metadata(&abs).map_err(Error::Io)?;
+        let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
         let file_attrs = rules.file_attrs(&rel, false);
         let stored = materialize_worktree_blob(
             odb,
@@ -1786,6 +1787,84 @@ mod tests {
         let mut req = commit_req(message);
         req.dry_run = true;
         req
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parallel_symlink_worktree_preview_is_clean_or_matches_commit() {
+        use crate::parallel::ThreadPolicy;
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::create_dir(root.join("files")).unwrap();
+        for n in 0..1024 {
+            fs::write(root.join(format!("files/{n}")), b"data\n").unwrap();
+        }
+        for (path, target) in [
+            ("linkdir", "files"),
+            ("linkfile", "files/0"),
+            ("linkmissing", "missing"),
+        ] {
+            symlink(target, root.join(path)).unwrap();
+        }
+        commit_worktree(&repo, &commit_req("initial"), &mut NullProgress).unwrap();
+        let mut index = repo.load_index().unwrap();
+        for entry in &mut index.entries {
+            entry.mtime_sec = 0;
+            entry.mtime_nsec = 0;
+            entry.size = 0;
+        }
+        repo.write_index(&mut index).unwrap();
+        let before = repo_snapshot(&repo);
+        let before_tip = resolve_ref(repo.git_dir(), "refs/heads/main").unwrap();
+        for threads in [1, 4] {
+            let repo = Repository::open(
+                repo.git_dir(),
+                &RepositoryOptions::empty().with_work_tree(root),
+            )
+            .unwrap()
+            .with_thread_policy(ThreadPolicy::with_threads_override(Some(threads)));
+            let err = commit_worktree(&repo, &dry_run_req("clean"), &mut NullProgress).unwrap_err();
+            assert!(matches!(err, Error::NothingToCommit), "{err:?}");
+            assert_eq!(repo_snapshot(&repo), before);
+            assert_eq!(
+                resolve_ref(repo.git_dir(), "refs/heads/main").unwrap(),
+                before_tip
+            );
+        }
+        for (path, target) in [
+            ("linkdir", "."),
+            ("linkfile", "files/1"),
+            ("linkmissing", "absent"),
+        ] {
+            fs::remove_file(root.join(path)).unwrap();
+            symlink(target, root.join(path)).unwrap();
+        }
+        let mut preview_files = None;
+        for threads in [1, 4] {
+            let repo = Repository::open(
+                repo.git_dir(),
+                &RepositoryOptions::empty().with_work_tree(root),
+            )
+            .unwrap()
+            .with_thread_policy(ThreadPolicy::with_threads_override(Some(threads)));
+            let preview =
+                commit_worktree(&repo, &dry_run_req("retarget"), &mut NullProgress).unwrap();
+            assert_eq!(preview.changes, 3);
+            if let Some(expected) = &preview_files {
+                assert_eq!(&preview.files, expected);
+            }
+            preview_files = Some(preview.files);
+            assert_eq!(repo_snapshot(&repo), before);
+            assert_eq!(
+                resolve_ref(repo.git_dir(), "refs/heads/main").unwrap(),
+                before_tip
+            );
+        }
+        let committed = commit_worktree(&repo, &commit_req("retarget"), &mut NullProgress).unwrap();
+        assert_eq!(Some(committed.files), preview_files);
     }
 
     #[test]

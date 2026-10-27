@@ -1,0 +1,1015 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-27T00:52:43.233445+00:00",
+  "machine": {
+    "logical_cores": 4,
+    "os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "cargo_profile": "release",
+    "cpu_model": "AMD EPYC 7763 64-Core Processor (4 vCPUs)",
+    "ram_bytes": 16766414848
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "baseline_grit_commit": "80dc322f7c2fafae948c30b9e6de159f884504e0",
+    "grit": "working tree for issue #2076",
+    "grit_commit": "factory/diff-parallel-symlinks (this change)"
+  },
+  "methodology": "One warmup then seven interleaved runs per tool, reversing order every other run; median wall time measured with Python perf_counter around /usr/bin/time -v, maximum peak RSS across runs. The Git-written index with unset stat cache is restored before every command. Edited regular fixture changes one tracked file; mixed fixture also retargets one directory symlink. No builds or tests ran during measurement. Baseline mixed scans fail and their timings are error-path timings, not performance comparisons.",
+  "scenarios": [
+    {
+      "id": "symlink-scan-regular-diff-clean",
+      "group": "worktree-symlinks",
+      "fixture": "50,000 tracked regular files in 100 directories",
+      "description": "regular diff, clean",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "diff",
+          "--no-ext-diff"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4736-main",
+          "--threads",
+          "4",
+          "diff",
+          "--json"
+        ],
+        "grit": [
+          "/tmp/grit-4736-fixed",
+          "--threads",
+          "4",
+          "diff",
+          "--json"
+        ]
+      },
+      "git": {
+        "mean_ms": 2608.168091857156,
+        "median_ms": 2623.2796019999114,
+        "stddev_ms": 45.12773944762418,
+        "min_ms": 2514.85626900012,
+        "max_ms": 2646.9962519997807,
+        "runs_ms": [
+          2591.30765000009,
+          2514.85626900012,
+          2646.9962519997807,
+          2623.2796019999114,
+          2641.4777400000276,
+          2627.358060000006,
+          2611.901070000158
+        ],
+        "peak_rss_bytes": 27402240,
+        "runs_rss_kb": [
+          26760,
+          26508,
+          26516,
+          26440,
+          26548,
+          26492,
+          26648
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      },
+      "baseline_grit": {
+        "mean_ms": 198.38892571426317,
+        "median_ms": 198.22367699998722,
+        "stddev_ms": 1.5917720697417,
+        "min_ms": 196.33216600004744,
+        "max_ms": 201.13365899987912,
+        "runs_ms": [
+          198.22367699998722,
+          197.17470700015838,
+          198.9102699999421,
+          201.13365899987912,
+          196.33216600004744,
+          197.56551299997227,
+          199.38248799985558
+        ],
+        "peak_rss_bytes": 68800512,
+        "runs_rss_kb": [
+          67092,
+          67188,
+          65420,
+          65820,
+          65080,
+          65952,
+          66700
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      },
+      "grit": {
+        "mean_ms": 196.67189028570778,
+        "median_ms": 196.33391999991545,
+        "stddev_ms": 1.0584636087370438,
+        "min_ms": 195.6733010001699,
+        "max_ms": 198.338362999948,
+        "runs_ms": [
+          195.69621599998754,
+          195.6733010001699,
+          197.92970499997864,
+          196.6027099999792,
+          196.33391999991545,
+          196.12901699997565,
+          198.338362999948
+        ],
+        "peak_rss_bytes": 68886528,
+        "runs_rss_kb": [
+          66824,
+          66596,
+          65616,
+          67272,
+          65224,
+          67084,
+          66520
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      }
+    },
+    {
+      "id": "symlink-scan-regular-preview-clean",
+      "group": "worktree-symlinks",
+      "fixture": "50,000 tracked regular files in 100 directories",
+      "description": "regular preview, clean",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "commit",
+          "-a",
+          "--dry-run",
+          "-m",
+          "bench"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4736-main",
+          "--threads",
+          "4",
+          "commit",
+          "--dry-run",
+          "-m",
+          "bench",
+          "--json"
+        ],
+        "grit": [
+          "/tmp/grit-4736-fixed",
+          "--threads",
+          "4",
+          "commit",
+          "--dry-run",
+          "-m",
+          "bench",
+          "--json"
+        ]
+      },
+      "git": {
+        "mean_ms": 916.5135594285597,
+        "median_ms": 916.1940190001587,
+        "stddev_ms": 4.921103674061262,
+        "min_ms": 910.5103919998783,
+        "max_ms": 923.2830999999351,
+        "runs_ms": [
+          923.2830999999351,
+          916.1940190001587,
+          922.2516790000554,
+          917.8511899999648,
+          910.5103919998783,
+          913.1565359998604,
+          912.3480000000654
+        ],
+        "peak_rss_bytes": 34222080,
+        "runs_rss_kb": [
+          33116,
+          33352,
+          33328,
+          33212,
+          33420,
+          32984,
+          33012
+        ],
+        "exit_codes": [
+          1
+        ],
+        "stderr": []
+      },
+      "baseline_grit": {
+        "mean_ms": 236.0665441427565,
+        "median_ms": 235.4932529999587,
+        "stddev_ms": 2.1937016180060773,
+        "min_ms": 233.86350399982803,
+        "max_ms": 239.71742699995957,
+        "runs_ms": [
+          235.4932529999587,
+          236.15125699984674,
+          235.13649599999553,
+          239.71742699995957,
+          233.8735909997922,
+          233.86350399982803,
+          238.2302809999146
+        ],
+        "peak_rss_bytes": 75268096,
+        "runs_rss_kb": [
+          73504,
+          73316,
+          72332,
+          72576,
+          71888,
+          72092,
+          72968
+        ],
+        "exit_codes": [
+          1
+        ],
+        "stderr": []
+      },
+      "grit": {
+        "mean_ms": 234.31629957141402,
+        "median_ms": 234.31639800014636,
+        "stddev_ms": 0.8597229626133902,
+        "min_ms": 233.1936659998064,
+        "max_ms": 235.3638399999909,
+        "runs_ms": [
+          235.3638399999909,
+          234.31639800014636,
+          233.1936659998064,
+          233.36283699995874,
+          234.67083500008812,
+          235.29170500000873,
+          234.01481599989893
+        ],
+        "peak_rss_bytes": 75575296,
+        "runs_rss_kb": [
+          73452,
+          73724,
+          73804,
+          72112,
+          73392,
+          73076,
+          72256
+        ],
+        "exit_codes": [
+          1
+        ],
+        "stderr": []
+      }
+    },
+    {
+      "id": "symlink-scan-regular-diff-edited",
+      "group": "worktree-symlinks",
+      "fixture": "50,000 tracked regular files in 100 directories",
+      "description": "regular diff, edited",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "diff",
+          "--no-ext-diff"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4736-main",
+          "--threads",
+          "4",
+          "diff",
+          "--json"
+        ],
+        "grit": [
+          "/tmp/grit-4736-fixed",
+          "--threads",
+          "4",
+          "diff",
+          "--json"
+        ]
+      },
+      "git": {
+        "mean_ms": 2604.990681428587,
+        "median_ms": 2603.1039660001625,
+        "stddev_ms": 7.434150956353791,
+        "min_ms": 2596.9718119999925,
+        "max_ms": 2615.200217999927,
+        "runs_ms": [
+          2596.9718119999925,
+          2608.543357999906,
+          2613.42528199998,
+          2603.1039660001625,
+          2615.200217999927,
+          2598.5273779999716,
+          2599.162756000169
+        ],
+        "peak_rss_bytes": 27410432,
+        "runs_rss_kb": [
+          26692,
+          26516,
+          26644,
+          26520,
+          26452,
+          26768,
+          26468
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      },
+      "baseline_grit": {
+        "mean_ms": 198.5688917142982,
+        "median_ms": 196.8111419998877,
+        "stddev_ms": 3.847594217889643,
+        "min_ms": 196.0929300000771,
+        "max_ms": 207.08138600002712,
+        "runs_ms": [
+          196.0929300000771,
+          196.73448599996846,
+          198.60086600010618,
+          196.8111419998877,
+          207.08138600002712,
+          196.73530299996855,
+          197.92612900005224
+        ],
+        "peak_rss_bytes": 68825088,
+        "runs_rss_kb": [
+          65992,
+          65800,
+          65792,
+          65952,
+          65144,
+          67212,
+          65956
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      },
+      "grit": {
+        "mean_ms": 196.8952818571584,
+        "median_ms": 197.03051700003016,
+        "stddev_ms": 1.0241308900184598,
+        "min_ms": 195.51210999998148,
+        "max_ms": 198.0706930000906,
+        "runs_ms": [
+          197.03051700003016,
+          198.03322699999626,
+          195.6895880000502,
+          198.0706930000906,
+          197.2982590000356,
+          195.51210999998148,
+          196.6325789999246
+        ],
+        "peak_rss_bytes": 68829184,
+        "runs_rss_kb": [
+          67192,
+          66504,
+          65980,
+          66008,
+          65460,
+          65960,
+          67216
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      }
+    },
+    {
+      "id": "symlink-scan-regular-preview-edited",
+      "group": "worktree-symlinks",
+      "fixture": "50,000 tracked regular files in 100 directories",
+      "description": "regular preview, edited",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "commit",
+          "-a",
+          "--dry-run",
+          "-m",
+          "bench"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4736-main",
+          "--threads",
+          "4",
+          "commit",
+          "--dry-run",
+          "-m",
+          "bench",
+          "--json"
+        ],
+        "grit": [
+          "/tmp/grit-4736-fixed",
+          "--threads",
+          "4",
+          "commit",
+          "--dry-run",
+          "-m",
+          "bench",
+          "--json"
+        ]
+      },
+      "git": {
+        "mean_ms": 915.2266328572166,
+        "median_ms": 913.6290390001705,
+        "stddev_ms": 4.723081644039023,
+        "min_ms": 908.7996490000023,
+        "max_ms": 921.6758370000662,
+        "runs_ms": [
+          913.6290390001705,
+          908.7996490000023,
+          915.366744000039,
+          912.2464580000269,
+          921.2908540000626,
+          913.5778490001485,
+          921.6758370000662
+        ],
+        "peak_rss_bytes": 34156544,
+        "runs_rss_kb": [
+          33356,
+          33356,
+          33228,
+          33140,
+          33212,
+          33336,
+          33212
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      },
+      "baseline_grit": {
+        "mean_ms": 366.1671004285836,
+        "median_ms": 366.9288850001067,
+        "stddev_ms": 2.063705304198834,
+        "min_ms": 363.1605899997794,
+        "max_ms": 368.14895899988187,
+        "runs_ms": [
+          363.1605899997794,
+          367.86773600010747,
+          366.9288850001067,
+          363.31908800002566,
+          366.80755800011866,
+          366.9368870000653,
+          368.14895899988187
+        ],
+        "peak_rss_bytes": 75587584,
+        "runs_rss_kb": [
+          72416,
+          71552,
+          72136,
+          72164,
+          72680,
+          73816,
+          72480
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      },
+      "grit": {
+        "mean_ms": 365.9434830000074,
+        "median_ms": 365.36982100005844,
+        "stddev_ms": 2.56017697178659,
+        "min_ms": 363.71073800000886,
+        "max_ms": 370.76713800001926,
+        "runs_ms": [
+          367.7842370000235,
+          365.36982100005844,
+          363.9799100001255,
+          365.9200449999389,
+          363.71073800000886,
+          370.76713800001926,
+          364.07249199987746
+        ],
+        "peak_rss_bytes": 75288576,
+        "runs_rss_kb": [
+          72240,
+          73156,
+          72244,
+          71652,
+          72272,
+          73384,
+          73524
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      }
+    },
+    {
+      "id": "symlink-scan-mixed-diff-clean",
+      "group": "worktree-symlinks",
+      "fixture": "50,000 tracked regular files in 100 directories + 64 directory symlinks",
+      "description": "mixed diff, clean",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "diff",
+          "--no-ext-diff"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4736-main",
+          "--threads",
+          "4",
+          "diff",
+          "--json"
+        ],
+        "grit": [
+          "/tmp/grit-4736-fixed",
+          "--threads",
+          "4",
+          "diff",
+          "--json"
+        ]
+      },
+      "git": {
+        "mean_ms": 2632.195761714261,
+        "median_ms": 2636.80559799991,
+        "stddev_ms": 27.404476169901457,
+        "min_ms": 2592.3821389999375,
+        "max_ms": 2678.8237139999183,
+        "runs_ms": [
+          2614.8461249999855,
+          2678.8237139999183,
+          2643.3560379998653,
+          2641.5413760000774,
+          2592.3821389999375,
+          2617.6153420001356,
+          2636.80559799991
+        ],
+        "peak_rss_bytes": 27410432,
+        "runs_rss_kb": [
+          26612,
+          26664,
+          26700,
+          26640,
+          26596,
+          26568,
+          26768
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      },
+      "baseline_grit": {
+        "mean_ms": 199.8884999999453,
+        "median_ms": 197.20598100002462,
+        "stddev_ms": 6.833425974906802,
+        "min_ms": 195.17055500000424,
+        "max_ms": 215.0611409999783,
+        "runs_ms": [
+          195.17055500000424,
+          198.85655600000973,
+          197.20598100002462,
+          215.0611409999783,
+          197.00278199979948,
+          199.3194389999644,
+          196.60304599983647
+        ],
+        "peak_rss_bytes": 60088320,
+        "runs_rss_kb": [
+          56580,
+          58680,
+          57248,
+          56540,
+          57752,
+          58252,
+          56884
+        ],
+        "exit_codes": [
+          1
+        ],
+        "stderr": []
+      },
+      "grit": {
+        "mean_ms": 198.6939839999715,
+        "median_ms": 198.56240799981606,
+        "stddev_ms": 1.3131145077490016,
+        "min_ms": 196.7203450001307,
+        "max_ms": 200.8883920000244,
+        "runs_ms": [
+          197.69506899979206,
+          200.8883920000244,
+          199.33411600004547,
+          199.1234730000997,
+          196.7203450001307,
+          198.534084999892,
+          198.56240799981606
+        ],
+        "peak_rss_bytes": 69091328,
+        "runs_rss_kb": [
+          67192,
+          66728,
+          67472,
+          65996,
+          66016,
+          65500,
+          66432
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      }
+    },
+    {
+      "id": "symlink-scan-mixed-preview-clean",
+      "group": "worktree-symlinks",
+      "fixture": "50,000 tracked regular files in 100 directories + 64 directory symlinks",
+      "description": "mixed preview, clean",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "commit",
+          "-a",
+          "--dry-run",
+          "-m",
+          "bench"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4736-main",
+          "--threads",
+          "4",
+          "commit",
+          "--dry-run",
+          "-m",
+          "bench",
+          "--json"
+        ],
+        "grit": [
+          "/tmp/grit-4736-fixed",
+          "--threads",
+          "4",
+          "commit",
+          "--dry-run",
+          "-m",
+          "bench",
+          "--json"
+        ]
+      },
+      "git": {
+        "mean_ms": 919.9216020000937,
+        "median_ms": 918.6204820000512,
+        "stddev_ms": 4.4790243323819645,
+        "min_ms": 913.9596740001252,
+        "max_ms": 926.2405740000759,
+        "runs_ms": [
+          926.2405740000759,
+          923.0289910001375,
+          923.4838800000489,
+          913.9596740001252,
+          918.5531560001436,
+          918.6204820000512,
+          915.5644570000732
+        ],
+        "peak_rss_bytes": 34226176,
+        "runs_rss_kb": [
+          33424,
+          33132,
+          33340,
+          33116,
+          33424,
+          33188,
+          33424
+        ],
+        "exit_codes": [
+          1
+        ],
+        "stderr": []
+      },
+      "baseline_grit": {
+        "mean_ms": 214.45506885717285,
+        "median_ms": 214.50455300009708,
+        "stddev_ms": 1.7794767024913296,
+        "min_ms": 212.67391200012753,
+        "max_ms": 217.19765800003188,
+        "runs_ms": [
+          217.19765800003188,
+          215.60218799982067,
+          214.50455300009708,
+          212.75565500013727,
+          212.67391200012753,
+          215.63880500002597,
+          212.81271099996957
+        ],
+        "peak_rss_bytes": 66101248,
+        "runs_rss_kb": [
+          64132,
+          63352,
+          62988,
+          62848,
+          63544,
+          63120,
+          64552
+        ],
+        "exit_codes": [
+          1
+        ],
+        "stderr": []
+      },
+      "grit": {
+        "mean_ms": 241.43509728566772,
+        "median_ms": 238.01362900007916,
+        "stddev_ms": 7.074674136866832,
+        "min_ms": 236.17408199993406,
+        "max_ms": 255.09436799984542,
+        "runs_ms": [
+          237.21468600001572,
+          247.30490299998564,
+          255.09436799984542,
+          238.01362900007916,
+          237.8709589997925,
+          238.3730540000215,
+          236.17408199993406
+        ],
+        "peak_rss_bytes": 76414976,
+        "runs_rss_kb": [
+          73748,
+          73720,
+          73160,
+          74068,
+          73536,
+          73524,
+          74624
+        ],
+        "exit_codes": [
+          1
+        ],
+        "stderr": []
+      }
+    },
+    {
+      "id": "symlink-scan-mixed-diff-edited",
+      "group": "worktree-symlinks",
+      "fixture": "50,000 tracked regular files in 100 directories + 64 directory symlinks",
+      "description": "mixed diff, edited",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "diff",
+          "--no-ext-diff"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4736-main",
+          "--threads",
+          "4",
+          "diff",
+          "--json"
+        ],
+        "grit": [
+          "/tmp/grit-4736-fixed",
+          "--threads",
+          "4",
+          "diff",
+          "--json"
+        ]
+      },
+      "git": {
+        "mean_ms": 2611.430426714248,
+        "median_ms": 2612.9016380000394,
+        "stddev_ms": 12.585488335273647,
+        "min_ms": 2593.4627500000715,
+        "max_ms": 2632.4035860000095,
+        "runs_ms": [
+          2612.9016380000394,
+          2632.4035860000095,
+          2613.3165129999725,
+          2618.9563329999146,
+          2600.688226999864,
+          2608.2839399998647,
+          2593.4627500000715
+        ],
+        "peak_rss_bytes": 27414528,
+        "runs_rss_kb": [
+          26572,
+          26568,
+          26644,
+          26632,
+          26428,
+          26772,
+          26744
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      },
+      "baseline_grit": {
+        "mean_ms": 197.3156424285857,
+        "median_ms": 195.9966509998594,
+        "stddev_ms": 3.285920133093772,
+        "min_ms": 195.01882800000203,
+        "max_ms": 204.0571390000423,
+        "runs_ms": [
+          195.090331000074,
+          199.07149699997717,
+          196.60312700011673,
+          195.9966509998594,
+          195.01882800000203,
+          195.37192400002823,
+          204.0571390000423
+        ],
+        "peak_rss_bytes": 59838464,
+        "runs_rss_kb": [
+          58052,
+          58436,
+          56292,
+          58428,
+          58200,
+          58300,
+          58280
+        ],
+        "exit_codes": [
+          1
+        ],
+        "stderr": []
+      },
+      "grit": {
+        "mean_ms": 198.62116971421528,
+        "median_ms": 198.63613699999405,
+        "stddev_ms": 1.106386828708107,
+        "min_ms": 197.0909080000638,
+        "max_ms": 199.93842399981077,
+        "runs_ms": [
+          198.63613699999405,
+          199.50701799984927,
+          197.4216629998864,
+          198.20136899988938,
+          199.55266900001334,
+          199.93842399981077,
+          197.0909080000638
+        ],
+        "peak_rss_bytes": 69976064,
+        "runs_rss_kb": [
+          67268,
+          67636,
+          67180,
+          68336,
+          67176,
+          68260,
+          66684
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      }
+    },
+    {
+      "id": "symlink-scan-mixed-preview-edited",
+      "group": "worktree-symlinks",
+      "fixture": "50,000 tracked regular files in 100 directories + 64 directory symlinks",
+      "description": "mixed preview, edited",
+      "driver": "cli",
+      "commands": {
+        "git": [
+          "git",
+          "commit",
+          "-a",
+          "--dry-run",
+          "-m",
+          "bench"
+        ],
+        "baseline_grit": [
+          "/tmp/grit-4736-main",
+          "--threads",
+          "4",
+          "commit",
+          "--dry-run",
+          "-m",
+          "bench",
+          "--json"
+        ],
+        "grit": [
+          "/tmp/grit-4736-fixed",
+          "--threads",
+          "4",
+          "commit",
+          "--dry-run",
+          "-m",
+          "bench",
+          "--json"
+        ]
+      },
+      "git": {
+        "mean_ms": 919.8015942857377,
+        "median_ms": 918.8075600000047,
+        "stddev_ms": 3.5740260092776257,
+        "min_ms": 915.3882709999834,
+        "max_ms": 925.0235730000895,
+        "runs_ms": [
+          923.1398220001665,
+          925.0235730000895,
+          916.8516759998511,
+          918.8075600000047,
+          921.8262770000365,
+          917.5739810000323,
+          915.3882709999834
+        ],
+        "peak_rss_bytes": 34332672,
+        "runs_rss_kb": [
+          33216,
+          33260,
+          33528,
+          33424,
+          33180,
+          33428,
+          33420
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      },
+      "baseline_grit": {
+        "mean_ms": 215.03852600000886,
+        "median_ms": 215.25840799995422,
+        "stddev_ms": 1.6698833596833698,
+        "min_ms": 212.71925499991085,
+        "max_ms": 218.05642300000727,
+        "runs_ms": [
+          215.6553330000861,
+          214.2143120001947,
+          214.01837700000215,
+          215.34757399990667,
+          218.05642300000727,
+          215.25840799995422,
+          212.71925499991085
+        ],
+        "peak_rss_bytes": 66547712,
+        "runs_rss_kb": [
+          64700,
+          63408,
+          64988,
+          64532,
+          64360,
+          64560,
+          64904
+        ],
+        "exit_codes": [
+          1
+        ],
+        "stderr": []
+      },
+      "grit": {
+        "mean_ms": 370.73359000000244,
+        "median_ms": 372.0184059998246,
+        "stddev_ms": 3.52247978722409,
+        "min_ms": 364.36113500008105,
+        "max_ms": 374.3629470000087,
+        "runs_ms": [
+          372.9714190001232,
+          373.3245410001018,
+          369.9469460000273,
+          372.0184059998246,
+          374.3629470000087,
+          368.14973599985024,
+          364.36113500008105
+        ],
+        "peak_rss_bytes": 76656640,
+        "runs_rss_kb": [
+          74312,
+          73312,
+          74104,
+          74860,
+          73384,
+          73376,
+          72788
+        ],
+        "exit_codes": [
+          0
+        ],
+        "stderr": []
+      }
+    }
+  ],
+  "fixture_setup": "System Git initializes and commits 50,000 regular files (136 bytes each) in 100 directories of 500 files; the mixed fixture adds 64 directory symlinks. git read-tree HEAD produces the saved unset-stat index. Before each scenario, restore initial file contents and link target, then optionally edit one regular file (128 bytes) and retarget link000 from d000 to d001. Restore the saved index before each timed command.",
+  "validation": {
+    "existing_diff_50k_perf_git_compat": {
+      "passed": 4,
+      "git_clean_ms": 95.559334,
+      "grit_clean_ms": 148.493666,
+      "git_hundred_edits_ms": 156.106517,
+      "grit_hundred_edits_ms": 150.880769,
+      "git_mtime_touch_ms": 94.834734,
+      "grit_mtime_touch_ms": 146.034363,
+      "single_deletion_parity": true,
+      "command": "GRIT_DIFF_PERF=1 GRIT_BIN=<fixed release binary> diff_50k_perf_git_compat --nocapture --test-threads=1",
+      "notes": "Existing tests run unchanged using the fixed release CLI; warm-stat fixtures differ from the unset-stat measurements above."
+    }
+  }
+}

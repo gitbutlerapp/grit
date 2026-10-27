@@ -122,3 +122,130 @@ fn commit_dry_run_amend_without_message_uses_head_subject() -> TestResult {
     );
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn parallel_symlink_commit_preview_matches_commit_without_writes() -> TestResult {
+    use grit_test_support::git;
+    use std::os::unix::fs::symlink;
+
+    fn snapshot(dir: &std::path::Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+        let mut files = std::collections::BTreeMap::new();
+        for entry in fs::read_dir(dir).expect("snapshot directory") {
+            let path = entry.expect("snapshot entry").path();
+            if path.is_dir() {
+                files.extend(snapshot(&path));
+            } else {
+                files.insert(path.clone(), fs::read(path).expect("snapshot file"));
+            }
+        }
+        files
+    }
+
+    let tmp = tempfile::tempdir()?;
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.name", "Test"]);
+    git(root, &["config", "user.email", "test@example.com"]);
+    fs::create_dir(root.join("files"))?;
+    for n in 0..1024 {
+        fs::write(root.join(format!("files/{n}")), b"data\n")?;
+    }
+    for (name, target) in [
+        ("linkdir", "files"),
+        ("linkfile", "files/0"),
+        ("linkmissing", "missing"),
+    ] {
+        symlink(target, root.join(name))?;
+    }
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "initial"]);
+    git(root, &["read-tree", "HEAD"]);
+    let before = snapshot(&root.join(".git"));
+    let index_mtime = fs::metadata(root.join(".git/index"))?.modified()?;
+    for threads in ["1", "4"] {
+        let out = run_grit(
+            root,
+            &[
+                "--threads",
+                threads,
+                "commit",
+                "--dry-run",
+                "-m",
+                "clean",
+                "--json",
+            ],
+        );
+        assert!(!out.status.success());
+        let json: Value = serde_json::from_slice(&out.stdout)?;
+        assert_eq!(json["kind"], "nothing_to_commit", "{json}");
+        assert_eq!(snapshot(&root.join(".git")), before);
+        assert_eq!(
+            fs::metadata(root.join(".git/index"))?.modified()?,
+            index_mtime
+        );
+    }
+    for (name, target) in [
+        ("linkdir", "."),
+        ("linkfile", "files/1"),
+        ("linkmissing", "absent"),
+    ] {
+        fs::remove_file(root.join(name))?;
+        symlink(target, root.join(name))?;
+    }
+    let mut preview_files = None;
+    for threads in ["1", "4"] {
+        let out = run_grit(
+            root,
+            &[
+                "--threads",
+                threads,
+                "commit",
+                "--dry-run",
+                "-m",
+                "retarget",
+                "--json",
+            ],
+        );
+        assert!(
+            out.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let json: Value = serde_json::from_slice(&out.stdout)?;
+        assert_eq!(json["changes"], 3);
+        assert_eq!(json["files"].as_array().expect("files").len(), 3);
+        if let Some(expected) = &preview_files {
+            assert_eq!(&json["files"], expected);
+        }
+        preview_files = Some(json["files"].clone());
+        assert_eq!(snapshot(&root.join(".git")), before);
+        assert_eq!(
+            fs::metadata(root.join(".git/index"))?.modified()?,
+            index_mtime
+        );
+    }
+    let out = run_grit(
+        root,
+        &["--threads", "4", "commit", "-m", "retarget", "--json"],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let committed: Value = serde_json::from_slice(&out.stdout)?;
+    assert_eq!(Some(committed["files"].clone()), preview_files);
+    for (name, target) in [
+        ("linkdir", "."),
+        ("linkfile", "files/1"),
+        ("linkmissing", "absent"),
+    ] {
+        assert_eq!(git(root, &["show", &format!("HEAD:{name}")]), target);
+        assert!(git(root, &["ls-tree", "HEAD", name]).starts_with("120000"));
+    }
+    assert!(git(root, &["diff"]).is_empty());
+    git(root, &["fsck", "--strict"]);
+    Ok(())
+}

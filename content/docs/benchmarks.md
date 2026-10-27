@@ -1622,3 +1622,26 @@ A second factory VM (Intel Xeon Platinum 8370C, 4 vCPUs, Rust 1.99.0, `release`,
 The graph-backed author range count improves by 86% against the reviewed branch and 64% against main. Counts agree with Git, including 500 for the review reproduction. Full-history author counts retain the original optimization; graph loading is skipped when there are no exclusions. `perf record -g` remains unavailable (`perf_event_paranoid=4`); `strace -c` records about 1.4 ms in syscalls before the fix, while the deterministic graph-range test reduces object reads from 34 to 2.
 
 This build records about 0.7–1.3 MiB more peak RSS on several unchanged paths than the reviewed build. A separate five-run `/proc/<pid>/smaps_rollup` sample of full-history author counting shows essentially unchanged peak anonymous memory (6,748 → 6,740 KiB), with the extra residency in file-backed mappings. Those samples are included in the baseline JSON; the RSS increases remain visible in the table rather than being treated as heap growth or omitted. No measured scenario slowed relative to main or the reviewed branch.
+
+## Parallel worktree symlinks (2026-10-27)
+
+Parallel worktree scans now compare physical symlinks through the same link-target reader and file-type classifier as serial scans. Regular files retain parallel hashing and streaming. Commit previews also use symlink metadata when loading a new link blob into their temporary object overlay.
+
+Factory VM: AMD EPYC 7763, 4 vCPUs, Rust 1.99.0, `release` profile, stock Git 2.55.0. The baseline is origin/main `80dc322f7`; fixed results are from this change. Each fixture has 50,000 tracked regular files in 100 directories; the mixed fixture adds 64 directory symlinks. The edited case changes one regular file and, for the mixed fixture, retargets one link.
+
+One warmup precedes seven interleaved runs per tool, reversing tool order on alternating runs. Wall time is the median measured with Python `perf_counter` around `/usr/bin/time -v`; RSS is the maximum process peak across runs. Builds and tests were idle. A saved Git-written index with unset stat data is restored before every command to force content verification; these are **not trusted-stat clean-tree timings**. Commands are `git diff --no-ext-diff` versus `grit --threads 4 diff --json`, and `git commit -a --dry-run -m bench` versus `grit --threads 4 commit --dry-run -m bench --json`.
+
+| Fixture / operation | Git ms | Main ms | Fixed ms | Git RSS KiB | Main RSS KiB | Fixed RSS KiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| regular diff, clean | 2623.28 | 198.22 | 196.33 | 26760 | 67188 | 67272 |
+| regular preview, clean | 916.19 | 235.49 | 234.32 | 33420 | 73504 | 73804 |
+| regular diff, edited | 2603.10 | 196.81 | 197.03 | 26768 | 67212 | 67216 |
+| regular preview, edited | 913.63 | 366.93 | 365.37 | 33356 | 73816 | 73524 |
+| mixed diff, clean | 2636.81 | 197.21 (error) | 198.56 | 26768 | 58680 | 67472 |
+| mixed preview, clean | 918.62 | 214.50 (error) | 238.01 | 33424 | 64552 | 74624 |
+| mixed diff, edited | 2612.90 | 196.00 (error) | 198.64 | 26772 | 58436 | 68336 |
+| mixed preview, edited | 918.81 | 215.26 (error) | 372.02 | 33528 | 64988 | 74860 |
+
+Regular-file timings stay within 1% of main and peak RSS within 0.5%. Mixed-fixture main results are directory-read errors; their time and RSS measure early failure and cannot be compared as successful scans. Fixed mixed diffs succeed; clean previews return `nothing_to_commit`, and edited previews succeed. Raw samples, exit codes, command arguments and fixture details are in `grit-utils/baselines/diff-parallel-symlinks-2076.json`.
+
+The existing 50,000-file performance suite also passes all four checks with the fixed release CLI: warm clean diff is 148.49 ms versus Git 95.56 ms (1.55×), 100 edits are 150.88 versus 156.11 ms (0.97×), and mtime-only touches are 146.03 versus 94.83 ms (1.54×). The deletion parity check passes. These existing fixtures include deep paths and retain their original 3× timing limit.

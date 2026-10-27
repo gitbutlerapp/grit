@@ -4426,6 +4426,12 @@ fn push_index_blob_worktree_diff(
     Ok(())
 }
 
+/// Compare tracked index entries with the worktree, using link-target bytes for symlinks.
+///
+/// Symlink targets bypass regular-file filters and line-ending conversion. Parallel and
+/// serial scans use the same file-type classification, including directory replacements
+/// and regular-file placeholders checked out with `core.symlinks=false`.
+///
 /// # Errors
 ///
 /// Returns errors from I/O or hashing.
@@ -4447,6 +4453,8 @@ pub fn diff_index_to_worktree_with_options(
 /// Like [`diff_index_to_worktree_with_options`], but loads config from `repository_git_dir`
 /// (the main repository for linked worktrees) and persists each hashed worktree blob into `odb`
 /// so staging can update the index without re-reading file contents.
+/// Symlinks store their target bytes. With [`DiffIndexToWorktreeOptions::hash_blobs_without_write`],
+/// returns the same blob IDs without writing objects, for staging previews.
 pub fn diff_index_to_worktree_for_staging(
     odb: &Odb,
     repository_git_dir: &Path,
@@ -5019,7 +5027,11 @@ fn diff_index_to_worktree_inner(
                 let ie = &index.entries[entry_index];
                 let worktree_mode =
                     mode_policy.index_mode_for_worktree(stat.git_mode, Some(ie.mode));
-                if parallel_blob_work {
+                // Streaming jobs read regular files. Links and directories need the shared
+                // classifier; use the physical type so core.symlinks=false placeholders
+                // keep the regular-file fast path even with an effective symlink mode.
+                if parallel_blob_work && !stat.is_dir && stat.git_mode != crate::index::MODE_SYMLINK
+                {
                     let stat_same = stat_matches_blob_stat(ie, &stat, stat_policy);
                     if stat_same
                         && worktree_mode == ie.mode

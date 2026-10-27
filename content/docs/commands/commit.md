@@ -58,6 +58,8 @@ On a **detached HEAD** (for example after [`grit switch --detach`](../switch/)),
 
 Auto-staging records the modes Git would. With `core.symlinks=false` (common on Windows, where Git and Grit check symlinks out as plain files holding the link target), a symlink stays a symlink (`120000`): an untouched link is not part of the commit, and editing the file stages the new link target. With `core.filemode=false`, a tracked file keeps the executable bit the index already has.
 
+Symlinks to files, directories and missing paths are staged as link-target bytes, without clean filters or line-ending conversion. `--dry-run` uses the same comparison in serial and parallel scans: an unchanged tree returns `nothing_to_commit` under `--json`, and retargeted links appear in the preview just as they will in the commit. Preview leaves the index, refs and stored objects unchanged.
+
 With `--allow-empty`, grit records a new commit whose tree matches the parent even when the working tree is clean (staging still runs first, the same as any other commit). Use this to mark a point in history (for example to trigger CI) without changing files. The resulting commit is valid for Git the same way as `git commit --allow-empty`.
 
 When a merge is in progress (`MERGE_HEAD` is present) and every conflict is resolved in the index, `grit commit` records a **merge commit** with two parents (your branch tip and the merged tip) and clears merge state the same way Git does after `git commit`.
