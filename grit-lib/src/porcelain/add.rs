@@ -1740,7 +1740,11 @@ mod tests {
         let mut index = Index::new();
         stage_file_in_index(&repo, &mut index, "large.bin", &vec![b'x'; 2 * 1024 * 1024]);
         write_index(&repo, &mut index);
-        fs::write(dir.path().join("large.bin"), b"changed").unwrap();
+        fs::write(
+            dir.path().join("large.bin"),
+            vec![b'y'; 2 * 1024 * 1024 + 1],
+        )
+        .unwrap();
         fs::write(dir.path().join("new.bin"), b"ignored").unwrap();
         fs::write(dir.path().join(".gitignore"), "*.bin\n").unwrap();
         let opts = StageOptions {

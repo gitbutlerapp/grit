@@ -642,6 +642,22 @@ CI job **`bench-scenarios-smoke`** installs hyperfine and runs `make bench-scena
 
 Detail: [Benchmark harness](content/docs/benchmarking.md).
 
+### Send-pack frontier regression
+
+The `pack_frontier` Criterion target builds 1,000 advertised commit tips and one
+backdated want. This makes repeated scans of the pending ancestry heap visible
+without transport or compression dominating the measurement:
+
+```bash
+cargo bench -p grit-lib --bench pack_frontier
+cargo test -p grit-lib --lib pack_object_select::tests
+```
+
+Tracked-staging unit tests count hash-only stream passes and stream writes, including
+size changes, stale index stat sizes, missing old objects, and partial clones. The
+`add_stream_size_git_compat` integration test cross-checks SHA-1 and SHA-256 index
+and blob writes with system Git at both loose-object and streamed-pack thresholds.
+
 ### Criterion (`grit-lib`)
 
 Criterion micro-benchmarks live under `grit-lib/benches/` (harness disabled). Shared fixture modules build deterministic repos in a temp directory using `grit-lib`; the object suite calls the system `git` binary only for `index-pack` / `repack` when a real `.idx` is required.

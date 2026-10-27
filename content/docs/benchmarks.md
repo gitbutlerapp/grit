@@ -9,6 +9,217 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
 
+## Daily regression audit (2026-10-27, #4744)
+
+The original daily reports used different hardware and Git versions: October 25
+used an Intel Xeon with Git 2.43.0, while October 26 used an AMD EPYC with Git 2.55.0.
+To separate code regressions from environment changes, both reported revisions
+(`2824ad3911`, `c7cf2c4436`) and frozen main `80dc322f7` were built in `release` and
+measured against stock Git 2.55.0 on one 4-vCPU AMD EPYC 7763 Linux VM with 16 GiB RAM.
+No compilation or tests ran during native timing. Historical and final paired comparisons use ten
+samples per tool and one warmup, with the frozen daily harness capped at ten.
+The three repaired plans use the corrected harness with `--min-runs 10` and its
+normal convergence policy (up to twenty runs). Tables show median elapsed
+milliseconds and maximum child-process RSS in KiB. The daily runner uses wait4;
+separate `/usr/bin/time -v` runs corroborate the three changed operations.
+
+HTTP measurements keep the c7cf2c4436 `grit-http-server` binary constant for both
+clients. The git/git fixture is pinned to v2.47.0 (`777489f9e0`). Preparation,
+commands, every sample, and phase measurements are retained in the linked reports.
+The harness is identical within each final main/fixed pair. The repaired runner honors
+`--min-runs 10`, rejects placeholder `true` plans, supplies Git's editor for
+history reword, derives an actual change-id prefix, and starts deepen with a
+single selected-branch shallow boundary. Thus repaired scenarios have a valid
+main/fixed control, but cannot be compared to the old failed/no-op daily series.
+
+The fixes preserve the features introduced by the regression commits. Streaming
+restaging now hashes and stores once when local canonical blob size proves that
+the content changed; unchanged, missing, and same-size objects retain the
+hash-first path, without fetching a missing previous blob. Path commits validate
+pathspecs without staging a discarded index, retaining both real index views and
+hook behavior. Push maintains an incremental count of interesting queued commits,
+retaining the existing reachability cutoff while removing repeated heap scans.
+Callgrind attributed 54.6% of the force-with-lease run's instructions to those
+scans. `perf` was unavailable because the VM disallows hardware performance events.
+
+The commit-boundary tests below were built from fresh archived source trees,
+with source mtimes refreshed before each build. Cached-build samples that failed
+this check were discarded. These are separate ten-run experiments.
+
+| Scenario | Parent | Introducing commit / merge | Git ms (after) | Grit parent ms | Grit after ms |
+| --- | --- | --- | ---: | ---: | ---: |
+| `add/modified@big-blobs` | `818de8006e` | af8594f21 | 291.32 | 137.40 | 237.29 |
+| `commit/paths@synth-10k` | `c0b0c50bfa` | bebfaa546 via 2a0f003c1 | 40.79 | 51.35 | 59.35 |
+| `push/force-with-lease@git-git` | `6388d987e4` | 69d7a1fa6 via 741ad80ab | 159.63 | 691.83 | 1456.57 |
+| `push/incremental@git-git` | `6388d987e4` | 69d7a1fa6 via 741ad80ab | 184.11 | 1312.61 | 2066.00 |
+| `push/incremental-http@git-git` | `6388d987e4` | 69d7a1fa6 via 741ad80ab | 99.52 | 1249.60 | 2017.09 |
+
+### Historical reproduction
+
+Each row compares the two reported commits on this VM. RSS is the maximum
+observed grit child-process RSS; the Git time comes from the newer-commit run.
+
+| Scenario | Git ms | 2824ad ms | c7cf2c ms | Grit RSS old → new (KiB) |
+| --- | ---: | ---: | ---: | ---: |
+| `add/modified@big-blobs` | 287.61 | 138.46 | 239.14 | 86,868 → 88,976 |
+| `branch/delete@many-refs` | 2.46 | 9.94 | 9.46 | 15,828 → 16,712 |
+| `clone/bare@synth-10k` | 701.23 | 775.77 | 780.35 | 23,712 → 24,624 |
+| `commit/paths@synth-10k` | 38.82 | 51.65 | 58.71 | 28,576 → 30,180 |
+| `commit/small@synth-100k` | 939.51 | 258.01 | 256.64 | 61,060 → 62,168 |
+| `commit/small@synth-10k` | 38.91 | 43.24 | 35.97 | 26,792 → 28,784 |
+| `commit/staged@synth-100k` | 110.34 | 77.60 | 75.05 | 57,272 → 58,900 |
+| `fetch/dry-run@git-git` | 111.82 | 99.24 | 97.93 | 92,376 → 99,932 |
+| `fetch/incremental-http@git-git` | 1957.74 | 1418.89 | 1433.68 | 100,064 → 102,296 |
+| `fetch/incremental@git-git` | 113.35 | 152.33 | 146.69 | 94,004 → 92,736 |
+| `fetch/one-branch@git-git` | 114.04 | 152.62 | 149.94 | 92,400 → 94,824 |
+| `pull/check@git-git` | 115.63 | 209.64 | 154.70 | 93,888 → 93,136 |
+| `pull/fast-forward@git-git` | 131.72 | 216.22 | 157.08 | 92,424 → 93,252 |
+| `push/force-with-lease@git-git` | 159.01 | 693.04 | 1477.63 | 74,092 → 75,408 |
+| `push/incremental-http@git-git` | 95.90 | 1226.90 | 1967.57 | 192,168 → 193,300 |
+| `push/incremental@git-git` | 179.50 | 1310.88 | 2091.71 | 192,316 → 192,840 |
+| `remote/remove@many-refs` | 622.55 | 779.77 | 774.16 | 25,004 → 25,836 |
+| `status/paths@synth-100k` | 44.60 | 109.47 | 82.89 | 41,972 → 43,512 |
+| `switch/branch@synth-100k` | 239.07 | 106.01 | 105.22 | 53,380 → 54,908 |
+
+Only large-blob add, path commits, and the three push cases reproduce a
+meaningful slowdown. Branch delete, bare clone, other commits, fetch/pull, remote
+remove, path status, and switch memory do not reproduce the daily regression;
+no speculative fixes were made for them. Main also already includes the MIDX
+residency improvement, which accounts for its lower network memory versus c7cf2c.
+
+The old deepen fixture produced over a thousand shallow boundaries; stock Git
+was still negotiating after 204 seconds and was deliberately terminated. That
+exit is not treated as a reproduction of the reported code 128. Reword fails
+with Git 2.55 code 129 because the old plan supplied an unsupported message
+option. Change-id resolution timed `true` in both old plans and is excluded
+from timing reports. The corrected plans test actual operations and compare
+Git/grit results, including exact shallow boundary ids.
+
+### Main versus fixed, including related commands
+
+The fixed binaries contain the library and harness changes through `66111b8f2`;
+the final branch additionally strengthens a test fixture and records this audit.
+Git ms is the fixed-run control; both Git controls are retained in the raw JSON.
+The `commit/small@synth-10k` row includes the initial ten-run batch and three
+thirty-run confirmation batches, with batch order alternated: **100 samples per
+binary**, without dropping outliers. Its initial 34.85 → 45.98 ms result was
+bimodal in both Git and grit. Repeated grit medians were 34.4–34.5 ms on main and
+33.3–34.0 ms fixed, so no persistent slowdown reproduced.
+
+| Scenario | Git ms | Grit main ms | Grit fixed ms | Main RSS KiB | Fixed RSS KiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `add/all@synth-100k` | 241.57 | 232.62 | 233.59 | 49,748 | 47,216 |
+| `add/dry-run@synth-10k` | 20.14 | 23.02 | 22.44 | 20,812 | 21,248 |
+| `add/modified@big-blobs` | 289.87 | 238.70 | 137.63 | 88,476 | 89,584 |
+| `add/modified@synth-10k` | 19.44 | 19.48 | 18.75 | 24,284 | 24,476 |
+| `add/patch-file@synth-10k` | 8.38 | 11.08 | 10.37 | 19,776 | 19,880 |
+| `add/update@synth-100k` | 153.38 | 160.58 | 158.52 | 44,740 | 44,648 |
+| `branch/delete@many-refs` | 2.46 | 10.59 | 9.89 | 16,700 | 16,436 |
+| `clone/bare@synth-10k` | 704.71 | 784.56 | 784.58 | 24,572 | 24,668 |
+| `commit/dry-run@synth-10k` | 23.27 | 49.85 | 48.05 | 23,700 | 23,944 |
+| `commit/paths@synth-10k` | 40.54 | 57.11 | 51.20 | 26,672 | 27,180 |
+| `commit/small@small` | 9.73 | 10.85 | 9.94 | 18,580 | 19,216 |
+| `commit/small@synth-100k` | 934.13 | 244.88 | 246.85 | 51,408 | 51,996 |
+| `commit/small@synth-10k` | 39.11 | 34.45 | 33.72 | 25,824 | 26,360 |
+| `commit/staged@synth-100k` | 108.32 | 68.59 | 67.53 | 47,948 | 48,860 |
+| `fetch/deepen@git-git` | 2666.77 | 8128.51 | 8163.79 | 136,208 | 134,960 |
+| `fetch/dry-run@git-git` | 113.73 | 75.95 | 74.65 | 64,024 | 64,024 |
+| `fetch/incremental-http@git-git` | 1950.46 | 1378.59 | 1349.62 | 69,212 | 69,368 |
+| `fetch/incremental@git-git` | 114.33 | 78.11 | 76.35 | 63,732 | 63,876 |
+| `fetch/one-branch@git-git` | 113.58 | 78.03 | 76.94 | 64,104 | 64,208 |
+| `history/reword@synth-10k` | 137.11 | 261.97 | 259.87 | 23,948 | 24,404 |
+| `pull/check@git-git` | 117.48 | 77.69 | 76.82 | 64,056 | 64,116 |
+| `pull/fast-forward@git-git` | 132.99 | 82.16 | 80.69 | 64,144 | 64,288 |
+| `push/force-with-lease@git-git` | 162.01 | 1453.69 | 749.27 | 75,352 | 75,684 |
+| `push/incremental-http@git-git` | 93.89 | 2022.37 | 1296.89 | 107,168 | 108,304 |
+| `push/incremental@git-git` | 185.40 | 2113.62 | 1368.53 | 106,724 | 107,784 |
+| `remote/remove@many-refs` | 613.84 | 771.89 | 775.66 | 25,616 | 25,652 |
+| `resolve/change-id@git-git` | 663.65 | 748.31 | 726.20 | 113,548 | 113,972 |
+| `status/paths@synth-100k` | 44.20 | 81.24 | 81.88 | 41,408 | 43,104 |
+| `switch/branch@synth-100k` | 235.74 | 85.09 | 82.64 | 45,740 | 46,164 |
+| `add/hunks@large-file` | unavailable | unavailable | unavailable | unavailable | unavailable |
+| `add/lines@large-file` | unavailable | unavailable | unavailable | unavailable | unavailable |
+| `add/patch-file@large-file` | unavailable | unavailable | unavailable | unavailable | unavailable |
+| `push/refspec@git-git` | unavailable | unavailable | unavailable | unavailable | unavailable |
+
+The four unavailable related plans fail on both binaries: large-file hunk and
+patch-file plans fail in stock Git with code 128; the line plan fails preparation
+with code 1; the refspec plan's correctness setup rejects a non-fast-forward push.
+They have no publishable timing or RSS series and are left for separate repairs.
+The historical and main harness code for these plans is identical.
+
+Large-blob add is **42.3% faster**, path commits **10.4% faster**, force-with-lease
+push **48.5% faster**, HTTP incremental push **35.9% faster**, and local incremental
+push **35.3% faster**. These are elapsed-time improvements with essentially unchanged
+memory on the changed operations; the original large memory increases did not
+reproduce. Same-size streams deliberately retain hash-first behavior so that a
+stat refresh does not write unchanged objects. Push remains slower than Git;
+corrected deepen, reword, and change-id plans now expose valid baselines for
+future work rather than substituting numbers for the old failed/no-op series.
+
+Separate GNU time runs retain every matching CLI-operation record, including
+warmups, tracing, and correctness checks. These measure the CLI child directly;
+the primary daily helper also includes shell/pipeline launch overhead. GNU time's
+wall time is quantized to 10 ms, so the small path-commit change is resolved by
+the primary measurements rather than the rounded values below. RSS is the maximum
+observed child peak, in KiB; complete GNU time output is retained in the audit.
+
+| GNU time confirmation | Git ms | Grit before ms | Grit after ms | Before RSS KiB | After RSS KiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `add/modified@big-blobs` | 280 | 230 | 130 | 84,988 | 85,352 |
+| `commit/paths@synth-10k` | 30 | 50 | 50 | 22,712 | 24,272 |
+| `push/force-with-lease@git-git` | 160 | 1440 | 750 | 73,836 | 73,928 |
+| `push/incremental-http@git-git` | 90 | 1970 | 1250 | 104,868 | 105,960 |
+| `push/incremental@git-git` | 180 | 2040 | 1330 | 104,640 | 105,872 |
+
+Raw reports: [historical old](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-perf-4744-old.json),
+[historical new](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-perf-4744-new.json),
+[main](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-perf-4744-before.json),
+[fixed](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-perf-4744-after.json),
+and [audit, commit boundaries, confirmations, and GNU time output](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/perf-4744-audit.json).
+The audit also records binary hashes and Criterion samples for
+`send_pack/backdated_want_1000_haves` (17.72 ms after, ten samples).
+
+Library regressions cover one-pass size-changed streaming, stale stat sizes,
+missing objects without a promisor fetch, validation without hashing, two real
+staging passes per path commit, and duplicate/shared want-have frontiers. A new
+system-Git round trip covers SHA-1/SHA-256 and binary CRLF attributes at two large
+file thresholds. Existing scoped-commit/hook, pack/fsck, push flag/lease, and the
+17 HTTP promisor tests pass. The optional external deep-history guard returns
+early without its separate fixture; the new frontier benchmark is self-contained.
+
+Validation remains limited by pre-existing failures. The required full
+`cargo test -p grit-lib -p grit-cli` command fails to compile
+`history_injected_ref_store` (`Signature: From<&str>`); the library-only full
+command also exposes stale `ServeOptions` calls in `serve_upload_pack_inprocess`.
+CLI units report 155 passes and the same command-page ordering failure before
+and after. Library units initially report 2,628 passes, two failures, and three
+ignored; the post-change result and exact failures are recorded in the audit.
+The reset/fsck failure observed after these changes also reproduces in isolation
+on freshly archived, unmodified main. No tests were removed or weakened.
+Workspace clippy, formatting, rustdoc with warnings denied, and the docs content
+check pass. The benchmark utility reports 132 passing units; smoke tests exercise
+the repaired plans and a non-smoke test verifies a requested thirty-run minimum.
+
+Reproduce the five improved scenarios with each frozen release binary and the
+same stock Git, keeping compilation and tests stopped during measurement:
+
+```bash
+cargo build --release -p grit-cli -p grit-utils -p grit-http-server
+for scenario in add/modified@big-blobs commit/paths@synth-10k \
+  push/force-with-lease@git-git push/incremental-http@git-git \
+  push/incremental@git-git; do
+  grit-bench --grit /path/to/frozen/grit --min-runs 10 daily \
+    --only "$scenario" --output "${scenario//\//_}.json"
+done
+cargo bench -p grit-lib --bench pack_frontier --features http-ureq,tracing
+```
+
+For HTTP comparisons, put the same frozen `grit-http-server` first on `PATH` for
+both clients. Historical ten-run reports used a frozen c7cf2c4436 harness with
+its maximum capped at ten; the repaired plans and thirty-run confirmations use
+the corrected runner's `--min-runs` option.
+
 ## Multi-pack-index preparation and clean status (2026-10-26)
 
 Issue [#2064](https://github.com/gitbutlerapp/grit/issues/2064) exposed three MIDX
