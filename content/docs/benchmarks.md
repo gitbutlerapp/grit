@@ -44,8 +44,23 @@ Thirty randomized interleaved samples per tool checked startup-heavy commands:
 JSON log **6.04 → 5.59 ms**, oneline log **5.96 → 5.63 ms**, author-filtered log
 **6.54 → 6.01 ms**, and show **4.06 → 3.39 ms** (medians). Direct RSS checks still
 show about **1 MiB more** for oneline/JSON log. The daily table records similarly
-small memory increases on other short commands. This tradeoff needs maintainer
-review against the requirement that related commands do not regress.
+small memory increases on other short commands. On 2026-10-27 the maintainer
+accepted this deliberate, documented tradeoff for the target's time and memory
+improvements. Removing extra startup pages from generic diff instantiations is a
+separate follow-up: candidates include a non-generic inner function, dynamic
+dispatch for the counting sink, or keeping instantiations out of startup paths.
+This follow-up is separate from relocation-cost work in #4626.
+
+A review recheck on 2026-10-27 rebuilt both original source snapshots on a fresh
+four-logical-CPU AMD EPYC 9V45 VM. With 100 randomized interleaved samples per tool,
+JSON log was **3.650 → 3.625 ms** and author-filtered log with limit 50 was
+**2.819 → 2.806 ms** without a commit graph and **2.914 → 2.901 ms** with one.
+The apparent short-command slowdowns in the adaptive table did not persist.
+A separate 20-sample interleaved target check was **263.9 → 133.8 ms** versus
+Git **75.1 ms**, with direct peak RSS **117.4 → 98.8 MiB** (maximum of five runs).
+The [review recheck](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/log-stat-review-recheck.json)
+retains the raw samples and exact commands. These comparisons each use one VM
+and one sitting; their absolute times are not interchangeable across machines.
 
 Criterion compares the unchanged full-file counter with `line_change_counts` in
 the same process (20 samples): **19.74 → 3.17 ms** for a small edit surrounded by

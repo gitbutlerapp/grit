@@ -1,0 +1,3715 @@
+{
+  "baseline_commit": "f2a97fc88fe49fc0ccba9bfdb7f3b2a4b47a4513",
+  "after_commit": "f3c83c08a9452b042636f1f7432bb82c967acd03",
+  "schema": "grit-log-stat-review-recheck/1",
+  "methodology": "Release binaries from original baseline f2a97fc88 and unchanged branch f3c83c08a; 5 warmups per tool; 100 randomized interleaved samples per tool for short commands, 20 for target; fresh processes; perf_counter_ns; stdout /dev/null; no concurrent builds/tests. Paired Git control. RSS maximum of 5 time -v runs per tool.",
+  "environment": {
+    "cpu": "Architecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           48 bits physical, 48 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  4\nOn-line CPU(s) list:                     0-3\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC 9V45 96-Core Processor\nCPU family:                              26\nModel:                                   2\nThread(s) per core:                      2\nCore(s) per socket:                      2\nSocket(s):                               1\nStepping:                                1\nBogoMIPS:                                5192.24\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology tsc_reliable nonstop_tsc cpuid extd_apicid aperfmperf tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves user_shstk avx_vnni avx512_bf16 clzero xsaveerptr rdpru arat npt nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload avx512vbmi umip avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm avx512_vp2intersect\nVirtualization:                          AMD-V\nHypervisor vendor:                       Microsoft\nVirtualization type:                     full\nL1d cache:                               96 KiB (2 instances)\nL1i cache:                               64 KiB (2 instances)\nL2 cache:                                2 MiB (2 instances)\nL3 cache:                                32 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-3\nVulnerability Gather data sampling:      Not affected\nVulnerability Ghostwrite:                Not affected\nVulnerability Indirect target selection: Not affected\nVulnerability Itlb multihit:             Not affected\nVulnerability L1tf:                      Not affected\nVulnerability Mds:                       Not affected\nVulnerability Meltdown:                  Not affected\nVulnerability Mmio stale data:           Not affected\nVulnerability Old microcode:             Not affected\nVulnerability Reg file data sampling:    Not affected\nVulnerability Retbleed:                  Not affected\nVulnerability Spec rstack overflow:      Vulnerable: Safe RET, no microcode\nVulnerability Spec store bypass:         Vulnerable\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Retpolines; STIBP disabled; RSB filling; PBRSB-eIBRS Not affected; BHI Not affected\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Not affected\nVulnerability Tsx async abort:           Not affected\nVulnerability Vmscape:                   Not affected\n",
+    "git": "git version 2.55.0",
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39"
+  },
+  "scenarios": {
+    "log/json-100@git-git": {
+      "cwd": "/home/runner/.cache/grit-bench/git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "-100",
+          "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%s%x00%b%x00"
+        ],
+        "before": [
+          "/tmp/log-stat-r2-before",
+          "log",
+          "-n",
+          "100",
+          "--json"
+        ],
+        "after": [
+          "/tmp/log-stat-r2-after",
+          "log",
+          "-n",
+          "100",
+          "--json"
+        ]
+      },
+      "execution_orders": [
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ]
+      ],
+      "git": {
+        "median_ms": 2.2986164999999996,
+        "mean_ms": 2.43215364,
+        "samples_ms": [
+          2.349453,
+          4.251244,
+          4.686667,
+          2.271566,
+          2.276693,
+          2.811646,
+          2.299228,
+          2.280309,
+          3.319316,
+          2.585867,
+          2.290604,
+          4.266931,
+          4.440428,
+          2.276373,
+          2.293428,
+          2.286178,
+          2.544004,
+          2.259268,
+          2.391446,
+          2.403243,
+          2.298005,
+          2.312677,
+          2.261941,
+          2.300329,
+          2.25443,
+          2.553559,
+          2.309693,
+          2.28106,
+          2.285096,
+          2.256403,
+          2.292437,
+          2.24773,
+          2.248481,
+          2.232817,
+          2.23391,
+          2.246929,
+          2.28111,
+          2.30798,
+          2.244285,
+          2.231987,
+          2.243985,
+          2.243914,
+          2.250314,
+          2.275742,
+          2.226568,
+          2.28143,
+          2.284516,
+          2.256864,
+          2.275031,
+          2.242482,
+          2.226899,
+          2.222182,
+          2.309283,
+          2.334351,
+          2.488512,
+          2.488732,
+          2.638617,
+          2.413078,
+          2.367739,
+          2.339618,
+          2.265758,
+          2.292367,
+          2.289523,
+          2.363554,
+          2.315662,
+          2.366088,
+          2.449412,
+          2.706243,
+          2.399848,
+          2.343453,
+          2.321731,
+          2.29453,
+          2.305457,
+          2.283664,
+          2.316163,
+          2.315582,
+          2.274841,
+          2.281131,
+          2.319988,
+          2.338887,
+          2.311496,
+          2.351996,
+          2.290785,
+          2.56053,
+          2.672406,
+          2.463003,
+          2.435852,
+          2.333468,
+          2.349723,
+          2.277805,
+          2.279909,
+          2.339678,
+          2.294681,
+          2.2811,
+          2.355812,
+          2.290855,
+          2.284996,
+          2.284705,
+          2.330945,
+          2.907129
+        ],
+        "rss_kib": 12540,
+        "rss_samples_kib": [
+          12512,
+          12396,
+          12540,
+          12492,
+          12456
+        ]
+      },
+      "before": {
+        "median_ms": 3.6500175,
+        "mean_ms": 3.79550917,
+        "samples_ms": [
+          3.745436,
+          3.678295,
+          7.024623,
+          4.173998,
+          3.624544,
+          4.004124,
+          4.562571,
+          3.806557,
+          3.615541,
+          4.115631,
+          5.88908,
+          5.061899,
+          5.785495,
+          3.590764,
+          3.64809,
+          3.622301,
+          3.58177,
+          3.635521,
+          3.884053,
+          3.664684,
+          3.684534,
+          3.59481,
+          3.654609,
+          3.589021,
+          3.634038,
+          3.592847,
+          3.884584,
+          3.719717,
+          3.636032,
+          3.682932,
+          3.570924,
+          3.597704,
+          3.58199,
+          3.595341,
+          3.606197,
+          3.611725,
+          3.618966,
+          3.585335,
+          3.604134,
+          3.614319,
+          3.652376,
+          3.588741,
+          3.546537,
+          3.563833,
+          3.546318,
+          3.545897,
+          3.553187,
+          3.572737,
+          3.569862,
+          3.564645,
+          3.591905,
+          3.591596,
+          3.656242,
+          3.649352,
+          3.712697,
+          4.223518,
+          4.012116,
+          3.73469,
+          3.700368,
+          3.646948,
+          3.615682,
+          3.541039,
+          3.581771,
+          3.602872,
+          3.813689,
+          3.936502,
+          3.866943,
+          3.829582,
+          3.946868,
+          3.762972,
+          3.691235,
+          3.69507,
+          3.637214,
+          3.643784,
+          3.62108,
+          3.60798,
+          3.595811,
+          3.637994,
+          3.936362,
+          3.803683,
+          3.650573,
+          3.719447,
+          3.70164,
+          4.224514,
+          4.109232,
+          3.973037,
+          3.729682,
+          3.6682,
+          3.712737,
+          3.649462,
+          3.675491,
+          3.686928,
+          3.653898,
+          3.667679,
+          3.612877,
+          3.623022,
+          3.680068,
+          3.597093,
+          3.582481,
+          3.666422
+        ],
+        "rss_kib": 22764,
+        "rss_samples_kib": [
+          22732,
+          22764,
+          22616,
+          22584,
+          22492
+        ]
+      },
+      "after": {
+        "median_ms": 3.624875,
+        "mean_ms": 3.79400787,
+        "samples_ms": [
+          3.732887,
+          3.634749,
+          4.749922,
+          3.596292,
+          3.612076,
+          3.602922,
+          4.424344,
+          4.299707,
+          4.346327,
+          4.918134,
+          3.656142,
+          7.021218,
+          7.120606,
+          3.5751,
+          3.599427,
+          3.665707,
+          3.616312,
+          3.655331,
+          3.728039,
+          3.836222,
+          3.669202,
+          3.591264,
+          3.607789,
+          3.598615,
+          3.571515,
+          3.607569,
+          3.680008,
+          3.619898,
+          3.604945,
+          3.601981,
+          3.597093,
+          3.598606,
+          3.572196,
+          3.592968,
+          3.575872,
+          3.579978,
+          3.565235,
+          3.577164,
+          3.55478,
+          3.589382,
+          3.532066,
+          3.604424,
+          3.540839,
+          3.590854,
+          3.612887,
+          3.578946,
+          3.588641,
+          3.574509,
+          3.560398,
+          3.538475,
+          3.633578,
+          3.583764,
+          3.613147,
+          3.70832,
+          3.685676,
+          3.965256,
+          4.227448,
+          3.762812,
+          3.689161,
+          3.644484,
+          3.552557,
+          3.612607,
+          3.585055,
+          3.563513,
+          3.758445,
+          3.687919,
+          3.960117,
+          4.302821,
+          3.977514,
+          3.717544,
+          3.709441,
+          3.63512,
+          3.614369,
+          3.59489,
+          3.60811,
+          3.663393,
+          3.654549,
+          3.604264,
+          3.581049,
+          3.749983,
+          3.636283,
+          4.348951,
+          3.851935,
+          4.026657,
+          3.87532,
+          4.020538,
+          3.756121,
+          3.729892,
+          3.665946,
+          3.61452,
+          3.598055,
+          3.622441,
+          3.631155,
+          3.611936,
+          3.67494,
+          3.62838,
+          3.627309,
+          3.666297,
+          3.598685,
+          4.498957
+        ],
+        "rss_kib": 23104,
+        "rss_samples_kib": [
+          23072,
+          23104,
+          23072,
+          22740,
+          22744
+        ]
+      },
+      "paired_median_delta_95_ci_ms": [
+        -0.026170000000000027,
+        0.0009020000000004025
+      ]
+    },
+    "log/author-n50@deep-history": {
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-no-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--format=%H"
+        ],
+        "before": [
+          "/tmp/log-stat-r2-before",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--json"
+        ],
+        "after": [
+          "/tmp/log-stat-r2-after",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--json"
+        ]
+      },
+      "execution_orders": [
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ]
+      ],
+      "git": {
+        "median_ms": 1.3068095,
+        "mean_ms": 1.31228294,
+        "samples_ms": [
+          1.265187,
+          1.315142,
+          1.323325,
+          1.271787,
+          1.268792,
+          1.273649,
+          1.28699,
+          1.266919,
+          1.287451,
+          1.290075,
+          1.278107,
+          1.269714,
+          1.27389,
+          1.265397,
+          1.290615,
+          1.262483,
+          1.265577,
+          1.357415,
+          1.327661,
+          1.34041,
+          1.315763,
+          1.330205,
+          1.315753,
+          1.342142,
+          1.302713,
+          1.342433,
+          1.343664,
+          1.314991,
+          1.292669,
+          1.305778,
+          1.289163,
+          1.293179,
+          1.28068,
+          1.30039,
+          1.296223,
+          1.297435,
+          1.299088,
+          1.298888,
+          1.313119,
+          1.305297,
+          1.283975,
+          1.311036,
+          1.308251,
+          1.318757,
+          1.54685,
+          1.422683,
+          1.366609,
+          1.350885,
+          1.332317,
+          1.324025,
+          1.330605,
+          1.319689,
+          1.314901,
+          1.353349,
+          1.339759,
+          1.312378,
+          1.310755,
+          1.302723,
+          1.335963,
+          1.436253,
+          1.362553,
+          1.357516,
+          1.339398,
+          1.361031,
+          1.322503,
+          1.297115,
+          1.307841,
+          1.294451,
+          1.288122,
+          1.317055,
+          1.272558,
+          1.282473,
+          1.337406,
+          1.289573,
+          1.268783,
+          1.341261,
+          1.339719,
+          1.284726,
+          1.29369,
+          1.344976,
+          1.287621,
+          1.28701,
+          1.312678,
+          1.32714,
+          1.27366,
+          1.338427,
+          1.331587,
+          1.270465,
+          1.296774,
+          1.272318,
+          1.317035,
+          1.284005,
+          1.282784,
+          1.261462,
+          1.285347,
+          1.272698,
+          1.304196,
+          1.386639,
+          1.325257,
+          1.326519
+        ],
+        "rss_kib": 6664,
+        "rss_samples_kib": [
+          6620,
+          6552,
+          6664,
+          6636,
+          6612
+        ]
+      },
+      "before": {
+        "median_ms": 2.8185960000000003,
+        "mean_ms": 2.83631623,
+        "samples_ms": [
+          2.76843,
+          2.750384,
+          2.746068,
+          2.794049,
+          2.744245,
+          2.758126,
+          2.802973,
+          2.80152,
+          2.893739,
+          2.760279,
+          2.748972,
+          2.769702,
+          2.739748,
+          2.790194,
+          2.927339,
+          2.813578,
+          2.743374,
+          2.846658,
+          2.84132,
+          2.805847,
+          2.809332,
+          2.826407,
+          2.857264,
+          2.819537,
+          2.797735,
+          2.802222,
+          2.912757,
+          2.882522,
+          2.829974,
+          2.784185,
+          2.788261,
+          2.792968,
+          2.878195,
+          2.803213,
+          2.858806,
+          2.888781,
+          2.809422,
+          2.817515,
+          2.792066,
+          2.845997,
+          2.835612,
+          2.810314,
+          2.831555,
+          2.868652,
+          3.497073,
+          3.132596,
+          2.903464,
+          2.936272,
+          2.835882,
+          2.811626,
+          2.818836,
+          2.885056,
+          2.897044,
+          2.822982,
+          2.799979,
+          2.790975,
+          2.793979,
+          2.842662,
+          2.993419,
+          2.899117,
+          2.906968,
+          3.059638,
+          2.973418,
+          2.859858,
+          2.886197,
+          2.90805,
+          2.864465,
+          2.798726,
+          2.818356,
+          2.796182,
+          2.778606,
+          2.828871,
+          2.768451,
+          2.800399,
+          2.838556,
+          2.794851,
+          2.817595,
+          2.837084,
+          2.840579,
+          2.785857,
+          2.819528,
+          2.837654,
+          2.856773,
+          2.82778,
+          2.83417,
+          2.771376,
+          2.805412,
+          2.748481,
+          2.735061,
+          2.871966,
+          2.844956,
+          2.810554,
+          2.787369,
+          2.795412,
+          2.769442,
+          2.789853,
+          2.845907,
+          2.840499,
+          2.836873,
+          2.789051
+        ],
+        "rss_kib": 17624,
+        "rss_samples_kib": [
+          17144,
+          17624,
+          17020,
+          17020,
+          17624
+        ]
+      },
+      "after": {
+        "median_ms": 2.806338,
+        "mean_ms": 2.82835346,
+        "samples_ms": [
+          2.730554,
+          2.730023,
+          2.772257,
+          2.762232,
+          2.784686,
+          2.78776,
+          2.786579,
+          2.802231,
+          2.809543,
+          2.775271,
+          2.72783,
+          2.72094,
+          2.773629,
+          2.745396,
+          2.74764,
+          2.753999,
+          2.738376,
+          2.893088,
+          2.812417,
+          2.795321,
+          2.800929,
+          2.7941,
+          2.855852,
+          2.796964,
+          2.838145,
+          2.877624,
+          2.756153,
+          2.769783,
+          2.823193,
+          2.785015,
+          2.84066,
+          2.844094,
+          2.813719,
+          2.809903,
+          2.847299,
+          2.798215,
+          2.819457,
+          2.86157,
+          2.829863,
+          2.775061,
+          2.873339,
+          2.791255,
+          3.240919,
+          3.078526,
+          3.251545,
+          2.920228,
+          2.955171,
+          2.872386,
+          2.898435,
+          2.799157,
+          2.799968,
+          2.840409,
+          2.82088,
+          2.852277,
+          2.789833,
+          2.842392,
+          2.852397,
+          2.797865,
+          2.822151,
+          2.924585,
+          3.039137,
+          2.893128,
+          2.949092,
+          3.05454,
+          2.898005,
+          2.839758,
+          2.831435,
+          2.800539,
+          2.800408,
+          2.831836,
+          2.802512,
+          2.803133,
+          2.752597,
+          2.794009,
+          2.799317,
+          2.785677,
+          2.768631,
+          2.76784,
+          2.842042,
+          2.768211,
+          2.831866,
+          2.817745,
+          2.844545,
+          2.900278,
+          2.830164,
+          2.773378,
+          2.757255,
+          2.746068,
+          2.769893,
+          2.860409,
+          2.835822,
+          2.823493,
+          2.765025,
+          2.802703,
+          2.76769,
+          2.779628,
+          2.849964,
+          2.825076,
+          2.836082,
+          2.785326
+        ],
+        "rss_kib": 17720,
+        "rss_samples_kib": [
+          17400,
+          17660,
+          17720,
+          17592,
+          17704
+        ]
+      },
+      "paired_median_delta_95_ci_ms": [
+        -0.015854000000000035,
+        -0.001271500000000092
+      ]
+    },
+    "log/author-n50@deep-history-cg": {
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-commit-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--format=%H"
+        ],
+        "before": [
+          "/tmp/log-stat-r2-before",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--json"
+        ],
+        "after": [
+          "/tmp/log-stat-r2-after",
+          "log",
+          "--author=.",
+          "-n",
+          "50",
+          "--json"
+        ]
+      },
+      "execution_orders": [
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ]
+      ],
+      "git": {
+        "median_ms": 1.5460734999999999,
+        "mean_ms": 1.57122755,
+        "samples_ms": [
+          1.55444,
+          1.539668,
+          1.534621,
+          1.536864,
+          1.546078,
+          1.530735,
+          1.585266,
+          1.58074,
+          1.591556,
+          1.542923,
+          1.54057,
+          1.574271,
+          1.559047,
+          1.587721,
+          1.529554,
+          1.615542,
+          1.550605,
+          1.538917,
+          1.565126,
+          1.543545,
+          1.583454,
+          1.602823,
+          1.531256,
+          1.524976,
+          1.56092,
+          1.522733,
+          1.535101,
+          1.572318,
+          1.542323,
+          1.538407,
+          1.609704,
+          1.721381,
+          1.586298,
+          1.591086,
+          1.6239,
+          1.556403,
+          1.54023,
+          1.516994,
+          1.504415,
+          1.512338,
+          1.521531,
+          1.516624,
+          1.514151,
+          1.523074,
+          1.495913,
+          1.503825,
+          1.592728,
+          1.56067,
+          1.555462,
+          1.542213,
+          1.543163,
+          1.743825,
+          1.674791,
+          1.639698,
+          1.719488,
+          1.632748,
+          1.639098,
+          1.631877,
+          1.59417,
+          1.556484,
+          1.565528,
+          1.536263,
+          1.548692,
+          1.540059,
+          1.612848,
+          1.524616,
+          1.54717,
+          1.537596,
+          1.540099,
+          1.607821,
+          1.546069,
+          1.555743,
+          1.576874,
+          1.529664,
+          1.551947,
+          1.528803,
+          1.534972,
+          1.532097,
+          1.530575,
+          1.587971,
+          1.544076,
+          1.522703,
+          1.539919,
+          1.544576,
+          2.495608,
+          1.548121,
+          1.536884,
+          1.550715,
+          1.617785,
+          1.546419,
+          1.619608,
+          1.544766,
+          1.56739,
+          1.539368,
+          1.541862,
+          1.545087,
+          1.533559,
+          1.540469,
+          1.535362,
+          1.546689
+        ],
+        "rss_kib": 9928,
+        "rss_samples_kib": [
+          9928,
+          9860,
+          9800,
+          9856,
+          9804
+        ]
+      },
+      "before": {
+        "median_ms": 2.9135584999999997,
+        "mean_ms": 2.95051501,
+        "samples_ms": [
+          2.962832,
+          2.882622,
+          2.897524,
+          2.975542,
+          2.96129,
+          2.88135,
+          2.890974,
+          2.916623,
+          2.876633,
+          2.884285,
+          2.954099,
+          2.912136,
+          2.956703,
+          2.90139,
+          2.89447,
+          2.881791,
+          2.92077,
+          2.875601,
+          2.870354,
+          2.885176,
+          2.902331,
+          2.940639,
+          2.907769,
+          2.91462,
+          2.913769,
+          2.903864,
+          2.94155,
+          2.897585,
+          2.929362,
+          2.915581,
+          2.962322,
+          3.164695,
+          3.195602,
+          2.996613,
+          3.021391,
+          2.917374,
+          2.820819,
+          2.860379,
+          2.83438,
+          2.822041,
+          2.816944,
+          2.88144,
+          2.928852,
+          2.832747,
+          2.81449,
+          2.865306,
+          2.950123,
+          2.928762,
+          2.895852,
+          2.901551,
+          2.918215,
+          3.218926,
+          3.20771,
+          2.989352,
+          3.109382,
+          3.350334,
+          3.161179,
+          3.052027,
+          2.944364,
+          2.928941,
+          2.940168,
+          2.909693,
+          2.95445,
+          2.870724,
+          2.905667,
+          2.879978,
+          2.911556,
+          2.958566,
+          2.919597,
+          2.862041,
+          2.876122,
+          2.936483,
+          2.879077,
+          2.915872,
+          2.928802,
+          2.911946,
+          2.908541,
+          2.911335,
+          2.8948,
+          2.877624,
+          2.919628,
+          2.944095,
+          2.912067,
+          4.549141,
+          3.006408,
+          2.898035,
+          2.939437,
+          2.917955,
+          2.897204,
+          2.946999,
+          2.919027,
+          2.902272,
+          2.885647,
+          2.913348,
+          2.879037,
+          2.880949,
+          2.942842,
+          2.90769,
+          3.169222,
+          2.926108
+        ],
+        "rss_kib": 19752,
+        "rss_samples_kib": [
+          19684,
+          19596,
+          19752,
+          19324,
+          19684
+        ]
+      },
+      "after": {
+        "median_ms": 2.90132,
+        "mean_ms": 2.95042156,
+        "samples_ms": [
+          2.92085,
+          2.965687,
+          2.890614,
+          2.935702,
+          2.904094,
+          2.902461,
+          2.90812,
+          2.880068,
+          2.88821,
+          2.936302,
+          2.919698,
+          2.996046,
+          2.92112,
+          2.888161,
+          2.939176,
+          2.895852,
+          2.917014,
+          2.934249,
+          2.873969,
+          2.889142,
+          2.878075,
+          2.880869,
+          2.923623,
+          2.872938,
+          2.846809,
+          2.884786,
+          2.901891,
+          2.866608,
+          2.880268,
+          2.871064,
+          2.885426,
+          3.010954,
+          3.102932,
+          3.104625,
+          2.978206,
+          2.927489,
+          2.89442,
+          2.864595,
+          2.840419,
+          2.858466,
+          2.837365,
+          2.877114,
+          2.79441,
+          2.880078,
+          2.840258,
+          2.792597,
+          2.900559,
+          2.868171,
+          2.873379,
+          2.929983,
+          2.94133,
+          2.890864,
+          3.128491,
+          3.147319,
+          3.39479,
+          3.22817,
+          3.143983,
+          3.066518,
+          2.979447,
+          2.945336,
+          2.946228,
+          2.877404,
+          2.959467,
+          2.932096,
+          2.860438,
+          2.859327,
+          2.875912,
+          2.924574,
+          2.900749,
+          3.023418,
+          2.953358,
+          2.93489,
+          2.886989,
+          2.879627,
+          2.870344,
+          2.897465,
+          2.866708,
+          2.869873,
+          2.900378,
+          2.857344,
+          2.872237,
+          2.908271,
+          2.903854,
+          4.545966,
+          3.751726,
+          2.925516,
+          2.906387,
+          2.857995,
+          2.888821,
+          2.897074,
+          2.937575,
+          2.967119,
+          2.897344,
+          2.940358,
+          2.930133,
+          3.151285,
+          2.909773,
+          2.889402,
+          2.957484,
+          2.886087
+        ],
+        "rss_kib": 20092,
+        "rss_samples_kib": [
+          20024,
+          20092,
+          20088,
+          19832,
+          19380
+        ]
+      },
+      "paired_median_delta_95_ci_ms": [
+        -0.02672500000000011,
+        0.004491500000000093
+      ]
+    },
+    "log/stat-n50@git-git": {
+      "cwd": "/home/runner/.cache/grit-bench/git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "--stat",
+          "-n",
+          "50"
+        ],
+        "before": [
+          "/tmp/log-stat-r2-before",
+          "log",
+          "--stat",
+          "-n",
+          "50"
+        ],
+        "after": [
+          "/tmp/log-stat-r2-after",
+          "log",
+          "--stat",
+          "-n",
+          "50"
+        ]
+      },
+      "execution_orders": [
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "after",
+          "before",
+          "git"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ],
+        [
+          "before",
+          "git",
+          "after"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "before",
+          "after",
+          "git"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "after",
+          "before"
+        ],
+        [
+          "git",
+          "before",
+          "after"
+        ],
+        [
+          "after",
+          "git",
+          "before"
+        ]
+      ],
+      "git": {
+        "median_ms": 75.053504,
+        "mean_ms": 75.2284571,
+        "samples_ms": [
+          74.57768,
+          74.098803,
+          73.844061,
+          73.380336,
+          75.448266,
+          75.276188,
+          74.989578,
+          75.032092,
+          81.783974,
+          76.00455,
+          76.93163,
+          75.655957,
+          73.858212,
+          75.074916,
+          74.314836,
+          75.320954,
+          75.872471,
+          75.428946,
+          73.91063,
+          73.765062
+        ],
+        "rss_kib": 36392,
+        "rss_samples_kib": [
+          36264,
+          36392,
+          36248,
+          36200,
+          36380
+        ]
+      },
+      "before": {
+        "median_ms": 263.901766,
+        "mean_ms": 267.2115211,
+        "samples_ms": [
+          261.418627,
+          277.09638,
+          277.56334,
+          263.208501,
+          262.170465,
+          267.468457,
+          258.813482,
+          260.680561,
+          267.438177,
+          264.681509,
+          259.439756,
+          257.57794,
+          285.127782,
+          264.595031,
+          261.326853,
+          259.442502,
+          284.115002,
+          260.925912,
+          272.610752,
+          278.529393
+        ],
+        "rss_kib": 120204,
+        "rss_samples_kib": [
+          107240,
+          108012,
+          110240,
+          111288,
+          120204
+        ]
+      },
+      "after": {
+        "median_ms": 133.768009,
+        "mean_ms": 133.5105441,
+        "samples_ms": [
+          135.251347,
+          130.796499,
+          128.469481,
+          132.292802,
+          135.026821,
+          130.101177,
+          130.837491,
+          134.116837,
+          139.811834,
+          133.419181,
+          129.602279,
+          134.301103,
+          137.568782,
+          130.481939,
+          136.993266,
+          134.987763,
+          132.773033,
+          137.071683,
+          130.327508,
+          135.980056
+        ],
+        "rss_kib": 101124,
+        "rss_samples_kib": [
+          95692,
+          95548,
+          94420,
+          101124,
+          95212
+        ]
+      },
+      "paired_median_delta_95_ci_ms": [
+        -139.825262,
+        -126.85368399999999
+      ]
+    }
+  },
+  "daily_before": {
+    "schema": "grit-daily-bench/1",
+    "generated_at": "2026-10-27T02:50:14.734138135Z",
+    "machine": {
+      "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+      "physical_cores": 2,
+      "logical_cores": 4,
+      "ram_bytes": 16766414848,
+      "os": "linux",
+      "kernel": "Linux 6.17.0-1022-azure",
+      "scratch_filesystem": "ext4",
+      "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+      "cargo_profile": "release"
+    },
+    "tools": {
+      "git": "git version 2.55.0",
+      "grit": "grit 0.5.21",
+      "grit_commit": "81bc746ce2e8913788f4ae27f2a5b977629f1e9e"
+    },
+    "scenarios": [
+      {
+        "id": "log/author-n50@deep-history",
+        "area": "revwalk",
+        "description": "grit log --author=. -n 50 vs git log on deep-history (no commit-graph)",
+        "git": {
+          "median_wall_ms": 1.726853,
+          "peak_rss_bytes": 8175616,
+          "runs": 20,
+          "samples_ms": [
+            1.785,
+            1.711,
+            1.694,
+            1.711,
+            1.692,
+            1.695,
+            1.773,
+            1.773,
+            1.729,
+            1.728,
+            1.762,
+            1.779,
+            1.816,
+            1.78,
+            1.756,
+            1.724,
+            1.697,
+            1.725,
+            1.7,
+            1.715
+          ],
+          "min_ms": 1.691916,
+          "max_ms": 1.816162,
+          "stddev_ms": 0.03738476092329741
+        },
+        "grit": {
+          "median_wall_ms": 3.2268415,
+          "peak_rss_bytes": 18829312,
+          "runs": 20,
+          "samples_ms": [
+            3.324,
+            3.213,
+            3.164,
+            3.207,
+            3.183,
+            3.303,
+            4.167,
+            3.281,
+            3.231,
+            3.207,
+            3.462,
+            3.358,
+            3.336,
+            3.305,
+            3.273,
+            3.223,
+            3.16,
+            3.114,
+            3.199,
+            3.156
+          ],
+          "min_ms": 3.114307,
+          "max_ms": 4.167014999999999,
+          "stddev_ms": 0.22197926840965157
+        },
+        "ratio": 1.8686254707262286,
+        "detail": {
+          "commands": {
+            "git": "git log --author=. -n 50 '--format=%H'",
+            "grit": "grit log --author=. -n 50 --json"
+          },
+          "phases": {
+            "grit": [
+              {
+                "name": "grit.revwalk.setup",
+                "ms": 0.429,
+                "count": 1,
+                "depth": 0
+              },
+              {
+                "name": "grit.repository.open",
+                "ms": 0.272,
+                "count": 1,
+                "depth": 0
+              },
+              {
+                "name": "grit.config.load",
+                "ms": 0.079,
+                "count": 2,
+                "depth": 0
+              },
+              {
+                "name": "grit.pack.index.open",
+                "ms": 0.016,
+                "count": 1,
+                "depth": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "log/author-n50@deep-history-cg",
+        "area": "revwalk",
+        "description": "grit log --author=. -n 50 vs git log on deep-history (commit-graph written)",
+        "git": {
+          "median_wall_ms": 1.9290615,
+          "peak_rss_bytes": 10457088,
+          "runs": 20,
+          "samples_ms": [
+            2.028,
+            2.033,
+            1.914,
+            1.961,
+            1.95,
+            1.93,
+            1.894,
+            1.897,
+            1.902,
+            1.927,
+            1.912,
+            1.982,
+            1.928,
+            1.881,
+            1.882,
+            1.932,
+            1.881,
+            1.981,
+            2.023,
+            2.059
+          ],
+          "min_ms": 1.8806479999999999,
+          "max_ms": 2.059217,
+          "stddev_ms": 0.05558333089818239
+        },
+        "grit": {
+          "median_wall_ms": 3.2345224999999997,
+          "peak_rss_bytes": 20709376,
+          "runs": 20,
+          "samples_ms": [
+            3.479,
+            3.309,
+            3.301,
+            3.156,
+            3.226,
+            3.167,
+            3.197,
+            3.194,
+            3.164,
+            3.21,
+            3.238,
+            3.316,
+            3.171,
+            3.17,
+            3.231,
+            3.284,
+            3.261,
+            3.355,
+            3.531,
+            3.682
+          ],
+          "min_ms": 3.15643,
+          "max_ms": 3.6821979999999996,
+          "stddev_ms": 0.1385742789224286
+        },
+        "ratio": 1.6767337381415781,
+        "detail": {
+          "commands": {
+            "git": "git log --author=. -n 50 '--format=%H'",
+            "grit": "grit log --author=. -n 50 --json"
+          },
+          "phases": {
+            "grit": [
+              {
+                "name": "grit.revwalk.setup",
+                "ms": 0.571,
+                "count": 1,
+                "depth": 0
+              },
+              {
+                "name": "grit.repository.open",
+                "ms": 0.312,
+                "count": 1,
+                "depth": 0
+              },
+              {
+                "name": "grit.config.load",
+                "ms": 0.097,
+                "count": 2,
+                "depth": 0
+              },
+              {
+                "name": "grit.pack.index.open",
+                "ms": 0.016,
+                "count": 1,
+                "depth": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "log/json-100@git-git",
+        "area": "revwalk",
+        "headline": true,
+        "name": "log",
+        "description": "Last 100 commits as JSON vs git log with a verbose --format",
+        "git": {
+          "median_wall_ms": 2.6955695000000004,
+          "peak_rss_bytes": 15167488,
+          "runs": 20,
+          "samples_ms": [
+            2.72,
+            2.719,
+            2.707,
+            2.681,
+            2.706,
+            2.702,
+            2.693,
+            2.676,
+            2.678,
+            2.667,
+            2.713,
+            2.696,
+            2.695,
+            2.69,
+            2.73,
+            2.742,
+            2.673,
+            2.683,
+            2.733,
+            2.683
+          ],
+          "min_ms": 2.6665669999999997,
+          "max_ms": 2.741829,
+          "stddev_ms": 0.021445036885268522
+        },
+        "grit": {
+          "median_wall_ms": 4.0120629999999995,
+          "peak_rss_bytes": 25567232,
+          "runs": 20,
+          "samples_ms": [
+            4.12,
+            4.015,
+            4.074,
+            4.124,
+            4.053,
+            4.003,
+            4.042,
+            4.046,
+            3.997,
+            4.032,
+            4.032,
+            4.004,
+            3.996,
+            4.001,
+            3.982,
+            3.956,
+            3.99,
+            3.97,
+            4.039,
+            4.009
+          ],
+          "min_ms": 3.955508,
+          "max_ms": 4.123981,
+          "stddev_ms": 0.04439650162770647
+        },
+        "ratio": 1.4883915996230106,
+        "detail": {
+          "commands": {
+            "git": "git log -100 '--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%s%x00%b%x00'",
+            "grit": "grit log --limit 100 --json"
+          },
+          "phases": {
+            "grit": [
+              {
+                "name": "grit.repository.open",
+                "ms": 0.259,
+                "count": 1,
+                "depth": 0
+              },
+              {
+                "name": "grit.config.load",
+                "ms": 0.074,
+                "count": 2,
+                "depth": 0
+              },
+              {
+                "name": "grit.pack.index.open",
+                "ms": 0.019,
+                "count": 1,
+                "depth": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "log/stat-n50@git-git",
+        "area": "revwalk",
+        "description": "Last 50 commits with stat: grit log --limit 50 --stat vs git log --stat -50",
+        "git": {
+          "median_wall_ms": 75.769188,
+          "peak_rss_bytes": 39632896,
+          "runs": 9,
+          "samples_ms": [
+            74.283,
+            74.618,
+            76.332,
+            75.42,
+            78.862,
+            75.769,
+            74.87,
+            76.335,
+            82.782
+          ],
+          "min_ms": 74.283292,
+          "max_ms": 82.781775,
+          "stddev_ms": 2.6888970007920747
+        },
+        "grit": {
+          "median_wall_ms": 276.079433,
+          "peak_rss_bytes": 121352192,
+          "runs": 9,
+          "samples_ms": [
+            283.24,
+            284.268,
+            281.924,
+            276.079,
+            269.866,
+            262.126,
+            270.743,
+            263.609,
+            281.423
+          ],
+          "min_ms": 262.126165,
+          "max_ms": 284.26780099999996,
+          "stddev_ms": 8.542408574516267
+        },
+        "ratio": 3.643690004966135,
+        "detail": {
+          "commands": {
+            "git": "git log --stat -50",
+            "grit": "grit log --limit 50 --stat"
+          },
+          "correctness": "the starting state is verified before every timed run",
+          "phases": {
+            "git": [
+              {
+                "name": "diff: setup",
+                "ms": 0.163,
+                "count": 25,
+                "depth": 0
+              },
+              {
+                "name": "diff: write",
+                "ms": 0.069,
+                "count": 25,
+                "depth": 0
+              }
+            ],
+            "grit": [
+              {
+                "name": "grit.diff.tree",
+                "ms": 8.337,
+                "count": 75,
+                "depth": 0
+              },
+              {
+                "name": "grit.repository.open",
+                "ms": 0.32,
+                "count": 1,
+                "depth": 0
+              },
+              {
+                "name": "grit.config.load",
+                "ms": 0.096,
+                "count": 2,
+                "depth": 0
+              },
+              {
+                "name": "grit.pack.index.open",
+                "ms": 0.022,
+                "count": 1,
+                "depth": 0
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "daily_after": {
+    "schema": "grit-daily-bench/1",
+    "generated_at": "2026-10-27T02:49:18.463294341Z",
+    "machine": {
+      "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+      "physical_cores": 2,
+      "logical_cores": 4,
+      "ram_bytes": 16766414848,
+      "os": "linux",
+      "kernel": "Linux 6.17.0-1022-azure",
+      "scratch_filesystem": "ext4",
+      "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+      "cargo_profile": "release"
+    },
+    "tools": {
+      "git": "git version 2.55.0",
+      "grit": "grit 0.5.21",
+      "grit_commit": "81bc746ce2e8913788f4ae27f2a5b977629f1e9e"
+    },
+    "scenarios": [
+      {
+        "id": "log/author-n50@deep-history",
+        "area": "revwalk",
+        "description": "grit log --author=. -n 50 vs git log on deep-history (no commit-graph)",
+        "git": {
+          "median_wall_ms": 1.7057380000000002,
+          "peak_rss_bytes": 8286208,
+          "runs": 20,
+          "samples_ms": [
+            1.758,
+            1.732,
+            1.692,
+            1.691,
+            1.693,
+            1.709,
+            1.679,
+            1.77,
+            1.735,
+            1.719,
+            1.681,
+            1.683,
+            1.672,
+            1.717,
+            1.695,
+            1.724,
+            1.691,
+            1.715,
+            1.705,
+            1.706
+          ],
+          "min_ms": 1.672429,
+          "max_ms": 1.769594,
+          "stddev_ms": 0.025923523717749787
+        },
+        "grit": {
+          "median_wall_ms": 3.1590885,
+          "peak_rss_bytes": 18776064,
+          "runs": 20,
+          "samples_ms": [
+            3.261,
+            3.199,
+            3.187,
+            3.149,
+            3.21,
+            3.178,
+            3.188,
+            3.171,
+            3.135,
+            3.135,
+            3.167,
+            3.09,
+            3.203,
+            3.129,
+            3.133,
+            3.165,
+            3.154,
+            3.104,
+            3.142,
+            3.102
+          ],
+          "min_ms": 3.0904059999999998,
+          "max_ms": 3.261132,
+          "stddev_ms": 0.0416773005513793
+        },
+        "ratio": 1.852036186096575,
+        "detail": {
+          "commands": {
+            "git": "git log --author=. -n 50 '--format=%H'",
+            "grit": "grit log --author=. -n 50 --json"
+          },
+          "phases": {
+            "grit": [
+              {
+                "name": "grit.revwalk.setup",
+                "ms": 0.439,
+                "count": 1,
+                "depth": 0
+              },
+              {
+                "name": "grit.repository.open",
+                "ms": 0.271,
+                "count": 1,
+                "depth": 0
+              },
+              {
+                "name": "grit.config.load",
+                "ms": 0.083,
+                "count": 2,
+                "depth": 0
+              },
+              {
+                "name": "grit.pack.index.open",
+                "ms": 0.017,
+                "count": 1,
+                "depth": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "log/author-n50@deep-history-cg",
+        "area": "revwalk",
+        "description": "grit log --author=. -n 50 vs git log on deep-history (commit-graph written)",
+        "git": {
+          "median_wall_ms": 1.9834905,
+          "peak_rss_bytes": 10534912,
+          "runs": 20,
+          "samples_ms": [
+            2.029,
+            2.037,
+            1.974,
+            1.983,
+            1.989,
+            2.032,
+            2.1,
+            2.09,
+            2.041,
+            2.029,
+            1.979,
+            1.935,
+            1.977,
+            1.981,
+            1.957,
+            1.984,
+            1.969,
+            1.942,
+            1.997,
+            1.977
+          ],
+          "min_ms": 1.935494,
+          "max_ms": 2.09999,
+          "stddev_ms": 0.04428241168356974
+        },
+        "grit": {
+          "median_wall_ms": 3.3222234999999998,
+          "peak_rss_bytes": 20705280,
+          "runs": 20,
+          "samples_ms": [
+            3.453,
+            3.382,
+            3.344,
+            3.259,
+            3.288,
+            3.666,
+            3.403,
+            3.45,
+            3.339,
+            3.333,
+            3.298,
+            3.302,
+            3.352,
+            3.311,
+            3.269,
+            3.27,
+            3.365,
+            3.245,
+            3.262,
+            3.217
+          ],
+          "min_ms": 3.216685,
+          "max_ms": 3.66621,
+          "stddev_ms": 0.10032890256346605
+        },
+        "ratio": 1.6749379439931775,
+        "detail": {
+          "commands": {
+            "git": "git log --author=. -n 50 '--format=%H'",
+            "grit": "grit log --author=. -n 50 --json"
+          },
+          "phases": {
+            "grit": [
+              {
+                "name": "grit.revwalk.setup",
+                "ms": 0.478,
+                "count": 1,
+                "depth": 0
+              },
+              {
+                "name": "grit.repository.open",
+                "ms": 0.277,
+                "count": 1,
+                "depth": 0
+              },
+              {
+                "name": "grit.config.load",
+                "ms": 0.081,
+                "count": 2,
+                "depth": 0
+              },
+              {
+                "name": "grit.pack.index.open",
+                "ms": 0.015,
+                "count": 1,
+                "depth": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "log/json-100@git-git",
+        "area": "revwalk",
+        "headline": true,
+        "name": "log",
+        "description": "Last 100 commits as JSON vs git log with a verbose --format",
+        "git": {
+          "median_wall_ms": 2.691409,
+          "peak_rss_bytes": 15200256,
+          "runs": 20,
+          "samples_ms": [
+            2.714,
+            2.708,
+            2.691,
+            2.652,
+            2.686,
+            2.702,
+            2.74,
+            2.673,
+            2.698,
+            2.711,
+            2.666,
+            2.653,
+            2.681,
+            2.714,
+            2.691,
+            2.641,
+            2.695,
+            2.685,
+            2.697,
+            2.686
+          ],
+          "min_ms": 2.6406229999999997,
+          "max_ms": 2.7404830000000002,
+          "stddev_ms": 0.024048246171471388
+        },
+        "grit": {
+          "median_wall_ms": 3.9866839999999995,
+          "peak_rss_bytes": 25980928,
+          "runs": 20,
+          "samples_ms": [
+            4.082,
+            4.026,
+            3.945,
+            3.918,
+            3.974,
+            4.03,
+            4.018,
+            3.972,
+            3.916,
+            4.004,
+            4.007,
+            3.921,
+            3.971,
+            4.0,
+            3.983,
+            3.996,
+            3.984,
+            3.99,
+            3.989,
+            3.958
+          ],
+          "min_ms": 3.916386,
+          "max_ms": 4.0822519999999995,
+          "stddev_ms": 0.04078608830868292
+        },
+        "ratio": 1.4812627883759024,
+        "detail": {
+          "commands": {
+            "git": "git log -100 '--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%s%x00%b%x00'",
+            "grit": "grit log --limit 100 --json"
+          },
+          "phases": {
+            "grit": [
+              {
+                "name": "grit.repository.open",
+                "ms": 0.301,
+                "count": 1,
+                "depth": 0
+              },
+              {
+                "name": "grit.config.load",
+                "ms": 0.075,
+                "count": 2,
+                "depth": 0
+              },
+              {
+                "name": "grit.pack.index.open",
+                "ms": 0.02,
+                "count": 1,
+                "depth": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "log/stat-n50@git-git",
+        "area": "revwalk",
+        "description": "Last 50 commits with stat: grit log --limit 50 --stat vs git log --stat -50",
+        "git": {
+          "median_wall_ms": 75.755711,
+          "peak_rss_bytes": 39616512,
+          "runs": 15,
+          "samples_ms": [
+            76.552,
+            74.73,
+            76.007,
+            78.406,
+            75.306,
+            75.229,
+            75.902,
+            76.086,
+            73.572,
+            76.508,
+            74.563,
+            74.406,
+            75.756,
+            74.821,
+            76.491
+          ],
+          "min_ms": 73.57185,
+          "max_ms": 78.40606799999999,
+          "stddev_ms": 1.1684612342564156
+        },
+        "grit": {
+          "median_wall_ms": 135.125646,
+          "peak_rss_bytes": 107823104,
+          "runs": 15,
+          "samples_ms": [
+            137.981,
+            134.567,
+            135.029,
+            130.749,
+            134.066,
+            138.519,
+            160.314,
+            140.084,
+            142.031,
+            135.126,
+            135.537,
+            133.058,
+            142.217,
+            134.43,
+            129.651
+          ],
+          "min_ms": 129.651382,
+          "max_ms": 160.314218,
+          "stddev_ms": 7.287378155939046
+        },
+        "ratio": 1.7837024326786397,
+        "detail": {
+          "commands": {
+            "git": "git log --stat -50",
+            "grit": "grit log --limit 50 --stat"
+          },
+          "correctness": "the starting state is verified before every timed run",
+          "phases": {
+            "git": [
+              {
+                "name": "diff: setup",
+                "ms": 0.146,
+                "count": 25,
+                "depth": 0
+              },
+              {
+                "name": "diff: write",
+                "ms": 0.069,
+                "count": 25,
+                "depth": 0
+              }
+            ],
+            "grit": [
+              {
+                "name": "grit.diff.tree",
+                "ms": 7.905,
+                "count": 50,
+                "depth": 0
+              },
+              {
+                "name": "grit.repository.open",
+                "ms": 0.347,
+                "count": 1,
+                "depth": 0
+              },
+              {
+                "name": "grit.config.load",
+                "ms": 0.12,
+                "count": 2,
+                "depth": 0
+              },
+              {
+                "name": "grit.pack.index.open",
+                "ms": 0.026,
+                "count": 1,
+                "depth": 0
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "daily_commit_metadata_note": "Daily tools.grit_commit is the auto-detected checkout tip 81bc746ce, not the frozen binary source. baseline_commit and after_commit above identify the actual source snapshots; only the original code-commit files were temporarily replaced for the before build, then restored. No implementation changes in this review recheck.",
+  "paired_bootstrap": {
+    "resamples": 10000,
+    "seed": 4687,
+    "statistic": "median of within-round (after minus before) wall-time differences",
+    "interval": "percentile 95%; indices 250 and 9749 in sorted 10000 resamples"
+  }
+}
