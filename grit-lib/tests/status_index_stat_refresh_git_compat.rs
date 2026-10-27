@@ -499,6 +499,11 @@ fn status_deep_linear_tree_timing_oracle_once() {
 
     const CHAINS: usize = 150;
     const DEPTH: usize = 10;
+    // Files from an earlier second, as after a checkout a moment ago. Written in the same
+    // second as the index, every entry would stay racy through both status runs: the first
+    // could not persist a non-racy index and the second would legitimately re-hash all files
+    // and rewrite the index, which is what this oracle must not see.
+    let past = filetime::FileTime::from_unix_time(filetime::FileTime::now().unix_seconds() - 10, 0);
     for chain in 0..CHAINS {
         let mut rel = format!("chain{chain:03}");
         for d in 0..DEPTH {
@@ -510,16 +515,20 @@ fn status_deep_linear_tree_timing_oracle_once() {
             fs::create_dir_all(parent).expect("mkdirs");
         }
         fs::write(&abs, format!("line {chain}\n")).expect("write");
+        filetime::set_file_mtime(&abs, past).expect("pin mtime");
     }
     git(repo_root, &["add", "-A"]);
     git(repo_root, &["commit", "-qm", "big"]);
-
     let grit_repo = Repository::open(
         &repo_root.join(".git"),
         &RepositoryOptions::empty().with_work_tree(repo_root),
     )
     .expect("open grit repo");
     let opts = StatusOptions::default();
+    let index_mtime_before = fs::metadata(grit_repo.index_handle().path())
+        .expect("index metadata")
+        .modified()
+        .expect("index mtime");
 
     let first_start = Instant::now();
     let first = status(&grit_repo, &opts, &mut NullProgress, &NeverCancel).expect("first status");
@@ -550,8 +559,11 @@ fn status_deep_linear_tree_timing_oracle_once() {
         second_elapsed <= first_elapsed + Duration::from_millis(5),
         "second status should not regress (first {first_elapsed:?}, second {second_elapsed:?})"
     );
+    // The warm pass can only be markedly faster when the first one had stat refresh
+    // work to do, which it records by rewriting the index.
+    let first_refreshed = index_mtime_after_first != index_mtime_before;
     let instrumented = std::env::var_os("CARGO_LLVM_COV").is_some();
-    if !instrumented && first_elapsed > Duration::from_millis(40) {
+    if first_refreshed && !instrumented && first_elapsed > Duration::from_millis(40) {
         assert!(
             second_elapsed * 2 + Duration::from_millis(5) < first_elapsed,
             "warm deep-tree status should be faster than the first pass (first {first_elapsed:?}, second {second_elapsed:?})"

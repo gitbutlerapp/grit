@@ -617,11 +617,21 @@ fn log_all_ref_updates_modes_match_git() {
     ];
 
     for mode in modes {
-        each_backend_git_oracle(|_, repo| {
+        each_backend_git_oracle(|backend, repo| {
+            // Rewriting the config must keep the reftable extension, or git would treat the
+            // reftable repository (whose `refs/heads` is a stub file) as a files repository.
+            let storage = match backend {
+                Backend::Files => "\trepositoryformatversion = 0\n",
+                Backend::Reftable => "\trepositoryformatversion = 1\n",
+            };
+            let extensions = match backend {
+                Backend::Files => "",
+                Backend::Reftable => "[extensions]\n\trefStorage = reftable\n",
+            };
             write_repo_config(
                 repo.worktree(),
                 &format!(
-                    "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tlogAllRefUpdates = {}\n",
+                    "[core]\n{storage}\tbare = false\n\tlogAllRefUpdates = {}\n{extensions}",
                     mode.key
                 ),
             );

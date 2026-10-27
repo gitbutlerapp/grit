@@ -440,7 +440,7 @@ fn comment_rejects_multiline_and_normalizes_leading_whitespace() {
 }
 
 #[test]
-fn multivar_set_and_unset_last_are_typed_errors() {
+fn multivar_set_is_typed_error_and_unset_last_removes_last_value() {
     let initial = "[remote \"origin\"]\n\turl = a\n\turl = b\n";
     let dir = tempdir().unwrap();
     let path = dir.path().join("cfg");
@@ -453,11 +453,16 @@ fn multivar_set_and_unset_last_are_typed_errors() {
         Error::Config(ConfigError::MultipleValues { .. })
     ));
 
-    let err = cfg.unset_last("remote.origin.url").unwrap_err();
-    assert!(matches!(
-        err,
-        Error::Config(ConfigError::MultipleValues { .. })
-    ));
+    // `unset_last` removes only the last value of a multi-valued key.
+    assert_eq!(cfg.unset_last("remote.origin.url").expect("unset last"), 1);
+    assert_eq!(cfg.count("remote.origin.url").expect("count"), 1);
+    assert_eq!(cfg.get("remote.origin.url").as_deref(), Some("a"));
+    cfg.write().expect("write");
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "[remote \"origin\"]\n\turl = a\n"
+    );
+    assert_git_get_matches(&path, "remote.origin.url", "a", "multivar_unset_last");
 }
 
 #[test]

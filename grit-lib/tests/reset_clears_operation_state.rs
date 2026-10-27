@@ -24,6 +24,9 @@ use grit_lib::repo::Repository;
 use grit_lib::state::{primary_in_progress_operation, resolve_head_for_repository};
 
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";
+/// Fixed git author/committer date so twin repositories (and the stash commits
+/// `merge --autostash` creates) get identical object ids regardless of wall-clock time.
+const GIT_DATE: &str = "1700000000 +0000";
 
 fn test_ident() -> grit_lib::ident::Signature {
     IDENT.parse().expect("IDENT")
@@ -39,6 +42,8 @@ fn git(root: &Path, args: &[&str]) -> String {
         .env("GIT_AUTHOR_EMAIL", "t@example.com")
         .env("GIT_COMMITTER_NAME", "Test")
         .env("GIT_COMMITTER_EMAIL", "t@example.com")
+        .env("GIT_AUTHOR_DATE", GIT_DATE)
+        .env("GIT_COMMITTER_DATE", GIT_DATE)
         .output()
         .expect("git spawn");
     assert!(
@@ -222,6 +227,8 @@ fn grit_reset_matches_git_porcelain_after_conflicted_merge() {
         .env("GIT_AUTHOR_EMAIL", "t@example.com")
         .env("GIT_COMMITTER_NAME", "Test")
         .env("GIT_COMMITTER_EMAIL", "t@example.com")
+        .env("GIT_AUTHOR_DATE", GIT_DATE)
+        .env("GIT_COMMITTER_DATE", GIT_DATE)
         .output()
         .expect("git merge");
     assert!(
@@ -262,6 +269,8 @@ fn merge_autostash_conflict(root: &Path) -> ObjectId {
         .env("GIT_AUTHOR_EMAIL", "t@example.com")
         .env("GIT_COMMITTER_NAME", "Test")
         .env("GIT_COMMITTER_EMAIL", "t@example.com")
+        .env("GIT_AUTHOR_DATE", GIT_DATE)
+        .env("GIT_COMMITTER_DATE", GIT_DATE)
         .output()
         .expect("git merge --autostash");
     assert!(

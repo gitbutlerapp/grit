@@ -192,7 +192,7 @@ fn hard_reset_backward_returns_cancelled_and_stops_deletes_early() {
             .with_ref_storage(RefStorageFormat::Files),
     )
     .expect("init");
-    let _head = seed_many_file_repo(&repo, FILES);
+    let head = seed_many_file_repo(&repo, FILES);
     let first = grit_lib::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim(
         &repo, "HEAD~119",
     )
@@ -213,15 +213,22 @@ fn hard_reset_backward_returns_cancelled_and_stops_deletes_early() {
     );
     let checkout_incs = progress.checkout_incs.load(Ordering::Relaxed);
     assert!(
-        checkout_incs <= 15,
+        (5..=15).contains(&checkout_incs),
         "expected bounded delete progress, saw {checkout_incs} increments"
     );
+    // A cancelled checkout restores the files it already deleted (delete rollback), so the
+    // work tree and HEAD are left exactly as they were before the reset.
     let wt = repo.work_tree().expect("work tree");
     let present = (0..FILES)
         .filter(|i| wt.join(format!("f{i}.txt")).exists())
         .count();
-    assert!(
-        present > 1 && present < FILES,
-        "backward reset should stop deleting early, found {present}/{FILES} files"
+    assert_eq!(
+        present, FILES,
+        "cancelled backward reset must roll back its deletions"
+    );
+    assert_eq!(
+        refs::resolve_ref(repo.git_dir(), "HEAD").expect("HEAD"),
+        head,
+        "cancelled reset must not move HEAD"
     );
 }

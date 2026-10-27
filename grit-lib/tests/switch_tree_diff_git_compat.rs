@@ -1591,7 +1591,7 @@ fn switch_scoped_worktree_diff_limits_metadata_probes() {
 
 #[cfg(unix)]
 #[test]
-fn switch_tracked_deletes_match_git_when_wholesale_dir_removal_fails() {
+fn switch_tracked_deletes_fail_and_roll_back_when_wholesale_dir_removal_fails() {
     use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
 
@@ -1658,7 +1658,11 @@ fn switch_tracked_deletes_match_git_when_wholesale_dir_removal_fails() {
     .expect("open");
     let target_oid =
         ObjectId::from_hex(git(root, &["rev-parse", "target"]).trim()).expect("target oid");
-    switch_repository(
+    let main_head = git(root, &["rev-parse", "HEAD"]);
+    // Git warns and switches anyway, leaving the files it could not unlink. Grit refuses
+    // instead (#1968): the unlink failure is a typed error, and the switch is rolled back
+    // so HEAD, the index and the work tree stay on `main`.
+    let err = switch_repository(
         &grit_repo,
         &SwitchOptions {
             mode: SwitchMode::Existing {
@@ -1671,14 +1675,41 @@ fn switch_tracked_deletes_match_git_when_wholesale_dir_removal_fails() {
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     )
-    .expect("grit switch");
-    let grit_left: Vec<_> = std::fs::read_dir(root.join("d005"))
+    .expect_err("grit switch must fail when tracked deletes cannot be unlinked");
+    match &err {
+        Error::WorktreePathIo {
+            path,
+            operation: grit_lib::error::WorktreePathOperation::Remove,
+            ..
+        } => assert!(path.starts_with("d005/"), "unexpected path {path}"),
+        other => panic!("unexpected error: {other:?}"),
+    }
+    let mut grit_left: Vec<_> = std::fs::read_dir(root.join("d005"))
         .map(|rd| rd.flatten().map(|e| e.file_name()).collect())
         .unwrap_or_default();
+    grit_left.sort();
+    let mut git_left = git_left;
+    git_left.sort();
     assert_eq!(
         git_left, grit_left,
-        "grit must leave the same tracked remnants as git when wholesale removal fails"
+        "neither git nor grit could unlink any of the tracked files"
     );
+    assert_eq!(
+        git(root, &["rev-parse", "HEAD"]),
+        main_head,
+        "HEAD stays on main"
+    );
+    assert_eq!(
+        git(root, &["symbolic-ref", "HEAD"]).trim(),
+        "refs/heads/main"
+    );
+    assert_eq!(git(root, &["status", "--porcelain"]), "");
+
+    let mut restore = std::fs::metadata(root.join("d005"))
+        .expect("meta")
+        .permissions();
+    restore.set_mode(0o755);
+    std::fs::set_permissions(root.join("d005"), restore).expect("restore d005");
 }
 
 fn setup_issue_1160_side_worktree(root: &std::path::Path) {

@@ -164,27 +164,41 @@ fn t1401_head_detached_vs_symbolic_both_backends() {
             "init should leave HEAD symbolic"
         );
 
-        match backend {
-            Backend::Files => write_ref(&git_dir, "HEAD", &oid).expect("detach HEAD"),
-            Backend::Reftable => {
-                fs::write(git_dir.join("HEAD"), format!("{oid}\n")).expect("detach HEAD file");
-            }
-        }
+        // Reftable keeps HEAD in the stack (the `HEAD` file is only a stub), so both
+        // backends detach and reattach through the ref API.
+        write_ref(&git_dir, "HEAD", &oid).expect("detach HEAD");
         assert!(read_head(&git_dir).unwrap().is_none());
         assert_eq!(resolve_ref(&git_dir, "HEAD").unwrap(), oid);
-
-        match backend {
-            Backend::Files => {
-                write_symbolic_ref(&git_dir, "HEAD", "refs/heads/main").expect("reattach HEAD");
-            }
-            Backend::Reftable => {
-                fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("reattach HEAD");
-            }
+        if git_interop_available(backend) {
+            assert_eq!(
+                git(
+                    repo.worktree(),
+                    &["rev-parse", "--symbolic-full-name", "HEAD"]
+                )
+                .trim(),
+                "HEAD",
+                "git must see a detached HEAD"
+            );
         }
+
+        write_symbolic_ref(&git_dir, "HEAD", "refs/heads/main").expect("reattach HEAD");
         assert_eq!(
             read_head(&git_dir).unwrap().as_deref(),
             Some("refs/heads/main")
         );
+        if git_interop_available(backend) {
+            assert_eq!(
+                git(repo.worktree(), &["symbolic-ref", "HEAD"]).trim(),
+                "refs/heads/main"
+            );
+        }
+        if backend == Backend::Reftable {
+            assert_eq!(
+                fs::read_to_string(git_dir.join("HEAD")).unwrap(),
+                "ref: refs/heads/.invalid\n",
+                "reftable HEAD file stays a stub"
+            );
+        }
         eprintln!("ok t1401_head ({})", backend_label(backend));
     });
 }

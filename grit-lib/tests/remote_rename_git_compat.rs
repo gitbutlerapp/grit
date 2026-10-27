@@ -10,10 +10,22 @@ use std::path::{Path, PathBuf};
 
 mod support;
 
-use support::{git_init_reftable_repo, require_reftable_git};
+use support::require_reftable_git;
 
 fn init_repo(root: &Path) {
-    git(root, &["init", "-q", "-b", "main", "."]);
+    init_repo_with(root, &[]);
+}
+
+/// Like [`init_repo`], but the repository uses the reftable ref backend.
+fn init_reftable_repo(root: &Path) {
+    init_repo_with(root, &["--ref-format=reftable"]);
+}
+
+fn init_repo_with(root: &Path, init_args: &[&str]) {
+    let mut args = vec!["init", "-q", "-b", "main"];
+    args.extend_from_slice(init_args);
+    args.push(".");
+    git(root, &args);
     git(root, &["config", "user.email", "t@example.com"]);
     git(root, &["config", "user.name", "Test"]);
     git(root, &["commit", "-q", "--allow-empty", "-m", "one"]);
@@ -134,11 +146,13 @@ fn rename_matches_git_twin_repo_reftable() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let bare = bare_upstream(tmp.path());
-    let grit_root = git_init_reftable_repo("main");
-    let grit_repo = grit_root.path().to_path_buf();
+    // Both twins use reftable so their configs and refs are directly comparable.
+    let grit_repo = tmp.path().join("grit");
     let git_repo = tmp.path().join("git");
+    std::fs::create_dir_all(&grit_repo).unwrap();
     std::fs::create_dir_all(&git_repo).unwrap();
-    init_repo(&git_repo);
+    init_reftable_repo(&grit_repo);
+    init_reftable_repo(&git_repo);
     git(
         &grit_repo,
         &["remote", "add", "origin", bare.to_str().unwrap()],

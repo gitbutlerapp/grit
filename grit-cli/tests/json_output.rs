@@ -2299,6 +2299,11 @@ fn bad_filter_and_missing_revision_errors_are_clean() -> TestResult {
     let repo = scratch.child("repo");
     fs::create_dir_all(&repo)?;
     gs_ok(&repo, &["init", "."]);
+    // `log` on an unborn branch is an error of its own (#1971); give it a commit so the
+    // bad filter is the only failure.
+    fs::write(repo.join("a.txt"), "a\n")?;
+    gs_ok(&repo, &["add", "a.txt"]);
+    gs_ok(&repo, &["commit", "first"]);
 
     let out = gs(&repo, ["--json", "--filter", ".commits[", "log"]);
     assert_eq!(out.status, Some(1), "{}", out.dump());

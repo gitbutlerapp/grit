@@ -17,8 +17,9 @@ use grit_lib::objects::{serialize_tag, set_extra_header, ObjectKind, TagData};
 use grit_lib::porcelain::tag::{verify_tag_by_name, TagError};
 use grit_lib::repo::Repository;
 use grit_lib::tree_sha256::{
-    parse_tree_sha256_tag_headers, verify_tag, SignatureVerdict, TagVerifyOptions, TreeSha256,
-    TREE_SHA256_EXCLUDED_HEADER, TREE_SHA256_HEADER,
+    parse_tree_sha256_tag_headers, verify_tag, MissingSubmodule, MissingSubmoduleReason,
+    SignatureVerdict, TagVerifyOptions, TreeSha256, TREE_SHA256_EXCLUDED_HEADER,
+    TREE_SHA256_HEADER,
 };
 use grit_test_support::git;
 
@@ -1098,7 +1099,9 @@ fn verify_tag_deep_nested_missing_submodule_path_from_root() {
 
     fs::remove_dir_all(root.join("inner/mid/leaf")).expect("remove leaf checkout");
 
-    let err = repo
+    // A missing submodule is reported in the verification result, not as an error, so the
+    // signature verdict is still available to the caller.
+    let verification = repo
         .verify_tag(
             tag_oid,
             &TagVerifyOptions {
@@ -1106,14 +1109,21 @@ fn verify_tag_deep_nested_missing_submodule_path_from_root() {
                 gpg: gpg_config(&repo),
             },
         )
-        .unwrap_err();
-    match err {
-        Error::TreeSha256MissingSubmodules(list) => {
-            assert_eq!(list.len(), 1);
-            assert_eq!(list[0].path, "inner/mid/leaf");
-        }
-        other => panic!("expected missing submodule error, got {other:?}"),
-    }
+        .expect("verify tag with missing nested submodule");
+    assert!(
+        matches!(verification.signature, SignatureVerdict::Good { .. }),
+        "{:?}",
+        verification.signature
+    );
+    assert_eq!(verification.tree_sha256, None);
+    assert_eq!(
+        verification.missing_submodules,
+        vec![MissingSubmodule {
+            path: "inner/mid/leaf".to_owned(),
+            reason: MissingSubmoduleReason::NotCheckedOut,
+        }]
+    );
+    assert!(!verification.is_ok());
 }
 
 #[test]
