@@ -863,14 +863,16 @@ fn build_commit_outcome(
     };
 
     let head_branch_ref = head_branch.as_deref();
-    let oneline_lines = if display.oneline && !display.graph {
-        commits
-            .iter()
-            .map(|c| render_oneline_line(repo, &c.commit, display.decorate, head_branch_ref))
-            .collect::<Result<Vec<_>>>()?
-    } else {
-        Vec::new()
-    };
+    // Markdown lists `--graph --oneline` walks as plain oneline bullets (see `graph_note`).
+    let oneline_lines =
+        if display.oneline && (!display.graph || output_mode == OutputMode::Markdown) {
+            commits
+                .iter()
+                .map(|c| render_oneline_line(repo, &c.commit, display.decorate, head_branch_ref))
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
 
     let graph_note = if display.graph && output_mode == OutputMode::Markdown {
         Some("`--graph` affects human output only; this listing omits graph columns.")

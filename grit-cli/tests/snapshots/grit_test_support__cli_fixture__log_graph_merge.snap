@@ -15,7 +15,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "_`--graph` affects human output only; this listing omits graph columns._\n\n",
+    "stdout": "_`--graph` affects human output only; this listing omits graph columns._\n\n- `71953de merge`\n- `b42cdc2 topic`\n- `4dad34b mainline`\n- `b37bbe8 root`\n- `83352a6 second`\n- `062ca6e first`\n",
     "stderr": ""
   }
 }

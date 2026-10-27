@@ -5,7 +5,7 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "9f2f900 (HEAD -> main, tag: v1) only\n",
+    "stdout": "9f2f900 (HEAD -> main, tag: v1) only\n\n→ more: grit log\n",
     "stderr": ""
   },
   "json": {
@@ -15,7 +15,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "- `9f2f900 (HEAD -> main, tag: v1) only`\n",
+    "stdout": "- `9f2f900 (HEAD -> main, tag: v1) only`\n\nMore history: run `grit log`\n",
     "stderr": ""
   }
 }

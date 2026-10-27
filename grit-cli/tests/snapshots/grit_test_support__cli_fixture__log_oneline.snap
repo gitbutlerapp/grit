@@ -5,7 +5,7 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "c786f16 third\n7c34b35 second\nb9d0d8c first\n",
+    "stdout": "c786f16 third\n7c34b35 second\nb9d0d8c first\n\n→ more: grit log\n",
     "stderr": ""
   },
   "json": {
@@ -15,7 +15,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "- `c786f16 third`\n- `7c34b35 second`\n- `b9d0d8c first`\n",
+    "stdout": "- `c786f16 third`\n- `7c34b35 second`\n- `b9d0d8c first`\n\nMore history: run `grit log`\n",
     "stderr": ""
   }
 }
