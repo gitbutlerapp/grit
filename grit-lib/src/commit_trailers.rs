@@ -26,14 +26,12 @@ fn load_trailer_rules(config: &ConfigSet) -> Vec<TrailerRule> {
     let mut rules: std::collections::BTreeMap<String, TrailerRule> =
         std::collections::BTreeMap::new();
     for e in config.entries() {
-        if !e.key.starts_with("trailer.") {
+        let mut parts = e.key.split('.');
+        let (Some("trailer"), Some(subsection), Some(var)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
             continue;
-        }
-        let parts: Vec<&str> = e.key.split('.').collect();
-        if parts.len() < 3 || parts[0] != "trailer" {
-            continue;
-        }
-        let subsection = parts[1];
+        };
         if RESERVED_TRAILER_SUBSECTIONS.contains(&subsection) {
             continue;
         }
@@ -43,7 +41,7 @@ fn load_trailer_rules(config: &ConfigSet) -> Vec<TrailerRule> {
                 name: subsection.to_string(),
                 key: None,
             });
-        if parts.len() >= 3 && parts[2] == "key" {
+        if var == "key" {
             if let Some(v) = &e.value {
                 rule.key = Some(v.clone());
             }
@@ -62,43 +60,15 @@ fn next_line_start(buf: &[u8], pos: usize) -> usize {
     }
 }
 
+/// Start of the line that ends at `len` (`None` when `len` is 0).
 fn last_line_start(buf: &[u8], len: usize) -> Option<usize> {
-    if len == 0 {
-        return None;
-    }
-    if len == 1 {
-        return Some(0);
-    }
-    let mut i = len - 2;
-    loop {
-        if buf[i] == b'\n' {
-            return Some(i + 1);
-        }
-        if i == 0 {
-            return Some(0);
-        }
-        i -= 1;
-    }
-}
-
-/// Start byte of the last line in `buf[..len]` (Git `last_line`).
-fn last_line_start_bounded(buf: &[u8], len: usize) -> usize {
-    if len == 0 {
-        return 0;
-    }
-    if len == 1 {
-        return 0;
-    }
-    let mut i = len - 2;
-    loop {
-        if buf[i] == b'\n' {
-            return i + 1;
-        }
-        if i == 0 {
-            return 0;
-        }
-        i -= 1;
-    }
+    let before_last_byte = buf.get(..len.checked_sub(1)?)?;
+    Some(
+        before_last_byte
+            .iter()
+            .rposition(|&b| b == b'\n')
+            .map_or(0, |i| i + 1),
+    )
 }
 
 fn is_blank_line_bytes(line: &[u8]) -> bool {
@@ -153,7 +123,7 @@ fn last_line_looks_like_trailer(buf: &[u8], rules: &[TrailerRule]) -> bool {
     if buf.is_empty() {
         return false;
     }
-    let bol = last_line_start_bounded(buf, buf.len());
+    let bol = last_line_start(buf, buf.len()).unwrap_or(0);
     let last = &buf[bol..];
     let mut trim_end = last.len();
     while trim_end > 0 && matches!(last[trim_end - 1], b' ' | b'\t' | b'\r') {
@@ -194,10 +164,6 @@ fn token_matches_rule(token: &[u8], rules: &[TrailerRule]) -> bool {
     false
 }
 
-fn find_end_of_log_message(input: &[u8]) -> usize {
-    input.len()
-}
-
 /// Byte offset where the trailer block starts, or `len` if none (`find_trailer_block_start`).
 fn find_trailer_block_start(buf: &[u8], len: usize, rules: &[TrailerRule]) -> usize {
     // First paragraph (until first blank line) is never part of the trailer block.
@@ -225,99 +191,67 @@ fn find_trailer_block_start(buf: &[u8], len: usize, rules: &[TrailerRule]) -> us
     let mut non_trailer_lines = 0i32;
     let mut possible_continuation_lines = 0i32;
 
-    let mut l = match last_line_start(buf, len) {
-        Some(s) => s,
-        None => return len,
+    let is_trailer_block = |recognized_prefix: bool, trailer_lines: i32, non_trailer_lines: i32| {
+        (recognized_prefix && trailer_lines * 3 >= non_trailer_lines)
+            || (trailer_lines > 0 && non_trailer_lines == 0)
     };
 
-    loop {
+    let mut next = last_line_start(buf, len);
+    while let Some(l) = next {
         if l < end_of_title {
             // Reached the title boundary without an intervening blank line: the post-title content
             // is entirely candidate trailers. Mirror Git's blank-line decision using the same ratio
             // so a trailer block flush against the title (e.g. `subject\n\nSigned-off-by: ...`) is
             // recognized rather than treated as plain body.
-            if !only_spaces {
-                non_trailer_lines += possible_continuation_lines;
-                if recognized_prefix && trailer_lines * 3 >= non_trailer_lines {
-                    return end_of_title;
-                }
-                if trailer_lines > 0 && non_trailer_lines == 0 {
-                    return end_of_title;
-                }
+            if !only_spaces
+                && is_trailer_block(
+                    recognized_prefix,
+                    trailer_lines,
+                    non_trailer_lines + possible_continuation_lines,
+                )
+            {
+                return end_of_title;
             }
             break;
         }
-        let line_end = next_line_start(buf, l).min(len);
-        let line = &buf[l..line_end];
+        next = last_line_start(buf, l);
+        let line = &buf[l..next_line_start(buf, l).min(len)];
 
-        if line.first().is_some_and(|b| *b == b'#') {
+        if line.first() == Some(&b'#') {
             non_trailer_lines += possible_continuation_lines;
             possible_continuation_lines = 0;
-            l = match last_line_start(buf, l) {
-                Some(s) => s,
-                None => break,
-            };
             continue;
         }
 
         if is_blank_line_bytes(line) {
             if only_spaces {
-                l = match last_line_start(buf, l) {
-                    Some(s) => s,
-                    None => break,
-                };
                 continue;
             }
             non_trailer_lines += possible_continuation_lines;
-            if recognized_prefix && trailer_lines * 3 >= non_trailer_lines {
-                return next_line_start(buf, l);
-            }
-            if trailer_lines > 0 && non_trailer_lines == 0 {
-                return next_line_start(buf, l);
-            }
-            return len;
+            return if is_trailer_block(recognized_prefix, trailer_lines, non_trailer_lines) {
+                next_line_start(buf, l)
+            } else {
+                len
+            };
         }
 
         only_spaces = false;
 
+        let indented = line.first().is_some_and(u8::is_ascii_whitespace);
         if line_bytes_starts_with_git_generated(line) {
             trailer_lines += 1;
             possible_continuation_lines = 0;
             recognized_prefix = true;
-            l = match last_line_start(buf, l) {
-                Some(s) => s,
-                None => break,
-            };
-            continue;
-        }
-
-        if let Some(sep_pos) = find_separator_colon(line) {
-            if sep_pos >= 1 && !line.first().is_some_and(|b| b.is_ascii_whitespace()) {
-                trailer_lines += 1;
-                possible_continuation_lines = 0;
-                if !recognized_prefix && token_matches_rule(&line[..sep_pos], rules) {
-                    recognized_prefix = true;
-                }
-                l = match last_line_start(buf, l) {
-                    Some(s) => s,
-                    None => break,
-                };
-                continue;
-            }
-        }
-
-        if line.first().is_some_and(|b| b.is_ascii_whitespace()) {
+        } else if let Some(sep_pos) = find_separator_colon(line).filter(|&p| p >= 1 && !indented) {
+            trailer_lines += 1;
+            possible_continuation_lines = 0;
+            recognized_prefix = recognized_prefix || token_matches_rule(&line[..sep_pos], rules);
+        } else if indented {
             possible_continuation_lines += 1;
         } else {
-            non_trailer_lines += 1;
-            non_trailer_lines += possible_continuation_lines;
+            non_trailer_lines += 1 + possible_continuation_lines;
             possible_continuation_lines = 0;
         }
-
-        l = match last_line_start(buf, l) {
-            Some(s) => s,
-            None => break,
-        };
     }
 
     len
@@ -325,52 +259,38 @@ fn find_trailer_block_start(buf: &[u8], len: usize, rules: &[TrailerRule]) -> us
 
 /// Iterator over raw trailer lines in Git's sense (lines in the trailer block).
 fn trailer_raw_lines<'a>(msg: &'a str, rules: &[TrailerRule]) -> Vec<&'a str> {
-    let bytes = msg.as_bytes();
-    let end = find_end_of_log_message(bytes);
-    let start = find_trailer_block_start(bytes, end, rules);
-    if start >= end {
-        return Vec::new();
-    }
-    let slice = msg.get(start..end).unwrap_or("");
-    slice.lines().collect()
+    let start = find_trailer_block_start(msg.as_bytes(), msg.len(), rules);
+    msg.get(start..).unwrap_or("").lines().collect()
 }
 
-/// Returns 0 = no conforming footer, 1 = footer without matching sob, 2 = sob in footer not last,
-/// 3 = last trailer is sob (matches `has_conforming_footer` in Git when sob is set).
-fn has_conforming_footer_with_sob(msg: &str, sob_line: Option<&str>, rules: &[TrailerRule]) -> u8 {
+/// Where a sign-off line sits relative to the message's trailer block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SignoffFooter {
+    /// The message has no trailer block.
+    NoTrailers,
+    /// The trailer block does not contain the sign-off.
+    Absent,
+    /// The sign-off is in the trailer block but is not its last line.
+    NotLast,
+    /// The last trailer line is the sign-off.
+    Last,
+}
+
+fn signoff_footer(msg: &str, sob_line: &str, rules: &[TrailerRule]) -> SignoffFooter {
     let lines = trailer_raw_lines(msg, rules);
-    if lines.is_empty() {
-        return 0;
+    let sob_prefix = sob_line.strip_suffix('\n').unwrap_or(sob_line);
+    // Prefix match, like Git's `strncmp` against the sign-off line.
+    let last_sob = lines.iter().rposition(|raw| {
+        raw.strip_suffix('\r')
+            .unwrap_or(raw)
+            .starts_with(sob_prefix)
+    });
+    match last_sob {
+        _ if lines.is_empty() => SignoffFooter::NoTrailers,
+        None => SignoffFooter::Absent,
+        Some(idx) if idx + 1 == lines.len() => SignoffFooter::Last,
+        Some(_) => SignoffFooter::NotLast,
     }
-    let Some(sob) = sob_line else {
-        return 1;
-    };
-    let sob_prefix = sob.strip_suffix('\n').unwrap_or(sob);
-    let mut found_sob = 0usize;
-    for (idx, raw) in lines.iter().enumerate() {
-        let raw_trim = raw.strip_suffix('\r').unwrap_or(raw);
-        // Git: `!strncmp(iter.raw, sob->buf, sob->len)` on C strings; equivalent to prefix match.
-        if raw_trim
-            .as_bytes()
-            .get(..sob_prefix.len())
-            .is_some_and(|head| head == sob_prefix.as_bytes())
-        {
-            found_sob = idx + 1;
-        }
-    }
-    let n = lines.len();
-    if found_sob == 0 {
-        return 1;
-    }
-    if found_sob == n {
-        return 3;
-    }
-    2
-}
-
-/// Returns 1 if there is a conforming footer, else 0 (sob unset).
-fn has_conforming_footer_any(msg: &str, rules: &[TrailerRule]) -> bool {
-    !trailer_raw_lines(msg, rules).is_empty()
 }
 
 fn strbuf_complete_line(s: &mut String) {
@@ -383,9 +303,8 @@ fn strbuf_complete_line(s: &mut String) {
 pub fn append_cherry_picked_from_line(msg: &mut String, full_hex: &str, config: &ConfigSet) {
     let rules = load_trailer_rules(config);
     strbuf_complete_line(msg);
-    let body_wo_final_blank_lines = msg.trim_end_matches('\n');
-    let has_footer = has_conforming_footer_any(msg, &rules)
-        || last_line_looks_like_trailer(body_wo_final_blank_lines.as_bytes(), &rules);
+    let has_footer = !trailer_raw_lines(msg, &rules).is_empty()
+        || last_line_looks_like_trailer(msg.trim_end_matches('\n').as_bytes(), &rules);
     if !has_footer {
         msg.push('\n');
     }
@@ -409,51 +328,34 @@ pub fn append_signoff_trailer_with_dedup(
     dedup: bool,
 ) {
     let rules = load_trailer_rules(config);
-    let ignore_footer = 0usize;
     strbuf_complete_line(msg);
 
-    let footer_kind = has_conforming_footer_with_sob(msg, Some(sob_line), &rules);
-
-    let sob_prefix = sob_line.strip_suffix('\n').unwrap_or(sob_line);
-    let msg_core_len = msg.len().saturating_sub(ignore_footer);
-    // Git: if the whole message buffer equals the sob (including final newline), treat as matching.
-    let has_footer = if msg_core_len == sob_line.len()
-        && msg.get(..sob_line.len()).is_some_and(|p| p == sob_line)
-    {
-        3u8
+    // A message that is exactly the sign-off line counts as already signed off.
+    let footer = if msg == sob_line {
+        SignoffFooter::Last
     } else {
-        footer_kind
+        signoff_footer(msg, sob_line, &rules)
     };
 
-    if has_footer == 0 {
-        let body_scan = msg.trim_end_matches('\n');
-        let trailer_tail = last_line_looks_like_trailer(body_scan.as_bytes(), &rules);
-        if !trailer_tail {
-            let len = msg.len().saturating_sub(ignore_footer);
-            let append_newlines: Option<&'static str> = if len == 0 {
-                Some("\n\n")
-            } else if len == 1
-                || msg
-                    .as_bytes()
-                    .get(len - 2)
-                    .copied()
-                    .is_some_and(|b| b != b'\n')
-            {
-                Some("\n")
-            } else {
-                None
-            };
-            if let Some(nl) = append_newlines {
-                let insert_at = msg.len() - ignore_footer;
-                msg.insert_str(insert_at, nl);
-            }
-        }
+    if footer == SignoffFooter::NoTrailers
+        && !last_line_looks_like_trailer(msg.trim_end_matches('\n').as_bytes(), &rules)
+    {
+        let separator = match msg.len() {
+            0 => "\n\n",
+            1 => "\n",
+            n if msg.as_bytes()[n - 2] != b'\n' => "\n",
+            _ => "",
+        };
+        msg.push_str(separator);
     }
 
-    let no_dup_sob = dedup;
-    if has_footer != 3 && (!no_dup_sob || has_footer != 2) {
-        let insert_at = msg.len() - ignore_footer;
-        msg.insert_str(insert_at, sob_prefix);
+    let already_signed = match footer {
+        SignoffFooter::Last => true,
+        SignoffFooter::NotLast => dedup,
+        SignoffFooter::NoTrailers | SignoffFooter::Absent => false,
+    };
+    if !already_signed {
+        msg.push_str(sob_line.strip_suffix('\n').unwrap_or(sob_line));
         msg.push('\n');
     }
 }
