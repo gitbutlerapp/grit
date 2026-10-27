@@ -26,7 +26,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
-    let repo = Repository::discover(None, &RepositoryOptions::empty())?;
+    let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
     let target = resolve_name(&repo, &cli.commit)?;
     let head = head_oid(&repo)?;
     if !is_ancestor(&repo, head, target)? {

@@ -26,8 +26,10 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
 
-    let repo = match Repository::discover(Some(Path::new(&repo_path)), &RepositoryOptions::empty())
-    {
+    let repo = match Repository::discover(
+        Some(Path::new(&repo_path)),
+        &RepositoryOptions::from_process(),
+    ) {
         Ok(r) => r,
         Err(err) => {
             eprintln!("open repository: {err}");

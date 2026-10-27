@@ -19,7 +19,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         grit_lib::error::Error::Message("usage: guide_network <consumer-repo>".to_owned())
     })?;
     let consumer = Path::new(&consumer);
-    let repo = Repository::discover(Some(consumer), &RepositoryOptions::empty())?;
+    let repo = Repository::discover(Some(consumer), &RepositoryOptions::from_process())?;
     let git_dir = repo.git_dir().to_path_buf();
     let work_tree = repo.work_tree().map(|p| p.to_path_buf());
     let config = ConfigSet::load(
@@ -33,7 +33,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
 
     let remote_git_dir =
         resolve_local_remote_git_dir(&remote_info.url, &git_dir, work_tree.as_deref());
-    let remote_repo = Repository::open(&remote_git_dir, &RepositoryOptions::empty())?;
+    let remote_repo = Repository::open(&remote_git_dir, &RepositoryOptions::from_process())?;
     let refs_on_remote = list_refs_from_git_dir(
         &remote_git_dir,
         Some(remote_repo.odb()),

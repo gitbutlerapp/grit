@@ -53,7 +53,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
-    let repo = Repository::discover(None, &RepositoryOptions::empty())?;
+    let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
     let git_dir = repo.git_dir().to_path_buf();
     let config = ConfigSet::load(
         &grit_lib::config::environment::Environment::capture_process(),

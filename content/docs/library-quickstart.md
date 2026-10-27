@@ -45,6 +45,10 @@ Start the project
 
 The first line is the full object id of `HEAD`; the second is the first line of the commit message.
 
+## The environment
+
+The program opens the repository with [`RepositoryOptions::from_process`](rustdoc:grit_lib::config::environment::RepositoryOptions::from_process), which snapshots the process environment (`HOME`, `GIT_*`, Windows `ProgramFiles`) so system and global config apply exactly as they do for `git` and `grit`: `core.autocrlf`, `user.name` and `user.email`, `safe.directory`, `core.excludesFile` and credential helpers. The library itself never reads the process environment. [`RepositoryOptions::empty`](rustdoc:grit_lib::config::environment::RepositoryOptions::empty) is the hermetic alternative for tests: no home directory and no global config. See [Embedding grit-lib](../library/embedding/#matching-git-and-grit-on-user-repositories).
+
 ## Next steps
 
 - [Library guide overview](../library/) — longer-form guides for objects, refs, diff, and network code.

@@ -52,5 +52,5 @@ fn main() -> Result<(), grit_lib::error::Error> {
 }
 
 fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
-    Repository::discover(Some(root), &RepositoryOptions::empty())
+    Repository::discover(Some(root), &RepositoryOptions::from_process())
 }

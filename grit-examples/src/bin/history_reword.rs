@@ -12,7 +12,7 @@ use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use std::path::{Path, PathBuf};
 
 fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
-    Repository::discover(Some(root), &RepositoryOptions::empty())
+    Repository::discover(Some(root), &RepositoryOptions::from_process())
 }
 
 fn main() -> Result<(), grit_lib::error::Error> {

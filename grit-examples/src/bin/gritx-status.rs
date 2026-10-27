@@ -26,7 +26,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let _cli = Cli::parse();
-    let repo = Repository::discover(None, &RepositoryOptions::empty())?;
+    let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
     let index = repo.index_handle().load()?;
     let index_paths: BTreeSet<String> = index
         .entries()

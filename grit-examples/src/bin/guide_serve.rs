@@ -35,7 +35,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (Some(service), Some(path)) = (args.next(), args.next()) else {
         return Err("usage: guide_serve <upload-pack|receive-pack> <repository>".into());
     };
-    let repo = Repository::open(Path::new(&path), &RepositoryOptions::empty().for_serving())?;
+    let repo = Repository::open(
+        Path::new(&path),
+        &RepositoryOptions::from_process().for_serving(),
+    )?;
 
     // The process boundary owns the environment: the library never reads it.
     let protocol = std::env::var("GIT_PROTOCOL")

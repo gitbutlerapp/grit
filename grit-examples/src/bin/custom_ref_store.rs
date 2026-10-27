@@ -15,7 +15,7 @@ use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
 
 fn main() -> grit_lib::error::Result<()> {
-    let repo = Repository::discover(None, &RepositoryOptions::empty())?;
+    let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
     let oid: ObjectId = "0100000000000000000000000000000000000000".parse()?;
 
     let memory = Arc::new(MemoryRefStore::new());

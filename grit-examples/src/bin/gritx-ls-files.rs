@@ -16,7 +16,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let _cli = Cli::parse();
-    let repo = Repository::discover(None, &RepositoryOptions::empty())?;
+    let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
     let index = repo.index_handle().load()?;
     for entry in index.entries() {
         println!("{}", String::from_utf8_lossy(&entry.path));

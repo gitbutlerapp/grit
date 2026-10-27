@@ -20,7 +20,7 @@ fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
     } else {
         None
     };
-    let mut opts = RepositoryOptions::empty();
+    let mut opts = RepositoryOptions::from_process();
     if let Some(wt) = work_tree {
         opts = opts.with_work_tree(wt);
     }

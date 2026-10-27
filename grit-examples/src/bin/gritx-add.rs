@@ -23,7 +23,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
-    let repo = Repository::discover(None, &RepositoryOptions::empty())?;
+    let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
     let mut index = repo.index_handle().load()?;
     for file in cli.files {
         add_path(&repo, &mut index, &file)?;

@@ -29,8 +29,8 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
-    let repo =
-        Repository::discover(None, &RepositoryOptions::empty()).context("not in a repository")?;
+    let repo = Repository::discover(None, &RepositoryOptions::from_process())
+        .context("not in a repository")?;
     let contents = std::fs::read(&cli.file)
         .with_context(|| format!("could not read {}", cli.file.display()))?;
     let oid = repo.odb().write(ObjectKind::Blob, &contents)?;

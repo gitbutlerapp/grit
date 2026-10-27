@@ -9,11 +9,24 @@ Grit is designed to be **linked into other Rust programs**, not only invoked as 
 
 [`Environment`](rustdoc:grit_lib::config::environment::Environment) holds Git discovery and configuration variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_CONFIG_*`, home paths, author/committer overrides, transport trace flags, and related fields). Construct it with:
 
-- `Environment::empty()` — defaults only (`cwd = "."`).
-- [`Environment::from_vars`](rustdoc:grit_lib::config::environment::Environment) — parse an iterator of `(key, value)` pairs plus an explicit working directory (no reads from `std::env` inside the library).
-- `Environment::capture_process()` — **CLI boundary only**: snapshot the current process into an [`Environment`](rustdoc:grit_lib::config::environment::Environment).
+- [`Environment::capture_process`](rustdoc:grit_lib::config::environment::Environment::capture_process) — an explicit snapshot of the calling process (`HOME`, `GIT_*`, Windows `ProgramFiles`, identity variables, …). This is what the `grit` CLI uses, and what a tool working on a user's repositories should use. Call it in your program, never from library code.
+- [`Environment::from_vars`](rustdoc:grit_lib::config::environment::Environment::from_vars) — parse an iterator of `(key, value)` pairs plus an explicit working directory (no reads from `std::env` inside the library).
+- [`Environment::empty`](rustdoc:grit_lib::config::environment::Environment::empty) — no variables at all (`cwd = "."`). There is no home directory, so the global `~/.gitconfig` is not read, and on Windows the Git for Windows system gitconfig cannot be found. On Unix `/etc/gitconfig` still loads unless you set `git_config_nosystem`.
 
 Pass the same `Environment` into `Repository` (`discover` / `open`) and into `ConfigSet` loading.
+
+### Matching `git` and `grit` on user repositories
+
+System and global config decide much of what a repository operation does: `core.autocrlf` (Git for Windows sets it to `true` in its system config), `user.name` / `user.email`, `safe.directory`, `core.excludesFile`, credential helpers. A program that should give the same answers as `git` and `grit` on the user's machine opens repositories with [`RepositoryOptions::from_process`](rustdoc:grit_lib::config::environment::RepositoryOptions::from_process):
+
+```rust
+use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::repo::Repository;
+
+let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
+```
+
+With [`RepositoryOptions::empty`](rustdoc:grit_lib::config::environment::RepositoryOptions::empty) none of that config applies. For example, on Windows `status` then reports CRLF files that `git status` calls clean as modified. Use `empty()` for hermetic work such as tests or a repository your program created itself. The examples on these pages that open your repository use `from_process()`; the ones that create a throwaway repository (`guide_embedding` below, and `guide_index`, `guide_objects` and `guide_replay_conflicts` when run without a path) stay on `empty()`, and `guide_embedding` sets its home directory and disables the system config explicitly.
 
 Clones share the captured variable map, avoiding a copy of every inherited variable during
 repository setup. Typed fields remain independent: changing or clearing an override on a
@@ -34,7 +47,15 @@ Empty snapshots need no allocation for the captured map.
 | `reference_unix_time` | Wall clock for rev-parse date selectors (`@{yesterday}`, etc.) |
 | Test knobs | `test_assume_different_owner`, … |
 
-Use `RepositoryOptions::with_environment` and `with_command_runner` on [`RepositoryOptions`](rustdoc:grit_lib::config::environment::RepositoryOptions); assign `diagnostics` when you need a custom sink.
+Construct options with one of the associated constructors, then chain the builder methods:
+
+| Constructor | Environment |
+| --- | --- |
+| [`RepositoryOptions::from_process()`](rustdoc:grit_lib::config::environment::RepositoryOptions::from_process) | Snapshot of the calling process, like `git` and `grit` |
+| [`RepositoryOptions::with_environment(env)`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_environment) | An [`Environment`](rustdoc:grit_lib::config::environment::Environment) you built |
+| [`RepositoryOptions::empty()`](rustdoc:grit_lib::config::environment::RepositoryOptions::empty) | [`Environment::empty`](rustdoc:grit_lib::config::environment::Environment::empty) |
+
+`with_environment` takes the environment and returns new options, so write `RepositoryOptions::with_environment(env).with_command_runner(runner)`; `RepositoryOptions::empty().with_environment(env)` does not compile. Assign `diagnostics` (or call `with_diagnostics`) when you need a custom sink.
 
 ## DiagnosticSink and ProgressSink
 

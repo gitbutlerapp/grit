@@ -29,7 +29,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
-    let repo = Repository::discover(None, &RepositoryOptions::empty())?;
+    let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
     let tree = cli.tree.parse()?;
     let parents = cli
         .parents

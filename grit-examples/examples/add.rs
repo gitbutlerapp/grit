@@ -5,7 +5,7 @@ use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
 fn main() -> grit_lib::error::Result<()> {
-    let repo = Repository::discover(None, &RepositoryOptions::empty())?;
+    let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
     let outcome = stage(
         &repo,
         &StageOptions {

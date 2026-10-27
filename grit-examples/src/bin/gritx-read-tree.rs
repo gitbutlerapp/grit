@@ -28,7 +28,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
-    let repo = Repository::discover(None, &RepositoryOptions::empty())?;
+    let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
     let oid = resolve_name(&repo, &cli.treeish)?;
     let tree_oid = match repo.odb().read(&oid)?.kind {
         ObjectKind::Commit => commit_tree(&repo, oid)?,

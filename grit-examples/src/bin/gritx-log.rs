@@ -24,7 +24,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
-    let repo = Repository::discover(None, &RepositoryOptions::empty())?;
+    let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
     let mut current = match cli.start {
         Some(name) => resolve_name(&repo, &name)?,
         None => head_oid(&repo)?,
