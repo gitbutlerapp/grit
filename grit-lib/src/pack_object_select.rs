@@ -1073,6 +1073,11 @@ impl<'a> EnumerationWalk<'a> {
             self.push_object(oid, path);
             return;
         };
+        // A tree in a have commit's snapshot is already on the peer, whatever the filter.
+        if self.at_object_boundary(oid) {
+            self.note_boundary(oid);
+            return;
+        }
         let first_walk = if self.depth_sensitive {
             match self.tree_depths.get(&oid) {
                 Some(&walked_at) if walked_at <= depth => false,
