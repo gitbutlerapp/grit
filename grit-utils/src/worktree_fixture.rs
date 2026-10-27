@@ -383,7 +383,7 @@ pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
     use grit_lib::repo::Repository;
 
     let repo = active_worktree_repo();
-    ensure_large_file_committed(git, &repo)?;
+    reset_large_file_index(git, &repo)?;
     modify_large_file_five_hundred_hunks(&repo)?;
     let grit_repo = Repository::discover(Some(&repo), &RepositoryOptions::default())?;
     let pathspec = vec![LARGE_HUNKS_FILE.to_string()];
@@ -447,6 +447,15 @@ fn ensure_large_file_committed(git: &Path, repo: &Path) -> Result<()> {
     fs::write(&path, contents).context("write large.txt")?;
     run_git(git, repo, &["add", LARGE_HUNKS_FILE])?;
     run_git(git, repo, &["commit", "-qm", "add large file"])?;
+    Ok(())
+}
+
+/// Commit `large.txt` if needed and unstage it, so each prepare starts from an index
+/// that matches `HEAD` (the timed `add --hunks` / `--lines` / `--patch-file` run stages
+/// part of the file, which would otherwise leave nothing to select on the next run).
+fn reset_large_file_index(git: &Path, repo: &Path) -> Result<()> {
+    ensure_large_file_committed(git, repo)?;
+    run_git(git, repo, &["reset", "-q", "--", LARGE_HUNKS_FILE])?;
     Ok(())
 }
 
@@ -518,7 +527,7 @@ pub fn prepare_add_lines_large(git: &Path) -> Result<()> {
     use grit_lib::repo::Repository;
 
     let repo = active_worktree_repo();
-    ensure_large_file_committed(git, &repo)?;
+    reset_large_file_index(git, &repo)?;
     modify_large_file_five_hundred_hunks(&repo)?;
     let grit_repo = Repository::discover(Some(&repo), &RepositoryOptions::default())?;
     let pathspec = vec![LARGE_HUNKS_FILE.to_string()];
