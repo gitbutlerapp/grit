@@ -1174,11 +1174,12 @@ fn try_count_diff_via_stored_commit_bitmaps(
 
 /// Count commits reachable from `tips` that are not ancestors of any `hide` tip.
 ///
-/// Traverses through commits filtered out by parent count (Git `rev-list` parent
-/// filters still walk the full graph). Uses the commit-graph when loaded and no
-/// parent or date filters are active.
-/// Unfiltered ranges use generation-ordered hiding and stop at the resolved
-/// frontier rather than materializing ancestor closures.
+/// One two-sided paint marks what `hide` reaches and stops at the common frontier, so the
+/// cost follows the size of the range rather than the depth of history. Parent and date
+/// filters only decide which painted commits are counted: like Git `rev-list`, the walk still
+/// goes through commits they reject. Cheap shortcuts (a first-parent chain down to `hide`,
+/// stored pack bitmaps, a whole-history commit-graph count) run first when commit-graph
+/// generations cannot bound the paint.
 ///
 /// # Errors
 ///
@@ -1198,78 +1199,41 @@ pub fn count_commits_reachable_excluding_ancestors_of(
         && filter.max_parents.is_none()
         && filter.since.is_none()
         && filter.until.is_none();
-    if unfiltered
-        && cache.graph.is_some()
-        && !hide.is_empty()
-        && !filter.first_parent_only
-        && !cache.has_parent_rewrites()?
-    {
-        // Generations resolve the included side without visiting older hidden ancestry.
-        return Ok(
+    // Generations resolve the included side without visiting older hidden ancestry.
+    let generations_bound_paint = cache.graph.is_some() && !cache.has_parent_rewrites()?;
+    if !generations_bound_paint || hide.is_empty() {
+        if let Some(n) = try_count_without_paint(&mut cache, tips, hide, filter, unfiltered)? {
+            return Ok(n);
+        }
+    }
+
+    let paint = match (generations_bound_paint, filter.first_parent_only) {
+        (true, true) => SidePaint::compute_hiding_first_parent(&mut cache, tips, hide)?,
+        (true, false) => {
             SidePaint::compute_hiding(&mut cache, tips, hide, HidePaintStop::TipsResolved)?
-                .count_only(PAINT_LEFT),
-        );
-    }
-
-    let single_relation = if tips.len() == 1 && hide.len() == 1 {
-        let relation = first_parent_chain_relation(&mut cache, tips[0], hide[0]);
-        if matches!(
-            relation,
-            FirstParentRelation::Same | FirstParentRelation::FirstIsAncestor
-        ) {
-            return Ok(0);
         }
-        Some(relation)
-    } else {
-        None
+        (false, _) => SidePaint::compute_hiding(&mut cache, tips, hide, HidePaintStop::Converged)?,
     };
-
-    if unfiltered {
-        if let Some(graph) = &cache.graph {
-            let shallow: HashSet<ObjectId> = cache.shallow_boundaries.iter().copied().collect();
-            if let Some(n) =
-                graph.count_reachable_commits(tips, hide, filter.first_parent_only, &shallow)
-            {
-                return Ok(n);
-            }
-        }
+    if unfiltered && !filter.first_parent_only {
+        return Ok(paint.count_only(PAINT_LEFT));
     }
 
-    // Walking a merge-free chain down to `hide` costs one commit per counted commit, so it
-    // runs before the bitmap probe, which pays for opening and checking the bitmap file.
-    if single_relation == Some(FirstParentRelation::SecondIsAncestor) {
-        if let Some(n) =
-            try_count_on_first_parent_chain_excluding_hide(&mut cache, tips[0], hide[0], filter)?
-        {
-            return Ok(n);
+    // Every commit the tips reach without `hide` is painted left-only, so the filtered walk
+    // tests membership in the paint instead of asking about ancestry per commit. Taking each
+    // entry out of the map doubles as the visited set; unpainted commits are common history.
+    let mut sides = paint.sides;
+    let mut stack = Vec::with_capacity(tips.len());
+    for &tip in tips {
+        if let Some(tip) = try_peel_to_commit_for_merge_base(repo, tip)? {
+            stack.push(tip);
         }
     }
-
-    if tips.len() == 1
-        && hide.len() == 1
-        && filter.min_parents.is_none()
-        && filter.max_parents.is_none()
-        && filter.since.is_none()
-        && filter.until.is_none()
-        && !filter.first_parent_only
-    {
-        if let Some(n) = try_count_diff_via_stored_commit_bitmaps(repo, tips[0], hide[0])? {
-            return Ok(n);
-        }
-    }
-
-    let mut stack: Vec<ObjectId> = tips.to_vec();
-    let mut walked = oid_hash_set();
     let mut count = 0usize;
     while let Some(oid) = stack.pop() {
-        if !walked.insert(oid) {
+        if sides.remove(&oid) != Some(PAINT_LEFT) {
             continue;
         }
-        if commit_is_excluded_from_count(&mut cache, hide, oid)? {
-            // Ancestors of `hide` cannot reach counted commits; do not walk past them.
-            continue;
-        }
-        let parents = cache.parents_of(oid)?;
+        let mut parents = cache.parents_of(oid)?;
         let parent_count = parents.len();
         let time = cache.commit_time(oid)?;
         let in_range = filter.since.is_none_or(|since| time >= since)
@@ -1279,16 +1243,59 @@ pub fn count_commits_reachable_excluding_ancestors_of(
         if in_range && parent_ok {
             count += 1;
         }
-        let parent_iter = if filter.first_parent_only {
-            parents.into_iter().take(1).collect::<Vec<_>>()
-        } else {
-            parents
-        };
-        for parent in parent_iter {
-            stack.push(parent);
+        if filter.first_parent_only {
+            parents.truncate(1);
         }
+        stack.extend(parents);
     }
     Ok(count)
+}
+
+/// Shortcuts for [`count_commits_reachable_excluding_ancestors_of`] that avoid painting, or
+/// `None` when the paint has to run.
+fn try_count_without_paint(
+    cache: &mut CommitGraphCache<'_>,
+    tips: &[ObjectId],
+    hide: &[ObjectId],
+    filter: ReachableCountFilter,
+    unfiltered: bool,
+) -> Result<Option<usize>> {
+    let single = (tips.len() == 1 && hide.len() == 1).then(|| (tips[0], hide[0]));
+    let relation = single.map(|(tip, hide)| first_parent_chain_relation(cache, tip, hide));
+    if matches!(
+        relation,
+        Some(FirstParentRelation::Same | FirstParentRelation::FirstIsAncestor)
+    ) {
+        return Ok(Some(0));
+    }
+
+    // The graph count follows first parents from `hide` too, so it only serves first-parent
+    // walks that hide nothing.
+    if unfiltered && (hide.is_empty() || !filter.first_parent_only) {
+        if let Some(graph) = &cache.graph {
+            let shallow: HashSet<ObjectId> = cache.shallow_boundaries.iter().copied().collect();
+            if let Some(n) =
+                graph.count_reachable_commits(tips, hide, filter.first_parent_only, &shallow)
+            {
+                return Ok(Some(n));
+            }
+        }
+    }
+
+    let Some((tip, hide)) = single else {
+        return Ok(None);
+    };
+    // Walking a merge-free chain down to `hide` costs one commit per counted commit, so it
+    // runs before the bitmap probe, which pays for opening and checking the bitmap file.
+    if relation == Some(FirstParentRelation::SecondIsAncestor) {
+        if let Some(n) = try_count_on_first_parent_chain_excluding_hide(cache, tip, hide, filter)? {
+            return Ok(Some(n));
+        }
+    }
+    if unfiltered && !filter.first_parent_only {
+        return try_count_diff_via_stored_commit_bitmaps(cache.repo, tip, hide);
+    }
+    Ok(None)
 }
 
 /// Like [`first_parent_commits_with_cutoffs`] but only when every visited commit has at most
@@ -1391,37 +1398,6 @@ fn try_count_on_first_parent_chain_excluding_hide(
         cur = first_parent_oid(cache, cur)?;
     }
     Ok(Some(count))
-}
-
-fn commit_is_excluded_from_count(
-    cache: &mut CommitGraphCache<'_>,
-    hide: &[ObjectId],
-    oid: ObjectId,
-) -> Result<bool> {
-    if hide.len() == 1 {
-        let hide_tip = hide[0];
-        match first_parent_chain_relation(cache, oid, hide_tip) {
-            FirstParentRelation::Same | FirstParentRelation::FirstIsAncestor => return Ok(true),
-            FirstParentRelation::SecondIsAncestor => return Ok(false),
-            FirstParentRelation::Unrelated => {}
-        }
-        if cache.is_ancestor(oid, hide_tip)? {
-            return Ok(true);
-        }
-        if cache.is_ancestor(hide_tip, oid)? {
-            return Ok(false);
-        }
-        return Ok(false);
-    }
-    if hide.contains(&oid) {
-        return Ok(true);
-    }
-    for &hide_tip in hide {
-        if cache.is_ancestor(oid, hide_tip)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 /// `commits_reachable_excluding_ancestors_of` function.
@@ -1633,6 +1609,23 @@ pub(crate) mod intersect_walk_test_hooks {
 
     pub(crate) fn record_commit_parent_lookup() {
         COMMIT_PARENT_LOOKUPS.with(|c| c.set(c.get().saturating_add(1)));
+    }
+
+    thread_local! {
+        /// Parent reads including cache hits: repeated walks over cached commits show here.
+        static COMMIT_PARENT_QUERIES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub fn reset_commit_parent_queries() {
+        COMMIT_PARENT_QUERIES.with(|c| c.set(0));
+    }
+
+    pub fn commit_parent_queries() -> usize {
+        COMMIT_PARENT_QUERIES.with(|c| c.get())
+    }
+
+    pub(crate) fn record_commit_parent_query() {
+        COMMIT_PARENT_QUERIES.with(|c| c.set(c.get().saturating_add(1)));
     }
 }
 
@@ -1916,6 +1909,28 @@ impl SidePaint {
         Self::paint(cache, tips, hide, walk)
     }
 
+    /// [`Self::compute_hiding`] with [`HidePaintStop::TipsResolved`] for a `--first-parent`
+    /// walk: the left side follows only first parents, while `hide` still hides everything it
+    /// reaches through any parent, as in Git. Only commits on the tips' first-parent chains are
+    /// painted left, so the walk ends where those chains meet hidden history.
+    ///
+    /// # Errors
+    ///
+    /// Propagates commit read and parse errors for commits not reached from `hide`.
+    fn compute_hiding_first_parent(
+        cache: &mut CommitGraphCache<'_>,
+        tips: &[ObjectId],
+        hide: &[ObjectId],
+    ) -> Result<Self> {
+        let walk = PaintWalk {
+            skip_missing_right: true,
+            open_while_left_only: true,
+            left_first_parent_only: true,
+            ..PaintWalk::default()
+        };
+        Self::paint(cache, tips, hide, walk)
+    }
+
     fn paint(
         cache: &mut CommitGraphCache<'_>,
         left: &[ObjectId],
@@ -1951,7 +1966,12 @@ impl SidePaint {
                         .map_or(node.committed_at, |floor| floor.min(node.committed_at)),
                 );
             }
-            for parent in cache.parents_of(node.oid)? {
+            for (i, parent) in cache.parents_of(node.oid)?.into_iter().enumerate() {
+                let side = if i > 0 && walk.left_first_parent_only {
+                    side & PAINT_RIGHT
+                } else {
+                    side
+                };
                 walk.mark(cache, parent, side)?;
             }
         }
@@ -2008,6 +2028,8 @@ struct PaintWalk {
     /// Oldest committer date among commits without a generation popped while the left side
     /// alone reached them.
     left_floor: Option<i64>,
+    /// Pass the left paint to first parents only ([`SidePaint::compute_hiding_first_parent`]).
+    left_first_parent_only: bool,
 }
 
 /// Commits a [`HidePaintStop::TipsResolvedDateSlop`] paint pops past its date guard, so a hide
@@ -2434,6 +2456,8 @@ impl<'r> CommitGraphCache<'r> {
     }
 
     fn parents_of(&mut self, oid: ObjectId) -> Result<Vec<ObjectId>> {
+        #[cfg(test)]
+        intersect_walk_test_hooks::record_commit_parent_query();
         if let Some(parents) = self.with_linkage(|link| link.parents.get(&oid).cloned()) {
             return Ok(parents);
         }
@@ -3571,6 +3595,131 @@ mod tests {
             count_commits_reachable_excluding_ancestors_of(&repo, &[tip], &[old], since)?,
             100
         );
+        Ok(())
+    }
+
+    /// Trunk of `len` merges, each bringing in one side commit. Most side commits fork from the
+    /// previous trunk commit; every seventh forks 30 merges back, so it sits off the first-parent
+    /// chain of the trunk commit it is merged into. Side commit `i` is dated `10 * i`, merge `i`
+    /// `10 * i + 5`. Returns the trunk (index 0 is the root).
+    fn write_merge_trunk(repo: &Repository, len: usize) -> Result<Vec<ObjectId>> {
+        let odb = repo.odb();
+        let mut trunk = vec![write_commit_same_time(&odb, &[], "t0", 0)?];
+        for i in 1..len {
+            let base = if i % 7 == 0 && i > 30 {
+                trunk[i - 30]
+            } else {
+                trunk[i - 1]
+            };
+            let side = write_commit_same_time(&odb, &[base], &format!("s{i}"), 10 * i as i64)?;
+            trunk.push(write_commit_same_time(
+                &odb,
+                &[trunk[i - 1], side],
+                &format!("t{i}"),
+                10 * i as i64 + 5,
+            )?);
+        }
+        Ok(trunk)
+    }
+
+    #[test]
+    fn count_excluding_ancestors_on_merge_heavy_range_is_linear() -> Result<()> {
+        use super::intersect_walk_test_hooks::{
+            commit_parent_lookups, commit_parent_queries, reset_commit_parent_lookups,
+            reset_commit_parent_queries,
+        };
+
+        const LEN: usize = 1600;
+        const OLD: usize = 600;
+        const RANGE: usize = 2 * (LEN - 1 - OLD);
+
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let trunk = write_merge_trunk(&repo, LEN)?;
+        let tip = trunk[LEN - 1];
+        let old = trunk[OLD];
+        let merges_in_range = LEN - 1 - OLD;
+        let newest_ten = 10 * (LEN - 10) as i64;
+        let oldest_ten = 10 * (OLD + 10) as i64 + 5;
+        let cases = [
+            (ReachableCountFilter::default(), RANGE),
+            (
+                ReachableCountFilter {
+                    first_parent_only: true,
+                    ..ReachableCountFilter::default()
+                },
+                merges_in_range,
+            ),
+            (
+                ReachableCountFilter {
+                    min_parents: Some(2),
+                    ..ReachableCountFilter::default()
+                },
+                merges_in_range,
+            ),
+            (
+                ReachableCountFilter {
+                    max_parents: Some(1),
+                    ..ReachableCountFilter::default()
+                },
+                merges_in_range,
+            ),
+            (
+                ReachableCountFilter {
+                    since: Some(newest_ten),
+                    ..ReachableCountFilter::default()
+                },
+                20,
+            ),
+            (
+                ReachableCountFilter {
+                    until: Some(oldest_ten),
+                    ..ReachableCountFilter::default()
+                },
+                20,
+            ),
+            (
+                ReachableCountFilter {
+                    since: Some(newest_ten),
+                    first_parent_only: true,
+                    ..ReachableCountFilter::default()
+                },
+                10,
+            ),
+        ];
+
+        let listed = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[old], None)?;
+        assert_eq!(listed.len(), RANGE);
+
+        for with_graph in [false, true] {
+            if with_graph {
+                std::fs::write(repo.git_dir().join("refs/heads/main"), format!("{tip}\n"))?;
+                crate::maintenance::write_commit_graph(
+                    &repo,
+                    &crate::maintenance::CommitGraphOptions::default(),
+                )?;
+            }
+            for (filter, expected) in cases {
+                clear_commit_linkage(&repo);
+                reset_commit_parent_lookups();
+                reset_commit_parent_queries();
+                assert_eq!(
+                    count_commits_reachable_excluding_ancestors_of(&repo, &[tip], &[old], filter)?,
+                    expected,
+                    "{filter:?}, commit-graph: {with_graph}"
+                );
+                let (lookups, queries) = (commit_parent_lookups(), commit_parent_queries());
+                assert!(
+                    lookups <= RANGE + 200 && queries <= 4 * RANGE,
+                    "counting must walk the range once, not re-check ancestry per commit \
+                     ({filter:?}, commit-graph: {with_graph}, lookups {lookups}, queries {queries})"
+                );
+                assert_eq!(
+                    count_commits_reachable_excluding_ancestors_of(&repo, &[old], &[tip], filter)?,
+                    0
+                );
+            }
+        }
         Ok(())
     }
 

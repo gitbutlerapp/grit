@@ -655,6 +655,147 @@ fn since_skew_bounded_limit_match_git() {
     );
 }
 
+/// Merge-heavy history: every trunk commit merges one side commit, some forked from well
+/// before `refs/tags/old`, one dated an hour before its parent. `refs/heads/elsewhere` merges
+/// the trunk in as a second parent.
+fn build_merge_heavy_history(wt: &Path) {
+    let at = |t: i64| format!("@{t} +0000");
+    let root =
+        support::commit_labeled_with_dates(wt, "t0", &[], &at(1_700_000_000), &at(1_700_000_000));
+    let mut trunk = vec![root];
+    for i in 1..40usize {
+        let base = if i % 5 == 0 && i > 12 {
+            trunk[i - 12]
+        } else {
+            trunk[i - 1]
+        };
+        let t = 1_700_000_000 + 10_000 * i as i64;
+        let side_time = if i == 23 { t - 13_600 } else { t };
+        let side = support::commit_labeled_with_dates(
+            wt,
+            &format!("s{i}"),
+            &[base],
+            &at(side_time),
+            &at(side_time),
+        );
+        if i == 30 {
+            git(wt, &["update-ref", "refs/heads/topic", &side.to_hex()]);
+        }
+        let merge = support::commit_labeled_with_dates(
+            wt,
+            &format!("t{i}"),
+            &[trunk[i - 1], side],
+            &at(t + 5_000),
+            &at(t + 5_000),
+        );
+        trunk.push(merge);
+    }
+    // Hides trunk[20] through its second parent only.
+    let fork = support::commit_labeled_with_dates(
+        wt,
+        "x",
+        &[root],
+        &at(1_700_000_001),
+        &at(1_700_000_001),
+    );
+    let elsewhere = support::commit_labeled_with_dates(
+        wt,
+        "elsewhere",
+        &[fork, trunk[20]],
+        &at(1_700_500_000),
+        &at(1_700_500_000),
+    );
+    git(
+        wt,
+        &["update-ref", "refs/heads/elsewhere", &elsewhere.to_hex()],
+    );
+    git(wt, &["update-ref", "refs/tags/old", &trunk[15].to_hex()]);
+    git(wt, &["update-ref", "refs/heads/main", &trunk[39].to_hex()]);
+}
+
+#[test]
+fn merge_heavy_range_counts_match_git_with_filters() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    build_merge_heavy_history(wt);
+
+    let since = 1_700_000_000 + 10_000 * 30;
+    let until = 1_700_000_000 + 10_000 * 22;
+    let cases: Vec<(Vec<String>, RevWalkListOptions)> = vec![
+        (vec![], RevWalkListOptions::default()),
+        (
+            vec!["--first-parent".into()],
+            RevWalkListOptions {
+                first_parent: true,
+                ..RevWalkListOptions::default()
+            },
+        ),
+        (
+            vec!["--merges".into()],
+            RevWalkListOptions {
+                merges: MergeFilter::OnlyMerges,
+                ..RevWalkListOptions::default()
+            },
+        ),
+        (
+            vec!["--no-merges".into()],
+            RevWalkListOptions {
+                merges: MergeFilter::NoMerges,
+                ..RevWalkListOptions::default()
+            },
+        ),
+        (
+            vec![format!("--since={since}")],
+            RevWalkListOptions {
+                since: Some(since),
+                ..RevWalkListOptions::default()
+            },
+        ),
+        (
+            vec![format!("--until={until}")],
+            RevWalkListOptions {
+                until: Some(until),
+                ..RevWalkListOptions::default()
+            },
+        ),
+        (
+            vec![format!("--since={since}"), "--first-parent".into()],
+            RevWalkListOptions {
+                since: Some(since),
+                first_parent: true,
+                ..RevWalkListOptions::default()
+            },
+        ),
+    ];
+
+    for with_graph in [false, true] {
+        if with_graph {
+            git_commit_graph_write(wt);
+        }
+        let repo = open_grit(wt);
+        for (flags, opts) in &cases {
+            for range in ["old..main", "topic..main", "main..topic", "elsewhere..main"] {
+                let mut args: Vec<&str> = flags.iter().map(String::as_str).collect();
+                args.push(range);
+                assert_eq!(
+                    grit_rev_list_count(&repo, &[range], opts),
+                    git_rev_list_count(wt, &args),
+                    "{args:?}, commit-graph: {with_graph}"
+                );
+            }
+            let mut args: Vec<&str> = flags.iter().map(String::as_str).collect();
+            args.push("old...topic");
+            assert_eq!(
+                repo.rev_walk()
+                    .left_right_counts(&["old...topic"], opts)
+                    .expect("left/right counts"),
+                git_rev_list_left_right_count(wt, &args),
+                "{args:?}, commit-graph: {with_graph}"
+            );
+        }
+    }
+}
+
 #[test]
 fn left_right_counts_match_git_rev_list_left_right_count() {
     let hist = HistoryRepo::init();
