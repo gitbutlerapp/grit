@@ -1,4 +1,4 @@
-//! Compare `blame_file` attributions with `git blame --porcelain`.
+//! Compare `blame_file` attributions with `git blame --line-porcelain`.
 
 use std::path::Path;
 use std::process::Command;
@@ -50,22 +50,28 @@ struct PorcelainLine {
     final_line: usize,
     commit: ObjectId,
     original_line: usize,
+    original_path: String,
 }
 
 fn parse_git_blame_porcelain(output: &str) -> Vec<PorcelainLine> {
     let mut lines = Vec::new();
     let mut group: Option<(ObjectId, usize, usize)> = None;
+    let mut filename = String::new();
     for raw in output.lines() {
+        if let Some(path) = raw.strip_prefix("filename ") {
+            filename = path.to_owned();
+            continue;
+        }
         if raw.starts_with('\t') {
-            let Some((commit, orig, final_line)) = group else {
+            let Some((commit, orig, final_line)) = group.take() else {
                 continue;
             };
             lines.push(PorcelainLine {
                 final_line,
                 commit,
                 original_line: orig,
+                original_path: filename.clone(),
             });
-            group = Some((commit, orig + 1, final_line + 1));
             continue;
         }
         let mut parts = raw.split_whitespace();
@@ -82,9 +88,6 @@ fn parse_git_blame_porcelain(output: &str) -> Vec<PorcelainLine> {
             continue;
         };
         let Some(final_s) = parts.next() else {
-            continue;
-        };
-        let Some(_count_s) = parts.next() else {
             continue;
         };
         let Ok(orig) = orig_s.parse::<usize>() else {
@@ -106,7 +109,7 @@ fn git_blame(
     line_range: Option<(usize, usize)>,
 ) -> Vec<PorcelainLine> {
     let range_spec = line_range.map(|(start, end)| format!("{start},{end}"));
-    let mut args: Vec<&str> = vec!["blame", "--porcelain"];
+    let mut args: Vec<&str> = vec!["blame", "--line-porcelain"];
     if let Some(spec) = &range_spec {
         args.push("-L");
         args.push(spec);
@@ -143,6 +146,7 @@ fn grit_blame(
             final_line: line.final_line,
             commit: line.commit,
             original_line: line.original_line,
+            original_path: line.original_path,
         })
         .collect();
     out.sort_by_key(|l| l.final_line);
@@ -168,6 +172,7 @@ fn assert_blame_matches(
         grit_lines.len(),
         "line count mismatch for rev={rev:?} range={range:?}"
     );
+    let mut source_line_counts = std::collections::HashMap::new();
     for (g, r) in git_lines.iter().zip(grit_lines.iter()) {
         assert_eq!(g.final_line, r.final_line, "final line");
         assert_eq!(g.commit, r.commit, "commit oid at line {}", g.final_line);
@@ -175,6 +180,24 @@ fn assert_blame_matches(
             g.original_line, r.original_line,
             "original line at final {}",
             g.final_line
+        );
+        assert_eq!(
+            g.original_path, r.original_path,
+            "original path at final {}",
+            g.final_line
+        );
+        let source_line_count = source_line_counts
+            .entry((r.commit, &r.original_path))
+            .or_insert_with(|| {
+                git_output(dir, &["show", &format!("{}:{}", r.commit, r.original_path)])
+                    .lines()
+                    .count()
+            });
+        assert!(
+            (1..=*source_line_count).contains(&r.original_line),
+            "original line must exist in {}:{}",
+            r.commit,
+            r.original_path
         );
     }
 }
@@ -1644,6 +1667,18 @@ fn blame_subtree_merge_vendor_prefix_matches_git() {
     git_run(&lib, &["add", "app.sh"]);
     git_run(&lib, &["commit", "-qam", "lib: bob adds line"]);
 
+    git_run(&lib, &["mv", "app.sh", "renamed.sh"]);
+    std::fs::write(
+        lib.join("renamed.sh"),
+        "a1\na2\nchanged middle\na3\nb4 by bob\n",
+    )
+    .unwrap();
+    git_run(&lib, &["add", "-A"]);
+    git_run(
+        &lib,
+        &["commit", "-qm", "lib: rename and insert middle line"],
+    );
+
     git_run(&proj, &["init", "-q", "-b", "main"]);
     git_run(&proj, &["config", "user.name", "Blame Test"]);
     git_run(&proj, &["config", "user.email", "blame@example.com"]);
@@ -1669,7 +1704,10 @@ fn blame_subtree_merge_vendor_prefix_matches_git() {
     git_run(&proj, &["commit", "-qm", "Merge lib as subtree"]);
 
     let repo = Repository::discover(Some(&proj), &RepositoryOptions::empty()).expect("open");
-    assert_blame_matches(&repo, &proj, "vendor/app.sh", None, None);
+    for range in [None, Some((1, 2)), Some((4, 5)), Some((1, 5))] {
+        assert_blame_matches(&repo, &proj, "vendor/renamed.sh", None, range);
+    }
+    git_run(&proj, &["fsck", "--strict"]);
 }
 
 /// One merge parent has the blamed path; another carries the same result bytes under a renamed path.
@@ -1827,7 +1865,7 @@ fn blame_copy_matching_preserves_final_newline() {
             git_run(root, &["commit", "-qm", "copy"]);
             let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
             for ignore_space in [false, true] {
-                let mut args = vec!["blame", "--porcelain", "-C", "-C", "-C"];
+                let mut args = vec!["blame", "--line-porcelain", "-C", "-C", "-C"];
                 if ignore_space {
                     args.push("-w");
                 }
@@ -1854,6 +1892,7 @@ fn blame_copy_matching_preserves_final_newline() {
                         commit: line.commit,
                         final_line: line.final_line,
                         original_line: line.original_line,
+                        original_path: line.original_path.clone(),
                     })
                     .collect();
                 assert_eq!(lines, oracle, "existing={existing_target} endings={source_ending:?}/{target_ending:?} -w={ignore_space}");

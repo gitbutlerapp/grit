@@ -1,4 +1,4 @@
-//! Compare `BlameResult::hunks()` and `original_path` with `git blame --porcelain`.
+//! Compare `BlameResult::hunks()` and `original_path` with `git blame --line-porcelain`.
 
 use std::path::Path;
 use std::process::Command;
@@ -74,16 +74,11 @@ fn flush_porcelain_hunk(
 fn parse_git_blame_porcelain_hunks(output: &str) -> Vec<PorcelainHunk> {
     let mut hunks = Vec::new();
     let mut pending: Option<(ObjectId, usize, usize, usize)> = None;
-    let mut last_filename: Option<String> = None;
     for raw in output.lines() {
         if raw.starts_with('\t') {
-            if let Some(path) = last_filename.as_deref() {
-                flush_porcelain_hunk(&mut hunks, &mut pending, path);
-            }
             continue;
         }
         if let Some(path) = raw.strip_prefix("filename ") {
-            last_filename = Some(path.to_string());
             flush_porcelain_hunk(&mut hunks, &mut pending, path);
             continue;
         }
@@ -118,9 +113,6 @@ fn parse_git_blame_porcelain_hunks(output: &str) -> Vec<PorcelainHunk> {
         };
         pending = Some((commit, orig, final_start, count));
     }
-    if let Some(path) = last_filename.as_deref() {
-        flush_porcelain_hunk(&mut hunks, &mut pending, path);
-    }
     hunks
 }
 
@@ -131,7 +123,7 @@ fn git_blame_hunks(
     line_range: Option<(usize, usize)>,
 ) -> Vec<PorcelainHunk> {
     let range_spec = line_range.map(|(start, end)| format!("{start},{end}"));
-    let mut args: Vec<&str> = vec!["blame", "--porcelain"];
+    let mut args: Vec<&str> = vec!["blame", "--line-porcelain"];
     if let Some(spec) = &range_spec {
         args.push("-L");
         args.push(spec);
@@ -278,4 +270,64 @@ fn blame_hunks_match_git_on_line_range() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let dir = repo.work_tree().expect("worktree");
     assert_hunks_match(&repo, dir, "wide.txt", None, Some((8, 12)));
+}
+
+/// Selected unchanged edges cross a rename-and-edit after an exact subtree move.
+#[test]
+fn blame_hunks_match_git_across_rename_edit_and_subtree_move() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    let initial: String = (1..=12).map(|i| format!("original line {i}\n")).collect();
+    std::fs::write(root.join("original"), &initial).unwrap();
+    git_run(root, &["add", "."]);
+    git_run(root, &["commit", "-qm", "initial lines"]);
+    let edited = initial
+        .replace("original line 2\n", "second revision line 2\n")
+        .replace("original line 11\n", "second revision line 11\n");
+    std::fs::write(root.join("original"), &edited).unwrap();
+    git_run(root, &["commit", "-qam", "edit prefix and suffix"]);
+    git_run(root, &["mv", "original", "renamed"]);
+    std::fs::write(
+        root.join("renamed"),
+        edited.replace("original line 6\n", "changed middle\ninserted middle\n"),
+    )
+    .unwrap();
+    git_run(root, &["add", "-A"]);
+    git_run(root, &["commit", "-qm", "rename and edit middle"]);
+    std::fs::create_dir(root.join("vendor")).unwrap();
+    git_run(root, &["mv", "renamed", "vendor/final"]);
+    git_run(root, &["commit", "-qm", "move unchanged file into subtree"]);
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    for range in [Some((1, 3)), Some((11, 13)), None, Some((1, 13))] {
+        assert_hunks_match(&repo, root, "vendor/final", None, range);
+        let result = blame_file(
+            &repo,
+            "vendor/final",
+            &BlameOptions {
+                line_range: range.map(|(a, b)| a..=b),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // Commit, path and line must navigate to the attributed source, even after
+        // the suffix shifted by one line in the rename-and-edit commit.
+        for line in &result.lines {
+            let source = git_output(
+                root,
+                &["show", &format!("{}:{}", line.commit, line.original_path)],
+            );
+            assert_eq!(
+                source.lines().nth(line.original_line - 1),
+                Some(line.content.as_str())
+            );
+        }
+        let commits: std::collections::HashSet<_> = result.lines.iter().map(|l| l.commit).collect();
+        assert!(
+            commits.len() >= 2,
+            "selected lines must have distinct origins"
+        );
+    }
+    git_run(root, &["fsck", "--strict"]);
 }

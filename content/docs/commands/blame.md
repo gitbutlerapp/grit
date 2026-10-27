@@ -108,6 +108,8 @@ Same top-level `file`, `rev`, and `commits` map. Replaces `lines[]` with `hunks[
 | `hunks[].unblamable` | boolean | Present and `true` when blame could not continue past an ignored revision. |
 | `hunks[].lines` | array of strings | Line text for each row in the hunk (same order as final lines). |
 
+Every `original_path` names the file in its reported `commit`, even when a line range crosses rename-and-edit commits or subtree imports. After decoding the filename bytes, read that commit's file at `original_line` (or `original_start` for a hunk). The path can differ from both the requested path and intermediate names in history.
+
 Hunk boundaries match `git blame --porcelain` group headers (`<oid> <orig> <final> <count>`). Prefer `--group` for agents and scripts on large files.
 
 Example:
@@ -172,6 +174,20 @@ Each cell shows median wall time in milliseconds / peak RSS in KiB. Nine fresh-p
 | 5,000 lines / 150 commits, `-L 100,120` | 52.33 / 7,736 | 31.02 / 28,252 | 26.90 / 27,708 |
 
 Wall time improves by about 2–13% against the baseline. Peak RSS is effectively flat for deep history (+80 KiB, within observed run variation), and falls by 40 KiB for full-file tail churn and 544 KiB for the range. The unchanged-prefix/suffix shortcut remains enabled.
+
+### Rename metadata regression
+
+Measured on 2026-10-27 on a 4-core Linux x86_64 VM with system Git 2.55.0 and Rust 1.99.0 release builds. Baseline grit is `origin/main` at `80dc322f7c2fafae948c30b9e6de159f884504e0`. Nine measurements are interleaved across Git, baseline grit, and the fix after two warmups, with builds and tests stopped. Each cell shows median wall milliseconds / peak RSS KiB; wall time uses a monotonic subprocess timer and RSS comes from `/usr/bin/time -v`. Output is discarded.
+
+The real-history case is `--rev 7e34d8174d -L 1,3 --json git-gui/git-gui.sh` in git/git (Git uses `--line-porcelain`). The tail cases use the existing 5,000-line / 150-commit fixture with `grit blame` versus `git blame --porcelain`, and `-L 100,120` for the range.
+
+| Scenario | System Git (ms / KiB) | Baseline grit (ms / KiB) | Fixed grit (ms / KiB) |
+| --- | ---: | ---: | ---: |
+| git/git git-gui, lines 1–3 | 191.81 / 83,372 | 527.11 / 335,004 | 527.43 / 334,968 |
+| Large-tail full file | 70.37 / 6,252 | 52.35 / 26,828 | 51.61 / 26,760 |
+| Large-tail lines 100–120 | 69.89 / 6,304 | 42.44 / 25,128 | 42.33 / 25,188 |
+
+The source-path fix retains the unchanged-prefix/suffix shortcut. Median wall time changes by at most 1.5%; the largest peak RSS increase is 60 KiB against baseline in this run.
 
 ## Exit status
 

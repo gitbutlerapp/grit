@@ -1087,6 +1087,7 @@ pub struct BlameLine {
     /// Text of the line in the final file.
     pub content: String,
     /// Reversibly stored path in the originating commit, including rename/copy origins.
+    /// Resolve this path in the attributed commit, not in the blamed revision.
     /// Recover exact filename bytes with `repo_relpath::storage_bytes`.
     pub original_path: String,
     /// Reversibly stored source path when copy detection attributed a different file.
@@ -3104,6 +3105,7 @@ fn compute_blame_with_session(
                     current_blob_mode = p_blob_mode;
                     walk_lines = Some((p_blob_oid, Arc::clone(&par_lines_arc)));
                     if parent_blob_path != current_path {
+                        note_blame_source_path(&mut pending, &parent_blob_path);
                         current_path = parent_blob_path;
                         session.set_bloom_path(&current_path);
                     }
@@ -3981,6 +3983,7 @@ pub struct BlameAttributedLine {
     /// 1-based line number in the blamed revision's file.
     pub final_line: usize,
     /// Reversibly stored path in the originating commit, including rename/copy origins.
+    /// Resolve this path in the attributed commit, not in the blamed revision.
     /// Recover exact filename bytes with `repo_relpath::storage_bytes`.
     pub original_path: String,
     /// Line text in the blamed revision.
@@ -3997,6 +4000,7 @@ pub struct BlameHunk {
     /// Commit that last modified every line in this hunk.
     pub commit: ObjectId,
     /// Reversibly stored path in the originating commit.
+    /// Resolve this path in `commit`; source lines begin at `original_start`.
     /// Recover exact filename bytes with `repo_relpath::storage_bytes`.
     pub original_path: String,
     /// 1-based starting line in the originating commit.
