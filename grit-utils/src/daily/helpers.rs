@@ -588,6 +588,32 @@ pub fn add_update_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     )
 }
 
+/// `-c` pairs for the path settings `git init` writes on macOS (case-insensitive, NFD volume).
+const MACOS_PATH_CONFIG: [&str; 4] = [
+    "-c",
+    "core.ignorecase=true",
+    "-c",
+    "core.precomposeunicode=true",
+];
+
+fn with_macos_path_config<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    MACOS_PATH_CONFIG.iter().chain(args).copied().collect()
+}
+
+pub fn add_all_ignorecase_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &with_macos_path_config(&["add"])),
+        sh_devnull(&ctx.git, &with_macos_path_config(&["add", "-A"])),
+    )
+}
+
+pub fn add_update_ignorecase_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &with_macos_path_config(&["add", "-u"])),
+        sh_devnull(&ctx.git, &with_macos_path_config(&["add", "-u"])),
+    )
+}
+
 pub fn add_dry_run_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_devnull(&ctx.grit, &["add", "--dry-run"]),

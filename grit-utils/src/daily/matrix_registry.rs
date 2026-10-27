@@ -118,6 +118,20 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Stage tracked changes: grit add -u vs git add -u (after ~1% modified)",
     },
     ScenarioSpec {
+        id: "add/all-ignorecase@synth-100k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Stage all changes with macOS path config (core.ignorecase, core.precomposeunicode): grit add vs git add -A",
+    },
+    ScenarioSpec {
+        id: "add/update-ignorecase@synth-100k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Stage tracked changes with macOS path config (core.ignorecase, core.precomposeunicode): grit add -u vs git add -u",
+    },
+    ScenarioSpec {
         id: "add/dry-run@synth-10k",
         area: Area::Worktree,
         headline: false,

@@ -45,6 +45,8 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | --- | --- |
 | `add/all@synth-100k` | Stage all changes: grit add vs git add -A (after ~1% modified) |
 | `add/update@synth-100k` | Stage tracked changes: grit add -u vs git add -u (after ~1% modified) |
+| `add/all-ignorecase@synth-100k` | Stage all changes with macOS path config (core.ignorecase, core.precomposeunicode): grit add vs git add -A |
+| `add/update-ignorecase@synth-100k` | Stage tracked changes with macOS path config (core.ignorecase, core.precomposeunicode): grit add -u vs git add -u |
 | `add/dry-run@synth-10k` | Preview staging: grit add --dry-run vs git add -n -A |
 | `add/patch-file@synth-10k` | Apply worktree diff to index: grit add --patch-file vs git apply --cached |
 | `add/hunks@large-file` | Stage half of 500 hunks in a 50k-line file: grit add --hunks vs git apply --cached |
