@@ -13,6 +13,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
+use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{
     Cancel, FlagCancel, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
@@ -557,4 +558,66 @@ fn rollback_that_cannot_remove_a_created_file_reports_it() {
         unrestored.len(),
         "only the reported paths differ:\n{status}"
     );
+}
+
+/// A cancelled `reset --hard` keeps what it was about to discard: dirty edits it had started
+/// to overwrite and a file only the index tracked are back exactly as they were.
+#[test]
+fn cancelled_hard_reset_keeps_dirty_and_index_only_files() {
+    let fx = fixture(Shape::RegularFiles);
+    for i in 0..20 {
+        write(
+            &fx.root,
+            &format!("keep/f{i:02}.txt"),
+            &format!("dirty edit {i}, longer\n"),
+        );
+    }
+    write(&fx.root, "staged-only.txt", "staged\n");
+    git(&fx.root, &["add", "staged-only.txt"]);
+    let status_before = git(
+        &fx.root,
+        &["status", "--porcelain", "--untracked-files=all"],
+    );
+    let before = repository_state(&fx.root);
+
+    let cancel = FlagCancel::new();
+    let mut progress = CancelAfter {
+        cancel: cancel.clone(),
+        limit: 5,
+        seen: 0,
+        in_checkout: false,
+        at_cancel: || {},
+    };
+    let signature = "T <t@t> 0 +0000".parse().expect("signature");
+    let err = reset_to_commit(
+        &open(&fx.root),
+        &ResetOptions::new(fx.main, ResetMode::Hard, signature, "reset"),
+        &mut progress,
+        &cancel,
+    )
+    .expect_err("cancelled reset");
+    assert!(matches!(err, Error::Cancelled), "{err:?}");
+    assert!(progress.seen >= 5, "cancel never fired");
+    assert_eq!(repository_state(&fx.root), before, "HEAD or index moved");
+    for i in 0..20 {
+        assert_eq!(
+            fs::read_to_string(fx.root.join(format!("keep/f{i:02}.txt"))).expect("dirty file"),
+            format!("dirty edit {i}, longer\n"),
+            "dirty edit {i} lost"
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(fx.root.join("staged-only.txt"))
+            .ok()
+            .as_deref(),
+        Some("staged\n")
+    );
+    assert_eq!(
+        git(
+            &fx.root,
+            &["status", "--porcelain", "--untracked-files=all"]
+        ),
+        status_before
+    );
+    git(&fx.root, &["fsck", "--no-progress", "--no-dangling"]);
 }

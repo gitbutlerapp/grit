@@ -45,6 +45,8 @@ struct SpooledCheckoutDelete {
 struct CheckoutDeleteSpool {
     spool: tempfile::TempDir,
     entries: Vec<SpooledCheckoutDelete>,
+    /// A restore failed: keep the spool directory, which holds the only copy of those files.
+    keep: bool,
 }
 
 impl CheckoutDeleteSpool {
@@ -56,6 +58,7 @@ impl CheckoutDeleteSpool {
                 .tempdir()
                 .map_err(Error::Io)?,
             entries: Vec::new(),
+            keep: false,
         })
     }
 
@@ -96,7 +99,16 @@ impl CheckoutDeleteSpool {
                 failed.push(entry.rel);
             }
         }
+        self.keep |= !failed.is_empty();
         failed
+    }
+}
+
+impl Drop for CheckoutDeleteSpool {
+    fn drop(&mut self) {
+        if self.keep {
+            self.spool.disable_cleanup(true);
+        }
     }
 }
 
