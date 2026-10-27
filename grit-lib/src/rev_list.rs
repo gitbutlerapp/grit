@@ -3991,13 +3991,18 @@ fn reorder_symmetric_topo_right_first(
     Ok(())
 }
 
+/// Add the commits of `tip`'s first-parent chain that are in `selected` to `spine`.
+///
+/// `seen` is shared across tips: once the walk reaches a commit an earlier tip's chain
+/// already visited, the rest of that chain is known, so each commit is loaded at most once
+/// for all tips together (many tips on one history would otherwise cost tips x depth reads).
 fn first_parent_spine_in_set(
     repo: &Repository,
     tip: ObjectId,
     selected: &HashSet<ObjectId>,
-) -> HashSet<ObjectId> {
-    let mut spine = HashSet::new();
-    let mut seen = HashSet::new();
+    seen: &mut HashSet<ObjectId>,
+    spine: &mut HashSet<ObjectId>,
+) {
     let mut cursor = Some(tip);
     while let Some(oid) = cursor {
         if !seen.insert(oid) {
@@ -4010,7 +4015,6 @@ fn first_parent_spine_in_set(
             .ok()
             .and_then(|commit| commit.parents.first().copied());
     }
-    spine
 }
 
 /// First-parent spines from every user tip, unioned (multi-tip `--simplify-merges`).
@@ -4020,8 +4024,9 @@ fn first_parent_spines_for_positive_tips(
     selected: &HashSet<ObjectId>,
 ) -> HashSet<ObjectId> {
     let mut spine = HashSet::new();
+    let mut seen = HashSet::new();
     for tip in positive_tips {
-        spine.extend(first_parent_spine_in_set(repo, *tip, selected));
+        first_parent_spine_in_set(repo, *tip, selected, &mut seen, &mut spine);
     }
     spine
 }
