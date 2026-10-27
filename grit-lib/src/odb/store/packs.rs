@@ -452,6 +452,11 @@ pub(crate) fn touch_pack_mtime(pack_path: &std::path::Path) -> bool {
     true
 }
 
+/// Compressed bytes a [`PackPayloadStream`] reads from a mapped pack before it drops the
+/// mapping's pages from the resident set, so streaming a large object keeps a bounded
+/// window of the pack resident instead of the whole compressed entry.
+const STREAM_RESIDENT_PACK_BYTES: usize = 4 * 1024 * 1024;
+
 /// Inflates a whole (non-delta) pack entry straight out of the mapped pack.
 ///
 /// Yields exactly the declared payload size, then requires the zlib stream to end there, so
@@ -462,6 +467,8 @@ struct PackPayloadStream {
     pos: usize,
     remaining: u64,
     stream_ended: bool,
+    /// Compressed bytes consumed since the mapping's pages were last released.
+    resident: usize,
 }
 
 impl PackPayloadStream {
@@ -472,6 +479,7 @@ impl PackPayloadStream {
             whole,
             dec: Decompress::new(true),
             stream_ended: false,
+            resident: 0,
         }
     }
 
@@ -487,6 +495,12 @@ impl PackPayloadStream {
         let consumed = (self.dec.total_in() - before_in) as usize;
         let produced = (self.dec.total_out() - before_out) as usize;
         self.pos += consumed;
+        self.resident += consumed;
+        if self.resident >= STREAM_RESIDENT_PACK_BYTES {
+            // The bytes stay readable; later reads fault pages back in from the page cache.
+            self.whole.pack.release_resident();
+            self.resident = 0;
+        }
         if status == Status::StreamEnd {
             self.stream_ended = true;
         } else if consumed == 0 && produced == 0 {
