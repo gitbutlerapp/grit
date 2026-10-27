@@ -2920,9 +2920,13 @@ fn rescue_in_pack_base(
         let Some(off) = other_idx.find_offset(&base_oid)? else {
             return Ok(None);
         };
-        if let Ok((kind, data)) =
-            resolve_pack_object_at(PackIndexHandle::Shared(other_idx), off, Some(dir), state)
-        {
+        // The nested resolution starts its own chain and clears `state.pending`; keep the
+        // caller's collected deltas aside so they are applied on top of the rescued base.
+        let caller_pending = std::mem::take(&mut state.pending);
+        let rescued =
+            resolve_pack_object_at(PackIndexHandle::Shared(other_idx), off, Some(dir), state);
+        state.pending = caller_pending;
+        if let Ok((kind, data)) = rescued {
             return Ok(Some((kind, data)));
         }
     }
