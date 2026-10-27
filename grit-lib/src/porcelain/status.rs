@@ -2082,15 +2082,27 @@ pub fn pathspec_may_match_directory(rel_dir: &str, pathspecs: &[String]) -> bool
     if rel_dir.is_empty() {
         return true;
     }
+    let is_dir_prefix = |dir: &str, path: &str| {
+        path.len() > dir.len() && path.as_bytes()[dir.len()] == b'/' && path.starts_with(dir)
+    };
     pathspecs.iter().any(|spec| {
         if crate::pathspec::has_glob_chars(spec) {
             return true;
         }
         let spec_norm = spec.trim_end_matches('/');
-        spec_norm == rel_dir
-            || spec_norm.starts_with(&format!("{rel_dir}/"))
-            || rel_dir.starts_with(&format!("{spec_norm}/"))
-            || crate::pathspec::pathspec_matches(spec, rel_dir)
+        if spec_norm == rel_dir
+            || is_dir_prefix(rel_dir, spec_norm)
+            || is_dir_prefix(spec_norm, rel_dir)
+        {
+            return true;
+        }
+        // Without magic or a `./` prefix, a glob-free spec matches only itself and paths
+        // under it, which the prefix checks above already cover.
+        let plain_literal = !spec_norm.is_empty()
+            && !spec.starts_with(':')
+            && !spec.starts_with("./")
+            && spec != ".";
+        !plain_literal && crate::pathspec::pathspec_matches(spec, rel_dir)
     })
 }
 
@@ -3169,6 +3181,75 @@ mod guidance_tests {
                 alternative: Some(NextStep::Abort(InProgressOperation::Merge)),
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod pathspec_prune_tests {
+    use super::pathspec_may_match_directory;
+
+    /// Directory prune without the literal fast path: every spec also goes through
+    /// [`crate::pathspec::pathspec_matches`].
+    fn may_match_via_full_matcher(rel_dir: &str, spec: &str) -> bool {
+        let rel_dir = rel_dir.trim_end_matches('/');
+        let spec_norm = spec.trim_end_matches('/');
+        rel_dir.is_empty()
+            || crate::pathspec::has_glob_chars(spec)
+            || spec_norm == rel_dir
+            || spec_norm.starts_with(&format!("{rel_dir}/"))
+            || rel_dir.starts_with(&format!("{spec_norm}/"))
+            || crate::pathspec::pathspec_matches(spec, rel_dir)
+    }
+
+    #[test]
+    fn literal_fast_path_agrees_with_full_matcher() {
+        let specs = [
+            "a",
+            "a/",
+            "a/b",
+            "a/b/c.txt",
+            "ab",
+            "a/bc",
+            "b",
+            ".",
+            "./a",
+            "./a/b",
+            "",
+            "/",
+            ":(icase)A/B",
+            ":(literal)a*",
+            ":!a",
+            ":(glob)a/**",
+            "a/*",
+            "a?",
+            "A/b",
+        ];
+        let dirs = [
+            "",
+            "a",
+            "a/",
+            "a/b",
+            "a/b/c.txt",
+            "ab",
+            "a/bc",
+            "b",
+            "A",
+            "x/a",
+        ];
+        for spec in specs {
+            for dir in dirs {
+                assert_eq!(
+                    pathspec_may_match_directory(dir, &[spec.to_owned()]),
+                    may_match_via_full_matcher(dir, spec),
+                    "spec {spec:?} dir {dir:?}"
+                );
+            }
+        }
+        let many: Vec<String> = (0..100).map(|i| format!("d{i}/f.txt")).collect();
+        assert!(pathspec_may_match_directory("d42", &many));
+        assert!(pathspec_may_match_directory("d42/f.txt", &many));
+        assert!(!pathspec_may_match_directory("d100", &many));
+        assert!(!pathspec_may_match_directory("d42/g", &many));
     }
 }
 
