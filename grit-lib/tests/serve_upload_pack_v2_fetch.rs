@@ -68,6 +68,8 @@ fn fixture(tmp: &Path) -> std::path::PathBuf {
             bare.to_str().unwrap(),
         ],
     );
+    // Git advertises and serves `object-info` only with this set.
+    git(&bare, &["config", "transfer.advertiseObjectInfo", "true"]);
     bare
 }
 
@@ -425,6 +427,52 @@ fn v2_advertisement_includes_server_option_object_info_and_wait_for_done() {
             "git missing {required:?}; caps={git_caps:?}"
         );
     }
+}
+
+#[test]
+fn object_info_is_not_advertised_without_transfer_advertise_object_info() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bare = fixture(tmp.path());
+    git(
+        &bare,
+        &["config", "--unset", "transfer.advertiseObjectInfo"],
+    );
+    let git_out = Command::new("git")
+        .args(["upload-pack", "--advertise-refs", "--stateless-rpc"])
+        .arg(&bare)
+        .env("GIT_PROTOCOL", "version=2")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git advertise");
+    assert!(git_out.status.success());
+    let git_caps = response_sections(&git_out.stdout);
+    let grit_caps = v2_capability_lines(&bare);
+    assert!(!git_caps.iter().any(|l| l == "object-info"), "{git_caps:?}");
+    assert!(
+        !grit_caps.iter().any(|l| l == "object-info"),
+        "{grit_caps:?}"
+    );
+
+    let mut body = Vec::new();
+    pkt(&mut body, "command=object-info");
+    pkt(&mut body, "object-format=sha1");
+    body.extend(b"0001");
+    pkt(&mut body, "size");
+    body.extend(b"0000");
+    let repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open");
+    let mut out = Vec::new();
+    let mut opts = ServeOptions {
+        protocol: ProtocolVersion::V2,
+        stateless_rpc: true,
+        ..ServeOptions::default()
+    };
+    upload_pack(&repo, &mut Cursor::new(body), &mut out, &mut opts).expect("stateless v2");
+    let sections = response_sections(&out);
+    assert!(
+        sections.first().is_some_and(|l| l.starts_with("ERR ")),
+        "object-info must be refused unless advertised: {sections:?}"
+    );
 }
 
 #[test]

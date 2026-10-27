@@ -16,6 +16,9 @@ pub(crate) struct UploadPackPolicy {
     pub allow_reachable_sha1_in_want: bool,
     pub ref_in_want: bool,
     pub allow_sideband_all: bool,
+    /// `transfer.advertiseObjectInfo`: advertise and serve the v2 `object-info`
+    /// command. Off by default, as in Git.
+    pub advertise_object_info: bool,
 }
 
 impl UploadPackPolicy {
@@ -27,6 +30,7 @@ impl UploadPackPolicy {
             allow_reachable_sha1_in_want: flag("uploadpack.allowreachablesha1inwant"),
             ref_in_want: flag("uploadpack.allowrefinwant"),
             allow_sideband_all: flag("uploadpack.allowsidebandall"),
+            advertise_object_info: flag("transfer.advertiseobjectinfo"),
         }
     }
 

@@ -41,7 +41,9 @@ const V0_CAPABILITIES: &[&str] = &[
 /// request is answered, which is how smart HTTP drives the exchange.
 ///
 /// Shallow fetches, partial-clone filters, and `want-ref` follow repository
-/// upload-pack policy and the capabilities advertised for the session.
+/// upload-pack policy and the capabilities advertised for the session. As in
+/// Git, the v2 `object-info` command is advertised and answered only when
+/// `transfer.advertiseObjectInfo` is true.
 ///
 /// # Parameters
 ///
@@ -495,6 +497,7 @@ fn serve_v2(
     output: &mut dyn Write,
     opts: &mut ServeOptions,
 ) -> Result<()> {
+    let policy = upload_policy(repo);
     if opts.advertise_refs || !opts.stateless_rpc {
         write_line(output, "version 2")?;
         if !opts.agent.is_empty() {
@@ -504,7 +507,6 @@ fn serve_v2(
         if opts.bundle_list.is_some() {
             write_line(output, "bundle-uri")?;
         }
-        let policy = upload_policy(repo);
         let fetch_caps = policy.v2_fetch_features().join(" ");
         write_line(output, &format!("fetch={fetch_caps}"))?;
         write_line(output, "server-option")?;
@@ -512,7 +514,9 @@ fn serve_v2(
             output,
             &format!("object-format={}", repo.odb().hash_algo().name()),
         )?;
-        write_line(output, "object-info")?;
+        if policy.advertise_object_info {
+            write_line(output, "object-info")?;
+        }
         write_flush(output)?;
         if opts.advertise_refs {
             return Ok(());
@@ -529,7 +533,7 @@ fn serve_v2(
         match request.command.as_str() {
             "ls-refs" => ls_refs(repo, output, &request.args, opts)?,
             "fetch" => fetch_v2(repo, output, &request.args, opts)?,
-            "object-info" => {
+            "object-info" if policy.advertise_object_info => {
                 super::object_info::write_object_info_response(repo, output, &request.args)?
             }
             "bundle-uri" if opts.bundle_list.is_some() => bundle_uri(output, opts)?,
