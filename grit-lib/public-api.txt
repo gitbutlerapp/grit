@@ -5571,6 +5571,9 @@ pub grit_lib::error::Error::CacheTreeCorrupt
 pub grit_lib::error::Error::Cancelled
 pub grit_lib::error::Error::CannotDeleteCurrentBranch
 pub grit_lib::error::Error::CannotDeleteCurrentBranch::branch: alloc::string::String
+pub grit_lib::error::Error::CheckoutRollbackIncomplete
+pub grit_lib::error::Error::CheckoutRollbackIncomplete::source: alloc::boxed::Box<grit_lib::error::Error>
+pub grit_lib::error::Error::CheckoutRollbackIncomplete::unrestored: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::CommitGraphParentMissing
 pub grit_lib::error::Error::CommitGraphParentMissing::commit: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::CommitGraphParentMissing::parent: grit_lib::objects::ObjectId
@@ -15739,6 +15742,9 @@ pub grit_lib::prelude::Error::CacheTreeCorrupt
 pub grit_lib::prelude::Error::Cancelled
 pub grit_lib::prelude::Error::CannotDeleteCurrentBranch
 pub grit_lib::prelude::Error::CannotDeleteCurrentBranch::branch: alloc::string::String
+pub grit_lib::prelude::Error::CheckoutRollbackIncomplete
+pub grit_lib::prelude::Error::CheckoutRollbackIncomplete::source: alloc::boxed::Box<grit_lib::error::Error>
+pub grit_lib::prelude::Error::CheckoutRollbackIncomplete::unrestored: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::CommitGraphParentMissing
 pub grit_lib::prelude::Error::CommitGraphParentMissing::commit: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::CommitGraphParentMissing::parent: grit_lib::objects::ObjectId
