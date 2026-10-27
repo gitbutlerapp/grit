@@ -120,6 +120,12 @@ impl Default for TreeMergeConflictPresentation<'_> {
 /// Paths in the result follow the **ours** tree naming. Rename detection uses a 50%
 /// similarity threshold, matching Git's default rename detection during merges.
 ///
+/// A rename onto a path the other side also fills with a different file (two files renamed
+/// to one name, or a rename onto an added file) is an add/add conflict at that path, as in
+/// Git: stage 2 and stage 3 hold each side's file, a renamed one already merged with the other
+/// side's edits of its source (conflict markers included when those overlap), and the old
+/// names are gone. Nothing is dropped until the user resolves the path.
+///
 /// # Parameters
 ///
 /// - `base_tree` — common ancestor tree (parent tree for cherry-pick, reverted commit tree for revert).
@@ -331,7 +337,7 @@ fn augment_renames_with_same_blob(
 /// Base files each side renamed to a different, otherwise unoccupied destination.
 ///
 /// Destinations that collide with another file on the opposite side (rename/add,
-/// rename/rename 2to1) are left to the path-by-path walk.
+/// rename/rename 2to1) become add/add conflicts in the path-by-path walk.
 fn rename_rename_conflicts(
     ours_new_to_old: &HashMap<Vec<u8>, Vec<u8>>,
     theirs_old_to_new: &HashMap<Vec<u8>, Vec<u8>>,
@@ -383,9 +389,13 @@ pub(crate) fn merge_rename_rename(
     diff_algorithm: Option<&str>,
     presentation: TreeMergeConflictPresentation<'_>,
 ) -> crate::error::Result<()> {
-    let merged = rename_rename_content(
+    let merged = renamed_file_content(
         ctx,
-        conflict,
+        [
+            &conflict.base_path,
+            &conflict.ours_path,
+            &conflict.theirs_path,
+        ],
         base,
         ours,
         theirs,
@@ -406,11 +416,15 @@ pub(crate) fn merge_rename_rename(
     Ok(())
 }
 
-/// Merged entry for both rename destinations, or `None` when each side keeps its own blob.
+/// Three-way merge of one file that a merge side renamed, or `None` when each side keeps its own
+/// blob (binary, symlink or gitlink content).
+///
+/// `paths` holds the file's base, ours and theirs paths; they label the conflict markers, which
+/// are 8 characters wide so the blob matches the one Git writes for a renamed file.
 #[expect(clippy::too_many_arguments)]
-fn rename_rename_content(
+fn renamed_file_content(
     ctx: &PathMergeContext<'_>,
-    conflict: &RenameRenameConflict,
+    paths: [&[u8]; 3],
     base: &IndexEntry,
     ours: &IndexEntry,
     theirs: &IndexEntry,
@@ -419,6 +433,7 @@ fn rename_rename_content(
     diff_algorithm: Option<&str>,
     presentation: TreeMergeConflictPresentation<'_>,
 ) -> crate::error::Result<Option<IndexEntry>> {
+    let [base_path, ours_path, theirs_path] = paths;
     if same_blob(ours, theirs) || same_blob(base, theirs) {
         return Ok(Some(ours.clone()));
     }
@@ -433,13 +448,13 @@ fn rename_rename_content(
     let base_obj = repo.odb().read(&base.oid)?;
     let ours_obj = repo.odb().read(&ours.oid)?;
     let theirs_obj = repo.odb().read(&theirs.oid)?;
-    let favor = merge_favor_for_path(ctx.file_attrs(&conflict.base_path).as_ref(), favor);
+    let favor = merge_favor_for_path(ctx.file_attrs(base_path).as_ref(), favor);
     let binary = |path: &[u8], data: &[u8]| {
         is_binary(data) || attrs_force_binary(ctx.file_attrs(path).as_ref())
     };
-    if binary(&conflict.base_path, &base_obj.data)
-        || binary(&conflict.ours_path, &ours_obj.data)
-        || binary(&conflict.theirs_path, &theirs_obj.data)
+    if binary(base_path, &base_obj.data)
+        || binary(ours_path, &ours_obj.data)
+        || binary(theirs_path, &theirs_obj.data)
     {
         return Ok(match favor {
             MergeFavor::Ours => Some(ours.clone()),
@@ -451,20 +466,18 @@ fn rename_rename_content(
     let label_base = format!(
         "{}:{}",
         presentation.label_base,
-        String::from_utf8_lossy(&conflict.base_path)
+        String::from_utf8_lossy(base_path)
     );
     let label_ours = format!(
         "{}:{}",
         presentation.label_ours,
-        String::from_utf8_lossy(&conflict.ours_path)
+        String::from_utf8_lossy(ours_path)
     );
-    let theirs_path = String::from_utf8_lossy(&conflict.theirs_path);
+    let theirs_path = String::from_utf8_lossy(theirs_path);
     let label_theirs = match presentation.label_theirs {
         TheirsConflictLabel::PathUtf8 => theirs_path.into_owned(),
         TheirsConflictLabel::Fixed(s) => format!("{s}:{theirs_path}"),
     };
-    // Git writes 8-character markers for rename/rename content merges; matching it keeps the
-    // conflicted blobs, and so the result tree, identical to Git's.
     let result = merge(&MergeInput {
         base: &base_obj.data,
         ours: &ours_obj.data,

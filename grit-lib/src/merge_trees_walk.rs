@@ -9,8 +9,8 @@ use super::merge_tree_cache::{
 use crate::index::IndexEntry;
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
-    merge_one_path, merge_rename_rename, PathMergeContext, RenameRenameConflict,
-    TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
+    merge_one_path, merge_rename_rename, renamed_file_content, PathMergeContext,
+    RenameRenameConflict, TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
 };
 use crate::objects::{serialize_tree, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
@@ -436,6 +436,217 @@ pub(crate) fn compose_merged_tree_oid(
     odb.write(ObjectKind::Tree, &data)
 }
 
+/// The three trees of a merge with their sparse path → entry maps.
+struct MergeSides<'a> {
+    base_tree: ObjectId,
+    ours_tree: ObjectId,
+    theirs_tree: ObjectId,
+    base: &'a BTreeMap<Vec<u8>, IndexEntry>,
+    ours: &'a BTreeMap<Vec<u8>, IndexEntry>,
+    theirs: &'a BTreeMap<Vec<u8>, IndexEntry>,
+}
+
+impl MergeSides<'_> {
+    fn side(&self, side: MergeTreeSide) -> (&BTreeMap<Vec<u8>, IndexEntry>, &ObjectId) {
+        match side {
+            MergeTreeSide::Base => (self.base, &self.base_tree),
+            MergeTreeSide::Ours => (self.ours, &self.ours_tree),
+            MergeTreeSide::Theirs => (self.theirs, &self.theirs_tree),
+        }
+    }
+
+    /// The file at `path` on `side`, from the sparse map or else the side's tree.
+    fn file(
+        &self,
+        cache: &mut MergeTreeCache,
+        odb: &Odb,
+        side: MergeTreeSide,
+        path: &[u8],
+    ) -> Option<IndexEntry> {
+        let (map, tree) = self.side(side);
+        map.get(path)
+            .cloned()
+            .or_else(|| file_entry_at_path(cache, odb, tree, path).ok().flatten())
+    }
+
+    /// True when `side` has a file at `path`; [`Self::file`] without the copy.
+    fn has_file(
+        &self,
+        cache: &mut MergeTreeCache,
+        odb: &Odb,
+        side: MergeTreeSide,
+        path: &[u8],
+    ) -> bool {
+        let (map, tree) = self.side(side);
+        map.contains_key(path)
+            || file_entry_at_path(cache, odb, tree, path)
+                .ok()
+                .flatten()
+                .is_some()
+    }
+}
+
+/// A path absent from the base that both sides fill with a different file, at least one of
+/// them by renaming a base file there (rename/rename 2to1 or rename/add).
+struct RenameCollision<'a> {
+    dest: &'a [u8],
+    /// Base path ours renamed to `dest`; `None` when ours added `dest`.
+    ours_source: Option<&'a [u8]>,
+    /// Base path theirs renamed to `dest`; `None` when theirs added `dest`.
+    theirs_source: Option<&'a [u8]>,
+}
+
+/// Rename destinations the other side also occupies, sorted by destination.
+///
+/// A source the other side renamed somewhere else as well is left to the path walk.
+fn rename_collisions<'a>(
+    cache: &mut MergeTreeCache,
+    odb: &Odb,
+    sides: &MergeSides<'_>,
+    ours_new_to_old: &'a HashMap<Vec<u8>, Vec<u8>>,
+    ours_rename_sources: &HashSet<&[u8]>,
+    theirs_old_to_new: &'a HashMap<Vec<u8>, Vec<u8>>,
+    theirs_source_by_dest: &HashMap<&'a [u8], &'a [u8]>,
+) -> Vec<RenameCollision<'a>> {
+    let ours_source = |dest: &[u8]| {
+        ours_new_to_old
+            .get(dest)
+            .map(Vec::as_slice)
+            .filter(|old| *old != dest)
+    };
+    let theirs_source = |dest: &[u8]| {
+        theirs_source_by_dest
+            .get(dest)
+            .copied()
+            .filter(|old| *old != dest)
+    };
+    let renamed_elsewhere_by_theirs = |old: &[u8]| {
+        theirs_old_to_new
+            .get(old)
+            .is_some_and(|new| new.as_slice() != old)
+    };
+
+    let mut dests: Vec<&'a [u8]> = ours_new_to_old
+        .keys()
+        .map(Vec::as_slice)
+        .filter(|dest| ours_source(dest).is_some())
+        .chain(
+            theirs_source_by_dest
+                .keys()
+                .copied()
+                .filter(|dest| theirs_source(dest).is_some()),
+        )
+        .collect();
+    dests.sort_unstable();
+    dests.dedup();
+
+    let mut out = Vec::new();
+    for dest in dests {
+        let ours_source = ours_source(dest);
+        let theirs_source = theirs_source(dest);
+        if ours_source.is_some() && ours_source == theirs_source {
+            continue;
+        }
+        if ours_source.is_some_and(renamed_elsewhere_by_theirs)
+            || theirs_source.is_some_and(|old| ours_rename_sources.contains(old))
+        {
+            continue;
+        }
+        if !sides.has_file(cache, odb, MergeTreeSide::Ours, dest)
+            || !sides.has_file(cache, odb, MergeTreeSide::Theirs, dest)
+            || sides.has_file(cache, odb, MergeTreeSide::Base, dest)
+        {
+            continue;
+        }
+        out.push(RenameCollision {
+            dest,
+            ours_source,
+            theirs_source,
+        });
+    }
+    out
+}
+
+/// Record a [`RenameCollision`] the way Git does: an add/add conflict at the destination.
+///
+/// A side that renamed a file there contributes that file merged with the other side's copy
+/// of the source (its own version when the other side deleted the source), so an edit made on
+/// the other side is kept; the merged blob carries conflict markers when the edits overlap. A
+/// side that added the destination contributes its blob. The two are then merged as an add/add.
+#[expect(clippy::too_many_arguments)]
+fn merge_rename_collision(
+    cache: &mut MergeTreeCache,
+    odb: &Odb,
+    ctx: &PathMergeContext<'_>,
+    index: &mut crate::index::Index,
+    conflict_content: &mut BTreeMap<Vec<u8>, ObjectId>,
+    sides: &MergeSides<'_>,
+    collision: &RenameCollision<'_>,
+    favor: MergeFavor,
+    ws: WhitespaceMergeOptions,
+    diff_algorithm: Option<&str>,
+    presentation: TreeMergeConflictPresentation<'_>,
+) -> crate::error::Result<()> {
+    let dest = collision.dest;
+    let (Some(mut at_ours), Some(mut at_theirs)) = (
+        sides.file(cache, odb, MergeTreeSide::Ours, dest),
+        sides.file(cache, odb, MergeTreeSide::Theirs, dest),
+    ) else {
+        return Ok(());
+    };
+    if let Some(source) = collision.ours_source {
+        let base = sides.file(cache, odb, MergeTreeSide::Base, source);
+        let other = sides.file(cache, odb, MergeTreeSide::Theirs, source);
+        if let (Some(base), Some(other)) = (base, other) {
+            if let Some(merged) = renamed_file_content(
+                ctx,
+                [source, dest, source],
+                &base,
+                &at_ours,
+                &other,
+                favor,
+                ws,
+                diff_algorithm,
+                presentation,
+            )? {
+                at_ours = merged;
+            }
+        }
+    }
+    if let Some(source) = collision.theirs_source {
+        let base = sides.file(cache, odb, MergeTreeSide::Base, source);
+        let other = sides.file(cache, odb, MergeTreeSide::Ours, source);
+        if let (Some(base), Some(other)) = (base, other) {
+            if let Some(merged) = renamed_file_content(
+                ctx,
+                [source, source, dest],
+                &base,
+                &other,
+                &at_theirs,
+                favor,
+                ws,
+                diff_algorithm,
+                presentation,
+            )? {
+                at_theirs = merged;
+            }
+        }
+    }
+    merge_one_path(
+        ctx,
+        index,
+        conflict_content,
+        dest,
+        None,
+        Some(&at_ours),
+        Some(&at_theirs),
+        favor,
+        ws,
+        diff_algorithm,
+        presentation,
+    )
+}
+
 #[expect(clippy::too_many_arguments)]
 pub(crate) fn three_way_on_touched_paths(
     cache: &mut MergeTreeCache,
@@ -462,8 +673,8 @@ pub(crate) fn three_way_on_touched_paths(
     let mut out = crate::index::Index::new();
     let mut conflict_content = BTreeMap::new();
     let mut handled_base: HSet<&[u8]> = HSet::new();
+    let mut handled_ours: HSet<&[u8]> = HSet::new();
     let mut handled_theirs: HSet<&[u8]> = HSet::new();
-    let mut rename_conflict_paths: HSet<&[u8]> = HSet::new();
 
     for conflict in &rename_conflicts {
         let (Some(b), Some(o), Some(t)) = (
@@ -488,7 +699,7 @@ pub(crate) fn three_way_on_touched_paths(
         )?;
         handled_base.insert(conflict.base_path.as_slice());
         handled_theirs.insert(conflict.theirs_path.as_slice());
-        rename_conflict_paths.extend([
+        handled_ours.extend([
             conflict.base_path.as_slice(),
             conflict.ours_path.as_slice(),
             conflict.theirs_path.as_slice(),
@@ -507,6 +718,56 @@ pub(crate) fn three_way_on_touched_paths(
         .map(|(old, new)| (new.as_slice(), old.as_slice()))
         .collect();
 
+    // Base paths ours renamed away are merged at their ours destination.
+    let ours_rename_sources: HSet<&[u8]> = ours_new_to_old
+        .iter()
+        .filter(|(new, old)| new != old)
+        .map(|(_, old)| old.as_slice())
+        .collect();
+
+    let sides = MergeSides {
+        base_tree,
+        ours_tree,
+        theirs_tree,
+        base,
+        ours,
+        theirs,
+    };
+    for collision in rename_collisions(
+        cache,
+        odb,
+        &sides,
+        ours_new_to_old,
+        &ours_rename_sources,
+        theirs_old_to_new,
+        &theirs_rename_source_by_dest,
+    ) {
+        merge_rename_collision(
+            cache,
+            odb,
+            &ctx,
+            &mut out,
+            &mut conflict_content,
+            &sides,
+            &collision,
+            favor,
+            ws,
+            diff_algorithm,
+            presentation,
+        )?;
+        let dest = collision.dest;
+        handled_ours.insert(dest);
+        handled_theirs.insert(dest);
+        for source in [collision.ours_source, collision.theirs_source]
+            .into_iter()
+            .flatten()
+        {
+            handled_base.insert(source);
+            handled_ours.insert(source);
+            handled_theirs.insert(source);
+        }
+    }
+
     // When the other side renamed base paths to `new`, those destinations are also in
     // `touched`. When ours still has the rename source, the source iteration already merges
     // at `new`; skip duplicate passes (issue #1093). Do not skip when ours deleted the source.
@@ -517,15 +778,8 @@ pub(crate) fn three_way_on_touched_paths(
         }
     }
 
-    // Base paths ours renamed away are merged at their ours destination.
-    let ours_rename_sources: HSet<&[u8]> = ours_new_to_old
-        .iter()
-        .filter(|(new, old)| new != old)
-        .map(|(_, old)| old.as_slice())
-        .collect();
-
     for op in ours_paths {
-        if rename_conflict_paths.contains(op) {
+        if handled_ours.contains(op) {
             continue;
         }
         if ours_rename_sources.contains(op)
@@ -536,24 +790,11 @@ pub(crate) fn three_way_on_touched_paths(
         }
         if theirs_rename_destinations.contains(op) && !ours_new_to_old.contains_key(op) {
             if let Some(old) = theirs_rename_source_by_dest.get(op) {
-                let ours_still_at_source = ours.contains_key(*old)
-                    || file_entry_at_path(cache, odb, &ours_tree, old)
-                        .ok()
-                        .flatten()
-                        .is_some();
+                let ours_still_at_source = sides.has_file(cache, odb, MergeTreeSide::Ours, old);
                 if ours_still_at_source {
-                    let ours_present_at_dest = ours.contains_key(op)
-                        || file_entry_at_path(cache, odb, &ours_tree, op)
-                            .ok()
-                            .flatten()
-                            .is_some();
+                    let ours_present_at_dest = sides.has_file(cache, odb, MergeTreeSide::Ours, op);
                     if !ours_present_at_dest {
-                        if theirs.get(op).is_some()
-                            || file_entry_at_path(cache, odb, &theirs_tree, op)
-                                .ok()
-                                .flatten()
-                                .is_some()
-                        {
+                        if sides.has_file(cache, odb, MergeTreeSide::Theirs, op) {
                             handled_theirs.insert(op);
                         }
                         continue;
@@ -573,19 +814,9 @@ pub(crate) fn three_way_on_touched_paths(
             theirs_old_to_new.get(path).map_or(path, Vec::as_slice)
         });
 
-        let b = bp.and_then(|p| base.get(p).cloned()).or_else(|| {
-            bp.and_then(|p| file_entry_at_path(cache, odb, &base_tree, p).ok().flatten())
-        });
-        let o = ours.get(op).cloned().or_else(|| {
-            file_entry_at_path(cache, odb, &ours_tree, op)
-                .ok()
-                .flatten()
-        });
-        let t = theirs.get(tp).cloned().or_else(|| {
-            file_entry_at_path(cache, odb, &theirs_tree, tp)
-                .ok()
-                .flatten()
-        });
+        let b = bp.and_then(|p| sides.file(cache, odb, MergeTreeSide::Base, p));
+        let o = sides.file(cache, odb, MergeTreeSide::Ours, op);
+        let t = sides.file(cache, odb, MergeTreeSide::Theirs, tp);
         if t.is_some() {
             handled_theirs.insert(tp);
         }
@@ -618,19 +849,11 @@ pub(crate) fn three_way_on_touched_paths(
             continue;
         }
         let tp = theirs_old_to_new.get(bp).map_or(bp, Vec::as_slice);
-        let b = base.get(bp).cloned().or_else(|| {
-            file_entry_at_path(cache, odb, &base_tree, bp)
-                .ok()
-                .flatten()
-        });
+        let b = sides.file(cache, odb, MergeTreeSide::Base, bp);
         if b.is_none() {
             continue;
         }
-        let t = theirs.get(tp).cloned().or_else(|| {
-            file_entry_at_path(cache, odb, &theirs_tree, tp)
-                .ok()
-                .flatten()
-        });
+        let t = sides.file(cache, odb, MergeTreeSide::Theirs, tp);
         if t.is_some() {
             handled_theirs.insert(tp);
         }
@@ -656,11 +879,7 @@ pub(crate) fn three_way_on_touched_paths(
         if handled_theirs.contains(tp) {
             continue;
         }
-        let t = theirs.get(tp).cloned().or_else(|| {
-            file_entry_at_path(cache, odb, &theirs_tree, tp)
-                .ok()
-                .flatten()
-        });
+        let t = sides.file(cache, odb, MergeTreeSide::Theirs, tp);
         if t.is_none() {
             continue;
         }

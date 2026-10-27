@@ -909,6 +909,9 @@ mod merge_rename_edit_issue_1093;
 #[path = "merge_rename_index_issue_1091.rs"]
 mod merge_rename_index_issue_1091;
 #[cfg(feature = "full-tests")]
+#[path = "merge_rename_rename_2to1_issue_2112.rs"]
+mod merge_rename_rename_2to1_issue_2112;
+#[cfg(feature = "full-tests")]
 #[path = "merge_rename_rename_issue_1878.rs"]
 mod merge_rename_rename_issue_1878;
 #[cfg(feature = "full-tests")]
