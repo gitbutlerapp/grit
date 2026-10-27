@@ -1711,6 +1711,22 @@ mod git_xdiff {
     /// (equal id <=> equal token); per-id tables are sized by the largest id.
     /// Returns `(changed1, changed2)`, one bool per original token.
     pub fn changed_flags(ids1: &[u32], ids2: &[u32], need_min: bool) -> (Vec<bool>, Vec<bool>) {
+        changed_flags_with_shared(ids1, ids2, &[], 0, need_min)
+    }
+
+    /// Like [`changed_flags`] for slices cut from two larger files whose other records are
+    /// identical on both sides.
+    ///
+    /// Git classifies each record by how often it occurs in the whole other file, so the
+    /// records left out still count: `shared_counts[id]` is how many of them have token `id`
+    /// (ids past its end have none), and `shared_records` is how many there are on each side.
+    pub fn changed_flags_with_shared(
+        ids1: &[u32],
+        ids2: &[u32],
+        shared_counts: &[u32],
+        shared_records: usize,
+        need_min: bool,
+    ) -> (Vec<bool>, Vec<bool>) {
         let nrec1 = ids1.len();
         let nrec2 = ids2.len();
 
@@ -1727,6 +1743,10 @@ mod git_xdiff {
         }
         for &id in ids2 {
             count2[id as usize] += 1;
+        }
+        for (id, &shared) in shared_counts.iter().enumerate().take(nclasses) {
+            count1[id] += i64::from(shared);
+            count2[id] += i64::from(shared);
         }
 
         let mut xdf1 = XdFile {
@@ -1769,7 +1789,7 @@ mod git_xdiff {
         let mlim1 = if need_min {
             i64::MAX
         } else {
-            let mut mlim = bogosqrt(nrec1 as i64);
+            let mut mlim = bogosqrt((nrec1 + shared_records) as i64);
             if mlim > XDL_MAX_EQLIMIT {
                 mlim = XDL_MAX_EQLIMIT;
             }
@@ -1792,7 +1812,7 @@ mod git_xdiff {
         let mlim2 = if need_min {
             i64::MAX
         } else {
-            let mut mlim = bogosqrt(nrec2 as i64);
+            let mut mlim = bogosqrt((nrec2 + shared_records) as i64);
             if mlim > XDL_MAX_EQLIMIT {
                 mlim = XDL_MAX_EQLIMIT;
             }
@@ -2210,38 +2230,30 @@ pub fn diff_slice_ops_compacted(
     )
 }
 
-/// Line-diff ops using Git's xdiff Myers engine (default blame path; faster than `similar` on large files).
+/// Compacted line-diff ops from Git's xdiff Myers engine over precomputed line ids for each side
+/// (default blame path; faster than `similar` on large files).
 #[must_use]
-pub(crate) fn line_diff_ops_git_xdiff_compacted(
-    old_lines: &[&str],
-    new_lines: &[&str],
-    indent_heuristic: bool,
-) -> Vec<similar::DiffOp> {
-    let mut interner =
-        crate::line_interner::LineInterner::with_capacity(old_lines.len() + new_lines.len());
-    let ids1 = interner.intern_all(old_lines);
-    let ids2 = interner.intern_all(new_lines);
-    line_diff_ops_git_xdiff_compacted_ids(
-        &ids1,
-        &ids2,
-        old_lines,
-        new_lines,
-        indent_heuristic,
-        super::WhitespaceMode::default(),
-    )
-}
-
-/// Like [`line_diff_ops_git_xdiff_compacted`], but reuses precomputed line ids for each side.
-#[must_use]
+///
+/// `shared_counts` and `shared_records` describe identical records of both files left out of
+/// the slices, as for [`git_xdiff::changed_flags_with_shared`]; pass `&[]` and `0` for whole files.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn line_diff_ops_git_xdiff_compacted_ids(
     old_ids: &[u32],
     new_ids: &[u32],
+    shared_counts: &[u32],
+    shared_records: usize,
     old_lines: &[&str],
     new_lines: &[&str],
     indent_heuristic: bool,
     ws: super::WhitespaceMode,
 ) -> Vec<similar::DiffOp> {
-    let (changed1, changed2) = git_xdiff::changed_flags(old_ids, new_ids, false);
+    let (changed1, changed2) = git_xdiff::changed_flags_with_shared(
+        old_ids,
+        new_ids,
+        shared_counts,
+        shared_records,
+        false,
+    );
     let ops = changed_flags_to_ops(&changed1, &changed2, old_lines.len(), new_lines.len());
     diff_indent_heuristic::apply_change_compact_to_ops_with_ws(
         &ops,
@@ -12126,6 +12138,80 @@ mod diff_index_to_tree_cache_tree_tests {
             diff_tree_path_change_count(&odb, Some(&old_tree), Some(&new_tree), "").expect("count");
         assert_eq!(count, entries.len());
         assert_eq!(count, 2);
+    }
+}
+
+#[cfg(test)]
+mod changed_flags_shared_tests {
+    use super::git_xdiff;
+    use crate::line_interner::LineInterner;
+
+    /// Cutting identical leading and trailing records out and passing their occurrence counts
+    /// gives the same changed records as diffing the whole files.
+    #[test]
+    fn shared_counts_stand_in_for_records_left_out() {
+        // `}` is frequent only outside the cut, which makes xdiff discard the middle `}` between
+        // unique lines instead of matching it.
+        let mut old: Vec<String> = Vec::new();
+        let mut new: Vec<String> = Vec::new();
+        for i in 0..60 {
+            for side in [&mut old, &mut new] {
+                side.push(format!("fn f{i}() {{\n"));
+                side.push("}\n".to_owned());
+            }
+        }
+        old.extend(
+            [
+                "u1\n", "u2\n", "u3\n", "u4\n", "}\n", "u5\n", "u6\n", "u7\n",
+            ]
+            .map(str::to_owned),
+        );
+        new.extend(
+            [
+                "v1\n", "v2\n", "v3\n", "v4\n", "}\n", "v5\n", "v6\n", "v7\n",
+            ]
+            .map(str::to_owned),
+        );
+        for i in 0..40 {
+            for side in [&mut old, &mut new] {
+                side.push(format!("fn g{i}() {{\n"));
+                side.push("}\n".to_owned());
+            }
+        }
+        let old: Vec<&str> = old.iter().map(String::as_str).collect();
+        let new: Vec<&str> = new.iter().map(String::as_str).collect();
+        let (head, tail) = (120, 80);
+
+        let mut interner = LineInterner::with_capacity(old.len() + new.len());
+        let ids1 = interner.intern_all(&old);
+        let ids2 = interner.intern_all(&new);
+        let (full1, full2) = git_xdiff::changed_flags(&ids1, &ids2, false);
+
+        let mut cut = LineInterner::default();
+        let cut1 = cut.intern_all(&old[head..old.len() - tail]);
+        let cut2 = cut.intern_all(&new[head..new.len() - tail]);
+        let mut shared = vec![0u32; cut.len()];
+        for line in old[..head].iter().chain(&old[old.len() - tail..]) {
+            if let Some(id) = cut.get(line) {
+                shared[id as usize] += 1;
+            }
+        }
+        let (part1, part2) =
+            git_xdiff::changed_flags_with_shared(&cut1, &cut2, &shared, head + tail, false);
+        assert_eq!(part1, full1[head..old.len() - tail]);
+        assert_eq!(part2, full2[head..new.len() - tail]);
+        assert!(full1[..head]
+            .iter()
+            .chain(&full1[old.len() - tail..])
+            .all(|c| !c));
+        // Like `git diff`, the whole middle is one change: the `}` among unique lines is
+        // discarded because it is frequent in the whole file.
+        assert!(full1[head..old.len() - tail].iter().all(|&c| c));
+        let (alone1, _) = git_xdiff::changed_flags(&cut1, &cut2, false);
+        assert!(
+            !alone1[4],
+            "counted alone, the cut keeps the `}}` as a match"
+        );
     }
 }
 

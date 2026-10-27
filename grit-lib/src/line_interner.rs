@@ -57,6 +57,21 @@ impl<'a> LineInterner<'a> {
         }
     }
 
+    /// The id already given to `line`, without interning it.
+    #[must_use]
+    pub fn get(&self, line: &str) -> Option<u32> {
+        let hash = self.hasher.hash_one(line);
+        self.table
+            .find(hash, |&id| self.lines[id as usize] == line)
+            .copied()
+    }
+
+    /// Number of distinct lines interned so far (one past the largest id).
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.lines.len()
+    }
+
     /// Intern every line in `lines`.
     pub fn intern_all(&mut self, lines: &[&'a str]) -> Vec<u32> {
         lines.iter().map(|line| self.intern(line)).collect()
@@ -89,5 +104,17 @@ mod tests {
         let ids2 = interner.intern_all(&new);
         assert_eq!(ids1, vec![0, 1, 0]);
         assert_eq!(ids2, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn get_finds_interned_lines_without_adding() {
+        let mut interner = LineInterner::default();
+        assert_eq!(interner.len(), 0);
+        let a = interner.intern("a\n");
+        let b = interner.intern("b\n");
+        assert_eq!(interner.get("a\n"), Some(a));
+        assert_eq!(interner.get("b\n"), Some(b));
+        assert_eq!(interner.get("c\n"), None);
+        assert_eq!(interner.len(), 2);
     }
 }

@@ -67,34 +67,6 @@ pub fn parse_diff_algorithm_name(name: &str) -> Option<BlameDiffAlgorithm> {
     }
 }
 
-/// Whether Myers blame should drop a trailing equal-line match (Git tie-break parity).
-fn should_drop_tail_match_for_myers_blob(
-    diff_algorithm: BlameDiffAlgorithm,
-    parent_idx: usize,
-    current_idx: usize,
-    parent: &BlobLines,
-    ws: crate::diff::WhitespaceMode,
-) -> bool {
-    if diff_algorithm != BlameDiffAlgorithm::Myers {
-        return false;
-    }
-    if parent.is_empty() || parent_idx + 1 != parent.len() {
-        return false;
-    }
-    // Preserve common append-at-end behavior. We only drop matches where the
-    // final parent line got shifted to the right in the child.
-    if current_idx <= parent_idx {
-        return false;
-    }
-    // Restrict this heuristic to duplicated low-information tail lines, which
-    // are the cases where xdiff/myers tie-breaking differs from `similar`.
-    let tail = parent.comparison_line(parent_idx, ws);
-    (0..parent.len())
-        .filter(|&i| blame_lines_equal(parent.comparison_line(i, ws), tail, ws))
-        .count()
-        >= 2
-}
-
 /// Parent line index for a child line known to lie in an unchanged affix region.
 fn affix_parent_index(
     child_idx: usize,
@@ -114,14 +86,16 @@ fn affix_parent_index(
 }
 
 /// Split pending lines into those mappable through unchanged affix vs those in the edited middle.
+///
+/// Only the part of the affix that change compaction cannot reach is mapped directly; see
+/// [`slide_safe_affix`].
 fn partition_pending_by_affix(
-    par: &BlobLines,
-    cur: &BlobLines,
+    affix: Affix,
+    old_len: usize,
+    new_len: usize,
     pending: Vec<TrackedLine>,
-    ws: crate::diff::WhitespaceMode,
 ) -> (Vec<TrackedLine>, Vec<TrackedLine>) {
-    let (prefix, suffix, _, _, _, _) = common_affix_trim_blob_lines(par, cur, ws);
-    let new_len = cur.len();
+    let (prefix, suffix) = (affix.safe_prefix, affix.safe_suffix);
     let suffix_start = new_len.saturating_sub(suffix);
     let mut affix_mapped = Vec::new();
     let mut need_diff = Vec::new();
@@ -130,7 +104,7 @@ fn partition_pending_by_affix(
         if i < prefix || (suffix > 0 && i >= suffix_start) {
             affix_mapped.push(TrackedLine {
                 final_lineno: t.final_lineno,
-                current_idx: affix_parent_index(i, prefix, suffix, par.len(), new_len),
+                current_idx: affix_parent_index(i, prefix, suffix, old_len, new_len),
                 ignored: t.ignored,
                 source_path: t.source_path,
                 origin: t.origin,
@@ -142,6 +116,256 @@ fn partition_pending_by_affix(
     (affix_mapped, need_diff)
 }
 
+/// Common prefix and suffix of two files, with the lengths of them no diff group can slide into.
+///
+/// The line diff only marks lines between the common prefix and suffix, but change compaction
+/// then slides each group while the line leaving it equals the line entering it, so every line
+/// a group ever covers has the text of a line in the edited middle. Affix lines next to the
+/// middle are therefore only safe once a line whose text appears nowhere in either middle
+/// stops the slide.
+fn slide_safe_affix<L: BlameLines + ?Sized>(
+    old: &L,
+    new: &L,
+    ws: crate::diff::WhitespaceMode,
+) -> Affix {
+    let (prefix, suffix) = common_affix_len(old, new, ws);
+    let new_hi = new.len() - suffix;
+    let old_hi = old.len() - suffix;
+    let mut affix = Affix {
+        prefix,
+        suffix,
+        safe_prefix: prefix,
+        safe_suffix: suffix,
+    };
+    if prefix == new_hi && prefix == old_hi {
+        return affix;
+    }
+    let mut middle = MiddleLines {
+        old,
+        new,
+        old_range: prefix..old_hi,
+        new_range: prefix..new_hi,
+        ws,
+        // A scan under whitespace rules normalizes every middle line again.
+        scans_left: if ws.normalizes_line_compare() { 0 } else { 8 },
+        set: None,
+    };
+    let prefix_reach = (0..prefix)
+        .rev()
+        .take_while(|&i| middle.contains(new.comparison_line(i, ws)))
+        .count();
+    let suffix_reach = (new_hi..new.len())
+        .take_while(|&i| middle.contains(new.comparison_line(i, ws)))
+        .count();
+    affix.safe_prefix -= prefix_reach;
+    affix.safe_suffix -= suffix_reach;
+    affix
+}
+
+/// Common prefix and suffix line counts of two files, and the parts of them that change
+/// compaction cannot reach (see [`slide_safe_affix`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Affix {
+    prefix: usize,
+    suffix: usize,
+    safe_prefix: usize,
+    safe_suffix: usize,
+}
+
+/// Membership test for the text of the edited middle of two files.
+///
+/// Usually only a line or two next to the middle is asked about, so the first few answers come
+/// from a scan; a set is built once more are needed.
+struct MiddleLines<'a, L: BlameLines + ?Sized> {
+    old: &'a L,
+    new: &'a L,
+    old_range: std::ops::Range<usize>,
+    new_range: std::ops::Range<usize>,
+    ws: crate::diff::WhitespaceMode,
+    scans_left: usize,
+    set: Option<hashbrown::HashSet<std::borrow::Cow<'a, str>>>,
+}
+
+impl<'a, L: BlameLines + ?Sized> MiddleLines<'a, L> {
+    fn lines(&self) -> impl Iterator<Item = &'a str> + '_ {
+        let (old, new, ws) = (self.old, self.new, self.ws);
+        self.old_range
+            .clone()
+            .map(move |i| old.comparison_line(i, ws))
+            .chain(
+                self.new_range
+                    .clone()
+                    .map(move |i| new.comparison_line(i, ws)),
+            )
+    }
+
+    fn contains(&mut self, line: &str) -> bool {
+        let ws = self.ws;
+        if self.set.is_none() && self.scans_left > 0 {
+            self.scans_left -= 1;
+            return self.lines().any(|m| blame_lines_equal(m, line, ws));
+        }
+        let set = match self.set.take() {
+            Some(set) => set,
+            None => self
+                .lines()
+                .map(|m| ws.normalize_line_for_compare(m))
+                .collect(),
+        };
+        let found = set.contains(&ws.normalize_line_for_compare(line));
+        self.set = Some(set);
+        found
+    }
+}
+
+/// Line access shared by blob lines and plain line slices in the line-map helpers.
+trait BlameLines {
+    fn len(&self) -> usize;
+    /// Text used to compare line `idx`, before any whitespace normalization.
+    fn comparison_line(&self, idx: usize, ws: crate::diff::WhitespaceMode) -> &str;
+    /// Byte length of `comparison_line(idx, WhitespaceMode::default())`.
+    fn exact_len(&self, idx: usize) -> usize;
+    /// Stored bytes of line `idx`, including its newline.
+    fn stored_line(&self, idx: usize) -> StoredLine<'_>;
+    /// Stored bytes of the last `lines` lines.
+    fn tail_bytes(&self, lines: usize) -> usize;
+}
+
+/// A line's stored bytes: its text, plus a newline the text itself leaves out.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct StoredLine<'a> {
+    text: &'a [u8],
+    implied_newline: bool,
+}
+
+impl<'a> StoredLine<'a> {
+    fn rev_bytes(self) -> impl Iterator<Item = u8> + 'a {
+        self.implied_newline
+            .then_some(b'\n')
+            .into_iter()
+            .chain(self.text.iter().rev().copied())
+    }
+}
+
+impl BlameLines for [&str] {
+    fn len(&self) -> usize {
+        <[&str]>::len(self)
+    }
+
+    fn comparison_line(&self, idx: usize, _ws: crate::diff::WhitespaceMode) -> &str {
+        self[idx]
+    }
+
+    fn exact_len(&self, idx: usize) -> usize {
+        self[idx].len()
+    }
+
+    /// Slice lines are records of a newline-separated file, so a line without one gains it.
+    fn stored_line(&self, idx: usize) -> StoredLine<'_> {
+        StoredLine {
+            text: self[idx].as_bytes(),
+            implied_newline: !self[idx].ends_with('\n'),
+        }
+    }
+
+    fn tail_bytes(&self, lines: usize) -> usize {
+        self[self.len() - lines..]
+            .iter()
+            .map(|l| l.len() + usize::from(!l.ends_with('\n')))
+            .sum()
+    }
+}
+
+impl BlameLines for BlobLines {
+    fn len(&self) -> usize {
+        BlobLines::len(self)
+    }
+
+    fn comparison_line(&self, idx: usize, ws: crate::diff::WhitespaceMode) -> &str {
+        BlobLines::comparison_line(self, idx, ws)
+    }
+
+    fn exact_len(&self, idx: usize) -> usize {
+        let start = self.line_start(idx);
+        (self.line_ends[idx] + 1).min(self.text.len()) - start
+    }
+
+    fn stored_line(&self, idx: usize) -> StoredLine<'_> {
+        StoredLine {
+            text: BlobLines::comparison_line(self, idx, crate::diff::WhitespaceMode::default())
+                .as_bytes(),
+            implied_newline: false,
+        }
+    }
+
+    fn tail_bytes(&self, lines: usize) -> usize {
+        if lines == 0 {
+            return 0;
+        }
+        self.text.len() - self.line_start(self.len() - lines)
+    }
+}
+
+/// Size of the blocks Git compares when dropping the common tail before a blame diff.
+const BLAME_TAIL_BLOCK: usize = 1024;
+
+/// Number of trailing lines `git blame` leaves out when diffing `old` against `new`.
+///
+/// With no context lines, Git drops the common tail of both files in 1 KiB blocks before
+/// running xdiff, keeping the line the last dropped block starts in. The dropped lines never
+/// reach the diff, so they neither count as occurrences of a line nor give a hunk room to slide,
+/// and the end of what remains is the end of the file for the indent heuristic. `affix` is
+/// [`slide_safe_affix`] of the two files under `ws`.
+fn blame_trimmed_tail_lines<L: BlameLines + ?Sized>(
+    old: &L,
+    new: &L,
+    affix: Affix,
+    ws: crate::diff::WhitespaceMode,
+) -> usize {
+    let (old_len, new_len) = (old.len(), new.len());
+    let shorter = old_len.min(new_len);
+    // Exact comparison already found the byte-identical suffix, unless it stopped at the prefix.
+    let equal_lines = if !ws.normalizes_line_compare() && affix.prefix + affix.suffix < shorter {
+        affix.suffix
+    } else {
+        (0..shorter)
+            .take_while(|&j| old.stored_line(old_len - 1 - j) == new.stored_line(new_len - 1 - j))
+            .count()
+    };
+    let mut common_bytes = new.tail_bytes(equal_lines);
+    if equal_lines < shorter {
+        let a = old.stored_line(old_len - 1 - equal_lines);
+        let b = new.stored_line(new_len - 1 - equal_lines);
+        common_bytes += a
+            .rev_bytes()
+            .zip(b.rev_bytes())
+            .take_while(|(x, y)| x == y)
+            .count();
+    }
+    let trimmed = common_bytes / BLAME_TAIL_BLOCK * BLAME_TAIL_BLOCK;
+    if trimmed == 0 {
+        return 0;
+    }
+    // A line is dropped when it starts after the first trimmed byte, i.e. when it and every
+    // line after it fit in fewer than `trimmed` bytes.
+    let (mut lo, mut hi) = (0usize, equal_lines);
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if new.tail_bytes(mid) < trimmed {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
+/// Unchanged lines kept on each side of the slidable region when diffing a window of the files.
+///
+/// The indent heuristic scores a split from at most 20 lines before and after it, so with this
+/// much context a window compacts exactly like the whole files.
+const COMPACTION_CONTEXT: usize = 21;
+
 fn blame_lines_equal(a: &str, b: &str, ws: crate::diff::WhitespaceMode) -> bool {
     if !ws.normalizes_line_compare() {
         a == b
@@ -150,73 +374,136 @@ fn blame_lines_equal(a: &str, b: &str, ws: crate::diff::WhitespaceMode) -> bool 
     }
 }
 
-fn blame_compacted_line_ops(
-    old_mid: &[&str],
-    new_mid: &[&str],
+/// Compacted diff ops for two windows cut from a pair of files.
+///
+/// Like Git, the line diff itself skips the common prefix and suffix, but compaction runs over
+/// the whole windows so groups can slide into the unchanged ends and the indent heuristic sees
+/// the surrounding lines. The windows leave `shared_records` lines of Git's view of the files
+/// out (identical on both sides); `shared` yields the comparison text of at least those whose
+/// text is in the edited middle, and Myers counts their occurrences the way xdiff counts every
+/// record of the files.
+fn blame_compacted_line_ops<'s>(
+    old: &[&str],
+    new: &[&str],
+    shared: impl Iterator<Item = &'s str>,
+    shared_records: usize,
     diff_algorithm: BlameDiffAlgorithm,
     indent_heuristic: bool,
     ws: crate::diff::WhitespaceMode,
 ) -> Vec<DiffOp> {
     use similar::TextDiff;
 
-    if !ws.normalizes_line_compare() {
-        if diff_algorithm == BlameDiffAlgorithm::Myers {
-            return crate::diff::line_diff_ops_git_xdiff_compacted(
-                old_mid,
-                new_mid,
-                indent_heuristic,
-            );
-        }
-        return crate::diff_indent_heuristic::diff_slice_ops_compacted(
-            old_mid,
-            new_mid,
-            diff_algorithm.to_similar(),
-            indent_heuristic,
-        );
-    }
-    let old_norm: Vec<String> = old_mid
-        .iter()
-        .map(|l| ws.normalize_line_for_compare(l).into_owned())
-        .collect();
-    let new_norm: Vec<String> = new_mid
-        .iter()
-        .map(|l| ws.normalize_line_for_compare(l).into_owned())
-        .collect();
-    let old_cmp: Vec<&str> = old_norm.iter().map(String::as_str).collect();
-    let new_cmp: Vec<&str> = new_norm.iter().map(String::as_str).collect();
+    let normalized = ws.normalizes_line_compare().then(|| {
+        let norm = |lines: &[&str]| -> Vec<String> {
+            lines
+                .iter()
+                .map(|l| ws.normalize_line_for_compare(l).into_owned())
+                .collect()
+        };
+        (norm(old), norm(new))
+    });
+    let normalized_refs: Option<(Vec<&str>, Vec<&str>)> = normalized.as_ref().map(|(o, n)| {
+        (
+            o.iter().map(String::as_str).collect(),
+            n.iter().map(String::as_str).collect(),
+        )
+    });
+    let (old_cmp, new_cmp) = match &normalized_refs {
+        Some((o, n)) => (o.as_slice(), n.as_slice()),
+        None => (old, new),
+    };
+    let (prefix, suffix) = common_affix_len(old_cmp, new_cmp, ws);
+    let old_mid = &old_cmp[prefix..old_cmp.len() - suffix];
+    let new_mid = &new_cmp[prefix..new_cmp.len() - suffix];
     if diff_algorithm == BlameDiffAlgorithm::Myers {
         use crate::line_interner::LineInterner;
         let mut interner = LineInterner::with_capacity(old_cmp.len() + new_cmp.len());
-        let ids1 = interner.intern_all(&old_cmp);
-        let ids2 = interner.intern_all(&new_cmp);
+        let ids1 = interner.intern_all(old_cmp);
+        let ids2 = interner.intern_all(new_cmp);
+        let mut shared_counts = vec![0u32; interner.len()];
+        for line in shared {
+            if let Some(id) = interner.get(&ws.normalize_line_for_compare(line)) {
+                shared_counts[id as usize] += 1;
+            }
+        }
         return crate::diff::line_diff_ops_git_xdiff_compacted_ids(
             &ids1,
             &ids2,
-            old_mid,
-            new_mid,
+            &shared_counts,
+            shared_records,
+            old,
+            new,
             indent_heuristic,
             ws,
         );
     }
-    // Align on normalized slices; compact with raw lines for indent heuristic and ws-aware sliding.
-    let diff = TextDiff::configure()
+    // Compaction reads only the changed ranges, so the middle's ops need no equal-run framing.
+    let mid_ops: Vec<DiffOp> = TextDiff::configure()
         .algorithm(diff_algorithm.to_similar())
-        .diff_slices(&old_cmp, &new_cmp);
-    let raw = diff.ops().to_vec();
+        .diff_slices(old_mid, new_mid)
+        .ops()
+        .iter()
+        .map(|op| shift_diff_op(op, prefix))
+        .collect();
     crate::diff_indent_heuristic::apply_change_compact_to_ops_with_ws(
-        &raw,
-        old_mid,
-        new_mid,
+        &mid_ops,
+        old,
+        new,
         indent_heuristic,
         ws,
     )
 }
 
-fn common_affix_trim_blob_lines(
-    old: &BlobLines,
-    new: &BlobLines,
+/// `op` with both line indexes moved forward by `by`.
+fn shift_diff_op(op: &DiffOp, by: usize) -> DiffOp {
+    match *op {
+        DiffOp::Equal {
+            old_index,
+            new_index,
+            len,
+        } => DiffOp::Equal {
+            old_index: old_index + by,
+            new_index: new_index + by,
+            len,
+        },
+        DiffOp::Delete {
+            old_index,
+            old_len,
+            new_index,
+        } => DiffOp::Delete {
+            old_index: old_index + by,
+            old_len,
+            new_index: new_index + by,
+        },
+        DiffOp::Insert {
+            old_index,
+            new_index,
+            new_len,
+        } => DiffOp::Insert {
+            old_index: old_index + by,
+            new_index: new_index + by,
+            new_len,
+        },
+        DiffOp::Replace {
+            old_index,
+            old_len,
+            new_index,
+            new_len,
+        } => DiffOp::Replace {
+            old_index: old_index + by,
+            old_len,
+            new_index: new_index + by,
+            new_len,
+        },
+    }
+}
+
+/// Lengths of the common line prefix and suffix of two files (the suffix never overlaps it).
+fn common_affix_len<L: BlameLines + ?Sized>(
+    old: &L,
+    new: &L,
     ws: crate::diff::WhitespaceMode,
-) -> (usize, usize, usize, usize, usize, usize) {
+) -> (usize, usize) {
     let mut prefix = 0usize;
     while prefix < old.len()
         && prefix < new.len()
@@ -239,36 +526,16 @@ fn common_affix_trim_blob_lines(
     {
         suffix += 1;
     }
-    let old_mid_end = old.len().saturating_sub(suffix);
-    let new_mid_end = new.len().saturating_sub(suffix);
-    (prefix, suffix, prefix, old_mid_end, prefix, new_mid_end)
-}
-
-fn common_affix_trim<'a>(
-    old: &'a [&'a str],
-    new: &'a [&'a str],
-    ws: crate::diff::WhitespaceMode,
-) -> (usize, usize, &'a [&'a str], &'a [&'a str]) {
-    let mut prefix = 0usize;
-    while prefix < old.len()
-        && prefix < new.len()
-        && blame_lines_equal(old[prefix], new[prefix], ws)
-    {
-        prefix += 1;
-    }
-    let mut suffix = 0usize;
-    while suffix < old.len().saturating_sub(prefix)
-        && suffix < new.len().saturating_sub(prefix)
-        && blame_lines_equal(old[old.len() - 1 - suffix], new[new.len() - 1 - suffix], ws)
-    {
-        suffix += 1;
-    }
-    let old_mid = &old[prefix..old.len() - suffix];
-    let new_mid = &new[prefix..new.len() - suffix];
-    (prefix, suffix, old_mid, new_mid)
+    (prefix, suffix)
 }
 
 /// Map each line in `new` to its origin line index in `old` (if any).
+///
+/// The map is read from the diff after change compaction, the way `git blame` places hunks, so
+/// an inserted or deleted block that could sit in several places is attributed where Git puts
+/// it rather than where a raw common prefix/suffix would leave it. Lines are treated as
+/// newline-terminated records of a file, and like `git blame` the diff leaves out the common
+/// tail Git drops in 1 KiB blocks before running xdiff.
 pub fn build_line_map(
     old: &[&str],
     new: &[&str],
@@ -286,97 +553,27 @@ pub fn build_line_map(
     .0
 }
 
-/// True when every focused child line index lies in the unchanged prefix or suffix
-/// after affix trimming (middle xdiff can be skipped for those lines).
-fn child_lines_only_in_affix(
-    focus: &[usize],
-    new_len: usize,
-    prefix: usize,
-    suffix: usize,
-) -> bool {
-    if focus.is_empty() {
-        return false;
-    }
-    let suffix_start = new_len.saturating_sub(suffix);
-    focus
-        .iter()
-        .all(|&idx| idx < prefix || (suffix > 0 && idx >= suffix_start))
-}
-
-/// Like [`build_line_map_with_changed_flags`], but reads line text from owned strings without
-/// building full-file `&str` slices (prefix/suffix mapping only touches unchanged ends).
-#[allow(clippy::too_many_arguments)]
+/// Like [`build_line_map_with_changed_flags`], for blob lines.
+///
+/// `affix` is [`slide_safe_affix`] of the two blobs.
 fn build_line_map_with_changed_flags_owned(
     old: &BlobLines,
     new: &BlobLines,
+    affix: Affix,
     diff_algorithm: BlameDiffAlgorithm,
     indent_heuristic: bool,
     with_changed_flags: bool,
-    child_focus: Option<&[usize]>,
     ws: crate::diff::WhitespaceMode,
 ) -> (Vec<Option<usize>>, Vec<bool>) {
-    let (prefix, suffix, old_lo, old_hi, new_lo, new_hi) =
-        common_affix_trim_blob_lines(old, new, ws);
-    let mut map = vec![None; new.len()];
-    for (i, slot) in map.iter_mut().take(prefix).enumerate() {
-        *slot = Some(i);
-    }
-    for i in 0..suffix {
-        let new_idx = new.len() - suffix + i;
-        let old_idx = old.len() - suffix + i;
-        map[new_idx] = Some(old_idx);
-    }
-    if old_lo >= old_hi && new_lo >= new_hi {
-        return if with_changed_flags {
-            (map, vec![false; new.len()])
-        } else {
-            (map, Vec::new())
-        };
-    }
-    if child_focus.is_some_and(|focus| child_lines_only_in_affix(focus, new.len(), prefix, suffix))
-    {
-        return if with_changed_flags {
-            (map, vec![false; new.len()])
-        } else {
-            (map, Vec::new())
-        };
-    }
-    let mut flags = if with_changed_flags {
-        vec![false; new.len()]
-    } else {
-        Vec::new()
-    };
-
-    // When `child_focus` is set (-L blame), always diff the full affix-trimmed middle.
-    // Index-aligned sub-windows are unsafe when both sides have equal line counts but an
-    // insert on one side of the window and a delete on the other shift true correspondence.
-    let (old_w_lo, old_w_hi, new_w_lo, new_w_hi) = (old_lo, old_hi, new_lo, new_hi);
-
-    let old_mid_owned: Vec<&str> = (old_w_lo..old_w_hi)
-        .map(|i| old.comparison_line(i, ws))
-        .collect();
-    let new_mid_owned: Vec<&str> = (new_w_lo..new_w_hi)
-        .map(|i| new.comparison_line(i, ws))
-        .collect();
-    let old_mid = old_mid_owned.as_slice();
-    let new_mid = new_mid_owned.as_slice();
-    let ops = blame_compacted_line_ops(old_mid, new_mid, diff_algorithm, indent_heuristic, ws);
-    let mid_map = crate::diff_indent_heuristic::map_new_to_old_from_ops(&ops, new_mid.len());
-    let old_base = old_w_lo;
-    let new_base = new_w_lo;
-    for (j, parent) in mid_map.into_iter().enumerate() {
-        map[new_base + j] = parent.map(|idx| idx + old_base);
-    }
-    if with_changed_flags {
-        let mid_flags =
-            crate::diff_indent_heuristic::new_line_changed_flags_from_ops(&ops, new_mid.len());
-        for (j, flag) in mid_flags.into_iter().enumerate() {
-            flags[new_base + j] = flag;
-        }
-        (map, flags)
-    } else {
-        (map, Vec::new())
-    }
+    windowed_line_map(
+        old,
+        new,
+        affix,
+        diff_algorithm,
+        indent_heuristic,
+        with_changed_flags,
+        ws,
+    )
 }
 
 /// Like [`build_line_map`], optionally returning xdiff-style changed flags for the new side
@@ -389,34 +586,95 @@ fn build_line_map_with_changed_flags(
     with_changed_flags: bool,
     ws: crate::diff::WhitespaceMode,
 ) -> (Vec<Option<usize>>, Vec<bool>) {
-    let (prefix, suffix, old_mid, new_mid) = common_affix_trim(old, new, ws);
-    let mut map = vec![None; new.len()];
-    let mut flags = vec![false; new.len()];
-    for (i, slot) in map.iter_mut().take(prefix).enumerate() {
-        *slot = Some(i);
-    }
-    for i in 0..suffix {
-        let new_idx = new.len() - suffix + i;
-        let old_idx = old.len() - suffix + i;
-        map[new_idx] = Some(old_idx);
-    }
-    if old_mid.is_empty() && new_mid.is_empty() {
-        return (map, flags);
-    }
+    windowed_line_map(
+        old,
+        new,
+        slide_safe_affix(old, new, ws),
+        diff_algorithm,
+        indent_heuristic,
+        with_changed_flags,
+        ws,
+    )
+}
+
+/// Line map and changed flags from a compacted diff of the window that compaction can affect.
+///
+/// The diff sees the files as `git blame` gives them to xdiff (see
+/// [`blame_trimmed_tail_lines`]). Lines outside [`slide_safe_affix`] plus
+/// [`COMPACTION_CONTEXT`] map straight through, which is what compacting the whole files would
+/// give them; they still count as occurrences for the Myers line classification.
+fn windowed_line_map<L: BlameLines + ?Sized>(
+    old: &L,
+    new: &L,
+    affix: Affix,
+    diff_algorithm: BlameDiffAlgorithm,
+    indent_heuristic: bool,
+    with_changed_flags: bool,
+    ws: crate::diff::WhitespaceMode,
+) -> (Vec<Option<usize>>, Vec<bool>) {
+    let trimmed_tail = blame_trimmed_tail_lines(old, new, affix, ws);
+    let (safe_prefix, safe_suffix) = (affix.safe_prefix, affix.safe_suffix);
+    let tail = safe_suffix
+        .saturating_sub(COMPACTION_CONTEXT)
+        .max(trimmed_tail);
+    let (old_hi, new_hi) = (old.len() - tail, new.len() - tail);
+    let lo = safe_prefix
+        .saturating_sub(COMPACTION_CONTEXT)
+        .min(old_hi)
+        .min(new_hi);
+    let old_w: Vec<&str> = (lo..old_hi).map(|i| old.comparison_line(i, ws)).collect();
+    let new_w: Vec<&str> = (lo..new_hi).map(|i| new.comparison_line(i, ws)).collect();
+    let shared_tail = new_hi..new.len() - trimmed_tail;
+    let shared_records = lo + shared_tail.len();
+    // Only the counts of lines in the edited middle are read, so without whitespace rules a
+    // shared line of another length needs no lookup.
+    let mid_lens = (!ws.normalizes_line_compare()).then(|| {
+        let lens = (affix.prefix..old.len() - affix.suffix)
+            .map(|i| old.exact_len(i))
+            .chain((affix.prefix..new.len() - affix.suffix).map(|i| new.exact_len(i)));
+        let mut seen = Vec::new();
+        for len in lens {
+            if seen.len() <= len {
+                seen.resize(len + 1, false);
+            }
+            seen[len] = true;
+        }
+        seen
+    });
+    let shared = (0..lo)
+        .chain(shared_tail)
+        .filter(|&i| {
+            mid_lens
+                .as_ref()
+                .is_none_or(|seen| seen.get(new.exact_len(i)).copied().unwrap_or(false))
+        })
+        .map(|i| new.comparison_line(i, ws));
     // `--indent-heuristic` / `diff.indentHeuristic` shifts ambiguous add/delete
     // runs like Git's xdiff, which changes which lines blame attributes (t4061).
-    let ops = blame_compacted_line_ops(old_mid, new_mid, diff_algorithm, indent_heuristic, ws);
-    let mid_map = crate::diff_indent_heuristic::map_new_to_old_from_ops(&ops, new_mid.len());
-    for (j, parent) in mid_map.into_iter().enumerate() {
-        map[prefix + j] = parent.map(|idx| idx + prefix);
-    }
-    if with_changed_flags {
-        let mid_flags =
-            crate::diff_indent_heuristic::new_line_changed_flags_from_ops(&ops, new_mid.len());
-        for (j, flag) in mid_flags.into_iter().enumerate() {
-            flags[prefix + j] = flag;
-        }
-    }
+    let ops = blame_compacted_line_ops(
+        &old_w,
+        &new_w,
+        shared,
+        shared_records,
+        diff_algorithm,
+        indent_heuristic,
+        ws,
+    );
+    let window_map = crate::diff_indent_heuristic::map_new_to_old_from_ops(&ops, new_w.len());
+    let map = (0..lo)
+        .map(Some)
+        .chain(window_map.into_iter().map(|m| m.map(|i| i + lo)))
+        .chain((old_hi..old.len()).map(Some))
+        .collect();
+    let flags = if with_changed_flags {
+        let mut flags = vec![false; new.len()];
+        let window_flags =
+            crate::diff_indent_heuristic::new_line_changed_flags_from_ops(&ops, new_w.len());
+        flags[lo..new_hi].copy_from_slice(&window_flags);
+        flags
+    } else {
+        Vec::new()
+    };
     (map, flags)
 }
 
@@ -1629,18 +1887,14 @@ impl BlobLines {
         self.line_ends.len()
     }
 
-    fn is_empty(&self) -> bool {
-        self.line_ends.is_empty()
+    /// Byte offset where line `idx` starts.
+    fn line_start(&self, idx: usize) -> usize {
+        idx.checked_sub(1)
+            .map_or(0, |prev| self.line_ends[prev] + 1)
     }
 
     fn line(&self, idx: usize) -> &str {
-        let end = self.line_ends[idx];
-        let start = if idx == 0 {
-            0
-        } else {
-            self.line_ends[idx - 1] + 1
-        };
-        &self.text[start..end]
+        &self.text[self.line_start(idx)..self.line_ends[idx]]
     }
 
     /// Exact comparison borrows the full record; whitespace modes compare line bodies.
@@ -1648,13 +1902,8 @@ impl BlobLines {
         if ws.normalizes_line_compare() {
             return self.line(idx);
         }
-        let start = if idx == 0 {
-            0
-        } else {
-            self.line_ends[idx - 1] + 1
-        };
         let end = (self.line_ends[idx] + 1).min(self.text.len());
-        &self.text[start..end]
+        &self.text[self.line_start(idx)..end]
     }
 
     // Keep normalization code shared by copy lookups rather than inlining it into the walk.
@@ -1954,11 +2203,11 @@ impl<'a> BlameSession<'a> {
         child_mode: u32,
         par_lines: &BlobLines,
         cur_lines: &BlobLines,
+        affix: Affix,
         diff_algorithm: BlameDiffAlgorithm,
         indent_heuristic: bool,
         is_ignored: bool,
         include_stop_blame: bool,
-        child_focus: Option<&[usize]>,
     ) -> PairMapCacheValue {
         #[cfg(test)]
         self.diffed_pairs.push((parent_oid, child_oid));
@@ -1976,8 +2225,7 @@ impl<'a> BlameSession<'a> {
             include_stop_blame,
             whitespace: ws,
         };
-        let cacheable = self.cache_pair_maps && child_focus.is_none();
-        if cacheable {
+        if self.cache_pair_maps {
             if let Some(maps) = self.pair_maps.get(&key) {
                 return maps.clone();
             }
@@ -1992,10 +2240,10 @@ impl<'a> BlameSession<'a> {
             build_line_map_with_changed_flags_owned(
                 par_lines,
                 cur_lines,
+                affix,
                 diff_algorithm,
                 indent_heuristic,
                 true,
-                child_focus,
                 ws,
             )
         } else {
@@ -2003,10 +2251,10 @@ impl<'a> BlameSession<'a> {
                 build_line_map_with_changed_flags_owned(
                     par_lines,
                     cur_lines,
+                    affix,
                     diff_algorithm,
                     indent_heuristic,
                     false,
-                    child_focus,
                     ws,
                 )
                 .0,
@@ -2049,7 +2297,7 @@ impl<'a> BlameSession<'a> {
             line_map: Arc::new(line_map),
             stop_blame_on_current: Arc::new(stop_blame_on_current),
         };
-        if cacheable {
+        if self.cache_pair_maps {
             self.pair_maps.insert(key, value.clone());
         }
         value
@@ -2750,11 +2998,11 @@ fn compute_blame_with_session(
                     current_blob_mode,
                     pl_arc.as_ref(),
                     cur_lines_arc.as_ref(),
+                    slide_safe_affix(pl_arc.as_ref(), cur_lines_arc.as_ref(), session.whitespace),
                     map_algo,
                     indent_heuristic,
                     false,
                     true,
-                    None,
                 );
                 par_lines_vec[i] = Some(pl_arc);
                 maps[i] = Some(Arc::clone(&pair.diff_line_map));
@@ -3098,11 +3346,16 @@ fn compute_blame_with_session(
                 let par_lines_arc =
                     session.load_blob_lines(p_blob_oid, &parent_blob_path, p_blob_mode)?;
                 let pending_batch = std::mem::take(&mut pending);
-                let (affix_mapped, need_diff) = partition_pending_by_affix(
+                let affix = slide_safe_affix(
                     par_lines_arc.as_ref(),
                     cur_lines_arc.as_ref(),
-                    pending_batch,
                     session.whitespace,
+                );
+                let (affix_mapped, need_diff) = partition_pending_by_affix(
+                    affix,
+                    par_lines_arc.len(),
+                    cur_lines_arc.len(),
+                    pending_batch,
                 );
                 // Only use affix partition when it avoids work: affix-only skip, or mixed
                 // affix + middle. When every pending line sits in the edited middle, fall back
@@ -3120,19 +3373,8 @@ fn compute_blame_with_session(
                     }
                     continue 'blame_loop;
                 }
-                let mut still_pending = if affix_mapped.is_empty() {
-                    pending = need_diff;
-                    Vec::new()
-                } else {
-                    pending = need_diff;
-                    affix_mapped
-                };
-                let focus_storage: Option<Vec<usize>> = if line_range.is_some() {
-                    Some(pending.iter().map(|t| t.current_idx).collect())
-                } else {
-                    None
-                };
-                let child_focus = focus_storage.as_deref();
+                let mut still_pending = affix_mapped;
+                pending = need_diff;
                 let maps = session.parent_child_line_maps(
                     p_blob_oid,
                     &parent_blob_path,
@@ -3142,11 +3384,11 @@ fn compute_blame_with_session(
                     current_blob_mode,
                     par_lines_arc.as_ref(),
                     cur_lines_arc.as_ref(),
+                    affix,
                     diff_algorithm,
                     indent_heuristic,
                     is_ignored,
                     true,
-                    child_focus,
                 );
                 let diff_line_map = maps.diff_line_map.as_slice();
                 let line_map = maps.line_map.as_slice();
@@ -3234,36 +3476,6 @@ fn compute_blame_with_session(
                             continue;
                         }
                         if let Some(parent_idx) = line_map[t.current_idx] {
-                            if should_drop_tail_match_for_myers_blob(
-                                diff_algorithm,
-                                parent_idx,
-                                t.current_idx,
-                                par_lines_arc.as_ref(),
-                                session.whitespace,
-                            ) {
-                                if is_ignored {
-                                    still_pending.push(TrackedLine {
-                                        final_lineno: t.final_lineno,
-                                        current_idx: t.current_idx,
-                                        ignored: true,
-                                        source_path: t.source_path.clone(),
-                                        origin: t.origin,
-                                    });
-                                } else {
-                                    result.push(blame_line_at_path(
-                                        current_oid,
-                                        t.final_lineno,
-                                        t.current_idx + 1,
-                                        final_lines[t.final_lineno - 1].clone(),
-                                        &current_path,
-                                        None,
-                                        t.ignored,
-                                        false,
-                                        false,
-                                    ));
-                                }
-                                continue;
-                            }
                             // Line came from parent — keep tracking
                             let carried_ignored = if is_ignored {
                                 let unchanged = parent_idx == t.current_idx
@@ -4296,10 +4508,7 @@ mod tests {
         ] {
             let old = BlobLines::from_content(before.to_owned());
             let new = BlobLines::from_content(after.to_owned());
-            assert_eq!(
-                common_affix_trim_blob_lines(&old, &new, exact),
-                (1, 0, 1, 2, 1, 2)
-            );
+            assert_eq!(common_affix_len(&old, &new, exact), (1, 0));
             let pending = vec![TrackedLine {
                 final_lineno: 2,
                 current_idx: 1,
@@ -4307,7 +4516,12 @@ mod tests {
                 source_path: None,
                 origin: 0,
             }];
-            let (affix, need) = partition_pending_by_affix(&old, &new, pending, exact);
+            let (affix, need) = partition_pending_by_affix(
+                slide_safe_affix(&old, &new, exact),
+                old.len(),
+                new.len(),
+                pending,
+            );
             assert!(affix.is_empty());
             assert_eq!(need.len(), 1);
             for algorithm in [
@@ -4317,7 +4531,13 @@ mod tests {
                 BlameDiffAlgorithm::Minimal,
             ] {
                 let (map, flags) = build_line_map_with_changed_flags_owned(
-                    &old, &new, algorithm, true, true, None, exact,
+                    &old,
+                    &new,
+                    slide_safe_affix(&old, &new, exact),
+                    algorithm,
+                    true,
+                    true,
+                    exact,
                 );
                 assert_eq!(map, vec![Some(0), None]);
                 assert_eq!(flags, vec![false, true]);
@@ -4331,7 +4551,13 @@ mod tests {
                     map
                 );
                 let (map, flags) = build_line_map_with_changed_flags_owned(
-                    &old, &new, algorithm, true, true, None, ws,
+                    &old,
+                    &new,
+                    slide_safe_affix(&old, &new, ws),
+                    algorithm,
+                    true,
+                    true,
+                    ws,
                 );
                 assert_eq!(map, vec![Some(0), Some(1)]);
                 assert_eq!(flags, vec![false, false]);
@@ -4425,6 +4651,251 @@ mod tests {
     }
 
     #[test]
+    fn build_line_map_slides_insertion_into_unchanged_suffix() {
+        let old = [
+            "PROG=a b c",
+            "\t$(CC) -o cat-file",
+            "",
+            "read-cache.o: cache.h",
+        ];
+        let new = [
+            "PROG=a b c fsck-cache",
+            "\t$(CC) -o cat-file",
+            "",
+            "fsck-cache: fsck-cache.o",
+            "\t$(CC) -o fsck-cache",
+            "",
+            "read-cache.o: cache.h",
+        ];
+        for algorithm in [BlameDiffAlgorithm::Myers, BlameDiffAlgorithm::Histogram] {
+            for indent_heuristic in [true, false] {
+                let map = build_line_map(&old, &new, algorithm, indent_heuristic);
+                assert_eq!(
+                    map,
+                    vec![None, Some(1), Some(2), None, None, None, Some(3)],
+                    "{algorithm:?} indent_heuristic={indent_heuristic}"
+                );
+            }
+        }
+        let old_lines = BlobLines::from_content(old.map(|l| format!("{l}\n")).concat());
+        let new_lines = BlobLines::from_content(new.map(|l| format!("{l}\n")).concat());
+        let exact = crate::diff::WhitespaceMode::default();
+        let (map, flags) = build_line_map_with_changed_flags_owned(
+            &old_lines,
+            &new_lines,
+            slide_safe_affix(&old_lines, &new_lines, exact),
+            BlameDiffAlgorithm::Myers,
+            true,
+            true,
+            exact,
+        );
+        assert_eq!(map, vec![None, Some(1), Some(2), None, None, None, Some(3)]);
+        assert_eq!(flags, vec![true, false, false, true, true, true, false]);
+        let pending = (0..new.len())
+            .map(|i| TrackedLine {
+                final_lineno: i + 1,
+                current_idx: i,
+                ignored: false,
+                source_path: None,
+                origin: 0,
+            })
+            .collect();
+        let (affix, need) = partition_pending_by_affix(
+            slide_safe_affix(&old_lines, &new_lines, exact),
+            old.len(),
+            new.len(),
+            pending,
+        );
+        let affix: Vec<(usize, usize)> = affix
+            .iter()
+            .map(|t| (t.final_lineno, t.current_idx))
+            .collect();
+        assert_eq!(
+            affix,
+            vec![(7, 3)],
+            "the trailing blank can slide, so it needs the diff"
+        );
+        assert_eq!(need.len(), 6);
+    }
+
+    #[test]
+    fn blame_tail_trim_follows_git_block_rule() {
+        let exact = crate::diff::WhitespaceMode::default();
+        let old_text = format!("a\n{}", "b\n".repeat(1000));
+        let new_text = format!("a\n{}", "b\n".repeat(1001));
+        let old = BlobLines::from_content(old_text.clone());
+        let new = BlobLines::from_content(new_text.clone());
+        // 2001 common tail bytes leave one 1 KiB block; the 511 two-byte lines after the line
+        // it starts in are dropped.
+        let affix = slide_safe_affix(&old, &new, exact);
+        assert_eq!(blame_trimmed_tail_lines(&old, &new, affix, exact), 511);
+        let old_refs: Vec<&str> = old_text.lines().collect();
+        let new_refs: Vec<&str> = new_text.lines().collect();
+        let slice_affix = slide_safe_affix(old_refs.as_slice(), new_refs.as_slice(), exact);
+        assert_eq!(
+            blame_trimmed_tail_lines(old_refs.as_slice(), new_refs.as_slice(), slice_affix, exact),
+            511
+        );
+        let ws = crate::diff::WhitespaceMode::ignore_all_space();
+        let ws_affix = slide_safe_affix(&old, &new, ws);
+        assert_eq!(blame_trimmed_tail_lines(&old, &new, ws_affix, ws), 511);
+
+        let map = build_line_map(&old_refs, &new_refs, BlameDiffAlgorithm::Myers, true);
+        let inserted: Vec<usize> = (0..map.len()).filter(|&i| map[i].is_none()).collect();
+        assert_eq!(
+            inserted,
+            vec![490],
+            "the insertion stops where git cut the tail"
+        );
+
+        let short_old = BlobLines::from_content("a\nb\n".to_owned());
+        let short_new = BlobLines::from_content("x\nb\n".to_owned());
+        let affix = slide_safe_affix(&short_old, &short_new, exact);
+        assert_eq!(
+            blame_trimmed_tail_lines(&short_old, &short_new, affix, exact),
+            0
+        );
+    }
+
+    /// Small deterministic generator for the window equivalence test.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next(&mut self, bound: usize) -> usize {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((self.0 >> 33) as usize) % bound
+        }
+    }
+
+    #[test]
+    fn windowed_line_map_matches_compacting_git_view() {
+        // Frequent lines sit near xdiff's frequency limit for these file sizes, and blank and
+        // indented lines give the indent heuristic something to weigh.
+        let pool = [
+            "",
+            "",
+            "}",
+            "\t}",
+            "#",
+            "\t\treturn 0;",
+            "\tif (x) {",
+            "\tx = 1;",
+            "fn a() {",
+        ];
+        let line = |rng: &mut Lcg, i: usize| -> String {
+            let pick = rng.next(pool.len() * 2);
+            pool.get(pick)
+                .map_or_else(|| format!("line {i} {}", rng.next(4)), |l| (*l).to_owned())
+        };
+        let mut rng = Lcg(7);
+        for case in 0..400 {
+            let len = 60 + rng.next(500);
+            let old: Vec<String> = (0..len).map(|i| line(&mut rng, i)).collect();
+            let mut new = old.clone();
+            for _ in 0..1 + rng.next(4) {
+                let at = rng.next(new.len());
+                let n = 1 + rng.next(6);
+                match rng.next(3) {
+                    0 => {
+                        for k in 0..n {
+                            let l = line(&mut rng, k);
+                            new.insert(at, l);
+                        }
+                    }
+                    1 => {
+                        new.drain(at..(at + n).min(new.len()));
+                    }
+                    _ => {
+                        let end = (at + n).min(new.len());
+                        for slot in &mut new[at..end] {
+                            *slot = line(&mut rng, case);
+                        }
+                    }
+                }
+            }
+            let old: Vec<&str> = old.iter().map(String::as_str).collect();
+            let new: Vec<&str> = new.iter().map(String::as_str).collect();
+            assert_window_matches_git_view(&old, &new, &format!("case {case}"));
+        }
+    }
+
+    /// A blank line stops the slide, so the indent heuristic reads the blank run before it.
+    #[test]
+    fn windowed_line_map_keeps_blank_context_for_indent_heuristic() {
+        let block = ["\tif (x) {", "\t\ty();", "\t}"];
+        let mut old = vec!["top"];
+        old.extend(std::iter::repeat_n("", 25));
+        old.extend(block);
+        old.push("end");
+        let mut new = old.clone();
+        new.splice(29..29, block);
+        assert_window_matches_git_view(&old, &new, "blank run");
+    }
+
+    /// A `}` frequent only outside the window still counts as frequent.
+    #[test]
+    fn windowed_line_map_counts_lines_outside_the_window() {
+        let version = |middle: [&'static str; 8]| -> Vec<String> {
+            let mut lines = vec!["}".to_owned(); 60];
+            lines.extend((0..30).map(|i| format!("head {i}")));
+            lines.extend(middle.map(str::to_owned));
+            lines.extend((0..30).map(|i| format!("tail {i}")));
+            lines
+        };
+        let old = version(["u1", "u2", "u3", "u4", "}", "u5", "u6", "u7"]);
+        let new = version(["v1", "v2", "v3", "v4", "}", "v5", "v6", "v7"]);
+        let old: Vec<&str> = old.iter().map(String::as_str).collect();
+        let new: Vec<&str> = new.iter().map(String::as_str).collect();
+        assert_window_matches_git_view(&old, &new, "frequent brace");
+        let map = build_line_map(&old, &new, BlameDiffAlgorithm::Myers, true);
+        assert!(
+            map[90..98].iter().all(Option::is_none),
+            "{:?}",
+            &map[88..100]
+        );
+    }
+
+    /// Windowed maps equal compacting all of Git's view of the files, for every algorithm.
+    fn assert_window_matches_git_view(old: &[&str], new: &[&str], label: &str) {
+        let exact = crate::diff::WhitespaceMode::default();
+        for algorithm in [BlameDiffAlgorithm::Myers, BlameDiffAlgorithm::Histogram] {
+            for indent_heuristic in [true, false] {
+                let affix = slide_safe_affix(old, new, exact);
+                let tail = blame_trimmed_tail_lines(old, new, affix, exact);
+                let (old_v, new_v) = (&old[..old.len() - tail], &new[..new.len() - tail]);
+                let ops = blame_compacted_line_ops(
+                    old_v,
+                    new_v,
+                    std::iter::empty(),
+                    0,
+                    algorithm,
+                    indent_heuristic,
+                    exact,
+                );
+                let mut expected =
+                    crate::diff_indent_heuristic::map_new_to_old_from_ops(&ops, new_v.len());
+                expected.extend((old.len() - tail..old.len()).map(Some));
+                let mut expected_flags =
+                    crate::diff_indent_heuristic::new_line_changed_flags_from_ops(
+                        &ops,
+                        new_v.len(),
+                    );
+                expected_flags.resize(new.len(), false);
+                let (map, flags) =
+                    windowed_line_map(old, new, affix, algorithm, indent_heuristic, true, exact);
+                assert_eq!(map, expected, "{label} {algorithm:?} {indent_heuristic}");
+                assert_eq!(
+                    flags, expected_flags,
+                    "{label} {algorithm:?} {indent_heuristic}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn build_line_map_identity_for_equal_files() {
         let lines = ["one", "two", "three"];
         let map = build_line_map(&lines, &lines, BlameDiffAlgorithm::Histogram, false);
@@ -4506,8 +4977,13 @@ mod tests {
             source_path: None,
             origin: 0,
         }];
-        let (affix, need) =
-            partition_pending_by_affix(&old, &new, pending, crate::diff::WhitespaceMode::default());
+        let exact = crate::diff::WhitespaceMode::default();
+        let (affix, need) = partition_pending_by_affix(
+            slide_safe_affix(&old, &new, exact),
+            old.len(),
+            new.len(),
+            pending,
+        );
         assert!(need.is_empty());
         assert_eq!(affix[0].current_idx, 0);
 
@@ -4519,10 +4995,10 @@ mod tests {
             origin: 0,
         }];
         let (affix, need) = partition_pending_by_affix(
-            &old,
-            &new,
+            slide_safe_affix(&old, &new, exact),
+            old.len(),
+            new.len(),
             pending_mid,
-            crate::diff::WhitespaceMode::default(),
         );
         assert!(affix.is_empty());
         assert_eq!(need.len(), 1);
