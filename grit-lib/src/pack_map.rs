@@ -32,7 +32,7 @@ pub(crate) struct PackFingerprint {
 }
 
 enum Storage {
-    Mapped(Mmap),
+    Mapped { map: Mmap, file: Option<File> },
     Owned(Vec<u8>),
 }
 
@@ -57,7 +57,7 @@ impl std::fmt::Debug for PackData {
             .field(
                 "backing",
                 &match &self.storage {
-                    Storage::Mapped(_) => "mapped",
+                    Storage::Mapped { .. } => "mapped",
                     Storage::Owned(_) => "owned",
                 },
             )
@@ -70,7 +70,7 @@ impl Deref for PackData {
 
     fn deref(&self) -> &[u8] {
         match &self.storage {
-            Storage::Mapped(m) => m.deref(),
+            Storage::Mapped { map, .. } => map.deref(),
             Storage::Owned(v) => v.as_slice(),
         }
     }
@@ -90,10 +90,16 @@ impl PackData {
     /// Map or read `path`, requiring at least `min_len` bytes (pack header vs index fanout).
     pub(crate) fn open_with_min_len(path: &Path, min_len: u64) -> Result<Arc<Self>> {
         let file = File::open(path).map_err(Error::Io)?;
-        Self::open_from_file(file, min_len)
+        Self::open_from_file(file, min_len, false)
     }
 
-    fn open_from_file(file: File, min_len: u64) -> Result<Arc<Self>> {
+    /// Keep the pack's descriptor for bounded positioned reads alongside its mapping.
+    /// Indexes, graphs and other mapped metadata keep the descriptor-free `open` path.
+    pub(crate) fn open_for_sparse_reads(path: &Path) -> Result<Arc<Self>> {
+        Self::open_from_file(File::open(path)?, HEADER_LEN as u64, true)
+    }
+
+    fn open_from_file(file: File, min_len: u64, sparse_reads: bool) -> Result<Arc<Self>> {
         let len = file.metadata().map_err(Error::Io)?.len();
         if len < min_len {
             return Err(Error::CorruptObject(format!(
@@ -115,7 +121,10 @@ impl PackData {
         }
         match map_read_only(&file, len_usize) {
             Ok(mmap) => Ok(Arc::new(Self {
-                storage: Storage::Mapped(mmap),
+                storage: Storage::Mapped {
+                    map: mmap,
+                    file: sparse_reads.then_some(file),
+                },
             })),
             Err(_) => {
                 let mut data = Vec::with_capacity(len_usize);
@@ -137,13 +146,57 @@ impl PackData {
         })
     }
 
+    /// Copy a bounded range without faulting scattered mmap windows into the process.
+    ///
+    /// Reads the same descriptor that backs the mapping, so replacing the path cannot
+    /// mix pack generations. Returns `None` on I/O failure or an invalid offset; callers
+    /// retain their normal mapped parsing and corruption/replacement recovery paths.
+    pub(crate) fn read_sparse(&self, offset: u64, out: &mut [u8]) -> Option<usize> {
+        let start = usize::try_from(offset).ok()?;
+        let len = out.len().min(self.len().checked_sub(start)?);
+        let out = &mut out[..len];
+        match &self.storage {
+            Storage::Mapped {
+                file: Some(file), ..
+            } => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::FileExt;
+                    file.read_exact_at(out, offset).ok()?;
+                }
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::FileExt;
+                    let mut filled = 0;
+                    while filled < len {
+                        let n = file
+                            .seek_read(&mut out[filled..], offset + filled as u64)
+                            .ok()?;
+                        if n == 0 {
+                            return None;
+                        }
+                        filled += n;
+                    }
+                }
+                #[cfg(not(any(unix, windows)))]
+                {
+                    let _ = file;
+                    out.copy_from_slice(&self[start..start + len]);
+                }
+            }
+            Storage::Mapped { file: None, .. } => return None,
+            Storage::Owned(bytes) => out.copy_from_slice(&bytes[start..start + len]),
+        }
+        Some(len)
+    }
+
     /// Drop this mapping's pages from the process's resident set.
     ///
     /// The bytes stay valid: later reads fault the pages back in from the file (usually
     /// straight from the page cache). Owned buffers and non-Unix platforms are left as is.
     pub(crate) fn release_resident(&self) {
         #[cfg(unix)]
-        if let Storage::Mapped(map) = &self.storage {
+        if let Storage::Mapped { map, .. } = &self.storage {
             // SAFETY: the mapping is a read-only shared file mapping and the file is never
             // modified while mapped (see the type docs), so dropping its pages only makes
             // the next read reload the same bytes from the file; no borrow observes a change.
@@ -156,7 +209,7 @@ impl PackData {
     /// True when backing storage is a memory map (not an owned buffer).
     #[cfg(test)]
     pub(crate) fn is_mapped_backing(&self) -> bool {
-        matches!(self.storage, Storage::Mapped(_))
+        matches!(self.storage, Storage::Mapped { .. })
     }
 
     /// Fingerprint of the bytes currently held in memory.
@@ -492,9 +545,39 @@ mod tests {
         let mut bytes = Vec::from(&b"PACK\x00\x00\x00\x02\x00\x00\x00\x00"[..]);
         bytes.extend((0..len).map(|i| u8::try_from(i % 251).unwrap_or(0)));
         fs::write(&path, &bytes).expect("write");
-        let data = PackData::open(&path).expect("open");
+        let data = PackData::open_for_sparse_reads(&path).expect("open");
         assert!(data.is_mapped_backing());
         (data, bytes)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sparse_reads_do_not_make_scattered_mapping_windows_resident() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (data, bytes) = mapped_test_pack(dir.path(), 24 << 20);
+        let mut prefix = [0; 16];
+        for offset in (0..bytes.len() - prefix.len()).step_by(64 << 10) {
+            assert_eq!(data.read_sparse(offset as u64, &mut prefix), Some(16));
+            assert_eq!(prefix, bytes[offset..offset + 16]);
+        }
+        assert!(mapping_rss_kib(data.as_ptr()) < 256);
+        // Keep using the inode that was mapped even after its path is replaced.
+        let path = dir.path().join("resident.pack");
+        fs::rename(&path, dir.path().join("old.pack")).expect("rename");
+        fs::write(&path, vec![0; bytes.len()]).expect("replacement");
+        assert_eq!(data.read_sparse(100, &mut prefix), Some(16));
+        assert_eq!(prefix, bytes[100..116]);
+    }
+
+    #[test]
+    fn sparse_owned_reads_are_bounded_at_eof() {
+        let data = PackData::from_owned(b"some bytes".to_vec());
+        let mut buf = [0; 16];
+        assert_eq!(data.read_sparse(5, &mut buf), Some(5));
+        assert_eq!(&buf[..5], b"bytes");
+        assert_eq!(data.read_sparse(10, &mut buf), Some(0));
+        assert_eq!(data.read_sparse(11, &mut buf), None);
+        assert_eq!(data.read_sparse(u64::MAX, &mut buf), None);
     }
 
     #[cfg(target_os = "linux")]

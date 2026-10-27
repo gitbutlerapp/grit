@@ -2035,10 +2035,10 @@ pub(crate) fn finish_initial_remote_fetch_layout(
     if opts.dry_run || !opts.initial_remote_fetch {
         return Ok(());
     }
+    crate::refs::pack_imported_refs_for_clone(git_dir, opts.remote_name.as_deref())?;
     let Some(remote) = opts.remote_name.as_deref() else {
         return Ok(());
     };
-    crate::refs::pack_remote_tracking_refs_for_clone(git_dir, remote)?;
     if let Some(branch) = default_branch {
         let target = format!("refs/remotes/{remote}/{branch}");
         let head_ref = format!("refs/remotes/{remote}/HEAD");

@@ -2,13 +2,14 @@
 
 use super::super::helpers::{
     blame_file_bench, cat_blob_bench, ctx, finish_git_git_matrix_ctx, headline_spec, log_all_bench,
-    log_json_bench, log_json_filter_bench, log_limit_documentation_git_git_bench,
-    log_oneline_bench, log_path_bench, log_stat_n50_bench, merge_base_bench, patch_id_head_bench,
-    prepare_history_rewrite_reset, prepare_none, reflog_list_bench, resolve_change_id_bench,
-    resolve_head_bench, revs_count_bench, revs_count_literal_path_git_git_bench, scenario_spec,
-    setup_big_blobs, setup_git_git_history, setup_git_git_no_commit_graph, setup_git_git_worktree,
-    setup_registry_worktree, setup_shape_worktree, setup_synth100k, shortlog_ahead_bench,
-    shortlog_behind_bench, show_head_bench, synth10k_kind,
+    log_json_bench, log_json_filter_bench, log_json_n10_decorations_bench,
+    log_limit_documentation_git_git_bench, log_oneline_bench, log_path_bench, log_stat_n50_bench,
+    merge_base_bench, patch_id_head_bench, prepare_history_rewrite_reset, prepare_none,
+    reflog_list_bench, resolve_change_id_bench, resolve_head_bench, revs_count_bench,
+    revs_count_literal_path_git_git_bench, scenario_spec, setup_big_blobs, setup_git_git_history,
+    setup_git_git_loose_tags, setup_git_git_no_commit_graph, setup_git_git_packed_tags,
+    setup_git_git_worktree, setup_registry_worktree, setup_shape_worktree, setup_synth100k,
+    shortlog_ahead_bench, shortlog_behind_bench, show_head_bench, synth10k_kind,
 };
 use super::super::matrix_helpers::{
     prepare_rebase_git_git_reset, rebase_onto_bench, rebase_onto_git_git_bench,
@@ -116,6 +117,24 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             correctness: None,
             build_git: |c| log_path_bench(c).1,
             build_grit: |c| log_path_bench(c).0,
+        },
+        DailyHeadlinePlan {
+            spec: scenario_spec("log/json-n10-loose-tags@git-git"),
+            pending: false,
+            setup: setup_git_git_loose_tags,
+            prepare: prepare_none,
+            correctness: None,
+            build_git: |c| log_json_n10_decorations_bench(c).1,
+            build_grit: |c| log_json_n10_decorations_bench(c).0,
+        },
+        DailyHeadlinePlan {
+            spec: scenario_spec("log/json-n10-packed-tags@git-git"),
+            pending: false,
+            setup: setup_git_git_packed_tags,
+            prepare: prepare_none,
+            correctness: None,
+            build_git: |c| log_json_n10_decorations_bench(c).1,
+            build_grit: |c| log_json_n10_decorations_bench(c).0,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("log/stat-n50@git-git"),

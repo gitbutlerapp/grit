@@ -111,6 +111,8 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `log/oneline-100@git-git` | Last 100 commits one line each vs git log --oneline |
 | `log/json-100@git-git` | Last 100 commits as JSON vs git log -100 with verbose `--format` |
 | `log/json-filter@git-git` | Commit oids via grit log --json --filter '.commits[].oid' vs git log -50 --format=%H |
+| `log/json-n10-loose-tags@git-git` | Bounded metadata with loose tags, including decorations and full messages |
+| `log/json-n10-packed-tags@git-git` | Same bounded metadata and tag tips with packed refs |
 | `log/stat-n50@git-git` | Last 50 commits with stat: grit log --limit 50 --stat vs git log --stat -50 |
 | `log/oneline-100@synth-100k` | Last 100 commits: grit log --limit 100 vs git log --oneline -100 |
 | `log/limit-path@git-git` | Bounded path log without commit-graph: grit log -n 200 -- Documentation vs git log (issue #1517) |

@@ -172,6 +172,60 @@ pub fn finish_git_git_matrix_ctx(headline: &mut DailyHeadlineContext, git: &Path
     Ok(())
 }
 
+/// Reproduce a fresh clone's historical loose-tag layout without moving any objects.
+pub fn setup_git_git_loose_tags(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    let headline = setup_git_git_history(setup)?;
+    let mut cmd = Command::new(setup.git);
+    git_env(&mut cmd);
+    let out = cmd
+        .current_dir(&headline.repo)
+        .args([
+            "for-each-ref",
+            "--format=%(objectname) %(refname) %(symref)",
+            "refs/",
+        ])
+        .output()?;
+    anyhow::ensure!(out.status.success(), "cannot list fixture tags");
+    let git_dir = PathBuf::from(git_rev_parse(
+        setup.git,
+        &headline.repo,
+        "--absolute-git-dir",
+    )?);
+    let odb = grit_lib::objects::odb::Odb::new(&git_dir.join("objects"));
+    let mut packed = Vec::new();
+    for line in std::str::from_utf8(&out.stdout)?.lines() {
+        let mut fields = line.split_whitespace();
+        let oid = fields.next().context("tag oid")?;
+        let name = fields.next().context("ref name")?;
+        if fields.next().is_some() {
+            continue;
+        } // Keep symbolic refs loose.
+        if name.starts_with("refs/tags/") {
+            let path = git_dir.join(name);
+            fs::create_dir_all(path.parent().context("tag parent")?)?;
+            fs::write(path, format!("{oid}\n"))?;
+        } else {
+            let oid = oid.parse()?;
+            let (peeled, _) = odb.peel_tags(oid)?;
+            packed.push(grit_lib::refs::PackedRefRecord {
+                refname: name.to_owned(),
+                oid,
+                peeled: (peeled != oid).then_some(peeled),
+            });
+        }
+    }
+    // Identical loose and packed tag records would otherwise hide the object-read cost.
+    grit_lib::refs::write_packed_refs_file(&git_dir, &packed)?;
+    Ok(headline)
+}
+
+/// Same refs and objects as the loose-tag scenario, with packed ref storage.
+pub fn setup_git_git_packed_tags(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    let headline = setup_git_git_history(setup)?;
+    run_git(setup.git, &headline.repo, &["pack-refs", "--all"])?;
+    Ok(headline)
+}
+
 pub fn setup_git_git_no_commit_graph(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     let headline = setup_git_git_history(setup)?;
     super::matrix_helpers::remove_commit_graph_if_present(&headline.repo)?;
@@ -641,6 +695,22 @@ pub fn log_json_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
                 "log",
                 "-100",
                 "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%s%x00%b%x00",
+            ],
+        ),
+    )
+}
+
+/// Equivalent bounded author/committer/parent/decoration/message metadata.
+pub fn log_json_n10_decorations_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["log", "-n", "10", "--json"]),
+        sh_devnull(
+            &ctx.git,
+            &[
+                "log",
+                "-n",
+                "10",
+                "--format=%H%x09%P%x09%an%x09%ae%x09%aI%x09%cn%x09%ce%x09%cI%x09%D%x09%B",
             ],
         ),
     )

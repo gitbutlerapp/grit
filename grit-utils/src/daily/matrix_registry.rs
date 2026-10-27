@@ -323,6 +323,20 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Last 50 commit oids via grit log --json --filter '.commits[].oid' vs git log -50 --format=%H",
     },
     ScenarioSpec {
+        id: "log/json-n10-loose-tags@git-git",
+        area: Area::Revwalk,
+        headline: false,
+        name: None,
+        description: "Bounded log metadata with loose tag refs scattered through git/git history",
+    },
+    ScenarioSpec {
+        id: "log/json-n10-packed-tags@git-git",
+        area: Area::Revwalk,
+        headline: false,
+        name: None,
+        description: "Bounded log metadata with the same git/git tag refs packed",
+    },
+    ScenarioSpec {
         id: "log/stat-n50@git-git",
         area: Area::Revwalk,
         headline: false,

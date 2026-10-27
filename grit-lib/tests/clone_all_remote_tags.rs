@@ -37,6 +37,16 @@ fn git_tags(dir: &Path) -> Vec<String> {
     tags
 }
 
+fn assert_packed_tags(root: &Path) {
+    let git_dir = root.join(".git");
+    let body = std::fs::read_to_string(git_dir.join("packed-refs")).expect("packed refs");
+    for name in git_tags(root) {
+        assert!(!git_dir.join(format!("refs/tags/{name}")).exists());
+        assert!(body.contains(&format!(" refs/tags/{name}\n")), "{body}");
+    }
+    assert!(git_in(root, &["fsck", "--strict"]));
+}
+
 fn build_upstream_with_orphan_tags(upstream: &Path) {
     assert!(git_in(upstream, &["init", "-q", "-b", "main", "."]));
     std::fs::write(upstream.join("a.txt"), b"a\n").unwrap();
@@ -123,6 +133,7 @@ fn clone_fetches_tags_on_unreachable_commits() {
     refs::resolve_ref(&git_dir, "refs/tags/side-ann").expect("annotated side-ann");
 
     assert_eq!(git_tags(grit_dest.path()), expected);
+    assert_packed_tags(grit_dest.path());
 
     assert!(git_in(grit_dest.path(), &["fsck", "--strict"]));
 }
@@ -150,4 +161,5 @@ fn clone_file_url_fetches_unreachable_tags() {
     let git_dir = grit_dest.path().join(".git");
     refs::resolve_ref(&git_dir, "refs/tags/side-tag").expect("side-tag via file://");
     refs::resolve_ref(&git_dir, "refs/tags/side-ann").expect("side-ann via file://");
+    assert_packed_tags(grit_dest.path());
 }

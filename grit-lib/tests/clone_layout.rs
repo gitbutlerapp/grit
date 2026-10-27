@@ -101,6 +101,21 @@ fn clone_fetch_keeps_pack_and_matches_git_layout() {
             "annotated release",
         ],
     );
+    assert!(git_in(
+        upstream.path(),
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e.com",
+            "tag",
+            "-a",
+            "nested",
+            "-m",
+            "nested tag",
+            "v1.0"
+        ]
+    ));
     git_in(upstream.path(), &["tag", "lightweight-tip"]);
     git_in(
         upstream.path(),
@@ -144,6 +159,9 @@ fn clone_fetch_keeps_pack_and_matches_git_layout() {
             "topic",
         ],
     );
+
+    // Exercise clone's pack-retention path; small loose-only sources use loose transfer.
+    assert!(git_in(upstream.path(), &["repack", "-ad"]));
 
     let git_clone = tempfile::tempdir().expect("git clone dir");
     assert!(git_in(
@@ -213,6 +231,25 @@ fn clone_fetch_keeps_pack_and_matches_git_layout() {
         clone_git.join("refs/remotes/origin/HEAD").exists(),
         "expected refs/remotes/origin/HEAD"
     );
+
+    let packed = std::fs::read_to_string(clone_git.join("packed-refs")).unwrap();
+    for name in ["v1.0", "nested", "lightweight-tip", "on-topic"] {
+        assert!(!clone_git.join(format!("refs/tags/{name}")).exists());
+        assert!(packed.contains(&format!(" refs/tags/{name}\n")), "{packed}");
+    }
+
+    for name in ["v1.0", "nested", "on-topic"] {
+        let oid = git_out(clone.path(), &["rev-parse", &format!("refs/tags/{name}")]).unwrap();
+        let peel = git_out(
+            clone.path(),
+            &["rev-parse", &format!("refs/tags/{name}^{{}}")],
+        )
+        .unwrap();
+        assert!(
+            packed.contains(&format!("{oid} refs/tags/{name}\n^{peel}\n")),
+            "{packed}"
+        );
+    }
 
     let grit_refs = for_each_ref(&clone.path());
     let git_refs = for_each_ref(git_clone.path());
@@ -303,4 +340,125 @@ fn library_clone_api_passes_fsck_and_status() {
         status.trim().is_empty(),
         "expected clean working tree after clone checkout, got:\n{status}"
     );
+}
+
+#[test]
+fn clone_tag_layout_covers_bare_no_tags_shallow_and_empty() {
+    use grit_lib::remote::clone::CloneTags;
+    let upstream = tempfile::tempdir().unwrap();
+    assert!(git_in(upstream.path(), &["init", "-q", "-b", "main"]));
+    assert!(git_in(
+        upstream.path(),
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "root"
+        ]
+    ));
+    assert!(git_in(upstream.path(), &["tag", "light"]));
+    for (name, target) in [("inner", "HEAD"), ("outer", "inner")] {
+        assert!(git_in(
+            upstream.path(),
+            &[
+                "-c",
+                "user.name=T",
+                "-c",
+                "user.email=t@e.com",
+                "tag",
+                "-a",
+                name,
+                "-m",
+                name,
+                target
+            ]
+        ));
+    }
+    let url = format!("file://{}", upstream.path().display());
+    for mode in ["normal", "bare", "no-tags", "shallow-single"] {
+        let dest = tempfile::tempdir().unwrap();
+        let control = tempfile::tempdir().unwrap();
+        let mut opts = CloneOptions::new(&url, dest.path().to_path_buf());
+        let mut git_args = vec!["clone", "-q"];
+        match mode {
+            "bare" => {
+                opts.bare = true;
+                git_args.push("--bare");
+            }
+            "no-tags" => {
+                opts.tags = Some(CloneTags::None);
+                git_args.push("--no-tags");
+            }
+            "shallow-single" => {
+                opts.depth = Some(1);
+                opts.single_branch = Some(true);
+                git_args.extend(["--depth", "1", "--single-branch"]);
+            }
+            _ => {}
+        }
+        git_args.extend([&url, "."]);
+        assert!(git_in(control.path(), &git_args));
+        let result = clone_repo(opts, &mut NoProgress, &NeverCancel, None).unwrap();
+        let git_dir = result.repo.git_dir();
+        let tags = git_out(
+            dest.path(),
+            &[
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                "refs/tags/",
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            tags,
+            git_out(
+                control.path(),
+                &[
+                    "for-each-ref",
+                    "--format=%(refname) %(objectname)",
+                    "refs/tags/"
+                ]
+            )
+            .unwrap(),
+            "{mode}"
+        );
+        let packed = std::fs::read_to_string(git_dir.join("packed-refs")).unwrap_or_default();
+        for line in tags.lines() {
+            let (name, oid) = line.split_once(' ').unwrap();
+            assert!(!git_dir.join(name).exists(), "{mode}: {name}");
+            assert!(
+                packed.contains(&format!("{oid} {name}\n")),
+                "{mode}: {packed}"
+            );
+            if name != "refs/tags/light" {
+                let peel = git_out(dest.path(), &["rev-parse", &format!("{name}^{{}}")]).unwrap();
+                assert!(
+                    packed.contains(&format!("{oid} {name}\n^{peel}\n")),
+                    "{mode}: {packed}"
+                );
+            }
+        }
+        assert!(std::fs::read_to_string(git_dir.join("HEAD"))
+            .unwrap()
+            .starts_with("ref: "));
+        assert!(git_in(dest.path(), &["fsck", "--strict"]));
+    }
+    let empty = tempfile::tempdir().unwrap();
+    assert!(git_in(empty.path(), &["init", "-q", "-b", "main"]));
+    let dest = tempfile::tempdir().unwrap();
+    let result = clone_repo(
+        CloneOptions::new(empty.path().to_string_lossy(), dest.path().to_path_buf()),
+        &mut NoProgress,
+        &NeverCancel,
+        None,
+    )
+    .unwrap();
+    assert!(!result.repo.git_dir().join("packed-refs").exists());
+    assert!(for_each_ref(dest.path()).is_empty());
+    assert!(git_in(dest.path(), &["fsck", "--strict"]));
 }

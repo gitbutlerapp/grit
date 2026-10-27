@@ -1977,37 +1977,30 @@ pub fn delete_ref_cas(git_dir: &Path, refname: &str, expected_old: ObjectId) -> 
 /// # Errors
 ///
 /// Propagates I/O failures and when the ref lock is already held.
-pub(crate) fn prune_loose_ref_cas(
+fn prune_loose_ref_cas(
     git_dir: &Path,
     refname: &str,
     expected: ObjectId,
+    wait: crate::lockfile::LockWait,
 ) -> Result<bool> {
     ensure_refname_safe_for_storage(refname)?;
     let storage_dir = ref_storage_dir(git_dir, refname);
     let stor = crate::ref_namespace::storage_ref_name(refname);
     let path = storage_dir.join(&stor);
     let lock_path = lock_path_for_ref(&path);
-    use crate::lockfile::{LockFile, LockWait};
-    let wait = LockWait::files_ref_lock_for_git_dir(git_dir);
+    use crate::lockfile::LockFile;
     let _lock = LockFile::acquire(&lock_path, wait)?;
-    let outcome = (|| -> Result<bool> {
-        if !path.is_file() {
-            return Ok(true);
-        }
-        let Ok(Ref::Direct(oid)) = read_ref_file(&path) else {
-            return Ok(false);
-        };
-        if oid != expected {
-            return Ok(false);
-        }
-        remove_empty_ref_directory(&path);
-        fs::remove_file(&path).map_err(Error::Io)?;
-        if let Some(parent) = path.parent() {
-            remove_empty_ref_directory(parent);
-        }
-        Ok(true)
-    })();
-    outcome
+    if !path.is_file() {
+        return Ok(true);
+    }
+    let Ok(Ref::Direct(oid)) = read_ref_file(&path) else {
+        return Ok(false);
+    };
+    if oid != expected {
+        return Ok(false);
+    }
+    fs::remove_file(&path).map_err(Error::Io)?;
+    Ok(true)
 }
 
 /// A one-time, in-memory snapshot of a ref store's `packed-refs` file.
@@ -3020,6 +3013,22 @@ fn pack_refs_files(
     all: bool,
     dry_run: bool,
 ) -> Result<(PathBuf, usize, usize)> {
+    pack_refs_files_matching(
+        git_dir,
+        odb,
+        |name| ref_matches_pack_include(name, all),
+        dry_run,
+        false,
+    )
+}
+
+fn pack_refs_files_matching(
+    git_dir: &Path,
+    odb: &crate::odb::Odb,
+    include: impl Fn(&str) -> bool,
+    dry_run: bool,
+    allow_missing: bool,
+) -> Result<(PathBuf, usize, usize)> {
     let storage_git_dir = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
     let packed_path = store::paths::packed_refs_path(&storage_git_dir);
 
@@ -3036,16 +3045,17 @@ fn pack_refs_files(
         if crate::worktree_ref::is_per_worktree_ref(&refname) {
             continue;
         }
-        if !ref_matches_pack_include(&refname, all) {
+        if !include(&refname) {
             continue;
         }
         let Ok(Ref::Direct(oid)) = read_ref_file(&path) else {
             continue;
         };
-        let Ok(Some(_)) = odb.try_read_once(&oid) else {
+        let object = odb.try_read_once(&oid).ok().flatten();
+        if object.is_none() && !allow_missing {
             continue;
-        };
-        let peel = if refname.starts_with("refs/tags/") {
+        }
+        let peel = if object.is_some_and(|object| object.kind == crate::objects::ObjectKind::Tag) {
             packed_ref_peel(odb, oid)
         } else {
             None
@@ -3089,14 +3099,28 @@ fn pack_refs_files(
     pack_refs_test_hooks::run_before_prune();
 
     let mut pruned = 0usize;
+    let mut parents = HashSet::new();
+    let wait = crate::lockfile::LockWait::files_ref_lock_for_git_dir(git_dir);
     for (refname, expected) in &to_prune {
-        match prune_loose_ref_cas(git_dir, refname, *expected) {
-            Ok(true) => pruned += 1,
+        match prune_loose_ref_cas(git_dir, refname, *expected, wait) {
+            Ok(true) => {
+                pruned += 1;
+                let path = storage_git_dir.join(crate::ref_namespace::storage_ref_name(refname));
+                if let Some(parent) = path.parent() {
+                    parents.insert(parent.to_path_buf());
+                }
+            }
             Ok(false) => {
                 remove_packed_ref(git_dir, refname)?;
             }
             Err(e) => return Err(e),
         }
+    }
+
+    // Each CAS lock has dropped. Scan each parent only once, rather than rereading a
+    // wide tag directory after every ref (when the current lock still made it nonempty).
+    for parent in parents {
+        remove_empty_ref_directory(&parent);
     }
 
     Ok((packed_path, packed_loose, pruned))
@@ -3751,106 +3775,44 @@ fn packed_ref_peel(odb: &crate::odb::Odb, oid: ObjectId) -> Option<ObjectId> {
     odb.peel_stored_tag_target(oid).ok().flatten()
 }
 
-/// After the first clone fetch, batch remote-tracking refs into `packed-refs`
-/// (Git's post-clone layout). Leaves `refs/remotes/{remote}/HEAD` as a loose
-/// symbolic ref.
+/// After the first clone fetch, pack imported tags and the remote's tracking refs.
+///
+/// Symbolic refs, including `refs/remotes/{remote}/HEAD`, stay loose. Existing packed
+/// entries are retained, nested tags receive their final peel value, and loose refs
+/// are pruned only while locked and still naming the packed object. Other loose
+/// branches and reflogs are left in place. Reftable stores need no layout change.
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] on filesystem failures, or when a tag peel cannot be read.
+/// Returns ref-store, packed-ref parsing, lock, and filesystem errors.
 pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Result<()> {
+    pack_imported_refs_for_clone(git_dir, Some(remote))
+}
+
+/// Bare clones import tags without creating remote-tracking refs.
+pub(crate) fn pack_imported_refs_for_clone(git_dir: &Path, remote: Option<&str>) -> Result<()> {
     if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return Ok(());
     }
-    let prefix = format!("refs/remotes/{remote}/");
-    let head_sym = format!("refs/remotes/{remote}/HEAD");
-    let mut entries = list_refs(git_dir, &prefix)?;
-    entries.retain(|(name, _)| name != &head_sym);
-    if entries.is_empty() {
-        return Ok(());
-    }
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let odb =
-        crate::odb::Odb::new(&git_dir.join("objects")).with_config_git_dir(git_dir.to_path_buf());
-    let mut merged: HashMap<String, (ObjectId, Option<ObjectId>)> = HashMap::new();
-    let packed_path = store::paths::packed_refs_path(git_dir);
-    if let Ok(data) = fs::read(&packed_path) {
-        parse_packed_refs_to_map(&packed_path, &data)?;
-        let content = String::from_utf8(data)
-            .map_err(|_| packed_refs_unexpected_line(&packed_path, "<invalid utf-8>"))?;
-        let mut last_name: Option<String> = None;
-        for line in content.split('\n') {
-            if line.starts_with('#') {
-                continue;
-            }
-            if let Some(hex) = line.strip_prefix('^') {
-                let Ok(peel_oid) = ObjectId::from_hex(hex.trim()) else {
-                    continue;
-                };
-                if let Some(name) = &last_name {
-                    if let Some(entry) = merged.get_mut(name) {
-                        entry.1 = Some(peel_oid);
-                    }
-                }
-                continue;
-            }
-            let mut parts = line.splitn(2, ' ');
-            let Some(hex) = parts.next() else {
-                continue;
-            };
-            let Some(name) = parts.next() else {
-                continue;
-            };
-            let name = name.trim();
-            let Ok(oid) = ObjectId::from_hex(hex) else {
-                continue;
-            };
-            if name.starts_with(&prefix) {
-                last_name = None;
-                continue;
-            }
-            merged.insert(name.to_owned(), (oid, None));
-            last_name = Some(name.to_owned());
-        }
-    }
-
-    for (name, oid) in &entries {
-        merged.insert(name.clone(), (*oid, packed_ref_peel(&odb, *oid)));
-    }
-
-    let mut names: Vec<String> = merged.keys().cloned().collect();
-    names.sort();
-
-    let mut body = String::from("# pack-refs with: peeled fully-peeled sorted\n");
-    for name in &names {
-        let Some((oid, peel)) = merged.get(name) else {
-            continue;
-        };
-        body.push_str(&oid.to_hex());
-        body.push(' ');
-        body.push_str(name);
-        body.push('\n');
-        if let Some(p) = peel {
-            body.push('^');
-            body.push_str(&p.to_hex());
-            body.push('\n');
-        }
-    }
-
-    atomic_rewrite_packed_refs(git_dir, &body)?;
-
-    for (name, _) in &entries {
-        let storage_dir = ref_storage_dir(git_dir, name);
-        let stor = crate::ref_namespace::storage_ref_name(name);
-        let path = storage_dir.join(&stor);
-        if path.is_file() {
-            let _ = fs::remove_file(&path);
-        }
-        if let Some(parent) = path.parent() {
-            remove_empty_ref_directory(parent);
-        }
-    }
+    let prefix = remote.map(|name| format!("refs/remotes/{name}/"));
+    let storage_git_dir = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
+    let odb = crate::odb::Odb::new(&storage_git_dir.join("objects"))
+        .with_config_git_dir(git_dir.to_path_buf());
+    odb.with_pack_read_context(|| {
+        pack_refs_files_matching(
+            git_dir,
+            &odb,
+            |name| {
+                name.starts_with("refs/tags/")
+                    || prefix
+                        .as_ref()
+                        .is_some_and(|prefix| name.starts_with(prefix))
+            },
+            false,
+            // Clone layout also covers promised/missing tips, as the public helper always did.
+            true,
+        )
+    })?;
     Ok(())
 }
 
@@ -5658,6 +5620,79 @@ mod pack_refs_tests {
             !packed_body.contains("refs/heads/race"),
             "packed entry for concurrently updated ref must be removed"
         );
+    }
+
+    #[test]
+    fn clone_packing_retains_symbolic_refs_and_concurrent_tag_updates() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let git_dir = repo.git_dir().to_path_buf();
+        let first = write_commit(&repo, vec![]);
+        let second = write_commit(&repo, vec![first]);
+        write_ref(&git_dir, "refs/tags/race", &first).expect("tag");
+        write_ref(&git_dir, "refs/heads/main", &first).expect("branch");
+        write_ref(&git_dir, "refs/remotes/origin/main", &first).expect("remote");
+        write_symbolic_ref(
+            &git_dir,
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        )
+        .expect("symbolic");
+        let tag = repo
+            .odb()
+            .write(
+                ObjectKind::Tag,
+                format!("object {first}\ntype commit\n\nremote tag\n").as_bytes(),
+            )
+            .expect("tag object");
+        write_ref(&git_dir, "refs/remotes/origin/tag", &tag).expect("tagged remote");
+        let hook_dir = git_dir.clone();
+        pack_refs_test_hooks::set_before_prune(Some(Box::new(move || {
+            write_ref(&hook_dir, "refs/tags/race", &second).expect("concurrent update");
+        })));
+        pack_remote_tracking_refs_for_clone(&git_dir, "origin").expect("pack");
+        assert_eq!(
+            resolve_ref(&git_dir, "refs/tags/race").expect("resolve"),
+            second
+        );
+        assert!(git_dir.join("refs/heads/main").exists());
+        assert!(git_dir.join("refs/remotes/origin/HEAD").exists());
+        assert!(!git_dir.join("refs/remotes/origin/main").exists());
+        let body = fs::read_to_string(store::paths::packed_refs_path(&git_dir)).expect("packed");
+        assert!(!body.contains("refs/tags/race"));
+        assert!(!body.contains("refs/remotes/origin/HEAD"));
+        assert!(
+            body.contains(&format!("{tag} refs/remotes/origin/tag\n^{first}\n")),
+            "{body}"
+        );
+    }
+
+    #[test]
+    fn clone_packing_routes_reftable_without_creating_packed_refs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .expect("init");
+        let commit = write_commit(&repo, vec![]);
+        write_ref(repo.git_dir(), "refs/tags/tip", &commit).expect("tag");
+        pack_remote_tracking_refs_for_clone(repo.git_dir(), "origin").expect("pack");
+        assert_eq!(
+            resolve_ref(repo.git_dir(), "refs/tags/tip").expect("resolve"),
+            commit
+        );
+        assert!(!store::paths::packed_refs_path(repo.git_dir()).exists());
     }
 
     #[test]

@@ -596,6 +596,7 @@ struct RefTipPeeler<'a> {
     packed: Option<PackedRefPeels>,
     graph: std::cell::OnceCell<Option<std::sync::Arc<crate::commit_graph_file::CommitGraphChain>>>,
     targets: Option<&'a OidHashSet>,
+    pack_context: std::cell::OnceCell<crate::pack_store::PackReadContextGuard>,
 }
 
 impl<'a> RefTipPeeler<'a> {
@@ -607,6 +608,7 @@ impl<'a> RefTipPeeler<'a> {
             packed,
             graph: std::cell::OnceCell::new(),
             targets,
+            pack_context: std::cell::OnceCell::new(),
         }
     }
 
@@ -653,6 +655,9 @@ impl<'a> RefTipPeeler<'a> {
         if self.targets.is_some_and(|t| t.contains(oid)) {
             return Some(*oid);
         }
+        // Keep tag header/body reads together, but leave the packed-ref-only path alone.
+        self.pack_context
+            .get_or_init(|| self.repo.odb().pack_read_context_guard());
         Some(
             self.repo
                 .odb()

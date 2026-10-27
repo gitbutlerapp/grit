@@ -1222,7 +1222,7 @@ pub(crate) mod pack_cache {
         size: u64,
     ) -> Result<Arc<PackData>> {
         invalidate_thread_local_for_pack_path_change(pack_path);
-        let bytes = PackData::open(pack_path)?;
+        let bytes = PackData::open_for_sparse_reads(pack_path)?;
         let store = crate::pack_store::PackStore::active_for_reads();
         store.with_catalog(|g| {
             drop_delta_entries_locked(g, pack_path, store.delta_bases());
@@ -3401,6 +3401,17 @@ pub fn read_object_info_from_pack_at_offset(idx: &PackIndex, offset: u64) -> Res
                 Err(e) => return Err(e),
             }
         }
+        // Object-info probes often visit many unrelated historical commits while peeling
+        // loose tags. A few header bytes must not retain a fault-around window per tip.
+        let mut header = [0u8; 16];
+        if let Some(len) = pack_bytes.read_sparse(offset, &mut header) {
+            if let Some(info) = read_whole_pack_entry_info_fast(idx, 0, &header[..len]) {
+                if info.kind == ObjectKind::Tag {
+                    remember_pack_read_info(&pack_path, offset, info);
+                }
+                return Ok(info);
+            }
+        }
         match read_object_info_from_pack_at_offset_with_bytes(idx, offset, pack_bytes.as_ref()) {
             Ok(info) => return Ok(info),
             Err(e) if attempt == 0 && pack_bytes_parse_may_be_stale(&e) => {
@@ -3509,7 +3520,7 @@ pub(crate) const COMMIT_HEADER_READ_PREFIX: usize = 512;
 fn read_whole_pack_entry_object_fast(
     idx: &PackIndex,
     offset: u64,
-    pack_bytes: &[u8],
+    pack_bytes: &PackData,
 ) -> Option<Object> {
     let mut data = Vec::new();
     read_whole_pack_entry_object_into(idx, offset, pack_bytes, &mut data)
@@ -3519,7 +3530,7 @@ fn read_whole_pack_entry_object_fast(
 fn read_whole_pack_entry_object_into(
     idx: &PackIndex,
     offset: u64,
-    pack_bytes: &[u8],
+    pack_bytes: &PackData,
     out: &mut Vec<u8>,
 ) -> Option<ObjectKind> {
     let pack_id = pack_cache::pack_id_for(&idx.pack_path);
@@ -3528,6 +3539,26 @@ fn read_whole_pack_entry_object_into(
         out.extend_from_slice(data.as_ref());
         return Some(kind);
     }
+    // Single-pack readers and general reads share this path: a preceding tag-info
+    // probe lets either read a small whole tag without faulting mmap windows.
+    if cached_pack_read_info(&idx.pack_path, offset)
+        .is_some_and(|info| info.kind == ObjectKind::Tag)
+    {
+        let mut bytes = [0u8; 4096];
+        if let Some(len) = pack_bytes.read_sparse(offset, &mut bytes) {
+            if let Some(kind) = inflate_whole_pack_entry_into(&bytes[..len], 0, out) {
+                return Some(kind);
+            }
+        }
+    }
+    inflate_whole_pack_entry_into(pack_bytes, offset, out)
+}
+
+fn inflate_whole_pack_entry_into(
+    pack_bytes: &[u8],
+    offset: u64,
+    out: &mut Vec<u8>,
+) -> Option<ObjectKind> {
     let mut pos = offset as usize;
     if pos >= pack_bytes.len() {
         return None;

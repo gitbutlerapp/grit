@@ -151,6 +151,8 @@ fn packed_ref_peel_lines_decorate_like_loose_tags() -> grit_lib::error::Result<(
     git(wt, &["tag", "-a", "-m", "moves later", "moving", &first]);
     git(wt, &["branch", "topic", &first]);
 
+    // Exercise sparse pack reads while every tag ref is still loose.
+    git(wt, &["repack", "-adf", "--window=0"]);
     let repo = open_grit_repo(wt);
     let loose = decoration_rows(&collect_decorations(&repo, false)?);
     let loose_full = decoration_rows(&collect_decorations(&repo, true)?);
@@ -172,6 +174,8 @@ fn packed_ref_peel_lines_decorate_like_loose_tags() -> grit_lib::error::Result<(
         decoration_rows(&collect_decorations(&repo, true)?),
         loose_full
     );
+
+    assert_targeted_matches_full(&repo, wt);
 
     // A loose ref now overrides the packed `moving` tag (and its stale peel line).
     git(wt, &["tag", "-f", "-a", "-m", "moved", "moving", "HEAD"]);
@@ -216,6 +220,8 @@ fn targeted_decorations_match_full_for_every_packed_refs_header() -> grit_lib::e
         &["update-ref", &format!("refs/replace/{first}"), &second],
     );
 
+    // Exercise sparse pack reads while every tag ref is still loose.
+    git(wt, &["repack", "-adf", "--window=0"]);
     let repo = open_grit_repo(wt);
     let loose = decoration_rows(&collect_decorations(&repo, false)?);
     assert!(
@@ -250,5 +256,87 @@ fn targeted_decorations_match_full_for_every_packed_refs_header() -> grit_lib::e
         );
         assert_targeted_matches_full(&repo, wt);
     }
+    Ok(())
+}
+
+#[test]
+fn targeted_tag_decorations_keep_injected_backends_and_broken_tags_working(
+) -> grit_lib::error::Result<()> {
+    use grit_lib::config::environment::RepositoryOptions;
+    use grit_lib::objects::odb::{store::MemoryStore, OdbBuilder};
+    use grit_lib::objects::HashAlgo;
+    use grit_lib::refs::store::{
+        Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
+    };
+    use grit_lib::repo::RepositoryBuilder;
+    use std::sync::Arc;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let git_dir = dir.path().join("memory.git");
+    let refs = Arc::new(MemoryRefStore::new());
+    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
+        .odb_builder(
+            OdbBuilder::files(git_dir.join("objects"))
+                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                .alternates(false),
+        )
+        .ref_store(refs.clone())
+        .initial_branch("main")
+        .open(&git_dir, None)?;
+    let tree = repo.odb().write(ObjectKind::Tree, b"")?;
+    let commit = repo.odb().write(
+        ObjectKind::Commit,
+        format!(
+            "tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\ncommit\n"
+        )
+        .as_bytes(),
+    )?;
+    let inner = repo.odb().write(
+        ObjectKind::Tag,
+        format!("object {commit}\ntype commit\n\ninner\n").as_bytes(),
+    )?;
+    let outer = repo.odb().write(
+        ObjectKind::Tag,
+        format!("object {inner}\ntype tag\n\nouter\n").as_bytes(),
+    )?;
+    let non_commit = repo.odb().write(
+        ObjectKind::Tag,
+        format!("object {tree}\ntype tree\n\ntree\n").as_bytes(),
+    )?;
+    let corrupt = repo.odb().write(ObjectKind::Tag, b"broken tag\n")?;
+    let missing: ObjectId = "1111111111111111111111111111111111111111".parse()?;
+    let dangling = repo.odb().write(
+        ObjectKind::Tag,
+        format!("object {missing}\ntype commit\n\nmissing target\n").as_bytes(),
+    )?;
+    let mut transaction = RefTransaction::new();
+    for (name, oid) in [
+        ("refs/heads/main", commit),
+        ("refs/tags/inner", inner),
+        ("refs/tags/outer", outer),
+        ("refs/tags/tree", non_commit),
+        ("refs/tags/corrupt", corrupt),
+        ("refs/tags/dangling", dangling),
+        ("refs/tags/missing", missing),
+    ] {
+        transaction = transaction.update(RefUpdate {
+            name: name.to_owned(),
+            new_value: Some(RawRef::Direct(oid)),
+            expected: Expected::Any,
+            reflog: None,
+            flags: RefUpdateFlags::default(),
+        })?;
+    }
+    refs.prepare(transaction)?.commit()?;
+    let targeted = collect_decorations_for_commits(&repo, false, &[commit])?;
+    let mut expected = collect_decorations(&repo, false)?;
+    expected.retain(|key, _| key == &commit.to_hex());
+    assert_eq!(decoration_rows(&targeted), decoration_rows(&expected));
+    let names: Vec<_> = targeted[&commit.to_hex()]
+        .iter()
+        .map(|item| item.display.as_str())
+        .collect();
+    assert!(names.contains(&"inner") && names.contains(&"outer"));
+    assert!(!git_dir.exists(), "injected stores require no files layout");
     Ok(())
 }

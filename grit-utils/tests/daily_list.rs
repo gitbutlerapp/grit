@@ -33,3 +33,19 @@ fn daily_list_includes_workspace_extras() {
         );
     }
 }
+
+#[test]
+fn daily_list_includes_bounded_log_tag_layouts() {
+    let out = Command::new(env!("CARGO_BIN_EXE_grit-bench"))
+        .args(["daily", "--list"])
+        .output()
+        .expect("daily list");
+    assert!(out.status.success());
+    let listing = String::from_utf8_lossy(&out.stdout);
+    for id in [
+        "log/json-n10-loose-tags@git-git",
+        "log/json-n10-packed-tags@git-git",
+    ] {
+        assert!(listing.lines().any(|line| line == id), "missing {id}");
+    }
+}
