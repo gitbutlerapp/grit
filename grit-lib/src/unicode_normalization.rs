@@ -87,9 +87,11 @@ pub struct WorktreePathForStaging {
 
 /// Resolve a repository-relative path to the on-disk file and the index spelling Git uses.
 ///
-/// When `precompose_unicode` is true, walks path components and matches directory entries by
-/// NFC-normalized segment names so an NFD worktree name (common on macOS, or Linux with
-/// `GIT_TEST_UTF8_NFD_TO_NFC`) still opens the correct file while the index stores NFC bytes.
+/// When `precompose_unicode` is true and `rel` contains non-ASCII bytes, walks path components
+/// and matches directory entries by NFC-normalized segment names so an NFD worktree name
+/// (common on macOS, or Linux with `GIT_TEST_UTF8_NFD_TO_NFC`) still opens the correct file
+/// while the index stores NFC bytes. Otherwise the result is `rel` joined to `work_tree`,
+/// without touching the filesystem.
 ///
 /// # Parameters
 ///
@@ -111,16 +113,17 @@ pub fn resolve_worktree_path_for_staging(
     };
 
     let abs = work_tree.join(rel);
+    // An ASCII path is its own NFC and NFD spelling, so no other directory entry can be it.
+    if !precompose_unicode || !has_non_ascii_utf8(rel) {
+        return WorktreePathForStaging {
+            abs,
+            index_relpath: rel.to_owned(),
+        };
+    }
     if fs::symlink_metadata(&abs).is_ok() {
         return WorktreePathForStaging {
             abs,
             index_relpath: index_rel(rel),
-        };
-    }
-    if !precompose_unicode {
-        return WorktreePathForStaging {
-            abs,
-            index_relpath: rel.to_owned(),
         };
     }
 
@@ -201,6 +204,33 @@ mod tests {
         let r = resolve_worktree_path_for_staging(wt, nfc, true);
         assert!(r.abs.is_file());
         assert_eq!(r.index_relpath.as_str(), nfc);
+    }
+
+    #[test]
+    fn resolve_ascii_path_is_identity_whether_or_not_it_exists() {
+        let td = tempfile::TempDir::new().expect("tempdir");
+        let wt = td.path();
+        fs::create_dir_all(wt.join("dir")).expect("mkdir");
+        fs::write(wt.join("dir/present.txt"), b"x").expect("write");
+        for rel in ["dir/present.txt", "dir/missing.txt", "absent/x"] {
+            for precompose in [false, true] {
+                let r = resolve_worktree_path_for_staging(wt, rel, precompose);
+                assert_eq!(r.abs, wt.join(rel), "{rel}");
+                assert_eq!(r.index_relpath, rel);
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_nfc_path_under_nfd_directory() {
+        let td = tempfile::TempDir::new().expect("tempdir");
+        let wt = td.path();
+        let nfd_dir = "cafe\u{0301}";
+        fs::create_dir_all(wt.join(nfd_dir)).expect("mkdir");
+        fs::write(wt.join(nfd_dir).join("menu.txt"), b"x").expect("write");
+        let r = resolve_worktree_path_for_staging(wt, "caf\u{00e9}/menu.txt", true);
+        assert!(r.abs.is_file(), "{}", r.abs.display());
+        assert_eq!(r.index_relpath, "caf\u{00e9}/menu.txt");
     }
 
     #[test]
