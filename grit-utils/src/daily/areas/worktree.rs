@@ -15,6 +15,14 @@ use super::super::helpers::{
     setup_stash_repo, setup_synth100k, stash_bench, status_clean_bench, status_dirty_bench,
     status_paths_bench, status_renamed_bench, switch_bench,
 };
+use super::super::helpers::{
+    clean_only_ignored_bench, init_branch_bench, prepare_worktree_restore_hunks, reset_keep_bench,
+    restore_hunks_bench, rm_dry_run_bench, stash_pop_index_bench, stash_push_paths_bench,
+};
+use super::super::matrix_helpers::{
+    prepare_clean_only_ignored, prepare_reset_keep, prepare_stash_pop_index,
+    prepare_stash_push_paths,
+};
 use super::super::plan::{DailyHeadlinePlan, DailySetup};
 use super::super::registry::RepoShape;
 
@@ -267,6 +275,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         correctness: None,
     });
     plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("restore/hunks@large-file"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_worktree_restore_hunks,
+        build_git: |c| restore_hunks_bench(c).1,
+        build_grit: |c| restore_hunks_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
         spec: scenario_spec("reset/hard@synth-10k"),
         pending: false,
         setup: setup_synth10k,
@@ -339,12 +356,66 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         correctness: None,
     });
     plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("clean/only-ignored@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_clean_only_ignored,
+        build_git: |c| clean_only_ignored_bench(c).1,
+        build_grit: |c| clean_only_ignored_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("stash/push-paths@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_stash_push_paths,
+        build_git: |c| stash_push_paths_bench(c).1,
+        build_grit: |c| stash_push_paths_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("stash/pop-index@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_stash_pop_index,
+        build_git: |c| stash_pop_index_bench(c).1,
+        build_grit: |c| stash_pop_index_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("reset/keep@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_reset_keep,
+        build_git: |c| reset_keep_bench(c).1,
+        build_grit: |c| reset_keep_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("rm/dry-run@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_worktree_rm_dir,
+        build_git: |c| rm_dry_run_bench(c).1,
+        build_grit: |c| rm_dry_run_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
         spec: scenario_spec("init/empty@small"),
         pending: false,
         setup: setup_init_empty,
         prepare: prepare_worktree_init_empty,
         build_git: |c| init_empty_bench(c).1,
         build_grit: |c| init_empty_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("init/branch@small"),
+        pending: false,
+        setup: setup_init_empty,
+        prepare: prepare_worktree_init_empty,
+        build_git: |c| init_branch_bench(c).1,
+        build_grit: |c| init_branch_bench(c).0,
         correctness: None,
     });
 
