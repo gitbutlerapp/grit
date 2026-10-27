@@ -4822,6 +4822,40 @@ fn on_disk_delta_chain_in_send_map(
     }
 }
 
+/// The `(id, pack offset)` of every object of `wanted` that `idx` lists.
+///
+/// A set much smaller than the index is looked up id by id, so packing a few objects
+/// from a large pack does not visit every index entry; larger sets scan the index once.
+fn wanted_index_entries<'a>(
+    idx: &PackIndex,
+    wanted: impl ExactSizeIterator<Item = &'a ObjectId>,
+    contains: impl Fn(&ObjectId) -> bool,
+) -> Result<Vec<(ObjectId, u64)>> {
+    // A lookup costs about log2(entries) comparisons; a scan one set probe per entry.
+    let lookup_cost = wanted
+        .len()
+        .saturating_mul(usize::BITS.saturating_sub(idx.len().leading_zeros()) as usize);
+    if lookup_cost < idx.len() {
+        let mut out = Vec::new();
+        for oid in wanted {
+            if let Some(offset) = idx.find_offset(oid)? {
+                out.push((*oid, offset));
+            }
+        }
+        return Ok(out);
+    }
+    let mut out = Vec::new();
+    for entry in idx.iter() {
+        let Ok(oid) = ObjectId::from_bytes(entry.oid()) else {
+            continue;
+        };
+        if contains(&oid) {
+            out.push((oid, entry.offset()?));
+        }
+    }
+    Ok(out)
+}
+
 /// Where an object to be packed currently lives among the local packs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PackedSlot {
@@ -4849,14 +4883,11 @@ pub(crate) fn locate_packed_objects(
     let mut slots = crate::objects::oid_hash_map_with_capacity(wanted.len());
     for (pack, idx) in (0u32..).zip(&indexes) {
         let bytes = read_pack_bytes_cached(&idx.pack_path)?;
-        for entry in idx.iter() {
-            let Ok(oid) = ObjectId::from_bytes(entry.oid()) else {
-                continue;
-            };
-            if !wanted.contains(&oid) || slots.contains_key(&oid) {
+        for (oid, offset) in wanted_index_entries(idx, wanted.iter(), |oid| wanted.contains(oid))? {
+            if slots.contains_key(&oid) {
                 continue;
             }
-            let mut pos = usize::try_from(entry.offset()?)
+            let mut pos = usize::try_from(offset)
                 .map_err(|_| Error::CorruptObject("pack offset exceeds memory".to_owned()))?;
             let (packed_type, _) = parse_pack_object_header(&bytes, &mut pos)?;
             let whole = !matches!(packed_type, PackedType::OfsDelta | PackedType::RefDelta);
@@ -4903,15 +4934,12 @@ pub fn collect_packed_delta_reuse_for_send(
 
     let mut on_disk: HashMap<ObjectId, OnDiskDelta> = HashMap::new();
     for (idx, pack_bytes) in &pack_bytes_by_index {
-        for entry in idx.iter() {
-            let Ok(oid) = ObjectId::from_bytes(entry.oid()) else {
-                continue;
-            };
-            if !send.contains(&oid) || on_disk.contains_key(&oid) {
+        for (oid, offset) in wanted_index_entries(idx, send.iter(), |oid| send.contains(oid))? {
+            if on_disk.contains_key(&oid) {
                 continue;
             }
             let Some((base, size, zlib_start, zlib_end)) =
-                parse_in_pack_delta_reuse_zlib(idx, pack_bytes, entry.offset()?, in_pack)?
+                parse_in_pack_delta_reuse_zlib(idx, pack_bytes, offset, in_pack)?
             else {
                 continue;
             };
@@ -7477,5 +7505,37 @@ mod cached_lookup_tests {
             .expect("slice");
         let good_pack = fs::read(&primary_pack).expect("primary pack");
         assert_eq!(&slice, &good_pack[start..end]);
+    }
+
+    #[test]
+    fn wanted_index_entries_lookups_match_a_full_scan() {
+        let tmp = TempDir::new().unwrap();
+        let bare = grit_test_support::git_packed_history(tmp.path(), 30);
+        let objects = bare.join("objects");
+        let indexes = read_local_pack_indexes_cached(&objects).unwrap();
+        assert_eq!(indexes.len(), 1);
+        let idx = &indexes[0];
+        let all: Vec<(ObjectId, u64)> = idx
+            .iter()
+            .map(|e| (ObjectId::from_bytes(e.oid()).unwrap(), e.offset().unwrap()))
+            .collect();
+        assert!(all.len() > 64);
+        let absent = ObjectId::from_hex("0000000000000000000000000000000000000001").unwrap();
+        let sorted = |mut v: Vec<(ObjectId, u64)>| {
+            v.sort();
+            v
+        };
+
+        let few: HashSet<ObjectId> = [all[3].0, all[all.len() - 1].0, absent].into();
+        let looked_up = wanted_index_entries(idx, few.iter(), |oid| few.contains(oid)).unwrap();
+        assert_eq!(sorted(looked_up), sorted(vec![all[3], all[all.len() - 1]]));
+
+        let many: HashSet<ObjectId> = all.iter().map(|(oid, _)| *oid).chain([absent]).collect();
+        let scanned = wanted_index_entries(idx, many.iter(), |oid| many.contains(oid)).unwrap();
+        assert_eq!(sorted(scanned), sorted(all));
+
+        let slots = locate_packed_objects(&objects, &few.iter().copied().collect()).unwrap();
+        assert_eq!(slots.len(), 2);
+        assert!(!slots.contains_key(&absent));
     }
 }
