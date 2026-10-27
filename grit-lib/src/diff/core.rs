@@ -4158,7 +4158,18 @@ fn parallel_process_blob_worktree_jobs(
         par_opts,
         est_bytes,
         |job| {
-            let eff_oid = read_regular_worktree_blob(
+            let modified = |new_oid| {
+                Ok(Some((
+                    job.entry_index,
+                    worktree_content_change_entry(
+                        &job.entry,
+                        &job.rel_path,
+                        job.worktree_mode,
+                        new_oid,
+                    ),
+                )))
+            };
+            let content = match read_regular_worktree_blob(
                 odb,
                 &job.file_path,
                 conv,
@@ -4167,28 +4178,21 @@ fn parallel_process_blob_worktree_jobs(
                 Some(&job.entry),
                 filter_process,
                 stream_from,
-            )?
-            .object_id(odb, store_dirty_blobs)?;
+            ) {
+                Ok(content) => content,
+                Err(err) if unreadable_worktree_blob_is_modified(&err, materialize_dirty_blobs) => {
+                    return modified(zero_oid());
+                }
+                Err(err) => return Err(err),
+            };
+            let eff_oid = content.object_id(odb, store_dirty_blobs)?;
             if eff_oid != job.entry.oid || job.worktree_mode != job.entry.mode {
-                let path_owned = job.rel_path.clone();
                 let new_oid = if eff_oid != job.entry.oid && !materialize_dirty_blobs {
                     zero_oid()
                 } else {
                     eff_oid
                 };
-                Ok(Some((
-                    job.entry_index,
-                    DiffEntry {
-                        status: DiffStatus::for_content_change(job.entry.mode, job.worktree_mode),
-                        old_path: Some(path_owned.clone()),
-                        new_path: Some(path_owned),
-                        old_mode: format_mode(job.entry.mode),
-                        new_mode: format_mode(job.worktree_mode),
-                        old_oid: job.entry.oid,
-                        new_oid,
-                        score: None,
-                    },
-                )))
+                modified(new_oid)
             } else {
                 Ok(None)
             }
@@ -4202,6 +4206,42 @@ fn parallel_process_blob_worktree_jobs(
     rows.sort_by_key(|(idx, _)| *idx);
     result.extend(rows.into_iter().map(|(_, d)| d));
     Ok(())
+}
+
+/// Index-vs-worktree entry for a tracked path whose content or mode differs from `ie`.
+fn worktree_content_change_entry(
+    ie: &IndexEntry,
+    path: &str,
+    worktree_mode: u32,
+    new_oid: ObjectId,
+) -> DiffEntry {
+    DiffEntry {
+        status: DiffStatus::for_content_change(ie.mode, worktree_mode),
+        old_path: Some(path.to_owned()),
+        new_path: Some(path.to_owned()),
+        old_mode: format_mode(ie.mode),
+        new_mode: format_mode(worktree_mode),
+        old_oid: ie.oid,
+        new_oid,
+        score: None,
+    }
+}
+
+/// Whether a failed read of a tracked file's content reports the path as modified (with an
+/// unknown worktree oid) instead of failing the whole scan.
+///
+/// A file that cannot be opened (no permission, held exclusively by another process) cannot
+/// be proven to match the index, so it counts as changed, as in Git. Callers that need the
+/// bytes themselves (`materialize_dirty_blobs`, i.e. staging) still get the error.
+fn unreadable_worktree_blob_is_modified(err: &Error, materialize_dirty_blobs: bool) -> bool {
+    !materialize_dirty_blobs
+        && matches!(
+            err,
+            Error::WorktreePathIo {
+                operation: crate::worktree::WorktreePathOperation::Read,
+                ..
+            }
+        )
 }
 
 /// Git `compare_stat_data`: a size mismatch means modified without reading blob contents.
@@ -4220,17 +4260,12 @@ fn try_push_status_modified_on_size_mismatch(
     if !for_status || crate::index::munge_index_size(meta.len()) == ie.size {
         return false;
     }
-    let path_owned = path_str_ref.to_owned();
-    result.push(DiffEntry {
-        status: DiffStatus::for_content_change(ie.mode, worktree_mode),
-        old_path: Some(path_owned.clone()),
-        new_path: Some(path_owned),
-        old_mode: format_mode(ie.mode),
-        new_mode: format_mode(worktree_mode),
-        old_oid: ie.oid,
-        new_oid: ie.oid,
-        score: None,
-    });
+    result.push(worktree_content_change_entry(
+        ie,
+        path_str_ref,
+        worktree_mode,
+        ie.oid,
+    ));
     true
 }
 
@@ -4248,17 +4283,12 @@ fn try_push_status_modified_on_size_mismatch_stat(
     if !for_status || stat.worktree_size() == ie.size {
         return false;
     }
-    let path_owned = path_str_ref.to_owned();
-    result.push(DiffEntry {
-        status: DiffStatus::for_content_change(ie.mode, worktree_mode),
-        old_path: Some(path_owned.clone()),
-        new_path: Some(path_owned),
-        old_mode: format_mode(ie.mode),
-        new_mode: format_mode(worktree_mode),
-        old_oid: ie.oid,
-        new_oid: ie.oid,
-        score: None,
-    });
+    result.push(worktree_content_change_entry(
+        ie,
+        path_str_ref,
+        worktree_mode,
+        ie.oid,
+    ));
     true
 }
 
@@ -4313,17 +4343,12 @@ fn push_index_blob_worktree_diff(
         mode_policy.index_mode_for_worktree(mode_from_metadata(&meta), Some(ie.mode));
     let stat_same = stat_matches_with_policy(ie, &meta, stat_policy);
     if stat_same && worktree_mode != ie.mode {
-        let path_owned = path_str_ref.to_owned();
-        result.push(DiffEntry {
-            status: DiffStatus::for_content_change(ie.mode, worktree_mode),
-            old_path: Some(path_owned.clone()),
-            new_path: Some(path_owned),
-            old_mode: format_mode(ie.mode),
-            new_mode: format_mode(worktree_mode),
-            old_oid: ie.oid,
-            new_oid: ie.oid,
-            score: None,
-        });
+        result.push(worktree_content_change_entry(
+            ie,
+            path_str_ref,
+            worktree_mode,
+            ie.oid,
+        ));
         return Ok(());
     }
 
@@ -4352,7 +4377,7 @@ fn push_index_blob_worktree_diff(
     } else {
         hash_stream_threshold(odb)?
     };
-    let eff_oid = worktree_blob_content_from(
+    let content = match worktree_blob_content_from(
         odb,
         file_path,
         &meta,
@@ -4362,11 +4387,22 @@ fn push_index_blob_worktree_diff(
         Some(ie),
         filter_process,
         stream_from,
-    )?
-    .object_id(odb, store)?;
+    ) {
+        Ok(content) => content,
+        Err(err) if unreadable_worktree_blob_is_modified(&err, materialize_dirty_blobs) => {
+            result.push(worktree_content_change_entry(
+                ie,
+                path_str_ref,
+                worktree_mode,
+                zero_oid(),
+            ));
+            return Ok(());
+        }
+        Err(err) => return Err(err),
+    };
+    let eff_oid = content.object_id(odb, store)?;
 
     if eff_oid != ie.oid || worktree_mode != ie.mode {
-        let path_owned = path_str_ref.to_owned();
         // `git diff-files --raw` uses the null OID for the worktree side when content differs.
         // Staging (`diff_index_to_worktree_for_staging`) materializes blobs and needs the real OID.
         let new_oid = if eff_oid != ie.oid && !materialize_dirty_blobs {
@@ -4374,16 +4410,12 @@ fn push_index_blob_worktree_diff(
         } else {
             eff_oid
         };
-        result.push(DiffEntry {
-            status: DiffStatus::for_content_change(ie.mode, worktree_mode),
-            old_path: Some(path_owned.clone()),
-            new_path: Some(path_owned),
-            old_mode: format_mode(ie.mode),
-            new_mode: format_mode(worktree_mode),
-            old_oid: ie.oid,
+        result.push(worktree_content_change_entry(
+            ie,
+            path_str_ref,
+            worktree_mode,
             new_oid,
-            score: None,
-        });
+        ));
     }
     Ok(())
 }
@@ -5006,17 +5038,12 @@ fn diff_index_to_worktree_inner(
                         return Ok(());
                     }
                     if stat_same && worktree_mode != ie.mode {
-                        let path_owned = path_str_ref.to_owned();
-                        result.push(DiffEntry {
-                            status: DiffStatus::for_content_change(ie.mode, worktree_mode),
-                            old_path: Some(path_owned.clone()),
-                            new_path: Some(path_owned),
-                            old_mode: format_mode(ie.mode),
-                            new_mode: format_mode(worktree_mode),
-                            old_oid: ie.oid,
-                            new_oid: ie.oid,
-                            score: None,
-                        });
+                        result.push(worktree_content_change_entry(
+                            ie,
+                            path_str_ref,
+                            worktree_mode,
+                            ie.oid,
+                        ));
                     } else if try_push_status_modified_on_size_mismatch_stat(
                         ie,
                         path_str_ref,
