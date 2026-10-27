@@ -534,6 +534,60 @@ pub(crate) fn fetch_ref_list_prefixes(refspecs: &[String]) -> Vec<String> {
     out
 }
 
+/// `ref-prefix` arguments for a v2 `ls-refs` request, narrowed the way Git does.
+///
+/// A pattern source asks for its literal prefix (up to the `*`), a full ref name for
+/// itself, and a short name for every ref it could resolve to under the rev-parse
+/// rules. Object ids need no advertisement. `refs/tags/` is added unless `tags` is
+/// [`TagMode::None`](crate::transfer::TagMode::None). Without refspecs this is
+/// [`fetch_ref_list_prefixes`] (the heads and tags namespaces).
+pub(crate) fn v2_ls_refs_prefixes(
+    refspecs: &[String],
+    tags: crate::transfer::TagMode,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for spec in refspecs {
+        if spec.starts_with('^') {
+            continue;
+        }
+        let raw = spec.strip_prefix('+').unwrap_or(spec.as_str());
+        let src = raw.split_once(':').map_or(raw, |(s, _)| s).trim();
+        if src.is_empty() || src == "HEAD" || ObjectId::from_hex(src).is_ok() {
+            continue;
+        }
+        if let Some(star) = src.find('*') {
+            let prefix = &src[..star];
+            if prefix.starts_with("refs/") {
+                push_unique_prefix(&mut out, prefix);
+            } else if !prefix.is_empty() {
+                push_unique_prefix(&mut out, &format!("refs/heads/{prefix}"));
+            }
+            continue;
+        }
+        if src.starts_with("refs/") {
+            push_unique_prefix(&mut out, src);
+            continue;
+        }
+        for candidate in [
+            src.to_owned(),
+            format!("refs/{src}"),
+            format!("refs/tags/{src}"),
+            format!("refs/heads/{src}"),
+            format!("refs/remotes/{src}"),
+            format!("refs/remotes/{src}/HEAD"),
+        ] {
+            push_unique_prefix(&mut out, &candidate);
+        }
+    }
+    if out.is_empty() {
+        return fetch_ref_list_prefixes(refspecs);
+    }
+    if tags != crate::transfer::TagMode::None {
+        push_unique_prefix(&mut out, "refs/tags/");
+    }
+    out
+}
+
 /// Parse an `unborn HEAD symref-target:…` line from a v2 `ls-refs` response.
 #[must_use]
 pub(crate) fn parse_v2_ls_refs_unborn_head_symref(line: &str) -> Option<String> {
@@ -646,13 +700,7 @@ pub(crate) fn build_v2_ls_refs_request(
     // drives `FetchOutcome::default_branch` (the wire equivalent of the v0/v1
     // `symref=HEAD:` capability). `HEAD` is dropped from the fetchable ref set.
     pkt_line::write_line(&mut req, "ref-prefix HEAD")?;
-    let mut prefixes = fetch_ref_list_prefixes(refspecs);
-    if tags != crate::transfer::TagMode::None && !prefixes.iter().any(|p| p == "refs/tags/") {
-        // Tag-following / `--tags` wants the tag namespace advertised so we can
-        // add tags from the ls-refs result, even if the refspecs only name heads.
-        prefixes.push("refs/tags/".to_owned());
-    }
-    for p in &prefixes {
+    for p in &v2_ls_refs_prefixes(refspecs, tags) {
         pkt_line::write_line(&mut req, &format!("ref-prefix {p}"))?;
     }
     pkt_line::write_flush(&mut req)?;
@@ -2525,6 +2573,35 @@ mod fetch_advertised_ref_tests {
         let mut haves = v2_local_haves(&local, &[want]).unwrap();
         assert_eq!(haves.first(INITIAL_FLUSH).unwrap(), all.as_slice());
         assert!(haves.exhausted);
+    }
+
+    #[test]
+    fn v2_ls_refs_prefixes_follow_refspecs_and_tag_mode() {
+        use crate::transfer::TagMode;
+
+        let heads = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        assert_eq!(v2_ls_refs_prefixes(&heads, TagMode::None), ["refs/heads/"]);
+        assert_eq!(
+            v2_ls_refs_prefixes(&heads, TagMode::Following),
+            ["refs/heads/", "refs/tags/"]
+        );
+        let short = vec!["main".to_owned()];
+        assert_eq!(
+            v2_ls_refs_prefixes(&short, TagMode::None),
+            [
+                "main",
+                "refs/main",
+                "refs/tags/main",
+                "refs/heads/main",
+                "refs/remotes/main",
+                "refs/remotes/main/HEAD",
+            ]
+        );
+        let oid = vec![format!("{}:refs/heads/x", "a".repeat(40))];
+        assert_eq!(
+            v2_ls_refs_prefixes(&oid, TagMode::None),
+            fetch_ref_list_prefixes(&oid)
+        );
     }
 
     #[test]
