@@ -28,6 +28,9 @@ mod add_after_clone_parallel_loose;
 #[path = "add_executable_git_compat.rs"]
 mod add_executable_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "add_ignorecase_spelling_git_compat.rs"]
+mod add_ignorecase_spelling_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "add_index_write_git_compat.rs"]
 mod add_index_write_git_compat;
 #[cfg(feature = "full-tests")]
