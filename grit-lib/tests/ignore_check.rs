@@ -89,14 +89,9 @@ fn normalize_ignore_query_accepts_macos_tmp_alias() {
     use grit_lib::worktree::ignore::normalize_repo_relative;
 
     let dir = tempfile::tempdir_in("/tmp").expect("temporary directory");
-    let repo = grit_lib::repo::init_repository(
-        dir.path(),
-        false,
-        "main",
-        None,
-        grit_lib::RefStorageFormat::Files,
-    )
-    .expect("init");
+    let repo =
+        grit_lib::repo::Repository::init(dir.path(), &grit_lib::repo::InitOptions::default())
+            .expect("init");
     let canonical = dir.path().canonicalize().expect("physical path");
     let alias = std::path::Path::new("/tmp").join(dir.path().file_name().expect("name"));
     for cwd in [&canonical, &alias] {

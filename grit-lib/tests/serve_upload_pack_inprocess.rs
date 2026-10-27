@@ -278,12 +278,13 @@ fn upload_pack_stateless_v0_want_reachable_non_tip() {
         &repo,
         &mut Cursor::new(v0_stateless_fetch_body(middle)),
         &mut pack_out,
-        &ServeOptions {
+        &mut ServeOptions {
             protocol: ProtocolVersion::V0,
             advertise_refs: false,
             stateless_rpc: true,
             agent: "grit-cov".to_owned(),
             hidden_refs: Vec::new(),
+            ..ServeOptions::default()
         },
     )
     .expect("stateless want for ancestor must succeed");
@@ -337,12 +338,13 @@ fn upload_pack_stateful_v0_rejects_non_advertised_ancestor_want() {
         &repo,
         &mut Cursor::new(body),
         &mut Vec::new(),
-        &ServeOptions {
+        &mut ServeOptions {
             protocol: ProtocolVersion::V0,
             advertise_refs: false,
             stateless_rpc: false,
             agent: "grit-cov".to_owned(),
             hidden_refs: Vec::new(),
+            ..ServeOptions::default()
         },
     )
     .expect_err("stateful session should reject ancestor not in advertisement");
@@ -377,12 +379,13 @@ fn upload_pack_stateless_v2_want_reachable_non_tip() {
         &repo,
         &mut Cursor::new(fetch_body),
         &mut v2_fetch,
-        &ServeOptions {
+        &mut ServeOptions {
             protocol: ProtocolVersion::V2,
             advertise_refs: false,
             stateless_rpc: true,
             agent: "grit-cov".to_owned(),
             hidden_refs: Vec::new(),
+            ..ServeOptions::default()
         },
     )
     .expect("v2 stateless fetch for ancestor");
@@ -413,12 +416,13 @@ fn upload_pack_stateless_allow_tip_sha1_in_want_accepts_reachable_ancestor() {
         &repo,
         &mut Cursor::new(v0_stateless_fetch_body(middle)),
         &mut Vec::new(),
-        &ServeOptions {
+        &mut ServeOptions {
             protocol: ProtocolVersion::V0,
             advertise_refs: false,
             stateless_rpc: true,
             agent: "grit-cov".to_owned(),
             hidden_refs: Vec::new(),
+            ..ServeOptions::default()
         },
     )
     .expect("allowTipSha1InWant must not block stateless reachable ancestor wants");
@@ -441,12 +445,13 @@ fn upload_pack_stateless_v0_want_current_annotated_tag_object() {
         &repo,
         &mut Cursor::new(v0_stateless_fetch_body(tag_obj)),
         &mut pack_out,
-        &ServeOptions {
+        &mut ServeOptions {
             protocol: ProtocolVersion::V0,
             advertise_refs: false,
             stateless_rpc: true,
             agent: "grit-cov".to_owned(),
             hidden_refs: Vec::new(),
+            ..ServeOptions::default()
         },
     )
     .expect("stateless want for annotated tag object on current ref");
@@ -473,12 +478,13 @@ fn upload_pack_stateless_v0_want_advertised_tip_skips_reachability_walk() {
         &repo,
         &mut Cursor::new(v0_stateless_fetch_body(tip)),
         &mut Vec::new(),
-        &ServeOptions {
+        &mut ServeOptions {
             protocol: ProtocolVersion::V0,
             advertise_refs: false,
             stateless_rpc: true,
             agent: "grit-cov".to_owned(),
             hidden_refs: Vec::new(),
+            ..ServeOptions::default()
         },
     )
     .expect("current tip want uses advertisement fast path");
@@ -508,12 +514,13 @@ fn upload_pack_stateless_v0_want_moved_annotated_blob_tag() {
         &repo,
         &mut Cursor::new(v0_stateless_fetch_body(tag_obj)),
         &mut pack_out,
-        &ServeOptions {
+        &mut ServeOptions {
             protocol: ProtocolVersion::V0,
             advertise_refs: false,
             stateless_rpc: true,
             agent: "grit-cov".to_owned(),
             hidden_refs: Vec::new(),
+            ..ServeOptions::default()
         },
     )
     .expect("stateless want for tag on reachable blob after tag ref moved away");

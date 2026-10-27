@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::diff::hash_worktree_file;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::worktree_rules::WorktreeRules;
@@ -37,8 +37,18 @@ fn init_repo_with_process_filter(wt: &Path, state_file: &Path) -> PathBuf {
         .expect("git config process");
     fs::write(wt.join(".gitattributes"), "* filter=test\n").expect("attributes");
     fs::write(state_file, "").expect("truncate state");
-    std::env::set_var("GRIT_FILTER_STATE_FILE", state_file);
     git_dir
+}
+
+/// Open options whose environment (which filter subprocesses inherit) names the
+/// fixture's state file.
+fn filter_options(wt: &Path, state_file: &Path) -> RepositoryOptions {
+    let vars = std::env::vars_os().chain([(
+        "GRIT_FILTER_STATE_FILE".into(),
+        state_file.as_os_str().to_owned(),
+    )]);
+    RepositoryOptions::with_environment(Environment::from_vars(vars, wt.to_path_buf()))
+        .with_work_tree(wt)
 }
 
 fn count_state_lines(state_file: &Path) -> usize {
@@ -60,8 +70,7 @@ fn filter_process_reused_and_disable_persists_on_repository() {
     fs::write(wt.join("a.txt"), b"hello\n").expect("a");
     fs::write(wt.join("b.txt"), b"world\n").expect("b");
 
-    let repo =
-        Repository::open(&git_dir, &RepositoryOptions::empty().with_work_tree(wt)).expect("open");
+    let repo = Repository::open(&git_dir, &filter_options(wt, &state_file)).expect("open");
     let index = repo.index_handle().load().expect("index");
     let rules = WorktreeRules::from_repository(&repo, &index).expect("rules");
     let filter_fp = Some(rules.filter_process());

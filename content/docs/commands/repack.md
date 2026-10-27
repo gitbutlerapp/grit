@@ -28,7 +28,7 @@ In a partial clone, maintenance works offline after local commits. Existing `.pr
 
 Use this when a repository has accumulated many loose objects after local commits. Clones and fetches already install packs; repack is mainly for long-lived worktrees built entirely with `grit commit`.
 
-## Benchmarking
+### Benchmarking
 
 Measured on 2026-10-26 using Linux x86_64, four CPUs, 15 GiB RAM, system Git 2.55.0, and Rust 1.99.0 with the `release` profile. The real Grit repository fixture has 11,278 commits and 125,062 reachable objects after adding one local indexed-file commit. Its blobless copy leaves 54,133 blobs promised, with the origin unavailable. Neither fixture has a checkout.
 
@@ -114,9 +114,6 @@ Pass `--markdown` for an agent-friendly summary with the same fields as JSON in 
 
 Schema: [v1](/schemas/repack/v1.json)
 
-
-
-
 ```text
 ## Repack
 
@@ -137,7 +134,6 @@ Schema: [v1](/schemas/repack/v1.json)
 | `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
-
 
 ## See also
 

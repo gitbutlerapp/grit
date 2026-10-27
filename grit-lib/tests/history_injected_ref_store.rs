@@ -42,7 +42,7 @@ fn rewrite_opts() -> RewriteOptions {
 
 fn apply_opts(message: &str, record: Option<&str>) -> ApplyOptions {
     ApplyOptions {
-        identity: TS.into(),
+        identity: TS.parse().expect("signature"),
         reflog_message: message.into(),
         record_operation: record.map(Into::into),
         hooks: Default::default(),

@@ -469,7 +469,19 @@ fn skip_balanced(bytes: &[u8], start: usize, open: u8, close: u8) -> Option<usiz
                     return Some(i);
                 }
             }
-            b'b' | b'B' | b'r' | b'R' | b'"' | b'\'' => {
+            // Comments can hold quotes and braces (`don't`, `{` in prose).
+            b'/' if starts_with(bytes, i, "//") || starts_with(bytes, i, "/*") => {
+                i = skip_ascii_whitespace(bytes, i)?;
+                continue;
+            }
+            // A quote is a char literal or a lifetime / loop label, which has no
+            // closing quote and must not swallow the code after it.
+            b'\'' => {
+                if let Some(end) = char_literal_end(bytes, i) {
+                    i = end;
+                }
+            }
+            b'b' | b'B' | b'r' | b'R' | b'"' if !follows_ident(bytes, i) => {
                 if let Some(end) = try_skip_rust_string(bytes, i) {
                     i = end;
                 }
@@ -479,6 +491,35 @@ fn skip_balanced(bytes: &[u8], start: usize, open: u8, close: u8) -> Option<usiz
         i += 1;
     }
     None
+}
+
+/// Index of the closing quote of the char literal starting at `i`, or `None`
+/// when the quote at `i` starts a lifetime or loop label.
+fn char_literal_end(bytes: &[u8], i: usize) -> Option<usize> {
+    let rest = bytes.get(i + 1..)?;
+    let first = *rest.first()?;
+    if first == b'\\' {
+        // The escaped character, then the closing quote (`'\u{10FFFF}'` is the longest).
+        return rest
+            .iter()
+            .skip(2)
+            .take(9)
+            .position(|&c| c == b'\'')
+            .map(|p| i + 3 + p);
+    }
+    let len = match first {
+        0xF0.. => 4,
+        0xE0.. => 3,
+        0xC0.. => 2,
+        _ => 1,
+    };
+    (rest.get(len) == Some(&b'\'')).then_some(i + 1 + len)
+}
+
+/// Whether the byte at `i` continues an identifier, so a `b` or `r` there is not
+/// a string prefix (`number"` is not a byte string).
+fn follows_ident(bytes: &[u8], i: usize) -> bool {
+    i > 0 && (bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_')
 }
 
 fn skip_ascii_whitespace(bytes: &[u8], mut i: usize) -> Option<usize> {

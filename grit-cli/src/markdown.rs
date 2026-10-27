@@ -7,7 +7,7 @@ use grit_lib::diff::{DiffEntry, DiffStatus};
 use crate::commands::add::AddOutcome;
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
 use crate::commands::commit::CommitOutcome;
-use crate::commands::diff::{FileDiff, Hunk, Line, LineKind, Segment, file_diff_status_label};
+use crate::commands::diff::{file_diff_status_label, FileDiff, Hunk, Line, LineKind, Segment};
 use crate::commands::history::{
     HeadPair, HistoryAbsorbOutcome, HistoryRewriteOutcome, RebaseCheckOutcome, RebaseCheckResult,
     RefPair, RewrittenPair,
@@ -22,7 +22,7 @@ use crate::commands::switch::SwitchOutcome;
 use crate::commands::update::UpdateOutcome;
 use crate::commands::worktree::{WorktreeOutcome, WorktreeRow};
 use crate::context::{self, CommitSummary};
-use crate::output::{RenderContext, outln};
+use crate::output::{outln, RenderContext};
 use crate::stdio;
 use crate::ui::{self, PathDisplayOptions};
 

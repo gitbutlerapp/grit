@@ -4708,6 +4708,7 @@ pub fn set_test_inject_index_write_fail_remaining(remaining: usize) {
 mod rewrite_apply_inject {
     use std::cell::RefCell;
 
+    // hygiene: thread-local rewrite abort injection for tests
     thread_local! {
         pub static ABORT_AFTER_REFS: RefCell<bool> = const { RefCell::new(false) };
     }

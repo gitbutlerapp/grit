@@ -30,6 +30,61 @@ On Unix, explicit file operands must be valid UTF-8. An operand containing inval
 
 Adding or removing the final newline attributes the last line to the commit that changed it. With `-w` / `--ignore-all-space`, newline-only changes are ignored along with other whitespace-only changes. Line content in the output excludes LF in either mode.
 
+### Benchmarking
+
+Measured on 2026-10-26 on a 4-core Linux VM with system Git 2.55.0 and release builds. The baseline is `origin/main` at `5d557d222cbe621d4d3bd41f7ecf1ab7d71c477b`. These are the existing deep-history and large-tail blame fixtures used by `grit-bench`.
+
+Each cell shows median wall time in milliseconds / peak RSS in KiB. Nine fresh-process measurements are interleaved across Git, baseline grit, and fixed grit after two warmups. Executable files and repository data are warmed equally before measurement; stdout is discarded. Git uses `blame --porcelain`, grit uses `blame`, and peak RSS comes from `/usr/bin/time -v`.
+
+| Scenario | System Git (ms / KiB) | Baseline grit (ms / KiB) | Fixed grit (ms / KiB) |
+| --- | ---: | ---: | ---: |
+| 2,000 commits, full file | 12.31 / 7,296 | 21.53 / 16,780 | 21.02 / 16,860 |
+| 5,000 lines / 150 commits, full file | 53.37 / 7,736 | 41.21 / 29,872 | 37.13 / 29,832 |
+| 5,000 lines / 150 commits, `-L 100,120` | 52.33 / 7,736 | 31.02 / 28,252 | 26.90 / 27,708 |
+
+Wall time improves by about 2–13% against the baseline. Peak RSS is effectively flat for deep history (+80 KiB, within observed run variation), and falls by 40 KiB for full-file tail churn and 544 KiB for the range. The unchanged-prefix/suffix shortcut remains enabled.
+
+#### Rename metadata regression
+
+Measured on 2026-10-27 on a 4-core Linux x86_64 VM with system Git 2.55.0 and Rust 1.99.0 release builds. Baseline grit is `origin/main` at `80dc322f7c2fafae948c30b9e6de159f884504e0`. Nine measurements are interleaved across Git, baseline grit, and the fix after two warmups, with builds and tests stopped. Each cell shows median wall milliseconds / peak RSS KiB; wall time uses a monotonic subprocess timer and RSS comes from `/usr/bin/time -v`. Output is discarded.
+
+The real-history case is `--rev 7e34d8174d -L 1,3 --json git-gui/git-gui.sh` in git/git (Git uses `--line-porcelain`). The tail cases use the existing 5,000-line / 150-commit fixture with `grit blame` versus `git blame --porcelain`, and `-L 100,120` for the range.
+
+| Scenario | System Git (ms / KiB) | Baseline grit (ms / KiB) | Fixed grit (ms / KiB) |
+| --- | ---: | ---: | ---: |
+| git/git git-gui, lines 1–3 | 191.81 / 83,372 | 527.11 / 335,004 | 527.43 / 334,968 |
+| Large-tail full file | 70.37 / 6,252 | 52.35 / 26,828 | 51.61 / 26,760 |
+| Large-tail lines 100–120 | 69.89 / 6,304 | 42.44 / 25,128 | 42.33 / 25,188 |
+
+The source-path fix retains the unchanged-prefix/suffix shortcut. Median wall time changes by at most 1.5%; the largest peak RSS increase is 60 KiB against baseline in this run.
+
+### Benchmarking encoded paths
+
+Measured on a 4-core Linux x86_64 VM with system Git 2.55.0 and Rust 1.99.0,
+using `dist` builds of main (`5a715a522`) and this fix. Each cell reports median
+**wall milliseconds / peak RSS KiB** from ten measured invocations after two
+warmups, interleaving Git, main, and the fix on an idle VM. RSS comes from
+`/usr/bin/time -v`; stdout is discarded. Grit uses `blame --json`; Git uses
+`blame --line-porcelain`. Ranges use `-L 1,200`.
+
+The packed fixture has 201 commits and two identical 4,096-line files, one UTF-8
+path and one raw-byte directory/filename, with Git-written changed-path Bloom
+filters. The real-repository case blames `grit-lib/src/blame.rs` at the baseline
+revision, whose file history has 76 changes.
+
+| Scenario | System Git | Main | Fix |
+| --- | ---: | ---: | ---: |
+| Packed UTF-8, full file | 73.9 / 30,226 | 101.7 / 75,230 | 102.7 / 75,262 |
+| Packed UTF-8, lines 1–200 | 56.5 / 30,174 | 71.1 / 68,962 | 71.9 / 68,810 |
+| Packed encoded path, full file | 74.5 / 30,266 | Path error | 101.7 / 75,290 |
+| Packed encoded path, lines 1–200 | 56.1 / 30,196 | Path error | 70.7 / 69,194 |
+| Grit repository, UTF-8, full file | 97.6 / 40,774 | 92.8 / 68,084 | 92.2 / 68,010 |
+| Grit repository, UTF-8, lines 1–200 | 63.5 / 39,864 | 72.9 / 64,658 | 72.2 / 64,672 |
+
+UTF-8 timings remain within 1.2% of the baseline in this run, with no material
+RSS increase. Encoded paths now complete both full-file and ranged blame;
+main's path errors provide no comparable successful-operation timing.
+
 ## Options
 
 | Option | Description |
@@ -150,9 +205,6 @@ Schema: [v1](/schemas/blame/v1.json)
 
 Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
-
-
-
 ```text
 ## Blame: `tracked.txt`
 
@@ -163,34 +215,6 @@ Revision `83352a61f6715ec3f0a297c6d6150725154fb833`
 | 1 |  | `83352a6` | Test | [TIME_AGO] | 1 | tracked v2 |
 ```
 
-## Benchmarking
-
-Measured on 2026-10-26 on a 4-core Linux VM with system Git 2.55.0 and release builds. The baseline is `origin/main` at `5d557d222cbe621d4d3bd41f7ecf1ab7d71c477b`. These are the existing deep-history and large-tail blame fixtures used by `grit-bench`.
-
-Each cell shows median wall time in milliseconds / peak RSS in KiB. Nine fresh-process measurements are interleaved across Git, baseline grit, and fixed grit after two warmups. Executable files and repository data are warmed equally before measurement; stdout is discarded. Git uses `blame --porcelain`, grit uses `blame`, and peak RSS comes from `/usr/bin/time -v`.
-
-| Scenario | System Git (ms / KiB) | Baseline grit (ms / KiB) | Fixed grit (ms / KiB) |
-| --- | ---: | ---: | ---: |
-| 2,000 commits, full file | 12.31 / 7,296 | 21.53 / 16,780 | 21.02 / 16,860 |
-| 5,000 lines / 150 commits, full file | 53.37 / 7,736 | 41.21 / 29,872 | 37.13 / 29,832 |
-| 5,000 lines / 150 commits, `-L 100,120` | 52.33 / 7,736 | 31.02 / 28,252 | 26.90 / 27,708 |
-
-Wall time improves by about 2–13% against the baseline. Peak RSS is effectively flat for deep history (+80 KiB, within observed run variation), and falls by 40 KiB for full-file tail churn and 544 KiB for the range. The unchanged-prefix/suffix shortcut remains enabled.
-
-### Rename metadata regression
-
-Measured on 2026-10-27 on a 4-core Linux x86_64 VM with system Git 2.55.0 and Rust 1.99.0 release builds. Baseline grit is `origin/main` at `80dc322f7c2fafae948c30b9e6de159f884504e0`. Nine measurements are interleaved across Git, baseline grit, and the fix after two warmups, with builds and tests stopped. Each cell shows median wall milliseconds / peak RSS KiB; wall time uses a monotonic subprocess timer and RSS comes from `/usr/bin/time -v`. Output is discarded.
-
-The real-history case is `--rev 7e34d8174d -L 1,3 --json git-gui/git-gui.sh` in git/git (Git uses `--line-porcelain`). The tail cases use the existing 5,000-line / 150-commit fixture with `grit blame` versus `git blame --porcelain`, and `-L 100,120` for the range.
-
-| Scenario | System Git (ms / KiB) | Baseline grit (ms / KiB) | Fixed grit (ms / KiB) |
-| --- | ---: | ---: | ---: |
-| git/git git-gui, lines 1–3 | 191.81 / 83,372 | 527.11 / 335,004 | 527.43 / 334,968 |
-| Large-tail full file | 70.37 / 6,252 | 52.35 / 26,828 | 51.61 / 26,760 |
-| Large-tail lines 100–120 | 69.89 / 6,304 | 42.44 / 25,128 | 42.33 / 25,188 |
-
-The source-path fix retains the unchanged-prefix/suffix shortcut. Median wall time changes by at most 1.5%; the largest peak RSS increase is 60 KiB against baseline in this run.
-
 ## Exit status
 
 | Code | Meaning |
@@ -200,34 +224,6 @@ The source-path fix retains the unchanged-prefix/suffix shortcut. Median wall ti
 | `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
-
-
-## Benchmarking encoded paths
-
-Measured on a 4-core Linux x86_64 VM with system Git 2.55.0 and Rust 1.99.0,
-using `dist` builds of main (`5a715a522`) and this fix. Each cell reports median
-**wall milliseconds / peak RSS KiB** from ten measured invocations after two
-warmups, interleaving Git, main, and the fix on an idle VM. RSS comes from
-`/usr/bin/time -v`; stdout is discarded. Grit uses `blame --json`; Git uses
-`blame --line-porcelain`. Ranges use `-L 1,200`.
-
-The packed fixture has 201 commits and two identical 4,096-line files, one UTF-8
-path and one raw-byte directory/filename, with Git-written changed-path Bloom
-filters. The real-repository case blames `grit-lib/src/blame.rs` at the baseline
-revision, whose file history has 76 changes.
-
-| Scenario | System Git | Main | Fix |
-| --- | ---: | ---: | ---: |
-| Packed UTF-8, full file | 73.9 / 30,226 | 101.7 / 75,230 | 102.7 / 75,262 |
-| Packed UTF-8, lines 1–200 | 56.5 / 30,174 | 71.1 / 68,962 | 71.9 / 68,810 |
-| Packed encoded path, full file | 74.5 / 30,266 | Path error | 101.7 / 75,290 |
-| Packed encoded path, lines 1–200 | 56.1 / 30,196 | Path error | 70.7 / 69,194 |
-| Grit repository, UTF-8, full file | 97.6 / 40,774 | 92.8 / 68,084 | 92.2 / 68,010 |
-| Grit repository, UTF-8, lines 1–200 | 63.5 / 39,864 | 72.9 / 64,658 | 72.2 / 64,672 |
-
-UTF-8 timings remain within 1.2% of the baseline in this run, with no material
-RSS increase. Encoded paths now complete both full-file and ranged blame;
-main's path errors provide no comparable successful-operation timing.
 
 ## See also
 

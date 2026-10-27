@@ -100,8 +100,6 @@ pub mod partial_clone {
 }
 pub mod serve {
     //! serve API (re-exported at this path).
-    pub use crate::serve::receive_pack;
-    pub use crate::serve::upload_pack;
     pub use crate::serve::*;
 }
 pub mod pkt_line {
