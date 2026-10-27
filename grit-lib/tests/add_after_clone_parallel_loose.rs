@@ -50,6 +50,10 @@ fn add_after_grit_clone_clean_tree_no_loose_writes() {
         ])
         .in_dir(&upstream)
         .suc();
+        // A local clone hard-links the upstream's loose objects, so the clone starts with
+        // as many loose objects as the upstream; `grit add` must not add any.
+        let loose_after_clone = loose_object_count(&dest_path);
+        assert_eq!(loose_after_clone, loose_object_count(&upstream));
         let add = grit_cmd(&["add"]).in_dir(&dest_path).exec();
         assert!(
             add.ok(),
@@ -58,7 +62,7 @@ fn add_after_grit_clone_clean_tree_no_loose_writes() {
         );
         let loose = loose_object_count(&dest_path);
         assert_eq!(
-            loose, 0,
+            loose, loose_after_clone,
             "clean grit add after grit clone must not write loose objects (attempt {attempt})"
         );
     }

@@ -234,6 +234,7 @@ fn pack_build_honors_explicit_zero_window_and_depth() {
         .find(|p| p.extension().is_some_and(|x| x == "idx"))
         .expect("idx beside pack");
     let out = Command::new("git")
+        .current_dir(scratch.path())
         .args(["verify-pack", "-v"])
         .arg(&idx_path)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -264,8 +265,10 @@ fn pack_files(git_dir: &Path) -> Vec<std::path::PathBuf> {
         .collect()
 }
 
+/// A same-filesystem local fetch hard-links the remote's loose objects (as `git clone
+/// --local` does) instead of reading and recompressing them into a new pack.
 #[test]
-fn fetch_local_from_delta_packed_remote_produces_compact_pack() {
+fn fetch_local_from_loose_remote_links_loose_objects() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let remote = tmp.path().join("remote");
     let local = tmp.path().join("local");
@@ -292,30 +295,35 @@ fn fetch_local_from_delta_packed_remote_produces_compact_pack() {
     };
     fetch_local(&local_git, &remote_git, &opts).expect("fetch_local");
 
-    let packs = pack_files(&local_git);
-    assert_eq!(packs.len(), 1, "expected one installed pack");
-
-    let grit_pack_len = std::fs::metadata(&packs[0]).expect("pack metadata").len();
-    let remote_odb = open_odb(&remote_git);
-    let tip = rev_parse(&remote, "HEAD");
-    let undeltified = build_pack(&remote_odb, &[tip], &[], &PackBuildOptions::default())
-        .expect("undeltified pack for comparison");
     assert!(
-        grit_pack_len < undeltified.len() as u64,
-        "fetch_local must delta-compress blobs (grit={grit_pack_len}, undeltified={})",
-        undeltified.len()
+        pack_files(&local_git).is_empty(),
+        "loose remote objects are linked, not packed"
     );
-
-    let count_out = git(&local_git, &["count-objects", "-v"]);
-    let mut loose = u64::MAX;
-    for line in count_out.lines() {
-        if let Some(v) = line.strip_prefix("count: ") {
-            loose = v.trim().parse().expect("count");
+    let objects: Vec<String> = git(&remote, &["rev-list", "--objects", "--all"])
+        .lines()
+        .filter_map(|l| l.split_whitespace().next().map(str::to_owned))
+        .collect();
+    assert_eq!(objects.len(), 26, "24 blobs, one tree, one commit");
+    for hex in &objects {
+        let rel = format!("objects/{}/{}", &hex[..2], &hex[2..]);
+        let local_meta = std::fs::metadata(local_git.join(&rel))
+            .unwrap_or_else(|e| panic!("{hex} must be loose in the local repo: {e}"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let remote_meta = std::fs::metadata(remote_git.join(&rel)).expect("remote loose");
+            assert_eq!(
+                (local_meta.dev(), local_meta.ino()),
+                (remote_meta.dev(), remote_meta.ino()),
+                "{hex} must be a hard link to the remote's loose file"
+            );
         }
+        #[cfg(not(unix))]
+        let _ = local_meta;
     }
     assert_eq!(
-        loose, 0,
-        "fetch_local should install a pack, not loose objects"
+        rev_parse(&local, "refs/remotes/origin/main"),
+        rev_parse(&remote, "HEAD")
     );
 
     let fsck = git_cmd(&["fsck", "--strict"]).in_dir(&local_git).exec();

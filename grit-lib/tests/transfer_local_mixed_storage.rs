@@ -1,10 +1,11 @@
 //! Local (`file://`) clone and push from a source whose objects are split
 //! between a packfile and loose files.
 //!
-//! The local transfer links the source's packs into the destination, then packs
-//! only the objects that are still missing (the loose ones). These tests check
-//! that the second pack holds exactly those objects instead of re-copying the
-//! whole history, and that the system `git` accepts the result.
+//! A local clone links the source's packs and its loose object files into the
+//! destination (as `git clone --local` does). A local push links the packs, then
+//! packs only the objects that are still missing (the loose ones). These tests
+//! check that nothing is re-copied from the linked pack, and that the system `git`
+//! accepts the result.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -131,7 +132,7 @@ fn grit_clone(url: String, dest: PathBuf) {
 }
 
 #[test]
-fn file_clone_packs_only_loose_objects_beside_linked_pack() {
+fn file_clone_links_source_pack_and_loose_objects() {
     let tmp = tempfile::tempdir().unwrap();
     let src = tmp.path().join("src");
     std::fs::create_dir_all(&src).unwrap();
@@ -143,14 +144,17 @@ fn file_clone_packs_only_loose_objects_beside_linked_pack() {
     grit_clone(file_url(&src), dest.clone());
 
     let dest_git = dest.join(".git");
-    let mut packs = pack_object_counts(&dest_git.join("objects"));
-    let linked = packs.iter().position(|p| *p == src_packs[0]);
-    let linked = linked.expect("source pack linked into the clone");
-    packs.remove(linked);
-    let copied: usize = packs.iter().map(|(_, n)| n).sum();
     assert_eq!(
-        copied, loose_count,
-        "only the loose objects should be packed again: {packs:?}"
+        pack_object_counts(&dest_git.join("objects")),
+        src_packs,
+        "the clone holds the linked source pack and no re-packed copy"
+    );
+    let src_loose = loose_objects(&src.join(".git/objects"));
+    assert_eq!(src_loose.len(), loose_count);
+    assert_eq!(
+        loose_objects(&dest_git.join("objects")),
+        src_loose,
+        "the source's loose objects are linked into the clone as loose files"
     );
 
     fsck_strict(&dest_git);
