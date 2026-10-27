@@ -20,7 +20,7 @@
 //! SHA-1 (40-hex) ones do.
 
 use std::ffi::OsString;
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout};
@@ -430,7 +430,7 @@ pub fn parse_git_url(url: &str) -> Result<GitDaemonUrl> {
 /// Holds the read and write halves of the socket (duplicated file descriptors of
 /// the same connection) plus the advertisement read on connect.
 pub struct GitDaemonConnection {
-    reader: TcpStream,
+    reader: BufReader<TcpStream>,
     writer: TcpStream,
     adv: Advertisement,
 }
@@ -587,7 +587,7 @@ impl Transport for GitDaemonTransport {
         self.write_request(&mut writer, &parsed, service, opts)
             .map_err(broken_connection)?;
 
-        let mut reader = stream;
+        let mut reader = BufReader::new(stream);
         let adv = read_advertisement(&mut reader).map_err(broken_connection)?;
         if !remote_handshake_complete(&adv) {
             return Err(Error::remote_unreadable(
@@ -987,7 +987,7 @@ pub struct SshConnection {
     // `Option` so [`Connection::finish_send`] can drop stdin (sending EOF to the
     // remote `git-upload-pack`) without consuming the connection.
     writer: Option<ChildStdin>,
-    reader: ChildStdout,
+    reader: BufReader<ChildStdout>,
     adv: Advertisement,
 }
 
@@ -1067,10 +1067,12 @@ pub(crate) fn connect_local_upload_pack(
         .stdin
         .take()
         .ok_or_else(|| Error::Message("git upload-pack missing stdin".to_owned()))?;
-    let mut reader = child
-        .stdout
-        .take()
-        .ok_or_else(|| Error::Message("git upload-pack missing stdout".to_owned()))?;
+    let mut reader = BufReader::new(
+        child
+            .stdout
+            .take()
+            .ok_or_else(|| Error::Message("git upload-pack missing stdout".to_owned()))?,
+    );
     let adv = read_advertisement(&mut reader)?;
     Ok(Box::new(SshConnection {
         child,
@@ -1281,8 +1283,9 @@ impl Transport for SshTransport {
             .into_system_parts()
             .map_err(|_| Error::Message("ssh child is not backed by a live process".to_owned()))?;
         let writer = writer.ok_or_else(|| Error::Message("ssh child has no stdin".to_owned()))?;
-        let mut reader =
-            reader.ok_or_else(|| Error::Message("ssh child has no stdout".to_owned()))?;
+        let mut reader = BufReader::new(
+            reader.ok_or_else(|| Error::Message("ssh child has no stdout".to_owned()))?,
+        );
 
         let adv = read_advertisement(&mut reader)?;
         verify_ssh_child_after_advertisement(url, &mut child, &adv)?;
