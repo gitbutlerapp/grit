@@ -50,6 +50,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `add/dry-run@synth-10k` | Preview staging: grit add --dry-run vs git add -n -A |
 | `add/patch-file@synth-10k` | Apply worktree diff to index: grit add --patch-file vs git apply --cached |
 | `add/hunks@large-file` | Stage half of 500 hunks in a 50k-line file: grit add --hunks vs git apply --cached |
+| `add/patch-file@large-file` | Apply prebuilt half-hunk patch to index: grit add --patch-file vs git apply --cached |
 | `add/lines@large-file` | Stage first 25k new-side lines in a 50k-line file: grit add --lines vs git apply --cached |
 | `add/modified@big-blobs` | Stage ~1% modified paths: grit add -- <paths> vs git add -- <paths> |
 | `add/modified@synth-10k` | Stage modified files vs git add -A |
@@ -68,10 +69,12 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `reset/hard-delete-heavy@wide-48k` | Hard reset to a commit deleting 2000 files in 20 dirs of a 48k-file tree and back: grit reset --hard vs git reset --hard |
 | `reset/keep@synth-10k` | Reset branch with unrelated local edits: grit reset --keep HEAD~1 vs git reset --keep HEAD~1 |
 | `reset/mixed@synth-10k` | Mixed reset dirty tree: grit reset HEAD vs git reset --mixed HEAD |
+| `reset/sparse@sparse-120k` | Sparse reset out and back, 300 visible files and 400 excluded directories |
+| `reset/sparse@sparse-240k` | Sparse reset out and back, 300 visible files and 400 excluded directories |
+| `reset/sparse@sparse-unique-120k` | Sparse reset out and back, 300 visible files and 400 excluded directories |
 | `reset/undo-commit@git-git` | Undo the last commit on pinned git.git (deep history, many tags): grit reset --soft HEAD~1 vs git reset --soft HEAD~1 |
 | `restore/hunks@large-file` | Discard half of 500 hunks in a 50k-line file: grit restore --hunks vs git apply -R |
 | `restore/paths@synth-10k` | Restore ~1% paths from index: grit restore -- <paths> vs git restore -- <paths> |
-| `restore/hunks@large-file` | Discard half of 500 hunks in a 50k-line file: grit restore --hunks vs git apply -R |
 | `rm/dir@synth-10k` | Remove tracked directory: grit rm -r <dir> vs git rm -r <dir> |
 | `rm/dry-run@synth-10k` | Preview remove directory: grit rm --dry-run <dir> vs git rm -n -r <dir> |
 | `stash/pop-sparse@wide-120k` | Pop 3k edits in a mostly unchanged 120k-file tree vs git stash pop |
@@ -89,6 +92,9 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `status/paths@synth-100k` | Path-limited status: grit status -- data/d0000 vs git status -s -- data/d0000 |
 | `status/renamed@synth-10k` | Staged rename in status: grit status vs git status -s after git mv |
 | `switch/branch@synth-10k` | Switch branch vs git switch |
+| `switch/sparse@sparse-120k` | Sparse switch out and back, 300 visible files and 400 excluded directories |
+| `switch/sparse@sparse-240k` | Sparse switch out and back, 300 visible files and 400 excluded directories |
+| `switch/sparse@sparse-unique-120k` | Sparse switch out and back, 300 visible files and 400 excluded directories |
 
 ## diff
 **grit-lib:** `grit_lib::diff`
@@ -174,12 +180,11 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `stash/list@synth-10k` | List stash entries vs git stash list |
 | `switch/branch@synth-100k` | Switch branch on 100k-file synthetic vs git switch |
 | `switch/delete-heavy@wide-48k` | Switch to a branch deleting 2000 files in 20 dirs of a 48k-file tree and back: grit switch vs git switch |
+| `switch/large-blob@big-asset` | Switch away from a 300 MB loose text blob and back, writing it to the work tree: grit switch vs git switch |
 | `tag/contains@git-git` | Tag --contains ref query vs git tag -l on git.git (commit-graph) |
 | `tag/create@many-refs` | Create lightweight tag vs git tag |
-| `tag/contains@git-git` | Tag --contains ref query vs git tag -l on git.git (commit-graph) |
 | `tag/list-sort-version@git-git` | Tag list --sort=version vs git tag -l --sort=version:refname on git.git |
 | `tag/list@many-refs` | List tags vs git tag -l |
-| `tag/list-sort-version@git-git` | Tag list --sort=version vs git tag -l --sort=version:refname on git.git |
 
 ## remotes
 **grit-lib:** `grit_lib::transport`, `grit_lib::remote`
@@ -195,6 +200,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `clone/checkout@synth-100k` | Local-path clone with full checkout of 100k files (both tools link the pack, so the checkout dominates) vs git clone |
 | `clone/shallow@git-git` | Shallow clone (`--depth 1`) over file:// vs git clone --depth 1 |
 | `clone/blobless@git-git` | Blobless partial clone over file://: grit `clone --blobs none` vs `git clone --filter=blob:none` |
+| `reset/blobless@git-git` | Materialize a fresh blobless no-checkout clone with reset --hard HEAD over smart HTTP |
 | `clone/shallow-depth1@synth-10k` | Shallow clone over file://: grit clone --shallow vs git clone --depth 1 |
 | `clone/shallow-depth1-http@synth-10k` | Shallow clone over grit smart HTTP: grit clone --shallow vs git clone --depth 1 |
 | `fetch/incremental-http@git-git` | Incremental fetch over grit smart HTTP (git-git bare remote) |
@@ -202,12 +208,9 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `fetch/dry-run@git-git` | Fetch dry-run reports updates without writing refs or objects |
 | `fetch/incremental@git-git` | Incremental fetch vs git fetch |
 | `fetch/one-branch@git-git` | Fetch one branch refspec vs git fetch origin main |
-| `fetch/dry-run@git-git` | Fetch dry-run reports updates without writing refs or objects |
-| `fetch/deepen@git-git` | Deepen a depth-1 client by 50 commits vs git fetch --deepen 50 |
 | `fetch/noop@git-git` | No-op fetch when client already matches remote (file:// git-git) |
 | `fetch/noop-local@many-refs` | No-op local fetch with 3,000 packed branches and 2,000 tags |
 | `fetch/noop-local-no-tags@many-refs` | The same local many-ref fetch with automatic tags disabled |
-| `fetch/one-branch@git-git` | Fetch one branch refspec vs git fetch origin main |
 | `ls-remote/all@many-refs` | List all refs on many-refs bare remote vs git ls-remote |
 | `remote/show@many-refs` | Remote show on many-refs client vs `git remote show origin` |
 | `remote/rename@many-refs` | Rename remote with ~10k packed tracking refs vs git remote rename |
@@ -217,7 +220,6 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `push/incremental-http@git-git` | Incremental push over grit smart HTTP (git-git bare remote) |
 | `push/refspec@git-git` | Explicit refspec push HEAD:refs/heads/bench vs git push |
 | `push/incremental@git-git` | Incremental push vs git push |
-| `push/refspec@git-git` | Explicit refspec push HEAD:refs/heads/bench vs git push |
 | `push/force-with-lease@git-git` | Amended commit push with `--force-with-lease` vs git |
 | `remote/list@small` | List remotes vs git remote |
 | `remote/remove@many-refs` | Remove origin with 10k packed tracking refs vs git remote remove |
