@@ -167,11 +167,15 @@ pub fn print_diff_file(
         }
         return Ok(());
     }
-    let patch = render_file_patch(file);
-    if !patch.is_empty() {
-        outln!(w);
-        print_fenced_diff(w, &patch)?;
+    // Hunkless renames and mode changes are fully described by the heading and metadata
+    // lines above; a fence holding only extended headers would add nothing (see the
+    // `--markdown` section of `content/docs/commands/diff.md`).
+    if file.hunks.as_deref().unwrap_or_default().is_empty() {
+        return Ok(());
     }
+    let patch = render_file_patch(file);
+    outln!(w);
+    print_fenced_diff(w, &patch)?;
     Ok(())
 }
 
