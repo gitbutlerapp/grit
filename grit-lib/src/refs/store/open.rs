@@ -1,5 +1,6 @@
 //! Open the correct [`super::RefStore`] backend for a git directory.
 
+use crate::git_path::CanonicalizeExt;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -90,7 +91,7 @@ pub(crate) fn open_files_ref_store(git_dir: &Path) -> Result<Option<FilesRefStor
 
 fn files_ref_store(git_dir: &Path, env: &Environment) -> FilesRefStore {
     let git_dir_buf = std::path::PathBuf::from(git_dir);
-    let git_dir_canon = std::fs::canonicalize(&git_dir_buf).unwrap_or(git_dir_buf);
+    let git_dir_canon = git_dir_buf.canonicalize_simplified().unwrap_or(git_dir_buf);
     let common_dir = resolve_common_dir(&git_dir_canon);
     FilesRefStore::open(FilesRefStoreConfig {
         git_dir: git_dir_canon,

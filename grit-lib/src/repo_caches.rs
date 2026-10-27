@@ -4,12 +4,14 @@
 //! reftable-backend detection live here instead of process-global statics so concurrent
 //! repositories on different threads do not cross-contaminate.
 
+use crate::git_path::CanonicalizeExt;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 fn canonical_config_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    path.canonicalize_simplified()
+        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Read repository-local `config` from disk (no caching; standalone [`ConfigSet::load`] paths use this).
@@ -546,7 +548,7 @@ impl RepoCaches {
     #[must_use]
     pub fn ref_storage_format(&self, git_dir: &Path) -> RefStorageFormat {
         let key = git_dir
-            .canonicalize()
+            .canonicalize_simplified()
             .unwrap_or_else(|_| git_dir.to_path_buf());
         if let Ok(guard) = self.ref_storage_format.lock() {
             if let Some(v) = guard.get(&key) {
@@ -572,7 +574,7 @@ impl RepoCaches {
         env: &Environment,
     ) -> Result<Arc<dyn crate::refs::store::RefStore>> {
         let key = git_dir
-            .canonicalize()
+            .canonicalize_simplified()
             .unwrap_or_else(|_| git_dir.to_path_buf());
         if let Ok(guard) = self.ref_stores.lock() {
             if let Some(store) = guard.get(&key) {
@@ -593,7 +595,7 @@ impl RepoCaches {
         store: Arc<dyn crate::refs::store::RefStore>,
     ) {
         let key = git_dir
-            .canonicalize()
+            .canonicalize_simplified()
             .unwrap_or_else(|_| git_dir.to_path_buf());
         let mut guard = self.ref_stores.lock().unwrap_or_else(|e| e.into_inner());
         guard.insert(key, store);
@@ -677,7 +679,7 @@ mod tests {
 
         assert_eq!(caches.cached_local_config_text_for_path(&config), None);
         let text = caches.local_config_text(&config).expect("read config");
-        let canonical = config.canonicalize().expect("canonicalize");
+        let canonical = config.canonicalize_simplified().expect("canonicalize");
         assert_eq!(
             caches.cached_local_config_text_for_path(&canonical),
             Some(text.clone())

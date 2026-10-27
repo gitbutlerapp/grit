@@ -20,6 +20,7 @@
 //! in-progress operation [`state`](crate::state::WtStatusState), the loaded and
 //! sparse-expanded index, and the stash count.
 
+use crate::git_path::CanonicalizeExt;
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::{BTreeSet, HashSet};
@@ -1950,11 +1951,11 @@ pub fn dir_is_nested_submodule_worktree(super_git_dir: &Path, dir: &Path) -> boo
     } else {
         dir.join(gitdir_path)
     };
-    let Ok(resolved_canon) = resolved.canonicalize() else {
+    let Ok(resolved_canon) = resolved.canonicalize_simplified() else {
         return false;
     };
     let modules_root = super_git_dir.join("modules");
-    let Ok(modules_canon) = modules_root.canonicalize() else {
+    let Ok(modules_canon) = modules_root.canonicalize_simplified() else {
         return false;
     };
     resolved_canon.starts_with(&modules_canon)

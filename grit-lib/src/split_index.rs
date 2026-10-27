@@ -1,5 +1,6 @@
 //! Split index: `link` extension and `sharedindex.<sha1>` (Git `split-index.c`).
 
+use crate::git_path::CanonicalizeExt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -673,9 +674,9 @@ pub(crate) fn write_index_file_split(
     let default_index = git_dir.join("index");
     let is_primary_index = path == default_index
         || path
-            .canonicalize()
+            .canonicalize_simplified()
             .ok()
-            .zip(default_index.canonicalize().ok())
+            .zip(default_index.canonicalize_simplified().ok())
             .is_some_and(|(a, b)| a == b);
     if !is_primary_index {
         index.split_link = None;

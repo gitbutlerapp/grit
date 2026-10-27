@@ -10,6 +10,7 @@ use crate::command_runner::{
 };
 use crate::config::{parse_path, ConfigSet};
 use crate::git_path::path_without_verbatim_prefix;
+use crate::git_path::CanonicalizeExt;
 use crate::objects::ObjectId;
 use crate::repo::Repository;
 use crate::state::HeadState;
@@ -175,9 +176,11 @@ fn git_prefix_for_invocation(repo: &Repository, invocation_cwd: &Path) -> String
     if invocation_cwd == repo.git_dir() {
         return String::new();
     }
-    let wt_canon = wt.canonicalize().unwrap_or_else(|_| wt.to_path_buf());
+    let wt_canon = wt
+        .canonicalize_simplified()
+        .unwrap_or_else(|_| wt.to_path_buf());
     let wd_canon = invocation_cwd
-        .canonicalize()
+        .canonicalize_simplified()
         .unwrap_or_else(|_| invocation_cwd.to_path_buf());
     let rel = wd_canon.strip_prefix(&wt_canon).ok();
     let Some(rel) = rel else {
@@ -393,7 +396,7 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
     }
-    match (a.canonicalize(), b.canonicalize()) {
+    match (a.canonicalize_simplified(), b.canonicalize_simplified()) {
         (Ok(ca), Ok(cb)) => ca == cb,
         _ => false,
     }

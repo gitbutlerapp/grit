@@ -53,6 +53,7 @@ pub mod gc {
     pub use crate::gc::*;
 }
 
+use crate::git_path::CanonicalizeExt;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -441,7 +442,7 @@ pub fn common_dir(git_dir: &Path) -> Option<PathBuf> {
     } else {
         git_dir.join(rel)
     };
-    path.canonicalize().ok()
+    path.canonicalize_simplified().ok()
 }
 
 /// Outcome of a single storage-level ref lookup (Git `refs_read_raw_ref` style).
@@ -682,7 +683,9 @@ pub fn verify_refname_available_for_create(
 ) -> std::result::Result<(), RefnameUnavailable> {
     // `Repository::git_dir` may be a relative path (e.g. `.git`); resolve so lookups match the
     // on-disk ref store regardless of process cwd (test harness runs from `trash/.git/...`).
-    let git_dir = fs::canonicalize(git_dir).unwrap_or_else(|_| git_dir.to_path_buf());
+    let git_dir = git_dir
+        .canonicalize_simplified()
+        .unwrap_or_else(|_| git_dir.to_path_buf());
     let mut seen_dirnames: HashSet<String> = HashSet::new();
     let segments: Vec<&str> = refname.split('/').filter(|s| !s.is_empty()).collect();
     if segments.len() <= 1 {
@@ -2262,7 +2265,10 @@ fn ref_path_for_display(path: &Path) -> String {
     // On platforms where the cwd and the (canonicalized) ref path disagree only by a
     // symlinked prefix (e.g. macOS `/tmp` -> `/private/tmp`), retry with both sides
     // canonicalized so the relative form is still recovered.
-    if let (Ok(cwd_c), Ok(path_c)) = (cwd.canonicalize(), path.canonicalize()) {
+    if let (Ok(cwd_c), Ok(path_c)) = (
+        cwd.canonicalize_simplified(),
+        path.canonicalize_simplified(),
+    ) {
         if let Ok(rel) = path_c.strip_prefix(&cwd_c) {
             return rel.to_string_lossy().into_owned();
         }
@@ -2627,7 +2633,8 @@ fn replace_packed_refs_file(
     // write fails").
     let lock = lock_path_for_ref(packed_path); // packed-refs.lock
     let _packed_lock = if !lock_already_held {
-        let abs_lock = fs::canonicalize(git_dir)
+        let abs_lock = git_dir
+            .canonicalize_simplified()
             .map(|d| d.join("packed-refs.lock"))
             .unwrap_or_else(|_| lock.clone());
         Some(acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?)
@@ -3538,7 +3545,8 @@ pub(crate) fn test_ref_store_batch_pause_after_ref_write(idx: usize, git_dir: &P
         .clone();
     if let Some((target, target_dir, gate)) = slot {
         let same_repo = |a: &Path, b: &Path| {
-            a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
+            a == b
+                || matches!((a.canonicalize_simplified(), b.canonicalize_simplified()), (Ok(a), Ok(b)) if a == b)
         };
         if idx != target || !same_repo(git_dir, &target_dir) {
             return;
@@ -3932,7 +3940,8 @@ pub(crate) fn pack_imported_refs_for_clone(git_dir: &Path, remote: Option<&str>)
 fn atomic_rewrite_packed_refs(git_dir: &Path, body: &str) -> Result<()> {
     let packed_path = store::paths::packed_refs_path(git_dir);
     let lock = lock_path_for_ref(&packed_path);
-    let abs_lock = fs::canonicalize(git_dir)
+    let abs_lock = git_dir
+        .canonicalize_simplified()
         .map(|d| d.join("packed-refs.lock"))
         .unwrap_or_else(|_| lock.clone());
     let _packed_lock = acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?;

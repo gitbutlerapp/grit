@@ -25,6 +25,8 @@ Call [`Repository::discover`](rustdoc:grit_lib::repo::Repository) when you have 
 
 Bare repositories return `None` from `Repository::work_tree`. Linked worktrees and gitfile indirection are handled during discovery so `Repository::git_dir` always points at the directory that contains `objects/`.
 
+Both paths are canonical (symlinks resolved). On Windows they use the plain `C:\...` or `\\server\share\...` spelling, so you can compare them with your own paths, use `starts_with` and show them to users. The `\\?\` form that `std::fs::canonicalize` returns is kept only for a path that cannot be written any other way, such as one longer than `MAX_PATH`. If your path may be relative or go through a symlink, pass both sides through [`path_for_disk_compare`](rustdoc:grit_lib::config::git_path::path_for_disk_compare) before comparing.
+
 ## Config
 
 `Repository::config` returns a lazily loaded snapshot of the merged cascade (system / global / local / worktree / environment overrides). Prefer it on hot paths instead of calling `ConfigSet::load` repeatedly. Keys use Git’s dotted names (`user.name`, `core.bare`, …).

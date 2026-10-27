@@ -3,6 +3,7 @@
 //! Mirrors Git's `create_default_gitdir_config` / `validate_submodule_git_dir` logic
 //! enough for upstream tests (encoded paths, nesting checks, conflict resolution).
 
+use crate::git_path::CanonicalizeExt;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -248,7 +249,8 @@ fn resolve_gitdir_value(work_tree: &Path, gitdir_cfg: &str) -> PathBuf {
 }
 
 fn canonical_abs(path: &Path) -> PathBuf {
-    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    path.canonicalize_simplified()
+        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn existing_gitdir_abs_paths(
@@ -728,8 +730,12 @@ pub fn write_submodule_gitfile(sub_worktree: &Path, modules_dir: &Path) -> Resul
 }
 
 fn pathdiff_relative(from: &Path, to: &Path) -> String {
-    let from_c = fs::canonicalize(from).unwrap_or_else(|_| from.to_path_buf());
-    let to_c = fs::canonicalize(to).unwrap_or_else(|_| to.to_path_buf());
+    let from_c = from
+        .canonicalize_simplified()
+        .unwrap_or_else(|_| from.to_path_buf());
+    let to_c = to
+        .canonicalize_simplified()
+        .unwrap_or_else(|_| to.to_path_buf());
     let from_comp: Vec<Component<'_>> = from_c.components().collect();
     let to_comp: Vec<Component<'_>> = to_c.components().collect();
     let mut i = 0usize;

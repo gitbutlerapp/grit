@@ -1370,6 +1370,7 @@ fn read_lock_state(admin: &Path) -> Result<(bool, Option<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git_path::CanonicalizeExt;
     use crate::repo::Repository;
     use std::fs;
     use tempfile::TempDir;
@@ -1758,7 +1759,7 @@ mod tests {
             Repository::discover(Some(linked.as_path()), &RepositoryOptions::empty()).unwrap();
         let linked_admin = linked_repo
             .git_dir()
-            .canonicalize()
+            .canonicalize_simplified()
             .unwrap_or_else(|_| linked_repo.git_dir().to_path_buf());
         assert_eq!(worktree_admin_dir(&linked_repo), linked_admin);
 

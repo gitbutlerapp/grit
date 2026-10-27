@@ -9,6 +9,7 @@ pub use crate::pack_index::{
 };
 
 use crate::error::{Error, Result};
+use crate::git_path::CanonicalizeExt;
 use crate::hash::{hash_object, verify_trailer};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use crate::odb::BoundedRead;
@@ -2562,7 +2563,8 @@ fn read_alternates_inner(
 }
 
 fn canonical_or_self(path: &Path) -> PathBuf {
-    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    path.canonicalize_simplified()
+        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Convert a [`PackedType`] to an [`ObjectKind`] for non-delta types.

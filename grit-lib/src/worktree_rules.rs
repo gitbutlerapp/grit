@@ -37,6 +37,7 @@ use crate::repo_caches::RepoCaches;
 /// `Sync`), so an operation's reads land in its caller's counts.
 #[cfg(test)]
 pub mod file_load_counters {
+    use crate::git_path::CanonicalizeExt;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
@@ -52,7 +53,9 @@ pub mod file_load_counters {
 
     /// Record one read of `path` (canonicalized when possible).
     pub fn record(path: &Path) {
-        let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let key = path
+            .canonicalize_simplified()
+            .unwrap_or_else(|_| path.to_path_buf());
         MAP.with(|m| *m.borrow_mut().entry(key).or_insert(0) += 1);
     }
 
@@ -65,7 +68,9 @@ pub mod file_load_counters {
     /// Read count for `path` since the last [`reset`] (canonicalized when possible).
     #[must_use]
     pub fn reads_for(path: &Path) -> u32 {
-        let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let key = path
+            .canonicalize_simplified()
+            .unwrap_or_else(|_| path.to_path_buf());
         MAP.with(|m| m.borrow().get(&key).copied().unwrap_or(0))
     }
 }

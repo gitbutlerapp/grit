@@ -12,6 +12,7 @@
 //! `GIT_ICASE_PATHSPECS`. The `grit` binary sets these from CLI flags such as
 //! `--literal-pathspecs` before dispatching subcommands.
 
+use crate::git_path::CanonicalizeExt;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
@@ -2265,7 +2266,7 @@ pub(crate) fn resolve_pathspec_in_worktree_with_argv_precompose(
         resolve_pathspec_with_argv_precompose(pathspec, work_tree, prefix, argv_precompose);
     if Path::new(&resolved).is_absolute() {
         let wt = work_tree
-            .canonicalize()
+            .canonicalize_simplified()
             .unwrap_or_else(|_| work_tree.to_path_buf());
         return Err(PathOutsideRepository {
             elt: elt.to_string(),
@@ -2713,8 +2714,8 @@ mod resolve_pathspec_tests {
         std::fs::create_dir_all(wt.join("d")).expect("mkdir");
         let file = wt.join("d/b.txt");
         std::fs::write(&file, b"x").expect("write");
-        let wt = wt.canonicalize().expect("canonicalize");
-        let abs = file.canonicalize().expect("canonicalize file");
+        let wt = wt.canonicalize_simplified().expect("canonicalize");
+        let abs = file.canonicalize_simplified().expect("canonicalize file");
         let spec = abs.to_string_lossy();
         assert_eq!(
             resolve_pathspec(&spec, &wt, None),
@@ -2736,7 +2737,7 @@ mod resolve_pathspec_tests {
             let file_b = wt.join("d/b.txt");
             std::fs::write(&file_a, b"a").expect("write");
             std::fs::write(&file_b, b"b").expect("write");
-            let wt = wt.canonicalize().expect("canonicalize worktree");
+            let wt = wt.canonicalize_simplified().expect("canonicalize worktree");
 
             assert_eq!(
                 resolve_pathspec(r"d\a.txt", &wt, None),
@@ -2744,7 +2745,7 @@ mod resolve_pathspec_tests {
                 "backslash relative pathspec (issue #915 A)"
             );
 
-            let abs_back = file_b.canonicalize().expect("canonicalize");
+            let abs_back = file_b.canonicalize_simplified().expect("canonicalize");
             let abs_back_spec = abs_back.display().to_string();
             assert_eq!(
                 resolve_pathspec(&abs_back_spec, &wt, None),

@@ -7,6 +7,7 @@
 //! [`crate::repo::Repository::open`](crate::repo::Repository::open), and
 //! [`ConfigSet::load`](crate::config::ConfigSet::load).
 
+use crate::git_path::CanonicalizeExt;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -585,7 +586,9 @@ impl Environment {
     /// Resolve `cwd` for discovery: canonicalize when possible without `env::current_dir`.
     #[must_use]
     pub fn discovery_cwd(&self) -> PathBuf {
-        self.cwd.canonicalize().unwrap_or_else(|_| self.cwd.clone())
+        self.cwd
+            .canonicalize_simplified()
+            .unwrap_or_else(|_| self.cwd.clone())
     }
 
     /// Variables exported to hook/filter subprocesses (no process inheritance).
@@ -1419,12 +1422,13 @@ mod tests {
             crate::repo::Repository::discover(None, &RepositoryOptions::with_environment(env))
                 .unwrap();
         assert_eq!(
-            repo.git_dir().canonicalize().unwrap(),
-            repo_dir.join(".git").canonicalize().unwrap()
+            repo.git_dir().canonicalize_simplified().unwrap(),
+            repo_dir.join(".git").canonicalize_simplified().unwrap()
         );
         assert_eq!(
-            repo.work_tree().map(|p| p.canonicalize().unwrap()),
-            Some(repo_dir.canonicalize().unwrap())
+            repo.work_tree()
+                .map(|p| p.canonicalize_simplified().unwrap()),
+            Some(repo_dir.canonicalize_simplified().unwrap())
         );
     }
 

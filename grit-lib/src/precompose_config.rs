@@ -2,6 +2,7 @@
 //!
 //! Used for pathspec matching when argv may use NFD spellings while the index stores NFC.
 
+use crate::git_path::CanonicalizeExt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -24,7 +25,7 @@ fn parse_ceiling_directories_paths(env: &Environment) -> Vec<PathBuf> {
                 return None;
             }
             Some(
-                p.canonicalize()
+                p.canonicalize_simplified()
                     .unwrap_or_else(|_| PathBuf::from(s.trim_end_matches('/'))),
             )
         })
@@ -76,7 +77,7 @@ fn longest_ancestor_length(path: &str, ceilings: &[String]) -> Option<usize> {
 fn probe_git_dir_at(dir: &Path) -> Option<PathBuf> {
     let dot_git = dir.join(".git");
     if dot_git.is_dir() {
-        return Some(dot_git.canonicalize().unwrap_or(dot_git));
+        return Some(dot_git.canonicalize_simplified().unwrap_or(dot_git));
     }
     if dot_git.is_file() {
         let content = fs::read_to_string(&dot_git).ok()?;
@@ -89,7 +90,7 @@ fn probe_git_dir_at(dir: &Path) -> Option<PathBuf> {
                 } else {
                     dir.join(p)
                 };
-                return Some(resolved.canonicalize().unwrap_or(resolved));
+                return Some(resolved.canonicalize_simplified().unwrap_or(resolved));
             }
         }
     }

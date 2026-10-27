@@ -6,6 +6,7 @@
 //! `^{commit}`).
 
 use crate::environment::RepositoryOptions;
+use crate::git_path::CanonicalizeExt;
 
 use std::borrow::Cow;
 use std::ffi::OsStr;
@@ -1552,7 +1553,7 @@ fn resolve_revision_with_navigation(
                 Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
                     let wt = repo
                         .work_tree()
-                        .and_then(|p| p.canonicalize().ok())
+                        .and_then(|p| p.canonicalize_simplified().ok())
                         .map(|p| p.display().to_string())
                         .unwrap_or_default();
                     return Err(RevParseError::OutsideRepository {
@@ -1649,7 +1650,7 @@ fn normalize_colon_path_for_tree(repo: &Repository, raw_path: &str) -> Result<St
     };
 
     let cwd = repo.environment().cwd.clone();
-    let wt_canon = work_tree.canonicalize().map_err(Error::Io)?;
+    let wt_canon = work_tree.canonicalize_simplified().map_err(Error::Io)?;
 
     let cwd_relative = raw_path.starts_with("./") || raw_path.starts_with("../") || raw_path == ".";
     if cwd_relative && !path_is_within(&cwd, work_tree) {
@@ -1880,7 +1881,7 @@ pub fn resolve_treeish_blob_at_path(repo: &Repository, spec: &str) -> Result<Tre
         Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
             let wt = repo
                 .work_tree()
-                .and_then(|p| p.canonicalize().ok())
+                .and_then(|p| p.canonicalize_simplified().ok())
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
             return Err(RevParseError::OutsideRepository {
@@ -2531,7 +2532,7 @@ fn resolve_base(
                                 Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
                                     let wt = repo
                                         .work_tree()
-                                        .and_then(|p| p.canonicalize().ok())
+                                        .and_then(|p| p.canonicalize_simplified().ok())
                                         .map(|p| p.display().to_string())
                                         .unwrap_or_default();
                                     return Err(RevParseError::OutsideRepository {
@@ -2554,7 +2555,7 @@ fn resolve_base(
                 Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
                     let wt = repo
                         .work_tree()
-                        .and_then(|p| p.canonicalize().ok())
+                        .and_then(|p| p.canonicalize_simplified().ok())
                         .map(|p| p.display().to_string())
                         .unwrap_or_default();
                     return Err(RevParseError::OutsideRepository {
@@ -3619,7 +3620,7 @@ pub fn resolve_index_path_entry(repo: &Repository, spec: &str) -> Result<Option<
         Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
             let wt = repo
                 .work_tree()
-                .and_then(|p| p.canonicalize().ok())
+                .and_then(|p| p.canonicalize_simplified().ok())
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
             return Err(RevParseError::OutsideRepository {

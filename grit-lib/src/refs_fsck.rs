@@ -2,6 +2,7 @@
 //!
 //! Aligns with Git's `refs_fsck` / `files_fsck_*` and `packed_fsck` behavior and message text.
 
+use crate::git_path::CanonicalizeExt;
 use std::cmp::Ordering;
 use std::fs;
 use std::io;
@@ -63,7 +64,7 @@ fn canonical_git_dir(git_dir: &Path) -> PathBuf {
     } else {
         git_dir.join(rel)
     };
-    path.canonicalize().unwrap_or(path)
+    path.canonicalize_simplified().unwrap_or(path)
 }
 
 fn is_pseudo_ref(name: &str) -> bool {
@@ -375,8 +376,10 @@ fn verify_loose_ref(
         let target = fs::read_link(path)?;
         let parent = path.parent().unwrap_or(Path::new(""));
         let joined = normalize_joined_path(parent, Path::new(&target));
-        let resolved = fs::canonicalize(&joined).unwrap_or(joined);
-        let abs_common = fs::canonicalize(common_dir).unwrap_or(common_dir.to_path_buf());
+        let resolved = joined.canonicalize_simplified().unwrap_or(joined);
+        let abs_common = common_dir
+            .canonicalize_simplified()
+            .unwrap_or(common_dir.to_path_buf());
         let g = abs_common.to_string_lossy();
         let r = resolved.to_string_lossy().to_string();
         let referent = if r.starts_with(g.as_ref()) {

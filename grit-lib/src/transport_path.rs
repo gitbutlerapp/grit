@@ -1,5 +1,6 @@
 //! Safety checks and path resolution for local transport URLs (matches Git `connect.c` / `path.c`).
 
+use crate::git_path::CanonicalizeExt;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -159,7 +160,9 @@ fn absolute_local_clone_source_url_from(source_path: &Path, cwd: &Path) -> Strin
     let absolute = if source_path.is_absolute() {
         source_path.to_path_buf()
     } else {
-        let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+        let cwd = cwd
+            .canonicalize_simplified()
+            .unwrap_or_else(|_| cwd.to_path_buf());
         cwd.join(source_path)
     };
     normalize_local_path_for_config(&absolute)

@@ -20,6 +20,7 @@
 //! Output formats: unified patch, raw (`:old-mode new-mode ...`), stat,
 //! numstat.
 
+use crate::git_path::CanonicalizeExt;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fs;
@@ -11150,8 +11151,12 @@ pub fn read_submodule_head_oid(sub_dir: &Path) -> Option<ObjectId> {
             .join("modules")
             .join(rel_str.trim_start_matches('/'));
         if local_mod.join("HEAD").exists() {
-            let sg = super_git_dir.canonicalize().unwrap_or(super_git_dir);
-            let cur = git_dir.canonicalize().unwrap_or_else(|_| git_dir.clone());
+            let sg = super_git_dir
+                .canonicalize_simplified()
+                .unwrap_or(super_git_dir);
+            let cur = git_dir
+                .canonicalize_simplified()
+                .unwrap_or_else(|_| git_dir.clone());
             if !cur.starts_with(&sg) {
                 git_dir = local_mod;
             }

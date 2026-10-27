@@ -40,6 +40,7 @@ pub use store::{CompositeStore, FilesSource, ObjectStream};
 #[doc(inline)]
 pub use store::{MemoryStore, ObjectStore, WritableObjectStore};
 
+use crate::git_path::CanonicalizeExt;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -709,7 +710,7 @@ impl Odb {
         fs::create_dir_all(&info)?;
         let alt_path = info.join("alternates");
         let alt_abs = alternate_objects_dir
-            .canonicalize()
+            .canonicalize_simplified()
             .unwrap_or_else(|_| alternate_objects_dir.to_path_buf());
         let line = format!("{}\n", alt_abs.display());
         let existing = match fs::read_to_string(&alt_path) {
@@ -976,7 +977,7 @@ impl Odb {
             if !objects.is_dir() {
                 continue;
             }
-            let canon = objects.canonicalize().unwrap_or(objects);
+            let canon = objects.canonicalize_simplified().unwrap_or(objects);
             if !dirs.iter().any(|p| p == &canon) {
                 dirs.push(canon);
             }
@@ -4080,11 +4081,13 @@ mod tests {
         )
         .unwrap();
         let resolved = read_alternates_recursive(&primary_objects).unwrap();
-        let alt_canonical = fs::canonicalize(&alt_objects).unwrap_or(alt_objects.clone());
+        let alt_canonical = alt_objects
+            .canonicalize_simplified()
+            .unwrap_or(alt_objects.clone());
         assert!(
-            resolved
-                .iter()
-                .any(|p| { fs::canonicalize(p).unwrap_or_else(|_| p.clone()) == alt_canonical }),
+            resolved.iter().any(|p| {
+                p.canonicalize_simplified().unwrap_or_else(|_| p.clone()) == alt_canonical
+            }),
             "relative alternate entry should resolve: {resolved:?}"
         );
 

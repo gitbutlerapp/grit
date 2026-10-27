@@ -6,6 +6,7 @@
 
 use crate::config::parse_path;
 use crate::config::ConfigSet;
+use crate::git_path::CanonicalizeExt;
 #[cfg(unix)]
 use crate::index::normalize_mode;
 use crate::index::Index;
@@ -801,7 +802,7 @@ pub fn path_relative_to_worktree(
         cwd.join(p)
     };
 
-    if let Ok(abs) = combined.canonicalize() {
+    if let Ok(abs) = combined.canonicalize_simplified() {
         let rel = crate::git_path::strip_worktree_prefix(&abs, wt)
             .ok_or_else(|| format!("path outside repository: {}", path_str))?;
         return Ok(normalize_rel_path(&rel));

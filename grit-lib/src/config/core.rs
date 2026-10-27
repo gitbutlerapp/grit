@@ -27,6 +27,7 @@
 //! are supported. Conditions: `gitdir:`, `gitdir/i:`, `onbranch:`,
 //! and `hasconfig:remote.*.url:`.
 
+use crate::git_path::CanonicalizeExt;
 use std::collections::HashMap;
 
 use crate::environment::Environment;
@@ -4265,7 +4266,7 @@ fn prepare_gitdir_pattern(
                     .into(),
             )
         })?;
-        let real = parent.canonicalize().map_err(Error::Io)?;
+        let real = parent.canonicalize_simplified().map_err(Error::Io)?;
         let mut dir = real.to_string_lossy().into_owned();
         if !dir.ends_with('/') && !dir.ends_with('\\') {
             dir.push('/');
@@ -4290,7 +4291,7 @@ fn prepare_gitdir_pattern(
 /// `strbuf_add_absolute_path` behaviour. This lets `gitdir:bar/` match when `bar` is a symlink.
 fn git_dir_match_texts(ctx: &IncludeContext, git_dir: &Path) -> (String, String) {
     let real = git_dir
-        .canonicalize()
+        .canonicalize_simplified()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| git_dir.to_string_lossy().into_owned());
     // Build the non-canonical absolute path using $PWD (symlink-preserving) when available.
@@ -4303,7 +4304,7 @@ fn git_dir_match_texts(ctx: &IncludeContext, git_dir: &Path) -> (String, String)
             if !pwd_path.is_absolute() {
                 return None;
             }
-            let pwd_canon = pwd_path.canonicalize().ok()?;
+            let pwd_canon = pwd_path.canonicalize_simplified().ok()?;
             let git_dir_str = git_dir.to_string_lossy();
             let pwd_canon_str = pwd_canon.to_string_lossy();
             // If git_dir starts with the canonical cwd, replace that prefix with $PWD

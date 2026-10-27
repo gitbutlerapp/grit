@@ -1,0 +1,4 @@
+disallowed-methods = [
+    { path = "std::path::Path::canonicalize", reason = "use git_path::CanonicalizeExt::canonicalize_simplified so Windows paths keep one spelling" },
+    { path = "std::fs::canonicalize", reason = "use git_path::CanonicalizeExt::canonicalize_simplified so Windows paths keep one spelling" },
+]

@@ -8,6 +8,7 @@
 //! Parent directory cleanup after removing a file must not `rmdir` an ancestor
 //! that still contains cwd (matches leaving `foo` when cwd is `foo`).
 
+use crate::git_path::CanonicalizeExt;
 use std::path::Path;
 
 use crate::environment::Environment;
@@ -32,9 +33,9 @@ pub fn cwd_relative_under_work_tree(work_tree: &Path, cwd: &Path) -> Option<Stri
 
 fn cwd_relative_to_work_tree(work_tree: &Path, cwd: &Path) -> Option<String> {
     let rel = cwd
-        .canonicalize()
+        .canonicalize_simplified()
         .ok()
-        .zip(work_tree.canonicalize().ok())
+        .zip(work_tree.canonicalize_simplified().ok())
         .and_then(|(c, w)| c.strip_prefix(&w).ok().map(|p| p.to_path_buf()))
         .or_else(|| cwd.strip_prefix(work_tree).ok().map(|p| p.to_path_buf()))?;
     let s = rel.to_string_lossy().replace('\\', "/");

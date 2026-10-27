@@ -1,5 +1,6 @@
 //! Filesystem ref backend (loose refs + `packed-refs`) implementing [`super::RefStore`].
 
+use crate::git_path::CanonicalizeExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -149,7 +150,7 @@ impl FilesRefStore {
     /// Convenience constructor for a simple repository directory.
     pub fn from_git_dir(git_dir: impl Into<PathBuf>) -> Result<Self> {
         let git_dir: PathBuf = git_dir.into();
-        let git_dir = fs::canonicalize(&git_dir).unwrap_or(git_dir);
+        let git_dir = git_dir.canonicalize_simplified().unwrap_or(git_dir);
         let common_dir = resolve_common_dir(&git_dir);
         Ok(Self::open(FilesRefStoreConfig {
             git_dir: git_dir.clone(),

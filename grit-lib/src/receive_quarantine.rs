@@ -6,6 +6,7 @@
 //! `GIT_QUARANTINE_PATH`. On success the quarantine contents are migrated into
 //! the main store; on failure the directory is removed.
 
+use crate::git_path::CanonicalizeExt;
 use std::borrow::Cow;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -100,7 +101,7 @@ impl Drop for ReceiveQuarantine {
 }
 
 fn abs_or_path(path: &Path) -> String {
-    path.canonicalize()
+    path.canonicalize_simplified()
         .unwrap_or_else(|_| path.to_path_buf())
         .to_string_lossy()
         .into_owned()

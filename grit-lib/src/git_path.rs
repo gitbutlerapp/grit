@@ -564,6 +564,117 @@ pub(crate) fn path_without_verbatim_prefix(path: &Path) -> Cow<'_, Path> {
     Cow::Borrowed(path)
 }
 
+/// Longest path, in UTF-16 units, that Win32 file APIs accept without the `\\?\` prefix
+/// (`MAX_PATH` less the terminating NUL).
+#[cfg(any(windows, test))]
+const WIN32_MAX_PATH_UNITS: usize = 259;
+
+/// Win32 spelling of a verbatim drive (`\\?\C:\…`) or UNC (`\\?\UNC\server\share\…`) path.
+///
+/// Returns `None` when `path` is not one of those forms, or when dropping the prefix would
+/// change which file the path names or push it past `MAX_PATH`: components Win32 rewrites or
+/// rejects (empty, `.`, `..`, a trailing `.` or space, `/`, `:`, wildcards, control
+/// characters), reserved device names such as `NUL` or `COM1.txt`, and over-long paths all keep
+/// the prefix. Volume GUID (`\\?\Volume{…}`) and device (`\\.\`) paths are never rewritten.
+#[cfg(any(windows, test))]
+fn simplify_verbatim_str(path: &str) -> Option<String> {
+    let (simple, components) = if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        let mut parts = rest.splitn(3, '\\');
+        let (server, share) = (parts.next()?, parts.next()?);
+        if server.is_empty() || share.is_empty() {
+            return None;
+        }
+        (format!(r"\\{rest}"), rest)
+    } else {
+        let rest = path.strip_prefix(r"\\?\")?;
+        let drive = rest.as_bytes();
+        if drive.len() < 3 || !drive[0].is_ascii_alphabetic() || drive[1..3] != *b":\\" {
+            return None;
+        }
+        (rest.to_owned(), &rest[3..])
+    };
+    let round_trips =
+        components.is_empty() || components.split('\\').all(win32_component_round_trips);
+    (round_trips && simple.encode_utf16().count() <= WIN32_MAX_PATH_UNITS).then_some(simple)
+}
+
+/// Whether Win32 path parsing leaves `component` unchanged and names a regular file.
+#[cfg(any(windows, test))]
+fn win32_component_round_trips(component: &str) -> bool {
+    const RESERVED: [&str; 6] = ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"];
+    if component.is_empty()
+        || component.ends_with(['.', ' '])
+        || component.contains(['/', ':', '<', '>', '"', '|', '?', '*'])
+        || component.chars().any(char::is_control)
+    {
+        return false;
+    }
+    let stem = component
+        .split('.')
+        .next()
+        .unwrap_or(component)
+        .trim_end_matches(' ');
+    if RESERVED.iter().any(|name| stem.eq_ignore_ascii_case(name)) {
+        return false;
+    }
+    let numbered_device = ["COM", "LPT"].iter().any(|device| {
+        stem.get(..3)
+            .is_some_and(|head| head.eq_ignore_ascii_case(device))
+            && matches!(
+                &stem[3..],
+                "1" | "2"
+                    | "3"
+                    | "4"
+                    | "5"
+                    | "6"
+                    | "7"
+                    | "8"
+                    | "9"
+                    | "\u{b9}"
+                    | "\u{b2}"
+                    | "\u{b3}"
+            )
+    });
+    !numbered_device
+}
+
+/// `path` in its plain Win32 spelling when it is a verbatim (`\\?\`) path that names the same
+/// file without the prefix; every other path, and every path off Windows, is returned unchanged.
+///
+/// [`std::fs::canonicalize`] always returns verbatim paths on Windows. Paths stored on a
+/// [`crate::repo::Repository`] go through this so they compare equal to, and display like, the
+/// paths callers passed in. Over-long and otherwise unrepresentable paths keep the prefix so
+/// they still open.
+#[must_use]
+pub(crate) fn simplify_verbatim_path(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    if let Some(simple) = path.to_str().and_then(simplify_verbatim_str) {
+        return PathBuf::from(simple);
+    }
+    path
+}
+
+/// [`Path::canonicalize`] followed by [`simplify_verbatim_path`].
+///
+/// Use this instead of [`Path::canonicalize`] everywhere in the crate, so canonical paths
+/// stored on a repository handle and canonical paths computed later compare equal.
+pub(crate) trait CanonicalizeExt {
+    /// Canonical absolute form of `self`, without a needless Windows `\\?\` prefix.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`std::io::Error`] from [`std::fs::canonicalize`] (for example when the
+    /// path does not exist).
+    fn canonicalize_simplified(&self) -> std::io::Result<PathBuf>;
+}
+
+impl CanonicalizeExt for Path {
+    #[allow(clippy::disallowed_methods)]
+    fn canonicalize_simplified(&self) -> std::io::Result<PathBuf> {
+        fs::canonicalize(self).map(simplify_verbatim_path)
+    }
+}
+
 /// User-facing path: forward slashes, no verbatim prefix (Git-style init/status paths).
 #[must_use]
 pub fn user_display_path(path: &Path) -> String {
@@ -582,7 +693,9 @@ pub fn path_for_error_message(path: &Path) -> String {
 /// extended-length prefixes, and uses forward slashes so system Git can open linked worktrees.
 #[must_use]
 pub fn absolute_path_for_gitfile_stored_path(path: &Path) -> String {
-    let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let canon = path
+        .canonicalize_simplified()
+        .unwrap_or_else(|_| path.to_path_buf());
     user_display_path(&canon)
 }
 
@@ -719,7 +832,9 @@ fn apply_macos_private_alias_for_compare(path: PathBuf) -> PathBuf {
 /// comparisons match non-verbatim spellings (`C:\…`).
 #[must_use]
 pub fn path_for_disk_compare(path: &Path) -> PathBuf {
-    let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let canon = path
+        .canonicalize_simplified()
+        .unwrap_or_else(|_| path.to_path_buf());
     #[cfg(windows)]
     let canon =
         PathBuf::from(strip_verbatim_path_prefix_str(&canon.display().to_string()).into_owned());
@@ -893,6 +1008,174 @@ mod git_path_component_tests {
     }
 
     #[test]
+    fn simplify_verbatim_str_rewrites_only_round_tripping_paths() {
+        let long_tail = "d".repeat(WIN32_MAX_PATH_UNITS - r"C:\".len());
+        let too_long_tail = format!("{long_tail}x");
+        let long_drive = format!(r"\\?\C:\{long_tail}");
+        let too_long_drive = format!(r"\\?\C:\{too_long_tail}");
+        let cases: &[(&str, Option<&str>)] = &[
+            (r"\\?\C:\Users\me\proj", Some(r"C:\Users\me\proj")),
+            (r"\\?\c:\proj\.git", Some(r"c:\proj\.git")),
+            (r"\\?\C:\", Some(r"C:\")),
+            (r"\\?\C:\a b\file.txt", Some(r"C:\a b\file.txt")),
+            ("\\\\?\\C:\\caf\u{e9}\\x", Some("C:\\caf\u{e9}\\x")),
+            (r"\\?\C:\console\nulled", Some(r"C:\console\nulled")),
+            (r"\\?\C:\COM10\LPT0", Some(r"C:\COM10\LPT0")),
+            (r"\\?\UNC\server\share\dir", Some(r"\\server\share\dir")),
+            (r"\\?\UNC\server\share", Some(r"\\server\share")),
+            (long_drive.as_str(), Some(&long_drive[4..])),
+            (too_long_drive.as_str(), None),
+            (r"\\?\C:\proj\dir.", None),
+            (r"\\?\C:\proj\dir ", None),
+            (r"\\?\C:\proj\.\x", None),
+            (r"\\?\C:\proj\..\x", None),
+            (r"\\?\C:\proj\\x", None),
+            (r"\\?\C:\proj\a/b", None),
+            (r"\\?\C:\proj\a:b", None),
+            (r"\\?\C:\proj\a*b", None),
+            (r"\\?\C:\proj\NUL", None),
+            (r"\\?\C:\proj\nul.txt", None),
+            (r"\\?\C:\proj\Com1", None),
+            (r"\\?\C:\proj\lpt9.log", None),
+            ("\\\\?\\C:\\proj\\COM\u{b9}", None),
+            (r"\\?\C:\proj\CONOUT$", None),
+            (r"\\?\C:", None),
+            (r"\\?\C:proj", None),
+            (r"\\?\1:\proj", None),
+            (r"\\?\UNC\server", None),
+            (r"\\?\UNC\\share", None),
+            (r"\\?\UNC\server\share\x.", None),
+            (
+                r"\\?\Volume{0a1b2c3d-0000-0000-0000-100000000000}\dir",
+                None,
+            ),
+            (r"\\.\C:\proj", None),
+            (r"\\.\PhysicalDrive0", None),
+            (r"\??\C:\proj", None),
+            (r"C:\proj", None),
+            (r"\\server\share", None),
+            ("/home/me/proj", None),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(
+                simplify_verbatim_str(input).as_deref(),
+                *expected,
+                "simplify {input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn simplify_verbatim_path_keeps_non_windows_paths() {
+        let unix = PathBuf::from("/home/me/proj");
+        assert_eq!(simplify_verbatim_path(unix.clone()), unix);
+        let verbatim = PathBuf::from(r"\\?\C:\proj");
+        let expected = if cfg!(windows) {
+            PathBuf::from(r"C:\proj")
+        } else {
+            verbatim.clone()
+        };
+        assert_eq!(simplify_verbatim_path(verbatim), expected);
+    }
+
+    #[test]
+    fn canonicalize_simplified_matches_canonicalize_without_prefix() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("a").join("..").join("b");
+        std::fs::create_dir_all(tmp.path().join("a")).expect("mkdir a");
+        std::fs::create_dir_all(tmp.path().join("b")).expect("mkdir b");
+        let simplified = dir.canonicalize_simplified().expect("canonicalize");
+        let raw = std::fs::canonicalize(&dir).expect("canonicalize");
+        assert_eq!(simplified, simplify_verbatim_path(raw));
+        assert!(!simplified.to_string_lossy().starts_with(r"\\?\"));
+        assert!(simplified.is_dir());
+        assert!(Path::new("does-not-exist-here")
+            .canonicalize_simplified()
+            .is_err());
+    }
+
+    #[test]
+    fn repository_paths_are_simplified_canonical_paths() {
+        use crate::config::environment::RepositoryOptions;
+        use crate::ref_storage::RefStorageFormat;
+        use crate::repo::{init_repository, Repository};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let work = tmp.path().join("hw");
+        init_repository(&work, false, "main", None, RefStorageFormat::Files).expect("init");
+        std::fs::create_dir_all(work.join("sub")).expect("mkdir sub");
+        let expected = work.canonicalize_simplified().expect("canonicalize");
+
+        for start in [work.clone(), work.join("sub"), work.join("sub").join("..")] {
+            let repo = Repository::discover(Some(start.as_path()), &RepositoryOptions::empty())
+                .expect("discover");
+            let wt = repo.work_tree().expect("work tree");
+            assert!(!wt.to_string_lossy().starts_with(r"\\?\"), "{wt:?}");
+            assert_eq!(wt, expected.as_path());
+            assert_eq!(repo.git_dir(), expected.join(".git"));
+            assert_eq!(repo.common_git_dir(), repo.git_dir());
+            assert!(repo.git_dir().join("config").is_file());
+            repo.config().expect("config through stored git dir");
+        }
+
+        let opened = Repository::open(
+            &work.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(&work),
+        )
+        .expect("open");
+        assert_eq!(opened.work_tree(), Some(expected.as_path()));
+        assert_eq!(opened.git_dir(), expected.join(".git"));
+    }
+
+    #[test]
+    fn separate_git_dir_gitfile_is_plain_absolute_path() {
+        use crate::objects::HashAlgo;
+        use crate::ref_storage::RefStorageFormat;
+        use crate::repo::init_repository_separate_git_dir;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let work = tmp.path().join("wt");
+        let git_dir = tmp.path().join("store.git");
+        let repo = init_repository_separate_git_dir(
+            &work,
+            &git_dir,
+            "main",
+            None,
+            RefStorageFormat::Files,
+            HashAlgo::Sha1,
+        )
+        .expect("init separate git dir");
+        let gitfile = std::fs::read_to_string(work.join(".git")).expect("read gitfile");
+        let stored = gitfile
+            .strip_prefix("gitdir: ")
+            .and_then(|rest| rest.strip_suffix('\n'))
+            .expect("gitdir line");
+        assert!(!stored.contains("?"), "{stored}");
+        assert_eq!(stored, absolute_path_for_gitfile_stored_path(&git_dir));
+        assert_eq!(
+            repo.git_dir(),
+            git_dir.canonicalize_simplified().expect("canonicalize")
+        );
+
+        let out = std::process::Command::new("git")
+            .args(["rev-parse", "--absolute-git-dir"])
+            .current_dir(&work)
+            .env("GIT_CEILING_DIRECTORIES", tmp.path())
+            .output();
+        let Ok(out) = out else {
+            return;
+        };
+        assert!(out.status.success(), "git rev-parse failed: {out:?}");
+        let git_view = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+        assert_eq!(
+            git_view
+                .canonicalize_simplified()
+                .expect("canonicalize git view"),
+            repo.git_dir()
+        );
+    }
+
+    #[test]
     fn user_display_path_uses_forward_slashes() {
         assert_eq!(
             user_display_path(Path::new(r"\\?\C:\tmp\p\.git")),
@@ -934,14 +1217,14 @@ mod git_path_component_tests {
         std::fs::write(repo.join("a.txt"), b"root").expect("write");
         std::fs::write(deep.join("a.txt"), b"nested").expect("write");
 
-        let cwd = deep.canonicalize().expect("canonicalize cwd");
+        let cwd = deep.canonicalize_simplified().expect("canonicalize cwd");
         let above = repo
             .join("a.txt")
-            .canonicalize()
+            .canonicalize_simplified()
             .expect("canonicalize above");
         let below = deep
             .join("a.txt")
-            .canonicalize()
+            .canonicalize_simplified()
             .expect("canonicalize below");
 
         assert_eq!(
@@ -988,7 +1271,10 @@ mod git_path_component_tests {
     #[test]
     fn strip_worktree_prefix_macos_private_tmp_alias() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let canon = tmp.path().canonicalize().expect("canonicalize tempdir");
+        let canon = tmp
+            .path()
+            .canonicalize_simplified()
+            .expect("canonicalize tempdir");
         let public = if let Ok(stripped) = canon.strip_prefix("/private") {
             std::path::PathBuf::from("/").join(stripped)
         } else {
@@ -1016,7 +1302,10 @@ mod git_path_component_tests {
     #[test]
     fn relative_path_for_display_macos_private_tmp_alias() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let repo_canon = tmp.path().canonicalize().expect("canonicalize tempdir");
+        let repo_canon = tmp
+            .path()
+            .canonicalize_simplified()
+            .expect("canonicalize tempdir");
         let repo_public = if let Ok(stripped) = repo_canon.strip_prefix("/private") {
             std::path::PathBuf::from("/").join(stripped)
         } else {
@@ -1039,7 +1328,7 @@ mod git_path_component_tests {
         );
 
         // Physical cwd after cd -P (private spelling).
-        let cwd_private = sub.canonicalize().expect("canonicalize sub");
+        let cwd_private = sub.canonicalize_simplified().expect("canonicalize sub");
         assert_eq!(
             relative_path_for_display(&cwd_private, &target).as_deref(),
             Some("f.txt")

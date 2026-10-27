@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used)]
 
 use crate::config::environment::{Environment, RepositoryOptions};
+use crate::git_path::CanonicalizeExt;
 use crate::index::{IndexEntry, MODE_REGULAR};
 use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
@@ -186,7 +187,7 @@ fn setup_trace_and_replace_ref_read_paths() -> crate::error::Result<()> {
     std::fs::create_dir_all(dir.path().join("nested/deep")).map_err(crate::error::Error::Io)?;
     let trace = dir.path().join("setup-trace.txt");
     std::fs::write(&trace, b"").map_err(crate::error::Error::Io)?;
-    let trace_abs = trace.canonicalize().unwrap_or(trace);
+    let trace_abs = trace.canonicalize_simplified().unwrap_or(trace);
     let mut env = Environment::empty();
     env.git_trace_setup = Some(trace_abs.to_string_lossy().into_owned());
     env.cwd = dir.path().join("nested/deep");
@@ -301,7 +302,7 @@ fn setup_trace_bare_layout_and_relative_git_dir() -> crate::error::Result<()> {
     std::fs::create_dir_all(&sub).map_err(crate::error::Error::Io)?;
     let trace_bare = layout.path().join("trace-bare.txt");
     std::fs::write(&trace_bare, b"").map_err(crate::error::Error::Io)?;
-    let trace_bare_abs = trace_bare.canonicalize().unwrap_or(trace_bare);
+    let trace_bare_abs = trace_bare.canonicalize_simplified().unwrap_or(trace_bare);
     let mut env = Environment::empty();
     env.git_trace_setup = Some(trace_bare_abs.to_string_lossy().into_owned());
     env.cwd = sub.clone();
@@ -332,7 +333,7 @@ fn setup_trace_bare_layout_and_relative_git_dir() -> crate::error::Result<()> {
     std::fs::create_dir_all(&nested).map_err(crate::error::Error::Io)?;
     let trace_rel = layout.path().join("trace-rel.txt");
     std::fs::write(&trace_rel, b"").map_err(crate::error::Error::Io)?;
-    let trace_rel_abs = trace_rel.canonicalize().unwrap_or(trace_rel);
+    let trace_rel_abs = trace_rel.canonicalize_simplified().unwrap_or(trace_rel);
     let mut env_rel = Environment::empty();
     env_rel.git_trace_setup = Some(trace_rel_abs.to_string_lossy().into_owned());
     env_rel.cwd = nested.clone();
@@ -350,7 +351,7 @@ fn setup_trace_bare_layout_and_relative_git_dir() -> crate::error::Result<()> {
     env_wt.git_dir = Some(wt_root.path().join(".git").to_string_lossy().into_owned());
     let trace_wt = layout.path().join("trace-wt.txt");
     std::fs::write(&trace_wt, b"").map_err(crate::error::Error::Io)?;
-    let trace_wt_abs = trace_wt.canonicalize().unwrap_or(trace_wt);
+    let trace_wt_abs = trace_wt.canonicalize_simplified().unwrap_or(trace_wt);
     env_wt.git_trace_setup = Some(trace_wt_abs.to_string_lossy().into_owned());
     let mut opts_wt = RepositoryOptions::empty();
     opts_wt.environment = env_wt;

@@ -331,6 +331,7 @@ fn commit_parents(odb: &Odb, oid: &ObjectId) -> Option<Vec<ObjectId>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git_path::CanonicalizeExt;
     use tempfile::tempdir;
 
     const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -418,7 +419,7 @@ mod tests {
         let admin = common.join("worktrees").join("linked");
         std::fs::create_dir_all(&admin).unwrap();
         std::fs::write(admin.join("commondir"), "../..\n").unwrap();
-        let common = common.canonicalize().unwrap();
+        let common = common.canonicalize_simplified().unwrap();
         assert_eq!(shallow_file_path(&admin), common.join("shallow"));
         assert_eq!(shallow_file_path(&common), common.join("shallow"));
 
