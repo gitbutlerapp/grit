@@ -5799,6 +5799,9 @@ pub grit_lib::error::Error::UnexpectedObjectKind::oid: grit_lib::objects::Object
 pub grit_lib::error::Error::UnknownObjectType(alloc::string::String)
 pub grit_lib::error::Error::UnmergedConflictMarkers
 pub grit_lib::error::Error::UnmergedConflictMarkers::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::error::Error::UnrelatedHistories
+pub grit_lib::error::Error::UnrelatedHistories::ours: grit_lib::objects::ObjectId
+pub grit_lib::error::Error::UnrelatedHistories::theirs: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::UnresolvedDeltas
 pub grit_lib::error::Error::UnresolvedDeltas::count: u64
 pub grit_lib::error::Error::UnsupportedObjectStore
@@ -14035,6 +14038,7 @@ pub struct grit_lib::porcelain::merge::MergePredictionOptions
 pub grit_lib::porcelain::merge::MergePredictionOptions::allow_fast_forward: bool
 pub grit_lib::porcelain::merge::MergePredictionOptions::allow_unrelated_histories: bool
 pub grit_lib::porcelain::merge::MergePredictionOptions::favor: grit_lib::diff::merge_file::MergeFavor
+pub grit_lib::porcelain::merge::MergePredictionOptions::ours_label: alloc::string::String
 pub grit_lib::porcelain::merge::MergePredictionOptions::theirs_label: alloc::string::String
 pub grit_lib::porcelain::merge::MergePredictionOptions::whitespace: grit_lib::diff::merge_trees::WhitespaceMergeOptions
 impl core::clone::Clone for grit_lib::porcelain::merge::MergePredictionOptions
@@ -14069,6 +14073,47 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::MergeSource
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeSource
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeSource
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeSource
+pub struct grit_lib::porcelain::merge::MergeTreeStage
+pub grit_lib::porcelain::merge::MergeTreeStage::mode: u32
+pub grit_lib::porcelain::merge::MergeTreeStage::oid: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::merge::MergeTreeStage::path: alloc::vec::Vec<u8>
+pub grit_lib::porcelain::merge::MergeTreeStage::stage: u8
+impl core::clone::Clone for grit_lib::porcelain::merge::MergeTreeStage
+pub fn grit_lib::porcelain::merge::MergeTreeStage::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::MergeTreeStage
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::MergeTreeStage
+pub fn grit_lib::porcelain::merge::MergeTreeStage::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::merge::MergeTreeStage
+pub fn grit_lib::porcelain::merge::MergeTreeStage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::MergeTreeStage
+impl core::marker::Freeze for grit_lib::porcelain::merge::MergeTreeStage
+impl core::marker::Send for grit_lib::porcelain::merge::MergeTreeStage
+impl core::marker::Sync for grit_lib::porcelain::merge::MergeTreeStage
+impl core::marker::Unpin for grit_lib::porcelain::merge::MergeTreeStage
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeTreeStage
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeTreeStage
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeTreeStage
+pub struct grit_lib::porcelain::merge::WrittenMergeTree
+pub grit_lib::porcelain::merge::WrittenMergeTree::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
+pub grit_lib::porcelain::merge::WrittenMergeTree::stages: alloc::vec::Vec<grit_lib::porcelain::merge::MergeTreeStage>
+pub grit_lib::porcelain::merge::WrittenMergeTree::tree: grit_lib::objects::ObjectId
+impl grit_lib::porcelain::merge::WrittenMergeTree
+pub fn grit_lib::porcelain::merge::WrittenMergeTree::is_clean(&self) -> bool
+impl core::clone::Clone for grit_lib::porcelain::merge::WrittenMergeTree
+pub fn grit_lib::porcelain::merge::WrittenMergeTree::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::WrittenMergeTree
+pub fn grit_lib::porcelain::merge::WrittenMergeTree::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::merge::WrittenMergeTree
+pub fn grit_lib::porcelain::merge::WrittenMergeTree::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::marker::Freeze for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::marker::Send for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::marker::Sync for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::marker::Unpin for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::WrittenMergeTree
 pub fn grit_lib::porcelain::merge::abort_branch_merge(&grit_lib::repo::Repository) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::merge::compose_fast_forward_index(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &grit_lib::index::Index) -> grit_lib::error::Result<grit_lib::index::Index>
 pub fn grit_lib::porcelain::merge::compose_octopus_final_index(&grit_lib::index::Index, &mut grit_lib::index::Index)
@@ -14085,6 +14130,7 @@ pub fn grit_lib::porcelain::merge::resolve_merge_source(&grit_lib::repo::Reposit
 pub fn grit_lib::porcelain::merge::tree_merge_has_conflicts(&grit_lib::diff::merge_trees::TreeMergeOutput) -> bool
 pub fn grit_lib::porcelain::merge::tree_to_index_entries(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::index::IndexEntry>>
 pub fn grit_lib::porcelain::merge::tree_to_map(alloc::vec::Vec<grit_lib::index::IndexEntry>) -> std::collections::hash::map::HashMap<alloc::vec::Vec<u8>, grit_lib::index::IndexEntry>
+pub fn grit_lib::porcelain::merge::write_merge_tree(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &grit_lib::porcelain::merge::MergePredictionOptions) -> grit_lib::error::Result<grit_lib::porcelain::merge::WrittenMergeTree>
 pub mod grit_lib::porcelain::paths
 pub enum grit_lib::porcelain::paths::RemoveBlockReason
 pub grit_lib::porcelain::paths::RemoveBlockReason::LocalModifications
@@ -15967,6 +16013,9 @@ pub grit_lib::prelude::Error::UnexpectedObjectKind::oid: grit_lib::objects::Obje
 pub grit_lib::prelude::Error::UnknownObjectType(alloc::string::String)
 pub grit_lib::prelude::Error::UnmergedConflictMarkers
 pub grit_lib::prelude::Error::UnmergedConflictMarkers::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::prelude::Error::UnrelatedHistories
+pub grit_lib::prelude::Error::UnrelatedHistories::ours: grit_lib::objects::ObjectId
+pub grit_lib::prelude::Error::UnrelatedHistories::theirs: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::UnresolvedDeltas
 pub grit_lib::prelude::Error::UnresolvedDeltas::count: u64
 pub grit_lib::prelude::Error::UnsupportedObjectStore

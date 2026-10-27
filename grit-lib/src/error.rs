@@ -872,6 +872,16 @@ pub enum Error {
         actual: crate::objects::ObjectKind,
     },
 
+    /// Two commits that were asked to be merged share no merge base, and the caller did not
+    /// allow merging unrelated histories.
+    #[error("commits {ours} and {theirs} have no common ancestor")]
+    UnrelatedHistories {
+        /// The commit being merged into.
+        ours: crate::objects::ObjectId,
+        /// The commit being merged in.
+        theirs: crate::objects::ObjectId,
+    },
+
     /// A commit-graph write was given a commit whose parent is neither among the commits
     /// being written nor in the base graph layers, so its parent edge cannot be encoded.
     #[error("commit-graph cannot encode parent {parent} of commit {commit}: parent not in graph")]

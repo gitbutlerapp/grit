@@ -319,20 +319,24 @@ impl Default for IntegrateBranchOptions {
     }
 }
 
-/// Options for [`predict_merge`].
+/// Options for [`predict_merge`] and [`write_merge_tree`].
 #[derive(Clone, Debug)]
 pub struct MergePredictionOptions {
     /// When `false`, a fast-forward is not considered even when `other_oid` is a
-    /// descendant of `into_oid`; a three-way merge is simulated instead.
+    /// descendant of `into_oid`; a three-way merge is simulated instead. Ignored by
+    /// [`write_merge_tree`], which always merges.
     pub allow_fast_forward: bool,
-    /// When `false`, histories with no merge base yield [`MergePrediction::Unrelated`].
-    /// When `true`, an empty merge base is treated like Git's `--allow-unrelated-histories`
-    /// (reserved for a later step; unrelated histories still report `Unrelated` today).
+    /// When `true`, [`write_merge_tree`] merges commits with no merge base over the empty
+    /// tree, like Git's `--allow-unrelated-histories`; when `false` it fails with
+    /// [`Error::UnrelatedHistories`]. [`predict_merge`] always reports
+    /// [`MergePrediction::Unrelated`] for such commits.
     pub allow_unrelated_histories: bool,
     /// Merge-favor policy for the simulated three-way merge (ours/theirs/normal).
     pub favor: MergeFavor,
     /// Whitespace handling for the simulated three-way merge.
     pub whitespace: WhitespaceMergeOptions,
+    /// Label for the current side in conflict markers (`<<<<<<< HEAD` by default).
+    pub ours_label: String,
     /// Label for the incoming side in conflict-marker metadata (presentation only).
     pub theirs_label: String,
 }
@@ -344,6 +348,7 @@ impl Default for MergePredictionOptions {
             allow_unrelated_histories: false,
             favor: MergeFavor::default(),
             whitespace: WhitespaceMergeOptions::default(),
+            ours_label: "HEAD".into(),
             theirs_label: "branch".into(),
         }
     }
@@ -358,7 +363,11 @@ pub enum MergePrediction {
     FastForward,
     /// A three-way merge would succeed; `tree` is the merged result tree OID.
     Clean {
-        /// Merged tree OID (matches `git merge-tree --write-tree` on success).
+        /// Merged tree OID: the same id `git merge-tree --write-tree` prints.
+        ///
+        /// The tree is **not** in the object database after [`predict_merge`] returns (its new
+        /// trees and blobs were only held in memory), so it cannot be committed, diffed or
+        /// read. Use [`write_merge_tree`] when the merged tree must be stored.
         tree: ObjectId,
     },
     /// A three-way merge would stop with conflicts.
@@ -374,7 +383,8 @@ pub enum MergePrediction {
 /// merge state files, or the working tree.
 ///
 /// Object writes from the merge are routed through the ODB in-memory overlay and
-/// discarded before return, so the on-disk object store is unchanged.
+/// discarded before return, so the on-disk object store is unchanged. That includes the
+/// tree reported by [`MergePrediction::Clean`]; call [`write_merge_tree`] to store it.
 ///
 /// # Errors
 ///
@@ -393,27 +403,153 @@ pub fn predict_merge(
         return Ok(MergePrediction::FastForward);
     }
 
-    let base_oid = merge_bases_first_vs_rest(repo, into_oid, &[other_oid])?
-        .into_iter()
-        .next();
-    let Some(base_oid) = base_oid else {
+    let Some(base_oid) = first_merge_base(repo, into_oid, other_oid)? else {
         return Ok(MergePrediction::Unrelated);
     };
-    let _ = options.allow_unrelated_histories;
-
-    let into_tree = repo.odb().commit_tree(&into_oid)?;
-    let other_tree = repo.odb().commit_tree(&other_oid)?;
     let base_tree = repo.odb().commit_tree(&base_oid)?;
 
+    let _overlay = MemOverlayGuard::enter(repo.odb());
+    let merged = merge_commit_trees(repo, base_tree, into_oid, other_oid, options)?;
+    if tree_merge_has_conflicts(&merged) {
+        return Ok(MergePrediction::Conflicts {
+            conflicts: conflicts_from_tree_merge(&merged),
+        });
+    }
+    let tree = materialized_merge_result_tree(repo.odb(), &merged)?;
+    Ok(MergePrediction::Clean { tree })
+}
+
+/// One unmerged index entry of a [`WrittenMergeTree`]: the `<mode> <oid> <stage> <path>`
+/// rows `git merge-tree --write-tree` prints after the tree id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeTreeStage {
+    /// Git file mode of this side (`0o100644`, `0o100755`, `0o120000`, `0o160000`).
+    pub mode: u32,
+    /// Blob (or gitlink commit) of this side; already in the object database.
+    pub oid: ObjectId,
+    /// `1` for the merge base, `2` for ours (`into`), `3` for theirs (`other`).
+    pub stage: u8,
+    /// Repository-relative path as raw bytes.
+    pub path: Vec<u8>,
+}
+
+/// A three-way merge result stored in the object database ([`write_merge_tree`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WrittenMergeTree {
+    /// Merged tree, present in the object database. Conflicted files hold conflict-marker
+    /// content, exactly like the tree `git merge-tree --write-tree` writes.
+    pub tree: ObjectId,
+    /// Conflicted paths and kinds; empty when the merge is clean.
+    pub conflicts: Vec<MergeConflictDetail>,
+    /// Unmerged entries (stages 1–3) sorted by path, then stage; empty when the merge is clean.
+    pub stages: Vec<MergeTreeStage>,
+}
+
+impl WrittenMergeTree {
+    /// Whether the merge finished without conflicts, so [`Self::tree`] can be committed as is.
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        self.conflicts.is_empty() && self.stages.is_empty()
+    }
+}
+
+/// Three-way merge `other_oid` into `into_oid` and store the resulting tree, without touching
+/// refs, the index, merge state files or the working tree (the library form of
+/// `git merge-tree --write-tree`).
+///
+/// Works in bare repositories. Unlike [`predict_merge`], every new tree and blob the merge
+/// creates is written to the object database before return, so a clean result can be
+/// committed directly with `NewCommit::new(tree, ..).with_parents(vec![into_oid, other_oid])`.
+/// On conflicts the tree is still written, with conflict markers in the conflicted files, and
+/// [`WrittenMergeTree::stages`] lists the unmerged entries.
+///
+/// A merge is always computed: [`MergePredictionOptions::allow_fast_forward`] is ignored, and
+/// when one commit contains the other the result is the newer commit's tree. With several merge
+/// bases (criss-cross history) the first one is used, as in [`predict_merge`]. When `options`
+/// allows unrelated histories, a missing merge base is treated as the empty tree. If the
+/// repository handle already has an in-memory write overlay active, the new objects stay in
+/// that outer overlay instead of being written to disk.
+///
+/// # Parameters
+///
+/// - `repo`: repository to merge in.
+/// - `into_oid`: commit merged into (stage 2, "ours").
+/// - `other_oid`: commit merged in (stage 3, "theirs").
+/// - `options`: favor, whitespace, conflict labels and unrelated-history policy.
+///
+/// # Errors
+///
+/// - [`Error::UnrelatedHistories`] when the commits share no merge base and
+///   [`MergePredictionOptions::allow_unrelated_histories`] is `false`.
+/// - Object read, merge and object write failures are propagated.
+pub fn write_merge_tree(
+    repo: &Repository,
+    into_oid: ObjectId,
+    other_oid: ObjectId,
+    options: &MergePredictionOptions,
+) -> Result<WrittenMergeTree> {
+    let base_tree = match first_merge_base(repo, into_oid, other_oid)? {
+        Some(base_oid) => repo.odb().commit_tree(&base_oid)?,
+        None if options.allow_unrelated_histories => repo.odb().empty_tree_oid()?,
+        None => {
+            return Err(Error::UnrelatedHistories {
+                ours: into_oid,
+                theirs: other_oid,
+            })
+        }
+    };
+
+    let merged = merge_commit_trees(repo, base_tree, into_oid, other_oid, options)?;
+    let tree = materialized_merge_result_tree(repo.odb(), &merged)?;
+
+    let stages = merged
+        .index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage() != 0)
+        .map(|entry| MergeTreeStage {
+            mode: entry.mode,
+            oid: entry.oid,
+            stage: entry.stage(),
+            path: entry.path.clone(),
+        })
+        .collect();
+    Ok(WrittenMergeTree {
+        tree,
+        conflicts: conflicts_from_tree_merge(&merged),
+        stages,
+    })
+}
+
+fn first_merge_base(
+    repo: &Repository,
+    into_oid: ObjectId,
+    other_oid: ObjectId,
+) -> Result<Option<ObjectId>> {
+    Ok(merge_bases_first_vs_rest(repo, into_oid, &[other_oid])?
+        .into_iter()
+        .next())
+}
+
+/// Three-way merge the trees of `into_oid` and `other_oid` over `base_tree`, labelling conflicts
+/// from `options`. New objects go wherever the ODB currently writes (disk, or an active overlay).
+fn merge_commit_trees(
+    repo: &Repository,
+    base_tree: ObjectId,
+    into_oid: ObjectId,
+    other_oid: ObjectId,
+    options: &MergePredictionOptions,
+) -> Result<TreeMergeOutput> {
+    let into_tree = repo.odb().commit_tree(&into_oid)?;
+    let other_tree = repo.odb().commit_tree(&other_oid)?;
     let presentation = TreeMergeConflictPresentation {
+        label_ours: &options.ours_label,
         label_theirs: crate::merge_trees::TheirsConflictLabel::Fixed(&options.theirs_label),
         df_directory_ours_commit: Some(into_oid),
         df_directory_theirs_commit: Some(other_oid),
         ..TreeMergeConflictPresentation::default()
     };
-
-    let _overlay = MemOverlayGuard::enter(repo.odb());
-    let merged = merge_trees_three_way(
+    merge_trees_three_way(
         repo,
         base_tree,
         into_tree,
@@ -422,14 +558,7 @@ pub fn predict_merge(
         options.whitespace,
         None,
         presentation,
-    )?;
-    if tree_merge_has_conflicts(&merged) {
-        return Ok(MergePrediction::Conflicts {
-            conflicts: conflicts_from_tree_merge(&merged),
-        });
-    }
-    let tree = materialized_merge_result_tree(repo.odb(), &merged)?;
-    Ok(MergePrediction::Clean { tree })
+    )
 }
 
 /// Planned merge of `other_oid` into `into_oid` without touching refs, the index, merge state,
@@ -495,6 +624,7 @@ pub fn plan_branch_merge(
         favor: options.favor,
         whitespace: WhitespaceMergeOptions::default(),
         theirs_label: label.to_owned(),
+        ..MergePredictionOptions::default()
     };
     match predict_merge(repo, into_oid, other_oid, &prediction_opts)? {
         MergePrediction::UpToDate | MergePrediction::FastForward => Ok(MergeDryRunPlan::UpToDate),
@@ -1632,6 +1762,51 @@ mod integrate_tests {
             "outer mem overlay must stay active after predict_merge"
         );
         repo.odb().disable_mem_overlay();
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn write_merge_tree_keeps_objects_in_outer_overlay() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let git = |args: &[&str]| grit_test_support::git(tmp.path(), args);
+        git(&["init", "-q", "-b", "main"]);
+        std::fs::write(tmp.path().join("f.txt"), "1\n2\n3\n4\n5\n6\n").expect("write");
+        git(&["add", "f.txt"]);
+        git(&["commit", "-qm", "base"]);
+        git(&["switch", "-qc", "topic"]);
+        std::fs::write(tmp.path().join("f.txt"), "one\n2\n3\n4\n5\n6\n").expect("write");
+        git(&["commit", "-qam", "topic"]);
+        git(&["switch", "-q", "main"]);
+        std::fs::write(tmp.path().join("f.txt"), "1\n2\n3\n4\n5\nsix\n").expect("write");
+        git(&["commit", "-qam", "main"]);
+        let oid =
+            |spec: &str| -> ObjectId { git(&["rev-parse", spec]).trim().parse().expect("oid") };
+        let (main, topic) = (oid("main"), oid("topic"));
+        let repo =
+            Repository::discover(Some(tmp.path()), &RepositoryOptions::empty()).expect("repo");
+
+        repo.odb().enable_mem_overlay();
+        let loose_before = repo.odb().count_loose_objects().expect("count");
+        let written = write_merge_tree(&repo, main, topic, &MergePredictionOptions::default())
+            .expect("write_merge_tree");
+        assert!(written.is_clean());
+        assert!(repo.odb().is_mem_overlay_active());
+        assert_eq!(
+            repo.odb().count_loose_objects().expect("count"),
+            loose_before
+        );
+        assert!(repo.odb().exists(&written.tree));
+
+        repo.odb().disable_mem_overlay();
+        assert!(!repo.odb().exists(&written.tree));
+        let written = write_merge_tree(&repo, main, topic, &MergePredictionOptions::default())
+            .expect("write_merge_tree");
+        assert!(!repo.odb().is_mem_overlay_active());
+        assert!(repo.odb().count_loose_objects().expect("count") > loose_before);
+        assert!(repo.odb().exists(&written.tree));
     }
 
     #[cfg_attr(
