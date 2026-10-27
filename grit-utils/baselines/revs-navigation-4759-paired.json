@@ -1,0 +1,7376 @@
+{
+  "method": "30 rotated interleaved runs per tool after 3 warmups; Python perf_counter_ns around /usr/bin/time -v; wall ms include GNU time launch; median process peak RSS in KiB; builds and tests stopped; before/after executables copied with identical 64-KiB buffered writes and fsync",
+  "main": "aa1964221e0493bdd9c49a2c7326424f5d768c57",
+  "machine": {
+    "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+    "physical_cores": 2,
+    "logical_cores": 4,
+    "ram_bytes": 16766418944,
+    "os": "linux",
+    "kernel": "Linux 6.17.0-1022-azure",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": {
+      "path": "/usr/bin/git",
+      "sha256": "d4d2ba562243015206d4248edfec871a74786499292d00ed072dbca2f5ae8073"
+    },
+    "before": {
+      "path": "/tmp/grit-4759/before/grit",
+      "sha256": "cb7b86c1bca79e254cf19fb2676d2e1052fd8ec66cb811ca9b0227198d6652be"
+    },
+    "after": {
+      "path": "/tmp/grit-4759/after/grit",
+      "sha256": "1e45dedf6a102eb090c339d5dc9887f4df78f0aa97fae3d71eab594ceeab2d85"
+    }
+  },
+  "scenarios": [
+    {
+      "id": "revs/left-right-count@deep-history",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-no-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "rev-list",
+          "--left-right",
+          "--count",
+          "HEAD~500...HEAD"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "revs",
+          "--left-right",
+          "--count",
+          "HEAD~500...HEAD"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "revs",
+          "--left-right",
+          "--count",
+          "HEAD~500...HEAD"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 3.778575,
+            "rss_kb": 6856,
+            "minor_faults": 274
+          },
+          {
+            "ms": 3.163143,
+            "rss_kb": 7112,
+            "minor_faults": 277
+          },
+          {
+            "ms": 3.036102,
+            "rss_kb": 7172,
+            "minor_faults": 277
+          },
+          {
+            "ms": 3.045026,
+            "rss_kb": 7116,
+            "minor_faults": 277
+          },
+          {
+            "ms": 2.905526,
+            "rss_kb": 7036,
+            "minor_faults": 276
+          },
+          {
+            "ms": 2.80102,
+            "rss_kb": 7108,
+            "minor_faults": 277
+          },
+          {
+            "ms": 2.921641,
+            "rss_kb": 7112,
+            "minor_faults": 277
+          },
+          {
+            "ms": 3.054721,
+            "rss_kb": 7176,
+            "minor_faults": 279
+          },
+          {
+            "ms": 2.937334,
+            "rss_kb": 7008,
+            "minor_faults": 276
+          },
+          {
+            "ms": 2.955382,
+            "rss_kb": 6984,
+            "minor_faults": 275
+          },
+          {
+            "ms": 3.060469,
+            "rss_kb": 7112,
+            "minor_faults": 275
+          },
+          {
+            "ms": 5.458695,
+            "rss_kb": 6856,
+            "minor_faults": 275
+          },
+          {
+            "ms": 2.90788,
+            "rss_kb": 7112,
+            "minor_faults": 277
+          },
+          {
+            "ms": 3.053819,
+            "rss_kb": 7048,
+            "minor_faults": 278
+          },
+          {
+            "ms": 2.972798,
+            "rss_kb": 7240,
+            "minor_faults": 278
+          },
+          {
+            "ms": 3.13462,
+            "rss_kb": 7240,
+            "minor_faults": 277
+          },
+          {
+            "ms": 3.190254,
+            "rss_kb": 6948,
+            "minor_faults": 277
+          },
+          {
+            "ms": 3.144795,
+            "rss_kb": 7112,
+            "minor_faults": 278
+          },
+          {
+            "ms": 2.980158,
+            "rss_kb": 7240,
+            "minor_faults": 278
+          },
+          {
+            "ms": 3.20101,
+            "rss_kb": 7112,
+            "minor_faults": 277
+          },
+          {
+            "ms": 2.917064,
+            "rss_kb": 6984,
+            "minor_faults": 275
+          },
+          {
+            "ms": 2.946738,
+            "rss_kb": 6984,
+            "minor_faults": 276
+          },
+          {
+            "ms": 3.070995,
+            "rss_kb": 7104,
+            "minor_faults": 276
+          },
+          {
+            "ms": 3.013278,
+            "rss_kb": 6944,
+            "minor_faults": 275
+          },
+          {
+            "ms": 3.10089,
+            "rss_kb": 7372,
+            "minor_faults": 279
+          },
+          {
+            "ms": 3.190594,
+            "rss_kb": 7220,
+            "minor_faults": 278
+          },
+          {
+            "ms": 3.30153,
+            "rss_kb": 6984,
+            "minor_faults": 275
+          },
+          {
+            "ms": 3.082933,
+            "rss_kb": 6992,
+            "minor_faults": 277
+          },
+          {
+            "ms": 3.106508,
+            "rss_kb": 7112,
+            "minor_faults": 278
+          },
+          {
+            "ms": 2.991726,
+            "rss_kb": 7112,
+            "minor_faults": 274
+          }
+        ],
+        "before": [
+          {
+            "ms": 6.58877,
+            "rss_kb": 15080,
+            "minor_faults": 586
+          },
+          {
+            "ms": 6.500948,
+            "rss_kb": 15080,
+            "minor_faults": 587
+          },
+          {
+            "ms": 6.359046,
+            "rss_kb": 15400,
+            "minor_faults": 591
+          },
+          {
+            "ms": 6.210072,
+            "rss_kb": 15272,
+            "minor_faults": 588
+          },
+          {
+            "ms": 5.827078,
+            "rss_kb": 15080,
+            "minor_faults": 588
+          },
+          {
+            "ms": 5.837723,
+            "rss_kb": 15268,
+            "minor_faults": 590
+          },
+          {
+            "ms": 5.764263,
+            "rss_kb": 15076,
+            "minor_faults": 586
+          },
+          {
+            "ms": 6.117863,
+            "rss_kb": 15400,
+            "minor_faults": 590
+          },
+          {
+            "ms": 6.194889,
+            "rss_kb": 14952,
+            "minor_faults": 585
+          },
+          {
+            "ms": 5.919887,
+            "rss_kb": 15080,
+            "minor_faults": 585
+          },
+          {
+            "ms": 5.923152,
+            "rss_kb": 14952,
+            "minor_faults": 584
+          },
+          {
+            "ms": 6.410582,
+            "rss_kb": 15396,
+            "minor_faults": 590
+          },
+          {
+            "ms": 5.951464,
+            "rss_kb": 14948,
+            "minor_faults": 584
+          },
+          {
+            "ms": 6.00849,
+            "rss_kb": 15400,
+            "minor_faults": 592
+          },
+          {
+            "ms": 6.474248,
+            "rss_kb": 15208,
+            "minor_faults": 588
+          },
+          {
+            "ms": 6.530803,
+            "rss_kb": 15080,
+            "minor_faults": 586
+          },
+          {
+            "ms": 6.299586,
+            "rss_kb": 15268,
+            "minor_faults": 590
+          },
+          {
+            "ms": 6.263162,
+            "rss_kb": 15208,
+            "minor_faults": 588
+          },
+          {
+            "ms": 6.033506,
+            "rss_kb": 15272,
+            "minor_faults": 589
+          },
+          {
+            "ms": 6.363161,
+            "rss_kb": 14952,
+            "minor_faults": 584
+          },
+          {
+            "ms": 6.23557,
+            "rss_kb": 15528,
+            "minor_faults": 594
+          },
+          {
+            "ms": 5.941008,
+            "rss_kb": 15140,
+            "minor_faults": 586
+          },
+          {
+            "ms": 6.058965,
+            "rss_kb": 15400,
+            "minor_faults": 591
+          },
+          {
+            "ms": 6.247668,
+            "rss_kb": 14952,
+            "minor_faults": 585
+          },
+          {
+            "ms": 6.249781,
+            "rss_kb": 15192,
+            "minor_faults": 588
+          },
+          {
+            "ms": 6.4827,
+            "rss_kb": 15528,
+            "minor_faults": 593
+          },
+          {
+            "ms": 6.476521,
+            "rss_kb": 15400,
+            "minor_faults": 590
+          },
+          {
+            "ms": 6.234368,
+            "rss_kb": 15460,
+            "minor_faults": 594
+          },
+          {
+            "ms": 6.161429,
+            "rss_kb": 15208,
+            "minor_faults": 587
+          },
+          {
+            "ms": 6.351263,
+            "rss_kb": 15400,
+            "minor_faults": 591
+          }
+        ],
+        "after": [
+          {
+            "ms": 5.491354,
+            "rss_kb": 15032,
+            "minor_faults": 588
+          },
+          {
+            "ms": 5.461199,
+            "rss_kb": 15160,
+            "minor_faults": 590
+          },
+          {
+            "ms": 5.237884,
+            "rss_kb": 15480,
+            "minor_faults": 593
+          },
+          {
+            "ms": 5.220198,
+            "rss_kb": 15160,
+            "minor_faults": 588
+          },
+          {
+            "ms": 5.133027,
+            "rss_kb": 15096,
+            "minor_faults": 588
+          },
+          {
+            "ms": 4.771906,
+            "rss_kb": 15096,
+            "minor_faults": 589
+          },
+          {
+            "ms": 4.990253,
+            "rss_kb": 15480,
+            "minor_faults": 594
+          },
+          {
+            "ms": 5.164203,
+            "rss_kb": 15096,
+            "minor_faults": 588
+          },
+          {
+            "ms": 4.934379,
+            "rss_kb": 15224,
+            "minor_faults": 590
+          },
+          {
+            "ms": 5.321579,
+            "rss_kb": 15096,
+            "minor_faults": 587
+          },
+          {
+            "ms": 5.281399,
+            "rss_kb": 15160,
+            "minor_faults": 590
+          },
+          {
+            "ms": 4.966197,
+            "rss_kb": 15096,
+            "minor_faults": 586
+          },
+          {
+            "ms": 5.266757,
+            "rss_kb": 15288,
+            "minor_faults": 592
+          },
+          {
+            "ms": 5.123563,
+            "rss_kb": 15480,
+            "minor_faults": 594
+          },
+          {
+            "ms": 4.925806,
+            "rss_kb": 15444,
+            "minor_faults": 592
+          },
+          {
+            "ms": 5.66915,
+            "rss_kb": 15352,
+            "minor_faults": 591
+          },
+          {
+            "ms": 5.175781,
+            "rss_kb": 15480,
+            "minor_faults": 594
+          },
+          {
+            "ms": 4.965125,
+            "rss_kb": 15220,
+            "minor_faults": 590
+          },
+          {
+            "ms": 5.43496,
+            "rss_kb": 15184,
+            "minor_faults": 589
+          },
+          {
+            "ms": 5.380698,
+            "rss_kb": 15416,
+            "minor_faults": 592
+          },
+          {
+            "ms": 5.058375,
+            "rss_kb": 15608,
+            "minor_faults": 595
+          },
+          {
+            "ms": 5.311474,
+            "rss_kb": 15096,
+            "minor_faults": 585
+          },
+          {
+            "ms": 5.089131,
+            "rss_kb": 15352,
+            "minor_faults": 591
+          },
+          {
+            "ms": 4.927519,
+            "rss_kb": 15304,
+            "minor_faults": 590
+          },
+          {
+            "ms": 5.592987,
+            "rss_kb": 15480,
+            "minor_faults": 595
+          },
+          {
+            "ms": 5.558014,
+            "rss_kb": 15096,
+            "minor_faults": 586
+          },
+          {
+            "ms": 7.376701,
+            "rss_kb": 15160,
+            "minor_faults": 589
+          },
+          {
+            "ms": 5.429661,
+            "rss_kb": 15096,
+            "minor_faults": 589
+          },
+          {
+            "ms": 5.252996,
+            "rss_kb": 15096,
+            "minor_faults": 586
+          },
+          {
+            "ms": 4.986778,
+            "rss_kb": 15160,
+            "minor_faults": 590
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "bd42fec50f5ed46656fb06f7e1a6ab0753debd6037b3bea874b96c2b2ec06ef4",
+        "before": "bd42fec50f5ed46656fb06f7e1a6ab0753debd6037b3bea874b96c2b2ec06ef4",
+        "after": "bd42fec50f5ed46656fb06f7e1a6ab0753debd6037b3bea874b96c2b2ec06ef4"
+      },
+      "summary": {
+        "git": {
+          "ms": 3.05427,
+          "rss_kb": 7112.0,
+          "max_rss_kb": 7372
+        },
+        "before": {
+          "ms": 6.2349689999999995,
+          "rss_kb": 15208.0,
+          "max_rss_kb": 15528
+        },
+        "after": {
+          "ms": 5.2290410000000005,
+          "rss_kb": 15172.0,
+          "max_rss_kb": 15608
+        }
+      }
+    },
+    {
+      "id": "revs/author-n50@deep-history",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-no-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "rev-list",
+          "--author=.",
+          "-n",
+          "50",
+          "HEAD"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "revs",
+          "--author=.",
+          "-n",
+          "50",
+          "HEAD"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "revs",
+          "--author=.",
+          "-n",
+          "50",
+          "HEAD"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 2.593759,
+            "rss_kb": 6692,
+            "minor_faults": 229
+          },
+          {
+            "ms": 2.515743,
+            "rss_kb": 6756,
+            "minor_faults": 229
+          },
+          {
+            "ms": 2.326308,
+            "rss_kb": 6824,
+            "minor_faults": 229
+          },
+          {
+            "ms": 2.251676,
+            "rss_kb": 6680,
+            "minor_faults": 228
+          },
+          {
+            "ms": 2.398787,
+            "rss_kb": 6852,
+            "minor_faults": 231
+          },
+          {
+            "ms": 2.309213,
+            "rss_kb": 6768,
+            "minor_faults": 229
+          },
+          {
+            "ms": 2.340009,
+            "rss_kb": 6692,
+            "minor_faults": 227
+          },
+          {
+            "ms": 2.451847,
+            "rss_kb": 6692,
+            "minor_faults": 229
+          },
+          {
+            "ms": 2.406047,
+            "rss_kb": 6680,
+            "minor_faults": 229
+          },
+          {
+            "ms": 2.457695,
+            "rss_kb": 6716,
+            "minor_faults": 228
+          },
+          {
+            "ms": 2.438296,
+            "rss_kb": 6852,
+            "minor_faults": 229
+          },
+          {
+            "ms": 2.312798,
+            "rss_kb": 6680,
+            "minor_faults": 228
+          },
+          {
+            "ms": 2.350244,
+            "rss_kb": 6692,
+            "minor_faults": 230
+          },
+          {
+            "ms": 2.446578,
+            "rss_kb": 6980,
+            "minor_faults": 233
+          },
+          {
+            "ms": 2.420209,
+            "rss_kb": 6828,
+            "minor_faults": 231
+          },
+          {
+            "ms": 2.364696,
+            "rss_kb": 6756,
+            "minor_faults": 229
+          },
+          {
+            "ms": 2.365227,
+            "rss_kb": 6692,
+            "minor_faults": 228
+          },
+          {
+            "ms": 2.289453,
+            "rss_kb": 6800,
+            "minor_faults": 230
+          },
+          {
+            "ms": 2.302323,
+            "rss_kb": 6692,
+            "minor_faults": 230
+          },
+          {
+            "ms": 2.519047,
+            "rss_kb": 6772,
+            "minor_faults": 229
+          },
+          {
+            "ms": 2.596203,
+            "rss_kb": 6700,
+            "minor_faults": 229
+          },
+          {
+            "ms": 2.506708,
+            "rss_kb": 6760,
+            "minor_faults": 227
+          },
+          {
+            "ms": 2.660589,
+            "rss_kb": 6692,
+            "minor_faults": 228
+          },
+          {
+            "ms": 2.407289,
+            "rss_kb": 6776,
+            "minor_faults": 230
+          },
+          {
+            "ms": 2.358276,
+            "rss_kb": 6692,
+            "minor_faults": 230
+          },
+          {
+            "ms": 2.498326,
+            "rss_kb": 6768,
+            "minor_faults": 229
+          },
+          {
+            "ms": 2.400149,
+            "rss_kb": 6980,
+            "minor_faults": 232
+          },
+          {
+            "ms": 2.517005,
+            "rss_kb": 6948,
+            "minor_faults": 232
+          },
+          {
+            "ms": 2.513339,
+            "rss_kb": 6752,
+            "minor_faults": 229
+          },
+          {
+            "ms": 5.698284,
+            "rss_kb": 6968,
+            "minor_faults": 231
+          }
+        ],
+        "before": [
+          {
+            "ms": 4.813177,
+            "rss_kb": 16756,
+            "minor_faults": 633
+          },
+          {
+            "ms": 4.71484,
+            "rss_kb": 16628,
+            "minor_faults": 629
+          },
+          {
+            "ms": 4.70821,
+            "rss_kb": 16884,
+            "minor_faults": 636
+          },
+          {
+            "ms": 4.157634,
+            "rss_kb": 16884,
+            "minor_faults": 635
+          },
+          {
+            "ms": 4.474971,
+            "rss_kb": 16884,
+            "minor_faults": 634
+          },
+          {
+            "ms": 4.59482,
+            "rss_kb": 16884,
+            "minor_faults": 635
+          },
+          {
+            "ms": 4.255411,
+            "rss_kb": 16884,
+            "minor_faults": 635
+          },
+          {
+            "ms": 4.356712,
+            "rss_kb": 16948,
+            "minor_faults": 638
+          },
+          {
+            "ms": 4.754399,
+            "rss_kb": 16756,
+            "minor_faults": 634
+          },
+          {
+            "ms": 4.571795,
+            "rss_kb": 16880,
+            "minor_faults": 635
+          },
+          {
+            "ms": 4.685165,
+            "rss_kb": 17204,
+            "minor_faults": 641
+          },
+          {
+            "ms": 4.531865,
+            "rss_kb": 16628,
+            "minor_faults": 631
+          },
+          {
+            "ms": 4.294349,
+            "rss_kb": 16496,
+            "minor_faults": 627
+          },
+          {
+            "ms": 4.433477,
+            "rss_kb": 17076,
+            "minor_faults": 638
+          },
+          {
+            "ms": 4.933007,
+            "rss_kb": 17072,
+            "minor_faults": 637
+          },
+          {
+            "ms": 4.545265,
+            "rss_kb": 16820,
+            "minor_faults": 636
+          },
+          {
+            "ms": 4.234018,
+            "rss_kb": 17076,
+            "minor_faults": 638
+          },
+          {
+            "ms": 4.237885,
+            "rss_kb": 16628,
+            "minor_faults": 630
+          },
+          {
+            "ms": 4.194759,
+            "rss_kb": 17012,
+            "minor_faults": 637
+          },
+          {
+            "ms": 4.21617,
+            "rss_kb": 17076,
+            "minor_faults": 639
+          },
+          {
+            "ms": 4.969271,
+            "rss_kb": 16880,
+            "minor_faults": 634
+          },
+          {
+            "ms": 4.576973,
+            "rss_kb": 16756,
+            "minor_faults": 633
+          },
+          {
+            "ms": 4.88805,
+            "rss_kb": 17008,
+            "minor_faults": 636
+          },
+          {
+            "ms": 4.775541,
+            "rss_kb": 17348,
+            "minor_faults": 643
+          },
+          {
+            "ms": 4.279737,
+            "rss_kb": 17204,
+            "minor_faults": 641
+          },
+          {
+            "ms": 4.28163,
+            "rss_kb": 16752,
+            "minor_faults": 634
+          },
+          {
+            "ms": 4.773878,
+            "rss_kb": 17076,
+            "minor_faults": 638
+          },
+          {
+            "ms": 4.439517,
+            "rss_kb": 17008,
+            "minor_faults": 637
+          },
+          {
+            "ms": 4.680458,
+            "rss_kb": 17012,
+            "minor_faults": 638
+          },
+          {
+            "ms": 4.76856,
+            "rss_kb": 16820,
+            "minor_faults": 635
+          }
+        ],
+        "after": [
+          {
+            "ms": 4.779767,
+            "rss_kb": 17088,
+            "minor_faults": 637
+          },
+          {
+            "ms": 4.750563,
+            "rss_kb": 17152,
+            "minor_faults": 638
+          },
+          {
+            "ms": 4.282962,
+            "rss_kb": 16640,
+            "minor_faults": 629
+          },
+          {
+            "ms": 4.597954,
+            "rss_kb": 16576,
+            "minor_faults": 630
+          },
+          {
+            "ms": 4.341189,
+            "rss_kb": 17156,
+            "minor_faults": 639
+          },
+          {
+            "ms": 4.158185,
+            "rss_kb": 16960,
+            "minor_faults": 637
+          },
+          {
+            "ms": 4.723132,
+            "rss_kb": 16960,
+            "minor_faults": 636
+          },
+          {
+            "ms": 4.444395,
+            "rss_kb": 16956,
+            "minor_faults": 637
+          },
+          {
+            "ms": 4.334339,
+            "rss_kb": 16640,
+            "minor_faults": 628
+          },
+          {
+            "ms": 4.870843,
+            "rss_kb": 17084,
+            "minor_faults": 637
+          },
+          {
+            "ms": 6.616551,
+            "rss_kb": 16636,
+            "minor_faults": 629
+          },
+          {
+            "ms": 4.178996,
+            "rss_kb": 16896,
+            "minor_faults": 635
+          },
+          {
+            "ms": 4.604755,
+            "rss_kb": 16640,
+            "minor_faults": 630
+          },
+          {
+            "ms": 4.438585,
+            "rss_kb": 16960,
+            "minor_faults": 637
+          },
+          {
+            "ms": 4.393929,
+            "rss_kb": 16576,
+            "minor_faults": 631
+          },
+          {
+            "ms": 4.539527,
+            "rss_kb": 16960,
+            "minor_faults": 636
+          },
+          {
+            "ms": 4.316142,
+            "rss_kb": 16896,
+            "minor_faults": 634
+          },
+          {
+            "ms": 4.088743,
+            "rss_kb": 16988,
+            "minor_faults": 638
+          },
+          {
+            "ms": 4.252396,
+            "rss_kb": 16640,
+            "minor_faults": 629
+          },
+          {
+            "ms": 4.397845,
+            "rss_kb": 16636,
+            "minor_faults": 628
+          },
+          {
+            "ms": 4.585356,
+            "rss_kb": 17064,
+            "minor_faults": 640
+          },
+          {
+            "ms": 5.049442,
+            "rss_kb": 17104,
+            "minor_faults": 640
+          },
+          {
+            "ms": 4.885436,
+            "rss_kb": 16888,
+            "minor_faults": 631
+          },
+          {
+            "ms": 4.506528,
+            "rss_kb": 16960,
+            "minor_faults": 637
+          },
+          {
+            "ms": 4.532887,
+            "rss_kb": 16960,
+            "minor_faults": 637
+          },
+          {
+            "ms": 4.491204,
+            "rss_kb": 17152,
+            "minor_faults": 639
+          },
+          {
+            "ms": 4.439607,
+            "rss_kb": 17088,
+            "minor_faults": 637
+          },
+          {
+            "ms": 4.852837,
+            "rss_kb": 16676,
+            "minor_faults": 631
+          },
+          {
+            "ms": 4.467659,
+            "rss_kb": 16832,
+            "minor_faults": 634
+          },
+          {
+            "ms": 4.386597,
+            "rss_kb": 17152,
+            "minor_faults": 638
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "4ba100f536c4f06470bcdbff19b2f0bd9da901cbaf024f808ceca4d97fcbb033",
+        "before": "157b7ded3d28907bff65f73eca50ed969fea3258528c1b25f870727f679a8130",
+        "after": "157b7ded3d28907bff65f73eca50ed969fea3258528c1b25f870727f679a8130"
+      },
+      "summary": {
+        "git": {
+          "ms": 2.413749,
+          "rss_kb": 6756.0,
+          "max_rss_kb": 6980
+        },
+        "before": {
+          "ms": 4.558529999999999,
+          "rss_kb": 16884.0,
+          "max_rss_kb": 17348
+        },
+        "after": {
+          "ms": 4.4794315000000005,
+          "rss_kb": 16960.0,
+          "max_rss_kb": 17156
+        }
+      }
+    },
+    {
+      "id": "revs/count-author@deep-history",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-no-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "rev-list",
+          "--count",
+          "--author=.",
+          "HEAD"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "revs",
+          "--count",
+          "--author=.",
+          "HEAD"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "revs",
+          "--count",
+          "--author=.",
+          "HEAD"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 98.310552,
+            "rss_kb": 19652,
+            "minor_faults": 3230
+          },
+          {
+            "ms": 101.518222,
+            "rss_kb": 19524,
+            "minor_faults": 3231
+          },
+          {
+            "ms": 102.807125,
+            "rss_kb": 19460,
+            "minor_faults": 3231
+          },
+          {
+            "ms": 101.901396,
+            "rss_kb": 19424,
+            "minor_faults": 3230
+          },
+          {
+            "ms": 104.699352,
+            "rss_kb": 19468,
+            "minor_faults": 3229
+          },
+          {
+            "ms": 103.948956,
+            "rss_kb": 19652,
+            "minor_faults": 3232
+          },
+          {
+            "ms": 102.978692,
+            "rss_kb": 19572,
+            "minor_faults": 3230
+          },
+          {
+            "ms": 99.674557,
+            "rss_kb": 19564,
+            "minor_faults": 3229
+          },
+          {
+            "ms": 101.675347,
+            "rss_kb": 19632,
+            "minor_faults": 3231
+          },
+          {
+            "ms": 101.876008,
+            "rss_kb": 19652,
+            "minor_faults": 3230
+          },
+          {
+            "ms": 100.037708,
+            "rss_kb": 19404,
+            "minor_faults": 3230
+          },
+          {
+            "ms": 100.12328,
+            "rss_kb": 19508,
+            "minor_faults": 3230
+          },
+          {
+            "ms": 98.712825,
+            "rss_kb": 19464,
+            "minor_faults": 3228
+          },
+          {
+            "ms": 95.085507,
+            "rss_kb": 19520,
+            "minor_faults": 3230
+          },
+          {
+            "ms": 97.489436,
+            "rss_kb": 19460,
+            "minor_faults": 3229
+          },
+          {
+            "ms": 96.552682,
+            "rss_kb": 19648,
+            "minor_faults": 3233
+          },
+          {
+            "ms": 95.595267,
+            "rss_kb": 19656,
+            "minor_faults": 3232
+          },
+          {
+            "ms": 96.070839,
+            "rss_kb": 19780,
+            "minor_faults": 3233
+          },
+          {
+            "ms": 94.944672,
+            "rss_kb": 19656,
+            "minor_faults": 3232
+          },
+          {
+            "ms": 101.126322,
+            "rss_kb": 19528,
+            "minor_faults": 3229
+          },
+          {
+            "ms": 99.917625,
+            "rss_kb": 19656,
+            "minor_faults": 3231
+          },
+          {
+            "ms": 96.453173,
+            "rss_kb": 19448,
+            "minor_faults": 3230
+          },
+          {
+            "ms": 99.232048,
+            "rss_kb": 19524,
+            "minor_faults": 3229
+          },
+          {
+            "ms": 95.954275,
+            "rss_kb": 19588,
+            "minor_faults": 3230
+          },
+          {
+            "ms": 101.154379,
+            "rss_kb": 19652,
+            "minor_faults": 3230
+          },
+          {
+            "ms": 100.486117,
+            "rss_kb": 19568,
+            "minor_faults": 3232
+          },
+          {
+            "ms": 99.323555,
+            "rss_kb": 19528,
+            "minor_faults": 3230
+          },
+          {
+            "ms": 98.637046,
+            "rss_kb": 19512,
+            "minor_faults": 3229
+          },
+          {
+            "ms": 99.43313,
+            "rss_kb": 19656,
+            "minor_faults": 3231
+          },
+          {
+            "ms": 103.897981,
+            "rss_kb": 19480,
+            "minor_faults": 3230
+          }
+        ],
+        "before": [
+          {
+            "ms": 129.298588,
+            "rss_kb": 25432,
+            "minor_faults": 2513
+          },
+          {
+            "ms": 128.391087,
+            "rss_kb": 25932,
+            "minor_faults": 2522
+          },
+          {
+            "ms": 130.588882,
+            "rss_kb": 25912,
+            "minor_faults": 2509
+          },
+          {
+            "ms": 130.443634,
+            "rss_kb": 26100,
+            "minor_faults": 2530
+          },
+          {
+            "ms": 127.240561,
+            "rss_kb": 25884,
+            "minor_faults": 2517
+          },
+          {
+            "ms": 135.234388,
+            "rss_kb": 25564,
+            "minor_faults": 1993
+          },
+          {
+            "ms": 132.390874,
+            "rss_kb": 25368,
+            "minor_faults": 2512
+          },
+          {
+            "ms": 131.184234,
+            "rss_kb": 25516,
+            "minor_faults": 2515
+          },
+          {
+            "ms": 128.90026,
+            "rss_kb": 25880,
+            "minor_faults": 2526
+          },
+          {
+            "ms": 129.954982,
+            "rss_kb": 25568,
+            "minor_faults": 2514
+          },
+          {
+            "ms": 127.16637,
+            "rss_kb": 25468,
+            "minor_faults": 2505
+          },
+          {
+            "ms": 125.267313,
+            "rss_kb": 25564,
+            "minor_faults": 2506
+          },
+          {
+            "ms": 127.47284,
+            "rss_kb": 25608,
+            "minor_faults": 2529
+          },
+          {
+            "ms": 127.557907,
+            "rss_kb": 25784,
+            "minor_faults": 2012
+          },
+          {
+            "ms": 127.105534,
+            "rss_kb": 25288,
+            "minor_faults": 2020
+          },
+          {
+            "ms": 120.558642,
+            "rss_kb": 25348,
+            "minor_faults": 1994
+          },
+          {
+            "ms": 124.473329,
+            "rss_kb": 26016,
+            "minor_faults": 2526
+          },
+          {
+            "ms": 125.726167,
+            "rss_kb": 25560,
+            "minor_faults": 2516
+          },
+          {
+            "ms": 125.185997,
+            "rss_kb": 25864,
+            "minor_faults": 2005
+          },
+          {
+            "ms": 126.459977,
+            "rss_kb": 25980,
+            "minor_faults": 2524
+          },
+          {
+            "ms": 158.705816,
+            "rss_kb": 25496,
+            "minor_faults": 1987
+          },
+          {
+            "ms": 125.951404,
+            "rss_kb": 25688,
+            "minor_faults": 2513
+          },
+          {
+            "ms": 127.152995,
+            "rss_kb": 25848,
+            "minor_faults": 2509
+          },
+          {
+            "ms": 127.873005,
+            "rss_kb": 25420,
+            "minor_faults": 2522
+          },
+          {
+            "ms": 128.664471,
+            "rss_kb": 25384,
+            "minor_faults": 2516
+          },
+          {
+            "ms": 130.50493,
+            "rss_kb": 25428,
+            "minor_faults": 2530
+          },
+          {
+            "ms": 127.977541,
+            "rss_kb": 25872,
+            "minor_faults": 2008
+          },
+          {
+            "ms": 125.703593,
+            "rss_kb": 25556,
+            "minor_faults": 2003
+          },
+          {
+            "ms": 127.78319,
+            "rss_kb": 25564,
+            "minor_faults": 2509
+          },
+          {
+            "ms": 128.340145,
+            "rss_kb": 25952,
+            "minor_faults": 2516
+          }
+        ],
+        "after": [
+          {
+            "ms": 128.03329,
+            "rss_kb": 25512,
+            "minor_faults": 2508
+          },
+          {
+            "ms": 133.944854,
+            "rss_kb": 25892,
+            "minor_faults": 2523
+          },
+          {
+            "ms": 130.275582,
+            "rss_kb": 25420,
+            "minor_faults": 2516
+          },
+          {
+            "ms": 128.659028,
+            "rss_kb": 25508,
+            "minor_faults": 2505
+          },
+          {
+            "ms": 135.099946,
+            "rss_kb": 25588,
+            "minor_faults": 2507
+          },
+          {
+            "ms": 131.175371,
+            "rss_kb": 25572,
+            "minor_faults": 1993
+          },
+          {
+            "ms": 130.82107,
+            "rss_kb": 25572,
+            "minor_faults": 2506
+          },
+          {
+            "ms": 131.09413,
+            "rss_kb": 25388,
+            "minor_faults": 2508
+          },
+          {
+            "ms": 128.803905,
+            "rss_kb": 26016,
+            "minor_faults": 2525
+          },
+          {
+            "ms": 127.845087,
+            "rss_kb": 26016,
+            "minor_faults": 2523
+          },
+          {
+            "ms": 127.805288,
+            "rss_kb": 25512,
+            "minor_faults": 2510
+          },
+          {
+            "ms": 127.448003,
+            "rss_kb": 25904,
+            "minor_faults": 2528
+          },
+          {
+            "ms": 127.779069,
+            "rss_kb": 25452,
+            "minor_faults": 2517
+          },
+          {
+            "ms": 129.515772,
+            "rss_kb": 25892,
+            "minor_faults": 2524
+          },
+          {
+            "ms": 126.734501,
+            "rss_kb": 25588,
+            "minor_faults": 2513
+          },
+          {
+            "ms": 122.667723,
+            "rss_kb": 25320,
+            "minor_faults": 2514
+          },
+          {
+            "ms": 130.606541,
+            "rss_kb": 25568,
+            "minor_faults": 2509
+          },
+          {
+            "ms": 124.881752,
+            "rss_kb": 25308,
+            "minor_faults": 2512
+          },
+          {
+            "ms": 124.683675,
+            "rss_kb": 26128,
+            "minor_faults": 2527
+          },
+          {
+            "ms": 126.524804,
+            "rss_kb": 25444,
+            "minor_faults": 2517
+          },
+          {
+            "ms": 129.476287,
+            "rss_kb": 25460,
+            "minor_faults": 2507
+          },
+          {
+            "ms": 124.819338,
+            "rss_kb": 25380,
+            "minor_faults": 2001
+          },
+          {
+            "ms": 125.619798,
+            "rss_kb": 25636,
+            "minor_faults": 2010
+          },
+          {
+            "ms": 129.31115,
+            "rss_kb": 25880,
+            "minor_faults": 2523
+          },
+          {
+            "ms": 128.172553,
+            "rss_kb": 26012,
+            "minor_faults": 2529
+          },
+          {
+            "ms": 126.865074,
+            "rss_kb": 25436,
+            "minor_faults": 2518
+          },
+          {
+            "ms": 127.013697,
+            "rss_kb": 25496,
+            "minor_faults": 2515
+          },
+          {
+            "ms": 127.073556,
+            "rss_kb": 25388,
+            "minor_faults": 2513
+          },
+          {
+            "ms": 125.428991,
+            "rss_kb": 25620,
+            "minor_faults": 2512
+          },
+          {
+            "ms": 123.951687,
+            "rss_kb": 25376,
+            "minor_faults": 2505
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "1833dec4f1106eb4e293cc1cdf906c6c3c576d000a51b001d8da50a853dd22ec",
+        "before": "1833dec4f1106eb4e293cc1cdf906c6c3c576d000a51b001d8da50a853dd22ec",
+        "after": "1833dec4f1106eb4e293cc1cdf906c6c3c576d000a51b001d8da50a853dd22ec"
+      },
+      "summary": {
+        "git": {
+          "ms": 99.79609099999999,
+          "rss_kb": 19546.0,
+          "max_rss_kb": 19780
+        },
+        "before": {
+          "ms": 127.82809750000001,
+          "rss_kb": 25566.0,
+          "max_rss_kb": 26100
+        },
+        "after": {
+          "ms": 127.8251875,
+          "rss_kb": 25540.0,
+          "max_rss_kb": 26128
+        }
+      }
+    },
+    {
+      "id": "revs/author-n50@deep-history-cg",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-commit-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "rev-list",
+          "--author=.",
+          "-n",
+          "50",
+          "HEAD"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "revs",
+          "--author=.",
+          "-n",
+          "50",
+          "HEAD"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "revs",
+          "--author=.",
+          "-n",
+          "50",
+          "HEAD"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 2.852476,
+            "rss_kb": 9976,
+            "minor_faults": 398
+          },
+          {
+            "ms": 2.597603,
+            "rss_kb": 9976,
+            "minor_faults": 399
+          },
+          {
+            "ms": 2.512035,
+            "rss_kb": 9844,
+            "minor_faults": 398
+          },
+          {
+            "ms": 2.446006,
+            "rss_kb": 9968,
+            "minor_faults": 399
+          },
+          {
+            "ms": 2.614929,
+            "rss_kb": 10104,
+            "minor_faults": 401
+          },
+          {
+            "ms": 2.552295,
+            "rss_kb": 10232,
+            "minor_faults": 402
+          },
+          {
+            "ms": 2.533557,
+            "rss_kb": 10232,
+            "minor_faults": 402
+          },
+          {
+            "ms": 2.638195,
+            "rss_kb": 10108,
+            "minor_faults": 402
+          },
+          {
+            "ms": 2.497723,
+            "rss_kb": 9976,
+            "minor_faults": 399
+          },
+          {
+            "ms": 2.431625,
+            "rss_kb": 10104,
+            "minor_faults": 401
+          },
+          {
+            "ms": 2.752175,
+            "rss_kb": 9892,
+            "minor_faults": 396
+          },
+          {
+            "ms": 2.604643,
+            "rss_kb": 9976,
+            "minor_faults": 399
+          },
+          {
+            "ms": 2.572556,
+            "rss_kb": 10040,
+            "minor_faults": 400
+          },
+          {
+            "ms": 2.547818,
+            "rss_kb": 10104,
+            "minor_faults": 400
+          },
+          {
+            "ms": 2.516101,
+            "rss_kb": 9912,
+            "minor_faults": 398
+          },
+          {
+            "ms": 2.432156,
+            "rss_kb": 10236,
+            "minor_faults": 401
+          },
+          {
+            "ms": 2.699636,
+            "rss_kb": 9872,
+            "minor_faults": 397
+          },
+          {
+            "ms": 2.532676,
+            "rss_kb": 10100,
+            "minor_faults": 400
+          },
+          {
+            "ms": 2.54918,
+            "rss_kb": 9972,
+            "minor_faults": 398
+          },
+          {
+            "ms": 2.529792,
+            "rss_kb": 10040,
+            "minor_faults": 399
+          },
+          {
+            "ms": 2.3887,
+            "rss_kb": 10036,
+            "minor_faults": 398
+          },
+          {
+            "ms": 2.458044,
+            "rss_kb": 9912,
+            "minor_faults": 398
+          },
+          {
+            "ms": 26.670053,
+            "rss_kb": 10040,
+            "minor_faults": 399
+          },
+          {
+            "ms": 4.741817,
+            "rss_kb": 9912,
+            "minor_faults": 398
+          },
+          {
+            "ms": 2.48903,
+            "rss_kb": 10104,
+            "minor_faults": 400
+          },
+          {
+            "ms": 2.609191,
+            "rss_kb": 10100,
+            "minor_faults": 400
+          },
+          {
+            "ms": 2.560087,
+            "rss_kb": 9976,
+            "minor_faults": 400
+          },
+          {
+            "ms": 2.489392,
+            "rss_kb": 10040,
+            "minor_faults": 399
+          },
+          {
+            "ms": 3.587588,
+            "rss_kb": 9976,
+            "minor_faults": 398
+          },
+          {
+            "ms": 2.984924,
+            "rss_kb": 9908,
+            "minor_faults": 399
+          }
+        ],
+        "before": [
+          {
+            "ms": 4.554707,
+            "rss_kb": 19636,
+            "minor_faults": 680
+          },
+          {
+            "ms": 4.300426,
+            "rss_kb": 19188,
+            "minor_faults": 671
+          },
+          {
+            "ms": 4.352844,
+            "rss_kb": 19764,
+            "minor_faults": 681
+          },
+          {
+            "ms": 4.117161,
+            "rss_kb": 19764,
+            "minor_faults": 681
+          },
+          {
+            "ms": 4.273285,
+            "rss_kb": 19060,
+            "minor_faults": 672
+          },
+          {
+            "ms": 4.427215,
+            "rss_kb": 19188,
+            "minor_faults": 673
+          },
+          {
+            "ms": 4.091473,
+            "rss_kb": 19212,
+            "minor_faults": 677
+          },
+          {
+            "ms": 6.590368,
+            "rss_kb": 19184,
+            "minor_faults": 674
+          },
+          {
+            "ms": 4.406425,
+            "rss_kb": 19444,
+            "minor_faults": 677
+          },
+          {
+            "ms": 4.164702,
+            "rss_kb": 19600,
+            "minor_faults": 680
+          },
+          {
+            "ms": 4.528999,
+            "rss_kb": 19164,
+            "minor_faults": 676
+          },
+          {
+            "ms": 4.805092,
+            "rss_kb": 19188,
+            "minor_faults": 677
+          },
+          {
+            "ms": 4.33709,
+            "rss_kb": 19896,
+            "minor_faults": 687
+          },
+          {
+            "ms": 4.296359,
+            "rss_kb": 19828,
+            "minor_faults": 682
+          },
+          {
+            "ms": 4.412854,
+            "rss_kb": 19760,
+            "minor_faults": 680
+          },
+          {
+            "ms": 4.198162,
+            "rss_kb": 19236,
+            "minor_faults": 677
+          },
+          {
+            "ms": 7.223917,
+            "rss_kb": 19060,
+            "minor_faults": 671
+          },
+          {
+            "ms": 4.71026,
+            "rss_kb": 19444,
+            "minor_faults": 678
+          },
+          {
+            "ms": 4.386855,
+            "rss_kb": 19188,
+            "minor_faults": 673
+          },
+          {
+            "ms": 4.205664,
+            "rss_kb": 19448,
+            "minor_faults": 677
+          },
+          {
+            "ms": 4.073936,
+            "rss_kb": 19444,
+            "minor_faults": 677
+          },
+          {
+            "ms": 4.224141,
+            "rss_kb": 19764,
+            "minor_faults": 682
+          },
+          {
+            "ms": 4.365132,
+            "rss_kb": 19856,
+            "minor_faults": 684
+          },
+          {
+            "ms": 4.774486,
+            "rss_kb": 19444,
+            "minor_faults": 676
+          },
+          {
+            "ms": 4.198813,
+            "rss_kb": 19640,
+            "minor_faults": 681
+          },
+          {
+            "ms": 4.448458,
+            "rss_kb": 19892,
+            "minor_faults": 686
+          },
+          {
+            "ms": 4.577331,
+            "rss_kb": 19632,
+            "minor_faults": 678
+          },
+          {
+            "ms": 4.239064,
+            "rss_kb": 19640,
+            "minor_faults": 682
+          },
+          {
+            "ms": 4.125673,
+            "rss_kb": 19764,
+            "minor_faults": 681
+          },
+          {
+            "ms": 5.024941,
+            "rss_kb": 19764,
+            "minor_faults": 680
+          }
+        ],
+        "after": [
+          {
+            "ms": 4.219244,
+            "rss_kb": 19072,
+            "minor_faults": 672
+          },
+          {
+            "ms": 4.231942,
+            "rss_kb": 19124,
+            "minor_faults": 674
+          },
+          {
+            "ms": 4.048568,
+            "rss_kb": 19584,
+            "minor_faults": 679
+          },
+          {
+            "ms": 4.324411,
+            "rss_kb": 19584,
+            "minor_faults": 678
+          },
+          {
+            "ms": 4.204922,
+            "rss_kb": 19584,
+            "minor_faults": 679
+          },
+          {
+            "ms": 4.135258,
+            "rss_kb": 19588,
+            "minor_faults": 679
+          },
+          {
+            "ms": 4.509248,
+            "rss_kb": 19388,
+            "minor_faults": 675
+          },
+          {
+            "ms": 4.233175,
+            "rss_kb": 19588,
+            "minor_faults": 679
+          },
+          {
+            "ms": 4.198082,
+            "rss_kb": 19584,
+            "minor_faults": 678
+          },
+          {
+            "ms": 7.020222,
+            "rss_kb": 19520,
+            "minor_faults": 679
+          },
+          {
+            "ms": 5.119463,
+            "rss_kb": 19008,
+            "minor_faults": 670
+          },
+          {
+            "ms": 4.624841,
+            "rss_kb": 19460,
+            "minor_faults": 677
+          },
+          {
+            "ms": 4.423641,
+            "rss_kb": 19520,
+            "minor_faults": 680
+          },
+          {
+            "ms": 4.347647,
+            "rss_kb": 19576,
+            "minor_faults": 677
+          },
+          {
+            "ms": 4.261056,
+            "rss_kb": 19584,
+            "minor_faults": 679
+          },
+          {
+            "ms": 7.842004,
+            "rss_kb": 19072,
+            "minor_faults": 674
+          },
+          {
+            "ms": 4.391842,
+            "rss_kb": 19456,
+            "minor_faults": 678
+          },
+          {
+            "ms": 4.231582,
+            "rss_kb": 19392,
+            "minor_faults": 676
+          },
+          {
+            "ms": 4.446875,
+            "rss_kb": 19516,
+            "minor_faults": 677
+          },
+          {
+            "ms": 4.244672,
+            "rss_kb": 19520,
+            "minor_faults": 678
+          },
+          {
+            "ms": 4.028648,
+            "rss_kb": 19520,
+            "minor_faults": 676
+          },
+          {
+            "ms": 4.485894,
+            "rss_kb": 19072,
+            "minor_faults": 672
+          },
+          {
+            "ms": 4.221187,
+            "rss_kb": 19072,
+            "minor_faults": 672
+          },
+          {
+            "ms": 5.021065,
+            "rss_kb": 19136,
+            "minor_faults": 675
+          },
+          {
+            "ms": 4.729268,
+            "rss_kb": 19580,
+            "minor_faults": 680
+          },
+          {
+            "ms": 4.384611,
+            "rss_kb": 18944,
+            "minor_faults": 671
+          },
+          {
+            "ms": 4.285172,
+            "rss_kb": 19576,
+            "minor_faults": 679
+          },
+          {
+            "ms": 4.355137,
+            "rss_kb": 19456,
+            "minor_faults": 677
+          },
+          {
+            "ms": 4.196289,
+            "rss_kb": 18944,
+            "minor_faults": 670
+          },
+          {
+            "ms": 4.209198,
+            "rss_kb": 19520,
+            "minor_faults": 678
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "4ba100f536c4f06470bcdbff19b2f0bd9da901cbaf024f808ceca4d97fcbb033",
+        "before": "157b7ded3d28907bff65f73eca50ed969fea3258528c1b25f870727f679a8130",
+        "after": "157b7ded3d28907bff65f73eca50ed969fea3258528c1b25f870727f679a8130"
+      },
+      "summary": {
+        "git": {
+          "ms": 2.5507375,
+          "rss_kb": 10006.0,
+          "max_rss_kb": 10236
+        },
+        "before": {
+          "ms": 4.358988,
+          "rss_kb": 19524.0,
+          "max_rss_kb": 19896
+        },
+        "after": {
+          "ms": 4.3047915,
+          "rss_kb": 19518.0,
+          "max_rss_kb": 19588
+        }
+      }
+    },
+    {
+      "id": "revs/count-author@deep-history-cg",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-commit-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "rev-list",
+          "--count",
+          "--author=.",
+          "HEAD"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "revs",
+          "--count",
+          "--author=.",
+          "HEAD"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "revs",
+          "--count",
+          "--author=.",
+          "HEAD"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 107.114986,
+            "rss_kb": 22712,
+            "minor_faults": 3154
+          },
+          {
+            "ms": 101.952254,
+            "rss_kb": 22776,
+            "minor_faults": 3156
+          },
+          {
+            "ms": 108.474052,
+            "rss_kb": 22652,
+            "minor_faults": 3154
+          },
+          {
+            "ms": 134.960946,
+            "rss_kb": 22648,
+            "minor_faults": 3153
+          },
+          {
+            "ms": 109.170838,
+            "rss_kb": 22584,
+            "minor_faults": 3153
+          },
+          {
+            "ms": 106.633123,
+            "rss_kb": 22904,
+            "minor_faults": 3157
+          },
+          {
+            "ms": 101.739925,
+            "rss_kb": 22904,
+            "minor_faults": 3158
+          },
+          {
+            "ms": 108.921013,
+            "rss_kb": 22776,
+            "minor_faults": 3154
+          },
+          {
+            "ms": 102.668908,
+            "rss_kb": 22652,
+            "minor_faults": 3155
+          },
+          {
+            "ms": 106.696507,
+            "rss_kb": 22584,
+            "minor_faults": 3153
+          },
+          {
+            "ms": 110.858929,
+            "rss_kb": 22780,
+            "minor_faults": 3154
+          },
+          {
+            "ms": 109.480552,
+            "rss_kb": 22420,
+            "minor_faults": 3153
+          },
+          {
+            "ms": 116.692425,
+            "rss_kb": 22772,
+            "minor_faults": 3156
+          },
+          {
+            "ms": 97.649973,
+            "rss_kb": 22648,
+            "minor_faults": 3153
+          },
+          {
+            "ms": 97.779909,
+            "rss_kb": 22780,
+            "minor_faults": 3155
+          },
+          {
+            "ms": 101.617493,
+            "rss_kb": 22712,
+            "minor_faults": 3153
+          },
+          {
+            "ms": 97.940469,
+            "rss_kb": 22780,
+            "minor_faults": 3157
+          },
+          {
+            "ms": 102.281067,
+            "rss_kb": 22648,
+            "minor_faults": 3153
+          },
+          {
+            "ms": 101.934778,
+            "rss_kb": 22572,
+            "minor_faults": 3155
+          },
+          {
+            "ms": 102.926465,
+            "rss_kb": 22580,
+            "minor_faults": 3155
+          },
+          {
+            "ms": 94.531027,
+            "rss_kb": 22660,
+            "minor_faults": 3153
+          },
+          {
+            "ms": 97.320399,
+            "rss_kb": 22780,
+            "minor_faults": 3157
+          },
+          {
+            "ms": 109.275584,
+            "rss_kb": 22844,
+            "minor_faults": 3159
+          },
+          {
+            "ms": 111.768552,
+            "rss_kb": 22652,
+            "minor_faults": 3154
+          },
+          {
+            "ms": 118.286295,
+            "rss_kb": 22716,
+            "minor_faults": 3155
+          },
+          {
+            "ms": 106.594825,
+            "rss_kb": 22588,
+            "minor_faults": 3153
+          },
+          {
+            "ms": 109.605238,
+            "rss_kb": 22712,
+            "minor_faults": 3154
+          },
+          {
+            "ms": 105.901865,
+            "rss_kb": 22840,
+            "minor_faults": 3155
+          },
+          {
+            "ms": 142.421342,
+            "rss_kb": 22708,
+            "minor_faults": 3153
+          },
+          {
+            "ms": 104.871501,
+            "rss_kb": 22780,
+            "minor_faults": 3156
+          }
+        ],
+        "before": [
+          {
+            "ms": 128.646322,
+            "rss_kb": 26184,
+            "minor_faults": 2024
+          },
+          {
+            "ms": 138.099046,
+            "rss_kb": 25504,
+            "minor_faults": 1990
+          },
+          {
+            "ms": 134.049069,
+            "rss_kb": 25632,
+            "minor_faults": 2006
+          },
+          {
+            "ms": 122.688185,
+            "rss_kb": 26056,
+            "minor_faults": 2016
+          },
+          {
+            "ms": 129.933489,
+            "rss_kb": 25988,
+            "minor_faults": 2001
+          },
+          {
+            "ms": 133.646526,
+            "rss_kb": 25640,
+            "minor_faults": 2531
+          },
+          {
+            "ms": 129.354911,
+            "rss_kb": 25764,
+            "minor_faults": 2512
+          },
+          {
+            "ms": 130.320368,
+            "rss_kb": 25480,
+            "minor_faults": 1996
+          },
+          {
+            "ms": 131.121931,
+            "rss_kb": 25676,
+            "minor_faults": 2007
+          },
+          {
+            "ms": 131.345185,
+            "rss_kb": 25496,
+            "minor_faults": 1992
+          },
+          {
+            "ms": 131.83494,
+            "rss_kb": 25760,
+            "minor_faults": 2002
+          },
+          {
+            "ms": 129.219728,
+            "rss_kb": 25500,
+            "minor_faults": 2013
+          },
+          {
+            "ms": 137.082517,
+            "rss_kb": 25676,
+            "minor_faults": 2018
+          },
+          {
+            "ms": 127.497386,
+            "rss_kb": 26064,
+            "minor_faults": 2522
+          },
+          {
+            "ms": 126.257947,
+            "rss_kb": 25640,
+            "minor_faults": 2001
+          },
+          {
+            "ms": 123.46502,
+            "rss_kb": 25816,
+            "minor_faults": 2523
+          },
+          {
+            "ms": 123.884088,
+            "rss_kb": 25612,
+            "minor_faults": 2511
+          },
+          {
+            "ms": 124.174824,
+            "rss_kb": 26016,
+            "minor_faults": 2522
+          },
+          {
+            "ms": 123.978039,
+            "rss_kb": 26004,
+            "minor_faults": 2014
+          },
+          {
+            "ms": 127.928532,
+            "rss_kb": 26076,
+            "minor_faults": 2009
+          },
+          {
+            "ms": 121.698832,
+            "rss_kb": 25496,
+            "minor_faults": 1997
+          },
+          {
+            "ms": 135.626424,
+            "rss_kb": 25872,
+            "minor_faults": 2018
+          },
+          {
+            "ms": 126.823265,
+            "rss_kb": 25620,
+            "minor_faults": 2013
+          },
+          {
+            "ms": 131.707538,
+            "rss_kb": 25512,
+            "minor_faults": 2519
+          },
+          {
+            "ms": 131.974879,
+            "rss_kb": 25684,
+            "minor_faults": 2519
+          },
+          {
+            "ms": 131.291144,
+            "rss_kb": 26000,
+            "minor_faults": 2010
+          },
+          {
+            "ms": 126.665398,
+            "rss_kb": 25648,
+            "minor_faults": 1997
+          },
+          {
+            "ms": 126.577416,
+            "rss_kb": 26028,
+            "minor_faults": 2016
+          },
+          {
+            "ms": 130.204955,
+            "rss_kb": 26000,
+            "minor_faults": 2015
+          },
+          {
+            "ms": 125.868062,
+            "rss_kb": 26084,
+            "minor_faults": 2001
+          }
+        ],
+        "after": [
+          {
+            "ms": 125.508377,
+            "rss_kb": 25568,
+            "minor_faults": 2515
+          },
+          {
+            "ms": 137.874815,
+            "rss_kb": 25564,
+            "minor_faults": 1995
+          },
+          {
+            "ms": 127.144927,
+            "rss_kb": 25716,
+            "minor_faults": 2015
+          },
+          {
+            "ms": 126.728102,
+            "rss_kb": 26024,
+            "minor_faults": 2517
+          },
+          {
+            "ms": 126.645979,
+            "rss_kb": 25712,
+            "minor_faults": 2003
+          },
+          {
+            "ms": 126.8668,
+            "rss_kb": 25648,
+            "minor_faults": 1999
+          },
+          {
+            "ms": 130.418585,
+            "rss_kb": 25768,
+            "minor_faults": 2516
+          },
+          {
+            "ms": 129.522752,
+            "rss_kb": 25916,
+            "minor_faults": 2534
+          },
+          {
+            "ms": 128.679197,
+            "rss_kb": 25616,
+            "minor_faults": 2011
+          },
+          {
+            "ms": 134.78363,
+            "rss_kb": 25776,
+            "minor_faults": 2010
+          },
+          {
+            "ms": 128.515563,
+            "rss_kb": 25684,
+            "minor_faults": 2519
+          },
+          {
+            "ms": 126.843616,
+            "rss_kb": 25696,
+            "minor_faults": 2007
+          },
+          {
+            "ms": 127.015142,
+            "rss_kb": 25696,
+            "minor_faults": 2020
+          },
+          {
+            "ms": 125.538338,
+            "rss_kb": 26152,
+            "minor_faults": 2007
+          },
+          {
+            "ms": 125.235865,
+            "rss_kb": 26068,
+            "minor_faults": 2520
+          },
+          {
+            "ms": 123.625651,
+            "rss_kb": 25632,
+            "minor_faults": 2010
+          },
+          {
+            "ms": 122.143589,
+            "rss_kb": 25712,
+            "minor_faults": 2512
+          },
+          {
+            "ms": 128.126709,
+            "rss_kb": 25744,
+            "minor_faults": 2513
+          },
+          {
+            "ms": 122.651911,
+            "rss_kb": 25688,
+            "minor_faults": 1999
+          },
+          {
+            "ms": 152.465632,
+            "rss_kb": 25624,
+            "minor_faults": 2513
+          },
+          {
+            "ms": 122.464109,
+            "rss_kb": 25684,
+            "minor_faults": 2008
+          },
+          {
+            "ms": 145.82093,
+            "rss_kb": 25708,
+            "minor_faults": 2004
+          },
+          {
+            "ms": 133.001048,
+            "rss_kb": 25708,
+            "minor_faults": 2001
+          },
+          {
+            "ms": 133.080466,
+            "rss_kb": 25744,
+            "minor_faults": 2515
+          },
+          {
+            "ms": 135.275718,
+            "rss_kb": 26024,
+            "minor_faults": 2002
+          },
+          {
+            "ms": 133.260556,
+            "rss_kb": 25648,
+            "minor_faults": 1998
+          },
+          {
+            "ms": 134.168838,
+            "rss_kb": 25776,
+            "minor_faults": 2000
+          },
+          {
+            "ms": 130.635951,
+            "rss_kb": 26024,
+            "minor_faults": 2517
+          },
+          {
+            "ms": 140.137718,
+            "rss_kb": 25716,
+            "minor_faults": 2007
+          },
+          {
+            "ms": 130.445876,
+            "rss_kb": 25704,
+            "minor_faults": 2010
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "1833dec4f1106eb4e293cc1cdf906c6c3c576d000a51b001d8da50a853dd22ec",
+        "before": "1833dec4f1106eb4e293cc1cdf906c6c3c576d000a51b001d8da50a853dd22ec",
+        "after": "1833dec4f1106eb4e293cc1cdf906c6c3c576d000a51b001d8da50a853dd22ec"
+      },
+      "summary": {
+        "git": {
+          "ms": 106.613974,
+          "rss_kb": 22712.0,
+          "max_rss_kb": 22904
+        },
+        "before": {
+          "ms": 129.2873195,
+          "rss_kb": 25722.0,
+          "max_rss_kb": 26184
+        },
+        "after": {
+          "ms": 128.59738,
+          "rss_kb": 25710.0,
+          "max_rss_kb": 26152
+        }
+      }
+    },
+    {
+      "id": "revs/count-since@deep-history",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-no-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "rev-list",
+          "--count",
+          "--since=1970-01-01 13:53:00 +0000",
+          "-n",
+          "20",
+          "HEAD"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "revs",
+          "--count",
+          "--since=1970-01-01 13:53:00 +0000",
+          "-n",
+          "20",
+          "HEAD"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "revs",
+          "--count",
+          "--since=1970-01-01 13:53:00 +0000",
+          "-n",
+          "20",
+          "HEAD"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 2.569513,
+            "rss_kb": 6492,
+            "minor_faults": 217
+          },
+          {
+            "ms": 2.346758,
+            "rss_kb": 6692,
+            "minor_faults": 218
+          },
+          {
+            "ms": 2.403975,
+            "rss_kb": 6564,
+            "minor_faults": 218
+          },
+          {
+            "ms": 2.306237,
+            "rss_kb": 6500,
+            "minor_faults": 216
+          },
+          {
+            "ms": 2.337495,
+            "rss_kb": 6496,
+            "minor_faults": 216
+          },
+          {
+            "ms": 2.3274,
+            "rss_kb": 6628,
+            "minor_faults": 216
+          },
+          {
+            "ms": 2.289013,
+            "rss_kb": 6564,
+            "minor_faults": 217
+          },
+          {
+            "ms": 2.356343,
+            "rss_kb": 6692,
+            "minor_faults": 219
+          },
+          {
+            "ms": 2.284625,
+            "rss_kb": 6500,
+            "minor_faults": 217
+          },
+          {
+            "ms": 2.21446,
+            "rss_kb": 6692,
+            "minor_faults": 218
+          },
+          {
+            "ms": 2.257525,
+            "rss_kb": 6668,
+            "minor_faults": 218
+          },
+          {
+            "ms": 2.203074,
+            "rss_kb": 6500,
+            "minor_faults": 218
+          },
+          {
+            "ms": 2.215973,
+            "rss_kb": 6696,
+            "minor_faults": 219
+          },
+          {
+            "ms": 2.271466,
+            "rss_kb": 6604,
+            "minor_faults": 217
+          },
+          {
+            "ms": 2.220519,
+            "rss_kb": 6548,
+            "minor_faults": 217
+          },
+          {
+            "ms": 2.144235,
+            "rss_kb": 6548,
+            "minor_faults": 217
+          },
+          {
+            "ms": 2.33407,
+            "rss_kb": 6604,
+            "minor_faults": 217
+          },
+          {
+            "ms": 2.20052,
+            "rss_kb": 6616,
+            "minor_faults": 217
+          },
+          {
+            "ms": 2.179939,
+            "rss_kb": 6556,
+            "minor_faults": 217
+          },
+          {
+            "ms": 2.190394,
+            "rss_kb": 6676,
+            "minor_faults": 218
+          },
+          {
+            "ms": 2.156594,
+            "rss_kb": 6548,
+            "minor_faults": 218
+          },
+          {
+            "ms": 2.124425,
+            "rss_kb": 6552,
+            "minor_faults": 217
+          },
+          {
+            "ms": 2.229042,
+            "rss_kb": 6680,
+            "minor_faults": 219
+          },
+          {
+            "ms": 2.154431,
+            "rss_kb": 6548,
+            "minor_faults": 218
+          },
+          {
+            "ms": 2.239819,
+            "rss_kb": 6500,
+            "minor_faults": 216
+          },
+          {
+            "ms": 2.253769,
+            "rss_kb": 6544,
+            "minor_faults": 218
+          },
+          {
+            "ms": 2.170204,
+            "rss_kb": 6564,
+            "minor_faults": 218
+          },
+          {
+            "ms": 2.131997,
+            "rss_kb": 6696,
+            "minor_faults": 218
+          },
+          {
+            "ms": 2.322101,
+            "rss_kb": 6548,
+            "minor_faults": 217
+          },
+          {
+            "ms": 2.221731,
+            "rss_kb": 6764,
+            "minor_faults": 219
+          }
+        ],
+        "before": [
+          {
+            "ms": 3.954248,
+            "rss_kb": 14596,
+            "minor_faults": 508
+          },
+          {
+            "ms": 3.760569,
+            "rss_kb": 14784,
+            "minor_faults": 509
+          },
+          {
+            "ms": 3.939327,
+            "rss_kb": 14724,
+            "minor_faults": 508
+          },
+          {
+            "ms": 3.612957,
+            "rss_kb": 14532,
+            "minor_faults": 507
+          },
+          {
+            "ms": 3.922181,
+            "rss_kb": 15108,
+            "minor_faults": 516
+          },
+          {
+            "ms": 3.862491,
+            "rss_kb": 14788,
+            "minor_faults": 510
+          },
+          {
+            "ms": 3.752045,
+            "rss_kb": 14852,
+            "minor_faults": 512
+          },
+          {
+            "ms": 3.638235,
+            "rss_kb": 14532,
+            "minor_faults": 507
+          },
+          {
+            "ms": 3.718836,
+            "rss_kb": 14404,
+            "minor_faults": 506
+          },
+          {
+            "ms": 3.547819,
+            "rss_kb": 14724,
+            "minor_faults": 509
+          },
+          {
+            "ms": 5.268329,
+            "rss_kb": 14404,
+            "minor_faults": 505
+          },
+          {
+            "ms": 3.664084,
+            "rss_kb": 14404,
+            "minor_faults": 506
+          },
+          {
+            "ms": 3.556943,
+            "rss_kb": 14852,
+            "minor_faults": 512
+          },
+          {
+            "ms": 3.709462,
+            "rss_kb": 14724,
+            "minor_faults": 509
+          },
+          {
+            "ms": 3.594459,
+            "rss_kb": 14724,
+            "minor_faults": 510
+          },
+          {
+            "ms": 3.460839,
+            "rss_kb": 14724,
+            "minor_faults": 510
+          },
+          {
+            "ms": 3.491024,
+            "rss_kb": 14788,
+            "minor_faults": 511
+          },
+          {
+            "ms": 3.596703,
+            "rss_kb": 14788,
+            "minor_faults": 510
+          },
+          {
+            "ms": 3.360769,
+            "rss_kb": 14724,
+            "minor_faults": 508
+          },
+          {
+            "ms": 3.342061,
+            "rss_kb": 14724,
+            "minor_faults": 510
+          },
+          {
+            "ms": 3.427799,
+            "rss_kb": 14724,
+            "minor_faults": 510
+          },
+          {
+            "ms": 3.293638,
+            "rss_kb": 14788,
+            "minor_faults": 510
+          },
+          {
+            "ms": 3.401059,
+            "rss_kb": 14788,
+            "minor_faults": 510
+          },
+          {
+            "ms": 3.488891,
+            "rss_kb": 14724,
+            "minor_faults": 510
+          },
+          {
+            "ms": 3.345506,
+            "rss_kb": 14852,
+            "minor_faults": 512
+          },
+          {
+            "ms": 3.397995,
+            "rss_kb": 14788,
+            "minor_faults": 511
+          },
+          {
+            "ms": 3.513188,
+            "rss_kb": 14724,
+            "minor_faults": 510
+          },
+          {
+            "ms": 3.383794,
+            "rss_kb": 15108,
+            "minor_faults": 517
+          },
+          {
+            "ms": 3.363783,
+            "rss_kb": 14596,
+            "minor_faults": 509
+          },
+          {
+            "ms": 3.682381,
+            "rss_kb": 14724,
+            "minor_faults": 510
+          }
+        ],
+        "after": [
+          {
+            "ms": 3.773919,
+            "rss_kb": 14548,
+            "minor_faults": 506
+          },
+          {
+            "ms": 3.666758,
+            "rss_kb": 14548,
+            "minor_faults": 507
+          },
+          {
+            "ms": 3.724995,
+            "rss_kb": 14420,
+            "minor_faults": 503
+          },
+          {
+            "ms": 3.926827,
+            "rss_kb": 14548,
+            "minor_faults": 507
+          },
+          {
+            "ms": 3.815901,
+            "rss_kb": 14612,
+            "minor_faults": 506
+          },
+          {
+            "ms": 3.651224,
+            "rss_kb": 14612,
+            "minor_faults": 507
+          },
+          {
+            "ms": 3.906938,
+            "rss_kb": 14740,
+            "minor_faults": 509
+          },
+          {
+            "ms": 3.623483,
+            "rss_kb": 14804,
+            "minor_faults": 508
+          },
+          {
+            "ms": 3.478345,
+            "rss_kb": 14420,
+            "minor_faults": 504
+          },
+          {
+            "ms": 3.686097,
+            "rss_kb": 14580,
+            "minor_faults": 506
+          },
+          {
+            "ms": 3.557434,
+            "rss_kb": 14612,
+            "minor_faults": 508
+          },
+          {
+            "ms": 3.422212,
+            "rss_kb": 14612,
+            "minor_faults": 507
+          },
+          {
+            "ms": 3.78823,
+            "rss_kb": 14932,
+            "minor_faults": 511
+          },
+          {
+            "ms": 3.582021,
+            "rss_kb": 14612,
+            "minor_faults": 507
+          },
+          {
+            "ms": 3.467549,
+            "rss_kb": 14612,
+            "minor_faults": 507
+          },
+          {
+            "ms": 3.691124,
+            "rss_kb": 14420,
+            "minor_faults": 504
+          },
+          {
+            "ms": 3.485647,
+            "rss_kb": 14612,
+            "minor_faults": 506
+          },
+          {
+            "ms": 3.376583,
+            "rss_kb": 14804,
+            "minor_faults": 509
+          },
+          {
+            "ms": 3.489392,
+            "rss_kb": 14612,
+            "minor_faults": 507
+          },
+          {
+            "ms": 3.394249,
+            "rss_kb": 14676,
+            "minor_faults": 506
+          },
+          {
+            "ms": 3.276973,
+            "rss_kb": 14928,
+            "minor_faults": 511
+          },
+          {
+            "ms": 3.425747,
+            "rss_kb": 14676,
+            "minor_faults": 507
+          },
+          {
+            "ms": 3.425586,
+            "rss_kb": 14804,
+            "minor_faults": 509
+          },
+          {
+            "ms": 3.245416,
+            "rss_kb": 14416,
+            "minor_faults": 503
+          },
+          {
+            "ms": 3.476773,
+            "rss_kb": 14804,
+            "minor_faults": 509
+          },
+          {
+            "ms": 3.339717,
+            "rss_kb": 14804,
+            "minor_faults": 510
+          },
+          {
+            "ms": 3.338846,
+            "rss_kb": 14420,
+            "minor_faults": 504
+          },
+          {
+            "ms": 3.723633,
+            "rss_kb": 14612,
+            "minor_faults": 505
+          },
+          {
+            "ms": 3.47464,
+            "rss_kb": 14804,
+            "minor_faults": 510
+          },
+          {
+            "ms": 3.319868,
+            "rss_kb": 14932,
+            "minor_faults": 512
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "5378796307535df3ec8d8b15a2e2dc5641419c3d3060cfe32238c0fa973f7aa3",
+        "before": "5378796307535df3ec8d8b15a2e2dc5641419c3d3060cfe32238c0fa973f7aa3",
+        "after": "5378796307535df3ec8d8b15a2e2dc5641419c3d3060cfe32238c0fa973f7aa3"
+      },
+      "summary": {
+        "git": {
+          "ms": 2.2344305,
+          "rss_kb": 6564.0,
+          "max_rss_kb": 6764
+        },
+        "before": {
+          "ms": 3.575701,
+          "rss_kb": 14724.0,
+          "max_rss_kb": 15108
+        },
+        "after": {
+          "ms": 3.4875195000000003,
+          "rss_kb": 14612.0,
+          "max_rss_kb": 14932
+        }
+      }
+    },
+    {
+      "id": "revs/count@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "rev-list",
+          "--count",
+          "HEAD"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "revs",
+          "--count",
+          "HEAD"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "revs",
+          "--count",
+          "HEAD"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 431.899035,
+            "rss_kb": 60924,
+            "minor_faults": 7164
+          },
+          {
+            "ms": 435.730901,
+            "rss_kb": 60908,
+            "minor_faults": 7163
+          },
+          {
+            "ms": 429.820247,
+            "rss_kb": 60664,
+            "minor_faults": 7158
+          },
+          {
+            "ms": 431.442811,
+            "rss_kb": 60664,
+            "minor_faults": 7157
+          },
+          {
+            "ms": 432.346344,
+            "rss_kb": 60608,
+            "minor_faults": 7159
+          },
+          {
+            "ms": 432.486625,
+            "rss_kb": 60608,
+            "minor_faults": 7161
+          },
+          {
+            "ms": 440.521732,
+            "rss_kb": 60932,
+            "minor_faults": 7164
+          },
+          {
+            "ms": 426.926778,
+            "rss_kb": 60564,
+            "minor_faults": 7159
+          },
+          {
+            "ms": 430.040687,
+            "rss_kb": 60564,
+            "minor_faults": 7160
+          },
+          {
+            "ms": 407.15713,
+            "rss_kb": 60804,
+            "minor_faults": 7164
+          },
+          {
+            "ms": 416.546711,
+            "rss_kb": 60740,
+            "minor_faults": 7159
+          },
+          {
+            "ms": 412.659322,
+            "rss_kb": 60796,
+            "minor_faults": 7161
+          },
+          {
+            "ms": 411.478762,
+            "rss_kb": 60656,
+            "minor_faults": 7162
+          },
+          {
+            "ms": 422.78845,
+            "rss_kb": 60612,
+            "minor_faults": 7160
+          },
+          {
+            "ms": 410.927047,
+            "rss_kb": 60792,
+            "minor_faults": 7160
+          },
+          {
+            "ms": 427.756665,
+            "rss_kb": 60676,
+            "minor_faults": 7159
+          },
+          {
+            "ms": 417.754342,
+            "rss_kb": 60616,
+            "minor_faults": 7159
+          },
+          {
+            "ms": 413.428477,
+            "rss_kb": 60804,
+            "minor_faults": 7161
+          },
+          {
+            "ms": 412.582038,
+            "rss_kb": 60808,
+            "minor_faults": 7161
+          },
+          {
+            "ms": 433.789654,
+            "rss_kb": 60600,
+            "minor_faults": 7159
+          },
+          {
+            "ms": 446.824269,
+            "rss_kb": 60796,
+            "minor_faults": 7160
+          },
+          {
+            "ms": 395.407023,
+            "rss_kb": 60664,
+            "minor_faults": 7159
+          },
+          {
+            "ms": 397.001102,
+            "rss_kb": 60664,
+            "minor_faults": 7158
+          },
+          {
+            "ms": 426.349742,
+            "rss_kb": 60604,
+            "minor_faults": 7158
+          },
+          {
+            "ms": 403.863252,
+            "rss_kb": 60676,
+            "minor_faults": 7160
+          },
+          {
+            "ms": 401.735446,
+            "rss_kb": 60684,
+            "minor_faults": 6139
+          },
+          {
+            "ms": 461.662162,
+            "rss_kb": 60808,
+            "minor_faults": 7161
+          },
+          {
+            "ms": 397.320327,
+            "rss_kb": 60588,
+            "minor_faults": 7158
+          },
+          {
+            "ms": 438.667954,
+            "rss_kb": 60608,
+            "minor_faults": 7159
+          },
+          {
+            "ms": 413.821939,
+            "rss_kb": 60612,
+            "minor_faults": 6138
+          }
+        ],
+        "before": [
+          {
+            "ms": 603.803761,
+            "rss_kb": 126760,
+            "minor_faults": 17617
+          },
+          {
+            "ms": 598.791405,
+            "rss_kb": 124972,
+            "minor_faults": 17285
+          },
+          {
+            "ms": 599.056432,
+            "rss_kb": 126548,
+            "minor_faults": 18660
+          },
+          {
+            "ms": 570.723119,
+            "rss_kb": 126088,
+            "minor_faults": 17960
+          },
+          {
+            "ms": 582.572085,
+            "rss_kb": 125936,
+            "minor_faults": 17997
+          },
+          {
+            "ms": 602.958112,
+            "rss_kb": 126548,
+            "minor_faults": 18068
+          },
+          {
+            "ms": 575.756645,
+            "rss_kb": 127208,
+            "minor_faults": 15185
+          },
+          {
+            "ms": 590.844427,
+            "rss_kb": 126296,
+            "minor_faults": 18660
+          },
+          {
+            "ms": 612.282783,
+            "rss_kb": 125912,
+            "minor_faults": 18428
+          },
+          {
+            "ms": 593.815489,
+            "rss_kb": 125864,
+            "minor_faults": 17440
+          },
+          {
+            "ms": 574.242832,
+            "rss_kb": 126188,
+            "minor_faults": 17037
+          },
+          {
+            "ms": 574.314991,
+            "rss_kb": 127084,
+            "minor_faults": 16206
+          },
+          {
+            "ms": 600.5526,
+            "rss_kb": 125168,
+            "minor_faults": 15752
+          },
+          {
+            "ms": 581.931881,
+            "rss_kb": 125848,
+            "minor_faults": 17481
+          },
+          {
+            "ms": 580.656259,
+            "rss_kb": 127244,
+            "minor_faults": 17227
+          },
+          {
+            "ms": 583.409485,
+            "rss_kb": 125592,
+            "minor_faults": 17353
+          },
+          {
+            "ms": 623.101621,
+            "rss_kb": 126376,
+            "minor_faults": 18001
+          },
+          {
+            "ms": 565.623887,
+            "rss_kb": 125008,
+            "minor_faults": 16658
+          },
+          {
+            "ms": 542.901697,
+            "rss_kb": 125068,
+            "minor_faults": 15749
+          },
+          {
+            "ms": 542.481483,
+            "rss_kb": 126300,
+            "minor_faults": 18102
+          },
+          {
+            "ms": 613.561918,
+            "rss_kb": 125524,
+            "minor_faults": 17325
+          },
+          {
+            "ms": 571.147882,
+            "rss_kb": 125232,
+            "minor_faults": 17307
+          },
+          {
+            "ms": 542.05495,
+            "rss_kb": 125836,
+            "minor_faults": 17990
+          },
+          {
+            "ms": 543.293676,
+            "rss_kb": 125448,
+            "minor_faults": 17296
+          },
+          {
+            "ms": 548.863708,
+            "rss_kb": 125964,
+            "minor_faults": 18470
+          },
+          {
+            "ms": 566.838434,
+            "rss_kb": 125812,
+            "minor_faults": 17379
+          },
+          {
+            "ms": 561.804917,
+            "rss_kb": 126840,
+            "minor_faults": 16714
+          },
+          {
+            "ms": 542.089405,
+            "rss_kb": 126296,
+            "minor_faults": 17985
+          },
+          {
+            "ms": 556.344479,
+            "rss_kb": 127016,
+            "minor_faults": 17200
+          },
+          {
+            "ms": 575.77438,
+            "rss_kb": 125848,
+            "minor_faults": 17358
+          }
+        ],
+        "after": [
+          {
+            "ms": 621.686374,
+            "rss_kb": 126004,
+            "minor_faults": 17499
+          },
+          {
+            "ms": 608.423818,
+            "rss_kb": 126460,
+            "minor_faults": 18003
+          },
+          {
+            "ms": 605.653494,
+            "rss_kb": 127216,
+            "minor_faults": 18192
+          },
+          {
+            "ms": 593.344057,
+            "rss_kb": 125828,
+            "minor_faults": 17934
+          },
+          {
+            "ms": 596.166598,
+            "rss_kb": 125292,
+            "minor_faults": 17336
+          },
+          {
+            "ms": 601.485573,
+            "rss_kb": 126372,
+            "minor_faults": 18114
+          },
+          {
+            "ms": 591.537577,
+            "rss_kb": 126204,
+            "minor_faults": 18045
+          },
+          {
+            "ms": 574.08593,
+            "rss_kb": 125952,
+            "minor_faults": 17964
+          },
+          {
+            "ms": 590.841033,
+            "rss_kb": 124856,
+            "minor_faults": 16777
+          },
+          {
+            "ms": 578.060537,
+            "rss_kb": 126292,
+            "minor_faults": 18080
+          },
+          {
+            "ms": 585.23935,
+            "rss_kb": 126608,
+            "minor_faults": 18162
+          },
+          {
+            "ms": 556.213771,
+            "rss_kb": 126860,
+            "minor_faults": 17154
+          },
+          {
+            "ms": 564.775878,
+            "rss_kb": 125972,
+            "minor_faults": 17491
+          },
+          {
+            "ms": 550.806794,
+            "rss_kb": 125332,
+            "minor_faults": 17888
+          },
+          {
+            "ms": 586.081065,
+            "rss_kb": 126168,
+            "minor_faults": 17077
+          },
+          {
+            "ms": 574.455834,
+            "rss_kb": 125548,
+            "minor_faults": 17355
+          },
+          {
+            "ms": 686.759168,
+            "rss_kb": 125088,
+            "minor_faults": 17287
+          },
+          {
+            "ms": 582.056127,
+            "rss_kb": 125772,
+            "minor_faults": 17340
+          },
+          {
+            "ms": 543.232884,
+            "rss_kb": 126832,
+            "minor_faults": 17214
+          },
+          {
+            "ms": 558.256102,
+            "rss_kb": 126704,
+            "minor_faults": 18170
+          },
+          {
+            "ms": 580.227286,
+            "rss_kb": 126224,
+            "minor_faults": 18063
+          },
+          {
+            "ms": 562.547837,
+            "rss_kb": 125444,
+            "minor_faults": 16264
+          },
+          {
+            "ms": 541.257524,
+            "rss_kb": 125256,
+            "minor_faults": 16772
+          },
+          {
+            "ms": 550.975295,
+            "rss_kb": 125812,
+            "minor_faults": 17318
+          },
+          {
+            "ms": 562.015753,
+            "rss_kb": 125640,
+            "minor_faults": 17865
+          },
+          {
+            "ms": 581.817604,
+            "rss_kb": 126508,
+            "minor_faults": 17116
+          },
+          {
+            "ms": 564.012122,
+            "rss_kb": 126948,
+            "minor_faults": 17225
+          },
+          {
+            "ms": 562.637085,
+            "rss_kb": 125196,
+            "minor_faults": 16791
+          },
+          {
+            "ms": 578.457556,
+            "rss_kb": 125088,
+            "minor_faults": 17328
+          },
+          {
+            "ms": 631.372377,
+            "rss_kb": 125700,
+            "minor_faults": 18428
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "dad32225efecf2ef49df96ea0308161d55e671d34c6714bede677673fc57a647",
+        "before": "dad32225efecf2ef49df96ea0308161d55e671d34c6714bede677673fc57a647",
+        "after": "dad32225efecf2ef49df96ea0308161d55e671d34c6714bede677673fc57a647"
+      },
+      "summary": {
+        "git": {
+          "ms": 424.569096,
+          "rss_kb": 60664.0,
+          "max_rss_kb": 60932
+        },
+        "before": {
+          "ms": 575.7655125,
+          "rss_kb": 125950.0,
+          "max_rss_kb": 127244
+        },
+        "after": {
+          "ms": 579.3424210000001,
+          "rss_kb": 125962.0,
+          "max_rss_kb": 127216
+        }
+      }
+    },
+    {
+      "id": "revs/count-path-head@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "rev-list",
+          "--count",
+          "HEAD",
+          "--",
+          "Documentation/git-log.txt"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "revs",
+          "--count",
+          "HEAD",
+          "--",
+          "Documentation/git-log.txt"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "revs",
+          "--count",
+          "HEAD",
+          "--",
+          "Documentation/git-log.txt"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 307.84205,
+            "rss_kb": 242676,
+            "minor_faults": 30095
+          },
+          {
+            "ms": 360.337783,
+            "rss_kb": 242668,
+            "minor_faults": 30095
+          },
+          {
+            "ms": 319.798228,
+            "rss_kb": 242740,
+            "minor_faults": 30097
+          },
+          {
+            "ms": 309.82319,
+            "rss_kb": 242732,
+            "minor_faults": 30097
+          },
+          {
+            "ms": 328.898932,
+            "rss_kb": 242812,
+            "minor_faults": 30099
+          },
+          {
+            "ms": 334.289455,
+            "rss_kb": 242620,
+            "minor_faults": 30095
+          },
+          {
+            "ms": 321.831325,
+            "rss_kb": 242668,
+            "minor_faults": 30096
+          },
+          {
+            "ms": 322.284444,
+            "rss_kb": 242604,
+            "minor_faults": 30094
+          },
+          {
+            "ms": 320.312838,
+            "rss_kb": 242676,
+            "minor_faults": 30096
+          },
+          {
+            "ms": 318.575052,
+            "rss_kb": 242616,
+            "minor_faults": 30094
+          },
+          {
+            "ms": 319.064617,
+            "rss_kb": 242736,
+            "minor_faults": 30096
+          },
+          {
+            "ms": 312.443474,
+            "rss_kb": 242668,
+            "minor_faults": 30095
+          },
+          {
+            "ms": 313.957621,
+            "rss_kb": 242844,
+            "minor_faults": 30097
+          },
+          {
+            "ms": 317.012802,
+            "rss_kb": 242664,
+            "minor_faults": 30094
+          },
+          {
+            "ms": 364.479902,
+            "rss_kb": 242668,
+            "minor_faults": 30096
+          },
+          {
+            "ms": 317.17783,
+            "rss_kb": 242864,
+            "minor_faults": 30096
+          },
+          {
+            "ms": 317.701294,
+            "rss_kb": 242724,
+            "minor_faults": 30097
+          },
+          {
+            "ms": 395.793949,
+            "rss_kb": 242724,
+            "minor_faults": 30095
+          },
+          {
+            "ms": 323.623313,
+            "rss_kb": 242732,
+            "minor_faults": 30096
+          },
+          {
+            "ms": 321.892816,
+            "rss_kb": 242524,
+            "minor_faults": 30096
+          },
+          {
+            "ms": 324.052168,
+            "rss_kb": 242744,
+            "minor_faults": 30095
+          },
+          {
+            "ms": 315.345564,
+            "rss_kb": 242804,
+            "minor_faults": 30097
+          },
+          {
+            "ms": 325.629032,
+            "rss_kb": 242732,
+            "minor_faults": 30097
+          },
+          {
+            "ms": 320.16529,
+            "rss_kb": 242664,
+            "minor_faults": 30094
+          },
+          {
+            "ms": 325.719618,
+            "rss_kb": 242676,
+            "minor_faults": 30096
+          },
+          {
+            "ms": 315.844542,
+            "rss_kb": 242696,
+            "minor_faults": 30096
+          },
+          {
+            "ms": 309.507206,
+            "rss_kb": 242604,
+            "minor_faults": 30095
+          },
+          {
+            "ms": 320.947707,
+            "rss_kb": 242748,
+            "minor_faults": 30097
+          },
+          {
+            "ms": 322.368274,
+            "rss_kb": 242716,
+            "minor_faults": 30096
+          },
+          {
+            "ms": 322.779821,
+            "rss_kb": 242676,
+            "minor_faults": 30095
+          }
+        ],
+        "before": [
+          {
+            "ms": 326.631513,
+            "rss_kb": 270472,
+            "minor_faults": 36963
+          },
+          {
+            "ms": 332.750559,
+            "rss_kb": 270324,
+            "minor_faults": 37481
+          },
+          {
+            "ms": 338.642563,
+            "rss_kb": 270668,
+            "minor_faults": 37509
+          },
+          {
+            "ms": 340.573828,
+            "rss_kb": 270684,
+            "minor_faults": 36470
+          },
+          {
+            "ms": 342.371372,
+            "rss_kb": 270212,
+            "minor_faults": 37476
+          },
+          {
+            "ms": 347.055492,
+            "rss_kb": 270588,
+            "minor_faults": 37499
+          },
+          {
+            "ms": 339.015852,
+            "rss_kb": 270600,
+            "minor_faults": 37477
+          },
+          {
+            "ms": 344.083079,
+            "rss_kb": 270316,
+            "minor_faults": 37004
+          },
+          {
+            "ms": 344.405242,
+            "rss_kb": 270484,
+            "minor_faults": 37516
+          },
+          {
+            "ms": 342.02288,
+            "rss_kb": 270444,
+            "minor_faults": 37498
+          },
+          {
+            "ms": 351.224878,
+            "rss_kb": 270128,
+            "minor_faults": 37500
+          },
+          {
+            "ms": 341.330313,
+            "rss_kb": 270936,
+            "minor_faults": 37549
+          },
+          {
+            "ms": 344.216981,
+            "rss_kb": 270764,
+            "minor_faults": 37494
+          },
+          {
+            "ms": 342.116812,
+            "rss_kb": 270304,
+            "minor_faults": 37521
+          },
+          {
+            "ms": 349.326212,
+            "rss_kb": 270704,
+            "minor_faults": 37536
+          },
+          {
+            "ms": 347.455637,
+            "rss_kb": 270656,
+            "minor_faults": 36488
+          },
+          {
+            "ms": 334.708805,
+            "rss_kb": 270800,
+            "minor_faults": 36495
+          },
+          {
+            "ms": 348.011,
+            "rss_kb": 270688,
+            "minor_faults": 36973
+          },
+          {
+            "ms": 345.378493,
+            "rss_kb": 270496,
+            "minor_faults": 37024
+          },
+          {
+            "ms": 339.963923,
+            "rss_kb": 270500,
+            "minor_faults": 37490
+          },
+          {
+            "ms": 342.837822,
+            "rss_kb": 270456,
+            "minor_faults": 36471
+          },
+          {
+            "ms": 343.54971,
+            "rss_kb": 270260,
+            "minor_faults": 36474
+          },
+          {
+            "ms": 346.074375,
+            "rss_kb": 270740,
+            "minor_faults": 37504
+          },
+          {
+            "ms": 343.043221,
+            "rss_kb": 270836,
+            "minor_faults": 37509
+          },
+          {
+            "ms": 346.237384,
+            "rss_kb": 270688,
+            "minor_faults": 37503
+          },
+          {
+            "ms": 344.879844,
+            "rss_kb": 270412,
+            "minor_faults": 36982
+          },
+          {
+            "ms": 334.793672,
+            "rss_kb": 270576,
+            "minor_faults": 36481
+          },
+          {
+            "ms": 345.40931,
+            "rss_kb": 270508,
+            "minor_faults": 37482
+          },
+          {
+            "ms": 354.95139,
+            "rss_kb": 270672,
+            "minor_faults": 37521
+          },
+          {
+            "ms": 351.375258,
+            "rss_kb": 270812,
+            "minor_faults": 37017
+          }
+        ],
+        "after": [
+          {
+            "ms": 326.48857,
+            "rss_kb": 270444,
+            "minor_faults": 36484
+          },
+          {
+            "ms": 335.47983,
+            "rss_kb": 270564,
+            "minor_faults": 37500
+          },
+          {
+            "ms": 342.172335,
+            "rss_kb": 270524,
+            "minor_faults": 36983
+          },
+          {
+            "ms": 343.135522,
+            "rss_kb": 270460,
+            "minor_faults": 37491
+          },
+          {
+            "ms": 339.445015,
+            "rss_kb": 270532,
+            "minor_faults": 37503
+          },
+          {
+            "ms": 347.956246,
+            "rss_kb": 270576,
+            "minor_faults": 36456
+          },
+          {
+            "ms": 335.767776,
+            "rss_kb": 270696,
+            "minor_faults": 36460
+          },
+          {
+            "ms": 346.728065,
+            "rss_kb": 270568,
+            "minor_faults": 37024
+          },
+          {
+            "ms": 341.347808,
+            "rss_kb": 270540,
+            "minor_faults": 37478
+          },
+          {
+            "ms": 344.634932,
+            "rss_kb": 270848,
+            "minor_faults": 37511
+          },
+          {
+            "ms": 344.992682,
+            "rss_kb": 270560,
+            "minor_faults": 37513
+          },
+          {
+            "ms": 342.754767,
+            "rss_kb": 270328,
+            "minor_faults": 37491
+          },
+          {
+            "ms": 343.53967,
+            "rss_kb": 270716,
+            "minor_faults": 37470
+          },
+          {
+            "ms": 340.953558,
+            "rss_kb": 270304,
+            "minor_faults": 36473
+          },
+          {
+            "ms": 403.447951,
+            "rss_kb": 271232,
+            "minor_faults": 36524
+          },
+          {
+            "ms": 383.522791,
+            "rss_kb": 270424,
+            "minor_faults": 37481
+          },
+          {
+            "ms": 342.011414,
+            "rss_kb": 270696,
+            "minor_faults": 37466
+          },
+          {
+            "ms": 335.500862,
+            "rss_kb": 270360,
+            "minor_faults": 36469
+          },
+          {
+            "ms": 353.714892,
+            "rss_kb": 270204,
+            "minor_faults": 37459
+          },
+          {
+            "ms": 349.400682,
+            "rss_kb": 270416,
+            "minor_faults": 36476
+          },
+          {
+            "ms": 345.241586,
+            "rss_kb": 270424,
+            "minor_faults": 37503
+          },
+          {
+            "ms": 343.180196,
+            "rss_kb": 271100,
+            "minor_faults": 37001
+          },
+          {
+            "ms": 347.493473,
+            "rss_kb": 271000,
+            "minor_faults": 37460
+          },
+          {
+            "ms": 346.525661,
+            "rss_kb": 270520,
+            "minor_faults": 37000
+          },
+          {
+            "ms": 345.275898,
+            "rss_kb": 270296,
+            "minor_faults": 37484
+          },
+          {
+            "ms": 336.017447,
+            "rss_kb": 270892,
+            "minor_faults": 37008
+          },
+          {
+            "ms": 372.168077,
+            "rss_kb": 270360,
+            "minor_faults": 36957
+          },
+          {
+            "ms": 351.937642,
+            "rss_kb": 270540,
+            "minor_faults": 37025
+          },
+          {
+            "ms": 388.392252,
+            "rss_kb": 270724,
+            "minor_faults": 37469
+          },
+          {
+            "ms": 360.714069,
+            "rss_kb": 270544,
+            "minor_faults": 36502
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "e726b440cc164001999e718b51780d80314709efe06e7857282377be9111127b",
+        "before": "e726b440cc164001999e718b51780d80314709efe06e7857282377be9111127b",
+        "after": "e726b440cc164001999e718b51780d80314709efe06e7857282377be9111127b"
+      },
+      "summary": {
+        "git": {
+          "ms": 320.6302725,
+          "rss_kb": 242686.0,
+          "max_rss_kb": 242864
+        },
+        "before": {
+          "ms": 343.8163945,
+          "rss_kb": 270582.0,
+          "max_rss_kb": 270936
+        },
+        "after": {
+          "ms": 344.813807,
+          "rss_kb": 270540.0,
+          "max_rss_kb": 271232
+        }
+      }
+    },
+    {
+      "id": "resolve/ancestor-500@deep-history",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-no-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "rev-parse",
+          "HEAD~500"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "resolve",
+          "HEAD~500"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "resolve",
+          "HEAD~500"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 2.899917,
+            "rss_kb": 6728,
+            "minor_faults": 264
+          },
+          {
+            "ms": 2.857233,
+            "rss_kb": 6728,
+            "minor_faults": 266
+          },
+          {
+            "ms": 2.69441,
+            "rss_kb": 6664,
+            "minor_faults": 264
+          },
+          {
+            "ms": 75.699494,
+            "rss_kb": 6728,
+            "minor_faults": 265
+          },
+          {
+            "ms": 3.090974,
+            "rss_kb": 6832,
+            "minor_faults": 266
+          },
+          {
+            "ms": 2.739186,
+            "rss_kb": 6780,
+            "minor_faults": 265
+          },
+          {
+            "ms": 2.689752,
+            "rss_kb": 6780,
+            "minor_faults": 268
+          },
+          {
+            "ms": 2.718736,
+            "rss_kb": 6732,
+            "minor_faults": 266
+          },
+          {
+            "ms": 2.723262,
+            "rss_kb": 6852,
+            "minor_faults": 266
+          },
+          {
+            "ms": 2.736052,
+            "rss_kb": 6856,
+            "minor_faults": 267
+          },
+          {
+            "ms": 2.739978,
+            "rss_kb": 6600,
+            "minor_faults": 262
+          },
+          {
+            "ms": 2.703553,
+            "rss_kb": 6732,
+            "minor_faults": 265
+          },
+          {
+            "ms": 2.679627,
+            "rss_kb": 6856,
+            "minor_faults": 266
+          },
+          {
+            "ms": 2.728851,
+            "rss_kb": 6784,
+            "minor_faults": 266
+          },
+          {
+            "ms": 2.763833,
+            "rss_kb": 6736,
+            "minor_faults": 264
+          },
+          {
+            "ms": 3.171124,
+            "rss_kb": 6728,
+            "minor_faults": 264
+          },
+          {
+            "ms": 2.7882,
+            "rss_kb": 6724,
+            "minor_faults": 265
+          },
+          {
+            "ms": 2.714319,
+            "rss_kb": 6708,
+            "minor_faults": 265
+          },
+          {
+            "ms": 2.78865,
+            "rss_kb": 6792,
+            "minor_faults": 265
+          },
+          {
+            "ms": 2.85485,
+            "rss_kb": 6724,
+            "minor_faults": 264
+          },
+          {
+            "ms": 2.759156,
+            "rss_kb": 6700,
+            "minor_faults": 266
+          },
+          {
+            "ms": 2.712937,
+            "rss_kb": 6792,
+            "minor_faults": 263
+          },
+          {
+            "ms": 4.776421,
+            "rss_kb": 6792,
+            "minor_faults": 265
+          },
+          {
+            "ms": 6.012594,
+            "rss_kb": 6856,
+            "minor_faults": 266
+          },
+          {
+            "ms": 2.704575,
+            "rss_kb": 6792,
+            "minor_faults": 264
+          },
+          {
+            "ms": 2.885606,
+            "rss_kb": 6728,
+            "minor_faults": 266
+          },
+          {
+            "ms": 2.779337,
+            "rss_kb": 6832,
+            "minor_faults": 267
+          },
+          {
+            "ms": 2.770253,
+            "rss_kb": 6720,
+            "minor_faults": 265
+          },
+          {
+            "ms": 2.980929,
+            "rss_kb": 6860,
+            "minor_faults": 265
+          },
+          {
+            "ms": 2.826868,
+            "rss_kb": 6728,
+            "minor_faults": 262
+          }
+        ],
+        "before": [
+          {
+            "ms": 4.718894,
+            "rss_kb": 14888,
+            "minor_faults": 524
+          },
+          {
+            "ms": 4.546105,
+            "rss_kb": 14824,
+            "minor_faults": 524
+          },
+          {
+            "ms": 4.69603,
+            "rss_kb": 14888,
+            "minor_faults": 524
+          },
+          {
+            "ms": 5.438723,
+            "rss_kb": 14888,
+            "minor_faults": 524
+          },
+          {
+            "ms": 4.827306,
+            "rss_kb": 14692,
+            "minor_faults": 521
+          },
+          {
+            "ms": 4.811604,
+            "rss_kb": 14888,
+            "minor_faults": 526
+          },
+          {
+            "ms": 4.462681,
+            "rss_kb": 14696,
+            "minor_faults": 522
+          },
+          {
+            "ms": 4.514027,
+            "rss_kb": 14888,
+            "minor_faults": 524
+          },
+          {
+            "ms": 4.727507,
+            "rss_kb": 15016,
+            "minor_faults": 528
+          },
+          {
+            "ms": 4.449531,
+            "rss_kb": 14696,
+            "minor_faults": 522
+          },
+          {
+            "ms": 4.457742,
+            "rss_kb": 14888,
+            "minor_faults": 524
+          },
+          {
+            "ms": 4.611343,
+            "rss_kb": 14888,
+            "minor_faults": 523
+          },
+          {
+            "ms": 4.413026,
+            "rss_kb": 14632,
+            "minor_faults": 521
+          },
+          {
+            "ms": 4.468509,
+            "rss_kb": 14632,
+            "minor_faults": 520
+          },
+          {
+            "ms": 4.830151,
+            "rss_kb": 14888,
+            "minor_faults": 525
+          },
+          {
+            "ms": 4.724709,
+            "rss_kb": 14692,
+            "minor_faults": 521
+          },
+          {
+            "ms": 4.532134,
+            "rss_kb": 14696,
+            "minor_faults": 523
+          },
+          {
+            "ms": 4.61582,
+            "rss_kb": 14824,
+            "minor_faults": 525
+          },
+          {
+            "ms": 4.506115,
+            "rss_kb": 14484,
+            "minor_faults": 518
+          },
+          {
+            "ms": 4.559095,
+            "rss_kb": 14888,
+            "minor_faults": 523
+          },
+          {
+            "ms": 4.623491,
+            "rss_kb": 14824,
+            "minor_faults": 525
+          },
+          {
+            "ms": 4.56946,
+            "rss_kb": 14504,
+            "minor_faults": 520
+          },
+          {
+            "ms": 5.011293,
+            "rss_kb": 14888,
+            "minor_faults": 524
+          },
+          {
+            "ms": 5.480456,
+            "rss_kb": 14864,
+            "minor_faults": 526
+          },
+          {
+            "ms": 4.615729,
+            "rss_kb": 14760,
+            "minor_faults": 523
+          },
+          {
+            "ms": 5.481628,
+            "rss_kb": 14632,
+            "minor_faults": 520
+          },
+          {
+            "ms": 4.852114,
+            "rss_kb": 14632,
+            "minor_faults": 520
+          },
+          {
+            "ms": 4.801699,
+            "rss_kb": 15016,
+            "minor_faults": 528
+          },
+          {
+            "ms": 4.961498,
+            "rss_kb": 14888,
+            "minor_faults": 524
+          },
+          {
+            "ms": 5.114718,
+            "rss_kb": 14568,
+            "minor_faults": 517
+          }
+        ],
+        "after": [
+          {
+            "ms": 4.660236,
+            "rss_kb": 14836,
+            "minor_faults": 521
+          },
+          {
+            "ms": 15.667798,
+            "rss_kb": 14712,
+            "minor_faults": 521
+          },
+          {
+            "ms": 4.793155,
+            "rss_kb": 15096,
+            "minor_faults": 524
+          },
+          {
+            "ms": 6.764736,
+            "rss_kb": 14712,
+            "minor_faults": 521
+          },
+          {
+            "ms": 4.586746,
+            "rss_kb": 14712,
+            "minor_faults": 520
+          },
+          {
+            "ms": 6.747075,
+            "rss_kb": 14648,
+            "minor_faults": 519
+          },
+          {
+            "ms": 4.68994,
+            "rss_kb": 14776,
+            "minor_faults": 521
+          },
+          {
+            "ms": 4.547017,
+            "rss_kb": 15188,
+            "minor_faults": 528
+          },
+          {
+            "ms": 4.380487,
+            "rss_kb": 14840,
+            "minor_faults": 522
+          },
+          {
+            "ms": 4.666135,
+            "rss_kb": 14840,
+            "minor_faults": 521
+          },
+          {
+            "ms": 4.566035,
+            "rss_kb": 14776,
+            "minor_faults": 522
+          },
+          {
+            "ms": 4.374578,
+            "rss_kb": 14840,
+            "minor_faults": 522
+          },
+          {
+            "ms": 4.6161,
+            "rss_kb": 14712,
+            "minor_faults": 521
+          },
+          {
+            "ms": 4.573376,
+            "rss_kb": 14840,
+            "minor_faults": 524
+          },
+          {
+            "ms": 4.531053,
+            "rss_kb": 14584,
+            "minor_faults": 519
+          },
+          {
+            "ms": 5.253025,
+            "rss_kb": 14776,
+            "minor_faults": 524
+          },
+          {
+            "ms": 5.180637,
+            "rss_kb": 14840,
+            "minor_faults": 522
+          },
+          {
+            "ms": 4.512184,
+            "rss_kb": 14648,
+            "minor_faults": 521
+          },
+          {
+            "ms": 4.797943,
+            "rss_kb": 15220,
+            "minor_faults": 527
+          },
+          {
+            "ms": 4.553806,
+            "rss_kb": 14776,
+            "minor_faults": 521
+          },
+          {
+            "ms": 4.548128,
+            "rss_kb": 14844,
+            "minor_faults": 523
+          },
+          {
+            "ms": 5.275038,
+            "rss_kb": 14968,
+            "minor_faults": 522
+          },
+          {
+            "ms": 4.611823,
+            "rss_kb": 14968,
+            "minor_faults": 525
+          },
+          {
+            "ms": 6.006715,
+            "rss_kb": 14712,
+            "minor_faults": 521
+          },
+          {
+            "ms": 4.980757,
+            "rss_kb": 15224,
+            "minor_faults": 530
+          },
+          {
+            "ms": 4.915579,
+            "rss_kb": 14776,
+            "minor_faults": 521
+          },
+          {
+            "ms": 4.606956,
+            "rss_kb": 14836,
+            "minor_faults": 522
+          },
+          {
+            "ms": 5.127286,
+            "rss_kb": 15224,
+            "minor_faults": 528
+          },
+          {
+            "ms": 4.828539,
+            "rss_kb": 14840,
+            "minor_faults": 522
+          },
+          {
+            "ms": 4.686125,
+            "rss_kb": 14904,
+            "minor_faults": 522
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "681191e42902eab0a8a287db6892b8910a4b1af81a431fcc72e3cd97070d4a7f",
+        "before": "631644b6c60d2bc1c687830cca788a95278dc94a2529f03bb047e583e93319af",
+        "after": "631644b6c60d2bc1c687830cca788a95278dc94a2529f03bb047e583e93319af"
+      },
+      "summary": {
+        "git": {
+          "ms": 2.767043,
+          "rss_kb": 6734.0,
+          "max_rss_kb": 6860
+        },
+        "before": {
+          "ms": 4.6597605,
+          "rss_kb": 14824.0,
+          "max_rss_kb": 15016
+        },
+        "after": {
+          "ms": 4.67613,
+          "rss_kb": 14838.0,
+          "max_rss_kb": 15224
+        }
+      }
+    },
+    {
+      "id": "resolve/ancestor-10000@deep-history",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-no-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "rev-parse",
+          "HEAD~10000"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "resolve",
+          "HEAD~10000"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "resolve",
+          "HEAD~10000"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 16.959835,
+            "rss_kb": 11460,
+            "minor_faults": 1387
+          },
+          {
+            "ms": 15.219647,
+            "rss_kb": 11400,
+            "minor_faults": 1384
+          },
+          {
+            "ms": 18.335257,
+            "rss_kb": 11452,
+            "minor_faults": 1386
+          },
+          {
+            "ms": 15.510603,
+            "rss_kb": 11508,
+            "minor_faults": 1387
+          },
+          {
+            "ms": 15.776962,
+            "rss_kb": 11396,
+            "minor_faults": 1384
+          },
+          {
+            "ms": 16.405834,
+            "rss_kb": 11336,
+            "minor_faults": 1385
+          },
+          {
+            "ms": 15.832118,
+            "rss_kb": 11456,
+            "minor_faults": 1385
+          },
+          {
+            "ms": 15.539626,
+            "rss_kb": 11444,
+            "minor_faults": 1388
+          },
+          {
+            "ms": 14.800193,
+            "rss_kb": 11508,
+            "minor_faults": 1386
+          },
+          {
+            "ms": 14.629131,
+            "rss_kb": 11576,
+            "minor_faults": 1388
+          },
+          {
+            "ms": 14.902931,
+            "rss_kb": 11528,
+            "minor_faults": 1388
+          },
+          {
+            "ms": 15.329221,
+            "rss_kb": 11468,
+            "minor_faults": 1386
+          },
+          {
+            "ms": 15.641258,
+            "rss_kb": 11332,
+            "minor_faults": 1385
+          },
+          {
+            "ms": 16.906435,
+            "rss_kb": 11344,
+            "minor_faults": 1386
+          },
+          {
+            "ms": 16.124032,
+            "rss_kb": 11336,
+            "minor_faults": 1386
+          },
+          {
+            "ms": 16.961217,
+            "rss_kb": 11404,
+            "minor_faults": 1387
+          },
+          {
+            "ms": 16.874797,
+            "rss_kb": 11448,
+            "minor_faults": 1387
+          },
+          {
+            "ms": 16.489029,
+            "rss_kb": 11528,
+            "minor_faults": 1386
+          },
+          {
+            "ms": 16.939214,
+            "rss_kb": 11520,
+            "minor_faults": 1386
+          },
+          {
+            "ms": 16.711403,
+            "rss_kb": 11336,
+            "minor_faults": 1386
+          },
+          {
+            "ms": 16.779955,
+            "rss_kb": 11464,
+            "minor_faults": 1386
+          },
+          {
+            "ms": 15.764523,
+            "rss_kb": 11436,
+            "minor_faults": 1386
+          },
+          {
+            "ms": 15.413387,
+            "rss_kb": 11520,
+            "minor_faults": 1387
+          },
+          {
+            "ms": 16.541758,
+            "rss_kb": 11400,
+            "minor_faults": 1384
+          },
+          {
+            "ms": 15.889501,
+            "rss_kb": 11440,
+            "minor_faults": 1387
+          },
+          {
+            "ms": 16.802329,
+            "rss_kb": 11516,
+            "minor_faults": 1387
+          },
+          {
+            "ms": 16.650422,
+            "rss_kb": 11400,
+            "minor_faults": 1388
+          },
+          {
+            "ms": 15.929831,
+            "rss_kb": 11464,
+            "minor_faults": 1387
+          },
+          {
+            "ms": 16.197472,
+            "rss_kb": 11396,
+            "minor_faults": 1386
+          },
+          {
+            "ms": 17.57035,
+            "rss_kb": 11400,
+            "minor_faults": 1387
+          }
+        ],
+        "before": [
+          {
+            "ms": 29.17,
+            "rss_kb": 16296,
+            "minor_faults": 677
+          },
+          {
+            "ms": 28.782088,
+            "rss_kb": 16104,
+            "minor_faults": 676
+          },
+          {
+            "ms": 32.483617,
+            "rss_kb": 16100,
+            "minor_faults": 677
+          },
+          {
+            "ms": 38.650822,
+            "rss_kb": 15844,
+            "minor_faults": 673
+          },
+          {
+            "ms": 47.926718,
+            "rss_kb": 16164,
+            "minor_faults": 677
+          },
+          {
+            "ms": 28.076741,
+            "rss_kb": 16424,
+            "minor_faults": 678
+          },
+          {
+            "ms": 28.565233,
+            "rss_kb": 16432,
+            "minor_faults": 680
+          },
+          {
+            "ms": 27.165985,
+            "rss_kb": 16164,
+            "minor_faults": 675
+          },
+          {
+            "ms": 27.283992,
+            "rss_kb": 16548,
+            "minor_faults": 683
+          },
+          {
+            "ms": 30.566223,
+            "rss_kb": 16296,
+            "minor_faults": 679
+          },
+          {
+            "ms": 26.959346,
+            "rss_kb": 16040,
+            "minor_faults": 673
+          },
+          {
+            "ms": 29.004471,
+            "rss_kb": 16292,
+            "minor_faults": 678
+          },
+          {
+            "ms": 27.570822,
+            "rss_kb": 16360,
+            "minor_faults": 678
+          },
+          {
+            "ms": 28.145114,
+            "rss_kb": 16172,
+            "minor_faults": 676
+          },
+          {
+            "ms": 28.979955,
+            "rss_kb": 16360,
+            "minor_faults": 678
+          },
+          {
+            "ms": 29.294456,
+            "rss_kb": 16296,
+            "minor_faults": 678
+          },
+          {
+            "ms": 29.407967,
+            "rss_kb": 16360,
+            "minor_faults": 679
+          },
+          {
+            "ms": 28.939935,
+            "rss_kb": 16296,
+            "minor_faults": 680
+          },
+          {
+            "ms": 29.502488,
+            "rss_kb": 16360,
+            "minor_faults": 681
+          },
+          {
+            "ms": 35.692037,
+            "rss_kb": 16572,
+            "minor_faults": 684
+          },
+          {
+            "ms": 28.980586,
+            "rss_kb": 15984,
+            "minor_faults": 674
+          },
+          {
+            "ms": 29.56363,
+            "rss_kb": 15976,
+            "minor_faults": 676
+          },
+          {
+            "ms": 28.634647,
+            "rss_kb": 16296,
+            "minor_faults": 680
+          },
+          {
+            "ms": 29.269129,
+            "rss_kb": 16096,
+            "minor_faults": 674
+          },
+          {
+            "ms": 28.476089,
+            "rss_kb": 16296,
+            "minor_faults": 678
+          },
+          {
+            "ms": 41.459958,
+            "rss_kb": 15976,
+            "minor_faults": 674
+          },
+          {
+            "ms": 29.927395,
+            "rss_kb": 16104,
+            "minor_faults": 673
+          },
+          {
+            "ms": 28.819434,
+            "rss_kb": 16296,
+            "minor_faults": 679
+          },
+          {
+            "ms": 29.168728,
+            "rss_kb": 16488,
+            "minor_faults": 680
+          },
+          {
+            "ms": 28.921938,
+            "rss_kb": 16296,
+            "minor_faults": 676
+          }
+        ],
+        "after": [
+          {
+            "ms": 29.530631,
+            "rss_kb": 16120,
+            "minor_faults": 674
+          },
+          {
+            "ms": 27.773587,
+            "rss_kb": 16312,
+            "minor_faults": 676
+          },
+          {
+            "ms": 27.679265,
+            "rss_kb": 16120,
+            "minor_faults": 674
+          },
+          {
+            "ms": 34.287211,
+            "rss_kb": 16064,
+            "minor_faults": 675
+          },
+          {
+            "ms": 27.386366,
+            "rss_kb": 16184,
+            "minor_faults": 676
+          },
+          {
+            "ms": 27.461299,
+            "rss_kb": 16088,
+            "minor_faults": 674
+          },
+          {
+            "ms": 27.747708,
+            "rss_kb": 16376,
+            "minor_faults": 679
+          },
+          {
+            "ms": 27.694227,
+            "rss_kb": 16376,
+            "minor_faults": 680
+          },
+          {
+            "ms": 27.895188,
+            "rss_kb": 16248,
+            "minor_faults": 678
+          },
+          {
+            "ms": 27.163612,
+            "rss_kb": 16184,
+            "minor_faults": 680
+          },
+          {
+            "ms": 27.256251,
+            "rss_kb": 16120,
+            "minor_faults": 673
+          },
+          {
+            "ms": 27.486335,
+            "rss_kb": 16504,
+            "minor_faults": 682
+          },
+          {
+            "ms": 28.235219,
+            "rss_kb": 16564,
+            "minor_faults": 680
+          },
+          {
+            "ms": 29.580826,
+            "rss_kb": 16376,
+            "minor_faults": 677
+          },
+          {
+            "ms": 29.172834,
+            "rss_kb": 16376,
+            "minor_faults": 677
+          },
+          {
+            "ms": 29.565323,
+            "rss_kb": 16120,
+            "minor_faults": 675
+          },
+          {
+            "ms": 29.491522,
+            "rss_kb": 16120,
+            "minor_faults": 673
+          },
+          {
+            "ms": 30.078331,
+            "rss_kb": 16180,
+            "minor_faults": 676
+          },
+          {
+            "ms": 29.123269,
+            "rss_kb": 16184,
+            "minor_faults": 677
+          },
+          {
+            "ms": 29.468767,
+            "rss_kb": 16248,
+            "minor_faults": 678
+          },
+          {
+            "ms": 33.119651,
+            "rss_kb": 16120,
+            "minor_faults": 674
+          },
+          {
+            "ms": 29.489198,
+            "rss_kb": 16120,
+            "minor_faults": 674
+          },
+          {
+            "ms": 28.156981,
+            "rss_kb": 16116,
+            "minor_faults": 675
+          },
+          {
+            "ms": 27.94269,
+            "rss_kb": 16248,
+            "minor_faults": 678
+          },
+          {
+            "ms": 29.093766,
+            "rss_kb": 16312,
+            "minor_faults": 677
+          },
+          {
+            "ms": 30.708205,
+            "rss_kb": 16376,
+            "minor_faults": 678
+          },
+          {
+            "ms": 29.9102,
+            "rss_kb": 16248,
+            "minor_faults": 676
+          },
+          {
+            "ms": 29.94651,
+            "rss_kb": 16120,
+            "minor_faults": 674
+          },
+          {
+            "ms": 30.573794,
+            "rss_kb": 16328,
+            "minor_faults": 677
+          },
+          {
+            "ms": 29.335738,
+            "rss_kb": 16312,
+            "minor_faults": 677
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "71f1c1c6e216fb94ca2eff23a05b64110a4139d912db154bd14ae24882737162",
+        "before": "a1ece0dacb0bb18cb192a35a860a93b621084d7f6a709247d2df652a7354942b",
+        "after": "a1ece0dacb0bb18cb192a35a860a93b621084d7f6a709247d2df652a7354942b"
+      },
+      "summary": {
+        "git": {
+          "ms": 16.160752000000002,
+          "rss_kb": 11446.0,
+          "max_rss_kb": 11576
+        },
+        "before": {
+          "ms": 28.9925285,
+          "rss_kb": 16296.0,
+          "max_rss_kb": 16572
+        },
+        "after": {
+          "ms": 29.1480515,
+          "rss_kb": 16216.0,
+          "max_rss_kb": 16564
+        }
+      }
+    },
+    {
+      "id": "resolve/head@deep-history",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-no-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "rev-parse",
+          "HEAD"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "resolve",
+          "HEAD"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "resolve",
+          "HEAD"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 2.189633,
+            "rss_kb": 4672,
+            "minor_faults": 174
+          },
+          {
+            "ms": 2.01458,
+            "rss_kb": 4488,
+            "minor_faults": 170
+          },
+          {
+            "ms": 1.983564,
+            "rss_kb": 4544,
+            "minor_faults": 174
+          },
+          {
+            "ms": 2.067259,
+            "rss_kb": 4620,
+            "minor_faults": 173
+          },
+          {
+            "ms": 2.007179,
+            "rss_kb": 4600,
+            "minor_faults": 173
+          },
+          {
+            "ms": 1.980699,
+            "rss_kb": 4604,
+            "minor_faults": 174
+          },
+          {
+            "ms": 1.987469,
+            "rss_kb": 4492,
+            "minor_faults": 172
+          },
+          {
+            "ms": 2.022152,
+            "rss_kb": 4536,
+            "minor_faults": 172
+          },
+          {
+            "ms": 1.917114,
+            "rss_kb": 4492,
+            "minor_faults": 172
+          },
+          {
+            "ms": 1.913929,
+            "rss_kb": 4552,
+            "minor_faults": 172
+          },
+          {
+            "ms": 2.004455,
+            "rss_kb": 4620,
+            "minor_faults": 173
+          },
+          {
+            "ms": 1.911285,
+            "rss_kb": 4428,
+            "minor_faults": 171
+          },
+          {
+            "ms": 1.929242,
+            "rss_kb": 4616,
+            "minor_faults": 173
+          },
+          {
+            "ms": 2.017876,
+            "rss_kb": 4412,
+            "minor_faults": 169
+          },
+          {
+            "ms": 1.997675,
+            "rss_kb": 4620,
+            "minor_faults": 173
+          },
+          {
+            "ms": 4.164593,
+            "rss_kb": 4620,
+            "minor_faults": 173
+          },
+          {
+            "ms": 1.936433,
+            "rss_kb": 4492,
+            "minor_faults": 171
+          },
+          {
+            "ms": 1.878827,
+            "rss_kb": 4556,
+            "minor_faults": 172
+          },
+          {
+            "ms": 57.119335,
+            "rss_kb": 4604,
+            "minor_faults": 174
+          },
+          {
+            "ms": 2.070904,
+            "rss_kb": 4428,
+            "minor_faults": 169
+          },
+          {
+            "ms": 1.951095,
+            "rss_kb": 4616,
+            "minor_faults": 173
+          },
+          {
+            "ms": 1.949152,
+            "rss_kb": 4672,
+            "minor_faults": 173
+          },
+          {
+            "ms": 2.037063,
+            "rss_kb": 4608,
+            "minor_faults": 174
+          },
+          {
+            "ms": 1.918025,
+            "rss_kb": 4492,
+            "minor_faults": 174
+          },
+          {
+            "ms": 1.918767,
+            "rss_kb": 4620,
+            "minor_faults": 174
+          },
+          {
+            "ms": 2.24133,
+            "rss_kb": 4468,
+            "minor_faults": 172
+          },
+          {
+            "ms": 2.012617,
+            "rss_kb": 4596,
+            "minor_faults": 173
+          },
+          {
+            "ms": 2.04125,
+            "rss_kb": 4620,
+            "minor_faults": 174
+          },
+          {
+            "ms": 1.978976,
+            "rss_kb": 4556,
+            "minor_faults": 173
+          },
+          {
+            "ms": 2.002833,
+            "rss_kb": 4492,
+            "minor_faults": 172
+          }
+        ],
+        "before": [
+          {
+            "ms": 3.781009,
+            "rss_kb": 12676,
+            "minor_faults": 462
+          },
+          {
+            "ms": 3.651304,
+            "rss_kb": 12800,
+            "minor_faults": 463
+          },
+          {
+            "ms": 3.58235,
+            "rss_kb": 12356,
+            "minor_faults": 457
+          },
+          {
+            "ms": 3.550493,
+            "rss_kb": 12644,
+            "minor_faults": 463
+          },
+          {
+            "ms": 3.429261,
+            "rss_kb": 12548,
+            "minor_faults": 460
+          },
+          {
+            "ms": 3.68262,
+            "rss_kb": 12612,
+            "minor_faults": 463
+          },
+          {
+            "ms": 3.987848,
+            "rss_kb": 12740,
+            "minor_faults": 463
+          },
+          {
+            "ms": 3.633307,
+            "rss_kb": 12352,
+            "minor_faults": 458
+          },
+          {
+            "ms": 3.48182,
+            "rss_kb": 12740,
+            "minor_faults": 461
+          },
+          {
+            "ms": 3.379546,
+            "rss_kb": 12612,
+            "minor_faults": 462
+          },
+          {
+            "ms": 3.410262,
+            "rss_kb": 12800,
+            "minor_faults": 463
+          },
+          {
+            "ms": 3.464443,
+            "rss_kb": 12804,
+            "minor_faults": 463
+          },
+          {
+            "ms": 3.3887,
+            "rss_kb": 12804,
+            "minor_faults": 464
+          },
+          {
+            "ms": 3.370633,
+            "rss_kb": 12548,
+            "minor_faults": 460
+          },
+          {
+            "ms": 3.830242,
+            "rss_kb": 12356,
+            "minor_faults": 458
+          },
+          {
+            "ms": 5.214017,
+            "rss_kb": 12676,
+            "minor_faults": 463
+          },
+          {
+            "ms": 3.46179,
+            "rss_kb": 12484,
+            "minor_faults": 458
+          },
+          {
+            "ms": 3.384624,
+            "rss_kb": 12932,
+            "minor_faults": 469
+          },
+          {
+            "ms": 4.218484,
+            "rss_kb": 12868,
+            "minor_faults": 464
+          },
+          {
+            "ms": 3.776962,
+            "rss_kb": 12932,
+            "minor_faults": 468
+          },
+          {
+            "ms": 3.540708,
+            "rss_kb": 12548,
+            "minor_faults": 460
+          },
+          {
+            "ms": 3.406216,
+            "rss_kb": 12676,
+            "minor_faults": 462
+          },
+          {
+            "ms": 4.838674,
+            "rss_kb": 12740,
+            "minor_faults": 463
+          },
+          {
+            "ms": 3.571124,
+            "rss_kb": 12740,
+            "minor_faults": 463
+          },
+          {
+            "ms": 3.330794,
+            "rss_kb": 12740,
+            "minor_faults": 463
+          },
+          {
+            "ms": 3.336672,
+            "rss_kb": 12804,
+            "minor_faults": 464
+          },
+          {
+            "ms": 3.865845,
+            "rss_kb": 12484,
+            "minor_faults": 460
+          },
+          {
+            "ms": 3.890793,
+            "rss_kb": 12676,
+            "minor_faults": 463
+          },
+          {
+            "ms": 3.568349,
+            "rss_kb": 12672,
+            "minor_faults": 462
+          },
+          {
+            "ms": 3.471104,
+            "rss_kb": 12868,
+            "minor_faults": 465
+          }
+        ],
+        "after": [
+          {
+            "ms": 4.364944,
+            "rss_kb": 12436,
+            "minor_faults": 459
+          },
+          {
+            "ms": 3.483532,
+            "rss_kb": 12244,
+            "minor_faults": 454
+          },
+          {
+            "ms": 3.712295,
+            "rss_kb": 12564,
+            "minor_faults": 458
+          },
+          {
+            "ms": 3.611724,
+            "rss_kb": 12628,
+            "minor_faults": 461
+          },
+          {
+            "ms": 3.49556,
+            "rss_kb": 12592,
+            "minor_faults": 459
+          },
+          {
+            "ms": 3.508589,
+            "rss_kb": 12372,
+            "minor_faults": 457
+          },
+          {
+            "ms": 3.681389,
+            "rss_kb": 12372,
+            "minor_faults": 457
+          },
+          {
+            "ms": 3.581248,
+            "rss_kb": 13012,
+            "minor_faults": 466
+          },
+          {
+            "ms": 3.374949,
+            "rss_kb": 12692,
+            "minor_faults": 460
+          },
+          {
+            "ms": 3.416121,
+            "rss_kb": 12500,
+            "minor_faults": 460
+          },
+          {
+            "ms": 3.350703,
+            "rss_kb": 12564,
+            "minor_faults": 460
+          },
+          {
+            "ms": 3.32191,
+            "rss_kb": 12564,
+            "minor_faults": 458
+          },
+          {
+            "ms": 3.387208,
+            "rss_kb": 12240,
+            "minor_faults": 454
+          },
+          {
+            "ms": 3.474448,
+            "rss_kb": 12500,
+            "minor_faults": 460
+          },
+          {
+            "ms": 3.633617,
+            "rss_kb": 12564,
+            "minor_faults": 459
+          },
+          {
+            "ms": 3.852345,
+            "rss_kb": 12244,
+            "minor_faults": 455
+          },
+          {
+            "ms": 3.405075,
+            "rss_kb": 12756,
+            "minor_faults": 461
+          },
+          {
+            "ms": 3.379987,
+            "rss_kb": 12884,
+            "minor_faults": 465
+          },
+          {
+            "ms": 4.02296,
+            "rss_kb": 12500,
+            "minor_faults": 458
+          },
+          {
+            "ms": 3.613737,
+            "rss_kb": 12576,
+            "minor_faults": 461
+          },
+          {
+            "ms": 3.593587,
+            "rss_kb": 12564,
+            "minor_faults": 459
+          },
+          {
+            "ms": 17.180686,
+            "rss_kb": 12628,
+            "minor_faults": 459
+          },
+          {
+            "ms": 5.067757,
+            "rss_kb": 12628,
+            "minor_faults": 459
+          },
+          {
+            "ms": 3.404754,
+            "rss_kb": 12500,
+            "minor_faults": 459
+          },
+          {
+            "ms": 3.436452,
+            "rss_kb": 12756,
+            "minor_faults": 462
+          },
+          {
+            "ms": 62.456481,
+            "rss_kb": 12564,
+            "minor_faults": 459
+          },
+          {
+            "ms": 3.652065,
+            "rss_kb": 12756,
+            "minor_faults": 461
+          },
+          {
+            "ms": 3.920057,
+            "rss_kb": 12500,
+            "minor_faults": 459
+          },
+          {
+            "ms": 3.592746,
+            "rss_kb": 12560,
+            "minor_faults": 459
+          },
+          {
+            "ms": 3.397934,
+            "rss_kb": 12564,
+            "minor_faults": 459
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "f7099930fd4cb4669bfb9992a0ef349a0cb6718224b4a452f9220bf465b1f9b4",
+        "before": "8260958643c3b8310ca81aaf59fa14ad6cf025eae3d69b04ea11a3ce375d6463",
+        "after": "8260958643c3b8310ca81aaf59fa14ad6cf025eae3d69b04ea11a3ce375d6463"
+      },
+      "summary": {
+        "git": {
+          "ms": 2.000254,
+          "rss_kb": 4576.0,
+          "max_rss_kb": 4672
+        },
+        "before": {
+          "ms": 3.559421,
+          "rss_kb": 12676.0,
+          "max_rss_kb": 12932
+        },
+        "after": {
+          "ms": 3.586997,
+          "rss_kb": 12564.0,
+          "max_rss_kb": 13012
+        }
+      }
+    },
+    {
+      "id": "revs/left-right-first-parent@deep-history",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/daily-deep-history-no-graph",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "rev-list",
+          "--left-right",
+          "--count",
+          "--first-parent",
+          "HEAD~500...HEAD"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "revs",
+          "--left-right",
+          "--count",
+          "--first-parent",
+          "HEAD~500...HEAD"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "revs",
+          "--left-right",
+          "--count",
+          "--first-parent",
+          "HEAD~500...HEAD"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 3.312887,
+            "rss_kb": 7104,
+            "minor_faults": 276
+          },
+          {
+            "ms": 3.2282,
+            "rss_kb": 7168,
+            "minor_faults": 278
+          },
+          {
+            "ms": 3.079386,
+            "rss_kb": 7220,
+            "minor_faults": 278
+          },
+          {
+            "ms": 10.143527,
+            "rss_kb": 6988,
+            "minor_faults": 276
+          },
+          {
+            "ms": 3.153697,
+            "rss_kb": 7048,
+            "minor_faults": 274
+          },
+          {
+            "ms": 3.012146,
+            "rss_kb": 6984,
+            "minor_faults": 275
+          },
+          {
+            "ms": 2.963943,
+            "rss_kb": 7048,
+            "minor_faults": 276
+          },
+          {
+            "ms": 3.098746,
+            "rss_kb": 7116,
+            "minor_faults": 276
+          },
+          {
+            "ms": 3.032155,
+            "rss_kb": 7112,
+            "minor_faults": 277
+          },
+          {
+            "ms": 2.983833,
+            "rss_kb": 7116,
+            "minor_faults": 276
+          },
+          {
+            "ms": 3.106037,
+            "rss_kb": 7240,
+            "minor_faults": 278
+          },
+          {
+            "ms": 3.025015,
+            "rss_kb": 7092,
+            "minor_faults": 277
+          },
+          {
+            "ms": 4.097553,
+            "rss_kb": 7112,
+            "minor_faults": 278
+          },
+          {
+            "ms": 3.093007,
+            "rss_kb": 7024,
+            "minor_faults": 276
+          },
+          {
+            "ms": 2.990343,
+            "rss_kb": 7176,
+            "minor_faults": 277
+          },
+          {
+            "ms": 2.980949,
+            "rss_kb": 7112,
+            "minor_faults": 278
+          },
+          {
+            "ms": 3.218225,
+            "rss_kb": 6980,
+            "minor_faults": 277
+          },
+          {
+            "ms": 3.055141,
+            "rss_kb": 6984,
+            "minor_faults": 275
+          },
+          {
+            "ms": 2.958315,
+            "rss_kb": 7048,
+            "minor_faults": 279
+          },
+          {
+            "ms": 3.07559,
+            "rss_kb": 7240,
+            "minor_faults": 279
+          },
+          {
+            "ms": 2.944074,
+            "rss_kb": 6920,
+            "minor_faults": 276
+          },
+          {
+            "ms": 3.006527,
+            "rss_kb": 7100,
+            "minor_faults": 278
+          },
+          {
+            "ms": 3.125826,
+            "rss_kb": 7112,
+            "minor_faults": 277
+          },
+          {
+            "ms": 3.065004,
+            "rss_kb": 6920,
+            "minor_faults": 273
+          },
+          {
+            "ms": 2.99511,
+            "rss_kb": 7048,
+            "minor_faults": 274
+          },
+          {
+            "ms": 3.289481,
+            "rss_kb": 6964,
+            "minor_faults": 276
+          },
+          {
+            "ms": 3.142471,
+            "rss_kb": 7240,
+            "minor_faults": 278
+          },
+          {
+            "ms": 3.037253,
+            "rss_kb": 7168,
+            "minor_faults": 277
+          },
+          {
+            "ms": 3.050363,
+            "rss_kb": 6856,
+            "minor_faults": 273
+          },
+          {
+            "ms": 3.031625,
+            "rss_kb": 6856,
+            "minor_faults": 275
+          }
+        ],
+        "before": [
+          {
+            "ms": 6.658962,
+            "rss_kb": 15144,
+            "minor_faults": 587
+          },
+          {
+            "ms": 6.415884,
+            "rss_kb": 15268,
+            "minor_faults": 588
+          },
+          {
+            "ms": 6.424992,
+            "rss_kb": 15400,
+            "minor_faults": 590
+          },
+          {
+            "ms": 6.296449,
+            "rss_kb": 15272,
+            "minor_faults": 589
+          },
+          {
+            "ms": 6.155838,
+            "rss_kb": 15408,
+            "minor_faults": 592
+          },
+          {
+            "ms": 6.225894,
+            "rss_kb": 15272,
+            "minor_faults": 591
+          },
+          {
+            "ms": 5.981167,
+            "rss_kb": 15244,
+            "minor_faults": 587
+          },
+          {
+            "ms": 6.276319,
+            "rss_kb": 15260,
+            "minor_faults": 588
+          },
+          {
+            "ms": 6.465864,
+            "rss_kb": 15400,
+            "minor_faults": 591
+          },
+          {
+            "ms": 6.158782,
+            "rss_kb": 15144,
+            "minor_faults": 587
+          },
+          {
+            "ms": 15.290453,
+            "rss_kb": 15080,
+            "minor_faults": 589
+          },
+          {
+            "ms": 6.29742,
+            "rss_kb": 14952,
+            "minor_faults": 585
+          },
+          {
+            "ms": 6.1637,
+            "rss_kb": 15144,
+            "minor_faults": 588
+          },
+          {
+            "ms": 5.98364,
+            "rss_kb": 14996,
+            "minor_faults": 586
+          },
+          {
+            "ms": 6.325913,
+            "rss_kb": 15080,
+            "minor_faults": 585
+          },
+          {
+            "ms": 6.122709,
+            "rss_kb": 15208,
+            "minor_faults": 588
+          },
+          {
+            "ms": 8.479268,
+            "rss_kb": 15272,
+            "minor_faults": 589
+          },
+          {
+            "ms": 6.425843,
+            "rss_kb": 15396,
+            "minor_faults": 590
+          },
+          {
+            "ms": 6.015468,
+            "rss_kb": 15204,
+            "minor_faults": 587
+          },
+          {
+            "ms": 8.838861,
+            "rss_kb": 15144,
+            "minor_faults": 588
+          },
+          {
+            "ms": 6.392123,
+            "rss_kb": 15272,
+            "minor_faults": 589
+          },
+          {
+            "ms": 6.212043,
+            "rss_kb": 15208,
+            "minor_faults": 587
+          },
+          {
+            "ms": 6.304932,
+            "rss_kb": 15400,
+            "minor_faults": 590
+          },
+          {
+            "ms": 6.355478,
+            "rss_kb": 14948,
+            "minor_faults": 583
+          },
+          {
+            "ms": 6.04315,
+            "rss_kb": 15400,
+            "minor_faults": 591
+          },
+          {
+            "ms": 6.271923,
+            "rss_kb": 15080,
+            "minor_faults": 587
+          },
+          {
+            "ms": 6.535898,
+            "rss_kb": 15144,
+            "minor_faults": 590
+          },
+          {
+            "ms": 6.030421,
+            "rss_kb": 14948,
+            "minor_faults": 584
+          },
+          {
+            "ms": 6.082269,
+            "rss_kb": 15408,
+            "minor_faults": 591
+          },
+          {
+            "ms": 7.175347,
+            "rss_kb": 14952,
+            "minor_faults": 584
+          }
+        ],
+        "after": [
+          {
+            "ms": 5.124322,
+            "rss_kb": 15096,
+            "minor_faults": 588
+          },
+          {
+            "ms": 15.14932,
+            "rss_kb": 15096,
+            "minor_faults": 589
+          },
+          {
+            "ms": 5.16293,
+            "rss_kb": 15288,
+            "minor_faults": 591
+          },
+          {
+            "ms": 5.498173,
+            "rss_kb": 15352,
+            "minor_faults": 591
+          },
+          {
+            "ms": 5.23651,
+            "rss_kb": 15288,
+            "minor_faults": 591
+          },
+          {
+            "ms": 5.025645,
+            "rss_kb": 15096,
+            "minor_faults": 589
+          },
+          {
+            "ms": 16.312675,
+            "rss_kb": 15096,
+            "minor_faults": 588
+          },
+          {
+            "ms": 5.0966,
+            "rss_kb": 15096,
+            "minor_faults": 588
+          },
+          {
+            "ms": 4.969681,
+            "rss_kb": 15096,
+            "minor_faults": 587
+          },
+          {
+            "ms": 8.569791,
+            "rss_kb": 15096,
+            "minor_faults": 589
+          },
+          {
+            "ms": 5.436219,
+            "rss_kb": 15096,
+            "minor_faults": 588
+          },
+          {
+            "ms": 5.147697,
+            "rss_kb": 15028,
+            "minor_faults": 586
+          },
+          {
+            "ms": 5.272154,
+            "rss_kb": 15608,
+            "minor_faults": 597
+          },
+          {
+            "ms": 5.164773,
+            "rss_kb": 15032,
+            "minor_faults": 588
+          },
+          {
+            "ms": 5.141498,
+            "rss_kb": 15480,
+            "minor_faults": 594
+          },
+          {
+            "ms": 5.599575,
+            "rss_kb": 15096,
+            "minor_faults": 588
+          },
+          {
+            "ms": 15.001359,
+            "rss_kb": 15032,
+            "minor_faults": 588
+          },
+          {
+            "ms": 5.091653,
+            "rss_kb": 15160,
+            "minor_faults": 589
+          },
+          {
+            "ms": 9.106332,
+            "rss_kb": 15080,
+            "minor_faults": 587
+          },
+          {
+            "ms": 5.149299,
+            "rss_kb": 15196,
+            "minor_faults": 589
+          },
+          {
+            "ms": 5.055158,
+            "rss_kb": 15352,
+            "minor_faults": 590
+          },
+          {
+            "ms": 5.444202,
+            "rss_kb": 15096,
+            "minor_faults": 589
+          },
+          {
+            "ms": 5.246745,
+            "rss_kb": 15608,
+            "minor_faults": 595
+          },
+          {
+            "ms": 5.057732,
+            "rss_kb": 15480,
+            "minor_faults": 594
+          },
+          {
+            "ms": 5.426826,
+            "rss_kb": 15480,
+            "minor_faults": 594
+          },
+          {
+            "ms": 5.553956,
+            "rss_kb": 15284,
+            "minor_faults": 592
+          },
+          {
+            "ms": 5.262869,
+            "rss_kb": 15096,
+            "minor_faults": 587
+          },
+          {
+            "ms": 5.379394,
+            "rss_kb": 15096,
+            "minor_faults": 588
+          },
+          {
+            "ms": 5.182519,
+            "rss_kb": 15160,
+            "minor_faults": 589
+          },
+          {
+            "ms": 5.046035,
+            "rss_kb": 15352,
+            "minor_faults": 590
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "bd42fec50f5ed46656fb06f7e1a6ab0753debd6037b3bea874b96c2b2ec06ef4",
+        "before": "bd42fec50f5ed46656fb06f7e1a6ab0753debd6037b3bea874b96c2b2ec06ef4",
+        "after": "bd42fec50f5ed46656fb06f7e1a6ab0753debd6037b3bea874b96c2b2ec06ef4"
+      },
+      "summary": {
+        "git": {
+          "ms": 3.0600725,
+          "rss_kb": 7096.0,
+          "max_rss_kb": 7240
+        },
+        "before": {
+          "ms": 6.2969345,
+          "rss_kb": 15208.0,
+          "max_rss_kb": 15408
+        },
+        "after": {
+          "ms": 5.2416275,
+          "rss_kb": 15096.0,
+          "max_rss_kb": 15608
+        }
+      }
+    },
+    {
+      "id": "log/oneline-100@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "log",
+          "--oneline",
+          "-n",
+          "100"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "log",
+          "--limit",
+          "100"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "log",
+          "--limit",
+          "100"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 3.945735,
+            "rss_kb": 12800,
+            "minor_faults": 343
+          },
+          {
+            "ms": 4.052535,
+            "rss_kb": 12672,
+            "minor_faults": 342
+          },
+          {
+            "ms": 3.897713,
+            "rss_kb": 12736,
+            "minor_faults": 343
+          },
+          {
+            "ms": 3.832876,
+            "rss_kb": 12804,
+            "minor_faults": 344
+          },
+          {
+            "ms": 3.786557,
+            "rss_kb": 12672,
+            "minor_faults": 341
+          },
+          {
+            "ms": 3.827999,
+            "rss_kb": 12784,
+            "minor_faults": 344
+          },
+          {
+            "ms": 4.762239,
+            "rss_kb": 12792,
+            "minor_faults": 341
+          },
+          {
+            "ms": 3.904133,
+            "rss_kb": 12672,
+            "minor_faults": 340
+          },
+          {
+            "ms": 3.769821,
+            "rss_kb": 12608,
+            "minor_faults": 340
+          },
+          {
+            "ms": 3.759736,
+            "rss_kb": 12780,
+            "minor_faults": 345
+          },
+          {
+            "ms": 3.910653,
+            "rss_kb": 12736,
+            "minor_faults": 341
+          },
+          {
+            "ms": 3.757072,
+            "rss_kb": 12668,
+            "minor_faults": 343
+          },
+          {
+            "ms": 3.661519,
+            "rss_kb": 12736,
+            "minor_faults": 342
+          },
+          {
+            "ms": 3.881108,
+            "rss_kb": 12796,
+            "minor_faults": 342
+          },
+          {
+            "ms": 3.878084,
+            "rss_kb": 12668,
+            "minor_faults": 340
+          },
+          {
+            "ms": 3.733707,
+            "rss_kb": 12728,
+            "minor_faults": 344
+          },
+          {
+            "ms": 3.834438,
+            "rss_kb": 12672,
+            "minor_faults": 343
+          },
+          {
+            "ms": 3.748459,
+            "rss_kb": 12672,
+            "minor_faults": 342
+          },
+          {
+            "ms": 3.678504,
+            "rss_kb": 12732,
+            "minor_faults": 343
+          },
+          {
+            "ms": 3.738544,
+            "rss_kb": 12736,
+            "minor_faults": 343
+          },
+          {
+            "ms": 3.861879,
+            "rss_kb": 12672,
+            "minor_faults": 341
+          },
+          {
+            "ms": 3.776802,
+            "rss_kb": 12776,
+            "minor_faults": 345
+          },
+          {
+            "ms": 3.858525,
+            "rss_kb": 12672,
+            "minor_faults": 341
+          },
+          {
+            "ms": 3.800898,
+            "rss_kb": 12800,
+            "minor_faults": 342
+          },
+          {
+            "ms": 3.662641,
+            "rss_kb": 12732,
+            "minor_faults": 344
+          },
+          {
+            "ms": 3.810031,
+            "rss_kb": 12604,
+            "minor_faults": 341
+          },
+          {
+            "ms": 3.888419,
+            "rss_kb": 12736,
+            "minor_faults": 343
+          },
+          {
+            "ms": 3.871554,
+            "rss_kb": 12716,
+            "minor_faults": 342
+          },
+          {
+            "ms": 3.769321,
+            "rss_kb": 12720,
+            "minor_faults": 343
+          },
+          {
+            "ms": 6.199494,
+            "rss_kb": 12736,
+            "minor_faults": 342
+          }
+        ],
+        "before": [
+          {
+            "ms": 7.226724,
+            "rss_kb": 21120,
+            "minor_faults": 694
+          },
+          {
+            "ms": 5.325974,
+            "rss_kb": 21056,
+            "minor_faults": 694
+          },
+          {
+            "ms": 5.423491,
+            "rss_kb": 20992,
+            "minor_faults": 693
+          },
+          {
+            "ms": 5.29028,
+            "rss_kb": 20736,
+            "minor_faults": 689
+          },
+          {
+            "ms": 5.19627,
+            "rss_kb": 21056,
+            "minor_faults": 693
+          },
+          {
+            "ms": 5.426876,
+            "rss_kb": 21248,
+            "minor_faults": 695
+          },
+          {
+            "ms": 5.294267,
+            "rss_kb": 21056,
+            "minor_faults": 695
+          },
+          {
+            "ms": 5.057322,
+            "rss_kb": 21056,
+            "minor_faults": 695
+          },
+          {
+            "ms": 5.221387,
+            "rss_kb": 20732,
+            "minor_faults": 688
+          },
+          {
+            "ms": 5.193516,
+            "rss_kb": 21440,
+            "minor_faults": 701
+          },
+          {
+            "ms": 5.150651,
+            "rss_kb": 21248,
+            "minor_faults": 697
+          },
+          {
+            "ms": 5.124672,
+            "rss_kb": 21056,
+            "minor_faults": 694
+          },
+          {
+            "ms": 4.984572,
+            "rss_kb": 21312,
+            "minor_faults": 698
+          },
+          {
+            "ms": 5.201328,
+            "rss_kb": 21312,
+            "minor_faults": 697
+          },
+          {
+            "ms": 5.119655,
+            "rss_kb": 21312,
+            "minor_faults": 698
+          },
+          {
+            "ms": 7.87772,
+            "rss_kb": 21056,
+            "minor_faults": 694
+          },
+          {
+            "ms": 4.987397,
+            "rss_kb": 21184,
+            "minor_faults": 698
+          },
+          {
+            "ms": 4.946936,
+            "rss_kb": 21120,
+            "minor_faults": 695
+          },
+          {
+            "ms": 4.86947,
+            "rss_kb": 21120,
+            "minor_faults": 695
+          },
+          {
+            "ms": 4.882179,
+            "rss_kb": 20992,
+            "minor_faults": 693
+          },
+          {
+            "ms": 5.306125,
+            "rss_kb": 21028,
+            "minor_faults": 693
+          },
+          {
+            "ms": 5.148348,
+            "rss_kb": 21568,
+            "minor_faults": 704
+          },
+          {
+            "ms": 5.140677,
+            "rss_kb": 21120,
+            "minor_faults": 695
+          },
+          {
+            "ms": 5.15596,
+            "rss_kb": 21568,
+            "minor_faults": 702
+          },
+          {
+            "ms": 4.98278,
+            "rss_kb": 21120,
+            "minor_faults": 695
+          },
+          {
+            "ms": 4.993405,
+            "rss_kb": 21568,
+            "minor_faults": 705
+          },
+          {
+            "ms": 5.371914,
+            "rss_kb": 21120,
+            "minor_faults": 695
+          },
+          {
+            "ms": 5.134037,
+            "rss_kb": 21120,
+            "minor_faults": 695
+          },
+          {
+            "ms": 16.337703,
+            "rss_kb": 21056,
+            "minor_faults": 693
+          },
+          {
+            "ms": 12.110491,
+            "rss_kb": 20736,
+            "minor_faults": 688
+          }
+        ],
+        "after": [
+          {
+            "ms": 5.261188,
+            "rss_kb": 21072,
+            "minor_faults": 694
+          },
+          {
+            "ms": 5.130641,
+            "rss_kb": 21008,
+            "minor_faults": 691
+          },
+          {
+            "ms": 5.257041,
+            "rss_kb": 21072,
+            "minor_faults": 694
+          },
+          {
+            "ms": 5.325093,
+            "rss_kb": 21136,
+            "minor_faults": 693
+          },
+          {
+            "ms": 5.064242,
+            "rss_kb": 20944,
+            "minor_faults": 692
+          },
+          {
+            "ms": 5.012364,
+            "rss_kb": 21136,
+            "minor_faults": 694
+          },
+          {
+            "ms": 5.427797,
+            "rss_kb": 21008,
+            "minor_faults": 693
+          },
+          {
+            "ms": 5.280697,
+            "rss_kb": 20880,
+            "minor_faults": 691
+          },
+          {
+            "ms": 4.995919,
+            "rss_kb": 21264,
+            "minor_faults": 694
+          },
+          {
+            "ms": 5.213396,
+            "rss_kb": 20880,
+            "minor_faults": 691
+          },
+          {
+            "ms": 5.084673,
+            "rss_kb": 20944,
+            "minor_faults": 690
+          },
+          {
+            "ms": 4.968088,
+            "rss_kb": 20944,
+            "minor_faults": 691
+          },
+          {
+            "ms": 5.207831,
+            "rss_kb": 21304,
+            "minor_faults": 697
+          },
+          {
+            "ms": 5.145233,
+            "rss_kb": 20944,
+            "minor_faults": 690
+          },
+          {
+            "ms": 4.962319,
+            "rss_kb": 21072,
+            "minor_faults": 694
+          },
+          {
+            "ms": 5.143521,
+            "rss_kb": 20880,
+            "minor_faults": 691
+          },
+          {
+            "ms": 5.020146,
+            "rss_kb": 21136,
+            "minor_faults": 693
+          },
+          {
+            "ms": 4.935759,
+            "rss_kb": 20876,
+            "minor_faults": 691
+          },
+          {
+            "ms": 4.973536,
+            "rss_kb": 21136,
+            "minor_faults": 695
+          },
+          {
+            "ms": 4.959555,
+            "rss_kb": 21264,
+            "minor_faults": 694
+          },
+          {
+            "ms": 4.944578,
+            "rss_kb": 20880,
+            "minor_faults": 691
+          },
+          {
+            "ms": 5.371203,
+            "rss_kb": 20876,
+            "minor_faults": 689
+          },
+          {
+            "ms": 5.102499,
+            "rss_kb": 21136,
+            "minor_faults": 694
+          },
+          {
+            "ms": 5.071793,
+            "rss_kb": 21072,
+            "minor_faults": 695
+          },
+          {
+            "ms": 4.891233,
+            "rss_kb": 20880,
+            "minor_faults": 690
+          },
+          {
+            "ms": 4.989981,
+            "rss_kb": 21008,
+            "minor_faults": 692
+          },
+          {
+            "ms": 5.0033,
+            "rss_kb": 20896,
+            "minor_faults": 692
+          },
+          {
+            "ms": 12.931911,
+            "rss_kb": 21008,
+            "minor_faults": 693
+          },
+          {
+            "ms": 5.135299,
+            "rss_kb": 21136,
+            "minor_faults": 695
+          },
+          {
+            "ms": 4.946976,
+            "rss_kb": 21008,
+            "minor_faults": 692
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "8e36a68b62614521168d84eaf975ed475d203119124cb690c8151450d2c71dce",
+        "before": "4ba9a2aa0a2dce9fa424468753ac26a832b91733ff05258264e2b693e2a0b090",
+        "after": "4ba9a2aa0a2dce9fa424468753ac26a832b91733ff05258264e2b693e2a0b090"
+      },
+      "summary": {
+        "git": {
+          "ms": 3.8304375000000004,
+          "rss_kb": 12732.0,
+          "max_rss_kb": 12804
+        },
+        "before": {
+          "ms": 5.174738,
+          "rss_kb": 21120.0,
+          "max_rss_kb": 21568
+        },
+        "after": {
+          "ms": 5.078233000000001,
+          "rss_kb": 21008.0,
+          "max_rss_kb": 21304
+        }
+      }
+    },
+    {
+      "id": "show/head@git-git",
+      "cwd": "/tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt",
+      "commands": {
+        "git": [
+          "/usr/bin/git",
+          "show",
+          "HEAD"
+        ],
+        "before": [
+          "/tmp/grit-4759/before/grit",
+          "show",
+          "HEAD"
+        ],
+        "after": [
+          "/tmp/grit-4759/after/grit",
+          "show",
+          "HEAD"
+        ]
+      },
+      "samples": {
+        "git": [
+          {
+            "ms": 2.806046,
+            "rss_kb": 6912,
+            "minor_faults": 254
+          },
+          {
+            "ms": 2.723012,
+            "rss_kb": 6976,
+            "minor_faults": 253
+          },
+          {
+            "ms": 2.584774,
+            "rss_kb": 6976,
+            "minor_faults": 257
+          },
+          {
+            "ms": 2.529081,
+            "rss_kb": 6964,
+            "minor_faults": 255
+          },
+          {
+            "ms": 2.583012,
+            "rss_kb": 6912,
+            "minor_faults": 255
+          },
+          {
+            "ms": 2.545446,
+            "rss_kb": 7096,
+            "minor_faults": 256
+          },
+          {
+            "ms": 2.593789,
+            "rss_kb": 6908,
+            "minor_faults": 253
+          },
+          {
+            "ms": 2.749943,
+            "rss_kb": 6912,
+            "minor_faults": 254
+          },
+          {
+            "ms": 2.647189,
+            "rss_kb": 6872,
+            "minor_faults": 253
+          },
+          {
+            "ms": 2.578235,
+            "rss_kb": 6960,
+            "minor_faults": 254
+          },
+          {
+            "ms": 2.570864,
+            "rss_kb": 6968,
+            "minor_faults": 254
+          },
+          {
+            "ms": 2.529672,
+            "rss_kb": 6912,
+            "minor_faults": 253
+          },
+          {
+            "ms": 2.467439,
+            "rss_kb": 6972,
+            "minor_faults": 254
+          },
+          {
+            "ms": 2.582011,
+            "rss_kb": 6896,
+            "minor_faults": 254
+          },
+          {
+            "ms": 2.522432,
+            "rss_kb": 6972,
+            "minor_faults": 255
+          },
+          {
+            "ms": 2.511205,
+            "rss_kb": 6944,
+            "minor_faults": 255
+          },
+          {
+            "ms": 2.682732,
+            "rss_kb": 6892,
+            "minor_faults": 252
+          },
+          {
+            "ms": 2.62854,
+            "rss_kb": 6912,
+            "minor_faults": 255
+          },
+          {
+            "ms": 3.37492,
+            "rss_kb": 7040,
+            "minor_faults": 255
+          },
+          {
+            "ms": 2.684424,
+            "rss_kb": 6976,
+            "minor_faults": 254
+          },
+          {
+            "ms": 2.586527,
+            "rss_kb": 6964,
+            "minor_faults": 255
+          },
+          {
+            "ms": 2.643253,
+            "rss_kb": 6840,
+            "minor_faults": 255
+          },
+          {
+            "ms": 2.690693,
+            "rss_kb": 6900,
+            "minor_faults": 254
+          },
+          {
+            "ms": 2.64162,
+            "rss_kb": 6936,
+            "minor_faults": 255
+          },
+          {
+            "ms": 2.707539,
+            "rss_kb": 6912,
+            "minor_faults": 254
+          },
+          {
+            "ms": 2.737454,
+            "rss_kb": 6912,
+            "minor_faults": 254
+          },
+          {
+            "ms": 2.571425,
+            "rss_kb": 6932,
+            "minor_faults": 254
+          },
+          {
+            "ms": 2.605616,
+            "rss_kb": 6976,
+            "minor_faults": 255
+          },
+          {
+            "ms": 2.685776,
+            "rss_kb": 6904,
+            "minor_faults": 255
+          },
+          {
+            "ms": 2.605156,
+            "rss_kb": 6884,
+            "minor_faults": 253
+          }
+        ],
+        "before": [
+          {
+            "ms": 4.092655,
+            "rss_kb": 16388,
+            "minor_faults": 580
+          },
+          {
+            "ms": 3.896932,
+            "rss_kb": 16196,
+            "minor_faults": 575
+          },
+          {
+            "ms": 3.900347,
+            "rss_kb": 16324,
+            "minor_faults": 578
+          },
+          {
+            "ms": 3.741078,
+            "rss_kb": 16192,
+            "minor_faults": 575
+          },
+          {
+            "ms": 3.677022,
+            "rss_kb": 16132,
+            "minor_faults": 576
+          },
+          {
+            "ms": 3.876231,
+            "rss_kb": 16068,
+            "minor_faults": 575
+          },
+          {
+            "ms": 3.771274,
+            "rss_kb": 16580,
+            "minor_faults": 583
+          },
+          {
+            "ms": 3.832766,
+            "rss_kb": 16196,
+            "minor_faults": 577
+          },
+          {
+            "ms": 4.29537,
+            "rss_kb": 16388,
+            "minor_faults": 580
+          },
+          {
+            "ms": 4.00198,
+            "rss_kb": 16196,
+            "minor_faults": 577
+          },
+          {
+            "ms": 3.940898,
+            "rss_kb": 16196,
+            "minor_faults": 577
+          },
+          {
+            "ms": 3.891745,
+            "rss_kb": 16260,
+            "minor_faults": 577
+          },
+          {
+            "ms": 3.7754,
+            "rss_kb": 16192,
+            "minor_faults": 576
+          },
+          {
+            "ms": 3.823121,
+            "rss_kb": 16324,
+            "minor_faults": 577
+          },
+          {
+            "ms": 3.932976,
+            "rss_kb": 16580,
+            "minor_faults": 583
+          },
+          {
+            "ms": 3.933957,
+            "rss_kb": 16196,
+            "minor_faults": 576
+          },
+          {
+            "ms": 7.104371,
+            "rss_kb": 16452,
+            "minor_faults": 581
+          },
+          {
+            "ms": 4.012636,
+            "rss_kb": 16260,
+            "minor_faults": 578
+          },
+          {
+            "ms": 3.970993,
+            "rss_kb": 16448,
+            "minor_faults": 580
+          },
+          {
+            "ms": 3.934208,
+            "rss_kb": 16220,
+            "minor_faults": 578
+          },
+          {
+            "ms": 4.050472,
+            "rss_kb": 16388,
+            "minor_faults": 579
+          },
+          {
+            "ms": 3.883291,
+            "rss_kb": 16388,
+            "minor_faults": 578
+          },
+          {
+            "ms": 3.817673,
+            "rss_kb": 16580,
+            "minor_faults": 583
+          },
+          {
+            "ms": 4.40285,
+            "rss_kb": 16324,
+            "minor_faults": 578
+          },
+          {
+            "ms": 4.21606,
+            "rss_kb": 16452,
+            "minor_faults": 582
+          },
+          {
+            "ms": 3.88923,
+            "rss_kb": 16580,
+            "minor_faults": 584
+          },
+          {
+            "ms": 3.939286,
+            "rss_kb": 16324,
+            "minor_faults": 577
+          },
+          {
+            "ms": 3.837303,
+            "rss_kb": 16388,
+            "minor_faults": 578
+          },
+          {
+            "ms": 3.850022,
+            "rss_kb": 16260,
+            "minor_faults": 578
+          },
+          {
+            "ms": 3.803812,
+            "rss_kb": 16132,
+            "minor_faults": 576
+          }
+        ],
+        "after": [
+          {
+            "ms": 3.904473,
+            "rss_kb": 16340,
+            "minor_faults": 576
+          },
+          {
+            "ms": 3.823172,
+            "rss_kb": 16468,
+            "minor_faults": 578
+          },
+          {
+            "ms": 3.763351,
+            "rss_kb": 16340,
+            "minor_faults": 578
+          },
+          {
+            "ms": 3.78888,
+            "rss_kb": 16212,
+            "minor_faults": 576
+          },
+          {
+            "ms": 3.640828,
+            "rss_kb": 16084,
+            "minor_faults": 574
+          },
+          {
+            "ms": 3.740177,
+            "rss_kb": 16468,
+            "minor_faults": 579
+          },
+          {
+            "ms": 3.938484,
+            "rss_kb": 16212,
+            "minor_faults": 574
+          },
+          {
+            "ms": 3.936081,
+            "rss_kb": 16276,
+            "minor_faults": 576
+          },
+          {
+            "ms": 3.889331,
+            "rss_kb": 16212,
+            "minor_faults": 575
+          },
+          {
+            "ms": 3.945024,
+            "rss_kb": 16468,
+            "minor_faults": 580
+          },
+          {
+            "ms": 3.790433,
+            "rss_kb": 16212,
+            "minor_faults": 573
+          },
+          {
+            "ms": 3.745205,
+            "rss_kb": 16340,
+            "minor_faults": 577
+          },
+          {
+            "ms": 3.825345,
+            "rss_kb": 16244,
+            "minor_faults": 576
+          },
+          {
+            "ms": 3.717283,
+            "rss_kb": 16532,
+            "minor_faults": 581
+          },
+          {
+            "ms": 3.624013,
+            "rss_kb": 16148,
+            "minor_faults": 575
+          },
+          {
+            "ms": 3.84887,
+            "rss_kb": 16212,
+            "minor_faults": 575
+          },
+          {
+            "ms": 3.86881,
+            "rss_kb": 16532,
+            "minor_faults": 581
+          },
+          {
+            "ms": 3.781659,
+            "rss_kb": 16276,
+            "minor_faults": 577
+          },
+          {
+            "ms": 4.209721,
+            "rss_kb": 16212,
+            "minor_faults": 575
+          },
+          {
+            "ms": 3.899977,
+            "rss_kb": 15956,
+            "minor_faults": 571
+          },
+          {
+            "ms": 3.797252,
+            "rss_kb": 16404,
+            "minor_faults": 578
+          },
+          {
+            "ms": 4.296761,
+            "rss_kb": 16400,
+            "minor_faults": 577
+          },
+          {
+            "ms": 3.873607,
+            "rss_kb": 16468,
+            "minor_faults": 579
+          },
+          {
+            "ms": 3.767819,
+            "rss_kb": 15956,
+            "minor_faults": 570
+          },
+          {
+            "ms": 4.358133,
+            "rss_kb": 16276,
+            "minor_faults": 578
+          },
+          {
+            "ms": 4.080286,
+            "rss_kb": 16276,
+            "minor_faults": 579
+          },
+          {
+            "ms": 3.910172,
+            "rss_kb": 16212,
+            "minor_faults": 575
+          },
+          {
+            "ms": 3.871594,
+            "rss_kb": 16332,
+            "minor_faults": 576
+          },
+          {
+            "ms": 3.764474,
+            "rss_kb": 16400,
+            "minor_faults": 579
+          },
+          {
+            "ms": 3.690692,
+            "rss_kb": 15956,
+            "minor_faults": 571
+          }
+        ]
+      },
+      "output_sha256": {
+        "git": "1a11d4cd97d2c91a7a633490908cb0a80fe2209cbae139011503a9fecc7b9d67",
+        "before": "a63bc9c0f098766d5968767389d5cdea750282b2041b02631ee6a89f481c9ef6",
+        "after": "a63bc9c0f098766d5968767389d5cdea750282b2041b02631ee6a89f481c9ef6"
+      },
+      "summary": {
+        "git": {
+          "ms": 2.605386,
+          "rss_kb": 6922.0,
+          "max_rss_kb": 7096
+        },
+        "before": {
+          "ms": 3.8986395,
+          "rss_kb": 16324.0,
+          "max_rss_kb": 16580
+        },
+        "after": {
+          "ms": 3.8371075,
+          "rss_kb": 16276.0,
+          "max_rss_kb": 16532
+        }
+      }
+    }
+  ],
+  "profiling": {
+    "allocations_before": 18591,
+    "allocations_after": 13586,
+    "peak_heap_bytes_before_approx": 637260,
+    "peak_heap_bytes_after_approx": 639920,
+    "tools": [
+      "perf record -g --call-graph dwarf (200 invocations)",
+      "strace -c",
+      "heaptrack"
+    ],
+    "root_cause": "Symmetric endpoint navigation parsed the same chain that the following ancestry walk parsed again. The endpoint resolver now seeds the existing parent/timestamp cache, with a 1024-entry bound and guards for differing parent semantics."
+  },
+  "candidate_source_sha256": {
+    "grit-lib/src/rev_parse.rs": "54c9c214a47f54062488973fb6e6f7fa20d7061baef8c32156b4d4edbf3faaaf",
+    "grit-lib/src/revwalk/queries.rs": "40d5564bfd319c535e5d227f2a5ea4d8e96e7372a90d21403be46bb148bbcbbf"
+  },
+  "git_git_fixture": {
+    "tag": "v2.47.0",
+    "head": "777489f9e09c8d0dd6b12f9d90de6376330577a2",
+    "commits": 75031
+  },
+  "unavailable_scenarios": {
+    "revs/count-path@git-git": "The registered revision 7e34d81 is absent from the pinned fixture; stock Git exits 128. The explicit HEAD control is reported separately."
+  },
+  "daily_target_recheck": {
+    "before": {
+      "schema": "grit-daily-bench/1",
+      "generated_at": "2026-10-27T03:40:51.498901349Z",
+      "machine": {
+        "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+        "physical_cores": 2,
+        "logical_cores": 4,
+        "ram_bytes": 16766418944,
+        "os": "linux",
+        "kernel": "Linux 6.17.0-1022-azure",
+        "scratch_filesystem": "ext4",
+        "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo_profile": "release"
+      },
+      "tools": {
+        "git": "git version 2.55.0",
+        "grit": "grit 0.5.22",
+        "grit_commit": "aa1964221e0493bdd9c49a2c7326424f5d768c57"
+      },
+      "scenarios": [
+        {
+          "id": "revs/left-right-count@deep-history",
+          "area": "revwalk",
+          "description": "Symmetric-range left/right counts on deep-history",
+          "git": {
+            "median_wall_ms": 2.643237,
+            "peak_rss_bytes": 9285632,
+            "runs": 20,
+            "samples_ms": [
+              2.325,
+              2.508,
+              2.646,
+              2.64,
+              2.745,
+              2.702,
+              2.571,
+              2.581,
+              2.574,
+              2.63,
+              2.686,
+              2.559,
+              2.618,
+              2.654,
+              2.556,
+              2.675,
+              3.997,
+              2.76,
+              2.711,
+              2.768
+            ],
+            "min_ms": 2.3245549999999997,
+            "max_ms": 3.996825,
+            "stddev_ms": 0.3226591186319468
+          },
+          "grit": {
+            "median_wall_ms": 5.821578499999999,
+            "peak_rss_bytes": 17682432,
+            "runs": 20,
+            "samples_ms": [
+              5.541,
+              5.765,
+              5.936,
+              5.984,
+              6.114,
+              5.756,
+              5.665,
+              5.717,
+              5.782,
+              5.861,
+              5.745,
+              5.577,
+              5.943,
+              5.784,
+              5.666,
+              5.963,
+              7.81,
+              5.859,
+              5.933,
+              7.654
+            ],
+            "min_ms": 5.541444,
+            "max_ms": 7.809934999999999,
+            "stddev_ms": 0.6088893348725395
+          },
+          "ratio": 2.202442875913132,
+          "detail": {
+            "commands": {
+              "git": "git rev-list --left-right --count HEAD~500...HEAD",
+              "grit": "grit revs --left-right --count HEAD~500...HEAD"
+            },
+            "phases": {
+              "grit": [
+                {
+                  "name": "grit.repository.open",
+                  "ms": 1.16,
+                  "count": 1,
+                  "depth": 0
+                },
+                {
+                  "name": "grit.config.load",
+                  "ms": 0.556,
+                  "count": 2,
+                  "depth": 0
+                },
+                {
+                  "name": "grit.pack.index.open",
+                  "ms": 0.025,
+                  "count": 1,
+                  "depth": 0
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "after": {
+      "schema": "grit-daily-bench/1",
+      "generated_at": "2026-10-27T03:40:54.970426077Z",
+      "machine": {
+        "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+        "physical_cores": 2,
+        "logical_cores": 4,
+        "ram_bytes": 16766418944,
+        "os": "linux",
+        "kernel": "Linux 6.17.0-1022-azure",
+        "scratch_filesystem": "ext4",
+        "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo_profile": "release"
+      },
+      "tools": {
+        "git": "git version 2.55.0",
+        "grit": "grit 0.5.22",
+        "grit_commit": "aa1964221e0493bdd9c49a2c7326424f5d768c57"
+      },
+      "scenarios": [
+        {
+          "id": "revs/left-right-count@deep-history",
+          "area": "revwalk",
+          "description": "Symmetric-range left/right counts on deep-history",
+          "git": {
+            "median_wall_ms": 2.345024,
+            "peak_rss_bytes": 8806400,
+            "runs": 20,
+            "samples_ms": [
+              2.673,
+              2.509,
+              2.426,
+              2.33,
+              2.314,
+              2.308,
+              2.252,
+              2.232,
+              2.237,
+              2.364,
+              2.514,
+              2.618,
+              2.616,
+              2.546,
+              2.407,
+              2.36,
+              2.328,
+              2.315,
+              2.269,
+              2.249
+            ],
+            "min_ms": 2.231867,
+            "max_ms": 2.673417,
+            "stddev_ms": 0.139206693016375
+          },
+          "grit": {
+            "median_wall_ms": 4.3607395,
+            "peak_rss_bytes": 17715200,
+            "runs": 20,
+            "samples_ms": [
+              4.596,
+              4.431,
+              4.373,
+              4.367,
+              4.262,
+              4.174,
+              4.159,
+              4.135,
+              4.272,
+              4.562,
+              4.837,
+              4.945,
+              4.528,
+              4.417,
+              4.355,
+              4.303,
+              4.406,
+              4.248,
+              4.104,
+              4.139
+            ],
+            "min_ms": 4.1043959999999995,
+            "max_ms": 4.945053,
+            "stddev_ms": 0.22591061018525377
+          },
+          "ratio": 1.8595713732567343,
+          "detail": {
+            "commands": {
+              "git": "git rev-list --left-right --count HEAD~500...HEAD",
+              "grit": "grit revs --left-right --count HEAD~500...HEAD"
+            },
+            "phases": {
+              "grit": [
+                {
+                  "name": "grit.repository.open",
+                  "ms": 0.287,
+                  "count": 1,
+                  "depth": 0
+                },
+                {
+                  "name": "grit.config.load",
+                  "ms": 0.078,
+                  "count": 2,
+                  "depth": 0
+                },
+                {
+                  "name": "grit.pack.index.open",
+                  "ms": 0.017,
+                  "count": 1,
+                  "depth": 0
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

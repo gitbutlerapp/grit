@@ -1,0 +1,866 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-27T03:16:26.309387238Z",
+  "machine": {
+    "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+    "physical_cores": 2,
+    "logical_cores": 4,
+    "ram_bytes": 16766418944,
+    "os": "linux",
+    "kernel": "Linux 6.17.0-1022-azure",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "grit": "grit 0.5.22",
+    "grit_commit": "aa1964221e0493bdd9c49a2c7326424f5d768c57"
+  },
+  "scenarios": [
+    {
+      "id": "log/oneline-100@git-git",
+      "area": "revwalk",
+      "headline": true,
+      "name": "log",
+      "description": "Last 100 commits one line each vs git log --oneline",
+      "git": {
+        "median_wall_ms": 3.095818,
+        "peak_rss_bytes": 14577664,
+        "runs": 20,
+        "samples_ms": [
+          3.096,
+          6.587,
+          5.499,
+          3.108,
+          3.029,
+          3.052,
+          3.095,
+          3.126,
+          3.083,
+          3.125,
+          3.119,
+          3.104,
+          3.084,
+          3.068,
+          3.041,
+          3.092,
+          3.111,
+          3.095,
+          3.126,
+          3.076
+        ],
+        "min_ms": 3.029404,
+        "max_ms": 6.587169,
+        "stddev_ms": 0.926135241101286
+      },
+      "grit": {
+        "median_wall_ms": 3.83045,
+        "peak_rss_bytes": 23236608,
+        "runs": 20,
+        "samples_ms": [
+          8.101,
+          7.224,
+          3.817,
+          3.783,
+          3.838,
+          3.891,
+          3.863,
+          3.866,
+          3.836,
+          3.797,
+          3.774,
+          3.852,
+          3.978,
+          3.74,
+          3.794,
+          3.853,
+          3.771,
+          3.825,
+          3.767,
+          3.822
+        ],
+        "min_ms": 3.740059,
+        "max_ms": 8.100609,
+        "stddev_ms": 1.1904545396728448
+      },
+      "ratio": 1.2372981874257465,
+      "detail": {
+        "commands": {
+          "git": "git log --oneline -100",
+          "grit": "grit log --limit 100"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.263,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.078,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.021,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "revs/author-n50@deep-history",
+      "area": "revwalk",
+      "description": "rev-list -n 50 --author=. HEAD on deep-history (no commit-graph)",
+      "git": {
+        "median_wall_ms": 1.8010055,
+        "peak_rss_bytes": 7958528,
+        "runs": 20,
+        "samples_ms": [
+          1.849,
+          1.744,
+          1.753,
+          1.818,
+          1.784,
+          1.85,
+          1.843,
+          1.873,
+          1.871,
+          1.855,
+          1.859,
+          1.846,
+          1.792,
+          1.779,
+          1.795,
+          1.755,
+          1.737,
+          1.795,
+          1.807,
+          1.762
+        ],
+        "min_ms": 1.7368139999999999,
+        "max_ms": 1.872778,
+        "stddev_ms": 0.044902609059438166
+      },
+      "grit": {
+        "median_wall_ms": 3.22768,
+        "peak_rss_bytes": 18477056,
+        "runs": 20,
+        "samples_ms": [
+          3.248,
+          3.182,
+          3.189,
+          3.149,
+          3.278,
+          3.273,
+          3.505,
+          3.298,
+          3.383,
+          3.231,
+          3.333,
+          3.147,
+          3.275,
+          3.262,
+          3.182,
+          3.13,
+          3.154,
+          3.17,
+          3.225,
+          3.165
+        ],
+        "min_ms": 3.130134,
+        "max_ms": 3.505242,
+        "stddev_ms": 0.09283523681531308
+      },
+      "ratio": 1.7921544381735646,
+      "detail": {
+        "commands": {
+          "git": "git rev-list -n 50 --author=. HEAD",
+          "grit": "grit revs --author=. -n 50 HEAD"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.revwalk.setup",
+              "ms": 0.473,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.repository.open",
+              "ms": 0.269,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.079,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.019,
+              "count": 1,
+              "depth": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "revs/author-n50@deep-history-cg",
+      "area": "revwalk",
+      "description": "rev-list -n 50 --author=. HEAD on deep-history (commit-graph written)",
+      "git": {
+        "median_wall_ms": 2.1529385,
+        "peak_rss_bytes": 10473472,
+        "runs": 20,
+        "samples_ms": [
+          2.244,
+          2.174,
+          2.121,
+          2.143,
+          2.16,
+          2.07,
+          2.103,
+          2.161,
+          2.084,
+          2.164,
+          2.207,
+          2.297,
+          2.307,
+          2.254,
+          2.146,
+          2.121,
+          2.17,
+          2.113,
+          2.103,
+          2.045
+        ],
+        "min_ms": 2.045147,
+        "max_ms": 2.3069789999999997,
+        "stddev_ms": 0.07187670727045095
+      },
+      "grit": {
+        "median_wall_ms": 3.4716355,
+        "peak_rss_bytes": 20361216,
+        "runs": 20,
+        "samples_ms": [
+          3.666,
+          3.451,
+          3.503,
+          3.432,
+          3.433,
+          3.385,
+          3.379,
+          3.454,
+          3.397,
+          3.549,
+          3.602,
+          3.863,
+          3.758,
+          3.655,
+          3.5,
+          3.481,
+          3.462,
+          3.446,
+          3.413,
+          3.498
+        ],
+        "min_ms": 3.378617,
+        "max_ms": 3.863493,
+        "stddev_ms": 0.13029428035679363
+      },
+      "ratio": 1.6125102969731835,
+      "detail": {
+        "commands": {
+          "git": "git rev-list -n 50 --author=. HEAD",
+          "grit": "grit revs --author=. -n 50 HEAD"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.revwalk.setup",
+              "ms": 0.562,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.repository.open",
+              "ms": 0.288,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.086,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.016,
+              "count": 1,
+              "depth": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "revs/count-author@deep-history",
+      "area": "revwalk",
+      "description": "rev-list --count --author=. HEAD on deep-history (no commit-graph)",
+      "git": {
+        "median_wall_ms": 94.5038045,
+        "peak_rss_bytes": 22257664,
+        "runs": 14,
+        "samples_ms": [
+          96.06,
+          94.37,
+          93.936,
+          95.241,
+          92.766,
+          91.088,
+          97.918,
+          95.35,
+          93.622,
+          93.284,
+          94.637,
+          96.127,
+          96.259,
+          93.716
+        ],
+        "min_ms": 91.08828600000001,
+        "max_ms": 97.91796099999999,
+        "stddev_ms": 1.7289467651196517
+      },
+      "grit": {
+        "median_wall_ms": 123.537127,
+        "peak_rss_bytes": 28811264,
+        "runs": 14,
+        "samples_ms": [
+          124.338,
+          124.352,
+          123.036,
+          117.969,
+          121.943,
+          123.235,
+          121.029,
+          123.839,
+          120.89,
+          122.468,
+          130.767,
+          124.659,
+          126.578,
+          125.377
+        ],
+        "min_ms": 117.968926,
+        "max_ms": 130.766622,
+        "stddev_ms": 2.984767631071389
+      },
+      "ratio": 1.3072185575343689,
+      "detail": {
+        "commands": {
+          "git": "git rev-list --count --author=. HEAD",
+          "grit": "grit revs --author=. --count HEAD"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.revwalk.setup",
+              "ms": 116.49,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.repository.open",
+              "ms": 0.326,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.096,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.022,
+              "count": 1,
+              "depth": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "revs/count-author@deep-history-cg",
+      "area": "revwalk",
+      "description": "rev-list --count --author=. HEAD on deep-history (commit-graph written)",
+      "git": {
+        "median_wall_ms": 98.55037899999999,
+        "peak_rss_bytes": 25370624,
+        "runs": 14,
+        "samples_ms": [
+          104.852,
+          108.389,
+          101.5,
+          95.545,
+          107.334,
+          100.388,
+          98.688,
+          98.413,
+          93.32,
+          93.737,
+          94.893,
+          95.697,
+          102.974,
+          96.478
+        ],
+        "min_ms": 93.319974,
+        "max_ms": 108.38936700000001,
+        "stddev_ms": 4.957961016858656
+      },
+      "grit": {
+        "median_wall_ms": 124.410212,
+        "peak_rss_bytes": 28844032,
+        "runs": 14,
+        "samples_ms": [
+          132.815,
+          131.592,
+          121.381,
+          124.35,
+          125.244,
+          129.519,
+          123.996,
+          124.471,
+          121.693,
+          125.603,
+          122.855,
+          123.651,
+          144.181,
+          123.287
+        ],
+        "min_ms": 121.38060300000001,
+        "max_ms": 144.18092199999998,
+        "stddev_ms": 6.108122552583358
+      },
+      "ratio": 1.2624021669160705,
+      "detail": {
+        "commands": {
+          "git": "git rev-list --count --author=. HEAD",
+          "grit": "grit revs --author=. --count HEAD"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.revwalk.setup",
+              "ms": 118.07,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.repository.open",
+              "ms": 0.337,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.101,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.016,
+              "count": 1,
+              "depth": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "revs/count-since@deep-history",
+      "area": "revwalk",
+      "description": "Bounded rev-list count with --since on deep-history vs grit rev-walk driver",
+      "git": {
+        "median_wall_ms": 1.6838514999999998,
+        "peak_rss_bytes": 7811072,
+        "runs": 20,
+        "samples_ms": [
+          1.728,
+          1.707,
+          1.682,
+          1.666,
+          1.685,
+          1.752,
+          1.708,
+          1.669,
+          1.694,
+          1.823,
+          1.694,
+          1.69,
+          1.695,
+          1.664,
+          1.683,
+          1.664,
+          1.668,
+          1.654,
+          1.654,
+          1.667
+        ],
+        "min_ms": 1.6539510000000002,
+        "max_ms": 1.823205,
+        "stddev_ms": 0.039647236420448595
+      },
+      "grit": {
+        "median_wall_ms": 2.5206925,
+        "peak_rss_bytes": 16617472,
+        "runs": 20,
+        "samples_ms": [
+          2.611,
+          2.51,
+          2.531,
+          2.499,
+          2.545,
+          2.547,
+          2.483,
+          2.483,
+          2.771,
+          2.608,
+          2.471,
+          2.545,
+          2.505,
+          2.548,
+          2.56,
+          2.533,
+          2.449,
+          2.436,
+          2.497,
+          2.484
+        ],
+        "min_ms": 2.436115,
+        "max_ms": 2.771217,
+        "stddev_ms": 0.07294899481452778
+      },
+      "ratio": 1.4969802859693984,
+      "detail": {
+        "commands": {
+          "git": "git rev-list --count '--since=1970-01-01 13:53:00 +0000' -n 20 HEAD",
+          "grit": "grit revs --count '--since=1970-01-01 13:53:00 +0000' -n 20 HEAD"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.265,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.081,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.02,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "revs/count@git-git",
+      "area": "revwalk",
+      "description": "Count commits at HEAD: grit revs --count HEAD vs git rev-list --count HEAD",
+      "git": {
+        "median_wall_ms": 407.256911,
+        "peak_rss_bytes": 64122880,
+        "runs": 4,
+        "samples_ms": [
+          405.047,
+          405.273,
+          413.228,
+          409.241
+        ],
+        "min_ms": 405.046996,
+        "max_ms": 413.228361,
+        "stddev_ms": 3.867819273701339
+      },
+      "grit": {
+        "median_wall_ms": 567.97838,
+        "peak_rss_bytes": 131981312,
+        "runs": 4,
+        "samples_ms": [
+          550.394,
+          585.141,
+          604.103,
+          550.815
+        ],
+        "min_ms": 550.393971,
+        "max_ms": 604.1034360000001,
+        "stddev_ms": 26.567040343361835
+      },
+      "ratio": 1.3946439327582092,
+      "detail": {
+        "commands": {
+          "git": "git rev-list --count HEAD",
+          "grit": "grit revs --count HEAD"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.revwalk.setup",
+              "ms": 542.68,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.repository.open",
+              "ms": 0.332,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.101,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.022,
+              "count": 1,
+              "depth": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "revs/left-right-count@deep-history",
+      "area": "revwalk",
+      "description": "Symmetric-range left/right counts on deep-history",
+      "git": {
+        "median_wall_ms": 2.396877,
+        "peak_rss_bytes": 9105408,
+        "runs": 20,
+        "samples_ms": [
+          5.158,
+          2.504,
+          4.76,
+          2.514,
+          2.439,
+          2.452,
+          2.376,
+          2.354,
+          2.375,
+          2.363,
+          2.357,
+          2.36,
+          2.368,
+          2.419,
+          2.361,
+          2.39,
+          2.403,
+          2.424,
+          2.382,
+          2.544
+        ],
+        "min_ms": 2.353972,
+        "max_ms": 5.157959,
+        "stddev_ms": 0.7890903271554949
+      },
+      "grit": {
+        "median_wall_ms": 5.088805000000001,
+        "peak_rss_bytes": 17784832,
+        "runs": 20,
+        "samples_ms": [
+          7.236,
+          7.656,
+          9.868,
+          5.151,
+          5.251,
+          5.011,
+          4.968,
+          5.077,
+          5.042,
+          4.97,
+          4.905,
+          5.087,
+          5.021,
+          5.112,
+          5.068,
+          5.09,
+          5.16,
+          5.061,
+          5.23,
+          5.343
+        ],
+        "min_ms": 4.904749,
+        "max_ms": 9.868046,
+        "stddev_ms": 1.2502261690792411
+      },
+      "ratio": 2.1230980980667766,
+      "detail": {
+        "commands": {
+          "git": "git rev-list --left-right --count HEAD~500...HEAD",
+          "grit": "grit revs --left-right --count HEAD~500...HEAD"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.296,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.093,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.02,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "show/head@git-git",
+      "area": "revwalk",
+      "headline": true,
+      "name": "show",
+      "description": "Show HEAD commit vs git show",
+      "git": {
+        "median_wall_ms": 2.0991935,
+        "peak_rss_bytes": 8757248,
+        "runs": 20,
+        "samples_ms": [
+          2.177,
+          2.191,
+          2.102,
+          4.661,
+          2.068,
+          2.008,
+          2.036,
+          2.069,
+          2.069,
+          2.114,
+          2.111,
+          2.163,
+          2.168,
+          2.096,
+          2.119,
+          2.073,
+          2.07,
+          2.103,
+          2.059,
+          2.067
+        ],
+        "min_ms": 2.0077010000000004,
+        "max_ms": 4.66076,
+        "stddev_ms": 0.5750367973338085
+      },
+      "grit": {
+        "median_wall_ms": 2.8842305,
+        "peak_rss_bytes": 18767872,
+        "runs": 20,
+        "samples_ms": [
+          3.115,
+          3.012,
+          2.901,
+          4.27,
+          2.86,
+          2.821,
+          2.851,
+          2.95,
+          2.79,
+          2.867,
+          2.805,
+          3.019,
+          3.277,
+          2.875,
+          2.883,
+          2.888,
+          2.871,
+          2.912,
+          2.886,
+          2.79
+        ],
+        "min_ms": 2.789553,
+        "max_ms": 4.270215,
+        "stddev_ms": 0.32501873897424827
+      },
+      "ratio": 1.3739707654392033,
+      "detail": {
+        "commands": {
+          "git": "git show",
+          "grit": "grit show"
+        },
+        "phases": {
+          "git": [
+            {
+              "name": "diff: setup",
+              "ms": 0.01,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "diff: write",
+              "ms": 0.004,
+              "count": 1,
+              "depth": 0
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.276,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.diff.tree",
+              "ms": 0.204,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.094,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.018,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

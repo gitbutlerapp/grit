@@ -9,6 +9,68 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
 
+## Symmetric revision counts (2026-10-27)
+
+Resolving `HEAD~500` parsed its parent chain, then the symmetric-range walk read
+those commits again for the same parents and timestamps. Symmetric range
+expansion now seeds the repository's existing metadata cache, capped at 1,024
+entries. Reuse is guarded when shallow boundaries, promisor state, grafts or
+replacements can change parent semantics; standalone resolution keeps its original
+retention policy.
+
+Measured against system Git 2.55.0 on a four-vCPU AMD EPYC 9V45 Linux VM with
+16 GiB RAM and Rust 1.99.0 `release` builds. Frozen main is `aa1964221e04`.
+The production deep-history fixture has 50,000 commits and 20,000 files; git/git
+is pinned to v2.47.0 (`777489f9e09c`). All builds and tests
+were stopped during measurements. Both grit executables were copied using the
+same buffered-write method and warmed equally.
+
+The table uses **30 rotated, interleaved runs per tool** after three warmups.
+Wall time is the median from Python `perf_counter_ns` around `/usr/bin/time -v`,
+including the helper's launch. Memory is the median process peak RSS in KiB.
+The target improves **16.1%**; peak RSS is essentially unchanged.
+Heaptrack records **18,591 → 13,586 allocation calls (26.9% fewer)**, with peak
+heap usage remaining about 0.64 MB. The scoped cache avoids extra retention in
+the standalone resolution controls.
+
+| Scenario | Git ms | Main ms | Fixed ms | Main peak KiB | Fixed peak KiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `revs/left-right-count@deep-history` | 3.054 | 6.235 | 5.229 | 15,208 | 15,172 |
+| `revs/author-n50@deep-history` | 2.414 | 4.559 | 4.479 | 16,884 | 16,960 |
+| `revs/count-author@deep-history` | 99.796 | 127.828 | 127.825 | 25,566 | 25,540 |
+| `revs/author-n50@deep-history-cg` | 2.551 | 4.359 | 4.305 | 19,524 | 19,518 |
+| `revs/count-author@deep-history-cg` | 106.614 | 129.287 | 128.597 | 25,722 | 25,710 |
+| `revs/count-since@deep-history` | 2.234 | 3.576 | 3.488 | 14,724 | 14,612 |
+| `revs/count@git-git` | 424.569 | 575.766 | 579.342 | 125,950 | 125,962 |
+| `revs/count-path-head@git-git` | 320.630 | 343.816 | 344.814 | 270,582 | 270,540 |
+| `resolve/ancestor-500@deep-history` | 2.767 | 4.660 | 4.676 | 14,824 | 14,838 |
+| `resolve/ancestor-10000@deep-history` | 16.161 | 28.993 | 29.148 | 16,296 | 16,216 |
+| `resolve/head@deep-history` | 2.000 | 3.559 | 3.587 | 12,676 | 12,564 |
+| `revs/left-right-first-parent@deep-history` | 3.060 | 6.297 | 5.242 | 15,208 | 15,096 |
+| `log/oneline-100@git-git` | 3.830 | 5.175 | 5.078 | 21,120 | 21,008 |
+| `show/head@git-git` | 2.605 | 3.899 | 3.837 | 16,324 | 16,276 |
+
+A targeted direct-spawn daily recheck measures the target at
+**5.822 → 4.361 ms**
+(20 runs per build; system Git **2.643 → 2.345 ms**).
+The earlier full-matrix captures experienced host drift, so the interleaved table
+is the primary before/after comparison.
+All measured grit outputs match frozen main byte for byte, and every count
+matches system Git. Library tests cover reuse, standalone retention, invalid
+objects, shallow and replacement guards, plus Git/grit object round trips and
+navigation through loose objects, packs, commit graphs, tags and merged histories.
+
+The registered `revs/count-path@git-git` row currently references `7e34d81`, absent
+from the pinned fixture, so system Git rejects it. The table labels the working
+`HEAD` path-count control separately.
+
+Raw samples, commands, binary/source hashes and profiling counts:
+[`revs-navigation-4759-paired.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/revs-navigation-4759-paired.json).
+The standard runner captures are
+[`daily-revs-navigation-4759-before.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-revs-navigation-4759-before.json)
+and
+[`daily-revs-navigation-4759-after.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-revs-navigation-4759-after.json).
+
 ## Inexact rename detection (2026-10-27)
 
 Issue [#1683](https://github.com/gitbutlerapp/grit/issues/1683) reproduced on

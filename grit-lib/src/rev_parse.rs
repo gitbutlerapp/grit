@@ -712,6 +712,10 @@ pub fn load_graft_parents(git_dir: &Path) -> HashMap<ObjectId, Vec<ObjectId>> {
     grafts
 }
 
+// Short range endpoints benefit from seeding the following walk's metadata cache. Bound
+// that extra retention so resolving a distant ancestor alone does not retain its history.
+const NAV_LINKAGE_CACHE_LIMIT: usize = 1024;
+
 /// Cached graft state for a sequence of `^` / `~` navigation steps.
 ///
 /// Parent links come from the object database with header-only parsing so `HEAD~N`
@@ -720,10 +724,16 @@ struct NavParentCache<'repo> {
     repo: &'repo Repository,
     grafts: HashMap<ObjectId, Vec<ObjectId>>,
     graph: Option<crate::commit_graph_file::CommitGraphChain>,
+    share_linkage: std::cell::OnceCell<bool>,
+}
+
+enum NavigationMetadata {
+    Discard,
+    RetainForWalk,
 }
 
 impl<'repo> NavParentCache<'repo> {
-    fn new(repo: &'repo Repository) -> Self {
+    fn new(repo: &'repo Repository, metadata: NavigationMetadata) -> Self {
         let grafts = load_graft_parents(repo.git_dir());
         let graph = repo
             .caches()
@@ -733,6 +743,10 @@ impl<'repo> NavParentCache<'repo> {
             repo,
             grafts,
             graph,
+            share_linkage: match metadata {
+                NavigationMetadata::Discard => std::cell::OnceCell::from(false),
+                NavigationMetadata::RetainForWalk => std::cell::OnceCell::new(),
+            },
         }
     }
 
@@ -745,15 +759,49 @@ impl<'repo> NavParentCache<'repo> {
                 return Ok(parents);
             }
         }
-        let obj = self.repo.odb().read(&commit_oid)?;
-        if obj.kind != ObjectKind::Commit {
+        // Reachability uses effective parents, whereas navigation reads the object's own
+        // parents. Share metadata only when shallow/promisor boundaries and rewrites cannot
+        // make those differ. This also avoids inflating a range endpoint's chain twice.
+        let share_linkage = *self.share_linkage.get_or_init(|| {
+            self.grafts.is_empty()
+                && crate::shallow::load_shallow_boundaries(self.repo.git_dir()).is_empty()
+                && !crate::promisor::repo_treats_promisor_packs(
+                    self.repo.git_dir(),
+                    &self.repo.config().unwrap_or_default(),
+                )
+        }) && self.repo.object_id_after_replace(&commit_oid) == commit_oid;
+        if share_linkage {
+            let cache = self
+                .repo
+                .caches()
+                .commit_linkage()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if let Some(parents) = cache.parents.get(&commit_oid) {
+                return Ok(parents.clone());
+            }
+        }
+        let object = self.repo.odb().read(&commit_oid)?;
+        if object.kind != ObjectKind::Commit {
             return Err(Error::InvalidRef(format!(
                 "invalid ref: {commit_oid} is not a commit"
             )));
         }
-        Ok(crate::objects::CommitRef::parse(&obj.data)?
-            .parents()
-            .to_vec())
+        let commit = crate::objects::CommitRef::parse(&object.data)?;
+        let parents = commit.parents().to_vec();
+        if share_linkage {
+            let mut cache = self
+                .repo
+                .caches()
+                .commit_linkage()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if cache.parents.len() < NAV_LINKAGE_CACHE_LIMIT {
+                cache.times.insert(commit_oid, commit.committer_timestamp());
+                cache.parents.insert(commit_oid, parents.clone());
+            }
+        }
+        Ok(parents)
     }
 }
 
@@ -762,7 +810,7 @@ pub fn commit_parents_for_navigation(
     repo: &Repository,
     commit_oid: ObjectId,
 ) -> Result<Vec<ObjectId>> {
-    NavParentCache::new(repo).parents_of(commit_oid)
+    NavParentCache::new(repo, NavigationMetadata::Discard).parents_of(commit_oid)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1298,6 +1346,49 @@ fn resolve_revision_impl(
     implicit_blob_abbrev: bool,
     remote_branch_name_guess: bool,
 ) -> Result<ObjectId> {
+    resolve_revision_with_navigation(
+        repo,
+        spec,
+        index_dwim,
+        commit_only_hex,
+        use_disambiguate_config,
+        treeish_colon_lhs,
+        implicit_tree_abbrev,
+        implicit_blob_abbrev,
+        remote_branch_name_guess,
+        NavigationMetadata::Discard,
+    )
+}
+
+/// Resolve an endpoint whose parsed ancestry is reused by the following walk.
+pub(crate) fn resolve_walk_range_end(repo: &Repository, spec: &str) -> Result<ObjectId> {
+    resolve_revision_with_navigation(
+        repo,
+        spec,
+        true,
+        true,
+        true,
+        false,
+        false,
+        false,
+        true,
+        NavigationMetadata::RetainForWalk,
+    )
+}
+
+#[expect(clippy::too_many_arguments)]
+fn resolve_revision_with_navigation(
+    repo: &Repository,
+    spec: &str,
+    index_dwim: bool,
+    commit_only_hex: bool,
+    use_disambiguate_config: bool,
+    treeish_colon_lhs: bool,
+    implicit_tree_abbrev: bool,
+    implicit_blob_abbrev: bool,
+    remote_branch_name_guess: bool,
+    metadata: NavigationMetadata,
+) -> Result<ObjectId> {
     // Handle `:/message` early — it can contain any characters so must
     // not be confused with peel/nav syntax.
     if let Some(pattern) = spec.strip_prefix(":/") {
@@ -1493,7 +1584,7 @@ fn resolve_revision_impl(
         implicit_blob_abbrev,
         remote_branch_name_guess,
     )?;
-    let nav_cache = NavParentCache::new(repo);
+    let nav_cache = NavParentCache::new(repo, metadata);
     for step in nav_steps {
         oid = apply_nav_step(repo, &nav_cache, oid, step).map_err(|e| {
             if matches!(e, Error::ObjectNotFound(_)) {
@@ -5076,6 +5167,123 @@ mod line_coverage_tests {
     }
 
     #[test]
+    fn parent_navigation_shares_only_equivalent_linkage() -> crate::error::Result<()> {
+        let dir = tempdir()?;
+        let repo = Repository::init(dir.path(), &InitOptions::default())?;
+        let tree = repo.odb().write_loose_materialize(ObjectKind::Tree, b"")?;
+        let root = repo.odb().write_loose_materialize(
+            ObjectKind::Commit,
+            format!(
+                "tree {tree}\nauthor Test <t@example.com> 1 +0000\n\
+                 committer Test <t@example.com> 1 +0000\n\nroot\n"
+            )
+            .as_bytes(),
+        )?;
+        let child = repo.odb().write_loose_materialize(
+            ObjectKind::Commit,
+            format!(
+                "tree {tree}\nparent {root}\nauthor Test <t@example.com> 2 +0000\n\
+                 committer Test <t@example.com> 2 +0000\n\n{}\n",
+                "long message".repeat(10_000)
+            )
+            .as_bytes(),
+        )?;
+        let blob = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Blob, b"not a commit")?;
+        let malformed = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Commit, b"tree invalid\n")?;
+        let spec = format!("{child}~1");
+        assert_eq!(resolve_revision(&repo, &spec)?, root);
+        assert!(
+            repo.caches()
+                .commit_linkage()
+                .lock()
+                .unwrap()
+                .parents
+                .is_empty(),
+            "standalone resolution must not retain ancestry metadata"
+        );
+        assert_eq!(resolve_walk_range_end(&repo, &spec)?, root);
+        let nav = NavParentCache::new(&repo, NavigationMetadata::RetainForWalk);
+        assert_eq!(nav.parents_of(child)?, vec![root]);
+        assert!(matches!(nav.parents_of(blob), Err(Error::InvalidRef(_))));
+        assert_eq!(nav.parents_of(root)?, Vec::<ObjectId>::new());
+        assert!(matches!(
+            nav.parents_of(malformed),
+            Err(Error::CorruptObject(_))
+        ));
+        assert_eq!(nav.parents_of(child)?, vec![root]);
+        assert_eq!(
+            apply_nav_step(&repo, &nav, child, NavStep::AncestorN(1))?,
+            root
+        );
+        use crate::merge_base::intersect_walk_test_hooks::{
+            commit_parent_lookups, reset_commit_parent_lookups,
+        };
+        use crate::merge_base::{
+            count_commits_reachable_excluding_ancestors_of, ReachableCountFilter,
+        };
+        reset_commit_parent_lookups();
+        assert_eq!(
+            count_commits_reachable_excluding_ancestors_of(
+                &repo,
+                &[child],
+                &[root],
+                ReachableCountFilter::default()
+            )?,
+            1
+        );
+        assert_eq!(
+            commit_parent_lookups(),
+            0,
+            "the range walk must reuse navigation metadata"
+        );
+
+        // Navigation reads original parents, while the subsequent walk observes shallow
+        // boundaries and replacements. Neither may consume the other's parent cache.
+        fs::write(repo.git_dir().join("shallow"), format!("{child}\n"))?;
+        let shallow_repo = Repository::open(&repo.git_dir(), &RepositoryOptions::empty())?;
+        assert_eq!(
+            NavParentCache::new(&shallow_repo, NavigationMetadata::RetainForWalk)
+                .parents_of(child)?,
+            vec![root]
+        );
+        assert_eq!(
+            count_commits_reachable_excluding_ancestors_of(
+                &shallow_repo,
+                &[child],
+                &[],
+                ReachableCountFilter::default()
+            )?,
+            1
+        );
+        fs::remove_file(repo.git_dir().join("shallow"))?;
+        fs::create_dir_all(repo.git_dir().join("refs/replace"))?;
+        fs::write(
+            repo.git_dir().join("refs/replace").join(child.to_hex()),
+            format!("{root}\n"),
+        )?;
+        let replaced_repo = Repository::open(&repo.git_dir(), &RepositoryOptions::empty())?;
+        assert_eq!(
+            NavParentCache::new(&replaced_repo, NavigationMetadata::RetainForWalk)
+                .parents_of(child)?,
+            vec![root]
+        );
+        assert_eq!(
+            count_commits_reachable_excluding_ancestors_of(
+                &replaced_repo,
+                &[child],
+                &[],
+                ReachableCountFilter::default()
+            )?,
+            1
+        );
+        Ok(())
+    }
+
+    #[test]
     fn internal_private_api_sweep() -> crate::error::Result<()> {
         use std::path::Path;
         assert!(parse_oneline_pattern("needle").is_some());
@@ -5139,7 +5347,7 @@ mod line_coverage_tests {
         let _ = peel_annotated_tag_chain(&repo, tag_oid);
         let _ = apply_peel(&repo, tag_oid, Some("commit"));
         let _ = apply_peel(&repo, c2, Some("tree"));
-        let nav = NavParentCache::new(&repo);
+        let nav = NavParentCache::new(&repo, NavigationMetadata::RetainForWalk);
         let _ = apply_nav_step(&repo, &nav, merge, NavStep::ParentN(2));
         let _ = apply_nav_step(&repo, &nav, merge, NavStep::AncestorN(2));
         let _ = commit_reachable_closure(&repo, merge);

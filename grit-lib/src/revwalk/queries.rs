@@ -17,7 +17,7 @@ use crate::rev_list::{
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{
     is_top_level_range, peel_to_commit_for_merge_base, resolve_revision,
-    resolve_revision_for_range_end, split_top_level_triple_dot_range,
+    resolve_revision_for_range_end, resolve_walk_range_end, split_top_level_triple_dot_range,
     try_peel_to_commit_for_merge_base,
 };
 use crate::revwalk::filter::CommitFilter;
@@ -162,8 +162,8 @@ fn symmetric_rev_list_specs(
     left_spec: &str,
     right_spec: &str,
 ) -> Result<(Vec<String>, Vec<String>, ObjectId, ObjectId)> {
-    let left_tip = resolve_revision_for_range_end(repo, left_spec)?;
-    let right_tip = resolve_revision_for_range_end(repo, right_spec)?;
+    let left_tip = resolve_walk_range_end(repo, left_spec)?;
+    let right_tip = resolve_walk_range_end(repo, right_spec)?;
     let left = peel_to_commit_for_merge_base(repo, left_tip)?;
     let right = peel_to_commit_for_merge_base(repo, right_tip)?;
     let bases = merge_bases_first_vs_rest(repo, left, &[right])?;

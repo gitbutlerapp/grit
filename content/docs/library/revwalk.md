@@ -23,6 +23,13 @@ Common helpers that do not need a full repository walk:
 
 Both list the symmetric difference for `A...B`, exactly like `git rev-list A...B`. [`parse_rev_walk_tokens`](rustdoc:grit_lib::revwalk::parse_rev_walk_tokens) does the expansion if you call `rev_list` yourself.
 
+When expanding symmetric ranges on ordinary histories, endpoint navigation such as
+`HEAD~500` shares the parent links and timestamps it parses with the following walk.
+Standalone revision resolution does not retain this metadata. Navigation seeds at most 1,024
+entries, so resolving a distant ancestor alone does not retain its entire history.
+Shallow boundaries, grafts, promisor repositories and replacement objects keep their
+existing traversal rules.
+
 ## Rev-list
 
 [`rev_list`](rustdoc:grit_lib::revwalk::rev_list::rev_list) takes positive and negative revision specs plus [`RevListOptions`](rustdoc:grit_lib::revwalk::rev_list::RevListOptions). It returns a [`RevListResult`](rustdoc:grit_lib::revwalk::rev_list::RevListResult) whose `commits` field is the final oid list (after skip, max-count, and reverse).
