@@ -9,6 +9,59 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
 
+## Sparse reset and switch (2026-10-27)
+
+Issue [#2081](https://github.com/gitbutlerapp/grit/issues/2081) found full-tree
+expansion behind a compact sparse index. Reset and switch now retain matching
+excluded tree entries when those directories are absent from disk. Target indexes
+reuse those entries and their tree IDs, and hard reset carries its index through
+checkout without an intermediate write and reload. Changed directories, present
+out-of-cone paths and unmerged guard checks still use expanded rows for correctness.
+
+Measured with Rust 1.99.0 `release` builds on a four-vCPU AMD EPYC 7763 Linux VM
+with 16 GiB RAM and stock Git 2.55.0. Frozen main is `02e8900b78ea`. The sparse
+fixtures have 300 visible files and 400 excluded directories (700 index rows),
+with 300 visible changes between two commits. The unique-blob variant additionally
+changes 5,000 excluded paths. The populated control tracks 10,000 files.
+
+Each value is the median of ten endpoint samples: five rotated rounds per tool,
+with a base/edited flip in each round after one warmup. Python `perf_counter`
+wraps `/usr/bin/time -v`; RSS is in KiB. Builds and tests were paused. Both grit
+binaries were copied once to fresh files using the same method before sampling.
+
+| Fixture / operation | Git ms | Main ms | Fixed ms | Git RSS KiB | Main RSS KiB | Fixed RSS KiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| sparse120k reset | 30.18 | 1063.71 | 30.66 | 10,514 | 73,548 | 17,592 |
+| sparse120k switch | 38.72 | 461.37 | 31.86 | 6,096 | 37,388 | 18,040 |
+| sparse240k reset | 36.46 | 2251.56 | 30.65 | 15,420 | 141,134 | 17,602 |
+| sparse240k switch | 52.36 | 1021.34 | 32.15 | 6,396 | 56,614 | 18,004 |
+| unique120k_changed5000 reset | 41.08 | 1152.15 | 534.75 | 18,320 | 110,460 | 108,318 |
+| unique120k_changed5000 switch | 52.06 | 556.55 | 446.04 | 13,838 | 76,252 | 75,890 |
+| full10k reset | 45.74 | 57.67 | 53.58 | 7,976 | 22,740 | 22,570 |
+| full10k switch | 38.92 | 32.11 | 32.11 | 8,016 | 19,104 | 19,340 |
+
+At 240k paths, reset improves **73.5×** and switch **31.8×**. Doubling unchanged
+excluded paths leaves grit near 30–32 ms and 17–18 MiB. The populated control
+keeps its timing and memory profile: reset is faster, while switch differs by
+less than 0.01 ms and less than 0.3 MiB in this run. All repositories pass system Git's
+status, write-tree and strict fsck checks after the grit operations.
+
+The unique-blob case documents the remaining fallback cost: changed excluded
+directories still expand. Reset improves about **2.2×**, and switch about **1.2×**,
+with peak memory essentially unchanged. Keeping changed excluded trees opaque is
+a follow-up; the deterministic regression here requires zero expanded descendant
+rows for unchanged excluded trees.
+
+The fixtures and library benchmarks live in `grit-test-support/src/sparse_scale.rs`
+and `grit-lib/benches/hot_paths.rs`. Daily rows are
+`reset/sparse@sparse-120k`, `reset/sparse@sparse-240k`,
+`switch/sparse@sparse-120k`, `switch/sparse@sparse-240k`, and the corresponding
+`sparse-unique-120k` variants. Each daily iteration measures both endpoints;
+fixture setup and correctness checks are outside the timed interval.
+
+Raw commands, GNU time output, samples and verification output:
+[`sparse-transitions-2081.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/sparse-transitions-2081.json).
+
 ## Inexact rename detection (2026-10-27)
 
 Issue [#1683](https://github.com/gitbutlerapp/grit/issues/1683) reproduced on

@@ -3,6 +3,8 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 mod hot_paths_fixture;
+mod sparse_transition_fixture;
+use sparse_transition_fixture::bench_sparse_transitions;
 
 use std::hint::black_box;
 
@@ -189,7 +191,8 @@ fn bench_staging_scan(c: &mut Criterion) {
 criterion_group!(
     name = hot_paths;
     config = Criterion::default().sample_size(10);
-    targets = bench_index_mutate,
+    targets = bench_sparse_transitions,
+    bench_index_mutate,
     bench_checkout,
     bench_status_clean_100k,
     bench_diff_worktree_clean_10k,

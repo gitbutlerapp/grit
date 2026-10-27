@@ -1596,6 +1596,22 @@ fn sh_script(script: String) -> Vec<String> {
     vec!["-c".into(), script]
 }
 
+/// A balanced sparse transition iteration; each run ends at the edited endpoint.
+pub(crate) fn sparse_transition_argv(program: &Path, command: &str) -> Vec<String> {
+    let option = if command == "reset" {
+        "--hard"
+    } else {
+        "--detach"
+    };
+    sh_script(chain_shell(
+        program,
+        &[
+            vec![command.into(), option.into(), "sparse-base".into()],
+            vec![command.into(), option.into(), "sparse-edited".into()],
+        ],
+    ))
+}
+
 pub(crate) fn switch_argv(
     grit: &Path,
     git: &Path,

@@ -967,6 +967,7 @@ dependencies = [
  "anyhow",
  "clap",
  "grit-lib",
+ "grit-test-support",
  "nix",
  "serde",
  "serde_json",

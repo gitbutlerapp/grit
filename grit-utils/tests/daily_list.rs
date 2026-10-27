@@ -33,3 +33,22 @@ fn daily_list_includes_workspace_extras() {
         );
     }
 }
+
+#[test]
+fn daily_list_includes_sparse_scaling_scenarios() {
+    let out = Command::new(env!("CARGO_BIN_EXE_grit-bench"))
+        .args(["daily", "--list"])
+        .output()
+        .expect("daily list");
+    assert!(out.status.success());
+    let listing = String::from_utf8(out.stdout).expect("utf8");
+    for shape in ["sparse-120k", "sparse-240k", "sparse-unique-120k"] {
+        for command in ["reset", "switch"] {
+            let id = format!("{command}/sparse@{shape}");
+            assert!(
+                listing.lines().any(|line| line.trim() == id),
+                "missing {id}"
+            );
+        }
+    }
+}

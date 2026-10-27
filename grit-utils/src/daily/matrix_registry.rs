@@ -4,6 +4,48 @@ use super::registry::{Area, ScenarioSpec};
 
 /// Matrix scenarios for worktree, index, diff, and history (step 7).
 pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
+    ScenarioSpec {
+        id: "reset/sparse@sparse-120k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Sparse reset out and back, 300 visible files and 400 excluded directories",
+    },
+    ScenarioSpec {
+        id: "switch/sparse@sparse-120k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Sparse switch out and back, 300 visible files and 400 excluded directories",
+    },
+    ScenarioSpec {
+        id: "reset/sparse@sparse-240k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Sparse reset out and back, 300 visible files and 400 excluded directories",
+    },
+    ScenarioSpec {
+        id: "switch/sparse@sparse-240k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Sparse switch out and back, 300 visible files and 400 excluded directories",
+    },
+    ScenarioSpec {
+        id: "reset/sparse@sparse-unique-120k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Sparse reset out and back, 300 visible files and 400 excluded directories",
+    },
+    ScenarioSpec {
+        id: "switch/sparse@sparse-unique-120k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Sparse switch out and back, 300 visible files and 400 excluded directories",
+    },
     // Worktree — status
     ScenarioSpec {
         id: "status/clean@synth-100k",

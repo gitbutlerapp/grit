@@ -24,6 +24,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 grit-lib = { path = "../grit-lib" }
+grit-test-support = { path = "../grit-test-support" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 time = { workspace = true, features = ["formatting", "parsing"] }

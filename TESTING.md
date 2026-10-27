@@ -702,3 +702,30 @@ Rust integration tests live under `grit-lib/tests/`. UX-only upstream cases are 
 | t5615 | `odb_alternates.rs` (`alternates_append_and_cache_refresh`, env alternates, write never in alternate) | Cache refresh / append / env `GIT_ALTERNATE_OBJECT_DIRECTORIES` |
 | t5616 | `promisor_packs.rs` | Partial clone `--filter=blob:none`, promisor pack markers, `exists` vs `exists_local`, missing blob `ObjectNotFound` |
 | t5330 | — | MIDX alternates scenarios covered in other steps; no additional rows for this change |
+
+### Sparse reset and switch scaling
+
+Issue #2081 uses Git-written sparse indexes over 120k and 240k tracked paths,
+with 300 visible files and 400 excluded directory rows. The library regression
+counts expanded sparse descendants per repository and requires zero for unchanged
+excluded trees. A separate test removes an excluded tree object to prove that
+building the target index never reads that subtree. Compatibility tests cover
+nested cones, changed/deleted excluded trees, staged and unstaged files, gitlinks,
+reset-to-HEAD repair, and Git operations after grit writes the index.
+
+```bash
+cargo test -p grit-lib --lib sparse_reset_and_switch_do_not_expand
+cargo test -p grit-lib --lib sparse_tree_walk_keeps_matching_excluded_subtree_opaque
+cargo test -p grit-lib --test sparse_checkout_checkout
+cargo test -p grit-cli --test reset_sparse_checkout_cli
+cargo bench -p grit-lib --bench hot_paths -- checkout/sparse_300_visible
+cargo run --release -p grit-utils -- --grit target/release/grit daily \
+  --only reset/sparse@sparse-120k,reset/sparse@sparse-240k,switch/sparse@sparse-120k,switch/sparse@sparse-240k
+```
+
+Daily rows also include `reset/sparse@sparse-unique-120k` and
+`switch/sparse@sparse-unique-120k`, with unique excluded blobs and 5,000 changed
+excluded paths. Each timed iteration goes to the base commit and back; fixture
+construction and post-run status/fsck checks stay outside the measurement.
+Use `--smoke` for a 2,400-path fixture. Record both wall time and peak RSS, with
+builds and tests stopped, against the same system Git and a frozen main binary.
