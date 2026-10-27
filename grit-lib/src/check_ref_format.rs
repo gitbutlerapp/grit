@@ -22,6 +22,8 @@
 //! 12. Must have at least two slash-separated components (unless
 //!     `--allow-onelevel`)
 
+use std::borrow::Cow;
+
 use crate::git_path::normalize_path_copy;
 
 use thiserror::Error;
@@ -100,15 +102,26 @@ pub struct RefNameOptions {
 ///
 /// Returns `Err` when the ref name is invalid.
 pub fn check_refname_format(refname: &str, opts: &RefNameOptions) -> Result<String, RefNameError> {
+    check_refname_format_borrowed(refname, opts).map(Cow::into_owned)
+}
+
+/// Validate a ref name without copying it unless normalization is requested.
+///
+/// Returns a borrowed `refname` or the normalized name, with the same errors as
+/// [`check_refname_format`] for the supplied `opts`.
+pub(crate) fn check_refname_format_borrowed<'a>(
+    refname: &'a str,
+    opts: &RefNameOptions,
+) -> Result<Cow<'a, str>, RefNameError> {
     if refname.is_empty() {
         return Err(RefNameError::Empty);
     }
 
     // Apply normalization (collapse leading/consecutive slashes) when requested.
     let normalized = if opts.normalize {
-        collapse_slashes(refname)
+        Cow::Owned(collapse_slashes(refname))
     } else {
-        refname.to_owned()
+        Cow::Borrowed(refname)
     };
 
     let name: &str = &normalized;
@@ -369,6 +382,23 @@ pub fn is_valid_advertised_symref_target(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn validation_borrows_names_when_normalization_is_disabled() {
+        let name = "refs/heads/topic";
+        assert!(matches!(
+            super::check_refname_format_borrowed(name, &super::RefNameOptions::default()),
+            Ok(std::borrow::Cow::Borrowed(value)) if value == name
+        ));
+        let opts = super::RefNameOptions {
+            normalize: true,
+            ..Default::default()
+        };
+        assert!(matches!(
+            super::check_refname_format_borrowed("/refs//heads/topic", &opts),
+            Ok(std::borrow::Cow::Owned(value)) if value == name
+        ));
+    }
+
     use super::*;
 
     fn opts_default() -> RefNameOptions {

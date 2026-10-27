@@ -1,0 +1,1106 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-27T02:14:43.942250727Z",
+  "machine": {
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "physical_cores": 2,
+    "logical_cores": 4,
+    "ram_bytes": 16766414848,
+    "os": "linux",
+    "kernel": "Linux 6.17.0-1022-azure",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "grit": "grit 0.5.22",
+    "grit_commit": "d989c8fe81ba6f1821765edd6abb69aa80777640"
+  },
+  "scenarios": [
+    {
+      "id": "branch/contains-json@git-git-10k-refs",
+      "area": "branching",
+      "description": "Bounded branch --contains HEAD~100 -n 100 on 10,000 unique packed tips",
+      "git": {
+        "median_wall_ms": 36.5351515,
+        "peak_rss_bytes": 19812352,
+        "runs": 20,
+        "samples_ms": [
+          36.506,
+          36.341,
+          36.796,
+          35.859,
+          37.193,
+          36.564,
+          36.171,
+          36.117,
+          35.88,
+          48.864,
+          35.934,
+          37.471,
+          37.01,
+          36.346,
+          35.34,
+          36.95,
+          37.312,
+          35.071,
+          37.533,
+          37.353
+        ],
+        "min_ms": 35.070625,
+        "max_ms": 48.864124000000004,
+        "stddev_ms": 2.848439985931386
+      },
+      "grit": {
+        "median_wall_ms": 30.8267075,
+        "peak_rss_bytes": 35905536,
+        "runs": 20,
+        "samples_ms": [
+          30.515,
+          30.865,
+          30.217,
+          31.576,
+          30.788,
+          31.133,
+          30.644,
+          30.156,
+          31.126,
+          30.493,
+          30.624,
+          31.073,
+          30.142,
+          32.426,
+          30.217,
+          30.29,
+          31.536,
+          35.562,
+          31.031,
+          31.039
+        ],
+        "min_ms": 30.142431000000002,
+        "max_ms": 35.561581000000004,
+        "stddev_ms": 1.2007911703730076
+      },
+      "ratio": 0.8437547467129021,
+      "detail": {
+        "commands": {
+          "git": "git for-each-ref --contains bb4248452e49ec81fff8b0748a32871d8d1dd6d3 --count=100 '--format=%(refname) %(subject) %(committerdate:iso8601) %(upstream)' refs/heads/",
+          "grit": "grit branch --contains bb4248452e49ec81fff8b0748a32871d8d1dd6d3 -n 100 --json"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.414,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.116,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.031,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        },
+        "notes": "Factory #4753: quiet release build; factory/branch-rename working tree based on d989c8fe81ba6f1821765edd6abb69aa80777640; tools.grit_commit records the base, not the uncommitted implementation. "
+      }
+    },
+    {
+      "id": "branch/contains@git-git-10k-refs",
+      "area": "branching",
+      "description": "Bounded branch --contains HEAD~100 -n 100 on 10,000 unique packed tips",
+      "git": {
+        "median_wall_ms": 36.100174,
+        "peak_rss_bytes": 19836928,
+        "runs": 20,
+        "samples_ms": [
+          35.967,
+          36.062,
+          36.896,
+          36.269,
+          35.519,
+          37.195,
+          35.556,
+          35.771,
+          37.014,
+          35.898,
+          36.488,
+          35.784,
+          37.235,
+          36.084,
+          35.761,
+          36.116,
+          36.277,
+          37.156,
+          36.072,
+          36.162
+        ],
+        "min_ms": 35.519208,
+        "max_ms": 37.235082000000006,
+        "stddev_ms": 0.5508792779685951
+      },
+      "grit": {
+        "median_wall_ms": 30.5386145,
+        "peak_rss_bytes": 36016128,
+        "runs": 20,
+        "samples_ms": [
+          30.198,
+          30.468,
+          38.66,
+          29.634,
+          29.839,
+          29.424,
+          30.067,
+          31.708,
+          30.22,
+          30.513,
+          30.895,
+          31.277,
+          30.447,
+          32.263,
+          30.317,
+          30.564,
+          31.668,
+          30.959,
+          35.116,
+          30.63
+        ],
+        "min_ms": 29.424203,
+        "max_ms": 38.659631,
+        "stddev_ms": 2.1336867357514384
+      },
+      "ratio": 0.8459409226116196,
+      "detail": {
+        "commands": {
+          "git": "git for-each-ref --contains bb4248452e49ec81fff8b0748a32871d8d1dd6d3 --count=100 '--format=%(refname:short)' refs/heads/",
+          "grit": "grit branch --contains bb4248452e49ec81fff8b0748a32871d8d1dd6d3 -n 100"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.451,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.122,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.03,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        },
+        "notes": "Factory #4753: quiet release build; factory/branch-rename working tree based on d989c8fe81ba6f1821765edd6abb69aa80777640; tools.grit_commit records the base, not the uncommitted implementation. "
+      }
+    },
+    {
+      "id": "branch/create@many-refs",
+      "area": "branching",
+      "description": "Create one branch vs git branch",
+      "git": {
+        "median_wall_ms": 1.827737,
+        "peak_rss_bytes": 7315456,
+        "runs": 20,
+        "samples_ms": [
+          2.116,
+          1.802,
+          1.997,
+          1.814,
+          1.827,
+          1.889,
+          1.844,
+          1.795,
+          1.952,
+          2.052,
+          1.894,
+          1.85,
+          1.819,
+          1.798,
+          1.81,
+          1.828,
+          1.827,
+          2.167,
+          1.804,
+          1.812
+        ],
+        "min_ms": 1.7950629999999999,
+        "max_ms": 2.16684,
+        "stddev_ms": 0.11243561947438845
+      },
+      "grit": {
+        "median_wall_ms": 3.5746824999999998,
+        "peak_rss_bytes": 13668352,
+        "runs": 20,
+        "samples_ms": [
+          3.743,
+          3.515,
+          3.678,
+          3.53,
+          3.523,
+          3.615,
+          3.527,
+          3.54,
+          3.678,
+          3.869,
+          3.752,
+          3.507,
+          3.571,
+          3.745,
+          3.52,
+          3.66,
+          3.557,
+          3.578,
+          3.428,
+          3.611
+        ],
+        "min_ms": 3.428183,
+        "max_ms": 3.868724,
+        "stddev_ms": 0.10920295275084194
+      },
+      "ratio": 1.955796977355057,
+      "detail": {
+        "prepare": "set -eu\n'grit-bench' prepare-daily-reset --git git\ngit branch -D daily-bench-branch 2>/dev/null || true",
+        "commands": {
+          "git": "git branch daily-bench-branch",
+          "grit": "grit branch daily-bench-branch"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.419,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.12,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.023,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        },
+        "notes": "Factory #4753: quiet release build; factory/branch-rename working tree based on d989c8fe81ba6f1821765edd6abb69aa80777640; tools.grit_commit records the base, not the uncommitted implementation. "
+      }
+    },
+    {
+      "id": "branch/delete@many-refs",
+      "area": "branching",
+      "description": "Delete one branch vs git branch -D",
+      "git": {
+        "median_wall_ms": 2.078703,
+        "peak_rss_bytes": 7569408,
+        "runs": 20,
+        "samples_ms": [
+          2.157,
+          2.079,
+          2.102,
+          2.078,
+          2.079,
+          2.233,
+          2.069,
+          2.051,
+          2.025,
+          42.873,
+          2.079,
+          2.059,
+          2.102,
+          2.238,
+          2.051,
+          2.015,
+          2.036,
+          2.07,
+          2.201,
+          2.192
+        ],
+        "min_ms": 2.0146919999999997,
+        "max_ms": 42.873290000000004,
+        "stddev_ms": 9.117242013068621
+      },
+      "grit": {
+        "median_wall_ms": 5.090158000000001,
+        "peak_rss_bytes": 14614528,
+        "runs": 20,
+        "samples_ms": [
+          5.764,
+          5.2,
+          4.892,
+          5.082,
+          5.307,
+          5.264,
+          5.018,
+          5.074,
+          5.117,
+          5.27,
+          4.927,
+          5.098,
+          5.22,
+          5.366,
+          5.035,
+          4.927,
+          5.046,
+          5.242,
+          5.039,
+          5.01
+        ],
+        "min_ms": 4.892460000000001,
+        "max_ms": 5.764423,
+        "stddev_ms": 0.1979646139807699
+      },
+      "ratio": 2.4487182632631987,
+      "detail": {
+        "prepare": "set -eu\n'grit-bench' prepare-daily-reset --git git\ngit branch -D daily-bench-branch 2>/dev/null || true\ngit branch daily-bench-branch HEAD",
+        "commands": {
+          "git": "git branch -D daily-bench-branch",
+          "grit": "grit branch -D daily-bench-branch"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.412,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.201,
+              "count": 3,
+              "depth": 0
+            }
+          ]
+        },
+        "notes": "Factory #4753: quiet release build; factory/branch-rename working tree based on d989c8fe81ba6f1821765edd6abb69aa80777640; tools.grit_commit records the base, not the uncommitted implementation. "
+      }
+    },
+    {
+      "id": "branch/list-json@many-refs",
+      "area": "branching",
+      "headline": true,
+      "name": "branch",
+      "description": "List branches with JSON vs git branch -vv",
+      "git": {
+        "median_wall_ms": 1.9880574999999998,
+        "peak_rss_bytes": 6680576,
+        "runs": 20,
+        "samples_ms": [
+          1.929,
+          1.987,
+          2.493,
+          1.989,
+          2.133,
+          2.069,
+          2.053,
+          2.071,
+          2.055,
+          1.958,
+          1.87,
+          2.058,
+          1.917,
+          2.02,
+          2.078,
+          1.918,
+          1.876,
+          1.854,
+          1.825,
+          1.922
+        ],
+        "min_ms": 1.824688,
+        "max_ms": 2.4931900000000002,
+        "stddev_ms": 0.14456291016333378
+      },
+      "grit": {
+        "median_wall_ms": 3.147202,
+        "peak_rss_bytes": 15286272,
+        "runs": 20,
+        "samples_ms": [
+          3.239,
+          3.225,
+          3.644,
+          3.231,
+          3.206,
+          3.076,
+          3.009,
+          3.591,
+          3.286,
+          3.008,
+          2.975,
+          3.413,
+          3.538,
+          3.117,
+          3.177,
+          2.977,
+          2.923,
+          2.935,
+          2.989,
+          3.095
+        ],
+        "min_ms": 2.922564,
+        "max_ms": 3.644377,
+        "stddev_ms": 0.21921945714499738
+      },
+      "ratio": 1.583053810063341,
+      "detail": {
+        "commands": {
+          "git": "git branch -vv",
+          "grit": "grit branch --json"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.325,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.098,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.022,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        },
+        "notes": "Factory #4753: quiet release build; factory/branch-rename working tree based on d989c8fe81ba6f1821765edd6abb69aa80777640; tools.grit_commit records the base, not the uncommitted implementation. "
+      }
+    },
+    {
+      "id": "branch/list@many-refs",
+      "area": "branching",
+      "headline": true,
+      "name": "branch",
+      "description": "List branches vs git branch",
+      "git": {
+        "median_wall_ms": 1.7015775,
+        "peak_rss_bytes": 6778880,
+        "runs": 20,
+        "samples_ms": [
+          1.762,
+          1.825,
+          1.758,
+          1.71,
+          1.781,
+          1.69,
+          1.705,
+          1.606,
+          1.638,
+          1.629,
+          1.658,
+          1.698,
+          1.652,
+          1.804,
+          1.635,
+          1.635,
+          1.625,
+          1.909,
+          1.728,
+          1.798
+        ],
+        "min_ms": 1.60598,
+        "max_ms": 1.909214,
+        "stddev_ms": 0.08198144441396478
+      },
+      "grit": {
+        "median_wall_ms": 2.849059,
+        "peak_rss_bytes": 13512704,
+        "runs": 20,
+        "samples_ms": [
+          2.997,
+          2.839,
+          3.042,
+          2.859,
+          2.968,
+          2.769,
+          2.761,
+          4.853,
+          2.788,
+          2.942,
+          2.838,
+          2.833,
+          3.279,
+          3.047,
+          2.717,
+          2.749,
+          2.763,
+          2.892,
+          2.797,
+          2.902
+        ],
+        "min_ms": 2.717437,
+        "max_ms": 4.853461,
+        "stddev_ms": 0.46066695331711294
+      },
+      "ratio": 1.674363348128428,
+      "detail": {
+        "commands": {
+          "git": "git branch",
+          "grit": "grit branch"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.716,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.102,
+              "count": 2,
+              "depth": 0
+            }
+          ]
+        },
+        "notes": "Factory #4753: quiet release build; factory/branch-rename working tree based on d989c8fe81ba6f1821765edd6abb69aa80777640; tools.grit_commit records the base, not the uncommitted implementation. "
+      }
+    },
+    {
+      "id": "branch/list@many-refs-loose",
+      "area": "branching",
+      "description": "List branches on loose many-refs fixture vs git branch",
+      "git": {
+        "median_wall_ms": 1.6715879999999999,
+        "peak_rss_bytes": 6705152,
+        "runs": 20,
+        "samples_ms": [
+          1.722,
+          1.999,
+          1.761,
+          1.674,
+          1.68,
+          1.6,
+          1.616,
+          1.61,
+          1.674,
+          1.628,
+          1.671,
+          1.668,
+          1.668,
+          1.645,
+          1.719,
+          1.672,
+          1.657,
+          1.858,
+          1.648,
+          1.779
+        ],
+        "min_ms": 1.600271,
+        "max_ms": 1.9992,
+        "stddev_ms": 0.09409831706637313
+      },
+      "grit": {
+        "median_wall_ms": 2.9056955,
+        "peak_rss_bytes": 13619200,
+        "runs": 20,
+        "samples_ms": [
+          2.975,
+          3.256,
+          2.898,
+          2.817,
+          2.733,
+          2.73,
+          2.698,
+          2.839,
+          2.803,
+          2.791,
+          2.996,
+          3.049,
+          2.928,
+          2.913,
+          2.794,
+          2.785,
+          2.996,
+          2.953,
+          3.111,
+          3.01
+        ],
+        "min_ms": 2.698289,
+        "max_ms": 3.255636,
+        "stddev_ms": 0.14261245728287744
+      },
+      "ratio": 1.7382844935474533,
+      "detail": {
+        "commands": {
+          "git": "git branch",
+          "grit": "grit branch"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.392,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.101,
+              "count": 2,
+              "depth": 0
+            }
+          ]
+        },
+        "notes": "Factory #4753: quiet release build; factory/branch-rename working tree based on d989c8fe81ba6f1821765edd6abb69aa80777640; tools.grit_commit records the base, not the uncommitted implementation. "
+      }
+    },
+    {
+      "id": "branch/merged-ref@many-refs",
+      "area": "branching",
+      "description": "Branch --merged ref query vs git for-each-ref on many-refs",
+      "git": {
+        "median_wall_ms": 1.230987,
+        "peak_rss_bytes": 6189056,
+        "runs": 20,
+        "samples_ms": [
+          1.185,
+          1.23,
+          1.325,
+          1.231,
+          1.163,
+          1.122,
+          1.134,
+          1.238,
+          1.204,
+          1.233,
+          1.398,
+          1.26,
+          1.193,
+          1.423,
+          1.183,
+          1.162,
+          1.247,
+          1.193,
+          1.256,
+          1.238
+        ],
+        "min_ms": 1.121933,
+        "max_ms": 1.4228349999999998,
+        "stddev_ms": 0.07749148260421912
+      },
+      "grit": {
+        "median_wall_ms": 2.6884885,
+        "peak_rss_bytes": 10567680,
+        "runs": 20,
+        "samples_ms": [
+          2.748,
+          2.764,
+          2.878,
+          2.673,
+          2.552,
+          2.546,
+          2.668,
+          2.704,
+          2.65,
+          2.769,
+          2.876,
+          2.615,
+          2.575,
+          2.602,
+          2.563,
+          2.986,
+          2.746,
+          2.777,
+          2.739,
+          2.658
+        ],
+        "min_ms": 2.545609,
+        "max_ms": 2.98619,
+        "stddev_ms": 0.11879091839672275
+      },
+      "ratio": 2.1840104728969516,
+      "detail": {
+        "commands": {
+          "git": "git for-each-ref refs/heads/ --merged=b2c0606217709fa3f65c3d522c290687721998c7 --format=%(refname)",
+          "grit": "grit-bench refs-driver ref-query /tmp/grit-bench-scratch/daily-bounded-branch-contains/worktree-run-many-refs --namespace heads --merged b2c0606217709fa3f65c3d522c290687721998c7"
+        },
+        "phases": {},
+        "notes": "Factory #4753: quiet release build; factory/branch-rename working tree based on d989c8fe81ba6f1821765edd6abb69aa80777640; tools.grit_commit records the base, not the uncommitted implementation. grit trace: traced run wrote no trace to /tmp/grit-daily-trace-74315-grit.txt"
+      }
+    },
+    {
+      "id": "branch/merged@many-refs",
+      "area": "branching",
+      "headline": true,
+      "name": "branch",
+      "description": "Branch --merged vs git branch --merged",
+      "git": {
+        "median_wall_ms": 1.864342,
+        "peak_rss_bytes": 7151616,
+        "runs": 20,
+        "samples_ms": [
+          1.813,
+          1.85,
+          1.951,
+          1.957,
+          1.894,
+          1.871,
+          1.852,
+          1.949,
+          1.797,
+          1.765,
+          1.858,
+          1.828,
+          1.93,
+          2.172,
+          1.938,
+          1.875,
+          1.91,
+          1.837,
+          1.758,
+          1.787
+        ],
+        "min_ms": 1.758328,
+        "max_ms": 2.172209,
+        "stddev_ms": 0.09254337203740004
+      },
+      "grit": {
+        "median_wall_ms": 3.1843575,
+        "peak_rss_bytes": 15503360,
+        "runs": 20,
+        "samples_ms": [
+          3.235,
+          3.164,
+          3.542,
+          3.257,
+          3.434,
+          3.169,
+          3.307,
+          3.143,
+          3.06,
+          3.062,
+          3.113,
+          3.2,
+          3.249,
+          3.407,
+          3.147,
+          3.806,
+          3.328,
+          3.078,
+          3.037,
+          3.008
+        ],
+        "min_ms": 3.0079730000000002,
+        "max_ms": 3.8057149999999997,
+        "stddev_ms": 0.19478928154941386
+      },
+      "ratio": 1.7080329145618132,
+      "detail": {
+        "commands": {
+          "git": "git branch --merged main",
+          "grit": "grit branch --merged main"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.357,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.115,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.026,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        },
+        "notes": "Factory #4753: quiet release build; factory/branch-rename working tree based on d989c8fe81ba6f1821765edd6abb69aa80777640; tools.grit_commit records the base, not the uncommitted implementation. "
+      }
+    },
+    {
+      "id": "branch/rename@many-refs",
+      "area": "branching",
+      "description": "Rename one branch vs git branch -m",
+      "git": {
+        "median_wall_ms": 2.0475065,
+        "peak_rss_bytes": 7139328,
+        "runs": 20,
+        "samples_ms": [
+          2.024,
+          2.211,
+          2.032,
+          2.038,
+          2.022,
+          2.008,
+          2.048,
+          2.009,
+          2.047,
+          2.126,
+          2.057,
+          2.069,
+          2.032,
+          2.045,
+          2.234,
+          2.069,
+          2.05,
+          2.188,
+          2.012,
+          2.067
+        ],
+        "min_ms": 2.007642,
+        "max_ms": 2.233992,
+        "stddev_ms": 0.06708143145100431
+      },
+      "grit": {
+        "median_wall_ms": 4.483606,
+        "peak_rss_bytes": 10616832,
+        "runs": 20,
+        "samples_ms": [
+          4.511,
+          4.445,
+          4.462,
+          4.49,
+          4.539,
+          4.465,
+          4.477,
+          5.316,
+          4.562,
+          4.699,
+          4.472,
+          4.433,
+          4.378,
+          4.494,
+          4.504,
+          4.384,
+          4.493,
+          4.504,
+          4.208,
+          4.369
+        ],
+        "min_ms": 4.2077420000000005,
+        "max_ms": 5.315745000000001,
+        "stddev_ms": 0.21157677308992306
+      },
+      "ratio": 2.189788408486127,
+      "detail": {
+        "prepare": "set -eu\n'grit-bench' prepare-daily-reset --git git\ngit branch -D daily-bench-branch-renamed 2>/dev/null || true\ngit branch -D daily-bench-branch 2>/dev/null || true\ngit branch daily-bench-branch HEAD",
+        "commands": {
+          "git": "git branch -m daily-bench-branch daily-bench-branch-renamed",
+          "grit": "grit-bench rename-branch-lib --repo /tmp/grit-bench-scratch/worktree-run-many-refs --old daily-bench-branch --new daily-bench-branch-renamed"
+        },
+        "phases": {},
+        "notes": "Factory #4753: quiet release build; factory/branch-rename working tree based on d989c8fe81ba6f1821765edd6abb69aa80777640; tools.grit_commit records the base, not the uncommitted implementation. grit trace: traced run wrote no trace to /tmp/grit-daily-trace-74315-grit.txt"
+      }
+    },
+    {
+      "id": "tag/create@many-refs",
+      "area": "branching",
+      "description": "Create lightweight tag vs git tag",
+      "git": {
+        "median_wall_ms": 1.8137465000000002,
+        "peak_rss_bytes": 7303168,
+        "runs": 20,
+        "samples_ms": [
+          2.2,
+          1.838,
+          1.752,
+          1.852,
+          1.788,
+          1.785,
+          1.894,
+          1.817,
+          1.773,
+          1.786,
+          2.066,
+          1.769,
+          1.787,
+          1.89,
+          2.016,
+          1.94,
+          1.788,
+          1.753,
+          1.811,
+          2.02
+        ],
+        "min_ms": 1.752169,
+        "max_ms": 2.200101,
+        "stddev_ms": 0.12275284516555811
+      },
+      "grit": {
+        "median_wall_ms": 3.6070025,
+        "peak_rss_bytes": 15036416,
+        "runs": 20,
+        "samples_ms": [
+          3.719,
+          3.694,
+          3.568,
+          3.557,
+          3.599,
+          3.462,
+          3.608,
+          3.755,
+          3.522,
+          3.555,
+          3.593,
+          3.581,
+          4.063,
+          3.716,
+          7.581,
+          3.606,
+          3.497,
+          3.632,
+          3.648,
+          3.802
+        ],
+        "min_ms": 3.462275,
+        "max_ms": 7.581186,
+        "stddev_ms": 0.8908010887202286
+      },
+      "ratio": 1.9887026660010094,
+      "detail": {
+        "prepare": "set -eu\n'grit-bench' prepare-daily-reset --git git\ngit tag -d daily-bench-tag 2>/dev/null || true",
+        "commands": {
+          "git": "git tag daily-bench-tag",
+          "grit": "grit tag daily-bench-tag"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.389,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.122,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.018,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        },
+        "notes": "Factory #4753: quiet release build; factory/branch-rename working tree based on d989c8fe81ba6f1821765edd6abb69aa80777640; tools.grit_commit records the base, not the uncommitted implementation. "
+      }
+    },
+    {
+      "id": "tag/list@many-refs",
+      "area": "branching",
+      "description": "List tags vs git tag -l",
+      "git": {
+        "median_wall_ms": 4.089637,
+        "peak_rss_bytes": 8368128,
+        "runs": 20,
+        "samples_ms": [
+          4.1,
+          4.039,
+          4.136,
+          4.261,
+          4.136,
+          4.224,
+          4.261,
+          4.105,
+          3.941,
+          4.071,
+          4.045,
+          4.181,
+          4.282,
+          4.059,
+          4.053,
+          4.08,
+          4.024,
+          4.043,
+          4.166,
+          3.98
+        ],
+        "min_ms": 3.941234,
+        "max_ms": 4.282075,
+        "stddev_ms": 0.09529782880018295
+      },
+      "grit": {
+        "median_wall_ms": 5.0821760000000005,
+        "peak_rss_bytes": 14053376,
+        "runs": 20,
+        "samples_ms": [
+          5.215,
+          4.941,
+          5.332,
+          5.572,
+          5.15,
+          5.606,
+          5.052,
+          5.016,
+          4.947,
+          5.12,
+          5.029,
+          5.151,
+          5.207,
+          5.012,
+          5.078,
+          5.023,
+          5.202,
+          5.072,
+          5.087,
+          4.952
+        ],
+        "min_ms": 4.940533,
+        "max_ms": 5.6060620000000005,
+        "stddev_ms": 0.18416760380538824
+      },
+      "ratio": 1.2426961121488291,
+      "detail": {
+        "commands": {
+          "git": "git tag -l --sort=version:refname",
+          "grit": "grit tag"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.327,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.09,
+              "count": 2,
+              "depth": 0
+            }
+          ]
+        },
+        "notes": "Factory #4753: quiet release build; factory/branch-rename working tree based on d989c8fe81ba6f1821765edd6abb69aa80777640; tools.grit_commit records the base, not the uncommitted implementation. "
+      }
+    }
+  ]
+}

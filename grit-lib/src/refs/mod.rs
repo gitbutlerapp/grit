@@ -63,7 +63,7 @@ use store::{
     RefStorageFormat, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
 
-use crate::check_ref_format::{check_refname_format, RefNameOptions};
+use crate::check_ref_format::{check_refname_format_borrowed, RefNameOptions};
 use crate::config::ConfigSet;
 use crate::error::{Error, RefLockError, Result};
 use crate::ident::Signature;
@@ -963,7 +963,7 @@ fn parse_packed_ref_data_line_borrowed<'a>(
     if refname.is_empty() || refname.as_bytes().iter().any(|b| b.is_ascii_whitespace()) {
         return Err(packed_refs_unexpected_line(path, line));
     }
-    if check_refname_format(refname, ref_opts).is_err() {
+    if check_refname_format_borrowed(refname, ref_opts).is_err() {
         return Err(packed_refs_unexpected_line(path, line));
     }
     Ok((refname, oid))
@@ -1428,8 +1428,22 @@ fn parse_packed_refs_to_map_with_prefix(
     data: &[u8],
     prefix_filter: Option<&str>,
 ) -> Result<HashMap<String, ObjectId>> {
+    let mut map = HashMap::new();
+    visit_packed_refs_with_prefix(path, data, prefix_filter, |refname, oid| {
+        map.insert(refname.to_owned(), oid);
+    })?;
+    Ok(map)
+}
+
+/// Validate every scanned record, passing borrowed names to a caller that need not keep them.
+fn visit_packed_refs_with_prefix(
+    path: &Path,
+    data: &[u8],
+    prefix_filter: Option<&str>,
+    mut visit: impl FnMut(&str, ObjectId),
+) -> Result<()> {
     if data.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(());
     }
     if data.contains(&b'\r') {
         return Err(packed_refs_unexpected_line(
@@ -1452,7 +1466,6 @@ fn parse_packed_refs_to_map_with_prefix(
         normalize: false,
     };
 
-    let mut map = HashMap::new();
     let mut expect_peel = false;
     let prefix_trim = prefix_filter.map(|p| p.trim_end_matches('/'));
     let packed_sorted = packed_refs_file_declares_sorted(text);
@@ -1499,11 +1512,11 @@ fn parse_packed_refs_to_map_with_prefix(
                 continue;
             }
         }
-        let (refname, oid) = parse_packed_ref_data_line(path, line, &ref_opts)?;
-        map.insert(refname, oid);
+        let (refname, oid) = parse_packed_ref_data_line_borrowed(path, line, &ref_opts)?;
+        visit(refname, oid);
         expect_peel = true;
     }
-    Ok(map)
+    Ok(())
 }
 
 pub(crate) fn read_packed_refs_map(store: &Path) -> Result<HashMap<String, ObjectId>> {
@@ -2444,8 +2457,15 @@ fn remove_packed_refs_inner(
         }
         Err(e) => return Err(Error::Io(e)),
     };
-    // Fail before mutating anything if the on-disk file is not readable like Git's.
-    parse_packed_refs_to_map(&packed_path, &content)?;
+    // Keep the full validation, but neither retain unrelated refs nor prepare a replacement
+    // when the deleted names are only loose. This is common for branch renames.
+    let mut has_removed_record = false;
+    visit_packed_refs_with_prefix(&packed_path, &content, None, |name, _| {
+        has_removed_record |= remove(name);
+    })?;
+    if !has_removed_record {
+        return Ok(removed);
+    }
 
     let content = String::from_utf8(content)
         .map_err(|_| packed_refs_unexpected_line(&packed_path, "<invalid utf-8>"))?;
@@ -5024,6 +5044,53 @@ mod packed_refs_parse_tests {
     use super::*;
 
     use tempfile::tempdir;
+
+    #[test]
+    fn packed_removal_validates_the_whole_file_before_any_change() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let record = "1111111111111111111111111111111111111111 refs/heads/keep\n";
+        let malformed = [
+            format!("{record}garbage\n").into_bytes(),
+            format!("{record}\n").into_bytes(),
+            format!("{record}^bad-id\n").into_bytes(),
+            format!("{record}^{}\n^{}\n", "1".repeat(40), "2".repeat(40)).into_bytes(),
+            format!("{record}{} refs/heads/bad..name\n", "2".repeat(40)).into_bytes(),
+            format!("{record}# comment\r\n").into_bytes(),
+            record.trim_end().as_bytes().to_vec(),
+            [record.as_bytes(), b"\xff\n"].concat(),
+        ];
+        for content in malformed {
+            for name in ["refs/heads/missing", "refs/heads/keep"] {
+                fs::write(&path, &content).unwrap();
+                assert!(
+                    remove_packed_ref(dir.path(), name).is_err(),
+                    "{name}: {content:?}"
+                );
+                assert_eq!(fs::read(&path).unwrap(), content);
+                assert!(!path.with_extension("lock").exists());
+                assert!(!dir.path().join("packed-refs.new").exists());
+            }
+        }
+    }
+
+    #[test]
+    fn packed_removal_without_a_match_preserves_valid_file_bytes() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        for hash_len in [40, 64] {
+            let body = format!(
+                "# pack-refs with: peeled\n# keep this comment\n{} refs/tags/tag\n^{}\n{} refs/heads/main\n",
+                "1".repeat(hash_len), "2".repeat(hash_len), "3".repeat(hash_len)
+            );
+            fs::write(&path, &body).unwrap();
+            remove_packed_ref(dir.path(), "refs/heads/topic").unwrap();
+            assert_eq!(fs::read_to_string(&path).unwrap(), body);
+        }
+        fs::write(&path, "").unwrap();
+        remove_packed_ref(dir.path(), "refs/heads/topic").unwrap();
+        assert!(fs::read(&path).unwrap().is_empty());
+    }
 
     #[test]
     fn parse_rejects_garbage_line() {

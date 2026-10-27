@@ -9,6 +9,59 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
 
+## Branch rename with many refs (2026-10-27)
+
+Renaming a loose branch used to build a complete packed-ref map only to validate
+it before removing the old name. Ref removal now scans borrowed names through the
+same strict parser and avoids constructing replacement contents when no packed
+record matches. Validation still checks the entire file, including malformed
+records after the last matching name. Reflog, locking and worktree behavior are
+unchanged.
+
+On a 4-vCPU AMD EPYC 9V74 Linux VM with 16 GiB RAM, Rust 1.99.0 `release` builds
+and system Git 2.55.0, the full daily fixture has 1,000 commits and 10,000 refs.
+The baseline is `d989c8fe8`; the after build includes the branch-rename optimization.
+The rename row calls the `rename_branch` library API through
+`grit-bench rename-branch-lib`; the other rows exercise `grit` commands.
+Compilation and test processes were paused for measurement. Each daily row has
+one warmup and 20 runs per tool; times are medians, RSS is the maximum reported by
+the daily measurement helper. The Git columns show before / after measurements
+in the same sitting.
+
+| Scenario | Git ms (before / after) | Grit before ms | Grit after ms | Grit RSS KiB (before / after) |
+| --- | ---: | ---: | ---: | ---: |
+| `branch/contains-json@git-git-10k-refs` | 36.30 / 36.54 | 31.48 | 30.83 | 35440 / 35064 |
+| `branch/contains@git-git-10k-refs` | 35.94 / 36.10 | 30.44 | 30.54 | 35284 / 35172 |
+| `branch/create@many-refs` | 1.87 / 1.83 | 3.47 | 3.57 | 14856 / 13348 |
+| `branch/delete@many-refs` | 2.08 / 2.08 | 8.21 | 5.09 | 15824 / 14272 |
+| `branch/list-json@many-refs` | 2.00 / 1.99 | 3.16 | 3.15 | 14392 / 14928 |
+| `branch/list@many-refs` | 1.69 / 1.70 | 2.83 | 2.85 | 13456 / 13196 |
+| `branch/list@many-refs-loose` | 1.74 / 1.67 | 2.96 | 2.91 | 13640 / 13300 |
+| `branch/merged-ref@many-refs` | 1.17 / 1.23 | 2.65 | 2.69 | 10596 / 10320 |
+| `branch/merged@many-refs` | 1.85 / 1.86 | 3.17 | 3.18 | 15008 / 15140 |
+| `branch/rename@many-refs` | 2.06 / 2.05 | 6.99 | 4.48 | 12104 / 10368 |
+| `tag/create@many-refs` | 1.82 / 1.81 | 3.60 | 3.61 | 14884 / 14684 |
+| `tag/list@many-refs` | 4.20 / 4.09 | 5.41 | 5.08 | 14040 / 13724 |
+
+A separate 40-run interleaved direct-spawn comparison confirmed rename at
+**6.85 → 4.40 ms**, against Git's **1.73 ms**. Ten `/usr/bin/time -v` samples per
+binary measured peak RSS at **12,112 → 10,384 KiB** (Git: **5,128 KiB**).
+Heaptrack counted **25,141 → 5,060 allocations** and **2.72 → 1.27 MB** peak live
+heap; these heap measurements exclude the profiler's own memory.
+
+Small changes in the daily create/list rows were checked with 100 interleaved
+runs per binary: create **2.88 → 2.90 ms**, list **2.41 → 2.42 ms**, JSON list
+**2.70 → 2.71 ms**. These differences are under 1%; the repeated daily create
+samples varied more, so no improvement is claimed for these paths.
+
+Raw daily samples are in
+[`daily-branch-rename-many-refs-before.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-branch-rename-many-refs-before.json)
+and
+[`daily-branch-rename-many-refs-after.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-branch-rename-many-refs-after.json).
+The interleaved runs, GNU time RSS samples, Heaptrack totals and daily repeats
+are in
+[`branch-rename-many-refs-study.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/branch-rename-many-refs-study.json).
+
 ## Multi-pack-index preparation and clean status (2026-10-26)
 
 Issue [#2064](https://github.com/gitbutlerapp/grit/issues/2064) exposed three MIDX

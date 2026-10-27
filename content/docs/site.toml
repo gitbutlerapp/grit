@@ -104,6 +104,8 @@ label = "Harness (make bench-lib / bench-scenarios)"
 # Baseline JSON paths are repo-root-relative; add entries when roadmap item 2 commits them on main.
 [benchmarks]
 baseline = [
+  "grit-utils/baselines/daily-branch-rename-many-refs-before.json",
+  "grit-utils/baselines/daily-branch-rename-many-refs-after.json",
   "grit-utils/baselines/midx-status-2064.json",
   "grit-utils/baselines/filtered-revision-count.json",
   "grit-utils/baselines/filtered-revision-count-range.json",
