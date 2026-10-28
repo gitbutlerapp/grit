@@ -1,6 +1,6 @@
 //! Stop/resume rebase sessions with Git-compatible `.git/rebase-merge/` state.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -28,8 +28,10 @@ use super::apply::{apply_rewrite, log_head_move};
 use super::error::HistoryError;
 use super::plan::{commit_parents, plan_rewrite_with_order_resumable_seeded, ResumablePlanOutcome};
 use super::rebase::{
-    plan_rebase_resumable, PreRebase, RebaseOntoOptions, RebasePlan, RebaseRequest,
+    commits_in_rebase_range, plan_rebase_resumable, PreRebase, RebaseOntoOptions, RebasePlan,
+    RebaseRequest,
 };
+use super::types::RefScope;
 use super::types::{
     AppliedRewrite, ApplyOptions, CommitEdit, HistoryEdits, PlannedRefUpdate, RewriteOptions,
     RewritePlan, RewrittenCommit,
@@ -995,14 +997,23 @@ fn install_stopped_rebase(
         .iter()
         .map(|h| parse_oid(h))
         .collect::<Result<Vec<_>, _>>()?;
+    let git_progress = git_visible_rebase_progress(
+        repo,
+        fork,
+        request.branch_tip,
+        &rebase_opts.rewrite,
+        &done,
+        &remaining,
+        conflict.commit,
+    )?;
     write_git_rebase_merge_files(
         repo,
         head_ref,
         orig_head,
         effective_onto,
-        &done,
-        &remaining,
-        &conflict.commit,
+        &git_progress.done,
+        &git_progress.remaining,
+        git_progress.stop.as_ref(),
     )?;
     write_persisted_state(repo.git_dir(), &persisted)?;
 
@@ -1115,6 +1126,53 @@ fn advance_after_plan(
     }
 }
 
+struct GitVisibleRebaseProgress {
+    done: Vec<ObjectId>,
+    remaining: Vec<ObjectId>,
+    stop: Option<ObjectId>,
+}
+
+/// Commits written to Git's `rebase-merge/` files for cross-tool `--continue`.
+///
+/// Grit's full replay order can include stacked-branch commits when
+/// [`RefScope::Branches`](super::types::RefScope::Branches) is active; Git must only see the
+/// rebased branch's own range so `git rebase --continue` finishes on that branch's tip.
+fn git_visible_rebase_progress(
+    repo: &Repository,
+    fork: ObjectId,
+    branch_tip: ObjectId,
+    rewrite: &RewriteOptions,
+    done: &[ObjectId],
+    remaining: &[ObjectId],
+    conflict: ObjectId,
+) -> Result<GitVisibleRebaseProgress, RebaseSessionError> {
+    if matches!(rewrite.scope, RefScope::Head) {
+        return Ok(GitVisibleRebaseProgress {
+            done: done.to_vec(),
+            remaining: remaining.to_vec(),
+            stop: Some(conflict),
+        });
+    }
+    let primary = commits_in_rebase_range(repo, fork, &[branch_tip])?;
+    let primary_set: HashSet<ObjectId> = primary.iter().copied().collect();
+    let git_done: Vec<ObjectId> = done
+        .iter()
+        .copied()
+        .filter(|oid| primary_set.contains(oid))
+        .collect();
+    let git_remaining: Vec<ObjectId> = remaining
+        .iter()
+        .copied()
+        .filter(|oid| primary_set.contains(oid))
+        .collect();
+    let git_stop = primary_set.contains(&conflict).then_some(conflict);
+    Ok(GitVisibleRebaseProgress {
+        done: git_done,
+        remaining: git_remaining,
+        stop: git_stop,
+    })
+}
+
 fn write_git_rebase_merge_files(
     repo: &Repository,
     head_ref: &str,
@@ -1122,17 +1180,18 @@ fn write_git_rebase_merge_files(
     onto: ObjectId,
     done: &[ObjectId],
     remaining: &[ObjectId],
-    current: &ObjectId,
+    current: Option<&ObjectId>,
 ) -> Result<(), RebaseSessionError> {
     let dir = repo.git_dir().join("rebase-merge");
     fs::create_dir_all(&dir).map_err(map_lib)?;
     fs::write(dir.join("head-name"), format!("{head_ref}\n")).map_err(map_lib)?;
     fs::write(dir.join("onto"), format!("{}\n", onto.to_hex())).map_err(map_lib)?;
     fs::write(dir.join("orig-head"), format!("{}\n", orig_head.to_hex())).map_err(map_lib)?;
-    let todo_remaining: Vec<ObjectId> = if remaining.first() == Some(current) {
-        remaining.iter().skip(1).copied().collect()
-    } else {
-        remaining.to_vec()
+    let todo_remaining: Vec<ObjectId> = match current {
+        Some(current) if remaining.first() == Some(current) => {
+            remaining.iter().skip(1).copied().collect()
+        }
+        _ => remaining.to_vec(),
     };
     fs::write(
         dir.join("git-rebase-todo"),
@@ -1141,19 +1200,28 @@ fn write_git_rebase_merge_files(
     .map_err(map_lib)?;
     // Git lists the stopped pick as the last `done` line and resumes from `stopped-sha`,
     // committing the staged resolution with `message` and `author-script`.
-    let done_with_current: Vec<ObjectId> = done.iter().chain([current]).copied().collect();
+    let done_with_current: Vec<ObjectId> = match current {
+        Some(current) => done.iter().chain([current]).copied().collect(),
+        None => done.to_vec(),
+    };
     fs::write(dir.join("done"), todo_lines(repo, &done_with_current)?).map_err(map_lib)?;
-    let msgnum = done.len() + 1;
-    let end = done.len() + remaining.len();
+    let msgnum = done_with_current.len();
+    let end = done_with_current.len() + todo_remaining.len();
     fs::write(dir.join("msgnum"), format!("{msgnum}\n")).map_err(map_lib)?;
     fs::write(dir.join("end"), format!("{end}\n")).map_err(map_lib)?;
-    fs::write(dir.join("stopped-sha"), format!("{}\n", current.to_hex())).map_err(map_lib)?;
-    let commit = load_commit(repo, *current)?;
-    match author_script(&commit.author) {
-        Some(script) => fs::write(dir.join("author-script"), script).map_err(map_lib)?,
-        None => remove_if_exists(&dir.join("author-script"))?,
+    if let Some(current) = current {
+        fs::write(dir.join("stopped-sha"), format!("{}\n", current.to_hex())).map_err(map_lib)?;
+        let commit = load_commit(repo, *current)?;
+        match author_script(&commit.author) {
+            Some(script) => fs::write(dir.join("author-script"), script).map_err(map_lib)?,
+            None => remove_if_exists(&dir.join("author-script"))?,
+        }
+        fs::write(dir.join("message"), commit.message).map_err(map_lib)?;
+    } else {
+        remove_if_exists(&dir.join("stopped-sha"))?;
+        remove_if_exists(&dir.join("author-script"))?;
+        remove_if_exists(&dir.join("message"))?;
     }
-    fs::write(dir.join("message"), commit.message).map_err(map_lib)?;
     Ok(())
 }
 

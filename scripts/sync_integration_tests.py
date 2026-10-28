@@ -41,6 +41,11 @@ CRATES = [
 ]
 ENTRY = "integration.rs"
 
+# Integration modules that must stay in the default suite despite using system git.
+MODULE_CFG_OVERRIDE: dict[tuple[str, str], str] = {
+    ("grit-cli", "rebase_exec_interrupt"): "unix",
+}
+
 GUARD = '''
 /// Fails when a file in `tests/` is neither a module above nor a `[[test]]`
 /// target in Cargo.toml: with `autotests = false` cargo would never build it.
@@ -113,7 +118,10 @@ def render(crate: str, modules: list[tuple[str, bool]], helpers: list[str]) -> s
         lines += [f"mod {h};" for h in helpers]
         lines.append("")
     for stem, full in modules:
-        if full:
+        cfg = MODULE_CFG_OVERRIDE.get((crate, stem))
+        if cfg:
+            lines.append(f"#[cfg({cfg})]")
+        elif full:
             lines.append('#[cfg(feature = "full-tests")]')
         lines.append(f'#[path = "{stem}.rs"]')
         lines.append(f"mod {module_name(stem)};")

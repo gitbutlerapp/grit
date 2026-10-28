@@ -1219,6 +1219,8 @@ mod promisor_on_demand_fetch;
 mod promisor_packs;
 #[path = "pruned_modules.rs"]
 mod pruned_modules;
+#[path = "published_crates_declare_rust_version.rs"]
+mod published_crates_declare_rust_version;
 #[cfg(feature = "full-tests")]
 #[path = "pull_git_compat.rs"]
 mod pull_git_compat;
@@ -1968,37 +1970,6 @@ mod worktree_typed_errors;
 #[cfg(feature = "full-tests")]
 #[path = "zlib_inflate_git_compat.rs"]
 mod zlib_inflate_git_compat;
-
-/// Published crates must declare MSRV so dependents get Cargo's toolchain error
-/// instead of opaque `E0658` (issue #2227).
-#[test]
-fn published_crates_declare_rust_version() {
-    const MSRV: &str = "1.95";
-    let workspace = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../Cargo.toml"));
-    assert!(
-        workspace.contains(&format!("rust-version = \"{MSRV}\"")),
-        "workspace [workspace.package] must set rust-version = \"{MSRV}\""
-    );
-
-    let published: &[(&str, &str)] = &[
-        ("grit-lib", include_str!("../Cargo.toml")),
-        ("grit-cli", include_str!("../../grit-cli/Cargo.toml")),
-        (
-            "grit-protocol",
-            include_str!("../../grit-protocol/Cargo.toml"),
-        ),
-        (
-            "grit-http-server",
-            include_str!("../../grit-http-server/Cargo.toml"),
-        ),
-    ];
-    for (name, manifest) in published {
-        assert!(
-            manifest.contains("rust-version.workspace = true"),
-            "{name} must set rust-version.workspace = true so crates.io carries MSRV"
-        );
-    }
-}
 
 /// Fails when a file in `tests/` is neither a module above nor a `[[test]]`
 /// target in Cargo.toml: with `autotests = false` cargo would never build it.

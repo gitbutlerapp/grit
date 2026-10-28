@@ -1070,6 +1070,152 @@ fn stacked_branches_move_atomically_after_continue() {
     assert_git_fsck_strict(wt);
 }
 
+/// Issue #2255: Git's `rebase --continue` must not replay stacked-branch commits grit appended
+/// to the full replay order when `--update-refs=branches` is active.
+#[test]
+fn git_rebase_continue_leaves_stacked_branch_untouched_on_primary_conflict() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "base.txt", "base\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "a"]);
+    commit_file(wt, "shared.txt", "a1\n", "a: shared");
+    commit_file(wt, "a2.txt", "a2\n", "a: two");
+    let a_tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "b"]);
+    commit_file(wt, "b1.txt", "b1\n", "b: one");
+    let b_before = git_oid(wt, "HEAD");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "shared.txt", "m\n", "main: shared");
+    let onto = git_oid(wt, "HEAD");
+    git(wt, &["switch", "a"]);
+
+    let grit = open_grit(wt);
+    let mut opts = rebase_opts();
+    opts.rewrite.scope = RefScope::Branches;
+    let start = StartRebaseOptions {
+        request: RebaseRequest {
+            upstream,
+            onto: Some(onto),
+            branch_tip: a_tip,
+        },
+        rebase: opts.clone(),
+        apply: grit_lib::revwalk::history::ApplyOptions {
+            identity: test_ident(),
+            reflog_message: "rebase".into(),
+            record_operation: None,
+            hooks: grit_lib::PostOperationHooks::Run,
+        },
+        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+    };
+
+    match start_rebase(
+        &grit,
+        &start,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("start")
+    {
+        RebaseOutcome::Stopped(_) => {}
+        other => panic!("expected conflict stop, got {other:?}"),
+    }
+
+    let todo = std::fs::read_to_string(wt.join(".git/rebase-merge/git-rebase-todo")).unwrap();
+    assert!(
+        todo.contains("a: two"),
+        "git todo must include the remaining primary commit: {todo}"
+    );
+    assert!(
+        !todo.contains("b: one"),
+        "git todo must not include stacked branch commits: {todo}"
+    );
+
+    std::fs::write(wt.join("shared.txt"), "resolved\n").expect("resolve");
+    git(wt, &["add", "shared.txt"]);
+    let cont = git_unchecked(wt, &["rebase", "--continue"]);
+    assert!(
+        cont.status.success(),
+        "git rebase --continue: {}",
+        String::from_utf8_lossy(&cont.stderr)
+    );
+
+    assert_eq!(
+        git(wt, &["log", "--format=%s", "main..a"]),
+        "a: two\na: shared\n",
+        "branch a should end on its own commits only"
+    );
+    assert_eq!(
+        git_oid(wt, "b"),
+        b_before,
+        "branch b must stay on old history"
+    );
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn git_rebase_continue_todo_excludes_descendant_merge_commit() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "base.txt", "base\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "a"]);
+    commit_file(wt, "shared.txt", "a1\n", "a: shared");
+    commit_file(wt, "a2.txt", "a2\n", "a: two");
+    let a_tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "side"]);
+    commit_file(wt, "side.txt", "side\n", "side: one");
+    git(wt, &["switch", "a"]);
+    git(wt, &["merge", "--no-ff", "-m", "Merge side into a", "side"]);
+    git(wt, &["switch", "-c", "b"]);
+    commit_file(wt, "b1.txt", "b1\n", "b: one");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "shared.txt", "m\n", "main: shared");
+    let onto = git_oid(wt, "HEAD");
+    git(wt, &["switch", "a"]);
+
+    let grit = open_grit(wt);
+    let mut opts = rebase_opts();
+    opts.rewrite.scope = RefScope::Branches;
+    let start = StartRebaseOptions {
+        request: RebaseRequest {
+            upstream,
+            onto: Some(onto),
+            branch_tip: a_tip,
+        },
+        rebase: opts,
+        apply: grit_lib::revwalk::history::ApplyOptions {
+            identity: test_ident(),
+            reflog_message: "rebase".into(),
+            record_operation: None,
+            hooks: grit_lib::PostOperationHooks::Run,
+        },
+        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+    };
+
+    match start_rebase(
+        &grit,
+        &start,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("start")
+    {
+        RebaseOutcome::Stopped(_) => {}
+        other => panic!("expected conflict stop, got {other:?}"),
+    }
+
+    let todo = std::fs::read_to_string(wt.join(".git/rebase-merge/git-rebase-todo")).unwrap();
+    assert!(
+        !todo.contains("Merge side into a"),
+        "git todo must not replay stacked merge commits: {todo}"
+    );
+    assert!(
+        todo.contains("a: two"),
+        "git todo must still list remaining primary commits: {todo}"
+    );
+}
+
 #[test]
 fn abort_restores_branch_index_worktree_exactly() {
     let (repo, upstream, onto, tip, orig_tip) = conflict_rebase_fixture();
