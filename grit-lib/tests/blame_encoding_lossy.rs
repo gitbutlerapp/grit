@@ -89,6 +89,36 @@ fn blame_file_contents_reports_encoding_lossy_and_bytes() {
     assert_latin1_lines(&result);
 }
 
+const MIXED_FILE: &[u8] = b"plain ascii\ncaf\xe9\n";
+
+fn init_mixed_repo() -> (tempfile::TempDir, Repository) {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "core.autocrlf", "false"]);
+    std::fs::write(root.join("mixed.txt"), MIXED_FILE).unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "mixed"]);
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
+    (tmp, repo)
+}
+
+#[test]
+fn mixed_encoding_flags_only_invalid_lines() {
+    let (_tmp, repo) = init_mixed_repo();
+    let result = blame_file(&repo, "mixed.txt", &BlameOptions::default()).unwrap();
+    assert_eq!(result.lines.len(), 2);
+    assert_eq!(result.lines[0].content, "plain ascii");
+    assert!(!result.lines[0].encoding_lossy);
+    assert!(result.lines[0].content_bytes.is_none());
+    assert_eq!(result.lines[1].content, "caf\u{fffd}");
+    assert!(result.lines[1].encoding_lossy);
+    assert_eq!(
+        result.lines[1].content_bytes.as_deref(),
+        Some(b"caf\xe9".as_ref())
+    );
+}
+
 #[test]
 fn utf8_blame_stays_lossless() {
     let tmp = tempfile::tempdir().unwrap();

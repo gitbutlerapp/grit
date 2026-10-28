@@ -2052,10 +2052,6 @@ impl BlobLines {
         Self::from_bytes(content.into_bytes())
     }
 
-    fn encoding_lossy(&self) -> bool {
-        matches!(self.storage, BlobStorage::Binary(_))
-    }
-
     fn bytes(&self) -> &[u8] {
         match &self.storage {
             BlobStorage::Utf8(s) => s.as_bytes(),
@@ -2098,14 +2094,8 @@ impl BlobLines {
 
     fn line_display(&self, idx: usize) -> BlameLineDisplay {
         let body = self.line_body_bytes(idx);
-        let encoding_lossy = self.encoding_lossy();
-        let content = if encoding_lossy {
-            String::from_utf8_lossy(body).into_owned()
-        } else {
-            std::str::from_utf8(body)
-                .map(str::to_owned)
-                .unwrap_or_else(|_| String::from_utf8_lossy(body).into_owned())
-        };
+        let encoding_lossy = std::str::from_utf8(body).is_err();
+        let content = String::from_utf8_lossy(body).into_owned();
         let content_bytes = encoding_lossy.then(|| body.to_vec());
         BlameLineDisplay {
             content,
