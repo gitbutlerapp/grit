@@ -136,6 +136,16 @@ pub trait RefStore: Send + Sync + Debug {
         f: &mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
     ) -> Result<()>;
 
+    /// Walk refs stored in this handle's physical reftable stack (`reftable/` under the
+    /// store git directory). On the files backend this matches [`Self::for_each_ref`].
+    fn for_each_physical_stack_ref(
+        &self,
+        prefix: &str,
+        f: &mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
+    ) -> Result<()> {
+        self.for_each_ref(prefix, f)
+    }
+
     /// Validate `txn`, take locks, and return a committable batch.
     ///
     /// Every check runs here, before anything is written, and a failure leaves the store

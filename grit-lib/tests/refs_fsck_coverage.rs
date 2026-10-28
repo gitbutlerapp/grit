@@ -246,3 +246,121 @@ fn refs_fsck_reftable_linked_worktree_placeholders_and_missing_object() {
         "{bad_head:?}"
     );
 }
+
+#[test]
+fn refs_fsck_reftable_worktree_local_stack_and_head_sentinel_bytes() {
+    let dir = tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(RefStorageFormat::Reftable),
+    )
+    .expect("init");
+    let git_dir = dir.path().join(".git");
+    let repo = Repository::open(
+        &git_dir,
+        &RepositoryOptions::empty().with_work_tree(dir.path()),
+    )
+    .expect("open");
+    let oid = support::stored_commit(&git_dir, 1);
+    write_ref(&git_dir, "refs/heads/main", &oid).expect("main");
+
+    let wt_path = dir.path().join("linked");
+    let entry = add_linked_worktree(
+        &repo,
+        &AddLinkedWorktreeOptions {
+            path: wt_path.clone(),
+            branch: Some(WorktreeBranch::Create("linked".into())),
+            start_point: Some("HEAD".into()),
+            force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
+        },
+    )
+    .expect("worktree");
+    let wt_id = entry
+        .admin_dir
+        .file_name()
+        .expect("worktree id")
+        .to_string_lossy();
+    let wt_repo = Repository::open(
+        &entry.admin_dir,
+        &RepositoryOptions::empty().with_work_tree(&wt_path),
+    )
+    .expect("linked repo");
+
+    let wt_dangling = RefTransaction::new()
+        .update(RefUpdate {
+            name: "refs/worktree/dangling".to_owned(),
+            new_value: Some(RawRef::Direct(ObjectId::from_bytes(&[3; 20]).expect("oid"))),
+            expected: Expected::Missing,
+            reflog: None,
+            flags: RefUpdateFlags {
+                skip_oid_verification: true,
+                ..RefUpdateFlags::default()
+            },
+        })
+        .expect("txn");
+    wt_repo
+        .refs()
+        .prepare(wt_dangling)
+        .and_then(|prepared| prepared.commit())
+        .expect("worktree-local ref");
+
+    let config = ConfigSet::load_repo_local_only(&git_dir).expect("config");
+    let odb = repo.odb().clone();
+    let issues = refs_fsck(&repo, &odb, &config, false).expect("fsck");
+    let wt_path = format!("worktrees/{wt_id}/refs/worktree/dangling");
+    assert!(
+        issues
+            .iter()
+            .any(|i| i.msg_id == "missingObject" && i.path == wt_path),
+        "{issues:?}"
+    );
+
+    let common_dangling = RefTransaction::new()
+        .update(RefUpdate {
+            name: "refs/heads/common-dangling".to_owned(),
+            new_value: Some(RawRef::Direct(ObjectId::from_bytes(&[4; 20]).expect("oid"))),
+            expected: Expected::Missing,
+            reflog: None,
+            flags: RefUpdateFlags {
+                skip_oid_verification: true,
+                ..RefUpdateFlags::default()
+            },
+        })
+        .expect("txn");
+    repo.refs()
+        .prepare(common_dangling)
+        .and_then(|prepared| prepared.commit())
+        .expect("common dangling");
+
+    let dup_check = refs_fsck(&repo, &odb, &config, false).expect("fsck");
+    assert_eq!(
+        dup_check
+            .iter()
+            .filter(|i| i.msg_id == "missingObject" && i.path == "refs/heads/common-dangling")
+            .count(),
+        1,
+        "{dup_check:?}"
+    );
+
+    std::fs::write(
+        entry.admin_dir.join("HEAD"),
+        b"ref: refs/heads/.invalid\n\r",
+    )
+    .expect("malformed head stub");
+    let bad_sentinel = refs_fsck(&repo, &odb, &config, false).expect("fsck");
+    assert!(
+        bad_sentinel.iter().any(|i| {
+            i.path.ends_with("HEAD")
+                && matches!(
+                    i.msg_id,
+                    "badReferentName" | "trailingRefContent" | "badRefContent"
+                )
+        }),
+        "{bad_sentinel:?}"
+    );
+}

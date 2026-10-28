@@ -483,22 +483,16 @@ fn build_reftable_updates_for_stack(
     Ok(out)
 }
 
-impl RefStore for ReftableRefStore {
-    fn format(&self) -> RefStorageFormat {
-        RefStorageFormat::Reftable
-    }
-
-    fn read_raw(&self, name: &str) -> Result<Option<RawRef>> {
-        self.read_raw_at(name)
-    }
-
-    fn for_each_ref(
+impl ReftableRefStore {
+    fn for_each_refs_in_stack_dir(
         &self,
+        stack_git_dir: &Path,
         prefix: &str,
         f: &mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
     ) -> Result<()> {
         let prefix = if prefix.is_empty() { "refs/" } else { prefix };
-        if "HEAD".starts_with(prefix) {
+        let (head_stack, _) = reftable_storage_location(&self.git_dir, "HEAD");
+        if head_stack == stack_git_dir && "HEAD".starts_with(prefix) {
             if let Some(value) = read_head_raw(&self.git_dir)? {
                 let peeled = match &value {
                     RawRef::Direct(_) => None,
@@ -514,8 +508,7 @@ impl RefStore for ReftableRefStore {
                 }
             }
         }
-        let store_git_dir = stack_root(&self.git_dir);
-        let stack = ReftableStack::open(&store_git_dir)?;
+        let stack = ReftableStack::open(stack_git_dir)?;
         let mut names: Vec<String> = stack
             .read_refs()?
             .into_iter()
@@ -550,6 +543,32 @@ impl RefStore for ReftableRefStore {
             }
         }
         Ok(())
+    }
+}
+
+impl RefStore for ReftableRefStore {
+    fn format(&self) -> RefStorageFormat {
+        RefStorageFormat::Reftable
+    }
+
+    fn read_raw(&self, name: &str) -> Result<Option<RawRef>> {
+        self.read_raw_at(name)
+    }
+
+    fn for_each_ref(
+        &self,
+        prefix: &str,
+        f: &mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
+    ) -> Result<()> {
+        self.for_each_refs_in_stack_dir(&stack_root(&self.git_dir), prefix, f)
+    }
+
+    fn for_each_physical_stack_ref(
+        &self,
+        prefix: &str,
+        f: &mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
+    ) -> Result<()> {
+        self.for_each_refs_in_stack_dir(&self.git_dir, prefix, f)
     }
 
     fn prepare(

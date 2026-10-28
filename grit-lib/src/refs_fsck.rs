@@ -13,15 +13,14 @@ use crate::config::ConfigSet;
 use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
-use crate::ref_storage::RefStorageFormat;
-use crate::refs::store::{open_ref_store, RawRef, RefEntry};
+use crate::refs::store::{open_ref_store, RawRef, RefEntry, RefStorageFormat, RefStore};
 use crate::repo::Repository;
 use std::ops::ControlFlow;
 
 /// Loose `refs/heads` placeholder written for reftable discovery.
 const REFTABLE_REFS_HEADS_SENTINEL: &[u8] = b"this repository uses the reftable format\n";
 /// Loose `HEAD` placeholder pointing at a deliberately invalid refname.
-const REFTABLE_HEAD_SENTINEL: &str = "ref: refs/heads/.invalid\n";
+const REFTABLE_HEAD_SENTINEL: &[u8] = b"ref: refs/heads/.invalid\n";
 
 struct LooseRefFsckCtx<'a> {
     common_dir: &'a Path,
@@ -235,7 +234,8 @@ fn fsck_worktree(
     strict: bool,
     issues: &mut Vec<RefsFsckIssue>,
 ) -> Result<()> {
-    let reftable = RefStorageFormat::detect(git_dir)?.is_reftable();
+    let store = open_ref_store(git_dir)?;
+    let reftable = store.format() == RefStorageFormat::Reftable;
 
     if reftable {
         fsck_reftable_refs_heads_stub(git_dir, common_dir, config, strict, issues)?;
@@ -262,7 +262,7 @@ fn fsck_worktree(
     fsck_root_refs(git_dir, path_prefix_for_root(worktree_id), &mut loose_ctx)?;
 
     if reftable {
-        fsck_reftable_store(git_dir, worktree_id, odb, config, strict, issues)?;
+        fsck_reftable_store(store.as_ref(), worktree_id, odb, config, strict, issues)?;
     }
     Ok(())
 }
@@ -307,14 +307,13 @@ fn fsck_reftable_refs_heads_stub(
 }
 
 fn fsck_reftable_store(
-    git_dir: &Path,
+    store: &dyn RefStore,
     worktree_id: Option<&str>,
     odb: &Odb,
     config: &ConfigSet,
     strict: bool,
     issues: &mut Vec<RefsFsckIssue>,
 ) -> Result<()> {
-    let store = open_ref_store(git_dir)?;
     let path_prefix = path_prefix_for_root(worktree_id);
     let display = |name: &str| -> String {
         match &path_prefix {
@@ -324,7 +323,7 @@ fn fsck_reftable_store(
     };
 
     let mut backend_err: Option<crate::error::Error> = None;
-    store.for_each_ref("refs/", &mut |entry: &RefEntry| -> ControlFlow<()> {
+    let mut visit = |entry: &RefEntry| -> ControlFlow<()> {
         let path = display(&entry.name);
         check_ref_file_name(&path, config, strict, issues);
         if let Err(e) = fsck_stored_ref(&path, &entry.value, odb, config, strict, issues) {
@@ -332,7 +331,13 @@ fn fsck_reftable_store(
             return ControlFlow::Break(());
         }
         ControlFlow::Continue(())
-    })?;
+    };
+
+    if worktree_id.is_some() {
+        store.for_each_physical_stack_ref("refs/", &mut visit)?;
+    } else {
+        store.for_each_ref("refs/", &mut visit)?;
+    }
     if let Some(e) = backend_err {
         return Err(e);
     }
@@ -381,10 +386,6 @@ fn fsck_stored_ref(
         }
     }
     Ok(())
-}
-
-fn is_reftable_head_sentinel(raw: &str) -> bool {
-    raw == REFTABLE_HEAD_SENTINEL || raw.strip_suffix('\r').unwrap_or(raw) == REFTABLE_HEAD_SENTINEL
 }
 
 fn path_prefix_for_root(worktree_id: Option<&str>) -> Option<String> {
@@ -487,8 +488,7 @@ fn verify_loose_ref(display_path: &str, path: &Path, ctx: &mut LooseRefFsckCtx<'
     }
     if ctx.reftable
         && stripped_for_head_check(display_path) == "HEAD"
-        && fs::read_to_string(path)
-            .is_ok_and(|raw| is_reftable_head_sentinel(raw.strip_suffix('\r').unwrap_or(&raw)))
+        && fs::read(path).is_ok_and(|b| b.as_slice() == REFTABLE_HEAD_SENTINEL)
     {
         return Ok(());
     }
