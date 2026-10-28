@@ -461,12 +461,19 @@ fn strip_line_terminator(line: &[u8]) -> &[u8] {
 /// Line body used for merge comparison: drop the record-separating `\n`, but keep a `\r` that
 /// precedes `\n` unless [`WhitespaceMode::ignore_cr_at_eol`] (git record hash / `xdl_recmatch`).
 fn line_content_for_merge_compare(line: &[u8], mode: &WhitespaceMode) -> Vec<u8> {
-    let body = if line.ends_with(b"\r\n") {
-        &line[..line.len() - 1]
+    let (body, from_crlf_record) = if line.ends_with(b"\r\n") {
+        (&line[..line.len() - 1], true)
+    } else if line.ends_with(b"\n") {
+        (&line[..line.len() - 1], false)
     } else {
-        strip_line_terminator(line)
+        // Incomplete final line: keep a lone trailing `\r` (git does not treat it like `\r\n`).
+        (line, false)
     };
-    normalize_line_for_compare(body, mode)
+    let mut bytes = body.to_vec();
+    if mode.ignore_cr_at_eol && from_crlf_record && bytes.last() == Some(&b'\r') {
+        bytes.pop();
+    }
+    normalize_line_for_compare(&bytes, mode)
 }
 
 /// Compare two lines for merge equality (git `xdl_recmatch` / `xdl_merge_cmp_lines`).
@@ -1429,10 +1436,6 @@ fn lines_for_merge_diff_compare(lines: &[Vec<u8>], mode: &WhitespaceMode) -> Vec
 
 fn normalize_line_for_compare(line: &[u8], mode: &WhitespaceMode) -> Vec<u8> {
     let mut bytes = line.to_vec();
-
-    if mode.ignore_cr_at_eol && bytes.ends_with(b"\r") {
-        bytes.pop();
-    }
 
     if mode.ignore_all_space {
         return bytes

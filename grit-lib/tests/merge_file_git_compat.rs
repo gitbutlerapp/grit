@@ -274,6 +274,44 @@ fn issue_2259_identical_crlf_conversion_merge_clean() {
 }
 
 #[test]
+fn issue_2259_incomplete_line_lone_cr_conflicts_like_git() {
+    let base = b"a\n";
+    let ours = b"a\r";
+    let theirs = b"A\n";
+    assert_merge_file_matches_git(
+        &[],
+        base,
+        ours,
+        theirs,
+        ConflictStyle::Merge,
+        MergeFavor::None,
+        7,
+        "incomplete final line with lone CR on ours",
+    );
+    let grit_out = grit_merge(MergeInput {
+        base,
+        ours,
+        theirs,
+        label_ours: "ours",
+        label_base: "base",
+        label_theirs: "theirs",
+        favor: MergeFavor::None,
+        style: ConflictStyle::Merge,
+        marker_size: 7,
+        diff_algorithm: None,
+        ignore_all_space: false,
+        ignore_space_change: false,
+        ignore_space_at_eol: false,
+        ignore_cr_at_eol: false,
+    });
+    assert_eq!(grit_out.conflicts, 1);
+    assert!(
+        grit_out.content.windows(2).any(|w| w == b"a\r"),
+        "ours side must preserve lone CR"
+    );
+}
+
+#[test]
 fn issue_2259_ignore_cr_at_eol_clean_for_interior_edit() {
     let base = b"a\nb\nc\nd\n";
     let ours = b"a\r\nb\r\nc\r\nd\r\n";
