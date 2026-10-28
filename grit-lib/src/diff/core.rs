@@ -377,6 +377,158 @@ pub(crate) fn compacted_line_ops_for_options(
     }
 }
 
+/// Trim metadata including optional uniform affix line samples (for O(1) shared counts).
+struct LfChangedRegionAffix<'a> {
+    region: (usize, usize, usize, usize, &'a str, &'a str),
+    uniform_prefix_line: Option<&'a str>,
+    uniform_suffix_line: Option<&'a str>,
+}
+
+fn lf_changed_region_affix<'a>(old: &'a str, new: &'a str) -> LfChangedRegionAffix<'a> {
+    let mut head_lines = 0usize;
+    let mut prefix_bytes = 0usize;
+    let mut prefix_sample: Option<&str> = None;
+    let mut prefix_uniform = true;
+    let mut old_iter = old.split_inclusive('\n');
+    let mut new_iter = new.split_inclusive('\n');
+    while let (Some(a), Some(b)) = (old_iter.next(), new_iter.next()) {
+        if a != b {
+            break;
+        }
+        if let Some(sample) = prefix_sample {
+            if a != sample {
+                prefix_uniform = false;
+            }
+        } else {
+            prefix_sample = Some(a);
+        }
+        head_lines += 1;
+        prefix_bytes += a.len();
+    }
+    let old_rem = &old[prefix_bytes..];
+    let new_rem = &new[prefix_bytes..];
+    let mut tail_lines = 0usize;
+    let mut suffix_bytes = 0usize;
+    let mut suffix_sample: Option<&str> = None;
+    let mut suffix_uniform = true;
+    let mut old_rev = old_rem.split_inclusive('\n').rev();
+    let mut new_rev = new_rem.split_inclusive('\n').rev();
+    while let (Some(a), Some(b)) = (old_rev.next(), new_rev.next()) {
+        if a != b {
+            break;
+        }
+        if let Some(sample) = suffix_sample {
+            if a != sample {
+                suffix_uniform = false;
+            }
+        } else {
+            suffix_sample = Some(a);
+        }
+        tail_lines += 1;
+        suffix_bytes += a.len();
+    }
+    let old_mid = &old[prefix_bytes..old.len() - suffix_bytes];
+    let new_mid = &new[prefix_bytes..new.len() - suffix_bytes];
+    LfChangedRegionAffix {
+        region: (
+            head_lines,
+            tail_lines,
+            prefix_bytes,
+            suffix_bytes,
+            old_mid,
+            new_mid,
+        ),
+        uniform_prefix_line: if prefix_uniform { prefix_sample } else { None },
+        uniform_suffix_line: if suffix_uniform { suffix_sample } else { None },
+    }
+}
+
+struct LfStatTrimInput<'a> {
+    old: &'a str,
+    old_mid: &'a str,
+    new_mid: &'a str,
+    prefix_bytes: usize,
+    suffix_bytes: usize,
+    head_lines: usize,
+    tail_lines: usize,
+    uniform_prefix_line: Option<&'a str>,
+    uniform_suffix_line: Option<&'a str>,
+    need_min: bool,
+}
+
+/// Count changed lines after Git xdiff trim + shared affix semantics (no full-file masks).
+fn count_xdiff_changed_lines_trimmed(input: LfStatTrimInput<'_>) -> (usize, usize) {
+    let LfStatTrimInput {
+        old,
+        old_mid,
+        new_mid,
+        prefix_bytes,
+        suffix_bytes,
+        head_lines,
+        tail_lines,
+        uniform_prefix_line,
+        uniform_suffix_line,
+        need_min,
+    } = input;
+    use crate::line_interner::LineInterner;
+
+    let shared_records = head_lines + tail_lines;
+    let cut_old: Vec<&str> = old_mid.split_inclusive('\n').collect();
+    let cut_new: Vec<&str> = new_mid.split_inclusive('\n').collect();
+    if cut_old.is_empty() && cut_new.is_empty() {
+        return (0, 0);
+    }
+    if shared_records == 0 {
+        let mut interner = LineInterner::with_capacity(cut_old.len() + cut_new.len());
+        let ids1 = interner.intern_all(&cut_old);
+        let ids2 = interner.intern_all(&cut_new);
+        let (c1, c2) = git_xdiff::changed_flags(&ids1, &ids2, need_min);
+        return (
+            c2.iter().filter(|&&c| c).count(),
+            c1.iter().filter(|&&c| c).count(),
+        );
+    }
+
+    let mut cut_interner =
+        LineInterner::with_capacity(cut_old.len() + cut_new.len() + shared_records);
+    let ids1 = cut_interner.intern_all(&cut_old);
+    let ids2 = cut_interner.intern_all(&cut_new);
+    let mut shared_counts = vec![0u32; cut_interner.len()];
+    let mut add_shared_run = |line: &str, count: usize| {
+        if count == 0 {
+            return;
+        }
+        if let Some(id) = cut_interner.get(line) {
+            shared_counts[id as usize] += count as u32;
+        }
+    };
+    if let Some(line) = uniform_prefix_line {
+        add_shared_run(line, head_lines);
+    } else {
+        for line in old[..prefix_bytes].split_inclusive('\n') {
+            add_shared_run(line, 1);
+        }
+    }
+    if let Some(line) = uniform_suffix_line {
+        add_shared_run(line, tail_lines);
+    } else if suffix_bytes > 0 {
+        for line in old[old.len() - suffix_bytes..].split_inclusive('\n') {
+            add_shared_run(line, 1);
+        }
+    }
+    let (mid1, mid2) = git_xdiff::changed_flags_with_shared(
+        &ids1,
+        &ids2,
+        &shared_counts,
+        shared_records,
+        need_min,
+    );
+    (
+        mid2.iter().filter(|&&c| c).count(),
+        mid1.iter().filter(|&&c| c).count(),
+    )
+}
+
 /// LF-only Myers/minimal stat counting without building [`LineSide`] compare keys.
 fn try_lf_only_stat_count(
     old_content: &str,
@@ -395,15 +547,20 @@ fn try_lf_only_stat_count(
     if old_content.as_bytes().contains(&b'\r') || new_content.as_bytes().contains(&b'\r') {
         return None;
     }
-    let old_lines: Vec<&str> = old_content.split_inclusive('\n').collect();
-    let new_lines: Vec<&str> = new_content.split_inclusive('\n').collect();
-    let (changed1, changed2) = xdiff_changed_flags_trimmed(
-        &old_lines,
-        &new_lines,
-        options.algorithm == DiffAlgorithm::Minimal,
-    );
-    let mut insertions = changed2.iter().filter(|&&c| c).count();
-    let mut deletions = changed1.iter().filter(|&&c| c).count();
+    let affix = lf_changed_region_affix(old_content, new_content);
+    let (head_lines, tail_lines, prefix_bytes, suffix_bytes, old_mid, new_mid) = affix.region;
+    let (mut insertions, mut deletions) = count_xdiff_changed_lines_trimmed(LfStatTrimInput {
+        old: old_content,
+        old_mid,
+        new_mid,
+        prefix_bytes,
+        suffix_bytes,
+        head_lines,
+        tail_lines,
+        uniform_prefix_line: affix.uniform_prefix_line,
+        uniform_suffix_line: affix.uniform_suffix_line,
+        need_min: options.algorithm == DiffAlgorithm::Minimal,
+    });
     if insertions == 0 && deletions == 0 && old_content != new_content {
         let before = LineSide::from_text(old_content);
         let after = LineSide::from_text(new_content);

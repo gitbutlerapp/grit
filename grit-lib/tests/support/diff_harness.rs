@@ -11,9 +11,9 @@ use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::diff::merge_file;
 use grit_lib::diff::ws::ws_blank_line;
 use grit_lib::diff::{
-    anchored_unified_diff, count_git_lines, diff_commits,
-    diff_index_to_tree, diff_index_to_worktree, diff_tree_to_worktree, diff_trees, format_raw,
-    format_raw_abbrev, normalize_ignore_space_change, postprocess_diff_entries, tree_oid_of_commit,
+    anchored_unified_diff, count_git_lines, diff_commits, diff_index_to_tree,
+    diff_index_to_worktree, diff_tree_to_worktree, diff_trees, format_raw, format_raw_abbrev,
+    normalize_ignore_space_change, postprocess_diff_entries, tree_oid_of_commit,
     unified_diff_histogram_ignore_with_prefix_and_funcname,
     unified_diff_with_prefix_and_funcname_and_algorithm, DiffEntry, DiffPostprocessOptions,
     DiffPostprocessWorktree,

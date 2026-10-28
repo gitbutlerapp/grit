@@ -544,19 +544,20 @@ fn pickaxe_g_repeated_anchor_line_stays_context_matches_git() {
     let pickaxe = Pickaxe::line_grep("unstable_config_on_stable", false)
         .expect("grep")
         .into_shared();
-    assert_pickaxe_matches_git(worktree, &["-G", "unstable_config_on_stable"], pickaxe, None, &[]);
+    assert_pickaxe_matches_git(
+        worktree,
+        &["-G", "unstable_config_on_stable"],
+        pickaxe,
+        None,
+        &[],
+    );
 }
 
 #[test]
 fn pickaxe_g_moved_matching_line_matches_git() {
     let repo = HistoryRepo::init();
     let worktree = repo.worktree();
-    commit_file(
-        worktree,
-        "f.txt",
-        "header\n(unstable)\nfooter\n",
-        "base",
-    );
+    commit_file(worktree, "f.txt", "header\n(unstable)\nfooter\n", "base");
     commit_file(
         worktree,
         "f.txt",
