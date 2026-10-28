@@ -1097,6 +1097,9 @@ fn read_in_tree_pattern_file(path: &Path) -> Result<InTreePatternFile> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return Ok(InTreePatternFile::Missing);
         }
+        Err(_) if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) => {
+            return Ok(InTreePatternFile::Symlink);
+        }
         Err(err) => return Err(Error::Io(err)),
     };
     let mut content = String::new();
