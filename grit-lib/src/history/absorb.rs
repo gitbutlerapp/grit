@@ -9,7 +9,7 @@ use crate::diff::structured::{structured_text_diff, StructuredHunk, StructuredLi
 use crate::diff::DiffOptions;
 use crate::diff::{diff_index_to_tree, diff_trees, DiffEntry, DiffStatus};
 use crate::index::write_tree::write_tree_from_index;
-use crate::merge_base::fork_point;
+use crate::merge_base::{fork_point, is_ancestor};
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     merge_trees_three_way, DirectoryRenameMode, TreeMergeConflictPresentation,
@@ -102,6 +102,18 @@ pub enum UnassignedReason {
     FileAdded,
     /// The path was deleted in the index relative to `HEAD`.
     FileDeleted,
+    /// Introducing commit is outside the absorb stack because another local branch tip
+    /// was excluded (see [`AbsorbPlan::excluded_refs`]).
+    HiddenByRef,
+}
+
+/// A local branch tip excluded from the absorb stack when `--base` is omitted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AbsorbExcludedRef {
+    /// Full ref name (for example `refs/heads/review`).
+    pub ref_name: String,
+    /// Tip commit OID for that branch.
+    pub tip: ObjectId,
 }
 
 impl UnassignedReason {
@@ -116,7 +128,23 @@ impl UnassignedReason {
             Self::PureAdditionFarFromContext => "pure_addition_far_from_context",
             Self::FileAdded => "file_added",
             Self::FileDeleted => "file_deleted",
+            Self::HiddenByRef => "hidden_by_ref",
         }
+    }
+}
+
+fn format_hidden_by_ref_message(refs: &[AbsorbExcludedRef]) -> String {
+    let names: Vec<&str> = refs.iter().map(|r| r.ref_name.as_str()).collect();
+    if names.len() == 1 {
+        format!(
+            "commits reachable from {} are excluded; use --base <rev>",
+            names[0]
+        )
+    } else {
+        format!(
+            "commits reachable from {} are excluded; use --base <rev>",
+            names.join(", ")
+        )
     }
 }
 
@@ -129,6 +157,8 @@ pub struct UnassignedHunk {
     pub hunk_range: HunkRange,
     /// Why the hunk was not assigned.
     pub reason: UnassignedReason,
+    /// Extra detail for [`UnassignedReason::HiddenByRef`] and similar cases.
+    pub detail: Option<String>,
 }
 
 /// Result of [`absorb`]: rewrite plan plus assignment detail.
@@ -140,6 +170,8 @@ pub struct AbsorbPlan {
     pub assignments: Vec<HunkAssignment>,
     /// Hunks that remain staged after apply.
     pub unassigned: Vec<UnassignedHunk>,
+    /// Local branch tips hidden from the absorb stack (empty when `--base` is set).
+    pub excluded_refs: Vec<AbsorbExcludedRef>,
 }
 
 /// Plan absorption of staged hunks into commits between `opts.base` and `HEAD`.
@@ -162,17 +194,20 @@ pub fn absorb(repo: &Repository, opts: &AbsorbOptions) -> Result<AbsorbPlan, His
         return Err(HistoryError::NothingStaged);
     }
 
-    let (stack, _base) = if let Some(base) = opts.base {
-        (build_absorb_stack(repo, head, Some(base))?, base)
+    let (stack, stack_bounds, _base) = if let Some(base) = opts.base {
+        let built = build_absorb_stack(repo, head, Some(base))?;
+        let bounds = built.stack_bounds(repo, head)?;
+        (built.commits, bounds, base)
     } else {
-        let stack = build_absorb_stack(repo, head, None)?;
-        let base = stack
+        let built = build_absorb_stack(repo, head, None)?;
+        let base = built
+            .commits
             .last()
             .and_then(|oldest| first_parent(repo, *oldest).ok().flatten())
             .unwrap_or_else(|| ObjectId::null(repo.odb().hash_algo()));
-        (stack, base)
+        let bounds = built.stack_bounds(repo, head)?;
+        (built.commits, bounds, base)
     };
-    let stack_set: HashSet<ObjectId> = stack.iter().copied().collect();
 
     let mut assignments = Vec::new();
     let mut unassigned = Vec::new();
@@ -185,7 +220,7 @@ pub fn absorb(repo: &Repository, opts: &AbsorbOptions) -> Result<AbsorbPlan, His
             &index,
             entry,
             &stack,
-            &stack_set,
+            &stack_bounds,
             &mut assignments,
             &mut unassigned,
         )?;
@@ -196,6 +231,7 @@ pub fn absorb(repo: &Repository, opts: &AbsorbOptions) -> Result<AbsorbPlan, His
             plan: empty_absorb_plan().plan,
             assignments,
             unassigned,
+            excluded_refs: stack_bounds.excluded_refs.clone(),
         });
     }
 
@@ -208,6 +244,7 @@ pub fn absorb(repo: &Repository, opts: &AbsorbOptions) -> Result<AbsorbPlan, His
             },
             assignments,
             unassigned,
+            excluded_refs: stack_bounds.excluded_refs.clone(),
         });
     }
 
@@ -284,6 +321,7 @@ pub fn absorb(repo: &Repository, opts: &AbsorbOptions) -> Result<AbsorbPlan, His
         plan,
         assignments,
         unassigned,
+        excluded_refs: stack_bounds.excluded_refs.clone(),
     })
 }
 
@@ -296,6 +334,7 @@ fn empty_absorb_plan() -> AbsorbPlan {
         },
         assignments: Vec::new(),
         unassigned: Vec::new(),
+        excluded_refs: Vec::new(),
     }
 }
 
@@ -316,7 +355,7 @@ fn classify_path_hunks(
     index: &crate::index::Index,
     entry: &DiffEntry,
     stack: &[ObjectId],
-    stack_set: &HashSet<ObjectId>,
+    stack_bounds: &AbsorbStackBounds,
     assignments: &mut Vec<HunkAssignment>,
     unassigned: &mut Vec<UnassignedHunk>,
 ) -> Result<(), HistoryError> {
@@ -328,6 +367,7 @@ fn classify_path_hunks(
                     path: path.clone(),
                     hunk_range: hunk,
                     reason: UnassignedReason::FileAdded,
+                    detail: None,
                 });
             }
             return Ok(());
@@ -338,6 +378,7 @@ fn classify_path_hunks(
                     path: path.clone(),
                     hunk_range: hunk,
                     reason: UnassignedReason::FileDeleted,
+                    detail: None,
                 });
             }
             return Ok(());
@@ -372,6 +413,7 @@ fn classify_path_hunks(
                 path: path.clone(),
                 hunk_range: range,
                 reason: UnassignedReason::DoesNotCommute,
+                detail: None,
             });
             continue;
         }
@@ -382,11 +424,11 @@ fn classify_path_hunks(
             &path,
             &head_blob,
             &stack_newest_first,
-            stack_set,
+            stack_bounds,
             &range,
             &hunk,
-        ) {
-            Ok(Some(commit)) => {
+        )? {
+            AssignHunkOutcome::Assigned(commit) => {
                 claimed_new_lines.push(new_line_span(&range));
                 assignments.push(HunkAssignment {
                     path: path.clone(),
@@ -395,13 +437,13 @@ fn classify_path_hunks(
                     subject: commit_subject(repo, commit),
                 });
             }
-            Ok(None) => {}
-            Err(reason) => {
+            AssignHunkOutcome::Unassigned(outcome) => {
                 claimed_new_lines.push(new_line_span(&range));
                 unassigned.push(UnassignedHunk {
                     path: path.clone(),
                     hunk_range: range,
-                    reason,
+                    reason: outcome.reason,
+                    detail: outcome.detail,
                 });
             }
         }
@@ -455,6 +497,23 @@ fn hunk_to_range(hunk: &StructuredHunk) -> HunkRange {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HunkAssignFailure {
+    reason: UnassignedReason,
+    detail: Option<String>,
+}
+
+enum AssignHunkOutcome {
+    Assigned(ObjectId),
+    Unassigned(HunkAssignFailure),
+}
+
+enum BlameCandidates {
+    Found(Vec<ObjectId>),
+    HiddenByRef(String),
+    Empty(UnassignedReason),
+}
+
 #[allow(clippy::too_many_arguments)]
 fn assign_hunk(
     repo: &Repository,
@@ -462,23 +521,42 @@ fn assign_hunk(
     path: &str,
     head_blob: &[u8],
     stack: &[ObjectId],
-    stack_set: &HashSet<ObjectId>,
+    stack_bounds: &AbsorbStackBounds,
     range: &HunkRange,
     hunk: &StructuredHunk,
-) -> Result<Option<ObjectId>, UnassignedReason> {
-    let candidates = blame_candidates(repo, head, path, head_blob, range, stack_set)?;
-    match candidates.len() {
-        0 => Err(UnassignedReason::NoCandidate),
-        1 => {
-            let candidate = candidates[0];
-            if commutes_with_all_later_commits(repo, path, stack, candidate, hunk) {
-                Ok(Some(candidate))
-            } else {
-                Err(UnassignedReason::DoesNotCommute)
+) -> Result<AssignHunkOutcome, HistoryError> {
+    let candidates = blame_candidates(repo, head, path, head_blob, range, stack_bounds)?;
+    Ok(match candidates {
+        BlameCandidates::HiddenByRef(detail) => AssignHunkOutcome::Unassigned(HunkAssignFailure {
+            reason: UnassignedReason::HiddenByRef,
+            detail: Some(detail),
+        }),
+        BlameCandidates::Empty(reason) => AssignHunkOutcome::Unassigned(HunkAssignFailure {
+            reason,
+            detail: None,
+        }),
+        BlameCandidates::Found(candidates) => match candidates.len() {
+            0 => AssignHunkOutcome::Unassigned(HunkAssignFailure {
+                reason: UnassignedReason::NoCandidate,
+                detail: None,
+            }),
+            1 => {
+                let candidate = candidates[0];
+                if commutes_with_all_later_commits(repo, path, stack, candidate, hunk) {
+                    AssignHunkOutcome::Assigned(candidate)
+                } else {
+                    AssignHunkOutcome::Unassigned(HunkAssignFailure {
+                        reason: UnassignedReason::DoesNotCommute,
+                        detail: None,
+                    })
+                }
             }
-        }
-        _ => Err(UnassignedReason::MultipleCandidates),
-    }
+            _ => AssignHunkOutcome::Unassigned(HunkAssignFailure {
+                reason: UnassignedReason::MultipleCandidates,
+                detail: None,
+            }),
+        },
+    })
 }
 
 fn commutes_with_all_later_commits(
@@ -516,10 +594,10 @@ fn blame_candidates(
     path: &str,
     head_blob: &[u8],
     range: &HunkRange,
-    stack_set: &HashSet<ObjectId>,
-) -> Result<Vec<ObjectId>, UnassignedReason> {
+    stack_bounds: &AbsorbStackBounds,
+) -> Result<BlameCandidates, HistoryError> {
     if range.old_lines == 0 {
-        return blame_candidates_for_pure_add(repo, head, path, head_blob, range, stack_set);
+        return blame_candidates_for_pure_add(repo, head, path, head_blob, range, stack_bounds);
     }
 
     let start = range.old_start;
@@ -536,15 +614,24 @@ fn blame_candidates(
             ..Default::default()
         },
     )
-    .map_err(|_| UnassignedReason::NoCandidate)?;
+    .map_err(|_| HistoryError::Planning {
+        message: "blame failed".into(),
+    })?;
 
-    let commits: HashSet<ObjectId> = blame
-        .lines
+    let all_commits: HashSet<ObjectId> = blame.lines.iter().map(|line| line.commit).collect();
+    let commits: HashSet<ObjectId> = all_commits
         .iter()
-        .map(|line| line.commit)
-        .filter(|c| stack_set.contains(c))
+        .copied()
+        .filter(|c| stack_bounds.stack_set.contains(c))
         .collect();
-    Ok(commits.into_iter().collect())
+    if commits.is_empty() {
+        if let Some(detail) =
+            hidden_by_ref_detail_for_blame(repo, head, &all_commits, stack_bounds)?
+        {
+            return Ok(BlameCandidates::HiddenByRef(detail));
+        }
+    }
+    Ok(BlameCandidates::Found(commits.into_iter().collect()))
 }
 
 fn blame_candidates_for_pure_add(
@@ -553,8 +640,8 @@ fn blame_candidates_for_pure_add(
     path: &str,
     head_blob: &[u8],
     range: &HunkRange,
-    stack_set: &HashSet<ObjectId>,
-) -> Result<Vec<ObjectId>, UnassignedReason> {
+    stack_bounds: &AbsorbStackBounds,
+) -> Result<BlameCandidates, HistoryError> {
     let head_lines = line_count(head_blob);
     let insert_at = range.new_start;
     let mut probe_lines = Vec::new();
@@ -565,10 +652,13 @@ fn blame_candidates_for_pure_add(
         probe_lines.push(insert_at);
     }
     if probe_lines.is_empty() {
-        return Err(UnassignedReason::PureAdditionFarFromContext);
+        return Ok(BlameCandidates::Empty(
+            UnassignedReason::PureAdditionFarFromContext,
+        ));
     }
 
     let mut commits = HashSet::new();
+    let mut all_commits = HashSet::new();
     for &line in &probe_lines {
         let blame = blame_file(
             repo,
@@ -580,16 +670,26 @@ fn blame_candidates_for_pure_add(
                 ..Default::default()
             },
         )
-        .map_err(|_| UnassignedReason::NoCandidate)?;
+        .map_err(|_| HistoryError::Planning {
+            message: "blame failed".into(),
+        })?;
         for entry in blame.lines {
-            if stack_set.contains(&entry.commit) {
+            all_commits.insert(entry.commit);
+            if stack_bounds.stack_set.contains(&entry.commit) {
                 commits.insert(entry.commit);
             }
         }
     }
 
     if commits.is_empty() {
-        return Err(UnassignedReason::PureAdditionFarFromContext);
+        if let Some(detail) =
+            hidden_by_ref_detail_for_blame(repo, head, &all_commits, stack_bounds)?
+        {
+            return Ok(BlameCandidates::HiddenByRef(detail));
+        }
+        return Ok(BlameCandidates::Empty(
+            UnassignedReason::PureAdditionFarFromContext,
+        ));
     }
 
     let min_dist = probe_lines
@@ -598,10 +698,149 @@ fn blame_candidates_for_pure_add(
         .min()
         .unwrap_or(usize::MAX);
     if min_dist > PURE_ADD_MAX_DISTANCE {
-        return Err(UnassignedReason::PureAdditionFarFromContext);
+        return Ok(BlameCandidates::Empty(
+            UnassignedReason::PureAdditionFarFromContext,
+        ));
     }
 
-    Ok(commits.into_iter().collect())
+    Ok(BlameCandidates::Found(commits.into_iter().collect()))
+}
+
+fn hidden_by_ref_detail_for_blame(
+    repo: &Repository,
+    head: ObjectId,
+    blame_commits: &HashSet<ObjectId>,
+    bounds: &AbsorbStackBounds,
+) -> Result<Option<String>, HistoryError> {
+    if bounds.excluded_refs.is_empty() || blame_commits.is_empty() {
+        return Ok(None);
+    }
+    let mut blocking = Vec::new();
+    for commit in blame_commits {
+        if bounds.stack_set.contains(commit) {
+            continue;
+        }
+        if !is_ancestor(repo, *commit, head).map_err(library_err)? {
+            continue;
+        }
+        if !bounds.stack_set_without_branch_tips.contains(commit) {
+            continue;
+        }
+        for excluded in &bounds.excluded_refs {
+            let mut hidden_without = bounds.hidden.clone();
+            hidden_without.remove(&excluded.tip);
+            let without_tip = absorb_stack_set(repo, head, &hidden_without, bounds.max_count)?;
+            if without_tip.contains(commit)
+                && !blocking
+                    .iter()
+                    .any(|e: &AbsorbExcludedRef| e.ref_name == excluded.ref_name)
+            {
+                blocking.push(excluded.clone());
+            }
+        }
+    }
+    if blocking.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(format_hidden_by_ref_message(&blocking)))
+}
+
+/// Membership and negation metadata for the default absorb stack.
+struct AbsorbStackBounds {
+    stack_set: HashSet<ObjectId>,
+    stack_set_without_branch_tips: HashSet<ObjectId>,
+    excluded_refs: Vec<AbsorbExcludedRef>,
+    hidden: HashSet<ObjectId>,
+    max_count: Option<usize>,
+}
+
+struct BuiltAbsorbStack {
+    commits: Vec<ObjectId>,
+    excluded_refs: Vec<AbsorbExcludedRef>,
+    hidden: HashSet<ObjectId>,
+    hidden_without_branch_tips: HashSet<ObjectId>,
+    max_count: Option<usize>,
+}
+
+impl BuiltAbsorbStack {
+    fn stack_bounds(
+        &self,
+        repo: &Repository,
+        head: ObjectId,
+    ) -> Result<AbsorbStackBounds, HistoryError> {
+        let stack_set: HashSet<ObjectId> = self.commits.iter().copied().collect();
+        let commits_without_branch_tips =
+            absorb_stack_commits(repo, head, &self.hidden_without_branch_tips, self.max_count)?;
+        Ok(AbsorbStackBounds {
+            stack_set,
+            stack_set_without_branch_tips: commits_without_branch_tips.into_iter().collect(),
+            excluded_refs: self.excluded_refs.clone(),
+            hidden: self.hidden.clone(),
+            max_count: self.max_count,
+        })
+    }
+}
+
+fn absorb_stack_set(
+    repo: &Repository,
+    head: ObjectId,
+    hidden: &HashSet<ObjectId>,
+    max_count: Option<usize>,
+) -> Result<HashSet<ObjectId>, HistoryError> {
+    Ok(absorb_stack_commits(repo, head, hidden, max_count)?
+        .into_iter()
+        .collect())
+}
+
+fn absorb_stack_commits(
+    repo: &Repository,
+    head: ObjectId,
+    hidden: &HashSet<ObjectId>,
+    max_count: Option<usize>,
+) -> Result<Vec<ObjectId>, HistoryError> {
+    let negative: Vec<String> = hidden.iter().map(ObjectId::to_hex).collect();
+    let walk = rev_list(
+        repo,
+        &[head.to_hex()],
+        &negative,
+        &RevListOptions {
+            ordering: OrderingMode::Topo,
+            reverse: false,
+            first_parent: true,
+            max_count,
+            ..RevListOptions::default()
+        },
+    )
+    .map_err(library_err)?;
+
+    let mut stack: Vec<ObjectId> = walk.commits;
+    stack.retain(|commit| {
+        load_commit(repo, *commit)
+            .map(|c| c.parents.len() <= 1)
+            .unwrap_or(false)
+    });
+    stack.reverse();
+    Ok(stack)
+}
+
+fn fork_point_and_upstream_hidden(
+    repo: &Repository,
+    head: ObjectId,
+    explicit_base: Option<ObjectId>,
+) -> Result<HashSet<ObjectId>, HistoryError> {
+    let mut hidden = HashSet::new();
+    if let Some(base) = explicit_base {
+        hidden.insert(base);
+        return Ok(hidden);
+    }
+    if let Some(branch) = current_branch_short(repo)? {
+        if let Some(upstream) = upstream_branch(repo, &branch) {
+            if let Ok(fp) = fork_point(repo, &upstream.full_ref, upstream.oid, head) {
+                hidden.insert(fp);
+            }
+        }
+    }
+    Ok(hidden)
 }
 
 fn line_count(blob: &[u8]) -> usize {
@@ -1135,6 +1374,7 @@ fn restore_index_path_from_tree(
 pub fn default_absorb_base(repo: &Repository, head: ObjectId) -> Result<ObjectId, HistoryError> {
     let stack = build_absorb_stack(repo, head, None)?;
     Ok(stack
+        .commits
         .last()
         .copied()
         .and_then(|oldest| first_parent(repo, oldest).ok().flatten())
@@ -1145,67 +1385,57 @@ fn build_absorb_stack(
     repo: &Repository,
     head: ObjectId,
     explicit_base: Option<ObjectId>,
-) -> Result<Vec<ObjectId>, HistoryError> {
-    let mut hidden = HashSet::new();
-    if let Some(base) = explicit_base {
-        hidden.insert(base);
+) -> Result<BuiltAbsorbStack, HistoryError> {
+    let mut hidden_branch_tips = HashSet::new();
+    let excluded_refs = if explicit_base.is_some() {
+        Vec::new()
     } else {
-        hide_other_branch_tips(repo, &mut hidden)?;
-        if let Some(branch) = current_branch_short(repo)? {
-            if let Some(upstream) = upstream_branch(repo, &branch) {
-                if let Ok(fp) = fork_point(repo, &upstream.full_ref, upstream.oid, head) {
-                    hidden.insert(fp);
-                }
-            }
-        }
-    }
+        hide_other_branch_tips(repo, &mut hidden_branch_tips)?
+    };
+    let hidden_without_branch_tips = fork_point_and_upstream_hidden(repo, head, explicit_base)?;
+    let mut hidden = hidden_without_branch_tips.clone();
+    hidden.extend(&hidden_branch_tips);
 
-    let negative: Vec<String> = hidden.iter().map(ObjectId::to_hex).collect();
     let max_count = if explicit_base.is_some() {
         None
     } else {
         Some(DEFAULT_ABSORB_STACK_LIMIT)
     };
-    let walk = rev_list(
-        repo,
-        &[head.to_hex()],
-        &negative,
-        &RevListOptions {
-            ordering: OrderingMode::Topo,
-            reverse: false,
-            first_parent: true,
-            max_count,
-            ..RevListOptions::default()
-        },
-    )
-    .map_err(library_err)?;
-
-    let mut stack: Vec<ObjectId> = walk.commits;
-    stack.retain(|commit| {
-        load_commit(repo, *commit)
-            .map(|c| c.parents.len() <= 1)
-            .unwrap_or(false)
-    });
-    stack.reverse();
-    Ok(stack)
+    let commits = absorb_stack_commits(repo, head, &hidden, max_count)?;
+    Ok(BuiltAbsorbStack {
+        commits,
+        excluded_refs,
+        hidden,
+        hidden_without_branch_tips,
+        max_count,
+    })
 }
 
 fn hide_other_branch_tips(
     repo: &Repository,
     hidden: &mut HashSet<ObjectId>,
-) -> Result<(), HistoryError> {
+) -> Result<Vec<AbsorbExcludedRef>, HistoryError> {
     let head_ref = resolve_head_for_repository(repo).map_err(library_err)?;
-    let current = match head_ref {
-        HeadState::Branch { refname, .. } => refname,
-        _ => return Ok(()),
+    let (current, head_tip) = match head_ref {
+        HeadState::Branch { refname, oid, .. } => (Some(refname), oid),
+        HeadState::Detached { oid } => (None, Some(oid)),
+        HeadState::Invalid => return Ok(Vec::new()),
     };
+    let mut excluded = Vec::new();
     for (name, oid) in repo.references().list("refs/heads/").map_err(library_err)? {
-        if name == current {
+        if Some(name.as_str()) == current.as_deref() {
+            continue;
+        }
+        if head_tip == Some(oid) {
             continue;
         }
         hidden.insert(oid);
+        excluded.push(AbsorbExcludedRef {
+            ref_name: name,
+            tip: oid,
+        });
     }
-    Ok(())
+    Ok(excluded)
 }
 
 fn current_branch_short(repo: &Repository) -> Result<Option<String>, HistoryError> {

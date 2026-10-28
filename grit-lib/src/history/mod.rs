@@ -65,8 +65,8 @@ mod undo;
 mod undo_work;
 
 pub use absorb::{
-    absorb, default_absorb_base, format_hunk_range_header, staged_absorb_paths, AbsorbOptions,
-    AbsorbPlan, HunkAssignment, HunkRange, UnassignedHunk, UnassignedReason,
+    absorb, default_absorb_base, format_hunk_range_header, staged_absorb_paths, AbsorbExcludedRef,
+    AbsorbOptions, AbsorbPlan, HunkAssignment, HunkRange, UnassignedHunk, UnassignedReason,
     DEFAULT_ABSORB_STACK_LIMIT,
 };
 pub use apply::{

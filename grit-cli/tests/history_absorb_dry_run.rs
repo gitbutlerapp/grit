@@ -212,6 +212,52 @@ fn absorb_dry_run_leaves_index_refs_worktree_unchanged() -> TestResult {
 }
 
 #[test]
+fn absorb_dry_run_with_backup_branch_at_head() -> TestResult {
+    let scratch = Scratch::new("backup-head")?;
+    let dir = scratch.path();
+    git(dir, &["init", "-b", "main"])?;
+    for i in 1..=3 {
+        let body: String = (1..=5).map(|n| format!("f{i}-{n}\n")).collect();
+        fs::write(dir.join(format!("f{i}.txt")), body)?;
+    }
+    git(dir, &["add", "."])?;
+    git(dir, &["commit", "-m", "base"])?;
+    git(dir, &["checkout", "-b", "feature"])?;
+    for i in 1..=3 {
+        let path = dir.join(format!("f{i}.txt"));
+        let mut text = fs::read_to_string(&path)?;
+        text.push_str(&format!("line {i}\n"));
+        fs::write(&path, text)?;
+        git(dir, &["add", "."])?;
+        git(dir, &["commit", "-m", &format!("feature: touch f{i}")])?;
+    }
+    git(dir, &["branch", "backup"])?;
+    let mut text = fs::read_to_string(dir.join("f1.txt"))?;
+    text = text.replace("line 1\n", "line 1 fixed\n");
+    fs::write(dir.join("f1.txt"), text)?;
+    git(dir, &["add", "f1.txt"])?;
+    let out = gs(dir, &["history", "absorb", "--dry-run", "--json"])?;
+    assert!(out.success(), "{}", out.stderr);
+    let json = parse_json(&out.stdout)?;
+    assert_eq!(json["assignments"].as_array().map(|a| a.len()), Some(1));
+    assert!(
+        !json["excluded_refs"]
+            .as_array()
+            .is_some_and(|refs| refs.iter().any(|r| r["ref"] == "refs/heads/backup")),
+        "{}",
+        out.stdout
+    );
+    let human = gs(dir, &["history", "absorb", "--dry-run"])?;
+    assert!(human.success(), "{}", human.stderr);
+    assert!(
+        human.stdout.contains("feature: touch f1"),
+        "{}",
+        human.stdout
+    );
+    Ok(())
+}
+
+#[test]
 fn absorb_dry_run_markdown_snapshot() -> TestResult {
     let scratch = Scratch::new("md")?;
     let dir = scratch.path();
