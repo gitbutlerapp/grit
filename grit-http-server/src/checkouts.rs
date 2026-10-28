@@ -36,15 +36,22 @@
 //! worktree, the worktree moves with it, keeping local changes. Plain pushes
 //! never change the target: receive-pack refuses them
 //! ([`grit_protocol::PushGuard`]).
+//!
+//! The endpoints are served by [`routes`] for any [`CheckoutHost`]: `grit
+//! serve` is one, and a server that keeps its repositories somewhere other
+//! than local disk can be another, bringing the local copy up to date before
+//! each request and keeping what the request changed after it
+//! ([`CheckoutHost::run`]).
 
 use std::path::Path;
 use std::sync::Arc;
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::{Path as UrlPath, State};
-use axum::http::{HeaderMap, Response, StatusCode};
+use axum::http::{HeaderMap, Method, Response, StatusCode};
 use axum::response::IntoResponse;
-use axum::Json;
+use axum::{Json, Router};
+use futures_util::future::BoxFuture;
 use grit_lib::bundle::BundleSpec;
 use grit_lib::ident::Signature;
 use grit_lib::objects::ObjectId;
@@ -61,12 +68,203 @@ use grit_lib::remote::snapshot_checkout::{
 use grit_lib::repo::Repository;
 use grit_protocol::RepositoryOptions;
 
+pub use crate::checkout_locks::CheckoutLocks;
 use crate::checkout_locks::{CheckoutSlot, RepoLocks, TargetSlot};
-use crate::server::{ServedRepository, ServerState};
+use crate::server::{Authorized, Rejection, ServedRepository, ServerState};
 use crate::store::Access;
 
-/// An error response, boxed because responses are large.
-type Rejection = Box<Response<Body>>;
+/// What the checkout endpoints need from the server that hosts them.
+///
+/// Every request is authorized with [`Self::authorize`], then does its work
+/// on a blocking thread inside [`Self::run`].
+pub trait CheckoutHost: Send + Sync + 'static {
+    /// Resolve the repository `name` for a request that needs `needed`
+    /// access, from the request's credentials.
+    ///
+    /// # Errors
+    ///
+    /// The response to send instead: `401`, `403` or `404`.
+    fn authorize<'a>(
+        &'a self,
+        headers: &'a HeaderMap,
+        name: &'a str,
+        needed: Access,
+    ) -> BoxFuture<'a, Result<Authorized, Rejection>>;
+
+    /// Environment used to open repositories and load their config.
+    fn repository_options(&self) -> &RepositoryOptions;
+
+    /// The locks checkout requests take turns on, kept as long as the server runs.
+    fn checkout_locks(&self) -> &CheckoutLocks;
+
+    /// Split a request path under `/.grit/checkouts/` into the repository
+    /// name and the rest, both without surrounding slashes. The default takes
+    /// the first path segment as the name.
+    fn split_name<'p>(&self, path: &'p str) -> Option<(&'p str, &'p str)> {
+        let path = path.trim_matches('/');
+        Some(path.split_once('/').unwrap_or((path, "")))
+    }
+
+    /// Run `op`, which reads and may change `repo` on local disk, on the
+    /// blocking thread the request runs on. Changes are refs, objects, and
+    /// the checkout records under `<git-dir>/grit-serve`.
+    ///
+    /// The default just runs it. A host whose repositories live elsewhere
+    /// brings the local copy up to date first and keeps what `op` changed
+    /// after, failing the request when it can't.
+    ///
+    /// # Errors
+    ///
+    /// `op`'s rejection, or the host's own.
+    fn run<T>(
+        &self,
+        repo: &ServedRepository,
+        op: impl FnOnce() -> Result<T, Rejection>,
+    ) -> Result<T, Rejection> {
+        let _ = repo;
+        op()
+    }
+
+    /// Called after a request changed a repository's branches.
+    fn pushed(&self) {}
+}
+
+impl CheckoutHost for ServerState {
+    fn authorize<'a>(
+        &'a self,
+        headers: &'a HeaderMap,
+        name: &'a str,
+        needed: Access,
+    ) -> BoxFuture<'a, Result<Authorized, Rejection>> {
+        Box::pin(std::future::ready(ServerState::authorize(
+            self, headers, name, needed,
+        )))
+    }
+
+    fn repository_options(&self) -> &RepositoryOptions {
+        &self.options
+    }
+
+    fn checkout_locks(&self) -> &CheckoutLocks {
+        &self.checkout_locks
+    }
+
+    fn pushed(&self) {
+        ServerState::pushed(self);
+    }
+}
+
+/// The checkout endpoints under `/.grit/checkouts/`, for `H`.
+pub fn routes<H: CheckoutHost>() -> Router<Arc<H>> {
+    Router::new().route(
+        &format!(
+            "/{}/{{*path}}",
+            grit_lib::remote::snapshot_checkout::CHECKOUT_API
+        ),
+        axum::routing::any(dispatch::<H>),
+    )
+}
+
+/// One checkout request, by what follows the repository name.
+enum Route<'a> {
+    Repo,
+    Integrate,
+    Slices,
+    Slice(&'a str),
+    Checkout(&'a str),
+    CheckoutAction(&'a str, &'a str),
+}
+
+impl<'a> Route<'a> {
+    fn parse(rest: &'a str) -> Option<Self> {
+        let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
+        Some(match parts.as_slice() {
+            [] => Self::Repo,
+            ["integrate"] => Self::Integrate,
+            ["slices"] => Self::Slices,
+            ["slices", slice] => Self::Slice(slice),
+            [id] => Self::Checkout(id),
+            [id, action] => Self::CheckoutAction(id, action),
+            _ => return None,
+        })
+    }
+}
+
+/// Parse a JSON request body.
+fn json_body<T: serde::de::DeserializeOwned>(body: &Bytes) -> Result<T, Rejection> {
+    serde_json::from_slice(body)
+        .map_err(|e| error(StatusCode::BAD_REQUEST, format!("bad request body: {e}")))
+}
+
+async fn dispatch<H: CheckoutHost>(
+    State(state): State<Arc<H>>,
+    UrlPath(path): UrlPath<String>,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response<Body> {
+    let not_found = || (StatusCode::NOT_FOUND, "not found\n").into_response();
+    let Some((name, rest)) = state.split_name(&path) else {
+        return not_found();
+    };
+    if name.is_empty() {
+        return not_found();
+    }
+    let Some(route) = Route::parse(rest) else {
+        return not_found();
+    };
+    let name = name.to_owned();
+    let state = &state;
+    let headers = &headers;
+    macro_rules! with_json {
+        (|$request:ident| $call:expr) => {
+            match json_body(&body) {
+                Ok($request) => $call.await,
+                Err(resp) => *resp,
+            }
+        };
+    }
+    match (route, method) {
+        (Route::Repo, Method::GET) => server_info(state, name, headers).await,
+        (Route::Repo, Method::POST) => with_json!(|request| create(state, name, headers, request)),
+        (Route::Integrate, Method::POST) => {
+            with_json!(|request| integrate_branch(state, name, headers, request))
+        }
+        (Route::Slices, Method::GET) => list_slices(state, name, headers).await,
+        (Route::Slice(slice), Method::PUT) => {
+            let slice = slice.to_owned();
+            with_json!(|request| put_slice(state, name, slice, headers, request))
+        }
+        (Route::Slice(slice), Method::DELETE) => {
+            delete_slice(state, name, slice.to_owned(), headers, &body).await
+        }
+        (Route::Checkout(id), Method::GET) => show(state, name, id.to_owned(), headers).await,
+        (Route::CheckoutAction(id, "bundle"), Method::GET) => {
+            bundle(state, name, id.to_owned(), headers).await
+        }
+        (Route::CheckoutAction(id, "update"), Method::POST) => {
+            update(state, name, id.to_owned(), headers).await
+        }
+        (Route::CheckoutAction(id, "work"), Method::POST) => {
+            let id = id.to_owned();
+            with_json!(|request| work_branch(state, name, id, headers, request))
+        }
+        (Route::CheckoutAction(id, "branch"), Method::POST) => {
+            let id = id.to_owned();
+            with_json!(|request| branch(state, name, id, headers, request))
+        }
+        (Route::CheckoutAction(id, "checkin"), Method::POST) => {
+            let id = id.to_owned();
+            with_json!(|request| checkin(state, name, id, headers, request))
+        }
+        (Route::CheckoutAction(_, "bundle" | "update" | "work" | "branch" | "checkin"), _)
+        | (
+            Route::Repo | Route::Integrate | Route::Slices | Route::Slice(_) | Route::Checkout(_),
+            _,
+        ) => (StatusCode::METHOD_NOT_ALLOWED, "method not allowed\n").into_response(),
+        (Route::CheckoutAction(..), _) => not_found(),
+    }
+}
 
 fn error(status: StatusCode, message: impl Into<String>) -> Rejection {
     Box::new(
@@ -104,8 +302,8 @@ fn target(repo: &Repository) -> Result<(String, ObjectId), Rejection> {
 
 /// Run `f` for a request on `name` that needs `needed` access, with the
 /// signed-in user's email and the repository's locks.
-async fn with_access<T: Send + 'static>(
-    state: &Arc<ServerState>,
+async fn with_access<H: CheckoutHost, T: Send + 'static>(
+    state: &Arc<H>,
     headers: &HeaderMap,
     name: &str,
     needed: Access,
@@ -113,33 +311,41 @@ async fn with_access<T: Send + 'static>(
         + Send
         + 'static,
 ) -> Result<T, Rejection> {
-    let found = state.authorize(headers, name, needed)?;
-    let options = state.options.clone();
-    let locks = state.checkout_locks.repo(&found.repo.path);
-    tokio::task::spawn_blocking(move || f(found.repo, found.email, options, &locks))
-        .await
-        .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    let found = state.authorize(headers, name, needed).await?;
+    let options = state.repository_options().clone();
+    let locks = state.checkout_locks().repo(&found.repo.path);
+    let state = Arc::clone(state);
+    tokio::task::spawn_blocking(move || {
+        let repo = found.repo.clone();
+        state.run(&repo, || f(found.repo, found.email, options, &locks))
+    })
+    .await
+    .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
 }
 
 /// Run `f` for an authorized read of `name`.
-async fn with_repo<T: Send + 'static>(
-    state: &Arc<ServerState>,
+async fn with_repo<H: CheckoutHost, T: Send + 'static>(
+    state: &Arc<H>,
     headers: &HeaderMap,
     name: &str,
     f: impl FnOnce(ServedRepository, RepositoryOptions) -> Result<T, Rejection> + Send + 'static,
 ) -> Result<T, Rejection> {
-    let found = state.authorize(headers, name, Access::Read)?;
-    let options = state.options.clone();
-    tokio::task::spawn_blocking(move || f(found.repo, options))
-        .await
-        .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    let found = state.authorize(headers, name, Access::Read).await?;
+    let options = state.repository_options().clone();
+    let state = Arc::clone(state);
+    tokio::task::spawn_blocking(move || {
+        let repo = found.repo.clone();
+        state.run(&repo, || f(found.repo, options))
+    })
+    .await
+    .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
 }
 
 /// Run `f` for a request on checkout `id` of `name` that needs `needed`
 /// access, holding the checkout until it is done, with the signed-in user's
 /// email and the repository's locks.
-async fn with_checkout<T: Send + 'static>(
-    state: &Arc<ServerState>,
+async fn with_checkout<H: CheckoutHost, T: Send + 'static>(
+    state: &Arc<H>,
     headers: &HeaderMap,
     name: &str,
     id: String,
@@ -154,23 +360,29 @@ async fn with_checkout<T: Send + 'static>(
         + Send
         + 'static,
 ) -> Result<T, Rejection> {
-    let found = state.authorize(headers, name, needed)?;
+    let found = state.authorize(headers, name, needed).await?;
     if !valid_checkout_id(&id) {
         return Err(no_checkout(&id));
     }
-    let options = state.options.clone();
-    let locks = state.checkout_locks.repo(&found.repo.path);
+    let options = state.repository_options().clone();
+    let locks = state.checkout_locks().repo(&found.repo.path);
     let mut slot = locks.checkout(&id).await;
-    tokio::task::spawn_blocking(move || f(found.repo, found.email, options, &locks, &mut slot))
-        .await
-        .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    let state = Arc::clone(state);
+    tokio::task::spawn_blocking(move || {
+        let repo = found.repo.clone();
+        state.run(&repo, || {
+            f(found.repo, found.email, options, &locks, &mut slot)
+        })
+    })
+    .await
+    .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
 }
 
 /// Run `f` for a request on `name` that moves its target branch and needs
 /// `needed` access, holding the target until it is done, with the signed-in
 /// user's email.
-async fn with_target<T: Send + 'static>(
-    state: &Arc<ServerState>,
+async fn with_target<H: CheckoutHost, T: Send + 'static>(
+    state: &Arc<H>,
     headers: &HeaderMap,
     name: &str,
     needed: Access,
@@ -178,22 +390,26 @@ async fn with_target<T: Send + 'static>(
         + Send
         + 'static,
 ) -> Result<T, Rejection> {
-    let found = state.authorize(headers, name, needed)?;
-    let options = state.options.clone();
-    let locks = state.checkout_locks.repo(&found.repo.path);
+    let found = state.authorize(headers, name, needed).await?;
+    let options = state.repository_options().clone();
+    let locks = state.checkout_locks().repo(&found.repo.path);
     let mut slot = locks.target().await;
-    tokio::task::spawn_blocking(move || f(found.repo, found.email, options, &mut slot))
-        .await
-        .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    let state = Arc::clone(state);
+    tokio::task::spawn_blocking(move || {
+        let repo = found.repo.clone();
+        state.run(&repo, || f(found.repo, found.email, options, &mut slot))
+    })
+    .await
+    .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
 }
 
 /// `GET /.grit/checkouts/<repo>`.
-pub(crate) async fn server_info(
-    State(state): State<Arc<ServerState>>,
-    UrlPath(name): UrlPath<String>,
-    headers: HeaderMap,
+async fn server_info<H: CheckoutHost>(
+    state: &Arc<H>,
+    name: String,
+    headers: &HeaderMap,
 ) -> Response<Body> {
-    let result = with_repo(&state, &headers, &name, |served, options| {
+    let result = with_repo(state, headers, &name, |served, options| {
         let repo = open(&served, &options)?;
         let (branch, head) = target(&repo)?;
         Ok(CheckoutServerInfo {
@@ -210,15 +426,15 @@ pub(crate) async fn server_info(
 }
 
 /// `POST /.grit/checkouts/<repo>`: make a checkout at the target branch's tip.
-pub(crate) async fn create(
-    State(state): State<Arc<ServerState>>,
-    UrlPath(name): UrlPath<String>,
-    headers: HeaderMap,
-    Json(request): Json<CheckoutRequest>,
+async fn create<H: CheckoutHost>(
+    state: &Arc<H>,
+    name: String,
+    headers: &HeaderMap,
+    request: CheckoutRequest,
 ) -> Response<Body> {
     let result = with_access(
-        &state,
-        &headers,
+        state,
+        headers,
         &name,
         Access::Read,
         move |served, _, options, locks| {
@@ -340,6 +556,11 @@ fn build_bundle(
         exclude: Vec::new(),
         filter: None,
     };
+    // Bundles are derived and may be gone (a host that rebuilds its copy of
+    // the repository keeps no bundles), so their directory may be too.
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
     let tmp = path.with_extension("bundle.tmp");
     {
         let mut out = std::io::BufWriter::new(std::fs::File::create(&tmp)?);
@@ -384,12 +605,13 @@ fn load_held<'a>(
 /// `GET /.grit/checkouts/<repo>/<id>`: the checkout's record, and where the
 /// branch it was made from is now, so a client can tell whether a refresh
 /// would move without making a snapshot.
-pub(crate) async fn show(
-    State(state): State<Arc<ServerState>>,
-    UrlPath((name, id)): UrlPath<(String, String)>,
-    headers: HeaderMap,
+async fn show<H: CheckoutHost>(
+    state: &Arc<H>,
+    name: String,
+    id: String,
+    headers: &HeaderMap,
 ) -> Response<Body> {
-    let result = with_repo(&state, &headers, &name, move |served, options| {
+    let result = with_repo(state, headers, &name, move |served, options| {
         let repo = open(&served, &options)?;
         let info = load(&repo, &id)?.info;
         let tip = branch_tip(&repo, &info.branch).ok().map(|t| t.to_hex());
@@ -403,12 +625,13 @@ pub(crate) async fn show(
 }
 
 /// `GET /.grit/checkouts/<repo>/<id>/bundle`: the snapshot, resumable with `Range`.
-pub(crate) async fn bundle(
-    State(state): State<Arc<ServerState>>,
-    UrlPath((name, id)): UrlPath<(String, String)>,
-    headers: HeaderMap,
+async fn bundle<H: CheckoutHost>(
+    state: &Arc<H>,
+    name: String,
+    id: String,
+    headers: &HeaderMap,
 ) -> Response<Body> {
-    let result = with_repo(&state, &headers, &name, move |served, options| {
+    let result = with_repo(state, headers, &name, move |served, options| {
         let repo = open(&served, &options)?;
         let info = load(&repo, &id)?.info;
         let path = bundle_path(&CheckoutStore::for_repository(&repo), &info.root);
@@ -427,7 +650,7 @@ pub(crate) async fn bundle(
                 path,
                 &format!("\"{root}\""),
                 "application/x-git-bundle",
-                &headers,
+                headers,
             )
             .await
         }
@@ -551,15 +774,16 @@ fn target_change_note(slot: &mut TargetSlot, change: &TargetChange) -> String {
 
 /// `POST /.grit/checkouts/<repo>/<id>/update`: a snapshot of the newest tip
 /// of the branch the checkout was made from, on top of the checkout's last one.
-pub(crate) async fn update(
-    State(state): State<Arc<ServerState>>,
-    UrlPath((name, id)): UrlPath<(String, String)>,
-    headers: HeaderMap,
+async fn update<H: CheckoutHost>(
+    state: &Arc<H>,
+    name: String,
+    id: String,
+    headers: &HeaderMap,
 ) -> Response<Body> {
     respond(
         with_checkout(
-            &state,
-            &headers,
+            state,
+            headers,
             &name,
             id.clone(),
             Access::Read,
@@ -619,16 +843,17 @@ pub(crate) async fn update(
 /// `POST /.grit/checkouts/<repo>/<id>/work`: reserve a fresh work branch for
 /// the checkout, as making one does, for a client whose branch was just
 /// integrated and that moves on to a new one.
-pub(crate) async fn work_branch(
-    State(state): State<Arc<ServerState>>,
-    UrlPath((name, id)): UrlPath<(String, String)>,
-    headers: HeaderMap,
-    Json(request): Json<WorkBranchRequest>,
+async fn work_branch<H: CheckoutHost>(
+    state: &Arc<H>,
+    name: String,
+    id: String,
+    headers: &HeaderMap,
+    request: WorkBranchRequest,
 ) -> Response<Body> {
     respond(
         with_checkout(
-            &state,
-            &headers,
+            state,
+            headers,
             &name,
             id.clone(),
             Access::Read,
@@ -650,16 +875,17 @@ pub(crate) async fn work_branch(
 /// `POST /.grit/checkouts/<repo>/<id>/branch`: show the server's branch to
 /// the checkout, as its paths and snapshots see it, at
 /// `refs/checkouts/<id>/in/heads/<branch>` for it to fetch.
-pub(crate) async fn branch(
-    State(state): State<Arc<ServerState>>,
-    UrlPath((name, id)): UrlPath<(String, String)>,
-    headers: HeaderMap,
-    Json(request): Json<BranchRequest>,
+async fn branch<H: CheckoutHost>(
+    state: &Arc<H>,
+    name: String,
+    id: String,
+    headers: &HeaderMap,
+    request: BranchRequest,
 ) -> Response<Body> {
     respond(
         with_checkout(
-            &state,
-            &headers,
+            state,
+            headers,
             &name,
             id.clone(),
             Access::Read,
@@ -726,15 +952,16 @@ fn projection_refused(name: &str, follows: &str, refusal: &ProjectError) -> Reje
 
 /// `POST /.grit/checkouts/<repo>/<id>/checkin`: graft pushed branches onto
 /// the real history and set the server's branches.
-pub(crate) async fn checkin(
-    State(state): State<Arc<ServerState>>,
-    UrlPath((name, id)): UrlPath<(String, String)>,
-    headers: HeaderMap,
-    Json(request): Json<CheckinRequest>,
+async fn checkin<H: CheckoutHost>(
+    state: &Arc<H>,
+    name: String,
+    id: String,
+    headers: &HeaderMap,
+    request: CheckinRequest,
 ) -> Response<Body> {
     let result = with_checkout(
-        &state,
-        &headers,
+        state,
+        headers,
         &name,
         id.clone(),
         Access::Write,
@@ -945,15 +1172,15 @@ fn refused(
 }
 
 /// `POST /.grit/checkouts/<repo>/integrate`: merge a branch into the target.
-pub(crate) async fn integrate_branch(
-    State(state): State<Arc<ServerState>>,
-    UrlPath(name): UrlPath<String>,
-    headers: HeaderMap,
-    Json(request): Json<IntegrateRequest>,
+async fn integrate_branch<H: CheckoutHost>(
+    state: &Arc<H>,
+    name: String,
+    headers: &HeaderMap,
+    request: IntegrateRequest,
 ) -> Response<Body> {
     let result = with_target(
-        &state,
-        &headers,
+        state,
+        headers,
         &name,
         Access::Write,
         move |served, email, options, slot| {
@@ -1002,13 +1229,13 @@ pub(crate) async fn integrate_branch(
 }
 
 /// `GET /.grit/checkouts/<repo>/slices`.
-pub(crate) async fn list_slices(
-    State(state): State<Arc<ServerState>>,
-    UrlPath(name): UrlPath<String>,
-    headers: HeaderMap,
+async fn list_slices<H: CheckoutHost>(
+    state: &Arc<H>,
+    name: String,
+    headers: &HeaderMap,
 ) -> Response<Body> {
     respond(
-        with_repo(&state, &headers, &name, |served, options| {
+        with_repo(state, headers, &name, |served, options| {
             let repo = open(&served, &options)?;
             let (target_name, head) = target(&repo)?;
             let slices = read_slices(&repo, head).map_err(|e| internal(&e))?;
@@ -1023,15 +1250,16 @@ pub(crate) async fn list_slices(
 }
 
 /// `PUT /.grit/checkouts/<repo>/slices/<slice>`: make or change a slice.
-pub(crate) async fn put_slice(
-    State(state): State<Arc<ServerState>>,
-    UrlPath((name, slice)): UrlPath<(String, String)>,
-    headers: HeaderMap,
-    Json(request): Json<SliceRequest>,
+async fn put_slice<H: CheckoutHost>(
+    state: &Arc<H>,
+    name: String,
+    slice: String,
+    headers: &HeaderMap,
+    request: SliceRequest,
 ) -> Response<Body> {
     let result = with_target(
-        &state,
-        &headers,
+        state,
+        headers,
         &name,
         Access::Write,
         move |served, email, options, slot| {
@@ -1060,16 +1288,17 @@ pub(crate) async fn put_slice(
 }
 
 /// `DELETE /.grit/checkouts/<repo>/slices/<slice>`.
-pub(crate) async fn delete_slice(
-    State(state): State<Arc<ServerState>>,
-    UrlPath((name, slice)): UrlPath<(String, String)>,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
+async fn delete_slice<H: CheckoutHost>(
+    state: &Arc<H>,
+    name: String,
+    slice: String,
+    headers: &HeaderMap,
+    body: &Bytes,
 ) -> Response<Body> {
-    let request: SliceDeleteRequest = serde_json::from_slice(&body).unwrap_or_default();
+    let request: SliceDeleteRequest = serde_json::from_slice(body).unwrap_or_default();
     let result = with_target(
-        &state,
-        &headers,
+        state,
+        headers,
         &name,
         Access::Write,
         move |served, email, options, slot| {

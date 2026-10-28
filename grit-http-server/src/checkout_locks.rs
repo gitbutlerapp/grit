@@ -30,9 +30,12 @@ use grit_lib::remote::snapshot_checkout::{CheckoutRecord, CheckoutStore, TargetC
 /// request holds or waits for.
 const KEPT_CHECKOUT_LOCKS: usize = 1024;
 
-/// The checkout locks of every served repository.
+/// The checkout locks of every served repository: what checkout requests
+/// on one repository take turns on. A server hosting the checkout endpoints
+/// keeps one for as long as it runs (see
+/// [`CheckoutHost::checkout_locks`](crate::checkouts::CheckoutHost::checkout_locks)).
 #[derive(Debug, Default)]
-pub(crate) struct CheckoutLocks {
+pub struct CheckoutLocks {
     repos: Mutex<HashMap<PathBuf, Arc<RepoLocks>>>,
 }
 
