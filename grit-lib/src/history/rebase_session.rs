@@ -343,7 +343,13 @@ pub fn start_rebase_with_exec(
                 return Ok(up_to_date_outcome(orig_head));
             }
             opts.pre_rebase.run(repo)?;
-            super::rebase::plan_rebase_identity_exec(repo, effective_onto, &range, &opts.rebase)?
+            super::rebase::plan_rebase_identity_exec(
+                repo,
+                fork,
+                effective_onto,
+                &range,
+                &opts.rebase,
+            )?
         }
         RebasePlan::Conflict {
             commit,

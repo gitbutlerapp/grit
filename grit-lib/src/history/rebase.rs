@@ -23,7 +23,8 @@ use super::plan::{
     plan_rewrite_with_order_resumable, ResumablePlanOutcome,
 };
 use super::types::{
-    CommitEdit, HistoryEdits, RefScope, RewriteOptions, RewritePlan, RewrittenCommit,
+    CommitEdit, HistoryEdits, PlannedRefUpdate, RefScope, RewriteOptions, RewritePlan,
+    RewrittenCommit,
 };
 
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
@@ -561,16 +562,20 @@ fn rebase_onto_impl(
 }
 
 /// Replay plan for `--exec` when the branch is already based on the upstream: reuse each commit
-/// in `range` unchanged so commands run without minting new OIDs.
+/// in the replay order unchanged so commands run without minting new OIDs until a command rewrites
+/// one (stacked branch tips are included the same way as [`extend_rebase_replay_order`]).
 pub(crate) fn plan_rebase_identity_exec(
     repo: &Repository,
+    fork: ObjectId,
     onto: ObjectId,
     range: &[ObjectId],
     opts: &RebaseOntoOptions,
 ) -> Result<RewritePlan, HistoryError> {
+    let skip_map = HashMap::new();
+    let replay_order = extend_rebase_replay_order(repo, fork, range, &opts.rewrite, &skip_map)?;
     let mut edits = HistoryEdits::new();
     let mut previous = onto;
-    for &commit in range {
+    for &commit in &replay_order {
         edits.insert(
             commit,
             CommitEdit::Reuse {
@@ -580,7 +585,6 @@ pub(crate) fn plan_rebase_identity_exec(
         );
         previous = commit;
     }
-    let replay_order = range.to_vec();
     let mut plan = plan_rewrite_with_order(
         repo,
         &edits,
@@ -590,6 +594,22 @@ pub(crate) fn plan_rebase_identity_exec(
         opts.favor,
     )?;
     plan.head.checkout_onto = Some(onto);
+    // Identity mapping leaves `plan_ref_updates` empty; seed every scoped ref so
+    // [`super::exec::ExecRewrites::finish`] can remap stacked tips after amending commands.
+    if let Some(&oldest) = replay_order.first() {
+        let scoped = collect_scoped_refs(repo, &opts.rewrite, oldest)?;
+        for (name, old) in scoped {
+            if plan.ref_updates.iter().any(|update| update.name == name) {
+                continue;
+            }
+            plan.ref_updates.push(PlannedRefUpdate {
+                name,
+                old,
+                new: old,
+            });
+        }
+        plan.ref_updates.sort_by(|a, b| a.name.cmp(&b.name));
+    }
     Ok(plan)
 }
 

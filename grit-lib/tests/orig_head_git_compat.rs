@@ -392,6 +392,46 @@ fn up_to_date_rebase_with_exec_runs_at_each_commit_without_rewriting_tip() {
 }
 
 #[test]
+fn up_to_date_rebase_with_exec_amend_moves_stacked_branch() {
+    let (tmp, _, _) = issue_repo();
+    let dir = tmp.path();
+    git(dir, &["switch", "-q", "main"]);
+    let main_before = rev(dir, "HEAD");
+    git(dir, &["switch", "-q", "-c", "stacked"]);
+    let stacked_before = commit(dir, "stack.txt", "s\n", "stacked");
+    git(dir, &["switch", "-q", "main"]);
+    assert_ne!(stacked_before, main_before);
+    assert_eq!(rev(dir, "main"), main_before);
+    let upstream = rev(dir, "HEAD~2");
+    let mut opts = rebase_opts(upstream, main_before);
+    opts.rebase.rewrite.scope = RefScope::Branches;
+    let amend = "env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+        GIT_AUTHOR_NAME=T GIT_AUTHOR_EMAIL=t@e.c GIT_COMMITTER_NAME=T GIT_COMMITTER_EMAIL=t@e.c \
+        git commit -q --amend -m amended";
+    let outcome = start_rebase_with_exec(
+        &open(dir),
+        &opts,
+        &ExecSpec {
+            commands: vec![amend.into()],
+        },
+        system_command_runner().as_ref(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("exec rebase");
+    assert!(
+        matches!(outcome, RebaseOutcome::ExecDone { .. }),
+        "{outcome:?}"
+    );
+    let main_after = rev(dir, "main");
+    let stacked_after = rev(dir, "refs/heads/stacked");
+    assert_ne!(main_after, main_before);
+    assert_ne!(stacked_after, stacked_before);
+    assert_eq!(rev(dir, "stacked^"), main_after);
+    git(dir, &["fsck", "--strict"]);
+}
+
+#[test]
 fn up_to_date_rebase_with_exec_failure_leaves_refs_unchanged() {
     let (tmp, _, _) = issue_repo();
     let dir = tmp.path();
