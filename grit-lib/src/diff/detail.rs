@@ -104,66 +104,6 @@ impl DiffEntry {
     }
 }
 
-/// Equal line affixes trimmed off both sides, plus byte lengths on `old`.
-#[must_use]
-pub(crate) fn changed_region_with_offsets<'a>(
-    old: &'a str,
-    new: &'a str,
-) -> (usize, usize, &'a str, &'a str) {
-    let prefix: usize = old
-        .split_inclusive('\n')
-        .zip(new.split_inclusive('\n'))
-        .take_while(|(a, b)| a == b)
-        .map(|(line, _)| line.len())
-        .sum();
-    let (old, new) = (&old[prefix..], &new[prefix..]);
-    let suffix: usize = old
-        .split_inclusive('\n')
-        .rev()
-        .zip(new.split_inclusive('\n').rev())
-        .take_while(|(a, b)| a == b)
-        .map(|(line, _)| line.len())
-        .sum();
-    (
-        prefix,
-        suffix,
-        &old[..old.len() - suffix],
-        &new[..new.len() - suffix],
-    )
-}
-
-/// Myers line counts on LF-only slices (no CR); used by the stat fast path.
-#[must_use]
-pub(crate) fn myers_lf_line_counts(old: &str, new: &str) -> LineStat {
-    if old.is_empty() || new.is_empty() {
-        return LineStat {
-            insertions: new.split_inclusive('\n').count(),
-            deletions: old.split_inclusive('\n').count(),
-        };
-    }
-    let old_lines: Vec<_> = old.split_inclusive('\n').collect();
-    let new_lines: Vec<_> = new.split_inclusive('\n').collect();
-    let mut interner =
-        crate::line_interner::LineInterner::with_capacity(old_lines.len() + new_lines.len());
-    let old_ids = interner.intern_all(&old_lines);
-    let new_ids = interner.intern_all(&new_lines);
-    let mut stat = LineStat::default();
-    for op in similar::capture_diff_slices(similar::Algorithm::Myers, &old_ids, &new_ids) {
-        match op {
-            similar::DiffOp::Delete { old_len, .. } => stat.deletions += old_len,
-            similar::DiffOp::Insert { new_len, .. } => stat.insertions += new_len,
-            similar::DiffOp::Replace {
-                old_len, new_len, ..
-            } => {
-                stat.deletions += old_len;
-                stat.insertions += new_len;
-            }
-            similar::DiffOp::Equal { .. } => {}
-        }
-    }
-    stat
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
