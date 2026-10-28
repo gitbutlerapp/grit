@@ -20,6 +20,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime};
 
+use crate::alternate_boundary::AlternateSources;
 use crate::commit_graph_file::CommitGraphChain;
 use crate::commit_graph_write::{
     atomic_replace_commit_graph, build_commit_graph_bytes_from_oid_maps,
@@ -1043,7 +1044,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
             write_pack_rev_sidecar_for_index_path(&idx_path)?;
         }
 
-        if opts.write_bitmap && promised.is_empty() {
+        if opts.write_bitmap && promised.is_empty() && !AlternateSources::load(odb)?.in_use() {
             if opts.incremental && packs_before > 0 {
                 // Per-pack bitmaps require reachability closure within one pack; incremental
                 // repack keeps older packs and adds a new layer. Write a multi-pack-index
@@ -1221,10 +1222,13 @@ fn reachable_loose_objects(odb: &Odb, reachable: &LazyReachable<'_>) -> Result<V
     }
     let promised = reachable.promised()?;
     let reachable = reachable.get()?;
+    let alternates = AlternateSources::load(odb)?;
     Ok(loose
         .into_iter()
         .map(|(oid, _)| oid)
-        .filter(|oid| reachable.contains(oid) && !promised.contains(oid))
+        .filter(|oid| {
+            reachable.contains(oid) && !promised.contains(oid) && !alternates.contains(oid)
+        })
         .collect())
 }
 
@@ -2007,6 +2011,8 @@ fn repack_object_list(
         .filter(|oid| !promised.contains(oid))
         .collect();
     roots.sort_unstable();
+    let alternates = AlternateSources::load(odb)?;
+    let use_bitmaps = use_bitmaps && promised.is_empty() && !alternates.in_use();
     let mut selection = enumerate_pack_objects_naming(
         odb,
         &roots,
@@ -2015,12 +2021,13 @@ fn repack_object_list(
             filter: None,
             shallow_grafts: shallow,
             have_shallow_grafts: Some(shallow),
-            use_bitmaps: use_bitmaps && promised.is_empty(),
+            use_bitmaps,
             exclude_objects: Some(promised),
             peer_odb: None,
             have_boundary: crate::pack_object_select::HaveBoundary::CommitClosure,
         },
         NameTrees::Yes,
+        true,
         &crate::progress::CancelSignal::never(),
     )?;
     if keep_unreachable {
@@ -2035,17 +2042,18 @@ fn append_repack_unreachable_retention(
     send: &mut Vec<ObjectId>,
     promised: &HashSet<ObjectId>,
 ) -> Result<()> {
+    let alternates = AlternateSources::load(odb)?;
     let mut in_send: OidHashSet = send.iter().copied().collect();
     odb.primary()?
         .packed_objects()
         .for_each_removable_pack_object(&mut |oid| {
-            if !promised.contains(oid) && in_send.insert(*oid) {
+            if !promised.contains(oid) && !alternates.contains(oid) && in_send.insert(*oid) {
                 send.push(*oid);
             }
             std::ops::ControlFlow::Continue(())
         })?;
     for (oid, _) in odb.enumerate_local_loose_objects()? {
-        if !promised.contains(&oid) && in_send.insert(oid) {
+        if !promised.contains(&oid) && !alternates.contains(&oid) && in_send.insert(oid) {
             send.push(oid);
         }
     }

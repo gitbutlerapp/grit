@@ -24,8 +24,10 @@ pub struct PrunePackedOptions {
 /// Remove loose objects that are already stored in a pack file.
 ///
 /// For each loose object under `objects_dir` whose [`crate::objects::ObjectId`] appears in
-/// at least one local pack index, the file is deleted (or, with
-/// [`PrunePackedOptions::dry_run`], paths are listed in the return value only).
+/// at least one local pack index, or in a non-promisor pack in an alternate object
+/// directory, the file is deleted (or, with [`PrunePackedOptions::dry_run`], paths are
+/// listed in the return value only). A duplicate loose object is kept when the alternate
+/// holds the same id only as loose, matching Git.
 /// Empty two-char prefix directories are removed afterwards.
 ///
 /// Returns the list of paths that were (or would be) removed.
@@ -46,14 +48,16 @@ pub fn prune_packed_objects(objects_dir: &Path, opts: PrunePackedOptions) -> Res
         packed_ids.insert(*oid);
         ControlFlow::Continue(())
     })?;
-    if packed_ids.is_empty() {
-        return Ok(Vec::new());
-    }
-
     let mut candidates = Vec::new();
     let mut prefix_dirs = HashSet::new();
     loose.for_each_object(&mut |oid| {
-        if !packed_ids.contains(oid) {
+        let in_local_pack = packed_ids.contains(oid);
+        let in_alternate_pack = if !in_local_pack {
+            odb.contained_in_alternate_pack(oid).unwrap_or(false)
+        } else {
+            false
+        };
+        if !in_local_pack && !in_alternate_pack {
             return ControlFlow::Continue(());
         }
         let obj_path = loose.object_path(oid);
