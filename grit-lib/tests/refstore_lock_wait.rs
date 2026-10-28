@@ -1,34 +1,43 @@
-//! Concurrent writers on a store with one writer slot (issue #2181).
+//! Concurrent ref writers: memory/reftable single slot (issue #2181) and files per-ref locks (#2250).
 //!
 //! [`MemoryRefStore`] (like a database backend with a single write transaction) lets one
 //! prepared transaction hold the whole store, so `prepare` for a disjoint ref fails fast with
 //! [`RefStoreError::LockHeld`]. grit-lib's ref writes retry that for
 //! `core.filesRefLockTimeout`, so concurrent updates to different refs all land, while a lock
 //! that is never released still fails once the budget is spent.
+//!
+//! The default [`FilesRefStore`](grit_lib::refs::store::FilesRefStore) takes one lock file per
+//! ref, so disjoint refs prepare and commit concurrently; only the same ref (or packed-refs)
+//! contends.
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::{mpsc, Arc, Barrier};
 use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
+use grit_lib::ident::Signature;
 use grit_lib::lockfile::LockWait;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::odb::OdbBuilder;
-use grit_lib::objects::{HashAlgo, ObjectId};
+use grit_lib::objects::{HashAlgo, NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::refs::store::RefName;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefStore, RefStoreError, RefTransaction, RefUpdate,
-    RefUpdateFlags,
+    Expected, FilesRefStore, FilesRefStoreConfig, MemoryRefStore, RawRef, RefStore, RefStoreError,
+    RefTransaction, RefUpdate, RefUpdateFlags,
 };
 use grit_lib::refs::{
     commit_ref_update_on_store, commit_ref_updates_on_store, prepare_with_lock_wait,
 };
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
+use grit_test_support::git_fsck;
+use time::OffsetDateTime;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
 
@@ -376,4 +385,150 @@ fn concurrent_commits_in_linked_worktrees_over_shared_stores() {
         }
         assert_eq!(depth, COMMITS + 1, "b{i} history");
     }
+}
+
+fn files_store(git_dir: &Path) -> FilesRefStore {
+    let git_dir = fs::canonicalize(git_dir).unwrap_or_else(|_| git_dir.to_path_buf());
+    FilesRefStore::open(FilesRefStoreConfig {
+        git_dir: git_dir.clone(),
+        common_dir: git_dir,
+        namespace_prefix: None,
+    })
+}
+
+#[test]
+fn files_concurrent_disjoint_ref_updates_through_repository_never_lock_held() {
+    const THREADS: usize = 8;
+    const ITERS: usize = 500;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo = Arc::new(Repository::init(tmp.path(), &InitOptions::default()).expect("init"));
+    let sig = Signature::new(
+        "A",
+        "a@example.com",
+        OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time"),
+    )
+    .expect("sig");
+    let blob = repo
+        .objects()
+        .write(ObjectKind::Blob, b"x\n")
+        .expect("blob");
+    let tree = repo
+        .objects()
+        .write_tree([TreeEntry {
+            mode: 0o100644,
+            name: b"f".to_vec(),
+            oid: blob,
+        }])
+        .expect("tree");
+    let commit = repo
+        .objects()
+        .write_commit(&NewCommit::new(tree, sig.clone(), sig, "c"))
+        .expect("commit");
+
+    let failures: usize = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..THREADS)
+            .map(|t| {
+                let repo = Arc::clone(&repo);
+                s.spawn(move || {
+                    let name = RefName::try_from(format!("refs/heads/t{t}").as_str()).expect("ref");
+                    let mut fails = 0usize;
+                    for _ in 0..ITERS {
+                        if repo.references().update(&name, &commit).is_err() {
+                            fails += 1;
+                        }
+                    }
+                    fails
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().expect("join")).sum()
+    });
+    assert_eq!(
+        failures, 0,
+        "disjoint refs must not see LockHeld through References::update"
+    );
+
+    let show = Command::new("git")
+        .args(["-C", tmp.path().to_str().expect("utf8"), "show-ref"])
+        .output()
+        .expect("git show-ref");
+    assert!(show.status.success(), "{show:?}");
+    let fsck = git_fsck(tmp.path(), true);
+    assert!(fsck.ok, "{fsck:?}");
+}
+
+#[test]
+fn files_prepare_disjoint_ref_while_another_transaction_is_open() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path();
+    fs::create_dir_all(path.join("refs/heads")).expect("refs");
+    fs::write(path.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+    let store = files_store(path);
+
+    let held = store
+        .prepare(txn("refs/heads/a", oid(1)))
+        .expect("prepare a");
+    let waiter = store
+        .prepare(txn("refs/heads/b", oid(2)))
+        .expect("prepare b while a is open");
+    waiter.commit().expect("commit b");
+    held.commit().expect("commit a");
+    assert_eq!(
+        store.read_raw("refs/heads/a").expect("read"),
+        Some(RawRef::Direct(oid(1)))
+    );
+    assert_eq!(
+        store.read_raw("refs/heads/b").expect("read"),
+        Some(RawRef::Direct(oid(2)))
+    );
+}
+
+#[test]
+fn files_concurrent_create_race_a_vs_a_slash_b_leaves_one_ref() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path();
+    fs::create_dir_all(path.join("refs/heads")).expect("refs");
+    fs::write(path.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+    let store = Arc::new(files_store(path));
+    let start = Arc::new(Barrier::new(2));
+    let outcomes: Vec<grit_lib::error::Result<()>> = std::thread::scope(|s| {
+        let a_store = Arc::clone(&store);
+        let b_store = Arc::clone(&store);
+        let a_start = Arc::clone(&start);
+        let b_start = Arc::clone(&start);
+        let a = s.spawn(move || {
+            a_start.wait();
+            commit_ref_update_on_store(
+                a_store.as_ref(),
+                set("refs/heads/a", oid(1), Expected::Missing),
+            )
+        });
+        let b = s.spawn(move || {
+            b_start.wait();
+            commit_ref_update_on_store(
+                b_store.as_ref(),
+                set("refs/heads/a/b", oid(2), Expected::Missing),
+            )
+        });
+        vec![a.join().expect("a"), b.join().expect("b")]
+    });
+    let successes = outcomes.iter().filter(|r| r.is_ok()).count();
+    let name_unavailable = outcomes
+        .iter()
+        .filter(|r| {
+            matches!(
+                r,
+                Err(Error::RefStore(RefStoreError::NameUnavailable { .. }))
+            )
+        })
+        .count();
+    assert_eq!(successes, 1, "{outcomes:?}");
+    assert_eq!(name_unavailable, 1, "{outcomes:?}");
+    let a_exists = path.join("refs/heads/a").is_file();
+    let b_exists = path.join("refs/heads/a/b").is_file();
+    assert!(a_exists ^ b_exists, "exactly one ref file must exist");
+    assert!(
+        !path.join("refs/heads/a.lock").exists() && !path.join("refs/heads/a/b.lock").exists(),
+        "locks released"
+    );
 }

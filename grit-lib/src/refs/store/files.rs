@@ -60,7 +60,6 @@ pub struct FilesRefStore {
     common_dir: PathBuf,
     namespace_prefix: Option<String>,
     packed_cache: Mutex<PackedCacheEntry>,
-    prepared: Mutex<Option<PreparedFilesBatch>>,
 }
 
 /// What a cached `packed-refs` view was read from. Writers replace the file by rename, so the
@@ -142,7 +141,6 @@ impl FilesRefStore {
                 map: None,
                 map_is_complete: false,
             }),
-            prepared: Mutex::new(None),
         }
     }
 
@@ -1597,29 +1595,22 @@ impl RefStore for FilesRefStore {
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
         txn.validate()?;
 
-        let mut prepared_guard = self.prepared.lock().unwrap_or_else(|e| e.into_inner());
-        if prepared_guard.is_some() {
-            return Err(RefStoreError::LockHeld {
-                name: txn.lock_name(),
-            });
-        }
-
         if txn.is_initial() {
             if let Some(initial_packed_records) = self.initial_packed_records(&txn)? {
                 let packed_lock = self.acquire_packed_lock()?;
-                *prepared_guard = Some(PreparedFilesBatch {
-                    updates: Vec::new(),
-                    case_only_renames: Vec::new(),
-                    ref_locks: HashMap::new(),
-                    packed_lock: Some(packed_lock),
-                    ref_lock_wait: LockWait::Immediately,
-                    before_commit: RefBatchState::default(),
-                    after_commit: RefBatchState::default(),
-                    initial_packed_records,
-                });
                 return Ok(Box::new(FilesPrepared {
                     store: self,
                     committed: false,
+                    batch: Some(PreparedFilesBatch {
+                        updates: Vec::new(),
+                        case_only_renames: Vec::new(),
+                        ref_locks: HashMap::new(),
+                        packed_lock: Some(packed_lock),
+                        ref_lock_wait: LockWait::Immediately,
+                        before_commit: RefBatchState::default(),
+                        after_commit: RefBatchState::default(),
+                        initial_packed_records,
+                    }),
                 }));
             }
         }
@@ -1733,20 +1724,19 @@ impl RefStore for FilesRefStore {
             }
         }
 
-        *prepared_guard = Some(PreparedFilesBatch {
-            updates,
-            case_only_renames,
-            ref_locks,
-            packed_lock,
-            ref_lock_wait,
-            before_commit,
-            after_commit,
-            initial_packed_records: Vec::new(),
-        });
-
         Ok(Box::new(FilesPrepared {
             store: self,
             committed: false,
+            batch: Some(PreparedFilesBatch {
+                updates,
+                case_only_renames,
+                ref_locks,
+                packed_lock,
+                ref_lock_wait,
+                before_commit,
+                after_commit,
+                initial_packed_records: Vec::new(),
+            }),
         }))
     }
 
@@ -1847,16 +1837,12 @@ impl RefStore for FilesRefStore {
 struct FilesPrepared<'a> {
     store: &'a FilesRefStore,
     committed: bool,
+    batch: Option<PreparedFilesBatch>,
 }
 
 impl PreparedRefTransaction for FilesPrepared<'_> {
     fn commit(mut self: Box<Self>) -> StoreResult<()> {
-        let mut guard = self
-            .store
-            .prepared
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let Some(mut batch) = guard.take() else {
+        let Some(mut batch) = self.batch.take() else {
             return Ok(());
         };
 
@@ -1922,12 +1908,7 @@ impl PreparedRefTransaction for FilesPrepared<'_> {
     }
 
     fn abort(mut self: Box<Self>) -> StoreResult<()> {
-        let mut guard = self
-            .store
-            .prepared
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if let Some(batch) = guard.take() {
+        if let Some(batch) = self.batch.take() {
             FilesRefStore::release_locks(&batch);
         }
         self.store.invalidate_packed_cache_after_write();
@@ -1941,10 +1922,8 @@ impl Drop for FilesPrepared<'_> {
         if self.committed {
             return;
         }
-        if let Ok(mut guard) = self.store.prepared.lock() {
-            if let Some(batch) = guard.take() {
-                FilesRefStore::release_locks(&batch);
-            }
+        if let Some(batch) = self.batch.take() {
+            FilesRefStore::release_locks(&batch);
         }
         self.store.invalidate_packed_cache_after_write();
     }
