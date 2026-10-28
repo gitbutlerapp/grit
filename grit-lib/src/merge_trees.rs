@@ -1518,15 +1518,13 @@ fn add_add_content_conflict(
 }
 
 /// Merge sparse [`TreeMergeOutput::index`] entries into `index` at [`TreeMergeOutput::touched_paths`].
+///
+/// Removes all stages at each touched path, then merges `merged.index` in one sorted pass via
+/// [`Index::remove_paths_and_insert`] (same semantics as the former remove/push/sort/dedup cycle).
 pub fn apply_tree_merge_output_to_index(index: &mut Index, merged: &TreeMergeOutput) {
-    for path in &merged.touched_paths {
-        index.remove_path_all_stages(path);
-    }
-    for entry in merged.index.entries() {
-        index.push_entry_unsorted(entry.clone());
-    }
-    index.sort();
-    index.dedup_paths_keep_last();
+    let paths: Vec<&[u8]> = merged.touched_paths.iter().map(Vec::as_slice).collect();
+    let replacements: Vec<IndexEntry> = merged.index.entries().to_vec();
+    index.remove_paths_and_insert(paths, replacements);
 }
 
 /// Refresh stage-0 stat cache for sparse merge index rows after a worktree checkout.
@@ -1546,6 +1544,7 @@ pub fn refresh_tree_merge_index_stat_cache(
     let Some(work_tree) = repo.work_tree() else {
         return Ok(());
     };
+    let mut refreshed_rows = Vec::new();
     for entry in merged.index.entries() {
         if entry.stage() != 0 {
             continue;
@@ -1566,14 +1565,17 @@ pub fn refresh_tree_merge_index_stat_cache(
         if !abs.is_file() {
             continue;
         }
-        let refreshed = entry_from_stat(&abs, &entry.path, entry.oid, entry.mode)?;
-        index.add_or_replace(refreshed);
+        refreshed_rows.push(entry_from_stat(&abs, &entry.path, entry.oid, entry.mode)?);
     }
-    index.sort();
+    index.overwrite_stage0_entries(refreshed_rows);
     Ok(())
 }
 
 /// Apply sparse merge index rows and sync stat cache from the work tree when present.
+///
+/// Skips paths whose stage-0 row already matches the merge result (including when only
+/// in-memory extended flags such as fsmonitor-valid differ). Applies the remainder in one
+/// index pass, then patches stat fields in place for any rows that still need refresh.
 ///
 /// # Errors
 ///
@@ -1631,7 +1633,11 @@ fn pending_tree_merge_index_rows(index: &Index, merged: &TreeMergeOutput) -> Tre
                     && existing.oid == row.oid
                     && existing.mode == row.mode
                     && existing.flags == row.flags
-                    && existing.flags_extended == row.flags_extended
+                    && IndexEntry::extended_flags_equal_ignoring_volatile(
+                        existing.flags_extended,
+                        row.flags_extended,
+                    )
+                    && !existing.intent_to_add()
                     && existing.size > 0
                     && (existing.mtime_sec > 0 || existing.ctime_sec > 0)
             }
@@ -2464,5 +2470,162 @@ mod tests {
         augment_renames_with_same_blob(&base, &side, &mut pairs);
         assert_eq!(pairs.len(), 1);
         assert_eq!(pairs[0].2, 100);
+    }
+
+    fn sparse_merge_test_entry(path: &str, oid: ObjectId, stage: u8) -> IndexEntry {
+        let mut flags = path.len().min(0xFFF) as u16;
+        if stage > 0 {
+            flags |= (stage as u16) << 12;
+        }
+        IndexEntry {
+            ctime_sec: 10,
+            ctime_nsec: 0,
+            mtime_sec: 10,
+            mtime_nsec: 0,
+            dev: 1,
+            ino: 1,
+            mode: MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 4,
+            oid,
+            flags,
+            flags_extended: None,
+            path: path.as_bytes().to_vec(),
+            base_index_pos: 0,
+        }
+    }
+
+    #[test]
+    fn apply_tree_merge_output_to_index_sparse_updates_keep_sorted() {
+        let oid = zero_oid();
+        let changed_oid =
+            ObjectId::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").expect("oid");
+        let mut index = Index::new();
+        for i in 0..800 {
+            index.push_entry_unsorted(sparse_merge_test_entry(
+                &format!("wide/f{i:04}.txt"),
+                oid,
+                0,
+            ));
+        }
+        index.sort();
+        assert!(index.entries_sorted);
+        let before_len = index.entries().len();
+
+        let del_path = b"wide/f0100.txt".to_vec();
+        let conflict_path = b"wide/f0200.txt".to_vec();
+        let update_path = b"wide/f0300.txt".to_vec();
+        let mut merge_index = Index::new();
+        merge_index.push_entry_unsorted(sparse_merge_test_entry("wide/f0200.txt", oid, 2));
+        merge_index.push_entry_unsorted(sparse_merge_test_entry("wide/f0200.txt", changed_oid, 3));
+        merge_index.push_entry_unsorted(sparse_merge_test_entry("wide/f0300.txt", changed_oid, 0));
+        merge_index.sort();
+        let mut touched = HashSet::new();
+        touched.insert(del_path.clone());
+        touched.insert(conflict_path.clone());
+        touched.insert(update_path.clone());
+        let merged = TreeMergeOutput {
+            index: merge_index,
+            conflict_content: BTreeMap::new(),
+            result_tree: oid,
+            touched_paths: touched,
+            rename_conflicts: Vec::new(),
+            directory_rename_conflicts: Vec::new(),
+        };
+
+        apply_tree_merge_output_to_index(&mut index, &merged);
+
+        assert!(index.entries_sorted);
+        assert!(index.get(&del_path, 0).is_none());
+        assert!(index.get(&conflict_path, 2).is_some());
+        assert!(index.get(&conflict_path, 3).is_some());
+        assert_eq!(index.get(&update_path, 0).map(|e| e.oid), Some(changed_oid));
+        assert_eq!(index.entries().len(), before_len);
+    }
+
+    #[test]
+    fn apply_tree_merge_worktree_index_skips_fsmonitor_only_diff() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        grit_test_support::git(dir.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.path().join("tracked.txt"), "hello\n").expect("write");
+        grit_test_support::git(dir.path(), &["add", "tracked.txt"]);
+        let repo =
+            Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("repo");
+        let mut index = repo.index_handle().load().expect("index");
+        let row = index.get(b"tracked.txt", 0).expect("row").clone();
+        let oid = row.oid;
+        let mut indexed = row.clone();
+        indexed.set_fsmonitor_valid(true);
+        index.overwrite_stage0_entries(vec![indexed]);
+        let entries_before = index.entries().to_vec();
+
+        let mut merge_index = Index::new();
+        merge_index.push_entry_unsorted(IndexEntry {
+            flags_extended: None,
+            size: 0,
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            ..sparse_merge_test_entry("tracked.txt", oid, 0)
+        });
+        merge_index.sort();
+        let mut touched = HashSet::new();
+        touched.insert(b"tracked.txt".to_vec());
+        let merged = TreeMergeOutput {
+            index: merge_index,
+            conflict_content: BTreeMap::new(),
+            result_tree: oid,
+            touched_paths: touched,
+            rename_conflicts: Vec::new(),
+            directory_rename_conflicts: Vec::new(),
+        };
+
+        apply_tree_merge_output_to_worktree_index(&repo, &mut index, &merged).expect("apply");
+
+        assert_eq!(index.entries(), entries_before.as_slice());
+        assert!(index.get(b"tracked.txt", 0).unwrap().fsmonitor_valid());
+    }
+
+    #[test]
+    fn apply_tree_merge_worktree_index_applies_oid_change() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        grit_test_support::git(dir.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.path().join("tracked.txt"), "hello\n").expect("write");
+        grit_test_support::git(dir.path(), &["add", "tracked.txt"]);
+        let repo =
+            Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("repo");
+        let mut index = repo.index_handle().load().expect("index");
+        let old_oid = index.get(b"tracked.txt", 0).expect("row").oid;
+        let mut indexed = index.get(b"tracked.txt", 0).expect("row").clone();
+        indexed.set_fsmonitor_valid(true);
+        index.overwrite_stage0_entries(vec![indexed]);
+
+        let new_oid = repo
+            .odb()
+            .write(crate::objects::ObjectKind::Blob, b"other\n")
+            .expect("write");
+        assert_ne!(old_oid, new_oid);
+
+        let mut merge_index = Index::new();
+        merge_index.push_entry_unsorted(sparse_merge_test_entry("tracked.txt", new_oid, 0));
+        merge_index.sort();
+        let mut touched = HashSet::new();
+        touched.insert(b"tracked.txt".to_vec());
+        let merged = TreeMergeOutput {
+            index: merge_index,
+            conflict_content: BTreeMap::new(),
+            result_tree: new_oid,
+            touched_paths: touched,
+            rename_conflicts: Vec::new(),
+            directory_rename_conflicts: Vec::new(),
+        };
+
+        apply_tree_merge_output_to_worktree_index(&repo, &mut index, &merged).expect("apply");
+
+        assert_eq!(index.get(b"tracked.txt", 0).map(|e| e.oid), Some(new_oid));
     }
 }
