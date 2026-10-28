@@ -887,8 +887,9 @@ impl CommitOutcome {
 /// # Errors
 ///
 /// - [`Error::Cancelled`] when `cancel` or [`ProgressSink::should_cancel`] fired before the
-///   commit object was written; `HEAD` and the branch are unchanged. A cancel after the
-///   pre-commit hook ran can leave the staged index on disk.
+///   commit object was written; `HEAD` and the branch are unchanged. Hook failures and cancel
+///   after hooks leave the on-disk index unchanged when the caller holds an index lock (for
+///   example [`commit_worktree`] and path-scoped commits).
 /// - [`Error::AmendUnborn`] when [`CommitRequest::amend`] is set but the branch has no commits yet.
 /// - [`Error::NothingToCommit`] when the new tree is empty (unborn branch) or matches the parent tree and [`CommitRequest::allow_empty`] is false (not applied when amending).
 /// - [`Error::IndexUnmerged`] when the index has conflict stages.
@@ -920,6 +921,9 @@ pub fn create_commit(
 ///
 /// Staging reports [`crate::progress::ProgressPhase::StagingFiles`] and polls `cancel`; a cancel
 /// during staging returns [`Error::Cancelled`] with the on-disk index, `HEAD` and refs unchanged.
+/// A failing `pre-commit`, `prepare-commit-msg`, or `commit-msg` hook also leaves the on-disk
+/// index and worktree unchanged (issue #2253): auto-staging runs in memory and hooks read a
+/// temporary index file until the ref moves.
 ///
 /// # Errors
 ///
@@ -934,6 +938,9 @@ pub fn commit_worktree(
     cancel: &dyn Cancel,
 ) -> Result<CommitOutcome> {
     guard_incomplete_rewrite_apply(repo)?;
+    let index_lock = (!req.dry_run)
+        .then(|| repo.begin_index_update())
+        .transpose()?;
     let head = resolve_head_for_repository(repo)?;
     let mut index = repo.load_index()?;
     let staged = crate::porcelain::add::stage_for_commit_on_index(
@@ -953,7 +960,8 @@ pub fn commit_worktree(
     if req.skip_pre_commit_tree_match {
         req.staged_change_count = Some(staged_count);
     }
-    let result = create_commit_with_index(repo, head, &mut index, &req, progress, cancel, None);
+    let persist = index_lock.map(|lock| LockedIndex { index: None, lock });
+    let result = create_commit_with_index(repo, head, &mut index, &req, progress, cancel, persist);
     if matches!(result, Err(Error::NothingToCommit))
         && !req.dry_run
         && (staged_count > 0 || stat_refreshed)
@@ -3074,7 +3082,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         let repo = git_repo_with_modified_file(root);
-        assert_commit_refused_by_foreign_lock(root, &repo, CommitScope::AutoStage, false);
+        assert_commit_refused_by_foreign_lock(root, &repo, CommitScope::AutoStage, true);
 
         system_git(root, &["add", "f1.txt"]);
         let lock_path = repo.git_dir().join("index.lock");

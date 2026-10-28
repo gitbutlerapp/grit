@@ -218,3 +218,67 @@ fn pre_commit_hook_sees_staged_index_from_implicit_add() -> TestResult {
     );
     Ok(())
 }
+
+fn seed_auto_stage_split(root: &Path) -> Result<(), Box<dyn Error>> {
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    fs::write(root.join("a.txt"), b"l1\nl2\nl3\n")?;
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "base"]);
+    fs::write(root.join("a.txt"), b"l1 STAGED\nl2\nl3\n")?;
+    git(root, &["add", "a.txt"]);
+    fs::write(root.join("a.txt"), b"l1 STAGED\nl2\nl3 UNSTAGED\n")?;
+    fs::write(root.join("untracked.txt"), b"new\n")?;
+    Ok(())
+}
+
+#[test]
+fn failing_pre_commit_hook_preserves_staged_unstaged_split() -> TestResult {
+    let scratch = Scratch::new("hook-pre")?;
+    let root = scratch.path();
+    seed_auto_stage_split(root)?;
+    assert_eq!(
+        git(root, &["status", "-s"]).trim(),
+        "MM a.txt\n?? untracked.txt"
+    );
+
+    let hook = root.join(".git/hooks/pre-commit");
+    fs::write(&hook, b"#!/bin/sh\nexit 1\n")?;
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755))?;
+
+    let before_status = git(root, &["status", "-s"]);
+    let before_cached = git(root, &["diff", "--cached"]);
+
+    let out = gs(root, ["commit", "-m", "try"]);
+    assert_ne!(out.status, Some(0), "{}", out.dump());
+
+    assert_eq!(git(root, &["status", "-s"]), before_status);
+    assert_eq!(git(root, &["diff", "--cached"]), before_cached);
+    Ok(())
+}
+
+#[test]
+fn failing_commit_msg_hook_preserves_staged_unstaged_split() -> TestResult {
+    let scratch = Scratch::new("hook-msg")?;
+    let root = scratch.path();
+    seed_auto_stage_split(root)?;
+    assert_eq!(
+        git(root, &["status", "-s"]).trim(),
+        "MM a.txt\n?? untracked.txt"
+    );
+
+    let hook = root.join(".git/hooks/commit-msg");
+    fs::write(&hook, b"#!/bin/sh\nexit 1\n")?;
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755))?;
+
+    let before_status = git(root, &["status", "-s"]);
+    let before_cached = git(root, &["diff", "--cached"]);
+
+    let out = gs(root, ["commit", "-m", "try"]);
+    assert_ne!(out.status, Some(0), "{}", out.dump());
+
+    assert_eq!(git(root, &["status", "-s"]), before_status);
+    assert_eq!(git(root, &["diff", "--cached"]), before_cached);
+    Ok(())
+}

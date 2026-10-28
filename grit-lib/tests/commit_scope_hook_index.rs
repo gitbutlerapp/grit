@@ -62,6 +62,30 @@ fn index_bytes(root: &Path) -> Vec<u8> {
     fs::read(root.join(".git/index")).expect("read index")
 }
 
+fn porcelain(root: &Path) -> String {
+    let out = Command::new("git")
+        .current_dir(root)
+        .args(["status", "--porcelain"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("status --porcelain");
+    assert!(out.status.success());
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+fn cached_diff(root: &Path) -> String {
+    let out = Command::new("git")
+        .current_dir(root)
+        .args(["diff", "--cached"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("diff --cached");
+    assert!(out.status.success());
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
 fn cached_names(root: &Path) -> Vec<String> {
     let out = Command::new("git")
         .current_dir(root)
@@ -167,4 +191,79 @@ fn paths_commit_commit_msg_failure_preserves_index() {
 
     assert_eq!(index_bytes(root), before_index);
     assert_eq!(cached_names(root), before_cached);
+}
+
+fn seed_auto_stage_split_repo(root: &Path) {
+    git(root, &["init", "-q", "-b", "main"]);
+    fs::write(root.join("a.txt"), b"l1\nl2\nl3\n").expect("a.txt base");
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "base"]);
+    fs::write(root.join("a.txt"), b"l1 STAGED\nl2\nl3\n").expect("stage line 1");
+    git(root, &["add", "a.txt"]);
+    fs::write(root.join("a.txt"), b"l1 STAGED\nl2\nl3 UNSTAGED\n").expect("unstage line 3");
+    fs::write(root.join("untracked.txt"), b"new\n").expect("untracked");
+}
+
+#[test]
+fn auto_stage_pre_commit_failure_preserves_index() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    seed_auto_stage_split_repo(root);
+    assert_eq!(porcelain(root), "MM a.txt\n?? untracked.txt\n");
+
+    install_hook(root, "pre-commit", "#!/bin/sh\nexit 1\n");
+
+    let before_index = index_bytes(root);
+    let before_porcelain = porcelain(root);
+    let before_cached = cached_diff(root);
+
+    let repo = open_repo(root);
+    let err = commit_with_scope(
+        &repo,
+        &commit_req("try"),
+        CommitScope::AutoStage,
+        &mut NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("pre-commit must fail");
+    assert!(
+        format!("{err}").contains("pre-commit") || format!("{err}").contains("hook"),
+        "unexpected error: {err}"
+    );
+
+    assert_eq!(index_bytes(root), before_index);
+    assert_eq!(porcelain(root), before_porcelain);
+    assert_eq!(cached_diff(root), before_cached);
+}
+
+#[test]
+fn auto_stage_commit_msg_failure_preserves_index() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    seed_auto_stage_split_repo(root);
+    assert_eq!(porcelain(root), "MM a.txt\n?? untracked.txt\n");
+
+    install_hook(root, "commit-msg", "#!/bin/sh\nexit 1\n");
+
+    let before_index = index_bytes(root);
+    let before_porcelain = porcelain(root);
+    let before_cached = cached_diff(root);
+
+    let repo = open_repo(root);
+    let err = commit_with_scope(
+        &repo,
+        &commit_req("try"),
+        CommitScope::AutoStage,
+        &mut NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("commit-msg must fail");
+    assert!(
+        format!("{err}").contains("commit-msg") || format!("{err}").contains("hook"),
+        "unexpected error: {err}"
+    );
+
+    assert_eq!(index_bytes(root), before_index);
+    assert_eq!(porcelain(root), before_porcelain);
+    assert_eq!(cached_diff(root), before_cached);
 }
