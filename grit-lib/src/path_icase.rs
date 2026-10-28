@@ -170,6 +170,102 @@ impl Stage0IcasePathMap {
         }
         removed
     }
+
+    /// Stage-0 path spelling already recorded for a case variant of `path`, if any.
+    #[must_use]
+    pub fn existing_stage0_spelling(&self, index: &Index, path: &str) -> Option<String> {
+        for index_path in self.paths.same_fold_hash(path.as_bytes()) {
+            if index_path.eq_ignore_ascii_case(path.as_bytes())
+                && index.get(index_path, 0).is_some()
+            {
+                return std::str::from_utf8(index_path).ok().map(str::to_owned);
+            }
+        }
+        None
+    }
+}
+
+/// Stage-0 directory prefix spellings for ignorecase staging (first index order wins).
+#[derive(Debug, Default)]
+pub(crate) struct Stage0IcaseDirSpellingMap {
+    by_fold: HashMap<u32, Vec<u8>>,
+}
+
+impl Stage0IcaseDirSpellingMap {
+    #[must_use]
+    pub fn from_index(index: &Index, ignorecase: bool) -> Self {
+        let mut by_fold = HashMap::new();
+        if !ignorecase {
+            return Self { by_fold };
+        }
+        for e in index.entries.iter().filter(|e| e.stage() == 0) {
+            let path = &e.path;
+            let mut end = 0usize;
+            while let Some(slash) = path[end..].iter().position(|&b| b == b'/') {
+                end += slash;
+                let prefix = &path[..end];
+                by_fold
+                    .entry(memihash(prefix))
+                    .or_insert_with(|| prefix.to_vec());
+                end += 1;
+            }
+        }
+        Self { by_fold }
+    }
+
+    /// Fold directory prefixes of `rel_path` to spellings already in the index.
+    #[must_use]
+    pub fn fold_directory_prefixes(&self, rel_path: &str) -> String {
+        if self.by_fold.is_empty() || rel_path.is_empty() {
+            return rel_path.to_owned();
+        }
+        let parts: Vec<&str> = rel_path.split('/').collect();
+        if parts.is_empty() {
+            return String::new();
+        }
+        let mut prefix = String::new();
+        for (i, comp) in parts.iter().enumerate() {
+            if i > 0 {
+                prefix.push('/');
+            }
+            prefix.push_str(comp);
+            if i + 1 < parts.len() {
+                if let Some(canonical) = self.by_fold.get(&memihash(prefix.as_bytes())) {
+                    prefix = String::from_utf8_lossy(canonical).into_owned();
+                }
+            }
+        }
+        prefix
+    }
+}
+
+/// True when the work tree volume folds ASCII path case (APFS, NTFS, …).
+#[must_use]
+pub(crate) fn worktree_filesystem_case_insensitive(work_tree: &Path) -> bool {
+    let upper = work_tree.join(".grit_icase_probe");
+    let lower = work_tree.join(".grit_icase_probe");
+    let _ = std::fs::remove_dir_all(&upper);
+    let _ = std::fs::remove_dir_all(&lower);
+    if std::fs::create_dir(&upper).is_err() {
+        return false;
+    }
+    let folds = lower.exists();
+    let _ = std::fs::remove_dir_all(&upper);
+    !folds
+}
+
+/// Path to use when staging an untracked or new file under `core.ignorecase`.
+#[must_use]
+pub(crate) fn fold_untracked_staging_path(
+    dir_map: &Stage0IcaseDirSpellingMap,
+    icase_map: &Stage0IcasePathMap,
+    index: &Index,
+    rel_path: &str,
+) -> String {
+    if let Some(existing) = icase_map.existing_stage0_spelling(index, rel_path) {
+        return existing;
+    }
+    dir_map.fold_directory_prefixes(rel_path)
 }
 
 /// Compare two repository-relative paths for identity.
@@ -747,6 +843,24 @@ mod tests {
     use super::*;
     use crate::index::IndexEntry;
     use crate::objects::ObjectId;
+
+    #[test]
+    fn fold_untracked_staging_path_uses_index_dir_and_leaf_spelling() {
+        let mut index = Index::default();
+        for path in ["Dir/f.txt", "readme.txt"] {
+            index.add_or_replace(dummy_entry(path));
+        }
+        let icase_map = Stage0IcasePathMap::from_index(&index, true);
+        let dir_map = Stage0IcaseDirSpellingMap::from_index(&index, true);
+        assert_eq!(
+            fold_untracked_staging_path(&dir_map, &icase_map, &index, "dir/g.txt"),
+            "Dir/g.txt"
+        );
+        assert_eq!(
+            fold_untracked_staging_path(&dir_map, &icase_map, &index, "README.txt"),
+            "readme.txt"
+        );
+    }
 
     fn dummy_entry(path: &str) -> IndexEntry {
         IndexEntry {

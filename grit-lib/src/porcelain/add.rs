@@ -24,8 +24,9 @@ use crate::index::{
 use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::path_icase::{
-    paths_equal, DentrySpellingCache, IcaseCheckoutCollisionMap, IcaseIndexCollisionGroups,
-    Stage0IcasePathMap,
+    fold_untracked_staging_path, paths_equal, worktree_filesystem_case_insensitive,
+    DentrySpellingCache, IcaseCheckoutCollisionMap, IcaseIndexCollisionGroups,
+    Stage0IcaseDirSpellingMap, Stage0IcasePathMap,
 };
 use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
 use crate::pathspec::{
@@ -572,6 +573,8 @@ fn stage_inner_on_index(
     let icase_collisions =
         ignorecase.then(|| IcaseCheckoutCollisionMap::from_index(work_tree, index, true));
     let mut icase_map = Stage0IcasePathMap::from_index(index, ignorecase);
+    let icase_dir_map = Stage0IcaseDirSpellingMap::from_index(index, ignorecase);
+    let icase_volume_folds_case = ignorecase && worktree_filesystem_case_insensitive(work_tree);
 
     let staging_pathspecs = normalized_staging_pathspecs(&opts.pathspecs);
     let pathspec_ctx = repo.pathspec_match_context();
@@ -802,15 +805,17 @@ fn stage_inner_on_index(
     }
 
     if let Some(ref icase_collisions) = icase_collisions {
-        outcome.modified.extend(stage_ignorecase_spelling_updates(
-            work_tree,
-            &icase_map,
-            icase_collisions.collision_groups(),
-            &matches,
-            index,
-            dry_run,
-            parallelism.threads(),
-        )?);
+        if !icase_volume_folds_case {
+            outcome.modified.extend(stage_ignorecase_spelling_updates(
+                work_tree,
+                &icase_map,
+                icase_collisions.collision_groups(),
+                &matches,
+                index,
+                dry_run,
+                parallelism.threads(),
+            )?);
+        }
     }
 
     if !untracked.is_empty() {
@@ -823,6 +828,7 @@ fn stage_inner_on_index(
             &matches,
             &indexed_any_stage,
             &rules,
+            &icase_dir_map,
             &mut icase_map,
             index,
             parallelism,
@@ -1320,6 +1326,7 @@ fn stage_untracked_paths_parallel(
     matches: &impl Fn(&str) -> bool,
     indexed_any_stage: &HashSet<Vec<u8>>,
     rules: &WorktreeRules,
+    icase_dir_map: &Stage0IcaseDirSpellingMap,
     icase_map: &mut Stage0IcasePathMap,
     index: &mut Index,
     parallelism: Parallelism,
@@ -1354,6 +1361,7 @@ fn stage_untracked_paths_parallel(
             let Some(path) = paths.next() else {
                 break;
             };
+            let path = fold_untracked_staging_path(icase_dir_map, icase_map, index, &path);
             if !matches(&path) || indexed_any_stage.contains(storage_bytes(&path).as_ref()) {
                 continue;
             }

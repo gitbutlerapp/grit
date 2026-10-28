@@ -219,10 +219,9 @@ fn ignorecase_edit_stages_only_the_edited_file() {
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), edited);
 }
 
-/// On a case-folding volume a case-only rename keeps the old name reachable, so the index
-/// entry must be respelled to the on-disk name rather than removed.
+/// On a case-folding volume a case-only rename keeps the index spelling (issue #2247).
 #[test]
-fn case_only_rename_restages_on_disk_spelling() {
+fn case_only_rename_keeps_index_spelling_on_folding_volume() {
     if !have_git() {
         return;
     }
@@ -236,10 +235,10 @@ fn case_only_rename_restages_on_disk_spelling() {
     let new: PathBuf = root.join("d3/sub3/F3.txt");
     std::fs::rename(root.join(&old), &new).expect("case-only rename");
     let (outcome, _) = stage_all(root);
-    assert_eq!(outcome.modified, vec!["d3/sub3/F3.txt".to_owned()]);
+    assert_eq!(outcome.total(), 0, "{outcome:?}");
     let files = ls_files(root);
-    assert!(files.iter().any(|p| p == "d3/sub3/F3.txt"), "{files:?}");
-    assert!(!files.iter().any(|p| p == &old), "{files:?}");
+    assert!(files.iter().any(|p| p == &old), "{files:?}");
+    assert!(!files.iter().any(|p| p == "d3/sub3/F3.txt"), "{files:?}");
 }
 
 #[test]

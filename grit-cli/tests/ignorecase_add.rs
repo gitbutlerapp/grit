@@ -71,10 +71,22 @@ fn grit_add_replaces_case_variant_without_duplicate_index_entries() {
     let index = Index::load(&git_dir.join("index")).expect("index");
     let stage0: Vec<_> = index.entries().iter().filter(|e| e.stage() == 0).collect();
     assert_eq!(stage0.len(), 1, "expected a single tracked file");
+    let volume_folds_case = {
+        let probe = dir.path().join(".grit_icase_probe");
+        std::fs::write(&probe, b"x").expect("probe");
+        let folds = dir.path().join(".GRIT_ICASE_PROBE").exists();
+        std::fs::remove_file(&probe).expect("remove probe");
+        folds
+    };
+    let expected_index_path = if volume_folds_case {
+        "File.txt"
+    } else {
+        "file.txt"
+    };
     assert_eq!(
         String::from_utf8_lossy(&stage0[0].path),
-        "file.txt",
-        "index must use the on-disk spelling after case-only rename"
+        expected_index_path,
+        "index spelling after case-only rename"
     );
 
     if Command::new("git").output().is_ok() {
@@ -83,7 +95,7 @@ fn grit_add_replaces_case_variant_without_duplicate_index_entries() {
         let listed = String::from_utf8_lossy(&ls.stdout);
         assert_eq!(
             listed.trim(),
-            "file.txt",
+            expected_index_path,
             "system git must see one path, got: {listed}"
         );
         let st = run_git(dir.path(), &["status", "--short"]);

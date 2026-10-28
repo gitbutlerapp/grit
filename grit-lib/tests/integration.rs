@@ -31,6 +31,9 @@ mod add_executable_git_compat;
 #[path = "add_ignorecase_clean_tree_perf_git_compat.rs"]
 mod add_ignorecase_clean_tree_perf_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "add_ignorecase_commit_autostage_2247.rs"]
+mod add_ignorecase_commit_autostage_2247;
+#[cfg(feature = "full-tests")]
 #[path = "add_ignorecase_spelling_git_compat.rs"]
 mod add_ignorecase_spelling_git_compat;
 #[cfg(feature = "full-tests")]

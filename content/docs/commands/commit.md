@@ -25,7 +25,7 @@ grit commit --patch-file <file|-> -m <message>
 
 ## Description
 
-By default, `grit commit` **auto-stages** every change in the working tree (modified, deleted and untracked files) and records a new commit on the current branch.
+By default, `grit commit` **auto-stages** every change in the working tree (modified, deleted and untracked files) and records a new commit on the current branch. With `core.ignorecase=true` on a case-folding volume, auto-staging keeps indexed path spellings (same as [`grit add`](add.md)); use [`grit mv`](mv.md) to change a path's case on purpose.
 
 Use **`--staged`** to commit the index as-is without auto-staging (Git’s `git commit` without `-a`). Use **`-a` / `--all`** to force auto-staging even when `commit.autoStage=false`.
 
