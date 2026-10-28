@@ -47,7 +47,7 @@ use crate::objects::{
 use crate::odb::Odb;
 use crate::pack::{prepare_pack_for_object_fsck, PackFsckTrailerIssue};
 use crate::pack_fsck_verify::{verify_pack_objects as verify_pack_file, PackFsckObjectOutcome};
-use crate::parallel::{try_par_map, ParallelOp, ParallelOptions};
+use crate::parallel::{pool_worthwhile, run_ordered_batches, ParallelOp, ParallelOptions};
 use crate::progress::{cancel_watch_arc, Cancel, ProgressPhase, ProgressSink};
 use crate::refs_fsck::{refs_fsck, RefsFsckIssue};
 use crate::repo::Repository;
@@ -747,6 +747,79 @@ enum LooseCheckOutcome {
     Issue(FsckIssue),
 }
 
+fn check_local_loose_object(
+    item: &(ObjectId, PathBuf),
+    fsck_opts: FsckObjectOptions,
+) -> LooseCheckOutcome {
+    let (oid, path) = item;
+    match Odb::read_loose_verify_oid(path, oid) {
+        Err(Error::LooseHashMismatch { .. }) => LooseCheckOutcome::Issue(FsckIssue::HashMismatch {
+            oid: *oid,
+            path: path.clone(),
+        }),
+        Err(Error::HashCollision { oid: colliding }) => {
+            LooseCheckOutcome::Issue(FsckIssue::BadObject {
+                oid: *oid,
+                error: FsckError::new(
+                    "sha1Collision",
+                    format!(
+                    "SHA-1 collision detected while verifying loose object (digest {colliding})"
+                ),
+                ),
+            })
+        }
+        Err(_) => LooseCheckOutcome::Issue(FsckIssue::CorruptLoose {
+            oid: *oid,
+            path: path.clone(),
+        }),
+        Ok(obj) => {
+            let fsck_err = fsck_object(obj.kind, &obj.data, fsck_opts).err();
+            LooseCheckOutcome::Verified { obj, fsck_err }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_loose_check_outcome(
+    oid: &ObjectId,
+    outcome: LooseCheckOutcome,
+    algo: HashAlgo,
+    config: &ConfigSet,
+    strict: bool,
+    issues: &mut Vec<FsckIssue>,
+    validated: &mut OidHashSet,
+    links: &mut OidHashMap<ValidatedObjectLinks>,
+    dot: &mut DotFsckTracker,
+) {
+    match outcome {
+        LooseCheckOutcome::Verified {
+            obj,
+            fsck_err: None,
+        } => {
+            record_validated_object(validated, links, *oid, obj.kind, &obj.data, algo);
+            apply_dot_checks(dot, issues, config, strict, oid, obj.kind, &obj.data);
+        }
+        LooseCheckOutcome::Verified {
+            obj,
+            fsck_err: Some(error),
+        } => {
+            push_bad_object(issues, config, strict, *oid, error.clone());
+            if object_fsck_allows_link_cache(&error, config, strict) {
+                record_validated_object(validated, links, *oid, obj.kind, &obj.data, algo);
+                apply_dot_checks(dot, issues, config, strict, oid, obj.kind, &obj.data);
+            }
+        }
+        LooseCheckOutcome::Issue(issue) => {
+            if should_emit(config, strict, issue_msg_id(&issue)) {
+                issues.push(issue);
+            }
+        }
+    }
+}
+
+/// One loose object per batch so at most `2 * n_workers` inflated payloads are live.
+const LOOSE_FSCK_BATCH: usize = 1;
+
 fn verify_loose_objects(
     repo: &Repository,
     config: &ConfigSet,
@@ -770,92 +843,50 @@ fn verify_loose_objects(
     if cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }
-    let results = match try_par_map::<_, _, String, _>(&loose, par_opts, total, |(oid, path)| {
-        let read = Odb::read_loose_verify_oid(path, oid);
-        match read {
-            Err(Error::LooseHashMismatch { .. }) => {
-                Ok(LooseCheckOutcome::Issue(FsckIssue::HashMismatch {
-                    oid: *oid,
-                    path: path.clone(),
-                }))
-            }
-            Err(Error::HashCollision { oid: colliding }) => Ok(LooseCheckOutcome::Issue(
-                FsckIssue::BadObject {
-                    oid: *oid,
-                    error: FsckError::new(
-                        "sha1Collision",
-                        format!(
-                            "SHA-1 collision detected while verifying loose object (digest {colliding})"
-                        ),
-                    ),
-                },
-            )),
-            Err(_) => Ok(LooseCheckOutcome::Issue(FsckIssue::CorruptLoose {
-                oid: *oid,
-                path: path.clone(),
-            })),
-            Ok(obj) => {
-                let fsck_err = fsck_object(obj.kind, &obj.data, fsck_opts).err();
-                Ok(LooseCheckOutcome::Verified { obj, fsck_err })
-            }
-        }
-    }) {
-        Ok(v) => v,
-        Err(e) => return Err(Error::Message(format!("parallel fsck: {e}"))),
-    };
 
+    let n_workers = par_opts.threads.get().min(total).max(1);
     let mut checked = 0usize;
     let mut validated = oid_hash_set();
     let mut links = oid_hash_map();
-    for (item, outcome) in loose.iter().zip(results) {
-        checked += 1;
-        if checked.is_multiple_of(128) {
-            progress.set(checked as u64);
-            if cancel.is_cancelled() {
-                return Err(Error::Cancelled);
+
+    let mut record_outcomes = |batch: &[(ObjectId, PathBuf)], outcomes: Vec<LooseCheckOutcome>| {
+        for ((oid, _), outcome) in batch.iter().zip(outcomes) {
+            checked += 1;
+            if checked.is_multiple_of(128) {
+                progress.set(checked as u64);
+                if cancel.is_cancelled() {
+                    return Err(Error::Cancelled);
+                }
             }
+            apply_loose_check_outcome(
+                oid,
+                outcome,
+                algo,
+                config,
+                strict,
+                issues,
+                &mut validated,
+                &mut links,
+                &mut dot,
+            );
         }
-        match outcome {
-            LooseCheckOutcome::Verified {
-                obj,
-                fsck_err: None,
-            } => {
-                record_validated_object(
-                    &mut validated,
-                    &mut links,
-                    item.0,
-                    obj.kind,
-                    &obj.data,
-                    algo,
-                );
-                apply_dot_checks(
-                    &mut dot, issues, config, strict, &item.0, obj.kind, &obj.data,
-                );
-            }
-            LooseCheckOutcome::Verified {
-                obj,
-                fsck_err: Some(error),
-            } => {
-                push_bad_object(issues, config, strict, item.0, error.clone());
-                if object_fsck_allows_link_cache(&error, config, strict) {
-                    record_validated_object(
-                        &mut validated,
-                        &mut links,
-                        item.0,
-                        obj.kind,
-                        &obj.data,
-                        algo,
-                    );
-                    apply_dot_checks(
-                        &mut dot, issues, config, strict, &item.0, obj.kind, &obj.data,
-                    );
-                }
-            }
-            LooseCheckOutcome::Issue(issue) => {
-                if should_emit(config, strict, issue_msg_id(&issue)) {
-                    issues.push(issue);
-                }
-            }
+        Ok(())
+    };
+
+    if pool_worthwhile(total, total, par_opts) {
+        run_ordered_batches(
+            &loose,
+            LOOSE_FSCK_BATCH,
+            n_workers,
+            || fsck_opts,
+            |opts, item| Ok(check_local_loose_object(item, *opts)),
+            |batch, outcomes| record_outcomes(batch, outcomes),
+        )
+        .map_err(|e| Error::Message(format!("parallel fsck: {e}")))?;
+    } else {
+        for item in &loose {
+            let outcome = check_local_loose_object(item, fsck_opts);
+            record_outcomes(std::slice::from_ref(item), vec![outcome])?;
         }
     }
     for pending in dot.finish_pending(odb)? {

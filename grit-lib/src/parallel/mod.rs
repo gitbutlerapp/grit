@@ -17,6 +17,7 @@ mod map;
 mod policy;
 mod pool;
 
+pub(crate) use map::pool_worthwhile;
 pub(crate) use pool::{run_ordered_batches, run_ordered_pool};
 
 pub use map::{

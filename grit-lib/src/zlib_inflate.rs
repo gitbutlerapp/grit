@@ -82,12 +82,15 @@ fn read_retrying(file: &mut std::fs::File, buf: &mut [u8]) -> Result<usize> {
 }
 
 /// Bytes to request on the next loose-object read: at most `chunk`, and on Windows at most
-/// uncompressed bytes left in the file (matches Git's size-bounded `pread` on loose objects).
+/// on-disk bytes left in the file (matches Git's size-bounded `pread` on loose objects).
 #[must_use]
 pub(crate) fn loose_file_read_len(chunk: usize, file_bytes_remaining: Option<u64>) -> usize {
     match file_bytes_remaining {
         Some(0) => 0,
-        Some(rem) => chunk.min(rem as usize).max(1),
+        Some(rem) => {
+            let cap = rem.min(chunk as u64);
+            usize::try_from(cap).unwrap_or(chunk).max(1)
+        }
         None => chunk,
     }
 }
