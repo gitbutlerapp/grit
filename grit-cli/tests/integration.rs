@@ -458,6 +458,9 @@ mod receive_pack_fsck_objects;
 #[path = "receive_pack_git_push.rs"]
 mod receive_pack_git_push;
 #[cfg(feature = "full-tests")]
+#[path = "receive_pack_shared_pack_mode.rs"]
+mod receive_pack_shared_pack_mode;
+#[cfg(feature = "full-tests")]
 #[path = "reflog_filter_cli.rs"]
 mod reflog_filter_cli;
 #[path = "reflog_json_fields.rs"]

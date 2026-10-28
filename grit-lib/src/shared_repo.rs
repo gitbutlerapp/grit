@@ -160,6 +160,28 @@ pub fn adjust_shared_perm_path(_shared_repo: i32, _path: &Path) -> std::io::Resu
     Ok(())
 }
 
+/// Finalize a published pack sidecar (`.pack`, `.idx`, or `.rev`) like Git's `index-pack`.
+///
+/// Strips write permission using the process umask (`0444 & ~umask`), then applies
+/// [`adjust_shared_perm_path`] when `core.sharedRepository` is set. No-op on non-Unix.
+#[cfg(unix)]
+pub fn finalize_pack_file_mode(shared_repo: i32, path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let old_umask = unsafe { libc::umask(0) };
+    unsafe {
+        libc::umask(old_umask);
+    }
+    let mode = 0o444 & !old_umask;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+    adjust_shared_perm_path(shared_repo, path)
+}
+
+#[cfg(not(unix))]
+pub fn finalize_pack_file_mode(_shared_repo: i32, _path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 /// Resolve `core.sharedRepository` from config text (merged set's string value).
 pub fn shared_repository_from_config_value(raw: Option<&str>) -> Result<i32, String> {
     let Some(v) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
@@ -250,6 +272,48 @@ mod tests {
             shared_repository_from_config_value(Some("group")).expect("group"),
             PERM_GROUP
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn finalize_pack_file_mode_respects_umask_and_shared_repo() -> std::io::Result<()> {
+        let old = unsafe { libc::umask(0o022) };
+        unsafe {
+            libc::umask(old);
+        }
+        let dir = tempfile::tempdir()?;
+        let file = dir.path().join("pack");
+        std::fs::write(&file, b"pack")?;
+        finalize_pack_file_mode(PERM_UMASK, &file)?;
+        assert_eq!(
+            std::fs::metadata(&file)?.permissions().mode() & 0o777,
+            0o444,
+            "umask 022 → 0444"
+        );
+
+        let file660 = dir.path().join("pack660");
+        std::fs::write(&file660, b"pack")?;
+        let shared660 = git_config_perm("core.sharedRepository", "0660").expect("0660");
+        finalize_pack_file_mode(shared660, &file660)?;
+        assert_eq!(
+            std::fs::metadata(&file660)?.permissions().mode() & 0o777,
+            0o440,
+            "shared 0660 → 0440"
+        );
+
+        let old077 = unsafe { libc::umask(0o077) };
+        let file077 = dir.path().join("pack077");
+        std::fs::write(&file077, b"pack")?;
+        finalize_pack_file_mode(PERM_UMASK, &file077)?;
+        assert_eq!(
+            std::fs::metadata(&file077)?.permissions().mode() & 0o777,
+            0o400,
+            "umask 077 → 0400"
+        );
+        unsafe {
+            libc::umask(old077);
+        }
+        Ok(())
     }
 
     #[cfg(unix)]

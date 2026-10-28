@@ -205,7 +205,16 @@ fn local_push_publishes_a_pack_as_readable_as_its_index() {
         meta.permissions().mode() & 0o777
     };
     assert_eq!(mode("pack"), mode("idx"), "{files:?}");
-    assert_eq!(files.len(), 2, "only the pack and its index: {files:?}");
+    if files
+        .iter()
+        .any(|p| p.extension().is_some_and(|e| e == "rev"))
+    {
+        assert_eq!(mode("pack"), mode("rev"), "{files:?}");
+    }
+    assert!(
+        files.len() >= 2 && files.len() <= 3,
+        "pack, index, and optional rev sidecar: {files:?}"
+    );
 }
 
 #[test]

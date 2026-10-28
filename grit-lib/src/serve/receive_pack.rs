@@ -1392,6 +1392,7 @@ fn ingest_spooled_pack(
             // Indexing hashes every object and the trailer is checked while
             // installing, so a second full read of the pack proves nothing.
             skip_post_index_verify: true,
+            merged_config: Some(cfg.clone()),
             ..Default::default()
         },
     )?;

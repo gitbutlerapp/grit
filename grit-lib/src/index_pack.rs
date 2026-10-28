@@ -171,6 +171,39 @@ impl Default for IngestPackOptions {
     }
 }
 
+struct IngestPackPublishPolicy {
+    shared_repo: i32,
+    write_rev: bool,
+}
+
+fn resolve_ingest_pack_publish_policy(
+    opts: &IngestPackOptions,
+    odb: &Odb,
+) -> Result<IngestPackPublishPolicy> {
+    let cfg = if let Some(c) = &opts.merged_config {
+        Some(c.clone())
+    } else if let Some(git_dir) = odb.config_git_dir() {
+        Some(crate::config::ConfigSet::load(
+            &opts.environment,
+            Some(git_dir),
+            true,
+        )?)
+    } else {
+        None
+    };
+    let shared_raw = cfg.as_ref().and_then(|c| c.get("core.sharedRepository"));
+    let shared_repo =
+        crate::shared_repo::shared_repository_from_config_value(shared_raw.as_deref())
+            .map_err(|msg| Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, msg)))?;
+    let write_rev = cfg
+        .as_ref()
+        .is_none_or(|c| c.pack_write_reverse_index_default(&opts.environment));
+    Ok(IngestPackPublishPolicy {
+        shared_repo,
+        write_rev,
+    })
+}
+
 impl IngestPackOptions {
     fn index_parallelism(&self, odb: &Odb) -> Result<Parallelism> {
         if let Some(n) = self.threads {
@@ -356,7 +389,8 @@ pub fn install_pack_bytes_with_progress(
 /// Install a pack from `pack_path` into `odb`'s `objects/pack/` directory.
 ///
 /// The file is moved into place when possible; callers may pass a temp receive
-/// path under `objects/pack/`.
+/// path under `objects/pack/`. Newly published `.pack`, `.idx`, and `.rev`
+/// sidecars are made read-only (respecting umask and `core.sharedRepository`).
 ///
 /// Several threads or processes may install the same pack into one repository at
 /// once (parallel fetches): each stages under its own name, and a `.pack`/`.idx`
@@ -385,6 +419,7 @@ pub fn install_pack_path_with_progress(
     cancel: Option<&dyn Cancel>,
 ) -> Result<IngestedPack> {
     odb.require_files_primary("index_pack")?;
+    let publish_policy = resolve_ingest_pack_publish_policy(opts, odb)?;
     let owned = pack_path.to_path_buf();
     let hb = odb.hash_algo().len();
     let meta = std::fs::metadata(&owned).map_err(Error::Io)?;
@@ -533,10 +568,21 @@ pub fn install_pack_path_with_progress(
             let staged = TempPath::try_from_path(staged).map_err(Error::Io)?;
             publish_no_clobber(staged, final_path).map_err(Error::Io)
         };
+        let shared_repo = publish_policy.shared_repo;
         if !publish(&stage_pack, &final_pack)? {
             touch_pack_mtime(&final_pack);
+        } else {
+            crate::shared_repo::finalize_pack_file_mode(shared_repo, &final_pack)?;
         }
-        publish(&stage_idx, &idx_path)?;
+        if publish(&stage_idx, &idx_path)? {
+            crate::shared_repo::finalize_pack_file_mode(shared_repo, &idx_path)?;
+        }
+        if publish_policy.write_rev {
+            crate::pack_rev::write_pack_rev_sidecar_for_index_path_with_shared(
+                &idx_path,
+                shared_repo,
+            )?;
+        }
         if opts.mark_promisor_pack {
             std::fs::write(final_pack.with_extension("promisor"), b"").map_err(Error::Io)?;
         }
@@ -1544,5 +1590,97 @@ mod tests {
             matches!(err, Error::ReceivedPackTempMissing { .. }),
             "expected typed missing-pack error, got {err:?}"
         );
+    }
+
+    #[cfg(unix)]
+    fn pack_sidecar_mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777
+    }
+
+    #[cfg(unix)]
+    fn large_blob_pack_for_install_test() -> Vec<u8> {
+        use grit_test_support::objects::{HashAlgo, ObjectKind as PK, PackBuilder};
+        let mut pb = PackBuilder::new(HashAlgo::Sha1);
+        for i in 0..120 {
+            pb.add_full(PK::Blob, format!("install-mode-{i}\n").as_bytes());
+        }
+        pb.build().bytes
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_pack_finalizes_modes_for_shared_group_and_writes_rev() {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let git_dir = tmp.path().join("remote.git");
+        std::fs::create_dir_all(git_dir.join("objects/pack")).expect("pack dir");
+        std::fs::write(
+            git_dir.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tsharedRepository = group\n",
+        )
+        .expect("config");
+        let objects = git_dir.join("objects");
+        let odb = Odb::new(objects.as_path()).with_config_git_dir(git_dir.clone());
+
+        let pack_bytes = large_blob_pack_for_install_test();
+        let spool = git_dir.join("objects/pack/incoming.pack");
+        {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&spool)
+                .expect("0600 spool");
+            f.write_all(&pack_bytes).expect("write pack");
+        }
+        assert_eq!(pack_sidecar_mode(&spool), 0o600);
+
+        install_pack_path(&spool, &odb, &IngestPackOptions::default()).expect("install");
+
+        let pack_dir = git_dir.join("objects/pack");
+        let pack_path = std::fs::read_dir(&pack_dir)
+            .expect("read pack dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|x| x == "pack"))
+            .expect("installed pack");
+        let idx_path = pack_path.with_extension("idx");
+        let rev_path = pack_path.with_extension("rev");
+        assert_eq!(pack_sidecar_mode(&pack_path), 0o444);
+        assert_eq!(pack_sidecar_mode(&idx_path), 0o444);
+        assert!(rev_path.is_file(), "expected .rev sidecar");
+        assert_eq!(pack_sidecar_mode(&rev_path), 0o444);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_pack_finalizes_modes_for_shared_0660_config() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let git_dir = tmp.path().join("remote.git");
+        std::fs::create_dir_all(git_dir.join("objects/pack")).expect("pack dir");
+        std::fs::write(
+            git_dir.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tsharedRepository = 0660\n",
+        )
+        .expect("config");
+        let objects = git_dir.join("objects");
+        let odb = Odb::new(objects.as_path()).with_config_git_dir(git_dir.clone());
+        let pack_bytes = large_blob_pack_for_install_test();
+        install_pack_bytes(pack_bytes, &odb, &IngestPackOptions::default()).expect("install");
+        let pack_path = std::fs::read_dir(git_dir.join("objects/pack"))
+            .expect("read pack dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|x| x == "pack"))
+            .expect("pack");
+        assert_eq!(pack_sidecar_mode(&pack_path), 0o440);
+        assert_eq!(pack_sidecar_mode(&pack_path.with_extension("idx")), 0o440);
     }
 }

@@ -6,10 +6,13 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
+use crate::config::ConfigSet;
+use crate::environment::Environment;
 use crate::error::{Error, Result};
 use crate::hash::verify_trailer;
 use crate::objects::HashAlgo;
 use crate::pack::PackIndex;
+use crate::shared_repo::{self, PERM_UMASK};
 use tempfile::NamedTempFile;
 
 /// Magic `RIDX` in big-endian form (same as Git's `RIDX_SIGNATURE`).
@@ -114,8 +117,35 @@ pub fn build_pack_rev_bytes_from_index_order_offsets_and_checksum(
 ///
 /// Propagates index read, pack read, or I/O failures while building or publishing the sidecar.
 pub fn write_pack_rev_sidecar_for_index_path(idx_path: &Path) -> Result<()> {
+    let shared_repo = shared_repo_from_pack_index_path(idx_path);
+    write_pack_rev_sidecar_for_index_path_with_shared(idx_path, shared_repo)
+}
+
+/// Like [`write_pack_rev_sidecar_for_index_path`], using an explicit `core.sharedRepository` value.
+///
+/// # Errors
+///
+/// Propagates index read, pack read, or I/O failures while building or publishing the sidecar.
+pub(crate) fn write_pack_rev_sidecar_for_index_path_with_shared(
+    idx_path: &Path,
+    shared_repo: i32,
+) -> Result<()> {
     let index = crate::pack::read_pack_index(idx_path)?;
-    write_pack_rev_sidecar(&index)
+    write_pack_rev_sidecar_with_shared(&index, shared_repo)
+}
+
+fn shared_repo_from_pack_index_path(idx_path: &Path) -> i32 {
+    let Some(objects_dir) = idx_path.parent().and_then(|pack| pack.parent()) else {
+        return PERM_UMASK;
+    };
+    let Some(git_dir) = objects_dir.parent() else {
+        return PERM_UMASK;
+    };
+    let Ok(cfg) = ConfigSet::load(&Environment::empty(), Some(git_dir), true) else {
+        return PERM_UMASK;
+    };
+    shared_repo::shared_repository_from_config_value(cfg.get("core.sharedRepository").as_deref())
+        .unwrap_or(PERM_UMASK)
 }
 
 /// Write a valid `.rev` sidecar for `index` when missing or corrupt.
@@ -124,6 +154,11 @@ pub fn write_pack_rev_sidecar_for_index_path(idx_path: &Path) -> Result<()> {
 ///
 /// Propagates pack read or I/O failures while building or publishing the sidecar.
 pub fn write_pack_rev_sidecar(index: &PackIndex) -> Result<()> {
+    let shared_repo = shared_repo_from_pack_index_path(&index.idx_path);
+    write_pack_rev_sidecar_with_shared(index, shared_repo)
+}
+
+fn write_pack_rev_sidecar_with_shared(index: &PackIndex, shared_repo: i32) -> Result<()> {
     let rev_path = rev_path_for_index(&index.idx_path);
     if rev_path.is_file() && verify_pack_rev_file(&rev_path, index).is_ok() {
         return Ok(());
@@ -148,6 +183,7 @@ pub fn write_pack_rev_sidecar(index: &PackIndex) -> Result<()> {
     let tmp = NamedTempFile::new_in(parent).map_err(Error::Io)?;
     tmp.as_file().write_all(&rev_bytes).map_err(Error::Io)?;
     tmp.persist(&rev_path).map_err(|e| Error::Io(e.error))?;
+    shared_repo::finalize_pack_file_mode(shared_repo, &rev_path).map_err(Error::Io)?;
     Ok(())
 }
 
