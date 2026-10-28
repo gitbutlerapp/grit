@@ -38,6 +38,15 @@
             "null"
           ]
         },
+        "line_encoding_lossy": {
+          "items": {
+            "type": "boolean"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "lines": {
           "items": {
             "type": "string"
@@ -82,6 +91,9 @@
         },
         "content": {
           "type": "string"
+        },
+        "encoding_lossy": {
+          "type": "boolean"
         },
         "final_line": {
           "format": "uint",

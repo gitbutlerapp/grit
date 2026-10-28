@@ -473,6 +473,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::line_range::LineRangeErr
 pub struct grit_lib::blame::BlameAttributedLine
 pub grit_lib::blame::BlameAttributedLine::commit: grit_lib::objects::ObjectId
 pub grit_lib::blame::BlameAttributedLine::content: alloc::string::String
+pub grit_lib::blame::BlameAttributedLine::content_bytes: core::option::Option<alloc::vec::Vec<u8>>
+pub grit_lib::blame::BlameAttributedLine::encoding_lossy: bool
 pub grit_lib::blame::BlameAttributedLine::final_line: usize
 pub grit_lib::blame::BlameAttributedLine::ignored: bool
 pub grit_lib::blame::BlameAttributedLine::not_committed: bool
@@ -538,6 +540,8 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::BlameHunk
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::blame::BlameHunk
 pub struct grit_lib::blame::BlameLine
 pub grit_lib::blame::BlameLine::content: alloc::string::String
+pub grit_lib::blame::BlameLine::content_bytes: core::option::Option<alloc::vec::Vec<u8>>
+pub grit_lib::blame::BlameLine::encoding_lossy: bool
 pub grit_lib::blame::BlameLine::final_lineno: usize
 pub grit_lib::blame::BlameLine::ignored: bool
 pub grit_lib::blame::BlameLine::not_committed: bool

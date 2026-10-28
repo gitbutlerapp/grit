@@ -97,6 +97,9 @@ mod blame_copy_git_compat;
 #[path = "blame_copy_into_target.rs"]
 mod blame_copy_into_target;
 #[cfg(feature = "full-tests")]
+#[path = "blame_encoding_lossy.rs"]
+mod blame_encoding_lossy;
+#[cfg(feature = "full-tests")]
 #[path = "blame_git_compat.rs"]
 mod blame_git_compat;
 #[cfg(feature = "full-tests")]

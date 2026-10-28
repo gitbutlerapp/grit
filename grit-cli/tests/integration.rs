@@ -43,6 +43,9 @@ mod auth_server_cli;
 #[path = "blame_copy_cli.rs"]
 mod blame_copy_cli;
 #[cfg(feature = "full-tests")]
+#[path = "blame_encoding_lossy_json.rs"]
+mod blame_encoding_lossy_json;
+#[cfg(feature = "full-tests")]
 #[path = "blame_ignore_revs_cli.rs"]
 mod blame_ignore_revs_cli;
 #[cfg(feature = "full-tests")]
@@ -445,7 +448,7 @@ mod rebase_cli;
 #[cfg(feature = "full-tests")]
 #[path = "rebase_conflicts_cli.rs"]
 mod rebase_conflicts_cli;
-#[cfg(unix)]
+#[cfg(feature = "full-tests")]
 #[path = "rebase_exec_interrupt.rs"]
 mod rebase_exec_interrupt;
 #[cfg(feature = "full-tests")]

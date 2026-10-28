@@ -20,6 +20,7 @@
 //! ```
 
 use std::ops::RangeInclusive;
+use std::sync::OnceLock;
 
 use similar::{Algorithm as SimilarAlgorithm, DiffOp};
 
@@ -287,7 +288,7 @@ impl BlameLines for BlobLines {
 
     fn exact_len(&self, idx: usize) -> usize {
         let start = self.line_start(idx);
-        (self.line_ends[idx] + 1).min(self.text.len()) - start
+        (self.line_ends[idx] + 1).min(self.bytes().len()) - start
     }
 
     fn stored_line(&self, idx: usize) -> StoredLine<'_> {
@@ -302,7 +303,7 @@ impl BlameLines for BlobLines {
         if lines == 0 {
             return 0;
         }
-        self.text.len() - self.line_start(self.len() - lines)
+        self.bytes().len() - self.line_start(self.len() - lines)
     }
 }
 
@@ -1294,8 +1295,12 @@ pub struct BlameLine {
     pub final_lineno: usize,
     /// 1-based line number in the originating commit's version of the file.
     pub orig_lineno: usize,
-    /// Text of the line in the final file.
+    /// Text of the line in the final file (lossy UTF-8 when [`Self::encoding_lossy`]).
     pub content: String,
+    /// `true` when line bytes are not valid UTF-8 and [`Self::content`] used lossy decoding.
+    pub encoding_lossy: bool,
+    /// Exact line bytes excluding the line terminator when [`Self::encoding_lossy`]; otherwise `None`.
+    pub content_bytes: Option<Vec<u8>>,
     /// Reversibly stored path in the originating commit, including rename/copy origins.
     /// Resolve this path in the attributed commit, not in the blamed revision.
     /// Recover exact filename bytes with `repo_relpath::storage_bytes`.
@@ -1311,12 +1316,16 @@ pub struct BlameLine {
     pub not_committed: bool,
 }
 
+fn final_line_display(final_text: &BlobLines, final_lineno: usize) -> BlameLineDisplay {
+    final_text.line_display(final_lineno - 1)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn blame_line_at_path(
     oid: ObjectId,
     final_lineno: usize,
     orig_lineno: usize,
-    content: String,
+    display: BlameLineDisplay,
     blame_path: &str,
     source_file: Option<String>,
     ignored: bool,
@@ -1327,7 +1336,9 @@ fn blame_line_at_path(
         oid,
         final_lineno,
         orig_lineno,
-        content,
+        content: display.content,
+        encoding_lossy: display.encoding_lossy,
+        content_bytes: display.content_bytes,
         original_path,
         source_file,
         ignored,
@@ -1339,7 +1350,7 @@ fn blame_line_at_path(
 fn blame_line_from_parent(
     pb: &BlameLine,
     final_lineno: usize,
-    content: String,
+    display: BlameLineDisplay,
     source_file: Option<String>,
     ignored: bool,
     unblamable: bool,
@@ -1348,7 +1359,9 @@ fn blame_line_from_parent(
         oid: pb.oid,
         final_lineno,
         orig_lineno: pb.orig_lineno,
-        content,
+        content: display.content,
+        encoding_lossy: display.encoding_lossy,
+        content_bytes: display.content_bytes,
         original_path: pb.original_path.clone(),
         source_file,
         ignored,
@@ -1460,7 +1473,7 @@ fn pass_overlay_to_parents(
     overlay: &BlameOverlay,
     walk: &OverlayWalk<'_>,
     pending: Vec<TrackedLine>,
-    final_lines: &[String],
+    final_text: &BlobLines,
     commit_cache: &mut BlameCommitCache,
     queue: &mut SuspectQueue,
     next_origin: &mut u32,
@@ -1558,7 +1571,7 @@ fn pass_overlay_to_parents(
                 session,
                 remaining,
                 &overlay.lines,
-                final_lines,
+                final_text,
                 walk.path,
                 parent,
                 &parent_commit.tree,
@@ -1587,7 +1600,9 @@ fn pass_overlay_to_parents(
             oid: null,
             final_lineno: t.final_lineno,
             orig_lineno: t.current_idx + 1,
-            content: final_lines[t.final_lineno - 1].clone(),
+            content: final_line_display(final_text, t.final_lineno).content,
+            encoding_lossy: final_line_display(final_text, t.final_lineno).encoding_lossy,
+            content_bytes: final_line_display(final_text, t.final_lineno).content_bytes,
             original_path: walk.path.to_owned(),
             source_file: None,
             ignored: false,
@@ -1942,21 +1957,21 @@ fn read_blob_content_for_blame(
     mode: u32,
     textconv_ctx: Option<&BlameTextconvContext>,
     use_textconv: bool,
-) -> Result<String> {
+) -> Result<Vec<u8>> {
     let obj = read_object_for_blame(odb, oid, None)?;
     if obj.kind != ObjectKind::Blob {
         return Err(LibError::Message("expected blob object".to_string()));
     }
 
     if !use_textconv || !is_regular_mode(mode) {
-        return Ok(String::from_utf8_lossy(&obj.data).into_owned());
+        return Ok(obj.data);
     }
 
     let Some(ctx) = textconv_ctx else {
-        return Ok(String::from_utf8_lossy(&obj.data).into_owned());
+        return Ok(obj.data);
     };
     let Some(command) = resolve_textconv_command(ctx, path) else {
-        return Ok(String::from_utf8_lossy(&obj.data).into_owned());
+        return Ok(obj.data);
     };
 
     let attrs =
@@ -1972,9 +1987,8 @@ fn read_blob_content_for_blame(
         Some(ctx.filters()),
     )
     .map_err(LibError::Filter)?;
-    let converted = run_textconv_command(&command, &worktree_data)
-        .or_else(|_| run_textconv_command(&command, &obj.data))?;
-    Ok(String::from_utf8_lossy(&converted).into_owned())
+    run_textconv_command(&command, &worktree_data)
+        .or_else(|_| run_textconv_command(&command, &obj.data))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1984,29 +1998,75 @@ struct BlobCacheKey {
     mode: u32,
 }
 
-/// Blob text split into lines without per-line `String` allocations.
+/// Display metadata for one line in a blamed file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BlameLineDisplay {
+    content: String,
+    encoding_lossy: bool,
+    content_bytes: Option<Vec<u8>>,
+}
+
+fn latin1_bytes_to_string(bytes: &[u8]) -> String {
+    bytes.iter().map(|&b| char::from(b)).collect()
+}
+
+#[derive(Clone)]
+enum BlobStorage {
+    Utf8(Arc<str>),
+    Binary(Arc<Vec<u8>>),
+}
+
+/// Blob bytes split into lines without per-line `String` allocations.
 #[derive(Clone)]
 struct BlobLines {
-    text: Arc<String>,
-    /// Exclusive end byte offset of each line in `text`.
+    storage: BlobStorage,
+    /// Exclusive end byte offset of each line in the blob.
     line_ends: Arc<Vec<usize>>,
+    compare_bodies: OnceLock<Arc<Vec<String>>>,
+    compare_records: OnceLock<Arc<Vec<String>>>,
 }
 
 impl BlobLines {
-    fn from_content(content: String) -> Self {
-        let unterminated = !content.is_empty() && !content.ends_with('\n');
-        // Cached versions keep this allocation, so reserve exactly the line count.
-        let count =
-            memchr::memchr_iter(b'\n', content.as_bytes()).count() + usize::from(unterminated);
+    fn from_bytes(content: Vec<u8>) -> Self {
+        let unterminated = !content.is_empty() && !content.ends_with(b"\n");
+        let count = memchr::memchr_iter(b'\n', &content).count() + usize::from(unterminated);
         let mut line_ends = Vec::with_capacity(count);
-        line_ends.extend(memchr::memchr_iter(b'\n', content.as_bytes()));
+        line_ends.extend(memchr::memchr_iter(b'\n', &content));
         if unterminated {
             line_ends.push(content.len());
         }
-        let text = Arc::new(content);
+        let storage = match std::str::from_utf8(&content) {
+            Ok(text) => BlobStorage::Utf8(Arc::from(text)),
+            Err(_) => BlobStorage::Binary(Arc::new(content)),
+        };
         Self {
-            text,
+            storage,
             line_ends: Arc::new(line_ends),
+            compare_bodies: OnceLock::new(),
+            compare_records: OnceLock::new(),
+        }
+    }
+
+    #[cfg(test)]
+    fn from_content(content: String) -> Self {
+        Self::from_bytes(content.into_bytes())
+    }
+
+    fn encoding_lossy(&self) -> bool {
+        matches!(self.storage, BlobStorage::Binary(_))
+    }
+
+    fn bytes(&self) -> &[u8] {
+        match &self.storage {
+            BlobStorage::Utf8(s) => s.as_bytes(),
+            BlobStorage::Binary(b) => b.as_ref(),
+        }
+    }
+
+    fn utf8(&self) -> Option<&str> {
+        match &self.storage {
+            BlobStorage::Utf8(s) => Some(s.as_ref()),
+            BlobStorage::Binary(_) => None,
         }
     }
 
@@ -2014,23 +2074,85 @@ impl BlobLines {
         self.line_ends.len()
     }
 
-    /// Byte offset where line `idx` starts.
     fn line_start(&self, idx: usize) -> usize {
         idx.checked_sub(1)
             .map_or(0, |prev| self.line_ends[prev] + 1)
     }
 
+    fn line_body_bytes(&self, idx: usize) -> &[u8] {
+        &self.bytes()[self.line_start(idx)..self.line_ends[idx]]
+    }
+
     fn line(&self, idx: usize) -> &str {
-        &self.text[self.line_start(idx)..self.line_ends[idx]]
+        if let Some(text) = self.utf8() {
+            let start = self.line_start(idx);
+            let end = self.line_ends[idx];
+            return &text[start..end];
+        }
+        // Only used for tests and lossy display helpers; comparison uses Latin-1 strings.
+        self.compare_bodies()
+            .get(idx)
+            .map(String::as_str)
+            .unwrap_or("")
+    }
+
+    fn line_display(&self, idx: usize) -> BlameLineDisplay {
+        let body = self.line_body_bytes(idx);
+        let encoding_lossy = self.encoding_lossy();
+        let content = if encoding_lossy {
+            String::from_utf8_lossy(body).into_owned()
+        } else {
+            std::str::from_utf8(body)
+                .map(str::to_owned)
+                .unwrap_or_else(|_| String::from_utf8_lossy(body).into_owned())
+        };
+        let content_bytes = encoding_lossy.then(|| body.to_vec());
+        BlameLineDisplay {
+            content,
+            encoding_lossy,
+            content_bytes,
+        }
+    }
+
+    fn compare_bodies(&self) -> &Arc<Vec<String>> {
+        self.compare_bodies.get_or_init(|| {
+            Arc::new(
+                (0..self.len())
+                    .map(|i| latin1_bytes_to_string(self.line_body_bytes(i)))
+                    .collect(),
+            )
+        })
+    }
+
+    fn compare_records(&self) -> &Arc<Vec<String>> {
+        self.compare_records.get_or_init(|| {
+            Arc::new(
+                (0..self.len())
+                    .map(|i| {
+                        let start = self.line_start(i);
+                        let end = (self.line_ends[i] + 1).min(self.bytes().len());
+                        latin1_bytes_to_string(&self.bytes()[start..end])
+                    })
+                    .collect(),
+            )
+        })
     }
 
     /// Exact comparison borrows the full record; whitespace modes compare line bodies.
     fn comparison_line(&self, idx: usize, ws: crate::diff::WhitespaceMode) -> &str {
-        if ws.normalizes_line_compare() {
-            return self.line(idx);
+        if let Some(text) = self.utf8() {
+            if ws.normalizes_line_compare() {
+                let start = self.line_start(idx);
+                let end = self.line_ends[idx];
+                return &text[start..end];
+            }
+            let end = (self.line_ends[idx] + 1).min(text.len());
+            return &text[self.line_start(idx)..end];
         }
-        let end = (self.line_ends[idx] + 1).min(self.text.len());
-        &self.text[self.line_start(idx)..end]
+        if ws.normalizes_line_compare() {
+            return &self.compare_bodies()[idx];
+        }
+        &self.compare_records()[idx]
     }
 
     fn comparison_refs(&self, ws: crate::diff::WhitespaceMode) -> Vec<&str> {
@@ -2040,7 +2162,9 @@ impl BlobLines {
     }
 
     fn to_vec(&self) -> Vec<String> {
-        (0..self.len()).map(|i| self.line(i).to_owned()).collect()
+        (0..self.len())
+            .map(|i| self.line_display(i).content)
+            .collect()
     }
 }
 
@@ -2262,7 +2386,7 @@ impl<'a> BlameSession<'a> {
             self.textconv_ctx,
             self.use_textconv,
         )?;
-        let lines = Arc::new(BlobLines::from_content(content));
+        let lines = Arc::new(BlobLines::from_bytes(content));
         self.blob_lines.insert(key, Arc::clone(&lines));
         Ok(lines)
     }
@@ -2711,8 +2835,7 @@ fn compute_blame_with_session(
     }
 
     let mut result: Vec<BlameLine> = Vec::with_capacity(num_lines);
-    // Store final content for output
-    let final_lines: Vec<String> = start_lines.to_vec();
+    let final_text: &BlobLines = &start_lines;
 
     let mut current_oid = start_oid;
     let mut current_blob_oid = blob_oid;
@@ -2744,7 +2867,7 @@ fn compute_blame_with_session(
             overlay,
             &walk,
             std::mem::take(&mut pending),
-            &final_lines,
+            final_text,
             &mut commit_cache,
             &mut queue,
             &mut next_origin,
@@ -2965,7 +3088,7 @@ fn compute_blame_with_session(
                         current_oid,
                         t.final_lineno,
                         idx + 1,
-                        final_lines[t.final_lineno - 1].clone(),
+                        final_line_display(final_text, t.final_lineno),
                         &current_path,
                         None,
                         t.ignored,
@@ -2995,7 +3118,7 @@ fn compute_blame_with_session(
                     result.push(blame_line_from_parent(
                         &pb,
                         t.final_lineno,
-                        final_lines[t.final_lineno - 1].clone(),
+                        final_line_display(final_text, t.final_lineno),
                         pb.source_file.clone(),
                         true,
                         pb.unblamable,
@@ -3005,7 +3128,7 @@ fn compute_blame_with_session(
                         current_oid,
                         t.final_lineno,
                         idx + 1,
-                        final_lines[t.final_lineno - 1].clone(),
+                        final_line_display(final_text, t.final_lineno),
                         &current_path,
                         None,
                         t.ignored,
@@ -3023,7 +3146,7 @@ fn compute_blame_with_session(
                     current_oid,
                     t.final_lineno,
                     t.current_idx + 1,
-                    final_lines[t.final_lineno - 1].clone(),
+                    final_line_display(final_text, t.final_lineno),
                     &blamed_path,
                     t.source_path.clone(),
                     t.ignored,
@@ -3224,7 +3347,7 @@ fn compute_blame_with_session(
                         current_oid,
                         t.final_lineno,
                         idx + 1,
-                        final_lines[t.final_lineno - 1].clone(),
+                        final_line_display(final_text, t.final_lineno),
                         &current_path,
                         None,
                         t.ignored,
@@ -3344,7 +3467,7 @@ fn compute_blame_with_session(
                         session,
                         pending_batch,
                         &cur_lines_arc,
-                        &final_lines,
+                        final_text,
                         &blamed_path,
                         parent_oid,
                         &parent_commit.tree,
@@ -3368,7 +3491,7 @@ fn compute_blame_with_session(
                             current_oid,
                             t.final_lineno,
                             t.current_idx + 1,
-                            final_lines[t.final_lineno - 1].clone(),
+                            final_line_display(final_text, t.final_lineno),
                             &blamed_path,
                             t.source_path.clone(),
                             t.ignored,
@@ -3384,7 +3507,7 @@ fn compute_blame_with_session(
                         current_oid,
                         t.final_lineno,
                         t.current_idx + 1,
-                        final_lines[t.final_lineno - 1].clone(),
+                        final_line_display(final_text, t.final_lineno),
                         &blamed_path,
                         t.source_path.clone(),
                         t.ignored,
@@ -3401,7 +3524,7 @@ fn compute_blame_with_session(
                         current_oid,
                         t.final_lineno,
                         t.current_idx + 1,
-                        final_lines[t.final_lineno - 1].clone(),
+                        final_line_display(final_text, t.final_lineno),
                         &current_path,
                         None,
                         t.ignored,
@@ -3508,7 +3631,7 @@ fn compute_blame_with_session(
                                     current_oid,
                                     t.final_lineno,
                                     t.current_idx + 1,
-                                    final_lines[t.final_lineno - 1].clone(),
+                                    final_line_display(final_text, t.final_lineno),
                                     &current_path,
                                     None,
                                     t.ignored,
@@ -3564,7 +3687,7 @@ fn compute_blame_with_session(
                                     current_oid,
                                     t.final_lineno,
                                     t.current_idx + 1,
-                                    final_lines[t.final_lineno - 1].clone(),
+                                    final_line_display(final_text, t.final_lineno),
                                     &blamed_path,
                                     t.source_path.clone(),
                                     t.ignored,
@@ -3600,7 +3723,7 @@ fn compute_blame_with_session(
                                     current_oid,
                                     t.final_lineno,
                                     t.current_idx + 1,
-                                    final_lines[t.final_lineno - 1].clone(),
+                                    final_line_display(final_text, t.final_lineno),
                                     &current_path,
                                     None,
                                     t.ignored,
@@ -3633,7 +3756,7 @@ fn compute_blame_with_session(
                                     current_oid,
                                     t.final_lineno,
                                     t.current_idx + 1,
-                                    final_lines[t.final_lineno - 1].clone(),
+                                    final_line_display(final_text, t.final_lineno),
                                     &blamed_path,
                                     t.source_path.clone(),
                                     t.ignored,
@@ -3646,7 +3769,7 @@ fn compute_blame_with_session(
                             current_oid,
                             t.final_lineno,
                             t.current_idx + 1,
-                            final_lines[t.final_lineno - 1].clone(),
+                            final_line_display(final_text, t.final_lineno),
                             &current_path,
                             None,
                             t.ignored,
@@ -3658,7 +3781,7 @@ fn compute_blame_with_session(
                             current_oid,
                             t.final_lineno,
                             t.current_idx + 1,
-                            final_lines[t.final_lineno - 1].clone(),
+                            final_line_display(final_text, t.final_lineno),
                             &current_path,
                             None,
                             t.ignored,
@@ -3673,7 +3796,7 @@ fn compute_blame_with_session(
                         session,
                         introduced_for_copy,
                         &cur_lines_arc,
-                        &final_lines,
+                        final_text,
                         &blamed_path,
                         parent_oid,
                         &parent_commit.tree,
@@ -3697,7 +3820,7 @@ fn compute_blame_with_session(
                             current_oid,
                             t.final_lineno,
                             t.current_idx + 1,
-                            final_lines[t.final_lineno - 1].clone(),
+                            final_line_display(final_text, t.final_lineno),
                             &blamed_path,
                             t.source_path.clone(),
                             t.ignored,
@@ -3864,7 +3987,7 @@ fn copy_detect_attribute_pending(
     session: &mut BlameSession<'_>,
     pending: Vec<TrackedLine>,
     cur_lines: &Arc<BlobLines>,
-    final_lines: &[String],
+    final_text: &BlobLines,
     _blamed_path: &str,
     parent_oid: ObjectId,
     parent_tree: &ObjectId,
@@ -4059,7 +4182,7 @@ fn copy_detect_attribute_pending(
                                 parent_oid,
                                 parent_line + 1,
                                 parent_line + 1,
-                                slice[rel - off].to_owned(),
+                                final_line_display(final_text, t.final_lineno),
                                 &source_path,
                                 None,
                                 false,
@@ -4069,7 +4192,7 @@ fn copy_detect_attribute_pending(
                     result.push(blame_line_from_parent(
                         &pb,
                         t.final_lineno,
-                        final_lines[t.final_lineno - 1].clone(),
+                        final_line_display(final_text, t.final_lineno),
                         pb.source_file.clone().or_else(|| Some(source_path.clone())),
                         pb.ignored || t.ignored,
                         pb.unblamable,
@@ -4454,7 +4577,15 @@ pub fn resolve_blame_line_range_with_options(
     )
     .map_err(|e| invalid(e.to_string()))?;
     let content: std::borrow::Cow<'_, str> = match &overlay {
-        Some(overlay) => overlay.lines.text.as_str().into(),
+        Some(overlay) => overlay
+            .lines
+            .utf8()
+            .map(std::borrow::Cow::Borrowed)
+            .unwrap_or_else(|| {
+                String::from_utf8_lossy(overlay.lines.bytes())
+                    .into_owned()
+                    .into()
+            }),
         None => {
             let Some(content_bytes) = read_blob_at_path(repo.odb(), &commit.tree, &file_path)
             else {
@@ -4582,8 +4713,12 @@ pub struct BlameAttributedLine {
     /// Resolve this path in the attributed commit, not in the blamed revision.
     /// Recover exact filename bytes with `repo_relpath::storage_bytes`.
     pub original_path: String,
-    /// Line text in the blamed revision.
+    /// Line text in the blamed revision (lossy UTF-8 when [`Self::encoding_lossy`]).
     pub content: String,
+    /// `true` when line bytes are not valid UTF-8 and [`Self::content`] used lossy decoding.
+    pub encoding_lossy: bool,
+    /// Exact line bytes excluding the line terminator when [`Self::encoding_lossy`]; otherwise `None`.
+    pub content_bytes: Option<Vec<u8>>,
     /// Line attribution passed through an ignored revision.
     pub ignored: bool,
     /// Line could not be blamed past an ignored revision.
@@ -4761,6 +4896,8 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
                     final_line: line.final_lineno,
                     original_path: line.original_path,
                     content: line.content,
+                    encoding_lossy: line.encoding_lossy,
+                    content_bytes: line.content_bytes,
                     ignored: line.ignored,
                     unblamable: line.unblamable,
                     not_committed: line.not_committed,
@@ -4903,10 +5040,8 @@ fn load_blame_overlay(
             .collect(),
         )
     };
-    let text = String::from_utf8(bytes)
-        .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned());
     Ok(Some(BlameOverlay {
-        lines: Arc::new(BlobLines::from_content(text)),
+        lines: Arc::new(BlobLines::from_bytes(bytes)),
         parents,
         copy_paths,
     }))
@@ -5546,6 +5681,8 @@ mod tests {
                     final_line: 1,
                     original_path: "a.txt".to_owned(),
                     content: "one".to_owned(),
+                    encoding_lossy: false,
+                    content_bytes: None,
                     ignored: false,
                     unblamable: false,
                     not_committed: false,
@@ -5556,6 +5693,8 @@ mod tests {
                     final_line: 2,
                     original_path: "a.txt".to_owned(),
                     content: "two".to_owned(),
+                    encoding_lossy: false,
+                    content_bytes: None,
                     ignored: false,
                     unblamable: false,
                     not_committed: false,
@@ -5566,6 +5705,8 @@ mod tests {
                     final_line: 3,
                     original_path: "b.txt".to_owned(),
                     content: "three".to_owned(),
+                    encoding_lossy: false,
+                    content_bytes: None,
                     ignored: false,
                     unblamable: false,
                     not_committed: false,
