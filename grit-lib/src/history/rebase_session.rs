@@ -26,7 +26,7 @@ use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
 
 use super::apply::{apply_rewrite, log_head_move};
 use super::error::HistoryError;
-use super::plan::{plan_rewrite_with_order_resumable_seeded, ResumablePlanOutcome};
+use super::plan::{commit_parents, plan_rewrite_with_order_resumable_seeded, ResumablePlanOutcome};
 use super::rebase::{
     plan_rebase_resumable, PreRebase, RebaseOntoOptions, RebasePlan, RebaseRequest,
 };
@@ -424,6 +424,19 @@ pub fn continue_rebase(
         return Err(RebaseSessionError::NothingToCommit);
     }
 
+    let original_parents = commit_parents(repo, current).map_err(RebaseSessionError::from)?;
+    let parents = if original_parents.len() <= 1 {
+        vec![head_oid]
+    } else {
+        let mut mapped = vec![head_oid];
+        mapped.extend(
+            original_parents[1..]
+                .iter()
+                .map(|parent| state.mapping.get(parent).copied().unwrap_or(*parent)),
+        );
+        mapped
+    };
+
     let mut edits = state.edits.clone();
     edits.insert(
         current,
@@ -431,7 +444,7 @@ pub fn continue_rebase(
             tree: Some(new_tree),
             message: None,
             author: None,
-            parents: Some(vec![head_oid]),
+            parents: Some(parents),
         },
     );
 

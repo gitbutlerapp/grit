@@ -3052,3 +3052,76 @@ fn exec_conflict_recovery_write_failure_rolls_back() {
     }
     assert_git_fsck_strict(wt);
 }
+
+#[test]
+fn rebase_merge_replay_one_conflict_keeps_merge_parents_issue_2245() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    git(wt, &["config", "grit.changeIds", "false"]);
+    commit_file(wt, "base.txt", "base\n", "base");
+    git(wt, &["switch", "-qc", "side"]);
+    commit_file(wt, "side.txt", "s\n", "side: a");
+    commit_file(wt, "side.txt", "s\ns2\n", "side: b");
+    git(wt, &["switch", "-qc", "feat", "main"]);
+    commit_file(wt, "shared.txt", "mine\n", "feat: a (shared)");
+    commit_file(wt, "c.txt", "c\n", "feat: c");
+    git(wt, &["merge", "-q", "--no-ff", "-m", "Merge side", "side"]);
+    commit_file(wt, "feat.txt", "f2\n", "feat: b");
+    git(wt, &["switch", "-q", "main"]);
+    commit_file(wt, "shared.txt", "theirs\n", "main: shared");
+    git(wt, &["switch", "-q", "feat"]);
+    let fork = git_oid(wt, "main~1");
+    let onto = git_oid(wt, "main");
+    let tip = git_oid(wt, "feat");
+    let opts = start_opts(fork, Some(onto), tip);
+
+    let RebaseOutcome::Stopped(first) = start_rebase(
+        &open_grit(wt),
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("start") else {
+        panic!("expected conflict on feat: a");
+    };
+    assert_eq!(first.conflicts.len(), 1);
+    assert_eq!(first.conflicts[0].path, "shared.txt");
+
+    std::fs::write(wt.join("shared.txt"), "resolved1\n").expect("resolve");
+    git(wt, &["add", "shared.txt"]);
+    let outcome = continue_rebase(
+        &open_grit(wt),
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("continue");
+    assert!(
+        matches!(
+            outcome,
+            RebaseOutcome::Done { .. } | RebaseOutcome::ExecDone { .. }
+        ),
+        "expected rebase to finish after one conflict, got {outcome:?}"
+    );
+
+    let merge_oid = git_oid(wt, "feat~1");
+    let merge =
+        grit_lib::objects::parse_commit(&open_grit(wt).odb().read(&merge_oid).expect("read").data)
+            .expect("parse merge");
+    assert_eq!(merge.parents.len(), 2, "Merge side keeps two parents");
+    let tree_listing = git(wt, &["ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<_> = tree_listing
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    assert!(
+        files.contains(&"side.txt"),
+        "side.txt must remain: {files:?}"
+    );
+    assert!(
+        !git_merge_base_is_ancestor(wt, "feat", "side"),
+        "side ref must not absorb feat commits"
+    );
+    assert_git_fsck_strict(wt);
+}
