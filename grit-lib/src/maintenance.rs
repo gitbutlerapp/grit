@@ -67,8 +67,8 @@ use time::OffsetDateTime;
 mod drop_blobs;
 
 pub use crate::offload::{
-    offload_blobs, LopReadiness, OffloadConfigChange, OffloadError, OffloadOptions, OffloadRepo,
-    OffloadReport, LOP_KEEP_MESSAGE,
+    offload_blobs, LopReadiness, OffloadConfigChange, OffloadError, OffloadOptions, OffloadPack,
+    OffloadPackRole, OffloadRepo, OffloadReport, LOP_GIT_DIR_KEY, LOP_KEEP_MESSAGE,
 };
 pub use drop_blobs::{
     drop_large_blobs_enabled, drop_promised_blobs, DropExpiry, DropPromisedBlobsOptions,
@@ -2314,7 +2314,17 @@ pub(crate) enum PromisorRewriteWhen {
 /// reachability walk, so unreachable objects are kept and nothing else can be lost.
 /// The new pack is marked `.promisor`, which makes the dropped objects promised as
 /// long as an object in it refers to them (a tree naming a dropped blob, say).
-/// `.keep` packs and alternates are left alone, so objects stored there stay.
+/// The kept blobs go into the same pack, though the promisor cannot supply them:
+/// Git counts every object a promisor-pack tree names as promised, and its repack
+/// and `gc` keep only those promised objects that sit in a promisor pack, so a
+/// kept blob in an ordinary pack beside it would be deleted. Maintenance that
+/// drops promised blobs must therefore check the promisor holds each one (see
+/// [`drop_promised_blobs`]). `.keep` packs and alternates are left alone, so
+/// objects stored there stay. That is not enough for an object only an ordinary
+/// (not `.promisor`) `.keep` pack holds when the new pack names it: Git then
+/// counts it as promised and deletes it once the marker goes, and leaves a copy
+/// out of its own promisor repack while the marker stays. Callers must rule that
+/// out first (offload refuses with [`crate::offload::OffloadError::KeptPackObjectPromised`]).
 ///
 /// The new pack is installed before anything is removed, and only the packs listed
 /// when the rewrite started are removed afterwards: a pack that arrives meanwhile
@@ -2628,7 +2638,10 @@ mod tests {
         let packed = odb.write(ObjectKind::Blob, b"packed").unwrap();
         let kept = odb.write(ObjectKind::Blob, b"kept").unwrap();
         let unreachable = odb.write(ObjectKind::Blob, b"unreachable loose").unwrap();
-        let old_pack = pack_into(&repo, &[packed, big], false);
+        let mut body = b"100644 big\0".to_vec();
+        body.extend_from_slice(big.as_bytes());
+        let tree = odb.write(ObjectKind::Tree, &body).unwrap();
+        let old_pack = pack_into(&repo, &[packed, big, tree], false);
         let kept_pack = pack_into(&repo, &[kept], true);
         crate::prune_packed::prune_packed_objects(odb.objects_dir(), Default::default()).unwrap();
         // A loose copy of an omitted object goes too.
@@ -2644,9 +2657,20 @@ mod tests {
         )
         .unwrap();
         assert_eq!(rewrite.dropped, 1, "the kept copy is not ours to drop");
-        assert_eq!(rewrite.objects, 2, "packed + unreachable");
+        assert_eq!(rewrite.objects, 3, "tree + packed + unreachable");
         let new_pack = rewrite.pack_path.expect("new pack");
         assert!(new_pack.with_extension("promisor").is_file());
+        // Kept blobs share the promisor pack with the tree, so Git's repack keeps
+        // them (it keeps only the promised objects found in promisor packs).
+        repo.odb().reprepare_local_packs();
+        let indexes = repo.odb().local_pack_indexes().unwrap();
+        let new_idx = indexes
+            .iter()
+            .find(|i| i.pack_path == new_pack)
+            .expect("listed");
+        for oid in [tree, packed, unreachable] {
+            assert!(new_idx.find_position(&oid).is_some(), "{oid}");
+        }
         assert!(!old_pack.exists());
         assert!(kept_pack.is_file() && kept_pack.with_extension("keep").is_file());
         assert!(rewrite.removed_pack_files >= 2, "old .pack and .idx");
@@ -2656,7 +2680,7 @@ mod tests {
         let odb = repo.odb();
         assert!(!odb.exists_stored(&big));
         assert!(odb.local_loose_file_size(&big).is_none());
-        for oid in [packed, kept, unreachable] {
+        for oid in [packed, kept, unreachable, tree] {
             assert!(odb.exists_stored(&oid), "{oid} kept");
         }
         assert!(odb.enumerate_local_loose_objects().unwrap().is_empty());
@@ -2688,25 +2712,32 @@ mod tests {
         let odb = repo.odb();
         let pushed = odb.write(ObjectKind::Blob, b"pushed").unwrap();
         let packed = odb.write(ObjectKind::Blob, b"packed").unwrap();
-        let old_pack = pack_into(&repo, &[packed], false);
+        let mut body = b"100644 packed\0".to_vec();
+        body.extend_from_slice(packed.as_bytes());
+        let tree = odb.write(ObjectKind::Tree, &body).unwrap();
+        // A promisor pack of the tree and an ordinary pack of its blob: the layout
+        // an earlier offload wrote, which Git's repack loses the blob from.
+        let tree_pack = pack_into(&repo, &[tree], false);
+        fs::write(tree_pack.with_extension("promisor"), b"").unwrap();
+        let blob_pack = pack_into(&repo, &[packed], false);
         crate::prune_packed::prune_packed_objects(odb.objects_dir(), Default::default()).unwrap();
         odb.write_loose_materialize(ObjectKind::Blob, b"pushed")
             .unwrap();
-        let fold = || {
+        let fold = |repo: &Repository| {
             rewrite_local_objects_without(
-                &repo,
+                repo,
                 &OidHashSet::default(),
                 &RepackOptions::default(),
                 PromisorRewriteWhen::Always,
             )
             .unwrap()
         };
-        let first = fold();
+        let first = fold(&repo);
         assert_eq!(first.dropped, 0);
-        assert_eq!(first.objects, 2);
+        assert_eq!(first.objects, 3);
         let pack = first.pack_path.expect("folded pack");
         assert!(pack.with_extension("promisor").is_file());
-        assert!(!old_pack.exists());
+        assert!(!tree_pack.exists() && !blob_pack.exists());
         let repo =
             Repository::open(dir.path(), &crate::environment::RepositoryOptions::empty()).unwrap();
         assert!(repo
@@ -2714,16 +2745,13 @@ mod tests {
             .enumerate_local_loose_objects()
             .unwrap()
             .is_empty());
-        assert!(repo.odb().exists_stored(&pushed));
+        let indexes = repo.odb().local_pack_indexes().unwrap();
+        assert_eq!(indexes.len(), 1);
+        for oid in [pushed, packed, tree] {
+            assert!(indexes[0].find_position(&oid).is_some(), "{oid}");
+        }
         // One promisor pack and nothing loose: nothing left to fold.
-        let second = rewrite_local_objects_without(
-            &repo,
-            &OidHashSet::default(),
-            &RepackOptions::default(),
-            PromisorRewriteWhen::Always,
-        )
-        .unwrap();
-        assert_eq!(second, PromisorRewrite::default());
+        assert_eq!(fold(&repo), PromisorRewrite::default());
         assert!(pack.is_file());
     }
 

@@ -13,8 +13,9 @@ use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
 use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
 use grit_lib::maintenance::{
-    drop_promised_blobs, gc, gc_auto, AutoGcOutcome, DropPromisedBlobsOptions,
-    DropPromisedBlobsReport, DropPromisedBlobsSkip, GcOptions, MidxOptions,
+    drop_promised_blobs, gc, gc_auto, offload_blobs, AutoGcOutcome, DropPromisedBlobsOptions,
+    DropPromisedBlobsReport, DropPromisedBlobsSkip, GcOptions, MidxOptions, OffloadOptions,
+    LOP_KEEP_MESSAGE,
 };
 use grit_lib::objects::index_pack::{install_pack_bytes, IngestPackOptions};
 use grit_lib::objects::pack::{clear_pack_cache, read_pack_index, read_packed_delta_dependency};
@@ -691,6 +692,225 @@ fn auto_gc_dry_run_reports_the_phase_and_changes_nothing() {
     assert_eq!(fx.packs(), before);
 }
 
+/// A main repository holding one blob of each of `sizes` (file `f<i>`) in its
+/// `main` commit, bare or with `main` checked out, and `remote.lop` naming a bare
+/// LOP next to it. Returns the temp dir, main's git dir, the blobs and the commit.
+fn main_with_lop(sizes: &[usize], bare: bool) -> (tempfile::TempDir, PathBuf, Vec<ObjectId>) {
+    let tmp = tempfile::tempdir().unwrap();
+    let init = InitOptions::new().with_initial_branch("main");
+    let (main_path, main_dir) = if bare {
+        let dir = tmp.path().join("main.git");
+        (dir.clone(), dir)
+    } else {
+        let work = tmp.path().join("main");
+        (work.clone(), work.join(".git"))
+    };
+    let main = Repository::init(&main_path, &init.clone().with_bare(bare)).unwrap();
+    Repository::init(&tmp.path().join("lop.git"), &init.with_bare(true)).unwrap();
+    let blobs: Vec<ObjectId> = sizes
+        .iter()
+        .enumerate()
+        .map(|(i, &size)| {
+            main.odb()
+                .write_loose_materialize(ObjectKind::Blob, &noise(50 + i as u64, size))
+                .unwrap()
+        })
+        .collect();
+    let names: Vec<String> = (0..blobs.len()).map(|i| format!("f{i}")).collect();
+    let entries: Vec<(&str, ObjectId)> = names
+        .iter()
+        .map(String::as_str)
+        .zip(blobs.iter().copied())
+        .collect();
+    let t = tree(&main, &entries);
+    let c = commit(&main, t, None, 1);
+    std::fs::write(main_dir.join("refs/heads/main"), format!("{c}\n")).unwrap();
+    let lop_url = tmp.path().join("lop.git");
+    append_config(
+        &main_dir,
+        &format!("[remote \"lop\"]\n\turl = {}\n", lop_url.display()),
+    );
+    (tmp, main_dir, blobs)
+}
+
+/// Offload the blobs of `limit` bytes or more from the repository at `main_dir`.
+fn offload_at(main_dir: &Path, limit: u64) -> grit_lib::maintenance::OffloadReport {
+    let main = Repository::open(main_dir, &RepositoryOptions::empty()).unwrap();
+    let mut offload = OffloadOptions::new("lop", NOW);
+    offload.filter = Some(ObjectFilterSpec::BlobLimit(limit));
+    let report = offload_blobs(&main, &offload).expect("offload");
+    drop(main);
+    clear_pack_cache();
+    report
+}
+
+/// A bare main repository holding one blob of each of `sizes`, offloaded to a LOP
+/// next to it at `limit`. Returns the temp dir, main's git dir and the blobs.
+fn offloaded_main(sizes: &[usize], limit: u64) -> (tempfile::TempDir, PathBuf, Vec<ObjectId>) {
+    let (tmp, main_dir, blobs) = main_with_lop(sizes, true);
+    offload_at(&main_dir, limit);
+    (tmp, main_dir, blobs)
+}
+
+/// Copy `oids` from `from` into a new pack of the repository at `to`, kept the way
+/// offload keeps the packs it writes into a LOP.
+fn copy_into(from: &Path, to: &Path, oids: &[ObjectId]) {
+    copy_into_kept(from, to, oids, LOP_KEEP_MESSAGE);
+}
+
+/// Copy `oids` from `from` into a new pack of the repository at `to` whose `.keep`
+/// marker says `message`.
+fn copy_into_kept(from: &Path, to: &Path, oids: &[ObjectId], message: &str) {
+    let from = Repository::open(from, &RepositoryOptions::empty()).unwrap();
+    let to = Repository::open(to, &RepositoryOptions::empty()).unwrap();
+    let pack = build_pack_from_send_list(
+        from.odb(),
+        oids,
+        &Default::default(),
+        &PackBuildOptions::default(),
+        &Default::default(),
+    )
+    .unwrap();
+    install_pack_bytes(
+        pack,
+        to.odb(),
+        &IngestPackOptions {
+            keep_message: Some(message.to_owned()),
+            ..IngestPackOptions::default()
+        },
+    )
+    .unwrap();
+    clear_pack_cache();
+}
+
+/// Whether some `.promisor` pack of the repository at `git_dir` holds `oid`.
+fn in_promisor_pack(git_dir: &Path, oid: &ObjectId) -> bool {
+    std::fs::read_dir(git_dir.join("objects/pack"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "promisor"))
+        .any(|p| {
+            read_pack_index(&p.with_extension("idx"))
+                .unwrap()
+                .find_position(oid)
+                .is_some()
+        })
+}
+
+#[test]
+fn blobs_an_offload_left_in_main_are_never_dropped() {
+    // f0 stays in main (below the offload limit), f1 moves to the LOP.
+    let (tmp, main_dir, blobs) = offloaded_main(&[50 * 1024, BIG], LIMIT);
+    let lop_dir = tmp.path().join("lop.git");
+    let main = Repository::open(&main_dir, &RepositoryOptions::empty()).unwrap();
+    let lop = Repository::open(&lop_dir, &RepositoryOptions::empty()).unwrap();
+    assert!(main.odb().exists_stored(&blobs[0]));
+    assert!(!lop.odb().exists_stored(&blobs[0]), "only main has f0");
+    assert!(lop.odb().exists_stored(&blobs[1]));
+    // f0 shares the promisor pack with the tree naming it, or Git's repack would
+    // delete it; so being there says nothing about the LOP.
+    assert!(in_promisor_pack(&main_dir, &blobs[0]));
+
+    // A threshold below the offload's: f0 is a candidate the LOP cannot supply.
+    let report = drop_promised_blobs(&main, &opts(1024, None)).expect("drop");
+    clear_pack_cache();
+    assert_eq!(report.candidates, 1, "{report:?}");
+    assert!(report.dropped.is_empty(), "{report:?}");
+    assert_eq!(report.kept.not_in_promisor, 1, "{report:?}");
+    let main = Repository::open(&main_dir, &RepositoryOptions::empty()).unwrap();
+    assert!(main.odb().exists_stored(&blobs[0]), "f0 lost");
+
+    // Once the LOP has a copy, it can go.
+    copy_into(&main_dir, &lop_dir, &blobs[..1]);
+    let report = drop_promised_blobs(&main, &opts(1024, None)).expect("drop");
+    clear_pack_cache();
+    assert_eq!(dropped_oids(&report), blobs[..1], "{report:?}");
+    let main = Repository::open(&main_dir, &RepositoryOptions::empty()).unwrap();
+    assert!(!main.odb().exists_stored(&blobs[0]));
+}
+
+#[test]
+fn a_blob_an_offload_kept_for_a_checkout_is_never_dropped() {
+    // f0 is above the offload limit, but the work tree has it checked out.
+    let (_tmp, main_dir, blobs) = main_with_lop(&[BIG], false);
+    let report = offload_at(&main_dir, LIMIT);
+    assert_eq!(report.skipped_checked_out, 1, "{report:?}");
+    assert!(in_promisor_pack(&main_dir, &blobs[0]));
+
+    // The checkout moves on, so f0 is only in history now.
+    let main = Repository::open(&main_dir, &RepositoryOptions::empty()).unwrap();
+    let head = std::fs::read_to_string(main_dir.join("refs/heads/main")).unwrap();
+    let parent = ObjectId::from_hex(head.trim()).unwrap();
+    let small = main
+        .odb()
+        .write_loose_materialize(ObjectKind::Blob, b"small\n")
+        .unwrap();
+    let t = tree(&main, &[("f1", small)]);
+    let c = commit(&main, t, Some(parent), 2);
+    std::fs::write(main_dir.join("refs/heads/main"), format!("{c}\n")).unwrap();
+
+    let report = drop_promised_blobs(&main, &opts(LIMIT, None)).expect("drop");
+    clear_pack_cache();
+    assert_eq!(report.candidates, 1, "{report:?}");
+    assert!(report.dropped.is_empty(), "{report:?}");
+    assert_eq!(report.kept.not_in_promisor, 1, "{report:?}");
+    let main = Repository::open(&main_dir, &RepositoryOptions::empty()).unwrap();
+    assert!(main.odb().exists_stored(&blobs[0]), "f0 lost");
+}
+
+#[test]
+fn an_offloaded_repository_keeps_what_it_cannot_confirm_over_the_network() {
+    let (tmp, main_dir, blobs) = offloaded_main(&[50 * 1024, BIG], LIMIT);
+    // Clients reach the LOP over HTTPS; the server has it on disk, where offload
+    // recorded it.
+    append_config(
+        &main_dir,
+        "[remote \"lop\"]\n\turl = https://lop.invalid/lop.git\n",
+    );
+    let main = Repository::open(&main_dir, &RepositoryOptions::empty()).unwrap();
+    let report = drop_promised_blobs(&main, &opts(1024, None)).expect("drop");
+    clear_pack_cache();
+    assert!(report.dropped.is_empty(), "{report:?}");
+    assert_eq!(report.kept.unverified, 1, "{report:?}");
+    let main = Repository::open(&main_dir, &RepositoryOptions::empty()).unwrap();
+    assert!(main.odb().exists_stored(&blobs[0]), "f0 lost");
+
+    // The recorded LOP directory is checked too: once it has f0, f0 can go.
+    copy_into(&main_dir, &tmp.path().join("lop.git"), &blobs[..1]);
+    let report = drop_promised_blobs(&main, &opts(1024, None)).expect("drop");
+    assert_eq!(dropped_oids(&report), blobs[..1], "{report:?}");
+}
+
+#[test]
+fn a_partial_clone_of_a_network_remote_trusts_its_promisor_packs() {
+    let fx = Fixture::new().with_old_versions_fetched();
+    fx.set_all_pack_mtimes(days_ago(30));
+    // Nothing local to check against, and no offload: Git's rule holds, a blob in
+    // a promisor pack came from the promisor.
+    append_config(
+        &fx.git_dir,
+        "[remote \"origin\"]\n\turl = https://server.invalid/server.git\n",
+    );
+    let report = fx.run(&opts(LIMIT, None));
+    assert_eq!(dropped_oids(&report), sorted(&fx.big[..3]), "{report:?}");
+}
+
+#[test]
+fn a_local_promisor_without_the_blob_keeps_it() {
+    let fx = Fixture::new().with_old_versions_fetched();
+    fx.set_all_pack_mtimes(days_ago(30));
+    let empty = fx.tmp.path().join("empty.git");
+    Repository::init(&empty, &InitOptions::new().with_bare(true)).unwrap();
+    append_config(
+        &fx.git_dir,
+        &format!("[remote \"origin\"]\n\turl = {}\n", empty.display()),
+    );
+    let report = fx.run(&opts(LIMIT, None));
+    assert!(report.dropped.is_empty(), "{report:?}");
+    assert_eq!(report.kept.not_in_promisor, 3, "{report:?}");
+}
+
 #[test]
 fn a_tag_in_a_promisor_pack_promises_its_blob() {
     let fx = Fixture::with_tagged_stray();
@@ -751,4 +971,84 @@ fn gc_with_an_invalid_expire_fails_before_repacking() {
             .is_file(),
         "repack ran"
     );
+}
+
+#[test]
+fn a_local_promisor_that_cannot_be_read_keeps_its_blobs() {
+    let fx = Fixture::new().with_old_versions_fetched();
+    fx.set_all_pack_mtimes(days_ago(30));
+    // The promisor was on a disk that is not mounted now: nothing can say it still
+    // has the blobs, so none of them goes.
+    let server = fx.tmp.path().join("server.git");
+    std::fs::rename(&server, fx.tmp.path().join("elsewhere.git")).unwrap();
+    let report = fx.run(&opts(LIMIT, None));
+    assert!(report.dropped.is_empty(), "{report:?}");
+    assert_eq!(report.kept.unverified, 3, "{report:?}");
+    for blob in &fx.big[..3] {
+        assert!(fx.offline().odb().exists_stored(blob));
+    }
+
+    // A promisor of another object format cannot supply them either.
+    Repository::init(
+        &server,
+        &InitOptions::new()
+            .with_bare(true)
+            .with_object_format(grit_lib::objects::HashAlgo::Sha256),
+    )
+    .unwrap();
+    let report = fx.run(&opts(LIMIT, None));
+    assert!(report.dropped.is_empty(), "{report:?}");
+    assert_eq!(report.kept.unverified, 3, "{report:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_promisor_storing_its_objects_here_supplies_nothing() {
+    let fx = Fixture::new().with_old_versions_fetched();
+    fx.set_all_pack_mtimes(days_ago(30));
+    // A promisor whose objects/ is this clone's own: every blob looks held there.
+    let alias = fx.tmp.path().join("alias.git");
+    Repository::init(&alias, &InitOptions::new().with_bare(true)).unwrap();
+    std::fs::remove_dir_all(alias.join("objects")).unwrap();
+    std::os::unix::fs::symlink(fx.git_dir.join("objects"), alias.join("objects")).unwrap();
+    append_config(
+        &fx.git_dir,
+        &format!("[remote \"origin\"]\n\turl = {}\n", alias.display()),
+    );
+    let report = fx.run(&opts(LIMIT, None));
+    assert!(report.dropped.is_empty(), "{report:?}");
+    assert_eq!(report.kept.not_in_promisor, 3, "{report:?}");
+}
+
+#[test]
+fn only_packs_offload_wrote_count_as_held_by_a_lop() {
+    // f0 stays in main (below the offload limit), f1 moves to the LOP.
+    let (tmp, main_dir, blobs) = offloaded_main(&[50 * 1024, BIG], LIMIT);
+    let lop_dir = tmp.path().join("lop.git");
+    let main = Repository::open(&main_dir, &RepositoryOptions::empty()).unwrap();
+    let drop_f0 = || {
+        let report = drop_promised_blobs(&main, &opts(1024, None)).expect("drop");
+        clear_pack_cache();
+        report
+    };
+    // Nothing in the LOP reaches a blob, so its own gc prunes a loose copy, and an
+    // unkept pack, and a pack receive-pack or fetch-pack keeps only until it is done.
+    let lop = Repository::open(&lop_dir, &RepositoryOptions::empty()).unwrap();
+    let data = main.odb().read(&blobs[0]).unwrap().data;
+    lop.odb()
+        .write_loose_materialize(ObjectKind::Blob, &data)
+        .unwrap();
+    copy_into_kept(
+        &main_dir,
+        &lop_dir,
+        &blobs[..1],
+        "receive-pack 4242 on build-host",
+    );
+    let report = drop_f0();
+    assert!(report.dropped.is_empty(), "{report:?}");
+    assert_eq!(report.kept.not_in_promisor, 1, "{report:?}");
+
+    copy_into(&main_dir, &lop_dir, &blobs[..1]);
+    let report = drop_f0();
+    assert_eq!(dropped_oids(&report), blobs[..1], "{report:?}");
 }

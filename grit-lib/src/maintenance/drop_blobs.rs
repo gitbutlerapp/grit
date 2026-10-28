@@ -10,6 +10,7 @@
 //!
 //! - it is stored in a `.promisor` pack, and nowhere else in this repository (not
 //!   loose, not in an ordinary pack), and none of its packs has a `.keep` marker;
+//! - a promisor can supply it again (see below);
 //! - some tree or tag stored in a promisor pack names it, so it stays a promised
 //!   object once it is gone (Git's rule for an acceptable missing object);
 //! - no worktree's index (nor the `GIT_INDEX_FILE` one, when set) or `HEAD` tree
@@ -17,6 +18,27 @@
 //! - no commit named by a worktree's `HEAD` reflog since the cutoff uses it;
 //! - none of the promisor packs holding it was written or freshened since the
 //!   cutoff (a lazy fetch writes a new pack, so this is when it was last fetched).
+//!
+//! In a partial clone, a blob in a promisor pack came from the promisor remote, so
+//! it can be fetched again. That stops being true once [`offload_blobs`] has run:
+//! the promisor pack it writes also holds the blobs only this repository has (Git
+//! would delete them anywhere else; see [`offload_blobs`]). So the promisors this
+//! machine can read are checked directly: promisor remotes with a local URL (a path
+//! or `file://`) and the LOP directories offload recorded in
+//! [`LOP_GIT_DIR_KEY`]. A blob one of them stores in its own object directory (not
+//! through its alternates) can go; in a recorded LOP, only a copy in a pack offload
+//! wrote there counts, since the LOP's own `gc` prunes any other (nothing in it
+//! reaches a blob). A promisor that stores its objects where this repository does
+//! (a linked worktree of it, say) holds nothing for this. A blob none of them
+//! stores stays when every promisor was read ([`KeptBlobCounts::not_in_promisor`]),
+//! and also ([`KeptBlobCounts::unverified`]) when offload has run here, since the
+//! network promisors left cannot be asked without fetching, or when a local
+//! promisor cannot be read (its directory is not a repository now, an unmounted
+//! disk say, or uses another object format). Otherwise, a partial clone of network
+//! remotes only, the promisor pack is trusted as Git does, and nothing extra is
+//! read.
+//!
+//! [`offload_blobs`]: crate::maintenance::offload_blobs
 //!
 //! Git 2.56 has a manual version of the same operation,
 //! `git repack -a -d --filter=blob:limit=<n> --drop-filtered`: the same candidates,
@@ -32,6 +54,7 @@ use smallvec::SmallVec;
 use time::OffsetDateTime;
 
 use crate::config::ConfigSet;
+use crate::environment::RepositoryOptions;
 use crate::error::{BadNumericSource, ConfigError, Error, Result};
 use crate::git_date::approx::approxidate_careful_at;
 use crate::index_pack::{install_pack_path, IngestPackOptions};
@@ -40,6 +63,7 @@ use crate::objects::{
     TreeRefIter,
 };
 use crate::odb::Odb;
+use crate::offload::LOP_GIT_DIR_KEY;
 use crate::pack::PackedType;
 use crate::pack_index::PackIndex;
 use crate::pack_objects::PackBuildOptions;
@@ -294,6 +318,15 @@ pub struct KeptBlobCounts {
     /// promisor copy would free nothing (and Git would no longer treat it as
     /// promised).
     pub outside_promisor_packs: usize,
+    /// Every promisor is on this machine and was read, and none stores it, so
+    /// nothing could supply it again.
+    pub not_in_promisor: usize,
+    /// No promisor this machine could read stores it, and the rest cannot be asked:
+    /// network remotes, which cannot be asked without fetching (counted here once
+    /// offload has put blobs only this repository has into its promisor packs, so
+    /// being in one proves nothing), or a local promisor that does not open as a
+    /// repository of this object format (an unmounted disk, say).
+    pub unverified: usize,
     /// A worktree's index (or the `GIT_INDEX_FILE` one) or `HEAD` tree uses it.
     pub checked_out: usize,
     /// The tree of a commit a worktree's `HEAD` reflog named since the cutoff uses
@@ -316,6 +349,8 @@ impl KeptBlobCounts {
             + self.recently_checked_out
             + self.recently_fetched
             + self.not_promised_elsewhere
+            + self.not_in_promisor
+            + self.unverified
     }
 }
 
@@ -374,6 +409,11 @@ impl DropPromisedBlobsReport {
 /// Drop large blobs a promisor remote can supply again from `repo`'s promisor
 /// packs, keeping those needed recently (see the module documentation for the
 /// exact rules).
+///
+/// A blob stays unless a promisor can supply it again: after
+/// [`crate::maintenance::offload_blobs`] has run, or when a promisor remote has a
+/// local URL, that is checked in the promisor's own object directory
+/// ([`KeptBlobCounts::not_in_promisor`], [`KeptBlobCounts::unverified`]).
 ///
 /// Nothing is fetched while deciding. Unless [`DropPromisedBlobsOptions::dry_run`]
 /// is set, the repository's `gc.pid` lock is held throughout. A promisor pack that
@@ -604,7 +644,7 @@ fn run(
 
     // Decide each candidate's fate; the first reason that applies wins.
     let cutoff = opts.keep_newer_than.map(SystemTime::from);
-    let mut undecided: OidHashSet = oid_hash_set();
+    let mut stored_only_here: OidHashSet = oid_hash_set();
     for (oid, cand) in &candidates {
         let holding = || cand.packs.iter().map(|&p| &packs[p as usize]);
         if holding().any(|p| p.kept) {
@@ -614,9 +654,12 @@ fn run(
         {
             report.kept.outside_promisor_packs += 1;
         } else {
-            undecided.insert(*oid);
+            stored_only_here.insert(*oid);
         }
     }
+    // Before the walks: in an offloaded repository most candidates stop here.
+    let mut undecided =
+        PromisorSupply::load(repo, config).suppliable(stored_only_here, &mut report.kept)?;
     let mut walk = ProtectionWalk::new(odb, &undecided);
     walk.mark_checkouts(repo)?;
     let checked_out = std::mem::take(&mut walk.hits);
@@ -686,6 +729,143 @@ fn run(
         &mut report,
     )?;
     Ok(report)
+}
+
+/// The promisors `drop-large-blobs` can check without fetching, and whether it
+/// must.
+struct PromisorSupply {
+    /// Promisors on this machine that opened: promisor remotes with a local URL,
+    /// and the LOPs offload recorded in [`LOP_GIT_DIR_KEY`].
+    local: Vec<LocalPromisor>,
+    /// Some promisor on this machine could not be read: its directory does not
+    /// open as a repository (an unmounted disk, say) or uses another object format.
+    /// What it holds is unknown, so blobs no readable promisor has are kept.
+    unreadable: bool,
+    /// Some promisor is on this machine (read or not, or `repo` itself).
+    any_local: bool,
+    /// Some promisor remote has a network URL.
+    network: bool,
+    /// [`LOP_GIT_DIR_KEY`] is set: offload has put blobs only this repository has
+    /// into its promisor packs.
+    offloaded: bool,
+}
+
+/// A promisor on this machine, and which of its copies count.
+struct LocalPromisor {
+    repo: Repository,
+    /// A LOP offload recorded: only its packs offload wrote count (see
+    /// [`crate::offload::lop_keep_packs`]). Nothing reaches a blob in a ref-less
+    /// LOP, so its own `gc` prunes any other copy.
+    lop: bool,
+}
+
+impl PromisorSupply {
+    /// The promisors of `repo` per `config`.
+    ///
+    /// A local promisor that stores its objects where `repo` does (`repo` itself, a
+    /// linked worktree of it, an `objects/` linked to its) supplies nothing. One
+    /// that does not open as a repository of the same object format is
+    /// [`Self::unreadable`].
+    fn load(repo: &Repository, config: &ConfigSet) -> Self {
+        let recorded: Vec<PathBuf> = config
+            .get_all(LOP_GIT_DIR_KEY)
+            .into_iter()
+            .filter(|v| !v.trim().is_empty())
+            .map(PathBuf::from)
+            .collect();
+        let mut dirs: Vec<(PathBuf, bool)> = recorded.iter().map(|d| (d.clone(), true)).collect();
+        let mut network = false;
+        for remote in crate::promisor_remote::configured_promisor_remotes(config, &[]) {
+            let Some(url) = remote.url else { continue };
+            if crate::transport_path::is_local_path_remote_url(&url) {
+                let dir = crate::transport_path::resolve_local_remote_git_dir(
+                    &url,
+                    repo.git_dir(),
+                    repo.work_tree(),
+                );
+                dirs.push((dir, false));
+            } else {
+                network = true;
+            }
+        }
+        let mut supply = Self {
+            local: Vec::new(),
+            unreadable: false,
+            any_local: !dirs.is_empty(),
+            network,
+            offloaded: !recorded.is_empty(),
+        };
+        for (dir, lop) in dirs {
+            let opened = Repository::open(
+                &dir,
+                &RepositoryOptions::with_environment(repo.environment().clone()),
+            );
+            let other = match opened {
+                Ok(other) if other.odb().hash_algo() == repo.odb().hash_algo() => other,
+                _ => {
+                    supply.unreadable = true;
+                    continue;
+                }
+            };
+            if crate::offload::same_object_store(&other, repo) {
+                continue;
+            }
+            // Listed twice (a recorded LOP that is also a remote): the first, LOP, rule.
+            if supply
+                .local
+                .iter()
+                .any(|p| crate::offload::same_object_store(&other, &p.repo))
+            {
+                continue;
+            }
+            supply.local.push(LocalPromisor { repo: other, lop });
+        }
+        supply
+    }
+
+    /// The blobs of `promised` a promisor can supply again; the rest are counted
+    /// in `kept`.
+    ///
+    /// A partial clone of network remotes only (no local promisor, no offload) is
+    /// trusted without reading anything. Otherwise a blob goes only if a local
+    /// promisor holds it, or, without offload and with every local promisor read,
+    /// a network one may.
+    fn suppliable(&self, promised: OidHashSet, kept: &mut KeptBlobCounts) -> Result<OidHashSet> {
+        if !self.any_local && !self.offloaded {
+            return Ok(promised);
+        }
+        if promised.is_empty() {
+            return Ok(promised);
+        }
+        let mut stores = Vec::with_capacity(self.local.len());
+        for promisor in &self.local {
+            let odb = promisor.repo.odb();
+            let indexes = if promisor.lop {
+                crate::offload::lop_keep_packs(odb)?
+            } else {
+                odb.local_pack_indexes()?
+            };
+            stores.push((odb, indexes, !promisor.lop));
+        }
+        let held = |oid: &ObjectId| {
+            stores.iter().any(|(odb, indexes, loose_counts)| {
+                indexes.iter().any(|idx| idx.find_position(oid).is_some())
+                    || (*loose_counts && odb.local_loose_file_size(oid).is_some())
+            })
+        };
+        let trust_network = self.network && !self.offloaded && !self.unreadable;
+        let mut out = oid_hash_set();
+        for oid in promised {
+            if held(&oid) || trust_network {
+                out.insert(oid);
+            } else if self.network || self.unreadable {
+                kept.unverified += 1;
+            } else {
+                kept.not_in_promisor += 1;
+            }
+        }
+        Ok(out)
+    }
 }
 
 /// Record `pack`'s blobs of at least `min_size` in `candidates`, and its trees and
@@ -1436,7 +1616,9 @@ mod tests {
             recently_checked_out: 4,
             recently_fetched: 5,
             not_promised_elsewhere: 6,
+            not_in_promisor: 7,
+            unverified: 8,
         };
-        assert_eq!(kept.total(), 21);
+        assert_eq!(kept.total(), 36);
     }
 }

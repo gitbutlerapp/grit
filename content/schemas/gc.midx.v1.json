@@ -15,6 +15,12 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "not_in_promisor": {
+          "description": "No promisor stores it, and every promisor remote is on this machine.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "not_promised_elsewhere": {
           "format": "uint",
           "minimum": 0.0,
@@ -34,15 +40,23 @@
           "format": "uint",
           "minimum": 0.0,
           "type": "integer"
+        },
+        "unverified": {
+          "description": "No promisor on this machine stores it, and offload has run here, so the network promisors cannot be trusted to have it.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
         }
       },
       "required": [
         "checked_out",
         "kept_pack",
+        "not_in_promisor",
         "not_promised_elsewhere",
         "outside_promisor_packs",
         "recently_checked_out",
-        "recently_fetched"
+        "recently_fetched",
+        "unverified"
       ],
       "type": "object"
     },
@@ -570,6 +584,13 @@
                 "null"
               ]
             },
+            "packs": {
+              "description": "Every pack the run wrote, in order.",
+              "items": {
+                "$ref": "#/definitions/OffloadPackJson"
+              },
+              "type": "array"
+            },
             "remote": {
               "description": "Promisor remote the blobs moved to.",
               "type": "string"
@@ -605,6 +626,7 @@
             "lop_ready",
             "main_bytes_after",
             "main_bytes_before",
+            "packs",
             "remote",
             "skipped_checked_out",
             "skipped_kept_pack",
@@ -747,6 +769,68 @@
         "value"
       ],
       "type": "object"
+    },
+    "OffloadPackJson": {
+      "description": "One pack `grit gc offload` wrote.",
+      "properties": {
+        "bytes": {
+          "description": "Size of the `.pack` file in bytes.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "objects": {
+          "description": "Objects in the pack.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "The `.pack` file.",
+          "type": "string"
+        },
+        "role": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OffloadPackRoleJson"
+            }
+          ],
+          "description": "Which pack this is."
+        }
+      },
+      "required": [
+        "bytes",
+        "objects",
+        "path",
+        "role"
+      ],
+      "type": "object"
+    },
+    "OffloadPackRoleJson": {
+      "description": "Which pack `grit gc offload` wrote.",
+      "oneOf": [
+        {
+          "description": "The promisor's new pack of the blobs that moved.",
+          "enum": [
+            "lop"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The main repository's `.promisor` pack of every object it keeps.",
+          "enum": [
+            "main-promisor"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A pack this version of grit does not know.",
+          "enum": [
+            "other"
+          ],
+          "type": "string"
+        }
+      ]
     }
   },
   "description": "Result of `grit gc` and its task subcommands.",

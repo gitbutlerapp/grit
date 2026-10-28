@@ -9,6 +9,16 @@
 //! layout Git's own large-object-promisor tests build with
 //! `git repack -a -d --filter=blob:limit=<n> --filter-to=<lop>`.
 //!
+//! The blobs that stay (smaller than the threshold, or needed by a checkout) are in
+//! that promisor pack too, although only the main repository has them. Git treats
+//! every object a tree in a promisor pack names as promised, and its `repack -a -d`
+//! and `gc` keep only the promised objects they find in promisor packs: a kept blob
+//! in an ordinary pack beside it would be deleted, with nothing to fetch it back
+//! from. The price is that a blob in a promisor pack no longer proves the promisor
+//! can supply it, so offload records the LOP's directory in `grit.lopGitDir`, and
+//! [`crate::maintenance::drop_promised_blobs`] drops a blob only once a promisor
+//! it can read is seen to hold it.
+//!
 //! [`offload_blobs`] moves the blobs a filter leaves out (`blob:limit=<n>`: every
 //! blob of `n` bytes or more) from the main repository to the LOP. It never removes
 //! anything from the main repository before the LOP holds it, and blobs any checkout
@@ -33,6 +43,15 @@ use crate::repo::Repository;
 
 /// Message written into the `.keep` marker of every pack offload adds to a LOP.
 pub const LOP_KEEP_MESSAGE: &str = "grit offload: large-object promisor pack";
+
+/// Multi-valued config key [`offload_blobs`] adds to the main repository: the
+/// absolute git directory of each LOP it moved blobs to.
+///
+/// Its presence marks a repository whose promisor pack holds blobs only it has, so
+/// [`crate::maintenance::drop_promised_blobs`] drops a blob there only after seeing
+/// it in a promisor it can read (one of these directories, or a promisor remote
+/// with a local URL).
+pub const LOP_GIT_DIR_KEY: &str = "grit.lopGitDir";
 
 /// Options for [`offload_blobs`].
 #[derive(Debug, Clone)]
@@ -102,7 +121,8 @@ pub enum OffloadError {
         /// Where the LOP was looked for.
         path: PathBuf,
     },
-    /// The LOP is the main repository itself.
+    /// The LOP is the main repository itself, or stores its objects in the same
+    /// directory (a linked worktree of it, or an `objects/` linked to its).
     #[error("the large-object promisor is this repository itself")]
     LopIsMainRepository,
     /// The two repositories use different object formats.
@@ -129,6 +149,27 @@ pub enum OffloadError {
     NotInLopAfterCopy {
         /// The blob.
         oid: ObjectId,
+    },
+    /// An ordinary `.keep` pack (one without `.promisor`) of the main repository
+    /// holds the only copy of an object that a commit, tree or tag going into the
+    /// promisor pack names. Git counts every object a promisor-pack object names as
+    /// promised, and its `repack -a -d` keeps a promised object only in a promisor
+    /// pack: once the marker goes, it would delete this one, which no promisor has.
+    /// Offload does not rewrite kept packs, and a copy in the promisor pack does
+    /// not help (Git's repack leaves out objects a kept pack holds), so it refuses
+    /// before changing anything. Removing the marker lets offload fold the pack
+    /// in; marking the pack `.promisor` keeps it as it is.
+    #[error(
+        "{oid} is only in kept pack {}, and {referrer} names it",
+        pack.display()
+    )]
+    KeptPackObjectPromised {
+        /// The kept pack holding the object.
+        pack: PathBuf,
+        /// The object.
+        oid: ObjectId,
+        /// An object going into the promisor pack that names it.
+        referrer: ObjectId,
     },
     /// Another maintenance run holds the main repository's `gc.pid` lock.
     #[error("maintenance is already running on this repository")]
@@ -204,9 +245,11 @@ pub struct OffloadReport {
     pub candidate_bytes: u64,
     /// Candidates copied into a new LOP pack.
     pub copied_to_lop: usize,
-    /// Candidates the LOP already had in a `.keep` pack of its own. A loose or
-    /// unkept copy there does not count (the LOP's `gc` may prune it), nor does one
-    /// it reaches through alternates; those candidates are copied.
+    /// Candidates the LOP already had in a pack an earlier offload wrote there (its
+    /// `.keep` marker holds [`LOP_KEEP_MESSAGE`]). A loose or unkept copy there
+    /// does not count (the LOP's `gc` may prune it), nor does one in a pack another
+    /// writer keeps for a while (`receive-pack`, `fetch-pack`), nor one it reaches
+    /// through alternates; those candidates are copied.
     pub already_in_lop: usize,
     /// Candidates no longer stored in the main repository afterwards.
     pub dropped_from_main: usize,
@@ -216,10 +259,11 @@ pub struct OffloadReport {
     /// Selected blobs kept because they are in a `.keep` pack (or the only tree
     /// naming them is), which offload does not rewrite.
     pub skipped_kept_pack: usize,
-    /// The pack added to the LOP, if any.
-    pub lop_pack: Option<PathBuf>,
-    /// The promisor pack the main repository's objects now live in, if rewritten.
-    pub main_pack: Option<PathBuf>,
+    /// The pack added to the LOP, holding the blobs copied there, if any.
+    pub lop_pack: Option<OffloadPack>,
+    /// The promisor pack the main repository's objects now live in (its commits,
+    /// trees, tags and the blobs it keeps), if rewritten.
+    pub main_pack: Option<OffloadPack>,
     /// Bytes of the main repository's local packs and loose objects before.
     pub main_bytes_before: u64,
     /// The same afterwards (equal to the before value on a dry run).
@@ -233,6 +277,51 @@ pub struct OffloadReport {
     pub advertised: bool,
 }
 
+impl OffloadReport {
+    /// The packs the run wrote, in the order they were written: the LOP pack, then
+    /// the main repository's promisor pack.
+    pub fn packs(&self) -> impl Iterator<Item = &OffloadPack> {
+        [&self.lop_pack, &self.main_pack].into_iter().flatten()
+    }
+}
+
+/// Which of the packs [`offload_blobs`] writes an [`OffloadPack`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OffloadPackRole {
+    /// The LOP's new pack of the blobs that moved, with a `.keep` marker.
+    Lop,
+    /// The main repository's `.promisor` pack of every object it keeps.
+    MainPromisor,
+}
+
+/// A pack [`offload_blobs`] wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct OffloadPack {
+    /// Which pack this is.
+    pub role: OffloadPackRole,
+    /// The `.pack` file (its `.idx` and other sidecars are beside it).
+    pub path: PathBuf,
+    /// Objects in the pack.
+    pub objects: usize,
+    /// Size of the `.pack` file in bytes.
+    pub bytes: u64,
+}
+
+impl OffloadPack {
+    /// Describe the pack at `path`, reading its size from disk.
+    fn written(role: OffloadPackRole, path: PathBuf, objects: usize) -> Result<Self> {
+        let bytes = std::fs::metadata(&path)?.len();
+        Ok(Self {
+            role,
+            path,
+            objects,
+            bytes,
+        })
+    }
+}
+
 /// Move the blobs [`OffloadOptions::filter`] selects from `repo` to the large-object
 /// promisor [`OffloadOptions::remote`].
 ///
@@ -241,12 +330,13 @@ pub struct OffloadReport {
 /// 1. Blobs reachable from the refs, reflogs and `HEAD`s, stored in `repo`, and left
 ///    out by the filter are the candidates. Those a checkout needs, and those in
 ///    `.keep` packs, stay.
-/// 2. The candidates the LOP does not already hold in a `.keep` pack of its own are
-///    copied into one new pack there, whole (no deltas), with a `.keep` marker
-///    written before the pack appears: nothing in the LOP refers to them, so an
-///    unprotected pack could be pruned. Every candidate is then checked to be in a
-///    `.keep` pack of the LOP, and the new pack, index and marker are flushed to
-///    disk.
+/// 2. The candidates the LOP does not already hold in a pack an earlier offload
+///    wrote there are copied into one new pack there, whole (no deltas), with a
+///    `.keep` marker holding [`LOP_KEEP_MESSAGE`] written before the pack appears:
+///    nothing in the LOP refers to them, so an unprotected pack could be pruned.
+///    A pack another writer keeps only for a while (`receive-pack`, `fetch-pack`)
+///    does not count. Every candidate is then checked to be in such a pack of the
+///    LOP, and the new pack, index and marker are flushed to disk.
 /// 3. The main repository's config gets `remote.<name>.promisor = true`, when the
 ///    filter came from `opts` `remote.<name>.partialCloneFilter`, and
 ///    `repack.writeBitmaps = false`. A reachability bitmap (pack or multi-pack)
@@ -259,11 +349,19 @@ pub struct OffloadReport {
 ///    leaves the bitmap out in that case, so the setting is for Git.
 ///    `promisor.advertise` and `extensions.partialClone` are left to the caller;
 ///    the report says whether clients are told about the LOP.
+///    It also gets the LOP's git directory in `grit.lopGitDir` (once per LOP),
+///    which tells `drop-large-blobs` where to check that a blob it would drop
+///    exists in the LOP.
 /// 4. The main repository's local packs and loose objects are rewritten into one
-///    `.promisor` pack without the candidates (see the module documentation). This
-///    happens on every run, even when no blob moves, so trees pushed since the last
-///    run (which name offloaded blobs) join the promisor pack again. The new pack is
-///    flushed to disk before the old packs are removed.
+///    `.promisor` pack without the candidates; its trees keep the offloaded blobs
+///    promised. The blobs that stay go into it too: Git's repack and `gc` keep a
+///    promised object only when it is in a promisor pack (see the module
+///    documentation). This happens on every run, even when no blob moves, so
+///    objects pushed since the last run (trees naming offloaded blobs, new small
+///    blobs) join the promisor pack, and a repository whose kept blobs sit in an
+///    ordinary pack is folded back. The new pack is flushed to disk before the old
+///    packs are removed. `.keep` packs are not rewritten (see
+///    [`OffloadError::KeptPackObjectPromised`]).
 ///
 /// # Parameters
 ///
@@ -307,6 +405,9 @@ pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<Offload
     let main_bytes_before = local_object_bytes(odb)?;
     let selection = select_candidates(repo, filter)?;
     let candidates: Vec<ObjectId> = selection.candidates.keys().copied().collect();
+    if let Some(refusal) = kept_object_the_promisor_pack_names(odb, &selection.candidates)? {
+        return Err(refusal.into());
+    }
     let in_lop = held_in_lop_keep_packs(lop.odb(), &candidates)?;
     let missing_in_lop: Vec<ObjectId> = candidates
         .iter()
@@ -342,7 +443,9 @@ pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<Offload
     }
 
     if !missing_in_lop.is_empty() {
-        report.lop_pack = copy_to_lop(repo, &lop, &missing_in_lop, opts)?;
+        report.lop_pack = copy_to_lop(repo, &lop, &missing_in_lop, opts)?
+            .map(|(path, objects)| OffloadPack::written(OffloadPackRole::Lop, path, objects))
+            .transpose()?;
         report.copied_to_lop = missing_in_lop.len();
     }
     lop.odb().invalidate_packs();
@@ -352,7 +455,7 @@ pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<Offload
     }
     if let Some(pack) = &report.lop_pack {
         // The main repository is about to drop its copies: the LOP's must be on disk.
-        crate::index_pack::sync_installed_pack(pack)?;
+        crate::index_pack::sync_installed_pack(&pack.path)?;
     }
 
     let mut wanted: Vec<(String, String)> = Vec::new();
@@ -371,14 +474,30 @@ pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<Offload
     if config.get_bool(bitmaps_key).and_then(|v| v.ok()) != Some(false) {
         wanted.push((bitmaps_key.to_owned(), "false".to_owned()));
     }
-    write_config(repo.git_dir(), &wanted)?;
+    // The promisor pack is about to hold blobs the LOP does not have; record where
+    // the LOP is, so dropping promised blobs can check it first.
+    let mut added: Vec<(String, String)> = Vec::new();
+    let lop_dir = lop_dir_value(lop.git_dir());
+    if !config
+        .get_all(LOP_GIT_DIR_KEY)
+        .iter()
+        .any(|v| same_dir(Path::new(v), lop.git_dir()))
+    {
+        added.push((LOP_GIT_DIR_KEY.to_owned(), lop_dir));
+    }
+    write_config(repo.git_dir(), &wanted, &added)?;
     report
         .config_changes
-        .extend(wanted.into_iter().map(|(key, value)| OffloadConfigChange {
-            repo: OffloadRepo::Main,
-            key,
-            value,
-        }));
+        .extend(
+            wanted
+                .into_iter()
+                .chain(added)
+                .map(|(key, value)| OffloadConfigChange {
+                    repo: OffloadRepo::Main,
+                    key,
+                    value,
+                }),
+        );
     if opts.configure_lop {
         let lop_changes: Vec<(String, String)> = [
             ("uploadpack.allowFilter", report.lop_ready.allow_filter),
@@ -391,7 +510,7 @@ pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<Offload
         .filter(|(_, already)| !already)
         .map(|(key, _)| (key.to_owned(), "true".to_owned()))
         .collect();
-        write_config(lop.git_dir(), &lop_changes)?;
+        write_config(lop.git_dir(), &lop_changes, &[])?;
         report
             .config_changes
             .extend(
@@ -421,7 +540,10 @@ pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<Offload
         &repack,
         crate::maintenance::PromisorRewriteWhen::Always,
     )?;
-    report.main_pack = rewrite.pack_path;
+    report.main_pack = rewrite
+        .pack_path
+        .map(|path| OffloadPack::written(OffloadPackRole::MainPromisor, path, rewrite.objects))
+        .transpose()?;
     report.dropped_from_main = odb.missing_stored_oids(candidates.iter().copied())?.len();
     report.main_bytes_after = local_object_bytes(odb)?;
     Ok(report)
@@ -452,15 +574,7 @@ fn open_lop(repo: &Repository, opts: &OffloadOptions, url: &str) -> Result<Repos
         &RepositoryOptions::with_environment(repo.environment().clone()),
     )
     .map_err(|_| OffloadError::LopNotARepository { path: path.clone() })?;
-    use crate::git_path::CanonicalizeExt as _;
-    let same = match (
-        repo.git_dir().canonicalize_simplified(),
-        lop.git_dir().canonicalize_simplified(),
-    ) {
-        (Ok(main), Ok(other)) => main == other,
-        _ => repo.git_dir() == lop.git_dir(),
-    };
-    if same {
+    if same_object_store(repo, &lop) {
         return Err(OffloadError::LopIsMainRepository.into());
     }
     let (main_algo, lop_algo) = (repo.odb().hash_algo(), lop.odb().hash_algo());
@@ -578,6 +692,100 @@ fn select_candidates(repo: &Repository, filter: ObjectFilterSpec) -> Result<Sele
     Ok(selection)
 }
 
+/// The refusal [`OffloadError::KeptPackObjectPromised`] when an object going into
+/// the promisor pack (one of the unkept packs or loose objects, except `omit`)
+/// names an object only an ordinary `.keep` pack holds.
+///
+/// Free without such packs. With them, every commit, tree and tag to be rewritten
+/// is read, as the rewrite reads them anyway.
+fn kept_object_the_promisor_pack_names(
+    odb: &Odb,
+    omit: &OidHashMap<u64>,
+) -> Result<Option<OffloadError>> {
+    odb.reprepare_local_packs();
+    let (kept, rewritten): (Vec<_>, Vec<_>) = odb
+        .local_pack_indexes()?
+        .into_iter()
+        .partition(|idx| idx.pack_path.with_extension("keep").is_file());
+    let (kept_promisor, kept_ordinary): (Vec<_>, Vec<_>) =
+        kept.into_iter().partition(|idx| idx.is_promisor);
+    if kept_ordinary.is_empty() {
+        return Ok(None);
+    }
+    let loose: OidHashSet = odb
+        .enumerate_local_loose_objects()?
+        .into_iter()
+        .map(|(oid, _)| oid)
+        .collect();
+    let in_promisor_pack_after = |oid: &ObjectId| {
+        loose.contains(oid)
+            || [&rewritten, &kept_promisor]
+                .into_iter()
+                .flatten()
+                .any(|idx| idx.find_position(oid).is_some())
+    };
+    let mut only_kept: OidHashMap<usize> = crate::objects::oid_hash_map();
+    for (pack_no, idx) in kept_ordinary.iter().enumerate() {
+        for entry in idx.iter() {
+            let oid = ObjectId::from_bytes(entry.oid())?;
+            if !in_promisor_pack_after(&oid) {
+                only_kept.entry(oid).or_insert(pack_no);
+            }
+        }
+    }
+    if only_kept.is_empty() {
+        return Ok(None);
+    }
+    let mut referrers: Vec<ObjectId> = loose.iter().copied().collect();
+    for idx in &rewritten {
+        for entry in idx.iter() {
+            referrers.push(ObjectId::from_bytes(entry.oid())?);
+        }
+    }
+    let oid_len = odb.hash_algo().len();
+    let mut checked = oid_hash_set();
+    for referrer in referrers {
+        if omit.contains_key(&referrer) || !checked.insert(referrer) {
+            continue;
+        }
+        let kind = match odb.read_info_without_fetch(&referrer) {
+            Ok(info) => info.kind,
+            Err(Error::ObjectNotFound(_)) => continue,
+            Err(err) => return Err(err),
+        };
+        if kind == ObjectKind::Blob {
+            continue;
+        }
+        let obj = odb.read(&referrer)?;
+        let mut named: Vec<ObjectId> = Vec::new();
+        match kind {
+            ObjectKind::Commit => {
+                let commit = CommitRef::parse(&obj.data)?;
+                named.push(commit.tree());
+                named.extend(commit.parents().iter().copied());
+            }
+            ObjectKind::Tree => {
+                for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
+                    let entry = entry?;
+                    if entry.mode & 0o170000 != 0o160000 {
+                        named.push(entry.oid);
+                    }
+                }
+            }
+            ObjectKind::Tag => named.extend(crate::objects::tag_object_line_oid(&obj.data)),
+            ObjectKind::Blob => {}
+        }
+        if let Some((oid, &pack_no)) = named.iter().find_map(|oid| only_kept.get_key_value(oid)) {
+            return Ok(Some(OffloadError::KeptPackObjectPromised {
+                pack: kept_ordinary[pack_no].pack_path.clone(),
+                oid: *oid,
+                referrer,
+            }));
+        }
+    }
+    Ok(None)
+}
+
 /// The size of `oid` when it is a blob stored locally that `filter` leaves out.
 fn selected_blob_size(odb: &Odb, filter: ObjectFilterSpec, oid: &ObjectId) -> Result<Option<u64>> {
     if !odb.try_exists_stored(oid)? {
@@ -602,13 +810,14 @@ fn keep_name(pack_path: &Path) -> PathBuf {
     PathBuf::from(pack_path.file_name().unwrap_or_default()).with_extension("keep")
 }
 
-/// Copy `blobs` from `repo` into one new `.keep` pack in `lop`.
+/// Copy `blobs` from `repo` into one new `.keep` pack in `lop`; returns the pack and
+/// how many objects it holds.
 fn copy_to_lop(
     repo: &Repository,
     lop: &Repository,
     blobs: &[ObjectId],
     opts: &OffloadOptions,
-) -> Result<Option<PathBuf>> {
+) -> Result<Option<(PathBuf, usize)>> {
     let cfg = repo.config().ok();
     let pack_opts = PackBuildOptions {
         delta: false,
@@ -646,32 +855,55 @@ fn copy_to_lop(
             ..IngestPackOptions::default()
         },
     )?;
-    Ok(ingested.pack_path)
+    let objects = ingested.object_ids.len();
+    Ok(ingested.pack_path.map(|path| (path, objects)))
 }
 
-/// For each of `oids`, whether the LOP itself holds it in a pack with a `.keep`
-/// marker.
-///
-/// Only such a copy is safe to rely on before the main repository drops its own:
-/// a loose object or one in an unkept pack is unreachable in the LOP and its next
-/// `gc` may prune it, and a copy found through the LOP's alternates (possibly the
-/// main repository itself) is not the LOP's at all.
+/// For each of `oids`, whether the LOP itself holds it in a pack offload wrote
+/// there (see [`lop_keep_packs`]).
 fn held_in_lop_keep_packs(lop: &Odb, oids: &[ObjectId]) -> Result<Vec<bool>> {
-    let pack_dir = lop.objects_dir().join("pack");
-    let kept: Vec<_> = lop
-        .local_pack_indexes()?
-        .into_iter()
-        .filter(|idx| pack_dir.join(keep_name(&idx.pack_path)).is_file())
-        .collect();
+    let kept = lop_keep_packs(lop)?;
     Ok(oids
         .iter()
         .map(|oid| kept.iter().any(|idx| idx.find_position(oid).is_some()))
         .collect())
 }
 
-/// Set `changes` in the local config of the repository at `git_dir`.
-fn write_config(git_dir: &Path, changes: &[(String, String)]) -> Result<()> {
-    if changes.is_empty() {
+/// The LOP's own packs whose `.keep` marker holds [`LOP_KEEP_MESSAGE`]: the packs
+/// offload wrote there.
+///
+/// Only a copy in one of those is safe to rely on before the main repository drops
+/// its own. Nothing in a ref-less LOP reaches a blob, so a loose object or one in
+/// an unkept pack goes at its next `gc`, and so does one in a pack kept only for a
+/// while: `receive-pack` and `fetch-pack` keep the pack they are writing until
+/// they have updated the refs, then remove the marker. A copy found through the
+/// LOP's alternates (possibly the main repository itself) is not the LOP's at all.
+///
+/// # Errors
+///
+/// Pack directory read failures.
+pub(crate) fn lop_keep_packs(lop: &Odb) -> Result<Vec<std::sync::Arc<PackIndex>>> {
+    Ok(lop
+        .local_pack_indexes()?
+        .into_iter()
+        .filter(|idx| has_lop_keep_marker(&idx.pack_path))
+        .collect())
+}
+
+/// Whether the `.keep` marker next to `pack_path` is one offload wrote.
+fn has_lop_keep_marker(pack_path: &Path) -> bool {
+    std::fs::read(pack_path.with_extension("keep"))
+        .is_ok_and(|contents| contents.trim_ascii_end() == LOP_KEEP_MESSAGE.as_bytes())
+}
+
+/// Set `changes` and add the values of `additions` (keeping earlier ones) in the
+/// local config of the repository at `git_dir`.
+fn write_config(
+    git_dir: &Path,
+    changes: &[(String, String)],
+    additions: &[(String, String)],
+) -> Result<()> {
+    if changes.is_empty() && additions.is_empty() {
         return Ok(());
     }
     let path = git_dir.join("config");
@@ -684,7 +916,36 @@ fn write_config(git_dir: &Path, changes: &[(String, String)]) -> Result<()> {
     for (key, value) in changes {
         config.set(key, value)?;
     }
+    for (key, value) in additions {
+        config.add_value(key, value)?;
+    }
     config.write()
+}
+
+/// `git_dir` as recorded in [`LOP_GIT_DIR_KEY`]: absolute, symlinks resolved when
+/// possible.
+fn lop_dir_value(git_dir: &Path) -> String {
+    use crate::git_path::CanonicalizeExt as _;
+    git_dir
+        .canonicalize_simplified()
+        .unwrap_or_else(|_| git_dir.to_path_buf())
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Whether two repositories store their objects in the same directory: one is the
+/// other, a linked worktree of it, or has its `objects/` linked to the other's.
+pub(crate) fn same_object_store(a: &Repository, b: &Repository) -> bool {
+    same_dir(a.odb().objects_dir(), b.odb().objects_dir())
+}
+
+/// Whether two paths name the same directory.
+pub(crate) fn same_dir(a: &Path, b: &Path) -> bool {
+    use crate::git_path::CanonicalizeExt as _;
+    match (a.canonicalize_simplified(), b.canonicalize_simplified()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
 }
 
 /// Bytes of the repository's own packs (with indexes) and loose objects.
@@ -829,26 +1090,54 @@ mod tests {
             assert_eq!(!main.odb().exists_stored(&blob), moved, "main f{i}");
             assert_eq!(lop.odb().exists_stored(&blob), moved, "lop f{i}");
         }
-        // The rest of main lives in one promisor pack; the loose objects are gone.
+        // The rest of main, the kept blob included, lives in one promisor pack; the
+        // loose objects are gone.
         let promisor = fx.files(&fx.main_dir(), "promisor");
         assert_eq!(promisor.len(), 1);
         assert_eq!(
-            report.main_pack.as_deref().and_then(Path::file_name),
+            report.main_pack.as_ref().and_then(|p| p.path.file_name()),
             promisor[0].with_extension("pack").file_name()
         );
+        let indexes = main.odb().local_pack_indexes().unwrap();
+        let promisor_idx = indexes
+            .iter()
+            .find(|i| i.is_promisor)
+            .expect("promisor pack");
+        assert_eq!(indexes.len(), 1);
+        assert_eq!(promisor_idx.len(), 3, "the commit, its tree and f1");
+        assert!(promisor_idx.find_position(&fx.blobs[1]).is_some());
         assert!(main
             .odb()
             .enumerate_local_loose_objects()
             .unwrap()
             .is_empty());
         assert!(report.main_bytes_after < report.main_bytes_before);
+
+        // The report describes each pack it wrote.
+        let roles: Vec<_> = report.packs().map(|p| (p.role, p.objects)).collect();
+        assert_eq!(
+            roles,
+            [
+                (OffloadPackRole::Lop, 2),
+                (OffloadPackRole::MainPromisor, 3),
+            ]
+        );
+        for pack in report.packs() {
+            assert_eq!(pack.bytes, std::fs::metadata(&pack.path).unwrap().len());
+        }
+        assert!(report
+            .lop_pack
+            .as_ref()
+            .unwrap()
+            .path
+            .starts_with(fx.lop().git_dir()));
     }
 
     #[test]
     fn lop_pack_is_kept_and_complete() {
         let fx = Fixture::new(&[4096]);
         let report = fx.offload(1024);
-        let lop_pack = report.lop_pack.expect("lop pack");
+        let lop_pack = report.lop_pack.expect("lop pack").path;
         assert_eq!(
             std::fs::read_to_string(lop_pack.with_extension("keep")).unwrap(),
             format!("{LOP_KEEP_MESSAGE}\n")
@@ -864,6 +1153,8 @@ mod tests {
         opts.filter = Some(ObjectFilterSpec::BlobLimit(1024));
         opts.configure_lop = true;
         let report = offload_blobs(&fx.main(), &opts).unwrap();
+        let lop_dir = lop_dir_value(fx.lop().git_dir());
+        assert!(Path::new(&lop_dir).is_absolute());
         let keys: Vec<(OffloadRepo, &str, &str)> = report
             .config_changes
             .iter()
@@ -879,6 +1170,7 @@ mod tests {
                     "blob:limit=1024"
                 ),
                 (OffloadRepo::Main, "repack.writeBitmaps", "false"),
+                (OffloadRepo::Main, LOP_GIT_DIR_KEY, lop_dir.as_str()),
                 (OffloadRepo::Lop, "uploadpack.allowFilter", "true"),
                 (OffloadRepo::Lop, "uploadpack.allowAnySHA1InWant", "true"),
             ]
@@ -891,6 +1183,19 @@ mod tests {
         assert_eq!(
             crate::partial_clone::stored_remote_filter(&config, "lop"),
             Some(ObjectFilterSpec::BlobLimit(1024))
+        );
+        assert_eq!(config.get_all(LOP_GIT_DIR_KEY), [lop_dir.clone()]);
+
+        // The LOP is recorded once, however often offload runs.
+        let again = offload_blobs(&fx.main(), &opts).unwrap();
+        assert!(
+            again.config_changes.is_empty(),
+            "{:?}",
+            again.config_changes
+        );
+        assert_eq!(
+            fx.main().config().unwrap().get_all(LOP_GIT_DIR_KEY),
+            [lop_dir]
         );
     }
 
@@ -906,7 +1211,14 @@ mod tests {
             .iter()
             .map(|c| c.key.as_str())
             .collect();
-        assert_eq!(keys, ["remote.lop.promisor", "repack.writeBitmaps"]);
+        assert_eq!(
+            keys,
+            [
+                "remote.lop.promisor",
+                "repack.writeBitmaps",
+                LOP_GIT_DIR_KEY
+            ]
+        );
         assert_eq!(report.lop_ready, LopReadiness::default());
     }
 
@@ -960,10 +1272,8 @@ mod tests {
         assert_eq!(fx.files(&fx.main_dir(), "pack").len(), 1);
     }
 
-    #[test]
-    fn blobs_the_lop_keeps_are_not_copied_again() {
-        let fx = Fixture::new(&[2048]);
-        let lop = fx.lop();
+    /// Put `fx`'s first blob into a new LOP pack whose `.keep` marker says `message`.
+    fn pack_into_lop(fx: &Fixture, message: &str) {
         let pack = crate::pack_objects::build_pack_from_send_list(
             fx.main().odb(),
             &[fx.blobs[0]],
@@ -974,18 +1284,56 @@ mod tests {
         .unwrap();
         crate::index_pack::install_pack_bytes(
             pack,
-            lop.odb(),
+            fx.lop().odb(),
             &IngestPackOptions {
-                keep_message: Some("pinned".into()),
+                keep_message: Some(message.to_owned()),
                 ..IngestPackOptions::default()
             },
         )
         .unwrap();
+    }
+
+    #[test]
+    fn blobs_the_lop_keeps_are_not_copied_again() {
+        let fx = Fixture::new(&[2048]);
+        pack_into_lop(&fx, LOP_KEEP_MESSAGE);
         let report = fx.offload(1024);
         assert_eq!(report.already_in_lop, 1);
         assert_eq!(report.copied_to_lop, 0);
         assert!(report.lop_pack.is_none());
         assert_eq!(report.dropped_from_main, 1);
+    }
+
+    #[test]
+    fn a_copy_another_writer_keeps_for_a_while_is_not_trusted() {
+        // receive-pack and fetch-pack keep the pack they write until the refs are
+        // updated, then remove the marker; an operator's marker is no promise either.
+        for message in ["receive-pack 4242 on build-host", "pinned"] {
+            let fx = Fixture::new(&[2048]);
+            pack_into_lop(&fx, message);
+            let report = fx.offload(1024);
+            assert_eq!(report.already_in_lop, 0, "{message}");
+            assert_eq!(report.copied_to_lop, 1, "{message}");
+            let lop_pack = report.lop_pack.expect("copied").path;
+            let keep = std::fs::read_to_string(lop_pack.with_extension("keep")).unwrap();
+            assert_eq!(keep.trim_end(), LOP_KEEP_MESSAGE);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_lop_sharing_main_objects_is_refused() {
+        let fx = Fixture::new(&[2048]);
+        let lop_objects = fx.lop_dir().join("objects");
+        std::fs::remove_dir_all(&lop_objects).unwrap();
+        std::os::unix::fs::symlink(fx.main_dir().join("objects"), &lop_objects).unwrap();
+        let mut opts = OffloadOptions::new("lop", NOW);
+        opts.filter = Some(ObjectFilterSpec::BlobLimit(1024));
+        assert!(matches!(
+            offload_err(&fx, &opts),
+            OffloadError::LopIsMainRepository
+        ));
+        assert!(fx.main().odb().exists_stored(&fx.blobs[0]));
     }
 
     /// Remove the LOP's loose objects, as its `gc --prune=now` would for blobs
@@ -1052,7 +1400,7 @@ mod tests {
             .unwrap();
         let again = fx.offload(1024);
         assert_eq!(again.candidates, 0);
-        let pack = again.main_pack.expect("folded");
+        let pack = again.main_pack.expect("folded").path;
         let promisor: Vec<_> = fx
             .files(&fx.main_dir(), "promisor")
             .iter()
@@ -1100,6 +1448,80 @@ mod tests {
         assert_eq!(report.candidates, 0);
         assert_eq!(report.skipped_kept_pack, 1);
         assert!(fx.main().odb().exists_stored(&fx.blobs[0]));
+    }
+
+    /// Pack `oids` of main into a new pack with a `.keep` marker, dropping their
+    /// loose copies.
+    fn keep_in_main(fx: &Fixture, oids: &[ObjectId]) -> PathBuf {
+        let main = fx.main();
+        let pack = crate::pack_objects::build_pack_from_send_list(
+            main.odb(),
+            oids,
+            &std::collections::HashSet::new(),
+            &PackBuildOptions::default(),
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let installed = crate::index_pack::install_pack_bytes(
+            pack,
+            main.odb(),
+            &IngestPackOptions {
+                keep_message: Some("pinned".into()),
+                ..IngestPackOptions::default()
+            },
+        )
+        .unwrap();
+        crate::prune_packed::prune_packed_objects(main.odb().objects_dir(), Default::default())
+            .unwrap();
+        installed.pack_path.unwrap()
+    }
+
+    #[test]
+    fn a_kept_object_the_promisor_pack_would_name_stops_offload() {
+        // f1 (small, staying) has its only copy in an operator's kept pack, and the
+        // tree naming it is loose: in the promisor pack it would make f1 promised.
+        let fx = Fixture::new(&[2048, 10]);
+        let kept = keep_in_main(&fx, &[fx.blobs[1]]);
+        let mut opts = OffloadOptions::new("lop", NOW);
+        opts.filter = Some(ObjectFilterSpec::BlobLimit(1024));
+        for dry_run in [true, false] {
+            opts.dry_run = dry_run;
+            match offload_err(&fx, &opts) {
+                OffloadError::KeptPackObjectPromised { pack, oid, .. } => {
+                    assert_eq!(pack, kept);
+                    assert_eq!(oid, fx.blobs[1]);
+                }
+                other => panic!("got {other:?}"),
+            }
+        }
+        assert!(fx.files(&fx.lop_dir(), "pack").is_empty(), "nothing copied");
+        assert!(fx.files(&fx.main_dir(), "promisor").is_empty());
+        assert!(fx.main().odb().exists_stored(&fx.blobs[0]));
+
+        // Without the marker the pack is folded in like any other.
+        std::fs::remove_file(kept.with_extension("keep")).unwrap();
+        let report = fx.offload(1024);
+        assert_eq!(report.dropped_from_main, 1);
+        let main = fx.main();
+        let indexes = main.odb().local_pack_indexes().unwrap();
+        assert_eq!(indexes.len(), 1);
+        assert!(indexes[0].is_promisor);
+        assert!(indexes[0].find_position(&fx.blobs[1]).is_some());
+    }
+
+    #[test]
+    fn a_kept_pack_nothing_names_does_not_stop_offload() {
+        let fx = Fixture::new(&[2048]);
+        let stray = fx
+            .main()
+            .odb()
+            .write(ObjectKind::Blob, b"named by nothing")
+            .unwrap();
+        let kept = keep_in_main(&fx, &[stray]);
+        let report = fx.offload(1024);
+        assert_eq!(report.dropped_from_main, 1);
+        assert!(kept.is_file() && kept.with_extension("keep").is_file());
+        assert!(fx.main().odb().exists_stored(&stray));
     }
 
     #[test]

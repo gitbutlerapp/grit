@@ -1,6 +1,7 @@
 //! `grit gc` — repository maintenance tasks (pack-refs, repack, prune, commit-graph, …).
 
 use std::io::Write;
+use std::path::Path;
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
@@ -10,7 +11,8 @@ use grit_lib::maintenance::{
     prune_loose_objects, repack_all, write_commit_graph, write_midx, AutoGcOutcome, AutoGcReason,
     CommitGraphOptions, DropExpiry, DropPromisedBlobsOptions, DropPromisedBlobsReport,
     DropPromisedBlobsSkip, GcLock, GcOptions, GcPhaseTimings, GcStats, MidxOptions, OffloadOptions,
-    OffloadRepo, OffloadReport, PackRefsOptions, PruneOptions, RepackOptions,
+    OffloadPack, OffloadPackRole, OffloadRepo, OffloadReport, PackRefsOptions, PruneOptions,
+    RepackOptions,
 };
 use grit_lib::objects::midx::MidxBitmapWriteOutcome;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
@@ -287,6 +289,11 @@ impl DropSkipReason {
 pub struct DropLargeBlobsKeptJson {
     pub kept_pack: usize,
     pub outside_promisor_packs: usize,
+    /// No promisor stores it, and every promisor remote is on this machine.
+    pub not_in_promisor: usize,
+    /// No promisor on this machine stores it, and offload has run here, so the
+    /// network promisors cannot be trusted to have it.
+    pub unverified: usize,
     pub checked_out: usize,
     pub recently_checked_out: usize,
     pub recently_fetched: usize,
@@ -317,6 +324,8 @@ impl From<DropPromisedBlobsReport> for DropLargeBlobsSummary {
                 recently_checked_out: r.kept.recently_checked_out,
                 recently_fetched: r.kept.recently_fetched,
                 not_promised_elsewhere: r.kept.not_promised_elsewhere,
+                not_in_promisor: r.kept.not_in_promisor,
+                unverified: r.kept.unverified,
             },
             blobs: r
                 .dropped
@@ -344,6 +353,8 @@ impl DropLargeBlobsSummary {
                 "also stored outside promisor packs",
             ),
             (k.not_promised_elsewhere, "not promised by a promisor pack"),
+            (k.not_in_promisor, "not in the promisor"),
+            (k.unverified, "not confirmed in the promisor"),
             (k.kept_pack, "in kept packs"),
         ]
         .iter()
@@ -432,6 +443,8 @@ impl DropLargeBlobsSummary {
             "- **kept_not_promised_elsewhere:** {}",
             k.not_promised_elsewhere
         );
+        outln!(w, "- **kept_not_in_promisor:** {}", k.not_in_promisor);
+        outln!(w, "- **kept_unverified:** {}", k.unverified);
         outln!(w, "- **kept_pack:** {}", k.kept_pack);
         if !self.blobs.is_empty() {
             outln!(w, "\n| oid | size |\n| --- | ---: |");
@@ -461,12 +474,71 @@ pub struct OffloadSummary {
     pub skipped_kept_pack: usize,
     pub lop_pack: Option<String>,
     pub main_pack: Option<String>,
+    /// Every pack the run wrote, in order.
+    pub packs: Vec<OffloadPackJson>,
     pub main_bytes_before: u64,
     pub main_bytes_after: u64,
     pub config_changes: Vec<OffloadConfigChangeJson>,
     pub lop_ready: LopReadyJson,
     /// `promisor.advertise` is on, so clients are told about the promisor.
     pub advertised: bool,
+}
+
+/// One pack `grit gc offload` wrote.
+#[derive(Serialize, JsonSchema)]
+pub struct OffloadPackJson {
+    /// Which pack this is.
+    pub role: OffloadPackRoleJson,
+    /// The `.pack` file.
+    pub path: String,
+    /// Objects in the pack.
+    pub objects: usize,
+    /// Size of the `.pack` file in bytes.
+    pub bytes: u64,
+}
+
+/// Which pack `grit gc offload` wrote.
+#[derive(Clone, Copy, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum OffloadPackRoleJson {
+    /// The promisor's new pack of the blobs that moved.
+    Lop,
+    /// The main repository's `.promisor` pack of every object it keeps.
+    MainPromisor,
+    /// A pack this version of grit does not know.
+    Other,
+}
+
+impl From<OffloadPackRole> for OffloadPackRoleJson {
+    fn from(role: OffloadPackRole) -> Self {
+        match role {
+            OffloadPackRole::Lop => Self::Lop,
+            OffloadPackRole::MainPromisor => Self::MainPromisor,
+            _ => Self::Other,
+        }
+    }
+}
+
+impl OffloadPackRoleJson {
+    /// The JSON spelling, for Markdown output.
+    const fn slug(self) -> &'static str {
+        match self {
+            Self::Lop => "lop",
+            Self::MainPromisor => "main-promisor",
+            Self::Other => "other",
+        }
+    }
+}
+
+impl From<&OffloadPack> for OffloadPackJson {
+    fn from(p: &OffloadPack) -> Self {
+        Self {
+            role: p.role.into(),
+            path: filesystem_path_for_user(&p.path),
+            objects: p.objects,
+            bytes: p.bytes,
+        }
+    }
 }
 
 /// One config value `grit gc offload` set.
@@ -487,6 +559,7 @@ pub struct LopReadyJson {
 
 impl From<OffloadReport> for OffloadSummary {
     fn from(r: OffloadReport) -> Self {
+        let packs = r.packs().map(OffloadPackJson::from).collect();
         Self {
             remote: r.remote,
             lop_git_dir: filesystem_path_for_user(&r.lop_git_dir),
@@ -498,8 +571,15 @@ impl From<OffloadReport> for OffloadSummary {
             dropped_from_main: r.dropped_from_main,
             skipped_checked_out: r.skipped_checked_out,
             skipped_kept_pack: r.skipped_kept_pack,
-            lop_pack: r.lop_pack.as_deref().map(filesystem_path_for_user),
-            main_pack: r.main_pack.as_deref().map(filesystem_path_for_user),
+            lop_pack: r
+                .lop_pack
+                .as_ref()
+                .map(|p| filesystem_path_for_user(&p.path)),
+            main_pack: r
+                .main_pack
+                .as_ref()
+                .map(|p| filesystem_path_for_user(&p.path)),
+            packs,
             main_bytes_before: r.main_bytes_before,
             main_bytes_after: r.main_bytes_after,
             config_changes: r
@@ -561,6 +641,27 @@ impl OffloadSummary {
                 format_bytes(self.main_bytes_after)
             );
         }
+        for pack in &self.packs {
+            let name = Path::new(&pack.path)
+                .file_name()
+                .map_or_else(|| pack.path.clone(), |n| n.to_string_lossy().into_owned());
+            let label = match pack.role {
+                OffloadPackRoleJson::Lop => format!("{} pack", self.remote),
+                OffloadPackRoleJson::MainPromisor => "promisor pack".to_owned(),
+                OffloadPackRoleJson::Other => "pack".to_owned(),
+            };
+            outln!(
+                w,
+                "  wrote {label} {name} ({} {}, {})",
+                pack.objects,
+                if pack.objects == 1 {
+                    "object"
+                } else {
+                    "objects"
+                },
+                format_bytes(pack.bytes)
+            );
+        }
         let skipped = self.skipped_checked_out + self.skipped_kept_pack;
         if skipped > 0 {
             outln!(
@@ -613,6 +714,16 @@ impl OffloadSummary {
         }
         if let Some(path) = &self.main_pack {
             outln!(w, "- **main_pack:** `{path}`");
+        }
+        for pack in &self.packs {
+            outln!(
+                w,
+                "- **pack:** `{}` ({}, {} objects, {} bytes)",
+                pack.path,
+                pack.role.slug(),
+                pack.objects,
+                pack.bytes
+            );
         }
         outln!(w, "- **main_bytes_before:** {}", self.main_bytes_before);
         outln!(w, "- **main_bytes_after:** {}", self.main_bytes_after);

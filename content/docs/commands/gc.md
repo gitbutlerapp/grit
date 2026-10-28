@@ -122,7 +122,7 @@ Like `git prune`, `grit gc prune` returns immediately when there is no loose obj
 
 ### `grit gc offload`
 
-Moves large blobs out of the repository to a *large-object promisor* (LOP): a second repository that holds only the big blobs. The repository you run it in becomes a partial repository of the LOP. Its `remote.<REMOTE>.promisor` is set, and its remaining objects move into one `.promisor` pack. Clients that accept the LOP through the `promisor-remote` capability get packs without the offloaded blobs and fetch those from the LOP themselves (see [grit upload-pack](upload-pack.md#serving-a-repository-whose-large-blobs-live-elsewhere)). This is the layout Git's own large-object-promisor setup uses, built there with `git repack -a -d --filter=blob:limit=<n> --filter-to=<lop>`.
+Moves large blobs out of the repository to a *large-object promisor* (LOP): a second repository that holds only the big blobs. The repository you run it in becomes a partial repository of the LOP. Its `remote.<REMOTE>.promisor` is set, and its remaining objects move into one `.promisor` pack, the blobs it keeps included. Those blobs exist only in this repository, but they have to be in the promisor pack: Git treats every blob a tree in a promisor pack names as promised, and `git repack -a -d`, `git gc --prune=now` and `git gc` keep a promised object only when it sits in a promisor pack. A kept blob in an ordinary pack beside it would be deleted (or moved to a cruft pack and pruned two weeks later), with `git fsck` still clean and nothing to fetch it back from. Clients that accept the LOP through the `promisor-remote` capability get packs without the offloaded blobs and fetch those from the LOP themselves (see [grit upload-pack](upload-pack.md#serving-a-repository-whose-large-blobs-live-elsewhere)). This is the layout Git's own large-object-promisor setup uses, built there with `git repack -a -d --filter=blob:limit=<n> --filter-to=<lop>`.
 
 | Option | Description |
 | --- | --- |
@@ -132,11 +132,13 @@ Moves large blobs out of the repository to a *large-object promisor* (LOP): a se
 | `--configure-lop` | Also set `uploadpack.allowFilter` and `uploadpack.allowAnySHA1InWant` in the LOP, which it needs to answer clients' lazy fetches. |
 | `--dry-run` | Report what would move; write nothing. |
 
-Nothing is removed from the repository before the LOP holds it. The blobs go into one new LOP pack, whole, with a `.keep` marker written before the pack appears: nothing in the LOP refers to them, so this protects them from `gc` there. A blob the LOP already holds in a `.keep` pack of its own is not copied again. A loose or unkept copy there is copied anyway, since the LOP's next `gc` may prune it, and so is a copy the LOP only reaches through its alternates. Every blob is checked to be in a `.keep` pack of the LOP, and the new pack is flushed to disk. Only then are the config set and the repository's own packs and loose objects rewritten without the blobs. Unreachable objects are kept, and a pack pushed during the run is left alone. Blobs that a checkout needs (a worktree's index or `HEAD`) stay, as do blobs in `.keep` packs. `promisor.advertise` and `extensions.partialClone` are left for you to set. The run takes the `gc.pid` lock like `grit gc`.
+Nothing is removed from the repository before the LOP holds it. The blobs go into one new LOP pack, whole, with a `.keep` marker written before the pack appears: nothing in the LOP refers to them, so this protects them from `gc` there. A blob the LOP already holds in a pack an earlier offload wrote there (its `.keep` marker reads `grit offload: large-object promisor pack`) is not copied again. Any other copy there is copied anyway: a loose or unkept one, since the LOP's next `gc` may prune it, one in a pack kept for a while by another writer (`receive-pack` and `fetch-pack` keep the pack they write until they have updated the refs, then remove the marker), and one the LOP only reaches through its alternates. Every blob is checked to be in such a pack of the LOP, and the new pack is flushed to disk. Only then are the config set (including `grit.lopGitDir`, the LOP's git directory, which [`grit gc drop-large-blobs`](#grit-gc-drop-large-blobs) checks before dropping anything here) and the repository's own packs and loose objects rewritten without the blobs. Unreachable objects are kept, and a pack pushed during the run is left alone. Blobs that a checkout needs (a worktree's index or `HEAD`) stay, as do blobs in `.keep` packs. `promisor.advertise` and `extensions.partialClone` are left for you to set. The run takes the `gc.pid` lock like `grit gc`. It refuses a LOP that stores its objects where the repository does (the repository itself, a linked worktree of it, or a directory whose `objects/` is linked to the repository's).
+
+Offload never rewrites a `.keep` pack, and it refuses to run, before changing anything, when an ordinary `.keep` pack (one without `.promisor`) holds the only copy of an object that a commit, tree or tag going into the promisor pack names: the parent commit of a pushed one, or a file it left unchanged. Git would count that object as promised, and `git repack -a -d` deletes a promised object outside a promisor pack once the `.keep` marker is gone (while the marker stays, it also leaves any copy out of the promisor pack it writes, so a copy is no help). The error names the pack, the object and the one naming it. Remove the marker and run offload again to fold the pack in, or mark the pack `.promisor` yourself to keep it as it is. A `.keep` pack whose objects nothing else names is left alone. Without ordinary `.keep` packs the check costs nothing; with them, it reads the commits, trees and tags to be rewritten.
 
 Besides `remote.<REMOTE>.promisor`, offload sets `repack.writeBitmaps = false` in the repository, and the repository cannot use reachability bitmaps afterwards. A bitmap, for one pack or a multi-pack-index, needs every object its commits reach in the packs it covers, and the offloaded blobs are in none of them. Git's repack keeps promisor and other objects in separate packs, so once a push adds a commit outside the promisor pack, Git fails with `Packfile doesn't have full closure`: `git gc` exits 128 on a bare repository, where bitmaps are on by default, and `git repack -a -d -b --write-midx` fails as well (Git 2.50 and 2.56). `grit gc` and `grit gc repack --bitmaps` leave the bitmap out instead, so the setting is there for Git. Git's own `git repack --filter-to` setup fails the same way on a bare repository unless bitmaps are off.
 
-Run it again whenever new large blobs have been pushed. It moves only those. Each run also folds objects pushed since the last one back into the single `.promisor` pack, even when no blob moves, so later fetches can tell from the pack alone that an offloaded blob is promised. It does nothing when there is nothing to move or fold. `grit gc`, `git gc` and `git fsck` keep the offloaded blobs promised and never fetch them back, and pushes to the repository (through `grit receive-pack` or Git's) may name offloaded blobs in their trees.
+Run it again whenever new large blobs have been pushed. It moves only those. Each run also folds objects pushed since the last one back into the single `.promisor` pack, even when no blob moves, so later fetches can tell from the pack alone that an offloaded blob is promised, and Git's maintenance keeps the small blobs pushed since. A repository whose kept blobs sit in an ordinary pack (as an earlier grit wrote it) is folded the same way on the next run. It does nothing when there is nothing to move or fold. `grit gc`, `git gc` and `git fsck` keep the offloaded blobs promised and never fetch them back, and pushes to the repository (through `grit receive-pack` or Git's) may name offloaded blobs in their trees.
 
 #### Setting up a large-object promisor
 
@@ -149,9 +151,12 @@ $ grit config promisor.sendFields partialCloneFilter
 $ grit config uploadpack.allowFilter true
 $ grit gc offload --to lop --blobs 1m --configure-lop
 offload: moved 12 blobs (1.4 GiB) to lop; main packs 1.5 GiB -> 92 MiB (3104 ms).
+  wrote lop pack pack-bc97733c….pack (12 objects, 1.4 GiB)
+  wrote promisor pack pack-32d0e589….pack (59662 objects, 92 MiB)
   set remote.lop.promisor = true (main)
   set remote.lop.partialCloneFilter = blob:limit=1048576 (main)
   set repack.writeBitmaps = false (main)
+  set grit.lopGitDir = /srv/lop.git (main)
   set uploadpack.allowFilter = true (lop)
   set uploadpack.allowAnySHA1InWant = true (lop)
 ```
@@ -171,6 +176,7 @@ Reclaims space in a partial clone. A partial clone fetches large blobs when some
 A blob is dropped only when every one of these holds:
 
 - It is stored in a `.promisor` pack (fetched from a promisor remote), and nowhere else in the repository: not loose, not in an ordinary pack. None of the packs holding it has a `.keep` marker.
+- A promisor can supply it again. In a partial clone, a blob in a promisor pack was fetched from the promisor, so that is enough, and nothing else is read when every promisor remote is a network one. But [`grit gc offload`](#grit-gc-offload) puts the blobs only this repository has in its promisor pack too, so the promisors this machine can read are checked directly: promisor remotes with a local URL (a path or `file://`) and the LOP directories offload recorded in `grit.lopGitDir`. A blob one of them stores in its own object directory (not through its alternates) can go. In a LOP offload recorded, only a copy in a pack offload wrote there counts: nothing in the LOP reaches a blob, so its own `gc` prunes any other copy. A promisor that stores its objects where this repository does (a linked worktree of it, say) holds nothing for this. One none of them stores stays (`not_in_promisor`) when every promisor was read, and also (`unverified`) when offload has run here, since a network promisor cannot be asked whether it has a blob without fetching it, or when a promisor with a local path cannot be read: its directory no longer opens as a repository (a disk that is not mounted, say) or uses another object format.
 - A tree or tag stored in a promisor pack names it. That is what keeps it a *promised* object once it is gone, so `git fsck` and `git rev-list --exclude-promisor-objects` accept it as missing. A blob fetched by id and committed only in local trees stays.
 - No worktree's index or `HEAD` tree uses it (linked worktrees and sparse-index directories included). With `GIT_INDEX_FILE` set, that index counts as well as the worktree's own.
 - No commit that a worktree's `HEAD` reflog moved to or from since the cutoff uses it.
@@ -198,7 +204,7 @@ $ grit gc drop-large-blobs --older-than now
 drop-large-blobs: dropped 2 promised blobs >= 100 KiB, reclaimed 588 KiB (kept: 1 checked out) (9 ms).
 ```
 
-Deciding costs one header read per object in the promisor packs plus reading trees breadth first from the promisor commits until every candidate is found to be promised, so it is quick even on a large clone. On a `blob:limit=50k` clone with 142,261 objects (2,000 commits) and 1,000 versions of a 120 KiB file fetched back in 10 packs (release build, Apple M-series laptop), a dry run took 31 ms and the real run, which dropped 999 blobs and shrank the pack directory from 147 MiB to 30 MiB, 61 ms; `git fsck --strict` was clean afterwards. A blob that turns out not to be promised (fetched by id and named only by local trees) makes the check read every tree in the promisor packs before keeping it. Git 2.56's `repack --drop-filtered` was not available to compare; for scale, `git repack -a -d --filter=blob:limit=50k --filter-to=<dir>` on the same clone (Git 2.50.1), which rewrites every pack, took 0.97 s.
+Deciding costs one header read per object in the promisor packs plus reading trees breadth first from the promisor commits until every candidate is found to be promised, so it is quick even on a large clone. On a `blob:limit=50k` clone with 142,261 objects (2,000 commits) and 1,000 versions of a 120 KiB file fetched back in 10 packs (release build, Apple M-series laptop), a dry run took 31 ms and the real run, which dropped 999 blobs and shrank the pack directory from 147 MiB to 30 MiB, 61 ms; `git fsck --strict` was clean afterwards. A blob that turns out not to be promised (fetched by id and named only by local trees) makes the check read every tree in the promisor packs before keeping it. Git 2.56's `repack --drop-filtered` was not available to compare; for scale, `git repack -a -d --filter=blob:limit=50k --filter-to=<dir>` on the same clone (Git 2.50.1), which rewrites every pack, took 0.97 s. Where a promisor is checked directly, that check comes right after the pack scan and costs one index lookup per candidate in each of its packs: on a 369,000-object repository offloaded at `100k`, a dry run at `--min-size 10k` took 0.2 s to keep all 39,870 candidates as `not_in_promisor`.
 
 ## Examples
 
@@ -331,12 +337,13 @@ The `offload` task (from `grit gc offload`) has these fields:
 | `tasks[].candidates` | number | Blobs selected that may move. |
 | `tasks[].candidate_bytes` | number | Their uncompressed size. |
 | `tasks[].copied_to_lop` | number | Blobs written into a new LOP pack. |
-| `tasks[].already_in_lop` | number | Blobs the LOP already had in a `.keep` pack of its own. |
+| `tasks[].already_in_lop` | number | Blobs the LOP already had in a pack an earlier offload wrote there. |
 | `tasks[].dropped_from_main` | number | Blobs no longer stored here afterwards (`0` on a dry run). |
 | `tasks[].skipped_checked_out` | number | Selected blobs kept because a worktree's index or `HEAD` needs them. |
 | `tasks[].skipped_kept_pack` | number | Selected blobs kept because they are in a `.keep` pack. |
 | `tasks[].lop_pack` | string or null | The pack added to the LOP. |
-| `tasks[].main_pack` | string or null | The `.promisor` pack the rest of the repository now lives in; null when nothing had to be rewritten. |
+| `tasks[].main_pack` | string or null | The `.promisor` pack the rest of the repository (its commits, trees, tags and the blobs it keeps) now lives in; null when nothing had to be rewritten. |
+| `tasks[].packs` | array | Every pack the run wrote, in order: `role` (`lop` or `main-promisor`), `path` (the `.pack` file), `objects` and `bytes` (size of the `.pack` file). Empty on a dry run or when nothing was written. |
 | `tasks[].main_bytes_before` | number | Size of this repository's packs and loose objects before the run. |
 | `tasks[].main_bytes_after` | number | The same afterwards. |
 | `tasks[].config_changes` | array | Each `{repo, key, value}` set, `repo` being `main` or `lop`. |
@@ -362,12 +369,17 @@ The `offload` task (from `grit gc offload`) has these fields:
       "skipped_kept_pack": 0,
       "lop_pack": "/srv/lop.git/objects/pack/pack-bc97733c….pack",
       "main_pack": "/srv/main.git/objects/pack/pack-32d0e589….pack",
+      "packs": [
+        { "role": "lop", "path": "/srv/lop.git/objects/pack/pack-bc97733c….pack", "objects": 2, "bytes": 500324 },
+        { "role": "main-promisor", "path": "/srv/main.git/objects/pack/pack-32d0e589….pack", "objects": 6, "bytes": 506 }
+      ],
       "main_bytes_before": 500813,
       "main_bytes_after": 1690,
       "config_changes": [
         { "repo": "main", "key": "remote.lop.promisor", "value": "true" },
         { "repo": "main", "key": "remote.lop.partialCloneFilter", "value": "blob:limit=102400" },
-        { "repo": "main", "key": "repack.writeBitmaps", "value": "false" }
+        { "repo": "main", "key": "repack.writeBitmaps", "value": "false" },
+        { "repo": "main", "key": "grit.lopGitDir", "value": "/srv/lop.git" }
       ],
       "lop_ready": { "allow_filter": true, "allow_any_sha1_in_want": true },
       "advertised": true
@@ -387,7 +399,7 @@ The `drop-large-blobs` task (from `grit gc drop-large-blobs`, or from `grit gc` 
 | `tasks[].bytes_reclaimed` | number | Bytes freed from the pack directory; on a dry run, the packed size of the dropped entries. |
 | `tasks[].packs_rewritten` | number | Promisor packs rewritten without the dropped blobs. |
 | `tasks[].packs_removed` | number | Promisor packs deleted because they held only dropped blobs. |
-| `tasks[].kept` | object | Candidates that stayed, each counted once under the first reason that applies: `kept_pack`, `outside_promisor_packs`, `checked_out`, `recently_checked_out`, `recently_fetched`, `not_promised_elsewhere`. |
+| `tasks[].kept` | object | Candidates that stayed, each counted once under the first reason that applies: `kept_pack`, `outside_promisor_packs`, `not_in_promisor` (no promisor stores it, and every promisor is on this machine and was read), `unverified` (no promisor this machine could read stores it, and offload has run here, so a network promisor is not trusted to, or a local promisor could not be read), `checked_out`, `recently_checked_out`, `recently_fetched`, `not_promised_elsewhere`. |
 | `tasks[].blobs` | array | `{oid, size}` for each dropped blob, sorted by `oid`. |
 | `tasks[].skipped` | string | `grit gc` only, when the enabled phase did not run: `no-promisor-remote`, `operation-in-progress`, `precious-objects`, `no-current-time` (a library caller gave gc no time; the `grit` command always does) or `other` (a reason newer than this grit). |
 
@@ -407,6 +419,8 @@ The `drop-large-blobs` task (from `grit gc drop-large-blobs`, or from `grit gc` 
       "kept": {
         "kept_pack": 0,
         "outside_promisor_packs": 0,
+        "not_in_promisor": 0,
+        "unverified": 0,
         "checked_out": 1,
         "recently_checked_out": 0,
         "recently_fetched": 0,
