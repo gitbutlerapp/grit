@@ -103,6 +103,7 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
             sort_paths: true,
             use_untracked_cache: false,
             cache_miss: UntrackedCacheMissAction::RefreshFull,
+            clean_unit_dirs: None,
         },
         &worktree_rules,
         None,

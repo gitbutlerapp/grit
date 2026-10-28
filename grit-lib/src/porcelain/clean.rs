@@ -93,15 +93,18 @@ pub fn clean_untracked(
     // Match `git clean` without `-d`: never enumerate nested files inside untracked directories.
     let show_all = false;
 
+    let clean_unit_dirs =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
     let scan = UntrackedScan {
         ignored_mode,
         show_all,
         sort_paths: true,
         use_untracked_cache: false,
         cache_miss: UntrackedCacheMissAction::RefreshFull,
+        clean_unit_dirs: Some(std::sync::Arc::clone(&clean_unit_dirs)),
     };
 
-    let (untracked, ignored, _) = collect_untracked_and_ignored_inner(
+    let (untracked, ignored, collect_meta) = collect_untracked_and_ignored_inner(
         repo,
         &mut index,
         work_tree,
@@ -143,7 +146,9 @@ pub fn clean_untracked(
         let paths_to_add = if rel.ends_with('/') {
             let trimmed = rel.trim_end_matches('/');
             let abs = work_tree.join(trimmed);
-            if nested_git_worktree_descendant_under(&abs)
+            if collect_meta.clean_collapsed_unit.contains(&rel) {
+                vec![rel]
+            } else if nested_git_worktree_descendant_under(&abs)
                 || (!clean_scope_includes_ignored(opts.scope)
                     && dir_preserves_ignored_descendants(repo, &index, &rules, work_tree, &abs)?)
                 || (!opts.excludes.is_empty()
@@ -452,7 +457,8 @@ fn walk_dir_preserves_ignored(
             continue;
         }
         let path = entry.path();
-        if path.is_dir() {
+        let is_dir = crate::read_dir_kind::entry_is_dir(&entry).unwrap_or(false);
+        if is_dir {
             if is_nested_git_worktree(&path) {
                 continue;
             }
@@ -480,18 +486,15 @@ fn walk_dir_preserves_ignored(
 }
 
 fn nested_git_worktree_descendant_under(dir_abs: &Path) -> bool {
-    if !dir_abs.is_dir() {
-        return false;
-    }
     let entries = match fs::read_dir(dir_abs) {
         Ok(e) => e,
         Err(_) => return false,
     };
     for entry in entries.filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if !path.is_dir() {
+        if !crate::read_dir_kind::entry_is_dir(&entry).unwrap_or(false) {
             continue;
         }
+        let path = entry.path();
         if is_nested_git_worktree(&path) {
             return true;
         }
@@ -559,7 +562,7 @@ fn walk_expand_collapsed_dir(
         } else {
             format!("{rel}/{name}")
         };
-        if child_abs.is_dir() {
+        if crate::read_dir_kind::entry_is_dir(&entry).unwrap_or(false) {
             child_dirs.push((child_rel, child_abs));
         } else if removable_untracked_path(repo, index, rules, scope, &child_rel)? {
             out.push(child_rel);
@@ -630,7 +633,7 @@ fn index_gitlink_at(index: &Index, rel: &str) -> bool {
 
 /// True when `abs` is a directory containing a nested `.git` (embedded repository).
 pub(crate) fn is_nested_git_worktree(abs: &Path) -> bool {
-    abs.is_dir() && abs.join(".git").exists()
+    abs.join(".git").exists()
 }
 
 /// True when `rel` names a nested repository root or a path inside one (matches `git clean` / `git stash -u`).

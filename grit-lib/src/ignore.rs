@@ -212,6 +212,8 @@ pub struct IgnoreMatcher {
     dir_exclude_stack_cache: HashMap<String, Vec<String>>,
     /// Fold ASCII case when comparing patterns and base directories (`core.ignorecase`).
     ignore_case: bool,
+    /// Repository-relative directories entered during a depth-first walk (skip restat in EXC_DIRS).
+    known_worktree_directories: std::collections::HashSet<String>,
 }
 
 impl IgnoreMatcher {
@@ -551,6 +553,7 @@ impl IgnoreMatcher {
         if self.gitignore_cache.contains_key(dir_rel) {
             return Ok(());
         }
+        self.known_worktree_directories.insert(dir_rel.to_owned());
         let per_dir_name = self.per_directory_name.clone();
         let rules = load_gitignore_for_dir(
             repo,
@@ -589,12 +592,15 @@ impl IgnoreMatcher {
                                 cur.push('/');
                             }
                             cur.push_str(segment);
-                            if worktree_path_is_existing_file(repo, &cur) {
+                            if self.known_worktree_directories.contains(&cur) {
+                                dirs.push(cur.clone());
+                            } else if worktree_path_is_existing_file(repo, &cur) {
                                 // Git does not treat a file path as a directory for EXC_DIRS
                                 // loading (`tracked.txt/.gitignore` must not be probed).
                                 break;
+                            } else {
+                                dirs.push(cur.clone());
                             }
-                            dirs.push(cur.clone());
                         }
                     }
                     self.per_dir_dirs_cache = Some((parent.to_string(), dirs.clone()));
@@ -1069,7 +1075,6 @@ enum InTreePatternFile {
 /// Read `path` without following a final symlink, so a link (dangling, or to a FIFO or
 /// device) is reported instead of opened. A missing file costs a single failed open on Unix.
 fn read_in_tree_pattern_file(path: &Path) -> Result<InTreePatternFile> {
-    let is_symlink = || fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
     #[cfg(unix)]
     let opened = {
         use std::os::unix::fs::OpenOptionsExt;
@@ -1079,18 +1084,22 @@ fn read_in_tree_pattern_file(path: &Path) -> Result<InTreePatternFile> {
             .open(path)
     };
     #[cfg(not(unix))]
-    let opened = if is_symlink() {
-        return Ok(InTreePatternFile::Symlink);
-    } else {
-        fs::File::open(path)
+    let opened = match fs::symlink_metadata(path) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(InTreePatternFile::Missing);
+        }
+        Err(err) => return Err(Error::Io(err)),
+        Ok(meta) if meta.file_type().is_symlink() => return Ok(InTreePatternFile::Symlink),
+        Ok(_) => fs::File::open(path),
     };
     let mut file = match opened {
         Ok(file) => file,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return Ok(InTreePatternFile::Missing);
         }
-        // `O_NOFOLLOW` fails with `ELOOP` (or `EMLINK` on some BSDs) on a symlink.
-        Err(_) if is_symlink() => return Ok(InTreePatternFile::Symlink),
+        Err(_) if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) => {
+            return Ok(InTreePatternFile::Symlink);
+        }
         Err(err) => return Err(Error::Io(err)),
     };
     let mut content = String::new();

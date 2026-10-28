@@ -207,6 +207,7 @@ mod checkout_gitlink_uninitialized_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "checkout_hostile_paths_git_compat.rs"]
 mod checkout_hostile_paths_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "checkout_ignorecase_collision_commit.rs"]
 mod checkout_ignorecase_collision_commit;
 #[cfg(feature = "full-tests")]
