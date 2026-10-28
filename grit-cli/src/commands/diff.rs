@@ -20,8 +20,8 @@ use grit_lib::diff::{
     diff_commits_with_renames_and_policy, diff_index_to_tree_with_renames,
     diff_index_to_worktree_with_renames, diff_trees_with_renames_and_policy,
     for_each_tree_diff_structured, hunk_ids_with_duplicate_peers, line_change_counts,
-    peer_hunks_by_primary_path, peer_scope_includes_path, read_submodule_head_oid,
-    read_worktree_side_bytes_for_diff, resolve_diff_request, sort_entries_by_path,
+    load_odb_blob_side_for_diff, load_worktree_side_for_diff, peer_hunks_by_primary_path,
+    peer_scope_includes_path, read_submodule_head_oid, resolve_diff_request, sort_entries_by_path,
     structured::{
         format_hunk_range, structured_file_diff, SideBytes, StructuredFileDiff, StructuredLineKind,
     },
@@ -2136,7 +2136,8 @@ fn old_side_bytes(odb: &Odb, e: &DiffEntry) -> Result<(SideBytes, bool)> {
     if e.old_mode == FileMode::ABSENT {
         return Ok((SideBytes::from_bytes(Vec::new()), false));
     }
-    blob_bytes(odb, &e.old_oid)
+    let path = e.old_path.as_deref().or(e.new_path.as_deref());
+    load_odb_blob_side_for_diff(odb, &e.old_oid, path, None, false).map_err(Into::into)
 }
 
 fn new_side_bytes(
@@ -2161,7 +2162,7 @@ fn new_side_bytes(
         let path_bytes = grit_lib::repo_relpath::storage_bytes(p);
         let index_entry = ctx.index.get(&path_bytes, 0);
         let rules = ctx.rules.lock().unwrap_or_else(|e| e.into_inner());
-        let data = read_worktree_side_bytes_for_diff(
+        load_worktree_side_for_diff(
             odb,
             ctx.work_tree,
             p,
@@ -2169,10 +2170,12 @@ fn new_side_bytes(
             rules.config(),
             index_entry,
             Some(&rules),
-        )?;
-        Ok(bytes_for_diff(data))
+            false,
+        )
+        .map_err(Into::into)
     } else {
-        blob_bytes(odb, &e.new_oid)
+        let path = e.new_path.as_deref().or(e.old_path.as_deref());
+        load_odb_blob_side_for_diff(odb, &e.new_oid, path, None, false).map_err(Into::into)
     }
 }
 
@@ -2204,24 +2207,6 @@ fn gitlink_new_line(e: &DiffEntry, work_tree: Option<&Path>) -> String {
             path.is_some_and(|p| submodule_porcelain_flags(wt, p, e.old_oid).modified)
         });
     gitlink_line(&resolved, if dirty { Some("-dirty") } else { None })
-}
-
-/// Read a blob. Returns `(bytes, is_binary)`; a zero oid → empty.
-fn blob_bytes(odb: &Odb, oid: &ObjectId) -> Result<(SideBytes, bool)> {
-    if *oid == ObjectId::zero() {
-        return Ok((SideBytes::from_bytes(Vec::new()), false));
-    }
-    let data = odb.read(oid)?.data;
-    Ok(bytes_for_diff(data))
-}
-
-/// Convert bytes to `(SideBytes, is_binary)`. NUL in the first 8 KiB ⇒ binary.
-fn bytes_for_diff(data: Vec<u8>) -> (SideBytes, bool) {
-    if data[..data.len().min(8000)].contains(&0) {
-        (SideBytes::from_bytes(Vec::new()), true)
-    } else {
-        (SideBytes::from_bytes(data), false)
-    }
 }
 
 fn structured_for_file_change(fc: &FileChange, diff_options: DiffOptions) -> StructuredFileDiff {

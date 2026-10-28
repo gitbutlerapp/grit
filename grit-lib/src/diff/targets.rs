@@ -14,10 +14,10 @@ use crate::diff::structured::{
 use crate::diff::{
     apply_rename_detection_to_diff_entries, diff_commits_with_renames_and_policy,
     diff_index_to_tree_with_renames, diff_index_to_worktree_with_renames,
-    diff_tree_to_worktree_with_git_dir_and_rules, index_mtime_for_diff, read_submodule_head_oid,
-    read_worktree_side_bytes_for_diff, sort_entries_by_path, submodule_porcelain_flags,
-    tree_diff_structured_parallel, DiffEntry, DiffIndexToWorktreeOptions, DiffOptions, DiffStatus,
-    TreeDiffStructured,
+    diff_tree_to_worktree_with_git_dir_and_rules, index_mtime_for_diff,
+    load_odb_blob_side_for_diff, load_worktree_side_for_diff, read_submodule_head_oid,
+    sort_entries_by_path, submodule_porcelain_flags, tree_diff_structured_parallel, DiffEntry,
+    DiffIndexToWorktreeOptions, DiffOptions, DiffStatus, TreeDiffStructured,
 };
 use crate::error::{Error, PathspecResolveError, Result};
 use crate::index::Index;
@@ -1185,7 +1185,8 @@ fn old_side_bytes(odb: &Odb, e: &DiffEntry) -> Result<(SideBytes, bool)> {
     if e.old_mode == FileMode::ABSENT {
         return Ok((SideBytes::from_bytes(Vec::new()), false));
     }
-    blob_bytes(odb, &e.old_oid)
+    let path = e.old_path.as_deref().or(e.new_path.as_deref());
+    load_odb_blob_side_for_diff(odb, &e.old_oid, path, None, false)
 }
 
 fn new_side_bytes(
@@ -1207,7 +1208,7 @@ fn new_side_bytes(
         let mode = e.new_mode.bits();
         let index_entry = ctx.index.get(p.as_bytes(), 0);
         let rules = ctx.rules.lock().unwrap_or_else(|e| e.into_inner());
-        let data = read_worktree_side_bytes_for_diff(
+        load_worktree_side_for_diff(
             odb,
             ctx.work_tree,
             p,
@@ -1215,10 +1216,11 @@ fn new_side_bytes(
             rules.config(),
             index_entry,
             Some(&rules),
-        )?;
-        Ok(bytes_for_diff(data))
+            false,
+        )
     } else {
-        blob_bytes(odb, &e.new_oid)
+        let path = e.new_path.as_deref().or(e.old_path.as_deref());
+        load_odb_blob_side_for_diff(odb, &e.new_oid, path, None, false)
     }
 }
 
@@ -1248,22 +1250,6 @@ fn gitlink_new_line(e: &DiffEntry, work_tree: Option<&Path>) -> String {
             path.is_some_and(|p| submodule_porcelain_flags(wt, p, e.old_oid).modified)
         });
     gitlink_line(&resolved, if dirty { Some("-dirty") } else { None })
-}
-
-fn blob_bytes(odb: &Odb, oid: &ObjectId) -> Result<(SideBytes, bool)> {
-    if *oid == ObjectId::zero() {
-        return Ok((SideBytes::from_bytes(Vec::new()), false));
-    }
-    let data = odb.read(oid)?.data;
-    Ok(bytes_for_diff(data))
-}
-
-fn bytes_for_diff(data: Vec<u8>) -> (SideBytes, bool) {
-    if data.iter().take(8000).any(|&b| b == 0) {
-        (SideBytes::from_bytes(Vec::new()), true)
-    } else {
-        (SideBytes::from_bytes(data), false)
-    }
 }
 
 /// Unstaged file diffs with staged peer hunks per path (for stable hunk ids).

@@ -4386,18 +4386,32 @@ fn status_size_change_proves_modified(
 
 /// Report `ie` modified when [`status_size_change_proves_modified`] holds; returns whether it
 /// did. The worktree side uses the null OID because the file was not hashed.
-#[must_use]
+#[allow(clippy::too_many_arguments)]
 fn try_push_status_modified_on_size_mismatch(
+    odb: &Odb,
     ie: &IndexEntry,
     path_str_ref: &str,
     worktree_size: u32,
     worktree_mode: u32,
+    raw_worktree_len: u64,
     for_status: bool,
     conversion_is_identity: impl FnOnce() -> bool,
     result: &mut Vec<DiffEntry>,
-) -> bool {
-    if !status_size_change_proves_modified(ie, worktree_size, for_status, conversion_is_identity) {
-        return false;
+) -> Result<bool> {
+    let identity = conversion_is_identity();
+    let size_differs = worktree_size != ie.size;
+    if !size_differs || !identity {
+        return Ok(false);
+    }
+    let threshold = odb.big_file_threshold()?;
+    let big_file = raw_worktree_len > threshold;
+    let proves_modified = if big_file {
+        true
+    } else {
+        status_size_change_proves_modified(ie, worktree_size, for_status, || identity)
+    };
+    if !proves_modified {
+        return Ok(false);
     }
     result.push(worktree_content_change_entry(
         ie,
@@ -4405,7 +4419,7 @@ fn try_push_status_modified_on_size_mismatch(
         worktree_mode,
         zero_oid(),
     ));
-    true
+    Ok(true)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4476,14 +4490,16 @@ fn push_index_blob_worktree_diff(
 
     let file_attrs = file_attrs_for(path_str_ref);
     if try_push_status_modified_on_size_mismatch(
+        odb,
         ie,
         path_str_ref,
         crate::index::munge_index_size(meta.len()),
         worktree_mode,
+        meta.len(),
         for_status,
         || crate::crlf::git_conversion_is_identity(conv, &file_attrs),
         result,
-    ) {
+    )? {
         return Ok(());
     }
 
@@ -5200,14 +5216,16 @@ fn diff_index_to_worktree_inner(
                             ie.oid,
                         ));
                     } else if try_push_status_modified_on_size_mismatch(
+                        odb,
                         ie,
                         path_str_ref,
                         stat.worktree_size(),
                         worktree_mode,
+                        stat.raw_size,
                         options.for_status,
                         || conversion_is_identity(entry_index, path_str_ref),
                         &mut result,
-                    ) {
+                    )? {
                     } else if !refresh_content_verified[entry_index] {
                         let file_path = index_entry_worktree_abs_bytes(
                             work_tree,
@@ -6697,6 +6715,39 @@ pub fn read_worktree_side_bytes_for_diff(
     index_entry: Option<&IndexEntry>,
     worktree_rules: Option<&crate::worktree_rules::WorktreeRules>,
 ) -> Result<Vec<u8>> {
+    Ok(load_worktree_side_for_diff(
+        odb,
+        work_tree,
+        rel_path,
+        mode,
+        config,
+        index_entry,
+        worktree_rules,
+        false,
+    )?
+    .0
+    .data)
+}
+
+/// Load worktree bytes for diffing, optionally skipping reads above `core.bigFileThreshold`.
+///
+/// Returns empty [`super::structured::SideBytes`] with `binary = true` when the file is not read.
+///
+/// # Errors
+///
+/// Returns I/O errors from the worktree path or [`Error`] from filter conversion.
+#[allow(clippy::too_many_arguments)]
+pub fn load_worktree_side_for_diff(
+    odb: &Odb,
+    work_tree: &Path,
+    rel_path: &str,
+    mode: u32,
+    config: &crate::config::ConfigSet,
+    index_entry: Option<&IndexEntry>,
+    worktree_rules: Option<&crate::worktree_rules::WorktreeRules>,
+    force_read_content: bool,
+) -> Result<(super::structured::SideBytes, bool)> {
+    use super::tree_content::{bytes_for_diff, treat_side_as_binary_without_reading};
     let file_path = crate::repo_relpath::worktree_abs(work_tree, rel_path);
     let rel_match = crate::repo_relpath::as_utf8_for_matching(rel_path);
     let meta = fs::symlink_metadata(&file_path).map_err(|source| {
@@ -6714,10 +6765,18 @@ pub fn read_worktree_side_bytes_for_diff(
                 source,
             )
         })?;
-        return Ok(symlink_target_bytes(&target));
+        return Ok((
+            super::structured::SideBytes::from_bytes(symlink_target_bytes(&target)),
+            false,
+        ));
     }
-    if let Some(rules) = worktree_rules {
-        return worktree_blob_bytes(
+    if !force_read_content
+        && treat_side_as_binary_without_reading(odb, meta.len(), Some(rel_match.as_ref()), false)?
+    {
+        return Ok((super::structured::SideBytes::from_bytes(Vec::new()), true));
+    }
+    let data = if let Some(rules) = worktree_rules {
+        worktree_blob_bytes(
             odb,
             &file_path,
             &meta,
@@ -6726,21 +6785,24 @@ pub fn read_worktree_side_bytes_for_diff(
             rel_match.as_ref(),
             index_entry,
             Some(rules.filter_process()),
-        );
-    }
-    let conv = crate::crlf::ConversionConfig::from_config(config);
-    let attrs = crate::crlf::load_gitattributes(work_tree);
-    let file_attrs = crate::crlf::get_file_attrs(&attrs, rel_match.as_ref(), meta.is_dir(), config);
-    worktree_blob_bytes(
-        odb,
-        &file_path,
-        &meta,
-        &conv,
-        &file_attrs,
-        rel_match.as_ref(),
-        index_entry,
-        None,
-    )
+        )?
+    } else {
+        let conv = crate::crlf::ConversionConfig::from_config(config);
+        let attrs = crate::crlf::load_gitattributes(work_tree);
+        let file_attrs =
+            crate::crlf::get_file_attrs(&attrs, rel_match.as_ref(), meta.is_dir(), config);
+        worktree_blob_bytes(
+            odb,
+            &file_path,
+            &meta,
+            &conv,
+            &file_attrs,
+            rel_match.as_ref(),
+            index_entry,
+            None,
+        )?
+    };
+    Ok(bytes_for_diff(data))
 }
 
 /// Symlink target as the byte string Git hashes for the blob OID.
@@ -13453,6 +13515,43 @@ mod smudge_racily_clean_tests {
             "must report modified, not refresh stat clean: {entries:?}, index_changed={index_changed}"
         );
         assert_eq!(entries[0].path(), rel);
+    }
+
+    #[test]
+    fn diff_name_status_skips_big_worktree_read_on_size_mismatch() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (git_dir, odb) = minimal_repo(wt, "[core]\n\tbigFileThreshold = 4k\n");
+        let rel = "big.bin";
+        let indexed = vec![b'x'; 100];
+        let mut index = Index::new();
+        index
+            .entries
+            .push(staged_entry_for_file(&odb, wt, rel, &indexed, (100, 0)));
+        fs::write(wt.join(rel), vec![b'y'; 5000]).expect("rewrite bigger");
+        let metrics = odb.hot_path_metrics();
+        metrics.reset_blob_content_reads();
+        metrics.set_blob_counting(true);
+        let (entries, _) = super::diff_index_to_worktree_with_options(
+            &odb,
+            &mut index,
+            wt,
+            super::DiffIndexToWorktreeOptions {
+                repository_git_dir: Some(git_dir),
+                for_status: false,
+                ..Default::default()
+            },
+        )
+        .expect("diff");
+        metrics.set_blob_counting(false);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].status, super::DiffStatus::Modified);
+        assert_eq!(entries[0].new_oid, super::zero_oid());
+        assert_eq!(
+            metrics.blob_content_reads(),
+            0,
+            "large size-only drift must not hash or read the worktree"
+        );
     }
 
     #[test]

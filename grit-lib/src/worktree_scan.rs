@@ -452,6 +452,8 @@ pub(crate) struct BlobDiskStat {
     pub(crate) fields: crate::index::IndexStatFields,
     pub(crate) git_mode: u32,
     pub(crate) is_dir: bool,
+    /// Worktree byte length before index munging (`st_size` / `metadata.len()`).
+    pub(crate) raw_size: u64,
 }
 
 impl BlobDiskStat {
@@ -468,6 +470,7 @@ impl BlobDiskStat {
                 crate::index::MODE_REGULAR
             },
             is_dir: kind == libc::S_IFDIR,
+            raw_size: stat.st_size as u64,
         }
     }
 
@@ -477,6 +480,7 @@ impl BlobDiskStat {
             fields: crate::index::IndexStatFields::from_metadata(meta),
             git_mode: crate::diff::mode_from_metadata(meta),
             is_dir: meta.is_dir() && !meta.file_type().is_symlink(),
+            raw_size: meta.len(),
         }
     }
 

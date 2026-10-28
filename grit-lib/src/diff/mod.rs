@@ -35,6 +35,7 @@ pub(crate) use posix_ere::PosixBre;
 mod targets;
 mod tree_content;
 pub(crate) use tree_content::gitlink_line;
+pub use tree_content::{bytes_for_diff, load_odb_blob_side_for_diff};
 mod unified_emit;
 mod whitespace_mode;
 

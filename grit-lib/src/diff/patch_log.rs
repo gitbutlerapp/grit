@@ -29,7 +29,8 @@ use crate::worktree_rules::WorktreeRules;
 
 use super::merge_commit::commit_first_parent_diff_entries;
 use super::merge_commit::DiffMerges;
-use super::{empty_blob_oid, read_worktree_side_bytes_for_diff, zero_oid, DiffEntry, DiffStatus};
+use super::tree_content::load_odb_blob_side_for_diff;
+use super::{empty_blob_oid, load_worktree_side_for_diff, zero_oid, DiffEntry, DiffStatus};
 
 /// How much commit metadata precedes each patch in [`write_commit_log_patch`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -342,8 +343,10 @@ fn write_diff_entry_patch_from_structured<W: Write>(
         write_structured_unified_body(out, git_old, git_new, old_mode, new_mode, structured)?;
         return Ok(());
     }
-    let old_bytes = read_blob_side(odb, entry.old_oid, old_mode == 0)?;
-    let new_bytes = read_blob_side(odb, entry.new_oid, new_mode == 0)?;
+    let path = entry.new_path.as_deref().or(entry.old_path.as_deref());
+    let force_read = is_binary;
+    let old_bytes = read_blob_side(odb, entry.old_oid, old_mode == 0, path, force_read)?;
+    let new_bytes = read_blob_side(odb, entry.new_oid, new_mode == 0, path, force_read)?;
     if old_bytes == new_bytes {
         return Ok(());
     }
@@ -873,8 +876,12 @@ fn write_diff_entry_patch<W: Write>(
 ) -> Result<()> {
     let old_mode = entry.old_mode.bits();
     let new_mode = entry.new_mode.bits();
-    let old_bytes = read_blob_side(odb, entry.old_oid, old_mode == 0)?;
-    let new_bytes = read_blob_side(odb, entry.new_oid, new_mode == 0)?;
+    let path = entry.new_path.as_deref().or(entry.old_path.as_deref());
+    let force_read = binary_format == LogPatchBinaryFormat::GitApplyBinaryPatch;
+    let (old_bytes, old_bin) =
+        load_patch_blob_side(odb, entry.old_oid, old_mode == 0, path, force_read)?;
+    let (new_bytes, new_bin) =
+        load_patch_blob_side(odb, entry.new_oid, new_mode == 0, path, force_read)?;
     write_diff_entry_patch_with_resolved_bytes(
         out,
         repo,
@@ -883,6 +890,7 @@ fn write_diff_entry_patch<W: Write>(
         abbrev_cache,
         binary_format,
         config,
+        old_bin || new_bin,
         &old_bytes,
         &new_bytes,
         new_tree,
@@ -898,6 +906,7 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
     abbrev_cache: &mut OidAbbrevCache,
     binary_format: LogPatchBinaryFormat,
     config: &ConfigSet,
+    side_known_binary: bool,
     old_bytes: &[u8],
     new_bytes: &[u8],
     new_tree: Option<&ObjectId>,
@@ -915,11 +924,12 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
         .unwrap_or("dev/null");
     let old_mode = entry.old_mode.bits();
     let new_mode = entry.new_mode.bits();
-    let is_binary = merge_file::is_binary(old_bytes) || merge_file::is_binary(new_bytes);
+    let is_binary =
+        side_known_binary || merge_file::is_binary(old_bytes) || merge_file::is_binary(new_bytes);
     let index_full_oid = is_binary && binary_format == LogPatchBinaryFormat::GitApplyBinaryPatch;
     write_diff_entry_patch_headers(out, repo, entry, opts, abbrev_cache, index_full_oid)?;
 
-    if old_bytes == new_bytes {
+    if old_bytes == new_bytes && entry.old_oid == entry.new_oid {
         return Ok(());
     }
 
@@ -1107,6 +1117,7 @@ pub fn write_patch_resolved<W: Write>(
             &mut abbrev_cache,
             LogPatchBinaryFormat::GitApplyBinaryPatch,
             &config,
+            false,
             &old,
             &new,
             None,
@@ -1159,7 +1170,7 @@ impl<'r> WorktreeSideReader<'r> {
 
     fn read(&self, odb: &Odb, path: &str, mode: u32) -> Result<Vec<u8>> {
         let index_entry = self.index.get(&crate::repo_relpath::storage_bytes(path), 0);
-        read_worktree_side_bytes_for_diff(
+        Ok(load_worktree_side_for_diff(
             odb,
             self.work_tree,
             path,
@@ -1167,7 +1178,10 @@ impl<'r> WorktreeSideReader<'r> {
             self.rules.config(),
             index_entry,
             Some(&self.rules),
-        )
+            true,
+        )?
+        .0
+        .data)
     }
 }
 
@@ -1184,7 +1198,13 @@ fn resolve_patch_side<'f, 'r>(
     }
     match source {
         PatchSide::Bytes(bytes) => Ok(Cow::Borrowed(bytes)),
-        PatchSide::Blob => Ok(Cow::Owned(read_blob_side(repo.odb(), oid, false)?)),
+        PatchSide::Blob => Ok(Cow::Owned(read_blob_side(
+            repo.odb(),
+            oid,
+            false,
+            Some(side.path(&file.entry)),
+            true,
+        )?)),
         PatchSide::Worktree => {
             let reader = match worktree {
                 Some(reader) => reader,
@@ -1224,15 +1244,28 @@ fn entry_with_content_ids(
     Ok(entry)
 }
 
-fn read_blob_side(odb: &Odb, oid: ObjectId, is_missing: bool) -> Result<Vec<u8>> {
+fn load_patch_blob_side(
+    odb: &Odb,
+    oid: ObjectId,
+    is_missing: bool,
+    path: Option<&str>,
+    force_read_content: bool,
+) -> Result<(Vec<u8>, bool)> {
     if is_missing || oid == zero_oid() || oid == empty_blob_oid() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), false));
     }
-    let obj = odb.read(&oid)?;
-    if obj.kind != ObjectKind::Blob {
-        return Ok(Vec::new());
-    }
-    Ok(obj.data)
+    let (side, binary) = load_odb_blob_side_for_diff(odb, &oid, path, None, force_read_content)?;
+    Ok((side.data, binary))
+}
+
+fn read_blob_side(
+    odb: &Odb,
+    oid: ObjectId,
+    is_missing: bool,
+    path: Option<&str>,
+    force_read_content: bool,
+) -> Result<Vec<u8>> {
+    Ok(load_patch_blob_side(odb, oid, is_missing, path, force_read_content)?.0)
 }
 
 #[cfg(test)]
@@ -1242,6 +1275,41 @@ mod tests {
 
     use crate::hash::hash_object;
     use crate::objects::HashAlgo;
+
+    #[test]
+    fn log_short_message_skips_big_blob_reads() -> Result<()> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
+        std::fs::write(
+            repo.git_dir().join("config"),
+            "[core]\n\tbigFileThreshold = 4k\n",
+        )?;
+        let odb = repo.odb();
+        let old = odb.write(ObjectKind::Blob, &vec![b'o'; 5000])?;
+        let new = odb.write(ObjectKind::Blob, &vec![b'n'; 5001])?;
+        let entry = DiffEntry {
+            status: DiffStatus::Modified,
+            old_path: Some("asset.bin".into()),
+            new_path: Some("asset.bin".into()),
+            old_oid: old,
+            new_oid: new,
+            old_mode: FileMode::REGULAR,
+            new_mode: FileMode::REGULAR,
+            score: None,
+        };
+        let metrics = odb.hot_path_metrics();
+        metrics.reset_blob_content_reads();
+        metrics.set_blob_counting(true);
+        let mut out = Cursor::new(Vec::new());
+        let mut opts = LogPatchOptions::git_default(&ConfigSet::default());
+        opts.binary_format = LogPatchBinaryFormat::LogShortMessage;
+        write_diff_entry_log_patch(&mut out, &repo, odb, &entry, &opts)?;
+        metrics.set_blob_counting(false);
+        let text = String::from_utf8(out.into_inner()).expect("utf-8");
+        assert!(text.contains("Binary files"));
+        assert_eq!(metrics.blob_content_reads(), 0);
+        Ok(())
+    }
 
     #[test]
     fn copied_diff_emits_copy_headers() -> Result<()> {
