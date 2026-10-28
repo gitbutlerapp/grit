@@ -537,10 +537,17 @@ fn resolved_clone_tags(opts: &CloneRunOptions) -> Option<CloneTags> {
 }
 
 fn effective_tag_fetch_mode(opts: &CloneRunOptions) -> CloneTags {
-    resolved_clone_tags(opts).unwrap_or(if opts.shallow || opts.depth.is_some() {
-        CloneTags::Following
-    } else {
-        CloneTags::All
+    resolved_clone_tags(opts).unwrap_or_else(|| {
+        let clone_opts = CloneOptions {
+            depth: opts.depth.or_else(|| opts.shallow.then_some(1)),
+            single_branch: opts.single_branch,
+            ..CloneOptions::new(String::new(), std::path::PathBuf::new())
+        };
+        if clone_effective_single_branch(&clone_opts) {
+            CloneTags::Following
+        } else {
+            CloneTags::All
+        }
     })
 }
 

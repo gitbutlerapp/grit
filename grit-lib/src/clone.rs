@@ -145,7 +145,9 @@ pub struct CloneOptions {
     ///
     /// `None` matches Git: depth implies single-branch unless explicitly disabled.
     pub single_branch: Option<bool>,
-    /// Tag fetch mode. `None` uses Git defaults (all tags for full clones, following for shallow).
+    /// Tag fetch mode. `None` uses Git defaults: all tags for full multi-branch clones,
+    /// tag-following when [`clone_effective_single_branch`] is true (explicit
+    /// `--single-branch` or shallow clone without `--no-single-branch`).
     pub tags: Option<CloneTags>,
     /// Optional on-demand promisor fetcher installed on the opened repository (for checkout prefetch).
     pub promisor_fetcher: Option<Arc<dyn PromisorFetcher>>,
@@ -525,7 +527,12 @@ fn clone_after_claim(
 
     let config = ConfigSet::load(&opts.environment, Some(repo.git_dir()), true)
         .map_err(CloneError::Library)?;
-    let remote = Remote::from_config(&config, &opts.remote_name)?;
+    let mut remote = Remote::from_config(&config, &opts.remote_name)?;
+    if bare {
+        // Bare clones have no `remote.*.fetch` refspec; avoid synthesizing tracking refspecs
+        // that would create `refs/remotes/<name>/…` (Git bare clone has none).
+        remote.fetch_refspecs.clear();
+    }
     let requested = match opts.branch.as_deref() {
         Some(name) => resolve_requested_clone_ref(name, &remote, &repo, http_factory)?,
         None => CloneRequestedRef::Default,
@@ -857,7 +864,7 @@ pub fn clone_effective_single_branch(opts: &CloneOptions) -> bool {
 
 fn resolve_clone_tag_mode(opts: &CloneOptions) -> TagMode {
     opts.tags.map(CloneTags::tag_mode).unwrap_or_else(|| {
-        if opts.depth.is_some() {
+        if clone_effective_single_branch(opts) {
             TagMode::Following
         } else {
             TagMode::All

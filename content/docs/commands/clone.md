@@ -15,7 +15,7 @@ grit clone <url> [<dir>] [--depth <N>] [-b|--branch <NAME>] [--blobs <none|SIZE>
 
 Copies the repository at `<url>` into a new directory and checks out the remote's default branch. The remote is saved as `origin`, so [`grit fetch`](../fetch/), [`grit pull`](../pull/) and [`grit push`](../push/) work with no further setup.
 
-Clone fetches every remote tag under `refs/tags/`, including tags on commits that are not reachable from any branch tip (matching `git clone`). Later [`grit fetch`](../fetch/) uses tag-following by default; pass `--tags` to fetch all tags again.
+Clone fetches every remote tag under `refs/tags/` on a full multi-branch clone, including tags on commits that are not reachable from any branch tip (matching `git clone`). With `--single-branch` (or a shallow clone without `--no-single-branch`), only tags whose peeled commits are reachable from the fetched branch history are imported — the same tag-following default as `git clone --single-branch`. Later [`grit fetch`](../fetch/) uses tag-following by default; pass `--tags` to fetch all tags again.
 
 With files-based ref storage, clone packs imported tags and remote-tracking refs,
 including final peel records for nested annotated tags. Symbolic `HEAD` refs stay
@@ -101,7 +101,7 @@ Working-tree materialization after fetch uses the same parallel checkout path as
 | `--depth <N>` | Shallow clone: fetch at most `N` commits on the selected ref (`git clone --depth`). |
 | `-b`, `--branch <NAME>` | Branch or tag to check out instead of the remote default. |
 | `--shallow` | Hidden alias for `--depth 1` (conflicts with `--depth`). |
-| `--single-branch` | Fetch only the branch that is checked out (`git clone --single-branch`). |
+| `--single-branch` | Fetch only the branch that is checked out and follow tags into that history only (`git clone --single-branch`). JSON `tag_fetch` is `following`. |
 | `--no-single-branch` | With `--depth`, fetch every branch tip (`git clone --no-single-branch --depth=1`). |
 | `--no-tags` | Do not fetch tags; sets `remote.<name>.tagOpt=--no-tags` like Git. |
 | `-o`, `--origin <name>` | Name of the remote (default `origin`). |

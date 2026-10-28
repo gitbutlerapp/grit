@@ -29,10 +29,10 @@ fn git_config_fetch_all(work_tree: &Path) -> Vec<String> {
         .collect()
 }
 
-fn remote_tracking_ref_names(git_dir: &Path) -> Vec<String> {
-    let wt = git_dir.parent().expect("work tree");
+fn remote_tracking_ref_names(repo: &Path) -> Vec<String> {
     let out = Command::new("git")
-        .current_dir(wt)
+        .arg("-C")
+        .arg(repo)
         .args(["for-each-ref", "--format=%(refname:short)", "refs/remotes/"])
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
@@ -45,6 +45,91 @@ fn remote_tracking_ref_names(git_dir: &Path) -> Vec<String> {
         .collect();
     names.sort();
     names
+}
+
+fn tag_names(repo: &Path) -> Vec<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["tag", "-l"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("tag -l");
+    assert!(out.status.success());
+    let mut tags: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect();
+    tags.sort();
+    tags
+}
+
+fn rev_list_all_count(repo: &Path) -> u64 {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-list", "--count", "--all"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("rev-list");
+    assert!(out.status.success());
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .expect("count")
+}
+
+fn fsck_ok(repo: &Path) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["fsck"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("fsck");
+    assert!(status.success(), "git fsck must pass");
+}
+
+fn build_two_branch_bare_with_branch_tags(bare: &Path) {
+    let wt = bare.with_extension("wt-tags");
+    std::fs::create_dir_all(&wt).unwrap();
+    git(&wt, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(wt.join("f"), b"a\n").unwrap();
+    git(&wt, &["add", "f"]);
+    git(
+        &wt,
+        &[
+            "-c",
+            "user.email=u@e.com",
+            "-c",
+            "user.name=U",
+            "commit",
+            "-qm",
+            "main",
+        ],
+    );
+    git(&wt, &["tag", "on-main"]);
+    git(&wt, &["switch", "-qc", "other"]);
+    std::fs::write(wt.join("g"), b"b\n").unwrap();
+    git(&wt, &["add", "g"]);
+    git(
+        &wt,
+        &[
+            "-c",
+            "user.email=u@e.com",
+            "-c",
+            "user.name=U",
+            "commit",
+            "-qm",
+            "other",
+        ],
+    );
+    git(&wt, &["tag", "only-on-other"]);
+    git(&wt, &["clone", "-q", "--bare", ".", bare.to_str().unwrap()]);
 }
 
 fn build_two_branch_bare(bare: &Path) {
@@ -177,8 +262,8 @@ fn clone_single_branch_refspec_matches_git() {
             "remote.origin.fetch must match git for case {case:?}"
         );
         assert_eq!(
-            remote_tracking_ref_names(&git_dest.join(".git")),
-            remote_tracking_ref_names(&grit_dest.join(".git")),
+            remote_tracking_ref_names(&git_dest),
+            remote_tracking_ref_names(&grit_dest),
             "remote-tracking refs must match git for case {case:?}"
         );
 
@@ -186,8 +271,8 @@ fn clone_single_branch_refspec_matches_git() {
         git(&git_dest, &["fetch", "-q", "origin"]);
         git(&grit_dest, &["fetch", "-q", "origin"]);
         assert_eq!(
-            remote_tracking_ref_names(&git_dest.join(".git")),
-            remote_tracking_ref_names(&grit_dest.join(".git")),
+            remote_tracking_ref_names(&git_dest),
+            remote_tracking_ref_names(&grit_dest),
             "after fetch, remote-tracking refs must still match for case {case:?}"
         );
     }
@@ -263,7 +348,7 @@ fn clone_origin_name_used_for_tracking_refs() {
     )
     .expect("clone with custom remote name");
 
-    let tracking = remote_tracking_ref_names(&dest.join(".git"));
+    let tracking = remote_tracking_ref_names(&dest);
     assert!(
         tracking.iter().any(|r| r.starts_with("upstream/")),
         "expected upstream/* tracking refs, got {tracking:?}"
@@ -402,6 +487,116 @@ fn clone_rejects_invalid_remote_name() {
             if name == "bad name" => {}
         other => panic!("expected InvalidRemoteName, got {other:?}"),
     }
+}
+
+fn assert_single_branch_tag_parity(url: &str, branch: &str, bare: bool) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let git_dest = tmp.path().join("git");
+    let grit_dest = tmp.path().join("grit");
+
+    let mut git_cmd = Command::new("git");
+    git_cmd.args(["clone", "-q", "--single-branch", "-b", branch]);
+    if bare {
+        git_cmd.arg("--bare");
+    }
+    git_cmd.arg(url).arg(if bare {
+        git_dest.to_str().unwrap()
+    } else {
+        git_dest.to_str().unwrap()
+    });
+    let status = git_cmd
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git clone");
+    assert!(status.success());
+
+    clone_repo(
+        CloneOptions {
+            branch: Some(branch.to_owned()),
+            single_branch: Some(true),
+            bare,
+            ..CloneOptions::new(url.to_owned(), grit_dest.clone())
+        },
+        &mut NoProgress,
+        &NeverCancel,
+        None,
+    )
+    .expect("grit clone");
+
+    assert_eq!(
+        tag_names(&grit_dest),
+        tag_names(&git_dest),
+        "tag names must match git for branch {branch} bare={bare}"
+    );
+    assert_eq!(
+        rev_list_all_count(&grit_dest),
+        rev_list_all_count(&git_dest),
+        "commit count must match git for branch {branch} bare={bare}"
+    );
+    fsck_ok(&grit_dest);
+    fsck_ok(&git_dest);
+
+    if bare {
+        assert_eq!(
+            remote_tracking_ref_names(&git_dest),
+            remote_tracking_ref_names(&grit_dest),
+            "bare clone must not create extra remote-tracking refs"
+        );
+    }
+}
+
+#[test]
+fn clone_single_branch_file_url_fetches_following_tags_only() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bare = tmp.path().join("remote.git");
+    build_two_branch_bare_with_branch_tags(&bare);
+    let url = file_url(&bare);
+
+    assert_single_branch_tag_parity(&url, "main", false);
+    assert_single_branch_tag_parity(&url, "other", false);
+    assert_single_branch_tag_parity(&url, "main", true);
+    assert_single_branch_tag_parity(&url, "other", true);
+}
+
+#[test]
+fn clone_depth_no_single_branch_fetches_all_tags() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bare = tmp.path().join("remote.git");
+    build_two_branch_bare_with_branch_tags(&bare);
+    let url = file_url(&bare);
+
+    let git_dest = tmp.path().join("git");
+    let grit_dest = tmp.path().join("grit");
+    let status = Command::new("git")
+        .args([
+            "clone",
+            "-q",
+            "--depth",
+            "1",
+            "--no-single-branch",
+            &url,
+            git_dest.to_str().unwrap(),
+        ])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git clone");
+    assert!(status.success());
+
+    clone_repo(
+        CloneOptions {
+            depth: Some(1),
+            single_branch: Some(false),
+            ..CloneOptions::new(url, grit_dest.clone())
+        },
+        &mut NoProgress,
+        &NeverCancel,
+        None,
+    )
+    .expect("grit clone");
+
+    assert_eq!(tag_names(&grit_dest), tag_names(&git_dest));
 }
 
 #[test]
