@@ -49,7 +49,17 @@ pub struct PackBuildOptions {
     pub reuse_objects: bool,
     /// Use pack reachability bitmaps for object enumeration when present.
     pub use_bitmaps: bool,
+    /// Soft cap, in bytes, on the payloads and delta indexes one delta-search
+    /// window holds (Git `--window-memory`; each search thread has a window).
+    /// `None` reads `pack.windowMemory`, which defaults to unlimited; `Some(0)`
+    /// is unlimited too.
+    pub window_memory: Option<u64>,
 }
+
+/// The delta-search window cap a served fetch uses when `pack.windowMemory`
+/// is not set: unlimited windows of large blobs would hold `window` of them,
+/// with their indexes, per search thread.
+pub const SERVE_WINDOW_MEMORY: u64 = 32 * 1024 * 1024;
 
 impl Default for PackBuildOptions {
     fn default() -> Self {
@@ -63,6 +73,7 @@ impl Default for PackBuildOptions {
             reuse_deltas: true,
             reuse_objects: true,
             use_bitmaps: true,
+            window_memory: None,
         }
     }
 }
@@ -131,6 +142,10 @@ impl PackBuildOptions {
         use_ofs_delta: bool,
     ) -> Self {
         let (window, max_depth) = Self::window_and_depth_from_config(cfg);
+        let window_memory = cfg
+            .map(crate::config::ConfigSet::pack_window_memory_bytes)
+            .filter(|&bytes| bytes > 0)
+            .unwrap_or(SERVE_WINDOW_MEMORY);
         Self {
             thin,
             delta: true,
@@ -140,6 +155,7 @@ impl PackBuildOptions {
             reuse_deltas: true,
             reuse_objects: true,
             use_bitmaps: true,
+            window_memory: Some(window_memory),
             ..Default::default()
         }
     }
@@ -1884,7 +1900,10 @@ fn search_new_deltas(
             .copied()
             .unwrap_or_else(|| base_oids[id - send.len()])
     };
-    let window_memory = crate::pack_delta::pack_config(odb)?.pack_window_memory_bytes();
+    let window_memory = match opts.window_memory {
+        Some(bytes) => bytes,
+        None => crate::pack_delta::pack_config(odb)?.pack_window_memory_bytes(),
+    };
     let threads = crate::pack_delta::pack_delta_search_parallel_options(odb, search_threads)?;
     let allowed = |target: &ObjectId, base: &ObjectId| {
         islands.in_same_island(target, base)

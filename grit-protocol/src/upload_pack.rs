@@ -7,7 +7,7 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 
-use crate::{run_upload_pack, Extensions, Result};
+use crate::{run_upload_pack, run_upload_pack_to, Extensions, Result};
 
 /// Run upload-pack ref advertisement (for `GET /info/refs?service=git-upload-pack`).
 ///
@@ -105,5 +105,45 @@ pub fn stateless_rpc_with(
         request_body,
         repository_options,
         extensions,
+    )
+}
+
+/// Run a stateless upload-pack RPC exchange (for `POST /git-upload-pack`),
+/// writing the response to `output` as it is produced instead of collecting
+/// it, so a server can stream a pack of any size in bounded memory.
+///
+/// # Parameters
+///
+/// - `repo_path`: the repository to fetch from.
+/// - `request_body`: the decoded request body (wants, haves, capabilities).
+/// - `protocol_version`: the wire version from the `Git-Protocol` header.
+/// - `repository_options`: environment used to load global/system config.
+/// - `extensions`: a `bundle-uri` bundle list to answer with.
+/// - `output`: where the response goes.
+///
+/// # Errors
+///
+/// Fails when the repository cannot be opened or the request is rejected
+/// before any output (for protocol v2 these go to `output` as an `ERR` line
+/// instead), and with [`grit_lib::remote::serve::ServeError::PackInterrupted`]
+/// when the pack fails after part of it was written: the caller must then end
+/// the response as failed, not complete it.
+pub fn stateless_rpc_to(
+    repo_path: &Path,
+    request_body: &[u8],
+    protocol_version: Option<u8>,
+    repository_options: &RepositoryOptions,
+    extensions: &Extensions,
+    output: &mut dyn std::io::Write,
+) -> Result<()> {
+    run_upload_pack_to(
+        repo_path,
+        protocol_version,
+        true,
+        false,
+        request_body,
+        repository_options,
+        extensions,
+        output,
     )
 }

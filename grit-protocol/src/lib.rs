@@ -183,6 +183,31 @@ pub(crate) fn run_upload_pack(
     repository_options: &RepositoryOptions,
     extensions: &Extensions,
 ) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    run_upload_pack_to(
+        repo_path,
+        protocol_version,
+        stateless_rpc,
+        advertise_refs,
+        input,
+        repository_options,
+        extensions,
+        &mut output,
+    )?;
+    Ok(output)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_upload_pack_to(
+    repo_path: &Path,
+    protocol_version: Option<u8>,
+    stateless_rpc: bool,
+    advertise_refs: bool,
+    input: &[u8],
+    repository_options: &RepositoryOptions,
+    extensions: &Extensions,
+    output: &mut dyn std::io::Write,
+) -> Result<()> {
     let repo = Repository::open(repo_path, &repository_options.clone().for_serving())?;
     let config =
         ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
@@ -197,9 +222,8 @@ pub(crate) fn run_upload_pack(
         push_bundle: None,
         ..ServeOptions::default()
     };
-    let mut output = Vec::new();
-    let _summary = serve::upload_pack(&repo, &mut &*input, &mut output, &mut opts)?;
-    Ok(output)
+    let _summary = serve::upload_pack(&repo, &mut &*input, output, &mut opts)?;
+    Ok(())
 }
 
 pub(crate) fn run_receive_pack(

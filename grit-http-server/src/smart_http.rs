@@ -10,6 +10,11 @@
 //! [`info_refs`] answers the first two and [`rpc`] the last two. Neither does
 //! routing or authentication: callers resolve the repository path and decide
 //! whether the client may use the [`Service`] first.
+//!
+//! Fetch responses stream: upload-pack writes into a bounded channel the
+//! response body reads from, so a clone of any size takes about
+//! [`STREAM_CHUNK`] × [`STREAM_CHANNEL_DEPTH`] of buffer on the server, and a
+//! client that reads slowly slows the pack down instead of piling it up.
 
 use std::io::Read;
 use std::path::PathBuf;
@@ -167,6 +172,34 @@ pub async fn rpc(
     options: RepositoryOptions,
     extensions: grit_protocol::Extensions,
 ) -> Response<Body> {
+    rpc_holding(
+        repo_path,
+        service,
+        protocol_version,
+        headers,
+        body,
+        options,
+        extensions,
+        (),
+    )
+    .await
+}
+
+/// [`rpc`], keeping `hold` alive until the response body has been sent in
+/// full (or the client went away): a fetch response streams after this
+/// returns, so whatever keeps the repository readable (a lock or lease) must
+/// live as long as the body.
+#[allow(clippy::too_many_arguments)]
+pub async fn rpc_holding<H: Send + 'static>(
+    repo_path: PathBuf,
+    service: Service,
+    protocol_version: Option<u8>,
+    headers: &HeaderMap,
+    body: Body,
+    options: RepositoryOptions,
+    extensions: grit_protocol::Extensions,
+    hold: H,
+) -> Response<Body> {
     let encoding = match body_encoding(headers) {
         Ok(e) => e,
         Err(resp) => return *resp,
@@ -181,21 +214,15 @@ pub async fn rpc(
                 Ok(b) => b,
                 Err(resp) => return *resp,
             };
-            let result = tokio::task::spawn_blocking(move || {
-                grit_protocol::upload_pack::stateless_rpc_with(
-                    &repo_path,
-                    &request,
-                    protocol_version,
-                    &options,
-                    &extensions,
-                )
-            })
+            return stream_upload_pack(
+                repo_path,
+                request,
+                protocol_version,
+                options,
+                extensions,
+                hold,
+            )
             .await;
-            match result {
-                Ok(Ok(data)) => data,
-                Ok(Err(e)) => return internal_error(&format!("{} failed: {e}", service.name())),
-                Err(e) => return internal_error(&format!("{} failed: {e}", service.name())),
-            }
         }
         Service::ReceivePack => {
             let raw = streaming_body_reader(body);
@@ -755,4 +782,125 @@ mod tests {
         );
         assert_eq!(Service::strip_rpc_suffix("a/info/refs"), None);
     }
+}
+
+/// Bytes upload-pack output is gathered into before it is handed to the body.
+pub const STREAM_CHUNK: usize = 64 * 1024;
+
+/// Chunks that may wait between upload-pack and a slow client.
+pub const STREAM_CHANNEL_DEPTH: usize = 8;
+
+type Chunk = std::io::Result<Bytes>;
+
+/// A `Write` for a blocking thread that hands what is written to an async
+/// response body in [`STREAM_CHUNK`]s, waiting while the body is
+/// [`STREAM_CHANNEL_DEPTH`] chunks behind. Once the body is gone (the client
+/// disconnected), writes fail with `BrokenPipe`, which stops upload-pack.
+struct ChannelWriter {
+    pending: Vec<u8>,
+    tx: tokio::sync::mpsc::Sender<Chunk>,
+    sent: bool,
+}
+
+impl ChannelWriter {
+    fn new(tx: tokio::sync::mpsc::Sender<Chunk>) -> Self {
+        Self {
+            pending: Vec::with_capacity(STREAM_CHUNK),
+            tx,
+            sent: false,
+        }
+    }
+
+    fn send_pending(&mut self) -> std::io::Result<()> {
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+        let chunk = Bytes::from(std::mem::replace(
+            &mut self.pending,
+            Vec::with_capacity(STREAM_CHUNK),
+        ));
+        self.tx
+            .blocking_send(Ok(chunk))
+            .map_err(|_| std::io::Error::from(std::io::ErrorKind::BrokenPipe))?;
+        self.sent = true;
+        Ok(())
+    }
+}
+
+impl std::io::Write for ChannelWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let room = STREAM_CHUNK.saturating_sub(self.pending.len()).max(1);
+        let n = buf.len().min(room);
+        self.pending.extend_from_slice(&buf[..n]);
+        if self.pending.len() >= STREAM_CHUNK {
+            self.send_pending()?;
+        }
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.send_pending()
+    }
+}
+
+/// Run upload-pack on a blocking thread and stream its output as the
+/// response body.
+///
+/// The status is decided by the first chunk: a failure before any output is
+/// a `500` as before; once output has started the response is a `200`, and a
+/// later failure aborts the body (the client sees a truncated transfer and
+/// fails) instead of ending it as if the pack were complete.
+async fn stream_upload_pack<H: Send + 'static>(
+    repo_path: PathBuf,
+    request: Vec<u8>,
+    protocol_version: Option<u8>,
+    options: RepositoryOptions,
+    extensions: grit_protocol::Extensions,
+    hold: H,
+) -> Response<Body> {
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Chunk>(STREAM_CHANNEL_DEPTH);
+    let task = tokio::task::spawn_blocking(move || {
+        let mut out = ChannelWriter::new(tx);
+        let result = grit_protocol::upload_pack::stateless_rpc_to(
+            &repo_path,
+            &request,
+            protocol_version,
+            &options,
+            &extensions,
+            &mut out,
+        );
+        match result {
+            Ok(()) => out.send_pending().map_err(grit_protocol::Error::Io),
+            Err(e) => {
+                if out.sent {
+                    // Part of the response is out: fail the body, not the status.
+                    let _ = out.tx.blocking_send(Err(std::io::Error::other(format!(
+                        "upload-pack failed: {e}"
+                    ))));
+                }
+                Err(e)
+            }
+        }
+    });
+    let first = match rx.recv().await {
+        Some(Ok(first)) => first,
+        Some(Err(e)) => return internal_error(&format!("upload-pack failed: {e}")),
+        // Nothing was sent: the task is done, one way or the other.
+        None => match task.await {
+            Ok(Ok(())) => Bytes::new(),
+            Ok(Err(e)) => return internal_error(&format!("upload-pack failed: {e}")),
+            Err(e) => return internal_error(&format!("upload-pack failed: {e}")),
+        },
+    };
+    let rest = futures_util::stream::unfold((rx, hold), |(mut rx, hold)| async move {
+        rx.recv().await.map(|chunk| (chunk, (rx, hold)))
+    });
+    let body = futures_util::StreamExt::chain(
+        futures_util::stream::once(std::future::ready(Ok::<Bytes, std::io::Error>(first))),
+        rest,
+    );
+    no_cache_headers(Response::builder())
+        .header(header::CONTENT_TYPE, "application/x-git-upload-pack-result")
+        .body(Body::from_stream(body))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }

@@ -69,6 +69,13 @@ impl PreparedBody {
     }
 }
 
+/// Whole objects at least this large that cannot be copied from a local pack are
+/// streamed through zlib into the output by the serial stage
+/// ([`PreparedBody::StreamWhole`]), or from `core.bigFileThreshold` when that is lower. Batches hold up to [`WRITE_BATCH_ENTRIES`] prepared
+/// entries and several batches are in flight, so without this a pack of large loose
+/// blobs would be held in memory, inflated and compressed, many objects at a time.
+const STREAM_WHOLE_FROM: u64 = 1 << 20;
+
 struct PreparedEntry {
     body: PreparedBody,
     /// Uncompressed payload size for pack headers (ignored for [`PreparedBody::Raw`]).
@@ -370,7 +377,9 @@ fn prepare_whole(
         }
     }
     let info = odb.read_info(&entry.oid)?;
-    if entry.kind == ObjectKind::Blob && info.size >= odb.big_file_threshold()? {
+    if entry.kind == ObjectKind::Blob
+        && info.size >= STREAM_WHOLE_FROM.min(odb.big_file_threshold()?)
+    {
         let payload_len = usize::try_from(info.size).map_err(|_| {
             Error::CorruptObject(format!("object size overflow for {}", entry.oid.to_hex()))
         })?;
