@@ -5843,6 +5843,8 @@ pub grit_lib::error::Error::InvalidRefStorageFormat::value: alloc::string::Strin
 pub grit_lib::error::Error::InvalidSignature(grit_lib::ident::SignatureError)
 pub grit_lib::error::Error::InvalidTreeEntry(grit_lib::objects::TreeEntryError)
 pub grit_lib::error::Error::Io(core::io::error::Error)
+pub grit_lib::error::Error::LocalUploadPack(alloc::boxed::Box<grit_lib::remote::serve::ServeError>)
+pub grit_lib::error::Error::LocalUploadPackPanicked
 pub grit_lib::error::Error::LockHeld
 pub grit_lib::error::Error::LockHeld::holder: core::option::Option<grit_lib::lockfile::LockHolder>
 pub grit_lib::error::Error::LockHeld::path: std::path::PathBuf
@@ -6473,6 +6475,7 @@ pub grit_lib::error::RemoteUnreadableReason::NotGitServer
 pub grit_lib::error::RemoteUnreadableReason::NotGitServer::content_type: core::option::Option<alloc::string::String>
 pub grit_lib::error::RemoteUnreadableReason::NotGitServer::status: u16
 pub grit_lib::error::RemoteUnreadableReason::RepositoryNotFound
+pub grit_lib::error::RemoteUnreadableReason::ResponseTruncated
 pub grit_lib::error::RemoteUnreadableReason::Transport
 pub grit_lib::error::RemoteUnreadableReason::Transport::detail: alloc::string::String
 impl grit_lib::error::RemoteUnreadableReason
@@ -16715,6 +16718,8 @@ pub grit_lib::prelude::Error::InvalidRefStorageFormat::value: alloc::string::Str
 pub grit_lib::prelude::Error::InvalidSignature(grit_lib::ident::SignatureError)
 pub grit_lib::prelude::Error::InvalidTreeEntry(grit_lib::objects::TreeEntryError)
 pub grit_lib::prelude::Error::Io(core::io::error::Error)
+pub grit_lib::prelude::Error::LocalUploadPack(alloc::boxed::Box<grit_lib::remote::serve::ServeError>)
+pub grit_lib::prelude::Error::LocalUploadPackPanicked
 pub grit_lib::prelude::Error::LockHeld
 pub grit_lib::prelude::Error::LockHeld::holder: core::option::Option<grit_lib::lockfile::LockHolder>
 pub grit_lib::prelude::Error::LockHeld::path: std::path::PathBuf
@@ -20737,6 +20742,8 @@ pub grit_lib::remote::clone::CloneOutcome::tags: u64
 pub grit_lib::remote::clone::CloneOutcome::transfer: grit_lib::remote::transfer::TransferStats
 pub grit_lib::remote::clone::CloneOutcome::url: alloc::string::String
 pub grit_lib::remote::clone::CloneOutcome::worktree_bytes: u64
+impl grit_lib::remote::clone::CloneOutcome
+pub fn grit_lib::remote::clone::CloneOutcome::filter_ignored(&self) -> bool
 impl core::fmt::Debug for grit_lib::remote::clone::CloneOutcome
 pub fn grit_lib::remote::clone::CloneOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl !core::marker::Freeze for grit_lib::remote::clone::CloneOutcome
@@ -24540,6 +24547,7 @@ impl<C: grit_lib::remote::transport::http::HttpClient + 'static> grit_lib::remot
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::advertised_refs(&self) -> &[(alloc::string::String, grit_lib::objects::ObjectId)]
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::advertised_tag_peel(&self) -> core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, grit_lib::objects::ObjectId>>
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::capabilities(&self) -> &[alloc::string::String]
+pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::finish(&mut self) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::finish_send(&mut self)
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::head_symref(&self) -> core::option::Option<&str>
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::protocol_version(&self) -> u8
@@ -24632,6 +24640,7 @@ impl grit_lib::remote::transport::Connection for grit_lib::remote::transport::Gi
 pub fn grit_lib::remote::transport::GitDaemonConnection::advertised_refs(&self) -> &[(alloc::string::String, grit_lib::objects::ObjectId)]
 pub fn grit_lib::remote::transport::GitDaemonConnection::advertised_tag_peel(&self) -> core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, grit_lib::objects::ObjectId>>
 pub fn grit_lib::remote::transport::GitDaemonConnection::capabilities(&self) -> &[alloc::string::String]
+pub fn grit_lib::remote::transport::GitDaemonConnection::finish(&mut self) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::GitDaemonConnection::finish_send(&mut self)
 pub fn grit_lib::remote::transport::GitDaemonConnection::head_symref(&self) -> core::option::Option<&str>
 pub fn grit_lib::remote::transport::GitDaemonConnection::protocol_version(&self) -> u8
@@ -24688,6 +24697,7 @@ impl grit_lib::remote::transport::Connection for grit_lib::remote::transport::Ss
 pub fn grit_lib::remote::transport::SshConnection::advertised_refs(&self) -> &[(alloc::string::String, grit_lib::objects::ObjectId)]
 pub fn grit_lib::remote::transport::SshConnection::advertised_tag_peel(&self) -> core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, grit_lib::objects::ObjectId>>
 pub fn grit_lib::remote::transport::SshConnection::capabilities(&self) -> &[alloc::string::String]
+pub fn grit_lib::remote::transport::SshConnection::finish(&mut self) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::SshConnection::finish_send(&mut self)
 pub fn grit_lib::remote::transport::SshConnection::head_symref(&self) -> core::option::Option<&str>
 pub fn grit_lib::remote::transport::SshConnection::protocol_version(&self) -> u8
@@ -24750,6 +24760,7 @@ pub trait grit_lib::remote::transport::Connection
 pub fn grit_lib::remote::transport::Connection::advertised_refs(&self) -> &[(alloc::string::String, grit_lib::objects::ObjectId)]
 pub fn grit_lib::remote::transport::Connection::advertised_tag_peel(&self) -> core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, grit_lib::objects::ObjectId>>
 pub fn grit_lib::remote::transport::Connection::capabilities(&self) -> &[alloc::string::String]
+pub fn grit_lib::remote::transport::Connection::finish(&mut self) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::Connection::finish_send(&mut self)
 pub fn grit_lib::remote::transport::Connection::head_symref(&self) -> core::option::Option<&str>
 pub fn grit_lib::remote::transport::Connection::protocol_version(&self) -> u8
@@ -24761,6 +24772,7 @@ impl grit_lib::remote::transport::Connection for grit_lib::remote::transport::Gi
 pub fn grit_lib::remote::transport::GitDaemonConnection::advertised_refs(&self) -> &[(alloc::string::String, grit_lib::objects::ObjectId)]
 pub fn grit_lib::remote::transport::GitDaemonConnection::advertised_tag_peel(&self) -> core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, grit_lib::objects::ObjectId>>
 pub fn grit_lib::remote::transport::GitDaemonConnection::capabilities(&self) -> &[alloc::string::String]
+pub fn grit_lib::remote::transport::GitDaemonConnection::finish(&mut self) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::GitDaemonConnection::finish_send(&mut self)
 pub fn grit_lib::remote::transport::GitDaemonConnection::head_symref(&self) -> core::option::Option<&str>
 pub fn grit_lib::remote::transport::GitDaemonConnection::protocol_version(&self) -> u8
@@ -24772,6 +24784,7 @@ impl grit_lib::remote::transport::Connection for grit_lib::remote::transport::Ss
 pub fn grit_lib::remote::transport::SshConnection::advertised_refs(&self) -> &[(alloc::string::String, grit_lib::objects::ObjectId)]
 pub fn grit_lib::remote::transport::SshConnection::advertised_tag_peel(&self) -> core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, grit_lib::objects::ObjectId>>
 pub fn grit_lib::remote::transport::SshConnection::capabilities(&self) -> &[alloc::string::String]
+pub fn grit_lib::remote::transport::SshConnection::finish(&mut self) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::SshConnection::finish_send(&mut self)
 pub fn grit_lib::remote::transport::SshConnection::head_symref(&self) -> core::option::Option<&str>
 pub fn grit_lib::remote::transport::SshConnection::protocol_version(&self) -> u8
@@ -24783,6 +24796,7 @@ impl<C: grit_lib::remote::transport::http::HttpClient + 'static> grit_lib::remot
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::advertised_refs(&self) -> &[(alloc::string::String, grit_lib::objects::ObjectId)]
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::advertised_tag_peel(&self) -> core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, grit_lib::objects::ObjectId>>
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::capabilities(&self) -> &[alloc::string::String]
+pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::finish(&mut self) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::finish_send(&mut self)
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::head_symref(&self) -> core::option::Option<&str>
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::protocol_version(&self) -> u8

@@ -788,13 +788,24 @@ impl Remote {
                         opts.remote_name.as_deref().or(self.name.as_deref()),
                     )
                 {
+                    let client_env = if opts.environment.is_fetch_options_default() {
+                        repo.environment()
+                    } else {
+                        &opts.environment
+                    };
                     let mut conn = crate::transport::connect_local_upload_pack(
                         &remote_git,
                         Service::UploadPack,
                         &connect,
+                        client_env,
                     )
                     .map_err(RemoteError::Library)?;
-                    return Ok(fetch_remote_into(repo, &mut *conn, opts, progress, cancel)?);
+                    let fetched = fetch_remote_into(repo, &mut *conn, opts, progress, cancel);
+                    // A serving side that failed knows why (the client may only have
+                    // seen the stream end early, or even taken it as an empty pack), so
+                    // its error comes first.
+                    conn.finish().map_err(RemoteError::Library)?;
+                    return Ok(fetched?);
                 }
                 Ok(fetch_local_into(repo, &remote_git, opts, progress, cancel)?)
             }

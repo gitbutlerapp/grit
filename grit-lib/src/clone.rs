@@ -290,6 +290,9 @@ pub struct CloneOutcome {
     /// [`Self::transfer`] includes what the bundle brought.
     pub bundle: crate::bundle_uri::BundleSeed,
     /// True when the initial fetch sent an object filter and the server applied it.
+    /// False while [`Self::filter`] is set means the server does not support `filter`,
+    /// so every object came; the clone is still configured as a partial clone, as Git
+    /// leaves it (see [`Self::filter_ignored`]).
     pub filter_sent: bool,
     /// The `promisor-remote` exchange of the initial fetch, when the server advertised
     /// promisor remotes.
@@ -297,6 +300,20 @@ pub struct CloneOutcome {
     /// The filter the initial fetch used: [`CloneOptions::filter`], or what
     /// [`CloneOptions::auto_filter`] resolved to.
     pub filter: Option<ObjectFilterSpec>,
+}
+
+impl CloneOutcome {
+    /// Whether a filter was requested but the server does not support `filter`.
+    ///
+    /// # Returns
+    ///
+    /// `true` when [`Self::filter`] is set but was not sent ([`Self::filter_sent`] is
+    /// false), so the server sent every object; the clone is still configured as a
+    /// partial clone, as Git leaves it.
+    #[must_use]
+    pub fn filter_ignored(&self) -> bool {
+        self.filter.is_some() && !self.filter_sent
+    }
 }
 
 /// Derive a destination directory from a clone URL (Git [`git_url_basename`]).

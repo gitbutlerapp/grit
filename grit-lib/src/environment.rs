@@ -615,6 +615,66 @@ impl Environment {
         self.captured_vars.as_ref()?.get(key).cloned()
     }
 
+    /// This environment as seen by a repository served over a local transport (a
+    /// `file://` URL or a path), the way Git's local transport passes the client's
+    /// environment to the `upload-pack` it runs.
+    ///
+    /// Global and system config discovery (`HOME`, `XDG_CONFIG_HOME`,
+    /// `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_NOSYSTEM`, …) is kept, so the
+    /// served repository sees settings such as `uploadpack.allowFilter` from
+    /// `~/.gitconfig`. Variables that describe the client's own repository are dropped:
+    /// `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`,
+    /// `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_PREFIX`,
+    /// replace-object and graft/shallow overrides, and the `-c` / `GIT_CONFIG_*`
+    /// command-line config (`GIT_CONFIG`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`).
+    #[must_use]
+    pub(crate) fn for_local_transport(&self) -> Self {
+        const CLIENT_REPO_VARS: &[&str] = &[
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_IMPLICIT_WORK_TREE",
+            "GIT_COMMON_DIR",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_GRAFT_FILE",
+            "GIT_SHALLOW_FILE",
+            "GIT_NO_REPLACE_OBJECTS",
+            "GIT_REPLACE_REF_BASE",
+            "GIT_PREFIX",
+            "GIT_CONFIG",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_CONFIG_COUNT",
+        ];
+        let is_client_repo_var = |key: &str| {
+            CLIENT_REPO_VARS.contains(&key)
+                || key.starts_with("GIT_CONFIG_KEY_")
+                || key.starts_with("GIT_CONFIG_VALUE_")
+        };
+        let mut env = self.clone();
+        env.git_dir = None;
+        env.git_work_tree = None;
+        env.git_index_file = None;
+        env.git_object_directory = None;
+        env.git_alternate_object_directories = None;
+        env.git_prefix = None;
+        env.git_no_replace_objects = false;
+        env.git_replace_ref_base = None;
+        env.git_config = None;
+        env.git_config_parameters = None;
+        env.git_config_count = None;
+        env.git_config_pairs = Vec::new();
+        env.captured_vars = self.captured_vars.as_ref().and_then(|vars| {
+            let kept: HashMap<String, OsString> = vars
+                .iter()
+                .filter(|(k, _)| !is_client_repo_var(k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            (!kept.is_empty()).then(|| Arc::new(kept))
+        });
+        env
+    }
+
     /// Resolve `cwd` for discovery: canonicalize when possible without `env::current_dir`.
     #[must_use]
     pub fn discovery_cwd(&self) -> PathBuf {
@@ -1253,6 +1313,55 @@ mod tests {
         assert!(!env.is_fetch_options_default());
         env.captured_vars = None;
         assert!(env.is_fetch_options_default());
+    }
+
+    #[test]
+    fn local_transport_keeps_config_discovery_and_drops_the_client_repository() {
+        let vars = [
+            ("HOME", "/home/u"),
+            ("XDG_CONFIG_HOME", "/home/u/.config"),
+            ("GIT_CONFIG_NOSYSTEM", "1"),
+            ("GIT_CONFIG_GLOBAL", "/home/u/alt.gitconfig"),
+            ("GIT_DIR", "/client/.git"),
+            ("GIT_WORK_TREE", "/client"),
+            ("GIT_COMMON_DIR", "/client/.git"),
+            ("GIT_OBJECT_DIRECTORY", "/client/.git/objects"),
+            ("GIT_ALTERNATE_OBJECT_DIRECTORIES", "/elsewhere"),
+            ("GIT_INDEX_FILE", "/client/.git/index"),
+            ("GIT_CONFIG_PARAMETERS", "'core.bare'='true'"),
+            ("GIT_CONFIG_COUNT", "1"),
+            ("GIT_CONFIG_KEY_0", "uploadpack.allowfilter"),
+            ("GIT_CONFIG_VALUE_0", "false"),
+            ("PATH", "/usr/bin"),
+        ]
+        .map(|(k, v)| (OsString::from(k), OsString::from(v)));
+        let env = Environment::from_vars(vars, PathBuf::from("/client")).for_local_transport();
+        assert_eq!(env.var("HOME").as_deref(), Some("/home/u"));
+        assert_eq!(
+            env.var("XDG_CONFIG_HOME").as_deref(),
+            Some("/home/u/.config")
+        );
+        assert_eq!(env.var("GIT_CONFIG_NOSYSTEM").as_deref(), Some("1"));
+        assert_eq!(
+            env.var("GIT_CONFIG_GLOBAL").as_deref(),
+            Some("/home/u/alt.gitconfig")
+        );
+        assert_eq!(env.var("PATH").as_deref(), Some("/usr/bin"));
+        for key in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_COMMON_DIR",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_INDEX_FILE",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_VALUE_0",
+        ] {
+            assert_eq!(env.var_os(key), None, "{key}");
+        }
+        assert!(env.git_config_pairs.is_empty());
     }
 
     #[test]

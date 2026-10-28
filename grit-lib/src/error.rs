@@ -94,11 +94,14 @@ pub enum RemoteUnreadableReason {
     /// The transport ran, but the remote never completed the Git protocol handshake (for
     /// example `ssh` exited, or a `git://` peer closed, before any ref advertisement).
     NoHandshake,
+    /// The remote ended a fetch response before sending the pack it was asked for (the
+    /// stream closed before the `packfile` section).
+    ResponseTruncated,
 }
 
 impl RemoteUnreadableReason {
     /// Stable snake-case name for machine-readable output (`repository_not_found`,
-    /// `transport`, `http_status`, `not_git_server`, `no_handshake`).
+    /// `transport`, `http_status`, `not_git_server`, `no_handshake`, `response_truncated`).
     #[must_use]
     pub fn slug(&self) -> &'static str {
         match self {
@@ -107,6 +110,7 @@ impl RemoteUnreadableReason {
             Self::HttpStatus { .. } => "http_status",
             Self::NotGitServer { .. } => "not_git_server",
             Self::NoHandshake => "no_handshake",
+            Self::ResponseTruncated => "response_truncated",
         }
     }
 }
@@ -140,6 +144,9 @@ fn remote_unreadable_message(url: Option<&str>, reason: &RemoteUnreadableReason)
         }
         RemoteUnreadableReason::NoHandshake => {
             format!("could not read from {target}: no Git protocol response")
+        }
+        RemoteUnreadableReason::ResponseTruncated => {
+            format!("{target} closed the connection before sending the pack")
         }
     }
 }
@@ -1474,6 +1481,16 @@ pub enum Error {
         reason: RemoteUnreadableReason,
     },
 
+    /// The upload-pack serving a local path or `file://` URL in this process failed
+    /// (for example it was asked for an object it does not have). Repository errors
+    /// of the served side are returned as themselves instead.
+    #[error("local upload-pack: {0}")]
+    LocalUploadPack(Box<crate::serve::ServeError>),
+
+    /// The thread serving a local path or `file://` URL panicked.
+    #[error("local upload-pack stopped unexpectedly")]
+    LocalUploadPackPanicked,
+
     /// A resumable bundle download or upload failed.
     #[error(transparent)]
     Resumable(#[from] Box<crate::resumable::ResumableError>),
@@ -2071,6 +2088,8 @@ impl Error {
             Self::MoveBadSource { .. } => "move_bad_source",
             Self::MoveMissingIndexEntry { .. } => "move_missing_index_entry",
             Self::RemoteUnreadable { .. } => "remote_unreadable",
+            Self::LocalUploadPack(..) => "local_upload_pack",
+            Self::LocalUploadPackPanicked => "local_upload_pack_panicked",
             Self::Resumable(..) => "resumable",
             Self::FetchRefspec(..) => "fetch_refspec",
             Self::FetchNonFastForward { .. } => "fetch_non_fast_forward",

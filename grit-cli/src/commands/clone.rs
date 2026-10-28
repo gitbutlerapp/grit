@@ -180,6 +180,11 @@ pub struct CloneOutcome {
     #[serde(default, skip_serializing_if = "CloneOutcome::partial_not_set")]
     #[schemars(default)]
     pub filter_auto: bool,
+    /// True when the server does not support filters: the `blobs` filter was not sent and
+    /// every blob was downloaded (the clone is still configured as a partial clone).
+    #[serde(default, skip_serializing_if = "CloneOutcome::partial_not_set")]
+    #[schemars(default)]
+    pub filter_ignored: bool,
     /// Promisor remotes the server advertised, and whether the clone accepted each.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(default)]
@@ -240,6 +245,11 @@ impl CloneOutcome {
         !*partial
     }
 
+    /// Summary line shown instead of the partial-clone line when the server ignored
+    /// the filter.
+    const FILTER_IGNORED_SUMMARY: &'static str =
+        "the server does not support filters; every blob was downloaded";
+
     fn partial_clone_summary(blobs: Option<CloneBlobsJson>) -> &'static str {
         match blobs {
             Some(CloneBlobsJson::None) => "blobless clone; blobs are fetched on demand",
@@ -279,6 +289,13 @@ fn render_summary(o: &CloneOutcome, w: &mut dyn Write, color: bool) -> Result<()
             "  {}  {}",
             paint(color, DIM, "partial"),
             CloneOutcome::partial_clone_summary(o.blobs)
+        );
+    } else if o.filter_ignored {
+        outln!(
+            w,
+            "  {}  {}",
+            paint(color, DIM, "filter"),
+            CloneOutcome::FILTER_IGNORED_SUMMARY
         );
     }
     for line in crate::commands::promisor_json::human_lines(
@@ -394,6 +411,8 @@ impl MarkdownRender for CloneOutcome {
                     CloneBlobsJson::Limit(n) => outln!(w, "- **blobs**: {n} bytes"),
                 }
             }
+        } else if self.filter_ignored {
+            outln!(w, "- **filter**: {}", CloneOutcome::FILTER_IGNORED_SUMMARY);
         }
         if let Some(line) = crate::commands::promisor_json::markdown_line(&self.promisor_remotes) {
             outln!(w, "{line}");
@@ -765,7 +784,7 @@ fn clone_into(
     let elapsed = started.elapsed();
     let transfer = TransferSummary::new(outcome.transfer, term_progress.phases().to_vec(), elapsed);
 
-    if filter.is_some() && !outcome.filter_sent {
+    if outcome.filter_ignored() {
         eprintln!(
             "warning: the server did not advertise filter support; fetched all objects without applying --blobs"
         );
@@ -789,6 +808,7 @@ fn clone_into(
         blobs: outcome.filter.as_ref().map(CloneBlobsJson::from_spec),
         partial: outcome.filter_sent,
         filter_auto: auto_filter,
+        filter_ignored: outcome.filter_ignored(),
         promisor_remotes: crate::commands::promisor_json::promisor_remotes(
             outcome.promisor.as_ref(),
         ),
@@ -881,6 +901,7 @@ mod tests {
             blobs: None,
             partial: false,
             filter_auto: false,
+            filter_ignored: false,
             promisor_remotes: Vec::new(),
             stored_fields: Vec::new(),
             promisor_warnings: Vec::new(),

@@ -124,6 +124,21 @@ pub trait Connection {
     /// (v0/v1 connections, where the server closes after the single response).
     fn finish_send(&mut self) {}
 
+    /// End the session and report how the server side ended, for transports whose
+    /// server runs in this process.
+    ///
+    /// Call it after the exchange, successful or not: when the client hit an EOF or a
+    /// protocol error, the server's own error says why (for example a promised object
+    /// it does not have). The default, for transports whose server is elsewhere, returns
+    /// `Ok(())`.
+    ///
+    /// # Errors
+    ///
+    /// The error the server side stopped with.
+    fn finish(&mut self) -> crate::error::Result<()> {
+        Ok(())
+    }
+
     /// Send whatever request is still buffered and wait until the server's
     /// response can be read from [`Self::reader`], giving up once `cancel` fires.
     ///
@@ -1055,52 +1070,193 @@ impl Connection for SshConnection {
     }
 }
 
-/// Spawn `git upload-pack` on a local repository path (Git's `file://` wire path).
+/// Serve a fetch from a local repository over the wire protocol, in-process
+/// (Git's `file://` transport, which runs `git upload-pack` on the path).
 ///
-/// Used when partial-clone filters require upload-pack instead of in-process
-/// [`crate::transfer::fetch_local`].
+/// The fetch side talks pkt-lines to [`crate::serve::upload_pack`] running on its own
+/// thread over a pair of pipes, so filtered and promisor fetches from local paths use
+/// the same exchange as a remote server: filters, the `promisor-remote`
+/// capability, `want`s of single objects. Only fetches are supported.
+///
+/// The served repository is opened with the client's environment as Git's local
+/// transport passes it to `upload-pack` ([`crate::environment::Environment::for_local_transport`]):
+/// global and system config apply (an `uploadpack.allowFilter` in `~/.gitconfig`, say),
+/// while the client's `GIT_DIR`, object directory and `-c` overrides never leak into it.
 pub(crate) fn connect_local_upload_pack(
     remote_git_dir: &std::path::Path,
     service: Service,
     opts: &ConnectOptions,
+    client_env: &crate::environment::Environment,
 ) -> Result<Box<dyn Connection>> {
+    use crate::serve::{ProtocolVersion, ServeOptions};
     if service != Service::UploadPack {
         return Err(Error::Message(
             "local upload-pack connect supports fetch only".to_owned(),
         ));
     }
-    // hygiene: local partial-clone filters need system git upload-pack until in-process fetch supports them
-    let mut cmd = std::process::Command::new("git");
-    cmd.arg("upload-pack").arg(remote_git_dir);
-    cmd.stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit());
-    if opts.protocol_version > 0 {
-        cmd.env("GIT_PROTOCOL", format!("version={}", opts.protocol_version));
+    let protocol = match opts.protocol_version {
+        2 => ProtocolVersion::V2,
+        1 => ProtocolVersion::V1,
+        _ => ProtocolVersion::V0,
+    };
+    let (mut server_input, client_writer) = crate::mem_pipe::mem_pipe();
+    let (client_reader, mut server_output) = crate::mem_pipe::mem_pipe();
+    let dir = remote_git_dir.to_path_buf();
+    let served_env = client_env.for_local_transport();
+    let server = std::thread::Builder::new()
+        .name("grit-local-upload-pack".to_owned())
+        .spawn(
+            move || -> std::result::Result<(), crate::serve::ServeError> {
+                let repo = crate::repo::Repository::open(
+                    &dir,
+                    &crate::environment::RepositoryOptions::with_environment(served_env)
+                        .for_serving(),
+                )?;
+                let config =
+                    crate::config::ConfigSet::load(repo.environment(), Some(repo.git_dir()), true)
+                        .unwrap_or_default();
+                let mut serve = ServeOptions {
+                    protocol,
+                    agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
+                    hidden_refs: crate::hide_refs::hide_ref_patterns_uploadpack(&config),
+                    ..ServeOptions::default()
+                };
+                crate::serve::upload_pack(&repo, &mut server_input, &mut server_output, &mut serve)
+                    .map(|_| ())
+            },
+        )?;
+    let mut conn = LocalUploadPackConnection {
+        writer: Some(client_writer),
+        reader: Some(BufReader::new(client_reader)),
+        adv: Advertisement::default(),
+        server: Some(server),
+    };
+    let adv = conn
+        .reader
+        .as_mut()
+        .map(|r| read_advertisement(r))
+        .transpose();
+    match adv {
+        Ok(Some(adv)) if remote_handshake_complete(&adv) => {
+            conn.adv = adv;
+            Ok(Box::new(conn))
+        }
+        // The server stopped before advertising anything: report why.
+        other => {
+            let served = conn.finish_server();
+            match (served, other) {
+                (Err(err), _) => Err(err),
+                (Ok(()), Err(err)) => Err(err),
+                (Ok(()), Ok(_)) => Err(Error::RemoteUnreadable {
+                    url: Some(remote_git_dir.display().to_string()),
+                    reason: RemoteUnreadableReason::NoHandshake,
+                }),
+            }
+        }
     }
-    let mut child = cmd.spawn().map_err(|e| {
-        Error::Message(format!(
-            "failed to spawn git upload-pack on {}: {e}",
-            remote_git_dir.display()
-        ))
-    })?;
-    let writer = child
-        .stdin
-        .take()
-        .ok_or_else(|| Error::Message("git upload-pack missing stdin".to_owned()))?;
-    let mut reader = BufReader::new(
-        child
-            .stdout
-            .take()
-            .ok_or_else(|| Error::Message("git upload-pack missing stdout".to_owned()))?,
-    );
-    let adv = read_advertisement(&mut reader)?;
-    Ok(Box::new(SshConnection {
-        child,
-        writer: Some(writer),
-        reader,
-        adv,
-    }))
+}
+
+/// A [`Connection`] to [`crate::serve::upload_pack`] serving a local repository on
+/// another thread; see [`connect_local_upload_pack`].
+///
+/// The two directions are in-memory pipes ([`crate::mem_pipe`]), not OS pipes, so a
+/// server still writing after the client gave up gets an error, never `SIGPIPE`.
+struct LocalUploadPackConnection {
+    /// Client → server pipe. `None` once [`Connection::finish_send`] closed it.
+    writer: Option<crate::mem_pipe::MemPipeWriter>,
+    /// Server → client pipe. `None` only while being torn down.
+    reader: Option<BufReader<crate::mem_pipe::MemPipeReader>>,
+    adv: Advertisement,
+    server: Option<std::thread::JoinHandle<std::result::Result<(), crate::serve::ServeError>>>,
+}
+
+impl LocalUploadPackConnection {
+    /// Close both pipes and wait for the serving thread, returning its error, if any.
+    ///
+    /// The client → server side closes first, so a server waiting for another command
+    /// sees the end of input and stops. Closing the read side makes a server blocked
+    /// writing a pack fail instead of waiting for a reader that is gone; that failure is
+    /// caused by this teardown, so it is not reported.
+    fn finish_server(&mut self) -> Result<()> {
+        self.writer = None;
+        self.reader = None;
+        let Some(server) = self.server.take() else {
+            return Ok(());
+        };
+        match server.join() {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) if stopped_by_closed_pipe(&err) => Ok(()),
+            Ok(Err(crate::serve::ServeError::Repository(err))) => Err(err),
+            Ok(Err(err)) => Err(Error::LocalUploadPack(Box::new(err))),
+            Err(_) => Err(Error::LocalUploadPackPanicked),
+        }
+    }
+}
+
+/// Whether `err` is the server failing to write because the client closed its end.
+fn stopped_by_closed_pipe(err: &crate::serve::ServeError) -> bool {
+    use crate::serve::ServeError;
+    match err {
+        ServeError::Io(e) | ServeError::Repository(Error::Io(e)) => {
+            e.kind() == std::io::ErrorKind::BrokenPipe
+        }
+        ServeError::PackInterrupted(inner) => stopped_by_closed_pipe(inner),
+        _ => false,
+    }
+}
+
+impl Connection for LocalUploadPackConnection {
+    fn reader(&mut self) -> &mut dyn Read {
+        // The reader lives until drop; the trait has no error channel.
+        #[allow(clippy::expect_used)]
+        self.reader
+            .as_mut()
+            .expect("local upload-pack reader used after teardown")
+    }
+
+    fn writer(&mut self) -> &mut dyn Write {
+        // Present until `finish_send` takes it; writing afterward is a caller bug.
+        #[allow(clippy::expect_used)]
+        self.writer
+            .as_mut()
+            .expect("local upload-pack writer used after finish_send")
+    }
+
+    fn advertised_refs(&self) -> &[(String, ObjectId)] {
+        &self.adv.refs
+    }
+
+    fn capabilities(&self) -> &[String] {
+        &self.adv.capabilities
+    }
+
+    fn head_symref(&self) -> Option<&str> {
+        self.adv.head_symref.as_deref()
+    }
+
+    fn protocol_version(&self) -> u8 {
+        self.adv.protocol_version
+    }
+
+    fn advertised_tag_peel(&self) -> Option<&std::collections::HashMap<String, ObjectId>> {
+        Some(&self.adv.advertised_peel)
+    }
+
+    fn finish_send(&mut self) {
+        self.writer = None;
+    }
+
+    fn finish(&mut self) -> Result<()> {
+        self.finish_server()
+    }
+}
+
+impl Drop for LocalUploadPackConnection {
+    fn drop(&mut self) {
+        // Callers that want the server's error use `Connection::finish` first; here
+        // only the thread is reaped.
+        let _ = self.finish_server();
+    }
 }
 
 impl Drop for SshConnection {

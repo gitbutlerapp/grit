@@ -1263,6 +1263,8 @@ mod promisor_packs;
 mod promisor_remote_git_compat;
 #[path = "promisor_remote_handshake.rs"]
 mod promisor_remote_handshake;
+#[path = "promisor_remote_local.rs"]
+mod promisor_remote_local;
 #[path = "pruned_modules.rs"]
 mod pruned_modules;
 #[path = "published_crates_declare_rust_version.rs"]

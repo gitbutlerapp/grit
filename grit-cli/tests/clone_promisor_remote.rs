@@ -270,3 +270,29 @@ fn clone_reports_promisor_config_warnings() {
         "{md}"
     );
 }
+
+#[test]
+fn clone_says_when_the_server_ignored_the_filter() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    grit_ok(&work, &["init", "-b", "main"]);
+    std::fs::write(work.join("a.txt"), "a\n").unwrap();
+    grit_ok(&work, &["add", "."]);
+    grit_ok(&work, &["commit", "-m", "seed"]);
+    let url = format!("file://{}", work.display());
+    let json = grit_ok(
+        tmp.path(),
+        &["--json", "clone", "--blobs", "none", &url, "c-json"],
+    );
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    // Nothing was filtered, so the clone is not reported as partial.
+    assert!(v.get("partial").is_none() || v["partial"] == false, "{v}");
+    assert_eq!(v["filter_ignored"], true);
+    let human = grit_ok(tmp.path(), &["clone", "--blobs", "none", &url, "c-human"]);
+    assert!(
+        human.contains("the server does not support filters; every blob was downloaded"),
+        "{human}"
+    );
+    assert!(!human.contains("blobless"), "{human}");
+}

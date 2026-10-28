@@ -284,6 +284,10 @@
       "description": "True with `--blobs auto`: the filter comes from the promisor remotes the server advertised and the clone accepted (`blobs` is the filter it resolved to).",
       "type": "boolean"
     },
+    "filter_ignored": {
+      "description": "True when the server does not support filters: the `blobs` filter was not sent and every blob was downloaded (the clone is still configured as a partial clone).",
+      "type": "boolean"
+    },
     "no_checkout_reason": {
       "description": "Why no working-tree checkout happened, when `files` is zero.",
       "type": [

@@ -255,6 +255,7 @@ pub mod lockfile;
 pub(crate) mod log_walk;
 pub(crate) mod mailmap;
 pub mod maintenance;
+pub(crate) mod mem_pipe;
 pub(crate) mod merge_base;
 pub(crate) mod merge_diff;
 pub(crate) mod merge_driver;

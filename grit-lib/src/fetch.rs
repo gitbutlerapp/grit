@@ -1295,6 +1295,9 @@ fn v2_wanted_ref_ad_line(line: &str) -> bool {
 /// sections (`acknowledgments`/`shallow-info`/`wanted-refs`/`packfile-uris`), and demux the
 /// side-band-64k pack from the `packfile` section into `out`. Lifted from the
 /// CLI's `read_v2_fetch_pack_response`, extended to surface shallow updates.
+///
+/// A stream that ends before the `packfile` section is
+/// [`RemoteUnreadableReason::ResponseTruncated`](crate::error::RemoteUnreadableReason::ResponseTruncated).
 pub(crate) fn read_v2_fetch_pack_response(
     reader: &mut dyn Read,
     out: &mut Vec<u8>,
@@ -1314,7 +1317,15 @@ pub(crate) fn read_v2_fetch_pack_response(
                         break line;
                     }
                 }
-                Some(pkt_line::Packet::Flush) | None => return Ok(()),
+                Some(pkt_line::Packet::Flush) => return Ok(()),
+                // A response to a request with wants ends with the packfile section;
+                // a stream that just stops was cut short (a server that died, say).
+                None => {
+                    return Err(Error::RemoteUnreadable {
+                        url: None,
+                        reason: crate::error::RemoteUnreadableReason::ResponseTruncated,
+                    })
+                }
                 Some(pkt_line::Packet::Delim) => continue,
                 Some(other) => {
                     return Err(Error::Message(format!(
@@ -2812,6 +2823,35 @@ mod fetch_advertised_ref_tests {
             "request must ask for unborn HEAD:\n{text}"
         );
         assert!(!text.contains("promisor-remote"), "{text}");
+    }
+
+    #[test]
+    fn v2_fetch_response_cut_before_the_pack_is_truncated() {
+        // An acknowledgments section, then the stream just ends.
+        let mut wire: Vec<u8> = Vec::new();
+        wire.extend_from_slice(b"0014acknowledgments\n");
+        wire.extend_from_slice(b"0008NAK\n");
+        wire.extend_from_slice(b"0001");
+        let err = super::read_v2_fetch_pack_response(
+            &mut wire.as_slice(),
+            &mut Vec::new(),
+            None,
+            &mut super::ShallowUpdate::default(),
+            &mut crate::fetch::NoProgress,
+            &crate::progress::NeverCancel,
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                Error::RemoteUnreadable {
+                    reason: crate::error::RemoteUnreadableReason::ResponseTruncated,
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
     }
 
     #[test]

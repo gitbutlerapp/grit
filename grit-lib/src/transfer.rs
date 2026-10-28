@@ -546,7 +546,9 @@ pub struct FetchOutcome {
     /// Objects and pack bytes ingested during this fetch.
     pub transfer: TransferStats,
     /// True when an object filter from [`FetchOptions::filter`] was sent on the wire
-    /// and the server advertised filter support.
+    /// and the server advertised filter support. False with a requested filter means
+    /// the server does not support `filter` and sent every object; as in Git, the pack
+    /// is still marked promisor and the remote stays a promisor remote.
     pub filter_sent: bool,
     /// The `promisor-remote` exchange, when the server advertised promisor remotes
     /// (protocol v2 only). Says which remotes were accepted and why others were not.
