@@ -413,6 +413,37 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
     git_cmd(args).in_dir(dir).suc().stdout
 }
 
+/// Parse `git --version` output such as `git version 2.50.1 (Apple Git-155)` or
+/// `git version 2.43.0.windows.1` into `(major, minor, patch)`.
+#[must_use]
+pub fn parse_git_version(output: &str) -> Option<(u32, u32, u32)> {
+    let version = output.trim().strip_prefix("git version ")?;
+    let version = version.split_whitespace().next()?;
+    let mut parts = version.split('.').map(|p| {
+        p.chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+    });
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+/// The system `git` version, or `None` when `git` is missing or prints something else.
+#[must_use]
+pub fn system_git_version() -> Option<(u32, u32, u32)> {
+    let out = Command::new("git").arg("--version").output().ok()?;
+    parse_git_version(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Whether the system `git` is at least `major.minor`. Tests of features newer Git
+/// added use it to skip, printing `SKIP`, on an older `git`.
+#[must_use]
+pub fn git_at_least(major: u32, minor: u32) -> bool {
+    system_git_version().is_some_and(|(ma, mi, _)| (ma, mi) >= (major, minor))
+}
+
 /// Resolve `rev` in the repository at `dir` with system `git rev-parse`.
 ///
 /// Works for SHA-1 and SHA-256 repositories. Panics when `git` fails or does not
@@ -767,5 +798,24 @@ fn copy_symlink(source: &Path, dest: &Path) -> io::Result<()> {
         std::os::windows::fs::symlink_dir(target, dest)
     } else {
         std::os::windows::fs::symlink_file(target, dest)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_git_version;
+
+    #[test]
+    fn parses_git_version_strings() {
+        assert_eq!(
+            parse_git_version("git version 2.50.1 (Apple Git-155)\n"),
+            Some((2, 50, 1))
+        );
+        assert_eq!(
+            parse_git_version("git version 2.43.0.windows.1"),
+            Some((2, 43, 0))
+        );
+        assert_eq!(parse_git_version("git version 2.54"), Some((2, 54, 0)));
+        assert_eq!(parse_git_version("not git"), None);
     }
 }

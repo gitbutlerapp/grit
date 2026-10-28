@@ -16,6 +16,7 @@ use crate::pack_object_select::TagCandidate;
 use crate::pack_objects::{write_upload_pack_stream_with_cancel, PackProgress};
 use crate::pkt_line::SidebandChannel1Writer;
 use crate::progress::{Cancel, CancelSignal, NeverCancel};
+use crate::promisor_remote::{parse_accepted_reply, PromisorAdvertisement};
 use crate::repo::Repository;
 use crate::rev_list::ObjectFilter;
 use crate::transfer::PackBuildOptions;
@@ -128,7 +129,10 @@ fn map_repo_cancel(err: ServeError) -> ServeError {
 /// Shallow fetches, partial-clone filters, and `want-ref` follow repository
 /// upload-pack policy and the capabilities advertised for the session. As in
 /// Git, the v2 `object-info` command is advertised and answered only when
-/// `transfer.advertiseObjectInfo` is true.
+/// `transfer.advertiseObjectInfo` is true. With `promisor.advertise` set, the
+/// v2 capabilities end with `promisor-remote` naming the repository's promisor
+/// remotes, and the names a client accepts are collected in
+/// [`ServeOptions::accepted_promisor_remotes`].
 ///
 /// # Parameters
 ///
@@ -672,7 +676,9 @@ fn serve_v2(
     stop: &CancelSignal<'_>,
 ) -> Result<UploadSession> {
     stop.poll().map_err(|_| ServeError::Cancelled)?;
-    let policy = upload_policy(repo);
+    let config = repo_config(repo);
+    let policy = UploadPackPolicy::from_config(&config);
+    let promisor_adv = PromisorAdvertisement::from_server_config(&config);
     if opts.advertise_refs || !opts.stateless_rpc {
         write_line(output, "version 2")?;
         if !opts.agent.is_empty() {
@@ -694,6 +700,16 @@ fn serve_v2(
             // clients match the capability by key, so older ones still see it.
             write_line(output, "object-info=size type")?;
         }
+        if let Some(adv) = &promisor_adv {
+            write_line(
+                output,
+                &format!(
+                    "{}={}",
+                    crate::protocol_v2::PROMISOR_REMOTE_CAPABILITY,
+                    adv.to_capability_value()
+                ),
+            )?;
+        }
         write_flush(output)?;
         if opts.advertise_refs {
             return Ok(UploadSession::default());
@@ -705,7 +721,7 @@ fn serve_v2(
     loop {
         stop.poll().map_err(|_| ServeError::Cancelled)?;
         opts.server_options.clear();
-        let Some(request) = read_v2_request(input, opts)? else {
+        let Some(request) = read_v2_request(input, opts, promisor_adv.as_ref())? else {
             return Ok(aggregate);
         };
         check_object_format(repo, request.object_format.as_deref())?;
@@ -742,7 +758,15 @@ struct V2Request {
 
 /// Read a v2 command request. Returns `None` at end of input or on a bare
 /// flush, which ends the session.
-fn read_v2_request(input: &mut dyn Read, opts: &mut ServeOptions) -> Result<Option<V2Request>> {
+///
+/// A `promisor-remote=<names>` capability records the names this server
+/// advertised in [`ServeOptions::accepted_promisor_remotes`]; other names are
+/// ignored, and a reply without names is a protocol error.
+fn read_v2_request(
+    input: &mut dyn Read,
+    opts: &mut ServeOptions,
+    promisor_adv: Option<&PromisorAdvertisement>,
+) -> Result<Option<V2Request>> {
     let mut command = None;
     let mut object_format = None;
     let mut args = Vec::new();
@@ -771,6 +795,10 @@ fn read_v2_request(input: &mut dyn Read, opts: &mut ServeOptions) -> Result<Opti
                     object_format = Some(f.to_owned());
                 } else if let Some(opt) = line.strip_prefix("server-option=") {
                     opts.server_options.push(opt.to_owned());
+                } else if let Some(rest) =
+                    line.strip_prefix(crate::protocol_v2::PROMISOR_REMOTE_CAPABILITY)
+                {
+                    record_accepted_promisors(rest, opts, promisor_adv)?;
                 }
                 // agent= and unknown capabilities are ignored.
             }
@@ -792,6 +820,34 @@ fn read_v2_request(input: &mut dyn Read, opts: &mut ServeOptions) -> Result<Opti
             "command request without command".into(),
         )),
     }
+}
+
+/// Record the client's `promisor-remote` reply (`rest` is what follows the
+/// capability name) in `opts`, keeping only names this server advertised.
+fn record_accepted_promisors(
+    rest: &str,
+    opts: &mut ServeOptions,
+    promisor_adv: Option<&PromisorAdvertisement>,
+) -> Result<()> {
+    let Some(value) = rest.strip_prefix('=') else {
+        if rest.is_empty() {
+            return Err(ServeError::Protocol(
+                "promisor-remote capability without a value".into(),
+            ));
+        }
+        // Some other capability that merely starts with the same letters.
+        return Ok(());
+    };
+    let names = parse_accepted_reply(value).map_err(|e| ServeError::Protocol(e.to_string()))?;
+    let Some(adv) = promisor_adv else {
+        return Ok(());
+    };
+    for name in names {
+        if adv.names().any(|n| n == name) && !opts.accepted_promisor_remotes.contains(&name) {
+            opts.accepted_promisor_remotes.push(name);
+        }
+    }
+    Ok(())
 }
 
 /// Answer `command=bundle-uri` with the configured bundle list.

@@ -14,6 +14,10 @@ pub(crate) struct UploadPackPolicy {
     pub allow_filter: bool,
     pub allow_tip_sha1_in_want: bool,
     pub allow_reachable_sha1_in_want: bool,
+    /// `uploadpack.allowAnySHA1InWant`: any object present in the repository may
+    /// be wanted, reachable or not. A large-object promisor that holds blobs no
+    /// ref points at needs this to answer lazy fetches.
+    pub allow_any_sha1_in_want: bool,
     pub ref_in_want: bool,
     pub allow_sideband_all: bool,
     /// `transfer.advertiseObjectInfo`: advertise and serve the v2 `object-info`
@@ -28,6 +32,7 @@ impl UploadPackPolicy {
             allow_filter: flag("uploadpack.allowfilter"),
             allow_tip_sha1_in_want: flag("uploadpack.allowtipsha1inwant"),
             allow_reachable_sha1_in_want: flag("uploadpack.allowreachablesha1inwant"),
+            allow_any_sha1_in_want: flag("uploadpack.allowanysha1inwant"),
             ref_in_want: flag("uploadpack.allowrefinwant"),
             allow_sideband_all: flag("uploadpack.allowsidebandall"),
             advertise_object_info: flag("transfer.advertiseobjectinfo"),
@@ -39,10 +44,11 @@ impl UploadPackPolicy {
         if self.allow_filter {
             caps.push("filter");
         }
-        if self.allow_tip_sha1_in_want {
+        // As in Git, allowing any object implies both narrower capabilities.
+        if self.allow_tip_sha1_in_want || self.allow_any_sha1_in_want {
             caps.push("allow-tip-sha1-in-want");
         }
-        if self.allow_reachable_sha1_in_want {
+        if self.allow_reachable_sha1_in_want || self.allow_any_sha1_in_want {
             caps.push("allow-reachable-sha1-in-want");
         }
         caps
@@ -132,6 +138,9 @@ pub(crate) fn validate_wants(
     policy: &UploadPackPolicy,
     stateless_rpc: bool,
 ) -> Result<()> {
+    if policy.allow_any_sha1_in_want {
+        return validate_wants_filtered(repo, wants);
+    }
     if policy.allow_reachable_sha1_in_want {
         let reachable = reachable_from_repository_tips(repo)?;
         for w in wants {

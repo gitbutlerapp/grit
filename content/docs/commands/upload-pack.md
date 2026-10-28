@@ -27,9 +27,19 @@ Shallow and deepen requests (`deepen`, `deepen-since`, `deepen-not`, `deepen-rel
 
 A filtered pack holds the objects `git upload-pack` would send for the same request: the wanted objects and every annotated tag the client asked for or that `include-tag` adds, then the commits, trees and blobs the filter keeps. It is built and streamed like an unfiltered one, reusing the objects and deltas already stored, and the pack bitmap selects the objects when it can apply the filter (`blob:none`, `blob:limit`, `tree:0`). A blob-less clone therefore costs about what a full clone does without the blobs. Trees a filter rules out are not read, and blob sizes are only looked up for `blob:limit`. Under `combine:` with `tree:<depth>`, `git` can leave out a tree it first met too deep even when it meets the tree again within the depth; grit sends such a tree.
 
-Protocol v2 `want-ref` is accepted only when `uploadpack.allowRefInWant` is set, and the response then includes a `wanted-refs` section with the object each requested ref resolved to. Asking for the same ref twice is a protocol error. Protocol v2 `sideband-all` is advertised and accepted only when `uploadpack.allowSidebandAll` is set. Optional `want` rules follow `uploadpack.allowTipSha1InWant` and `uploadpack.allowReachableSha1InWant`.
+Protocol v2 `want-ref` is accepted only when `uploadpack.allowRefInWant` is set, and the response then includes a `wanted-refs` section with the object each requested ref resolved to. Asking for the same ref twice is a protocol error. Protocol v2 `sideband-all` is advertised and accepted only when `uploadpack.allowSidebandAll` is set. Optional `want` rules follow `uploadpack.allowTipSha1InWant`, `uploadpack.allowReachableSha1InWant` and `uploadpack.allowAnySHA1InWant`. The last lets a client want any object the repository has, reachable or not, and also turns on the other two capabilities in protocol v0. A large-object promisor needs it: it holds blobs that no ref points at, and clients fetch them by object id.
 
 In `--stateless-rpc` mode (smart HTTP POST), any commit reachable from the server's current ref tips may appear in a `want` line without those config flags. That matches Git when ref discovery and the fetch run as separate requests and a push can move refs in between. Stateful sessions (SSH and the negotiation half of a long-lived connection) still require each `want` to match the ref advertisement from that session unless `uploadpack.allowReachableSha1InWant` or `uploadpack.allowTipSha1InWant` is set.
+
+### Promisor remotes
+
+A repository that keeps some of its objects on other remotes (a large-object promisor holding the big blobs, for example) can tell clients about them. With `promisor.advertise = true`, the protocol v2 capabilities end with a `promisor-remote` line that names each of the repository's promisor remotes (`remote.<name>.promisor = true`, a `remote.<name>.partialCloneFilter`, or the `extensions.partialClone` remote, listed last) that has a URL. `promisor.sendFields` adds each remote's `partialCloneFilter` and `token` when they are set. Protocol v0 and v1 never carry the capability.
+
+```text
+promisor-remote=name=lop,url=https://lop.example.com/project.git,partialCloneFilter=blob:limit=1m
+```
+
+A client that accepts some of these remotes says so with a `promisor-remote=<names>` line in the capabilities of its command requests. The server keeps only the names it advertised. In a stateful session (SSH, `git://`, a local pipe) the acceptance lasts until the connection closes, so a reply sent with `ls-refs` covers the `fetch` that follows. Over smart HTTP each request stands alone: only a reply in the `fetch` request itself counts. `grit` clients send it with both commands; `git` clients send it only with `ls-refs`, so over smart HTTP their acceptance never reaches the fetch. A `promisor-remote` line with no names is a protocol error.
 
 ## Options
 

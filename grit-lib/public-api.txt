@@ -11704,6 +11704,217 @@ pub fn grit_lib::objects::promisor::read_promisor_missing_oids(&std::path::Path)
 pub fn grit_lib::objects::promisor::repo_treats_promisor_packs(&std::path::Path, &grit_lib::config::ConfigSet) -> bool
 pub fn grit_lib::objects::promisor::write_promisor_marker(&std::path::Path, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
 pub mod grit_lib::objects::promisor_remote
+pub enum grit_lib::objects::promisor_remote::AcceptFromServer
+pub grit_lib::objects::promisor_remote::AcceptFromServer::All
+pub grit_lib::objects::promisor_remote::AcceptFromServer::KnownName
+pub grit_lib::objects::promisor_remote::AcceptFromServer::KnownUrl
+pub grit_lib::objects::promisor_remote::AcceptFromServer::None
+impl grit_lib::objects::promisor_remote::AcceptFromServer
+pub fn grit_lib::objects::promisor_remote::AcceptFromServer::parse(&str) -> core::option::Option<Self>
+impl core::clone::Clone for grit_lib::objects::promisor_remote::AcceptFromServer
+pub fn grit_lib::objects::promisor_remote::AcceptFromServer::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::promisor_remote::AcceptFromServer
+impl core::cmp::PartialEq for grit_lib::objects::promisor_remote::AcceptFromServer
+pub fn grit_lib::objects::promisor_remote::AcceptFromServer::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::objects::promisor_remote::AcceptFromServer
+pub fn grit_lib::objects::promisor_remote::AcceptFromServer::default() -> Self
+impl core::fmt::Debug for grit_lib::objects::promisor_remote::AcceptFromServer
+pub fn grit_lib::objects::promisor_remote::AcceptFromServer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::promisor_remote::AcceptFromServer
+impl core::marker::StructuralPartialEq for grit_lib::objects::promisor_remote::AcceptFromServer
+impl core::marker::Freeze for grit_lib::objects::promisor_remote::AcceptFromServer
+impl core::marker::Send for grit_lib::objects::promisor_remote::AcceptFromServer
+impl core::marker::Sync for grit_lib::objects::promisor_remote::AcceptFromServer
+impl core::marker::Unpin for grit_lib::objects::promisor_remote::AcceptFromServer
+impl core::marker::UnsafeUnpin for grit_lib::objects::promisor_remote::AcceptFromServer
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::promisor_remote::AcceptFromServer
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::promisor_remote::AcceptFromServer
+#[non_exhaustive] pub enum grit_lib::objects::promisor_remote::PromisorConfigWarning
+pub grit_lib::objects::promisor_remote::PromisorConfigWarning::InvalidAdvertisedValue
+pub grit_lib::objects::promisor_remote::PromisorConfigWarning::InvalidAdvertisedValue::field: grit_lib::objects::promisor_remote::PromisorField
+pub grit_lib::objects::promisor_remote::PromisorConfigWarning::InvalidAdvertisedValue::remote: alloc::string::String
+pub grit_lib::objects::promisor_remote::PromisorConfigWarning::UnknownAcceptValue(alloc::string::String)
+pub grit_lib::objects::promisor_remote::PromisorConfigWarning::UnknownField
+pub grit_lib::objects::promisor_remote::PromisorConfigWarning::UnknownField::field: alloc::string::String
+pub grit_lib::objects::promisor_remote::PromisorConfigWarning::UnknownField::key: &'static str
+impl core::clone::Clone for grit_lib::objects::promisor_remote::PromisorConfigWarning
+pub fn grit_lib::objects::promisor_remote::PromisorConfigWarning::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::promisor_remote::PromisorConfigWarning
+impl core::cmp::PartialEq for grit_lib::objects::promisor_remote::PromisorConfigWarning
+pub fn grit_lib::objects::promisor_remote::PromisorConfigWarning::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::promisor_remote::PromisorConfigWarning
+pub fn grit_lib::objects::promisor_remote::PromisorConfigWarning::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::objects::promisor_remote::PromisorConfigWarning
+impl core::marker::Freeze for grit_lib::objects::promisor_remote::PromisorConfigWarning
+impl core::marker::Send for grit_lib::objects::promisor_remote::PromisorConfigWarning
+impl core::marker::Sync for grit_lib::objects::promisor_remote::PromisorConfigWarning
+impl core::marker::Unpin for grit_lib::objects::promisor_remote::PromisorConfigWarning
+impl core::marker::UnsafeUnpin for grit_lib::objects::promisor_remote::PromisorConfigWarning
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::promisor_remote::PromisorConfigWarning
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::promisor_remote::PromisorConfigWarning
+#[non_exhaustive] pub enum grit_lib::objects::promisor_remote::PromisorField
+pub grit_lib::objects::promisor_remote::PromisorField::PartialCloneFilter
+pub grit_lib::objects::promisor_remote::PromisorField::Token
+impl grit_lib::objects::promisor_remote::PromisorField
+pub const grit_lib::objects::promisor_remote::PromisorField::ALL: [Self; 2]
+pub const fn grit_lib::objects::promisor_remote::PromisorField::config_key(self) -> &'static str
+pub fn grit_lib::objects::promisor_remote::PromisorField::parse_list(&str) -> (alloc::vec::Vec<Self>, alloc::vec::Vec<alloc::string::String>)
+pub const fn grit_lib::objects::promisor_remote::PromisorField::wire_name(self) -> &'static str
+impl core::clone::Clone for grit_lib::objects::promisor_remote::PromisorField
+pub fn grit_lib::objects::promisor_remote::PromisorField::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::promisor_remote::PromisorField
+impl core::cmp::PartialEq for grit_lib::objects::promisor_remote::PromisorField
+pub fn grit_lib::objects::promisor_remote::PromisorField::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::promisor_remote::PromisorField
+pub fn grit_lib::objects::promisor_remote::PromisorField::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::objects::promisor_remote::PromisorField
+pub fn grit_lib::objects::promisor_remote::PromisorField::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::objects::promisor_remote::PromisorField
+impl core::marker::StructuralPartialEq for grit_lib::objects::promisor_remote::PromisorField
+impl core::marker::Freeze for grit_lib::objects::promisor_remote::PromisorField
+impl core::marker::Send for grit_lib::objects::promisor_remote::PromisorField
+impl core::marker::Sync for grit_lib::objects::promisor_remote::PromisorField
+impl core::marker::Unpin for grit_lib::objects::promisor_remote::PromisorField
+impl core::marker::UnsafeUnpin for grit_lib::objects::promisor_remote::PromisorField
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::promisor_remote::PromisorField
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::promisor_remote::PromisorField
+#[non_exhaustive] pub enum grit_lib::objects::promisor_remote::PromisorRejection
+pub grit_lib::objects::promisor_remote::PromisorRejection::FieldMismatch(grit_lib::objects::promisor_remote::PromisorField)
+pub grit_lib::objects::promisor_remote::PromisorRejection::FieldMissing(grit_lib::objects::promisor_remote::PromisorField)
+pub grit_lib::objects::promisor_remote::PromisorRejection::NotPartialFetch
+pub grit_lib::objects::promisor_remote::PromisorRejection::PolicyNone
+pub grit_lib::objects::promisor_remote::PromisorRejection::UnknownRemote
+pub grit_lib::objects::promisor_remote::PromisorRejection::UrlMismatch
+pub grit_lib::objects::promisor_remote::PromisorRejection::UrlMismatch::configured: alloc::string::String
+impl core::clone::Clone for grit_lib::objects::promisor_remote::PromisorRejection
+pub fn grit_lib::objects::promisor_remote::PromisorRejection::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::promisor_remote::PromisorRejection
+impl core::cmp::PartialEq for grit_lib::objects::promisor_remote::PromisorRejection
+pub fn grit_lib::objects::promisor_remote::PromisorRejection::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::promisor_remote::PromisorRejection
+pub fn grit_lib::objects::promisor_remote::PromisorRejection::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::objects::promisor_remote::PromisorRejection
+impl core::marker::Freeze for grit_lib::objects::promisor_remote::PromisorRejection
+impl core::marker::Send for grit_lib::objects::promisor_remote::PromisorRejection
+impl core::marker::Sync for grit_lib::objects::promisor_remote::PromisorRejection
+impl core::marker::Unpin for grit_lib::objects::promisor_remote::PromisorRejection
+impl core::marker::UnsafeUnpin for grit_lib::objects::promisor_remote::PromisorRejection
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::promisor_remote::PromisorRejection
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::promisor_remote::PromisorRejection
+#[non_exhaustive] pub enum grit_lib::objects::promisor_remote::PromisorReplyError
+pub grit_lib::objects::promisor_remote::PromisorReplyError::Empty
+impl core::clone::Clone for grit_lib::objects::promisor_remote::PromisorReplyError
+pub fn grit_lib::objects::promisor_remote::PromisorReplyError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::promisor_remote::PromisorReplyError
+impl core::cmp::PartialEq for grit_lib::objects::promisor_remote::PromisorReplyError
+pub fn grit_lib::objects::promisor_remote::PromisorReplyError::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::objects::promisor_remote::PromisorReplyError
+impl core::fmt::Debug for grit_lib::objects::promisor_remote::PromisorReplyError
+pub fn grit_lib::objects::promisor_remote::PromisorReplyError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::objects::promisor_remote::PromisorReplyError
+pub fn grit_lib::objects::promisor_remote::PromisorReplyError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::objects::promisor_remote::PromisorReplyError
+impl core::marker::Freeze for grit_lib::objects::promisor_remote::PromisorReplyError
+impl core::marker::Send for grit_lib::objects::promisor_remote::PromisorReplyError
+impl core::marker::Sync for grit_lib::objects::promisor_remote::PromisorReplyError
+impl core::marker::Unpin for grit_lib::objects::promisor_remote::PromisorReplyError
+impl core::marker::UnsafeUnpin for grit_lib::objects::promisor_remote::PromisorReplyError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::promisor_remote::PromisorReplyError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::promisor_remote::PromisorReplyError
+pub struct grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+pub grit_lib::objects::promisor_remote::PromisorAcceptPolicy::accept: grit_lib::objects::promisor_remote::AcceptFromServer
+pub grit_lib::objects::promisor_remote::PromisorAcceptPolicy::check_fields: alloc::vec::Vec<grit_lib::objects::promisor_remote::PromisorField>
+pub grit_lib::objects::promisor_remote::PromisorAcceptPolicy::store_fields: alloc::vec::Vec<grit_lib::objects::promisor_remote::PromisorField>
+impl grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+pub fn grit_lib::objects::promisor_remote::PromisorAcceptPolicy::from_config(&grit_lib::config::ConfigSet) -> (Self, alloc::vec::Vec<grit_lib::objects::promisor_remote::PromisorConfigWarning>)
+impl core::clone::Clone for grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+pub fn grit_lib::objects::promisor_remote::PromisorAcceptPolicy::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+impl core::cmp::PartialEq for grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+pub fn grit_lib::objects::promisor_remote::PromisorAcceptPolicy::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+pub fn grit_lib::objects::promisor_remote::PromisorAcceptPolicy::default() -> Self
+impl core::fmt::Debug for grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+pub fn grit_lib::objects::promisor_remote::PromisorAcceptPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+impl core::marker::Freeze for grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+impl core::marker::Send for grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+impl core::marker::Sync for grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+impl core::marker::Unpin for grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+impl core::marker::UnsafeUnpin for grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::promisor_remote::PromisorAcceptPolicy
+pub struct grit_lib::objects::promisor_remote::PromisorAdvertisement
+pub grit_lib::objects::promisor_remote::PromisorAdvertisement::remotes: alloc::vec::Vec<grit_lib::objects::promisor_remote::PromisorInfo>
+impl grit_lib::objects::promisor_remote::PromisorAdvertisement
+pub fn grit_lib::objects::promisor_remote::PromisorAdvertisement::from_server_config(&grit_lib::config::ConfigSet) -> core::option::Option<Self>
+pub fn grit_lib::objects::promisor_remote::PromisorAdvertisement::names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn grit_lib::objects::promisor_remote::PromisorAdvertisement::parse(&str) -> Self
+pub fn grit_lib::objects::promisor_remote::PromisorAdvertisement::to_capability_value(&self) -> alloc::string::String
+impl core::clone::Clone for grit_lib::objects::promisor_remote::PromisorAdvertisement
+pub fn grit_lib::objects::promisor_remote::PromisorAdvertisement::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::promisor_remote::PromisorAdvertisement
+impl core::cmp::PartialEq for grit_lib::objects::promisor_remote::PromisorAdvertisement
+pub fn grit_lib::objects::promisor_remote::PromisorAdvertisement::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::objects::promisor_remote::PromisorAdvertisement
+pub fn grit_lib::objects::promisor_remote::PromisorAdvertisement::default() -> Self
+impl core::fmt::Debug for grit_lib::objects::promisor_remote::PromisorAdvertisement
+pub fn grit_lib::objects::promisor_remote::PromisorAdvertisement::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::objects::promisor_remote::PromisorAdvertisement
+impl core::marker::Freeze for grit_lib::objects::promisor_remote::PromisorAdvertisement
+impl core::marker::Send for grit_lib::objects::promisor_remote::PromisorAdvertisement
+impl core::marker::Sync for grit_lib::objects::promisor_remote::PromisorAdvertisement
+impl core::marker::Unpin for grit_lib::objects::promisor_remote::PromisorAdvertisement
+impl core::marker::UnsafeUnpin for grit_lib::objects::promisor_remote::PromisorAdvertisement
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::promisor_remote::PromisorAdvertisement
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::promisor_remote::PromisorAdvertisement
+pub struct grit_lib::objects::promisor_remote::PromisorCandidate
+pub grit_lib::objects::promisor_remote::PromisorCandidate::advertised: grit_lib::objects::promisor_remote::PromisorInfo
+pub grit_lib::objects::promisor_remote::PromisorCandidate::rejection: core::option::Option<grit_lib::objects::promisor_remote::PromisorRejection>
+impl grit_lib::objects::promisor_remote::PromisorCandidate
+pub fn grit_lib::objects::promisor_remote::PromisorCandidate::is_accepted(&self) -> bool
+impl core::clone::Clone for grit_lib::objects::promisor_remote::PromisorCandidate
+pub fn grit_lib::objects::promisor_remote::PromisorCandidate::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::promisor_remote::PromisorCandidate
+impl core::cmp::PartialEq for grit_lib::objects::promisor_remote::PromisorCandidate
+pub fn grit_lib::objects::promisor_remote::PromisorCandidate::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::promisor_remote::PromisorCandidate
+pub fn grit_lib::objects::promisor_remote::PromisorCandidate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::objects::promisor_remote::PromisorCandidate
+impl core::marker::Freeze for grit_lib::objects::promisor_remote::PromisorCandidate
+impl core::marker::Send for grit_lib::objects::promisor_remote::PromisorCandidate
+impl core::marker::Sync for grit_lib::objects::promisor_remote::PromisorCandidate
+impl core::marker::Unpin for grit_lib::objects::promisor_remote::PromisorCandidate
+impl core::marker::UnsafeUnpin for grit_lib::objects::promisor_remote::PromisorCandidate
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::promisor_remote::PromisorCandidate
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::promisor_remote::PromisorCandidate
+pub struct grit_lib::objects::promisor_remote::PromisorDecision
+pub grit_lib::objects::promisor_remote::PromisorDecision::candidates: alloc::vec::Vec<grit_lib::objects::promisor_remote::PromisorCandidate>
+impl grit_lib::objects::promisor_remote::PromisorDecision
+pub fn grit_lib::objects::promisor_remote::PromisorDecision::accepted(&self) -> impl core::iter::traits::iterator::Iterator<Item = &grit_lib::objects::promisor_remote::PromisorInfo>
+pub fn grit_lib::objects::promisor_remote::PromisorDecision::accepted_names(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::objects::promisor_remote::PromisorDecision::any_accepted(&self) -> bool
+pub fn grit_lib::objects::promisor_remote::PromisorDecision::combined_filter(&self) -> (core::option::Option<grit_lib::remote::partial_clone::ObjectFilterSpec>, alloc::vec::Vec<alloc::string::String>)
+pub fn grit_lib::objects::promisor_remote::PromisorDecision::decide(&grit_lib::objects::promisor_remote::PromisorAcceptPolicy, &[grit_lib::objects::promisor_remote::PromisorInfo], &grit_lib::objects::promisor_remote::PromisorAdvertisement) -> Self
+pub fn grit_lib::objects::promisor_remote::PromisorDecision::decline_all(&mut self, grit_lib::objects::promisor_remote::PromisorRejection)
+pub fn grit_lib::objects::promisor_remote::PromisorDecision::reply_value(&self) -> core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::objects::promisor_remote::PromisorDecision
+pub fn grit_lib::objects::promisor_remote::PromisorDecision::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::promisor_remote::PromisorDecision
+impl core::cmp::PartialEq for grit_lib::objects::promisor_remote::PromisorDecision
+pub fn grit_lib::objects::promisor_remote::PromisorDecision::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::objects::promisor_remote::PromisorDecision
+pub fn grit_lib::objects::promisor_remote::PromisorDecision::default() -> Self
+impl core::fmt::Debug for grit_lib::objects::promisor_remote::PromisorDecision
+pub fn grit_lib::objects::promisor_remote::PromisorDecision::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::objects::promisor_remote::PromisorDecision
+impl core::marker::Freeze for grit_lib::objects::promisor_remote::PromisorDecision
+impl core::marker::Send for grit_lib::objects::promisor_remote::PromisorDecision
+impl core::marker::Sync for grit_lib::objects::promisor_remote::PromisorDecision
+impl core::marker::Unpin for grit_lib::objects::promisor_remote::PromisorDecision
+impl core::marker::UnsafeUnpin for grit_lib::objects::promisor_remote::PromisorDecision
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::promisor_remote::PromisorDecision
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::promisor_remote::PromisorDecision
 pub struct grit_lib::objects::promisor_remote::PromisorInfo
 pub grit_lib::objects::promisor_remote::PromisorInfo::filter: core::option::Option<alloc::string::String>
 pub grit_lib::objects::promisor_remote::PromisorInfo::name: alloc::string::String
@@ -11711,10 +11922,14 @@ pub grit_lib::objects::promisor_remote::PromisorInfo::token: core::option::Optio
 pub grit_lib::objects::promisor_remote::PromisorInfo::url: core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::objects::promisor_remote::PromisorInfo
 pub fn grit_lib::objects::promisor_remote::PromisorInfo::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::promisor_remote::PromisorInfo
+impl core::cmp::PartialEq for grit_lib::objects::promisor_remote::PromisorInfo
+pub fn grit_lib::objects::promisor_remote::PromisorInfo::eq(&self, &Self) -> bool
 impl core::default::Default for grit_lib::objects::promisor_remote::PromisorInfo
 pub fn grit_lib::objects::promisor_remote::PromisorInfo::default() -> Self
 impl core::fmt::Debug for grit_lib::objects::promisor_remote::PromisorInfo
 pub fn grit_lib::objects::promisor_remote::PromisorInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::objects::promisor_remote::PromisorInfo
 impl core::marker::Freeze for grit_lib::objects::promisor_remote::PromisorInfo
 impl core::marker::Send for grit_lib::objects::promisor_remote::PromisorInfo
 impl core::marker::Sync for grit_lib::objects::promisor_remote::PromisorInfo
@@ -11733,9 +11948,32 @@ impl core::marker::Unpin for grit_lib::objects::promisor_remote::PromisorReply
 impl core::marker::UnsafeUnpin for grit_lib::objects::promisor_remote::PromisorReply
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::promisor_remote::PromisorReply
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::promisor_remote::PromisorReply
+pub struct grit_lib::objects::promisor_remote::StoredPromisorField
+pub grit_lib::objects::promisor_remote::StoredPromisorField::field: grit_lib::objects::promisor_remote::PromisorField
+pub grit_lib::objects::promisor_remote::StoredPromisorField::remote: alloc::string::String
+pub grit_lib::objects::promisor_remote::StoredPromisorField::replaced: bool
+impl core::clone::Clone for grit_lib::objects::promisor_remote::StoredPromisorField
+pub fn grit_lib::objects::promisor_remote::StoredPromisorField::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::promisor_remote::StoredPromisorField
+impl core::cmp::PartialEq for grit_lib::objects::promisor_remote::StoredPromisorField
+pub fn grit_lib::objects::promisor_remote::StoredPromisorField::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::promisor_remote::StoredPromisorField
+pub fn grit_lib::objects::promisor_remote::StoredPromisorField::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::objects::promisor_remote::StoredPromisorField
+impl core::marker::Freeze for grit_lib::objects::promisor_remote::StoredPromisorField
+impl core::marker::Send for grit_lib::objects::promisor_remote::StoredPromisorField
+impl core::marker::Sync for grit_lib::objects::promisor_remote::StoredPromisorField
+impl core::marker::Unpin for grit_lib::objects::promisor_remote::StoredPromisorField
+impl core::marker::UnsafeUnpin for grit_lib::objects::promisor_remote::StoredPromisorField
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::promisor_remote::StoredPromisorField
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::promisor_remote::StoredPromisorField
+pub fn grit_lib::objects::promisor_remote::configured_promisor_remotes(&grit_lib::config::ConfigSet, &[grit_lib::objects::promisor_remote::PromisorField]) -> alloc::vec::Vec<grit_lib::objects::promisor_remote::PromisorInfo>
+pub fn grit_lib::objects::promisor_remote::lazy_fetch_order(&grit_lib::config::ConfigSet, &[alloc::string::String]) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::objects::promisor_remote::parse_accepted_reply(&str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, grit_lib::objects::promisor_remote::PromisorReplyError>
 pub fn grit_lib::objects::promisor_remote::parse_advertisement(&str) -> alloc::vec::Vec<grit_lib::objects::promisor_remote::PromisorInfo>
 pub fn grit_lib::objects::promisor_remote::promisor_remote_info(&grit_lib::config::ConfigSet) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::objects::promisor_remote::promisor_remote_reply(&grit_lib::config::ConfigSet, &str) -> grit_lib::objects::promisor_remote::PromisorReply
+pub fn grit_lib::objects::promisor_remote::store_advertised_fields(&std::path::Path, &grit_lib::objects::promisor_remote::PromisorAcceptPolicy, &grit_lib::config::ConfigSet, &grit_lib::objects::promisor_remote::PromisorDecision) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::objects::promisor_remote::StoredPromisorField>, alloc::vec::Vec<grit_lib::objects::promisor_remote::PromisorConfigWarning>)>
 pub mod grit_lib::objects::prune_packed
 pub struct grit_lib::objects::prune_packed::PrunePackedOptions
 pub grit_lib::objects::prune_packed::PrunePackedOptions::dry_run: bool
@@ -21380,6 +21618,7 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::protocol_v2::FetchResponseS
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::protocol_v2::FetchResponseSection
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::protocol_v2::FetchResponseSection
 pub const grit_lib::remote::protocol_v2::FETCH_RESPONSE_SECTION_ORDER: &[grit_lib::remote::protocol_v2::FetchResponseSection]
+pub const grit_lib::remote::protocol_v2::PROMISOR_REMOTE_CAPABILITY: &str
 pub fn grit_lib::remote::protocol_v2::cap_lines_for_command_request(&[alloc::string::String]) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::remote::protocol_v2::fetch_features(&[alloc::string::String]) -> std::collections::hash::set::HashSet<alloc::string::String>
 pub fn grit_lib::remote::protocol_v2::fetch_prelude_shallow_before_wanted_refs(&[&str]) -> bool
@@ -21388,6 +21627,7 @@ pub fn grit_lib::remote::protocol_v2::fetch_supports_filter(&[alloc::string::Str
 pub fn grit_lib::remote::protocol_v2::fetch_supports_ref_in_want(&[alloc::string::String]) -> bool
 pub fn grit_lib::remote::protocol_v2::fetch_supports_sideband_all(&[alloc::string::String]) -> bool
 pub fn grit_lib::remote::protocol_v2::server_advertises_bundle_uri(&[alloc::string::String]) -> bool
+pub fn grit_lib::remote::protocol_v2::server_promisor_remote_info(&[alloc::string::String]) -> core::option::Option<&str>
 pub mod grit_lib::remote::push
 pub fn grit_lib::remote::push::push_http(alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>, &std::path::Path, &str, &[grit_lib::remote::transfer::PushRefSpec], &grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::PushOutcome>
 pub fn grit_lib::remote::push::push_remote(&std::path::Path, &mut dyn grit_lib::remote::transport::Connection, &[grit_lib::remote::transfer::PushRefSpec], &grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::PushOutcome>
@@ -22080,6 +22320,7 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::serve::RejectedObject
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::RejectedObject
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::RejectedObject
 pub struct grit_lib::remote::serve::ServeOptions
+pub grit_lib::remote::serve::ServeOptions::accepted_promisor_remotes: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::serve::ServeOptions::advertise_refs: bool
 pub grit_lib::remote::serve::ServeOptions::agent: alloc::string::String
 pub grit_lib::remote::serve::ServeOptions::bundle_list: core::option::Option<grit_lib::remote::bundle_uri::BundleList>

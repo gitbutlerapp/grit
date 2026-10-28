@@ -161,6 +161,28 @@ pub fn fetch_supports_filter(caps: &[String]) -> bool {
     fetch_supports_feature(caps, "filter")
 }
 
+/// Name of the protocol v2 capability a server uses to advertise its promisor remotes, and a
+/// client uses to say which of them it accepted (see
+/// [`crate::promisor_remote::PromisorAdvertisement`]).
+pub const PROMISOR_REMOTE_CAPABILITY: &str = "promisor-remote";
+
+/// The value of the server's `promisor-remote=<value>` capability, if it advertised one.
+///
+/// # Parameters
+///
+/// - `caps`: the v2 capability lines from the server's advertisement.
+///
+/// # Returns
+///
+/// The text after `promisor-remote=`, or `None` when the capability is absent.
+#[must_use]
+pub fn server_promisor_remote_info(caps: &[String]) -> Option<&str> {
+    caps.iter().find_map(|c| {
+        c.strip_prefix(PROMISOR_REMOTE_CAPABILITY)
+            .and_then(|rest| rest.strip_prefix('='))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,6 +278,17 @@ mod tests {
     #[test]
     fn fetch_features_empty_without_fetch_cap() {
         assert!(fetch_features(&s(&["ls-refs", "agent=x"])).is_empty());
+    }
+
+    #[test]
+    fn promisor_remote_info_value() {
+        let caps = s(&["agent=x", "promisor-remote=name=lop,url=file:///lop"]);
+        assert_eq!(
+            server_promisor_remote_info(&caps),
+            Some("name=lop,url=file:///lop")
+        );
+        assert_eq!(server_promisor_remote_info(&s(&["promisor-remote"])), None);
+        assert_eq!(server_promisor_remote_info(&s(&["agent=x"])), None);
     }
 
     #[test]

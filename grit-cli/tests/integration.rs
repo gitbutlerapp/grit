@@ -421,6 +421,9 @@ mod precise_commit_workflow;
 #[path = "promisor_blobless_cli.rs"]
 mod promisor_blobless_cli;
 #[cfg(feature = "full-tests")]
+#[path = "promisor_remote_git_client.rs"]
+mod promisor_remote_git_client;
+#[cfg(feature = "full-tests")]
 #[path = "pull_json.rs"]
 mod pull_json;
 #[cfg(feature = "full-tests")]

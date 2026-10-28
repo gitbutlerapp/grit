@@ -186,6 +186,15 @@ pub struct ServeOptions {
     /// receive-pack as `pushBundle=<value>`; relative values are relative to
     /// the repository URL. `None` advertises nothing.
     pub push_bundle: Option<String>,
+    /// Filled while serving: the promisor remotes the client accepted, from the
+    /// `promisor-remote=<names>` capability of its v2 command requests. Only names
+    /// this server advertised (see
+    /// [`PromisorAdvertisement`](crate::promisor_remote::PromisorAdvertisement))
+    /// are kept. The list lasts for the whole session, so an acceptance sent with
+    /// `ls-refs` still holds for the `fetch` that follows; a stateless (smart
+    /// HTTP) request only sees what that one request carried. Callers leave it
+    /// empty.
+    pub accepted_promisor_remotes: Vec<String>,
 }
 
 /// Name of the receive-pack capability that advertises a resumable push

@@ -1671,6 +1671,8 @@ mod serde_models_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "serve_ls_refs_prefix.rs"]
 mod serve_ls_refs_prefix;
+#[path = "serve_promisor_remote.rs"]
+mod serve_promisor_remote;
 #[cfg(feature = "full-tests")]
 #[path = "serve_receive_deny_non_ff.rs"]
 mod serve_receive_deny_non_ff;
