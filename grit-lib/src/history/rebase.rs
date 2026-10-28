@@ -202,7 +202,7 @@ pub enum PreRebase {
 }
 
 impl PreRebase {
-    fn run(&self, repo: &Repository) -> Result<(), HistoryError> {
+    pub(crate) fn run(&self, repo: &Repository) -> Result<(), HistoryError> {
         match self {
             Self::Run { upstream } => run_pre_rebase(repo, upstream.as_deref())
                 .map(drop)
@@ -554,6 +554,39 @@ fn rebase_onto_impl(
         &opts.rewrite,
         Some(&replay_order),
         opts.flatten_leaf_merges.then_some(onto),
+        opts.favor,
+    )?;
+    plan.head.checkout_onto = Some(onto);
+    Ok(plan)
+}
+
+/// Replay plan for `--exec` when the branch is already based on the upstream: reuse each commit
+/// in `range` unchanged so commands run without minting new OIDs.
+pub(crate) fn plan_rebase_identity_exec(
+    repo: &Repository,
+    onto: ObjectId,
+    range: &[ObjectId],
+    opts: &RebaseOntoOptions,
+) -> Result<RewritePlan, HistoryError> {
+    let mut edits = HistoryEdits::new();
+    let mut previous = onto;
+    for &commit in range {
+        edits.insert(
+            commit,
+            CommitEdit::Reuse {
+                existing: commit,
+                parent: previous,
+            },
+        );
+        previous = commit;
+    }
+    let replay_order = range.to_vec();
+    let mut plan = plan_rewrite_with_order(
+        repo,
+        &edits,
+        &opts.rewrite,
+        Some(&replay_order),
+        Some(onto),
         opts.favor,
     )?;
     plan.head.checkout_onto = Some(onto);

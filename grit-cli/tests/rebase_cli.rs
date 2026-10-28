@@ -1196,3 +1196,48 @@ fn exec_failure_after_dirty_stop_forwards_streams_and_exit_code() -> TestResult 
     git_fsck_strict(dir)?;
     Ok(())
 }
+
+/// Issue #2246: `--exec` must run when the branch is already based on the upstream.
+#[test]
+fn rebase_exec_runs_when_already_up_to_date_with_upstream() -> TestResult {
+    let scratch = Scratch::new("issue-2246")?;
+    let dir = scratch.path();
+    git(dir, &["init", "-q", "-b", "main"])?;
+    for i in 1..=3 {
+        fs::write(dir.join(format!("f{i}.txt")), format!("{i}\n"))?;
+        git(dir, &["add", "."])?;
+        git(dir, &["commit", "-qm", &format!("c{i}")])?;
+    }
+    let tip = git(dir, &["rev-parse", "HEAD"])?.trim().to_owned();
+    let upstream = git(dir, &["rev-parse", "HEAD~2"])?.trim().to_owned();
+
+    let ok = gs(dir, ["rebase", "--exec", "true", &upstream, "--json"])?;
+    assert!(ok.success(), "{}\n{}", ok.stdout, ok.stderr);
+    let json = parse_json(&ok.stdout)?;
+    assert_eq!(
+        json.get("result").and_then(Value::as_str),
+        Some("completed")
+    );
+    let exec = json
+        .get("exec")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    assert_eq!(exec, 2, "expected exec at c2 and c3: {json}");
+    assert_eq!(git(dir, &["rev-parse", "HEAD"])?.trim(), tip);
+    assert!(
+        !ok.stdout.contains("Already up to date"),
+        "must not claim up to date when exec ran"
+    );
+
+    let failed = gs(dir, ["rebase", "--exec", "false", &upstream, "--json"])?;
+    assert_eq!(
+        failed.status,
+        Some(1),
+        "{}\n{}",
+        failed.stdout,
+        failed.stderr
+    );
+    assert_eq!(git(dir, &["rev-parse", "HEAD"])?.trim(), tip);
+    git_fsck_strict(dir)?;
+    Ok(())
+}

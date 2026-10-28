@@ -638,6 +638,10 @@ fn render_rewrite_rows(
 impl HumanRender for HistoryRewriteOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if self.operation == "rebase" && self.rewritten.is_empty() {
+            if !self.exec.is_empty() {
+                outln!(w, "Exec commands ran; branch is unchanged");
+                return Ok(());
+            }
             outln!(w, "Already up to date");
             return Ok(());
         }
@@ -1474,6 +1478,14 @@ fn reflog_identity(repo: &Repository) -> Result<grit_lib::ident::Signature> {
     )
 }
 
+fn omit_identity_rewrite_rows(outcome: &mut HistoryRewriteOutcome) {
+    outcome.rewritten.retain(|pair| {
+        pair.new
+            .as_deref()
+            .is_none_or(|new| new != pair.old.as_str())
+    });
+}
+
 fn map_rebase_outcome(outcome: RebaseOutcome) -> Result<RebaseCliOutcome> {
     match outcome {
         RebaseOutcome::Done {
@@ -1486,9 +1498,12 @@ fn map_rebase_outcome(outcome: RebaseOutcome) -> Result<RebaseCliOutcome> {
             });
             Ok(RebaseCliOutcome::from_rewrite(outcome))
         }
-        RebaseOutcome::ExecDone { plan, exec, .. } => Ok(RebaseCliOutcome::from_rewrite(
-            HistoryRewriteOutcome::new("rebase", &plan, false).with_exec(exec_rows(&exec.runs)),
-        )),
+        RebaseOutcome::ExecDone { plan, exec, .. } => {
+            let mut outcome =
+                HistoryRewriteOutcome::new("rebase", &plan, false).with_exec(exec_rows(&exec.runs));
+            omit_identity_rewrite_rows(&mut outcome);
+            Ok(RebaseCliOutcome::from_rewrite(outcome))
+        }
         RebaseOutcome::Stopped(stop) => {
             Ok(RebaseCliOutcome::from_stop(stop.commit, &stop.conflicts))
         }

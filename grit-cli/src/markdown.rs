@@ -1325,7 +1325,11 @@ pub fn print_rebase_outcome(
                 outln!(w, "- Dry run (refs unchanged)");
             }
             if outcome.rewritten.is_empty() {
-                outln!(w, "- Already up to date");
+                if !outcome.exec.is_empty() {
+                    outln!(w, "- Exec commands ran; branch is unchanged");
+                } else {
+                    outln!(w, "- Already up to date");
+                }
             } else {
                 print_history_rewrite_rows(
                     w,
@@ -1382,7 +1386,11 @@ pub fn print_history_rewrite_outcome(
     outln!(w, "## {title}");
     outln!(w);
     if outcome.operation == "rebase" && outcome.rewritten.is_empty() {
-        outln!(w, "- Already up to date");
+        if !outcome.exec.is_empty() {
+            outln!(w, "- Exec commands ran; branch is unchanged");
+        } else {
+            outln!(w, "- Already up to date");
+        }
         return Ok(());
     }
     if outcome.dry_run {

@@ -5,7 +5,7 @@ use crate::support;
 
 use std::path::Path;
 
-use grit_lib::command_runner::system_command_runner;
+use grit_lib::command_runner::{system_command_runner, RecordingRunner};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
@@ -361,6 +361,73 @@ fn up_to_date_rebase_leaves_orig_head_untouched() {
     let stale = set_stale_orig_head(dir);
     rebase(dir, rev(dir, "main~1"), main);
     assert_eq!(git_orig_head(dir), Some(stale));
+}
+
+#[test]
+fn up_to_date_rebase_with_exec_runs_at_each_commit_without_rewriting_tip() {
+    let (tmp, _, _) = issue_repo();
+    let dir = tmp.path();
+    let tip_before = rev(dir, "HEAD");
+    let upstream = rev(dir, "HEAD~2");
+    let runner = RecordingRunner::always_success();
+    let outcome = start_rebase_with_exec(
+        &open(dir),
+        &rebase_opts(upstream, tip_before),
+        &ExecSpec {
+            commands: vec!["true".into()],
+        },
+        runner.as_ref(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("exec rebase");
+    assert!(
+        matches!(outcome, RebaseOutcome::ExecDone { .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(runner.specs().len(), 2, "c2 and c3");
+    assert_eq!(rev(dir, "HEAD"), tip_before);
+    assert_eq!(git_orig_head(dir), Some(tip_before));
+    git(dir, &["fsck", "--strict"]);
+}
+
+#[test]
+fn up_to_date_rebase_with_exec_failure_leaves_refs_unchanged() {
+    let (tmp, _, _) = issue_repo();
+    let dir = tmp.path();
+    let tip_before = rev(dir, "HEAD");
+    let upstream = rev(dir, "HEAD~2");
+    let err = rebase_with_exec(dir, upstream, tip_before, "false").expect_err("command fails");
+    assert!(
+        matches!(
+            err,
+            RebaseSessionError::History(HistoryError::ExecFailed { .. })
+        ),
+        "{err:?}"
+    );
+    assert_eq!(rev(dir, "HEAD"), tip_before);
+    assert_eq!(git_orig_head(dir), None);
+}
+
+#[test]
+fn up_to_date_rebase_with_exec_on_empty_range_runs_nothing() {
+    let (tmp, _, _) = issue_repo();
+    let dir = tmp.path();
+    let tip = rev(dir, "HEAD");
+    let runner = RecordingRunner::always_success();
+    let outcome = start_rebase_with_exec(
+        &open(dir),
+        &rebase_opts(tip, tip),
+        &ExecSpec {
+            commands: vec!["true".into()],
+        },
+        runner.as_ref(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("exec");
+    assert!(matches!(outcome, RebaseOutcome::Done { .. }), "{outcome:?}");
+    assert!(runner.specs().is_empty());
 }
 
 fn rebase_with_exec(
