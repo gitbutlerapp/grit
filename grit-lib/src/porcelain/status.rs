@@ -892,12 +892,12 @@ pub fn expand_untracked_for_staging_with_rules(
     Ok(expanded)
 }
 
-/// Stored paths of the stage-0 gitlink entries in `index`.
+/// Stored paths of gitlink entries in `index` (any conflict stage).
 fn stage0_gitlink_paths(index: &Index) -> HashSet<String> {
     index
         .entries
         .iter()
-        .filter(|e| e.stage() == 0 && e.mode == MODE_GITLINK)
+        .filter(|e| e.mode == MODE_GITLINK)
         .map(|e| crate::repo_relpath::storage_string(&e.path))
         .collect()
 }
@@ -3349,6 +3349,94 @@ mod status_op_tests {
         assert!(
             model.untracked.iter().any(|p| p == "foo.txt"),
             "foo.txt should be untracked, got {:?}",
+            model.untracked
+        );
+    }
+
+    #[test]
+    fn unmerged_gitlink_is_conflict_not_untracked() {
+        use crate::index::{Index, IndexEntry, MODE_GITLINK};
+        use crate::objects::ObjectKind;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        init_min_repo(root);
+        let sub = root.join("vendor/lib");
+        fs::create_dir_all(&sub).unwrap();
+        let git = sub.join(".git");
+        fs::create_dir_all(git.join("objects")).unwrap();
+        fs::create_dir_all(git.join("refs/heads")).unwrap();
+        fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            git.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
+        )
+        .unwrap();
+        fs::write(sub.join("f.txt"), b"sub\n").unwrap();
+        let sub_repo =
+            Repository::open(&git, &RepositoryOptions::empty().with_work_tree(&sub)).unwrap();
+        let blob = sub_repo.odb().write(ObjectKind::Blob, b"sub\n").unwrap();
+        let tree = sub_repo
+            .odb()
+            .write(
+                ObjectKind::Tree,
+                format!("100644 {blob}\tf.txt\n").as_bytes(),
+            )
+            .unwrap();
+        let commit = sub_repo
+            .odb()
+            .write(
+                ObjectKind::Commit,
+                format!("tree {tree}\nauthor t <t@t> 0 +0000\ncommitter t <t@t> 0 +0000\n\nm\n")
+                    .as_bytes(),
+            )
+            .unwrap();
+        crate::refs::write_ref(&git, "refs/heads/main", &commit).unwrap();
+
+        let gitlink = commit;
+        let mut index = Index::new();
+        for stage in 1..=3u8 {
+            index.entries.push(IndexEntry {
+                ctime_sec: 0,
+                ctime_nsec: 0,
+                mtime_sec: 0,
+                mtime_nsec: 0,
+                dev: 0,
+                ino: 0,
+                mode: MODE_GITLINK,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                oid: gitlink,
+                flags: (b"vendor/lib".len() as u16) | ((stage as u16) << 12),
+                flags_extended: None,
+                path: b"vendor/lib".to_vec(),
+                base_index_pos: 0,
+            });
+        }
+        index.sort();
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        repo.write_index(&mut index).unwrap();
+
+        let model = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+        assert!(
+            model.conflicts.iter().any(|p| p == "vendor/lib"),
+            "conflicts: {:?}",
+            model.conflicts
+        );
+        assert!(
+            !model.untracked.iter().any(|p| p.starts_with("vendor/lib")),
+            "untracked must not list conflicted submodule: {:?}",
             model.untracked
         );
     }

@@ -320,14 +320,25 @@ fn restricted_index_paths_for_pathspecs(
         }
     }
     let matcher = PathspecListMatcher::new(pathspecs, ctx);
-    index
+    let mut paths: BTreeSet<String> = index
         .entries
         .iter()
         .filter(|e| e.stage() == 0)
         .filter_map(|e| std::str::from_utf8(&e.path).ok())
         .filter(|p| matcher.matches(p))
         .map(str::to_owned)
-        .collect()
+        .collect();
+    for entry in &index.entries {
+        if entry.stage() == 0 {
+            continue;
+        }
+        if let Ok(path) = std::str::from_utf8(&entry.path) {
+            if matcher.matches(path) {
+                paths.insert(path.to_owned());
+            }
+        }
+    }
+    paths
 }
 
 fn stage_via_worktree_diff(
@@ -443,7 +454,13 @@ fn stage_inner_on_index(
     let mut icase_map = Stage0IcasePathMap::from_index(index, ignorecase);
 
     let staging_pathspecs = normalized_staging_pathspecs(&opts.pathspecs);
-    let pathspec_ctx = repo.pathspec_match_context();
+    let mut pathspec_ctx = repo.pathspec_match_context();
+    if staging_pathspecs
+        .iter()
+        .any(|s| s.ends_with('/') && !pathspec_is_exclude(s))
+    {
+        pathspec_ctx.is_directory = true;
+    }
     let pathspec_matcher = PathspecListMatcher::new(staging_pathspecs.as_ref(), pathspec_ctx);
     let staging_thresholds = opts.staging_thresholds.unwrap_or_default();
     let use_tracked_scan = tracked_scan && !index.entries.is_empty() && !opts.dry_run;
@@ -818,6 +835,26 @@ fn stage_unmerged_paths_matching_pathspecs(
             ) {
                 rejects.push(rel.to_owned());
                 continue;
+            }
+        }
+        if meta.is_dir() && !meta.file_type().is_symlink() {
+            if let Some(head_oid) = read_submodule_head_oid(&abs) {
+                if dry_run {
+                    modified.push(rel.to_owned());
+                    continue;
+                }
+                stage_gitlink_at(rel, &meta, head_oid, index)?;
+                modified.push(rel.to_owned());
+                continue;
+            }
+            if index
+                .entries
+                .iter()
+                .any(|e| e.path == *raw_path && e.mode == MODE_GITLINK)
+            {
+                return Err(Error::Message(format!(
+                    "could not resolve submodule HEAD for '{rel}'"
+                )));
             }
         }
         if dry_run {
@@ -3279,6 +3316,92 @@ mod tests {
         let entry = index.get(b"sub", 0).unwrap();
         assert_eq!(entry.mode, MODE_GITLINK);
         assert_eq!(entry.oid, new_head);
+    }
+
+    #[test]
+    fn stage_unmerged_gitlink_pathspec_stages_checked_out_head() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let sub = root.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let sub_repo = open_nested_repo(&sub);
+        let base_oid = commit_in_repo(&sub_repo, "inside.txt", b"base\n", "base");
+        let ours_oid = commit_in_repo(&sub_repo, "inside.txt", b"ours\n", "ours");
+        let theirs_oid = commit_in_repo(&sub_repo, "inside.txt", b"theirs\n", "theirs");
+        set_branch_head(&sub_repo, theirs_oid);
+
+        for spec in ["sub", "sub/"] {
+            let mut index = Index::new();
+            index
+                .entries
+                .push(conflict_index_entry("sub", 1, base_oid, MODE_GITLINK));
+            index
+                .entries
+                .push(conflict_index_entry("sub", 2, ours_oid, MODE_GITLINK));
+            index
+                .entries
+                .push(conflict_index_entry("sub", 3, theirs_oid, MODE_GITLINK));
+            write_index(&repo, &mut index);
+            let outcome = stage(
+                &repo,
+                &StageOptions {
+                    pathspecs: vec![spec.to_owned()],
+                    ..StageOptions::default()
+                },
+                &mut NullProgress,
+                &crate::progress::NeverCancel,
+            )
+            .unwrap();
+            assert_eq!(outcome.modified, vec![spec.trim_end_matches('/')]);
+            let index = repo.load_index().unwrap();
+            assert!(
+                !index.has_unmerged_entries(),
+                "pathspec {spec:?} should collapse unmerged gitlink stages"
+            );
+            let entry = index.get(b"sub", 0).expect("stage-0 gitlink");
+            assert_eq!(entry.mode, MODE_GITLINK);
+            assert_eq!(entry.oid, theirs_oid);
+            assert_ne!(entry.oid, empty_blob_oid());
+        }
+    }
+
+    #[test]
+    fn stage_unmerged_gitlink_replaced_by_file_stages_blob() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(
+            repo.git_dir().join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n\tbare = false\n",
+        )
+        .unwrap();
+        repo.reload_config().unwrap();
+        let gitlink_oid = repo
+            .odb()
+            .write(
+                ObjectKind::Commit,
+                b"tree 0000000000000000000000000000000000000000\nauthor t <t@t> 0 +0000\ncommitter t <t@t> 0 +0000\n\nsub\n",
+            )
+            .unwrap();
+        let mut index = Index::new();
+        index
+            .entries
+            .push(conflict_index_entry("sub", 1, gitlink_oid, MODE_GITLINK));
+        index
+            .entries
+            .push(conflict_index_entry("sub", 2, gitlink_oid, MODE_GITLINK));
+        index
+            .entries
+            .push(conflict_index_entry("sub", 3, gitlink_oid, MODE_GITLINK));
+        write_index(&repo, &mut index);
+        fs::write(root.join("sub"), b"plain file\n").unwrap();
+
+        stage_with_pathspecs(&repo, &["sub"]);
+        let index = repo.load_index().unwrap();
+        let entry = index.get(b"sub", 0).expect("resolved stage 0");
+        assert_eq!(entry.mode, MODE_REGULAR);
+        assert_ne!(entry.oid, empty_blob_oid());
     }
 
     #[test]

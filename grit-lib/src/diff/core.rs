@@ -11297,8 +11297,9 @@ pub(crate) fn is_unregistered_embedded_git_repo(index: &Index, rel: &str, abs: &
         return false;
     }
     if index
-        .get(rel.as_bytes(), 0)
-        .is_some_and(|e| e.mode == crate::index::MODE_GITLINK)
+        .entries
+        .iter()
+        .any(|e| e.path.as_slice() == rel.as_bytes() && e.mode == crate::index::MODE_GITLINK)
     {
         return false;
     }
