@@ -1,5 +1,5 @@
-//! `grit auth` — sign in to GitHub with the OAuth **Device Flow** and store the
-//! resulting token in Git's credential store.
+//! `grit auth` — sign in to grithub or GitHub (with the OAuth **Device Flow**)
+//! and store the resulting token in Git's credential store.
 //!
 //! The protocol lives in [`grit_lib::remote::github_auth`]: `grit` asks GitHub
 //! for a device code, tells you to enter the short user code at
@@ -9,6 +9,13 @@
 //! authenticates with it as the HTTP password.
 //!
 //! There is no intermediate service: every request goes straight to github.com.
+//!
+//! ## Which host
+//!
+//! Without a URL, `grit auth` signs in to GitHub only when the current
+//! repository's `origin` is on github.com; everywhere else it signs in to
+//! grithub ([`GRITHUB_URL`]), a `grit serve`-style host, as below
+//! ([`default_host`]). `grit auth https://github.com` always means GitHub.
 //!
 //! ## `grit serve` hosts
 //!
@@ -187,6 +194,56 @@ impl MarkdownRender for LogoutOutcome {
 /// sensitive and is safe to ship. Override with `$GRIT_GITHUB_CLIENT_ID` or the
 /// `grit.githubClientId` config key.
 const DEFAULT_GITHUB_CLIENT_ID: &str = "Ov23lin6WOpOsGuXSupZ";
+
+/// The host `grit auth` signs in to when no URL is given: grithub.
+pub const GRITHUB_URL: &str = "https://grithub.dev";
+
+/// Where `grit auth` (or `grit auth logout`) without a URL goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DefaultHost {
+    /// GitHub, with its device flow: the current repository's `origin` is on github.com.
+    GitHub,
+    /// A grit server: grithub, or `$GRIT_DEFAULT_HOST` when set.
+    Grit(ServerUrl),
+}
+
+/// Pick the host for `grit auth` without a URL: GitHub when the current
+/// repository's `origin` is a github.com URL, otherwise grithub
+/// ([`GRITHUB_URL`], or the `GRIT_DEFAULT_HOST` environment variable).
+///
+/// # Errors
+///
+/// Fails when `GRIT_DEFAULT_HOST` is not an `http`/`https` URL.
+pub fn default_host() -> Result<DefaultHost> {
+    let config = load_config();
+    if config
+        .get("remote.origin.url")
+        .is_some_and(|url| is_github_url(&url))
+    {
+        return Ok(DefaultHost::GitHub);
+    }
+    let url = crate::context::environment()
+        .var("GRIT_DEFAULT_HOST")
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| GRITHUB_URL.to_owned());
+    match grit_server(&url)? {
+        Some(server) => Ok(DefaultHost::Grit(server)),
+        None => Ok(DefaultHost::GitHub),
+    }
+}
+
+/// Whether `url` (HTTPS, `ssh://` or scp-style `git@github.com:owner/repo`) is on github.com.
+fn is_github_url(url: &str) -> bool {
+    if is_github_https_url(url) {
+        return true;
+    }
+    let rest = url.strip_prefix("ssh://").unwrap_or(url);
+    let authority = rest.split(['/', ':']).next().unwrap_or_default();
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    host.eq_ignore_ascii_case(GITHUB_HOST) || host.eq_ignore_ascii_case("www.github.com")
+}
 
 /// Run the interactive `grit auth` device flow and store the token.
 pub fn run() -> Result<AuthOutcome> {
@@ -615,5 +672,31 @@ fn device_flow_error(err: DeviceFlowError) -> anyhow::Error {
             anyhow!("unexpected response from GitHub while polling for the token")
         }
         other => anyhow::Error::new(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn github_urls_in_every_form() {
+        for url in [
+            "https://github.com/o/r.git",
+            "https://x-access-token@github.com/o/r",
+            "git@github.com:o/r.git",
+            "ssh://git@github.com/o/r.git",
+            "github.com:o/r",
+        ] {
+            assert!(is_github_url(url), "{url}");
+        }
+        for url in [
+            "https://grithub.dev/o/r.git",
+            "git@gitlab.com:o/r.git",
+            "/srv/repos/r.git",
+            "https://github.com.evil.example/o/r",
+        ] {
+            assert!(!is_github_url(url), "{url}");
+        }
     }
 }

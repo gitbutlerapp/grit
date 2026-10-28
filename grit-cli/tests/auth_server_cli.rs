@@ -393,11 +393,22 @@ fn signing_in_in_the_browser_stores_a_token_that_clone_uses() {
 }
 
 #[test]
-fn token_requires_a_url_and_github_urls_use_the_device_flow() {
+fn a_token_without_a_url_goes_to_the_default_host_and_github_urls_use_the_device_flow() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let home: PathBuf = tmp.path().to_path_buf();
-    let no_url = run(&home, &home, &["auth", "--token", "grit_x"]);
-    assert_eq!(no_url.status.code(), Some(2), "{no_url:?}");
+    // Without a URL the token is checked with the default host (grithub, here
+    // a port nothing listens on), not refused as a usage error.
+    let no_url = grit(&home, &home, &["auth", "--token", "grit_x"])
+        .env("GRIT_DEFAULT_HOST", "http://127.0.0.1:1")
+        .output()
+        .expect("spawn grit");
+    assert!(!no_url.status.success(), "{no_url:?}");
+    assert_ne!(no_url.status.code(), Some(2), "{no_url:?}");
+    assert!(
+        String::from_utf8_lossy(&no_url.stderr).contains("127.0.0.1:1"),
+        "{}",
+        String::from_utf8_lossy(&no_url.stderr)
+    );
     let github = run(
         &home,
         &home,

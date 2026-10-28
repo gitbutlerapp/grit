@@ -709,9 +709,9 @@ enum HooksAction {
 /// Subcommands of `grit auth`.
 #[derive(Debug, Subcommand)]
 enum AuthAction {
-    /// Forget the stored token (sign out) for GitHub, or for a `grit serve` URL.
+    /// Forget the stored token (sign out) for grithub (GitHub inside a github.com repository), or for a `grit serve` URL.
     Logout {
-        /// A `grit serve` host to sign out of instead of GitHub.
+        /// A host to sign out of instead of the default one.
         #[arg(value_name = "URL")]
         url: Option<String>,
         /// Report which stored credential would be removed without erasing it.
@@ -1966,14 +1966,14 @@ enum Command {
         #[command(subcommand)]
         action: WorktreeAction,
     },
-    /// Sign in to GitHub or a `grit serve` host, or store a username and token for any HTTPS host.
+    /// Sign in to grithub (GitHub inside a github.com repository), a `grit serve` host, or store a username and token for any HTTPS host.
     #[command(args_conflicts_with_subcommands = true, visible_alias = "login")]
     Auth {
-        /// The host (or one of its repository URLs) to sign in to instead of GitHub.
+        /// The host (or one of its repository URLs) to sign in to; without it, grithub.dev, or GitHub when `origin` is on github.com.
         #[arg(value_name = "URL")]
         url: Option<String>,
-        /// Store this access token: with `--username`, for any HTTP(S) host; alone, a `grit serve` token (from `grit serve token`), checked with the server.
-        #[arg(long, value_name = "TOKEN", requires = "url")]
+        /// Store this access token: with `--username`, for any HTTP(S) host; alone, a `grit serve` or grithub token, checked with the server.
+        #[arg(long, value_name = "TOKEN")]
         token: Option<String>,
         /// Store `--token` for this user name on any HTTP(S) host, without signing in.
         #[arg(long, value_name = "USER", requires_all = ["url", "token"])]
@@ -4241,21 +4241,35 @@ fn dispatch(
                             commands::auth::run_server_token(&server, &token)?
                         }
                         (Some(server), None) => commands::auth::run_server_login(&server)?,
-                        (None, Some(_)) => {
+                        (None, Some(_)) if url.is_some() => {
                             anyhow::bail!("--token is for `grit serve` hosts; GitHub signs in with the browser, or store a personal access token with `--username <user> --token <token>`")
                         }
-                        (None, None) => commands::auth::run()?,
+                        (None, token) => match (commands::auth::default_host()?, token) {
+                            (commands::auth::DefaultHost::Grit(server), Some(token)) => {
+                                commands::auth::run_server_token(&server, &token)?
+                            }
+                            (commands::auth::DefaultHost::Grit(server), None) => {
+                                commands::auth::run_server_login(&server)?
+                            }
+                            (commands::auth::DefaultHost::GitHub, Some(_)) => {
+                                anyhow::bail!("--token is for `grit serve` hosts; GitHub signs in with the browser, or store a personal access token with `--username <user> --token <token>`")
+                            }
+                            (commands::auth::DefaultHost::GitHub, None) => commands::auth::run()?,
+                        },
                     }
                 };
                 emit_success(&outcome, opts, ctx)
             }
             Some(AuthAction::Logout { url, dry_run }) => {
-                let server = url
-                    .as_deref()
-                    .map(commands::auth::grit_server)
-                    .transpose()?;
+                let server = match url.as_deref() {
+                    Some(url) => commands::auth::grit_server(url)?,
+                    None => match commands::auth::default_host()? {
+                        commands::auth::DefaultHost::Grit(server) => Some(server),
+                        commands::auth::DefaultHost::GitHub => None,
+                    },
+                };
                 emit_success(
-                    &commands::auth::logout(server.flatten().as_ref(), dry_run)?,
+                    &commands::auth::logout(server.as_ref(), dry_run)?,
                     opts,
                     ctx,
                 )

@@ -43,7 +43,8 @@ fn git(home: &Path, args: &[&str], stdin: Option<&[u8]>) -> Option<Output> {
 fn grit_logout_json(home: &Path, dry_run: bool) -> Value {
     let mut cmd = Command::new(GRIT);
     isolated(&mut cmd, home);
-    let mut args = vec!["--json", "auth", "logout"];
+    // Outside a github.com repository the default host is grithub, so name GitHub.
+    let mut args = vec!["--json", "auth", "logout", "https://github.com"];
     if dry_run {
         args.push("--dry-run");
     }

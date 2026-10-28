@@ -1,6 +1,6 @@
 ---
 title: grit auth
-summary: Sign in to GitHub or a grit serve host, or save a username and token for any HTTPS host, so pushes and fetches just work.
+summary: Sign in to grithub, GitHub or a grit serve host, or save a username and token for any HTTPS host, so pushes and fetches just work.
 group: Remotes
 order: 5
 ---
@@ -8,7 +8,7 @@ order: 5
 ## Synopsis
 
 ```text
-grit auth
+grit auth [--token <token>]
 grit auth <url> [--token <token>]
 grit auth <url> --username <user> --token <token>
 grit auth logout [<url>] [--dry-run]
@@ -18,9 +18,11 @@ grit auth logout [<url>] [--dry-run]
 
 ## Description
 
-Signs you in to GitHub and saves the token, so that [`grit push`](../push/), [`grit fetch`](../fetch/) and [`grit clone`](../clone/) work with private repositories over HTTPS.
+Signs you in and saves the token, so that [`grit push`](../push/), [`grit fetch`](../fetch/) and [`grit clone`](../clone/) work with private repositories over HTTPS.
 
-`grit auth` uses GitHub's device flow. It prints a web address and a short code. Open `https://github.com/login/device` in your browser, enter the code and approve access. `grit` waits until you do, then saves the token with your credential helper. Every request goes straight to github.com.
+Without a URL, `grit auth` signs in to [grithub](https://grithub.dev), unless you run it inside a repository whose `origin` is on github.com: then it signs in to GitHub. grithub signs in like a [`grit serve` host](#signing-in-to-a-grit-serve-host): `grit` opens grithub's sign-in page in your browser, you sign in with Google or your email address and approve the code, and `grit` saves the new token. Set the `GRIT_DEFAULT_HOST` environment variable to sign in to another grit server by default. `grit auth https://github.com` always signs in to GitHub.
+
+GitHub sign-in uses GitHub's device flow. It prints a web address and a short code. Open `https://github.com/login/device` in your browser, enter the code and approve access. `grit` waits until you do, then saves the token with your credential helper. Every request goes straight to github.com.
 
 The token is saved with your credential helper. When no `credential.helper` is set, `grit` sets one in your global config first and tells you which:
 
@@ -37,7 +39,7 @@ $ grit config --global credential.helper libsecret
 
 The helper is shared with Git and asked the same way: `grit` sends it the protocol and host (`protocol=https`, `host=github.com`), so one stored entry covers every repository on that host, and entries Git already saved, such as lines in `~/.git-credentials`, work as they are. Set `credential.useHttpPath` to keep a separate entry per repository; the helper then also gets the repository path (`path=owner/repo.git`).
 
-`grit auth logout` removes the saved GitHub token from your credential helper.
+`grit auth logout` removes the saved token for the same default host from your credential helper: grithub's, or GitHub's inside a repository whose `origin` is on github.com.
 
 `grit` signs in with its own GitHub OAuth app. To use a different one, set its client id in the `GRIT_GITHUB_CLIENT_ID` environment variable or the `grit.githubClientId` setting.
 
