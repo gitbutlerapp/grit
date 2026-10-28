@@ -19462,6 +19462,7 @@ impl grit_lib::refs::store::RefStore for grit_lib::refs::store::FilesRefStore
 pub fn grit_lib::refs::store::FilesRefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
 pub fn grit_lib::refs::store::FilesRefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
@@ -19506,6 +19507,7 @@ impl grit_lib::refs::store::RefStore for grit_lib::refs::store::MemoryRefStore
 pub fn grit_lib::refs::store::MemoryRefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
 pub fn grit_lib::refs::store::MemoryRefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
@@ -19714,6 +19716,7 @@ impl grit_lib::refs::store::RefStore for grit_lib::refs::store::ReftableRefStore
 pub fn grit_lib::refs::store::ReftableRefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
 pub fn grit_lib::refs::store::ReftableRefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
@@ -19738,6 +19741,7 @@ pub trait grit_lib::refs::store::RefStore: core::marker::Send + core::marker::Sy
 pub fn grit_lib::refs::store::RefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
 pub fn grit_lib::refs::store::RefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::RefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::RefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::RefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::RefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::RefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
@@ -19752,6 +19756,7 @@ impl grit_lib::refs::store::RefStore for grit_lib::refs::store::FilesRefStore
 pub fn grit_lib::refs::store::FilesRefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
 pub fn grit_lib::refs::store::FilesRefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
@@ -19766,6 +19771,7 @@ impl grit_lib::refs::store::RefStore for grit_lib::refs::store::MemoryRefStore
 pub fn grit_lib::refs::store::MemoryRefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
 pub fn grit_lib::refs::store::MemoryRefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
@@ -19780,6 +19786,7 @@ impl grit_lib::refs::store::RefStore for grit_lib::refs::store::ReftableRefStore
 pub fn grit_lib::refs::store::ReftableRefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
 pub fn grit_lib::refs::store::ReftableRefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
