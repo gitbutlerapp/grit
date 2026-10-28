@@ -169,3 +169,133 @@ fn t6417_merge_favor_ours_theirs_grit_api() {
     });
     assert_eq!(theirs_out.content, b"a\nTHEIRS\nc\n");
 }
+
+/// Issue #2259: CRLF conversion on one side plus an edit on the other must conflict (not auto-merge).
+#[test]
+fn issue_2259_crlf_conversion_with_edit_conflicts_like_git() {
+    let base = b"a\nb\nc\nd\n";
+    let ours = b"a\r\nb\r\nc\r\nd\r\n";
+    let theirs = b"a\nB\nc\nd\n";
+    assert_merge_file_matches_git(
+        &[],
+        base,
+        ours,
+        theirs,
+        ConflictStyle::Merge,
+        MergeFavor::None,
+        7,
+        "issue 2259 interior edit",
+    );
+    let grit_out = grit_merge(MergeInput {
+        base,
+        ours,
+        theirs,
+        label_ours: "ours",
+        label_base: "base",
+        label_theirs: "theirs",
+        favor: MergeFavor::None,
+        style: ConflictStyle::Merge,
+        marker_size: 7,
+        diff_algorithm: None,
+        ignore_all_space: false,
+        ignore_space_change: false,
+        ignore_space_at_eol: false,
+        ignore_cr_at_eol: false,
+    });
+    assert_eq!(grit_out.conflicts, 1, "expected one conflict region");
+}
+
+#[test]
+fn issue_2259_crlf_conversion_with_trailing_append_conflicts_like_git() {
+    let base = b"a\nb\nc\nd\n";
+    let ours = b"a\r\nb\r\nc\r\nd\r\n";
+    let theirs = b"a\nb\nc\nd\ne\n";
+    assert_merge_file_matches_git(
+        &[],
+        base,
+        ours,
+        theirs,
+        ConflictStyle::Merge,
+        MergeFavor::None,
+        7,
+        "issue 2259 trailing append",
+    );
+}
+
+#[test]
+fn issue_2259_adjacent_lf_edits_still_conflict() {
+    let base = b"a\nb\nc\nd\n";
+    let ours = b"a\nB\nc\nd\n";
+    let theirs = b"a\nb\nC\nd\n";
+    assert_merge_file_matches_git(
+        &[],
+        base,
+        ours,
+        theirs,
+        ConflictStyle::Merge,
+        MergeFavor::None,
+        7,
+        "adjacent single-line LF edits",
+    );
+}
+
+#[test]
+fn issue_2259_non_adjacent_crlf_edits_merge_clean() {
+    let base = b"a\nb\nc\nd\n";
+    let ours = b"a\r\nb\r\nc\r\nd\r\n";
+    let theirs = b"a\nb\nC\nd\n";
+    assert_merge_file_matches_git(
+        &[],
+        base,
+        ours,
+        theirs,
+        ConflictStyle::Merge,
+        MergeFavor::None,
+        7,
+        "non-adjacent CRLF vs LF edit",
+    );
+}
+
+#[test]
+fn issue_2259_identical_crlf_conversion_merge_clean() {
+    let base = b"a\nb\nc\nd\n";
+    let ours = b"a\r\nb\r\nc\r\nd\r\n";
+    let theirs = b"a\r\nb\r\nc\r\nd\r\n";
+    assert_merge_file_matches_git(
+        &[],
+        base,
+        ours,
+        theirs,
+        ConflictStyle::Merge,
+        MergeFavor::None,
+        7,
+        "identical CRLF on both sides",
+    );
+}
+
+#[test]
+fn issue_2259_ignore_cr_at_eol_clean_for_interior_edit() {
+    let base = b"a\nb\nc\nd\n";
+    let ours = b"a\r\nb\r\nc\r\nd\r\n";
+    let theirs = b"a\nB\nc\nd\n";
+    let grit_out = grit_merge(MergeInput {
+        base,
+        ours,
+        theirs,
+        label_ours: "ours",
+        label_base: "base",
+        label_theirs: "theirs",
+        favor: MergeFavor::None,
+        style: ConflictStyle::Merge,
+        marker_size: 7,
+        diff_algorithm: None,
+        ignore_all_space: false,
+        ignore_space_change: false,
+        ignore_space_at_eol: false,
+        ignore_cr_at_eol: true,
+    });
+    assert_eq!(
+        grit_out.conflicts, 0,
+        "ignore_cr_at_eol should auto-merge CR-only EOL diffs"
+    );
+}
