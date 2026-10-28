@@ -108,6 +108,19 @@ impl DiffEntry {
 mod tests {
     use super::*;
     use crate::diff::options::DiffAlgorithm;
+    use crate::diff::structured::{structured_file_diff, SideBytes};
+    use crate::objects::FileMode;
+
+    fn patch_oracle_stat(old: &str, new: &str, options: &DiffOptions) -> LineStat {
+        let structured = structured_file_diff(
+            FileMode::REGULAR,
+            FileMode::REGULAR,
+            &SideBytes::from_bytes(old.as_bytes().to_vec()),
+            &SideBytes::from_bytes(new.as_bytes().to_vec()),
+            options.clone(),
+        );
+        LineStat::from_hunks(&structured.hunks)
+    }
 
     fn git_numstat(old: &str, new: &str, algorithm: DiffAlgorithm) -> LineStat {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -148,6 +161,87 @@ mod tests {
             insertions: ins,
             deletions: del,
         }
+    }
+
+    #[test]
+    fn myers_stat_preserves_line_boundaries_and_repeated_lines() {
+        let options = DiffOptions::default();
+        let texts = [
+            "",
+            "a",
+            "a\n",
+            "a\na",
+            "a\na\n",
+            "a\nb\na\n",
+            "b\na\nb\n",
+            "\n",
+            "\n\n",
+            "a\r",
+            "a\r\n",
+            "a\rb\n",
+            "é\n猫",
+            "é\n猫\n",
+            "a\n\r\nb\n",
+        ];
+        for old in texts {
+            for new in texts {
+                let grit = line_change_counts(old, new, &options);
+                let patch = patch_oracle_stat(old, new, &options);
+                assert_eq!(grit, patch, "patch oracle: old={old:?}, new={new:?}");
+                if !old.contains('\r') && !new.contains('\r') {
+                    let git = git_numstat(old, new, DiffAlgorithm::Myers);
+                    assert_eq!(grit, git, "git numstat: old={old:?}, new={new:?}");
+                }
+            }
+        }
+
+        let mut seed = 4687u64;
+        for iteration in 0..500 {
+            let mut text = || {
+                (0..160)
+                    .map(|_| {
+                        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                        match seed >> 61 {
+                            0..=3 => "repeat\n",
+                            4 => "é\r\n",
+                            5 => "\n",
+                            6 => "x\ry\n",
+                            _ => "tail\n",
+                        }
+                    })
+                    .collect::<String>()
+            };
+            let (mut old, mut new) = (text(), text());
+            if iteration % 2 == 0 {
+                old = old.replace('\r', "");
+                new = new.replace('\r', "");
+            }
+            let prefix = "unchanged\n".repeat(120);
+            let old = format!("{prefix}{old}{prefix}");
+            let new = format!("{prefix}{new}{prefix}");
+            let grit = line_change_counts(&old, &new, &options);
+            let patch = patch_oracle_stat(&old, &new, &options);
+            assert_eq!(grit, patch, "random iteration {iteration}");
+        }
+    }
+
+    #[test]
+    fn myers_stat_large_file_small_edit() {
+        let options = DiffOptions::default();
+        let prefix = "unchanged prefix\n".repeat(10_000);
+        let suffix = "unchanged suffix\n".repeat(10_000);
+        let old = format!("{prefix}old\n{suffix}");
+        let new = format!("{prefix}new\nextra\n{suffix}");
+        let grit = line_change_counts(&old, &new, &options);
+        assert_eq!(
+            grit,
+            LineStat {
+                insertions: 2,
+                deletions: 1,
+            }
+        );
+        assert_eq!(grit, patch_oracle_stat(&old, &new, &options));
+        assert_eq!(grit, git_numstat(&old, &new, DiffAlgorithm::Myers));
     }
 
     #[test]

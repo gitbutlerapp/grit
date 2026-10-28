@@ -24,8 +24,6 @@ fn line_stats(c: &mut Criterion) {
             "new\n".repeat(1000),
         ),
     ] {
-        // The raw counter is the previous stat implementation. Keeping both APIs
-        // here measures the effect of boundary trimming in the same process.
         group.bench_with_input(
             BenchmarkId::new("full_file", name),
             &(&old, &new),

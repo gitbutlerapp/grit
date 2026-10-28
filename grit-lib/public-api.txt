@@ -5391,7 +5391,6 @@ pub fn grit_lib::diff::commit_diff_files(&grit_lib::repo::Repository, &grit_lib:
 pub fn grit_lib::diff::count_changes(&str, &str) -> (usize, usize)
 pub fn grit_lib::diff::count_changes_git_histogram(&str, &str) -> (usize, usize)
 pub fn grit_lib::diff::count_changes_with_algorithm(&str, &str, similar::types::Algorithm, bool) -> (usize, usize)
-pub fn grit_lib::diff::count_line_changes_with_options(&str, &str, &grit_lib::diff::DiffOptions) -> (usize, usize)
 pub fn grit_lib::diff::count_git_lines(&[u8]) -> usize
 pub fn grit_lib::diff::detect_copies(&grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, bool, &[(alloc::string::String, grit_lib::objects::FileMode, grit_lib::objects::ObjectId)]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::detect_copies_with_policy(&grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, bool, &[(alloc::string::String, grit_lib::objects::FileMode, grit_lib::objects::ObjectId)], &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>

@@ -647,14 +647,15 @@ fn pathological_pairs() -> Vec<BlobPair> {
 }
 
 pub fn grit_numstat(old: &str, new: &str, algo: LineDiffAlgo) -> (usize, usize) {
-    use grit_lib::diff::{count_line_changes_with_options, DiffOptions};
+    use grit_lib::diff::{line_change_counts, DiffOptions};
     let algorithm = match algo {
         LineDiffAlgo::Myers => grit_lib::diff::DiffAlgorithm::Myers,
         LineDiffAlgo::Minimal => grit_lib::diff::DiffAlgorithm::Minimal,
         LineDiffAlgo::Patience => grit_lib::diff::DiffAlgorithm::Patience,
         LineDiffAlgo::Histogram => grit_lib::diff::DiffAlgorithm::Histogram,
     };
-    count_line_changes_with_options(old, new, &DiffOptions::default().with_algorithm(algorithm))
+    let stat = line_change_counts(old, new, &DiffOptions::default().with_algorithm(algorithm));
+    (stat.insertions, stat.deletions)
 }
 
 pub fn git_numstat(old: &[u8], new: &[u8], path: &str, algo: LineDiffAlgo) -> (usize, usize) {

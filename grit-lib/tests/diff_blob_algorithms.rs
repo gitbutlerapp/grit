@@ -450,7 +450,6 @@ fn append_after_eof_without_newline_matches_git() {
 }
 
 #[test]
-#[test]
 fn numstat_matches_git_on_repeated_anchor_insertion() {
     let anchor = "fn anchor() {\n";
     let old = format!("{anchor}{anchor}// old body\n");

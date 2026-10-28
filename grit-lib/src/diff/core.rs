@@ -377,13 +377,54 @@ pub(crate) fn compacted_line_ops_for_options(
     }
 }
 
+/// LF-only Myers/minimal stat counting without building [`LineSide`] compare keys.
+fn try_lf_only_stat_count(
+    old_content: &str,
+    new_content: &str,
+    options: &crate::diff::options::DiffOptions,
+) -> Option<(usize, usize)> {
+    use crate::diff::options::DiffAlgorithm;
+
+    if !matches!(
+        options.algorithm,
+        DiffAlgorithm::Myers | DiffAlgorithm::Minimal
+    ) || options.whitespace.is_active()
+    {
+        return None;
+    }
+    if old_content.as_bytes().contains(&b'\r') || new_content.as_bytes().contains(&b'\r') {
+        return None;
+    }
+    let old_lines: Vec<&str> = old_content.split_inclusive('\n').collect();
+    let new_lines: Vec<&str> = new_content.split_inclusive('\n').collect();
+    let (changed1, changed2) = xdiff_changed_flags_trimmed(
+        &old_lines,
+        &new_lines,
+        options.algorithm == DiffAlgorithm::Minimal,
+    );
+    let mut insertions = changed2.iter().filter(|&&c| c).count();
+    let mut deletions = changed1.iter().filter(|&&c| c).count();
+    if insertions == 0 && deletions == 0 && old_content != new_content {
+        let before = LineSide::from_text(old_content);
+        let after = LineSide::from_text(new_content);
+        for edit in line_ending_only_edits(&before, &after) {
+            insertions += edit.after_len as usize;
+            deletions += edit.before_len as usize;
+        }
+    }
+    Some((insertions, deletions))
+}
+
 /// Count changed lines using the same alignment as structured patches and `--numstat`.
 #[must_use]
-pub fn count_line_changes_with_options(
+pub(crate) fn count_line_changes_with_options(
     old_content: &str,
     new_content: &str,
     options: &crate::diff::options::DiffOptions,
 ) -> (usize, usize) {
+    if let Some(count) = try_lf_only_stat_count(old_content, new_content, options) {
+        return count;
+    }
     let ws = options.whitespace;
     let ops = compacted_line_ops_for_options(old_content, new_content, options);
     let (mut insertions, mut deletions) = count_diff_ops(&ops);
@@ -402,6 +443,71 @@ pub fn count_line_changes_with_options(
     (insertions, deletions)
 }
 
+/// Myers/minimal changed flags with Git occurrence semantics, trimming equal ends via
+/// [`git_xdiff::changed_flags_with_shared`] so large unchanged regions are not re-interned.
+fn xdiff_changed_flags_trimmed(
+    old_compare: &[&str],
+    new_compare: &[&str],
+    need_min: bool,
+) -> (Vec<bool>, Vec<bool>) {
+    use crate::line_interner::LineInterner;
+
+    let nrec1 = old_compare.len();
+    let nrec2 = new_compare.len();
+    if nrec1 == 0 && nrec2 == 0 {
+        return (Vec::new(), Vec::new());
+    }
+    let lim = nrec1.min(nrec2);
+    let mut head = 0usize;
+    while head < lim && old_compare[head] == new_compare[head] {
+        head += 1;
+    }
+    let mut tail = 0usize;
+    let rem = lim - head;
+    while tail < rem && old_compare[nrec1 - 1 - tail] == new_compare[nrec2 - 1 - tail] {
+        tail += 1;
+    }
+    let shared_records = head + tail;
+    if shared_records == 0 {
+        let mut interner = LineInterner::with_capacity(nrec1 + nrec2);
+        let ids1 = interner.intern_all(old_compare);
+        let ids2 = interner.intern_all(new_compare);
+        return git_xdiff::changed_flags(&ids1, &ids2, need_min);
+    }
+
+    let cut_old = &old_compare[head..nrec1 - tail];
+    let cut_new = &new_compare[head..nrec2 - tail];
+    let mut cut_interner =
+        LineInterner::with_capacity(cut_old.len() + cut_new.len() + shared_records);
+    let ids1 = cut_interner.intern_all(cut_old);
+    let ids2 = cut_interner.intern_all(cut_new);
+    let mut shared_counts = vec![0u32; cut_interner.len()];
+    for line in old_compare[..head]
+        .iter()
+        .chain(&old_compare[nrec1 - tail..])
+    {
+        if let Some(id) = cut_interner.get(line) {
+            shared_counts[id as usize] += 1;
+        }
+    }
+    let (mid1, mid2) = git_xdiff::changed_flags_with_shared(
+        &ids1,
+        &ids2,
+        &shared_counts,
+        shared_records,
+        need_min,
+    );
+    let mut full1 = vec![false; nrec1];
+    let mut full2 = vec![false; nrec2];
+    if !mid1.is_empty() {
+        full1[head..nrec1 - tail].copy_from_slice(&mid1);
+    }
+    if !mid2.is_empty() {
+        full2[head..nrec2 - tail].copy_from_slice(&mid2);
+    }
+    (full1, full2)
+}
+
 pub(crate) fn git_xdiff_compacted_line_ops(
     old_compare: &[&str],
     new_compare: &[&str],
@@ -410,16 +516,7 @@ pub(crate) fn git_xdiff_compacted_line_ops(
     indent_heuristic: bool,
     need_min: bool,
 ) -> Vec<similar::DiffOp> {
-    use crate::line_interner::LineInterner;
-
-    // The interned ids are only needed by the alignment, and the line bodies only by the
-    // compaction; keeping the two apart lowers the peak on large files.
-    let (changed1, changed2) = {
-        let mut interner = LineInterner::with_capacity(old_compare.len() + new_compare.len());
-        let ids1 = interner.intern_all(old_compare);
-        let ids2 = interner.intern_all(new_compare);
-        git_xdiff::changed_flags(&ids1, &ids2, need_min)
-    };
+    let (changed1, changed2) = xdiff_changed_flags_trimmed(old_compare, new_compare, need_min);
     let old_lines = line_bodies(before);
     let new_lines = line_bodies(after);
     diff_indent_heuristic::apply_change_compact_to_masks(
