@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use smallvec::SmallVec;
@@ -251,22 +252,38 @@ impl Stage0IcaseDirSpellingMap {
     }
 }
 
+static FS_PROBE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn unique_fs_probe_basename() -> String {
+    let seq = FS_PROBE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!(".grit-icase-fs-probe-{}-{seq}", std::process::id())
+}
+
 /// True when the work tree volume folds ASCII path case (APFS, NTFS, …).
 ///
-/// Uses a uniquely named probe file under `work_tree` and never deletes paths it did not create.
+/// Creates a uniquely named empty file with [`OpenOptions::create_new`]; neither the lowercase
+/// nor uppercase spelling may already exist. Only a probe file this call created is removed.
 #[must_use]
 pub(crate) fn worktree_filesystem_case_insensitive(work_tree: &Path) -> bool {
-    for attempt in 0..128_u32 {
-        let name = format!(".grit-icase-fs-probe-{attempt:05}");
+    for _ in 0..32 {
+        let name = unique_fs_probe_basename();
+        let upper_name: String = name.chars().map(|c| c.to_ascii_uppercase()).collect();
         let lower = work_tree.join(&name);
-        if lower.exists() {
+        let upper = work_tree.join(&upper_name);
+        if lower.exists() || upper.exists() {
             continue;
         }
-        if std::fs::write(&lower, b"").is_err() {
+        if let Err(e) = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lower)
+        {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                continue;
+            }
             return false;
         }
-        let upper_name: String = name.chars().map(|c| c.to_ascii_uppercase()).collect();
-        let folds = work_tree.join(upper_name).exists();
+        let folds = upper.exists();
         let _ = std::fs::remove_file(&lower);
         return folds;
     }
@@ -903,6 +920,24 @@ mod tests {
         assert!(
             user_dir.join("sentinel").is_dir(),
             "probe must not delete an existing .grit_icase_probe tree"
+        );
+    }
+
+    #[test]
+    fn filesystem_case_probe_ignores_preexisting_uppercase_decoy() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        if !worktree_has_distinct_icase_dentries(wt) {
+            return;
+        }
+        std::fs::write(wt.join(".GRIT-ICASE-FS-PROBE-00000"), b"decoy").expect("decoy");
+        assert!(
+            !worktree_filesystem_case_insensitive(wt),
+            "a pre-existing uppercase path must not classify the volume as case-folding"
+        );
+        assert!(
+            wt.join(".GRIT-ICASE-FS-PROBE-00000").is_file(),
+            "probe must not remove unrelated paths"
         );
     }
 

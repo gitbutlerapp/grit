@@ -147,6 +147,52 @@ fn ignorecase_add_stages_hash_collision_dirs_independently() {
     );
 }
 
+/// Pre-existing uppercase probe decoy must not disable case-sensitive respell (reviewer regression).
+#[test]
+fn ignorecase_sensitive_volume_respells_after_uppercase_probe_decoy() {
+    if is_case_insensitive(std::env::temp_dir().as_path()) {
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    fs::write(root.join(".gitignore"), ".GRIT-ICASE-FS-PROBE-00000\n").expect("gitignore");
+    fs::write(root.join(".GRIT-ICASE-FS-PROBE-00000"), b"decoy\n").expect("decoy");
+
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "core.ignorecase", "true"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "T"]);
+
+    fs::create_dir_all(root.join("Dir")).expect("Dir");
+    fs::write(root.join("Dir/f.txt"), "b\n").expect("f");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "init"]);
+
+    fs::rename(root.join("Dir"), root.join("dir")).expect("rename dir");
+
+    let repo = open(root);
+    stage(
+        &repo,
+        &StageOptions {
+            mode: StageMode::All,
+            ..StageOptions::default()
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("stage");
+
+    let paths = index_paths(root);
+    assert!(
+        paths.iter().any(|p| p == "dir/f.txt"),
+        "case-sensitive volume must respell tracked paths, got {paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p == "Dir/f.txt"),
+        "old spelling must not remain after respell: {paths:?}"
+    );
+}
+
 /// Case-sensitive volume: new `dir/g.txt` folds to indexed `Dir/` without ENOENT (issue #2247).
 #[test]
 fn ignorecase_add_folds_new_file_under_index_dir_on_sensitive_volume() {
