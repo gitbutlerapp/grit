@@ -980,6 +980,7 @@ fn ingest_pack_options_for_fetch(
         merged_config: Some(pack_config),
         environment: fetch_opts.environment.clone(),
         mark_promisor_pack: fetch_opts.mark_received_pack_promisor,
+        keep_message: None,
         trusted_index_rows: None,
     })
 }

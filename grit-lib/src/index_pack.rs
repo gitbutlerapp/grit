@@ -150,6 +150,13 @@ pub struct IngestPackOptions {
     pub environment: crate::environment::Environment,
     /// When true, write an empty sibling `.promisor` file next to the installed pack.
     pub mark_promisor_pack: bool,
+    /// When set, write a sibling `.keep` file holding this message (Git's
+    /// `index-pack --keep=<msg>`), so `gc` and `repack` leave the pack alone.
+    ///
+    /// The marker is written before the pack is published, so a concurrent `gc`
+    /// never sees the pack unprotected. A large-object promisor relies on that,
+    /// since nothing references the blobs it holds.
+    pub keep_message: Option<String>,
     /// Rows for a pack built in-process (`oid`, pack offset, per-object CRC32). When set, the
     /// pack body is not rescanned to rebuild the index (local repack/gc only); together with
     /// [`Self::skip_post_index_verify`] the pack's trailer is trusted as written too, so the
@@ -166,6 +173,7 @@ impl Default for IngestPackOptions {
             merged_config: None,
             environment: crate::environment::Environment::empty(),
             mark_promisor_pack: false,
+            keep_message: None,
             trusted_index_rows: None,
         }
     }
@@ -569,19 +577,30 @@ pub fn install_pack_path_with_progress(
             publish_no_clobber(staged, final_path).map_err(Error::Io)
         };
         let shared_repo = publish_policy.shared_repo;
-        if !publish(&stage_pack, &final_pack)? {
-            touch_pack_mtime(&final_pack);
-        } else {
-            crate::shared_repo::finalize_pack_file_mode(shared_repo, &final_pack)?;
-        }
-        if publish(&stage_idx, &idx_path)? {
-            crate::shared_repo::finalize_pack_file_mode(shared_repo, &idx_path)?;
-        }
-        if publish_policy.write_rev {
-            crate::pack_rev::write_pack_rev_sidecar_for_index_path_with_shared(
-                &idx_path,
-                shared_repo,
-            )?;
+        // The keep marker goes first: a gc that finds the pack must find it too.
+        let keep = write_keep_marker(&final_pack, opts)?;
+        let published = (|| -> Result<()> {
+            if !publish(&stage_pack, &final_pack)? {
+                touch_pack_mtime(&final_pack);
+            } else {
+                crate::shared_repo::finalize_pack_file_mode(shared_repo, &final_pack)?;
+            }
+            if publish(&stage_idx, &idx_path)? {
+                crate::shared_repo::finalize_pack_file_mode(shared_repo, &idx_path)?;
+            }
+            if publish_policy.write_rev {
+                crate::pack_rev::write_pack_rev_sidecar_for_index_path_with_shared(
+                    &idx_path,
+                    shared_repo,
+                )?;
+            }
+            Ok(())
+        })();
+        if let Err(err) = published {
+            if let Some(keep) = keep.filter(|_| !final_pack.is_file()) {
+                let _ = std::fs::remove_file(keep);
+            }
+            return Err(err);
         }
         if opts.mark_promisor_pack {
             std::fs::write(final_pack.with_extension("promisor"), b"").map_err(Error::Io)?;
@@ -603,6 +622,55 @@ pub fn install_pack_path_with_progress(
     let ingested = install_result?;
     odb.invalidate_packs();
     Ok(ingested)
+}
+
+/// Flush an installed pack to disk: the `.pack`, its `.idx` and whichever of the
+/// `.rev`, `.keep` and `.promisor` sidecars exist, then the pack directory, so the
+/// new names survive a crash too.
+///
+/// [`install_pack_path`] does not do this itself (Git does by default, through
+/// `core.fsync`). Callers that delete other copies of the pack's objects right
+/// after (offloading to a large-object promisor, rewriting a partial repository's
+/// packs) call it first, so a power loss never leaves an object in neither place.
+///
+/// # Errors
+///
+/// [`Error::Io`] when a file cannot be opened or synced.
+pub(crate) fn sync_installed_pack(pack_path: &Path) -> Result<()> {
+    let sync = |path: &Path| std::fs::File::open(path).and_then(|f| f.sync_all());
+    sync(pack_path).map_err(Error::Io)?;
+    sync(&pack_path.with_extension("idx")).map_err(Error::Io)?;
+    for ext in ["rev", "keep", "promisor"] {
+        let sidecar = pack_path.with_extension(ext);
+        if sidecar.is_file() {
+            sync(&sidecar).map_err(Error::Io)?;
+        }
+    }
+    // Directories can be synced this way on Unix only.
+    #[cfg(unix)]
+    if let Some(dir) = pack_path.parent() {
+        sync(dir).map_err(Error::Io)?;
+    }
+    Ok(())
+}
+
+/// Write the `.keep` marker [`IngestPackOptions::keep_message`] asks for next to
+/// `final_pack`.
+///
+/// Returns the marker when this call created it, so a failed publish can take it
+/// back; one that was already there (another installer of the same pack) is left.
+fn write_keep_marker(final_pack: &Path, opts: &IngestPackOptions) -> Result<Option<PathBuf>> {
+    let Some(message) = &opts.keep_message else {
+        return Ok(None);
+    };
+    let path = final_pack.with_extension("keep");
+    let created = !path.exists();
+    let mut contents = message.trim_end_matches('\n').as_bytes().to_vec();
+    if !contents.is_empty() {
+        contents.push(b'\n');
+    }
+    std::fs::write(&path, contents).map_err(Error::Io)?;
+    Ok(created.then_some(path))
 }
 
 /// Complete a thin pack in place (`index-pack --fix-thin`): append each of `bases` from
@@ -1543,6 +1611,39 @@ mod tests {
             "staging left behind"
         );
         assert_repo_fsck_clean(repo.path(), &tip);
+    }
+
+    #[test]
+    fn keep_message_is_written_next_to_the_pack() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let odb = Odb::new(tmp.path());
+        let ingested = install_pack_bytes(
+            single_blob_pack(b"kept blob"),
+            &odb,
+            &IngestPackOptions {
+                keep_message: Some("large-object promisor".to_owned()),
+                mark_promisor_pack: true,
+                ..Default::default()
+            },
+        )
+        .expect("install");
+        let pack = ingested.pack_path.expect("pack path");
+        assert_eq!(
+            std::fs::read_to_string(pack.with_extension("keep")).expect("keep"),
+            "large-object promisor\n"
+        );
+        assert!(pack.with_extension("promisor").is_file());
+
+        // A pack installed without the option gets no marker.
+        let plain = install_pack_bytes(
+            single_blob_pack(b"plain blob"),
+            &odb,
+            &IngestPackOptions::default(),
+        )
+        .expect("install")
+        .pack_path
+        .expect("pack path");
+        assert!(!plain.with_extension("keep").exists());
     }
 
     #[test]

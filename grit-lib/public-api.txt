@@ -9520,6 +9520,7 @@ pub mod grit_lib::objects::index_pack
 pub struct grit_lib::objects::index_pack::IngestPackOptions
 pub grit_lib::objects::index_pack::IngestPackOptions::environment: grit_lib::config::environment::Environment
 pub grit_lib::objects::index_pack::IngestPackOptions::fix_thin: bool
+pub grit_lib::objects::index_pack::IngestPackOptions::keep_message: core::option::Option<alloc::string::String>
 pub grit_lib::objects::index_pack::IngestPackOptions::mark_promisor_pack: bool
 pub grit_lib::objects::index_pack::IngestPackOptions::merged_config: core::option::Option<grit_lib::config::ConfigSet>
 pub grit_lib::objects::index_pack::IngestPackOptions::skip_post_index_verify: bool

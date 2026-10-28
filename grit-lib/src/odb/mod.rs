@@ -1712,6 +1712,22 @@ impl Odb {
         Ok(false)
     }
 
+    /// Delete `oid`'s loose file from this database's own `objects/`, if there is one.
+    ///
+    /// Returns whether a file was removed. Packed copies and alternates are untouched;
+    /// callers drop cached reads themselves if they keep any.
+    ///
+    /// # Errors
+    ///
+    /// Removal failures other than the file not existing.
+    pub(crate) fn remove_local_loose(&self, oid: &ObjectId) -> Result<bool> {
+        match fs::remove_file(self.object_path(oid)) {
+            Ok(()) => Ok(true),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(Error::Io(err)),
+        }
+    }
+
     /// Size in bytes of `oid`'s loose file in this database's own `objects/`,
     /// or `None` when it is not stored loose here.
     pub(crate) fn local_loose_file_size(&self, oid: &ObjectId) -> Option<u64> {

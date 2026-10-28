@@ -1974,7 +1974,7 @@ fn build_repack_pack(
 ///
 /// Propagates thread-option, object read, and staging-file I/O failures; the staging
 /// file is removed when writing fails.
-fn write_staged_repack_pack(
+pub(crate) fn write_staged_repack_pack(
     odb: &Odb,
     pack_dir: &Path,
     objects: &[ObjectId],
@@ -2239,6 +2239,201 @@ fn remove_superseded_pack_files_retaining(
     Ok(removed)
 }
 
+/// What [`rewrite_local_objects_without`] did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PromisorRewrite {
+    /// The promisor pack that now holds the kept objects; `None` when nothing was
+    /// rewritten.
+    pub(crate) pack_path: Option<PathBuf>,
+    /// Objects written into that pack.
+    pub(crate) objects: usize,
+    /// Objects of the drop set that were stored (packed or loose) and are now gone.
+    pub(crate) dropped: usize,
+    /// Pack files (with their sidecars) removed.
+    pub(crate) removed_pack_files: usize,
+}
+
+/// When [`rewrite_local_objects_without`] rewrites.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PromisorRewriteWhen {
+    /// Only when it drops something.
+    Dropping,
+    /// Also to fold every local pack and loose object into one promisor pack.
+    Always,
+}
+
+/// Rewrite the repository's own packs and loose objects into one promisor pack that
+/// leaves out `omit`.
+///
+/// Every object in the local packs without a `.keep` marker, promisor or not, and
+/// every loose object goes into the new pack, except those in `omit`; there is no
+/// reachability walk, so unreachable objects are kept and nothing else can be lost.
+/// The new pack is marked `.promisor`, which makes the dropped objects promised as
+/// long as an object in it refers to them (a tree naming a dropped blob, say).
+/// `.keep` packs and alternates are left alone, so objects stored there stay.
+///
+/// The new pack is installed before anything is removed, and only the packs listed
+/// when the rewrite started are removed afterwards: a pack that arrives meanwhile
+/// (a push) survives. Then loose copies of the dropped objects and loose objects
+/// now packed are deleted. The multi-pack-index is removed; no bitmap is written.
+///
+/// The new pack, its index and markers are flushed to disk before any old pack is
+/// removed, so a crash never leaves an object in neither.
+///
+/// Callers hold the [`GcLock`]. With [`PromisorRewriteWhen::Dropping`], an `omit`
+/// that names nothing stored in the rewritten packs or loose changes nothing. With
+/// [`PromisorRewriteWhen::Always`] the rewrite also runs to fold other packs and
+/// loose objects into one promisor pack, and is skipped only when the local
+/// objects already are exactly one promisor pack (plus `.keep` packs).
+///
+/// # Errors
+///
+/// [`Error::UnsupportedObjectStore`] without a files-backed object store, and pack
+/// read, write and file removal failures.
+pub(crate) fn rewrite_local_objects_without(
+    repo: &Repository,
+    omit: &OidHashSet,
+    opts: &RepackOptions,
+    when: PromisorRewriteWhen,
+) -> Result<PromisorRewrite> {
+    let odb = repo.odb();
+    odb.require_files_primary("promisor rewrite")?;
+    if omit.is_empty() && when == PromisorRewriteWhen::Dropping {
+        return Ok(PromisorRewrite::default());
+    }
+    let objects_dir = odb.objects_dir().to_path_buf();
+    let pack_dir = objects_dir.join("pack");
+    odb.reprepare_local_packs();
+    let snapshot: Vec<_> = odb
+        .local_pack_indexes()?
+        .into_iter()
+        .filter(|idx| !pack_has_keep_marker(&pack_dir, &idx.pack_path))
+        .collect();
+
+    let mut send = Vec::new();
+    let mut seen: OidHashSet = OidHashSet::default();
+    let mut dropped: OidHashSet = OidHashSet::default();
+    let mut take = |oid: ObjectId| {
+        if omit.contains(&oid) {
+            dropped.insert(oid);
+        } else if seen.insert(oid) {
+            send.push(oid);
+        }
+    };
+    for idx in &snapshot {
+        for entry in idx.iter() {
+            take(ObjectId::from_bytes(entry.oid())?);
+        }
+    }
+    let loose = odb.enumerate_local_loose_objects()?;
+    for (oid, _) in &loose {
+        take(*oid);
+    }
+    let folded = loose.is_empty() && snapshot.len() <= 1 && snapshot.iter().all(|i| i.is_promisor);
+    let nothing_to_do = match when {
+        PromisorRewriteWhen::Dropping => dropped.is_empty(),
+        PromisorRewriteWhen::Always => dropped.is_empty() && folded,
+    };
+    if nothing_to_do {
+        return Ok(PromisorRewrite::default());
+    }
+
+    let cfg = opts
+        .merged_config
+        .clone()
+        .or_else(|| repo.config().ok().map(|c| (*c).clone()));
+    let pack_opts = opts
+        .pack_build
+        .unwrap_or_else(|| PackBuildOptions::for_local_copy(cfg.as_ref()));
+    let built = write_staged_repack_pack(
+        odb,
+        &pack_dir,
+        &send,
+        &HashMap::new(),
+        &pack_opts,
+        opts.threads,
+        cfg.as_ref(),
+    )?;
+    clear_pack_midx_state(&pack_dir)?;
+    let mut rewrite = PromisorRewrite {
+        dropped: dropped.len(),
+        ..PromisorRewrite::default()
+    };
+    if let Some(staging) = built.staging_path.as_ref() {
+        let trusted_rows = (!built.index_rows.is_empty()).then_some(built.index_rows);
+        let ingested = install_pack_path(
+            staging,
+            odb,
+            &IngestPackOptions {
+                threads: opts.threads,
+                merged_config: cfg.clone(),
+                environment: opts.environment.clone(),
+                skip_post_index_verify: trusted_rows.is_some(),
+                trusted_index_rows: trusted_rows,
+                mark_promisor_pack: true,
+                ..IngestPackOptions::default()
+            },
+        )?;
+        rewrite.objects = ingested.object_ids.len();
+        if let Some(pack_path) = &ingested.pack_path {
+            if cfg
+                .as_ref()
+                .is_none_or(|c| c.pack_write_reverse_index_default(&opts.environment))
+            {
+                write_pack_rev_sidecar_for_index_path(&pack_path.with_extension("idx"))?;
+            }
+            crate::index_pack::sync_installed_pack(pack_path)?;
+        }
+        rewrite.pack_path = ingested.pack_path;
+    }
+
+    // Drop cached pack mmaps before deleting pack files (Windows).
+    odb.invalidate_packs();
+    let new_stem = rewrite
+        .pack_path
+        .as_deref()
+        .and_then(Path::file_stem)
+        .map(|s| s.to_os_string());
+    let stems: HashSet<std::ffi::OsString> = snapshot
+        .iter()
+        .filter_map(|idx| idx.pack_path.file_stem().map(|s| s.to_os_string()))
+        .filter(|stem| Some(stem) != new_stem.as_ref())
+        .collect();
+    drop(snapshot);
+    rewrite.removed_pack_files = remove_pack_files_with_stems(&pack_dir, &stems)?;
+    for oid in &dropped {
+        odb.remove_local_loose(oid)?;
+    }
+    prune_packed_objects(&objects_dir, PrunePackedOptions::default())?;
+    odb.invalidate_packs();
+    Ok(rewrite)
+}
+
+/// Remove every file in `pack_dir` named `<stem>.<ext>` for one of `stems` (the
+/// pack, its index and every sidecar). A pack that has gained a `.keep` marker since
+/// it was listed is left whole. Returns how many files went.
+fn remove_pack_files_with_stems(
+    pack_dir: &Path,
+    stems: &HashSet<std::ffi::OsString>,
+) -> Result<usize> {
+    if stems.is_empty() {
+        return Ok(0);
+    }
+    let mut removed = 0usize;
+    for entry in fs::read_dir(pack_dir)?.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        let Some(stem) = path.file_stem().filter(|stem| stems.contains(*stem)) else {
+            continue;
+        };
+        if !path.is_file() || pack_dir.join(stem).with_extension("keep").is_file() {
+            continue;
+        }
+        fs::remove_file(&path)?;
+        removed += 1;
+    }
+    Ok(removed)
+}
+
 fn pack_has_keep_marker(pack_dir: &Path, pack_path: &Path) -> bool {
     let Some(stem) = pack_path.file_stem().and_then(|s| s.to_str()) else {
         return false;
@@ -2355,6 +2550,167 @@ mod tests {
     use crate::progress::{NeverCancel, NullProgress};
     use crate::repo::InitOptions;
     use tempfile::TempDir;
+
+    /// Pack `oids` (already stored) into one new pack of `repo`, with a `.keep` marker
+    /// when `keep`; returns the pack path.
+    fn pack_into(repo: &Repository, oids: &[ObjectId], keep: bool) -> PathBuf {
+        let pack = crate::pack_objects::build_pack_from_send_list(
+            repo.odb(),
+            oids,
+            &HashSet::new(),
+            &PackBuildOptions::default(),
+            &HashMap::new(),
+        )
+        .unwrap();
+        install_pack_bytes(
+            pack,
+            repo.odb(),
+            &IngestPackOptions {
+                keep_message: keep.then(|| "pinned".to_owned()),
+                ..IngestPackOptions::default()
+            },
+        )
+        .unwrap()
+        .pack_path
+        .unwrap()
+    }
+
+    #[test]
+    fn promisor_rewrite_drops_only_the_omitted_objects() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
+        let odb = repo.odb();
+        let big = odb.write(ObjectKind::Blob, b"big blob").unwrap();
+        let packed = odb.write(ObjectKind::Blob, b"packed").unwrap();
+        let kept = odb.write(ObjectKind::Blob, b"kept").unwrap();
+        let unreachable = odb.write(ObjectKind::Blob, b"unreachable loose").unwrap();
+        let old_pack = pack_into(&repo, &[packed, big], false);
+        let kept_pack = pack_into(&repo, &[kept], true);
+        crate::prune_packed::prune_packed_objects(odb.objects_dir(), Default::default()).unwrap();
+        // A loose copy of an omitted object goes too.
+        odb.write_loose_materialize(ObjectKind::Blob, b"big blob")
+            .unwrap();
+
+        let omit: OidHashSet = [big, kept].into_iter().collect();
+        let rewrite = rewrite_local_objects_without(
+            &repo,
+            &omit,
+            &RepackOptions::default(),
+            PromisorRewriteWhen::Dropping,
+        )
+        .unwrap();
+        assert_eq!(rewrite.dropped, 1, "the kept copy is not ours to drop");
+        assert_eq!(rewrite.objects, 2, "packed + unreachable");
+        let new_pack = rewrite.pack_path.expect("new pack");
+        assert!(new_pack.with_extension("promisor").is_file());
+        assert!(!old_pack.exists());
+        assert!(kept_pack.is_file() && kept_pack.with_extension("keep").is_file());
+        assert!(rewrite.removed_pack_files >= 2, "old .pack and .idx");
+
+        let repo =
+            Repository::open(dir.path(), &crate::environment::RepositoryOptions::empty()).unwrap();
+        let odb = repo.odb();
+        assert!(!odb.exists_stored(&big));
+        assert!(odb.local_loose_file_size(&big).is_none());
+        for oid in [packed, kept, unreachable] {
+            assert!(odb.exists_stored(&oid), "{oid} kept");
+        }
+        assert!(odb.enumerate_local_loose_objects().unwrap().is_empty());
+    }
+
+    #[test]
+    fn promisor_rewrite_without_anything_to_drop_changes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
+        let blob = repo.odb().write(ObjectKind::Blob, b"x").unwrap();
+        let absent = ObjectId::from_hex("0123456789abcdef0123456789abcdef01234567").unwrap();
+        for omit in [OidHashSet::default(), [absent].into_iter().collect()] {
+            let rewrite = rewrite_local_objects_without(
+                &repo,
+                &omit,
+                &RepackOptions::default(),
+                PromisorRewriteWhen::Dropping,
+            )
+            .unwrap();
+            assert_eq!(rewrite, PromisorRewrite::default());
+        }
+        assert!(repo.odb().local_loose_file_size(&blob).is_some());
+    }
+
+    #[test]
+    fn promisor_rewrite_always_folds_until_one_promisor_pack_is_left() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
+        let odb = repo.odb();
+        let pushed = odb.write(ObjectKind::Blob, b"pushed").unwrap();
+        let packed = odb.write(ObjectKind::Blob, b"packed").unwrap();
+        let old_pack = pack_into(&repo, &[packed], false);
+        crate::prune_packed::prune_packed_objects(odb.objects_dir(), Default::default()).unwrap();
+        odb.write_loose_materialize(ObjectKind::Blob, b"pushed")
+            .unwrap();
+        let fold = || {
+            rewrite_local_objects_without(
+                &repo,
+                &OidHashSet::default(),
+                &RepackOptions::default(),
+                PromisorRewriteWhen::Always,
+            )
+            .unwrap()
+        };
+        let first = fold();
+        assert_eq!(first.dropped, 0);
+        assert_eq!(first.objects, 2);
+        let pack = first.pack_path.expect("folded pack");
+        assert!(pack.with_extension("promisor").is_file());
+        assert!(!old_pack.exists());
+        let repo =
+            Repository::open(dir.path(), &crate::environment::RepositoryOptions::empty()).unwrap();
+        assert!(repo
+            .odb()
+            .enumerate_local_loose_objects()
+            .unwrap()
+            .is_empty());
+        assert!(repo.odb().exists_stored(&pushed));
+        // One promisor pack and nothing loose: nothing left to fold.
+        let second = rewrite_local_objects_without(
+            &repo,
+            &OidHashSet::default(),
+            &RepackOptions::default(),
+            PromisorRewriteWhen::Always,
+        )
+        .unwrap();
+        assert_eq!(second, PromisorRewrite::default());
+        assert!(pack.is_file());
+    }
+
+    #[test]
+    fn pack_removal_spares_unlisted_and_newly_kept_packs() {
+        let dir = TempDir::new().unwrap();
+        for name in [
+            "pack-a.pack",
+            "pack-a.idx",
+            "pack-a.rev",
+            "pack-b.pack",
+            "pack-b.idx",
+            "pack-c.pack",
+            "pack-c.keep",
+        ] {
+            fs::write(dir.path().join(name), b"").unwrap();
+        }
+        let stems: HashSet<std::ffi::OsString> =
+            ["pack-a", "pack-c"].into_iter().map(Into::into).collect();
+        assert_eq!(remove_pack_files_with_stems(dir.path(), &stems).unwrap(), 3);
+        let mut left: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            ["pack-b.idx", "pack-b.pack", "pack-c.keep", "pack-c.pack"]
+        );
+    }
 
     #[cfg_attr(
         not(feature = "full-tests"),
