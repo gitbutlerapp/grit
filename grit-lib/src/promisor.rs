@@ -146,6 +146,65 @@ pub fn promisor_expanded_object_ids(repo: &Repository) -> Result<HashSet<ObjectI
     maintenance_promise_boundary(repo.odb())
 }
 
+/// The objects a promisor remote promises, as Git's `is_promisor_object` defines
+/// them: every object stored in a promisor pack, plus the objects those refer to
+/// directly (a commit's tree and parents, a tag's target, a tree's entries), plus
+/// [`read_promisor_missing_oids`].
+///
+/// Unlike [`maintenance_promise_boundary`] there is no further walk: an object
+/// named only by an object outside the promisor packs is not promised, even when
+/// that object is itself reachable from promisor history. This is the rule for
+/// deciding whether a missing object is acceptable (serving, receiving, fsck).
+/// Only objects already in promisor packs are read; nothing is fetched.
+///
+/// # Errors
+///
+/// Pack index and object read failures, and parse errors in promisor-pack objects.
+pub(crate) fn promisor_referenced_objects(odb: &Odb) -> Result<HashSet<ObjectId>> {
+    let mut members = Vec::new();
+    if odb.uses_files_primary() {
+        odb.primary()?
+            .packed_objects()
+            .for_each_promisor_object(&mut |oid| {
+                members.push(*oid);
+                ControlFlow::Continue(())
+            })?;
+    }
+    let mut set: HashSet<ObjectId> = HashSet::with_capacity(members.len());
+    for oid in members {
+        set.insert(oid);
+        match odb.read_info_without_fetch(&oid) {
+            Ok(info) if info.kind == ObjectKind::Blob => continue,
+            Err(crate::error::Error::ObjectNotFound(_)) => continue,
+            Err(err) => return Err(err),
+            Ok(_) => {}
+        }
+        let Some(obj) = odb.try_read_once(&oid)? else {
+            continue;
+        };
+        match obj.kind {
+            ObjectKind::Commit => {
+                let c = parse_commit(&obj.data)?;
+                set.insert(c.tree);
+                set.extend(c.parents);
+            }
+            ObjectKind::Tag => {
+                set.insert(parse_tag(&obj.data)?.object);
+            }
+            ObjectKind::Tree => {
+                for entry in TreeRefIter::with_oid_len(&obj.data, odb.hash_algo().len()) {
+                    set.insert(entry?.oid);
+                }
+            }
+            ObjectKind::Blob => {}
+        }
+    }
+    if let Some(git_dir) = odb.config_git_dir() {
+        set.extend(read_promisor_missing_oids(git_dir));
+    }
+    Ok(set)
+}
+
 /// Classify promises using only available objects. Never hydrate missing targets while
 /// deciding which objects maintenance may omit from local packs and reachability walks.
 ///

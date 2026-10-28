@@ -493,10 +493,10 @@ pub fn fsck(
         let index_roots = oid_hash_set_from(&index_roots_set);
         let roots = reachability_roots(repo)?;
         let treats_promisor = crate::promisor::repo_treats_promisor_packs(repo.git_dir(), &config);
-        let promisor_parents = if treats_promisor {
-            oid_hash_set_from(&crate::promisor::promisor_pack_object_ids(
-                repo.odb().objects_dir(),
-            ))
+        // Git's `is_promisor_object`: a missing object is fine when an object in a
+        // promisor pack names it, whatever holds the object that led the walk there.
+        let promised = if treats_promisor {
+            oid_hash_set_from(&crate::promisor::promisor_referenced_objects(repo.odb())?)
         } else {
             oid_hash_set()
         };
@@ -518,7 +518,7 @@ pub fn fsck(
             options.strict,
             progress,
             cancel,
-            &promisor_parents,
+            &promised,
             &shallow,
         )?;
         reachable = walked;
@@ -545,7 +545,7 @@ pub fn fsck(
             if reachable.contains(&oid) {
                 continue;
             }
-            if let Ok(info) = odb.read_info(&oid) {
+            if let Ok(info) = odb.read_info_without_fetch(&oid) {
                 dangling.push((info.kind, oid));
             }
         }
@@ -1272,7 +1272,7 @@ fn walk_connectivity(
     strict: bool,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-    promisor_parents: &OidHashSet,
+    promised: &OidHashSet,
     shallow: &OidHashSet,
 ) -> Result<(OidHashSet, Vec<FsckIssue>)> {
     let odb = repo.odb();
@@ -1318,14 +1318,15 @@ fn walk_connectivity(
                 parent,
                 root_kind,
                 links,
-                promisor_parents,
+                promised,
                 shallow,
             );
             continue;
         }
-        let obj = match odb.read(&oid) {
-            Ok(o) => o,
-            Err(_) => {
+        // As in Git, fsck never fetches: a promised object stays missing.
+        let obj = match odb.try_read_once(&oid) {
+            Ok(Some(o)) => o,
+            Ok(None) | Err(_) => {
                 if root_kind == WalkRootKind::IndexOnly && parent.is_zero() {
                     // Report once from [`fsck_index_missing_blobs`].
                 } else if should_emit(config, strict, "missingObject") {
@@ -1378,7 +1379,7 @@ fn walk_connectivity(
                         oid,
                         ObjectKind::Commit,
                         "parent",
-                        promisor_parents,
+                        promised,
                     );
                 }
                 follow_typed_link(
@@ -1393,7 +1394,7 @@ fn walk_connectivity(
                     oid,
                     ObjectKind::Tree,
                     "tree",
-                    promisor_parents,
+                    promised,
                 );
             }
             ObjectKind::Tree => {
@@ -1408,7 +1409,7 @@ fn walk_connectivity(
                     oid,
                     &obj.data,
                     algo.len(),
-                    promisor_parents,
+                    promised,
                 );
             }
             ObjectKind::Tag => {
@@ -1435,7 +1436,7 @@ fn walk_connectivity(
                     oid,
                     expected,
                     "object",
-                    promisor_parents,
+                    promised,
                 );
             }
             ObjectKind::Blob => {}
@@ -1488,7 +1489,7 @@ fn child_exists_with_kind(
             ChildKindProbe::WrongKind
         };
     }
-    match odb.read_info(&target) {
+    match odb.read_info_without_fetch(&target) {
         Ok(child) if child.kind == expected => ChildKindProbe::Matches,
         Ok(_) => ChildKindProbe::WrongKind,
         Err(_) => ChildKindProbe::Missing,
@@ -1507,7 +1508,7 @@ fn walk_tree_entries_from_data(
     tree_oid: ObjectId,
     tree_data: &[u8],
     oid_len: usize,
-    promisor_parents: &OidHashSet,
+    promised: &OidHashSet,
 ) {
     let entries = TreeRefIter::with_oid_len(tree_data, oid_len).collect::<Result<Vec<_>>>();
     let entries = match entries {
@@ -1528,7 +1529,7 @@ fn walk_tree_entries_from_data(
             seen,
             tree_oid,
             entry,
-            promisor_parents,
+            promised,
         );
     }
 }
@@ -1544,7 +1545,7 @@ fn walk_one_tree_entry(
     seen: &mut OidHashSet,
     tree_oid: ObjectId,
     entry: TreeEntryRef<'_>,
-    promisor_parents: &OidHashSet,
+    promised: &OidHashSet,
 ) {
     if entry.mode == MODE_GITLINK {
         return;
@@ -1552,7 +1553,7 @@ fn walk_one_tree_entry(
     if let Some(expected) = kind_for_tree_mode(entry.mode) {
         match child_exists_with_kind(odb, store_links, entry.oid, expected) {
             ChildKindProbe::Missing => {
-                if expected == ObjectKind::Blob && promisor_parents.contains(&tree_oid) {
+                if promised.contains(&entry.oid) {
                     return;
                 }
                 if should_emit(config, strict, "missingObject") {
@@ -1597,7 +1598,7 @@ fn walk_from_validated_links(
     _parent: ObjectId,
     _root_kind: WalkRootKind,
     links: &ValidatedObjectLinks,
-    promisor_parents: &OidHashSet,
+    promised: &OidHashSet,
     shallow: &OidHashSet,
 ) {
     match links {
@@ -1616,7 +1617,7 @@ fn walk_from_validated_links(
                     oid,
                     ObjectKind::Commit,
                     "parent",
-                    promisor_parents,
+                    promised,
                 );
             }
             follow_typed_link(
@@ -1631,7 +1632,7 @@ fn walk_from_validated_links(
                 oid,
                 ObjectKind::Tree,
                 "tree",
-                promisor_parents,
+                promised,
             );
         }
         ValidatedObjectLinks::Tag {
@@ -1650,7 +1651,7 @@ fn walk_from_validated_links(
                 oid,
                 *object_type,
                 "object",
-                promisor_parents,
+                promised,
             );
         }
         ValidatedObjectLinks::Tree | ValidatedObjectLinks::Blob => {}
@@ -1670,11 +1671,11 @@ fn follow_typed_link(
     parent: ObjectId,
     expected: ObjectKind,
     link_name: &str,
-    promisor_parents: &OidHashSet,
+    promised: &OidHashSet,
 ) {
     match child_exists_with_kind(odb, store_links, target, expected) {
         ChildKindProbe::Missing => {
-            if expected == ObjectKind::Blob && promisor_parents.contains(&parent) {
+            if promised.contains(&target) {
                 return;
             }
             if should_emit(config, strict, "missingObject") {
@@ -1742,7 +1743,7 @@ fn fsck_index_missing_blobs(
         if already_reported.contains(&entry.oid) {
             continue;
         }
-        if odb.read(&entry.oid).is_err() {
+        if !matches!(odb.try_read_once(&entry.oid), Ok(Some(_))) {
             if promisor_promised.is_some_and(|promised| promised.contains(&entry.oid)) {
                 continue;
             }
@@ -2098,6 +2099,133 @@ mod tests {
                 )
             }),
             "commit tree must not accept a blob oid: {:?}",
+            report.issues
+        );
+    }
+
+    /// Fails every fetch and counts the attempts.
+    #[derive(Default)]
+    struct RecordingFetcher {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl crate::promisor_fetch::PromisorFetcher for RecordingFetcher {
+        fn fetch_missing(&self, _repo: &Repository, _oids: &[ObjectId]) -> Result<()> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(Error::Message("fsck must not fetch".to_owned()))
+        }
+    }
+
+    fn tree_naming(repo: &Repository, entries: &[(&str, ObjectId)]) -> ObjectId {
+        let mut body = Vec::new();
+        for (name, oid) in entries {
+            body.extend_from_slice(format!("100644 {name}\0").as_bytes());
+            body.extend_from_slice(oid.as_bytes());
+        }
+        repo.odb()
+            .write_loose_materialize(ObjectKind::Tree, &body)
+            .unwrap()
+    }
+
+    fn commit_on(repo: &Repository, tree: ObjectId, parent: Option<ObjectId>) -> ObjectId {
+        let parent = parent.map(|p| format!("parent {p}\n")).unwrap_or_default();
+        let body = format!(
+            "tree {tree}\n{parent}author A <a@e> 1 +0000\ncommitter A <a@e> 1 +0000\n\nc\n"
+        );
+        repo.odb()
+            .write_loose_materialize(ObjectKind::Commit, body.as_bytes())
+            .unwrap()
+    }
+
+    /// A partial repository whose promisor pack holds a commit and a tree naming a
+    /// blob it lacks, and a loose commit on top (as a push leaves it) whose tree
+    /// names that blob too. Returns the promised blob and the loose tree.
+    fn partial_repo_with_pushed_tree(dir: &std::path::Path) -> (ObjectId, ObjectId) {
+        let repo = Repository::init(dir, &InitOptions::new().with_bare(true)).unwrap();
+        let promised = ObjectId::from_hex("0123456789abcdef0123456789abcdef01234567").unwrap();
+        let old_tree = tree_naming(&repo, &[("big", promised)]);
+        let old = commit_on(&repo, old_tree, None);
+        let pack = crate::pack_objects::build_pack_from_send_list(
+            repo.odb(),
+            &[old, old_tree],
+            &std::collections::HashSet::new(),
+            &crate::pack_objects::PackBuildOptions::default(),
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        crate::index_pack::install_pack_bytes(
+            pack,
+            repo.odb(),
+            &crate::index_pack::IngestPackOptions {
+                mark_promisor_pack: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::prune_packed::prune_packed_objects(repo.odb().objects_dir(), Default::default())
+            .unwrap();
+        let small = repo.odb().write(ObjectKind::Blob, b"small\n").unwrap();
+        let new_tree = tree_naming(&repo, &[("big", promised), ("small", small)]);
+        let new = commit_on(&repo, new_tree, Some(old));
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &new).unwrap();
+        let config = dir.join("config");
+        let mut text = std::fs::read_to_string(&config).unwrap();
+        text.push_str("[remote \"lop\"]\n\turl = /nonexistent\n\tpromisor = true\n");
+        std::fs::write(config, text).unwrap();
+        (promised, new_tree)
+    }
+
+    #[test]
+    fn promised_blob_named_outside_promisor_packs_is_not_missing_and_never_fetched() {
+        let dir = TempDir::new().unwrap();
+        let (promised, _) = partial_repo_with_pushed_tree(dir.path());
+        let fetcher = std::sync::Arc::new(RecordingFetcher::default());
+        let repo = Repository::open(
+            dir.path(),
+            &crate::environment::RepositoryOptions::empty()
+                .with_promisor_fetcher(Some(fetcher.clone())),
+        )
+        .unwrap();
+        let report = fsck(
+            &repo,
+            &FsckOptions::full_repository(false),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+        assert!(report.issues.is_empty(), "{:?}", report.issues);
+        assert_eq!(
+            fetcher.calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "fsck never fetches"
+        );
+        assert!(!repo.odb().exists_stored(&promised));
+    }
+
+    #[test]
+    fn blob_no_promisor_object_names_is_still_missing() {
+        let dir = TempDir::new().unwrap();
+        partial_repo_with_pushed_tree(dir.path());
+        let repo =
+            Repository::open(dir.path(), &crate::environment::RepositoryOptions::empty()).unwrap();
+        let ghost = ObjectId::from_hex("1123456789abcdef0123456789abcdef01234567").unwrap();
+        let tree = tree_naming(&repo, &[("ghost", ghost)]);
+        let head = crate::refs::resolve_ref(repo.git_dir(), "refs/heads/main").unwrap();
+        let tip = commit_on(&repo, tree, Some(head));
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &tip).unwrap();
+        let report = fsck(
+            &repo,
+            &FsckOptions::full_repository(false),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+        assert!(
+            report.issues.iter().any(|issue| matches!(
+                issue,
+                FsckIssue::MissingObject { oid, .. } if *oid == ghost
+            )),
+            "{:?}",
             report.issues
         );
     }
