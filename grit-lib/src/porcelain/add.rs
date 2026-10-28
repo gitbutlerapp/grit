@@ -31,7 +31,7 @@ use crate::path_validate::{validate_path, EntryMode, PathValidationKind, Protect
 use crate::pathspec::{
     context_from_mode_bits, exact_literal_pathspec_set, has_glob_chars,
     matches_pathspec_list_with_context, pathspec_is_exclude, sorted_paths_match_pathspec,
-    PathspecMatchContext,
+    PathspecListMatcher, PathspecMatchContext,
 };
 use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::porcelain::index_mode::{
@@ -339,6 +339,13 @@ fn worktree_path_matches_staging_pathspecs(
     matches_pathspec_list_with_context(path, pathspecs, base_ctx)
 }
 
+/// Trailing-slash positive pathspecs match directory/gitlink entries only with mode context.
+fn staging_pathspecs_need_entry_mode_context(pathspecs: &[String]) -> bool {
+    pathspecs
+        .iter()
+        .any(|s| !pathspec_is_exclude(s) && s.ends_with('/'))
+}
+
 fn staging_index_path_modes(index: &Index) -> HashMap<Vec<u8>, u32> {
     let mut modes = HashMap::new();
     for entry in &index.entries {
@@ -382,16 +389,76 @@ fn restricted_index_paths_for_pathspecs(
             return exact;
         }
     }
-    let mut paths = BTreeSet::new();
+    if staging_pathspecs_need_entry_mode_context(pathspecs) {
+        let mut paths = BTreeSet::new();
+        for entry in &index.entries {
+            let Ok(path) = std::str::from_utf8(&entry.path) else {
+                continue;
+            };
+            if index_path_matches_staging_pathspecs(path, entry.mode, pathspecs, base_ctx) {
+                paths.insert(path.to_owned());
+            }
+        }
+        return paths;
+    }
+    let matcher = PathspecListMatcher::new(pathspecs, base_ctx);
+    let mut paths: BTreeSet<String> = index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0)
+        .filter_map(|e| std::str::from_utf8(&e.path).ok())
+        .filter(|p| matcher.matches(p))
+        .map(str::to_owned)
+        .collect();
     for entry in &index.entries {
-        let Ok(path) = std::str::from_utf8(&entry.path) else {
+        if entry.stage() == 0 {
             continue;
-        };
-        if index_path_matches_staging_pathspecs(path, entry.mode, pathspecs, base_ctx) {
-            paths.insert(path.to_owned());
+        }
+        if let Ok(path) = std::str::from_utf8(&entry.path) {
+            if matcher.matches(path) {
+                paths.insert(path.to_owned());
+            }
         }
     }
     paths
+}
+
+enum StagingPathspecFilter<'a> {
+    List(PathspecListMatcher<'a>),
+    ModeAware {
+        pathspecs: &'a [String],
+        base_ctx: PathspecMatchContext,
+        index_path_modes: HashMap<Vec<u8>, u32>,
+    },
+}
+
+impl StagingPathspecFilter<'_> {
+    fn matches(&self, path: &str) -> bool {
+        match self {
+            Self::List(matcher) => matcher.matches(path),
+            Self::ModeAware {
+                pathspecs,
+                base_ctx,
+                index_path_modes,
+            } => staging_path_matches(path, index_path_modes, pathspecs, *base_ctx),
+        }
+    }
+}
+
+fn staging_pathspec_filter<'a>(
+    index: &Index,
+    pathspecs: &'a [String],
+    base_ctx: PathspecMatchContext,
+) -> StagingPathspecFilter<'a> {
+    if staging_pathspecs_need_entry_mode_context(pathspecs) {
+        StagingPathspecFilter::ModeAware {
+            pathspecs,
+            base_ctx,
+            index_path_modes: staging_index_path_modes(index),
+        }
+    } else {
+        StagingPathspecFilter::List(PathspecListMatcher::new(pathspecs, base_ctx))
+    }
 }
 
 fn stage_via_worktree_diff(
@@ -639,15 +706,8 @@ fn stage_inner_on_index(
         }
     }
 
-    let index_path_modes = staging_index_path_modes(index);
-    let matches = |path: &str| {
-        staging_path_matches(
-            path,
-            &index_path_modes,
-            staging_pathspecs.as_ref(),
-            pathspec_ctx,
-        )
-    };
+    let pathspec_filter = staging_pathspec_filter(index, staging_pathspecs.as_ref(), pathspec_ctx);
+    let matches = |path: &str| staging_pathspecs.is_empty() || pathspec_filter.matches(path);
 
     if opts.intent_to_add {
         let mut outcome = stage_intent_to_add_paths(
@@ -3418,6 +3478,22 @@ mod tests {
             assert_eq!(entry.oid, theirs_oid);
             assert_ne!(entry.oid, empty_blob_oid());
         }
+    }
+
+    #[test]
+    fn staging_pathspec_mode_context_only_for_trailing_slash_positives() {
+        assert!(!staging_pathspecs_need_entry_mode_context(&[]));
+        assert!(!staging_pathspecs_need_entry_mode_context(&[".".into()]));
+        assert!(!staging_pathspecs_need_entry_mode_context(&[
+            ".".into(),
+            ":(exclude)foo/*".into(),
+        ]));
+        assert!(staging_pathspecs_need_entry_mode_context(&["sub/".into()]));
+        assert!(staging_pathspecs_need_entry_mode_context(&[
+            ".".into(),
+            "sub/".into(),
+            ":(exclude)foo/*".into(),
+        ]));
     }
 
     #[test]
