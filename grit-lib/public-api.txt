@@ -15430,8 +15430,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::stage_tracked
 pub struct grit_lib::porcelain::stage_tracked::StageTrackedSummary
 pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::modified: alloc::vec::Vec<alloc::vec::Vec<u8>>
 pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::removed: alloc::vec::Vec<alloc::vec::Vec<u8>>
-pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::untracked_invalidation_deferred: bool
 pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::stat_refreshed: bool
+pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::untracked_invalidation_deferred: bool
 impl grit_lib::porcelain::stage_tracked::StageTrackedSummary
 pub fn grit_lib::porcelain::stage_tracked::StageTrackedSummary::change_count(&self) -> usize
 impl core::clone::Clone for grit_lib::porcelain::stage_tracked::StageTrackedSummary
