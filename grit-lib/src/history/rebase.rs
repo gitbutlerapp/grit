@@ -739,22 +739,6 @@ fn descends_from_rewritten_range(
         .any(|&range_commit| is_ancestor(repo, range_commit, commit).unwrap_or(false))
 }
 
-/// When `commit` is the tip of a side branch merged into the range, return the first parent
-/// of that merge on the mainline so the side replay chains onto the replayed mainline commit.
-fn mainline_anchor_for_parallel_root(
-    repo: &Repository,
-    commit: ObjectId,
-    range_set: &HashSet<ObjectId>,
-) -> Result<Option<ObjectId>, HistoryError> {
-    for &merge_oid in range_set {
-        let parents = commit_parents(repo, merge_oid)?;
-        if parents.len() >= 2 && parents[1] == commit {
-            return Ok(Some(parents[0]));
-        }
-    }
-    Ok(None)
-}
-
 pub(crate) fn commits_in_rebase_range(
     repo: &Repository,
     fork: ObjectId,
