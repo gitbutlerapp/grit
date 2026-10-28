@@ -83,6 +83,44 @@ fn diff_stat_counts_match_git_numstat_trees_text_and_binary() {
 }
 
 #[test]
+fn tree_diff_stat_matches_structured_patch_repeated_anchor() {
+    use grit_lib::diff::structured::{structured_file_diff, SideBytes};
+    use grit_lib::diff::LineStat;
+    use grit_lib::objects::FileMode;
+
+    let anchor = "fn anchor() {\n";
+    let old_body = format!("{anchor}{anchor}// old body\n");
+    let mut new_body = String::new();
+    for i in 0..800 {
+        new_body.push_str(&format!("// inserted block {i}\n"));
+    }
+    new_body.push_str(&anchor);
+    new_body.push_str("// new tail\n");
+
+    let (_dir, repo) = init_repo();
+    let old = tree_with(&repo, &[("feature.rs", old_body.as_bytes())]);
+    let new = tree_with(&repo, &[("feature.rs", new_body.as_bytes())]);
+    let grit = grit_numstat_for_trees(&repo, Some(&old), Some(&new));
+    let (_, _, path) = grit.first().expect("one file");
+    assert_eq!(path, "feature.rs");
+    let (tree_ins, tree_del, _) = grit[0];
+
+    let structured = structured_file_diff(
+        FileMode::REGULAR,
+        FileMode::REGULAR,
+        &SideBytes::from_bytes(old_body.into_bytes()),
+        &SideBytes::from_bytes(new_body.into_bytes()),
+        DiffOptions::default(),
+    );
+    let patch = LineStat::from_hunks(&structured.hunks);
+    assert_eq!(
+        (tree_ins, tree_del),
+        (patch.insertions, patch.deletions),
+        "tree --stat must match patch line counts (issue #2236)"
+    );
+}
+
+#[test]
 fn identical_binary_rename_keeps_binary_flag_in_stat_mode() {
     let (_dir, repo) = init_repo();
     let old = tree_with(&repo, &[("f.txt", b"alpha\n")]);
