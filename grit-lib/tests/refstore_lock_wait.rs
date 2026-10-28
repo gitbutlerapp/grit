@@ -12,7 +12,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{mpsc, Arc, Barrier};
 use std::time::{Duration, Instant};
 
@@ -36,7 +35,6 @@ use grit_lib::refs::{
 };
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
-use grit_test_support::git_fsck;
 use time::OffsetDateTime;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
@@ -447,14 +445,14 @@ fn files_concurrent_disjoint_ref_updates_through_repository_never_lock_held() {
         failures, 0,
         "disjoint refs must not see LockHeld through References::update"
     );
-
-    let show = Command::new("git")
-        .args(["-C", tmp.path().to_str().expect("utf8"), "show-ref"])
-        .output()
-        .expect("git show-ref");
-    assert!(show.status.success(), "{show:?}");
-    let fsck = git_fsck(tmp.path(), true);
-    assert!(fsck.ok, "{fsck:?}");
+    for t in 0..THREADS {
+        let name = format!("refs/heads/t{t}");
+        let resolved = repo
+            .references()
+            .resolve(&RefName::try_from(name.as_str()).expect("ref"))
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(resolved, commit, "{name}");
+    }
 }
 
 #[test]
@@ -483,10 +481,7 @@ fn files_prepare_disjoint_ref_while_another_transaction_is_open() {
     );
 }
 
-#[test]
-fn files_concurrent_create_race_a_vs_a_slash_b_leaves_one_ref() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let path = tmp.path();
+fn assert_a_vs_a_slash_b_create_race_once(path: &Path) {
     fs::create_dir_all(path.join("refs/heads")).expect("refs");
     fs::write(path.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
     let store = Arc::new(files_store(path));
@@ -524,6 +519,14 @@ fn files_concurrent_create_race_a_vs_a_slash_b_leaves_one_ref() {
         .count();
     assert_eq!(successes, 1, "{outcomes:?}");
     assert_eq!(name_unavailable, 1, "{outcomes:?}");
+    for outcome in &outcomes {
+        if let Err(err) = outcome {
+            assert!(
+                matches!(err, Error::RefStore(RefStoreError::NameUnavailable { .. })),
+                "commit-time D/F races must return NameUnavailable, not {err:?}"
+            );
+        }
+    }
     let a_exists = path.join("refs/heads/a").is_file();
     let b_exists = path.join("refs/heads/a/b").is_file();
     assert!(a_exists ^ b_exists, "exactly one ref file must exist");
@@ -531,4 +534,22 @@ fn files_concurrent_create_race_a_vs_a_slash_b_leaves_one_ref() {
         !path.join("refs/heads/a.lock").exists() && !path.join("refs/heads/a/b.lock").exists(),
         "locks released"
     );
+}
+
+#[test]
+fn files_concurrent_create_race_a_vs_a_slash_b_leaves_one_ref() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    assert_a_vs_a_slash_b_create_race_once(tmp.path());
+}
+
+#[test]
+fn files_concurrent_create_race_a_vs_a_slash_b_stress() {
+    const ITERS: usize = 100;
+    for i in 0..ITERS {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        assert_a_vs_a_slash_b_create_race_once(tmp.path());
+        if i + 1 == ITERS {
+            eprintln!("stress iterations={ITERS} ok");
+        }
+    }
 }

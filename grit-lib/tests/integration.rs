@@ -1362,6 +1362,9 @@ mod refstore_conformance_reftable;
 mod refstore_custom_backend;
 #[path = "refstore_lock_wait.rs"]
 mod refstore_lock_wait;
+#[cfg(feature = "full-tests")]
+#[path = "refstore_lock_wait_git_compat.rs"]
+mod refstore_lock_wait_git_compat;
 #[path = "refstore_reftable_create_race.rs"]
 mod refstore_reftable_create_race;
 #[cfg(feature = "full-tests")]

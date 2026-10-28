@@ -886,17 +886,50 @@ impl FilesRefStore {
     /// A directory that cannot be created (a ref file in the way) is reported as a
     /// [`GitDirPathOperation::CreateDir`] failure; otherwise as [`Self::acquire_ref_lock_mapped`].
     fn lock_ref(&self, refname: &str, lock_path: &Path, wait: LockWait) -> Result<()> {
+        if let Some(reason) = self.name_unavailable_if_ancestor_is_loose_file(refname) {
+            return Err(Error::RefStore(RefStoreError::NameUnavailable { reason }));
+        }
         let Err(err) = self.acquire_ref_lock_mapped(lock_path, refname, wait) else {
             return Ok(());
         };
         if let Some(parent) = lock_path.parent() {
-            self.io_ref_store(
-                parent,
-                GitDirPathOperation::CreateDir,
-                fs::create_dir_all(parent),
-            )?;
+            if parent.is_file() {
+                return Err(Error::RefStore(RefStoreError::NameUnavailable {
+                    reason: RefnameUnavailable::AncestorExists {
+                        blocking: loose_storage_path_to_refname(&self.common_dir, parent),
+                        new_ref: refname.to_owned(),
+                    },
+                }));
+            }
+            if let Err(source) = fs::create_dir_all(parent) {
+                if let Some(reason) = self.name_unavailable_if_ancestor_is_loose_file(refname) {
+                    return Err(Error::RefStore(RefStoreError::NameUnavailable { reason }));
+                }
+                self.io_ref_store(parent, GitDirPathOperation::CreateDir, Err(source))?;
+            }
         }
         Err(err)
+    }
+
+    /// Whether a strict ancestor of `refname` is already stored as a loose ref file (blocks
+    /// creating a descendant under it).
+    fn name_unavailable_if_ancestor_is_loose_file(
+        &self,
+        refname: &str,
+    ) -> Option<RefnameUnavailable> {
+        for (slash, _) in refname.match_indices('/').rev() {
+            let ancestor = &refname[..slash];
+            if ancestor == "refs" {
+                continue;
+            }
+            if self.loose_ref_file_exists(ancestor).ok()? {
+                return Some(RefnameUnavailable::AncestorExists {
+                    blocking: ancestor.to_owned(),
+                    new_ref: refname.to_owned(),
+                });
+            }
+        }
+        None
     }
 
     fn acquire_ref_lock_mapped(
@@ -955,6 +988,7 @@ impl FilesRefStore {
     fn write_loose_value(
         common_dir: &Path,
         checkout_git_dir: &Path,
+        refname: &str,
         path: &Path,
         lock: &Path,
         value: &RawRef,
@@ -978,14 +1012,27 @@ impl FilesRefStore {
             remove_empty_ref_directory(path);
             fs::rename(lock, path)
         });
-        io_with_ref_store_path(
-            common_dir,
-            checkout_git_dir,
-            path,
-            GitDirPathOperation::UpdateRef,
-            renamed,
-        )?;
-        Ok(())
+        match renamed {
+            Ok(()) => Ok(()),
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    io::ErrorKind::IsADirectory | io::ErrorKind::NotADirectory
+                ) =>
+            {
+                let _ = fs::remove_file(lock);
+                Err(Error::RefStore(RefStoreError::NameUnavailable {
+                    reason: name_unavailable_after_loose_rename_conflict(refname, path, common_dir),
+                }))
+            }
+            Err(err) => io_with_ref_store_path(
+                common_dir,
+                checkout_git_dir,
+                path,
+                GitDirPathOperation::UpdateRef,
+                Err(err),
+            ),
+        }
     }
 
     fn persist_case_only_loose_ref(
@@ -1010,6 +1057,7 @@ impl FilesRefStore {
             FilesRefStore::write_loose_value(
                 &self.common_dir,
                 &self.git_dir,
+                &rename.from,
                 &from_path,
                 &from_lock,
                 value,
@@ -1291,6 +1339,7 @@ impl FilesRefStore {
             Some(value) => FilesRefStore::write_loose_value(
                 &self.common_dir,
                 &self.git_dir,
+                name,
                 &path,
                 lock,
                 value,
@@ -1926,6 +1975,56 @@ impl Drop for FilesPrepared<'_> {
             FilesRefStore::release_locks(&batch);
         }
         self.store.invalidate_packed_cache_after_write();
+    }
+}
+
+fn loose_storage_path_to_refname(storage_root: &Path, loose: &Path) -> String {
+    loose
+        .strip_prefix(storage_root)
+        .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| loose.to_string_lossy().into_owned())
+}
+
+fn first_loose_ref_file_under(dir: &Path) -> Option<PathBuf> {
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_type = entry.file_type().ok()?;
+        if file_type.is_dir() {
+            if let Some(found) = first_loose_ref_file_under(&path) {
+                return Some(found);
+            }
+        } else if file_type.is_file() && path.extension().is_none_or(|e| e != "lock") {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn name_unavailable_after_loose_rename_conflict(
+    refname: &str,
+    ref_path: &Path,
+    storage_root: &Path,
+) -> RefnameUnavailable {
+    if ref_path.is_dir() {
+        if let Some(descendant) = first_loose_ref_file_under(ref_path) {
+            return RefnameUnavailable::DescendantExists {
+                blocking: loose_storage_path_to_refname(storage_root, &descendant),
+                new_ref: refname.to_owned(),
+            };
+        }
+    }
+    if let Some(parent) = ref_path.parent() {
+        if parent.is_file() {
+            return RefnameUnavailable::AncestorExists {
+                blocking: loose_storage_path_to_refname(storage_root, parent),
+                new_ref: refname.to_owned(),
+            };
+        }
+    }
+    RefnameUnavailable::DescendantExists {
+        blocking: format!("{refname}/…"),
+        new_ref: refname.to_owned(),
     }
 }
 
