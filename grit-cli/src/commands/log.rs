@@ -19,7 +19,7 @@ use grit_lib::revwalk::log_walk::{LogWalkCursor, LogWalkQuery};
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io::Write;
 
 use crate::commands::diff::{
@@ -178,9 +178,16 @@ impl HumanRender for LogOutcome {
             }
             return render_author_groups_human(w, &self.author_group_rows);
         }
-        if self.commits.is_empty() && !self.display.graph {
-            outln!(w, "No commits yet.");
-            return Ok(());
+        if !self.display.graph {
+            let empty = if self.display.oneline {
+                self.oneline_lines.is_empty()
+            } else {
+                self.commits.is_empty()
+            };
+            if empty {
+                outln!(w, "No commits yet.");
+                return Ok(());
+            }
         }
         let now = ctx.now.unix_timestamp();
         let color = use_color();
@@ -261,9 +268,16 @@ impl MarkdownRender for LogOutcome {
             }
             return render_author_groups_markdown(w, &self.author_group_rows);
         }
-        if self.commit_rows.is_empty() && !self.display.graph {
-            outln!(w, "No commits yet.");
-            return Ok(());
+        if !self.display.graph {
+            let empty = if self.display.oneline {
+                self.oneline_lines.is_empty()
+            } else {
+                self.commit_rows.is_empty()
+            };
+            if empty {
+                outln!(w, "No commits yet.");
+                return Ok(());
+            }
         }
         if let Some(note) = self.graph_note {
             outln!(w, "_{note}_");
@@ -790,6 +804,10 @@ fn build_commit_outcome(
         && !display.decorate;
     let need_refs = display.decorate || json_output;
     let need_commit_details = need_refs || (format.any_format_flag() && !format.log_patch_text());
+    let plain_oneline = display.oneline
+        && !need_commit_details
+        && !display.decorate
+        && (!display.graph || output_mode == OutputMode::Markdown);
     let head_branch = if display.oneline || display.decorate {
         resolve_current_branch(repo)?
     } else {
@@ -822,6 +840,44 @@ fn build_commit_outcome(
                 oids: oids.to_vec(),
                 pathspecs,
             }),
+        });
+    }
+
+    if plain_oneline {
+        use grit_lib::objects::read_commit_subject_line;
+        use grit_lib::OidAbbrevBatch;
+
+        let mut abbrev = OidAbbrevBatch::new(7);
+        let oneline_lines = oids
+            .iter()
+            .map(|oid| {
+                let abbrev_hex = abbrev.abbrev_known(repo, *oid)?;
+                let subject = match parsed.cached_subject_line(oid) {
+                    Some(Ok(s)) => s,
+                    Some(Err(e)) => return Err(e.into()),
+                    None => read_commit_subject_line(&repo.odb().read(oid)?.data)?,
+                };
+                Ok(format!("{abbrev_hex} {subject}"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        drop(parsed);
+        return Ok(LogOutcome {
+            commits: Vec::new(),
+            groups: None,
+            next,
+            truncated,
+            commit_rows: Vec::new(),
+            author_group_rows: Vec::new(),
+            display,
+            head_branch,
+            oneline_lines,
+            graph_lines: Vec::new(),
+            graph_note: None,
+            continuation_args,
+            show_continuation_cursor,
+            format,
+            commit_diffs: Vec::new(),
+            patch_text: None,
         });
     }
 
@@ -965,7 +1021,7 @@ fn build_graph_oneline_lines(
     let mut layout = GraphLayout::new(charset);
     let blocks = layout.render(&inputs);
     let mut out = Vec::with_capacity(oids.len() + blocks.len());
-    let mut prefix_cache = HashMap::new();
+    let mut abbrev_batch = grit_lib::OidAbbrevBatch::new(7);
     for (block, &oid) in blocks.into_iter().zip(oids.iter()) {
         let subject = subjects
             .get(&oid)
@@ -976,7 +1032,7 @@ fn build_graph_oneline_lines(
                 out.push(graph_line.prefix.trim_end().to_owned());
                 continue;
             }
-            let text = render_oneline_oid_subject(repo, oid, subject, &mut prefix_cache)?;
+            let text = render_oneline_oid_subject(repo, oid, subject, &mut abbrev_batch)?;
             out.push(format!("{}{text}", graph_line.prefix));
         }
     }

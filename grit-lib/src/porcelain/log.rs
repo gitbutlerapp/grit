@@ -238,6 +238,12 @@ pub trait CommitReuse {
     ///
     /// Returns commit-parse errors for sources that hold unparsed objects.
     fn take_commit(&mut self, oid: &ObjectId) -> Option<Result<CommitData>>;
+
+    /// Subject line from walk-cached commit bytes when the source holds them.
+    fn cached_subject_line(&self, oid: &ObjectId) -> Option<Result<String>> {
+        let _ = oid;
+        None
+    }
 }
 
 impl CommitReuse for OidHashMap<CommitData> {

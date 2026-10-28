@@ -873,6 +873,9 @@ mod local_transport_reachable;
 #[path = "lockfile_contention_git_compat.rs"]
 mod lockfile_contention_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "log_oneline_abbrev_packed.rs"]
+mod log_oneline_abbrev_packed;
+#[cfg(feature = "full-tests")]
 #[path = "log_patch_git_compat.rs"]
 mod log_patch_git_compat;
 #[cfg(feature = "full-tests")]
@@ -1111,6 +1114,12 @@ mod odb_store_object_safety;
 #[cfg(feature = "full-tests")]
 #[path = "odb_with_stream.rs"]
 mod odb_with_stream;
+#[cfg(feature = "full-tests")]
+#[path = "oid_abbrev_alternate_pack_collision.rs"]
+mod oid_abbrev_alternate_pack_collision;
+#[cfg(feature = "full-tests")]
+#[path = "oid_abbrev_separate_pack_collision.rs"]
+mod oid_abbrev_separate_pack_collision;
 #[path = "oid_hashtable_api.rs"]
 mod oid_hashtable_api;
 #[cfg(feature = "full-tests")]

@@ -118,6 +118,46 @@ fn log_group_by_author_count_respects_max_count() {
 }
 
 #[test]
+fn log_oneline_human_lists_commits_from_oneline_lines() {
+    let fixture = CliFixture::empty();
+    for i in 0..5 {
+        fixture.write_repo_file("a.txt", &format!("v{i}\n"));
+        fixture.run_ok(&["commit", "-m", &format!("commit {i}")]);
+    }
+    let out = fixture.run_ok(&["log", "--oneline", "-n", "5"]).stdout;
+    assert!(
+        !out.contains("No commits yet."),
+        "plain oneline must not treat empty commits vec as empty history: {out}"
+    );
+    assert_eq!(
+        out.lines().filter(|l| !l.trim().is_empty()).count(),
+        5,
+        "{out}"
+    );
+}
+
+#[test]
+fn log_oneline_markdown_lists_commits_from_oneline_lines() {
+    let fixture = CliFixture::empty();
+    for i in 0..5 {
+        fixture.write_repo_file("a.txt", &format!("v{i}\n"));
+        fixture.run_ok(&["commit", "-m", &format!("commit {i}")]);
+    }
+    let out = fixture
+        .run_ok(&["--markdown", "log", "--oneline", "-n", "5"])
+        .stdout;
+    assert!(
+        !out.contains("No commits yet."),
+        "markdown oneline must not treat empty commit_rows as empty history: {out}"
+    );
+    assert_eq!(
+        out.lines().filter(|l| l.starts_with("- `")).count(),
+        5,
+        "{out}"
+    );
+}
+
+#[test]
 fn log_empty_json_includes_commits_array() {
     let fixture = CliFixture::empty();
     fixture.write_repo_file("a.txt", "x\n");

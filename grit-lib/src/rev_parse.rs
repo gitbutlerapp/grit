@@ -2067,21 +2067,14 @@ pub(crate) fn abbreviate_object_id_with_prefix_cache(
         return Ok(target);
     }
 
-    let short = &target[..min_len];
-    if prefix_ambiguous.get(short) == Some(&false) {
-        target.truncate(min_len);
-        return Ok(target);
-    }
-    let mut candidates = Vec::new();
-    repo.odb().lookup_prefix(short, 0, &mut candidates)?;
-    prefix_ambiguous.insert(short.to_owned(), candidates.len() > 1);
-    let shared = candidates
-        .iter()
-        .filter(|other| **other != oid)
-        .map(|other| oid.common_prefix_nibbles(other))
-        .max();
-    target.truncate(shared.map_or(min_len, |n| (n + 1).clamp(min_len, hex_len)));
-    Ok(target)
+    crate::oid_abbrev::abbreviate_object_id_known(
+        repo,
+        oid,
+        min_len,
+        prefix_ambiguous,
+        &mut [None; 256],
+        &mut None,
+    )
 }
 
 /// Render `path` relative to `cwd` with `/` separators.

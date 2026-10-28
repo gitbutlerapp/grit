@@ -14327,12 +14327,16 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::log::LoadedCommit
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::log::LoadedCommit
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::log::LoadedCommit
 pub trait grit_lib::porcelain::log::CommitReuse
+pub fn grit_lib::porcelain::log::CommitReuse::cached_subject_line(&self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<alloc::string::String>>
 pub fn grit_lib::porcelain::log::CommitReuse::take_commit(&mut self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<grit_lib::objects::CommitData>>
 impl grit_lib::porcelain::log::CommitReuse for grit_lib::objects::OidHashMap<grit_lib::objects::CommitData>
+pub fn grit_lib::objects::OidHashMap<grit_lib::objects::CommitData>::cached_subject_line(&self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<alloc::string::String>>
 pub fn grit_lib::objects::OidHashMap<grit_lib::objects::CommitData>::take_commit(&mut self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<grit_lib::objects::CommitData>>
 impl grit_lib::porcelain::log::CommitReuse for grit_lib::revwalk::log_walk::WalkedCommits
+pub fn grit_lib::revwalk::log_walk::WalkedCommits::cached_subject_line(&self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<alloc::string::String>>
 pub fn grit_lib::revwalk::log_walk::WalkedCommits::take_commit(&mut self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<grit_lib::objects::CommitData>>
 impl<T: grit_lib::porcelain::log::CommitReuse + ?core::marker::Sized> grit_lib::porcelain::log::CommitReuse for &mut T
+pub fn &mut T::cached_subject_line(&self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<alloc::string::String>>
 pub fn &mut T::take_commit(&mut self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<grit_lib::objects::CommitData>>
 pub fn grit_lib::porcelain::log::collect_decorations(&grit_lib::repo::Repository, bool) -> grit_lib::error::Result<grit_lib::porcelain::log::DecorationMap>
 pub fn grit_lib::porcelain::log::collect_decorations_for_commits(&grit_lib::repo::Repository, bool, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<grit_lib::porcelain::log::DecorationMap>
@@ -27198,6 +27202,7 @@ pub fn grit_lib::revwalk::log_walk::WalkedCommits::default() -> Self
 impl core::fmt::Debug for grit_lib::revwalk::log_walk::WalkedCommits
 pub fn grit_lib::revwalk::log_walk::WalkedCommits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::porcelain::log::CommitReuse for grit_lib::revwalk::log_walk::WalkedCommits
+pub fn grit_lib::revwalk::log_walk::WalkedCommits::cached_subject_line(&self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<alloc::string::String>>
 pub fn grit_lib::revwalk::log_walk::WalkedCommits::take_commit(&mut self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<grit_lib::objects::CommitData>>
 impl core::marker::Freeze for grit_lib::revwalk::log_walk::WalkedCommits
 impl core::marker::Send for grit_lib::revwalk::log_walk::WalkedCommits
@@ -30604,4 +30609,19 @@ impl core::marker::Unpin for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::marker::UnsafeUnpin for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::ref_storage::RefStorageFormat
+pub struct grit_lib::OidAbbrevBatch
+impl grit_lib::OidAbbrevBatch
+pub fn grit_lib::OidAbbrevBatch::abbrev_known(&mut self, &grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::error::Result<alloc::string::String>
+pub fn grit_lib::OidAbbrevBatch::new(usize) -> Self
+impl core::clone::Clone for grit_lib::OidAbbrevBatch
+pub fn grit_lib::OidAbbrevBatch::clone(&self) -> Self
+impl core::default::Default for grit_lib::OidAbbrevBatch
+pub fn grit_lib::OidAbbrevBatch::default() -> Self
+impl core::marker::Freeze for grit_lib::OidAbbrevBatch
+impl core::marker::Send for grit_lib::OidAbbrevBatch
+impl core::marker::Sync for grit_lib::OidAbbrevBatch
+impl core::marker::Unpin for grit_lib::OidAbbrevBatch
+impl core::marker::UnsafeUnpin for grit_lib::OidAbbrevBatch
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::OidAbbrevBatch
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::OidAbbrevBatch
 pub const grit_lib::PARALLEL_STAT_MIN_ENTRIES: usize

@@ -1049,6 +1049,18 @@ impl Odb {
         }
     }
 
+    /// Whether abbreviation must consult the full read chain (not only the primary pack index).
+    ///
+    /// True when [`OdbBuilder::push_read_source`] layers or alternate object directories
+    /// can hold additional objects beyond the primary `objects/` loose and pack stores.
+    #[must_use]
+    pub(crate) fn has_secondary_object_stores(&self) -> bool {
+        if !self.extra_read_sources.is_empty() {
+            return true;
+        }
+        self.alternates_enabled && self.alternate_object_lookup_needed()
+    }
+
     /// Whether any alternate object directory is configured for this database.
     #[must_use]
     fn alternate_object_lookup_needed(&self) -> bool {

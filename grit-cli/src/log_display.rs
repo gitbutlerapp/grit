@@ -3,11 +3,10 @@
 use std::io::Write;
 
 use anyhow::Result;
-use std::collections::HashMap;
-
 use grit_lib::object_inspect::abbreviate_for_display;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::OidAbbrevBatch;
 
 use crate::context::CommitSummary;
 use crate::output::{outln, CommitJson, CommitRefJson, CommitRefKind};
@@ -78,9 +77,9 @@ pub fn render_oneline_oid_subject(
     repo: &Repository,
     oid: ObjectId,
     subject: &str,
-    _prefix_cache: &mut HashMap<String, bool>,
+    abbrev_batch: &mut OidAbbrevBatch,
 ) -> Result<String> {
-    let abbrev = abbreviate_for_display(repo, oid, true)?;
+    let abbrev = abbrev_batch.abbrev_known(repo, oid)?;
     Ok(format!("{abbrev} {subject}"))
 }
 

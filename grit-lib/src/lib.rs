@@ -205,6 +205,7 @@ pub(crate) mod github_auth;
 pub(crate) mod grit_server_auth;
 pub(crate) mod line_interner;
 pub mod line_range;
+mod oid_abbrev;
 pub(crate) mod oid_abbrev_cache;
 pub(crate) mod pack_roll_delta;
 pub(crate) mod partial_clone;
@@ -380,6 +381,7 @@ pub mod fuzz;
 
 pub use ref_storage::RefStorageFormat;
 
+pub use crate::oid_abbrev::OidAbbrevBatch;
 pub use objects::bench_fixture;
 pub use objects::pack_reuse;
 pub use objects::pack_write;

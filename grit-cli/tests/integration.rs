@@ -448,7 +448,7 @@ mod rebase_cli;
 #[cfg(feature = "full-tests")]
 #[path = "rebase_conflicts_cli.rs"]
 mod rebase_conflicts_cli;
-#[cfg(unix)]
+#[cfg(feature = "full-tests")]
 #[path = "rebase_exec_interrupt.rs"]
 mod rebase_exec_interrupt;
 #[cfg(feature = "full-tests")]

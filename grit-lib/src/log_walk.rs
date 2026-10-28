@@ -174,6 +174,11 @@ impl CommitReuse for WalkedCommits {
         let span = self.spans.remove(oid)?;
         Some(parse_commit(self.payload(&span)))
     }
+
+    fn cached_subject_line(&self, oid: &ObjectId) -> Option<Result<String>> {
+        let span = self.spans.get(oid)?;
+        Some(crate::objects::read_commit_subject_line(self.payload(span)))
+    }
 }
 
 impl LogWalkCursor {

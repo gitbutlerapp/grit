@@ -6,25 +6,19 @@ use crate::commit_pretty::abbrev_hex;
 use crate::config::ConfigSet;
 use crate::error::Result;
 use crate::objects::ObjectId;
+use crate::oid_abbrev::OidAbbrevBatch;
 use crate::parallel::ThreadPolicy;
 use crate::repo::Repository;
-use crate::rev_parse::abbreviate_object_id_with_prefix_cache;
 
 /// Memoized unique abbreviations using [`Repository::odb`] prefix lookup (pack/MIDX/loose).
 #[derive(Clone)]
 pub(crate) struct OidAbbrevCache {
-    min_len: usize,
-    memo: HashMap<ObjectId, String>,
-    prefix_ambiguous: HashMap<String, bool>,
+    batch: OidAbbrevBatch,
 }
 
 impl Default for OidAbbrevCache {
     fn default() -> Self {
-        Self {
-            min_len: 7,
-            memo: HashMap::new(),
-            prefix_ambiguous: HashMap::new(),
-        }
+        Self::new(7)
     }
 }
 
@@ -32,25 +26,13 @@ impl OidAbbrevCache {
     #[must_use]
     pub(crate) fn new(min_len: usize) -> Self {
         Self {
-            min_len: min_len.clamp(4, 40),
-            memo: HashMap::new(),
-            prefix_ambiguous: HashMap::new(),
+            batch: OidAbbrevBatch::new(min_len),
         }
     }
 
     /// Unique abbreviated hex for `oid`, extending past `min_len` when required.
     pub(crate) fn abbrev(&mut self, repo: &Repository, oid: &ObjectId) -> Result<String> {
-        if let Some(hit) = self.memo.get(oid) {
-            return Ok(hit.clone());
-        }
-        let abbrev = abbreviate_object_id_with_prefix_cache(
-            repo,
-            *oid,
-            self.min_len,
-            &mut self.prefix_ambiguous,
-        )?;
-        self.memo.insert(*oid, abbrev.clone());
-        Ok(abbrev)
+        self.batch.abbrev_known(repo, *oid)
     }
 
     /// Precompute index-line abbreviations with batch-local and ODB disambiguation.
@@ -64,11 +46,11 @@ impl OidAbbrevCache {
     where
         I: IntoIterator<Item = ObjectId>,
     {
-        let min_len = self.min_len;
+        let min_len = self.batch.min_len();
         let mut unique: HashSet<ObjectId> = HashSet::new();
         for oid in oids {
             if oid.is_zero() {
-                self.memo.insert(oid, abbrev_hex(&oid, min_len));
+                self.batch.insert_memo(oid, abbrev_hex(&oid, min_len));
             } else {
                 unique.insert(oid);
             }
@@ -80,13 +62,8 @@ impl OidAbbrevCache {
         list.sort_by_key(ObjectId::to_hex);
         if list.len() <= 4 {
             for oid in list {
-                let abbrev = abbreviate_object_id_with_prefix_cache(
-                    repo,
-                    oid,
-                    min_len,
-                    &mut self.prefix_ambiguous,
-                )?;
-                self.memo.insert(oid, abbrev);
+                let abbrev = self.batch.abbrev_known(repo, oid)?;
+                self.batch.insert_memo(oid, abbrev);
             }
             return Ok(());
         }
@@ -117,9 +94,8 @@ impl OidAbbrevCache {
         }
 
         for (oid, len) in list.into_iter().zip(lens) {
-            let abbrev =
-                abbreviate_object_id_with_prefix_cache(repo, oid, len, &mut self.prefix_ambiguous)?;
-            self.memo.insert(oid, abbrev);
+            let abbrev = self.batch.abbrev_known_at(repo, oid, len)?;
+            self.batch.insert_memo(oid, abbrev);
         }
         Ok(())
     }
