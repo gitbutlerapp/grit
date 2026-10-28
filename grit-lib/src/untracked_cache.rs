@@ -1397,6 +1397,7 @@ fn visit_untracked_directory_uc(
     }
 
     if ignored_mode != UntrackedIgnoredMode::No
+        && !show_all
         && !rel.is_empty()
         && matcher.is_path_ignored(repo, Some(index), rel, true)?
     {
@@ -1816,6 +1817,7 @@ fn visit_untracked_directory_collect(
     }
 
     if ignored_mode != UntrackedIgnoredMode::No
+        && !show_all
         && !rel.is_empty()
         && matcher.is_path_ignored(repo, Some(index), rel, true)?
     {

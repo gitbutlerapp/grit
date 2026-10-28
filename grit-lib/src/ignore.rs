@@ -1084,14 +1084,18 @@ fn read_in_tree_pattern_file(path: &Path) -> Result<InTreePatternFile> {
             .open(path)
     };
     #[cfg(not(unix))]
-    let opened = fs::File::open(path);
+    let opened = match fs::symlink_metadata(path) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(InTreePatternFile::Missing);
+        }
+        Err(err) => return Err(Error::Io(err)),
+        Ok(meta) if meta.file_type().is_symlink() => return Ok(InTreePatternFile::Symlink),
+        Ok(_) => fs::File::open(path),
+    };
     let mut file = match opened {
         Ok(file) => file,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return Ok(InTreePatternFile::Missing);
-        }
-        Err(_) if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) => {
-            return Ok(InTreePatternFile::Symlink);
         }
         Err(err) => return Err(Error::Io(err)),
     };

@@ -1676,8 +1676,10 @@ fn visit_untracked_directory(
     }
 
     // An excluded directory cannot re-include descendants; report it once when listing ignored
-    // paths without enumerating every child (issue #2242).
+    // paths in normal mode without enumerating every child (issue #2242). With
+    // `--untracked-files=all`, Git lists individual ignored files instead.
     if ignored_mode != IgnoredMode::No
+        && !show_all
         && !rel.is_empty()
         && matcher.is_path_ignored(repo, Some(index), rel, true)?
     {
@@ -1694,7 +1696,6 @@ fn visit_untracked_directory(
             repo, index, work_tree, gitlinks, matcher, rel, abs, pathspecs, rules,
         )? {
             ignored_out.push(dir_line);
-            record_clean_unit_dir(clean_unit_dirs, rel);
             return Ok(());
         }
     }
@@ -1755,7 +1756,6 @@ fn visit_untracked_directory(
         if found.get() {
             if !rel.is_empty() {
                 untracked_out.push(format!("{rel}/"));
-                record_clean_unit_dir(clean_unit_dirs, rel);
             }
             return Ok(());
         }
@@ -1813,9 +1813,6 @@ fn visit_untracked_directory(
             && directory_pathspec_matches_self(rel, pathspecs);
         if collapse_matching || collapse_traditional {
             ignored_out.push(format!("{rel}/"));
-            if dir_excluded {
-                record_clean_unit_dir(clean_unit_dirs, rel);
-            }
         } else {
             ignored_out.append(&mut sub_ignored);
         }
@@ -1827,7 +1824,6 @@ fn visit_untracked_directory(
             untracked_out.append(&mut sub_untracked);
         } else {
             untracked_out.push(format!("{rel}/"));
-            record_clean_unit_dir(clean_unit_dirs, rel);
         }
         return Ok(());
     }
