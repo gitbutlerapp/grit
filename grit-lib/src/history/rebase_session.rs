@@ -294,10 +294,12 @@ pub fn start_rebase(
 ///
 /// The commands run through [`verify_rebase_with_exec`](super::verify_rebase_with_exec); when
 /// they all succeed, the (possibly amended) plan is applied atomically and the pre-rebase tip
-/// `opts.request.branch_tip` is recorded as `ORIG_HEAD`. A branch that is already up to date
-/// returns [`RebaseOutcome::Done`] with no `head_change`, runs nothing, and leaves `ORIG_HEAD`
-/// untouched. Unlike [`start_rebase`], a replay conflict before any command runs is reported
-/// as an error and nothing changes.
+/// `opts.request.branch_tip` is recorded as `ORIG_HEAD`. When there is nothing to replay and
+/// no `--exec` commands, returns [`RebaseOutcome::Done`] with no `head_change` and leaves
+/// `ORIG_HEAD` untouched. With `--exec`, commits in the rebase range still run the commands
+/// even when the branch is already based on the upstream (matching `git rebase -x`). Unlike
+/// [`start_rebase`], a replay conflict before any command runs is reported as an error and
+/// nothing changes.
 ///
 /// # Errors
 ///
@@ -325,7 +327,30 @@ pub fn start_rebase_with_exec(
         &opts.rebase,
         &opts.pre_rebase,
     )? {
-        RebasePlan::UpToDate => return Ok(up_to_date_outcome(orig_head)),
+        RebasePlan::UpToDate => {
+            if spec.commands.is_empty() {
+                return Ok(up_to_date_outcome(orig_head));
+            }
+            let fork =
+                super::rebase::rebase_fork(repo, opts.request.upstream, opts.request.branch_tip)?;
+            let effective_onto = opts.request.onto.unwrap_or(opts.request.upstream);
+            if opts.request.branch_tip == effective_onto {
+                return Ok(up_to_date_outcome(orig_head));
+            }
+            let range =
+                super::rebase::commits_in_rebase_range(repo, fork, &[opts.request.branch_tip])?;
+            if range.is_empty() {
+                return Ok(up_to_date_outcome(orig_head));
+            }
+            opts.pre_rebase.run(repo)?;
+            super::rebase::plan_rebase_identity_exec(
+                repo,
+                fork,
+                effective_onto,
+                &range,
+                &opts.rebase,
+            )?
+        }
         RebasePlan::Conflict {
             commit,
             subject,

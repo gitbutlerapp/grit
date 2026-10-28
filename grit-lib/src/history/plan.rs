@@ -421,10 +421,18 @@ fn plan_rewrite_with_order_impl(
 
         if let Some(CommitEdit::Reuse { existing, parent }) = edit {
             // Descendants and refs continue from the replay chain, while the row still names
-            // the upstream commit.
-            let continuation =
-                linear_tip.unwrap_or_else(|| mapping.get(parent).copied().unwrap_or(*parent));
-            mapping.insert(old_oid, continuation);
+            // the upstream commit. When the reused commit is the source itself, keep that OID
+            // in the mapping so refs and `HEAD` stay put (identity `--exec` replay).
+            if *existing == old_oid {
+                mapping.insert(old_oid, *existing);
+                if linear_tip.is_some() {
+                    linear_tip = Some(*existing);
+                }
+            } else {
+                let continuation =
+                    linear_tip.unwrap_or_else(|| mapping.get(parent).copied().unwrap_or(*parent));
+                mapping.insert(old_oid, continuation);
+            }
             rewritten.push(RewrittenCommit {
                 old: old_oid,
                 new: Some(*existing),
