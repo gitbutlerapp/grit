@@ -21,6 +21,31 @@ pub fn validate_storable_refname(name: &str) -> Result<(), RefStoreError> {
     })
 }
 
+/// Reject a symbolic ref value before any lock or target lookup.
+///
+/// The target must be safe to store (same rules as an update name). `HEAD` may only point
+/// under `refs/`. A ref may not symbolically point at itself.
+///
+/// # Errors
+///
+/// Returns [`RefStoreError::InvalidSymrefTarget`] naming the ref and target.
+pub fn validate_symref_target(name: &str, target: &str) -> Result<(), RefStoreError> {
+    let err = || RefStoreError::InvalidSymrefTarget {
+        name: name.to_owned(),
+        target: target.to_owned(),
+    };
+    if crate::refs::ensure_refname_safe_for_storage(target).is_err() {
+        return Err(err());
+    }
+    if name == "HEAD" && !target.starts_with("refs/") {
+        return Err(err());
+    }
+    if target == name {
+        return Err(err());
+    }
+    Ok(())
+}
+
 /// Reject reflog message bytes that would split a physical log line.
 pub fn validate_reflog_message(message: &str) -> Result<(), RefStoreError> {
     if message.bytes().any(|b| b == b'\n' || b == b'\r') {

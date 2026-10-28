@@ -44,6 +44,16 @@ fn commit_one(store: &dyn RefStore, update: RefUpdate) -> Result<(), RefStoreErr
         .commit()
 }
 
+fn symref(name: &str, target: &str) -> RefUpdate {
+    RefUpdate {
+        name: name.to_owned(),
+        new_value: Some(RawRef::Symbolic(target.to_owned())),
+        expected: Expected::Any,
+        reflog: None,
+        flags: RefUpdateFlags::default(),
+    }
+}
+
 fn head_tree(repo: &TestRepo) -> ObjectId {
     git(repo.worktree(), &["rev-parse", "HEAD^{tree}"])
         .trim()
@@ -235,6 +245,31 @@ fn skip_oid_verification_writes_the_dangling_ref_git_fsck_reports() {
             !git_ok(repo.worktree(), &["fsck", "--no-progress"]),
             "{backend:?}: git fsck must flag the dangling ref"
         );
+    });
+}
+
+#[test]
+fn issue_2258_invalid_symref_targets_leave_git_status_and_fsck_clean() {
+    each_backend(|backend, repo| {
+        empty_commit_oid(repo);
+        if !git_interop_available(backend) {
+            return;
+        }
+        let grit = open(repo);
+        for (name, target) in [
+            ("HEAD", "foo"),
+            ("refs/heads/sym1", "foo"),
+            ("refs/heads/loop", "refs/heads/loop"),
+            ("HEAD", "refs/heads/a..b"),
+        ] {
+            assert!(
+                commit_one(grit.refs(), symref(name, target)).is_err(),
+                "{backend:?} {name} -> {target}"
+            );
+        }
+        assert!(git_ok(repo.worktree(), &["status", "--porcelain"]));
+        assert!(git_ok(repo.worktree(), &["fsck", "--no-progress"]));
+        assert_fsck_when_git_interop(repo);
     });
 }
 

@@ -2577,6 +2577,7 @@ fn ref_store_error_refname(err: &Error) -> Option<String> {
         | crate::refs::store::RefStoreError::DuplicateUpdate { name }
         | crate::refs::store::RefStoreError::LockHeld { name }
         | crate::refs::store::RefStoreError::InvalidRefName { name }
+        | crate::refs::store::RefStoreError::InvalidSymrefTarget { name, .. }
         | crate::refs::store::RefStoreError::NullOid { name }
         | crate::refs::store::RefStoreError::MissingObject { name, .. }
         | crate::refs::store::RefStoreError::NotACommit { name, .. }
