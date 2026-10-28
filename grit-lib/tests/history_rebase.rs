@@ -1605,6 +1605,95 @@ fn rebase_skipping_duplicate_after_merge_keeps_stacked_refs_and_tree_like_git() 
     assert_git_fsck_strict(git_wt.path());
 }
 
+#[test]
+fn rebase_merge_side_branch_keeps_side_parentage_like_git_rebase_merges() {
+    let grit_repo = HistoryRepo::init();
+    let git_repo = HistoryRepo::init();
+    let wt_g = grit_repo.worktree();
+    let wt_git = git_repo.worktree();
+    git(wt_g, &["config", "grit.changeIds", "false"]);
+    git(wt_git, &["config", "grit.changeIds", "false"]);
+    commit_file(wt_g, "base.txt", "base\n", "base");
+    commit_file(wt_git, "base.txt", "base\n", "base");
+    for wt in [wt_g, wt_git] {
+        git(wt, &["switch", "-qc", "side"]);
+        commit_file(wt, "side.txt", "s\n", "side: a");
+        commit_file(wt, "side.txt", "s\ns2\n", "side: b");
+        git(wt, &["switch", "-qc", "feat", "main"]);
+        commit_file(wt, "shared.txt", "mine\n", "feat: a (shared)");
+        commit_file(wt, "c.txt", "c\n", "feat: c");
+        git(wt, &["merge", "-q", "--no-ff", "-m", "Merge side", "side"]);
+        commit_file(wt, "feat.txt", "f2\n", "feat: b");
+        git(wt, &["switch", "-q", "main"]);
+        commit_file(wt, "other.txt", "o\n", "main: other");
+        git(wt, &["switch", "-q", "feat"]);
+    }
+    let fork = git_rev_parse(wt_g, "main~1");
+    let onto = git_rev_parse(wt_g, "main");
+    let tip = git_rev_parse(wt_g, "feat");
+    let fork_git = git_rev_parse(wt_git, "main~1");
+    let onto_git = git_rev_parse(wt_git, "main");
+
+    let grit = open_grit(wt_g);
+    let mut opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, false);
+    opts.skip_applied = false;
+    plan_apply(&grit, rebase_request(fork, Some(onto), tip), &opts);
+
+    let rebase = std::process::Command::new("git")
+        .current_dir(wt_git)
+        .args([
+            "rebase",
+            "--rebase-merges",
+            "--onto",
+            &onto_git.to_hex(),
+            &fork_git.to_hex(),
+            "feat",
+        ])
+        .env("GIT_AUTHOR_NAME", "Refs Harness Author")
+        .env("GIT_AUTHOR_EMAIL", "refs-harness@example.com")
+        .env("GIT_COMMITTER_NAME", "Refs Harness Author")
+        .env("GIT_COMMITTER_EMAIL", "refs-harness@example.com")
+        .env("GIT_COMMITTER_DATE", "1700001000 +0000")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git rebase");
+    assert!(rebase.success(), "git rebase --rebase-merges failed");
+
+    let git_tip = git_rev_parse(wt_git, "feat");
+    let grit_merge_oid = git_rev_parse(wt_g, "feat~1");
+    let git_merge_oid = git_rev_parse(wt_git, "feat~1");
+    let grit_merge =
+        parse_commit(&grit.odb().read(&grit_merge_oid).expect("read").data).expect("parse");
+    let git_merge = parse_commit(
+        &open_grit(wt_git)
+            .odb()
+            .read(&git_merge_oid)
+            .expect("read")
+            .data,
+    )
+    .expect("parse");
+    assert_eq!(grit_merge.parents.len(), 2);
+    assert_eq!(grit_merge.parents.len(), git_merge.parents.len());
+    assert_eq!(grit_merge.tree, git_merge.tree);
+    let grit_tree = git(wt_g, &["ls-tree", "-r", "--name-only", "feat"]);
+    let grit_files: Vec<_> = grit_tree
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    assert!(
+        grit_files.contains(&"side.txt"),
+        "merged side content kept: {grit_files:?}"
+    );
+    assert!(
+        !git_merge_base_is_ancestor(wt_g, "feat", "side"),
+        "side ref must not absorb feat commits"
+    );
+    assert_git_fsck_strict(wt_g);
+    assert_git_fsck_strict(wt_git);
+}
+
 /// The fixture from issue #2182: `feature` (X, Y) with `mid` at X and `backup` at Y, while
 /// `main` gained M. `feature` is checked out.
 fn init_backup_fixture(wt: &std::path::Path) {

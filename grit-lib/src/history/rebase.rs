@@ -88,7 +88,10 @@ pub struct RebaseOntoOptions {
     /// commit is replayed on top of the previous one, starting at the onto commit, in
     /// topological order. A branch that merged its upstream, or merged a local topic, keeps all
     /// of its own commits and ends on top of the onto commit. All tips are chained into that one
-    /// line, so pass a single tip. When `false`, merges are replayed as merges.
+    /// line, so pass a single tip. When `false`, merges are replayed as merges (like
+    /// `git rebase --rebase-merges`): only the first-parent chain from each tip to the fork
+    /// is reparented onto `onto`; commits on merged side branches keep their original parent
+    /// until mapping moves it.
     pub flatten_leaf_merges: bool,
     /// Auto-resolve replay conflicts the same way as `git rebase -X ours|theirs`.
     ///
@@ -426,7 +429,7 @@ pub(crate) fn build_rebase_rewrite_inputs(
     let edits = if opts.flatten_leaf_merges {
         linear_rebase_edits(repo, onto, &range, &skip_map, &opts.drop)?
     } else {
-        merge_preserving_rebase_edits(repo, fork, onto, &range, &skip_map)?
+        merge_preserving_rebase_edits(repo, fork, onto, tips, &range, &skip_map)?
     };
 
     let replay_order = extend_rebase_replay_order(repo, fork, &range, &opts.rewrite, &skip_map)?;
@@ -470,8 +473,9 @@ fn linear_rebase_edits(
     Ok(edits)
 }
 
-/// Edits that replay `range` onto `onto` keeping its shape: local roots move onto `onto` (or
-/// onto the replayed mainline of the merge that brings them in) and merges are replayed.
+/// Edits that replay `range` onto `onto` keeping its shape: only the first-parent chain from
+/// each tip back to `fork` is reparented onto `onto`; side branches merged in keep their
+/// original parent until mapping moves it, and merge commits are replayed with two parents.
 ///
 /// A commit whose patch is already in `fork..onto` is skipped: what follows it continues from
 /// where the commit itself would have been replayed onto, never from the upstream equivalent.
@@ -479,18 +483,20 @@ fn merge_preserving_rebase_edits(
     repo: &Repository,
     fork: ObjectId,
     onto: ObjectId,
+    tips: &[ObjectId],
     range: &[ObjectId],
     skip_map: &HashMap<ObjectId, ObjectId>,
 ) -> Result<HistoryEdits, HistoryError> {
     let range_set: HashSet<ObjectId> = range.iter().copied().collect();
+    let mainline = mainline_commits_in_range(repo, fork, tips, &range_set)?;
     let mut edits = HistoryEdits::new();
     for &commit in range {
         let parents = commit_parents(repo, commit)?;
         let is_local_root = parents
             .iter()
             .all(|parent| *parent == fork || !range_set.contains(parent));
-        let reparent_onto = if is_local_root {
-            Some(mainline_anchor_for_parallel_root(repo, commit, &range_set)?.unwrap_or(onto))
+        let reparent_onto = if is_local_root && mainline.contains(&commit) {
+            Some(onto)
         } else {
             None
         };
@@ -504,6 +510,25 @@ fn merge_preserving_rebase_edits(
         }
     }
     Ok(edits)
+}
+
+/// First-parent commits from each rebase tip back to `fork` (exclusive).
+fn mainline_commits_in_range(
+    repo: &Repository,
+    fork: ObjectId,
+    tips: &[ObjectId],
+    range_set: &HashSet<ObjectId>,
+) -> Result<HashSet<ObjectId>, HistoryError> {
+    let mut mainline = HashSet::new();
+    for &tip in tips {
+        let mut current = tip;
+        while current != fork && range_set.contains(&current) {
+            mainline.insert(current);
+            let parents = commit_parents(repo, current)?;
+            current = parents.first().copied().unwrap_or(fork);
+        }
+    }
+    Ok(mainline)
 }
 
 fn rebase_onto_impl(
@@ -659,22 +684,6 @@ fn descends_from_rewritten_range(
     range_set
         .iter()
         .any(|&range_commit| is_ancestor(repo, range_commit, commit).unwrap_or(false))
-}
-
-/// When `commit` is the tip of a side branch merged into the range, return the first parent
-/// of that merge on the mainline so the side replay chains onto the replayed mainline commit.
-fn mainline_anchor_for_parallel_root(
-    repo: &Repository,
-    commit: ObjectId,
-    range_set: &HashSet<ObjectId>,
-) -> Result<Option<ObjectId>, HistoryError> {
-    for &merge_oid in range_set {
-        let parents = commit_parents(repo, merge_oid)?;
-        if parents.len() >= 2 && parents[1] == commit {
-            return Ok(Some(parents[0]));
-        }
-    }
-    Ok(None)
 }
 
 fn commits_in_rebase_range(
