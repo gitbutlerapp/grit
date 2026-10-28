@@ -3988,30 +3988,9 @@ fn copy_detect_attribute_pending(
                     }
                     continue;
                 }
-                let mut best: Option<(
-                    ContiguousCopyMatch,
-                    String,
-                    Arc<BlobLines>,
-                    Vec<BlameLine>,
-                )> = None;
+                let mut best: Option<(ContiguousCopyMatch, String, ObjectId, u32)> = None;
                 for (path, oid, mode) in &candidates {
-                    let (source_lines, source_blame) = load_copy_source_blame(
-                        odb,
-                        parent_oid,
-                        path,
-                        *oid,
-                        *mode,
-                        ignore_revs,
-                        diff_algorithm,
-                        textconv_ctx,
-                        use_textconv,
-                        copy_depth.saturating_sub(1),
-                        first_parent_only,
-                        grafts,
-                        indent_heuristic,
-                        session,
-                        &mut source_cache,
-                    )?;
+                    let source_lines = session.load_blob_lines(*oid, path, *mode)?;
                     let src_refs = source_lines.comparison_refs(ws);
                     let Some(m) = find_best_contiguous_copy_match(sub, &src_refs, ws) else {
                         continue;
@@ -4020,10 +3999,10 @@ fn copy_detect_attribute_pending(
                         m.score > b.score || (m.score == b.score && m.len > b.len)
                     });
                     if replace {
-                        best = Some((m, path.clone(), Arc::clone(&source_lines), source_blame));
+                        best = Some((m, path.clone(), *oid, *mode));
                     }
                 }
-                let Some((m, source_path, _source_lines, source_blame)) = best else {
+                let Some((m, source_path, source_oid, source_mode)) = best else {
                     for t in &group_lines {
                         let rel = t.current_idx - start_idx;
                         if rel >= off && rel < off + len {
@@ -4041,6 +4020,23 @@ fn copy_detect_attribute_pending(
                     }
                     continue;
                 }
+                let (_source_lines, source_blame) = load_copy_source_blame(
+                    odb,
+                    parent_oid,
+                    &source_path,
+                    source_oid,
+                    source_mode,
+                    ignore_revs,
+                    diff_algorithm,
+                    textconv_ctx,
+                    use_textconv,
+                    copy_depth.saturating_sub(1),
+                    first_parent_only,
+                    grafts,
+                    indent_heuristic,
+                    session,
+                    &mut source_cache,
+                )?;
                 made_progress = true;
                 if m.suspect_start > 0 {
                     subranges.push((off, m.suspect_start));

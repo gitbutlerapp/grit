@@ -111,8 +111,8 @@ fn git_copy_args(level: CopyDetection) -> Vec<&'static str> {
     match level {
         CopyDetection::Off => Vec::new(),
         CopyDetection::FromModifiedFiles => vec!["-C"],
-        CopyDetection::FromCreatingCommit => vec!["-C", "-C1"],
-        CopyDetection::FromAnyCommit => vec!["-C", "-C", "-C1"],
+        CopyDetection::FromCreatingCommit => vec!["-C", "-C"],
+        CopyDetection::FromAnyCommit => vec!["-C", "-C", "-C"],
     }
 }
 

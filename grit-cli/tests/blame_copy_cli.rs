@@ -65,7 +65,7 @@ fn copy_detection_twice_reports_original_path_in_json() {
     let mut git_cmd = Command::new("git");
     git_cmd
         .current_dir(dir.path())
-        .args(["blame", "--porcelain", "-C", "-C1", "--", "uno"]);
+        .args(["blame", "--porcelain", "-C", "-C", "--", "uno"]);
     git_env(&mut git_cmd);
     let git_out = git_cmd.output().unwrap();
     assert!(git_out.status.success());
