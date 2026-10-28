@@ -295,6 +295,20 @@ fn diff_driver_binary_config(config: &ConfigSet, driver: &str) -> bool {
         .is_some_and(|v| parse_bool(v.as_str()).unwrap_or(false))
 }
 
+/// True when a path's `diff=<driver>` attribute pairs with an explicit `diff.<driver>.binary=false`.
+///
+/// Git resolves the driver before the big-file shortcut and keeps such paths textual even above
+/// `core.bigFileThreshold`.
+#[must_use]
+pub fn diff_driver_forces_text(git_dir: &Path, config: &ConfigSet, path: &str) -> bool {
+    let fa = attrs_for_repo_path(git_dir, path);
+    let DiffAttr::Driver(driver) = fa.diff_attr else {
+        return false;
+    };
+    let key = format!("diff.{driver}.binary");
+    config.get(&key).and_then(|v| parse_bool(v.as_str()).ok()) == Some(false)
+}
+
 /// Force `Binary files ... differ` when the path's diff driver sets `binary`, except for symlinks.
 ///
 /// Matches Git's `diff_filespec_is_binary` driver flag: `diff.<name>.binary` applies to paths

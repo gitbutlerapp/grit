@@ -3,7 +3,7 @@
 use crate::config::ConfigSet;
 use crate::diff_rename_parallel::parallel_map_indices;
 use crate::error::{Error, Result};
-use crate::merge_diff::{diff_attr_forces_text, diff_textconv_active};
+use crate::merge_diff::{diff_attr_forces_text, diff_driver_forces_text, diff_textconv_active};
 use crate::objects::pack_store::PackReadContextGuard;
 use crate::objects::FileMode;
 use crate::objects::ObjectId;
@@ -353,13 +353,16 @@ pub(crate) fn gitlink_line(oid: &ObjectId) -> String {
     format!("Subproject commit {}\n", oid.to_hex())
 }
 
-fn git_dir_for_odb(odb: &Odb) -> Option<&Path> {
-    odb.objects_dir().parent()
+fn git_dir_for_diff(odb: &Odb) -> Option<&Path> {
+    odb.config_git_dir().or_else(|| odb.objects_dir().parent())
 }
 
 /// True when a path's attributes or textconv require reading a blob above
 /// [`Odb::big_file_threshold`](crate::objects::odb::Odb::big_file_threshold).
-fn diff_side_must_read_large_blob(path: &str, git_dir: &Path) -> Result<bool> {
+fn diff_side_must_read_large_blob(odb: &Odb, path: &str) -> Result<bool> {
+    let Some(git_dir) = git_dir_for_diff(odb) else {
+        return Ok(false);
+    };
     if diff_attr_forces_text(git_dir, path) {
         return Ok(true);
     }
@@ -367,9 +370,11 @@ fn diff_side_must_read_large_blob(path: &str, git_dir: &Path) -> Result<bool> {
         &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
-    )
-    .unwrap_or_default();
-    Ok(diff_textconv_active(git_dir, &config, path))
+    )?;
+    if diff_textconv_active(git_dir, &config, path) {
+        return Ok(true);
+    }
+    Ok(diff_driver_forces_text(git_dir, &config, path))
 }
 
 /// Whether a blob/worktree side at `size` bytes should be treated as binary without reading
@@ -388,10 +393,8 @@ pub(crate) fn treat_side_as_binary_without_reading(
         return Ok(false);
     }
     if let Some(path) = path {
-        if let Some(git_dir) = git_dir_for_odb(odb) {
-            if diff_side_must_read_large_blob(path, git_dir)? {
-                return Ok(false);
-            }
+        if diff_side_must_read_large_blob(odb, path)? {
+            return Ok(false);
         }
     }
     Ok(true)
@@ -572,6 +575,58 @@ mod tests {
             opts.threads,
             policy.resolve(ParallelOp::DiffContent, &config).threads
         );
+    }
+
+    #[test]
+    fn big_file_threshold_honors_diff_driver_binary_false() -> Result<()> {
+        let (dir, repo) = init_repo_with_core_config(
+            "[core]\n\tbigFileThreshold = 4k\n\n[diff \"foo\"]\n\tbinary = false\n",
+        );
+        std::fs::write(dir.path().join(".gitattributes"), "*.bin diff=foo\n")?;
+        let odb = repo.odb();
+        let mut old_body = vec![b'a'; 100];
+        old_body.extend(std::iter::repeat_n(b'x', 4900));
+        assert_eq!(old_body.len(), 5000);
+        let mut new_body = old_body.clone();
+        new_body[0] = b'b';
+        let old_oid = odb.write(ObjectKind::Blob, &old_body)?;
+        let new_oid = odb.write(ObjectKind::Blob, &new_body)?;
+        let tree_old = odb.write(
+            ObjectKind::Tree,
+            &serialize_tree(&[TreeEntry {
+                mode: 0o100644,
+                name: b"a.bin".to_vec(),
+                oid: old_oid,
+            }]),
+        )?;
+        let tree_new = odb.write(
+            ObjectKind::Tree,
+            &serialize_tree(&[TreeEntry {
+                mode: 0o100644,
+                name: b"a.bin".to_vec(),
+                oid: new_oid,
+            }]),
+        )?;
+        let entries = diff_trees(odb, Some(&tree_old), Some(&tree_new), "")?;
+        assert_eq!(entries.len(), 1);
+        let metrics = odb.hot_path_metrics();
+        metrics.set_blob_counting(true);
+        metrics.reset_blob_content_reads();
+        let structured = tree_diff_structured_entry(odb, &entries[0], &DiffOptions::default())?;
+        metrics.set_blob_counting(false);
+        assert!(
+            !structured.binary,
+            "diff.foo.binary=false must force a textual diff"
+        );
+        assert!(
+            !structured.structured.hunks.is_empty(),
+            "expected unified hunks, not binary short-circuit"
+        );
+        assert!(
+            metrics.blob_content_reads() >= 2,
+            "both sides must be read for a line diff"
+        );
+        Ok(())
     }
 
     #[test]
