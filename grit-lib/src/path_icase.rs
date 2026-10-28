@@ -188,7 +188,7 @@ impl Stage0IcasePathMap {
 /// Stage-0 directory prefix spellings for ignorecase staging (first index order wins).
 #[derive(Debug, Default)]
 pub(crate) struct Stage0IcaseDirSpellingMap {
-    by_fold: HashMap<u32, Vec<u8>>,
+    by_fold: HashMap<u32, Vec<Vec<u8>>>,
 }
 
 impl Stage0IcaseDirSpellingMap {
@@ -204,13 +204,25 @@ impl Stage0IcaseDirSpellingMap {
             while let Some(slash) = path[end..].iter().position(|&b| b == b'/') {
                 end += slash;
                 let prefix = &path[..end];
-                by_fold
-                    .entry(memihash(prefix))
-                    .or_insert_with(|| prefix.to_vec());
+                let bucket = by_fold.entry(memihash(prefix)).or_default();
+                if !bucket
+                    .iter()
+                    .any(|existing| existing.eq_ignore_ascii_case(prefix))
+                {
+                    bucket.push(prefix.to_vec());
+                }
                 end += 1;
             }
         }
         Self { by_fold }
+    }
+
+    fn canonical_dir_prefix<'a>(&'a self, prefix: &str) -> Option<&'a [u8]> {
+        self.by_fold
+            .get(&memihash(prefix.as_bytes()))?
+            .iter()
+            .find(|candidate| candidate.eq_ignore_ascii_case(prefix.as_bytes()))
+            .map(|p| p.as_slice())
     }
 
     /// Fold directory prefixes of `rel_path` to spellings already in the index.
@@ -230,7 +242,7 @@ impl Stage0IcaseDirSpellingMap {
             }
             prefix.push_str(comp);
             if i + 1 < parts.len() {
-                if let Some(canonical) = self.by_fold.get(&memihash(prefix.as_bytes())) {
+                if let Some(canonical) = self.canonical_dir_prefix(&prefix) {
                     prefix = String::from_utf8_lossy(canonical).into_owned();
                 }
             }
@@ -240,18 +252,25 @@ impl Stage0IcaseDirSpellingMap {
 }
 
 /// True when the work tree volume folds ASCII path case (APFS, NTFS, …).
+///
+/// Uses a uniquely named probe file under `work_tree` and never deletes paths it did not create.
 #[must_use]
 pub(crate) fn worktree_filesystem_case_insensitive(work_tree: &Path) -> bool {
-    let upper = work_tree.join(".grit_icase_probe");
-    let lower = work_tree.join(".grit_icase_probe");
-    let _ = std::fs::remove_dir_all(&upper);
-    let _ = std::fs::remove_dir_all(&lower);
-    if std::fs::create_dir(&upper).is_err() {
-        return false;
+    for attempt in 0..128_u32 {
+        let name = format!(".grit-icase-fs-probe-{attempt:05}");
+        let lower = work_tree.join(&name);
+        if lower.exists() {
+            continue;
+        }
+        if std::fs::write(&lower, b"").is_err() {
+            return false;
+        }
+        let upper_name: String = name.chars().map(|c| c.to_ascii_uppercase()).collect();
+        let folds = work_tree.join(upper_name).exists();
+        let _ = std::fs::remove_file(&lower);
+        return folds;
     }
-    let folds = lower.exists();
-    let _ = std::fs::remove_dir_all(&upper);
-    !folds
+    false
 }
 
 /// Path to use when staging an untracked or new file under `core.ignorecase`.
@@ -859,6 +878,31 @@ mod tests {
         assert_eq!(
             fold_untracked_staging_path(&dir_map, &icase_map, &index, "README.txt"),
             "readme.txt"
+        );
+    }
+
+    #[test]
+    fn dir_spelling_map_does_not_fold_across_memihash_collisions() {
+        assert_eq!(memihash(b"f02398b.txt"), memihash(b"f0688b8.txt"));
+        let mut index = Index::default();
+        index.add_or_replace(dummy_entry("f02398b.txt/x"));
+        let dir_map = Stage0IcaseDirSpellingMap::from_index(&index, true);
+        assert_eq!(
+            dir_map.fold_directory_prefixes("f0688b8.txt/y"),
+            "f0688b8.txt/y"
+        );
+    }
+
+    #[test]
+    fn filesystem_case_probe_does_not_remove_preexisting_paths() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        let user_dir = wt.join(".grit_icase_probe");
+        std::fs::create_dir_all(user_dir.join("sentinel")).expect("user dir");
+        let _ = worktree_filesystem_case_insensitive(wt);
+        assert!(
+            user_dir.join("sentinel").is_dir(),
+            "probe must not delete an existing .grit_icase_probe tree"
         );
     }
 

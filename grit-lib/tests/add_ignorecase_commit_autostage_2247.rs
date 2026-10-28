@@ -6,7 +6,7 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;
-use grit_lib::porcelain::add::stage_for_commit;
+use grit_lib::porcelain::add::{stage, stage_for_commit, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
@@ -33,11 +33,21 @@ fn index_paths(root: &Path) -> Vec<String> {
 }
 
 fn is_case_insensitive(dir: &Path) -> bool {
-    let probe = dir.join(".grit_icase_probe");
-    std::fs::write(&probe, b"").expect("write probe");
-    let folded = dir.join(".GRIT_ICASE_PROBE").exists();
-    std::fs::remove_file(&probe).expect("remove probe");
-    folded
+    for attempt in 0..128_u32 {
+        let name = format!(".grit-icase-test-probe-{attempt:05}");
+        let lower = dir.join(&name);
+        if lower.exists() {
+            continue;
+        }
+        if std::fs::write(&lower, b"").is_err() {
+            return false;
+        }
+        let upper: String = name.chars().map(|c| c.to_ascii_uppercase()).collect();
+        let folded = dir.join(upper).exists();
+        let _ = std::fs::remove_file(&lower);
+        return folded;
+    }
+    false
 }
 
 /// Repro A on Linux: both `Src/` and `src/` exist; unrelated commit must not rewrite either.
@@ -94,6 +104,87 @@ fn ignorecase_unrelated_commit_preserves_dual_case_dirs_on_sensitive_volume() {
     assert!(tree_paths.contains(&"Src/a.txt"));
     assert!(tree_paths.contains(&"src/b.txt"));
     assert!(tree_paths.contains(&"unrelated.txt"));
+}
+
+/// `memihash` directory collision must not fold unrelated paths (reviewer repro).
+#[test]
+fn ignorecase_add_stages_hash_collision_dirs_independently() {
+    if is_case_insensitive(std::env::temp_dir().as_path()) {
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "core.ignorecase", "true"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "T"]);
+
+    fs::create_dir_all(root.join("f02398b.txt")).expect("dir1");
+    fs::write(root.join("f02398b.txt/x"), "one\n").expect("x");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "init"]);
+
+    fs::create_dir_all(root.join("f0688b8.txt")).expect("dir2");
+    fs::write(root.join("f0688b8.txt/y"), "two\n").expect("y");
+
+    let repo = open(root);
+    stage(
+        &repo,
+        &StageOptions {
+            mode: StageMode::All,
+            ..StageOptions::default()
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("stage must not ENOENT on hash-collision directory names");
+
+    let mut paths = index_paths(root);
+    paths.sort();
+    assert_eq!(
+        paths,
+        vec!["f02398b.txt/x".to_owned(), "f0688b8.txt/y".to_owned()]
+    );
+}
+
+/// Case-sensitive volume: new `dir/g.txt` folds to indexed `Dir/` without ENOENT (issue #2247).
+#[test]
+fn ignorecase_add_folds_new_file_under_index_dir_on_sensitive_volume() {
+    if is_case_insensitive(std::env::temp_dir().as_path()) {
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "core.ignorecase", "true"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "T"]);
+
+    fs::create_dir_all(root.join("Dir")).expect("Dir");
+    fs::write(root.join("Dir/f.txt"), "b\n").expect("f");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "init"]);
+
+    fs::rename(root.join("Dir"), root.join("dir")).expect("rename dir");
+    fs::write(root.join("dir/g.txt"), "g\n").expect("g");
+
+    let repo = open(root);
+    stage(
+        &repo,
+        &StageOptions {
+            mode: StageMode::All,
+            ..StageOptions::default()
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("stage");
+
+    let paths = index_paths(root);
+    assert!(
+        paths.iter().any(|p| p == "Dir/g.txt"),
+        "new file must stage under indexed directory spelling, got {paths:?}"
+    );
 }
 
 /// Repro B on a case-folding volume: new files use index directory spelling; leaf aliases update in place.

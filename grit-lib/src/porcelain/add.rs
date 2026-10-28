@@ -1358,27 +1358,30 @@ fn stage_untracked_paths_parallel(
     loop {
         inputs.clear();
         while inputs.len() < UNTRACKED_STAGE_CHUNK {
-            let Some(path) = paths.next() else {
+            let Some(disk_path) = paths.next() else {
                 break;
             };
-            let path = fold_untracked_staging_path(icase_dir_map, icase_map, index, &path);
-            if !matches(&path) || indexed_any_stage.contains(storage_bytes(&path).as_ref()) {
+            let index_path =
+                fold_untracked_staging_path(icase_dir_map, icase_map, index, &disk_path);
+            if !matches(&index_path)
+                || indexed_any_stage.contains(storage_bytes(&index_path).as_ref())
+            {
                 continue;
             }
-            let resolved = resolve_worktree_path_for_staging(work_tree, &path, precompose_unicode);
+            let resolved =
+                resolve_worktree_path_for_staging(work_tree, &disk_path, precompose_unicode);
             let meta = fs::symlink_metadata(&resolved.abs).map_err(Error::Io)?;
             if crate::read_dir_kind::metadata_is_git_ignored_special(&meta) {
                 continue;
             }
-            if is_unregistered_embedded_git_repo(index, &resolved.index_relpath, &resolved.abs) {
-                deferred.push(resolved.index_relpath.trim_end_matches('/').to_owned());
+            if is_unregistered_embedded_git_repo(index, &index_path, &resolved.abs) {
+                deferred.push(index_path.trim_end_matches('/').to_owned());
                 continue;
             }
-            let file_attrs =
-                rules.file_attrs(&as_utf8_for_matching(&resolved.index_relpath), false);
+            let file_attrs = rules.file_attrs(&as_utf8_for_matching(&index_path), false);
             inputs.push(WorktreeBlobReadInput {
                 abs: resolved.abs,
-                index_relpath: resolved.index_relpath,
+                index_relpath: index_path,
                 index_entry: None,
                 file_attrs,
                 cached_meta: Some(meta),
