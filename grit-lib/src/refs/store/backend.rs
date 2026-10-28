@@ -126,7 +126,7 @@ pub(crate) fn verify_direct_targets(
 }
 
 fn oids_to_verify_for_update(update: &RefUpdate) -> Vec<ObjectId> {
-    if update.new_value.is_none() {
+    if update.new_value.is_none() && !update.flags.log_only {
         return Vec::new();
     }
     let mut oids = Vec::new();
@@ -478,6 +478,53 @@ mod tests {
             })
         );
         assert_eq!(probes, 1);
+    }
+
+    #[test]
+    fn verify_direct_targets_checks_log_only_explicit_reflog_oids_without_new_value() {
+        let log_only = RefUpdate {
+            name: "refs/heads/main".to_owned(),
+            new_value: None,
+            expected: Expected::Any,
+            reflog: Some(super::super::ReflogUpdate {
+                identity: "A <a@example.com>".to_owned(),
+                message: "log".to_owned(),
+                time: time::OffsetDateTime::UNIX_EPOCH,
+                old_oid: Some(oid(1)),
+                new_oid: Some(oid(9)),
+            }),
+            flags: RefUpdateFlags {
+                log_only: true,
+                ..Default::default()
+            },
+        };
+        assert_eq!(
+            verify_direct_targets(&[log_only], |_| Ok(None)),
+            Err(RefStoreError::MissingObject {
+                name: "refs/heads/main".to_owned(),
+                oid: oid(9)
+            })
+        );
+        let ok = RefUpdate {
+            name: "refs/heads/main".to_owned(),
+            new_value: None,
+            expected: Expected::Any,
+            reflog: Some(super::super::ReflogUpdate {
+                identity: "A <a@example.com>".to_owned(),
+                message: "log".to_owned(),
+                time: time::OffsetDateTime::UNIX_EPOCH,
+                old_oid: Some(oid(1)),
+                new_oid: Some(oid(1)),
+            }),
+            flags: RefUpdateFlags {
+                log_only: true,
+                ..Default::default()
+            },
+        };
+        assert_eq!(
+            verify_direct_targets(&[ok], |_| Ok(Some(ObjectKind::Commit))),
+            Ok(())
+        );
     }
 
     #[test]

@@ -11,6 +11,7 @@ use grit_lib::error::Error;
 use grit_lib::ident::Signature;
 use grit_lib::objects::{NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::refs::ref_storage::RefStorageFormat;
+use grit_lib::refs::reflog::read_reflog;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefName, RefStore, RefStoreError, RefTransaction, RefUpdate,
     RefUpdateFlags, ReflogUpdate,
@@ -286,6 +287,42 @@ fn log_only_updates_with_missing_reflog_objects_are_refused() {
             Some(RawRef::Direct(fx.commit)),
             "{format:?}"
         );
+    });
+}
+
+#[test]
+fn log_only_with_no_new_value_still_checks_explicit_reflog_objects() {
+    each_format(|format, fx| {
+        let git_dir = fx.repo.git_dir();
+        let log_len = || read_reflog(git_dir, "refs/heads/main").map_or(0, |e| e.len());
+        let before = log_len();
+        let log_only = RefUpdate {
+            name: "refs/heads/main".to_owned(),
+            new_value: None,
+            expected: Expected::Any,
+            reflog: Some(ReflogUpdate {
+                identity: "Ref Verify <verify@example.com>".to_owned(),
+                message: "log only".to_owned(),
+                time: time::OffsetDateTime::UNIX_EPOCH,
+                old_oid: Some(fx.commit),
+                new_oid: Some(bogus()),
+            }),
+            flags: RefUpdateFlags {
+                log_only: true,
+                ..RefUpdateFlags::default()
+            },
+        };
+        let err = commit_ref_update_on_store(fx.repo.refs(), log_only).expect_err("{format:?}");
+        assert!(
+            matches!(&err, Error::RefStore(e) if *e == missing("refs/heads/main", bogus())),
+            "{format:?}: {err:?}"
+        );
+        assert_eq!(
+            fx.raw("refs/heads/main"),
+            Some(RawRef::Direct(fx.commit)),
+            "{format:?}"
+        );
+        assert_eq!(log_len(), before, "{format:?}: reflog must be unchanged");
     });
 }
 
