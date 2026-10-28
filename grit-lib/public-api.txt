@@ -15915,6 +15915,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusOptions
 pub struct grit_lib::porcelain::status::UntrackedCollectMeta
+pub grit_lib::porcelain::status::UntrackedCollectMeta::clean_collapsed_unit: std::collections::hash::set::HashSet<alloc::string::String>
 pub grit_lib::porcelain::status::UntrackedCollectMeta::untracked_cache_refreshed: bool
 impl core::clone::Clone for grit_lib::porcelain::status::UntrackedCollectMeta
 pub fn grit_lib::porcelain::status::UntrackedCollectMeta::clone(&self) -> Self
@@ -15922,7 +15923,6 @@ impl core::default::Default for grit_lib::porcelain::status::UntrackedCollectMet
 pub fn grit_lib::porcelain::status::UntrackedCollectMeta::default() -> Self
 impl core::fmt::Debug for grit_lib::porcelain::status::UntrackedCollectMeta
 pub fn grit_lib::porcelain::status::UntrackedCollectMeta::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::porcelain::status::UntrackedCollectMeta
 impl core::marker::Freeze for grit_lib::porcelain::status::UntrackedCollectMeta
 impl core::marker::Send for grit_lib::porcelain::status::UntrackedCollectMeta
 impl core::marker::Sync for grit_lib::porcelain::status::UntrackedCollectMeta
