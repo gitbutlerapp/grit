@@ -4,6 +4,7 @@ use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::sync::Arc;
 
+use crate::alternate_boundary::AlternateSources;
 use crate::bitmap_walk::{BitmapWalkError, ReachabilityQuery, ReachableSet};
 use crate::commit_graph_file::{CommitGraphChain, UNRANKED_GENERATION};
 use crate::environment::RepositoryOptions;
@@ -12,6 +13,7 @@ use crate::objects::{
     oid_hash_map, oid_hash_set, oid_hash_set_with_capacity, parse_tag, tag_object_line_oid,
     CommitRef, Object, ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeRefIter,
 };
+use crate::odb::store::{CompositeStore, ObjectStore};
 use crate::odb::Odb;
 use crate::pack_bitmap::BitmapIndex;
 use crate::pack_name_hash::pack_name_hash;
@@ -107,6 +109,7 @@ pub fn enumerate_pack_objects(
         haves,
         opts,
         NameTrees::No,
+        false,
         &CancelSignal::never(),
     )
 }
@@ -141,16 +144,22 @@ pub(crate) fn enumerate_pack_objects_naming(
     haves: &[ObjectId],
     opts: &PackEnumerateOptions<'_>,
     name_trees: NameTrees,
+    local_only: bool,
     stop: &CancelSignal<'_>,
 ) -> Result<PackObjectSelection> {
     stop.poll()?;
-    if opts.use_bitmaps {
+    if !local_only && opts.use_bitmaps {
         if let Some(sel) = try_bitmap_enumeration(odb, wants, haves, opts)? {
             stop.poll()?;
             return Ok(sel);
         }
     }
-    walk_enumeration(odb, wants, haves, opts, name_trees, stop)
+    let alternate_sources = if local_only {
+        AlternateSources::load(odb)?.composite()
+    } else {
+        None
+    };
+    walk_enumeration(odb, wants, haves, opts, name_trees, alternate_sources, stop)
 }
 
 /// Bitmap reachability for upload-pack when shallow grafts and filters allow it.
@@ -258,6 +267,7 @@ fn walk_enumeration(
     haves: &[ObjectId],
     opts: &PackEnumerateOptions<'_>,
     name_trees: NameTrees,
+    alternate_sources: Option<Arc<CompositeStore>>,
     stop: &CancelSignal<'_>,
 ) -> Result<PackObjectSelection> {
     let have_shallow = opts.have_shallow_grafts.unwrap_or(opts.shallow_grafts);
@@ -289,6 +299,7 @@ fn walk_enumeration(
                 &mut boundary,
                 &have_commits,
                 opts.peer_odb,
+                alternate_sources,
                 false,
                 opts.shallow_grafts,
                 filter,
@@ -854,6 +865,7 @@ fn collect_reachable_excluding_with_name_hashes(
     boundary: &mut HashSet<ObjectId>,
     have_commits: &HashSet<ObjectId>,
     peer_odb: Option<&Odb>,
+    alternate_sources: Option<Arc<CompositeStore>>,
     skip_missing: bool,
     shallow_grafts: &HashSet<ObjectId>,
     filter: Option<&ObjectFilter>,
@@ -867,6 +879,7 @@ fn collect_reachable_excluding_with_name_hashes(
         boundary,
         have_commits,
         peer_odb,
+        alternate_sources,
         skip_missing,
         filter,
         depth_sensitive: filter.is_some_and(ObjectFilter::is_depth_sensitive),
@@ -991,6 +1004,8 @@ struct EnumerationWalk<'a> {
     have_commits: &'a HashSet<ObjectId>,
     /// Objects already on the peer (local fetch): stop without listing.
     peer_odb: Option<&'a Odb>,
+    /// Alternate object directories (`repack -l` / `pack-objects --local`).
+    alternate_sources: Option<Arc<CompositeStore>>,
     skip_missing: bool,
     filter: Option<&'a ObjectFilter>,
     /// The filter's verdict for trees and blobs depends on where they are met.
@@ -1061,6 +1076,13 @@ impl<'a> EnumerationWalk<'a> {
     }
 
     fn at_object_boundary(&self, oid: ObjectId) -> bool {
+        if self
+            .alternate_sources
+            .as_ref()
+            .is_some_and(|s| s.contains(&oid).unwrap_or(false))
+        {
+            return true;
+        }
         self.boundary.contains(&oid)
             || self
                 .peer_odb
@@ -1306,6 +1328,7 @@ mod tests {
                 have_boundary: HaveBoundary::CommitClosure,
             },
             name_trees,
+            false,
             &CancelSignal::never(),
         )
         .expect("walk")

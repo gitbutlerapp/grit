@@ -46,14 +46,20 @@ pub fn prune_packed_objects(objects_dir: &Path, opts: PrunePackedOptions) -> Res
         packed_ids.insert(*oid);
         ControlFlow::Continue(())
     })?;
-    if packed_ids.is_empty() {
-        return Ok(Vec::new());
-    }
+    let alternate_sources = odb.sources().ok();
 
     let mut candidates = Vec::new();
     let mut prefix_dirs = HashSet::new();
     loose.for_each_object(&mut |oid| {
-        if !packed_ids.contains(oid) {
+        let in_local_pack = packed_ids.contains(oid);
+        let in_alternate = if !in_local_pack {
+            alternate_sources
+                .as_ref()
+                .is_some_and(|s| s.contains(oid).unwrap_or(false))
+        } else {
+            false
+        };
+        if !in_local_pack && !in_alternate {
             return ControlFlow::Continue(());
         }
         let obj_path = loose.object_path(oid);

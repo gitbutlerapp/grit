@@ -335,6 +335,7 @@ impl<'a> PackObjects<'a> {
                 have_boundary: HaveBoundary::CommitClosure,
             },
             NameTrees::for_delta_search(&opts),
+            false,
             stop,
         )?;
         let send = selection.send;
@@ -575,6 +576,7 @@ fn write_pack_with_shallow_and_filter(
             have_boundary,
         },
         NameTrees::for_delta_search(opts),
+        false,
         stop,
     )?;
     append_included_tags(odb, &mut selection.send, include_tags)?;
@@ -956,6 +958,7 @@ pub(crate) fn build_pack_with_write_threads_full(
             have_boundary: HaveBoundary::CommitClosure,
         },
         NameTrees::for_delta_search(opts),
+        false,
         &CancelSignal::never(),
     )?;
     build_pack_from_send_list_full(
@@ -994,6 +997,7 @@ pub fn build_pack_with_parallel_threads(
             have_boundary: HaveBoundary::CommitClosure,
         },
         NameTrees::for_delta_search(opts),
+        false,
         &CancelSignal::never(),
     )?;
     build_pack_from_send_list_with_parallel_threads(
@@ -1993,6 +1997,7 @@ pub(crate) mod tests {
                 have_boundary: HaveBoundary::CommitClosure,
             },
             NameTrees::for_delta_search(&opts),
+            false,
             &CancelSignal::never(),
         )
         .unwrap();

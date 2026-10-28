@@ -234,6 +234,7 @@ pub(crate) mod hide_refs;
 #[path = "history/mod.rs"]
 mod history_root;
 pub(crate) use history_root as history;
+pub(crate) mod alternate_boundary;
 pub(crate) mod hooks;
 pub mod ident;
 pub(crate) mod ident_config;
