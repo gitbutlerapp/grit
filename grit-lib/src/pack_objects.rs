@@ -21,7 +21,9 @@ use crate::objects::{
     parse_tag, HashAlgo, ObjectId, ObjectInfo, ObjectKind, OidHashMap, OidHashSet, TreeRefIter,
 };
 use crate::odb::Odb;
-use crate::pack_object_select::{append_included_tags, HaveBoundary, NameTrees, TagCandidate};
+use crate::pack_object_select::{
+    append_included_tags, HaveBoundary, NameTrees, PackObjectSelection, TagCandidate,
+};
 use crate::parallel::{try_par_map_force, ParallelHashError};
 use crate::progress::CancelSignal;
 use crate::repo::Repository;
@@ -598,6 +600,18 @@ fn write_pack_with_shallow_and_filter(
         stop,
     )?;
     append_included_tags(odb, &mut selection.send, include_tags)?;
+    write_selected_pack(odb, &selection, opts, w, stop)
+}
+
+/// Write a pack holding exactly `selection.send`, searching for deltas when `opts`
+/// asks for them (thin bases from `selection.have_closure`).
+fn write_selected_pack(
+    odb: &Odb,
+    selection: &PackObjectSelection,
+    opts: &PackBuildOptions,
+    w: &mut dyn Write,
+    stop: &CancelSignal<'_>,
+) -> Result<PackStats> {
     if !opts.delta {
         let bytes = serialize_pack(odb, &selection.send, opts)?;
         stop.poll()?;
@@ -739,6 +753,57 @@ fn write_upload_pack_stream_in_context(
 }
 
 type PackIndexRows = Vec<(ObjectId, u64, u32)>;
+
+/// Objects selected for an upload-pack response from a repository with promisor
+/// remotes, with the blobs it does not store set aside.
+///
+/// Always uses the object walk: bitmaps and verbatim pack reuse cannot tell that a
+/// blob is missing. See [`write_upload_pack_selection`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_upload_pack_objects_probing(
+    repo: &Repository,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    source_shallow: &HashSet<ObjectId>,
+    have_shallow: &HashSet<ObjectId>,
+    filter: Option<&ObjectFilter>,
+    opts: &PackBuildOptions,
+) -> Result<(
+    PackObjectSelection,
+    Vec<crate::pack_object_select::MissingBlob>,
+)> {
+    repo.odb().with_pack_read_context(|| {
+        crate::pack_object_select::enumerate_pack_objects_probing(
+            repo.odb(),
+            wants,
+            haves,
+            &crate::pack_object_select::PackEnumerateOptions {
+                filter,
+                shallow_grafts: source_shallow,
+                have_shallow_grafts: Some(have_shallow),
+                use_bitmaps: false,
+                exclude_objects: None,
+                peer_odb: None,
+                have_boundary: HaveBoundary::TipsOnly,
+            },
+            NameTrees::for_delta_search(opts),
+            &CancelSignal::never(),
+        )
+    })
+}
+
+/// Stream the pack for a selection made by [`select_upload_pack_objects_probing`]
+/// (after its missing blobs were omitted or fetched).
+pub(crate) fn write_upload_pack_selection(
+    repo: &Repository,
+    selection: &PackObjectSelection,
+    opts: &PackBuildOptions,
+    w: &mut dyn Write,
+    stop: &CancelSignal<'_>,
+) -> Result<PackStats> {
+    repo.odb()
+        .with_pack_read_context(|| write_selected_pack(repo.odb(), selection, opts, w, stop))
+}
 
 fn write_pack_header(w: &mut dyn Write, count: u32) -> Result<()> {
     w.write_all(b"PACK").map_err(Error::Io)?;

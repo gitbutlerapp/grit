@@ -780,13 +780,17 @@ impl Remote {
                     }
                 }
                 // An automatic filter needs the server's promisor advertisement, which
-                // only the wire protocol carries.
+                // only the wire protocol carries. A source that is itself backed by a
+                // promisor remote (a server whose large blobs live on a LOP) lacks some
+                // objects, so copying its object store would come up short: it is
+                // served like a remote, which omits or fetches what it lacks.
                 if opts.auto_filter
                     || crate::partial_clone::fetch_requires_upload_pack(
                         opts.filter.as_ref(),
                         &cfg,
                         opts.remote_name.as_deref().or(self.name.as_deref()),
                     )
+                    || local_source_has_promisor_remotes(&remote_git)
                 {
                     let client_env = if opts.environment.is_fetch_options_default() {
                         repo.environment()
@@ -798,6 +802,7 @@ impl Remote {
                         Service::UploadPack,
                         &connect,
                         client_env,
+                        repo.caches().promisor_fetcher(),
                     )
                     .map_err(RemoteError::Library)?;
                     let fetched = fetch_remote_into(repo, &mut *conn, opts, progress, cancel);
@@ -936,6 +941,13 @@ fn repo_context(repo: Option<&Repository>) -> (&Path, Option<&Path>, Option<Odb>
         Some(r) => (r.git_dir(), r.work_tree(), Some(r.odb().clone())),
         None => (Path::new("."), None, None),
     }
+}
+
+/// Whether the local repository at `git_dir` has promisor remotes of its own
+/// (only its own config counts, as for any served repository's partial state).
+fn local_source_has_promisor_remotes(git_dir: &Path) -> bool {
+    ConfigSet::load_repo_local_only(git_dir)
+        .is_ok_and(|cfg| crate::promisor::repo_treats_promisor_packs(git_dir, &cfg))
 }
 
 fn local_git_dir_from_url(

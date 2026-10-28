@@ -23,6 +23,10 @@ pub(crate) struct UploadPackPolicy {
     /// `transfer.advertiseObjectInfo`: advertise and serve the v2 `object-info`
     /// command. Off by default, as in Git.
     pub advertise_object_info: bool,
+    /// `uploadpack.lazyFetch` (grit only): before answering a client that accepted
+    /// no promisor remote, fetch the promised objects the repository lacks from its
+    /// own promisor remotes. Off by default, like Git's upload-pack.
+    pub lazy_fetch: bool,
 }
 
 impl UploadPackPolicy {
@@ -36,6 +40,7 @@ impl UploadPackPolicy {
             ref_in_want: flag("uploadpack.allowrefinwant"),
             allow_sideband_all: flag("uploadpack.allowsidebandall"),
             advertise_object_info: flag("transfer.advertiseobjectinfo"),
+            lazy_fetch: flag("uploadpack.lazyfetch"),
         }
     }
 

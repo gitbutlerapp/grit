@@ -1706,6 +1706,8 @@ mod serve_upload_pack_advertise;
 #[cfg(feature = "full-tests")]
 #[path = "serve_upload_pack_inprocess.rs"]
 mod serve_upload_pack_inprocess;
+#[path = "serve_upload_pack_promisor.rs"]
+mod serve_upload_pack_promisor;
 #[cfg(feature = "full-tests")]
 #[path = "serve_upload_pack_v2_fetch.rs"]
 mod serve_upload_pack_v2_fetch;

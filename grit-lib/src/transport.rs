@@ -1082,11 +1082,18 @@ impl Connection for SshConnection {
 /// transport passes it to `upload-pack` ([`crate::environment::Environment::for_local_transport`]):
 /// global and system config apply (an `uploadpack.allowFilter` in `~/.gitconfig`, say),
 /// while the client's `GIT_DIR`, object directory and `-c` overrides never leak into it.
+///
+/// `GIT_NO_LAZY_FETCH` in that environment sets the served side's
+/// [`ServeOptions::lazy_fetch`](crate::serve::ServeOptions::lazy_fetch), as it does for
+/// Git's upload-pack; when lazy fetch is on, `promisor_fetcher` (normally the client
+/// repository's) is what the served repository fetches promised objects with. With it
+/// off the served repository gets no fetcher and fetches nothing.
 pub(crate) fn connect_local_upload_pack(
     remote_git_dir: &std::path::Path,
     service: Service,
     opts: &ConnectOptions,
     client_env: &crate::environment::Environment,
+    promisor_fetcher: Option<std::sync::Arc<dyn crate::promisor_fetch::PromisorFetcher>>,
 ) -> Result<Box<dyn Connection>> {
     use crate::serve::{ProtocolVersion, ServeOptions};
     if service != Service::UploadPack {
@@ -1107,6 +1114,7 @@ pub(crate) fn connect_local_upload_pack(
         .name("grit-local-upload-pack".to_owned())
         .spawn(
             move || -> std::result::Result<(), crate::serve::ServeError> {
+                let lazy_fetch = ServeOptions::lazy_fetch_from_environment(&served_env);
                 let repo = crate::repo::Repository::open(
                     &dir,
                     &crate::environment::RepositoryOptions::with_environment(served_env)
@@ -1119,8 +1127,10 @@ pub(crate) fn connect_local_upload_pack(
                     protocol,
                     agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
                     hidden_refs: crate::hide_refs::hide_ref_patterns_uploadpack(&config),
+                    lazy_fetch,
                     ..ServeOptions::default()
                 };
+                serve.attach_promisor_fetcher(&repo, &config, promisor_fetcher);
                 crate::serve::upload_pack(&repo, &mut server_input, &mut server_output, &mut serve)
                     .map(|_| ())
             },

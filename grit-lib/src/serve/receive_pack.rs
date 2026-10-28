@@ -600,11 +600,26 @@ pub fn receive_pack_with_hook_cancellable(
         PushShallowInfo::classify(&request.shallow, repo.odb(), &receiver_grafts)?;
     let client_boundaries: HashSet<ObjectId> = request.shallow.iter().copied().collect();
 
+    // A partial repository (one offloaded to a large-object promisor, say) lacks
+    // the objects its promisor remotes have; a pushed tree may still name them.
+    let promises = if crate::promisor::repo_treats_promisor_packs(repo.git_dir(), cfg.as_ref()) {
+        Some(super::promised_objects::PromisorObjects::new(repo)?)
+    } else {
+        None
+    };
     let unpack_error = match quarantine.as_ref() {
         Some(q) => {
             let odb = q.odb();
             spool_push_pack(input, &odb, max_input, &stop)
-                .and_then(|pack| ingest_spooled_pack(&odb, pack, cfg.as_ref(), &client_boundaries))
+                .and_then(|pack| {
+                    ingest_spooled_pack(
+                        &odb,
+                        pack,
+                        cfg.as_ref(),
+                        &client_boundaries,
+                        promises.as_ref(),
+                    )
+                })
                 .and_then(|indexed| match &policy.fsck_objects {
                     Some(fsck) => check_received_objects(repo, &odb, indexed, cfg.as_ref(), fsck),
                     None => Ok(()),
@@ -1483,26 +1498,40 @@ fn check_received_objects(
 /// were unpacked as loose files.
 ///
 /// The loose path checks that every pushed object's references resolve,
-/// except the parents of `shallow_boundaries`: the pushing client is shallow
-/// there and does not have them.
+/// except the parents of `shallow_boundaries` (the pushing client is shallow
+/// there and does not have them) and, with `promises`, objects a promisor
+/// remote of the repository has: Git's connectivity check skips those too, so a
+/// push to a repository whose large blobs live on a promisor works.
 fn ingest_spooled_pack(
     odb: &Odb,
     pack: SpooledPack,
     cfg: &ConfigSet,
     shallow_boundaries: &HashSet<ObjectId>,
+    promises: Option<&super::promised_objects::PromisorObjects<'_>>,
 ) -> std::result::Result<Option<HashSet<ObjectId>>, UnpackError> {
     if should_use_unpack_objects(&pack.header, cfg) {
         let mut reader = BufReader::with_capacity(SPOOL_CHUNK, pack.file.reopen()?);
-        unpack_objects(
-            &mut reader,
-            odb,
-            &UnpackOptions {
-                quiet: true,
-                strict: true,
-                shallow_boundaries: shallow_boundaries.clone(),
-                ..UnpackOptions::default()
-            },
-        )?;
+        let opts = UnpackOptions {
+            quiet: true,
+            strict: true,
+            shallow_boundaries: shallow_boundaries.clone(),
+            ..UnpackOptions::default()
+        };
+        match promises {
+            Some(promises) => {
+                let promised =
+                    |oid: &ObjectId, referrer: &ObjectId| promises.is_promised(oid, Some(referrer));
+                crate::unpack_objects::unpack_objects_with_promises(
+                    &mut reader,
+                    odb,
+                    &opts,
+                    &promised,
+                )?;
+            }
+            None => {
+                unpack_objects(&mut reader, odb, &opts)?;
+            }
+        }
         return Ok(None);
     }
     let path = pack.file.into_temp_path();

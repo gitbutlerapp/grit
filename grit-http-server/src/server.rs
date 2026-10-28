@@ -180,6 +180,12 @@ pub struct ServeConfig {
     /// The user database (see [`default_database_path`]).
     pub database: PathBuf,
     /// Environment used to load global and system config for each repository.
+    ///
+    /// A [`RepositoryOptions::promisor_fetcher`] here is given only to upload-pack
+    /// requests that may lazily fetch promised objects (`uploadpack.lazyFetch`,
+    /// `GIT_NO_LAZY_FETCH=0`). Everything else the server opens a repository for
+    /// (snapshot checkouts, clone bundles, pushes, the web pages) gets no fetcher,
+    /// so reading a blob kept on a large-object promisor never pulls it back in.
     pub repository_options: RepositoryOptions,
     /// When clone bundles are built ([`crate::bundles`]).
     pub bundles: BundleSettings,
@@ -189,7 +195,11 @@ pub(crate) struct ServerState {
     pub(crate) repositories: Repositories,
     store: Mutex<AuthStore>,
     logins: Mutex<PendingLogins>,
+    /// [`ServeConfig::repository_options`] without the promisor fetcher.
     pub(crate) options: RepositoryOptions,
+    /// [`ServeConfig::repository_options`] as given, for smart-protocol requests:
+    /// upload-pack keeps the fetcher only when lazy fetch is on.
+    smart_options: RepositoryOptions,
     /// Checked when a sign-in names no user, so it takes as long as a real one.
     pub(crate) stand_in_password: HashedPassword,
     bundles: BundleSettings,
@@ -233,7 +243,11 @@ impl Server {
                 repositories: Repositories::at(&config.root),
                 store: Mutex::new(store),
                 logins: Mutex::new(PendingLogins::default()),
-                options: config.repository_options,
+                options: config
+                    .repository_options
+                    .clone()
+                    .with_promisor_fetcher(None),
+                smart_options: config.repository_options,
                 stand_in_password,
                 bundles: config.bundles,
                 scheduler: Mutex::new(None),
@@ -562,7 +576,7 @@ async fn get_dispatch(
         repo.path,
         service,
         protocol_version,
-        state.options.clone(),
+        state.smart_options.clone(),
         extensions,
     )
     .await
@@ -701,7 +715,7 @@ async fn post_dispatch(
         protocol_version,
         &headers,
         body,
-        state.options.clone(),
+        state.smart_options.clone(),
         extensions,
     )
     .await;

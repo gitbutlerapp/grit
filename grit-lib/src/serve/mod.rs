@@ -18,6 +18,7 @@
 //! configuration at their own boundary.
 
 mod object_info;
+mod promised_objects;
 mod receive_pack;
 mod ref_update_policy;
 mod shallow_upload;
@@ -52,6 +53,19 @@ pub enum ServeError {
     /// The client asked for an object that is not an advertised ref tip.
     #[error("not our ref: {0}")]
     NotOurRef(ObjectId),
+    /// An object the response needs is not stored in the served repository.
+    ///
+    /// Only raised before any pack byte is written, so the client gets a clean
+    /// `ERR` line (protocol v2) or a side-band error (v0/v1) instead of a pack cut
+    /// short. Repositories without promisor remotes report missing objects the
+    /// way they always did, as a [`ServeError::Repository`] error.
+    #[error("object {oid} is missing: {reason}")]
+    ObjectMissing {
+        /// The missing object.
+        oid: ObjectId,
+        /// Why it could not be sent.
+        reason: MissingObjectReason,
+    },
     /// The client requested a v2 command this server does not implement.
     #[error("unknown command: {0}")]
     UnknownCommand(String),
@@ -90,6 +104,34 @@ pub enum ServeError {
     /// failed rather than complete it.
     #[error("the pack failed partway through: {0}")]
     PackInterrupted(Box<ServeError>),
+}
+
+/// Why a missing object could not be served; see [`ServeError::ObjectMissing`].
+///
+/// A repository whose large blobs live on a large-object promisor (LOP) leaves
+/// them out of its own packs. Such a blob is *promised*: some object in a promisor
+/// pack refers to it. A client that accepted one of the advertised promisor
+/// remotes is sent the pack without it and fetches it from the LOP itself; any
+/// other client needs the server to fetch it first (lazy fetch, see
+/// [`ServeOptions::lazy_fetch`]) or gets this error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum MissingObjectReason {
+    /// The object can be fetched from a promisor remote, but the client accepted
+    /// none of them and lazy fetch is off.
+    #[error("it is stored on a promisor remote the client did not accept")]
+    Promised,
+    /// No promisor object refers to it: the repository is missing an object it
+    /// should have.
+    #[error("no promisor remote has it either")]
+    NotPromised,
+    /// Lazy fetch was requested, but the [`Repository`] was opened without a
+    /// [`PromisorFetcher`](crate::promisor_fetch::PromisorFetcher).
+    #[error("lazy fetch is on but no promisor fetcher is installed")]
+    NoFetcher,
+    /// Lazy fetch ran and the object is still not stored.
+    #[error("fetching it from the promisor remotes did not bring it in")]
+    LazyFetchFailed,
 }
 
 /// Why a `deepen-not` argument was rejected; see [`ServeError::InvalidDeepenNot`].
@@ -195,6 +237,94 @@ pub struct ServeOptions {
     /// HTTP) request only sees what that one request carried. Callers leave it
     /// empty.
     pub accepted_promisor_remotes: Vec<String>,
+    /// Fetch objects this repository is missing from its own promisor remotes
+    /// before answering a client that accepted none of them, so the client still
+    /// gets a complete pack. `None` uses `uploadpack.lazyFetch` (a grit setting,
+    /// false by default).
+    ///
+    /// Git's upload-pack turns lazy fetch off unless `GIT_NO_LAZY_FETCH=0` is in
+    /// its environment; the library reads no environment, so callers map that
+    /// variable here. Fetching needs a
+    /// [`PromisorFetcher`](crate::promisor_fetch::PromisorFetcher) on the
+    /// [`Repository`], otherwise the request fails with
+    /// [`MissingObjectReason::NoFetcher`].
+    pub lazy_fetch: Option<bool>,
+}
+
+impl ServeOptions {
+    /// The [`Self::lazy_fetch`] an upload-pack process should use under `env`, from
+    /// `GIT_NO_LAZY_FETCH` (or grit's `GRIT_NO_LAZY_FETCH`, which wins when both are
+    /// set): a false value turns lazy fetch on, a true value turns it off, and
+    /// unset (or not a boolean) leaves `uploadpack.lazyFetch` in charge.
+    ///
+    /// Git's upload-pack sets `GIT_NO_LAZY_FETCH=1` unless the variable is already
+    /// in its environment, so `GIT_NO_LAZY_FETCH=0` is how a Git server is told to
+    /// fetch promised objects for clients that did not accept its promisor remotes.
+    ///
+    /// # Parameters
+    ///
+    /// - `env`: the server process environment.
+    #[must_use]
+    pub fn lazy_fetch_from_environment(env: &crate::environment::Environment) -> Option<bool> {
+        [
+            crate::promisor_fetch::NO_LAZY_FETCH_ENV,
+            "GIT_NO_LAZY_FETCH",
+        ]
+        .into_iter()
+        .find_map(|key| env.var(key))
+        .and_then(|value| crate::config::parse_bool(value.trim()).ok())
+        .map(|no_lazy_fetch| !no_lazy_fetch)
+    }
+
+    /// Whether upload-pack may fetch missing promised objects for this session:
+    /// [`Self::lazy_fetch`] when set, otherwise `uploadpack.lazyFetch` from `config`.
+    ///
+    /// A caller uses this to decide whether to open the served [`Repository`] with a
+    /// [`PromisorFetcher`](crate::promisor_fetch::PromisorFetcher). Without one, a
+    /// served repository never fetches anything.
+    ///
+    /// # Parameters
+    ///
+    /// - `config`: the served repository's configuration.
+    #[must_use]
+    pub fn lazy_fetch_enabled(&self, config: &crate::config::ConfigSet) -> bool {
+        self.lazy_fetch.unwrap_or_else(|| {
+            config
+                .get_bool("uploadpack.lazyfetch")
+                .and_then(|v| v.ok())
+                .unwrap_or(false)
+        })
+    }
+
+    /// Give the repository an upload-pack session serves the promisor fetcher it may
+    /// use: `fetcher` when [`Self::lazy_fetch_enabled`], and none otherwise, so a
+    /// server without lazy fetch never fetches anything, whichever fetcher the
+    /// repository was opened with.
+    ///
+    /// Every upload-pack entry point (the `grit upload-pack` command, smart HTTP,
+    /// the in-process local transport) calls this right after opening the
+    /// repository.
+    ///
+    /// # Parameters
+    ///
+    /// - `repo`: the served repository.
+    /// - `config`: its configuration.
+    /// - `fetcher`: the fetcher to use when lazy fetch is on.
+    ///
+    /// # Returns
+    ///
+    /// Whether a fetcher is now installed.
+    pub fn attach_promisor_fetcher(
+        &self,
+        repo: &Repository,
+        config: &crate::config::ConfigSet,
+        fetcher: Option<std::sync::Arc<dyn crate::promisor_fetch::PromisorFetcher>>,
+    ) -> bool {
+        let fetcher = fetcher.filter(|_| self.lazy_fetch_enabled(config));
+        let attached = fetcher.is_some();
+        repo.caches().set_promisor_fetcher(fetcher);
+        attached
+    }
 }
 
 /// Name of the receive-pack capability that advertises a resumable push

@@ -63,8 +63,21 @@ pub fn run(
         advertise_refs,
         agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
         hidden_refs,
+        lazy_fetch: ServeOptions::lazy_fetch_from_environment(repo.environment()),
         ..ServeOptions::default()
     };
+    // Only a server allowed to fetch missing promised objects gets a fetcher.
+    if matches!(service, Service::UploadPack) {
+        opts.attach_promisor_fetcher(
+            &repo,
+            &config,
+            Some(std::sync::Arc::new(
+                grit_lib::objects::promisor::DefaultPromisorFetcher::new(std::sync::Arc::new(
+                    crate::context::http_client_factory(),
+                )),
+            )),
+        );
+    }
 
     let stdin = std::io::stdin();
     let mut input = stdin.lock();

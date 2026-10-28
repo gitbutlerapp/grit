@@ -22244,6 +22244,30 @@ impl core::marker::Unpin for grit_lib::remote::serve::DeepenNotError
 impl core::marker::UnsafeUnpin for grit_lib::remote::serve::DeepenNotError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::DeepenNotError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::DeepenNotError
+#[non_exhaustive] pub enum grit_lib::remote::serve::MissingObjectReason
+pub grit_lib::remote::serve::MissingObjectReason::LazyFetchFailed
+pub grit_lib::remote::serve::MissingObjectReason::NoFetcher
+pub grit_lib::remote::serve::MissingObjectReason::NotPromised
+pub grit_lib::remote::serve::MissingObjectReason::Promised
+impl core::clone::Clone for grit_lib::remote::serve::MissingObjectReason
+pub fn grit_lib::remote::serve::MissingObjectReason::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::serve::MissingObjectReason
+impl core::cmp::PartialEq for grit_lib::remote::serve::MissingObjectReason
+pub fn grit_lib::remote::serve::MissingObjectReason::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::remote::serve::MissingObjectReason
+impl core::fmt::Debug for grit_lib::remote::serve::MissingObjectReason
+pub fn grit_lib::remote::serve::MissingObjectReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::remote::serve::MissingObjectReason
+pub fn grit_lib::remote::serve::MissingObjectReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::serve::MissingObjectReason
+impl core::marker::StructuralPartialEq for grit_lib::remote::serve::MissingObjectReason
+impl core::marker::Freeze for grit_lib::remote::serve::MissingObjectReason
+impl core::marker::Send for grit_lib::remote::serve::MissingObjectReason
+impl core::marker::Sync for grit_lib::remote::serve::MissingObjectReason
+impl core::marker::Unpin for grit_lib::remote::serve::MissingObjectReason
+impl core::marker::UnsafeUnpin for grit_lib::remote::serve::MissingObjectReason
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::MissingObjectReason
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::MissingObjectReason
 pub enum grit_lib::remote::serve::ProtocolVersion
 pub grit_lib::remote::serve::ProtocolVersion::V0
 pub grit_lib::remote::serve::ProtocolVersion::V1
@@ -22316,6 +22340,9 @@ pub grit_lib::remote::serve::ServeError::NotOurRef(grit_lib::objects::ObjectId)
 pub grit_lib::remote::serve::ServeError::ObjectFormatMismatch
 pub grit_lib::remote::serve::ServeError::ObjectFormatMismatch::client: alloc::string::String
 pub grit_lib::remote::serve::ServeError::ObjectFormatMismatch::repository: &'static str
+pub grit_lib::remote::serve::ServeError::ObjectMissing
+pub grit_lib::remote::serve::ServeError::ObjectMissing::oid: grit_lib::objects::ObjectId
+pub grit_lib::remote::serve::ServeError::ObjectMissing::reason: grit_lib::remote::serve::MissingObjectReason
 pub grit_lib::remote::serve::ServeError::PackInterrupted(alloc::boxed::Box<grit_lib::remote::serve::ServeError>)
 pub grit_lib::remote::serve::ServeError::Protocol(alloc::string::String)
 pub grit_lib::remote::serve::ServeError::Repository(grit_lib::error::Error)
@@ -22533,10 +22560,15 @@ pub grit_lib::remote::serve::ServeOptions::advertise_refs: bool
 pub grit_lib::remote::serve::ServeOptions::agent: alloc::string::String
 pub grit_lib::remote::serve::ServeOptions::bundle_list: core::option::Option<grit_lib::remote::bundle_uri::BundleList>
 pub grit_lib::remote::serve::ServeOptions::hidden_refs: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::remote::serve::ServeOptions::lazy_fetch: core::option::Option<bool>
 pub grit_lib::remote::serve::ServeOptions::protocol: grit_lib::remote::serve::ProtocolVersion
 pub grit_lib::remote::serve::ServeOptions::push_bundle: core::option::Option<alloc::string::String>
 pub grit_lib::remote::serve::ServeOptions::server_options: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::serve::ServeOptions::stateless_rpc: bool
+impl grit_lib::remote::serve::ServeOptions
+pub fn grit_lib::remote::serve::ServeOptions::attach_promisor_fetcher(&self, &grit_lib::repo::Repository, &grit_lib::config::ConfigSet, core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>) -> bool
+pub fn grit_lib::remote::serve::ServeOptions::lazy_fetch_enabled(&self, &grit_lib::config::ConfigSet) -> bool
+pub fn grit_lib::remote::serve::ServeOptions::lazy_fetch_from_environment(&grit_lib::config::environment::Environment) -> core::option::Option<bool>
 impl core::clone::Clone for grit_lib::remote::serve::ServeOptions
 pub fn grit_lib::remote::serve::ServeOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::remote::serve::ServeOptions

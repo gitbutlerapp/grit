@@ -58,7 +58,15 @@ pub fn run(
     let config = ServeConfig {
         root: root.clone(),
         database,
-        repository_options: grit_protocol::repository_options_from_process(),
+        // Used only for upload-pack requests that may lazily fetch promised objects
+        // (`uploadpack.lazyFetch`, `GIT_NO_LAZY_FETCH=0`).
+        repository_options: grit_protocol::repository_options_from_process().with_promisor_fetcher(
+            Some(std::sync::Arc::new(
+                grit_lib::objects::promisor::DefaultPromisorFetcher::new(std::sync::Arc::new(
+                    crate::context::http_client_factory(),
+                )),
+            )),
+        ),
         bundles,
     };
     let server = match Server::bind(config, bind) {

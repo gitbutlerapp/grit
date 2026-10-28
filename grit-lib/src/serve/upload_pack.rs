@@ -1,19 +1,24 @@
 //! Serving fetches and clones (`upload-pack`).
 
+use super::promised_objects::{
+    missing_objects_policy, plan_pack, resolve_missing_wants, MissingObjects,
+};
 use super::shallow_upload::{compute_shallow_response, ShallowRequest, ShallowResponse};
 use super::upload_pack_policy::{
     resolve_want_ref, validate_wants, validate_wants_filtered, UploadPackPolicy,
 };
 use super::{
     advertised_refs, check_object_format, head_info, parse_oid, read_packet, write_flush,
-    write_line, AdvertisedRef, DeepenNotError, Packet, Peel, ProtocolVersion, Result, ServeError,
-    ServeOptions,
+    write_line, AdvertisedRef, DeepenNotError, MissingObjectReason, Packet, Peel, ProtocolVersion,
+    Result, ServeError, ServeOptions,
 };
 use crate::config::ConfigSet;
 use crate::objects::pack_objects::PackStats;
 use crate::objects::{ObjectId, ObjectKind};
-use crate::pack_object_select::TagCandidate;
-use crate::pack_objects::{write_upload_pack_stream_with_cancel, PackProgress};
+use crate::pack_object_select::{PackObjectSelection, TagCandidate};
+use crate::pack_objects::{
+    write_upload_pack_selection, write_upload_pack_stream_with_cancel, PackProgress,
+};
 use crate::pkt_line::SidebandChannel1Writer;
 use crate::progress::{Cancel, CancelSignal, NeverCancel};
 use crate::promisor_remote::{parse_accepted_reply, PromisorAdvertisement};
@@ -147,7 +152,24 @@ fn map_repo_cancel(err: ServeError) -> ServeError {
 /// Returns [`ServeError::NotOurRef`] when the client wants an object outside the
 /// allowed set (advertised refs in stateful mode; reachable from ref tips in
 /// stateless RPC), [`ServeError::Protocol`] for malformed or unsupported requests,
-/// and I/O or repository errors from reading objects and writing the pack.
+/// [`ServeError::ObjectMissing`] when a repository with promisor remotes lacks an
+/// object the response needs (see below), and I/O or repository errors from
+/// reading objects and writing the pack.
+///
+/// # Repositories with promisor remotes
+///
+/// A repository that keeps some blobs on a promisor remote (`remote.<name>.promisor`
+/// or `extensions.partialClone`), such as a server whose large blobs live on a
+/// large-object promisor, plans each pack before sending any of it, with the object
+/// walk rather than bitmaps. A promised blob it does not store is left out when the
+/// client accepted one of the advertised promisor remotes. Otherwise it is fetched
+/// first when [`ServeOptions::lazy_fetch`] (or `uploadpack.lazyFetch`) allows, and
+/// the request fails with [`ServeError::ObjectMissing`] when it does not. That error
+/// reaches a protocol v2 client as an `ERR` line. A v0 client gets it as an `ERR`
+/// line when a want itself is missing, and on side band 3 when the pack walk
+/// finds the missing object.
+/// Only blobs are handled this way: a missing commit, tree or tag fails the
+/// request as before.
 pub fn upload_pack(
     repo: &Repository,
     input: &mut dyn Read,
@@ -198,6 +220,23 @@ pub fn upload_pack_cancellable(
                     counter.flush()?;
                     Err(err)
                 }
+                // Raised before any pack byte: tell the client why instead of hanging up.
+                err @ ServeError::ObjectMissing { .. } if opts.protocol == ProtocolVersion::V2 => {
+                    write_line(
+                        &mut counter,
+                        &format!("ERR {}", client_error_message(repo, &err)),
+                    )?;
+                    write_flush(&mut counter)?;
+                    counter.flush()?;
+                    if opts.stateless_rpc {
+                        Ok(UploadOutcome {
+                            bytes_written: counter.bytes,
+                            ..UploadOutcome::default()
+                        })
+                    } else {
+                        Err(err)
+                    }
+                }
                 err if opts.stateless_rpc && opts.protocol == ProtocolVersion::V2 => {
                     let msg = serve_error_client_message(&err);
                     write_line(&mut counter, &format!("ERR {msg}"))?;
@@ -217,8 +256,46 @@ pub fn upload_pack_cancellable(
     }
 }
 
+/// [`serve_error_client_message`], naming the advertised promisor remotes when
+/// the client could have fetched a missing object from one of them.
+fn client_error_message(repo: &Repository, err: &ServeError) -> String {
+    let msg = serve_error_client_message(err);
+    if !matches!(
+        err,
+        ServeError::ObjectMissing {
+            reason: MissingObjectReason::Promised,
+            ..
+        }
+    ) {
+        return msg;
+    }
+    match PromisorAdvertisement::from_server_config(&repo_config(repo)) {
+        Some(adv) => format!(
+            "{msg} (promisor remotes offered: {})",
+            adv.names().collect::<Vec<_>>().join(", ")
+        ),
+        None => msg,
+    }
+}
+
 fn serve_error_client_message(err: &ServeError) -> String {
     match err {
+        ServeError::ObjectMissing { oid, reason } => match reason {
+            MissingObjectReason::Promised => format!(
+                "object {oid} lives on a promisor remote this client did not accept; \
+                 accept it on the client (promisor.acceptFromServer) or let the server \
+                 fetch it (uploadpack.lazyFetch)"
+            ),
+            MissingObjectReason::NotPromised => {
+                format!("object {oid} is missing from the repository")
+            }
+            MissingObjectReason::NoFetcher => format!(
+                "object {oid} is missing and this server cannot fetch from its promisor remotes"
+            ),
+            MissingObjectReason::LazyFetchFailed => format!(
+                "object {oid} is missing and the server's promisor remotes did not supply it"
+            ),
+        },
         ServeError::Protocol(msg) => msg.clone(),
         ServeError::PackInterrupted(inner) => serve_error_client_message(inner),
         ServeError::UploadFilter(e) => e.to_string(),
@@ -240,6 +317,21 @@ fn repo_config(repo: &Repository) -> ConfigSet {
 
 fn upload_policy(repo: &Repository) -> UploadPackPolicy {
     UploadPackPolicy::from_config(&repo_config(repo))
+}
+
+/// How this request treats objects the repository lacks; `None` for a repository
+/// without promisor remotes (the ordinary pack path).
+fn missing_objects_mode(
+    repo: &Repository,
+    config: &ConfigSet,
+    policy: &UploadPackPolicy,
+    opts: &ServeOptions,
+) -> Option<MissingObjects> {
+    missing_objects_policy(
+        crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config),
+        !opts.accepted_promisor_remotes.is_empty(),
+        opts.lazy_fetch.unwrap_or(policy.lazy_fetch),
+    )
 }
 
 fn serve_v0(
@@ -266,9 +358,21 @@ fn serve_v0(
         output.flush()?;
     }
 
-    let Some(request) = read_v0_request(repo, input, &config, &policy, stop)? else {
+    let Some(mut request) = read_v0_request(repo, input, &config, &policy, stop)? else {
         return Ok(UploadSession::default());
     };
+    let missing = missing_objects_mode(repo, &config, &policy, opts);
+    if let Some(mode) = missing {
+        if let Err(err) = resolve_missing_wants(repo, &mut request.wants, mode) {
+            if matches!(err, ServeError::ObjectMissing { .. }) {
+                // The client reads ACK/NAK next; an `ERR` line there is reported
+                // as a remote error, as for Git's own refusals of a want.
+                write_line(output, &format!("ERR {}", client_error_message(repo, &err)))?;
+                output.flush()?;
+            }
+            return Err(err);
+        }
+    }
     if request.filter.is_some() {
         validate_wants_filtered(repo, &request.wants)?;
     } else {
@@ -397,8 +501,8 @@ fn serve_v0(
         &refs,
         &request,
         &common,
-        request.filter.as_ref(),
         shallow_resp.as_ref(),
+        missing,
         output,
         sideband,
         stop,
@@ -623,8 +727,8 @@ fn write_response_pack_from_v0(
     refs: &[AdvertisedRef],
     request: &V0Request,
     common: &[ObjectId],
-    filter: Option<&ObjectFilter>,
     shallow: Option<&ShallowResponse>,
+    missing: Option<MissingObjects>,
     output: &mut dyn Write,
     sideband: bool,
     stop: &CancelSignal<'_>,
@@ -651,21 +755,29 @@ fn write_response_pack_from_v0(
         .map(|s| s.pack_shallow_grafts.clone())
         .unwrap_or_default();
 
-    write_response_pack(
-        ResponsePackInput {
-            repo,
-            refs,
-            wants: &pack_wants,
-            common: &pack_common,
-            caps: &request.caps,
-            filter,
-            have_shallow: &have_shallow,
-            source_shallow: &source_shallow,
-        },
-        output,
-        sideband,
-        stop,
-    )
+    let input = ResponsePackInput {
+        repo,
+        refs,
+        wants: &pack_wants,
+        common: &pack_common,
+        caps: &request.caps,
+        filter: request.filter.as_ref(),
+        have_shallow: &have_shallow,
+        source_shallow: &source_shallow,
+        missing,
+    };
+    let prepared = match prepare_response_pack(&input) {
+        Ok(prepared) => prepared,
+        Err(err @ ServeError::ObjectMissing { .. }) if sideband => {
+            // Nothing of the pack is out yet: say why on the error band.
+            let message = format!("{}\n", client_error_message(repo, &err));
+            let _ = crate::pkt_line::write_sideband_packet(output, 3, message.as_bytes())
+                .and_then(|()| output.flush());
+            return Err(err);
+        }
+        Err(err) => return Err(err),
+    };
+    write_prepared_pack(&input, &prepared, output, sideband, stop)
 }
 
 fn serve_v2(
@@ -991,6 +1103,10 @@ fn fetch_v2(
         Some(spec) => Some(policy.parse_filter(&config, &spec)?),
     };
 
+    let missing = missing_objects_mode(repo, &config, &policy, opts);
+    if let Some(mode) = missing {
+        resolve_missing_wants(repo, &mut wants, mode)?;
+    }
     if filter.is_some() {
         validate_wants_filtered(repo, &wants)?;
     } else {
@@ -1045,6 +1161,25 @@ fn fetch_v2(
         Default::default()
     };
 
+    let mut pack_wants = wants;
+    pack_wants.extend(shallow_resp.extra_wants.iter().copied());
+    pack_wants.sort();
+    pack_wants.dedup();
+    let have_shallow: HashSet<ObjectId> = client_shallow.iter().copied().collect();
+    let input = ResponsePackInput {
+        repo,
+        refs: &refs,
+        wants: &pack_wants,
+        common: &common,
+        caps: &caps,
+        filter: filter.as_ref(),
+        have_shallow: &have_shallow,
+        source_shallow: &shallow_resp.pack_shallow_grafts,
+        missing,
+    };
+    // Settle what the pack holds before any section that commits to sending it.
+    let prepared = prepare_response_pack(&input)?;
+
     if !shallow_resp.shallow.is_empty() || !shallow_resp.unshallow.is_empty() {
         write_v2_fetch_line(output, "shallow-info", sideband_all)?;
         for oid in &shallow_resp.unshallow {
@@ -1064,31 +1199,11 @@ fn fetch_v2(
         write_v2_section_delim(output)?;
     }
 
-    let mut pack_wants = wants;
-    pack_wants.extend(shallow_resp.extra_wants);
-    pack_wants.sort();
-    pack_wants.dedup();
-
-    let have_shallow: HashSet<ObjectId> = client_shallow.iter().copied().collect();
     write_v2_fetch_line(output, "packfile", sideband_all)?;
     stop.poll().map_err(|_| ServeError::Cancelled)?;
     // Protocol v2 always side-band-64k frames the packfile section payload (band 1),
     // even when `sideband-all` was not negotiated.
-    let pack = write_response_pack(
-        ResponsePackInput {
-            repo,
-            refs: &refs,
-            wants: &pack_wants,
-            common: &common,
-            caps: &caps,
-            filter: filter.as_ref(),
-            have_shallow: &have_shallow,
-            source_shallow: &shallow_resp.pack_shallow_grafts,
-        },
-        output,
-        true,
-        stop,
-    )?;
+    let pack = write_prepared_pack(&input, &prepared, output, true, stop)?;
     Ok(UploadSession {
         pack: Some(pack),
         negotiation_rounds,
@@ -1146,7 +1261,7 @@ fn write_v2_fetch_line(output: &mut dyn Write, line: &str, sideband_all: bool) -
     }
 }
 
-/// Inputs for [`write_response_pack`].
+/// Inputs for [`prepare_response_pack`] and [`write_prepared_pack`].
 struct ResponsePackInput<'a> {
     repo: &'a Repository,
     refs: &'a [AdvertisedRef],
@@ -1156,26 +1271,30 @@ struct ResponsePackInput<'a> {
     filter: Option<&'a ObjectFilter>,
     have_shallow: &'a HashSet<ObjectId>,
     source_shallow: &'a HashSet<ObjectId>,
+    /// How objects the repository lacks are handled; `None` without promisor remotes.
+    missing: Option<MissingObjects>,
 }
 
-/// Stream the pack answering a fetch to `output`, adding annotated tags when
-/// `include-tag` was negotiated.
-///
-/// With `sideband` the pack is framed on side-band channel 1 and followed by a
-/// flush packet. The pack is written as it is produced, never held in memory whole.
+/// A response pack whose contents are settled but not yet written.
+struct PreparedPack {
+    /// Annotated tags `include-tag` may add; the pack writer adds those whose peeled
+    /// object it sends.
+    include_tags: Vec<TagCandidate>,
+    pack_opts: PackBuildOptions,
+    /// The planned objects, for a repository with promisor remotes; otherwise the
+    /// pack is enumerated (or reused from bitmaps) while it streams.
+    planned: Option<PackObjectSelection>,
+}
+
+/// Settle what a response pack holds: the `include-tag` candidates and, for a
+/// repository with promisor remotes, the objects with missing blobs omitted or
+/// fetched.
 ///
 /// # Errors
 ///
-/// A failure before any pack byte went out is returned as is. One after is
-/// [`ServeError::PackInterrupted`]; with a side band, the client is first told
-/// on band 3 (best effort: the failure may be the client hanging up).
-fn write_response_pack(
-    input: ResponsePackInput<'_>,
-    output: &mut dyn Write,
-    sideband: bool,
-    stop: &CancelSignal<'_>,
-) -> Result<PackStats> {
-    stop.poll().map_err(|_| ServeError::Cancelled)?;
+/// [`ServeError::ObjectMissing`] when a missing blob can be neither omitted nor
+/// fetched, and read failures. Nothing has been written to the client then.
+fn prepare_response_pack(input: &ResponsePackInput<'_>) -> Result<PreparedPack> {
     let include_tags = if input.caps.contains("include-tag") {
         tag_candidates(input.refs)
     } else {
@@ -1187,9 +1306,9 @@ fn write_response_pack(
         input.caps.contains("thin-pack") && !input.common.is_empty(),
         input.caps.contains("ofs-delta"),
     );
-    let mut progress = |_ev: PackProgress| {};
-    let mut send = |out: &mut dyn Write| {
-        write_upload_pack_stream_with_cancel(
+    let planned = match input.missing {
+        None => None,
+        Some(mode) => Some(plan_pack(
             input.repo,
             input.wants,
             input.common,
@@ -1198,10 +1317,52 @@ fn write_response_pack(
             input.filter,
             &include_tags,
             &pack_opts,
+            mode,
+        )?),
+    };
+    Ok(PreparedPack {
+        include_tags,
+        pack_opts,
+        planned,
+    })
+}
+
+/// Stream the pack [`prepare_response_pack`] settled to `output`.
+///
+/// With `sideband` the pack is framed on side-band channel 1 and followed by a
+/// flush packet. The pack is written as it is produced, never held in memory whole.
+///
+/// # Errors
+///
+/// A failure before any pack byte went out is returned as is. One after is
+/// [`ServeError::PackInterrupted`]; with a side band, the client is first told
+/// on band 3 (best effort: the failure may be the client hanging up).
+fn write_prepared_pack(
+    input: &ResponsePackInput<'_>,
+    prepared: &PreparedPack,
+    output: &mut dyn Write,
+    sideband: bool,
+    stop: &CancelSignal<'_>,
+) -> Result<PackStats> {
+    stop.poll().map_err(|_| ServeError::Cancelled)?;
+    let mut progress = |_ev: PackProgress| {};
+    let mut send = |out: &mut dyn Write| match &prepared.planned {
+        Some(selection) => {
+            write_upload_pack_selection(input.repo, selection, &prepared.pack_opts, out, stop)
+        }
+        None => write_upload_pack_stream_with_cancel(
+            input.repo,
+            input.wants,
+            input.common,
+            input.source_shallow,
+            input.have_shallow,
+            input.filter,
+            &prepared.include_tags,
+            &prepared.pack_opts,
             &mut progress,
             out,
             stop,
-        )
+        ),
     };
     if !sideband {
         let mut counted = CountingWriter {
@@ -1340,6 +1501,17 @@ mod tests {
         (commits, tags)
     }
 
+    /// Prepare and write the pack answering `input`, as a fetch does.
+    fn write_response_pack(
+        input: ResponsePackInput<'_>,
+        output: &mut dyn Write,
+        sideband: bool,
+        stop: &CancelSignal<'_>,
+    ) -> Result<PackStats> {
+        let prepared = prepare_response_pack(&input)?;
+        write_prepared_pack(&input, &prepared, output, sideband, stop)
+    }
+
     /// Answer `input` with `include-tag` and return the tags of `input.refs` the
     /// pack holds, sorted.
     fn packed_tags(input: ResponsePackInput<'_>) -> Vec<ObjectId> {
@@ -1429,6 +1601,7 @@ mod tests {
             filter: None,
             have_shallow: &HashSet::new(),
             source_shallow: &resp.pack_shallow_grafts,
+            missing: None,
         });
         let mut expected = vec![fx.tags[1].oid, fx.tags[2].oid];
         expected.sort();
@@ -1452,6 +1625,7 @@ mod tests {
             filter: None,
             have_shallow: &HashSet::new(),
             source_shallow: &HashSet::new(),
+            missing: None,
         });
         assert_eq!(tags, vec![fx.tags[2].oid]);
     }
@@ -1485,6 +1659,7 @@ mod tests {
             filter: None,
             have_shallow: &HashSet::new(),
             source_shallow: &HashSet::new(),
+            missing: None,
         });
         let reads = store.reads() - before;
         assert_eq!(packed, vec![tags[1].oid], "only the tag on a sent commit");
@@ -1551,6 +1726,7 @@ mod tests {
                     filter: None,
                     have_shallow: &HashSet::new(),
                     source_shallow: &HashSet::new(),
+                    missing: None,
                 },
                 &mut pack,
                 false,

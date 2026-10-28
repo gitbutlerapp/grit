@@ -355,6 +355,9 @@ mod log_pickaxe_json;
 #[path = "log_terminal_cli.rs"]
 mod log_terminal_cli;
 #[cfg(feature = "full-tests")]
+#[path = "lop_serve_git_compat.rs"]
+mod lop_serve_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "maintenance_commands.rs"]
 mod maintenance_commands;
 #[cfg(feature = "full-tests")]

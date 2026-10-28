@@ -394,7 +394,30 @@ impl UnpackSink for StoreSink<'_> {
 /// - [`Error::Io`] — I/O failure reading from `reader`.
 /// - [`Error::Zlib`] — decompression failure.
 pub fn unpack_objects(reader: &mut dyn Read, odb: &Odb, opts: &UnpackOptions) -> Result<usize> {
-    unpack_into(reader, odb, opts, None, None).map(|unpacked| unpacked.count)
+    unpack_into(reader, odb, opts, None, None, None).map(|unpacked| unpacked.count)
+}
+
+/// Asks whether a reference the pack does not resolve is promised.
+///
+/// Called with the missing object and the object naming it; `Ok(true)` lets the
+/// strict check pass it.
+pub(crate) type PromisedReference<'a> = &'a dyn Fn(&ObjectId, &ObjectId) -> Result<bool>;
+
+/// [`unpack_objects`] for a repository with promisor remotes: under
+/// [`UnpackOptions::strict`], a reference that resolves neither in the pack nor in
+/// `odb` passes when `promised` says a promisor remote has it, as Git's
+/// connectivity check skips promisor objects.
+///
+/// # Errors
+///
+/// As [`unpack_objects`], plus whatever `promised` returns.
+pub(crate) fn unpack_objects_with_promises(
+    reader: &mut dyn Read,
+    odb: &Odb,
+    opts: &UnpackOptions,
+    promised: PromisedReference<'_>,
+) -> Result<usize> {
+    unpack_into(reader, odb, opts, None, None, Some(promised)).map(|unpacked| unpacked.count)
 }
 
 /// Apply a pack stream to any [`WritableObjectStore`], resolving every delta.
@@ -488,8 +511,15 @@ pub fn ingest_pack_into_with_progress(
     progress: Option<&mut dyn ProgressSink>,
     cancel: Option<&dyn Cancel>,
 ) -> Result<IngestedObjects> {
-    unpack_into(reader, &StoreSink { store, bases }, opts, progress, cancel)
-        .map(Unpacked::into_ingested)
+    unpack_into(
+        reader,
+        &StoreSink { store, bases },
+        opts,
+        progress,
+        cancel,
+        None,
+    )
+    .map(Unpacked::into_ingested)
 }
 
 /// Like [`ingest_pack_into_with_progress`], writing into `odb` the way [`unpack_objects`]
@@ -501,7 +531,7 @@ pub(crate) fn ingest_pack_into_odb(
     progress: Option<&mut dyn ProgressSink>,
     cancel: Option<&dyn Cancel>,
 ) -> Result<IngestedObjects> {
-    unpack_into(reader, odb, opts, progress, cancel).map(Unpacked::into_ingested)
+    unpack_into(reader, odb, opts, progress, cancel, None).map(Unpacked::into_ingested)
 }
 
 /// Everything [`unpack_into`] resolved.
@@ -541,6 +571,7 @@ fn unpack_into<S: UnpackSink + ?Sized>(
     opts: &UnpackOptions,
     mut progress: Option<&mut dyn ProgressSink>,
     cancel: Option<&dyn Cancel>,
+    promised: Option<PromisedReference<'_>>,
 ) -> Result<Unpacked> {
     /// Blobs larger than this may stream straight to disk without caching payload bytes.
     const MAX_STREAM_BLOB_BYTES: usize = 1024 * 1024;
@@ -772,6 +803,7 @@ fn unpack_into<S: UnpackSink + ?Sized>(
             &opts.allowed_missing,
             opts.allow_promisor_missing_references,
             &opts.shallow_boundaries,
+            promised,
         )?;
     }
 
@@ -1026,7 +1058,20 @@ fn strict_verify_packed_references_map<S: UnpackSink + ?Sized>(
     allowed_missing: &HashSet<ObjectId>,
     allow_promisor_missing_references: bool,
     shallow_boundaries: &HashSet<ObjectId>,
+    promised: Option<PromisedReference<'_>>,
 ) -> Result<()> {
+    let resolves = |target: &ObjectId, referrer: &ObjectId| -> Result<bool> {
+        if strict_ref_resolves_map(
+            target,
+            pack,
+            sink,
+            allowed_missing,
+            allow_promisor_missing_references,
+        )? {
+            return Ok(true);
+        }
+        promised.map_or(Ok(false), |promised| promised(target, referrer))
+    };
     for (oid, entry) in pack {
         let kind = packed_entry_kind(entry);
         if kind == ObjectKind::Blob {
@@ -1043,13 +1088,7 @@ fn strict_verify_packed_references_map<S: UnpackSink + ?Sized>(
                     if e.mode == MODE_GITLINK {
                         continue;
                     }
-                    if !strict_ref_resolves_map(
-                        &e.oid,
-                        pack,
-                        sink,
-                        allowed_missing,
-                        allow_promisor_missing_references,
-                    )? {
+                    if !resolves(&e.oid, oid)? {
                         return Err(Error::CorruptObject(format!(
                             "strict: missing object {} referenced by tree",
                             e.oid.to_hex()
@@ -1059,13 +1098,7 @@ fn strict_verify_packed_references_map<S: UnpackSink + ?Sized>(
             }
             ObjectKind::Commit => {
                 let c = parse_commit(&data)?;
-                if !strict_ref_resolves_map(
-                    &c.tree,
-                    pack,
-                    sink,
-                    allowed_missing,
-                    allow_promisor_missing_references,
-                )? {
+                if !resolves(&c.tree, oid)? {
                     return Err(Error::CorruptObject(format!(
                         "strict: missing tree {} referenced by commit",
                         c.tree.to_hex()
@@ -1078,13 +1111,7 @@ fn strict_verify_packed_references_map<S: UnpackSink + ?Sized>(
                     continue;
                 }
                 for p in &c.parents {
-                    if !strict_ref_resolves_map(
-                        p,
-                        pack,
-                        sink,
-                        allowed_missing,
-                        allow_promisor_missing_references,
-                    )? {
+                    if !resolves(p, oid)? {
                         return Err(Error::CorruptObject(format!(
                             "strict: missing parent {} referenced by commit",
                             p.to_hex()
@@ -1094,13 +1121,7 @@ fn strict_verify_packed_references_map<S: UnpackSink + ?Sized>(
             }
             ObjectKind::Tag => {
                 let t = parse_tag(&data)?;
-                if !strict_ref_resolves_map(
-                    &t.object,
-                    pack,
-                    sink,
-                    allowed_missing,
-                    allow_promisor_missing_references,
-                )? {
+                if !resolves(&t.object, oid)? {
                     return Err(Error::CorruptObject(format!(
                         "strict: missing object {} referenced by tag",
                         t.object.to_hex()
@@ -3179,6 +3200,7 @@ mod tests {
             &HashSet::new(),
             false,
             &HashSet::new(),
+            None,
         )
         .expect("strict connectivity");
         assert_eq!(
@@ -3215,6 +3237,7 @@ mod tests {
                 &HashSet::new(),
                 false,
                 &HashSet::new(),
+                None,
             ),
             Err(Error::CorruptObject(_))
         ));
