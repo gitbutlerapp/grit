@@ -528,6 +528,48 @@ fn pickaxe_matches_commit_pairs_renames_per_policy() {
 }
 
 #[test]
+fn pickaxe_g_repeated_anchor_line_stays_context_matches_git() {
+    let repo = HistoryRepo::init();
+    let worktree = repo.worktree();
+    let anchor = "fn unstable_config_on_stable() {\n";
+    let old_body = format!("{anchor}{anchor}// before\n");
+    commit_file(worktree, "f.rs", &old_body, "base");
+    let mut new_body = String::new();
+    for i in 0..600 {
+        new_body.push_str(&format!("// block {i}\n"));
+    }
+    new_body.push_str(&anchor);
+    new_body.push_str("// after\n");
+    commit_file(worktree, "f.rs", &new_body, "big-insert");
+    let pickaxe = Pickaxe::line_grep("unstable_config_on_stable", false)
+        .expect("grep")
+        .into_shared();
+    assert_pickaxe_matches_git(worktree, &["-G", "unstable_config_on_stable"], pickaxe, None, &[]);
+}
+
+#[test]
+fn pickaxe_g_moved_matching_line_matches_git() {
+    let repo = HistoryRepo::init();
+    let worktree = repo.worktree();
+    commit_file(
+        worktree,
+        "f.txt",
+        "header\n(unstable)\nfooter\n",
+        "base",
+    );
+    commit_file(
+        worktree,
+        "f.txt",
+        "header\nfooter\n(unstable)\n",
+        "move-line",
+    );
+    let pickaxe = Pickaxe::line_grep("unstable", false)
+        .expect("grep")
+        .into_shared();
+    assert_pickaxe_matches_git(worktree, &["-G", "unstable"], pickaxe, None, &["f.txt"]);
+}
+
+#[test]
 fn pickaxe_first_parent_diffs_merges_against_first_parent_matches_git() {
     let repo = HistoryRepo::init();
     let worktree = repo.worktree();

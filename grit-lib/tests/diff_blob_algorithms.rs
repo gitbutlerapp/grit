@@ -450,6 +450,30 @@ fn append_after_eof_without_newline_matches_git() {
 }
 
 #[test]
+#[test]
+fn numstat_matches_git_on_repeated_anchor_insertion() {
+    let anchor = "fn anchor() {\n";
+    let old = format!("{anchor}{anchor}// old body\n");
+    let mut new = String::new();
+    for i in 0..800 {
+        new.push_str(&format!("// inserted block {i}\n"));
+    }
+    new.push_str(&anchor);
+    new.push_str("// new tail\n");
+
+    for algo in [
+        LineDiffAlgo::Myers,
+        LineDiffAlgo::Minimal,
+        LineDiffAlgo::Patience,
+        LineDiffAlgo::Histogram,
+    ] {
+        let git = git_numstat(old.as_bytes(), new.as_bytes(), "f.rs", algo);
+        let grit = grit_numstat(&old, &new, algo);
+        assert_eq!(grit, git, "numstat vs git for {algo:?}");
+    }
+}
+
+#[test]
 fn histogram_no_newline_eof_context_line_matches_git_and_applies() {
     let old = b"a\nb\nc";
     let new = b"a\nx\nc";

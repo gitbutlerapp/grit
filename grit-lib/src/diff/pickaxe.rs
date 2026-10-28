@@ -41,6 +41,10 @@ impl<'a> PickaxeRenames<'a> {
     pub(crate) fn from_config(config: &'a ConfigSet) -> Self {
         Self::new(renames_from_config(config), config)
     }
+
+    pub(crate) fn config(&self) -> &'a ConfigSet {
+        self.config
+    }
 }
 
 /// Which pickaxe mode is active (`-S` or `-G`).
@@ -209,6 +213,7 @@ impl Pickaxe {
         renames: PickaxeRenames<'_>,
         blob_occurrence_cache: &mut HashMap<ObjectId, usize>,
     ) -> Result<bool> {
+        let diff_options = crate::diff::DiffOptions::from_config(renames.config());
         let odb = repo.odb();
         let entries = diff_trees_for_pathspecs(odb, parent_tree, Some(commit_tree), paths)?;
         // Rename pairing only ever combines an added path with a deleted one, so every other
@@ -217,7 +222,12 @@ impl Pickaxe {
         for entry in entries {
             if matches!(entry.status, DiffStatus::Added | DiffStatus::Deleted) {
                 unpaired.push(entry);
-            } else if self.changed_filepair_matches(odb, &entry, blob_occurrence_cache)? {
+            } else if self.changed_filepair_matches(
+                odb,
+                &entry,
+                &diff_options,
+                blob_occurrence_cache,
+            )? {
                 return Ok(true);
             }
         }
@@ -248,7 +258,7 @@ impl Pickaxe {
             None => unpaired,
         };
         for entry in &pairs {
-            if self.changed_filepair_matches(odb, entry, blob_occurrence_cache)? {
+            if self.changed_filepair_matches(odb, entry, &diff_options, blob_occurrence_cache)? {
                 return Ok(true);
             }
         }
@@ -259,12 +269,13 @@ impl Pickaxe {
         &self,
         odb: &crate::odb::Odb,
         entry: &DiffEntry,
+        diff_options: &crate::diff::DiffOptions,
         blob_occurrence_cache: &mut HashMap<ObjectId, usize>,
     ) -> Result<bool> {
         if entry.old_oid == entry.new_oid && entry.old_mode == entry.new_mode {
             return Ok(false);
         }
-        self.filepair_matches(odb, entry, blob_occurrence_cache)
+        self.filepair_matches(odb, entry, diff_options, blob_occurrence_cache)
     }
 
     /// Whether the one present side of an added or deleted `entry` holds a match by itself.
@@ -297,6 +308,7 @@ impl Pickaxe {
         &self,
         odb: &crate::odb::Odb,
         entry: &DiffEntry,
+        diff_options: &crate::diff::DiffOptions,
         blob_occurrence_cache: &mut HashMap<ObjectId, usize>,
     ) -> Result<bool> {
         match &self.kind {
@@ -333,6 +345,7 @@ impl Pickaxe {
                     &String::from_utf8_lossy(&old_bytes.data),
                     &String::from_utf8_lossy(&new_bytes.data),
                     regex,
+                    diff_options,
                 ))
             }
         }
@@ -447,17 +460,59 @@ fn blob_side(odb: &crate::odb::Odb, mode: FileMode, oid: &ObjectId) -> Result<(S
     Ok((SideBytes::from_bytes(data), binary))
 }
 
-fn line_grep_match(old_text: &str, new_text: &str, regex: &PosixEre) -> bool {
-    use similar::{ChangeTag, TextDiff};
-    let diff = TextDiff::from_lines(old_text, new_text);
-    for change in diff.iter_all_changes() {
-        let line = change.value();
-        let check = match change.tag() {
-            ChangeTag::Delete | ChangeTag::Insert => line.as_bytes(),
-            ChangeTag::Equal => continue,
-        };
-        if regex.is_match(check) {
-            return true;
+fn line_grep_match(
+    old_text: &str,
+    new_text: &str,
+    regex: &PosixEre,
+    diff_options: &crate::diff::DiffOptions,
+) -> bool {
+    use crate::diff::core::compacted_line_ops_for_options;
+    use crate::diff::unified_emit::LineSide;
+    use similar::DiffOp;
+
+    let before = LineSide::from_text(old_text);
+    let after = LineSide::from_text(new_text);
+    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
+    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+    for op in compacted_line_ops_for_options(old_text, new_text, diff_options) {
+        match op {
+            DiffOp::Equal { .. } => {}
+            DiffOp::Delete {
+                old_index, old_len, ..
+            } => {
+                for line in &old_lines[old_index..old_index + old_len] {
+                    if regex.is_match(line.as_bytes()) {
+                        return true;
+                    }
+                }
+            }
+            DiffOp::Insert {
+                new_index, new_len, ..
+            } => {
+                for line in &new_lines[new_index..new_index + new_len] {
+                    if regex.is_match(line.as_bytes()) {
+                        return true;
+                    }
+                }
+            }
+            DiffOp::Replace {
+                old_index,
+                old_len,
+                new_index,
+                new_len,
+                ..
+            } => {
+                for line in &old_lines[old_index..old_index + old_len] {
+                    if regex.is_match(line.as_bytes()) {
+                        return true;
+                    }
+                }
+                for line in &new_lines[new_index..new_index + new_len] {
+                    if regex.is_match(line.as_bytes()) {
+                        return true;
+                    }
+                }
+            }
         }
     }
     false

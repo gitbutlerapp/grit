@@ -11,7 +11,7 @@ use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::diff::merge_file;
 use grit_lib::diff::ws::ws_blank_line;
 use grit_lib::diff::{
-    anchored_unified_diff, count_changes_with_algorithm, count_git_lines, diff_commits,
+    anchored_unified_diff, count_git_lines, diff_commits,
     diff_index_to_tree, diff_index_to_worktree, diff_tree_to_worktree, diff_trees, format_raw,
     format_raw_abbrev, normalize_ignore_space_change, postprocess_diff_entries, tree_oid_of_commit,
     unified_diff_histogram_ignore_with_prefix_and_funcname,
@@ -647,7 +647,14 @@ fn pathological_pairs() -> Vec<BlobPair> {
 }
 
 pub fn grit_numstat(old: &str, new: &str, algo: LineDiffAlgo) -> (usize, usize) {
-    count_changes_with_algorithm(old, new, algo.similar_algorithm(), algo.use_git_histogram())
+    use grit_lib::diff::{count_line_changes_with_options, DiffOptions};
+    let algorithm = match algo {
+        LineDiffAlgo::Myers => grit_lib::diff::DiffAlgorithm::Myers,
+        LineDiffAlgo::Minimal => grit_lib::diff::DiffAlgorithm::Minimal,
+        LineDiffAlgo::Patience => grit_lib::diff::DiffAlgorithm::Patience,
+        LineDiffAlgo::Histogram => grit_lib::diff::DiffAlgorithm::Histogram,
+    };
+    count_line_changes_with_options(old, new, &DiffOptions::default().with_algorithm(algorithm))
 }
 
 pub fn git_numstat(old: &[u8], new: &[u8], path: &str, algo: LineDiffAlgo) -> (usize, usize) {

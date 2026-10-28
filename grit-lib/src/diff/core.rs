@@ -292,6 +292,116 @@ fn line_bodies<'a>(side: &LineSide<'a>) -> Vec<&'a str> {
     side.lines.iter().map(|l| l.body).collect()
 }
 
+/// Count insertions and deletions from compacted line diff ops (patch/stat alignment).
+#[must_use]
+fn count_diff_ops(ops: &[similar::DiffOp]) -> (usize, usize) {
+    use similar::DiffOp;
+    let mut insertions = 0usize;
+    let mut deletions = 0usize;
+    for op in ops {
+        match *op {
+            DiffOp::Equal { .. } => {}
+            DiffOp::Delete { old_len, .. } => deletions += old_len,
+            DiffOp::Insert { new_len, .. } => insertions += new_len,
+            DiffOp::Replace {
+                old_len, new_len, ..
+            } => {
+                deletions += old_len;
+                insertions += new_len;
+            }
+        }
+    }
+    (insertions, deletions)
+}
+
+/// Line alignment ops shared by unified patches, `--numstat`, and `-G`.
+pub(crate) fn compacted_line_ops_for_options(
+    old_content: &str,
+    new_content: &str,
+    options: &crate::diff::options::DiffOptions,
+) -> Vec<similar::DiffOp> {
+    use crate::diff::options::DiffAlgorithm;
+
+    let ws = options.whitespace;
+    match options.algorithm {
+        DiffAlgorithm::Histogram => {
+            histogram_compacted_line_ops(old_content, new_content, options.indent_heuristic, ws)
+        }
+        DiffAlgorithm::Patience => {
+            let before = LineSide::from_text(old_content);
+            let after = LineSide::from_text(new_content);
+            if before.is_empty() && after.is_empty() {
+                return Vec::new();
+            }
+            let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
+            let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+            let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
+            let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
+            let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+            let (changed1, changed2) =
+                git_xdiff::patience_changed_flags(&old_compare, &new_compare);
+            let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
+            diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
+                &raw,
+                diff_indent_heuristic::CompactSide {
+                    lines: &old_refs,
+                    keys: &old_compare,
+                },
+                diff_indent_heuristic::CompactSide {
+                    lines: &new_refs,
+                    keys: &new_compare,
+                },
+                options.indent_heuristic,
+                ws,
+                false,
+            )
+        }
+        DiffAlgorithm::Myers | DiffAlgorithm::Minimal => {
+            let before = LineSide::from_text(old_content);
+            let after = LineSide::from_text(new_content);
+            if before.is_empty() && after.is_empty() {
+                return Vec::new();
+            }
+            let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
+            let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
+            let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+            git_xdiff_compacted_line_ops(
+                &old_compare,
+                &new_compare,
+                &before,
+                &after,
+                options.indent_heuristic,
+                options.algorithm == DiffAlgorithm::Minimal,
+            )
+        }
+    }
+}
+
+/// Count changed lines using the same alignment as structured patches and `--numstat`.
+#[must_use]
+pub fn count_line_changes_with_options(
+    old_content: &str,
+    new_content: &str,
+    options: &crate::diff::options::DiffOptions,
+) -> (usize, usize) {
+    let ws = options.whitespace;
+    let ops = compacted_line_ops_for_options(old_content, new_content, options);
+    let (mut insertions, mut deletions) = count_diff_ops(&ops);
+    if insertions == 0
+        && deletions == 0
+        && old_content != new_content
+        && !ws.normalizes_line_compare()
+    {
+        let before = LineSide::from_text(old_content);
+        let after = LineSide::from_text(new_content);
+        for edit in line_ending_only_edits(&before, &after) {
+            insertions += edit.after_len as usize;
+            deletions += edit.before_len as usize;
+        }
+    }
+    (insertions, deletions)
+}
+
 pub(crate) fn git_xdiff_compacted_line_ops(
     old_compare: &[&str],
     new_compare: &[&str],
@@ -10770,8 +10880,7 @@ pub fn count_changes(old_content: &str, new_content: &str) -> (usize, usize) {
 
 /// Count insertions and deletions using the given line-diff algorithm.
 ///
-/// Git's `--stat` / `--numstat` follow the configured diff algorithm; this mirrors that by
-/// running [`similar::TextDiff`] with an explicit [`similar::Algorithm`].
+/// Uses the same compacted line alignment as unified patches and [`line_change_counts`].
 #[must_use]
 pub fn count_changes_with_algorithm(
     old_content: &str,
@@ -10779,31 +10888,25 @@ pub fn count_changes_with_algorithm(
     algorithm: similar::Algorithm,
     use_git_histogram: bool,
 ) -> (usize, usize) {
-    if use_git_histogram {
-        use imara_diff::{Algorithm, Diff, InternedInput};
-        let input = InternedInput::new(old_content, new_content);
-        let mut d = Diff::compute(Algorithm::Histogram, &input);
-        d.postprocess_lines(&input);
-        return (d.count_additions() as usize, d.count_removals() as usize);
-    }
-
-    use similar::{ChangeTag, TextDiff};
-
-    let diff = TextDiff::configure()
-        .algorithm(algorithm)
-        .diff_lines(old_content, new_content);
-    let mut ins = 0;
-    let mut del = 0;
-
-    for change in diff.iter_all_changes() {
-        match change.tag() {
-            ChangeTag::Insert => ins += 1,
-            ChangeTag::Delete => del += 1,
-            ChangeTag::Equal => {}
+    use crate::diff::options::{DiffAlgorithm, DiffOptions};
+    let diff_algorithm = if use_git_histogram {
+        DiffAlgorithm::Histogram
+    } else {
+        match algorithm {
+            similar::Algorithm::Myers => DiffAlgorithm::Myers,
+            similar::Algorithm::Lcs => DiffAlgorithm::Minimal,
+            similar::Algorithm::Patience => DiffAlgorithm::Patience,
+            _ => DiffAlgorithm::Myers,
         }
-    }
-
-    (ins, del)
+    };
+    count_line_changes_with_options(
+        old_content,
+        new_content,
+        &DiffOptions {
+            algorithm: diff_algorithm,
+            ..DiffOptions::default()
+        },
+    )
 }
 
 /// Count insertions and deletions using Git's histogram line-diff engine.
