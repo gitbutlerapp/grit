@@ -259,6 +259,26 @@ fn git_apply_index_tree(src: &std::path::Path, base: Option<&str>, patch: &[u8])
     git_stdout(&dst, &["write-tree"])
 }
 
+fn assert_binary_literals_nonzero(patch: &[u8], path: &str) {
+    let text = String::from_utf8_lossy(patch);
+    if !text.contains(&format!("diff --git a/{path} b/{path}")) {
+        return;
+    }
+    let in_file = text
+        .split(&format!("diff --git a/{path} b/{path}"))
+        .nth(1)
+        .unwrap_or(&text);
+    for line in in_file
+        .lines()
+        .take_while(|l| !l.starts_with("diff --git "))
+    {
+        if let Some(rest) = line.strip_prefix("literal ") {
+            let size: usize = rest.parse().expect("literal size");
+            assert!(size > 0, "literal 0 in binary patch for {path}:\n{text}");
+        }
+    }
+}
+
 fn assert_binary_patch(patch: &[u8], path: &str) {
     let text = String::from_utf8_lossy(patch);
     assert!(
@@ -367,6 +387,34 @@ fn diff_patch_text_worktree_binary_applies_with_git() {
             "git apply --index of grit diff --patch-text {args:?}"
         );
     }
+}
+
+#[test]
+fn diff_patch_text_large_binary_commit_range_applies_from_preimage_only() {
+    let dir = TempDir::new().expect("tempdir");
+    init_repo(dir.path());
+    let mut v1 = vec![0u8; 100_000];
+    for (i, b) in v1.iter_mut().enumerate() {
+        *b = (i % 251) as u8;
+    }
+    v1[1000] = 0;
+    fs::write(dir.path().join("x.bin"), &v1).expect("write");
+    git_in(dir.path(), &["add", "x.bin"]);
+    git_in(dir.path(), &["commit", "-q", "-m", "one"]);
+    let mut v2 = v1.clone();
+    v2[5000] = v2[5000].wrapping_add(1);
+    fs::write(dir.path().join("x.bin"), &v2).expect("write");
+    git_in(dir.path(), &["add", "x.bin"]);
+    git_in(dir.path(), &["commit", "-q", "-m", "two"]);
+
+    let patch = grit_patch_text(dir.path(), &["HEAD~1..HEAD"]);
+    assert_binary_patch(&patch, "x.bin");
+    assert_binary_literals_nonzero(&patch, "x.bin");
+    let want = git_stdout(dir.path(), &["rev-parse", "HEAD^{tree}"]);
+    assert_eq!(
+        git_apply_index_tree(dir.path(), Some("HEAD~1"), &patch),
+        want
+    );
 }
 
 #[test]

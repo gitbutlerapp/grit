@@ -253,10 +253,76 @@ fn show_patch_text_binary_git_apply_check() {
     let patch = grit_patch_stdout(dir.path(), &["show", "--patch-text", "HEAD"]);
     let text = String::from_utf8_lossy(&patch);
     assert!(
-        text.contains("GIT binary patch") || text.contains("index "),
-        "expected binary patch section, got:\n{text}"
+        text.contains("GIT binary patch"),
+        "expected GIT binary patch section, got:\n{text}"
     );
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("literal ") {
+            let size: usize = rest.parse().expect("literal size");
+            assert!(size > 0, "literal 0 in show binary patch:\n{text}");
+        }
+    }
     git_apply_check_reverse(dir.path(), &patch);
+}
+
+#[test]
+fn show_patch_text_large_binary_applies_from_preimage_only() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    git_in(root, &["init", "-q", "-b", "main"]);
+    git_in(root, &["config", "user.email", "t@example.com"]);
+    git_in(root, &["config", "user.name", "Test"]);
+    let mut v1 = vec![0u8; 100_000];
+    for (i, b) in v1.iter_mut().enumerate() {
+        *b = (i % 251) as u8;
+    }
+    v1[1000] = 0;
+    fs::write(root.join("x.bin"), &v1).expect("write");
+    git_in(root, &["add", "x.bin"]);
+    git_in(root, &["commit", "-q", "-m", "one"]);
+    let mut v2 = v1.clone();
+    v2[5000] = v2[5000].wrapping_add(9);
+    fs::write(root.join("x.bin"), &v2).expect("write");
+    git_in(root, &["add", "x.bin"]);
+    git_in(root, &["commit", "-q", "-m", "two"]);
+
+    let patch = grit_patch_stdout(root, &["show", "--patch-text", "HEAD"]);
+    let text = String::from_utf8_lossy(&patch);
+    assert!(text.contains("GIT binary patch"), "got:\n{text}");
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("literal ") {
+            let size: usize = rest.parse().expect("literal size");
+            assert!(size > 0, "literal 0 in show patch:\n{text}");
+        }
+    }
+
+    let scratch = TempDir::new().expect("tempdir");
+    git_in(scratch.path(), &["init", "-q"]);
+    let blob = Command::new("git")
+        .current_dir(root)
+        .args(["show", "HEAD~1:x.bin"])
+        .output()
+        .expect("git show");
+    assert!(blob.status.success());
+    fs::write(scratch.path().join("x.bin"), &blob.stdout).expect("preimage");
+    git_in(scratch.path(), &["add", "x.bin"]);
+    fs::write(scratch.path().join("p.diff"), &patch).expect("patch");
+    git_in(scratch.path(), &["apply", "--index", "p.diff"]);
+    let got = Command::new("git")
+        .current_dir(scratch.path())
+        .arg("write-tree")
+        .output()
+        .expect("write-tree");
+    assert!(got.status.success());
+    let want = Command::new("git")
+        .current_dir(root)
+        .args(["rev-parse", "HEAD^{tree}"])
+        .output()
+        .expect("rev-parse");
+    assert_eq!(
+        String::from_utf8_lossy(&got.stdout).trim(),
+        String::from_utf8_lossy(&want.stdout).trim()
+    );
 }
 
 fn grit_patch_redirected_stdout(dir: &std::path::Path, args: &[&str]) -> Vec<u8> {

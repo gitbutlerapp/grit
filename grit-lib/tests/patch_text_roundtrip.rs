@@ -470,6 +470,77 @@ fn write_patch_resolved_worktree_side_needs_work_tree() {
     );
 }
 
+/// Issue #2244: `literal 0` must not appear when the blob is non-empty.
+fn assert_binary_literals_nonzero(patch: &[u8], path: &str) {
+    let text = std::str::from_utf8(patch).expect("utf8 patch");
+    if !text.contains(&format!("diff --git a/{path} b/{path}")) {
+        return;
+    }
+    let in_file = text
+        .split(&format!("diff --git a/{path} b/{path}"))
+        .nth(1)
+        .unwrap_or(text);
+    for line in in_file
+        .lines()
+        .take_while(|l| !l.starts_with("diff --git "))
+    {
+        if let Some(rest) = line.strip_prefix("literal ") {
+            let size: usize = rest.parse().expect("literal size");
+            assert!(size > 0, "literal 0 in binary patch for {path}:\n{text}");
+        }
+    }
+}
+
+fn git_apply_preimage_only(src: &std::path::Path, base: &str, rel: &str, patch: &[u8]) -> ObjectId {
+    let scratch = TempDir::new().expect("tempdir");
+    git_in(
+        scratch.path(),
+        &["init", "-q", "--initial-branch=main", "."],
+    );
+    let blob = Command::new("git")
+        .current_dir(src)
+        .args(["show", &format!("{base}:{rel}")])
+        .output()
+        .expect("git show blob");
+    assert!(blob.status.success(), "git show {base}:{rel}");
+    if let Some(parent) = scratch.path().join(rel).parent() {
+        std::fs::create_dir_all(parent).expect("mkdir");
+    }
+    std::fs::write(scratch.path().join(rel), &blob.stdout).expect("write preimage");
+    git_in(scratch.path(), &["add", rel]);
+    std::fs::write(scratch.path().join("p.diff"), patch).expect("write patch");
+    git_in(scratch.path(), &["apply", "--index", "p.diff"]);
+    ObjectId::from_hex(&git_out(scratch.path(), &["write-tree"])).expect("tree")
+}
+
+#[test]
+fn large_binary_commit_patch_applies_from_preimage_only() {
+    let dir = TempDir::new().expect("tempdir");
+    git_in(dir.path(), &["init", "-q", "--initial-branch=main", "."]);
+    let mut v1 = vec![0u8; 100_000];
+    for (i, b) in v1.iter_mut().enumerate() {
+        *b = (i % 251) as u8;
+    }
+    v1[1000] = 0;
+    std::fs::write(dir.path().join("x.bin"), &v1).unwrap();
+    git_in(dir.path(), &["add", "x.bin"]);
+    git_in(dir.path(), &["commit", "-q", "-m", "one"]);
+    let mut v2 = v1.clone();
+    v2[5000] = v2[5000].wrapping_add(42);
+    std::fs::write(dir.path().join("x.bin"), &v2).unwrap();
+    git_in(dir.path(), &["add", "x.bin"]);
+    git_in(dir.path(), &["commit", "-q", "-m", "two"]);
+
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).expect("open");
+    let patch = grit_patch_structured(&repo, "HEAD~1", "HEAD");
+    assert_binary_literals_nonzero(&patch, "x.bin");
+    let want = git_tree(dir.path(), "HEAD");
+    assert_eq!(
+        git_apply_preimage_only(dir.path(), "HEAD~1", "x.bin", &patch),
+        want
+    );
+}
+
 #[test]
 fn patch_text_roundtrip_fixtures() {
     let dir = TempDir::new().expect("tempdir");

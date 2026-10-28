@@ -400,9 +400,27 @@ pub(crate) fn treat_side_as_binary_without_reading(
     Ok(true)
 }
 
+/// Classify blob bytes for diffing after inflation.
+///
+/// When `retain_binary_payload` is false, binary sides drop payload bytes (line diffs stay lean).
+/// When true (patch-text / `--binary` emission), payload is kept and `binary` is still set.
+pub(crate) fn side_bytes_after_blob_read(
+    data: Vec<u8>,
+    retain_binary_payload: bool,
+) -> (SideBytes, bool) {
+    let binary = data.iter().take(8000).any(|&b| b == 0);
+    if binary && !retain_binary_payload {
+        (SideBytes::from_bytes(Vec::new()), true)
+    } else {
+        (SideBytes::from_bytes(data), binary)
+    }
+}
+
 /// Load ODB blob bytes for diffing, skipping inflation when over `core.bigFileThreshold`.
 ///
-/// Returns empty [`SideBytes`] with `binary = true` when content is not read.
+/// Returns empty [`SideBytes`] with `binary = true` when content is not read. When
+/// `force_read_content` is true, large blobs are inflated and binary payload bytes are retained
+/// (for `GIT binary patch` / `git apply`).
 ///
 /// # Errors
 ///
@@ -429,7 +447,7 @@ pub fn load_odb_blob_side_for_diff(
     #[cfg(test)]
     odb.hot_path_metrics().record_blob_content_read();
     let data = odb.read(oid)?.data;
-    Ok(bytes_for_diff(data))
+    Ok(side_bytes_after_blob_read(data, force_read_content))
 }
 
 /// Classify raw blob bytes for line diffs (NUL in the first 8 KiB ⇒ binary).

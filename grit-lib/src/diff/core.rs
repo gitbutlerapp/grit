@@ -6898,6 +6898,8 @@ pub fn read_worktree_side_bytes_for_diff(
 /// Load worktree bytes for diffing, optionally skipping reads above `core.bigFileThreshold`.
 ///
 /// Returns empty [`super::structured::SideBytes`] with `binary = true` when the file is not read.
+/// When `force_read_content` is true, large files are read and binary payload bytes are retained
+/// (for `GIT binary patch` / `git apply`).
 ///
 /// # Errors
 ///
@@ -6913,7 +6915,7 @@ pub fn load_worktree_side_for_diff(
     worktree_rules: Option<&crate::worktree_rules::WorktreeRules>,
     force_read_content: bool,
 ) -> Result<(super::structured::SideBytes, bool)> {
-    use super::tree_content::{bytes_for_diff, treat_side_as_binary_without_reading};
+    use super::tree_content::{side_bytes_after_blob_read, treat_side_as_binary_without_reading};
     let file_path = crate::repo_relpath::worktree_abs(work_tree, rel_path);
     let rel_match = crate::repo_relpath::as_utf8_for_matching(rel_path);
     let meta = fs::symlink_metadata(&file_path).map_err(|source| {
@@ -6968,7 +6970,7 @@ pub fn load_worktree_side_for_diff(
             None,
         )?
     };
-    Ok(bytes_for_diff(data))
+    Ok(side_bytes_after_blob_read(data, force_read_content))
 }
 
 /// Symlink target as the byte string Git hashes for the blob OID.
