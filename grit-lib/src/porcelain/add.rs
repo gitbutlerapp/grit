@@ -5,7 +5,7 @@
 //! that full [`super::status::status`] requires.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -29,8 +29,9 @@ use crate::path_icase::{
 };
 use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
 use crate::pathspec::{
-    exact_literal_pathspec_set, has_glob_chars, pathspec_is_exclude, sorted_paths_match_pathspec,
-    PathspecListMatcher,
+    context_from_mode_bits, exact_literal_pathspec_set, has_glob_chars,
+    matches_pathspec_list_with_context, pathspec_is_exclude, sorted_paths_match_pathspec,
+    PathspecMatchContext,
 };
 use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::porcelain::index_mode::{
@@ -305,12 +306,74 @@ fn normalized_staging_pathspecs(pathspecs: &[String]) -> Cow<'_, [String]> {
     }
 }
 
+fn staging_pathspec_context_for_mode(
+    base: PathspecMatchContext,
+    mode: u32,
+) -> PathspecMatchContext {
+    let from_mode = context_from_mode_bits(mode);
+    PathspecMatchContext {
+        is_directory: from_mode.is_directory,
+        is_git_submodule: from_mode.is_git_submodule,
+        precompose_paths: base.precompose_paths,
+    }
+}
+
+fn index_path_matches_staging_pathspecs(
+    path: &str,
+    mode: u32,
+    pathspecs: &[String],
+    base_ctx: PathspecMatchContext,
+) -> bool {
+    matches_pathspec_list_with_context(
+        path,
+        pathspecs,
+        staging_pathspec_context_for_mode(base_ctx, mode),
+    )
+}
+
+fn worktree_path_matches_staging_pathspecs(
+    path: &str,
+    pathspecs: &[String],
+    base_ctx: PathspecMatchContext,
+) -> bool {
+    matches_pathspec_list_with_context(path, pathspecs, base_ctx)
+}
+
+fn staging_index_path_modes(index: &Index) -> HashMap<Vec<u8>, u32> {
+    let mut modes = HashMap::new();
+    for entry in &index.entries {
+        if entry.stage() == 0 {
+            modes.insert(entry.path.clone(), entry.mode);
+        }
+    }
+    for entry in &index.entries {
+        modes.entry(entry.path.clone()).or_insert(entry.mode);
+    }
+    modes
+}
+
+fn staging_path_matches(
+    path: &str,
+    index_path_modes: &HashMap<Vec<u8>, u32>,
+    pathspecs: &[String],
+    base_ctx: PathspecMatchContext,
+) -> bool {
+    if pathspecs.is_empty() {
+        return true;
+    }
+    if let Some(&mode) = index_path_modes.get(path.as_bytes()) {
+        index_path_matches_staging_pathspecs(path, mode, pathspecs, base_ctx)
+    } else {
+        worktree_path_matches_staging_pathspecs(path, pathspecs, base_ctx)
+    }
+}
+
 fn restricted_index_paths_for_pathspecs(
     index: &Index,
     pathspecs: &[String],
-    ctx: crate::pathspec::PathspecMatchContext,
+    base_ctx: PathspecMatchContext,
 ) -> BTreeSet<String> {
-    if let Some(exact) = exact_literal_pathspec_set(pathspecs, ctx) {
+    if let Some(exact) = exact_literal_pathspec_set(pathspecs, base_ctx) {
         if exact.iter().all(|p| {
             index
                 .get(p.as_bytes(), 0)
@@ -319,23 +382,13 @@ fn restricted_index_paths_for_pathspecs(
             return exact;
         }
     }
-    let matcher = PathspecListMatcher::new(pathspecs, ctx);
-    let mut paths: BTreeSet<String> = index
-        .entries
-        .iter()
-        .filter(|e| e.stage() == 0)
-        .filter_map(|e| std::str::from_utf8(&e.path).ok())
-        .filter(|p| matcher.matches(p))
-        .map(str::to_owned)
-        .collect();
+    let mut paths = BTreeSet::new();
     for entry in &index.entries {
-        if entry.stage() == 0 {
+        let Ok(path) = std::str::from_utf8(&entry.path) else {
             continue;
-        }
-        if let Ok(path) = std::str::from_utf8(&entry.path) {
-            if matcher.matches(path) {
-                paths.insert(path.to_owned());
-            }
+        };
+        if index_path_matches_staging_pathspecs(path, entry.mode, pathspecs, base_ctx) {
+            paths.insert(path.to_owned());
         }
     }
     paths
@@ -454,14 +507,7 @@ fn stage_inner_on_index(
     let mut icase_map = Stage0IcasePathMap::from_index(index, ignorecase);
 
     let staging_pathspecs = normalized_staging_pathspecs(&opts.pathspecs);
-    let mut pathspec_ctx = repo.pathspec_match_context();
-    if staging_pathspecs
-        .iter()
-        .any(|s| s.ends_with('/') && !pathspec_is_exclude(s))
-    {
-        pathspec_ctx.is_directory = true;
-    }
-    let pathspec_matcher = PathspecListMatcher::new(staging_pathspecs.as_ref(), pathspec_ctx);
+    let pathspec_ctx = repo.pathspec_match_context();
     let staging_thresholds = opts.staging_thresholds.unwrap_or_default();
     let use_tracked_scan = tracked_scan && !index.entries.is_empty() && !opts.dry_run;
     let restrict_to_paths = if staging_pathspecs.is_empty() {
@@ -593,7 +639,15 @@ fn stage_inner_on_index(
         }
     }
 
-    let matches = |path: &str| staging_pathspecs.is_empty() || pathspec_matcher.matches(path);
+    let index_path_modes = staging_index_path_modes(index);
+    let matches = |path: &str| {
+        staging_path_matches(
+            path,
+            &index_path_modes,
+            staging_pathspecs.as_ref(),
+            pathspec_ctx,
+        )
+    };
 
     if opts.intent_to_add {
         let mut outcome = stage_intent_to_add_paths(
@@ -3364,6 +3418,43 @@ mod tests {
             assert_eq!(entry.oid, theirs_oid);
             assert_ne!(entry.oid, empty_blob_oid());
         }
+    }
+
+    #[test]
+    fn stage_trailing_slash_pathspec_does_not_leak_directory_context_to_files() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::create_dir_all(root.join("sub")).unwrap();
+        fs::write(root.join("foo"), b"old foo\n").unwrap();
+        fs::write(root.join("sub/a"), b"old sub\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+        fs::write(root.join("foo"), b"new foo\n").unwrap();
+        fs::write(root.join("sub/a"), b"new sub\n").unwrap();
+
+        let outcome = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec![
+                    ".".to_owned(),
+                    "sub/".to_owned(),
+                    ":(exclude)foo/*".to_owned(),
+                ],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+        let mut modified = outcome.modified;
+        modified.sort_unstable();
+        assert_eq!(modified, vec!["foo", "sub/a"]);
     }
 
     #[test]
