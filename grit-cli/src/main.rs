@@ -313,6 +313,21 @@ enum GcAction {
         #[arg(long = "dry-run")]
         dry_run: bool,
     },
+    /// Drop large blobs a promisor remote can supply again and nothing needed recently.
+    #[command(name = "drop-large-blobs")]
+    DropLargeBlobs {
+        /// Drop blobs at least this big, such as `1m` (default:
+        /// `maintenance.drop-large-blobs.minSize`, else the promisor's `blob:limit`, else 1m).
+        #[arg(long = "min-size", value_name = "SIZE")]
+        min_size: Option<String>,
+        /// Keep blobs needed since this date (Git approxidate; `now` keeps none for
+        /// recency). Default: `maintenance.drop-large-blobs.expire`, else `2.weeks.ago`.
+        #[arg(long = "older-than", value_name = "DATE")]
+        older_than: Option<String>,
+        /// List the blobs that would be dropped without changing anything.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
 }
 
 /// Subcommands of `grit ignore`.
@@ -3344,6 +3359,18 @@ fn dispatch(
                         configure_lop,
                         dry_run: dry_run || sub_dry,
                     },
+                    quiet,
+                    mode,
+                    ctx.now,
+                )?,
+                Some(GcAction::DropLargeBlobs {
+                    min_size,
+                    older_than,
+                    dry_run: sub_dry,
+                }) => commands::gc::run_drop_large_blobs(
+                    min_size.as_deref(),
+                    older_than.as_deref(),
+                    dry_run || sub_dry,
                     quiet,
                     mode,
                     ctx.now,

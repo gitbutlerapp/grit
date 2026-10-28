@@ -2,6 +2,115 @@
   "$id": "https://grit-scm.com/schemas/gc.commit-graph/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "DropLargeBlobsKeptJson": {
+      "description": "Why candidate blobs stayed (each counted once, under the first reason that applies).",
+      "properties": {
+        "checked_out": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "kept_pack": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "not_promised_elsewhere": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "outside_promisor_packs": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "recently_checked_out": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "recently_fetched": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "checked_out",
+        "kept_pack",
+        "not_promised_elsewhere",
+        "outside_promisor_packs",
+        "recently_checked_out",
+        "recently_fetched"
+      ],
+      "type": "object"
+    },
+    "DropSkipReason": {
+      "description": "Why `grit gc` skipped the drop-large-blobs phase.",
+      "oneOf": [
+        {
+          "description": "The task is not enabled, or `expire` is `never`.",
+          "enum": [
+            "disabled"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The repository has no promisor remote.",
+          "enum": [
+            "no-promisor-remote"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A merge, rebase, cherry-pick, revert, am or bisect is in progress.",
+          "enum": [
+            "operation-in-progress"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "`extensions.preciousObjects` is set.",
+          "enum": [
+            "precious-objects"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "gc was given no current time to measure recency against.",
+          "enum": [
+            "no-current-time"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A reason this version of grit does not know.",
+          "enum": [
+            "other"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "DroppedBlobJson": {
+      "description": "One dropped blob.",
+      "properties": {
+        "oid": {
+          "type": "string"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "oid",
+        "size"
+      ],
+      "type": "object"
+    },
     "GcAutoReport": {
       "description": "What `grit gc --auto` decided (JSON uses a `status` discriminator).",
       "oneOf": [
@@ -499,6 +608,103 @@
             "remote",
             "skipped_checked_out",
             "skipped_kept_pack",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "`grit gc drop-large-blobs` results (see `content/docs/commands/gc.md`).",
+          "properties": {
+            "blobs": {
+              "description": "The dropped blobs, sorted by id.",
+              "items": {
+                "$ref": "#/definitions/DroppedBlobJson"
+              },
+              "type": "array"
+            },
+            "bytes_reclaimed": {
+              "description": "Bytes freed (on a dry run, an estimate).",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "candidates": {
+              "description": "Blobs stored in promisor packs at or above `min_size`.",
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "dropped": {
+              "description": "Blobs dropped (on a dry run, that would be).",
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "duration_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "keep_newer_than": {
+              "description": "Blobs needed at or after this time (Unix seconds) stayed; absent: no recency window.",
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "kept": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/DropLargeBlobsKeptJson"
+                }
+              ],
+              "description": "Candidates kept, by reason."
+            },
+            "min_size": {
+              "description": "Blobs at least this many bytes were candidates.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "packs_removed": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "packs_rewritten": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "skipped": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DropSkipReason"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why `grit gc` skipped the phase."
+            },
+            "task": {
+              "enum": [
+                "drop-large-blobs"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "blobs",
+            "bytes_reclaimed",
+            "candidates",
+            "dropped",
+            "duration_ms",
+            "kept",
+            "min_size",
+            "packs_removed",
+            "packs_rewritten",
             "task"
           ],
           "type": "object"

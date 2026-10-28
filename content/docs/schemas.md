@@ -34,8 +34,10 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `fsck` | [v1](/schemas/fsck/v1.json) |
 | `gc` | [v1](/schemas/gc/v1.json) |
 | `gc.commit-graph` | [v1](/schemas/gc.commit-graph/v1.json) |
+| `gc.drop-large-blobs` | [v1](/schemas/gc.drop-large-blobs/v1.json) |
 | `gc.midx` | [v1](/schemas/gc.midx/v1.json) |
 | `gc.pack-refs` | [v1](/schemas/gc.pack-refs/v1.json) |
+| `gc.offload` | [v1](/schemas/gc.offload/v1.json) |
 | `gc.prune` | [v1](/schemas/gc.prune/v1.json) |
 | `gc.repack` | [v1](/schemas/gc.repack/v1.json) |
 | `history.absorb` | [v1](/schemas/history.absorb/v1.json) |

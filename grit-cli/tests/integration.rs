@@ -257,6 +257,8 @@ mod fsck_cli;
 #[cfg(feature = "full-tests")]
 #[path = "gc_auto.rs"]
 mod gc_auto;
+#[path = "gc_drop_large_blobs.rs"]
+mod gc_drop_large_blobs;
 #[cfg(feature = "full-tests")]
 #[path = "gc_roundtrip.rs"]
 mod gc_roundtrip;

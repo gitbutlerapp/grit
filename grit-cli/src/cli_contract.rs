@@ -268,6 +268,14 @@ const COMMAND_CONTRACTS: &[(&str, CommandContract)] = &[
         },
     ),
     (
+        "gc.drop-large-blobs",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
         "gc.prune",
         CommandContract {
             kind: CommandKind::Mutation,

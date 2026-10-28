@@ -6,10 +6,11 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::Result;
 use grit_lib::config::git_date::approx::approxidate_careful_at;
 use grit_lib::maintenance::{
-    auto_gc_needed, gc, gc_auto, offload_blobs, pack_refs, prune_loose_objects, repack_all,
-    write_commit_graph, write_midx, AutoGcOutcome, AutoGcReason, CommitGraphOptions, GcLock,
-    GcOptions, GcPhaseTimings, GcStats, MidxOptions, OffloadOptions, OffloadRepo, OffloadReport,
-    PackRefsOptions, PruneOptions, RepackOptions,
+    auto_gc_needed, drop_promised_blobs, gc, gc_auto, offload_blobs, pack_refs,
+    prune_loose_objects, repack_all, write_commit_graph, write_midx, AutoGcOutcome, AutoGcReason,
+    CommitGraphOptions, DropExpiry, DropPromisedBlobsOptions, DropPromisedBlobsReport,
+    DropPromisedBlobsSkip, GcLock, GcOptions, GcPhaseTimings, GcStats, MidxOptions, OffloadOptions,
+    OffloadRepo, OffloadReport, PackRefsOptions, PruneOptions, RepackOptions,
 };
 use grit_lib::objects::midx::MidxBitmapWriteOutcome;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
@@ -192,6 +193,254 @@ pub enum GcTaskReport {
         #[serde(flatten)]
         report: OffloadSummary,
     },
+    DropLargeBlobs {
+        duration_ms: u64,
+        #[serde(flatten)]
+        report: DropLargeBlobsSummary,
+    },
+}
+
+/// `grit gc drop-large-blobs` results (see `content/docs/commands/gc.md`).
+#[derive(Serialize, JsonSchema)]
+pub struct DropLargeBlobsSummary {
+    /// Blobs at least this many bytes were candidates.
+    pub min_size: u64,
+    /// Blobs needed at or after this time (Unix seconds) stayed; absent: no recency window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keep_newer_than: Option<i64>,
+    /// Blobs stored in promisor packs at or above `min_size`.
+    pub candidates: usize,
+    /// Blobs dropped (on a dry run, that would be).
+    pub dropped: usize,
+    /// Bytes freed (on a dry run, an estimate).
+    pub bytes_reclaimed: u64,
+    pub packs_rewritten: usize,
+    pub packs_removed: usize,
+    /// Candidates kept, by reason.
+    pub kept: DropLargeBlobsKeptJson,
+    /// The dropped blobs, sorted by id.
+    pub blobs: Vec<DroppedBlobJson>,
+    /// Why `grit gc` skipped the phase.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<DropSkipReason>,
+}
+
+/// Why `grit gc` skipped the drop-large-blobs phase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum DropSkipReason {
+    /// The task is not enabled, or `expire` is `never`.
+    Disabled,
+    /// The repository has no promisor remote.
+    NoPromisorRemote,
+    /// A merge, rebase, cherry-pick, revert, am or bisect is in progress.
+    OperationInProgress,
+    /// `extensions.preciousObjects` is set.
+    PreciousObjects,
+    /// gc was given no current time to measure recency against.
+    NoCurrentTime,
+    /// A reason this version of grit does not know.
+    Other,
+}
+
+impl From<DropPromisedBlobsSkip> for DropSkipReason {
+    fn from(skip: DropPromisedBlobsSkip) -> Self {
+        match skip {
+            DropPromisedBlobsSkip::Disabled => Self::Disabled,
+            DropPromisedBlobsSkip::NoPromisorRemote => Self::NoPromisorRemote,
+            DropPromisedBlobsSkip::OperationInProgress(_) => Self::OperationInProgress,
+            DropPromisedBlobsSkip::PreciousObjects => Self::PreciousObjects,
+            DropPromisedBlobsSkip::NoCurrentTime => Self::NoCurrentTime,
+            _ => Self::Other,
+        }
+    }
+}
+
+impl DropSkipReason {
+    /// The JSON value, for Markdown output.
+    fn label(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::NoPromisorRemote => "no-promisor-remote",
+            Self::OperationInProgress => "operation-in-progress",
+            Self::PreciousObjects => "precious-objects",
+            Self::NoCurrentTime => "no-current-time",
+            Self::Other => "other",
+        }
+    }
+
+    /// Human wording.
+    fn describe(self) -> &'static str {
+        match self {
+            Self::Disabled => "the task is not enabled",
+            Self::NoPromisorRemote => "the repository has no promisor remote",
+            Self::OperationInProgress => "an operation is in progress",
+            Self::PreciousObjects => "extensions.preciousObjects is set",
+            Self::NoCurrentTime => "no current time was given",
+            Self::Other => "for a reason this grit does not know",
+        }
+    }
+}
+
+/// Why candidate blobs stayed (each counted once, under the first reason that applies).
+#[derive(Serialize, JsonSchema)]
+pub struct DropLargeBlobsKeptJson {
+    pub kept_pack: usize,
+    pub outside_promisor_packs: usize,
+    pub checked_out: usize,
+    pub recently_checked_out: usize,
+    pub recently_fetched: usize,
+    pub not_promised_elsewhere: usize,
+}
+
+/// One dropped blob.
+#[derive(Serialize, JsonSchema)]
+pub struct DroppedBlobJson {
+    pub oid: String,
+    pub size: u64,
+}
+
+impl From<DropPromisedBlobsReport> for DropLargeBlobsSummary {
+    fn from(r: DropPromisedBlobsReport) -> Self {
+        Self {
+            min_size: r.min_size,
+            keep_newer_than: r.keep_newer_than.map(OffsetDateTime::unix_timestamp),
+            candidates: r.candidates,
+            dropped: r.dropped.len(),
+            bytes_reclaimed: r.bytes_reclaimed,
+            packs_rewritten: r.packs_rewritten,
+            packs_removed: r.packs_removed,
+            kept: DropLargeBlobsKeptJson {
+                kept_pack: r.kept.kept_pack,
+                outside_promisor_packs: r.kept.outside_promisor_packs,
+                checked_out: r.kept.checked_out,
+                recently_checked_out: r.kept.recently_checked_out,
+                recently_fetched: r.kept.recently_fetched,
+                not_promised_elsewhere: r.kept.not_promised_elsewhere,
+            },
+            blobs: r
+                .dropped
+                .iter()
+                .map(|b| DroppedBlobJson {
+                    oid: b.oid.to_hex(),
+                    size: b.size,
+                })
+                .collect(),
+            skipped: r.skipped.map(DropSkipReason::from),
+        }
+    }
+}
+
+impl DropLargeBlobsSummary {
+    /// `1 checked out, 2 recently fetched`, listing only reasons that kept something.
+    fn kept_reasons(&self) -> String {
+        let k = &self.kept;
+        [
+            (k.checked_out, "checked out"),
+            (k.recently_checked_out, "recently checked out"),
+            (k.recently_fetched, "recently fetched"),
+            (
+                k.outside_promisor_packs,
+                "also stored outside promisor packs",
+            ),
+            (k.not_promised_elsewhere, "not promised by a promisor pack"),
+            (k.kept_pack, "in kept packs"),
+        ]
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, why)| format!("{n} {why}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+    }
+
+    fn render_human(&self, w: &mut dyn Write, duration_ms: u64, dry_run: bool) -> Result<()> {
+        if let Some(reason) = self.skipped {
+            let why = reason.describe();
+            outln!(w, "drop-large-blobs: skipped, {why} ({duration_ms} ms).");
+            return Ok(());
+        }
+        let kept = self.kept_reasons();
+        let kept = if kept.is_empty() {
+            String::new()
+        } else {
+            format!(" (kept: {kept})")
+        };
+        let threshold = format_bytes(self.min_size);
+        if self.dropped == 0 {
+            outln!(
+                w,
+                "drop-large-blobs: nothing to drop, {} {} >= {threshold}{kept} ({duration_ms} ms).",
+                self.candidates,
+                if self.candidates == 1 {
+                    "candidate"
+                } else {
+                    "candidates"
+                }
+            );
+            return Ok(());
+        }
+        let noun = if self.dropped == 1 { "blob" } else { "blobs" };
+        if dry_run {
+            outln!(
+                w,
+                "drop-large-blobs: would drop {} promised {noun} >= {threshold}, about {}{kept} ({duration_ms} ms).",
+                self.dropped,
+                format_bytes(self.bytes_reclaimed)
+            );
+            for blob in &self.blobs {
+                outln!(w, "  {} {}", blob.oid, blob.size);
+            }
+        } else {
+            outln!(
+                w,
+                "drop-large-blobs: dropped {} promised {noun} >= {threshold}, reclaimed {}{kept} ({duration_ms} ms).",
+                self.dropped,
+                format_bytes(self.bytes_reclaimed)
+            );
+        }
+        Ok(())
+    }
+
+    fn render_markdown_fields(&self, w: &mut dyn Write) -> Result<()> {
+        if let Some(reason) = self.skipped {
+            outln!(w, "- **skipped:** {}", reason.label());
+        }
+        outln!(w, "- **min_size:** {}", self.min_size);
+        if let Some(cutoff) = self.keep_newer_than {
+            outln!(w, "- **keep_newer_than:** {cutoff}");
+        }
+        outln!(w, "- **candidates:** {}", self.candidates);
+        outln!(w, "- **dropped:** {}", self.dropped);
+        outln!(w, "- **bytes_reclaimed:** {}", self.bytes_reclaimed);
+        outln!(w, "- **packs_rewritten:** {}", self.packs_rewritten);
+        outln!(w, "- **packs_removed:** {}", self.packs_removed);
+        let k = &self.kept;
+        outln!(w, "- **kept_checked_out:** {}", k.checked_out);
+        outln!(
+            w,
+            "- **kept_recently_checked_out:** {}",
+            k.recently_checked_out
+        );
+        outln!(w, "- **kept_recently_fetched:** {}", k.recently_fetched);
+        outln!(
+            w,
+            "- **kept_outside_promisor_packs:** {}",
+            k.outside_promisor_packs
+        );
+        outln!(
+            w,
+            "- **kept_not_promised_elsewhere:** {}",
+            k.not_promised_elsewhere
+        );
+        outln!(w, "- **kept_pack:** {}", k.kept_pack);
+        if !self.blobs.is_empty() {
+            outln!(w, "\n| oid | size |\n| --- | ---: |");
+            for blob in &self.blobs {
+                outln!(w, "| `{}` | {} |", blob.oid, blob.size);
+            }
+        }
+        Ok(())
+    }
 }
 
 /// `grit gc offload` results (see `content/docs/commands/gc.md`).
@@ -605,6 +854,10 @@ impl GcTaskReport {
                 duration_ms,
                 report,
             } => report.render_human(w, *duration_ms, dry_run)?,
+            Self::DropLargeBlobs {
+                duration_ms,
+                report,
+            } => report.render_human(w, *duration_ms, dry_run)?,
         }
         Ok(())
     }
@@ -692,6 +945,15 @@ impl GcTaskReport {
                 report.render_markdown_fields(w)?;
                 outln!(w);
             }
+            Self::DropLargeBlobs {
+                duration_ms,
+                report,
+            } => {
+                outln!(w, "#### drop-large-blobs\n");
+                outln!(w, "- **duration_ms:** {duration_ms}");
+                report.render_markdown_fields(w)?;
+                outln!(w);
+            }
         }
         Ok(())
     }
@@ -739,6 +1001,16 @@ fn tasks_from_gc_stats(stats: GcStats, timings: GcPhaseTimings) -> Vec<GcTaskRep
             duration_ms: timings.prune_ms,
             pruned: stats.prune.pruned,
             kept: stats.prune.kept,
+        });
+    }
+    // The phase is opt-in; a disabled one is not worth a line.
+    if let Some(report) = stats
+        .drop_large_blobs
+        .filter(|r| r.skipped != Some(DropPromisedBlobsSkip::Disabled))
+    {
+        tasks.push(GcTaskReport::DropLargeBlobs {
+            duration_ms: timings.drop_large_blobs_ms,
+            report: report.into(),
         });
     }
     if let Some(graph) = stats.commit_graph {
@@ -1062,6 +1334,60 @@ pub fn run_offload(
         dry_run: args.dry_run,
         auto: None,
         tasks: vec![GcTaskReport::Offload {
+            duration_ms: elapsed.as_millis() as u64,
+            report: report.into(),
+        }],
+    })
+}
+
+/// `grit gc drop-large-blobs`: drop large promised blobs not needed recently.
+///
+/// Starts from `maintenance.drop-large-blobs.*`; `--min-size` and `--older-than` override
+/// them. Unlike the `grit gc` phase, this runs even when the task is not enabled.
+pub fn run_drop_large_blobs(
+    min_size: Option<&str>,
+    older_than: Option<&str>,
+    dry_run: bool,
+    quiet: bool,
+    mode: OutputMode,
+    now: OffsetDateTime,
+) -> Result<GcOutcome> {
+    let repo = context::discover()?;
+    let config = repo.config().map_err(crate::json_error::map_lib_error)?;
+    let min_size = min_size
+        .map(|size| {
+            ObjectFilterSpec::from_blobs_cli(size)
+                .ok()
+                .and_then(|f| f.blob_limit_bytes())
+                .ok_or_else(|| anyhow::anyhow!("invalid --min-size value: '{size}'"))
+        })
+        .transpose()?;
+    let expiry = older_than
+        .map(|spec| {
+            DropExpiry::parse(spec, now)
+                .ok_or_else(|| anyhow::anyhow!("invalid date for --older-than: '{spec}'"))
+        })
+        .transpose()?;
+    let Some(mut opts) =
+        DropPromisedBlobsOptions::from_config_with_overrides(&config, now, min_size, expiry)
+            .map_err(crate::json_error::map_lib_error)?
+    else {
+        if older_than.is_some() {
+            anyhow::bail!("--older-than never keeps every blob; nothing to drop");
+        }
+        anyhow::bail!(
+            "maintenance.drop-large-blobs.expire is 'never'; give --older-than to run anyway"
+        );
+    };
+    opts.dry_run = dry_run;
+    let (report, elapsed) = timed(mode, "Dropping large promised blobs…", || {
+        drop_promised_blobs(&repo, &opts).map_err(crate::json_error::map_lib_error)
+    })?;
+    Ok(GcOutcome {
+        quiet,
+        dry_run,
+        auto: None,
+        tasks: vec![GcTaskReport::DropLargeBlobs {
             duration_ms: elapsed.as_millis() as u64,
             report: report.into(),
         }],

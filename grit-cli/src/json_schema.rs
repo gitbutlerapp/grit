@@ -197,6 +197,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<GcOutcome>("gc.pack-refs"),
         entry::<GcOutcome>("gc.prune"),
         entry::<GcOutcome>("gc.offload"),
+        entry::<GcOutcome>("gc.drop-large-blobs"),
         entry::<FsckOutcome>("fsck"),
         entry::<HooksOutcome>("hooks"),
         entry::<HooksOutcome>("hooks.list"),
@@ -385,6 +386,7 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("pack-refs") => "gc.pack-refs",
             Some("prune") => "gc.prune",
             Some("offload") => "gc.offload",
+            Some("drop-large-blobs") => "gc.drop-large-blobs",
             _ => return None,
         },
         "history" => match positional.get(1).copied() {
