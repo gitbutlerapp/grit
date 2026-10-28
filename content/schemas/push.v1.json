@@ -94,6 +94,13 @@
       ],
       "description": "High-level push kind (`branch`, `tags`, `delete`, `refspecs`)."
     },
+    "origin_added": {
+      "description": "URL saved as `origin`: a `<owner>/<project>` push from a repository with no remotes.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "rejected": {
       "type": "boolean"
     },

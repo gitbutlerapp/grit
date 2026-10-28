@@ -4,9 +4,9 @@ use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::push_plan::{
-    apply_set_upstream_after_push, load_push_plan_context, open_push_destination, parse_force_mode,
-    push_follow_tags_config, resolve_push, resolve_push_invocation, PushPlanError, PushPlanKind,
-    PushRequest,
+    apply_set_upstream_after_push, expand_repository_shorthand, load_push_plan_context,
+    open_push_destination, parse_force_mode, push_follow_tags_config, resolve_push,
+    resolve_push_invocation, PushPlanError, PushPlanKind, PushRequest,
 };
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::PushOptions;
@@ -46,6 +46,10 @@ pub struct PushOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub upstream_set: Option<Vec<String>>,
+    /// URL saved as `origin`: a `<owner>/<project>` push from a repository with no remotes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub origin_added: Option<String>,
     /// Hook and diagnostic lines from the remote (`remote: …` in human output).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(skip_serializing_if = "Vec::is_empty")]
@@ -173,6 +177,9 @@ impl HumanRender for PushOutcome {
                 }
             }
         }
+        if let Some(url) = &self.origin_added {
+            outln!(w, "  added remote origin → {url}");
+        }
         Ok(())
     }
 }
@@ -186,6 +193,9 @@ impl MarkdownRender for PushOutcome {
             .unwrap_or("refs");
         markdown::print_remote_push_messages(w, &self.remote_messages)?;
         markdown::print_push_results(w, &self.remote, label, self.dry_run, &self.results)?;
+        if let Some(url) = &self.origin_added {
+            writeln!(w, "\nAdded remote `origin` → `{url}`.")?;
+        }
         Ok(())
     }
 }
@@ -221,7 +231,16 @@ pub fn run(
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
         .context("could not load config")?;
 
-    let invocation = resolve_push_invocation(&config, remote_flag.as_deref(), positionals)
+    // `grit push <owner>/<project> main` pushes to that repository on the default grit host.
+    let shorthand_url = remote_flag
+        .is_none()
+        .then(|| expand_repository_shorthand(&config, positionals, &auth::default_grit_host_url()))
+        .flatten();
+    let mut positionals = positionals.to_vec();
+    if let Some(url) = &shorthand_url {
+        positionals[0] = url.clone();
+    }
+    let invocation = resolve_push_invocation(&config, remote_flag.as_deref(), &positionals)
         .map_err(plan_error)?;
 
     let factory = crate::context::http_client_factory();
@@ -294,6 +313,19 @@ pub fn run(
     )
     .map_err(|e| anyhow::Error::msg(e.to_string()))?;
 
+    let pushed = report
+        .results
+        .iter()
+        .any(|r| matches!(r.status, PushRefStatus::Ok));
+    let origin_added = match shorthand_url {
+        Some(url) if pushed && !dry_run => repo
+            .remotes()
+            .add_origin_if_none(&url)
+            .map_err(map_remote_error)?
+            .then_some(url),
+        _ => None,
+    };
+
     let mut rejected = false;
     let results = report
         .results
@@ -356,6 +388,7 @@ pub fn run(
         rejected,
         dry_run,
         upstream_set: (!upstream_set.is_empty()).then_some(upstream_set),
+        origin_added,
         remote_messages: report.remote_messages,
     })
 }

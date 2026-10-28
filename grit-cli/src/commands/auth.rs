@@ -222,14 +222,18 @@ pub fn default_host() -> Result<DefaultHost> {
     {
         return Ok(DefaultHost::GitHub);
     }
-    let url = crate::context::environment()
-        .var("GRIT_DEFAULT_HOST")
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| GRITHUB_URL.to_owned());
-    match grit_server(&url)? {
+    match grit_server(&default_grit_host_url())? {
         Some(server) => Ok(DefaultHost::Grit(server)),
         None => Ok(DefaultHost::GitHub),
     }
+}
+
+/// The grit server used when none is named: `$GRIT_DEFAULT_HOST`, else [`GRITHUB_URL`].
+pub fn default_grit_host_url() -> String {
+    crate::context::environment()
+        .var("GRIT_DEFAULT_HOST")
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| GRITHUB_URL.to_owned())
 }
 
 /// Whether `url` (HTTPS, `ssh://` or scp-style `git@github.com:owner/repo`) is on github.com.

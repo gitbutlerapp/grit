@@ -9,6 +9,7 @@ order: 4
 
 ```text
 grit push [<remote>] [<refspec>...]
+grit push <owner>/<project> <refspec>...
 grit push --tags
 grit push [<remote>] --delete <ref>...
 grit push --dry-run
@@ -25,6 +26,8 @@ grit push --remote <name>   # hidden alias for one release
 ## Description
 
 Pushes refs to a remote over SSH, smart HTTP, or the `file://` transport. With no refspecs, grit pushes the current branch using the same remote-selection rules as Git (`branch.<name>.pushRemote`, `remote.pushDefault`, `branch.<name>.remote`, then `origin`) and applies `remote.<name>.push` refspecs when configured.
+
+A remote written as `<owner>/<project>` and followed by at least one refspec is a repository on the default grit host: `grit push me/app main` pushes to `https://grithub.dev/me/app.git`, or to that path under `$GRIT_DEFAULT_HOST` when it is set. A configured remote with the same name takes precedence. After a push like this from a repository with no remotes yet, grit saves the URL as `origin`, so later `grit push` and `grit fetch` go there. A lone `<owner>/<project>` argument is still a refspec, so `grit push topic/x` pushes a branch to the default remote.
 
 Incremental SSH and HTTP pushes stop exploring advertised commit history once the new commit frontier is exhausted. A one-commit push does not need to walk every advertised branch and tag back to its root. Annotated tags targeting blobs or trees may be advertised alongside commit refs without preventing a push.
 
@@ -196,6 +199,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `results` | array | Per-ref outcomes; each object has `ref`, `status` (`ok`, `up_to_date`, or `rejected`), optional `reason` (`stale` for a failed lease or a ref another push moved meanwhile, `already_exists` when another push created the new ref first, `remote_ref_missing` when `--delete` targets a ref absent on the remote), optional `deleted` (`true` when the ref was removed), `old_oid`, `new_oid`, `src`, and `forced`. |
 | `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |
 | `upstream_set` | array of strings | Branch short names whose upstream config was written (`-u` only; omitted when empty). |
+| `origin_added` | string | URL saved as `origin` after an `<owner>/<project>` push from a repository with no remotes (omitted otherwise). |
 | `remote_messages` | array of strings | Hook and diagnostic text from the remote (same lines as `remote: …` on stderr in human mode; omitted when empty). |
 
 Example:

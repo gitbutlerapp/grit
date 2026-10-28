@@ -164,6 +164,23 @@ impl<'repo> RepositoryRemotes<'repo> {
         Ok(())
     }
 
+    /// Add [`DEFAULT_REMOTE`] (`origin`) for `url` when the repository has no remotes at all,
+    /// as after a first push to a URL from a fresh repository.
+    ///
+    /// Returns whether `origin` was added. Any `remote.<name>.*` section, with or without a URL,
+    /// counts as a remote and leaves the config untouched.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::add`].
+    pub fn add_origin_if_none(&self, url: &str) -> std::result::Result<bool, RemoteError> {
+        if !configured_remotes(self.repo.config()?.as_ref()).is_empty() {
+            return Ok(false);
+        }
+        self.add(DEFAULT_REMOTE, url)?;
+        Ok(true)
+    }
+
     /// Load `remote.<name>` URL(s) and fetch refspecs from config.
     ///
     /// # Errors
@@ -1097,6 +1114,36 @@ mod tests {
                 .as_deref(),
             Some("/tmp/a.git")
         );
+    }
+
+    #[test]
+    fn add_origin_if_none_only_adds_to_a_repository_without_remotes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        assert!(repo
+            .remotes()
+            .add_origin_if_none("https://h/me/a.git")
+            .expect("first"));
+        assert!(!repo
+            .remotes()
+            .add_origin_if_none("https://h/me/b.git")
+            .expect("second"));
+        assert_eq!(
+            repo.config()
+                .expect("config")
+                .get("remote.origin.url")
+                .as_deref(),
+            Some("https://h/me/a.git")
+        );
+
+        let other = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(other.path(), &InitOptions::default()).expect("init");
+        repo.remotes().add("upstream", "/tmp/u.git").expect("add");
+        assert!(!repo
+            .remotes()
+            .add_origin_if_none("https://h/me/a.git")
+            .expect("with upstream"));
+        assert_eq!(repo.remotes().list().expect("list"), ["upstream"]);
     }
 
     #[test]
