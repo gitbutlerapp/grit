@@ -2669,3 +2669,163 @@ fn gc_shared_clone_recovers_from_duplicated_alternate_pack() {
     git(clone_dir.path(), &["rev-parse", "HEAD"]);
     git_fsck(clone_dir.path(), true);
 }
+
+fn git_rev_parse(dir: &Path, spec: &str) -> String {
+    let out = Command::new("git")
+        .current_dir(dir)
+        .args(["rev-parse", spec])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("rev-parse");
+    assert!(out.status.success(), "rev-parse {spec}");
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+fn local_loose_object_path(git_dir: &Path, oid: &str) -> PathBuf {
+    git_dir.join("objects").join(&oid[..2]).join(&oid[2..])
+}
+
+/// Copy a loose object from the alternate into the clone's own `objects/` tree.
+fn duplicate_alternate_loose_object_in_clone(clone: &Path, oid: &str) {
+    let git_dir = clone.join(".git");
+    let objects = git_dir.join("objects");
+    let alt_file = objects.join("info/alternates");
+    let alt_raw = std::fs::read_to_string(&alt_file).expect("alternates");
+    let alt_line = alt_raw.lines().next().expect("alternates line").trim();
+    let alt_objects = PathBuf::from(alt_line);
+    let alt_objects = if alt_objects.is_absolute() {
+        alt_objects
+    } else {
+        alt_file
+            .parent()
+            .expect("info")
+            .join(alt_objects)
+            .canonicalize()
+            .expect("canonical alternates path")
+    };
+    let src = alt_objects.join(&oid[..2]).join(&oid[2..]);
+    assert!(
+        src.is_file(),
+        "alternate must hold {oid} as loose for this fixture"
+    );
+    let dst = local_loose_object_path(&git_dir, oid);
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent).expect("fan-out dir");
+    }
+    std::fs::copy(&src, &dst).expect("copy loose duplicate");
+    assert!(dst.is_file(), "duplicate must exist as local loose");
+}
+
+/// Materialize a local loose copy when the object is available via alternates (e.g. packed).
+fn write_loose_materialize_duplicate(repo: &Repository, oid: &str) {
+    let oid: ObjectId = oid.parse().expect("oid");
+    let obj = repo.odb().read(&oid).expect("read via alternates");
+    repo.odb()
+        .write_loose_materialize(obj.kind, &obj.data)
+        .expect("local loose materialize");
+    assert!(
+        local_loose_object_path(repo.git_dir(), oid.to_hex().as_str()).is_file(),
+        "local loose copy must exist"
+    );
+}
+
+#[test]
+fn gc_preserves_loose_duplicate_when_alternate_holds_object_loose_only() {
+    let _pack_guard = test_pack_cache_guard();
+    let source = history_source_repo(3);
+    assert_eq!(
+        git_pack_count(&source.path().join(".git")),
+        0,
+        "source must keep history loose-only in the alternate"
+    );
+
+    let grit_clone = TempDir::new().expect("grit clone");
+    let git_clone = TempDir::new().expect("git clone");
+    shared_clone_from(source.path(), grit_clone.path());
+    shared_clone_from(source.path(), git_clone.path());
+
+    let grit_repo =
+        Repository::discover(Some(grit_clone.path()), &RepositoryOptions::empty()).expect("open");
+    grit_commit_all(
+        &grit_repo,
+        &grit_clone.path().join("local.txt"),
+        "grit local",
+    );
+    std::fs::write(git_clone.path().join("local.txt"), b"x\n").expect("write");
+    git(git_clone.path(), &["add", "local.txt"]);
+    git(git_clone.path(), &["commit", "-m", "git local"]);
+
+    let parent = git_rev_parse(grit_clone.path(), "HEAD~1");
+    duplicate_alternate_loose_object_in_clone(grit_clone.path(), &parent);
+    duplicate_alternate_loose_object_in_clone(git_clone.path(), &parent);
+
+    git(git_clone.path(), &["gc", "--quiet"]);
+    gc(
+        &grit_repo,
+        &GcOptions::with_reflog_policy(1_700_000_000, false),
+    )
+    .expect("grit gc");
+    clear_pack_cache_after_disk_maintenance();
+
+    assert!(
+        local_loose_object_path(&grit_clone.path().join(".git"), &parent).is_file(),
+        "grit gc must keep a local loose duplicate when the alternate copy is loose-only"
+    );
+    assert!(
+        local_loose_object_path(&git_clone.path().join(".git"), &parent).is_file(),
+        "git gc keeps the local loose duplicate in this fixture"
+    );
+    git_fsck(grit_clone.path(), true);
+}
+
+#[test]
+fn gc_prunes_loose_duplicate_when_alternate_holds_object_in_pack() {
+    let _pack_guard = test_pack_cache_guard();
+    let source = history_source_repo(5);
+    git(source.path(), &["repack", "-a", "-d"]);
+    assert!(
+        git_pack_count(&source.path().join(".git")) >= 1,
+        "alternate must serve objects from packs"
+    );
+
+    let grit_clone = TempDir::new().expect("grit clone");
+    let git_clone = TempDir::new().expect("git clone");
+    shared_clone_from(source.path(), grit_clone.path());
+    shared_clone_from(source.path(), git_clone.path());
+
+    let grit_repo =
+        Repository::discover(Some(grit_clone.path()), &RepositoryOptions::empty()).expect("open");
+    grit_commit_all(
+        &grit_repo,
+        &grit_clone.path().join("packed-alt.txt"),
+        "grit local",
+    );
+    std::fs::write(git_clone.path().join("packed-alt.txt"), b"y\n").expect("write");
+    git(git_clone.path(), &["add", "packed-alt.txt"]);
+    git(git_clone.path(), &["commit", "-m", "git local"]);
+
+    let parent = git_rev_parse(grit_clone.path(), "HEAD~1");
+    write_loose_materialize_duplicate(&grit_repo, &parent);
+    let git_repo = Repository::discover(Some(git_clone.path()), &RepositoryOptions::empty())
+        .expect("open git clone");
+    write_loose_materialize_duplicate(&git_repo, &parent);
+
+    git(git_clone.path(), &["gc", "--quiet"]);
+    gc(
+        &grit_repo,
+        &GcOptions::with_reflog_policy(1_700_000_000, false),
+    )
+    .expect("grit gc");
+    clear_pack_cache_after_disk_maintenance();
+
+    assert!(
+        !local_loose_object_path(&grit_clone.path().join(".git"), &parent).exists(),
+        "grit gc must prune a local loose duplicate when the alternate has a pack copy"
+    );
+    assert!(
+        !local_loose_object_path(&git_clone.path().join(".git"), &parent).exists(),
+        "git gc prunes the local loose duplicate in this fixture"
+    );
+    git_fsck(grit_clone.path(), true);
+}

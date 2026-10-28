@@ -365,6 +365,11 @@ pub(crate) fn local_object_materialized_without_rescan(objects_dir: &Path, oid: 
 }
 
 fn object_in_local_packs(objects_dir: &Path, oid: &ObjectId) -> bool {
+    object_in_non_promisor_pack(objects_dir, oid)
+}
+
+/// Whether `oid` is listed in a non-promisor pack index under `objects_dir` (not loose).
+pub(crate) fn object_in_non_promisor_pack(objects_dir: &Path, oid: &ObjectId) -> bool {
     let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
         return false;
     };

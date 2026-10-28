@@ -1657,6 +1657,37 @@ impl Odb {
         pack::read_local_pack_indexes_cached(&self.objects_dir)
     }
 
+    /// Whether `oid` is stored in a non-promisor pack under any alternate object directory.
+    ///
+    /// Loose objects in alternates do not count (Git `has_object_pack` / `prune-packed`).
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack index read failures from an alternate directory.
+    pub(crate) fn contained_in_alternate_pack(&self, oid: &ObjectId) -> Result<bool> {
+        if !self.alternates_enabled {
+            return Ok(false);
+        }
+        for alt_dir in self.file_alternate_dirs_snapshot().iter() {
+            if store::object_in_non_promisor_pack(alt_dir, oid) {
+                return Ok(true);
+            }
+        }
+        for alt_dir in self.env_alternate_dirs_snapshot().iter() {
+            if store::object_in_non_promisor_pack(alt_dir, oid) {
+                return Ok(true);
+            }
+        }
+        if let Ok(guard) = self.submodule_alternate_dirs.lock() {
+            for alt_dir in guard.iter() {
+                if store::object_in_non_promisor_pack(alt_dir, oid) {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     /// Size in bytes of `oid`'s loose file in this database's own `objects/`,
     /// or `None` when it is not stored loose here.
     pub(crate) fn local_loose_file_size(&self, oid: &ObjectId) -> Option<u64> {
