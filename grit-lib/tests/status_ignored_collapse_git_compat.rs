@@ -177,3 +177,79 @@ fn grit_cli_status_ignored_short_collapses_nested_dirs() {
         "must not enumerate ignored files in normal mode, got:\n{stdout}"
     );
 }
+
+/// Issue #2242: `node_modules/`-style directory excludes must match git without listing every file.
+#[test]
+fn directory_exclude_ignored_matches_git_on_dense_tree() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "Test"]);
+    fs::write(root.join("tracked.txt"), b"t\n").expect("write");
+    git(root, &["add", "tracked.txt"]);
+    git(root, &["commit", "-qm", "seed"]);
+
+    fs::write(root.join(".gitignore"), "node_modules/\n").expect("write");
+    let nm = root.join("node_modules");
+    for a in 0..5 {
+        for m in 0..5 {
+            let d = nm.join(format!("p{a}")).join(format!("m{m}"));
+            fs::create_dir_all(&d).expect("mkdir");
+            for f in 0..20 {
+                fs::write(d.join(format!("f{f}.txt")), b"x\n").expect("write");
+            }
+        }
+    }
+
+    let grit_repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(root),
+    )
+    .expect("open");
+
+    let (git_u, git_i) = git_untracked_and_ignored(root, "normal");
+    let (grit_u, grit_i) = grit_untracked_and_ignored(&grit_repo, UntrackedMode::Normal);
+
+    assert_eq!(grit_u, git_u);
+    assert_eq!(grit_i, git_i);
+    assert!(
+        grit_i.iter().any(|p| p == "node_modules/"),
+        "expected collapsed node_modules/, got {grit_i:?}"
+    );
+}
+
+/// File-glob ignores still enumerate individual paths (unlike directory excludes).
+#[test]
+fn file_glob_ignored_still_lists_files_like_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "Test"]);
+    fs::write(root.join("tracked.txt"), b"t\n").expect("write");
+    git(root, &["add", "tracked.txt"]);
+    git(root, &["commit", "-qm", "seed"]);
+
+    fs::write(root.join(".gitignore"), "*.log\n").expect("write");
+    fs::write(root.join("a.log"), b"x\n").expect("write");
+    fs::write(root.join("b.log"), b"y\n").expect("write");
+
+    let grit_repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(root),
+    )
+    .expect("open");
+
+    let (git_u, git_i) = git_untracked_and_ignored(root, "normal");
+    let (grit_u, grit_i) = grit_untracked_and_ignored(&grit_repo, UntrackedMode::Normal);
+
+    assert_eq!(grit_u, git_u);
+    assert_eq!(grit_i, git_i);
+    assert!(
+        grit_i.iter().any(|p| p.ends_with(".log")),
+        "file patterns must list files, got {grit_i:?}"
+    );
+}

@@ -649,6 +649,7 @@ fn stage_inner_on_index(
             sort_paths: !bulk_empty_index_add,
             use_untracked_cache: !bulk_empty_index_add,
             cache_miss: UntrackedCacheMissAction::RefreshFull,
+            clean_unit_dirs: None,
         };
         let (untracked, _, _) = collect_untracked_and_ignored_inner(
             repo,

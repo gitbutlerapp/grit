@@ -560,3 +560,68 @@ fn pathspec_limits_removal() {
     assert!(!root.join("only/remove.txt").exists());
     assert!(root.join("keep.txt").exists());
 }
+
+/// Issue #2242: dry-run must match git on collapsed untracked and ignored directory trees.
+#[test]
+fn clean_dry_run_collapsed_dirs_match_git_on_dense_tree() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    fs::write(root.join(".gitignore"), b"node_modules/\n").unwrap();
+    fs::write(root.join("tracked.txt"), b"t\n").unwrap();
+    git(root, &["add", ".gitignore", "tracked.txt"]);
+    git(root, &["commit", "-q", "-m", "init"]);
+
+    let scratch = root.join("scratch");
+    fs::create_dir_all(scratch.join("p0/m0")).unwrap();
+    for i in 0..100 {
+        fs::write(scratch.join(format!("p0/m0/u{i}.txt")), b"x\n").unwrap();
+    }
+    let nm = root.join("node_modules");
+    fs::create_dir_all(nm.join("p0/m0")).unwrap();
+    for i in 0..100 {
+        fs::write(nm.join(format!("p0/m0/f{i}.txt")), b"x\n").unwrap();
+    }
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    let grit_default: BTreeSet<String> = clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: true,
+            dry_run: true,
+            ..Default::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("grit clean -n -d")
+    .removed
+    .into_iter()
+    .map(|p| normalize_clean_path(&p))
+    .collect();
+    assert_eq!(
+        grit_default,
+        git_clean_preview(root, &["-d"]),
+        "default clean dry-run must match git"
+    );
+
+    let grit_ignored: BTreeSet<String> = clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: true,
+            scope: CleanScope::OnlyIgnored,
+            dry_run: true,
+            ..Default::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("grit clean only-ignored dry-run")
+    .removed
+    .into_iter()
+    .map(|p| normalize_clean_path(&p))
+    .collect();
+    assert_eq!(
+        grit_ignored,
+        git_clean_preview(root, &["-X", "-d"]),
+        "only-ignored clean dry-run must match git clean -nX -d"
+    );
+}

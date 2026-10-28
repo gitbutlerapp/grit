@@ -517,6 +517,7 @@ pub fn collect_untracked_and_ignored_with_cache(
             sort_paths: true,
             use_untracked_cache,
             cache_miss: UntrackedCacheMissAction::RefreshFull,
+            clean_unit_dirs: None,
         },
         &rules,
         None,
@@ -568,6 +569,7 @@ pub(crate) fn count_unstaged_and_untracked_paths(
             sort_paths: true,
             use_untracked_cache: false,
             cache_miss: UntrackedCacheMissAction::RefreshFull,
+            clean_unit_dirs: None,
         },
         &worktree_rules,
         None,
@@ -622,6 +624,7 @@ pub fn collect_untracked_and_ignored_with_rules_and_cancel(
             sort_paths: true,
             use_untracked_cache: true,
             cache_miss: UntrackedCacheMissAction::RefreshFull,
+            clean_unit_dirs: None,
         },
         rules,
         cancel_watch,
@@ -637,7 +640,7 @@ pub(crate) enum UntrackedCacheMissAction {
 }
 
 /// How [`collect_untracked_and_ignored_inner`] walks and reports the work tree.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct UntrackedScan {
     /// Whether (and how) ignored paths are reported.
     pub ignored_mode: IgnoredMode,
@@ -649,13 +652,44 @@ pub(crate) struct UntrackedScan {
     pub use_untracked_cache: bool,
     /// How to recover when [`UntrackedScan::use_untracked_cache`] cannot answer from cache.
     pub cache_miss: UntrackedCacheMissAction,
+    /// When set, collapsed directories safe for `git clean` without rescanning are recorded here.
+    pub clean_unit_dirs: CleanUnitDirHints,
+}
+
+/// Collapsed directory paths (`dir/`) that need no second walk for `clean` dry-run.
+pub(crate) type CleanUnitDirHints = Option<Arc<Mutex<HashSet<String>>>>;
+
+fn record_clean_unit_dir(hints: &CleanUnitDirHints, rel: &str) {
+    let Some(set) = hints else {
+        return;
+    };
+    if rel.is_empty() {
+        return;
+    }
+    if let Ok(mut guard) = set.lock() {
+        guard.insert(if rel.ends_with('/') {
+            rel.to_owned()
+        } else {
+            format!("{rel}/")
+        });
+    }
+}
+
+fn take_clean_unit_dirs(hints: &CleanUnitDirHints) -> HashSet<String> {
+    hints
+        .as_ref()
+        .and_then(|set| set.lock().ok())
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
 }
 
 /// Side effects from an untracked/ignored walk beyond the path lists.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct UntrackedCollectMeta {
     /// The index UNTR extension was rebuilt and should be written to disk.
     pub untracked_cache_refreshed: bool,
+    /// Collapsed untracked/ignored directories removable as a unit by `clean`.
+    pub clean_collapsed_unit: HashSet<String>,
 }
 
 fn poll_untracked_cancel(
@@ -684,7 +718,9 @@ pub(crate) fn collect_untracked_and_ignored_inner(
         sort_paths,
         use_untracked_cache,
         cache_miss,
+        clean_unit_dirs,
     } = scan;
+    let clean_unit_dirs = &clean_unit_dirs;
     // Keep parity with historical status behavior in tests that rely on broad untracked scans
     // (including detached-HEAD wtstatus cases): when no explicit pathspec is requested, avoid
     // pathspec-based pruning entirely.
@@ -731,6 +767,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
                         Vec::new(),
                         UntrackedCollectMeta {
                             untracked_cache_refreshed: true,
+                            ..UntrackedCollectMeta::default()
                         },
                     ));
                 }
@@ -770,12 +807,20 @@ pub(crate) fn collect_untracked_and_ignored_inner(
             rules.config(),
             effective_pathspecs,
             cancel_watch.clone(),
+            clean_unit_dirs,
         )?;
         if sort_paths {
             par_untracked.sort_unstable();
             par_ignored.sort_unstable();
         }
-        return Ok((par_untracked, par_ignored, UntrackedCollectMeta::default()));
+        return Ok((
+            par_untracked,
+            par_ignored,
+            UntrackedCollectMeta {
+                clean_collapsed_unit: take_clean_unit_dirs(clean_unit_dirs),
+                ..UntrackedCollectMeta::default()
+            },
+        ));
     }
 
     poll_untracked_cancel(cancel_watch.as_ref())?;
@@ -798,13 +843,21 @@ pub(crate) fn collect_untracked_and_ignored_inner(
         &mut untracked,
         &mut ignored,
         cancel_watch,
+        clean_unit_dirs,
     )?;
 
     if sort_paths {
         untracked.sort();
         ignored.sort();
     }
-    Ok((untracked, ignored, UntrackedCollectMeta::default()))
+    Ok((
+        untracked,
+        ignored,
+        UntrackedCollectMeta {
+            clean_collapsed_unit: take_clean_unit_dirs(clean_unit_dirs),
+            ..UntrackedCollectMeta::default()
+        },
+    ))
 }
 
 /// Expand collapsed untracked directory markers (`dir/`) into concrete file paths for staging.
@@ -884,6 +937,7 @@ pub fn expand_untracked_for_staging_with_rules(
                 &mut expanded,
                 &mut ignored,
                 None,
+                &None,
             )?;
         }
     }
@@ -962,6 +1016,7 @@ fn collect_untracked_parallel_top_level(
     config: &ConfigSet,
     pathspecs: &[String],
     cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    clean_unit_dirs: &CleanUnitDirHints,
 ) -> Result<(Vec<String>, Vec<String>)> {
     poll_untracked_cancel(cancel_watch.as_ref())?;
     let entries = named_entries_sorted(fs::read_dir(work_tree).map_err(crate::error::Error::Io)?);
@@ -1012,6 +1067,7 @@ fn collect_untracked_parallel_top_level(
                 local_untracked,
                 local_ignored,
                 cancel_watch.clone(),
+                clean_unit_dirs,
             )?;
             Ok::<(), crate::error::Error>(())
         };
@@ -1053,6 +1109,7 @@ fn collect_untracked_parallel_top_level(
                     &mut untracked,
                     &mut ignored,
                     cancel_watch.clone(),
+                    clean_unit_dirs,
                 )?;
             }
         }
@@ -1133,6 +1190,7 @@ fn collect_untracked_parallel_top_level(
                 &mut local_untracked,
                 &mut local_ignored,
                 cancel_watch.clone(),
+                clean_unit_dirs,
             )?;
             Ok((local_untracked, local_ignored))
         },
@@ -1286,6 +1344,7 @@ fn visit_untracked_dir_entry(
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
     cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    clean_unit_dirs: &CleanUnitDirHints,
 ) -> Result<UntrackedWalkStep> {
     if name == b".git" {
         return Ok(UntrackedWalkStep::Continue);
@@ -1337,6 +1396,7 @@ fn visit_untracked_dir_entry(
             untracked_out,
             ignored_out,
             cancel_watch,
+            clean_unit_dirs,
         )?;
         if check_only && visible_out.is_some_and(|out| out.get()) {
             return Ok(UntrackedWalkStep::Stop);
@@ -1385,6 +1445,7 @@ fn visit_untracked_read_dir_lazy(
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
     cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    clean_unit_dirs: &CleanUnitDirHints,
 ) -> Result<()> {
     for entry in entries {
         poll_untracked_cancel(cancel_watch.as_ref())?;
@@ -1419,6 +1480,7 @@ fn visit_untracked_read_dir_lazy(
                 untracked_out,
                 ignored_out,
                 cancel_watch.clone(),
+                clean_unit_dirs,
             )?,
             UntrackedWalkStep::Stop
         ) {
@@ -1448,6 +1510,7 @@ fn visit_untracked_node(
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
     cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    clean_unit_dirs: &CleanUnitDirHints,
 ) -> Result<()> {
     if check_only && visible_out.is_some_and(|out| out.get()) {
         return Ok(());
@@ -1480,6 +1543,7 @@ fn visit_untracked_node(
             untracked_out,
             ignored_out,
             cancel_watch,
+            clean_unit_dirs,
         );
     }
 
@@ -1513,6 +1577,7 @@ fn visit_untracked_node(
             untracked_out,
             ignored_out,
             cancel_watch,
+            clean_unit_dirs,
         );
     }
 
@@ -1539,6 +1604,7 @@ fn visit_untracked_node(
                 untracked_out,
                 ignored_out,
                 cancel_watch.clone(),
+                clean_unit_dirs,
             )?,
             UntrackedWalkStep::Stop
         ) {
@@ -1569,6 +1635,7 @@ fn visit_untracked_directory(
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
     cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    clean_unit_dirs: &CleanUnitDirHints,
 ) -> Result<()> {
     let _ = matcher.note_directory_entered(repo, Some(index), rel);
 
@@ -1592,6 +1659,7 @@ fn visit_untracked_directory(
             untracked_out,
             ignored_out,
             cancel_watch.clone(),
+            clean_unit_dirs,
         )?;
         return Ok(());
     }
@@ -1607,22 +1675,14 @@ fn visit_untracked_directory(
         return Ok(());
     }
 
-    // Git `dir.c`: with `--ignored=matching` and full untracked listing, an excluded
-    // directory is reported as a single path without enumerating children (unless
-    // tracked files force a full walk — handled above).
-    if ignored_mode == IgnoredMode::Matching
-        && show_all
-        && matcher.is_path_ignored(repo, Some(index), rel, true)?
-    {
-        ignored_out.push(format!("{rel}/"));
-        return Ok(());
-    }
-
+    // An excluded directory cannot re-include descendants; report it once when listing ignored
+    // paths without enumerating every child (issue #2242).
     if ignored_mode != IgnoredMode::No
-        && dir_is_nested_submodule_worktree(repo.git_dir(), abs)
+        && !rel.is_empty()
         && matcher.is_path_ignored(repo, Some(index), rel, true)?
     {
         ignored_out.push(format!("{rel}/"));
+        record_clean_unit_dir(clean_unit_dirs, rel);
         return Ok(());
     }
 
@@ -1634,6 +1694,7 @@ fn visit_untracked_directory(
             repo, index, work_tree, gitlinks, matcher, rel, abs, pathspecs, rules,
         )? {
             ignored_out.push(dir_line);
+            record_clean_unit_dir(clean_unit_dirs, rel);
             return Ok(());
         }
     }
@@ -1658,6 +1719,7 @@ fn visit_untracked_directory(
             untracked_out,
             ignored_out,
             cancel_watch.clone(),
+            clean_unit_dirs,
         )?;
         return Ok(());
     }
@@ -1688,10 +1750,12 @@ fn visit_untracked_directory(
             untracked_out,
             ignored_out,
             cancel_watch.clone(),
+            clean_unit_dirs,
         )?;
         if found.get() {
             if !rel.is_empty() {
                 untracked_out.push(format!("{rel}/"));
+                record_clean_unit_dir(clean_unit_dirs, rel);
             }
             return Ok(());
         }
@@ -1722,6 +1786,7 @@ fn visit_untracked_directory(
         &mut sub_untracked,
         &mut sub_ignored,
         cancel_watch.clone(),
+        clean_unit_dirs,
     )?;
 
     if show_all {
@@ -1748,6 +1813,9 @@ fn visit_untracked_directory(
             && directory_pathspec_matches_self(rel, pathspecs);
         if collapse_matching || collapse_traditional {
             ignored_out.push(format!("{rel}/"));
+            if dir_excluded {
+                record_clean_unit_dir(clean_unit_dirs, rel);
+            }
         } else {
             ignored_out.append(&mut sub_ignored);
         }
@@ -1759,6 +1827,7 @@ fn visit_untracked_directory(
             untracked_out.append(&mut sub_untracked);
         } else {
             untracked_out.push(format!("{rel}/"));
+            record_clean_unit_dir(clean_unit_dirs, rel);
         }
         return Ok(());
     }
@@ -3538,6 +3607,48 @@ mod status_op_tests {
             entries_read <= 8,
             "check-only probe must stop at the first visible entry, not scan all \
              3000 files (read {entries_read} directory entries during probe)"
+        );
+    }
+
+    #[test]
+    fn status_ignored_collapses_directory_exclude_without_full_walk() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        init_min_repo(root);
+        fs::write(root.join(".gitignore"), "node_modules/\n").unwrap();
+        let nm = root.join("node_modules");
+        fs::create_dir_all(nm.join("p0/m0")).unwrap();
+        for i in 0..500 {
+            fs::write(nm.join(format!("p0/m0/f{i}.txt")), b"x\n").unwrap();
+        }
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        untracked_walk_probe::reset();
+        let model = status(
+            &repo,
+            &StatusOptions {
+                ignored: IgnoredMode::Traditional,
+                ..StatusOptions::default()
+            },
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+
+        assert_eq!(
+            model.ignored,
+            vec!["node_modules/".to_owned()],
+            "directory exclude must collapse to a single ignored path"
+        );
+        let dirs_read = untracked_walk_probe::dirs_read();
+        assert!(
+            dirs_read <= 4,
+            "ignored directory exclude must not read every nested directory \
+             (listed {dirs_read} directories)"
         );
     }
 

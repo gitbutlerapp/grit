@@ -1396,8 +1396,8 @@ fn visit_untracked_directory_uc(
         return Ok(());
     }
 
-    if ignored_mode == UntrackedIgnoredMode::Matching
-        && show_all
+    if ignored_mode != UntrackedIgnoredMode::No
+        && !rel.is_empty()
         && matcher.is_path_ignored(repo, Some(index), rel, true)?
     {
         return Ok(());
@@ -1815,8 +1815,8 @@ fn visit_untracked_directory_collect(
         return Ok(());
     }
 
-    if ignored_mode == UntrackedIgnoredMode::Matching
-        && show_all
+    if ignored_mode != UntrackedIgnoredMode::No
+        && !rel.is_empty()
         && matcher.is_path_ignored(repo, Some(index), rel, true)?
     {
         ignored_out.push(format!("{rel}/"));
