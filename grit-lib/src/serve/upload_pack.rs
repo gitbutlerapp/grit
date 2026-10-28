@@ -189,6 +189,11 @@ pub fn upload_pack_cancellable(
                     counter.flush()?;
                     Err(ServeError::Cancelled)
                 }
+                // Part of the pack is out: an `ERR` line now would land inside it.
+                err @ ServeError::PackInterrupted(_) => {
+                    counter.flush()?;
+                    Err(err)
+                }
                 err if opts.stateless_rpc && opts.protocol == ProtocolVersion::V2 => {
                     let msg = serve_error_client_message(&err);
                     write_line(&mut counter, &format!("ERR {msg}"))?;
@@ -211,6 +216,7 @@ pub fn upload_pack_cancellable(
 fn serve_error_client_message(err: &ServeError) -> String {
     match err {
         ServeError::Protocol(msg) => msg.clone(),
+        ServeError::PackInterrupted(inner) => serve_error_client_message(inner),
         ServeError::UploadFilter(e) => e.to_string(),
         ServeError::NotOurRef(oid) => format!("not our ref {}", oid.to_hex()),
         ServeError::UnknownCommand(cmd) => format!("unknown command {cmd}"),
@@ -1101,6 +1107,12 @@ struct ResponsePackInput<'a> {
 ///
 /// With `sideband` the pack is framed on side-band channel 1 and followed by a
 /// flush packet. The pack is written as it is produced, never held in memory whole.
+///
+/// # Errors
+///
+/// A failure before any pack byte went out is returned as is. One after is
+/// [`ServeError::PackInterrupted`]; with a side band, the client is first told
+/// on band 3 (best effort: the failure may be the client hanging up).
 fn write_response_pack(
     input: ResponsePackInput<'_>,
     output: &mut dyn Write,
@@ -1120,7 +1132,7 @@ fn write_response_pack(
         input.caps.contains("ofs-delta"),
     );
     let mut progress = |_ev: PackProgress| {};
-    let stats = if !sideband {
+    let mut send = |out: &mut dyn Write| {
         write_upload_pack_stream_with_cancel(
             input.repo,
             input.wants,
@@ -1131,31 +1143,68 @@ fn write_response_pack(
             &include_tags,
             &pack_opts,
             &mut progress,
-            output,
+            out,
             stop,
         )
-        .map_err(ServeError::Repository)?
-    } else {
-        let mut band = SidebandChannel1Writer::new(output);
-        let stats = write_upload_pack_stream_with_cancel(
-            input.repo,
-            input.wants,
-            input.common,
-            input.source_shallow,
-            input.have_shallow,
-            input.filter,
-            &include_tags,
-            &pack_opts,
-            &mut progress,
-            &mut band,
-            stop,
-        )
-        .map_err(ServeError::Repository)?;
-        band.finish()?;
-        write_flush(output)?;
-        stats
     };
-    Ok(stats)
+    if !sideband {
+        let mut counted = CountingWriter {
+            inner: output,
+            bytes: 0,
+        };
+        return match send(&mut counted) {
+            Ok(stats) => Ok(stats),
+            Err(e) => Err(pack_failure(e, counted.bytes)),
+        };
+    }
+    let sent = {
+        let mut band = SidebandChannel1Writer::new(&mut *output);
+        let mut counted = CountingWriter {
+            inner: &mut band,
+            bytes: 0,
+        };
+        let result = send(&mut counted);
+        let written = counted.bytes;
+        match result {
+            Ok(stats) => band
+                .finish()
+                .map(|()| stats)
+                .map_err(|e| pack_failure_io(e, written)),
+            Err(e) => Err(pack_failure(e, written)),
+        }
+    };
+    match sent {
+        Ok(stats) => {
+            write_flush(output)?;
+            Ok(stats)
+        }
+        Err(ServeError::PackInterrupted(err)) => {
+            // hygiene: band 3 carries the remote error line Git clients print verbatim
+            let message = format!("error: {}\n", serve_error_client_message(&err));
+            let _ = crate::pkt_line::write_sideband_packet(output, 3, message.as_bytes())
+                .and_then(|()| output.flush());
+            Err(ServeError::PackInterrupted(err))
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// Classify a pack-writing failure: before any byte went out it is returned
+/// as is (a cancel stays a cancel), after it is [`ServeError::PackInterrupted`].
+fn pack_failure(err: crate::error::Error, written: u64) -> ServeError {
+    let err = map_repo_cancel(ServeError::Repository(err));
+    if written == 0 || matches!(err, ServeError::Cancelled) {
+        return err;
+    }
+    ServeError::PackInterrupted(Box::new(err))
+}
+
+/// [`pack_failure`] for an I/O error from finishing the side band.
+fn pack_failure_io(err: std::io::Error, written: u64) -> ServeError {
+    if written == 0 {
+        return ServeError::Io(err);
+    }
+    ServeError::PackInterrupted(Box::new(ServeError::Io(err)))
 }
 
 /// The annotated tags under `refs/tags/` that `include-tag` may add to the pack.

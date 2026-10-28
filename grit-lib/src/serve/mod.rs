@@ -84,6 +84,12 @@ pub enum ServeError {
     /// The session was stopped by a cancel signal before finishing.
     #[error("cancelled")]
     Cancelled,
+    /// Sending the pack failed after part of it had gone out, so the response
+    /// cannot be turned into a clean error any more. With a side band the
+    /// client was told on band 3; the transport should end the response as
+    /// failed rather than complete it.
+    #[error("the pack failed partway through: {0}")]
+    PackInterrupted(Box<ServeError>),
 }
 
 /// Why a `deepen-not` argument was rejected; see [`ServeError::InvalidDeepenNot`].

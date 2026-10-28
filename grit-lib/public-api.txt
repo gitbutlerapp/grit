@@ -21868,6 +21868,7 @@ pub grit_lib::remote::serve::ServeError::NotOurRef(grit_lib::objects::ObjectId)
 pub grit_lib::remote::serve::ServeError::ObjectFormatMismatch
 pub grit_lib::remote::serve::ServeError::ObjectFormatMismatch::client: alloc::string::String
 pub grit_lib::remote::serve::ServeError::ObjectFormatMismatch::repository: &'static str
+pub grit_lib::remote::serve::ServeError::PackInterrupted(alloc::boxed::Box<grit_lib::remote::serve::ServeError>)
 pub grit_lib::remote::serve::ServeError::Protocol(alloc::string::String)
 pub grit_lib::remote::serve::ServeError::Repository(grit_lib::error::Error)
 pub grit_lib::remote::serve::ServeError::UnknownCommand(alloc::string::String)
