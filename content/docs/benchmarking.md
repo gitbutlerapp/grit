@@ -91,6 +91,8 @@ Groups included in the merged report:
 | `deep-leaf`, `dense-leaf` | smoke layout only when `SMOKE=1` |
 | `odb-backend`, `bitmaps`, `refs` | full runs only (`SMOKE=0`) |
 
+`grit-bench partial-clone [--files N] [--packs N]` runs on its own, outside the merged report: a `blob:none` `file://` clone of a source holding `--packs` packs (50 by default, one incremental repack per batch of files), and the `reset --hard` in a blobless clone that then lazily fetches every `HEAD` blob, both against Git.
+
 Equivalent CLI:
 
 ```bash

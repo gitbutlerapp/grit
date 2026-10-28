@@ -5080,15 +5080,10 @@ pub fn packed_ref_delta_reuse_slice(
     oid: &ObjectId,
     packed_set: &HashSet<ObjectId>,
 ) -> Result<Option<(ObjectId, Vec<u8>)>> {
-    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
-    sort_pack_indexes_oldest_first(&mut indexes);
-    for idx in indexes {
+    for (idx, entry_offset) in packs_holding(objects_dir, oid, PackPreference::Oldest)? {
         if idx.hash_bytes() != 20 {
             continue;
         }
-        let Some(entry_offset) = idx.find_offset(oid)? else {
-            continue;
-        };
         let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
         let Some((base, delta)) =
             parse_in_pack_delta_reuse_candidate(&idx, &pack_bytes, entry_offset, packed_set)?
@@ -5104,41 +5099,64 @@ pub fn packed_ref_delta_reuse_slice(
 
 /// Prefer older packs when the same OID exists as a full object in a fresh repack and as a delta
 /// in an earlier thin pack (t5316).
+///
+/// Each pack's mtime is read once per call (not once per comparison).
 pub(crate) fn sort_pack_indexes_oldest_first(indexes: &mut [Arc<PackIndex>]) {
-    indexes.sort_by(|a, b| {
-        let ta = fs::metadata(&a.pack_path)
-            .and_then(|m| m.modified())
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        let tb = fs::metadata(&b.pack_path)
-            .and_then(|m| m.modified())
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        ta.cmp(&tb).then_with(|| a.pack_path.cmp(&b.pack_path))
-    });
+    if indexes.len() < 2 {
+        return;
+    }
+    indexes.sort_by_cached_key(|idx| (pack_mtime(idx), idx.pack_path.clone()));
 }
 
-fn sort_pack_indexes_newest_first(indexes: &mut [Arc<PackIndex>]) {
-    indexes.sort_by(|a, b| {
-        let ta = fs::metadata(&a.pack_path)
-            .and_then(|m| m.modified())
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        let tb = fs::metadata(&b.pack_path)
-            .and_then(|m| m.modified())
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        tb.cmp(&ta).then_with(|| b.pack_path.cmp(&a.pack_path))
-    });
+fn pack_mtime(idx: &PackIndex) -> std::time::SystemTime {
+    fs::metadata(&idx.pack_path)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+}
+
+/// Which pack wins when one object is stored in several.
+#[derive(Clone, Copy)]
+enum PackPreference {
+    /// Oldest pack first, as [`sort_pack_indexes_oldest_first`].
+    Oldest,
+    /// Newest pack first (ties: path descending).
+    Newest,
+}
+
+/// The local packs whose index lists `oid`, with its offset there, preferred pack first.
+///
+/// Per-object lookups call this instead of sorting every pack: the order only matters
+/// among packs that hold the object, which is almost always one, so the common case
+/// reads no pack mtimes at all.
+fn packs_holding(
+    objects_dir: &Path,
+    oid: &ObjectId,
+    preference: PackPreference,
+) -> Result<Vec<(Arc<PackIndex>, u64)>> {
+    let mut holding = Vec::new();
+    for idx in read_local_pack_indexes_cached(objects_dir)? {
+        if let Some(offset) = idx.find_offset(oid)? {
+            holding.push((idx, offset));
+        }
+    }
+    if holding.len() > 1 {
+        let key = |idx: &PackIndex| (pack_mtime(idx), idx.pack_path.clone());
+        match preference {
+            PackPreference::Oldest => holding.sort_by_cached_key(|(idx, _)| key(idx)),
+            PackPreference::Newest => {
+                holding.sort_by_cached_key(|(idx, _)| std::cmp::Reverse(key(idx)));
+            }
+        }
+    }
+    Ok(holding)
 }
 
 /// `packed_delta_base_oid` function.
 pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Option<ObjectId>> {
-    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
-    sort_pack_indexes_newest_first(&mut indexes);
-    for idx in &indexes {
+    for (idx, entry_offset) in packs_holding(objects_dir, oid, PackPreference::Newest)? {
         if idx.hash_bytes() != 20 {
             continue;
         }
-        let Some(entry_offset) = idx.find_offset(oid)? else {
-            continue;
-        };
         let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
         let mut p = entry_offset as usize;
         let (packed_type, _) = parse_pack_object_header(&pack_bytes, &mut p)?;
@@ -5327,12 +5345,7 @@ pub(crate) fn packed_full_object_range(
     objects_dir: &Path,
     oid: &ObjectId,
 ) -> Result<Option<(Arc<PackData>, usize, usize)>> {
-    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
-    sort_pack_indexes_newest_first(&mut indexes);
-    for idx in &indexes {
-        let Some(entry_offset) = idx.find_offset(oid)? else {
-            continue;
-        };
+    for (idx, entry_offset) in packs_holding(objects_dir, oid, PackPreference::Newest)? {
         let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
         let start = entry_offset as usize;
         let mut p = start;
@@ -5343,7 +5356,7 @@ pub(crate) fn packed_full_object_range(
             // The same OID may be a full object in another pack; keep scanning.
             continue;
         }
-        let Some(end) = pack_entry_raw_end(idx, &pack_bytes, entry_offset)? else {
+        let Some(end) = pack_entry_raw_end(&idx, &pack_bytes, entry_offset)? else {
             continue;
         };
         if end <= start {
@@ -5352,7 +5365,7 @@ pub(crate) fn packed_full_object_range(
         // Git `check_pack_crc`: verbatim reuse copies bytes unparsed, so guard with the pack
         // index's CRC32 when v2 records one. v1 indexes rely on the zlib trailer; inflating
         // here only to verify the oid would retain the whole payload in anon RSS (issue #2287).
-        if !packed_entry_matches_index_crc(idx, &pack_bytes, entry_offset)? {
+        if !packed_entry_matches_index_crc(&idx, &pack_bytes, entry_offset)? {
             continue;
         }
         return Ok(Some((pack_bytes, start, end)));

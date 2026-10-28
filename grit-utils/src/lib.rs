@@ -46,6 +46,7 @@ pub mod odb_suite;
 pub mod parallel_env;
 pub mod parallel_fixture;
 pub mod parallel_suite;
+pub mod partial_clone_suite;
 pub mod perf_targets;
 pub mod real_repo_fixture;
 pub mod refs_driver;

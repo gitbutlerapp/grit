@@ -37,6 +37,12 @@ const CHUNK_BYTES: u64 = 4 * 1024 * 1024;
 /// Fewest candidates in a chunk, so a run of huge objects still shares a window.
 const CHUNK_MIN_OBJECTS: usize = 256;
 
+/// [`CHUNK_MIN_OBJECTS`] for blobs whose path is unknown (name hash 0), as in a
+/// fetch of bare object ids. With no path to group by, neighbours are only alike in
+/// size, so a long run of huge objects gains little from sharing a window and is
+/// better spread over the threads.
+const CHUNK_MIN_UNNAMED_OBJECTS: usize = 64;
+
 /// One object that may become a delta target or base.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct DeltaCandidate {
@@ -123,9 +129,12 @@ fn kind_rank(kind: ObjectKind) -> u8 {
 }
 
 /// Split `sorted` into chunks of about [`CHUNK_BYTES`] of payload (at least
-/// [`CHUNK_MIN_OBJECTS`] candidates), moving each cut forward to the next change
+/// [`CHUNK_MIN_OBJECTS`] candidates, or [`CHUNK_MIN_UNNAMED_OBJECTS`] for blobs whose
+/// path is unknown), moving each cut forward to the next change
 /// of kind or path hash so one file's history is not split, as long as the chunk
-/// stays under twice its target.
+/// stays under twice its target. A zero path hash means the path is unknown (a
+/// fetch of bare object ids, or commits), not that the objects share a path, so a
+/// cut is never moved across a run of them.
 fn chunk_bounds(sorted: &[DeltaCandidate]) -> Vec<(usize, usize)> {
     let n = sorted.len();
     let mut out = Vec::new();
@@ -133,7 +142,13 @@ fn chunk_bounds(sorted: &[DeltaCandidate]) -> Vec<(usize, usize)> {
     while start < n {
         let mut end = start;
         let mut bytes = 0u64;
-        while end < n && (bytes < CHUNK_BYTES || end - start < CHUNK_MIN_OBJECTS) {
+        let min_objects = if sorted[start].kind == ObjectKind::Blob && sorted[start].name_hash == 0
+        {
+            CHUNK_MIN_UNNAMED_OBJECTS
+        } else {
+            CHUNK_MIN_OBJECTS
+        };
+        while end < n && (bytes < CHUNK_BYTES || end - start < min_objects) {
             bytes += sorted[end].size;
             end += 1;
         }
@@ -141,6 +156,7 @@ fn chunk_bounds(sorted: &[DeltaCandidate]) -> Vec<(usize, usize)> {
         while end < n
             && bytes < 2 * soft_bytes
             && sorted[end].kind == sorted[end - 1].kind
+            && sorted[end].name_hash != 0
             && sorted[end].name_hash == sorted[end - 1].name_hash
         {
             bytes += sorted[end].size;
@@ -541,6 +557,28 @@ mod tests {
     }
 
     #[test]
+    fn chunk_bounds_split_blobs_of_unknown_path() {
+        // A fetch of bare blob ids: no names, the largest first. They are not one
+        // path's history, so no cut moves past them, and runs of big blobs are cut
+        // at the smaller minimum so the threads share the work.
+        let mut v: Vec<DeltaCandidate> = (0..300)
+            .map(|i| cand(i, ObjectKind::Blob, 0, 1024 * 1024))
+            .collect();
+        v.extend((300..1000).map(|i| cand(i, ObjectKind::Blob, 0, 1024)));
+        let bounds = chunk_bounds(&v);
+        assert_eq!(bounds[0], (0, CHUNK_MIN_UNNAMED_OBJECTS));
+        assert!(bounds.len() > 4, "{bounds:?}");
+        assert!(bounds.windows(2).all(|w| w[0].1 == w[1].0));
+        assert_eq!(bounds.last().map(|b| b.1), Some(v.len()));
+
+        // Commits have no path either but keep the usual minimum.
+        let commits: Vec<DeltaCandidate> = (0..300)
+            .map(|i| cand(i, ObjectKind::Commit, 0, 1024 * 1024))
+            .collect();
+        assert_eq!(chunk_bounds(&commits)[0], (0, CHUNK_MIN_OBJECTS));
+    }
+
+    #[test]
     fn chunk_bounds_cap_long_histories_and_keep_a_minimum_size() {
         let v: Vec<DeltaCandidate> = (0..20_000)
             .map(|i| cand(i, ObjectKind::Blob, 1, 1024))
@@ -550,8 +588,9 @@ mod tests {
         assert_eq!(bounds.last().map(|b| b.1), Some(v.len()));
         assert!(bounds.windows(2).all(|w| w[0].1 == w[1].0));
 
+        // Distinct named paths (hash 0 would mean an unknown path).
         let huge: Vec<DeltaCandidate> = (0..600)
-            .map(|i| cand(i, ObjectKind::Blob, i, 64 * 1024 * 1024))
+            .map(|i| cand(i, ObjectKind::Blob, i + 1, 64 * 1024 * 1024))
             .collect();
         assert_eq!(chunk_bounds(&huge)[0], (0, CHUNK_MIN_OBJECTS));
     }

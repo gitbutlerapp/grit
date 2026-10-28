@@ -32,6 +32,7 @@ use grit_utils::parallel_suite::{
     prepare_parallel_checkout, prepare_parallel_clone, prepare_parallel_index_pack,
     run_parallel_suite,
 };
+use grit_utils::partial_clone_suite::run_partial_clone_suite;
 use grit_utils::perf_targets::{
     ledger_failures, load_bench_report, load_perf_targets, render_ledger_markdown,
 };
@@ -289,6 +290,15 @@ enum Cmd {
     LocalClone {
         #[arg(long, default_value_t = 5_000)]
         files: usize,
+    },
+    /// Local partial clone: `blob:none` `file://` clone of a many-pack source, and the
+    /// checkout that lazily fetches every `HEAD` blob
+    PartialClone {
+        #[arg(long, default_value_t = 3_000)]
+        files: usize,
+        /// Packs in the source repository (one incremental repack per batch of files).
+        #[arg(long, default_value_t = 50)]
+        packs: usize,
     },
     /// Ref workloads (for-each-ref, update-ref --stdin) on 100k-ref fixtures
     Refs,
@@ -2110,6 +2120,11 @@ fn main() -> Result<()> {
             let cfg = run_config(&cli, true);
             let bench_exe = std::env::current_exe().context("current exe")?;
             run_local_clone_suite(&hyperfine, &git, &grit, &bench_exe, &cfg, *files, timestamp)?
+        }
+        Cmd::PartialClone { files, packs } => {
+            eprintln!("Running local partial-clone benchmarks ({files} files, {packs} packs)...");
+            let cfg = run_config(&cli, true);
+            run_partial_clone_suite(&hyperfine, &git, &grit, &cfg, *files, *packs, timestamp)?
         }
         Cmd::Refs => {
             eprintln!("Running ref benchmarks (100k-ref fixtures)...");
