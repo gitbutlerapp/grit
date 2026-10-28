@@ -395,12 +395,14 @@ fn lf_changed_region_affix<'a>(old: &'a str, new: &'a str) -> LfChangedRegionAff
         if a != b {
             break;
         }
-        if let Some(sample) = prefix_sample {
-            if a != sample {
-                prefix_uniform = false;
+        if prefix_uniform {
+            if let Some(sample) = prefix_sample {
+                if a != sample {
+                    prefix_uniform = false;
+                }
+            } else {
+                prefix_sample = Some(a);
             }
-        } else {
-            prefix_sample = Some(a);
         }
         head_lines += 1;
         prefix_bytes += a.len();
@@ -417,12 +419,14 @@ fn lf_changed_region_affix<'a>(old: &'a str, new: &'a str) -> LfChangedRegionAff
         if a != b {
             break;
         }
-        if let Some(sample) = suffix_sample {
-            if a != sample {
-                suffix_uniform = false;
+        if suffix_uniform {
+            if let Some(sample) = suffix_sample {
+                if a != sample {
+                    suffix_uniform = false;
+                }
+            } else {
+                suffix_sample = Some(a);
             }
-        } else {
-            suffix_sample = Some(a);
         }
         tail_lines += 1;
         suffix_bytes += a.len();
@@ -478,6 +482,10 @@ fn count_xdiff_changed_lines_trimmed(input: LfStatTrimInput<'_>) -> (usize, usiz
     if cut_old.is_empty() && cut_new.is_empty() {
         return (0, 0);
     }
+    let middle_disjoint_from_uniform_affix = |prefix: Option<&str>, suffix: Option<&str>| {
+        let hits = |needle: &str| cut_old.contains(&needle) || cut_new.contains(&needle);
+        prefix.is_none_or(|line| !hits(line)) && suffix.is_none_or(|line| !hits(line))
+    };
     if shared_records == 0 {
         let mut interner = LineInterner::with_capacity(cut_old.len() + cut_new.len());
         let ids1 = interner.intern_all(&cut_old);
@@ -487,6 +495,26 @@ fn count_xdiff_changed_lines_trimmed(input: LfStatTrimInput<'_>) -> (usize, usiz
             c2.iter().filter(|&&c| c).count(),
             c1.iter().filter(|&&c| c).count(),
         );
+    }
+    if middle_disjoint_from_uniform_affix(uniform_prefix_line, uniform_suffix_line) {
+        let mut interner = LineInterner::with_capacity(cut_old.len() + cut_new.len());
+        let ids1 = interner.intern_all(&cut_old);
+        let ids2 = interner.intern_all(&cut_new);
+        let mut stat = (0usize, 0usize);
+        for op in similar::capture_diff_slices(similar::Algorithm::Myers, &ids1, &ids2) {
+            match op {
+                similar::DiffOp::Delete { old_len, .. } => stat.1 += old_len,
+                similar::DiffOp::Insert { new_len, .. } => stat.0 += new_len,
+                similar::DiffOp::Replace {
+                    old_len, new_len, ..
+                } => {
+                    stat.1 += old_len;
+                    stat.0 += new_len;
+                }
+                similar::DiffOp::Equal { .. } => {}
+            }
+        }
+        return stat;
     }
 
     let mut cut_interner =
@@ -529,12 +557,55 @@ fn count_xdiff_changed_lines_trimmed(input: LfStatTrimInput<'_>) -> (usize, usiz
     )
 }
 
+fn is_uniform_line_run(region: &str, line: &str) -> bool {
+    !line.is_empty()
+        && region.len().is_multiple_of(line.len())
+        && region.starts_with(line)
+        && region.ends_with(line)
+}
+
+fn lf_mid_might_share_affix_line(
+    old: &str,
+    prefix_bytes: usize,
+    suffix_bytes: usize,
+    old_mid: &str,
+    new_mid: &str,
+) -> bool {
+    let mid: Vec<&str> = old_mid
+        .split_inclusive('\n')
+        .chain(new_mid.split_inclusive('\n'))
+        .collect();
+    let region_might_share = |region: &str| {
+        let Some(first) = region.split_inclusive('\n').next() else {
+            return false;
+        };
+        if mid.contains(&first) {
+            return true;
+        }
+        if is_uniform_line_run(region, first) {
+            return false;
+        }
+        region
+            .split_inclusive('\n')
+            .any(|affix| mid.contains(&affix))
+    };
+    if prefix_bytes > 0 && region_might_share(&old[..prefix_bytes]) {
+        return true;
+    }
+    if suffix_bytes > 0 {
+        let start = old.len() - suffix_bytes;
+        return region_might_share(&old[start..]);
+    }
+    false
+}
+
 /// LF-only Myers/minimal stat counting without building [`LineSide`] compare keys.
 fn try_lf_only_stat_count(
     old_content: &str,
     new_content: &str,
     options: &crate::diff::options::DiffOptions,
 ) -> Option<(usize, usize)> {
+    use crate::diff::detail::{changed_region_with_offsets, myers_lf_line_counts};
     use crate::diff::options::DiffAlgorithm;
 
     if !matches!(
@@ -546,6 +617,20 @@ fn try_lf_only_stat_count(
     }
     if old_content.as_bytes().contains(&b'\r') || new_content.as_bytes().contains(&b'\r') {
         return None;
+    }
+    let (prefix_bytes, suffix_bytes, old_mid, new_mid) =
+        changed_region_with_offsets(old_content, new_content);
+    if !lf_mid_might_share_affix_line(old_content, prefix_bytes, suffix_bytes, old_mid, new_mid) {
+        let mut stat = myers_lf_line_counts(old_mid, new_mid);
+        if stat.insertions == 0 && stat.deletions == 0 && old_content != new_content {
+            let before = LineSide::from_text(old_content);
+            let after = LineSide::from_text(new_content);
+            for edit in line_ending_only_edits(&before, &after) {
+                stat.insertions += edit.after_len as usize;
+                stat.deletions += edit.before_len as usize;
+            }
+        }
+        return Some((stat.insertions, stat.deletions));
     }
     let affix = lf_changed_region_affix(old_content, new_content);
     let (head_lines, tail_lines, prefix_bytes, suffix_bytes, old_mid, new_mid) = affix.region;
@@ -11134,7 +11219,7 @@ pub fn count_changes(old_content: &str, new_content: &str) -> (usize, usize) {
 
 /// Count insertions and deletions using the given line-diff algorithm.
 ///
-/// Uses the same compacted line alignment as unified patches and [`crate::diff::line_change_counts`].
+/// Uses the same compacted line alignment as unified patches and [`line_change_counts`].
 #[must_use]
 pub fn count_changes_with_algorithm(
     old_content: &str,
