@@ -3662,6 +3662,7 @@ pub fn grit_lib::diff::merge_diff::diff_attr_external_driver(&std::path::Path, &
 pub fn grit_lib::diff::merge_diff::diff_attr_forces_binary(&std::path::Path, &str) -> bool
 pub fn grit_lib::diff::merge_diff::diff_attr_forces_text(&std::path::Path, &str) -> bool
 pub fn grit_lib::diff::merge_diff::diff_cachetextconv_enabled(&grit_lib::config::ConfigSet, &str) -> bool
+pub fn grit_lib::diff::merge_diff::diff_driver_forces_text(&std::path::Path, &grit_lib::config::ConfigSet, &str) -> bool
 pub fn grit_lib::diff::merge_diff::diff_forced_binary_by_driver(&std::path::Path, &grit_lib::config::ConfigSet, &str, &str, &str) -> bool
 pub fn grit_lib::diff::merge_diff::diff_textconv_active(&std::path::Path, &grit_lib::config::ConfigSet, &str) -> bool
 pub fn grit_lib::diff::merge_diff::diff_textconv_cmd_line(&grit_lib::config::ConfigSet, &str) -> core::option::Option<alloc::string::String>
@@ -5383,6 +5384,7 @@ pub fn grit_lib::diff::apply_rotate_skip_entries(alloc::vec::Vec<grit_lib::diff:
 pub fn grit_lib::diff::apply_rotate_skip_log_entries(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, alloc::vec::Vec<grit_lib::diff::DiffEntry>, core::option::Option<&str>, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::build_file_diffs(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, grit_lib::diff::DiffDetail, grit_lib::diff::DiffOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<grit_lib::diff::DiffFilesOutput>
 pub fn grit_lib::diff::build_file_diffs_streaming(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, grit_lib::diff::DiffOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, impl core::ops::function::FnMut(grit_lib::diff::ListedFileDiff) -> grit_lib::error::Result<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::diff::bytes_for_diff(alloc::vec::Vec<u8>) -> (grit_lib::diff::structured::SideBytes, bool)
 pub fn grit_lib::diff::classify_worktree_entry_for_add(&grit_lib::diff::WorktreeAddRefreshParams<'_>) -> grit_lib::error::Result<grit_lib::diff::WorktreeAddRefresh>
 pub fn grit_lib::diff::combined_structured_patch_body(&grit_lib::diff::combined_diff_patch::CombinedStructuredTextDiff) -> alloc::string::String
 pub fn grit_lib::diff::commit_diff_files(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, grit_lib::diff::DiffMerges, grit_lib::diff::DiffDetail, &grit_lib::diff::DiffOptions, &[alloc::string::String], &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<grit_lib::diff::DiffFilesOutput>
@@ -5433,6 +5435,8 @@ pub fn grit_lib::diff::indent_heuristic_from_config(&grit_lib::config::ConfigSet
 pub fn grit_lib::diff::index_mtime_for_diff(&grit_lib::index::Index, core::option::Option<(u32, u32)>) -> core::option::Option<(u32, u32)>
 pub fn grit_lib::diff::line_change_counts(&str, &str, &grit_lib::diff::DiffOptions) -> grit_lib::diff::LineStat
 pub fn grit_lib::diff::line_diff_unified_hunk_body(&str, &str, &grit_lib::diff::DiffOptions) -> alloc::string::String
+pub fn grit_lib::diff::load_odb_blob_side_for_diff(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, core::option::Option<&str>, core::option::Option<&core::sync::atomic::AtomicUsize>, bool) -> grit_lib::error::Result<(grit_lib::diff::structured::SideBytes, bool)>
+pub fn grit_lib::diff::load_worktree_side_for_diff(&grit_lib::objects::odb::Odb, &std::path::Path, &str, u32, &grit_lib::config::ConfigSet, core::option::Option<&grit_lib::index::IndexEntry>, core::option::Option<&grit_lib::worktree::worktree_rules::WorktreeRules>, bool) -> grit_lib::error::Result<(grit_lib::diff::structured::SideBytes, bool)>
 pub fn grit_lib::diff::map_new_to_old_lines_compacted(&str, &str, similar::types::Algorithm, bool, usize) -> alloc::vec::Vec<core::option::Option<usize>>
 pub fn grit_lib::diff::materialize_worktree_blob(&grit_lib::objects::odb::Odb, &std::path::Path, &std::fs::Metadata, &grit_lib::worktree::crlf::ConversionConfig, &grit_lib::worktree::crlf::FileAttrs, &str, core::option::Option<&grit_lib::index::IndexEntry>, core::option::Option<&grit_lib::filter_process::FilterProcessState>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::diff::mode_from_metadata(&std::fs::Metadata) -> u32
@@ -15430,8 +15434,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::stage_tracked
 pub struct grit_lib::porcelain::stage_tracked::StageTrackedSummary
 pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::modified: alloc::vec::Vec<alloc::vec::Vec<u8>>
 pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::removed: alloc::vec::Vec<alloc::vec::Vec<u8>>
-pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::untracked_invalidation_deferred: bool
 pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::stat_refreshed: bool
+pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::untracked_invalidation_deferred: bool
 impl grit_lib::porcelain::stage_tracked::StageTrackedSummary
 pub fn grit_lib::porcelain::stage_tracked::StageTrackedSummary::change_count(&self) -> usize
 impl core::clone::Clone for grit_lib::porcelain::stage_tracked::StageTrackedSummary
