@@ -657,6 +657,9 @@ fn map_commit_error(err: Error) -> anyhow::Error {
         Error::PartialCommitDuringMerge => {
             anyhow::anyhow!("cannot do a partial commit during a merge")
         }
+        Error::PartialCommitDuringReplay => {
+            anyhow::anyhow!("cannot do a partial commit during a cherry-pick or revert")
+        }
         Error::PathspecNoMatch { spec } => anyhow::anyhow!(
             "pathspec '{spec}' did not match any file(s) known to git"
         ),

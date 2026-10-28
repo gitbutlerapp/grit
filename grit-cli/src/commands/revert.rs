@@ -226,7 +226,15 @@ pub struct RevertRunOptions {
 pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
     let repo = context::discover()?;
     if opts.abort {
-        abort_replay_sequence(&repo).map_err(map_replay_error)?;
+        use grit_lib::porcelain::replay_sequence::ReplayAbortOutcome;
+        match abort_replay_sequence(&repo).map_err(map_replay_error)? {
+            ReplayAbortOutcome::Rewound => {}
+            ReplayAbortOutcome::ClearedInPlace => {
+                eprintln!(
+                    "warning: branch tip moved during the revert; replay state cleared without moving the branch"
+                );
+            }
+        }
         return Ok(RevertOutcome::new(RevertResult::Aborted));
     }
 
@@ -369,8 +377,11 @@ fn map_replay_error(err: Error) -> anyhow::Error {
         Error::NoReplayInProgress => {
             anyhow::anyhow!("no revert in progress")
         }
-        Error::ReplayAbortHeadMoved => anyhow::anyhow!(
-            "cannot abort revert: the current branch moved since the revert started"
+        Error::ReplaySkipAlreadyCommitted => anyhow::anyhow!(
+            "nothing to skip: current step already committed; run `grit revert --continue` instead"
+        ),
+        Error::ReplayContinueDirtyIndex => anyhow::anyhow!(
+            "cannot continue revert: index differs from HEAD after the step was committed"
         ),
         Error::Message(msg) => anyhow::anyhow!(msg),
         other => anyhow::Error::new(other),

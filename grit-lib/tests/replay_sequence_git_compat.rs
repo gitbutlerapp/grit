@@ -9,12 +9,14 @@ use std::process::Command;
 use grit_lib::change_id::change_id;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{parse_commit, ObjectId};
+use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     abort_replay_sequence, commits_to_replay, continue_replay_sequence, predict_replay_sequence,
-    skip_replay_step, start_replay_sequence, ReplayCreated, ReplayEmptyPolicy, ReplayOptions,
-    ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
+    skip_replay_step, start_replay_sequence, ReplayAbortOutcome, ReplayCreated, ReplayEmptyPolicy,
+    ReplayOptions, ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
 };
+use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";
 
@@ -204,6 +206,49 @@ fn pick_stops_with_markers_and_cherry_pick_head() {
 }
 
 #[test]
+fn commit_after_pick_conflict_finishes_sequence_issue_2262() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "f.txt", "a\nb\nc\n", "base");
+    git(root.path(), &["switch", "-c", "side"]);
+    fs::write(root.path().join("f.txt"), "a\nSIDE\nc\n").unwrap();
+    git(
+        root.path(),
+        &["commit", "-qam", "side", "--author=Other <o@example.com>"],
+    );
+    let side = oid_from_rev(root.path(), "HEAD");
+    git(root.path(), &["switch", "main"]);
+    fs::write(root.path().join("f.txt"), "a\nMAIN\nc\n").unwrap();
+    git(root.path(), &["commit", "-qam", "mainchg"]);
+
+    let repo = open_repo(root.path());
+    start_replay_sequence(&repo, &pick_req(vec![side], ReplayOptions::default())).expect("pick");
+    fs::write(root.path().join("f.txt"), "a\nRES\nc\n").unwrap();
+
+    let req = CommitRequest {
+        message: "resolved pick".to_owned(),
+        ..Default::default()
+    };
+    let mut progress = NullProgress;
+    commit_with_scope(
+        &repo,
+        &req,
+        CommitScope::AutoStage,
+        &mut progress,
+        &NeverCancel,
+    )
+    .expect("commit finishes pick");
+
+    assert_eq!(
+        git(root.path(), &["log", "-1", "--format=%an"]).trim(),
+        "Other"
+    );
+    assert_no_replay_state(root.path());
+    abort_replay_sequence(&repo).expect_err("no replay after commit");
+    git_fsck_strict(root.path());
+}
+
+#[test]
 fn git_status_recognizes_grit_stop() {
     let root = tempfile::tempdir().expect("tempdir");
     init_repo(root.path());
@@ -364,7 +409,7 @@ fn abort_restores_branch_index_worktree() {
 }
 
 #[test]
-fn abort_refuses_when_head_moved() {
+fn abort_clears_state_when_head_moved() {
     let root = tempfile::tempdir().expect("tempdir");
     init_repo(root.path());
     commit_file(root.path(), "f", "base\n", "base");
@@ -379,8 +424,9 @@ fn abort_refuses_when_head_moved() {
     let repo = open_repo(root.path());
     start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default())).expect("pick");
     git(root.path(), &["update-ref", "refs/heads/main", "HEAD~1"]);
-    let err = abort_replay_sequence(&repo).unwrap_err();
-    assert!(matches!(err, grit_lib::error::Error::ReplayAbortHeadMoved));
+    let outcome = abort_replay_sequence(&repo).expect("abort clears without rewind");
+    assert_eq!(outcome, ReplayAbortOutcome::ClearedInPlace);
+    assert_no_replay_state(root.path());
 }
 
 #[test]

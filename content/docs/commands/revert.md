@@ -19,7 +19,7 @@ Creates new commits on the current branch that undo the changes introduced by ea
 
 `<commit>` can be a full or short commit id, a branch name, a range such as `v1.0..main`, or several commits in one invocation.
 
-When a step would conflict, grit stops with conflict markers in the worktree and unmerged index entries — the same model as [`grit pick`](../pick/) and [`grit merge`](../merge/). Resolve conflicts, stage the result with [`grit add`](../add/), then run `grit revert --continue`. Use `--abort` to restore the branch to its pre-revert state, or `--skip` to drop the current step and continue with any remaining commits.
+When a step would conflict, grit stops with conflict markers in the worktree and unmerged index entries — the same model as [`grit pick`](../pick/) and [`grit merge`](../merge/). Resolve conflicts, then either run [`grit commit`](../commit/) (auto-stages and finishes the step) or stage with [`grit add`](../add/) and run `grit revert --continue`. Use `--abort` to restore the branch to its pre-revert state when the tip has not moved; if you already committed the resolution, `--abort` only clears revert state. Use `--skip` to drop the current step and continue with any remaining commits.
 
 Merge commits require `--mainline <n>` (1-based parent number, long option only) so grit knows which parent line to replay.
 
