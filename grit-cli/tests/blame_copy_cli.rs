@@ -79,6 +79,29 @@ fn copy_detection_twice_reports_original_path_in_json() {
 }
 
 #[test]
+fn copy_detection_short_move_json_original_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    let a: String = (1..=20).map(|n| format!("orig line {n}\n")).collect();
+    fs::write(root.join("a.txt"), a).unwrap();
+    git(root, &["add", "."]);
+    git(root, &["commit", "-m", "add a"]);
+    let a_tail: String = (11..=20).map(|n| format!("orig line {n}\n")).collect();
+    fs::write(root.join("a.txt"), a_tail).unwrap();
+    let b: String = (1..=10)
+        .map(|n| format!("orig line {n}\n"))
+        .chain(std::iter::once("extra\n".to_owned()))
+        .collect();
+    fs::write(root.join("b.txt"), b).unwrap();
+    git(root, &["add", "."]);
+    git(root, &["commit", "-m", "move"]);
+    let grit = gs_json(root, &["blame", "-C", "b.txt"]);
+    let line = &grit["lines"][0];
+    assert_eq!(line["original_path"].as_str(), Some("a.txt"));
+}
+
+#[test]
 fn copy_detection_rejects_more_than_three_flags() {
     let dir = tempfile::tempdir().unwrap();
     setup_copy_by_creation(dir.path());

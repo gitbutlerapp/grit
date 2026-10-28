@@ -248,6 +248,44 @@ fn fixture_copy_from_older_commit() -> (tempfile::TempDir, Repository) {
     (tmp, open_repo(&root))
 }
 
+/// Issue #2239: short lines still score as a chunk (Git `blame_entry_score`).
+fn fixture_short_lines_moved_between_files() -> (tempfile::TempDir, Repository) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_path_buf();
+    git_run(&root, &["init", "-q", "-b", "main"]);
+    let a_content: String = (1..=20).map(|n| format!("orig line {n}\n")).collect();
+    std::fs::write(root.join("a.txt"), a_content).unwrap();
+    git_run(&root, &["add", "."]);
+    git_run(&root, &["commit", "-m", "add a"]);
+    let a_tail: String = (11..=20).map(|n| format!("orig line {n}\n")).collect();
+    std::fs::write(root.join("a.txt"), a_tail).unwrap();
+    let b_content: String = (1..=10)
+        .map(|n| format!("orig line {n}\n"))
+        .chain(std::iter::once("extra\n".to_owned()))
+        .collect();
+    std::fs::write(root.join("b.txt"), b_content).unwrap();
+    git_run(&root, &["add", "."]);
+    git_run(&root, &["commit", "-m", "move lines from a to b"]);
+    (tmp, open_repo(&root))
+}
+
+fn fixture_short_lines_whole_file_copy() -> (tempfile::TempDir, Repository) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_path_buf();
+    git_run(&root, &["init", "-q", "-b", "main"]);
+    let a_content: String = (1..=20).map(|n| format!("orig line {n}\n")).collect();
+    std::fs::write(root.join("a.txt"), a_content).unwrap();
+    git_run(&root, &["add", "."]);
+    git_run(&root, &["commit", "-m", "add a"]);
+    std::fs::write(root.join("o.txt"), "other\n").unwrap();
+    git_run(&root, &["add", "o.txt"]);
+    git_run(&root, &["commit", "-m", "other"]);
+    std::fs::copy(root.join("a.txt"), root.join("c.txt")).unwrap();
+    git_run(&root, &["add", "c.txt"]);
+    git_run(&root, &["commit", "-m", "copy a to c"]);
+    (tmp, open_repo(&root))
+}
+
 fn fixture_exact_rename_preserves_original_path() -> (tempfile::TempDir, Repository) {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path().to_path_buf();
@@ -278,6 +316,42 @@ fn fixture_two_hop_exact_rename_preserves_original_path() -> (tempfile::TempDir,
     git_run(&root, &["add", "dest.txt"]);
     git_run(&root, &["commit", "-m", "rename to dest"]);
     (tmp, open_repo(&root))
+}
+
+#[test]
+fn short_lines_moved_between_files_level1() {
+    let (tmp, repo) = fixture_short_lines_moved_between_files();
+    assert_blame_copy_matches(
+        &repo,
+        tmp.path(),
+        "b.txt",
+        CopyDetection::FromModifiedFiles,
+        Some((1, 10)),
+    );
+}
+
+#[test]
+fn short_lines_whole_file_copy_level2() {
+    let (tmp, repo) = fixture_short_lines_whole_file_copy();
+    assert_blame_copy_matches(
+        &repo,
+        tmp.path(),
+        "c.txt",
+        CopyDetection::FromCreatingCommit,
+        Some((1, 5)),
+    );
+}
+
+#[test]
+fn short_lines_whole_file_copy_level3() {
+    let (tmp, repo) = fixture_short_lines_whole_file_copy();
+    assert_blame_copy_matches(
+        &repo,
+        tmp.path(),
+        "c.txt",
+        CopyDetection::FromAnyCommit,
+        Some((1, 5)),
+    );
 }
 
 #[test]

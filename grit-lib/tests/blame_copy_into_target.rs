@@ -75,6 +75,67 @@ fn build_copy_into_target_fixture() -> (tempfile::TempDir, ObjectId, ObjectId) {
     (tmp, base_oid, tip)
 }
 
+fn build_short_line_copy_into_target_fixture() -> (tempfile::TempDir, ObjectId, ObjectId) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.email", "copy@example.com"]);
+    git_run(root, &["config", "user.name", "Copy Test"]);
+    let line = |n: u32| format!("orig line {n}\n");
+    let source: String = (1..=10).map(line).collect();
+    std::fs::write(root.join("source.txt"), &source).unwrap();
+    std::fs::write(root.join("target.txt"), "existing\n").unwrap();
+    git_run(root, &["add", "."]);
+    git_run(root, &["commit", "-q", "-m", "base"]);
+    let base_oid = head_oid(root);
+    let tail: String = (2..=10).map(line).collect();
+    std::fs::write(root.join("source.txt"), format!("modified\n{tail}")).unwrap();
+    let copied: String = (1..=10).map(line).collect();
+    std::fs::write(root.join("target.txt"), format!("existing\n{copied}")).unwrap();
+    git_run(root, &["add", "."]);
+    git_run(root, &["commit", "-q", "-m", "copy"]);
+    let tip = head_oid(root);
+    (tmp, base_oid, tip)
+}
+
+#[test]
+fn compute_blame_short_lines_copy_into_target_attributes_source_file() {
+    let (_tmp, base_oid, tip) = build_short_line_copy_into_target_fixture();
+    let root = _tmp.path();
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    let grafts = HashMap::new();
+    let policy = grit_lib::parallel::ThreadPolicy::default();
+    let lines = compute_blame(
+        repo.odb(),
+        tip,
+        "target.txt",
+        &HashSet::new(),
+        BlameDiffAlgorithm::Myers,
+        None,
+        false,
+        1,
+        false,
+        &grafts,
+        true,
+        None,
+        grit_lib::diff::WhitespaceMode::default(),
+        &policy,
+    )
+    .expect("compute_blame");
+    for final_line in 2..=11 {
+        let grit_line = lines
+            .iter()
+            .find(|l| l.final_lineno == final_line)
+            .expect("grit line");
+        assert_eq!(grit_line.oid, base_oid, "line {final_line}");
+        assert_eq!(
+            grit_line.source_file.as_deref(),
+            Some("source.txt"),
+            "line {final_line} source"
+        );
+    }
+}
+
 #[test]
 fn compute_blame_copy_into_existing_target_attributes_source_file() {
     let (_tmp, base_oid, tip) = build_copy_into_target_fixture();

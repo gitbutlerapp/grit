@@ -1265,7 +1265,6 @@ use crate::crlf::{
     load_gitattributes_parsed, ConversionConfig, GitAttributes,
 };
 use crate::diff::{detect_renames, diff_trees, DiffEntry, DiffStatus};
-use crate::diff_rename_parallel::{diff_rename_parallel_options, parallel_map_indices};
 use crate::error::{Error as LibError, Result};
 use crate::index::Index;
 use crate::objects::{
@@ -1275,58 +1274,10 @@ use crate::objects::{
 };
 use crate::odb::Odb;
 use crate::pack::SingleLocalPackReader;
-use crate::parallel::{ParallelOptions, ThreadPolicy};
+use crate::parallel::ThreadPolicy;
 use crate::repo::Repository;
 use crate::repo_relpath::{format_path_stored, storage_bytes, storage_string};
 use crate::wildmatch::wildmatch;
-
-/// Copy source attribution plus its original line records for comparison keys.
-type CopySourceBlame = (String, Arc<BlobLines>, Vec<BlameLine>);
-
-/// Cached copy-detection blame lookup: source path, lines by content, use counts.
-type CopySourceBlameCache = (
-    String,
-    HashMap<String, Vec<BlameLine>>,
-    HashMap<String, usize>,
-);
-
-/// Attribute `current_idx` through copy detection when `-C`/`-CCC` data is cached.
-fn attribute_line_from_copy_cache(
-    inserted_copy_source: &mut Option<CopySourceBlameCache>,
-    cur_lines: &BlobLines,
-    current_idx: usize,
-    ws: crate::diff::WhitespaceMode,
-    t: &TrackedLine,
-    final_lines: &[String],
-    result: &mut Vec<BlameLine>,
-) -> bool {
-    let Some((source_path, by_content, used)) = inserted_copy_source.as_mut() else {
-        return false;
-    };
-    let key = cur_lines.comparison_key(current_idx, ws);
-    let line_text = key.as_ref();
-    if blame_copy_content_score(line_text) < BLAME_DEFAULT_COPY_SCORE {
-        return false;
-    }
-    let used_key = line_text.to_owned();
-    let used_count = used.get(&used_key).copied().unwrap_or(0);
-    let Some(pb) = by_content
-        .get(line_text)
-        .and_then(|candidates| candidates.get(used_count))
-    else {
-        return false;
-    };
-    used.insert(used_key, used_count + 1);
-    result.push(blame_line_from_parent(
-        pb,
-        t.final_lineno,
-        final_lines[t.final_lineno - 1].clone(),
-        pb.source_file.clone().or_else(|| Some(source_path.clone())),
-        pb.ignored || t.ignored,
-        pb.unblamable,
-    ));
-    true
-}
 
 /// Hook the CLI installs so blame can lazily hydrate missing objects from a
 /// promisor remote (partial clone). The lib does no transport itself; the CLI
@@ -1436,6 +1387,7 @@ fn resolve_path_in_tree_entry(
 
 /// Split content into lines. A final line without a trailing newline is still a line
 /// (matches git blame / `wc -l` + 1 semantics in upstream tests).
+#[cfg(test)]
 fn content_lines(s: &str) -> Vec<&str> {
     if s.is_empty() {
         return Vec::new();
@@ -1597,59 +1549,40 @@ fn pass_overlay_to_parents(
         }
     }
 
-    let mut copy_source = None;
     if walk.copy_depth >= 1 && !remaining.is_empty() {
         if let Some(&parent) = overlay.parents.first() {
-            let parent_tree =
-                get_blame_commit(odb, parent, commit_cache, session.commit_graph.as_deref())?.tree;
-            let cur_refs = cur.comparison_refs(ws);
-            if let Some((source_path, source_lines, source_blame)) = find_copy_source_blame(
+            let parent_commit =
+                get_blame_commit(odb, parent, commit_cache, session.commit_graph.as_deref())?;
+            let (left, _handoff, copy_lines) = copy_detect_attribute_pending(
                 odb,
-                parent,
-                &parent_tree,
+                session,
+                remaining,
+                &overlay.lines,
+                final_lines,
                 walk.path,
-                &cur_refs,
+                parent,
+                &parent_commit.tree,
+                &parent_commit.tree,
+                walk.path,
+                walk.copy_depth,
+                false,
+                Some(overlay.copy_paths.as_ref()),
+                None,
                 walk.ignore_revs,
                 walk.diff_algorithm,
                 walk.textconv_ctx,
                 walk.use_textconv,
-                walk.copy_depth - 1,
-                false,
-                overlay.copy_paths.as_ref(),
                 walk.first_parent_only,
                 walk.grafts,
                 walk.indent_heuristic,
-                session,
-            )? {
-                let mut by_content: HashMap<String, Vec<BlameLine>> = HashMap::new();
-                for line in source_blame {
-                    by_content
-                        .entry(
-                            source_lines
-                                .comparison_key(line.final_lineno - 1, ws)
-                                .into_owned(),
-                        )
-                        .or_default()
-                        .push(line);
-                }
-                copy_source = Some((source_path, by_content, HashMap::new()));
-            }
+            )?;
+            result.extend(copy_lines);
+            remaining = left;
         }
     }
 
     let null = ObjectId::null(odb.hash_algo());
     for t in remaining {
-        if attribute_line_from_copy_cache(
-            &mut copy_source,
-            cur,
-            t.current_idx,
-            ws,
-            &t,
-            final_lines,
-            result,
-        ) {
-            continue;
-        }
         result.push(BlameLine {
             oid: null,
             final_lineno: t.final_lineno,
@@ -2100,16 +2033,6 @@ impl BlobLines {
         &self.text[self.line_start(idx)..end]
     }
 
-    // Keep normalization code shared by copy lookups rather than inlining it into the walk.
-    #[inline(never)]
-    fn comparison_key(
-        &self,
-        idx: usize,
-        ws: crate::diff::WhitespaceMode,
-    ) -> std::borrow::Cow<'_, str> {
-        ws.normalize_line_for_compare(self.comparison_line(idx, ws))
-    }
-
     fn comparison_refs(&self, ws: crate::diff::WhitespaceMode) -> Vec<&str> {
         (0..self.len())
             .map(|i| self.comparison_line(i, ws))
@@ -2191,7 +2114,6 @@ struct BlameSession<'a> {
     textconv_ctx: Option<&'a BlameTextconvContext>,
     use_textconv: bool,
     whitespace: crate::diff::WhitespaceMode,
-    copy_score_parallel: ParallelOptions,
     commit_graph: Option<Arc<CommitGraphChain>>,
     bloom_pathspec: Vec<String>,
     bloom_key_cache: Option<BloomKeyCacheEntry>,
@@ -2216,15 +2138,12 @@ impl<'a> BlameSession<'a> {
         use_textconv: bool,
         thread_policy: &ThreadPolicy,
     ) -> Self {
-        let config = textconv_ctx
-            .map(|ctx| ctx.config.clone())
-            .unwrap_or_default();
+        let _ = thread_policy;
         Self {
             odb,
             textconv_ctx,
             use_textconv,
             whitespace: crate::diff::WhitespaceMode::default(),
-            copy_score_parallel: diff_rename_parallel_options(&config, thread_policy),
             commit_graph: None,
             bloom_pathspec: Vec::new(),
             bloom_key_cache: None,
@@ -3413,112 +3332,50 @@ fn compute_blame_with_session(
 
         match parent_blob_entry {
             None if !is_ignored => {
-                // If copy detection is enabled, try to track lines to source
-                // files in the parent tree.
                 if copy_depth >= 1 {
-                    let allowed = copy_allowed_parent_paths(
-                        odb,
-                        &parent_commit.tree,
-                        &commit.tree,
-                        copy_depth,
-                        true,
-                    )?;
                     let cur_lines_arc = session.load_blob_lines(
                         current_blob_oid,
                         &current_path,
                         current_blob_mode,
                     )?;
-                    let cur_lines = cur_lines_arc.comparison_refs(session.whitespace);
-                    let mut entries = Vec::new();
-                    collect_tree_file_entries(odb, &parent_commit.tree, "", &mut entries)?;
-                    let mut by_content: HashMap<String, Vec<(String, BlameLine)>> = HashMap::new();
-                    for (path, oid, mode) in entries {
-                        if path == current_path || !is_regular_mode(mode) {
-                            continue;
-                        }
-                        if !path_allowed_for_copy_search(&path, allowed.as_ref()) {
-                            continue;
-                        }
-
-                        let source_lines_arc = session.load_blob_lines(oid, &path, mode)?;
-                        let source_lines = source_lines_arc.comparison_refs(session.whitespace);
-                        let overlap =
-                            blame_copy_overlap_score(&cur_lines, &source_lines, session.whitespace);
-                        if overlap < BLAME_DEFAULT_COPY_SCORE {
-                            continue;
-                        }
-
-                        let parent_revision = parent_oid.to_hex();
-                        let source_blame = compute_blame_with_session(
-                            odb,
-                            parent_oid,
-                            &parent_revision,
-                            &path,
-                            ignore_revs,
-                            diff_algorithm,
-                            textconv_ctx,
-                            use_textconv,
-                            copy_depth.saturating_sub(1),
-                            first_parent_only,
-                            grafts,
-                            indent_heuristic,
-                            None,
-                            None,
-                            session,
-                        )?;
-                        for line in source_blame {
-                            by_content
-                                .entry(
-                                    source_lines_arc
-                                        .comparison_key(line.final_lineno - 1, session.whitespace)
-                                        .into_owned(),
-                                )
-                                .or_default()
-                                .push((path.clone(), line));
-                        }
+                    let pending_batch = std::mem::take(&mut pending);
+                    let (remaining, _handoff, copy_lines) = copy_detect_attribute_pending(
+                        odb,
+                        session,
+                        pending_batch,
+                        &cur_lines_arc,
+                        &final_lines,
+                        &blamed_path,
+                        parent_oid,
+                        &parent_commit.tree,
+                        &commit.tree,
+                        &current_path,
+                        copy_depth,
+                        true,
+                        None,
+                        None,
+                        ignore_revs,
+                        diff_algorithm,
+                        textconv_ctx,
+                        use_textconv,
+                        first_parent_only,
+                        grafts,
+                        indent_heuristic,
+                    )?;
+                    result.extend(copy_lines);
+                    for t in remaining {
+                        result.push(blame_line_at_path(
+                            current_oid,
+                            t.final_lineno,
+                            t.current_idx + 1,
+                            final_lines[t.final_lineno - 1].clone(),
+                            &blamed_path,
+                            t.source_path.clone(),
+                            t.ignored,
+                            false,
+                        ));
                     }
-
-                    if !by_content.is_empty() {
-                        let mut used: HashMap<String, usize> = HashMap::new();
-                        for t in pending.drain(..) {
-                            let key = session.whitespace.normalize_line_for_compare(
-                                cur_lines.get(t.current_idx).copied().unwrap_or(""),
-                            );
-                            let line_text = key.as_ref();
-                            let used_key = line_text.to_owned();
-                            let used_count = used.get(&used_key).copied().unwrap_or(0);
-                            if blame_copy_content_score(line_text) >= BLAME_DEFAULT_COPY_SCORE {
-                                if let Some((source_path, pb)) = by_content
-                                    .get(line_text)
-                                    .and_then(|candidates| candidates.get(used_count))
-                                {
-                                    used.insert(used_key, used_count + 1);
-                                    result.push(blame_line_from_parent(
-                                        pb,
-                                        t.final_lineno,
-                                        final_lines[t.final_lineno - 1].clone(),
-                                        pb.source_file
-                                            .clone()
-                                            .or_else(|| Some(source_path.clone())),
-                                        pb.ignored || t.ignored,
-                                        pb.unblamable,
-                                    ));
-                                    continue;
-                                }
-                            }
-                            result.push(blame_line_at_path(
-                                current_oid,
-                                t.final_lineno,
-                                t.current_idx + 1,
-                                final_lines[t.final_lineno - 1].clone(),
-                                &blamed_path,
-                                t.source_path.clone(),
-                                t.ignored,
-                                false,
-                            ));
-                        }
-                        continue 'blame_loop;
-                    }
+                    continue 'blame_loop;
                 }
 
                 // No rename/copy source found — attribute to current commit.
@@ -3627,7 +3484,6 @@ fn compute_blame_with_session(
                 let diff_line_map = maps.diff_line_map.as_slice();
                 let line_map = maps.line_map.as_slice();
                 let stop_blame_on_current = maps.stop_blame_on_current.as_slice();
-                let mut inserted_copy_source: Option<CopySourceBlameCache> = None;
                 let inserted_line_duplicates_parent = pending.iter().any(|t| {
                     t.current_idx < cur_lines_arc.len()
                         && (0..par_lines_arc.len()).any(|i| {
@@ -3638,74 +3494,27 @@ fn compute_blame_with_session(
                             )
                         })
                 });
-                if copy_depth >= 1 && !inserted_line_duplicates_parent {
-                    let cur_line_refs = cur_lines_arc.comparison_refs(session.whitespace);
-                    let allowed = copy_allowed_parent_paths(
-                        odb,
-                        &parent_commit.tree,
-                        &commit.tree,
-                        copy_depth,
-                        false,
-                    )?;
-                    if let Some((source_path, source_lines, source_blame)) = find_copy_source_blame(
-                        odb,
-                        parent_oid,
-                        &parent_commit.tree,
-                        &current_path,
-                        &cur_line_refs,
-                        ignore_revs,
-                        diff_algorithm,
-                        textconv_ctx,
-                        use_textconv,
-                        copy_depth - 1,
-                        false,
-                        allowed.as_ref(),
-                        first_parent_only,
-                        grafts,
-                        indent_heuristic,
-                        session,
-                    )? {
-                        let mut by_content: HashMap<String, Vec<BlameLine>> = HashMap::new();
-                        for line in source_blame {
-                            by_content
-                                .entry(
-                                    source_lines
-                                        .comparison_key(line.final_lineno - 1, session.whitespace)
-                                        .into_owned(),
-                                )
-                                .or_default()
-                                .push(line);
-                        }
-                        inserted_copy_source = Some((source_path, by_content, HashMap::new()));
-                    }
-                }
+                let mut introduced_for_copy = Vec::new();
 
                 for t in pending.drain(..) {
                     if t.current_idx < line_map.len() {
                         if diff_line_map.get(t.current_idx).and_then(|m| *m).is_none()
                             && !is_ignored
                         {
-                            if attribute_line_from_copy_cache(
-                                &mut inserted_copy_source,
-                                cur_lines_arc.as_ref(),
-                                t.current_idx,
-                                session.whitespace,
-                                &t,
-                                &final_lines,
-                                &mut result,
-                            ) {
-                                continue;
+                            if copy_depth >= 1 && !inserted_line_duplicates_parent {
+                                introduced_for_copy.push(t);
+                            } else {
+                                result.push(blame_line_at_path(
+                                    current_oid,
+                                    t.final_lineno,
+                                    t.current_idx + 1,
+                                    final_lines[t.final_lineno - 1].clone(),
+                                    &current_path,
+                                    None,
+                                    t.ignored,
+                                    false,
+                                ));
                             }
-                            result.push(blame_line_at_path(
-                                current_oid,
-                                t.final_lineno,
-                                t.current_idx + 1,
-                                final_lines[t.final_lineno - 1].clone(),
-                                &current_path,
-                                None,
-                                t.ignored,
-                                false,
-                            ));
                             continue;
                         }
                         if let Some(parent_idx) = line_map[t.current_idx] {
@@ -3817,28 +3626,20 @@ fn compute_blame_with_session(
                                 });
                                 continue;
                             }
-                            if attribute_line_from_copy_cache(
-                                &mut inserted_copy_source,
-                                cur_lines_arc.as_ref(),
-                                t.current_idx,
-                                session.whitespace,
-                                &t,
-                                &final_lines,
-                                &mut result,
-                            ) {
-                                continue;
+                            if copy_depth >= 1 && !inserted_line_duplicates_parent {
+                                introduced_for_copy.push(t);
+                            } else {
+                                result.push(blame_line_at_path(
+                                    current_oid,
+                                    t.final_lineno,
+                                    t.current_idx + 1,
+                                    final_lines[t.final_lineno - 1].clone(),
+                                    &blamed_path,
+                                    t.source_path.clone(),
+                                    t.ignored,
+                                    false,
+                                ));
                             }
-                            // Line was introduced in current commit
-                            result.push(blame_line_at_path(
-                                current_oid,
-                                t.final_lineno,
-                                t.current_idx + 1,
-                                final_lines[t.final_lineno - 1].clone(),
-                                &blamed_path,
-                                t.source_path.clone(),
-                                t.ignored,
-                                false,
-                            ));
                         }
                     } else if is_ignored {
                         result.push(blame_line_at_path(
@@ -3866,6 +3667,46 @@ fn compute_blame_with_session(
                     }
                 }
 
+                if copy_depth >= 1 && !introduced_for_copy.is_empty() {
+                    let (left, handoff, copy_lines) = copy_detect_attribute_pending(
+                        odb,
+                        session,
+                        introduced_for_copy,
+                        &cur_lines_arc,
+                        &final_lines,
+                        &blamed_path,
+                        parent_oid,
+                        &parent_commit.tree,
+                        &commit.tree,
+                        &current_path,
+                        copy_depth,
+                        false,
+                        None,
+                        Some(&par_lines_arc),
+                        ignore_revs,
+                        diff_algorithm,
+                        textconv_ctx,
+                        use_textconv,
+                        first_parent_only,
+                        grafts,
+                        indent_heuristic,
+                    )?;
+                    result.extend(copy_lines);
+                    for t in left {
+                        result.push(blame_line_at_path(
+                            current_oid,
+                            t.final_lineno,
+                            t.current_idx + 1,
+                            final_lines[t.final_lineno - 1].clone(),
+                            &blamed_path,
+                            t.source_path.clone(),
+                            t.ignored,
+                            false,
+                        ));
+                    }
+                    still_pending.extend(handoff);
+                }
+
                 pending = still_pending;
                 current_oid = parent_oid;
                 current_blob_oid = p_blob_oid;
@@ -3886,24 +3727,367 @@ fn compute_blame_with_session(
 
 /// Git's default minimum line score for copy detection (`blame.h`).
 const BLAME_DEFAULT_COPY_SCORE: usize = 40;
+/// Git's default minimum chunk score for within-file move detection (`blame.h`).
+const BLAME_DEFAULT_MOVE_SCORE: usize = 20;
 
 fn blame_copy_content_score(line: &str) -> usize {
     line.chars().filter(|c| c.is_ascii_alphanumeric()).count()
 }
 
-fn blame_copy_overlap_score(cur: &[&str], src: &[&str], ws: crate::diff::WhitespaceMode) -> usize {
-    cur.iter()
-        .filter_map(|line| {
-            let score = blame_copy_content_score(line);
-            if score >= BLAME_DEFAULT_COPY_SCORE
-                && src.iter().any(|s| blame_lines_equal(s, line, ws))
+/// Git `blame_entry_score`: one plus alphanumeric bytes across all lines in the chunk.
+fn blame_entry_score_lines(lines: &[&str]) -> usize {
+    1 + lines
+        .iter()
+        .map(|line| blame_copy_content_score(line))
+        .sum::<usize>()
+}
+
+/// Longest contiguous equal run between a suspect chunk and a candidate file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ContiguousCopyMatch {
+    suspect_start: usize,
+    parent_start: usize,
+    len: usize,
+    score: usize,
+}
+
+fn find_best_contiguous_copy_match(
+    suspect: &[&str],
+    parent: &[&str],
+    ws: crate::diff::WhitespaceMode,
+) -> Option<ContiguousCopyMatch> {
+    let mut best: Option<ContiguousCopyMatch> = None;
+    for s_start in 0..suspect.len() {
+        for p_start in 0..parent.len() {
+            let mut len = 0usize;
+            while s_start + len < suspect.len()
+                && p_start + len < parent.len()
+                && blame_lines_equal(suspect[s_start + len], parent[p_start + len], ws)
             {
-                Some(score)
-            } else {
-                None
+                len += 1;
             }
-        })
-        .sum()
+            if len == 0 {
+                continue;
+            }
+            let score = blame_entry_score_lines(&suspect[s_start..s_start + len]);
+            let replace = best.is_none_or(|b| score > b.score || (score == b.score && len > b.len));
+            if replace {
+                best = Some(ContiguousCopyMatch {
+                    suspect_start: s_start,
+                    parent_start: p_start,
+                    len,
+                    score,
+                });
+            }
+        }
+    }
+    best
+}
+
+/// Contiguous `current_idx` groups for copy/move suspect chunks.
+fn group_contiguous_tracked(pending: &[TrackedLine]) -> Vec<(usize, usize)> {
+    if pending.is_empty() {
+        return Vec::new();
+    }
+    let mut order: Vec<usize> = (0..pending.len()).collect();
+    order.sort_by_key(|&i| pending[i].current_idx);
+    let mut groups = Vec::new();
+    let mut start = pending[order[0]].current_idx;
+    let mut end = start + 1;
+    for &i in order.iter().skip(1) {
+        let idx = pending[i].current_idx;
+        if idx == end {
+            end += 1;
+        } else {
+            groups.push((start, end));
+            start = idx;
+            end = idx + 1;
+        }
+    }
+    groups.push((start, end));
+    groups
+}
+
+type CopySourceCache = HashMap<String, (Arc<BlobLines>, Vec<BlameLine>)>;
+
+#[expect(clippy::too_many_arguments)]
+fn load_copy_source_blame(
+    odb: &Odb,
+    parent_oid: ObjectId,
+    path: &str,
+    oid: ObjectId,
+    mode: u32,
+    ignore_revs: &HashSet<ObjectId>,
+    diff_algorithm: BlameDiffAlgorithm,
+    textconv_ctx: Option<&BlameTextconvContext>,
+    use_textconv: bool,
+    copy_depth: usize,
+    first_parent_only: bool,
+    grafts: &HashMap<ObjectId, Vec<ObjectId>>,
+    indent_heuristic: bool,
+    session: &mut BlameSession<'_>,
+    cache: &mut CopySourceCache,
+) -> Result<(Arc<BlobLines>, Vec<BlameLine>)> {
+    if let Some(entry) = cache.get(path) {
+        return Ok((Arc::clone(&entry.0), entry.1.clone()));
+    }
+    let source_lines = session.load_blob_lines(oid, path, mode)?;
+    let parent_revision = parent_oid.to_hex();
+    let source_blame = compute_blame_with_session(
+        odb,
+        parent_oid,
+        &parent_revision,
+        path,
+        ignore_revs,
+        diff_algorithm,
+        textconv_ctx,
+        use_textconv,
+        copy_depth,
+        first_parent_only,
+        grafts,
+        indent_heuristic,
+        None,
+        None,
+        session,
+    )?;
+    cache.insert(
+        path.to_owned(),
+        (Arc::clone(&source_lines), source_blame.clone()),
+    );
+    Ok((source_lines, source_blame))
+}
+
+/// Apply Git-style copy/move detection to still-unblamed lines.
+#[expect(clippy::too_many_arguments)]
+fn copy_detect_attribute_pending(
+    odb: &Odb,
+    session: &mut BlameSession<'_>,
+    pending: Vec<TrackedLine>,
+    cur_lines: &Arc<BlobLines>,
+    final_lines: &[String],
+    _blamed_path: &str,
+    parent_oid: ObjectId,
+    parent_tree: &ObjectId,
+    child_tree: &ObjectId,
+    current_path: &str,
+    copy_depth: usize,
+    blaming_new_file: bool,
+    // When set, skip tree-based copy path rules and use this allow-list (`None` = all paths).
+    explicit_allowed_paths: Option<Option<&HashSet<String>>>,
+    move_parent_lines: Option<&Arc<BlobLines>>,
+    ignore_revs: &HashSet<ObjectId>,
+    diff_algorithm: BlameDiffAlgorithm,
+    textconv_ctx: Option<&BlameTextconvContext>,
+    use_textconv: bool,
+    first_parent_only: bool,
+    grafts: &HashMap<ObjectId, Vec<ObjectId>>,
+    indent_heuristic: bool,
+) -> Result<(Vec<TrackedLine>, Vec<TrackedLine>, Vec<BlameLine>)> {
+    if copy_depth == 0 || pending.is_empty() {
+        return Ok((pending, Vec::new(), Vec::new()));
+    }
+    let ws = session.whitespace;
+    let cur_refs = cur_lines.comparison_refs(ws);
+    let allowed = match explicit_allowed_paths {
+        Some(paths) => paths.cloned(),
+        None => {
+            copy_allowed_parent_paths(odb, parent_tree, child_tree, copy_depth, blaming_new_file)?
+        }
+    };
+    let mut entries = Vec::new();
+    collect_tree_file_entries(odb, parent_tree, "", &mut entries)?;
+    let mut candidates: Vec<(String, ObjectId, u32)> = Vec::new();
+    for (path, oid, mode) in entries {
+        if path == current_path || !is_regular_mode(mode) {
+            continue;
+        }
+        if !path_allowed_for_copy_search(&path, allowed.as_ref()) {
+            continue;
+        }
+        candidates.push((path, oid, mode));
+    }
+    let mut source_cache: CopySourceCache = HashMap::new();
+    let mut result = Vec::new();
+    let mut parent_handoff = Vec::new();
+    let mut work = pending;
+    let copy_threshold = BLAME_DEFAULT_COPY_SCORE;
+    let move_threshold = BLAME_DEFAULT_MOVE_SCORE;
+
+    if let Some(par_lines) = move_parent_lines {
+        let par_refs = par_lines.comparison_refs(ws);
+        let mut next_work = Vec::new();
+        for group in group_contiguous_tracked(&work) {
+            let slice: Vec<&str> = (group.0..group.1).map(|i| cur_refs[i]).collect();
+            if blame_entry_score_lines(&slice) <= move_threshold {
+                next_work.extend(
+                    work.iter()
+                        .filter(|t| t.current_idx >= group.0 && t.current_idx < group.1)
+                        .cloned(),
+                );
+                continue;
+            }
+            let Some(m) = find_best_contiguous_copy_match(&slice, &par_refs, ws) else {
+                next_work.extend(
+                    work.iter()
+                        .filter(|t| t.current_idx >= group.0 && t.current_idx < group.1)
+                        .cloned(),
+                );
+                continue;
+            };
+            if m.score <= move_threshold {
+                next_work.extend(
+                    work.iter()
+                        .filter(|t| t.current_idx >= group.0 && t.current_idx < group.1)
+                        .cloned(),
+                );
+                continue;
+            }
+            for t in work
+                .iter()
+                .filter(|t| t.current_idx >= group.0 && t.current_idx < group.1)
+            {
+                let off = t.current_idx - group.0;
+                if off < m.suspect_start || off >= m.suspect_start + m.len {
+                    next_work.push(t.clone());
+                    continue;
+                }
+                let parent_line = m.parent_start + (off - m.suspect_start);
+                parent_handoff.push(TrackedLine {
+                    current_idx: parent_line,
+                    ..t.clone()
+                });
+            }
+        }
+        work = next_work;
+    }
+
+    loop {
+        let mut made_progress = false;
+        let groups = group_contiguous_tracked(&work);
+        let mut still_pending = Vec::new();
+        for (start_idx, end_idx) in groups {
+            let slice: Vec<&str> = (start_idx..end_idx).map(|i| cur_refs[i]).collect();
+            let group_lines: Vec<TrackedLine> = work
+                .iter()
+                .filter(|t| t.current_idx >= start_idx && t.current_idx < end_idx)
+                .cloned()
+                .collect();
+            let mut subranges = vec![(0usize, slice.len())];
+            let mut group_pending = Vec::new();
+            while let Some((off, len)) = subranges.pop() {
+                if len == 0 {
+                    continue;
+                }
+                let sub = &slice[off..off + len];
+                if blame_entry_score_lines(sub) <= copy_threshold {
+                    for t in &group_lines {
+                        let rel = t.current_idx - start_idx;
+                        if rel >= off && rel < off + len {
+                            group_pending.push(t.clone());
+                        }
+                    }
+                    continue;
+                }
+                let mut best: Option<(
+                    ContiguousCopyMatch,
+                    String,
+                    Arc<BlobLines>,
+                    Vec<BlameLine>,
+                )> = None;
+                for (path, oid, mode) in &candidates {
+                    let (source_lines, source_blame) = load_copy_source_blame(
+                        odb,
+                        parent_oid,
+                        path,
+                        *oid,
+                        *mode,
+                        ignore_revs,
+                        diff_algorithm,
+                        textconv_ctx,
+                        use_textconv,
+                        copy_depth.saturating_sub(1),
+                        first_parent_only,
+                        grafts,
+                        indent_heuristic,
+                        session,
+                        &mut source_cache,
+                    )?;
+                    let src_refs = source_lines.comparison_refs(ws);
+                    let Some(m) = find_best_contiguous_copy_match(sub, &src_refs, ws) else {
+                        continue;
+                    };
+                    let replace = best.as_ref().is_none_or(|(b, _, _, _)| {
+                        m.score > b.score || (m.score == b.score && m.len > b.len)
+                    });
+                    if replace {
+                        best = Some((m, path.clone(), Arc::clone(&source_lines), source_blame));
+                    }
+                }
+                let Some((m, source_path, _source_lines, source_blame)) = best else {
+                    for t in &group_lines {
+                        let rel = t.current_idx - start_idx;
+                        if rel >= off && rel < off + len {
+                            group_pending.push(t.clone());
+                        }
+                    }
+                    continue;
+                };
+                if m.score <= copy_threshold {
+                    for t in &group_lines {
+                        let rel = t.current_idx - start_idx;
+                        if rel >= off && rel < off + len {
+                            group_pending.push(t.clone());
+                        }
+                    }
+                    continue;
+                }
+                made_progress = true;
+                if m.suspect_start > 0 {
+                    subranges.push((off, m.suspect_start));
+                }
+                if m.suspect_start + m.len < len {
+                    subranges.push((off + m.suspect_start + m.len, len - m.suspect_start - m.len));
+                }
+                for t in &group_lines {
+                    let rel = t.current_idx - start_idx;
+                    if rel < off + m.suspect_start || rel >= off + m.suspect_start + m.len {
+                        continue;
+                    }
+                    let parent_line = m.parent_start + (rel - off - m.suspect_start);
+                    let pb = source_blame
+                        .iter()
+                        .find(|l| l.final_lineno == parent_line + 1)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            blame_line_at_path(
+                                parent_oid,
+                                parent_line + 1,
+                                parent_line + 1,
+                                slice[rel - off].to_owned(),
+                                &source_path,
+                                None,
+                                false,
+                                false,
+                            )
+                        });
+                    result.push(blame_line_from_parent(
+                        &pb,
+                        t.final_lineno,
+                        final_lines[t.final_lineno - 1].clone(),
+                        pb.source_file.clone().or_else(|| Some(source_path.clone())),
+                        pb.ignored || t.ignored,
+                        pb.unblamable,
+                    ));
+                }
+            }
+            still_pending.extend(group_pending);
+        }
+        work = still_pending;
+        if !made_progress {
+            break;
+        }
+    }
+    Ok((work, parent_handoff, result))
 }
 
 fn copy_changed_parent_paths(
@@ -3989,103 +4173,6 @@ fn find_path_by_oid_in_tree(
         }
     }
     Ok(None)
-}
-
-#[expect(clippy::too_many_arguments)]
-fn find_copy_source_blame(
-    odb: &Odb,
-    parent_oid: ObjectId,
-    parent_tree_oid: &ObjectId,
-    exclude_path: &str,
-    current_lines: &[&str],
-    ignore_revs: &HashSet<ObjectId>,
-    diff_algorithm: BlameDiffAlgorithm,
-    textconv_ctx: Option<&BlameTextconvContext>,
-    use_textconv: bool,
-    copy_depth: usize,
-    include_current_path: bool,
-    allowed_paths: Option<&HashSet<String>>,
-    first_parent_only: bool,
-    grafts: &HashMap<ObjectId, Vec<ObjectId>>,
-    indent_heuristic: bool,
-    session: &mut BlameSession<'_>,
-) -> Result<Option<CopySourceBlame>> {
-    let mut entries = Vec::new();
-    collect_tree_file_entries(odb, parent_tree_oid, "", &mut entries)?;
-
-    let mut candidates: Vec<(String, ObjectId, u32)> = Vec::new();
-    for (path, oid, mode) in entries {
-        if (!include_current_path && path == exclude_path) || !is_regular_mode(mode) {
-            continue;
-        }
-        if !path_allowed_for_copy_search(&path, allowed_paths) {
-            continue;
-        }
-        candidates.push((path, oid, mode));
-    }
-
-    let est_bytes = current_lines
-        .iter()
-        .map(|line| line.len())
-        .sum::<usize>()
-        .saturating_mul(candidates.len());
-
-    let scored: Vec<(usize, usize)> = parallel_map_indices(
-        odb,
-        candidates.len(),
-        session.copy_score_parallel,
-        est_bytes,
-        |ci| -> std::result::Result<(usize, usize), LibError> {
-            let (path, oid, mode) = &candidates[ci];
-            let content =
-                read_blob_content_for_blame(odb, oid, path, *mode, textconv_ctx, use_textconv)?;
-            let parsed: Vec<&str> = if session.whitespace.normalizes_line_compare() {
-                content_lines(&content)
-            } else {
-                content.split_inclusive('\n').collect()
-            };
-            let score = blame_copy_overlap_score(current_lines, &parsed, session.whitespace);
-            Ok((ci, score))
-        },
-    )?;
-
-    let mut best_index = None;
-    let mut best_score = 0usize;
-    for (index, score) in scored {
-        if score > best_score {
-            best_score = score;
-            best_index = Some(index);
-        }
-    }
-
-    let Some(index) = best_index else {
-        return Ok(None);
-    };
-    if best_score < BLAME_DEFAULT_COPY_SCORE {
-        return Ok(None);
-    }
-
-    let (source_path, source_oid, source_mode) = &candidates[index];
-    let source_lines = session.load_blob_lines(*source_oid, source_path, *source_mode)?;
-    let parent_revision = parent_oid.to_hex();
-    let source_blame = compute_blame_with_session(
-        odb,
-        parent_oid,
-        &parent_revision,
-        source_path,
-        ignore_revs,
-        diff_algorithm,
-        textconv_ctx,
-        use_textconv,
-        copy_depth,
-        first_parent_only,
-        grafts,
-        indent_heuristic,
-        None,
-        None,
-        session,
-    )?;
-    Ok(Some((source_path.clone(), source_lines, source_blame)))
 }
 
 fn collect_tree_file_entries(
