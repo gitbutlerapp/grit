@@ -5914,6 +5914,7 @@ pub grit_lib::error::Error::ObjectStreamTruncated::expected: u64
 pub grit_lib::error::Error::OdbObjectsDirMismatch
 pub grit_lib::error::Error::OdbObjectsDirMismatch::builder: std::path::PathBuf
 pub grit_lib::error::Error::OdbObjectsDirMismatch::repository: std::path::PathBuf
+pub grit_lib::error::Error::Offload(grit_lib::maintenance::OffloadError)
 pub grit_lib::error::Error::OperationInProgress(grit_lib::state::InProgressOperation)
 pub grit_lib::error::Error::PackDeltaBaseNotWritten
 pub grit_lib::error::Error::PackDeltaBaseNotWritten::base: grit_lib::objects::ObjectId
@@ -6117,6 +6118,8 @@ impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::error::E
 pub fn grit_lib::error::Error::from(grit_lib::ident::SignatureError) -> Self
 impl core::convert::From<grit_lib::lockfile::LockError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::lockfile::LockError) -> Self
+impl core::convert::From<grit_lib::maintenance::OffloadError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::maintenance::OffloadError) -> Self
 impl core::convert::From<grit_lib::objects::TreeEntryError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::objects::TreeEntryError) -> Self
 impl core::convert::From<grit_lib::porcelain::branch_error::BranchError> for grit_lib::error::Error
@@ -8161,6 +8164,57 @@ impl core::marker::Unpin for grit_lib::maintenance::GcLockAttempt
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::GcLockAttempt
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::GcLockAttempt
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::GcLockAttempt
+#[non_exhaustive] pub enum grit_lib::maintenance::OffloadError
+pub grit_lib::maintenance::OffloadError::HashAlgoMismatch
+pub grit_lib::maintenance::OffloadError::HashAlgoMismatch::lop: grit_lib::objects::HashAlgo
+pub grit_lib::maintenance::OffloadError::HashAlgoMismatch::main: grit_lib::objects::HashAlgo
+pub grit_lib::maintenance::OffloadError::LopIsMainRepository
+pub grit_lib::maintenance::OffloadError::LopNotARepository
+pub grit_lib::maintenance::OffloadError::LopNotARepository::path: std::path::PathBuf
+pub grit_lib::maintenance::OffloadError::LopNotLocal
+pub grit_lib::maintenance::OffloadError::LopNotLocal::remote: alloc::string::String
+pub grit_lib::maintenance::OffloadError::LopNotLocal::url: alloc::string::String
+pub grit_lib::maintenance::OffloadError::MaintenanceRunning
+pub grit_lib::maintenance::OffloadError::MaintenanceRunning::holder: grit_lib::maintenance::GcLockHolder
+pub grit_lib::maintenance::OffloadError::NoThreshold
+pub grit_lib::maintenance::OffloadError::NoThreshold::remote: alloc::string::String
+pub grit_lib::maintenance::OffloadError::NotInLopAfterCopy
+pub grit_lib::maintenance::OffloadError::NotInLopAfterCopy::oid: grit_lib::objects::ObjectId
+pub grit_lib::maintenance::OffloadError::RemoteNotConfigured
+pub grit_lib::maintenance::OffloadError::RemoteNotConfigured::remote: alloc::string::String
+impl core::convert::From<grit_lib::maintenance::OffloadError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::maintenance::OffloadError) -> Self
+impl core::error::Error for grit_lib::maintenance::OffloadError
+impl core::fmt::Debug for grit_lib::maintenance::OffloadError
+pub fn grit_lib::maintenance::OffloadError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::maintenance::OffloadError
+pub fn grit_lib::maintenance::OffloadError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::maintenance::OffloadError
+impl core::marker::Send for grit_lib::maintenance::OffloadError
+impl core::marker::Sync for grit_lib::maintenance::OffloadError
+impl core::marker::Unpin for grit_lib::maintenance::OffloadError
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::OffloadError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::OffloadError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::OffloadError
+#[non_exhaustive] pub enum grit_lib::maintenance::OffloadRepo
+pub grit_lib::maintenance::OffloadRepo::Lop
+pub grit_lib::maintenance::OffloadRepo::Main
+impl core::clone::Clone for grit_lib::maintenance::OffloadRepo
+pub fn grit_lib::maintenance::OffloadRepo::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::OffloadRepo
+impl core::cmp::PartialEq for grit_lib::maintenance::OffloadRepo
+pub fn grit_lib::maintenance::OffloadRepo::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::maintenance::OffloadRepo
+pub fn grit_lib::maintenance::OffloadRepo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::maintenance::OffloadRepo
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::OffloadRepo
+impl core::marker::Freeze for grit_lib::maintenance::OffloadRepo
+impl core::marker::Send for grit_lib::maintenance::OffloadRepo
+impl core::marker::Sync for grit_lib::maintenance::OffloadRepo
+impl core::marker::Unpin for grit_lib::maintenance::OffloadRepo
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::OffloadRepo
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::OffloadRepo
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::OffloadRepo
 #[non_exhaustive] pub struct grit_lib::maintenance::BuiltCommitGraph
 pub grit_lib::maintenance::BuiltCommitGraph::bloom_stats: core::option::Option<grit_lib::revwalk::commit_graph::BloomWriteStats>
 pub grit_lib::maintenance::BuiltCommitGraph::bytes: alloc::vec::Vec<u8>
@@ -8332,6 +8386,29 @@ impl core::marker::Unpin for grit_lib::maintenance::GcStats
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::GcStats
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::GcStats
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::GcStats
+#[non_exhaustive] pub struct grit_lib::maintenance::LopReadiness
+pub grit_lib::maintenance::LopReadiness::allow_any_sha1_in_want: bool
+pub grit_lib::maintenance::LopReadiness::allow_filter: bool
+impl grit_lib::maintenance::LopReadiness
+pub fn grit_lib::maintenance::LopReadiness::is_ready(&self) -> bool
+impl core::clone::Clone for grit_lib::maintenance::LopReadiness
+pub fn grit_lib::maintenance::LopReadiness::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::LopReadiness
+impl core::cmp::PartialEq for grit_lib::maintenance::LopReadiness
+pub fn grit_lib::maintenance::LopReadiness::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::maintenance::LopReadiness
+pub fn grit_lib::maintenance::LopReadiness::default() -> Self
+impl core::fmt::Debug for grit_lib::maintenance::LopReadiness
+pub fn grit_lib::maintenance::LopReadiness::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::maintenance::LopReadiness
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::LopReadiness
+impl core::marker::Freeze for grit_lib::maintenance::LopReadiness
+impl core::marker::Send for grit_lib::maintenance::LopReadiness
+impl core::marker::Sync for grit_lib::maintenance::LopReadiness
+impl core::marker::Unpin for grit_lib::maintenance::LopReadiness
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::LopReadiness
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::LopReadiness
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::LopReadiness
 #[non_exhaustive] pub struct grit_lib::maintenance::MidxOptions
 pub grit_lib::maintenance::MidxOptions::bitmap: bool
 pub grit_lib::maintenance::MidxOptions::dry_run: bool
@@ -8376,6 +8453,80 @@ impl core::marker::Unpin for grit_lib::maintenance::MidxWriteReport
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::MidxWriteReport
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::MidxWriteReport
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::MidxWriteReport
+#[non_exhaustive] pub struct grit_lib::maintenance::OffloadConfigChange
+pub grit_lib::maintenance::OffloadConfigChange::key: alloc::string::String
+pub grit_lib::maintenance::OffloadConfigChange::repo: grit_lib::maintenance::OffloadRepo
+pub grit_lib::maintenance::OffloadConfigChange::value: alloc::string::String
+impl core::clone::Clone for grit_lib::maintenance::OffloadConfigChange
+pub fn grit_lib::maintenance::OffloadConfigChange::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::OffloadConfigChange
+impl core::cmp::PartialEq for grit_lib::maintenance::OffloadConfigChange
+pub fn grit_lib::maintenance::OffloadConfigChange::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::maintenance::OffloadConfigChange
+pub fn grit_lib::maintenance::OffloadConfigChange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::OffloadConfigChange
+impl core::marker::Freeze for grit_lib::maintenance::OffloadConfigChange
+impl core::marker::Send for grit_lib::maintenance::OffloadConfigChange
+impl core::marker::Sync for grit_lib::maintenance::OffloadConfigChange
+impl core::marker::Unpin for grit_lib::maintenance::OffloadConfigChange
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::OffloadConfigChange
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::OffloadConfigChange
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::OffloadConfigChange
+#[non_exhaustive] pub struct grit_lib::maintenance::OffloadOptions
+pub grit_lib::maintenance::OffloadOptions::configure_lop: bool
+pub grit_lib::maintenance::OffloadOptions::dry_run: bool
+pub grit_lib::maintenance::OffloadOptions::filter: core::option::Option<grit_lib::remote::partial_clone::ObjectFilterSpec>
+pub grit_lib::maintenance::OffloadOptions::lop_git_dir: core::option::Option<std::path::PathBuf>
+pub grit_lib::maintenance::OffloadOptions::now_unix: i64
+pub grit_lib::maintenance::OffloadOptions::remote: alloc::string::String
+pub grit_lib::maintenance::OffloadOptions::threads: core::option::Option<usize>
+impl grit_lib::maintenance::OffloadOptions
+pub fn grit_lib::maintenance::OffloadOptions::new(impl core::convert::Into<alloc::string::String>, i64) -> Self
+impl core::clone::Clone for grit_lib::maintenance::OffloadOptions
+pub fn grit_lib::maintenance::OffloadOptions::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::maintenance::OffloadOptions
+pub fn grit_lib::maintenance::OffloadOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::maintenance::OffloadOptions
+impl core::marker::Send for grit_lib::maintenance::OffloadOptions
+impl core::marker::Sync for grit_lib::maintenance::OffloadOptions
+impl core::marker::Unpin for grit_lib::maintenance::OffloadOptions
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::OffloadOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::OffloadOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::OffloadOptions
+#[non_exhaustive] pub struct grit_lib::maintenance::OffloadReport
+pub grit_lib::maintenance::OffloadReport::advertised: bool
+pub grit_lib::maintenance::OffloadReport::already_in_lop: usize
+pub grit_lib::maintenance::OffloadReport::candidate_bytes: u64
+pub grit_lib::maintenance::OffloadReport::candidates: usize
+pub grit_lib::maintenance::OffloadReport::config_changes: alloc::vec::Vec<grit_lib::maintenance::OffloadConfigChange>
+pub grit_lib::maintenance::OffloadReport::copied_to_lop: usize
+pub grit_lib::maintenance::OffloadReport::dropped_from_main: usize
+pub grit_lib::maintenance::OffloadReport::dry_run: bool
+pub grit_lib::maintenance::OffloadReport::filter: grit_lib::remote::partial_clone::ObjectFilterSpec
+pub grit_lib::maintenance::OffloadReport::lop_git_dir: std::path::PathBuf
+pub grit_lib::maintenance::OffloadReport::lop_pack: core::option::Option<std::path::PathBuf>
+pub grit_lib::maintenance::OffloadReport::lop_ready: grit_lib::maintenance::LopReadiness
+pub grit_lib::maintenance::OffloadReport::main_bytes_after: u64
+pub grit_lib::maintenance::OffloadReport::main_bytes_before: u64
+pub grit_lib::maintenance::OffloadReport::main_pack: core::option::Option<std::path::PathBuf>
+pub grit_lib::maintenance::OffloadReport::remote: alloc::string::String
+pub grit_lib::maintenance::OffloadReport::skipped_checked_out: usize
+pub grit_lib::maintenance::OffloadReport::skipped_kept_pack: usize
+impl core::clone::Clone for grit_lib::maintenance::OffloadReport
+pub fn grit_lib::maintenance::OffloadReport::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::OffloadReport
+impl core::cmp::PartialEq for grit_lib::maintenance::OffloadReport
+pub fn grit_lib::maintenance::OffloadReport::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::maintenance::OffloadReport
+pub fn grit_lib::maintenance::OffloadReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::OffloadReport
+impl core::marker::Freeze for grit_lib::maintenance::OffloadReport
+impl core::marker::Send for grit_lib::maintenance::OffloadReport
+impl core::marker::Sync for grit_lib::maintenance::OffloadReport
+impl core::marker::Unpin for grit_lib::maintenance::OffloadReport
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::OffloadReport
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::OffloadReport
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::OffloadReport
 #[non_exhaustive] pub struct grit_lib::maintenance::PackRefsOptions
 pub grit_lib::maintenance::PackRefsOptions::all: bool
 pub grit_lib::maintenance::PackRefsOptions::dry_run: bool
@@ -8517,11 +8668,13 @@ impl core::marker::Unpin for grit_lib::maintenance::RepackStats
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::RepackStats
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::RepackStats
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::RepackStats
+pub const grit_lib::maintenance::LOP_KEEP_MESSAGE: &str
 pub fn grit_lib::maintenance::auto_gc_needed(&grit_lib::repo::Repository) -> grit_lib::error::Result<core::option::Option<grit_lib::maintenance::AutoGcReason>>
 pub fn grit_lib::maintenance::build_commit_graph(&grit_lib::repo::Repository, &grit_lib::maintenance::CommitGraphOptions) -> grit_lib::error::Result<grit_lib::maintenance::CommitGraphBuild>
 pub fn grit_lib::maintenance::collect_maintenance_object_roots(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::maintenance::gc(&grit_lib::repo::Repository, &grit_lib::maintenance::GcOptions) -> grit_lib::error::Result<grit_lib::maintenance::GcStats>
 pub fn grit_lib::maintenance::gc_auto(&grit_lib::repo::Repository, &grit_lib::maintenance::GcOptions) -> grit_lib::error::Result<grit_lib::maintenance::AutoGcOutcome>
+pub fn grit_lib::maintenance::offload_blobs(&grit_lib::repo::Repository, &grit_lib::maintenance::OffloadOptions) -> grit_lib::error::Result<grit_lib::maintenance::OffloadReport>
 pub fn grit_lib::maintenance::pack_refs(&grit_lib::repo::Repository, &grit_lib::maintenance::PackRefsOptions) -> grit_lib::error::Result<grit_lib::maintenance::PackRefsReport>
 pub fn grit_lib::maintenance::prune_loose_objects(&grit_lib::repo::Repository, &grit_lib::maintenance::PruneOptions) -> grit_lib::error::Result<grit_lib::refs::gc::PruneStats>
 pub fn grit_lib::maintenance::repack(&grit_lib::repo::Repository, &grit_lib::maintenance::RepackOptions) -> grit_lib::error::Result<grit_lib::maintenance::RepackReport>
@@ -16790,6 +16943,7 @@ pub grit_lib::prelude::Error::ObjectStreamTruncated::expected: u64
 pub grit_lib::prelude::Error::OdbObjectsDirMismatch
 pub grit_lib::prelude::Error::OdbObjectsDirMismatch::builder: std::path::PathBuf
 pub grit_lib::prelude::Error::OdbObjectsDirMismatch::repository: std::path::PathBuf
+pub grit_lib::prelude::Error::Offload(grit_lib::maintenance::OffloadError)
 pub grit_lib::prelude::Error::OperationInProgress(grit_lib::state::InProgressOperation)
 pub grit_lib::prelude::Error::PackDeltaBaseNotWritten
 pub grit_lib::prelude::Error::PackDeltaBaseNotWritten::base: grit_lib::objects::ObjectId
@@ -16993,6 +17147,8 @@ impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::error::E
 pub fn grit_lib::error::Error::from(grit_lib::ident::SignatureError) -> Self
 impl core::convert::From<grit_lib::lockfile::LockError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::lockfile::LockError) -> Self
+impl core::convert::From<grit_lib::maintenance::OffloadError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::maintenance::OffloadError) -> Self
 impl core::convert::From<grit_lib::objects::TreeEntryError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::objects::TreeEntryError) -> Self
 impl core::convert::From<grit_lib::porcelain::branch_error::BranchError> for grit_lib::error::Error

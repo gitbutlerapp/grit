@@ -294,6 +294,25 @@ enum GcAction {
         #[arg(long = "dry-run")]
         dry_run: bool,
     },
+    /// Move large blobs to a large-object promisor remote and drop them here.
+    Offload {
+        /// Promisor remote that receives the blobs (`remote.<name>.url`).
+        #[arg(long, value_name = "REMOTE")]
+        to: String,
+        /// Blobs to move: `none` for every blob, or a size such as `1m` (blobs at
+        /// least that big). Defaults to `remote.<REMOTE>.partialCloneFilter`.
+        #[arg(long, value_name = "none|SIZE")]
+        blobs: Option<String>,
+        /// The promisor's git directory, when its URL is not a local path.
+        #[arg(long = "lop-dir", value_name = "PATH")]
+        lop_dir: Option<std::path::PathBuf>,
+        /// Also set `uploadpack.allowFilter` and `uploadpack.allowAnySHA1InWant` in the promisor.
+        #[arg(long = "configure-lop")]
+        configure_lop: bool,
+        /// Report what would move without changing anything.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
 }
 
 /// Subcommands of `grit ignore`.
@@ -3311,6 +3330,24 @@ fn dispatch(
                 }) => {
                     commands::gc::run_prune(older_than.as_deref(), dry_run || sub_dry, quiet, mode)?
                 }
+                Some(GcAction::Offload {
+                    to,
+                    blobs,
+                    lop_dir,
+                    configure_lop,
+                    dry_run: sub_dry,
+                }) => commands::gc::run_offload(
+                    commands::gc::OffloadArgs {
+                        remote: to,
+                        blobs,
+                        lop_dir,
+                        configure_lop,
+                        dry_run: dry_run || sub_dry,
+                    },
+                    quiet,
+                    mode,
+                    ctx.now,
+                )?,
             };
             emit_success(&outcome, opts, ctx)
         }

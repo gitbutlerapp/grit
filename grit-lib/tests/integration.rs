@@ -1133,6 +1133,9 @@ mod odb_store_object_safety;
 #[path = "odb_with_stream.rs"]
 mod odb_with_stream;
 #[cfg(feature = "full-tests")]
+#[path = "offload_git_compat.rs"]
+mod offload_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "oid_abbrev_alternate_pack_collision.rs"]
 mod oid_abbrev_alternate_pack_collision;
 #[cfg(feature = "full-tests")]

@@ -269,6 +269,7 @@ pub mod notes;
 mod object_inspect_root;
 pub mod objects;
 pub(crate) mod odb;
+pub(crate) mod offload;
 pub mod operation;
 pub(crate) mod pack;
 pub(crate) mod pack_bitmap;

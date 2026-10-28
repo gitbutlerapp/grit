@@ -161,3 +161,88 @@ fn gc_midx_dry_run_then_real() {
     let real_task = task_report(&real_doc, "midx");
     assert_eq!(dry_task["pack_count"], real_task["pack_count"]);
 }
+
+#[test]
+fn gc_offload_dry_run_then_real() {
+    let fixture = CliFixture::new();
+    // Letters from a xorshift sequence: they do not compress away.
+    let mut state = 0x2545_f491_4f6c_dd1d_u64;
+    let big: String = (0..20_000)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            char::from(b'a' + (state % 26) as u8)
+        })
+        .collect();
+    fixture.write_repo_file("big.bin", &big);
+    fixture.run_ok(&["add", "big.bin"]);
+    fixture.run_ok(&["commit", "-m", "big"]);
+    fixture.run_ok(&["rm", "big.bin"]);
+    fixture.run_ok(&["commit", "-m", "drop big"]);
+    let lop = fixture.home_root().join("lop.git");
+    fixture.run_ok(&["init", "--bare", lop.to_str().expect("utf-8 path")]);
+    fixture.run_ok(&["remote", "add", "lop", lop.to_str().expect("utf-8 path")]);
+
+    let before = git_fingerprint(&fixture);
+    let dry = fixture.run_ok(&[
+        "gc",
+        "offload",
+        "--to",
+        "lop",
+        "--blobs",
+        "10k",
+        "--dry-run",
+        "--json",
+    ]);
+    assert_unchanged_git(&before, &git_fingerprint(&fixture), "gc offload");
+    let dry_doc: Value = serde_json::from_str(&dry.stdout).expect("json");
+    assert_eq!(dry_doc["dry_run"], true);
+    let dry_task = task_report(&dry_doc, "offload");
+    assert_eq!(dry_task["candidates"], 1);
+    assert_eq!(dry_task["dropped_from_main"], 0);
+    assert!(!lop
+        .join("objects/pack")
+        .read_dir()
+        .is_ok_and(|mut d| d.next().is_some()));
+
+    // `--dry-run` on `gc` itself applies too.
+    fixture.run_ok(&[
+        "gc",
+        "--dry-run",
+        "offload",
+        "--to",
+        "lop",
+        "--blobs",
+        "10k",
+    ]);
+    assert_unchanged_git(&before, &git_fingerprint(&fixture), "gc --dry-run offload");
+
+    let real = fixture.run_ok(&["gc", "offload", "--to", "lop", "--blobs", "10k", "--json"]);
+    let real_doc: Value = serde_json::from_str(&real.stdout).expect("json");
+    let real_task = task_report(&real_doc, "offload");
+    assert_eq!(real_task["candidates"], dry_task["candidates"]);
+    assert_eq!(real_task["dropped_from_main"], 1);
+    assert_eq!(real_task["filter"], "blob:limit=10240");
+    fixture.run_ok(&["fsck"]);
+}
+
+#[test]
+fn gc_offload_reports_typed_errors() {
+    let fixture = CliFixture::new();
+    let out = fixture.run(&[
+        "gc", "offload", "--to", "nowhere", "--blobs", "1k", "--json",
+    ]);
+    assert!(!out.ok());
+    let doc: Value = serde_json::from_str(&out.stdout).expect("json error");
+    assert!(
+        doc["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("'nowhere'")),
+        "{}",
+        out.dump("offload")
+    );
+    let bad = fixture.run(&["gc", "offload", "--to", "lop", "--blobs", "lots"]);
+    assert!(!bad.ok());
+    assert!(bad.stderr.contains("--blobs"), "{}", bad.dump("bad blobs"));
+}

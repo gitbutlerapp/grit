@@ -384,8 +384,163 @@
             "task"
           ],
           "type": "object"
+        },
+        {
+          "description": "`grit gc offload` results (see `content/docs/commands/gc.md`).",
+          "properties": {
+            "advertised": {
+              "description": "`promisor.advertise` is on, so clients are told about the promisor.",
+              "type": "boolean"
+            },
+            "already_in_lop": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "candidate_bytes": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "candidates": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "config_changes": {
+              "items": {
+                "$ref": "#/definitions/OffloadConfigChangeJson"
+              },
+              "type": "array"
+            },
+            "copied_to_lop": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "dropped_from_main": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "duration_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "filter": {
+              "description": "Filter that chose the blobs (`blob:limit=<bytes>` or `blob:none`).",
+              "type": "string"
+            },
+            "lop_git_dir": {
+              "description": "The promisor's git directory.",
+              "type": "string"
+            },
+            "lop_pack": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "lop_ready": {
+              "$ref": "#/definitions/LopReadyJson"
+            },
+            "main_bytes_after": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "main_bytes_before": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "main_pack": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "remote": {
+              "description": "Promisor remote the blobs moved to.",
+              "type": "string"
+            },
+            "skipped_checked_out": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "skipped_kept_pack": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "task": {
+              "enum": [
+                "offload"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "advertised",
+            "already_in_lop",
+            "candidate_bytes",
+            "candidates",
+            "config_changes",
+            "copied_to_lop",
+            "dropped_from_main",
+            "duration_ms",
+            "filter",
+            "lop_git_dir",
+            "lop_ready",
+            "main_bytes_after",
+            "main_bytes_before",
+            "remote",
+            "skipped_checked_out",
+            "skipped_kept_pack",
+            "task"
+          ],
+          "type": "object"
         }
       ]
+    },
+    "LopReadyJson": {
+      "description": "Whether the promisor can answer clients' lazy fetches.",
+      "properties": {
+        "allow_any_sha1_in_want": {
+          "type": "boolean"
+        },
+        "allow_filter": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "allow_any_sha1_in_want",
+        "allow_filter"
+      ],
+      "type": "object"
+    },
+    "OffloadConfigChangeJson": {
+      "description": "One config value `grit gc offload` set.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "repo": {
+          "description": "`main` or `lop`.",
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "repo",
+        "value"
+      ],
+      "type": "object"
     }
   },
   "description": "Result of `grit gc` and its task subcommands.",

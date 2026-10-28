@@ -1848,6 +1848,11 @@ pub enum Error {
     #[error(transparent)]
     Midx(#[from] MidxError),
 
+    /// Offloading blobs to a large-object promisor was refused
+    /// ([`crate::maintenance::offload_blobs`]).
+    #[error(transparent)]
+    Offload(#[from] crate::offload::OffloadError),
+
     /// Revision parsing failed ([`crate::rev_parse_error::RevParseError`]).
     #[error(transparent)]
     RevParse(#[from] crate::rev_parse_error::RevParseError),
@@ -2149,6 +2154,7 @@ impl Error {
             Self::NotesMergeBothEmpty { .. } => "notes_merge_both_empty",
             Self::NotesMergeInProgress { .. } => "notes_merge_in_progress",
             Self::Midx(..) => "midx",
+            Self::Offload(..) => "offload",
             Self::RevParse(..) => "rev_parse",
             Self::RevList(..) => "rev_list",
             Self::Hook(..) => "hook",

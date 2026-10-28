@@ -102,6 +102,46 @@ fn snapshot_gc_midx() {
     });
 }
 
+/// A large file committed and then deleted (so no checkout needs it), plus a bare
+/// large-object promisor `lop` under the fixture home.
+fn prepare_offload(fixture: &CliFixture) {
+    // Letters from a xorshift sequence: they do not compress away.
+    let mut state = 0x2545_f491_4f6c_dd1d_u64;
+    let big: String = (0..20_000)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            char::from(b'a' + (state % 26) as u8)
+        })
+        .collect();
+    fixture.write_repo_file("big.bin", &big);
+    fixture.run_ok(&["add", "big.bin"]);
+    fixture.run_ok(&["commit", "-m", "big"]);
+    fixture.run_ok(&["rm", "big.bin"]);
+    fixture.run_ok(&["commit", "-m", "drop big"]);
+    let lop = fixture.home_root().join("lop.git");
+    fixture.run_ok(&["init", "--bare", lop.to_str().unwrap()]);
+    fixture.run_ok(&["remote", "add", "lop", lop.to_str().unwrap()]);
+}
+
+#[test]
+fn snapshot_gc_offload() {
+    snapshot_fresh(
+        "gc_offload",
+        &[
+            "gc",
+            "offload",
+            "--to",
+            "lop",
+            "--blobs",
+            "10k",
+            "--configure-lop",
+        ],
+        prepare_offload,
+    );
+}
+
 #[test]
 fn snapshot_repack_dry_run() {
     snapshot_all_modes("repack", &["repack", "--dry-run"]);

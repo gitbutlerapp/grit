@@ -64,6 +64,11 @@ use crate::repo::Repository;
 use crate::shallow::load_shallow_boundaries;
 use time::OffsetDateTime;
 
+pub use crate::offload::{
+    offload_blobs, LopReadiness, OffloadConfigChange, OffloadError, OffloadOptions, OffloadRepo,
+    OffloadReport, LOP_KEEP_MESSAGE,
+};
+
 /// Options for [`repack_all()`].
 #[derive(Debug, Clone)]
 #[non_exhaustive]

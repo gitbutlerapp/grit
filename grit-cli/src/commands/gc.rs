@@ -6,17 +6,20 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::Result;
 use grit_lib::config::git_date::approx::approxidate_careful_at;
 use grit_lib::maintenance::{
-    auto_gc_needed, gc, gc_auto, pack_refs, prune_loose_objects, repack_all, write_commit_graph,
-    write_midx, AutoGcOutcome, AutoGcReason, CommitGraphOptions, GcLock, GcOptions, GcPhaseTimings,
-    GcStats, MidxOptions, PackRefsOptions, PruneOptions, RepackOptions,
+    auto_gc_needed, gc, gc_auto, offload_blobs, pack_refs, prune_loose_objects, repack_all,
+    write_commit_graph, write_midx, AutoGcOutcome, AutoGcReason, CommitGraphOptions, GcLock,
+    GcOptions, GcPhaseTimings, GcStats, MidxOptions, OffloadOptions, OffloadRepo, OffloadReport,
+    PackRefsOptions, PruneOptions, RepackOptions,
 };
 use grit_lib::objects::midx::MidxBitmapWriteOutcome;
+use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use schemars::JsonSchema;
 use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::context;
 use crate::output::{outln, progress, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::progress::format_bytes;
 use crate::ui::filesystem_path_for_user;
 
 /// Result of `grit gc` and its task subcommands.
@@ -184,6 +187,204 @@ pub enum GcTaskReport {
         path: String,
         bitmap: String,
     },
+    Offload {
+        duration_ms: u64,
+        #[serde(flatten)]
+        report: OffloadSummary,
+    },
+}
+
+/// `grit gc offload` results (see `content/docs/commands/gc.md`).
+#[derive(Serialize, JsonSchema)]
+pub struct OffloadSummary {
+    /// Promisor remote the blobs moved to.
+    pub remote: String,
+    /// The promisor's git directory.
+    pub lop_git_dir: String,
+    /// Filter that chose the blobs (`blob:limit=<bytes>` or `blob:none`).
+    pub filter: String,
+    pub candidates: usize,
+    pub candidate_bytes: u64,
+    pub copied_to_lop: usize,
+    pub already_in_lop: usize,
+    pub dropped_from_main: usize,
+    pub skipped_checked_out: usize,
+    pub skipped_kept_pack: usize,
+    pub lop_pack: Option<String>,
+    pub main_pack: Option<String>,
+    pub main_bytes_before: u64,
+    pub main_bytes_after: u64,
+    pub config_changes: Vec<OffloadConfigChangeJson>,
+    pub lop_ready: LopReadyJson,
+    /// `promisor.advertise` is on, so clients are told about the promisor.
+    pub advertised: bool,
+}
+
+/// One config value `grit gc offload` set.
+#[derive(Serialize, JsonSchema)]
+pub struct OffloadConfigChangeJson {
+    /// `main` or `lop`.
+    pub repo: String,
+    pub key: String,
+    pub value: String,
+}
+
+/// Whether the promisor can answer clients' lazy fetches.
+#[derive(Serialize, JsonSchema)]
+pub struct LopReadyJson {
+    pub allow_filter: bool,
+    pub allow_any_sha1_in_want: bool,
+}
+
+impl From<OffloadReport> for OffloadSummary {
+    fn from(r: OffloadReport) -> Self {
+        Self {
+            remote: r.remote,
+            lop_git_dir: filesystem_path_for_user(&r.lop_git_dir),
+            filter: r.filter.to_wire_spec(),
+            candidates: r.candidates,
+            candidate_bytes: r.candidate_bytes,
+            copied_to_lop: r.copied_to_lop,
+            already_in_lop: r.already_in_lop,
+            dropped_from_main: r.dropped_from_main,
+            skipped_checked_out: r.skipped_checked_out,
+            skipped_kept_pack: r.skipped_kept_pack,
+            lop_pack: r.lop_pack.as_deref().map(filesystem_path_for_user),
+            main_pack: r.main_pack.as_deref().map(filesystem_path_for_user),
+            main_bytes_before: r.main_bytes_before,
+            main_bytes_after: r.main_bytes_after,
+            config_changes: r
+                .config_changes
+                .into_iter()
+                .map(|c| OffloadConfigChangeJson {
+                    repo: match c.repo {
+                        OffloadRepo::Lop => "lop",
+                        _ => "main",
+                    }
+                    .to_owned(),
+                    key: c.key,
+                    value: c.value,
+                })
+                .collect(),
+            lop_ready: LopReadyJson {
+                allow_filter: r.lop_ready.allow_filter,
+                allow_any_sha1_in_want: r.lop_ready.allow_any_sha1_in_want,
+            },
+            advertised: r.advertised,
+        }
+    }
+}
+
+/// `1 blob`, `2 blobs`.
+fn blobs(n: usize) -> String {
+    if n == 1 {
+        "1 blob".to_owned()
+    } else {
+        format!("{n} blobs")
+    }
+}
+
+impl OffloadSummary {
+    fn render_human(&self, w: &mut dyn Write, duration_ms: u64, dry_run: bool) -> Result<()> {
+        let size = format_bytes(self.candidate_bytes);
+        if dry_run {
+            outln!(
+                w,
+                "offload: would move {} ({size}) to {}; {} already there ({duration_ms} ms).",
+                blobs(self.candidates),
+                self.remote,
+                self.already_in_lop
+            );
+        } else if self.candidates == 0 {
+            outln!(
+                w,
+                "offload: nothing to move to {} ({}, {duration_ms} ms).",
+                self.remote,
+                self.filter
+            );
+        } else {
+            outln!(
+                w,
+                "offload: moved {} ({size}) to {}; main packs {} -> {} ({duration_ms} ms).",
+                blobs(self.dropped_from_main),
+                self.remote,
+                format_bytes(self.main_bytes_before),
+                format_bytes(self.main_bytes_after)
+            );
+        }
+        let skipped = self.skipped_checked_out + self.skipped_kept_pack;
+        if skipped > 0 {
+            outln!(
+                w,
+                "  kept {} here ({} checked out, {} in kept packs).",
+                blobs(skipped),
+                self.skipped_checked_out,
+                self.skipped_kept_pack
+            );
+        }
+        for change in &self.config_changes {
+            outln!(
+                w,
+                "  set {} = {} ({})",
+                change.key,
+                change.value,
+                change.repo
+            );
+        }
+        if !self.lop_ready.allow_filter || !self.lop_ready.allow_any_sha1_in_want {
+            outln!(
+                w,
+                "  hint: {} cannot serve clients' lazy fetches yet; rerun with --configure-lop or set uploadpack.allowFilter and uploadpack.allowAnySHA1InWant there.",
+                self.remote
+            );
+        }
+        if !self.advertised {
+            outln!(
+                w,
+                "  hint: clients are not told about {}; set promisor.advertise = true (and promisor.sendFields = partialCloneFilter).",
+                self.remote
+            );
+        }
+        Ok(())
+    }
+
+    fn render_markdown_fields(&self, w: &mut dyn Write) -> Result<()> {
+        outln!(w, "- **remote:** {}", self.remote);
+        outln!(w, "- **lop_git_dir:** `{}`", self.lop_git_dir);
+        outln!(w, "- **filter:** `{}`", self.filter);
+        outln!(w, "- **candidates:** {}", self.candidates);
+        outln!(w, "- **candidate_bytes:** {}", self.candidate_bytes);
+        outln!(w, "- **copied_to_lop:** {}", self.copied_to_lop);
+        outln!(w, "- **already_in_lop:** {}", self.already_in_lop);
+        outln!(w, "- **dropped_from_main:** {}", self.dropped_from_main);
+        outln!(w, "- **skipped_checked_out:** {}", self.skipped_checked_out);
+        outln!(w, "- **skipped_kept_pack:** {}", self.skipped_kept_pack);
+        if let Some(path) = &self.lop_pack {
+            outln!(w, "- **lop_pack:** `{path}`");
+        }
+        if let Some(path) = &self.main_pack {
+            outln!(w, "- **main_pack:** `{path}`");
+        }
+        outln!(w, "- **main_bytes_before:** {}", self.main_bytes_before);
+        outln!(w, "- **main_bytes_after:** {}", self.main_bytes_after);
+        for change in &self.config_changes {
+            outln!(
+                w,
+                "- **config_change:** `{} = {}` ({})",
+                change.key,
+                change.value,
+                change.repo
+            );
+        }
+        outln!(w, "- **lop_allow_filter:** {}", self.lop_ready.allow_filter);
+        outln!(
+            w,
+            "- **lop_allow_any_sha1_in_want:** {}",
+            self.lop_ready.allow_any_sha1_in_want
+        );
+        outln!(w, "- **advertised:** {}", self.advertised);
+        Ok(())
+    }
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -400,6 +601,10 @@ impl GcTaskReport {
                     );
                 }
             }
+            Self::Offload {
+                duration_ms,
+                report,
+            } => report.render_human(w, *duration_ms, dry_run)?,
         }
         Ok(())
     }
@@ -476,6 +681,15 @@ impl GcTaskReport {
                 outln!(w, "- **pack_count:** {pack_count}");
                 outln!(w, "- **path:** `{path}`");
                 outln!(w, "- **bitmap:** {bitmap}");
+                outln!(w);
+            }
+            Self::Offload {
+                duration_ms,
+                report,
+            } => {
+                outln!(w, "#### offload\n");
+                outln!(w, "- **duration_ms:** {duration_ms}");
+                report.render_markdown_fields(w)?;
                 outln!(w);
             }
         }
@@ -803,6 +1017,53 @@ pub fn run_prune(
             duration_ms: elapsed.as_millis() as u64,
             pruned: stats.pruned,
             kept: stats.kept,
+        }],
+    })
+}
+
+/// Arguments of `grit gc offload`.
+pub struct OffloadArgs {
+    /// `--to`: the promisor remote.
+    pub remote: String,
+    /// `--blobs`: `none` or a size; `None` uses the remote's partialCloneFilter.
+    pub blobs: Option<String>,
+    /// `--lop-dir`: the promisor's git directory.
+    pub lop_dir: Option<std::path::PathBuf>,
+    /// `--configure-lop`.
+    pub configure_lop: bool,
+    /// `--dry-run` (on `gc` or `gc offload`).
+    pub dry_run: bool,
+}
+
+/// `grit gc offload`: move large blobs to a large-object promisor remote.
+pub fn run_offload(
+    args: OffloadArgs,
+    quiet: bool,
+    mode: OutputMode,
+    now: OffsetDateTime,
+) -> Result<GcOutcome> {
+    let repo = context::discover()?;
+    let filter = args
+        .blobs
+        .as_deref()
+        .map(ObjectFilterSpec::from_blobs_cli)
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("invalid --blobs value: {e}"))?;
+    let mut opts = OffloadOptions::new(args.remote, now.unix_timestamp());
+    opts.filter = filter;
+    opts.lop_git_dir = args.lop_dir;
+    opts.configure_lop = args.configure_lop;
+    opts.dry_run = args.dry_run;
+    let (report, elapsed) = timed(mode, "Offloading large blobs…", || {
+        offload_blobs(&repo, &opts).map_err(crate::json_error::map_lib_error)
+    })?;
+    Ok(GcOutcome {
+        quiet,
+        dry_run: args.dry_run,
+        auto: None,
+        tasks: vec![GcTaskReport::Offload {
+            duration_ms: elapsed.as_millis() as u64,
+            report: report.into(),
         }],
     })
 }

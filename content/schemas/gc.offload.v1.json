@@ -1,0 +1,575 @@
+{
+  "$id": "https://grit-scm.com/schemas/gc.offload/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "GcAutoReport": {
+      "description": "What `grit gc --auto` decided (JSON uses a `status` discriminator).",
+      "oneOf": [
+        {
+          "description": "Below `gc.auto` and `gc.autoPackLimit` (or `gc.auto=0`); nothing ran.",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-needed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Another maintenance run holds `gc.pid`; nothing ran.",
+          "properties": {
+            "host": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pid": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "status": {
+              "enum": [
+                "already-running"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The `pre-auto-gc` hook exited non-zero; nothing ran.",
+          "properties": {
+            "exit_code": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "status": {
+              "enum": [
+                "declined-by-hook"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "exit_code",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Maintenance ran (or would run, with `--dry-run`).",
+          "oneOf": [
+            {
+              "description": "Estimated loose objects above `gc.auto`.",
+              "properties": {
+                "estimate": {
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "limit": {
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "trigger": {
+                  "enum": [
+                    "loose-objects"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "estimate",
+                "limit",
+                "trigger"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "Packs without `.keep` above `gc.autoPackLimit`.",
+              "properties": {
+                "count": {
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "limit": {
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "trigger": {
+                  "enum": [
+                    "packs"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "count",
+                "limit",
+                "trigger"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "ran"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "GcTaskReport": {
+      "description": "One maintenance task report (JSON uses a `task` discriminator).",
+      "oneOf": [
+        {
+          "properties": {
+            "duration_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "path": {
+              "type": "string"
+            },
+            "refs_packed": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "refs_pruned": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "task": {
+              "enum": [
+                "pack-refs"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "duration_ms",
+            "path",
+            "refs_packed",
+            "refs_pruned",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "duration_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "entries_pruned": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "task": {
+              "enum": [
+                "reflog-expire"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "duration_ms",
+            "entries_pruned",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "duration_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "loose_before": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "objects_packed": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "pack_bytes": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "pack_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "packs_before": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "pruned_loose": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "removed_pack_files": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "task": {
+              "enum": [
+                "repack"
+              ],
+              "type": "string"
+            },
+            "unreachable_loose_pruned": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "duration_ms",
+            "loose_before",
+            "packs_before",
+            "pruned_loose",
+            "removed_pack_files",
+            "task",
+            "unreachable_loose_pruned"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "duration_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kept": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "pruned": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "task": {
+              "enum": [
+                "prune"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "duration_ms",
+            "kept",
+            "pruned",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "commit_count": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "duration_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "path": {
+              "type": "string"
+            },
+            "removed_chain": {
+              "type": "boolean"
+            },
+            "skipped": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "task": {
+              "enum": [
+                "commit-graph"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "commit_count",
+            "duration_ms",
+            "path",
+            "removed_chain",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "bitmap": {
+              "type": "string"
+            },
+            "duration_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "pack_count": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "path": {
+              "type": "string"
+            },
+            "task": {
+              "enum": [
+                "midx"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "bitmap",
+            "duration_ms",
+            "pack_count",
+            "path",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "`grit gc offload` results (see `content/docs/commands/gc.md`).",
+          "properties": {
+            "advertised": {
+              "description": "`promisor.advertise` is on, so clients are told about the promisor.",
+              "type": "boolean"
+            },
+            "already_in_lop": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "candidate_bytes": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "candidates": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "config_changes": {
+              "items": {
+                "$ref": "#/definitions/OffloadConfigChangeJson"
+              },
+              "type": "array"
+            },
+            "copied_to_lop": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "dropped_from_main": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "duration_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "filter": {
+              "description": "Filter that chose the blobs (`blob:limit=<bytes>` or `blob:none`).",
+              "type": "string"
+            },
+            "lop_git_dir": {
+              "description": "The promisor's git directory.",
+              "type": "string"
+            },
+            "lop_pack": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "lop_ready": {
+              "$ref": "#/definitions/LopReadyJson"
+            },
+            "main_bytes_after": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "main_bytes_before": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "main_pack": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "remote": {
+              "description": "Promisor remote the blobs moved to.",
+              "type": "string"
+            },
+            "skipped_checked_out": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "skipped_kept_pack": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "task": {
+              "enum": [
+                "offload"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "advertised",
+            "already_in_lop",
+            "candidate_bytes",
+            "candidates",
+            "config_changes",
+            "copied_to_lop",
+            "dropped_from_main",
+            "duration_ms",
+            "filter",
+            "lop_git_dir",
+            "lop_ready",
+            "main_bytes_after",
+            "main_bytes_before",
+            "remote",
+            "skipped_checked_out",
+            "skipped_kept_pack",
+            "task"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "LopReadyJson": {
+      "description": "Whether the promisor can answer clients' lazy fetches.",
+      "properties": {
+        "allow_any_sha1_in_want": {
+          "type": "boolean"
+        },
+        "allow_filter": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "allow_any_sha1_in_want",
+        "allow_filter"
+      ],
+      "type": "object"
+    },
+    "OffloadConfigChangeJson": {
+      "description": "One config value `grit gc offload` set.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "repo": {
+          "description": "`main` or `lop`.",
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "repo",
+        "value"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit gc` and its task subcommands.",
+  "properties": {
+    "auto": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GcAutoReport"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Decision of `grit gc --auto`; absent for a plain `grit gc`."
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "tasks": {
+      "items": {
+        "$ref": "#/definitions/GcTaskReport"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "dry_run",
+    "tasks"
+  ],
+  "title": "GcOutcome",
+  "type": "object"
+}

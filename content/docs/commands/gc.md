@@ -17,6 +17,7 @@ grit gc commit-graph [--dry-run]
 grit gc midx [--dry-run]
 grit gc pack-refs [--dry-run]
 grit gc prune [--older-than DATE] [--dry-run]
+grit gc offload --to REMOTE [--blobs none|SIZE] [--lop-dir PATH] [--configure-lop] [--dry-run]
 ```
 
 ## Description
@@ -117,6 +118,44 @@ Partial clones can run maintenance offline, including after creating local commi
 
 Like `git prune`, `grit gc prune` returns immediately when there is no loose object older than the cutoff: it only checks that the objects named by refs, reflogs and the index exist instead of walking the object graph.
 
+### `grit gc offload`
+
+Moves large blobs out of the repository to a *large-object promisor* (LOP): a second repository that holds only the big blobs. The repository you run it in becomes a partial repository of the LOP. Its `remote.<REMOTE>.promisor` is set, and its remaining objects move into one `.promisor` pack. Clients that accept the LOP through the `promisor-remote` capability get packs without the offloaded blobs and fetch those from the LOP themselves (see [grit upload-pack](upload-pack.md#serving-a-repository-whose-large-blobs-live-elsewhere)). This is the layout Git's own large-object-promisor setup uses, built there with `git repack -a -d --filter=blob:limit=<n> --filter-to=<lop>`.
+
+| Option | Description |
+| --- | --- |
+| `--to REMOTE` | The promisor remote the blobs go to. `remote.<REMOTE>.url` must be set. |
+| `--blobs none\|SIZE` | Which blobs move: `none` moves every blob, a size such as `512k` or `1m` moves blobs of at least that many bytes (`k`, `m`, `g` are KiB, MiB, GiB, as for [`grit clone --blobs`](clone.md)). Defaults to `remote.<REMOTE>.partialCloneFilter`; one of the two is required. A given value is also stored as `partialCloneFilter` when that is unset, so `promisor.sendFields = partialCloneFilter` passes it on to clients. |
+| `--lop-dir PATH` | The LOP's git directory on this machine, for when `remote.<REMOTE>.url` is the URL clients use (such as `https://…`) rather than a local path. |
+| `--configure-lop` | Also set `uploadpack.allowFilter` and `uploadpack.allowAnySHA1InWant` in the LOP, which it needs to answer clients' lazy fetches. |
+| `--dry-run` | Report what would move; write nothing. |
+
+Nothing is removed from the repository before the LOP holds it. The blobs go into one new LOP pack, whole, with a `.keep` marker written before the pack appears: nothing in the LOP refers to them, so this protects them from `gc` there. A blob the LOP already holds in a `.keep` pack of its own is not copied again. A loose or unkept copy there is copied anyway, since the LOP's next `gc` may prune it, and so is a copy the LOP only reaches through its alternates. Every blob is checked to be in a `.keep` pack of the LOP, and the new pack is flushed to disk. Only then are the config set and the repository's own packs and loose objects rewritten without the blobs. Unreachable objects are kept, and a pack pushed during the run is left alone. Blobs that a checkout needs (a worktree's index or `HEAD`) stay, as do blobs in `.keep` packs. `promisor.advertise` and `extensions.partialClone` are left for you to set. The run takes the `gc.pid` lock like `grit gc`.
+
+Besides `remote.<REMOTE>.promisor`, offload sets `repack.writeBitmaps = false` in the repository, and the repository cannot use reachability bitmaps afterwards. A bitmap, for one pack or a multi-pack-index, needs every object its commits reach in the packs it covers, and the offloaded blobs are in none of them. Git's repack keeps promisor and other objects in separate packs, so once a push adds a commit outside the promisor pack, Git fails with `Packfile doesn't have full closure`: `git gc` exits 128 on a bare repository, where bitmaps are on by default, and `git repack -a -d -b --write-midx` fails as well (Git 2.50 and 2.56). `grit gc` and `grit gc repack --bitmaps` leave the bitmap out instead, so the setting is there for Git. Git's own `git repack --filter-to` setup fails the same way on a bare repository unless bitmaps are off.
+
+Run it again whenever new large blobs have been pushed. It moves only those. Each run also folds objects pushed since the last one back into the single `.promisor` pack, even when no blob moves, so later fetches can tell from the pack alone that an offloaded blob is promised. It does nothing when there is nothing to move or fold. `grit gc`, `git gc` and `git fsck` keep the offloaded blobs promised and never fetch them back, and pushes to the repository (through `grit receive-pack` or Git's) may name offloaded blobs in their trees.
+
+#### Setting up a large-object promisor
+
+```console
+$ grit init --bare /srv/lop.git
+$ cd /srv/main.git
+$ grit remote add lop /srv/lop.git
+$ grit config promisor.advertise true
+$ grit config promisor.sendFields partialCloneFilter
+$ grit config uploadpack.allowFilter true
+$ grit gc offload --to lop --blobs 1m --configure-lop
+offload: moved 12 blobs (1.4 GiB) to lop; main packs 1.5 GiB -> 92 MiB (3104 ms).
+  set remote.lop.promisor = true (main)
+  set remote.lop.partialCloneFilter = blob:limit=1048576 (main)
+  set repack.writeBitmaps = false (main)
+  set uploadpack.allowFilter = true (lop)
+  set uploadpack.allowAnySHA1InWant = true (lop)
+```
+
+Clients then clone with the LOP accepted, for example `git clone -c remote.lop.url=… -c remote.lop.promisor=true -c promisor.acceptFromServer=All --filter=blob:limit=1m <url>`, or `grit clone --blobs auto` with the same `--config` values. Git 2.49 and newer understand the `promisor-remote` capability; before 2.54 the client must pass `--filter` itself. A client that accepts nothing is refused with a hint, unless the server lazily fetches the blobs for it (`uploadpack.lazyFetch = true`, or `GIT_NO_LAZY_FETCH=0` for `grit upload-pack` / `grit serve`). When clients reach the LOP at a different URL than the server, give `remote.lop.url` that URL and pass `--lop-dir /srv/lop.git` to offload.
+
 ## Examples
 
 ```console
@@ -193,7 +232,7 @@ commit-graph: skipped, parents are rewritten (shallow); any existing graph remov
 
 ## JSON output
 
-Schema: [v1](/schemas/gc/v1.json) (task subcommands also have [gc.repack](/schemas/gc.repack/v1.json), [gc.commit-graph](/schemas/gc.commit-graph/v1.json), [gc.midx](/schemas/gc.midx/v1.json), [gc.pack-refs](/schemas/gc.pack-refs/v1.json), and [gc.prune](/schemas/gc.prune/v1.json) schemas).
+Schema: [v1](/schemas/gc/v1.json) (task subcommands also have [gc.repack](/schemas/gc.repack/v1.json), [gc.commit-graph](/schemas/gc.commit-graph/v1.json), [gc.midx](/schemas/gc.midx/v1.json), [gc.pack-refs](/schemas/gc.pack-refs/v1.json), [gc.prune](/schemas/gc.prune/v1.json), and [gc.offload](/schemas/gc.offload/v1.json) schemas).
 
 Pass `--json` for stable, scripting-friendly output:
 
@@ -201,7 +240,7 @@ Pass `--json` for stable, scripting-friendly output:
 | ----- | ---- | ------- |
 | `dry_run` | boolean | Whether this run only estimated work (full gc). |
 | `auto` | object | Only with `--auto`. `status` is `not-needed`, `already-running` (with `pid` and `host` from `gc.pid`, each `null` when unreadable), `declined-by-hook` (with the hook's `exit_code`), or `ran`. For `ran`, `trigger` is `loose-objects` (with `estimate` and `limit`) or `packs` (with `count` and `limit`). |
-| `tasks` | array | One object per maintenance task; each value includes `task` (`pack-refs`, `reflog-expire`, `repack`, `prune`, `commit-graph`, `midx`) and task-specific counters plus `duration_ms`. |
+| `tasks` | array | One object per maintenance task; each value includes `task` (`pack-refs`, `reflog-expire`, `repack`, `prune`, `commit-graph`, `midx`, `offload`) and task-specific counters plus `duration_ms`. |
 | `tasks[].skipped` | string | `commit-graph` only, present when no graph was written: `shallow`, `grafts` or `replace-refs`. `commit_count` is then `0` and any existing graph has been deleted (dry run: would be). |
 
 Example (abbreviated):
@@ -233,6 +272,61 @@ Example (abbreviated):
       "commit_count": 87,
       "path": ".git/objects/info/commit-graph",
       "removed_chain": false
+    }
+  ]
+}
+```
+
+The `offload` task (from `grit gc offload`) has these fields:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `tasks[].remote` | string | The promisor remote the blobs moved to. |
+| `tasks[].lop_git_dir` | string | The LOP's git directory. |
+| `tasks[].filter` | string | The filter that chose the blobs, `blob:limit=<bytes>` or `blob:none`. |
+| `tasks[].candidates` | number | Blobs selected that may move. |
+| `tasks[].candidate_bytes` | number | Their uncompressed size. |
+| `tasks[].copied_to_lop` | number | Blobs written into a new LOP pack. |
+| `tasks[].already_in_lop` | number | Blobs the LOP already had in a `.keep` pack of its own. |
+| `tasks[].dropped_from_main` | number | Blobs no longer stored here afterwards (`0` on a dry run). |
+| `tasks[].skipped_checked_out` | number | Selected blobs kept because a worktree's index or `HEAD` needs them. |
+| `tasks[].skipped_kept_pack` | number | Selected blobs kept because they are in a `.keep` pack. |
+| `tasks[].lop_pack` | string or null | The pack added to the LOP. |
+| `tasks[].main_pack` | string or null | The `.promisor` pack the rest of the repository now lives in; null when nothing had to be rewritten. |
+| `tasks[].main_bytes_before` | number | Size of this repository's packs and loose objects before the run. |
+| `tasks[].main_bytes_after` | number | The same afterwards. |
+| `tasks[].config_changes` | array | Each `{repo, key, value}` set, `repo` being `main` or `lop`. |
+| `tasks[].lop_ready` | object | `allow_filter` and `allow_any_sha1_in_want`: the LOP's upload-pack settings afterwards. |
+| `tasks[].advertised` | boolean | `promisor.advertise` is on, so clients are told about the LOP. |
+
+```json
+{
+  "dry_run": false,
+  "tasks": [
+    {
+      "task": "offload",
+      "duration_ms": 95,
+      "remote": "lop",
+      "lop_git_dir": "/srv/lop.git",
+      "filter": "blob:limit=102400",
+      "candidates": 2,
+      "candidate_bytes": 500000,
+      "copied_to_lop": 2,
+      "already_in_lop": 0,
+      "dropped_from_main": 2,
+      "skipped_checked_out": 0,
+      "skipped_kept_pack": 0,
+      "lop_pack": "/srv/lop.git/objects/pack/pack-bc97733c….pack",
+      "main_pack": "/srv/main.git/objects/pack/pack-32d0e589….pack",
+      "main_bytes_before": 500813,
+      "main_bytes_after": 1690,
+      "config_changes": [
+        { "repo": "main", "key": "remote.lop.promisor", "value": "true" },
+        { "repo": "main", "key": "remote.lop.partialCloneFilter", "value": "blob:limit=102400" },
+        { "repo": "main", "key": "repack.writeBitmaps", "value": "false" }
+      ],
+      "lop_ready": { "allow_filter": true, "allow_any_sha1_in_want": true },
+      "advertised": true
     }
   ]
 }
@@ -296,7 +390,7 @@ Example (abbreviated):
 - **removed_chain:** false
 ```
 
-A skipped commit-graph task adds a `- **skipped:** shallow` (or `grafts`, `replace-refs`) bullet.
+A skipped commit-graph task adds a `- **skipped:** shallow` (or `grafts`, `replace-refs`) bullet. An `offload` task lists its JSON fields as bullets, one `config_change` bullet per value set, and `lop_allow_filter` / `lop_allow_any_sha1_in_want` for `lop_ready`.
 
 
 ## Exit status
