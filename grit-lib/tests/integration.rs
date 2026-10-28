@@ -410,6 +410,8 @@ mod commit_trailers_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "compare_with_target_git_compat.rs"]
 mod compare_with_target_git_compat;
+#[path = "concurrent_commit_in_process.rs"]
+mod concurrent_commit_in_process;
 #[cfg(feature = "full-tests")]
 #[path = "concurrent_repos.rs"]
 mod concurrent_repos;

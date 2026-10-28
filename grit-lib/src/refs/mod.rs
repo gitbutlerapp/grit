@@ -677,9 +677,15 @@ pub fn read_raw_ref(git_dir: &Path, refname: &str) -> Result<RawRefLookup> {
 /// Lock file path for a loose ref file (`<refpath>.lock`), matching Git's naming for nested refs.
 #[must_use]
 pub fn lock_path_for_ref(path: &Path) -> PathBuf {
-    let mut s = path.as_os_str().to_owned();
-    s.push(".lock");
-    PathBuf::from(s)
+    let mut name = path
+        .file_name()
+        .map(|s| s.to_os_string())
+        .unwrap_or_default();
+    name.push(".lock");
+    match path.parent() {
+        Some(parent) => parent.join(&name),
+        None => PathBuf::from(name),
+    }
 }
 
 /// First packed ref name strictly under `refname/` (sorted `packed-refs` prefix scan).

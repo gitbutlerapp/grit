@@ -141,6 +141,18 @@ pub fn git_dir_from_pack_dir(pack_dir: &Path) -> PathBuf {
         .unwrap_or_else(|| pack_dir.to_path_buf())
 }
 
+/// Whether a git-dir I/O failure is likely transient contention (retry), not a permanent ACL.
+#[must_use]
+pub fn is_git_dir_transient_contention(operation: GitDirPathOperation, source: &io::Error) -> bool {
+    if crate::worktree::io_error::is_file_in_use(source) {
+        return true;
+    }
+    matches!(
+        operation,
+        GitDirPathOperation::WriteIndex | GitDirPathOperation::UpdateRef
+    ) && crate::atomic_replace::is_replace_contention(source)
+}
+
 /// Human-readable summary for [`Error::GitDirPathIo`].
 #[must_use]
 pub fn format_git_dir_io_message(
@@ -148,7 +160,12 @@ pub fn format_git_dir_io_message(
     operation: GitDirPathOperation,
     source: &io::Error,
 ) -> String {
-    if source.kind() == io::ErrorKind::PermissionDenied {
+    if is_git_dir_transient_contention(operation, source) {
+        format!(
+            "cannot {} ({path}): file is in use by another process (close it and retry)",
+            operation.phrase()
+        )
+    } else if source.kind() == io::ErrorKind::PermissionDenied {
         format!(
             "insufficient permission to {} ({path}): {source}",
             operation.phrase()
@@ -323,5 +340,24 @@ mod tests {
         let msg = format_git_dir_io_message(".git/objects", GitDirPathOperation::WriteObject, &err);
         assert!(msg.contains(".git/objects"));
         assert!(msg.contains("insufficient permission"));
+    }
+
+    #[test]
+    fn sharing_violation_maps_to_in_use_message() {
+        let err = io::Error::from_raw_os_error(libc::EBUSY as i32);
+        let msg = format_git_dir_io_message(".git/index", GitDirPathOperation::WriteIndex, &err);
+        assert!(msg.contains("in use by another process"));
+        assert!(!msg.contains("insufficient permission"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn access_denied_maps_to_in_use_for_index_write_only() {
+        let err = io::Error::from_raw_os_error(5);
+        let index = format_git_dir_io_message(".git/index", GitDirPathOperation::WriteIndex, &err);
+        assert!(index.contains("in use by another process"));
+        let object =
+            format_git_dir_io_message(".git/objects", GitDirPathOperation::WriteObject, &err);
+        assert!(object.contains("insufficient permission"));
     }
 }

@@ -1007,7 +1007,7 @@ pub enum Error {
     /// The lock file belongs to whoever created it and is never removed. Retry once the other
     /// process finishes, or delete `path` when no process owns it (a `holder` with
     /// `running: false` means the lock is stale).
-    #[error("lock file {} already exists", path.display())]
+    #[error("lock file {} already exists", crate::git_path::user_display_path(.path))]
     LockHeld {
         /// The lock file that could not be created.
         path: std::path::PathBuf,
@@ -2188,6 +2188,20 @@ impl Error {
     #[must_use]
     pub fn is_worktree_file_in_use(&self) -> bool {
         matches!(self, Self::WorktreePathIo { source, .. } if crate::worktree::io_error::is_file_in_use(source))
+    }
+
+    /// Whether this is [`Error::GitDirPathIo`] caused by another process holding a git-dir file
+    /// open (Windows sharing or access-denied during replace, `EBUSY`, …).
+    #[must_use]
+    pub fn is_git_dir_file_in_use(&self) -> bool {
+        matches!(
+            self,
+            Self::GitDirPathIo {
+                source,
+                operation,
+                ..
+            } if crate::git_dir::io_error::is_git_dir_transient_contention(*operation, source)
+        )
     }
 
     /// Whether this is [`Error::Cancelled`] or a nested history failure that was cancelled.
