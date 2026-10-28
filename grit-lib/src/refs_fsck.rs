@@ -13,7 +13,24 @@ use crate::config::ConfigSet;
 use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
+use crate::ref_storage::RefStorageFormat;
+use crate::refs::store::{open_ref_store, RawRef, RefEntry};
 use crate::repo::Repository;
+use std::ops::ControlFlow;
+
+/// Loose `refs/heads` placeholder written for reftable discovery.
+const REFTABLE_REFS_HEADS_SENTINEL: &[u8] = b"this repository uses the reftable format\n";
+/// Loose `HEAD` placeholder pointing at a deliberately invalid refname.
+const REFTABLE_HEAD_SENTINEL: &str = "ref: refs/heads/.invalid\n";
+
+struct LooseRefFsckCtx<'a> {
+    common_dir: &'a Path,
+    odb: &'a Odb,
+    config: &'a ConfigSet,
+    strict: bool,
+    reftable: bool,
+    issues: &'a mut Vec<RefsFsckIssue>,
+}
 
 /// Severity of a refs-fsck diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,25 +235,156 @@ fn fsck_worktree(
     strict: bool,
     issues: &mut Vec<RefsFsckIssue>,
 ) -> Result<()> {
-    let refs_dir = git_dir.join("refs");
-    if refs_dir.is_dir() {
-        walk_refs_files(common_dir, &refs_dir, odb, config, strict, issues)?;
+    let reftable = RefStorageFormat::detect(git_dir)?.is_reftable();
+
+    if reftable {
+        fsck_reftable_refs_heads_stub(git_dir, common_dir, config, strict, issues)?;
     }
 
-    if worktree_id.is_none() {
-        fsck_packed_refs(common_dir, config, strict, issues)?;
-    }
-
-    fsck_root_refs(
-        git_dir,
+    let mut loose_ctx = LooseRefFsckCtx {
         common_dir,
-        path_prefix_for_root(worktree_id),
         odb,
         config,
         strict,
+        reftable,
         issues,
-    )?;
+    };
+
+    let refs_dir = git_dir.join("refs");
+    if refs_dir.is_dir() {
+        walk_refs_files(&refs_dir, &mut loose_ctx)?;
+    }
+
+    if worktree_id.is_none() {
+        fsck_packed_refs(common_dir, config, strict, loose_ctx.issues)?;
+    }
+
+    fsck_root_refs(git_dir, path_prefix_for_root(worktree_id), &mut loose_ctx)?;
+
+    if reftable {
+        fsck_reftable_store(git_dir, worktree_id, odb, config, strict, issues)?;
+    }
     Ok(())
+}
+
+fn fsck_reftable_refs_heads_stub(
+    git_dir: &Path,
+    common_dir: &Path,
+    config: &ConfigSet,
+    strict: bool,
+    issues: &mut Vec<RefsFsckIssue>,
+) -> Result<()> {
+    let heads = git_dir.join("refs/heads");
+    let display = display_rel_path(common_dir, &heads);
+    if heads.is_dir() {
+        push_issue(
+            issues,
+            config,
+            strict,
+            "badRefContent",
+            false,
+            display,
+            "this repository uses the reftable format".to_owned(),
+        );
+    } else if heads.is_file() {
+        let raw = fs::read(&heads)?;
+        if raw.as_slice() != REFTABLE_REFS_HEADS_SENTINEL {
+            let detail = String::from_utf8_lossy(&raw)
+                .trim_end_matches(['\n', '\r'])
+                .to_owned();
+            push_issue(
+                issues,
+                config,
+                strict,
+                "badRefContent",
+                false,
+                display,
+                detail,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn fsck_reftable_store(
+    git_dir: &Path,
+    worktree_id: Option<&str>,
+    odb: &Odb,
+    config: &ConfigSet,
+    strict: bool,
+    issues: &mut Vec<RefsFsckIssue>,
+) -> Result<()> {
+    let store = open_ref_store(git_dir)?;
+    let path_prefix = path_prefix_for_root(worktree_id);
+    let display = |name: &str| -> String {
+        match &path_prefix {
+            Some(p) => format!("{p}{name}"),
+            None => name.to_owned(),
+        }
+    };
+
+    let mut backend_err: Option<crate::error::Error> = None;
+    store.for_each_ref("refs/", &mut |entry: &RefEntry| -> ControlFlow<()> {
+        let path = display(&entry.name);
+        check_ref_file_name(&path, config, strict, issues);
+        if let Err(e) = fsck_stored_ref(&path, &entry.value, odb, config, strict, issues) {
+            backend_err = Some(e);
+            return ControlFlow::Break(());
+        }
+        ControlFlow::Continue(())
+    })?;
+    if let Some(e) = backend_err {
+        return Err(e);
+    }
+
+    if let Some(head) = store.read_raw("HEAD")? {
+        let path = display("HEAD");
+        fsck_stored_ref(&path, &head, odb, config, strict, issues)?;
+    }
+    Ok(())
+}
+
+fn fsck_stored_ref(
+    display_path: &str,
+    value: &RawRef,
+    odb: &Odb,
+    config: &ConfigSet,
+    strict: bool,
+    issues: &mut Vec<RefsFsckIssue>,
+) -> Result<()> {
+    match value {
+        RawRef::Symbolic(target) => {
+            refs_fsck_symref(display_path, target, config, strict, issues);
+        }
+        RawRef::Direct(oid) => {
+            if oid.is_zero() {
+                push_issue(
+                    issues,
+                    config,
+                    strict,
+                    "badRefOid",
+                    false,
+                    display_path.to_owned(),
+                    format!("points to invalid object ID '{}'", oid.to_hex()),
+                );
+            } else if !odb.contains(oid)? {
+                push_issue(
+                    issues,
+                    config,
+                    strict,
+                    "missingObject",
+                    false,
+                    display_path.to_owned(),
+                    format!("points to missing object {}", oid.to_hex()),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_reftable_head_sentinel(raw: &str) -> bool {
+    raw == REFTABLE_HEAD_SENTINEL || raw.strip_suffix('\r').unwrap_or(raw) == REFTABLE_HEAD_SENTINEL
 }
 
 fn path_prefix_for_root(worktree_id: Option<&str>) -> Option<String> {
@@ -267,14 +415,7 @@ fn normalize_joined_path(base: &Path, rel: &Path) -> PathBuf {
     out
 }
 
-fn walk_refs_files(
-    common_dir: &Path,
-    dir: &Path,
-    odb: &Odb,
-    config: &ConfigSet,
-    strict: bool,
-    issues: &mut Vec<RefsFsckIssue>,
-) -> Result<()> {
+fn walk_refs_files(dir: &Path, ctx: &mut LooseRefFsckCtx<'_>) -> Result<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -283,7 +424,10 @@ fn walk_refs_files(
             continue;
         }
         if path.is_dir() {
-            walk_refs_files(common_dir, &path, odb, config, strict, issues)?;
+            if ctx.reftable && fname == "heads" {
+                continue;
+            }
+            walk_refs_files(&path, ctx)?;
             continue;
         }
         if !path.is_file() && !path.is_symlink() {
@@ -292,20 +436,16 @@ fn walk_refs_files(
         if !fname.starts_with('.') && fname.ends_with(".lock") {
             continue;
         }
-        let display = display_rel_path(common_dir, &path);
-        verify_loose_ref(common_dir, &display, &path, odb, config, strict, issues)?;
+        let display = display_rel_path(ctx.common_dir, &path);
+        verify_loose_ref(&display, &path, ctx)?;
     }
     Ok(())
 }
 
 fn fsck_root_refs(
     git_dir: &Path,
-    common_dir: &Path,
     path_prefix: Option<String>,
-    odb: &Odb,
-    config: &ConfigSet,
-    strict: bool,
-    issues: &mut Vec<RefsFsckIssue>,
+    ctx: &mut LooseRefFsckCtx<'_>,
 ) -> Result<()> {
     let Ok(rd) = fs::read_dir(git_dir) else {
         return Ok(());
@@ -333,28 +473,34 @@ fn fsck_root_refs(
             Some(p) => format!("{p}{name}"),
             None => name,
         };
-        verify_loose_ref(common_dir, &display, &path, odb, config, strict, issues)?;
+        verify_loose_ref(&display, &path, ctx)?;
     }
     Ok(())
 }
 
-fn verify_loose_ref(
-    common_dir: &Path,
-    display_path: &str,
-    path: &Path,
-    odb: &Odb,
-    config: &ConfigSet,
-    strict: bool,
-    issues: &mut Vec<RefsFsckIssue>,
-) -> Result<()> {
-    check_ref_file_name(display_path, config, strict, issues);
+fn verify_loose_ref(display_path: &str, path: &Path, ctx: &mut LooseRefFsckCtx<'_>) -> Result<()> {
+    if ctx.reftable
+        && (display_path == "refs/heads" || display_path.ends_with("/refs/heads"))
+        && fs::read(path).is_ok_and(|b| b.as_slice() == REFTABLE_REFS_HEADS_SENTINEL)
+    {
+        return Ok(());
+    }
+    if ctx.reftable
+        && stripped_for_head_check(display_path) == "HEAD"
+        && fs::read_to_string(path)
+            .is_ok_and(|raw| is_reftable_head_sentinel(raw.strip_suffix('\r').unwrap_or(&raw)))
+    {
+        return Ok(());
+    }
+
+    check_ref_file_name(display_path, ctx.config, ctx.strict, ctx.issues);
 
     let meta = fs::symlink_metadata(path)?;
     if !meta.is_file() && !meta.is_symlink() {
         push_issue(
-            issues,
-            config,
-            strict,
+            ctx.issues,
+            ctx.config,
+            ctx.strict,
             "badRefFiletype",
             false,
             display_path.to_owned(),
@@ -365,9 +511,9 @@ fn verify_loose_ref(
 
     if meta.is_symlink() {
         push_issue(
-            issues,
-            config,
-            strict,
+            ctx.issues,
+            ctx.config,
+            ctx.strict,
             "symlinkRef",
             true,
             display_path.to_owned(),
@@ -377,9 +523,10 @@ fn verify_loose_ref(
         let parent = path.parent().unwrap_or(Path::new(""));
         let joined = normalize_joined_path(parent, Path::new(&target));
         let resolved = joined.canonicalize_simplified().unwrap_or(joined);
-        let abs_common = common_dir
+        let abs_common = ctx
+            .common_dir
             .canonicalize_simplified()
-            .unwrap_or(common_dir.to_path_buf());
+            .unwrap_or_else(|_| ctx.common_dir.to_path_buf());
         let g = abs_common.to_string_lossy();
         let r = resolved.to_string_lossy().to_string();
         let referent = if r.starts_with(g.as_ref()) {
@@ -388,7 +535,7 @@ fn verify_loose_ref(
         } else {
             r.replace('\\', "/")
         };
-        refs_fsck_symref(display_path, &referent, config, strict, issues);
+        refs_fsck_symref(display_path, &referent, ctx.config, ctx.strict, ctx.issues);
         return Ok(());
     }
 
@@ -404,7 +551,7 @@ fn verify_loose_ref(
         {
             s = &s[1..];
         }
-        fsck_symref_contents(display_path, s, config, strict, issues);
+        fsck_symref_contents(display_path, s, ctx.config, ctx.strict, ctx.issues);
         return Ok(());
     }
 
@@ -416,9 +563,9 @@ fn verify_loose_ref(
     // A valid ref points at a full hex OID (40 chars for SHA-1, 64 for SHA-256).
     if !ObjectId::is_hex_len(i) {
         push_issue(
-            issues,
-            config,
-            strict,
+            ctx.issues,
+            ctx.config,
+            ctx.strict,
             "badRefContent",
             false,
             display_path.to_owned(),
@@ -430,9 +577,9 @@ fn verify_loose_ref(
         Ok(o) => o,
         Err(_) => {
             push_issue(
-                issues,
-                config,
-                strict,
+                ctx.issues,
+                ctx.config,
+                ctx.strict,
                 "badRefContent",
                 false,
                 display_path.to_owned(),
@@ -449,9 +596,9 @@ fn verify_loose_ref(
             .is_some_and(|b| b.is_ascii_whitespace())
     {
         push_issue(
-            issues,
-            config,
-            strict,
+            ctx.issues,
+            ctx.config,
+            ctx.strict,
             "badRefContent",
             false,
             display_path.to_owned(),
@@ -462,9 +609,9 @@ fn verify_loose_ref(
 
     if trailing.is_empty() {
         push_issue(
-            issues,
-            config,
-            strict,
+            ctx.issues,
+            ctx.config,
+            ctx.strict,
             "refMissingNewline",
             true,
             display_path.to_owned(),
@@ -474,9 +621,9 @@ fn verify_loose_ref(
         // Git: warn when `*trailing != '\n' || *(trailing + 1)` — only a lone `\n` after the oid
         // is valid; anything else (including `\n\n\n`) is reported with the full tail string.
         push_issue(
-            issues,
-            config,
-            strict,
+            ctx.issues,
+            ctx.config,
+            ctx.strict,
             "trailingRefContent",
             true,
             display_path.to_owned(),
@@ -486,19 +633,19 @@ fn verify_loose_ref(
 
     if oid.is_zero() {
         push_issue(
-            issues,
-            config,
-            strict,
+            ctx.issues,
+            ctx.config,
+            ctx.strict,
             "badRefOid",
             false,
             display_path.to_owned(),
             format!("points to invalid object ID '{}'", oid.to_hex()),
         );
-    } else if !odb.contains(&oid)? {
+    } else if !ctx.odb.contains(&oid)? {
         push_issue(
-            issues,
-            config,
-            strict,
+            ctx.issues,
+            ctx.config,
+            ctx.strict,
             "missingObject",
             false,
             display_path.to_owned(),
