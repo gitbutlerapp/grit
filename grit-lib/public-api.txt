@@ -5700,6 +5700,9 @@ pub grit_lib::error::ConfigError::ConfigFileLocked::path: alloc::string::String
 pub grit_lib::error::ConfigError::IncludeDepthExceeded
 pub grit_lib::error::ConfigError::IncludeDepthExceeded::depth: usize
 pub grit_lib::error::ConfigError::IncludeDepthExceeded::limit: usize
+pub grit_lib::error::ConfigError::InvalidDate
+pub grit_lib::error::ConfigError::InvalidDate::key: alloc::string::String
+pub grit_lib::error::ConfigError::InvalidDate::value: alloc::string::String
 pub grit_lib::error::ConfigError::InvalidDirectoryRenames
 pub grit_lib::error::ConfigError::InvalidDirectoryRenames::value: alloc::string::String
 pub grit_lib::error::ConfigError::InvalidUntrackedFilesMode
@@ -5880,6 +5883,8 @@ pub grit_lib::error::Error::MoveNothingToMove
 pub grit_lib::error::Error::MoveNothingToMove::src: alloc::string::String
 pub grit_lib::error::Error::MoveSourceNotTracked
 pub grit_lib::error::Error::MoveSourceNotTracked::src: alloc::string::String
+pub grit_lib::error::Error::NoPromisorRemote
+pub grit_lib::error::Error::NoPromisorRemote::operation: &'static str
 pub grit_lib::error::Error::NoReplayInProgress
 pub grit_lib::error::Error::NotARepository(grit_lib::error::NotARepositoryReason)
 pub grit_lib::error::Error::NotFastForward
@@ -5936,6 +5941,8 @@ pub grit_lib::error::Error::PathspecIgnored
 pub grit_lib::error::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::PathspecNoMatch
 pub grit_lib::error::Error::PathspecNoMatch::spec: alloc::string::String
+pub grit_lib::error::Error::PreciousObjectsRepository
+pub grit_lib::error::Error::PreciousObjectsRepository::operation: &'static str
 pub grit_lib::error::Error::PromisedObjectMissing(grit_lib::objects::ObjectId)
 pub grit_lib::error::Error::PromisorFetchFailed
 pub grit_lib::error::Error::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, grit_lib::error::Error)>
@@ -8152,6 +8159,50 @@ impl core::marker::Unpin for grit_lib::maintenance::CommitGraphSkipReason
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::CommitGraphSkipReason
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::CommitGraphSkipReason
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::CommitGraphSkipReason
+pub enum grit_lib::maintenance::DropExpiry
+pub grit_lib::maintenance::DropExpiry::Immediately
+pub grit_lib::maintenance::DropExpiry::KeepNewerThan(time::offset_date_time::OffsetDateTime)
+pub grit_lib::maintenance::DropExpiry::Never
+impl grit_lib::maintenance::DropExpiry
+pub fn grit_lib::maintenance::DropExpiry::parse(&str, time::offset_date_time::OffsetDateTime) -> core::option::Option<Self>
+impl core::clone::Clone for grit_lib::maintenance::DropExpiry
+pub fn grit_lib::maintenance::DropExpiry::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::DropExpiry
+impl core::cmp::PartialEq for grit_lib::maintenance::DropExpiry
+pub fn grit_lib::maintenance::DropExpiry::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::maintenance::DropExpiry
+pub fn grit_lib::maintenance::DropExpiry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::maintenance::DropExpiry
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::DropExpiry
+impl core::marker::Freeze for grit_lib::maintenance::DropExpiry
+impl core::marker::Send for grit_lib::maintenance::DropExpiry
+impl core::marker::Sync for grit_lib::maintenance::DropExpiry
+impl core::marker::Unpin for grit_lib::maintenance::DropExpiry
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::DropExpiry
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::DropExpiry
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::DropExpiry
+#[non_exhaustive] pub enum grit_lib::maintenance::DropPromisedBlobsSkip
+pub grit_lib::maintenance::DropPromisedBlobsSkip::Disabled
+pub grit_lib::maintenance::DropPromisedBlobsSkip::NoCurrentTime
+pub grit_lib::maintenance::DropPromisedBlobsSkip::NoPromisorRemote
+pub grit_lib::maintenance::DropPromisedBlobsSkip::OperationInProgress(grit_lib::state::InProgressOperation)
+pub grit_lib::maintenance::DropPromisedBlobsSkip::PreciousObjects
+impl core::clone::Clone for grit_lib::maintenance::DropPromisedBlobsSkip
+pub fn grit_lib::maintenance::DropPromisedBlobsSkip::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::DropPromisedBlobsSkip
+impl core::cmp::PartialEq for grit_lib::maintenance::DropPromisedBlobsSkip
+pub fn grit_lib::maintenance::DropPromisedBlobsSkip::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::maintenance::DropPromisedBlobsSkip
+pub fn grit_lib::maintenance::DropPromisedBlobsSkip::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::maintenance::DropPromisedBlobsSkip
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::DropPromisedBlobsSkip
+impl core::marker::Freeze for grit_lib::maintenance::DropPromisedBlobsSkip
+impl core::marker::Send for grit_lib::maintenance::DropPromisedBlobsSkip
+impl core::marker::Sync for grit_lib::maintenance::DropPromisedBlobsSkip
+impl core::marker::Unpin for grit_lib::maintenance::DropPromisedBlobsSkip
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::DropPromisedBlobsSkip
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::DropPromisedBlobsSkip
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::DropPromisedBlobsSkip
 pub enum grit_lib::maintenance::GcLockAttempt
 pub grit_lib::maintenance::GcLockAttempt::Acquired(grit_lib::maintenance::GcLock)
 pub grit_lib::maintenance::GcLockAttempt::Held(grit_lib::maintenance::GcLockHolder)
@@ -8281,6 +8332,77 @@ impl core::marker::Unpin for grit_lib::maintenance::CommitGraphWriteReport
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::CommitGraphWriteReport
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::CommitGraphWriteReport
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::CommitGraphWriteReport
+#[non_exhaustive] pub struct grit_lib::maintenance::DropPromisedBlobsOptions
+pub grit_lib::maintenance::DropPromisedBlobsOptions::dry_run: bool
+pub grit_lib::maintenance::DropPromisedBlobsOptions::keep_newer_than: core::option::Option<time::offset_date_time::OffsetDateTime>
+pub grit_lib::maintenance::DropPromisedBlobsOptions::min_size: u64
+pub grit_lib::maintenance::DropPromisedBlobsOptions::now: time::offset_date_time::OffsetDateTime
+pub grit_lib::maintenance::DropPromisedBlobsOptions::threads: core::option::Option<usize>
+impl grit_lib::maintenance::DropPromisedBlobsOptions
+pub fn grit_lib::maintenance::DropPromisedBlobsOptions::from_config(&grit_lib::config::ConfigSet, time::offset_date_time::OffsetDateTime) -> grit_lib::error::Result<core::option::Option<Self>>
+pub fn grit_lib::maintenance::DropPromisedBlobsOptions::from_config_with_overrides(&grit_lib::config::ConfigSet, time::offset_date_time::OffsetDateTime, core::option::Option<u64>, core::option::Option<grit_lib::maintenance::DropExpiry>) -> grit_lib::error::Result<core::option::Option<Self>>
+pub fn grit_lib::maintenance::DropPromisedBlobsOptions::new(time::offset_date_time::OffsetDateTime, u64, core::option::Option<time::offset_date_time::OffsetDateTime>) -> Self
+impl core::clone::Clone for grit_lib::maintenance::DropPromisedBlobsOptions
+pub fn grit_lib::maintenance::DropPromisedBlobsOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::DropPromisedBlobsOptions
+impl core::cmp::PartialEq for grit_lib::maintenance::DropPromisedBlobsOptions
+pub fn grit_lib::maintenance::DropPromisedBlobsOptions::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::maintenance::DropPromisedBlobsOptions
+pub fn grit_lib::maintenance::DropPromisedBlobsOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::DropPromisedBlobsOptions
+impl core::marker::Freeze for grit_lib::maintenance::DropPromisedBlobsOptions
+impl core::marker::Send for grit_lib::maintenance::DropPromisedBlobsOptions
+impl core::marker::Sync for grit_lib::maintenance::DropPromisedBlobsOptions
+impl core::marker::Unpin for grit_lib::maintenance::DropPromisedBlobsOptions
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::DropPromisedBlobsOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::DropPromisedBlobsOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::DropPromisedBlobsOptions
+#[non_exhaustive] pub struct grit_lib::maintenance::DropPromisedBlobsReport
+pub grit_lib::maintenance::DropPromisedBlobsReport::bytes_reclaimed: u64
+pub grit_lib::maintenance::DropPromisedBlobsReport::candidates: usize
+pub grit_lib::maintenance::DropPromisedBlobsReport::dropped: alloc::vec::Vec<grit_lib::maintenance::DroppedBlob>
+pub grit_lib::maintenance::DropPromisedBlobsReport::keep_newer_than: core::option::Option<time::offset_date_time::OffsetDateTime>
+pub grit_lib::maintenance::DropPromisedBlobsReport::kept: grit_lib::maintenance::KeptBlobCounts
+pub grit_lib::maintenance::DropPromisedBlobsReport::min_size: u64
+pub grit_lib::maintenance::DropPromisedBlobsReport::packs_removed: usize
+pub grit_lib::maintenance::DropPromisedBlobsReport::packs_rewritten: usize
+pub grit_lib::maintenance::DropPromisedBlobsReport::skipped: core::option::Option<grit_lib::maintenance::DropPromisedBlobsSkip>
+impl core::clone::Clone for grit_lib::maintenance::DropPromisedBlobsReport
+pub fn grit_lib::maintenance::DropPromisedBlobsReport::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::DropPromisedBlobsReport
+impl core::cmp::PartialEq for grit_lib::maintenance::DropPromisedBlobsReport
+pub fn grit_lib::maintenance::DropPromisedBlobsReport::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::maintenance::DropPromisedBlobsReport
+pub fn grit_lib::maintenance::DropPromisedBlobsReport::default() -> Self
+impl core::fmt::Debug for grit_lib::maintenance::DropPromisedBlobsReport
+pub fn grit_lib::maintenance::DropPromisedBlobsReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::DropPromisedBlobsReport
+impl core::marker::Freeze for grit_lib::maintenance::DropPromisedBlobsReport
+impl core::marker::Send for grit_lib::maintenance::DropPromisedBlobsReport
+impl core::marker::Sync for grit_lib::maintenance::DropPromisedBlobsReport
+impl core::marker::Unpin for grit_lib::maintenance::DropPromisedBlobsReport
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::DropPromisedBlobsReport
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::DropPromisedBlobsReport
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::DropPromisedBlobsReport
+#[non_exhaustive] pub struct grit_lib::maintenance::DroppedBlob
+pub grit_lib::maintenance::DroppedBlob::oid: grit_lib::objects::ObjectId
+pub grit_lib::maintenance::DroppedBlob::pack: std::path::PathBuf
+pub grit_lib::maintenance::DroppedBlob::size: u64
+impl core::clone::Clone for grit_lib::maintenance::DroppedBlob
+pub fn grit_lib::maintenance::DroppedBlob::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::DroppedBlob
+impl core::cmp::PartialEq for grit_lib::maintenance::DroppedBlob
+pub fn grit_lib::maintenance::DroppedBlob::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::maintenance::DroppedBlob
+pub fn grit_lib::maintenance::DroppedBlob::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::DroppedBlob
+impl core::marker::Freeze for grit_lib::maintenance::DroppedBlob
+impl core::marker::Send for grit_lib::maintenance::DroppedBlob
+impl core::marker::Sync for grit_lib::maintenance::DroppedBlob
+impl core::marker::Unpin for grit_lib::maintenance::DroppedBlob
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::DroppedBlob
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::DroppedBlob
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::DroppedBlob
 pub struct grit_lib::maintenance::GcLock
 impl grit_lib::maintenance::GcLock
 pub fn grit_lib::maintenance::GcLock::current_holder(&grit_lib::repo::Repository, i64) -> core::option::Option<grit_lib::maintenance::GcLockHolder>
@@ -8315,6 +8437,7 @@ impl core::marker::UnsafeUnpin for grit_lib::maintenance::GcLockHolder
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::GcLockHolder
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::GcLockHolder
 #[non_exhaustive] pub struct grit_lib::maintenance::GcOptions
+pub grit_lib::maintenance::GcOptions::drop_large_blobs: bool
 pub grit_lib::maintenance::GcOptions::expire_reflog: bool
 pub grit_lib::maintenance::GcOptions::now_unix: i64
 pub grit_lib::maintenance::GcOptions::pack_refs: bool
@@ -8339,6 +8462,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::GcOption
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::GcOptions
 #[non_exhaustive] pub struct grit_lib::maintenance::GcPhaseTimings
 pub grit_lib::maintenance::GcPhaseTimings::commit_graph_ms: u64
+pub grit_lib::maintenance::GcPhaseTimings::drop_large_blobs_ms: u64
 pub grit_lib::maintenance::GcPhaseTimings::pack_refs_ms: u64
 pub grit_lib::maintenance::GcPhaseTimings::prune_ms: u64
 pub grit_lib::maintenance::GcPhaseTimings::reflog_ms: u64
@@ -8363,6 +8487,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::GcPhaseT
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::GcPhaseTimings
 pub struct grit_lib::maintenance::GcStats
 pub grit_lib::maintenance::GcStats::commit_graph: core::option::Option<grit_lib::maintenance::CommitGraphWriteReport>
+pub grit_lib::maintenance::GcStats::drop_large_blobs: core::option::Option<grit_lib::maintenance::DropPromisedBlobsReport>
 pub grit_lib::maintenance::GcStats::pack_refs: core::option::Option<grit_lib::maintenance::PackRefsReport>
 pub grit_lib::maintenance::GcStats::phase_timings: grit_lib::maintenance::GcPhaseTimings
 pub grit_lib::maintenance::GcStats::prune: grit_lib::refs::gc::PruneStats
@@ -8386,6 +8511,33 @@ impl core::marker::Unpin for grit_lib::maintenance::GcStats
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::GcStats
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::GcStats
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::GcStats
+#[non_exhaustive] pub struct grit_lib::maintenance::KeptBlobCounts
+pub grit_lib::maintenance::KeptBlobCounts::checked_out: usize
+pub grit_lib::maintenance::KeptBlobCounts::kept_pack: usize
+pub grit_lib::maintenance::KeptBlobCounts::not_promised_elsewhere: usize
+pub grit_lib::maintenance::KeptBlobCounts::outside_promisor_packs: usize
+pub grit_lib::maintenance::KeptBlobCounts::recently_checked_out: usize
+pub grit_lib::maintenance::KeptBlobCounts::recently_fetched: usize
+impl grit_lib::maintenance::KeptBlobCounts
+pub fn grit_lib::maintenance::KeptBlobCounts::total(&self) -> usize
+impl core::clone::Clone for grit_lib::maintenance::KeptBlobCounts
+pub fn grit_lib::maintenance::KeptBlobCounts::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::KeptBlobCounts
+impl core::cmp::PartialEq for grit_lib::maintenance::KeptBlobCounts
+pub fn grit_lib::maintenance::KeptBlobCounts::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::maintenance::KeptBlobCounts
+pub fn grit_lib::maintenance::KeptBlobCounts::default() -> Self
+impl core::fmt::Debug for grit_lib::maintenance::KeptBlobCounts
+pub fn grit_lib::maintenance::KeptBlobCounts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::maintenance::KeptBlobCounts
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::KeptBlobCounts
+impl core::marker::Freeze for grit_lib::maintenance::KeptBlobCounts
+impl core::marker::Send for grit_lib::maintenance::KeptBlobCounts
+impl core::marker::Sync for grit_lib::maintenance::KeptBlobCounts
+impl core::marker::Unpin for grit_lib::maintenance::KeptBlobCounts
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::KeptBlobCounts
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::KeptBlobCounts
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::KeptBlobCounts
 #[non_exhaustive] pub struct grit_lib::maintenance::LopReadiness
 pub grit_lib::maintenance::LopReadiness::allow_any_sha1_in_want: bool
 pub grit_lib::maintenance::LopReadiness::allow_filter: bool
@@ -8668,10 +8820,15 @@ impl core::marker::Unpin for grit_lib::maintenance::RepackStats
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::RepackStats
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::RepackStats
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::RepackStats
+pub const grit_lib::maintenance::DEFAULT_DROP_EXPIRE: &str
+pub const grit_lib::maintenance::DEFAULT_DROP_MIN_SIZE: u64
+pub const grit_lib::maintenance::DROP_LARGE_BLOBS_TASK: &str
 pub const grit_lib::maintenance::LOP_KEEP_MESSAGE: &str
 pub fn grit_lib::maintenance::auto_gc_needed(&grit_lib::repo::Repository) -> grit_lib::error::Result<core::option::Option<grit_lib::maintenance::AutoGcReason>>
 pub fn grit_lib::maintenance::build_commit_graph(&grit_lib::repo::Repository, &grit_lib::maintenance::CommitGraphOptions) -> grit_lib::error::Result<grit_lib::maintenance::CommitGraphBuild>
 pub fn grit_lib::maintenance::collect_maintenance_object_roots(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
+pub fn grit_lib::maintenance::drop_large_blobs_enabled(&grit_lib::config::ConfigSet) -> grit_lib::error::Result<bool>
+pub fn grit_lib::maintenance::drop_promised_blobs(&grit_lib::repo::Repository, &grit_lib::maintenance::DropPromisedBlobsOptions) -> grit_lib::error::Result<grit_lib::maintenance::DropPromisedBlobsReport>
 pub fn grit_lib::maintenance::gc(&grit_lib::repo::Repository, &grit_lib::maintenance::GcOptions) -> grit_lib::error::Result<grit_lib::maintenance::GcStats>
 pub fn grit_lib::maintenance::gc_auto(&grit_lib::repo::Repository, &grit_lib::maintenance::GcOptions) -> grit_lib::error::Result<grit_lib::maintenance::AutoGcOutcome>
 pub fn grit_lib::maintenance::offload_blobs(&grit_lib::repo::Repository, &grit_lib::maintenance::OffloadOptions) -> grit_lib::error::Result<grit_lib::maintenance::OffloadReport>
@@ -16909,6 +17066,8 @@ pub grit_lib::prelude::Error::MoveNothingToMove
 pub grit_lib::prelude::Error::MoveNothingToMove::src: alloc::string::String
 pub grit_lib::prelude::Error::MoveSourceNotTracked
 pub grit_lib::prelude::Error::MoveSourceNotTracked::src: alloc::string::String
+pub grit_lib::prelude::Error::NoPromisorRemote
+pub grit_lib::prelude::Error::NoPromisorRemote::operation: &'static str
 pub grit_lib::prelude::Error::NoReplayInProgress
 pub grit_lib::prelude::Error::NotARepository(grit_lib::error::NotARepositoryReason)
 pub grit_lib::prelude::Error::NotFastForward
@@ -16965,6 +17124,8 @@ pub grit_lib::prelude::Error::PathspecIgnored
 pub grit_lib::prelude::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::PathspecNoMatch
 pub grit_lib::prelude::Error::PathspecNoMatch::spec: alloc::string::String
+pub grit_lib::prelude::Error::PreciousObjectsRepository
+pub grit_lib::prelude::Error::PreciousObjectsRepository::operation: &'static str
 pub grit_lib::prelude::Error::PromisedObjectMissing(grit_lib::objects::ObjectId)
 pub grit_lib::prelude::Error::PromisorFetchFailed
 pub grit_lib::prelude::Error::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, grit_lib::error::Error)>
@@ -17972,6 +18133,8 @@ pub fn grit_lib::repo::Repository::with_thread_policy(self, grit_lib::parallel::
 pub fn grit_lib::repo::Repository::work_tree(&self) -> core::option::Option<&std::path::Path>
 pub fn grit_lib::repo::Repository::worktrees(&self) -> grit_lib::repo_handles::RepositoryWorktrees<'_>
 pub fn grit_lib::repo::Repository::write_largest_pack_bitmap(&self, &grit_lib::objects::bitmap::PackBitmapWriteOptions, std::time::SystemTime) -> core::result::Result<std::path::PathBuf, grit_lib::objects::bitmap::PackBitmapWriteError>
+impl grit_lib::repo::Repository
+pub fn grit_lib::repo::Repository::drop_promised_blobs(&self, &grit_lib::maintenance::DropPromisedBlobsOptions) -> grit_lib::error::Result<grit_lib::maintenance::DropPromisedBlobsReport>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::enforce_safe_directory(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::Repository::verify_safe_for_clone_source(&self) -> grit_lib::error::Result<()>
@@ -25500,6 +25663,8 @@ pub fn grit_lib::repo::Repository::with_thread_policy(self, grit_lib::parallel::
 pub fn grit_lib::repo::Repository::work_tree(&self) -> core::option::Option<&std::path::Path>
 pub fn grit_lib::repo::Repository::worktrees(&self) -> grit_lib::repo_handles::RepositoryWorktrees<'_>
 pub fn grit_lib::repo::Repository::write_largest_pack_bitmap(&self, &grit_lib::objects::bitmap::PackBitmapWriteOptions, std::time::SystemTime) -> core::result::Result<std::path::PathBuf, grit_lib::objects::bitmap::PackBitmapWriteError>
+impl grit_lib::repo::Repository
+pub fn grit_lib::repo::Repository::drop_promised_blobs(&self, &grit_lib::maintenance::DropPromisedBlobsOptions) -> grit_lib::error::Result<grit_lib::maintenance::DropPromisedBlobsReport>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::enforce_safe_directory(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::Repository::verify_safe_for_clone_source(&self) -> grit_lib::error::Result<()>

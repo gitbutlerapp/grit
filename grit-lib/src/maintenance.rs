@@ -64,9 +64,16 @@ use crate::repo::Repository;
 use crate::shallow::load_shallow_boundaries;
 use time::OffsetDateTime;
 
+mod drop_blobs;
+
 pub use crate::offload::{
     offload_blobs, LopReadiness, OffloadConfigChange, OffloadError, OffloadOptions, OffloadRepo,
     OffloadReport, LOP_KEEP_MESSAGE,
+};
+pub use drop_blobs::{
+    drop_large_blobs_enabled, drop_promised_blobs, DropExpiry, DropPromisedBlobsOptions,
+    DropPromisedBlobsReport, DropPromisedBlobsSkip, DroppedBlob, KeptBlobCounts,
+    DEFAULT_DROP_EXPIRE, DEFAULT_DROP_MIN_SIZE, DROP_LARGE_BLOBS_TASK,
 };
 
 /// Options for [`repack_all()`].
@@ -411,6 +418,12 @@ pub struct GcOptions {
     /// Changed-path Bloom filters are kept when the existing graph has them and are not
     /// added otherwise, matching `git gc`.
     pub write_commit_graph: bool,
+    /// When true (the default), run the drop-large-blobs phase after repack if
+    /// `maintenance.drop-large-blobs.enabled` is set (see [`drop_promised_blobs`]).
+    /// False never runs it. The phase takes its recency cutoff from
+    /// [`Self::now_unix`] and is skipped ([`DropPromisedBlobsSkip::NoCurrentTime`])
+    /// when that is 0.
+    pub drop_large_blobs: bool,
 }
 
 impl Default for GcOptions {
@@ -424,6 +437,7 @@ impl Default for GcOptions {
             now_unix: 0,
             pack_refs: true,
             write_commit_graph: true,
+            drop_large_blobs: true,
         }
     }
 }
@@ -830,6 +844,8 @@ pub struct GcPhaseTimings {
     pub prune_ms: u64,
     /// Commit-graph write after repack.
     pub commit_graph_ms: u64,
+    /// Drop-large-blobs phase after repack.
+    pub drop_large_blobs_ms: u64,
 }
 
 /// Result of [`gc`].
@@ -847,6 +863,10 @@ pub struct GcStats {
     pub commit_graph: Option<CommitGraphWriteReport>,
     /// Reflog lines removed by expiry during gc.
     pub reflog_entries_pruned: usize,
+    /// The drop-large-blobs phase (`None` when [`GcOptions::drop_large_blobs`] is
+    /// false). Reports [`DropPromisedBlobsSkip::Disabled`] unless
+    /// `maintenance.drop-large-blobs.enabled` is set.
+    pub drop_large_blobs: Option<DropPromisedBlobsReport>,
     /// Per-phase wall times for the gc orchestration.
     pub phase_timings: GcPhaseTimings,
 }
@@ -1803,6 +1823,12 @@ fn gc_locked(repo: &Repository, opts: &GcOptions, now: i64) -> Result<GcStats> {
     let mut stats = GcStats::default();
     let cfg = repo.config()?;
     let prune_policy = gc_loose_prune_policy(&cfg, now)?;
+    // Settled before any phase, so a bad config value changes nothing.
+    let drop_plan = if opts.drop_large_blobs {
+        Some(drop_blobs::plan_drop_for_gc(&cfg, opts.now_unix)?)
+    } else {
+        None
+    };
     let dry_run = opts.repack.dry_run;
 
     if opts.pack_refs && gc_should_pack_refs(repo, &cfg)? && !dry_run {
@@ -1833,6 +1859,19 @@ fn gc_locked(repo: &Repository, opts: &GcOptions, now: i64) -> Result<GcStats> {
     let repack_total_ms = duration_ms(repack_start.elapsed());
     stats.phase_timings.prune_ms = stats.repack.unreachable_prune_ms;
     stats.phase_timings.repack_ms = repack_total_ms.saturating_sub(stats.phase_timings.prune_ms);
+
+    // Repack leaves promisor packs as they are, so the drop phase sees them whole.
+    if let Some(plan) = drop_plan {
+        let start = Instant::now();
+        stats.drop_large_blobs = Some(drop_blobs::run_drop_for_gc(
+            repo,
+            &cfg,
+            plan,
+            dry_run,
+            opts.repack.threads,
+        )?);
+        stats.phase_timings.drop_large_blobs_ms = duration_ms(start.elapsed());
+    }
 
     if dry_run {
         return Ok(stats);

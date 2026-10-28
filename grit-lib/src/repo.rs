@@ -2218,7 +2218,9 @@ impl Repository {
         )
     }
 
-    fn load_index_at_preserving_sparse(
+    /// Load the index at `path` without expanding sparse-directory placeholders (and
+    /// so without reading any tree), resolving a split index.
+    pub(crate) fn load_index_at_preserving_sparse(
         &self,
         path: &std::path::Path,
         parse_ctx: crate::index::IndexParseContext,

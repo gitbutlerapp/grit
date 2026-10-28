@@ -592,6 +592,11 @@ mod diff_worktree_stat_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "diff_ws_filter_integration.rs"]
 mod diff_ws_filter_integration;
+#[path = "drop_promised_blobs.rs"]
+mod drop_promised_blobs;
+#[cfg(feature = "full-tests")]
+#[path = "drop_promised_blobs_git_compat.rs"]
+mod drop_promised_blobs_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "embedded_repo_gitlink_git_compat.rs"]
 mod embedded_repo_gitlink_git_compat;

@@ -352,6 +352,16 @@ pub enum ConfigError {
     #[error("{0}")]
     Other(String),
 
+    /// A config value that must be a date (an approxidate such as `2.weeks.ago`) is
+    /// not one.
+    #[error("'{value}' is not a date for '{key}'")]
+    InvalidDate {
+        /// Config key name that failed validation.
+        key: String,
+        /// Raw config value that could not be parsed.
+        value: String,
+    },
+
     /// The config file could not be written because a `.lock` file is already present.
     #[error("could not lock config file {path}: File exists")]
     ConfigFileLocked {
@@ -1878,6 +1888,24 @@ pub enum Error {
         operation: &'static str,
     },
 
+    /// The operation fetches objects back from a promisor remote, and the repository
+    /// has none: no `remote.<name>.promisor = true` and no `extensions.partialClone`.
+    /// Nothing was changed.
+    #[error("{operation} needs a promisor remote to fetch objects back from")]
+    NoPromisorRemote {
+        /// Operation that was refused (for example `"drop-large-blobs"`).
+        operation: &'static str,
+    },
+
+    /// The operation would delete objects, and `extensions.preciousObjects` says this
+    /// repository never loses any (it may be shared as an alternate). Nothing was
+    /// changed.
+    #[error("{operation} deletes objects, which extensions.preciousObjects forbids here")]
+    PreciousObjectsRepository {
+        /// Operation that was refused (for example `"drop-large-blobs"`).
+        operation: &'static str,
+    },
+
     /// [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) was given an
     /// [`OdbBuilder`](crate::odb::OdbBuilder) rooted somewhere other than the repository's
     /// `objects/` directory.
@@ -2160,6 +2188,8 @@ impl Error {
             Self::Hook(..) => "hook",
             Self::History(..) => "history",
             Self::UnsupportedObjectStore { .. } => "unsupported_object_store",
+            Self::NoPromisorRemote { .. } => "no_promisor_remote",
+            Self::PreciousObjectsRepository { .. } => "precious_objects_repository",
             Self::OdbObjectsDirMismatch { .. } => "odb_objects_dir_mismatch",
             Self::TreeSha256InvalidHex => "tree_sha256_invalid_hex",
             Self::TreeSha256InvalidRevision { .. } => "tree_sha256_invalid_revision",

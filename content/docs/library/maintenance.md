@@ -37,6 +37,22 @@ println!("moved {} blobs, main {} -> {} bytes",
     report.dropped_from_main, report.main_bytes_before, report.main_bytes_after);
 ```
 
+### Dropping promised large blobs
+
+A partial clone keeps every large blob it ever fetched. [`drop_promised_blobs`](rustdoc:grit_lib::maintenance::drop_promised_blobs) (also [`Repository::drop_promised_blobs`](rustdoc:grit_lib::repo::Repository)) removes the ones the promisor remote can supply again and nothing has needed recently, so they come back through the ordinary lazy fetch the next time something reads them. [`DropPromisedBlobsOptions`](rustdoc:grit_lib::maintenance::DropPromisedBlobsOptions) carries the size threshold (`blob:limit` semantics: at least `min_size` bytes), the recency cutoff and the current time, all passed in; [`DropPromisedBlobsOptions::from_config`](rustdoc:grit_lib::maintenance::DropPromisedBlobsOptions::from_config) reads `maintenance.drop-large-blobs.minSize` and `.expire`, and [`DropPromisedBlobsOptions::from_config_with_overrides`](rustdoc:grit_lib::maintenance::DropPromisedBlobsOptions::from_config_with_overrides) lets a caller's own size or [`DropExpiry`](rustdoc:grit_lib::maintenance::DropExpiry) (parsed from `never`, `now` or a date) take the place of either key, which is then not read. An `expire` that is not a date is [`ConfigError::InvalidDate`](rustdoc:grit_lib::error::ConfigError). [`drop_large_blobs_enabled`](rustdoc:grit_lib::maintenance::drop_large_blobs_enabled) says whether [`gc`](rustdoc:grit_lib::maintenance::gc) runs it as a phase ([`GcOptions::drop_large_blobs`](rustdoc:grit_lib::maintenance::GcOptions), [`GcStats::drop_large_blobs`](rustdoc:grit_lib::maintenance::GcStats)); `gc` checks that config before its first phase, and skips the phase ([`DropPromisedBlobsSkip::NoCurrentTime`](rustdoc:grit_lib::maintenance::DropPromisedBlobsSkip)) when `GcOptions::now_unix` is 0 rather than read a clock.
+
+Only blobs stored in `.promisor` packs are candidates, and one is dropped only when it is stored nowhere else locally, no pack holding it has a `.keep` marker, some tree or tag in a promisor pack names it (so Git still treats it as promised once it is gone), no worktree's index (nor a `GIT_INDEX_FILE` one) or `HEAD` tree uses it, no commit a worktree's `HEAD` reflog named since the cutoff uses it, and no promisor pack holding it was written since the cutoff. The [`DropPromisedBlobsReport`](rustdoc:grit_lib::maintenance::DropPromisedBlobsReport) lists the dropped blobs ([`DroppedBlob`](rustdoc:grit_lib::maintenance::DroppedBlob)) and counts the rest by reason ([`KeptBlobCounts`](rustdoc:grit_lib::maintenance::KeptBlobCounts)). Deciding reads pack headers, the trees of the protected commits and, until every remaining candidate is found, the trees in promisor packs; it never fetches. Packs holding only dropped blobs are deleted and other affected packs rewritten, keeping their `.promisor` contents and modification time. Refusals are typed: [`Error::NoPromisorRemote`](rustdoc:grit_lib::error::Error), [`Error::OperationInProgress`](rustdoc:grit_lib::error::Error), [`Error::PreciousObjectsRepository`](rustdoc:grit_lib::error::Error) and [`Error::MaintenanceRunning`](rustdoc:grit_lib::error::Error); inside `gc` the first three become [`DropPromisedBlobsSkip`](rustdoc:grit_lib::maintenance::DropPromisedBlobsSkip) values instead.
+
+```rust
+use grit_lib::maintenance::{drop_promised_blobs, DropPromisedBlobsOptions};
+
+let two_weeks_ago = now - time::Duration::weeks(2);
+let opts = DropPromisedBlobsOptions::new(now, 1024 * 1024, Some(two_weeks_ago));
+let report = drop_promised_blobs(&repo, &opts)?;
+println!("dropped {} blobs, freed {} bytes ({} kept for a checkout)",
+    report.dropped.len(), report.bytes_reclaimed, report.kept.checked_out);
+```
+
 Like Git's, fsck never fetches: a promised object that is missing stays missing, even with a promisor fetcher installed.
 
 Partial-clone maintenance works offline. Repack keeps existing `.promisor` packs and their sidecars intact, and writes local objects into a separate unmarked pack. GC, reflog expiry, pruning, incremental repack, and dry runs honor promises without hydrating missing history. Missing non-promised objects still fail validation. Bitmaps are omitted when the local pack cannot contain the complete closure; `RepackStats::pack_path` and `pack_bytes` refer to the newly written local pack even when other packs remain.
