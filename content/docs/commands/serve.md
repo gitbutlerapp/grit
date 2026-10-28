@@ -56,6 +56,8 @@ Fetches over protocol v2 see the `bundle-uri` command in the server's capabiliti
 
 `--no-bundles` turns this off: nothing is built and nothing is advertised.
 
+A repository with promisor remotes gets no bundle, and any bundle built earlier is removed. This covers a repository offloaded with [`grit gc offload`](../gc/#grit-gc-offload): some of its blobs live elsewhere, and a bundle holding them would undo the offload. Its clients clone through upload-pack, which points them at the promisor.
+
 ### Partial clone filters
 
 [`grit clone --blobs`](../clone/) and filtered fetches need the server to advertise Git's `filter` capability. On each served bare repository, enable it the same way as with `git upload-pack`:

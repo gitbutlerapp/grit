@@ -12,6 +12,12 @@
 //! [`BundleSettings::interval`] (24 hours unless configured). Each bundle has a
 //! new file name, so a client resuming a download never splices two versions;
 //! the previous bundle is kept for clients still downloading it.
+//!
+//! A repository with promisor remotes (one whose large blobs were offloaded to a
+//! large-object promisor with `grit gc offload`) gets no bundle: it cannot
+//! write one, since some blobs live elsewhere, and a bundle holding them would
+//! undo the offload anyway. Clients clone it through upload-pack, which points
+//! them at the promisor.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -173,14 +179,39 @@ pub fn needs_bundle(
     u64::try_from(age).is_ok_and(|age| age >= interval.as_secs())
 }
 
+/// Whether the repository has promisor remotes, so some of its objects may be
+/// stored elsewhere (see the module documentation).
+fn has_promisor_remotes(repo: &Repository) -> bool {
+    grit_lib::config::ConfigSet::load_repo_local_only(repo.git_dir()).is_ok_and(|cfg| {
+        grit_lib::objects::promisor::repo_treats_promisor_packs(repo.git_dir(), &cfg)
+    })
+}
+
+/// Remove every bundle and the manifest, so nothing is offered any more.
+fn remove_bundles(repo_path: &Path) -> std::io::Result<()> {
+    let dir = bundle_dir(repo_path);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == MANIFEST || name.ends_with(".bundle") {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
 /// Build a new bundle for the repository at `repo_path` and make it current.
 ///
 /// Keeps the previous bundle (clients may still be downloading it) and removes
-/// older ones.
+/// older ones. A repository with promisor remotes gets no bundle, and any it had
+/// is removed.
 ///
 /// # Returns
 ///
-/// The new manifest, or `None` when the repository has no branches or tags.
+/// The new manifest, or `None` when the repository has no branches or tags, or
+/// has promisor remotes.
 ///
 /// # Errors
 ///
@@ -192,6 +223,10 @@ pub fn build(
     now: OffsetDateTime,
 ) -> Result<Option<BundleManifest>, BundleBuildError> {
     let repo = Repository::open(repo_path, &options.clone().for_serving())?;
+    if has_promisor_remotes(&repo) {
+        remove_bundles(repo_path)?;
+        return Ok(None);
+    }
     let refs = bundle_refs(&repo)?;
     let Some(digest) = refs_digest(&repo)? else {
         return Ok(None);
@@ -373,6 +408,52 @@ mod tests {
         assert!(served_file(dir.path(), MANIFEST).is_none());
         assert!(served_file(dir.path(), "../HEAD").is_none());
         assert!(served_file(dir.path(), "..bundle").is_none());
+    }
+
+    #[test]
+    fn repositories_with_promisor_remotes_get_no_bundle() {
+        let dir = match tempfile::tempdir() {
+            Ok(d) => d,
+            Err(e) => panic!("tempdir: {e}"),
+        };
+        let init = grit_lib::repo::InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main");
+        let repo = match Repository::init(dir.path(), &init) {
+            Ok(r) => r,
+            Err(e) => panic!("init: {e}"),
+        };
+        let blob = repo
+            .odb()
+            .write(grit_lib::objects::ObjectKind::Blob, b"x\n")
+            .unwrap_or_else(|e| panic!("blob: {e}"));
+        let mut tree = b"100644 f\0".to_vec();
+        tree.extend_from_slice(blob.as_bytes());
+        let tree = repo
+            .odb()
+            .write(grit_lib::objects::ObjectKind::Tree, &tree)
+            .unwrap_or_else(|e| panic!("tree: {e}"));
+        let commit =
+            format!("tree {tree}\nauthor A <a@e> 1 +0000\ncommitter A <a@e> 1 +0000\n\nc\n");
+        let commit = repo
+            .odb()
+            .write(grit_lib::objects::ObjectKind::Commit, commit.as_bytes())
+            .unwrap_or_else(|e| panic!("commit: {e}"));
+        assert!(std::fs::write(dir.path().join("refs/heads/main"), format!("{commit}\n")).is_ok());
+        let at = OffsetDateTime::from_unix_timestamp(1_000).unwrap_or(OffsetDateTime::UNIX_EPOCH);
+        let options = RepositoryOptions::default();
+        assert!(matches!(build(dir.path(), &options, at), Ok(Some(_))));
+        assert!(current(dir.path()).is_some());
+
+        let config = dir.path().join("config");
+        let mut text = std::fs::read_to_string(&config).unwrap_or_default();
+        text.push_str("[remote \"lop\"]\n\turl = https://lop.example/r.git\n\tpromisor = true\n");
+        assert!(std::fs::write(&config, text).is_ok());
+        assert!(matches!(build(dir.path(), &options, at), Ok(None)));
+        assert!(
+            current(dir.path()).is_none(),
+            "the old bundle is no longer offered"
+        );
     }
 
     #[test]
