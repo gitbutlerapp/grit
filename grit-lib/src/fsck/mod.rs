@@ -740,7 +740,10 @@ fn dedupe_issues(issues: &mut Vec<FsckIssue>) {
 }
 
 enum LooseCheckOutcome {
-    Clean,
+    Verified {
+        obj: crate::objects::Object,
+        fsck_err: Option<FsckError>,
+    },
     Issue(FsckIssue),
 }
 
@@ -792,13 +795,8 @@ fn verify_loose_objects(
                 path: path.clone(),
             })),
             Ok(obj) => {
-                if let Err(err) = fsck_object(obj.kind, &obj.data, fsck_opts) {
-                    return Ok(LooseCheckOutcome::Issue(FsckIssue::BadObject {
-                        oid: *oid,
-                        error: err,
-                    }));
-                }
-                Ok(LooseCheckOutcome::Clean)
+                let fsck_err = fsck_object(obj.kind, &obj.data, fsck_opts).err();
+                Ok(LooseCheckOutcome::Verified { obj, fsck_err })
             }
         }
     }) {
@@ -818,8 +816,28 @@ fn verify_loose_objects(
             }
         }
         match outcome {
-            LooseCheckOutcome::Clean => {
-                if let Ok(obj) = Odb::read_loose_verify_oid(&item.1, &item.0) {
+            LooseCheckOutcome::Verified {
+                obj,
+                fsck_err: None,
+            } => {
+                record_validated_object(
+                    &mut validated,
+                    &mut links,
+                    item.0,
+                    obj.kind,
+                    &obj.data,
+                    algo,
+                );
+                apply_dot_checks(
+                    &mut dot, issues, config, strict, &item.0, obj.kind, &obj.data,
+                );
+            }
+            LooseCheckOutcome::Verified {
+                obj,
+                fsck_err: Some(error),
+            } => {
+                push_bad_object(issues, config, strict, item.0, error.clone());
+                if object_fsck_allows_link_cache(&error, config, strict) {
                     record_validated_object(
                         &mut validated,
                         &mut links,
@@ -833,31 +851,11 @@ fn verify_loose_objects(
                     );
                 }
             }
-            LooseCheckOutcome::Issue(issue) => match &issue {
-                FsckIssue::BadObject { oid, error } => {
-                    push_bad_object(issues, config, strict, *oid, error.clone());
-                    if object_fsck_allows_link_cache(error, config, strict) {
-                        if let Ok(obj) = Odb::read_loose_verify_oid(&item.1, &item.0) {
-                            record_validated_object(
-                                &mut validated,
-                                &mut links,
-                                item.0,
-                                obj.kind,
-                                &obj.data,
-                                algo,
-                            );
-                            apply_dot_checks(
-                                &mut dot, issues, config, strict, &item.0, obj.kind, &obj.data,
-                            );
-                        }
-                    }
+            LooseCheckOutcome::Issue(issue) => {
+                if should_emit(config, strict, issue_msg_id(&issue)) {
+                    issues.push(issue);
                 }
-                other => {
-                    if should_emit(config, strict, issue_msg_id(other)) {
-                        issues.push(other.clone());
-                    }
-                }
-            },
+            }
         }
     }
     for pending in dot.finish_pending(odb)? {

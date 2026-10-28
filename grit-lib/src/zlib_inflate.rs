@@ -81,6 +81,74 @@ fn read_retrying(file: &mut std::fs::File, buf: &mut [u8]) -> Result<usize> {
     }
 }
 
+/// Bytes to request on the next loose-object read: at most `chunk`, and on Windows at most
+/// uncompressed bytes left in the file (matches Git's size-bounded `pread` on loose objects).
+#[must_use]
+pub(crate) fn loose_file_read_len(chunk: usize, file_bytes_remaining: Option<u64>) -> usize {
+    match file_bytes_remaining {
+        Some(0) => 0,
+        Some(rem) => chunk.min(rem as usize).max(1),
+        None => chunk,
+    }
+}
+
+/// Tracks how much of a loose object file is left to read; Windows uses `fstat` once so reads
+/// never use a 64 KiB buffer on a few-hundred-byte object (Defender cold-read latency).
+pub(crate) struct LooseFileReadBudget {
+    #[cfg(windows)]
+    remaining: u64,
+}
+
+impl LooseFileReadBudget {
+    pub(crate) fn new(file: &std::fs::File) -> Result<Self> {
+        #[cfg(windows)]
+        {
+            let remaining = file.metadata().map_err(Error::Io)?.len();
+            Ok(Self { remaining })
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = file;
+            Ok(Self {})
+        }
+    }
+
+    pub(crate) fn read(&mut self, file: &mut std::fs::File, buf: &mut [u8]) -> Result<usize> {
+        let remaining = {
+            #[cfg(windows)]
+            {
+                Some(self.remaining)
+            }
+            #[cfg(not(windows))]
+            {
+                None
+            }
+        };
+        let cap = loose_file_read_len(buf.len(), remaining);
+        if cap == 0 {
+            return Ok(0);
+        }
+        let n = read_retrying(file, &mut buf[..cap])?;
+        #[cfg(windows)]
+        {
+            self.remaining = self.remaining.saturating_sub(n as u64);
+        }
+        Ok(n)
+    }
+
+    /// Bytes already read outside this budget (e.g. zlib CMF/FLG prefix).
+    pub(crate) fn note_consumed(&mut self, n: u64) {
+        #[cfg(windows)]
+        {
+            self.remaining = self.remaining.saturating_sub(n);
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = n;
+        }
+    }
+}
+
 /// Scratch space for one zlib stream decode; reset before each object.
 pub(crate) struct ZlibInflateScratch {
     dec: Decompress,
@@ -351,7 +419,8 @@ impl ZlibInflateScratch {
         if input.len() < READ_CHUNK {
             input.resize(READ_CHUNK, 0);
         }
-        let result = self.inflate_loose_reads(&mut input, file, out, limit);
+        let mut read_budget = LooseFileReadBudget::new(file)?;
+        let result = self.inflate_loose_reads(&mut input, file, out, limit, &mut read_budget);
         self.input = input;
         result
     }
@@ -370,10 +439,11 @@ impl ZlibInflateScratch {
         file: &mut std::fs::File,
         out: &mut Vec<u8>,
         limit: Option<u64>,
+        read_budget: &mut LooseFileReadBudget,
     ) -> Result<bool> {
         let mut filled = 0usize;
         while filled < 2 {
-            let n = read_retrying(file, &mut input[filled..])?;
+            let n = read_budget.read(file, &mut input[filled..])?;
             if n == 0 {
                 return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
             }
@@ -390,7 +460,7 @@ impl ZlibInflateScratch {
         let mut tail = [0u8; 64];
         let result = loop {
             if in_off == filled && !eof {
-                filled = match read_retrying(file, input) {
+                filled = match read_budget.read(file, input) {
                     Ok(n) => n,
                     Err(e) => break Err(e),
                 };
@@ -473,8 +543,9 @@ impl ZlibInflateScratch {
         self.reset();
         let mut prefix = Vec::with_capacity(LOOSE_HEADER_MAX);
         let mut input = [0u8; HEADER_INPUT_CHUNK];
+        let mut read_budget = LooseFileReadBudget::new(file)?;
         loop {
-            let n = file.read(&mut input).map_err(Error::Io)?;
+            let n = read_budget.read(file, &mut input)?;
             if n == 0 {
                 return Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
             }
@@ -1197,5 +1268,36 @@ mod tests {
         assert_eq!(declared_loose_object_len(b"blob \0"), None);
         assert_eq!(declared_loose_object_len(b"blob x1\0"), None);
         assert_eq!(declared_loose_object_len(b"blob\0"), None);
+    }
+
+    #[test]
+    fn loose_file_read_len_never_exceeds_chunk_or_remaining() {
+        let chunk = READ_CHUNK;
+        assert_eq!(loose_file_read_len(chunk, None), chunk);
+        assert_eq!(loose_file_read_len(chunk, Some(0)), 0);
+        assert_eq!(loose_file_read_len(chunk, Some(400)), 400);
+        assert_eq!(loose_file_read_len(chunk, Some(chunk as u64 + 1)), chunk);
+        assert_eq!(loose_file_read_len(512, Some(200)), 200);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn loose_file_read_budget_caps_buffer_to_file_size() {
+        use std::io::Write;
+
+        let plain = b"blob 3\0foo";
+        let zlib = deflate(plain);
+        let mut file = tempfile::NamedTempFile::new().expect("temp");
+        file.write_all(&zlib).expect("write");
+        let len = zlib.len() as u64;
+        let mut file = file.reopen().expect("reopen");
+        let mut budget = LooseFileReadBudget::new(&file).expect("budget");
+        let mut buf = vec![0u8; READ_CHUNK];
+        let n = budget.read(&mut file, &mut buf).expect("read");
+        assert_eq!(n, zlib.len());
+        assert!(n < READ_CHUNK);
+        let n2 = budget.read(&mut file, &mut buf).expect("read2");
+        assert_eq!(n2, 0);
+        assert_eq!(n as u64, len);
     }
 }

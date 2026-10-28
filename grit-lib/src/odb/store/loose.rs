@@ -16,7 +16,7 @@ use crate::git_dir::io_error::{map_objects_dir_io, GitDirPathOperation};
 use crate::hash::{self, ObjectPayloadHasher};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
 use crate::odb::WriteOptions;
-use crate::zlib_inflate::with_loose_scratch;
+use crate::zlib_inflate::{with_loose_scratch, LooseFileReadBudget};
 
 const READ_CHUNK: usize = 64 * 1024;
 /// Payload bytes read from a source stream per step when writing a loose object.
@@ -859,6 +859,7 @@ fn is_loose_suffix_for_algo(suffix: &str, algo: HashAlgo) -> bool {
 /// Incremental zlib reader yielding only the object payload (after the Git header).
 struct LoosePayloadReader {
     file: File,
+    read_budget: LooseFileReadBudget,
     dec: Decompress,
     /// Compressed input read from `file`; bytes before `pending_pos` are already consumed.
     pending: Vec<u8>,
@@ -884,13 +885,17 @@ enum LooseReadPhase {
 
 impl LoosePayloadReader {
     fn open(mut file: File) -> Result<Self> {
+        let read_budget = LooseFileReadBudget::new(&file)?;
         let mut hdr = [0u8; 2];
         file.read_exact(&mut hdr).map_err(Error::Io)?;
         let cmf_flg = u16::from(hdr[0]) << 8 | u16::from(hdr[1]);
         let looks_like_zlib_header = cmf_flg != 0 && cmf_flg % 31 == 0;
         let preset_dictionary = looks_like_zlib_header && (hdr[1] & 0x20) != 0;
+        let mut read_budget = read_budget;
+        read_budget.note_consumed(2);
         let mut reader = Self {
             file,
+            read_budget,
             dec: Decompress::new(true),
             pending: hdr.to_vec(),
             pending_pos: 0,
@@ -951,13 +956,7 @@ impl LoosePayloadReader {
         }
         if self.pending_pos == self.pending.len() && !self.input_exhausted {
             self.pending.resize(READ_CHUNK, 0);
-            let n = loop {
-                match self.file.read(&mut self.pending) {
-                    Ok(n) => break n,
-                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                    Err(e) => return Err(Error::Io(e)),
-                }
-            };
+            let n = self.read_budget.read(&mut self.file, &mut self.pending)?;
             self.pending.truncate(n);
             self.pending_pos = 0;
             self.input_exhausted = n == 0;
