@@ -6,7 +6,11 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::diff::{entry_is_racy, hash_worktree_file, index_mtime_for_diff, stat_matches};
+use crate::diff::{
+    entry_is_racy, hash_worktree_file, index_mtime_for_diff, stat_matches,
+    submodule_embedded_git_dir,
+};
+use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::index::{
     entry_from_metadata, Index, IndexEntry, IndexLock, MODE_EXECUTABLE, MODE_GITLINK,
@@ -18,8 +22,8 @@ use crate::pathspec::{
     pathspec_is_exclude, sorted_paths_match_pathspec, PathspecListMatcher, PathspecMatchContext,
 };
 use crate::porcelain::checkout::{
-    remove_empty_parent_dirs, write_blob_to_worktree, write_smudged_blob_to_worktree,
-    CheckoutJournal, LeadingDirCache,
+    checkout_between_trees, remove_empty_parent_dirs, write_blob_to_worktree,
+    write_smudged_blob_to_worktree, CheckoutJournal, LeadingDirCache,
 };
 use crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths;
 use crate::porcelain::stash::{flat_tree_lookup, flatten_tree_full, FlatTreeEntry};
@@ -409,10 +413,40 @@ fn restore_conflict_side(
         });
     };
     if entry.mode == MODE_GITLINK {
+        checkout_submodule_worktree_to_commit(&work_tree.join(path), entry.oid)?;
+        outcome.restored.push(path.to_string());
         return Ok(());
     }
     write_smudged_blob_to_worktree(repo, work_tree, rules, path, &entry.oid, entry.mode)?;
     outcome.restored.push(path.to_string());
+    Ok(())
+}
+
+fn checkout_submodule_worktree_to_commit(sub_worktree: &Path, oid: ObjectId) -> Result<()> {
+    let Some(git_dir) = submodule_embedded_git_dir(sub_worktree) else {
+        return Err(Error::Message(format!(
+            "submodule at '{}' is not checked out",
+            sub_worktree.display()
+        )));
+    };
+    let sub_repo = Repository::open(
+        &git_dir,
+        &RepositoryOptions::empty().with_work_tree(sub_worktree),
+    )?;
+    let commit_obj = sub_repo.odb().read(&oid)?;
+    let tree = parse_commit(&commit_obj.data)?.tree;
+    let from_tree = resolve_head_for_repository(&sub_repo)
+        .ok()
+        .and_then(|head| head.oid().copied())
+        .and_then(|head_oid| {
+            sub_repo
+                .odb()
+                .read(&head_oid)
+                .ok()
+                .and_then(|c| parse_commit(&c.data).ok().map(|p| p.tree))
+        });
+    checkout_between_trees(&sub_repo, from_tree.as_ref(), &tree)?;
+    crate::refs::write_ref(&git_dir, "HEAD", &oid)?;
     Ok(())
 }
 
@@ -1238,5 +1272,101 @@ mod tests {
             paths: vec!["a".into(), "b".into()],
         };
         assert_eq!(err.to_string(), "paths are unmerged: 'a', 'b'");
+    }
+
+    fn gitlink_conflict_entry(path: &str, stage: u16, oid: ObjectId) -> IndexEntry {
+        IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: MODE_GITLINK,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid,
+            flags: (path.len() as u16) | (stage << 12),
+            flags_extended: None,
+            path: path.as_bytes().to_vec(),
+            base_index_pos: 0,
+        }
+    }
+
+    fn commit_in_nested(repo: &Repository, rel: &str, content: &[u8], msg: &str) -> ObjectId {
+        let wt = repo.work_tree().expect("wt");
+        std::fs::write(wt.join(rel), content).expect("write");
+        let blob = repo.odb().write(ObjectKind::Blob, content).expect("blob");
+        let mut tree_body = format!("100644 {rel}\0").into_bytes();
+        tree_body.extend_from_slice(blob.as_bytes());
+        let tree = repo
+            .odb()
+            .write(ObjectKind::Tree, &tree_body)
+            .expect("tree");
+        let commit_body =
+            format!("tree {tree}\nauthor t <t@t> 0 +0000\ncommitter t <t@t> 0 +0000\n\n{msg}\n");
+        repo.odb()
+            .write(ObjectKind::Commit, commit_body.as_bytes())
+            .expect("commit")
+    }
+
+    fn open_nested_repo(nested_root: &std::path::Path) -> Repository {
+        let git = nested_root.join(".git");
+        std::fs::create_dir_all(git.join("objects")).expect("objects");
+        std::fs::create_dir_all(git.join("refs/heads")).expect("refs");
+        std::fs::write(git.join("HEAD"), "ref: refs/heads/main\n").expect("head");
+        std::fs::write(
+            git.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
+        )
+        .expect("config");
+        Repository::open(
+            &git,
+            &RepositoryOptions::empty().with_work_tree(nested_root),
+        )
+        .expect("open nested")
+    }
+
+    #[test]
+    fn restore_conflict_side_checks_out_submodule_without_clearing_stages() {
+        let (dir, repo) = init_repo();
+        let wt = repo.work_tree().expect("wt");
+        let sub = wt.join("sub");
+        std::fs::create_dir_all(&sub).expect("mkdir sub");
+        let sub_repo = open_nested_repo(&sub);
+        let base = commit_in_nested(&sub_repo, "f.txt", b"base\n", "base");
+        let ours = commit_in_nested(&sub_repo, "f.txt", b"ours\n", "ours");
+        let theirs = commit_in_nested(&sub_repo, "f.txt", b"theirs\n", "theirs");
+        crate::refs::write_ref(&sub_repo.git_dir(), "refs/heads/main", &ours).expect("sub head");
+        crate::refs::write_symbolic_ref(&sub_repo.git_dir(), "HEAD", "refs/heads/main")
+            .expect("sym");
+
+        let mut index = repo.load_index().expect("index");
+        index.entries.push(gitlink_conflict_entry("sub", 1, base));
+        index.entries.push(gitlink_conflict_entry("sub", 2, ours));
+        index.entries.push(gitlink_conflict_entry("sub", 3, theirs));
+        index.sort();
+        repo.write_index(&mut index).expect("write index");
+
+        restore_paths(
+            &repo,
+            &RestoreOptions {
+                stage: Some(ConflictSide::Theirs),
+                ..opts("sub")
+            },
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("restore theirs");
+
+        let index = repo.load_index().expect("index");
+        assert!(index.get(b"sub", 3).is_some(), "stages stay unmerged");
+        assert_eq!(
+            crate::diff::read_submodule_head_oid(&sub),
+            Some(theirs),
+            "submodule worktree should match stage 3"
+        );
+        let _ = dir;
     }
 }
