@@ -5934,6 +5934,9 @@ pub grit_lib::error::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::strin
 pub grit_lib::error::Error::PathspecNoMatch
 pub grit_lib::error::Error::PathspecNoMatch::spec: alloc::string::String
 pub grit_lib::error::Error::PromisedObjectMissing(grit_lib::objects::ObjectId)
+pub grit_lib::error::Error::PromisorFetchFailed
+pub grit_lib::error::Error::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, grit_lib::error::Error)>
+pub grit_lib::error::Error::PromisorFetchFailed::missing: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::PushAtomicUnsupported
 pub grit_lib::error::Error::PushOptionsUnsupported
 pub grit_lib::error::Error::ReceivedPackTempMissing
@@ -16803,6 +16806,9 @@ pub grit_lib::prelude::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::str
 pub grit_lib::prelude::Error::PathspecNoMatch
 pub grit_lib::prelude::Error::PathspecNoMatch::spec: alloc::string::String
 pub grit_lib::prelude::Error::PromisedObjectMissing(grit_lib::objects::ObjectId)
+pub grit_lib::prelude::Error::PromisorFetchFailed
+pub grit_lib::prelude::Error::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, grit_lib::error::Error)>
+pub grit_lib::prelude::Error::PromisorFetchFailed::missing: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::PushAtomicUnsupported
 pub grit_lib::prelude::Error::PushOptionsUnsupported
 pub grit_lib::prelude::Error::ReceivedPackTempMissing

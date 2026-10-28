@@ -879,6 +879,18 @@ pub enum Error {
     #[error("promised object not available locally: {0}")]
     PromisedObjectMissing(crate::objects::ObjectId),
 
+    /// Promised objects could not be fetched: every promisor remote was asked, and some
+    /// failed. [`Self::PromisedObjectMissing`] is used instead when every remote answered
+    /// but none had the object.
+    #[error("{}", promisor_fetch_failed_message(missing, failures))]
+    PromisorFetchFailed {
+        /// The first object still missing after every remote was tried.
+        missing: crate::objects::ObjectId,
+        /// One entry per remote that failed, in the order they were tried: the remote's
+        /// name and its first error.
+        failures: Vec<(String, Error)>,
+    },
+
     /// An object's stored data is corrupt or malformed.
     #[error("corrupt object: {0}")]
     CorruptObject(String),
@@ -1975,6 +1987,7 @@ impl Error {
             Self::ObjectNotFound(..) => "object_not_found",
             Self::RevisionNotFound(..) => "revision_not_found",
             Self::PromisedObjectMissing(..) => "promised_object_missing",
+            Self::PromisorFetchFailed { .. } => "promisor_fetch_failed",
             Self::CorruptObject(..) => "corrupt_object",
             Self::PackIndexChecksumMismatch { .. } => "pack_index_checksum_mismatch",
             Self::UnresolvedDeltas { .. } => "unresolved_deltas",
@@ -2287,6 +2300,18 @@ impl From<crate::lockfile::LockError> for Error {
 
 /// Convenience alias for `Result<T, Error>`.
 pub type Result<T> = std::result::Result<T, Error>;
+
+fn promisor_fetch_failed_message(
+    missing: &crate::objects::ObjectId,
+    failures: &[(String, Error)],
+) -> String {
+    let causes = failures
+        .iter()
+        .map(|(remote, err)| format!("{remote}: {err}"))
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!("could not fetch promised object {missing} ({causes})")
+}
 
 /// Serializes as `{"kind": <Error::kind_name>, "message": <Display text>}`.
 #[cfg(feature = "serde-models")]

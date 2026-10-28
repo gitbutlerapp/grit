@@ -1258,6 +1258,9 @@ mod promisor_on_demand_fetch;
 #[cfg(feature = "full-tests")]
 #[path = "promisor_packs.rs"]
 mod promisor_packs;
+#[cfg(feature = "full-tests")]
+#[path = "promisor_remote_git_compat.rs"]
+mod promisor_remote_git_compat;
 #[path = "promisor_remote_handshake.rs"]
 mod promisor_remote_handshake;
 #[path = "pruned_modules.rs"]

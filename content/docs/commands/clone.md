@@ -124,7 +124,7 @@ Cloning into 'project' ...
   files     2 files · 19.5 KiB in the work tree
 ```
 
-The checkout's missing blobs are then fetched on demand.
+The checkout's missing blobs came from `lop`. Missing objects are always asked of the promisor remotes in config order, with the remote the clone came from (`extensions.partialClone`) last, so a LOP configured before it is tried first and the server is only asked for what the LOP did not have. A server refuses a request that names any object it lacks, so when the LOP holds only the large blobs, the missing objects are split into smaller requests until each remote is asked only for what it has. When an object cannot be fetched, the error names every remote that failed and why.
 
 `--bare` creates a bare repository at the destination (the directory itself is the git directory, named with a `.git` suffix when the URL is derived automatically), fetches `refs/heads/*` and tags directly, and configures only `remote.<name>.url` — matching `git clone --bare`. `--no-checkout` fetches and sets `HEAD` to the default branch without writing the index or work tree files, matching `git clone --no-checkout`.
 

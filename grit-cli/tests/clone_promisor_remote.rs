@@ -10,14 +10,16 @@ use grit_test_support::grit_cmd;
 const GRIT: &str = env!("CARGO_BIN_EXE_grit");
 const TOKEN: &str = "s3cret-lop-token";
 
-/// An ssh stand-in that runs the requested service with `grit` on this machine.
+/// An ssh stand-in that runs the requested service with `grit` on this machine and logs
+/// each remote command to `ssh.log`.
 fn fake_ssh(dir: &Path) -> PathBuf {
     let script = dir.join("fake-ssh.sh");
+    let log = dir.join("ssh.log").display().to_string();
     std::fs::write(
         &script,
         format!(
             "#!/bin/sh\nwhile [ \"$1\" = \"-p\" ] || [ \"$1\" = \"-o\" ]; do shift 2; done\n\
-             shift\ncmd=$*\ncase \"$cmd\" in\n  \"git-upload-pack \"*) cmd=\"'{GRIT}' upload-pack ${{cmd#git-upload-pack }}\" ;;\nesac\n\
+             shift\ncmd=$*\necho \"$cmd\" >> '{log}'\ncase \"$cmd\" in\n  \"git-upload-pack \"*) cmd=\"'{GRIT}' upload-pack ${{cmd#git-upload-pack }}\" ;;\nesac\n\
              eval \"exec $cmd\"\n"
         ),
     )
@@ -156,7 +158,21 @@ fn blobs_auto_accepts_the_lop_and_reports_it_without_tokens() {
     assert_eq!(lop_json["filter"], "blob:limit=5k");
     assert!(lop_json["rejected"].is_null());
     assert_eq!(v["stored_fields"][0]["field"], "token");
-    assert_eq!(v["files"], 2, "the big file was fetched from the LOP");
+    assert_eq!(v["files"], 2);
+    // The checkout's missing blob was asked of the LOP, not of the server again.
+    let log = std::fs::read_to_string(tmp.path().join("ssh.log")).unwrap();
+    let lop_path = lop.display().to_string();
+    let server_path = server.display().to_string();
+    assert_eq!(
+        log.lines().filter(|l| l.contains(&lop_path)).count(),
+        1,
+        "{log}"
+    );
+    assert_eq!(
+        log.lines().filter(|l| l.contains(&server_path)).count(),
+        1,
+        "{log}"
+    );
 
     let dest = tmp.path().join("c-json");
     assert_eq!(
