@@ -232,6 +232,12 @@ pub struct FetchOptions {
     /// Object filter for partial clone (`blob:none`, `blob:limit=<n>`). Omitted when
     /// unset; promisor remotes may reapply `remote.*.partialclonefilter` automatically.
     pub filter: Option<ObjectFilterSpec>,
+    /// Pick the filter from the promisor remotes the server advertises and the client
+    /// accepts, from their advertised `partialCloneFilter` (Git's `--filter=auto`; see
+    /// [`PromisorDecision::combined_filter`](crate::promisor_remote::PromisorDecision::combined_filter)).
+    /// Ignored when [`Self::filter`] is set. A remote whose stored filter is `auto` turns it on.
+    /// Without an accepted remote that advertises a usable filter, the fetch is unfiltered.
+    pub auto_filter: bool,
     /// When true, the received pack is written with a sibling `.promisor` marker.
     ///
     /// Set by the fetch driver when a filter was sent on the wire; callers should
@@ -279,6 +285,7 @@ impl Default for FetchOptions {
             http_protocol_version: None,
             remote_progress: false,
             filter: None,
+            auto_filter: false,
             mark_received_pack_promisor: false,
             object_wants: Vec::new(),
             promisor_object_fetch: false,
@@ -321,6 +328,7 @@ impl Clone for FetchOptions {
             http_protocol_version: self.http_protocol_version,
             remote_progress: self.remote_progress,
             filter: self.filter,
+            auto_filter: self.auto_filter,
             mark_received_pack_promisor: self.mark_received_pack_promisor,
             object_wants: self.object_wants.clone(),
             promisor_object_fetch: self.promisor_object_fetch,
@@ -540,6 +548,9 @@ pub struct FetchOutcome {
     /// True when an object filter from [`FetchOptions::filter`] was sent on the wire
     /// and the server advertised filter support.
     pub filter_sent: bool,
+    /// The `promisor-remote` exchange, when the server advertised promisor remotes
+    /// (protocol v2 only). Says which remotes were accepted and why others were not.
+    pub promisor: Option<crate::promisor_remote::PromisorHandshake>,
 }
 
 impl FetchOutcome {
@@ -2198,6 +2209,7 @@ pub(crate) fn fetch_local_into(
         new_unshallow: shallow_unshallow,
         transfer,
         filter_sent: false,
+        promisor: None,
     })
 }
 

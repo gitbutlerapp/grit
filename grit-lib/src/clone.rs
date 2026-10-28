@@ -139,6 +139,16 @@ pub struct CloneOptions {
     pub depth: Option<u32>,
     /// Partial-clone object filter applied to the initial fetch and recorded in config.
     pub filter: Option<ObjectFilterSpec>,
+    /// Pick the filter from the promisor remotes the server advertises and the new
+    /// repository accepts (Git's `clone --filter=auto`), and record
+    /// `remote.<name>.partialclonefilter=auto` so later fetches do the same. Ignored when
+    /// [`Self::filter`] is set. Accepting needs `promisor.acceptFromServer` and the promisor
+    /// remotes themselves in config, usually through [`Self::config`].
+    pub auto_filter: bool,
+    /// Config entries written into the new repository right after it is created, before
+    /// anything is fetched (`git clone -c <key>=<value>`). Each entry is added, so a key
+    /// given twice gets both values.
+    pub config: Vec<(String, String)>,
     /// Remote branch or tag to check out (`git clone -b` / `--branch`).
     pub branch: Option<String>,
     /// Single-branch fetch (`git clone --single-branch` / `--no-single-branch`).
@@ -174,6 +184,8 @@ impl CloneOptions {
             thread_policy: crate::parallel::ThreadPolicy::default(),
             depth: None,
             filter: None,
+            auto_filter: false,
+            config: Vec::new(),
             branch: None,
             single_branch: None,
             tags: None,
@@ -279,6 +291,12 @@ pub struct CloneOutcome {
     pub bundle: crate::bundle_uri::BundleSeed,
     /// True when the initial fetch sent an object filter and the server applied it.
     pub filter_sent: bool,
+    /// The `promisor-remote` exchange of the initial fetch, when the server advertised
+    /// promisor remotes.
+    pub promisor: Option<crate::promisor_remote::PromisorHandshake>,
+    /// The filter the initial fetch used: [`CloneOptions::filter`], or what
+    /// [`CloneOptions::auto_filter`] resolved to.
+    pub filter: Option<ObjectFilterSpec>,
 }
 
 /// Derive a destination directory from a clone URL (Git [`git_url_basename`]).
@@ -521,6 +539,8 @@ impl CloneIntoOptions {
             bare: self.bare,
             checkout: self.checkout,
             bundle_cache: self.bundle_cache.clone(),
+            auto_filter: false,
+            config: Vec::new(),
         }
     }
 }
@@ -711,6 +731,7 @@ fn clone_after_claim(
     let git_dir = repo.git_dir().to_path_buf();
     let preserve_injected_store = !repo.odb().uses_files_primary();
 
+    add_local_config(&repo, &opts.config)?;
     let origin_url = stored_clone_remote_url(&opts.url);
     set_local_config(
         &repo,
@@ -776,6 +797,7 @@ fn clone_after_claim(
         remote_progress: progress.remote_sideband_progress(),
         fetch_depth: opts.depth.and_then(crate::transfer::FetchDepth::depth),
         filter: opts.filter,
+        auto_filter: opts.auto_filter && opts.filter.is_none(),
         link_source_objects: should_store_absolute_local_clone_url(&opts.url),
         ..Default::default()
     };
@@ -783,7 +805,7 @@ fn clone_after_claim(
         fetch_opts.http_protocol_version = Some(v);
     }
     let bundle = match opts.bundle_cache.as_deref() {
-        Some(cache) if opts.depth.is_none() && opts.filter.is_none() => {
+        Some(cache) if opts.depth.is_none() && opts.filter.is_none() && !opts.auto_filter => {
             remote.seed_from_bundle_uri(&repo, cache, progress, cancel, http_factory)
         }
         _ => crate::bundle_uri::BundleSeed::NotOffered,
@@ -809,10 +831,22 @@ fn clone_after_claim(
         .map_err(CloneError::Library)?;
     }
 
-    if let Some(spec) = opts.filter {
-        PartialCloneConfig::write(repo.git_dir(), &opts.remote_name, &spec)
-            .map_err(CloneError::Library)?;
-    }
+    let used_filter = match opts.filter {
+        Some(spec) => {
+            PartialCloneConfig::write(repo.git_dir(), &opts.remote_name, &spec)
+                .map_err(CloneError::Library)?;
+            Some(spec)
+        }
+        None if opts.auto_filter => {
+            PartialCloneConfig::write_auto(repo.git_dir(), &opts.remote_name)
+                .map_err(CloneError::Library)?;
+            fetch_outcome
+                .promisor
+                .as_ref()
+                .and_then(|h| h.resolved_filter)
+        }
+        None => None,
+    };
 
     let (head, oid) = setup_clone_head(
         &repo,
@@ -869,6 +903,8 @@ fn clone_after_claim(
         bare,
         bundle,
         filter_sent: fetch_outcome.filter_sent,
+        promisor: fetch_outcome.promisor,
+        filter: used_filter,
     })
 }
 
@@ -1290,6 +1326,22 @@ fn stored_clone_remote_url(url: &str) -> String {
     } else {
         url.to_owned()
     }
+}
+
+/// Add `entries` to the repository's local config (`git clone -c`), keeping any
+/// existing values of the same keys.
+fn add_local_config(repo: &Repository, entries: &[(String, String)]) -> Result<()> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let path = repo.git_dir().join("config");
+    let content = fs::read_to_string(&path).unwrap_or_default();
+    let mut config = ConfigFile::parse(&path, &content, ConfigScope::Local)?;
+    for (key, value) in entries {
+        config.add_value(key, value)?;
+    }
+    config.write()?;
+    Ok(())
 }
 
 fn set_local_config(repo: &Repository, entries: &[(&str, String)]) -> Result<()> {

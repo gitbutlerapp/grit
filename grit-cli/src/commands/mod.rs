@@ -31,6 +31,7 @@ pub mod mv;
 pub mod notes;
 pub mod patch_id;
 pub mod pick;
+pub mod promisor_json;
 pub mod pull;
 pub mod push;
 pub mod reflog;

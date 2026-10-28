@@ -155,6 +155,30 @@ When a fetcher is installed and [`fetch.promisorLazy`](rustdoc:grit_lib::objects
 
 On the serving side, pass the client's [`ObjectFilter`](rustdoc:grit_lib::revwalk::rev_list::ObjectFilter) to [`write_upload_pack_stream`](rustdoc:grit_lib::objects::pack_objects::write_upload_pack_stream) (or [`build_pack_with_shallow_and_filter`](rustdoc:grit_lib::objects::pack_objects::build_pack_with_shallow_and_filter) for an in-memory pack). The filtered pack streams like an unfiltered one and holds the objects `git pack-objects --filter` selects: wanted objects and tag targets always, then the commits, trees and blobs the filter keeps.
 
+### Large-object promisors
+
+A server can point clients at the remotes that hold some of its objects, such as a large-object promisor (LOP) with the big blobs, through the protocol v2 `promisor-remote` capability. [`PromisorAdvertisement`](rustdoc:grit_lib::objects::promisor_remote::PromisorAdvertisement) models it: [`from_server_config`](rustdoc:grit_lib::objects::promisor_remote::PromisorAdvertisement::from_server_config) builds it from `promisor.advertise` and `promisor.sendFields`, and [`upload_pack`](rustdoc:grit_lib::remote::serve::upload_pack) advertises it and collects the names a client accepts in [`ServeOptions::accepted_promisor_remotes`](rustdoc:grit_lib::remote::serve::ServeOptions::accepted_promisor_remotes). `uploadpack.allowAnySHA1InWant` lets a LOP served by grit hand out blobs no ref points at.
+
+On the client, a v2 fetch reads the advertisement and runs [`PromisorHandshake::evaluate`](rustdoc:grit_lib::objects::promisor_remote::PromisorHandshake::evaluate): [`PromisorAcceptPolicy`](rustdoc:grit_lib::objects::promisor_remote::PromisorAcceptPolicy) (`promisor.acceptFromServer`, `checkFields`, `storeFields`) decides, against the promisor remotes already in config ([`configured_promisor_remotes`](rustdoc:grit_lib::objects::promisor_remote::configured_promisor_remotes)), which advertised remotes to accept, and each verdict is a [`PromisorRejection`](rustdoc:grit_lib::objects::promisor_remote::PromisorRejection) or acceptance. Only a partial fetch accepts anything: one with a filter, or one from a remote configured as a promisor remote. The accepted names go back to the server with both the `ls-refs` and the `fetch` request, so a stateless smart-HTTP server sees them where it builds the pack. With [`FetchOptions::auto_filter`](rustdoc:grit_lib::remote::transfer::FetchOptions::auto_filter) the filter comes from the accepted remotes ([`PromisorDecision::combined_filter`](rustdoc:grit_lib::objects::promisor_remote::PromisorDecision::combined_filter)). The result is in [`FetchOutcome::promisor`](rustdoc:grit_lib::remote::transfer::FetchOutcome::promisor) and [`CloneOutcome::promisor`](rustdoc:grit_lib::remote::clone::CloneOutcome::promisor).
+
+```rust
+use grit_lib::remote::clone::{clone, CloneOptions};
+
+let mut opts = CloneOptions::new("https://git.example.com/project.git", "project".into());
+opts.auto_filter = true;
+opts.config = vec![
+    ("remote.lop.url".into(), "https://lop.example.com/project.git".into()),
+    ("remote.lop.promisor".into(), "true".into()),
+    ("promisor.acceptFromServer".into(), "knownUrl".into()),
+];
+let outcome = clone(opts, &mut progress, &cancel, None)?;
+for remote in outcome.promisor.iter().flat_map(|h| h.decision.accepted()) {
+    println!("accepted {}", remote.name);
+}
+```
+
+Accepting never creates a remote, and lazy fetches use the URL configured locally, not the advertised one.
+
 ## Bundles
 
 Offline bundle files are documented on the [Bundle](../bundle/) guide (`RepositoryBundles`). Smart HTTP and local remotes above cover online fetch/push.

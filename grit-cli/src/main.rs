@@ -889,9 +889,14 @@ enum Command {
         /// Name for the remote (default `origin`).
         #[arg(short = 'o', long, value_name = "NAME")]
         origin: Option<String>,
-        /// Partial clone: omit blobs (`none`) or blobs at/above a size (`1k`, `512`, …).
-        #[arg(long, value_name = "none|SIZE")]
+        /// Partial clone: omit blobs (`none`), blobs at/above a size (`1k`, `512`, …), or
+        /// what the server's accepted promisor remotes hold (`auto`).
+        #[arg(long, value_name = "none|auto|SIZE")]
         blobs: Option<String>,
+        /// Set a config value in the new repository before fetching (`git clone -c`;
+        /// repeatable). Unlike the global `-c`, it is kept in the clone's config.
+        #[arg(long = "config", value_name = "KEY=VALUE", value_parser = global_args::parse_config_override)]
+        config: Vec<grit_lib::config::environment::ConfigOverride>,
         /// Create a bare repository (`git clone --bare`).
         #[arg(long)]
         bare: bool,
@@ -2763,6 +2768,7 @@ fn dispatch(
             no_tags,
             origin,
             blobs,
+            config,
             bare,
             no_checkout,
             quiet,
@@ -2785,6 +2791,7 @@ fn dispatch(
                 no_tags,
                 origin,
                 blobs,
+                config,
                 bare,
                 no_checkout,
                 quiet,

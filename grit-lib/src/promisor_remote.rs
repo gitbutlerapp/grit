@@ -182,6 +182,9 @@ pub enum PromisorConfigWarning {
         /// Which field.
         field: PromisorField,
     },
+    /// An accepted remote advertised a filter other than `blob:none` or `blob:limit=<n>`,
+    /// which cannot be used as the automatic filter.
+    UnusableAutoFilter(String),
 }
 
 /// The client's rules for accepting advertised promisor remotes.
@@ -241,13 +244,19 @@ impl PromisorAcceptPolicy {
 
 /// One advertised or configured promisor remote.
 ///
-/// `Debug` output never shows the token.
+/// `Debug` output and serialization never show the token, nor a user name or password
+/// in the URL.
 #[derive(Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct PromisorInfo {
     /// Remote name.
     pub name: String,
-    /// Remote URL.
+    /// Remote URL, as configured or advertised. Serialized with any user name and
+    /// password removed (see [`Self::display_url`]).
+    #[cfg_attr(
+        feature = "serde-models",
+        serde(serialize_with = "serialize_redacted_url")
+    )]
     pub url: Option<String>,
     /// Partial-clone filter (`partialCloneFilter` field).
     pub filter: Option<String>,
@@ -256,11 +265,34 @@ pub struct PromisorInfo {
     pub token: Option<String>,
 }
 
+impl PromisorInfo {
+    /// The URL with any user name and password removed, for showing to people.
+    ///
+    /// # Returns
+    ///
+    /// An empty string when there is no URL.
+    #[must_use]
+    pub fn display_url(&self) -> String {
+        crate::transport_path::redact_url_for_display(self.url.as_deref().unwrap_or_default())
+    }
+}
+
+#[cfg(feature = "serde-models")]
+fn serialize_redacted_url<S: serde::Serializer>(
+    url: &Option<String>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    match url {
+        Some(url) => serializer.serialize_some(&crate::transport_path::redact_url_for_display(url)),
+        None => serializer.serialize_none(),
+    }
+}
+
 impl std::fmt::Debug for PromisorInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PromisorInfo")
             .field("name", &self.name)
-            .field("url", &self.url)
+            .field("url", &self.url.as_ref().map(|_| self.display_url()))
             .field("filter", &self.filter)
             .field("token", &self.token.as_ref().map(|_| "<redacted>"))
             .finish()
@@ -445,6 +477,12 @@ fn promisor_remote_names(cfg: &ConfigSet) -> Vec<String> {
     names
 }
 
+/// Whether `name` is a promisor remote in `cfg`: `remote.<name>.promisor` is true,
+/// `remote.<name>.partialCloneFilter` is set, or `extensions.partialClone` names it.
+pub(crate) fn is_promisor_remote(cfg: &ConfigSet, name: &str) -> bool {
+    promisor_remote_names(cfg).iter().any(|n| n == name)
+}
+
 /// The promisor remotes configured in `cfg` that have a non-empty URL.
 ///
 /// Remotes come in first-seen config order with the `extensions.partialClone` remote last,
@@ -526,7 +564,7 @@ pub enum PromisorRejection {
     UnknownRemote,
     /// A local remote has the name but a different URL (`knownUrl` policy).
     UrlMismatch {
-        /// The locally configured URL.
+        /// The locally configured URL, with any user name and password removed.
         configured: String,
     },
     /// A `promisor.checkFields` field was not advertised or is not set locally.
@@ -688,7 +726,7 @@ fn rejection_for(
         (AcceptFromServer::KnownUrl, Some(p)) => {
             if p.url != advertised.url {
                 return Some(PromisorRejection::UrlMismatch {
-                    configured: p.url.clone().unwrap_or_default(),
+                    configured: p.display_url(),
                 });
             }
             fields_rejection(policy, local, advertised, Some(p))
@@ -814,6 +852,93 @@ pub fn store_advertised_fields(
     }
     file.write()?;
     Ok((stored, warnings))
+}
+
+/// What the `promisor-remote` exchange decided for one fetch.
+///
+/// Built by the fetch driver when the server advertises promisor remotes and returned in
+/// [`FetchOutcome::promisor`](crate::transfer::FetchOutcome::promisor).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+pub struct PromisorHandshake {
+    /// The verdict on every advertised remote.
+    pub decision: PromisorDecision,
+    /// Fields written into local config (`promisor.storeFields`).
+    pub stored: Vec<StoredPromisorField>,
+    /// The filter chosen from the accepted remotes, when the fetch asked for one
+    /// automatically ([`FetchOptions::auto_filter`](crate::transfer::FetchOptions::auto_filter)).
+    pub resolved_filter: Option<ObjectFilterSpec>,
+    /// Config values that were ignored, advertised values that were not stored, and
+    /// advertised filters too complex to use as the automatic filter.
+    pub warnings: Vec<PromisorConfigWarning>,
+}
+
+impl PromisorHandshake {
+    /// Decide the client side of the exchange.
+    ///
+    /// Reads the client's policy from `cfg`, decides against its configured promisor remotes,
+    /// and declines everything with [`PromisorRejection::NotPartialFetch`] unless
+    /// `partial_fetch`: a client that is not doing a partial fetch needs every object from
+    /// this server. With `auto_filter`, also picks the filter for the fetch from the accepted
+    /// remotes ([`PromisorDecision::combined_filter`]). Writes nothing; see
+    /// [`Self::store_fields`].
+    ///
+    /// # Parameters
+    ///
+    /// - `cfg`: the client's merged config.
+    /// - `advertisement`: what the server advertised.
+    /// - `partial_fetch`: whether the fetch is filtered or is from a promisor remote.
+    /// - `auto_filter`: whether to resolve the filter from the accepted remotes.
+    #[must_use]
+    pub fn evaluate(
+        cfg: &ConfigSet,
+        advertisement: &PromisorAdvertisement,
+        partial_fetch: bool,
+        auto_filter: bool,
+    ) -> Self {
+        let (policy, mut warnings) = PromisorAcceptPolicy::from_config(cfg);
+        let local = configured_promisor_remotes(cfg, &policy.check_fields);
+        let mut decision = PromisorDecision::decide(&policy, &local, advertisement);
+        if !partial_fetch {
+            decision.decline_all(PromisorRejection::NotPartialFetch);
+        }
+        let resolved_filter = if auto_filter {
+            let (filter, unsupported) = decision.combined_filter();
+            warnings.extend(
+                unsupported
+                    .into_iter()
+                    .map(PromisorConfigWarning::UnusableAutoFilter),
+            );
+            filter
+        } else {
+            None
+        };
+        Self {
+            decision,
+            stored: Vec::new(),
+            resolved_filter,
+            warnings,
+        }
+    }
+
+    /// Write `promisor.storeFields` values of the accepted remotes into `git_dir`'s config
+    /// (see [`store_advertised_fields`]), recording what was written in [`Self::stored`].
+    ///
+    /// # Parameters
+    ///
+    /// - `git_dir`: the repository being fetched into.
+    /// - `cfg`: the client's merged config, loaded before the fetch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] when the local config file cannot be read or written.
+    pub fn store_fields(&mut self, git_dir: &Path, cfg: &ConfigSet) -> Result<()> {
+        let (policy, _) = PromisorAcceptPolicy::from_config(cfg);
+        let (stored, warnings) = store_advertised_fields(git_dir, &policy, cfg, &self.decision)?;
+        self.stored.extend(stored);
+        self.warnings.extend(warnings);
+        Ok(())
+    }
 }
 
 /// A malformed client `promisor-remote=` reply.
@@ -1284,6 +1409,56 @@ mod tests {
     }
 
     #[test]
+    fn debug_and_serialization_drop_url_credentials() {
+        let p = PromisorInfo {
+            name: "lop".into(),
+            url: Some("https://bob:pw-secret@lop.example.com/r.git".into()),
+            filter: None,
+            token: Some("hunter2".into()),
+        };
+        let mut outputs = vec![
+            format!("{p:?}"),
+            format!(
+                "{:?}",
+                PromisorAdvertisement {
+                    remotes: vec![p.clone()]
+                }
+            ),
+        ];
+        #[cfg(feature = "serde-models")]
+        outputs.push(serde_json::to_string(&p).unwrap());
+        for shown in outputs {
+            assert!(!shown.contains("pw-secret"), "{shown}");
+            assert!(!shown.contains("hunter2"), "{shown}");
+            assert!(shown.contains("lop.example.com/r.git"), "{shown}");
+        }
+
+        let d = decide(
+            &[
+                ("remote.lop.promisor", "true"),
+                (
+                    "remote.lop.url",
+                    "https://bob:pw-secret@lop.example.com/r.git",
+                ),
+                ("promisor.acceptFromServer", "knownUrl"),
+            ],
+            "name=lop,url=https://lop.example.com/other.git",
+        );
+        let Some(PromisorRejection::UrlMismatch { configured }) = rejection(&d) else {
+            panic!("expected a URL mismatch");
+        };
+        assert!(!configured.contains("pw-secret"), "{configured}");
+        assert!(configured.contains("lop.example.com/r.git"), "{configured}");
+        let shown = format!("{d:?}");
+        assert!(!shown.contains("pw-secret"), "{shown}");
+        #[cfg(feature = "serde-models")]
+        {
+            let json = serde_json::to_string(&d).unwrap();
+            assert!(!json.contains("pw-secret"), "{json}");
+        }
+    }
+
+    #[test]
     fn debug_redacts_token() {
         let p = PromisorInfo {
             name: "lop".into(),
@@ -1294,6 +1469,33 @@ mod tests {
         let shown = format!("{p:?}");
         assert!(!shown.contains("hunter2"), "{shown}");
         assert!(shown.contains("<redacted>"));
+    }
+
+    #[test]
+    fn display_url_drops_credentials() {
+        let p = PromisorInfo {
+            name: "lop".into(),
+            url: Some("https://bob:pw@lop.example.com/r.git".into()),
+            ..Default::default()
+        };
+        let shown = p.display_url();
+        assert!(!shown.contains("pw"), "{shown}");
+        assert!(shown.contains("lop.example.com/r.git"), "{shown}");
+        assert_eq!(PromisorInfo::default().display_url(), "");
+    }
+
+    #[cfg(feature = "serde-models")]
+    #[test]
+    fn serialized_info_skips_token() {
+        let p = PromisorInfo {
+            name: "lop".into(),
+            url: Some("u".into()),
+            filter: None,
+            token: Some("hunter2".into()),
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(!json.contains("hunter2"), "{json}");
+        assert!(json.contains("\"name\":\"lop\""), "{json}");
     }
 
     #[test]
@@ -1314,6 +1516,57 @@ mod tests {
         assert_eq!(
             r.accepted_filters,
             [("lop".to_owned(), "blob:limit=5k".to_owned())]
+        );
+    }
+
+    #[test]
+    fn handshake_declines_unless_partial_and_resolves_auto_filter() {
+        let mut client = LOP.to_vec();
+        client.push(("promisor.acceptFromServer", "knownUrl"));
+        let c = cfg(&client);
+        let a = adv("name=lop,url=file:///lop,partialCloneFilter=blob:limit=5k");
+
+        let h = PromisorHandshake::evaluate(&c, &a, false, true);
+        assert_eq!(
+            rejection(&h.decision),
+            Some(PromisorRejection::NotPartialFetch)
+        );
+        assert_eq!(h.resolved_filter, None);
+
+        let h = PromisorHandshake::evaluate(&c, &a, true, true);
+        assert!(h.decision.any_accepted());
+        assert_eq!(
+            h.resolved_filter,
+            Some(ObjectFilterSpec::BlobLimit(5 * 1024))
+        );
+
+        let h = PromisorHandshake::evaluate(&c, &a, true, false);
+        assert_eq!(h.resolved_filter, None);
+
+        let a = adv("name=lop,url=file:///lop,partialCloneFilter=tree:0");
+        let h = PromisorHandshake::evaluate(&c, &a, true, true);
+        assert_eq!(
+            h.warnings,
+            [PromisorConfigWarning::UnusableAutoFilter("tree:0".into())]
+        );
+    }
+
+    #[test]
+    fn handshake_store_fields() {
+        let dir = repo_with_config(
+            "[remote \"lop\"]\n\turl = file:///lop\n\tpromisor = true\n\
+             [promisor]\n\tacceptFromServer = knownUrl\n\tstoreFields = partialCloneFilter\n",
+        );
+        let c = load(dir.path());
+        let a = adv("name=lop,url=file:///lop,partialCloneFilter=blob:none");
+        let mut h = PromisorHandshake::evaluate(&c, &a, true, false);
+        h.store_fields(dir.path(), &c).unwrap();
+        assert_eq!(h.stored.len(), 1);
+        assert_eq!(
+            load(dir.path())
+                .get("remote.lop.partialclonefilter")
+                .as_deref(),
+            Some("blob:none")
         );
     }
 

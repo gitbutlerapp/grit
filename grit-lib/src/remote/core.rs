@@ -779,11 +779,15 @@ impl Remote {
                         opts.filter = crate::partial_clone::stored_remote_filter(&cfg, name);
                     }
                 }
-                if crate::partial_clone::fetch_requires_upload_pack(
-                    opts.filter.as_ref(),
-                    &cfg,
-                    opts.remote_name.as_deref().or(self.name.as_deref()),
-                ) {
+                // An automatic filter needs the server's promisor advertisement, which
+                // only the wire protocol carries.
+                if opts.auto_filter
+                    || crate::partial_clone::fetch_requires_upload_pack(
+                        opts.filter.as_ref(),
+                        &cfg,
+                        opts.remote_name.as_deref().or(self.name.as_deref()),
+                    )
+                {
                     let mut conn = crate::transport::connect_local_upload_pack(
                         &remote_git,
                         Service::UploadPack,

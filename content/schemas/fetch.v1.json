@@ -74,6 +74,102 @@
         "up_to_date"
       ],
       "type": "string"
+    },
+    "PromisorRemoteJson": {
+      "description": "One promisor remote the server advertised, and whether this client accepted it.",
+      "properties": {
+        "accepted": {
+          "description": "Whether the client accepted the remote, letting the server leave out what it holds.",
+          "type": "boolean"
+        },
+        "filter": {
+          "description": "The partial-clone filter the server advertised for the remote.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Remote name as the server advertised it.",
+          "type": "string"
+        },
+        "rejected": {
+          "description": "Why the remote was not accepted: `policy_none`, `unknown_remote`, `url_mismatch`, `field_missing`, `field_mismatch` or `not_partial`; `null` when accepted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "Advertised URL, with any credentials removed.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted",
+        "name",
+        "url"
+      ],
+      "type": "object"
+    },
+    "PromisorWarningJson": {
+      "description": "Something about the promisor exchange the client ignored or could not use.",
+      "properties": {
+        "code": {
+          "description": "`unknown_accept_value` (`promisor.acceptFromServer` is not a known policy, so nothing is accepted), `unknown_field` (a `promisor.checkFields` / `promisor.storeFields` entry is not a known field), `invalid_advertised_value` (an advertised field value was not stored because it is invalid) or `unusable_auto_filter` (an accepted remote's filter cannot be used by `--blobs auto`).",
+          "type": "string"
+        },
+        "field": {
+          "description": "The field name, for `unknown_field` and `invalid_advertised_value`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "description": "The config key concerned, for `unknown_accept_value` and `unknown_field`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "remote": {
+          "description": "The remote concerned, for `invalid_advertised_value`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "description": "The ignored config value, or the unusable filter. Advertised values that were rejected as invalid are never shown (they may be tokens).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "type": "object"
+    },
+    "StoredFieldJson": {
+      "description": "A remote field written into local config from the server's advertisement.",
+      "properties": {
+        "field": {
+          "description": "`partialCloneFilter` or `token`. The value itself is never shown.",
+          "type": "string"
+        },
+        "remote": {
+          "description": "The remote whose config changed.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "remote"
+      ],
+      "type": "object"
     }
   },
   "description": "Result of `grit fetch`: the refs that changed.",
@@ -81,6 +177,20 @@
     "dry_run": {
       "description": "True when the fetch was a dry run (no refs or objects written).",
       "type": "boolean"
+    },
+    "promisor_remotes": {
+      "description": "Promisor remotes the server advertised, and whether this fetch accepted each.",
+      "items": {
+        "$ref": "#/definitions/PromisorRemoteJson"
+      },
+      "type": "array"
+    },
+    "promisor_warnings": {
+      "description": "Promisor config or advertised values that were ignored or could not be used.",
+      "items": {
+        "$ref": "#/definitions/PromisorWarningJson"
+      },
+      "type": "array"
     },
     "rejected": {
       "description": "True when any ref update was rejected (exit 1 when set).",
@@ -99,6 +209,13 @@
         }
       ],
       "description": "Shallow boundary changes when a depth/deepen/unshallow fetch ran."
+    },
+    "stored_fields": {
+      "description": "Remote fields stored from the advertisement (`promisor.storeFields`).",
+      "items": {
+        "$ref": "#/definitions/StoredFieldJson"
+      },
+      "type": "array"
     },
     "updated": {
       "format": "uint",

@@ -8,7 +8,7 @@ order: 2
 ## Synopsis
 
 ```text
-grit clone <url> [<dir>] [--depth <N>] [-b|--branch <NAME>] [--blobs <none|SIZE>] [--shallow] [--single-branch | --no-single-branch] [--no-tags] [-o <name>] [--bare] [--no-checkout] [-q|--quiet]
+grit clone <url> [<dir>] [--depth <N>] [-b|--branch <NAME>] [--blobs <none|auto|SIZE>] [--config <KEY=VALUE>]... [--shallow] [--single-branch | --no-single-branch] [--no-tags] [-o <name>] [--bare] [--no-checkout] [-q|--quiet]
 ```
 
 ## Description
@@ -80,9 +80,51 @@ Pass `--depth <N>` for the same result as `git clone --depth`: only one ref is f
 
 `--blobs <SIZE>` omits blobs whose inflated size is at or above the limit. `<SIZE>` accepts the same suffixes as Git's `blob:limit` filter (`512`, `1k`, `2m`, …). Smaller blobs stay in the first pack, which keeps checkouts working when only large assets are skipped.
 
+`--blobs auto` takes the filter from the server instead: from the [large-object promisors](#large-object-promisors) it advertises and the clone accepts, using the strictest `partialCloneFilter` they advertise (`blob:none` over any limit, else the smallest limit). Without an accepted remote that advertises a filter, nothing is filtered. The clone records `remote.<name>.partialclonefilter=auto`, so each later fetch picks its filter the same way, as Git 2.54 and newer do; older Git does not understand that value.
+
 Partial clone trades disk and bandwidth on the first fetch for extra round-trips when something needs blob bytes (for example `git log -p` or reading a large file). It works with `--depth`, `-b` / `--branch`, and the other clone options. The server must allow filter requests (`uploadpack.allowFilter` on bare repos served over smart HTTP or `file://`).
 
 When you pass `--blobs` but the server does not advertise filter support, grit warns on stderr (even with `-q`), fetches an unfiltered pack, and does not treat the clone as partial in human output or `--json` (`partial` is omitted or false). Promisor configuration is still written, matching `git clone --filter` when the server ignores the filter, so later commands may warn about a promisor remote even though every blob arrived in the first pack.
+
+`--config <KEY=VALUE>` writes a config value into the new repository before anything is fetched, like `git clone -c`. It can be repeated, and a key given twice gets both values. A key without `=VALUE` is set to `true`. Unlike the global `-c`, which lasts for one command, these values stay in the clone's config.
+
+### Large-object promisors
+
+A server can keep its large blobs on another remote, a large-object promisor (LOP), and say so with the protocol v2 `promisor-remote` capability (see [grit serve](../serve/#large-object-promisors)). A clone that accepts the LOP lets the server leave those blobs out; they are then fetched from the LOP when something needs them, instead of through the server.
+
+Accepting takes two things in the new repository's config, so they go in with `--config`: the LOP itself as a promisor remote (`remote.<name>.url` and `remote.<name>.promisor=true`), and a policy in `promisor.acceptFromServer`:
+
+| Value | Accepts |
+| --- | --- |
+| `none` (default) | nothing |
+| `knownUrl` | a remote configured under the advertised name with the same URL (the safest choice) |
+| `knownName` | a remote configured under the advertised name, whatever its URL |
+| `all` | every advertised remote; only for servers you fully trust |
+
+`promisor.checkFields` (`partialCloneFilter`, `token`) also requires the advertised value of each listed field to equal the one configured for the remote. `promisor.storeFields` copies the advertised values of the listed fields into the config of a remote that is already configured; it never creates a remote or changes its URL. Lazy fetches always use the URL configured locally, never the advertised one.
+
+Accepting needs a partial clone (`--blobs`): a full clone needs every object from the server, so it declines (`not_partial`). The clone's summary says what it decided:
+
+```console
+$ grit clone --blobs auto \
+    --config remote.lop.url=https://lop.example.com/project.git \
+    --config remote.lop.promisor=true \
+    --config promisor.acceptFromServer=knownUrl \
+    https://git.example.com/project.git
+Cloning into 'project' ...
+✓ Cloned into project on main in 128ms
+  partial  partial clone; large blobs are fetched on demand
+  promisor  lop accepted · blob:limit=5k
+
+  time      ·······················█▓······▒▒▒▒▒▒▒▒▒  128ms
+            · connect 72ms  █ receiving 0ms  ▓ indexing 2ms  · other 17ms  ▒ checkout 28ms
+  data      225 B received
+  objects   3 · 1 commit · 1 tree · 1 blob
+  refs      1 branch · 0 tags
+  files     2 files · 19.5 KiB in the work tree
+```
+
+The checkout's missing blobs are then fetched on demand.
 
 `--bare` creates a bare repository at the destination (the directory itself is the git directory, named with a `.git` suffix when the URL is derived automatically), fetches `refs/heads/*` and tags directly, and configures only `remote.<name>.url` — matching `git clone --bare`. `--no-checkout` fetches and sets `HEAD` to the default branch without writing the index or work tree files, matching `git clone --no-checkout`.
 
@@ -105,7 +147,8 @@ Working-tree materialization after fetch uses the same parallel checkout path as
 | `--no-single-branch` | With `--depth`, fetch every branch tip (`git clone --no-single-branch --depth=1`). |
 | `--no-tags` | Do not fetch tags; sets `remote.<name>.tagOpt=--no-tags` like Git. |
 | `-o`, `--origin <name>` | Name of the remote (default `origin`). |
-| `--blobs <none\|SIZE>` | Partial clone: omit all blobs (`none`) or blobs at/above `<SIZE>` (`1k`, `512`, …). |
+| `--blobs <none\|auto\|SIZE>` | Partial clone: omit all blobs (`none`), blobs at/above `<SIZE>` (`1k`, `512`, …), or what the accepted promisor remotes hold (`auto`). |
+| `--config <KEY=VALUE>` | Write a config value into the new repository before fetching (`git clone -c`). Repeatable. |
 | `--bare` | Bare repository; no working tree (`git clone --bare`). |
 | `--no-checkout` | Fetch refs but do not check out files (`git clone --no-checkout`). |
 | `-q`, `--quiet` | No progress, no `Cloning into` line and no human summary. Warnings (such as an empty remote) still go to stderr; `--json` and `--markdown` output is unchanged. |
@@ -185,8 +228,12 @@ Pass `--json` for stable, scripting-friendly output:
 | `detached` | boolean | True when `HEAD` is detached (tag checkout). |
 | `tag` | string or omitted | Tag name when `-b` named a tag. |
 | `depth` | integer or omitted | Shallow depth when `--depth` or `--shallow` was used. |
-| `blobs` | string or integer or omitted | `"none"` or a byte limit when `--blobs` was used. |
+| `blobs` | string or integer or omitted | The filter used: `"none"` or a byte limit. With `--blobs auto`, the filter it resolved to; omitted when nothing was filtered. |
 | `partial` | boolean or omitted | `true` when the server applied the `--blobs` filter on the initial fetch. Omitted or false when the server lacks filter support (see warning above). |
+| `filter_auto` | boolean or omitted | `true` with `--blobs auto`. |
+| `promisor_remotes` | array or omitted | The promisor remotes the server advertised: `name`, `url` (credentials removed), `accepted`, `filter` (the advertised `partialCloneFilter`, or `null`) and `rejected` (why it was not accepted: `policy_none`, `unknown_remote`, `url_mismatch`, `field_missing`, `field_mismatch` or `not_partial`; `null` when accepted). Omitted when the server advertised none. Tokens are never shown. |
+| `stored_fields` | array or omitted | Fields copied into config by `promisor.storeFields`: `remote` and `field` (`partialCloneFilter` or `token`), never the value. Omitted when nothing was stored. |
+| `promisor_warnings` | array or omitted | Promisor config or advertised values that were ignored: `code` is `unknown_accept_value` (`promisor.acceptFromServer` is not a known policy, so nothing is accepted), `unknown_field` (a `promisor.checkFields` / `promisor.storeFields` entry is not a known field), `invalid_advertised_value` (an advertised field was not stored because its value is invalid) or `unusable_auto_filter` (`--blobs auto` cannot use an accepted remote's filter, such as `tree:0`); `key`, `remote`, `field` and `value` say which, when they apply. A rejected advertised value is never shown. Shown as `promisor  warning: …` lines in the human output and `promisor warning` bullets in `--markdown`. Omitted when there were none. |
 | `objects` | integer | Objects installed during fetch: for network clones, objects in the received pack; for local-path clones, objects in newly linked pack indexes plus any reachable loose objects hardlinked from the source. |
 | `bytes` | integer | On-disk payload bytes installed during fetch: for network clones, the received `.pack` size; for local-path clones, the sum of newly linked `.pack` files plus reachable loose object files (same bytes as hardlinked/copied object store data). |
 | `branches` | integer | Remote branches fetched. |
@@ -293,6 +340,42 @@ Unborn remote default branch (`HEAD` on the server points at a branch with no co
 }
 ```
 
+A clone that accepted a large-object promisor (`--blobs auto`):
+
+```json
+{
+  "url": "https://git.example.com/project.git",
+  "path": "project",
+  "remote": "origin",
+  "single_branch": false,
+  "tag_fetch": "all",
+  "branch": "main",
+  "detached": false,
+  "blobs": 5120,
+  "partial": true,
+  "filter_auto": true,
+  "promisor_remotes": [
+    {
+      "name": "lop",
+      "url": "https://lop.example.com/project.git",
+      "accepted": true,
+      "filter": "blob:limit=5k",
+      "rejected": null
+    }
+  ],
+  "objects": 3,
+  "bytes": 225,
+  "branches": 1,
+  "tags": 0,
+  "files": 2,
+  "object_types": { "commits": 1, "trees": 1, "blobs": 1, "tags": 0 },
+  "worktree_bytes": 20006,
+  "seconds": 0.13,
+  "phases": [],
+  "bare": false
+}
+```
+
 ## Markdown output
 
 Pass [`--markdown`](../global-options/) for agent-friendly output.
@@ -322,6 +405,13 @@ Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside 
 | --- | ---: | --- | ---: |
 | copying | 8 | objects | [SECONDS] |
 | checkout | 2 | files | [SECONDS] |
+```
+
+When the server advertised promisor remotes, a bullet lists them, and one more names each stored field:
+
+```text
+- **promisor remotes**: `lop` (accepted)
+- **stored**: `partialCloneFilter` for `lop`
 ```
 
 ## Exit status

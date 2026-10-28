@@ -38,6 +38,18 @@ pub struct FetchOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub shallow: Option<FetchShallowDelta>,
+    /// Promisor remotes the server advertised, and whether this fetch accepted each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub promisor_remotes: Vec<crate::commands::promisor_json::PromisorRemoteJson>,
+    /// Remote fields stored from the advertisement (`promisor.storeFields`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub stored_fields: Vec<crate::commands::promisor_json::StoredFieldJson>,
+    /// Promisor config or advertised values that were ignored or could not be used.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub promisor_warnings: Vec<crate::commands::promisor_json::PromisorWarningJson>,
     /// What was received and where the time went, for the human summary.
     #[serde(skip)]
     #[schemars(skip)]
@@ -113,6 +125,9 @@ impl HumanRender for FetchAllOutcome {
                     .iter()
                     .any(|u| u.status == FetchUpdateStatus::Rejected),
                 shallow: None,
+                promisor_remotes: Vec::new(),
+                stored_fields: Vec::new(),
+                promisor_warnings: Vec::new(),
                 transfer: TransferSummary::default(),
             };
             one.render_human(w, ctx)?;
@@ -139,6 +154,9 @@ impl MarkdownRender for FetchAllOutcome {
                     .iter()
                     .any(|u| u.status == FetchUpdateStatus::Rejected),
                 shallow: None,
+                promisor_remotes: Vec::new(),
+                stored_fields: Vec::new(),
+                promisor_warnings: Vec::new(),
                 transfer: TransferSummary::default(),
             };
             one.render_markdown(w, ctx)?;
@@ -237,6 +255,13 @@ impl HumanRender for FetchOutcome {
                 self.remote
             );
         }
+        for line in crate::commands::promisor_json::human_lines(
+            &self.promisor_remotes,
+            &self.stored_fields,
+            &self.promisor_warnings,
+        ) {
+            outln!(w, "  promisor  {line}");
+        }
         render_transfer(&self.transfer, w)
     }
 }
@@ -254,6 +279,16 @@ fn render_transfer(transfer: &TransferSummary, w: &mut dyn Write) -> Result<()> 
 impl MarkdownRender for FetchOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         markdown::print_fetch_updates(w, &self.remote, &self.updates, self.updated, self.dry_run)?;
+        if let Some(line) = crate::commands::promisor_json::markdown_line(&self.promisor_remotes) {
+            outln!(w, "{line}");
+        }
+        for s in &self.stored_fields {
+            outln!(w, "- **stored**: `{}` for `{}`", s.field, s.remote);
+        }
+        for line in crate::commands::promisor_json::markdown_warning_lines(&self.promisor_warnings)
+        {
+            outln!(w, "{line}");
+        }
         Ok(())
     }
 }
@@ -359,6 +394,11 @@ fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
         dry_run: args.dry_run,
         rejected,
         shallow,
+        promisor_remotes: crate::commands::promisor_json::promisor_remotes(
+            result.promisor.as_ref(),
+        ),
+        stored_fields: crate::commands::promisor_json::stored_fields(result.promisor.as_ref()),
+        promisor_warnings: crate::commands::promisor_json::warnings(result.promisor.as_ref()),
         transfer,
     })
 }

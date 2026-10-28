@@ -129,6 +129,8 @@ pub struct CloneRunOptions {
     pub bare: bool,
     pub no_checkout: bool,
     pub blobs: Option<String>,
+    /// `--config KEY=VALUE` entries written into the new repository.
+    pub config: Vec<grit_lib::config::environment::ConfigOverride>,
     pub quiet: crate::quiet_args::QuietArgs,
     pub mode: OutputMode,
 }
@@ -173,6 +175,23 @@ pub struct CloneOutcome {
     #[serde(default, skip_serializing_if = "CloneOutcome::partial_not_set")]
     #[schemars(default)]
     pub partial: bool,
+    /// True with `--blobs auto`: the filter comes from the promisor remotes the server
+    /// advertised and the clone accepted (`blobs` is the filter it resolved to).
+    #[serde(default, skip_serializing_if = "CloneOutcome::partial_not_set")]
+    #[schemars(default)]
+    pub filter_auto: bool,
+    /// Promisor remotes the server advertised, and whether the clone accepted each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub promisor_remotes: Vec<crate::commands::promisor_json::PromisorRemoteJson>,
+    /// Remote fields stored from the advertisement (`promisor.storeFields`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub stored_fields: Vec<crate::commands::promisor_json::StoredFieldJson>,
+    /// Promisor config or advertised values that were ignored or could not be used.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub promisor_warnings: Vec<crate::commands::promisor_json::PromisorWarningJson>,
     /// Objects received during the fetch.
     pub objects: u64,
     /// Pack bytes received during the fetch.
@@ -261,6 +280,13 @@ fn render_summary(o: &CloneOutcome, w: &mut dyn Write, color: bool) -> Result<()
             paint(color, DIM, "partial"),
             CloneOutcome::partial_clone_summary(o.blobs)
         );
+    }
+    for line in crate::commands::promisor_json::human_lines(
+        &o.promisor_remotes,
+        &o.stored_fields,
+        &o.promisor_warnings,
+    ) {
+        outln!(w, "  {}  {line}", paint(color, DIM, "promisor"));
     }
     outln!(w);
 
@@ -368,6 +394,16 @@ impl MarkdownRender for CloneOutcome {
                     CloneBlobsJson::Limit(n) => outln!(w, "- **blobs**: {n} bytes"),
                 }
             }
+        }
+        if let Some(line) = crate::commands::promisor_json::markdown_line(&self.promisor_remotes) {
+            outln!(w, "{line}");
+        }
+        for s in &self.stored_fields {
+            outln!(w, "- **stored**: `{}` for `{}`", s.field, s.remote);
+        }
+        for line in crate::commands::promisor_json::markdown_warning_lines(&self.promisor_warnings)
+        {
+            outln!(w, "{line}");
         }
         outln!(w, "- **url**: `{}`", self.url);
         if let Some(bundle) = &self.bundle {
@@ -551,12 +587,24 @@ fn effective_tag_fetch_mode(opts: &CloneRunOptions) -> CloneTags {
     })
 }
 
-fn parse_blobs_filter(raw: Option<&str>) -> Result<Option<ObjectFilterSpec>> {
+/// A parsed `--blobs` value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BlobsArg {
+    /// `none` or a size.
+    Filter(ObjectFilterSpec),
+    /// `auto`: take the filter from the accepted promisor remotes.
+    Auto,
+}
+
+fn parse_blobs_filter(raw: Option<&str>) -> Result<Option<BlobsArg>> {
     let Some(raw) = raw else {
         return Ok(None);
     };
+    if raw.trim().eq_ignore_ascii_case("auto") {
+        return Ok(Some(BlobsArg::Auto));
+    }
     ObjectFilterSpec::from_blobs_cli(raw)
-        .map(Some)
+        .map(|spec| Some(BlobsArg::Filter(spec)))
         .map_err(|e| {
             anyhow::Error::from(CloneUsageError).context(format!("invalid --blobs value: {e}"))
         })
@@ -597,7 +645,7 @@ pub fn run(mut opts: CloneRunOptions) -> Result<CloneOutcome> {
     }
     match clone_into(
         &opts,
-        filter.as_ref(),
+        filter,
         &path,
         &dir,
         started,
@@ -621,7 +669,7 @@ pub fn run(mut opts: CloneRunOptions) -> Result<CloneOutcome> {
 #[allow(clippy::too_many_arguments)]
 fn clone_into(
     run: &CloneRunOptions,
-    filter: Option<&ObjectFilterSpec>,
+    blobs: Option<BlobsArg>,
     path: &Path,
     dir: &str,
     started: Instant,
@@ -634,6 +682,11 @@ fn clone_into(
         .clone()
         .unwrap_or_else(|| grit_lib::remote::DEFAULT_REMOTE.to_owned());
     let tag_mode = effective_tag_fetch_mode(run);
+    let filter = match blobs {
+        Some(BlobsArg::Filter(spec)) => Some(spec),
+        Some(BlobsArg::Auto) | None => None,
+    };
+    let auto_filter = blobs == Some(BlobsArg::Auto);
     let clone_opts = CloneOptions {
         url: run.url.clone(),
         dest: path.to_path_buf(),
@@ -643,7 +696,13 @@ fn clone_into(
         thread_policy: crate::context::thread_policy_for_repo(),
         depth: run.depth,
         branch: run.branch.clone(),
-        filter: filter.copied(),
+        filter,
+        auto_filter,
+        config: run
+            .config
+            .iter()
+            .map(|c| (c.key().to_owned(), c.value().unwrap_or("true").to_owned()))
+            .collect(),
         single_branch: run.single_branch,
         tags: resolved_clone_tags(run),
         promisor_fetcher: Some(std::sync::Arc::new(
@@ -727,8 +786,14 @@ fn clone_into(
         detached,
         tag,
         depth: run.depth,
-        blobs: filter.map(CloneBlobsJson::from_spec),
+        blobs: outcome.filter.as_ref().map(CloneBlobsJson::from_spec),
         partial: outcome.filter_sent,
+        filter_auto: auto_filter,
+        promisor_remotes: crate::commands::promisor_json::promisor_remotes(
+            outcome.promisor.as_ref(),
+        ),
+        stored_fields: crate::commands::promisor_json::stored_fields(outcome.promisor.as_ref()),
+        promisor_warnings: crate::commands::promisor_json::warnings(outcome.promisor.as_ref()),
         objects: outcome.transfer.objects,
         bytes: outcome.transfer.bytes,
         branches: outcome.branches,
@@ -815,6 +880,10 @@ mod tests {
             depth: None,
             blobs: None,
             partial: false,
+            filter_auto: false,
+            promisor_remotes: Vec::new(),
+            stored_fields: Vec::new(),
+            promisor_warnings: Vec::new(),
             objects: 1_234,
             bytes: 2 * 1024 * 1024,
             branches: 1,

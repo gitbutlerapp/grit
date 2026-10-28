@@ -651,8 +651,9 @@ fn v2_ls_refs(
     local_odb: &crate::odb::Odb,
     tags: crate::transfer::TagMode,
     refspecs: &[String],
+    promisor_reply: Option<&str>,
 ) -> Result<LsRefsAdvertised> {
-    let req = build_v2_ls_refs_request(server_caps, local_odb, tags, refspecs)?;
+    let req = build_v2_ls_refs_request(server_caps, local_odb, tags, refspecs, promisor_reply)?;
     conn.writer().write_all(&req)?;
     conn.writer().flush()?;
     parse_v2_ls_refs_response(conn.reader())
@@ -665,15 +666,17 @@ fn v2_ls_refs(
 /// a duplex socket) and the stateless smart-HTTP transport (which POSTs it as a
 /// request body) share one request builder. `HEAD` is always requested so the
 /// server advertises its `symref-target`; `refs/tags/` is added under `--tags` /
-/// tag-following even when the refspecs name only heads.
+/// tag-following even when the refspecs name only heads. `promisor_reply`, the
+/// accepted promisor remotes, is sent as a `promisor-remote=` capability line.
 pub(crate) fn build_v2_ls_refs_request(
     server_caps: &[String],
     local_odb: &crate::odb::Odb,
     tags: crate::transfer::TagMode,
     refspecs: &[String],
+    promisor_reply: Option<&str>,
 ) -> Result<Vec<u8>> {
     let object_format = v2_object_format(server_caps, local_odb);
-    let cap_echo = protocol_v2::cap_lines_for_command_request(server_caps);
+    let cap_echo = command_cap_echo(server_caps, promisor_reply);
 
     let mut req: Vec<u8> = Vec::new();
     pkt_line::write_line(&mut req, "command=ls-refs")?;
@@ -853,6 +856,84 @@ fn add_negotiation_tips(
     Ok(())
 }
 
+/// What a v2 `command=fetch` is for, which decides what the request carries.
+#[derive(Clone, Copy)]
+enum V2FetchMode<'a> {
+    /// A ref fetch: offer local haves, and repeat the `promisor-remote` reply
+    /// (if any) so a stateless server sees it on the fetch request too.
+    Refs {
+        /// Accepted promisor remotes, as sent in the `ls-refs` request.
+        promisor_reply: Option<&'a str>,
+    },
+    /// A promisor object-want fetch: no haves (Git's noop negotiator) and no
+    /// promisor reply.
+    ObjectWants,
+}
+
+/// The capability lines echoed on a v2 command request: agent and object-format
+/// from the server's advertisement, plus `promisor-remote=<reply>` when the client
+/// accepted promisor remotes.
+fn command_cap_echo(server_caps: &[String], promisor_reply: Option<&str>) -> Vec<String> {
+    let mut echo = protocol_v2::cap_lines_for_command_request(server_caps);
+    if let Some(reply) = promisor_reply {
+        echo.push(format!(
+            "{}={reply}",
+            protocol_v2::PROMISOR_REMOTE_CAPABILITY
+        ));
+    }
+    echo
+}
+
+/// Run the client side of the `promisor-remote` exchange for a v2 ref fetch.
+///
+/// Returns `None` when the server advertised no promisor remotes. Accepting needs a
+/// partial fetch (a filter, an automatic filter, or a fetch from a remote configured
+/// as a promisor remote): otherwise the server could leave out objects this client
+/// has no way to get again, and the pack, marked promisor because a remote was
+/// accepted, would claim objects no configured promisor can supply. Being a partial
+/// clone of some other remote is not enough.
+/// Stores `promisor.storeFields` values (unless dry-run), and resolves the filter
+/// when [`FetchOptions::auto_filter`] is set.
+fn v2_promisor_handshake(
+    local: &Repository,
+    local_cfg: &crate::config::ConfigSet,
+    server_caps: &[String],
+    opts: &mut FetchOptions,
+) -> Result<Option<crate::promisor_remote::PromisorHandshake>> {
+    use crate::net_trace::net_trace;
+    use crate::promisor_remote::{PromisorAdvertisement, PromisorHandshake};
+    let Some(value) = protocol_v2::server_promisor_remote_info(server_caps) else {
+        return Ok(None);
+    };
+    let advertisement = PromisorAdvertisement::parse(value);
+    if advertisement.remotes.is_empty() {
+        return Ok(None);
+    }
+    let auto_filter = opts.filter.is_none() && opts.auto_filter;
+    let partial_fetch = opts.filter.is_some()
+        || auto_filter
+        || opts
+            .remote_name
+            .as_deref()
+            .is_some_and(|name| crate::promisor_remote::is_promisor_remote(local_cfg, name));
+    let mut handshake =
+        PromisorHandshake::evaluate(local_cfg, &advertisement, partial_fetch, auto_filter);
+    if !opts.dry_run {
+        handshake.store_fields(local.git_dir(), local_cfg)?;
+    }
+    if auto_filter {
+        opts.filter = handshake.resolved_filter;
+    }
+    net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
+        "fetch_remote: server advertised {} promisor remote(s), accepted [{}]",
+        advertisement.remotes.len(),
+        handshake.decision.accepted_names().join(", ")
+    );
+    Ok(Some(handshake))
+}
+
 /// Run a v2 `command=fetch` negotiation over the connection and return the raw
 /// pack bytes for `wants`.
 ///
@@ -877,14 +958,18 @@ fn negotiate_pack_v2(
     wire_filter: Option<&str>,
     progress: &mut dyn Progress,
     cancel: &dyn Cancel,
-    skip_local_haves: bool,
+    mode: V2FetchMode<'_>,
 ) -> Result<(Option<std::path::PathBuf>, ShallowUpdate)> {
     if wants.is_empty() {
         return Ok((None, ShallowUpdate::default()));
     }
+    let (skip_local_haves, promisor_reply) = match mode {
+        V2FetchMode::Refs { promisor_reply } => (false, promisor_reply),
+        V2FetchMode::ObjectWants => (true, None),
+    };
     let local_odb = local.odb();
     let object_format = v2_object_format(server_caps, local_odb);
-    let cap_echo = protocol_v2::cap_lines_for_command_request(server_caps);
+    let cap_echo = command_cap_echo(server_caps, promisor_reply);
     let sideband_all = protocol_v2::fetch_supports_sideband_all(server_caps);
 
     // The ordered `have` list is produced lazily from local ref tips. Empty for a
@@ -1411,11 +1496,14 @@ pub fn fetch_remote_into(
     if opts.filter.is_none() {
         if let Some(remote) = opts.remote_name.as_deref() {
             opts.filter = crate::partial_clone::stored_remote_filter(&local_cfg, remote);
+            opts.auto_filter |=
+                crate::partial_clone::stored_remote_filter_is_auto(&local_cfg, remote);
         }
     }
     if !opts.object_wants.is_empty() {
         return fetch_remote_object_wants(local, conn, opts, progress, cancel);
     }
+    let mut promisor_handshake: Option<crate::promisor_remote::PromisorHandshake> = None;
     let local_odb_for_ls = local.odb();
 
     // 1. Remote refs + default branch.
@@ -1429,8 +1517,18 @@ pub fn fetch_remote_into(
         >= 2
     {
         let caps: Vec<String> = conn.capabilities().to_vec();
-        let (refs, head_symref, peel, head_oid) =
-            v2_ls_refs(conn, &caps, local_odb_for_ls, opts.tags, &opts.refspecs)?;
+        promisor_handshake = v2_promisor_handshake(local, &local_cfg, &caps, opts)?;
+        let promisor_reply = promisor_handshake
+            .as_ref()
+            .and_then(|h| h.decision.reply_value());
+        let (refs, head_symref, peel, head_oid) = v2_ls_refs(
+            conn,
+            &caps,
+            local_odb_for_ls,
+            opts.tags,
+            &opts.refspecs,
+            promisor_reply.as_deref(),
+        )?;
         let default_branch =
             head_symref.map(|t| t.strip_prefix("refs/heads/").unwrap_or(&t).to_owned());
         (refs, default_branch, Some(caps), peel, head_oid)
@@ -1621,8 +1719,13 @@ pub fn fetch_remote_into(
         v0_caps.as_deref(),
     );
     // Match Git: a requested/stored partial-clone filter marks the received pack
-    // promisor even when the server lacks `filter` and fetches unfiltered.
-    opts.mark_received_pack_promisor = opts.filter.is_some();
+    // promisor even when the server lacks `filter` and fetches unfiltered. So does
+    // accepting a promisor remote: the server may then leave out objects that
+    // remote holds.
+    let promisor_reply = promisor_handshake
+        .as_ref()
+        .and_then(|h| h.decision.reply_value());
+    opts.mark_received_pack_promisor = opts.filter.is_some() || promisor_reply.is_some();
     let wire_filter = wire_filter.as_deref();
 
     if wants.is_empty() {
@@ -1645,7 +1748,9 @@ pub fn fetch_remote_into(
                 wire_filter,
                 progress,
                 cancel,
-                false,
+                V2FetchMode::Refs {
+                    promisor_reply: promisor_reply.as_deref(),
+                },
             )?
         } else {
             negotiate_pack(
@@ -1681,6 +1786,7 @@ pub fn fetch_remote_into(
                     new_unshallow: shallow_update.unshallow,
                     transfer: crate::transfer::TransferStats::default(),
                     filter_sent,
+                    promisor: promisor_handshake,
                 });
             }
             let pack_config =
@@ -1952,6 +2058,7 @@ pub fn fetch_remote_into(
         new_unshallow: shallow_update.unshallow,
         transfer,
         filter_sent,
+        promisor: promisor_handshake,
     })
 }
 
@@ -1977,6 +2084,7 @@ fn fetch_remote_object_wants(
             new_unshallow: Vec::new(),
             transfer: crate::transfer::TransferStats::default(),
             filter_sent: false,
+            promisor: None,
         });
     }
 
@@ -2024,7 +2132,7 @@ fn fetch_remote_object_wants(
             wire_filter,
             progress,
             cancel,
-            true,
+            V2FetchMode::ObjectWants,
         )?
     } else {
         negotiate_pack(
@@ -2084,6 +2192,7 @@ fn fetch_remote_object_wants(
         new_unshallow: shallow_update.unshallow,
         transfer,
         filter_sent,
+        promisor: None,
     })
 }
 
@@ -2696,12 +2805,27 @@ mod fetch_advertised_ref_tests {
 
         let caps = vec!["ls-refs=unborn".to_owned()];
         let odb = Odb::new(std::path::Path::new("/dev/null"));
-        let req = build_v2_ls_refs_request(&caps, &odb, TagMode::None, &[]).unwrap();
+        let req = build_v2_ls_refs_request(&caps, &odb, TagMode::None, &[], None).unwrap();
         let text = String::from_utf8_lossy(&req);
         assert!(
             text.contains("unborn"),
             "request must ask for unborn HEAD:\n{text}"
         );
+        assert!(!text.contains("promisor-remote"), "{text}");
+    }
+
+    #[test]
+    fn build_v2_ls_refs_request_carries_promisor_reply_before_args() {
+        use crate::odb::Odb;
+        use crate::transfer::TagMode;
+
+        let caps = vec!["agent=git/2.50".to_owned(), "object-format=sha1".to_owned()];
+        let odb = Odb::new(std::path::Path::new("/dev/null"));
+        let req = build_v2_ls_refs_request(&caps, &odb, TagMode::None, &[], Some("lop")).unwrap();
+        let text = String::from_utf8_lossy(&req);
+        let reply = text.find("promisor-remote=lop\n").expect("reply line");
+        let delim = text.find("0001").expect("delim");
+        assert!(reply < delim, "{text}");
     }
 
     #[test]
@@ -3413,7 +3537,9 @@ mod v2_negotiation_tests {
             None,
             &mut NoProgress,
             &NeverCancel,
-            false,
+            V2FetchMode::Refs {
+                promisor_reply: None,
+            },
         );
 
         let last = server.requests.last().unwrap();

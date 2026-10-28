@@ -524,6 +524,7 @@ fn complete_bundle_fetch(
         new_unshallow: Vec::new(),
         transfer,
         filter_sent: false,
+        promisor: None,
     })
 }
 

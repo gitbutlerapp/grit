@@ -40,7 +40,7 @@ pub struct GlobalRepoArgs {
     pub no_optional_locks: bool,
 }
 
-fn parse_config_override(spec: &str) -> Result<ConfigOverride, String> {
+pub(crate) fn parse_config_override(spec: &str) -> Result<ConfigOverride, String> {
     spec.parse()
         .map_err(|err: grit_lib::error::Error| err.to_string())
 }

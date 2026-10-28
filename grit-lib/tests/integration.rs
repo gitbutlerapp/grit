@@ -1258,6 +1258,8 @@ mod promisor_on_demand_fetch;
 #[cfg(feature = "full-tests")]
 #[path = "promisor_packs.rs"]
 mod promisor_packs;
+#[path = "promisor_remote_handshake.rs"]
+mod promisor_remote_handshake;
 #[path = "pruned_modules.rs"]
 mod pruned_modules;
 #[path = "published_crates_declare_rust_version.rs"]

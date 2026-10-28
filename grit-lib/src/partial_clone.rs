@@ -13,6 +13,8 @@ use crate::rev_list::{expand_object_filter_for_protocol, ObjectFilter};
 /// Only `blob:none` and `blob:limit=<n>` are supported on the wire today; other
 /// [`ObjectFilter`] kinds remain server-side upload-pack policy only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum ObjectFilterSpec {
     /// Omit all blob objects (`blob:none`).
     BlobNone,
@@ -136,6 +138,49 @@ impl PartialCloneConfig {
         config.write()?;
         Ok(())
     }
+
+    /// Set the same keys as [`Self::write`] with the filter left to be chosen on each fetch
+    /// (`remote.<remote>.partialclonefilter=auto`, Git's `clone --filter=auto`).
+    ///
+    /// Each later fetch from `remote` then picks its filter from the promisor remotes the
+    /// server advertises and the client accepts (see
+    /// [`PromisorDecision::combined_filter`](crate::promisor_remote::PromisorDecision::combined_filter)).
+    /// Git older than 2.54 does not understand the `auto` value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::Error`] on config I/O failure.
+    pub fn write_auto(git_dir: &Path, remote: &str) -> Result<()> {
+        let path = git_dir.join("config");
+        let content = std::fs::read_to_string(&path).map_err(Error::Io)?;
+        let mut config = ConfigFile::parse(&path, &content, ConfigScope::Local)?;
+        config.set(&format!("remote.{remote}.promisor"), "true")?;
+        config.set(
+            &format!("remote.{remote}.partialclonefilter"),
+            AUTO_FILTER_VALUE,
+        )?;
+        config.set("extensions.partialclone", remote)?;
+        config.set("core.repositoryformatversion", "1")?;
+        config.write()?;
+        Ok(())
+    }
+}
+
+/// The `remote.<name>.partialclonefilter` value that makes each fetch choose its filter from
+/// the accepted promisor remotes (Git's `--filter=auto`).
+pub const AUTO_FILTER_VALUE: &str = "auto";
+
+/// Whether `remote.<remote>.partialclonefilter` is [`AUTO_FILTER_VALUE`].
+///
+/// # Parameters
+///
+/// - `config`: merged config.
+/// - `remote`: remote name.
+#[must_use]
+pub fn stored_remote_filter_is_auto(config: &ConfigSet, remote: &str) -> bool {
+    config
+        .get(&format!("remote.{remote}.partialclonefilter"))
+        .is_some_and(|s| s.trim().eq_ignore_ascii_case(AUTO_FILTER_VALUE))
 }
 
 /// Stored `remote.<name>.partialclonefilter` when present and valid.
@@ -233,6 +278,22 @@ mod tests {
             ObjectFilterSpec::BlobLimit(512)
         );
         assert!(ObjectFilterSpec::parse("tree:0").is_err());
+    }
+
+    #[test]
+    fn auto_filter_is_written_and_detected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("config"), "[core]\n\tbare = true\n").expect("config");
+        PartialCloneConfig::write_auto(dir.path(), "origin").expect("write");
+        let cfg = ConfigSet::load_repo_local_only(dir.path()).expect("load");
+        assert!(stored_remote_filter_is_auto(&cfg, "origin"));
+        assert!(!stored_remote_filter_is_auto(&cfg, "other"));
+        assert_eq!(stored_remote_filter(&cfg, "origin"), None);
+        assert!(remote_is_promisor(&cfg, "origin"));
+        assert_eq!(
+            cfg.get("extensions.partialclone").as_deref(),
+            Some("origin")
+        );
     }
 
     #[test]

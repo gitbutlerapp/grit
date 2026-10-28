@@ -118,6 +118,8 @@ mod clone_invalid_origin;
 #[cfg(feature = "full-tests")]
 #[path = "clone_progress.rs"]
 mod clone_progress;
+#[path = "clone_promisor_remote.rs"]
+mod clone_promisor_remote;
 #[cfg(feature = "full-tests")]
 #[path = "clone_shallow.rs"]
 mod clone_shallow;
