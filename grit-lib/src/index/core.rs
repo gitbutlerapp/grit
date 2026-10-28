@@ -356,6 +356,15 @@ impl IndexEntry {
         }
     }
 
+    /// Compare extended flags for merge index fast paths, ignoring in-memory-only bits.
+    pub(crate) fn extended_flags_equal_ignoring_volatile(
+        left: Option<u16>,
+        right: Option<u16>,
+    ) -> bool {
+        (left.unwrap_or(0) & Self::FLAG_EXT_ON_DISK)
+            == (right.unwrap_or(0) & Self::FLAG_EXT_ON_DISK)
+    }
+
     /// Mark this entry's `oid` as just hashed from the worktree file whose stat data it holds
     /// (in-memory only, like [`Index::mark_content_verified`] without a per-path map entry).
     pub(crate) fn mark_content_verified(&mut self) {
@@ -2609,14 +2618,20 @@ impl Index {
                 .collect::<Vec<_>>();
             self.entries = merge_sorted_index_entries(kept, replacements);
             self.entries_sorted = true;
-            for path in invalidated_paths {
-                self.invalidate_after_path_removal(&path);
-            }
-            for path in repl_for_inval {
-                if let Ok(p) = std::str::from_utf8(&path) {
-                    self.invalidate_untracked_cache_for_path(p);
+            const BULK_INDEX_EXTENSION_INVALIDATE_MIN: usize = 64;
+            let invalidations = invalidated_paths.len() + repl_for_inval.len();
+            if invalidations >= BULK_INDEX_EXTENSION_INVALIDATE_MIN {
+                self.drop_derived_index_extensions();
+            } else {
+                for path in invalidated_paths {
+                    self.invalidate_after_path_removal(&path);
                 }
-                self.invalidate_cache_tree_for_path(&path);
+                for path in repl_for_inval {
+                    if let Ok(p) = std::str::from_utf8(&path) {
+                        self.invalidate_untracked_cache_for_path(p);
+                    }
+                    self.invalidate_cache_tree_for_path(&path);
+                }
             }
             self.touch_fsmonitor_after_entry_change();
             return;
