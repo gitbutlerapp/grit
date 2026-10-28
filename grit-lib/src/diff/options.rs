@@ -73,7 +73,7 @@ pub enum RenameDetection {
 
 impl Default for RenameDetection {
     fn default() -> Self {
-        Self::Similarity(40)
+        Self::Similarity(50)
     }
 }
 
@@ -344,11 +344,15 @@ mod tests {
         assert!(!opts.indent_heuristic);
         assert_eq!(opts.renames, RenameDetection::Off);
 
-        let cfg2 = config_from("[diff]\n\trenames = copies\n");
-        assert_eq!(
-            DiffOptions::from_config(&cfg2).renames,
-            RenameDetection::default()
-        );
+        // Git's `-M` default is 50%; `diff.renames` on (or unset) must not lower it.
+        assert_eq!(RenameDetection::default(), RenameDetection::Similarity(50));
+        for on in ["", "[diff]\n\trenames = true\n", "[diff]\n\trenames = copies\n"] {
+            assert_eq!(
+                DiffOptions::from_config(&config_from(on)).renames,
+                RenameDetection::Similarity(50),
+                "config={on:?}"
+            );
+        }
 
         for off in ["no", "0", "off", "OFF"] {
             let cfg = config_from(&format!("[diff]\n\trenames = {off}\n"));

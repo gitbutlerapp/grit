@@ -203,6 +203,59 @@ fn algorithm_flag_overrides_config() {
 }
 
 #[test]
+fn default_rename_threshold_matches_git_m() {
+    use grit_lib::diff::DiffOptions;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let wt = dir.path();
+    git_quiet(wt, &["init", "-q", "-b", "main"]);
+    let old: String = (1..=100).map(|i| format!("line {i}\n")).collect();
+    fs::write(wt.join("old.txt"), old).unwrap();
+    git_quiet(wt, &["add", "."]);
+    git_quiet(wt, &["commit", "-qm", "one"]);
+    let parent = rev_parse_tree(wt, "HEAD^{tree}");
+    fs::remove_file(wt.join("old.txt")).unwrap();
+    let new: String = (1..=45)
+        .map(|i| format!("line {i}\n"))
+        .chain((1..=55).map(|i| format!("new {i}\n")))
+        .collect();
+    fs::write(wt.join("new.txt"), new).unwrap();
+    git_quiet(wt, &["add", "-A"]);
+    git_quiet(wt, &["commit", "-qm", "two"]);
+    let commit = rev_parse_tree(wt, "HEAD^{tree}");
+
+    let repo = grit_lib::repo::Repository::discover(
+        Some(wt),
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open");
+    let grit_at = |threshold: u32| {
+        let entries =
+            diff_trees_with_renames(repo.odb(), Some(&parent), Some(&commit), "", threshold)
+                .expect("diff");
+        grit_name_status(&entries)
+    };
+
+    // Plain `-M` uses Git's default 50%, which this low-40s pair does not reach.
+    let git_default = git_name_status(wt, &["-M", &parent.to_hex(), &commit.to_hex()]);
+    assert_eq!(
+        git_default,
+        vec!["A\tnew.txt".to_string(), "D\told.txt".to_string()]
+    );
+    assert_eq!(
+        grit_at(DiffOptions::default().rename_threshold_u32()),
+        git_default
+    );
+
+    let git_m40 = git_name_status(wt, &["-M40", &parent.to_hex(), &commit.to_hex()]);
+    assert!(
+        git_m40.iter().any(|l| l.starts_with('R')),
+        "git -M40: {git_m40:?}"
+    );
+    assert_eq!(grit_at(40), git_m40);
+}
+
+#[test]
 fn exact_rename_matches_git_m100_percent() {
     let dir = tempfile::tempdir().expect("tempdir");
     let wt = dir.path();
