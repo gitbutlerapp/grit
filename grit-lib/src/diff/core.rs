@@ -11219,7 +11219,7 @@ pub fn count_changes(old_content: &str, new_content: &str) -> (usize, usize) {
 
 /// Count insertions and deletions using the given line-diff algorithm.
 ///
-/// Uses the same compacted line alignment as unified patches and [`line_change_counts`].
+/// Uses the same compacted line alignment as unified patches and [`crate::diff::line_change_counts`].
 #[must_use]
 pub fn count_changes_with_algorithm(
     old_content: &str,
