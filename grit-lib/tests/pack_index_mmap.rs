@@ -84,14 +84,38 @@ fn git_large_offset_table_opens_via_mmap() {
         &built.bytes,
         grit_test_support::objects::HashAlgo::Sha1,
         &IndexPackOptions {
-            index_version: Some(IndexVersion::V2LargeOffsetAt(0x40)),
+            index_version: Some(IndexVersion::V2LargeOffsetAt(1)),
             ..IndexPackOptions::default()
         },
     );
     let idx_path = out.idx_path.expect("idx");
     let mapped = read_pack_index_no_verify(&idx_path).expect("mmap");
     let oid = ObjectId::from_bytes(mapped.oid_at(0)).expect("oid");
-    assert!(mapped.find_offset(&oid).expect("lookup").is_some());
+    let offset = mapped.find_offset(&oid).expect("lookup").expect("offset");
+    assert!(offset > 0, "expected pack offset, got {offset}");
+    assert_eq!(mapped.offset_at(0).expect("row"), offset);
+}
+
+#[test]
+fn git_pack_offset_past_2gib_reads_via_mmap() {
+    let repo = RepoFixture::init(grit_test_support::objects::HashAlgo::Sha1).expect("init");
+    let oid_large =
+        crate::midx_support::install_git_large_offset_pack(&repo).expect("large-offset fixture");
+    let idx_path = repo.objects_dir().join("pack/large-loff.idx");
+    let mapped = read_pack_index_no_verify(&idx_path).expect("mmap");
+    let offset = mapped
+        .find_offset(&oid_large)
+        .expect("lookup")
+        .expect("large blob");
+    assert_eq!(offset, 1u64 << 32);
+    let records = verify_pack_and_collect(&idx_path).expect("grit verify-pack");
+    assert_eq!(records.len(), 2);
+    assert!(
+        records
+            .iter()
+            .any(|r| r.oid.as_slice() == oid_large.as_bytes()),
+        "missing large blob in verify-pack listing"
+    );
 }
 
 #[test]
@@ -115,7 +139,7 @@ fn lazy_v2_out_of_range_large_offset_slot_returns_corruption_not_panic() {
 }
 
 #[test]
-fn lazy_v2_inconsistent_large_offset_slot_returns_corruption() {
+fn lazy_v2_out_of_range_large_offset_slot_returns_corruption_on_lookup() {
     let oid = ObjectId::from_bytes(&[0x01; 20]).expect("oid");
     let mut body = Vec::new();
     body.extend_from_slice(b"\xfftOc");
@@ -131,7 +155,9 @@ fn lazy_v2_inconsistent_large_offset_slot_returns_corruption() {
     body.extend_from_slice(&[0u8; 20]);
     body.extend_from_slice(&[0u8; 20]);
     let idx = parse_pack_index_bytes(Path::new("bad-assign.idx"), body, false).expect("lazy");
-    let err = idx.find_offset(&oid).expect_err("inconsistent slot");
+    let err = idx
+        .find_offset(&oid)
+        .expect_err("slot 1 with one large entry");
     assert!(matches!(err, Error::CorruptObject(_)));
 }
 

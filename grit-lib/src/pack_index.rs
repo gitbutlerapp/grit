@@ -206,7 +206,7 @@ impl PackIndex {
         }
     }
 
-    fn decode_v2_offset_at(&self, row: usize, raw: u32) -> Result<u64> {
+    fn decode_v2_offset_at(&self, _row: usize, raw: u32) -> Result<u64> {
         if (raw & 0x8000_0000) == 0 {
             return Ok(u64::from(raw));
         }
@@ -215,13 +215,6 @@ impl PackIndex {
             return Err(Error::CorruptObject(format!(
                 "large offset slot {slot} out of range ({} slots) in {}",
                 self.layout.large_off_count,
-                self.idx_path.display()
-            )));
-        }
-        let expected_slot = self.large_slot_index_for_row(row)?;
-        if slot != expected_slot {
-            return Err(Error::CorruptObject(format!(
-                "inconsistent 64b offset index at entry {row} in {}",
                 self.idx_path.display()
             )));
         }
@@ -234,19 +227,6 @@ impl PackIndex {
             )));
         }
         Ok(read_u64_be_slice(&self.storage, loff))
-    }
-
-    fn large_slot_index_for_row(&self, row: usize) -> Result<usize> {
-        debug_assert!(self.layout.version == PackIndexVersion::V2);
-        let mut next = 0usize;
-        for i in 0..row {
-            let start = self.layout.off32_base + i * 4;
-            let raw = read_u32_be_slice(&self.storage, start);
-            if (raw & 0x8000_0000) != 0 {
-                next += 1;
-            }
-        }
-        Ok(next)
     }
 
     /// CRC32 at sorted position `i` (`None` for version-1 indexes).
@@ -1293,6 +1273,60 @@ mod tests {
         parse_pack_index_bytes(Path::new("bad-large.idx"), body.clone(), false)
             .expect("lazy open skips large-slot assignment scan");
         let err = parse_pack_index_bytes(Path::new("bad-large.idx"), body, true).unwrap_err();
+        assert!(matches!(err, Error::CorruptObject(_)));
+    }
+
+    #[test]
+    fn v2_large_offset_table_direct_index_many_rows() {
+        use crate::pack::write_v2_pack_index_with_trailer;
+        use std::time::Instant;
+
+        const N: u32 = 20_000;
+        let mut rows: Vec<(ObjectId, u64, u32)> = Vec::with_capacity(N as usize);
+        for i in 0..N {
+            let mut bytes = [0u8; 20];
+            bytes[0] = 0x07;
+            bytes[1..5].copy_from_slice(&i.to_be_bytes());
+            let oid = ObjectId::from_bytes(&bytes).expect("oid");
+            let offset = (1u64 << 31) + u64::from(i) * 64;
+            rows.push((oid, offset, 0));
+        }
+        let last_offset = rows.last().expect("row").1;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let idx_path = tmp.path().join("many-large.idx");
+        write_v2_pack_index_with_trailer(&idx_path, &rows, &[0u8; 20], 20, None).expect("write");
+        let bytes = std::fs::read(&idx_path).expect("read");
+        let lazy = parse_pack_index_bytes(&idx_path, bytes.clone(), false).expect("lazy");
+        let last_row = (N - 1) as usize;
+        assert_eq!(lazy.offset_at(last_row).expect("last"), last_offset);
+        assert_eq!(lazy.offset_at(0).expect("first"), (1u64 << 31));
+
+        let t0 = Instant::now();
+        for _ in 0..50 {
+            let _ = lazy.offset_at(last_row).expect("last");
+        }
+        let last_elapsed = t0.elapsed();
+        let t1 = Instant::now();
+        for _ in 0..50 {
+            let _ = lazy.offset_at(0).expect("first");
+        }
+        let first_elapsed = t1.elapsed();
+        assert!(
+            last_elapsed <= first_elapsed * 10,
+            "last row lookup {last_elapsed:?} vs first {first_elapsed:?}"
+        );
+
+        let mut swapped = bytes;
+        let off32_base = 8 + 256 * 4 + 20 * (N as usize) + 4 * (N as usize);
+        let second_off32 = off32_base + 4;
+        swapped[second_off32..second_off32 + 4].copy_from_slice(&0x8000_0000u32.to_be_bytes());
+        let lazy_swap =
+            parse_pack_index_bytes(&idx_path, swapped, false).expect("lazy swapped slot");
+        assert_eq!(lazy_swap.offset_at(1).expect("swapped"), 1u64 << 31);
+        let mut swapped_for_verify = std::fs::read(&idx_path).expect("read");
+        swapped_for_verify[second_off32..second_off32 + 4]
+            .copy_from_slice(&0x8000_0000u32.to_be_bytes());
+        let err = parse_pack_index_bytes(&idx_path, swapped_for_verify, true).expect_err("verify");
         assert!(matches!(err, Error::CorruptObject(_)));
     }
 
