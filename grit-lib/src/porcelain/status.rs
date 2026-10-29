@@ -266,8 +266,8 @@ pub struct StatusModel {
     pub head_tree: Option<ObjectId>,
     /// In-progress operation state (merge, rebase, cherry-pick, bisect, …).
     pub state: WtStatusState,
-    /// The loaded index, with sparse-directory placeholders expanded — the same
-    /// index the renderers query for per-stage entries. Not serialized: the
+    /// The loaded index (sparse-directory placeholders stay collapsed unless a
+    /// pathspec required expanding them). Not serialized: the
     /// per-path results are in the other fields.
     #[cfg_attr(feature = "serde-models", serde(skip))]
     pub index: Index,
@@ -2282,15 +2282,14 @@ pub fn status(
     let state = crate::state::wt_status_get_state(repo.git_dir(), &head, true)?;
     let repo_config = repo.config().ok();
 
-    // Load the index (including split-index merge and GIT_INDEX_FILE), remembering
-    // whether it was sparse on disk, then expand sparse-directory placeholders
-    // so the diffs see real entries.
+    // Load without expanding sparse-directory placeholders; expand only directories
+    // a pathspec may reach so read-mostly status stays on Git's sparse index shape.
     let index_path = repo.index_path_for_env()?;
-    let mut index = repo.load_index_at(&index_path)?;
+    let mut index = repo.load_index_at_preserving_sparse(
+        &index_path,
+        crate::index::IndexParseContext::from_policy(repo.thread_policy()),
+    )?;
     let index_mtime = index.source_mtime;
-    let worktree_rules = Arc::new(Mutex::new(
-        crate::worktree_rules::WorktreeRules::from_repository(repo, &index)?,
-    ));
     let sparse_directory_prefixes: Vec<Vec<u8>> = index
         .entries
         .iter()
@@ -2299,11 +2298,19 @@ pub fn status(
         .collect();
     let index_sparse_on_disk =
         index.sparse_directories || index.has_sparse_directory_placeholders();
-    let protect = repo_config
-        .as_deref()
-        .map(crate::path_validate::ProtectOptions::from_config)
-        .unwrap_or_default();
-    let _ = index.expand_sparse_directory_placeholders(repo.odb(), protect);
+    if !opts.pathspecs.is_empty() {
+        crate::porcelain::index_from_tree::expand_sparse_for_pathspecs(
+            repo,
+            &mut index,
+            &opts.pathspecs,
+        )?;
+    }
+    if let Some(cfg) = repo_config.as_deref() {
+        repo.clear_present_skip_worktree(&mut index, cfg);
+    }
+    let worktree_rules = Arc::new(Mutex::new(
+        crate::worktree_rules::WorktreeRules::from_repository(repo, &index)?,
+    ));
 
     let head_tree = match head.oid() {
         Some(oid) => {

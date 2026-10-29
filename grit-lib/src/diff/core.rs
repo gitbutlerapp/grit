@@ -3805,8 +3805,10 @@ fn diff_index_to_tree_flatten(
     tree_oid: Option<&ObjectId>,
     ignore_submodules: bool,
 ) -> Result<Vec<DiffEntry>> {
+    let sparse_index = index.has_sparse_directory_placeholders();
     // Flatten the tree into a sorted list of (path, mode, oid)
     let tree_entries = match tree_oid {
+        Some(oid) if sparse_index => flatten_tree_with_index(odb, oid, "", Some(index))?,
         Some(oid) => flatten_tree(odb, oid, "")?,
         None => Vec::new(),
     };
@@ -3829,6 +3831,10 @@ fn diff_index_to_tree_flatten(
         if ie.stage() == 0 && ie.intent_to_add() {
             // Intent-to-add entries are not "staged" for diff-index / status
             // (matches Git: `git diff --cached` is empty for `-N` paths).
+            continue;
+        }
+        if ie.stage() == 0 && ie.is_sparse_directory_placeholder() {
+            let _ = tree_map.remove(path.as_str());
             continue;
         }
         if ie.stage() != 0 {
@@ -4133,6 +4139,17 @@ fn diff_index_tree_at(
     cache_node: Option<&CacheTreeNode>,
     dir_prefix: &[u8],
 ) -> Result<()> {
+    if !dir_prefix.is_empty() {
+        let mut path = dir_prefix.to_vec();
+        path.push(b'/');
+        if let Some(entry) = walk.index.entries.get(*walk.idx_cursor).filter(|entry| {
+            entry.path == path && entry.is_sparse_directory_placeholder() && entry.oid == *tree_oid
+        }) {
+            let _ = entry;
+            *walk.idx_cursor += 1;
+            return Ok(());
+        }
+    }
     let tree_entries = read_tree(walk.odb, tree_oid)?;
     if tree_entries_have_duplicate_names(&tree_entries) {
         walk.abort_to_flatten = true;
@@ -4176,6 +4193,10 @@ fn diff_index_tree_at(
                     std::cmp::Ordering::Equal => {
                         if t_is_tree && i_is_tree {
                             let full_path = join_index_path(dir_prefix, t_name);
+                            if diff_index_tree_skip_sparse_placeholder(walk, &full_path, t_entry)? {
+                                ti += 1;
+                                continue;
+                            }
                             let child_cache = cache_children.get(t_name);
                             if child_cache
                                 .is_some_and(|c| c.is_valid() && c.oid == Some(t_entry.oid))
@@ -4241,6 +4262,28 @@ fn diff_index_tree_at(
     }
 
     Ok(())
+}
+
+fn diff_index_tree_skip_sparse_placeholder(
+    walk: &mut DiffIndexTreeWalk<'_, '_>,
+    full_path: &[u8],
+    t_entry: &TreeEntry,
+) -> Result<bool> {
+    let Some(entry) = walk.index.entries.get(*walk.idx_cursor) else {
+        return Ok(false);
+    };
+    if !entry.is_sparse_directory_placeholder() {
+        return Ok(false);
+    }
+    let mut dir = full_path.to_vec();
+    if !dir.ends_with(b"/") {
+        dir.push(b'/');
+    }
+    if entry.path != dir || entry.oid != t_entry.oid {
+        return Ok(false);
+    }
+    *walk.idx_cursor += 1;
+    Ok(true)
 }
 
 fn emit_index_tree_deleted(
@@ -8087,8 +8130,10 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
     };
     let filter_fp = worktree_rules.map(|r| r.filter_process());
 
+    let sparse_index = index.has_sparse_directory_placeholders();
     // Flatten the tree into a BTreeMap keyed by path
     let tree_flat = match tree_oid {
+        Some(oid) if sparse_index => flatten_tree_with_index(odb, oid, "", Some(index))?,
         Some(oid) => flatten_tree(odb, oid, "")?,
         None => Vec::new(),
     };
@@ -11808,6 +11853,26 @@ struct FlatEntry {
 }
 
 fn flatten_tree(odb: &Odb, tree_oid: &ObjectId, prefix: &str) -> Result<Vec<FlatEntry>> {
+    flatten_tree_with_index(odb, tree_oid, prefix, None)
+}
+
+fn sparse_index_skips_tree_descent(index: &Index, dir_path: &str, tree_oid: &ObjectId) -> bool {
+    let mut storage = crate::repo_relpath::storage_bytes(dir_path).into_owned();
+    if !storage.ends_with(b"/") {
+        storage.push(b'/');
+    }
+    index.find_entry_pos(&storage, 0).is_some_and(|pos| {
+        let entry = &index.entries[pos];
+        entry.is_sparse_directory_placeholder() && entry.oid == *tree_oid
+    })
+}
+
+fn flatten_tree_with_index(
+    odb: &Odb,
+    tree_oid: &ObjectId,
+    prefix: &str,
+    index: Option<&Index>,
+) -> Result<Vec<FlatEntry>> {
     let entries = read_tree(odb, tree_oid)?;
     let mut result = Vec::new();
 
@@ -11815,7 +11880,10 @@ fn flatten_tree(odb: &Odb, tree_oid: &ObjectId, prefix: &str) -> Result<Vec<Flat
         let name_str = String::from_utf8_lossy(&entry.name);
         let path = format_path(prefix, &name_str);
         if is_tree_mode(entry.mode) {
-            let nested = flatten_tree(odb, &entry.oid, &path)?;
+            if index.is_some_and(|idx| sparse_index_skips_tree_descent(idx, &path, &entry.oid)) {
+                continue;
+            }
+            let nested = flatten_tree_with_index(odb, &entry.oid, &path, index)?;
             result.extend(nested);
         } else {
             result.push(FlatEntry {

@@ -6918,6 +6918,7 @@ impl<'repo> grit_lib::index::handle::IndexHandle<'repo>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::begin_update(&self) -> grit_lib::error::Result<grit_lib::index::IndexLock>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::commit_update(&self, &mut grit_lib::index::IndexLock, &mut grit_lib::index::Index, bool) -> grit_lib::error::Result<()>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::load(&self) -> grit_lib::error::Result<grit_lib::index::Index>
+pub fn grit_lib::index::handle::IndexHandle<'repo>::load_preserving_sparse(&self) -> grit_lib::error::Result<grit_lib::index::Index>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::load_at(&self, &std::path::Path) -> grit_lib::error::Result<grit_lib::index::Index>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::index::handle::IndexHandle<'repo>::path(&self) -> std::path::PathBuf
@@ -7417,6 +7418,7 @@ impl<'repo> grit_lib::index::handle::IndexHandle<'repo>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::begin_update(&self) -> grit_lib::error::Result<grit_lib::index::IndexLock>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::commit_update(&self, &mut grit_lib::index::IndexLock, &mut grit_lib::index::Index, bool) -> grit_lib::error::Result<()>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::load(&self) -> grit_lib::error::Result<grit_lib::index::Index>
+pub fn grit_lib::index::handle::IndexHandle<'repo>::load_preserving_sparse(&self) -> grit_lib::error::Result<grit_lib::index::Index>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::load_at(&self, &std::path::Path) -> grit_lib::error::Result<grit_lib::index::Index>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::index::handle::IndexHandle<'repo>::path(&self) -> std::path::PathBuf

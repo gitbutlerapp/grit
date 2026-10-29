@@ -388,6 +388,11 @@ path = "tests/status_index_stat_refresh_git_compat.rs"
 required-features = ["full-tests"]
 
 [[test]]
+name = "sparse_index_readonly_porcelain_git_compat"
+path = "tests/sparse_index_readonly_porcelain_git_compat.rs"
+required-features = ["full-tests"]
+
+[[test]]
 name = "status_optional_locks_git_compat"
 path = "tests/status_optional_locks_git_compat.rs"
 required-features = ["full-tests"]

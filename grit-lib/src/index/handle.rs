@@ -69,6 +69,16 @@ impl<'repo> IndexHandle<'repo> {
         self.repo.load_index()
     }
 
+    /// Load the index without expanding sparse-directory placeholders.
+    ///
+    /// Use for read-mostly porcelain (`status`, `diff`) on cone sparse-index checkouts.
+    /// [`Self::load`] still expands every placeholder for callers that need a fully
+    /// materialized index.
+    #[inline]
+    pub fn load_preserving_sparse(&self) -> Result<Index> {
+        self.repo.load_index_preserving_sparse()
+    }
+
     /// Load an index from an explicit on-disk path.
     #[inline]
     pub fn load_at(&self, path: &Path) -> Result<Index> {

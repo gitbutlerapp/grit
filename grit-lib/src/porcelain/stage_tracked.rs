@@ -112,7 +112,7 @@ pub fn stage_tracked_modifications_with_thresholds(
     thresholds: IndexStagingThresholds,
 ) -> Result<StageTrackedSummary> {
     let index_path = repo.index_path_for_env()?;
-    let (mut lock, mut index) = match repo.lock_and_load_index() {
+    let (mut lock, mut index) = match repo.lock_and_load_index_preserving_sparse() {
         Ok(locked) => locked,
         Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok(StageTrackedSummary::default());

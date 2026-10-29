@@ -9,7 +9,7 @@ See also the [Repository](../repository/) and [Objects](../objects/) pages for o
 
 ## Reading the index
 
-`IndexHandle::load` reads `index` from disk with the same sparse-checkout and split-index rules porcelain commands use. Entries are `IndexEntry` values with path, mode, object id, and stage.
+`IndexHandle::load` reads `index` from disk and expands every sparse-directory placeholder (full in-memory materialization). Read-mostly porcelain such as `status` and `diff` use [`IndexHandle::load_preserving_sparse`](rustdoc:grit_lib::index::handle::IndexHandle::load_preserving_sparse) instead so cone sparse-index repos stay on Git's compact index shape. Entries are `IndexEntry` values with path, mode, object id, and stage.
 
 ## Staging paths
 

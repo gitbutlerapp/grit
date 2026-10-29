@@ -2575,6 +2575,18 @@ impl Repository {
         Ok((lock, index))
     }
 
+    /// Like [`Self::lock_and_load_index`], but keeps sparse-directory placeholders collapsed.
+    pub(crate) fn lock_and_load_index_preserving_sparse(
+        &self,
+    ) -> Result<(crate::index::IndexLock, Index)> {
+        let lock = self.lock_index()?;
+        let index = self.load_index_at_preserving_sparse(
+            &lock.index_path,
+            crate::index::IndexParseContext::from_policy(self.thread_policy()),
+        )?;
+        Ok((lock, index))
+    }
+
     /// Shared pre-write housekeeping for [`Self::write_index_file`] and [`Self::flush_index_update`].
     fn prepare_index_for_disk_write(
         &self,

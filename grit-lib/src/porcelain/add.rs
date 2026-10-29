@@ -498,7 +498,17 @@ fn stage_inner(
 ) -> Result<StageOutcome> {
     let mut scope = ProgressScope::new(progress, cancel);
     if opts.dry_run {
-        let mut index = repo.load_index()?;
+        let mut index = repo.load_index_preserving_sparse()?;
+        if !opts.pathspecs.is_empty() {
+            crate::porcelain::index_from_tree::expand_sparse_for_pathspecs(
+                repo,
+                &mut index,
+                &opts.pathspecs,
+            )?;
+        }
+        if let Ok(cfg) = repo.config() {
+            repo.clear_present_skip_worktree(&mut index, cfg.as_ref());
+        }
         return stage_inner_on_index(
             repo,
             opts,
@@ -510,7 +520,17 @@ fn stage_inner(
             None,
         );
     }
-    let (mut lock, mut index) = repo.lock_and_load_index()?;
+    let (mut lock, mut index) = repo.lock_and_load_index_preserving_sparse()?;
+    if !opts.pathspecs.is_empty() {
+        crate::porcelain::index_from_tree::expand_sparse_for_pathspecs(
+            repo,
+            &mut index,
+            &opts.pathspecs,
+        )?;
+    }
+    if let Ok(cfg) = repo.config() {
+        repo.clear_present_skip_worktree(&mut index, cfg.as_ref());
+    }
     stage_inner_on_index(
         repo,
         opts,

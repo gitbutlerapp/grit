@@ -387,6 +387,39 @@ fn matching_sparse_trees(
 }
 
 /// Expose rows needed by a tree delta, including a directory/file replacement at its root.
+/// Expand sparse-directory placeholders only when a pathspec may select paths under them.
+pub(crate) fn expand_sparse_for_pathspecs(
+    repo: &Repository,
+    index: &mut Index,
+    pathspecs: &[String],
+) -> Result<()> {
+    if pathspecs.is_empty() || !index.has_sparse_directory_placeholders() {
+        return Ok(());
+    }
+    let paths: Vec<Vec<u8>> = pathspecs
+        .iter()
+        .map(|path| crate::repo_relpath::storage_bytes(path).into_owned())
+        .collect();
+    index.expand_sparse_directories_matching(
+        repo.odb(),
+        ProtectOptions::from_config(&*repo.config()?),
+        |row| sparse_row_touched_by_paths(row, &paths),
+    )
+}
+
+fn sparse_row_touched_by_paths(row: &IndexEntry, paths: &[Vec<u8>]) -> bool {
+    let dir = row.path.strip_suffix(b"/").unwrap_or(&row.path);
+    paths.iter().any(|path| {
+        path.starts_with(&row.path)
+            || path == dir
+            || dir
+                .strip_prefix(path.as_slice())
+                .is_some_and(|tail| tail.is_empty() || tail.starts_with(b"/"))
+            || (path.starts_with(dir)
+                && (path.len() == dir.len() || path.get(dir.len()) == Some(&b'/')))
+    })
+}
+
 pub(crate) fn expand_sparse_for_tree_changes(
     repo: &Repository,
     index: &mut Index,
@@ -407,16 +440,7 @@ pub(crate) fn expand_sparse_for_tree_changes(
     index.expand_sparse_directories_matching(
         repo.odb(),
         ProtectOptions::from_config(&*repo.config()?),
-        |row| {
-            let dir = row.path.strip_suffix(b"/").unwrap_or(&row.path);
-            paths.iter().any(|path| {
-                path.starts_with(&row.path)
-                    || path == dir
-                    || dir
-                        .strip_prefix(path.as_slice())
-                        .is_some_and(|tail| tail.starts_with(b"/"))
-            })
-        },
+        |row| sparse_row_touched_by_paths(row, &paths),
     )
 }
 
