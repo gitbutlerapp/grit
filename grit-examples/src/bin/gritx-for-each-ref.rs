@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::refs;
 use grit_lib::repo::Repository;
 
 #[derive(Debug, Parser)]
@@ -25,7 +24,7 @@ fn main() {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
-    for (name, oid) in refs::list_refs(repo.git_dir(), &cli.prefix)? {
+    for (name, oid) in repo.references().list(&cli.prefix)? {
         println!("{oid} {name}");
     }
     Ok(())
