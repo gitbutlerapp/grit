@@ -3,7 +3,7 @@
 #![allow(clippy::unwrap_used)]
 
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::create_commit;
 use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::listing::query_listings_on_store;

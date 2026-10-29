@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::create_commit;
 use grit_lib::porcelain::status::{
     status, BeforeOpportunisticIndexWriteHook, StatusOptions, UntrackedMode,
 };

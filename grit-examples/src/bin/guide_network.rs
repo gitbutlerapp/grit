@@ -46,11 +46,9 @@ fn main() -> Result<(), grit_lib::error::Error> {
         remote_git_dir.display()
     );
 
-    let fetch_opts = FetchOptions {
-        refspecs: remote_info.fetch_refspecs.clone(),
-        tags: TagMode::Following,
-        ..Default::default()
-    };
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.refspecs = remote_info.fetch_refspecs.clone();
+    fetch_opts.tags = TagMode::Following;
     remote::fetch(&repo, &remote_info, &fetch_opts)
         .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
 

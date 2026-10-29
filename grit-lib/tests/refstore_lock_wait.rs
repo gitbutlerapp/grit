@@ -24,7 +24,7 @@ use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions, TrackMode};
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::store::RefName;
 use grit_lib::refs::store::{

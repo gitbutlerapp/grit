@@ -62,19 +62,17 @@ fn run() -> Result<()> {
     eprintln!("  transport: {}", r.kind.label());
     eprintln!("  auth:      {}", remote::describe_auth(&config, &r));
 
-    let opts = FetchOptions {
-        refspecs: r.fetch_refspecs.clone(),
-        tags: if cli.tags {
-            TagMode::All
-        } else {
-            TagMode::Following
-        },
-        prune: cli.prune,
-        fetch_depth: cli
-            .depth
-            .and_then(grit_lib::remote::transfer::FetchDepth::depth),
-        ..Default::default()
+    let mut opts = FetchOptions::new();
+    opts.refspecs = r.fetch_refspecs.clone();
+    opts.tags = if cli.tags {
+        TagMode::All
+    } else {
+        TagMode::Following
     };
+    opts.prune = cli.prune;
+    opts.fetch_depth = cli
+        .depth
+        .and_then(grit_lib::remote::transfer::FetchDepth::depth);
 
     let outcome = remote::fetch(&repo, &r, &opts)?;
 

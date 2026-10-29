@@ -120,9 +120,8 @@ fn allow_empty_still_stages_dirty_tracked_files() {
 
     let repo = open_repo(root);
     stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage like commit");
-    let mut req = commit_req("marker");
+    let mut req = commit_req("marker").skip_pre_commit_tree_match(true);
     req.allow_empty = true;
-    req.skip_pre_commit_tree_match = true;
     let outcome = create_commit(&repo, &req, &mut NullProgress, &NeverCancel)
         .expect("allow-empty after stage");
     assert_eq!(
