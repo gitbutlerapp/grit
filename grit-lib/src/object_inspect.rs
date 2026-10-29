@@ -504,19 +504,32 @@ pub fn tree_entry_mode_cat_file_p(mode: u32) -> String {
 
 /// Object type label for one tree entry in `git cat-file -p` / `ls-tree` output.
 ///
-/// Git uses mode for trees and gitlinks; other entries use the stored object kind when present.
+/// Git derives the type word from the mode bits (`object_type()` in Git's tree-walk code),
+/// not from reading the referenced object.
 #[must_use]
-pub fn tree_entry_cat_file_type(repo: &Repository, mode: u32, oid: &ObjectId) -> &'static str {
-    if mode == 0o040000 {
-        return "tree";
+pub fn tree_entry_cat_file_type(mode: u32) -> &'static str {
+    match mode & 0o170_000 {
+        0o040_000 => "tree",
+        0o160_000 => "commit",
+        _ => "blob",
     }
-    if mode == 0o160000 {
-        return "commit";
+}
+
+/// Format parsed tree entries like `git cat-file -p` (one line per entry).
+#[must_use]
+pub fn format_tree_entries_cat_file_p(entries: &[TreeEntry]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for e in entries {
+        out.extend_from_slice(tree_entry_mode_cat_file_p(e.mode).as_bytes());
+        out.push(b' ');
+        out.extend_from_slice(tree_entry_cat_file_type(e.mode).as_bytes());
+        out.push(b' ');
+        out.extend_from_slice(e.oid.to_hex().as_bytes());
+        out.push(b'\t');
+        out.extend_from_slice(&e.name);
+        out.push(b'\n');
     }
-    if let Ok(info) = repo.odb().read_info(oid) {
-        return object_kind_cat_file_label(info.kind);
-    }
-    "blob"
+    out
 }
 
 /// Format a tree object's payload like `git cat-file -p` (one line per entry).
@@ -524,28 +537,24 @@ pub fn tree_entry_cat_file_type(repo: &Repository, mode: u32, oid: &ObjectId) ->
 /// # Errors
 ///
 /// Returns [`Error::CorruptObject`] when `data` is not a valid tree.
-pub fn format_tree_cat_file_p(repo: &Repository, data: &[u8]) -> Result<Vec<u8>> {
+pub fn format_tree_cat_file_p(data: &[u8]) -> Result<Vec<u8>> {
     let entries = parse_tree(data)?;
-    let mut out = Vec::new();
-    for e in &entries {
-        out.extend_from_slice(tree_entry_mode_cat_file_p(e.mode).as_bytes());
-        out.push(b' ');
-        out.extend_from_slice(tree_entry_cat_file_type(repo, e.mode, &e.oid).as_bytes());
-        out.push(b' ');
-        out.extend_from_slice(e.oid.to_hex().as_bytes());
-        out.push(b'\t');
-        out.extend_from_slice(&e.name);
-        out.push(b'\n');
-    }
-    Ok(out)
+    Ok(format_tree_entries_cat_file_p(&entries))
 }
 
-fn object_kind_cat_file_label(kind: ObjectKind) -> &'static str {
-    match kind {
-        ObjectKind::Blob => "blob",
-        ObjectKind::Tree => "tree",
-        ObjectKind::Commit => "commit",
-        ObjectKind::Tag => "tag",
+#[cfg(test)]
+mod tree_entry_cat_file_type_tests {
+    use super::tree_entry_cat_file_type;
+
+    #[test]
+    fn mode_mask_labels_match_git() {
+        assert_eq!(tree_entry_cat_file_type(0o040_000), "tree");
+        assert_eq!(tree_entry_cat_file_type(0o040_755), "tree");
+        assert_eq!(tree_entry_cat_file_type(0o160_000), "commit");
+        assert_eq!(tree_entry_cat_file_type(0o100_644), "blob");
+        assert_eq!(tree_entry_cat_file_type(0o100_755), "blob");
+        assert_eq!(tree_entry_cat_file_type(0o120_000), "blob");
+        assert_eq!(tree_entry_cat_file_type(0o100_664), "blob");
     }
 }
 

@@ -5,7 +5,9 @@ use std::io::{self, Write};
 use crate::revision_errors::map_resolve_error;
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use grit_lib::object_inspect::{format_tree_cat_file_p, tree_entry_mode_cat_file_p};
+use grit_lib::object_inspect::{
+    format_tree_entries_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p,
+};
 use grit_lib::objects::{Object, ObjectKind};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -161,7 +163,7 @@ pub fn run(spec: String, output: OutputMode) -> Result<CatOutcome> {
             let obj = repo
                 .read_object_raw_for_display(&resolved.oid)
                 .with_context(|| format!("read object {}", resolved.oid.to_hex()))?;
-            let (content, human_raw) = build_content_for_kind(&repo, kind, &obj)?;
+            let (content, human_raw) = build_content_for_kind(kind, &obj, output)?;
             Ok(CatOutcome {
                 warnings: sink.warnings(),
                 spec,
@@ -169,7 +171,7 @@ pub fn run(spec: String, output: OutputMode) -> Result<CatOutcome> {
                 kind: kind_label(kind).to_owned(),
                 size: resolved.size,
                 content,
-                human_raw: Some(human_raw),
+                human_raw,
             })
         }
     }
@@ -225,41 +227,48 @@ fn run_blob(
 }
 
 fn build_content_for_kind(
-    repo: &grit_lib::repo::Repository,
     kind: ObjectKind,
     obj: &Object,
-) -> Result<(CatContentJson, Vec<u8>)> {
+    output: OutputMode,
+) -> Result<(CatContentJson, Option<Vec<u8>>)> {
     match kind {
         ObjectKind::Blob => {
             let json =
                 blob_payload_json(&obj.data, u64::try_from(obj.data.len()).unwrap_or(u64::MAX));
-            Ok((CatContentJson::Blob(json), obj.data.clone()))
+            let raw = matches!(output, OutputMode::Human).then(|| obj.data.clone());
+            Ok((CatContentJson::Blob(json), raw))
         }
         ObjectKind::Tree => {
-            let human = format_tree_cat_file_p(repo, &obj.data)?;
             let parsed = grit_lib::objects::parse_tree(&obj.data)?;
-            let entries = parsed
-                .iter()
-                .map(|e| TreeLineJson {
-                    mode: tree_entry_mode_cat_file_p(e.mode),
-                    object_type: grit_lib::object_inspect::tree_entry_cat_file_type(
-                        repo, e.mode, &e.oid,
-                    )
-                    .to_owned(),
-                    oid: e.oid.to_hex(),
-                    path: String::from_utf8_lossy(&e.name).into_owned(),
-                })
-                .collect();
-            Ok((CatContentJson::Tree { entries }, human))
+            match output {
+                OutputMode::Human => {
+                    let human = format_tree_entries_cat_file_p(&parsed);
+                    Ok((CatContentJson::Tree { entries: vec![] }, Some(human)))
+                }
+                OutputMode::Json | OutputMode::Markdown => {
+                    let entries = parsed
+                        .iter()
+                        .map(|e| TreeLineJson {
+                            mode: tree_entry_mode_cat_file_p(e.mode),
+                            object_type: tree_entry_cat_file_type(e.mode).to_owned(),
+                            oid: e.oid.to_hex(),
+                            path: String::from_utf8_lossy(&e.name).into_owned(),
+                        })
+                        .collect();
+                    Ok((CatContentJson::Tree { entries }, None))
+                }
+            }
         }
-        ObjectKind::Commit => Ok((
-            CatContentJson::Commit(text_object_json(&obj.data)),
-            obj.data.clone(),
-        )),
-        ObjectKind::Tag => Ok((
-            CatContentJson::Tag(text_object_json(&obj.data)),
-            obj.data.clone(),
-        )),
+        ObjectKind::Commit => {
+            let json = CatContentJson::Commit(text_object_json(&obj.data));
+            let raw = matches!(output, OutputMode::Human).then(|| obj.data.clone());
+            Ok((json, raw))
+        }
+        ObjectKind::Tag => {
+            let json = CatContentJson::Tag(text_object_json(&obj.data));
+            let raw = matches!(output, OutputMode::Human).then(|| obj.data.clone());
+            Ok((json, raw))
+        }
     }
 }
 

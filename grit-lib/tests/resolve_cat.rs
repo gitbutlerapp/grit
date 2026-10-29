@@ -175,7 +175,7 @@ fn cat_matches_git_cat_file() {
             "tree" => {
                 assert!(matches!(_parsed, ObjectContents::Tree(_)));
                 assert_eq!(resolved.kind, ObjectKind::Tree);
-                let grit_body = format_tree_cat_file_p(&repo, &obj.data).expect("format tree");
+                let grit_body = format_tree_cat_file_p(&obj.data).expect("format tree");
                 assert_eq!(grit_body, git_body, "tree cat-file -p body for {spec}");
             }
             "commit" => {
@@ -261,7 +261,7 @@ fn cat_tree_missing_gitlink_matches_git_cat_file_p() {
     let repo = open_grit_repo(wt);
     let oid = grit_lib::objects::ObjectId::from_hex(&tree_oid).expect("hex");
     let obj = repo.read_object_raw_for_display(&oid).expect("read tree");
-    let grit_body = format_tree_cat_file_p(&repo, &obj.data).expect("format tree");
+    let grit_body = format_tree_cat_file_p(&obj.data).expect("format tree");
     assert_eq!(grit_body, git_body, "tree with absent gitlink");
 }
 
@@ -283,8 +283,69 @@ fn cat_nested_tree_directory_mode_matches_git() {
     let obj = repo
         .read_object_raw_for_display(&resolved.oid)
         .expect("read");
-    let grit_body = format_tree_cat_file_p(&repo, &obj.data).expect("format tree");
+    let grit_body = format_tree_cat_file_p(&obj.data).expect("format tree");
     assert_eq!(grit_body, git_body, "nested tree cat-file -p");
+}
+
+#[test]
+fn cat_tree_entry_type_follows_mode_not_stored_object_kind() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    std::fs::write(wt.join("blob.txt"), b"blob body\n").expect("write blob");
+    std::fs::create_dir(wt.join("subdir")).expect("mkdir");
+    std::fs::write(wt.join("subdir/nested.txt"), b"nested\n").expect("write nested");
+    git(wt, &["add", "blob.txt", "subdir"]);
+    git(wt, &["commit", "-m", "objects for mktree"]);
+
+    let blob_oid = git_rev_parse_verify(wt, "HEAD:blob.txt").expect("blob oid");
+    let subdir_tree_oid = git_rev_parse_verify(wt, "HEAD:subdir").expect("tree oid");
+
+    let tree_oid = {
+        let mut child = Command::new("git")
+            .current_dir(wt)
+            .args(["mktree"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("mktree");
+        write!(
+            child.stdin.as_mut().expect("stdin"),
+            "100644 blob {}\twrong-kind-blob\n040000 tree {}\twrong-kind-tree\n",
+            blob_oid,
+            subdir_tree_oid,
+        )
+        .unwrap();
+        let out = child.wait_with_output().expect("mktree wait");
+        assert!(
+            out.status.success(),
+            "mktree: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+
+    let spec = tree_oid.as_str();
+    let git_body = git_cat_file_p(wt, spec).expect("git -p");
+    let repo = open_grit_repo(wt);
+    let oid = grit_lib::objects::ObjectId::from_hex(&tree_oid).expect("hex");
+    let obj = repo.read_object_raw_for_display(&oid).expect("read tree");
+    let grit_body = format_tree_cat_file_p(&obj.data).expect("format tree");
+    assert_eq!(
+        grit_body, git_body,
+        "type words must follow mode bits like git cat-file -p"
+    );
+    assert!(
+        git_body
+            .split(|&b| b == b'\n')
+            .any(|line| line.starts_with(format!("100644 blob {blob_oid}").as_bytes())),
+        "git labels blob mode as blob even when oid is not a blob object"
+    );
+    assert!(
+        git_body
+            .split(|&b| b == b'\n')
+            .any(|line| { line.starts_with(format!("040000 tree {subdir_tree_oid}").as_bytes()) }),
+        "git labels tree mode as tree even when oid is not a tree object"
+    );
 }
 
 #[test]

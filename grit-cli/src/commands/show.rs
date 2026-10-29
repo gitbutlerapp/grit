@@ -16,7 +16,8 @@ use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use grit_lib::diff::DiffMerges;
 use grit_lib::object_inspect::{
-    format_tree_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p, RevisionLabel,
+    format_tree_entries_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p,
+    RevisionLabel,
 };
 use grit_lib::objects::ObjectKind;
 use schemars::JsonSchema;
@@ -81,6 +82,10 @@ pub enum ShowPathOutcome {
         oid: String,
         size: u64,
         entries: Vec<ShowTreeEntryJson>,
+        /// Preformatted `git cat-file -p` lines for human stdout (built when the tree is parsed).
+        #[serde(skip)]
+        #[schemars(skip)]
+        cat_file_p: Vec<u8>,
     },
 }
 
@@ -426,11 +431,12 @@ fn show_rev_path(spec: &str) -> Result<ShowPathOutcome> {
         ObjectKind::Tree => {
             let obj = repo.read_object_raw_for_display(&resolved.oid)?;
             let parsed = grit_lib::objects::parse_tree(&obj.data)?;
+            let cat_file_p = format_tree_entries_cat_file_p(&parsed);
             let entries = parsed
                 .iter()
                 .map(|e| ShowTreeEntryJson {
                     mode: tree_entry_mode_cat_file_p(e.mode),
-                    object_type: tree_entry_cat_file_type(&repo, e.mode, &e.oid).to_owned(),
+                    object_type: tree_entry_cat_file_type(e.mode).to_owned(),
                     oid: e.oid.to_hex(),
                     path: String::from_utf8_lossy(&e.name).into_owned(),
                 })
@@ -441,6 +447,7 @@ fn show_rev_path(spec: &str) -> Result<ShowPathOutcome> {
                 oid: resolved.oid.to_hex(),
                 size: resolved.size,
                 entries,
+                cat_file_p,
             })
         }
         other => bail!("'{spec}' resolved to {other:?}, expected a blob or tree"),
@@ -508,12 +515,8 @@ impl HumanRender for ShowPathOutcome {
                     .map_err(|e| anyhow::anyhow!("writing blob: {e}"))?;
                 Ok(())
             }
-            ShowPathOutcome::Tree { spec, .. } => {
-                let (repo, _) = context::discover_with_warnings()?;
-                let resolved = repo.resolve(spec)?;
-                let obj = repo.read_object_raw_for_display(&resolved.oid)?;
-                let human = format_tree_cat_file_p(&repo, &obj.data)?;
-                w.write_all(&human)
+            ShowPathOutcome::Tree { cat_file_p, .. } => {
+                w.write_all(cat_file_p)
                     .map_err(|e| anyhow::anyhow!("writing tree: {e}"))?;
                 Ok(())
             }

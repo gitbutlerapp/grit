@@ -8646,8 +8646,9 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::object_inspect::ResolvedRe
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::ResolvedRefName
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::ResolvedRefName
 pub fn grit_lib::object_inspect::abbreviate_for_display(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, bool) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::object_inspect::format_tree_cat_file_p(&grit_lib::repo::Repository, &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
-pub fn grit_lib::object_inspect::tree_entry_cat_file_type(&grit_lib::repo::Repository, u32, &grit_lib::objects::ObjectId) -> &'static str
+pub fn grit_lib::object_inspect::format_tree_cat_file_p(&[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
+pub fn grit_lib::object_inspect::format_tree_entries_cat_file_p(&[grit_lib::objects::TreeEntry]) -> alloc::vec::Vec<u8>
+pub fn grit_lib::object_inspect::tree_entry_cat_file_type(u32) -> &'static str
 pub fn grit_lib::object_inspect::tree_entry_mode_cat_file_p(u32) -> alloc::string::String
 pub mod grit_lib::objects
 pub mod grit_lib::objects::bench_fixture
@@ -27440,8 +27441,9 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::object_inspect::ResolvedRe
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::ResolvedRefName
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::ResolvedRefName
 pub fn grit_lib::revwalk::object_inspect::abbreviate_for_display(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, bool) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::revwalk::object_inspect::format_tree_cat_file_p(&grit_lib::repo::Repository, &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
-pub fn grit_lib::revwalk::object_inspect::tree_entry_cat_file_type(&grit_lib::repo::Repository, u32, &grit_lib::objects::ObjectId) -> &'static str
+pub fn grit_lib::revwalk::object_inspect::format_tree_cat_file_p(&[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
+pub fn grit_lib::revwalk::object_inspect::format_tree_entries_cat_file_p(&[grit_lib::objects::TreeEntry]) -> alloc::vec::Vec<u8>
+pub fn grit_lib::revwalk::object_inspect::tree_entry_cat_file_type(u32) -> &'static str
 pub fn grit_lib::revwalk::object_inspect::tree_entry_mode_cat_file_p(u32) -> alloc::string::String
 pub mod grit_lib::revwalk::queries
 pub enum grit_lib::revwalk::queries::MergeFilter
