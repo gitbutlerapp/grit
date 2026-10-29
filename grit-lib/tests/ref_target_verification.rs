@@ -13,8 +13,8 @@ use grit_lib::objects::{NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::reflog::read_reflog;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, PreparedRefTransaction, RawRef, RefName, RefStore, RefStoreError,
-    RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
+    Expected, MemoryRefStore, PreparedRefTransaction, RawRef, RefCaseOnlyRename, RefName, RefStore,
+    RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
 use grit_lib::refs::{
     commit_ref_update_on_store, update_branch_for_commit, update_branch_for_commit_on_store,
@@ -717,4 +717,26 @@ fn allowing_failures_prepare_not_a_commit_commits_sibling() {
         );
         assert_eq!(fx.raw("refs/heads/tree-branch"), None, "{format:?}");
     });
+}
+
+#[test]
+fn allowing_failures_prepare_rename_only_commits_case_only_rename() {
+    let fx = Fixture::new(RefStorageFormat::Files);
+    commit_updates(fx.repo.refs(), vec![put("refs/heads/topic", fx.commit)]).expect("seed topic");
+    assert_eq!(fx.raw("refs/heads/topic"), Some(RawRef::Direct(fx.commit)));
+    let txn = RefTransaction::new()
+        .with_case_only_rename(RefCaseOnlyRename {
+            from: String::from("refs/heads/topic"),
+            to: String::from("refs/heads/Topic"),
+        })
+        .allowing_failures();
+    let prepared = fx
+        .repo
+        .refs()
+        .prepare(txn)
+        .expect("prepare rename-only allowing_failures");
+    assert!(prepared.rejected_updates().is_empty());
+    prepared.commit().expect("commit");
+    assert_eq!(fx.raw("refs/heads/topic"), None);
+    assert_eq!(fx.raw("refs/heads/Topic"), Some(RawRef::Direct(fx.commit)));
 }

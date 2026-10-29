@@ -211,7 +211,11 @@ impl RefStore for ObjectCheckedRefStore {
             self.verify_update_targets(txn.updates())?;
             (txn, Vec::new())
         };
-        if txn.allows_failures() && txn.updates().is_empty() {
+        if txn.allows_failures()
+            && txn.updates().is_empty()
+            && txn.reflog_renames().is_empty()
+            && txn.case_only_renames().is_empty()
+        {
             return Ok(Box::new(ObjectCheckedPrepared {
                 rejections: object_rejections,
                 inner: None,
