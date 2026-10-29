@@ -1438,9 +1438,6 @@ impl ReftableReader {
 
     /// Look up a single ref by name.
     pub fn lookup_ref(&self, name: &str) -> Result<Option<RefRecord>> {
-        if self.ref_index_position > 0 {
-            return self.lookup_ref_via_index(name);
-        }
         let mut found = None;
         self.for_each_ref_in_range(name, None, |rec| {
             if rec.name == name {
@@ -1453,14 +1450,6 @@ impl ReftableReader {
             ControlFlow::Continue(())
         })?;
         Ok(found)
-    }
-
-    /// Resolve a ref name to a record using ref index blocks when present.
-    fn lookup_ref_via_index(&self, name: &str) -> Result<Option<RefRecord>> {
-        let Some(block_off) = self.locate_ref_block_via_index(name.as_bytes())? else {
-            return Ok(None);
-        };
-        self.find_ref_in_block(block_off, name)
     }
 
     fn locate_ref_block_via_index(&self, name: &[u8]) -> Result<Option<usize>> {
@@ -1507,29 +1496,6 @@ impl ReftableReader {
             rpos = new_pos;
         }
         Ok(last)
-    }
-
-    fn find_ref_in_block(&self, block_pos: usize, name: &str) -> Result<Option<RefRecord>> {
-        let (records_start, records_end) = self.block_record_range(block_pos)?;
-        let mut rpos = records_start;
-        let mut prev_name = Vec::<u8>::new();
-        while rpos < records_end {
-            let (rec, new_pos) = decode_ref_record(
-                &self.data,
-                rpos,
-                &prev_name,
-                self.min_update_index,
-                self.hash_size(),
-            )?;
-            prev_name = rec.name.as_bytes().to_vec();
-            match rec.name.as_str().cmp(name) {
-                std::cmp::Ordering::Equal => return Ok(Some(rec)),
-                std::cmp::Ordering::Greater => return Ok(None),
-                std::cmp::Ordering::Less => {}
-            }
-            rpos = new_pos;
-        }
-        Ok(None)
     }
 
     fn block_record_range(&self, block_pos: usize) -> Result<(usize, usize)> {
@@ -2393,7 +2359,7 @@ impl ReftableStack {
     ///
     /// Later tables override earlier ones; deletions omit the ref. Uses index block
     /// seeking per table when available. An empty `prefix` is treated as `refs/`.
-    pub fn for_each_merged_ref_under_prefix(
+    pub(crate) fn for_each_merged_ref_under_prefix(
         &self,
         prefix: &str,
         mut f: impl FnMut(&RefRecord) -> ControlFlow<()>,
@@ -2406,6 +2372,9 @@ impl ReftableStack {
         let upper = prefix_upper_exclusive(prefix);
 
         let mut visit = |rec: &RefRecord| -> ControlFlow<()> {
+            if matches!(rec.value, RefValue::Deletion) {
+                return ControlFlow::Continue(());
+            }
             if prefix.ends_with('/') && !rec.name.starts_with(prefix) {
                 return ControlFlow::Continue(());
             }
