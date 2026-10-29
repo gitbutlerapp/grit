@@ -3395,13 +3395,23 @@ fn test_inject_reftable_transaction_fail() -> Result<()> {
 
 /// Delete a ref from a reftable repo.
 pub fn reftable_delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
+    let (store_git_dir, _) = reftable_storage_location(git_dir, refname);
+    let opts = read_write_options(&store_git_dir);
+    reftable_delete_ref_with_write_options(git_dir, refname, &opts)
+}
+
+/// Delete a ref using explicit reftable write options (for tests and callers that disable auto-compaction).
+pub fn reftable_delete_ref_with_write_options(
+    git_dir: &Path,
+    refname: &str,
+    opts: &WriteOptions,
+) -> Result<()> {
     let (store_git_dir, storage_refname) = reftable_storage_location(git_dir, refname);
     let mut stack = ReftableStack::open(&store_git_dir)?;
     if stack.lookup_ref(&storage_refname)?.is_none() {
         return Err(RefStoreError::not_found(refname).into());
     }
-    let opts = read_write_options(&store_git_dir);
-    stack.write_ref(&storage_refname, RefValue::Deletion, None, &opts)
+    stack.write_ref(&storage_refname, RefValue::Deletion, None, opts)
 }
 
 /// Read the symbolic target of a ref in a reftable repo.
@@ -3576,16 +3586,6 @@ pub fn read_write_options(git_dir: &Path) -> WriteOptions {
     read_write_options_with_environment(git_dir, &crate::environment::Environment::empty())
 }
 
-fn autocompaction_enabled_for_write_options(env: &crate::environment::Environment) -> bool {
-    if env.git_test_reftable_autocompaction.is_some() {
-        return env.reftable_autocompaction_enabled();
-    }
-    std::env::var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
-        .ok()
-        .map(|value| value != "false")
-        .unwrap_or(true)
-}
-
 /// Read reftable write options from config and an explicit discovery environment.
 pub fn read_write_options_with_environment(
     git_dir: &Path,
@@ -3593,7 +3593,7 @@ pub fn read_write_options_with_environment(
 ) -> WriteOptions {
     let mut opts = WriteOptions {
         hash_size: reftable_hash_size_for_git_dir(git_dir),
-        autocompaction_enabled: autocompaction_enabled_for_write_options(env),
+        autocompaction_enabled: env.reftable_autocompaction_enabled(),
         ..Default::default()
     };
 

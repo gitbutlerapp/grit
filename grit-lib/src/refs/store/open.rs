@@ -72,7 +72,10 @@ pub(crate) fn open_ref_store_uncached(
     };
     let store: Arc<dyn RefStore> = match format {
         OnDiskFormat::Files => Arc::new(files_ref_store(git_dir, env)),
-        OnDiskFormat::Reftable => Arc::new(ReftableRefStore::open(git_dir.to_path_buf())?),
+        OnDiskFormat::Reftable => Arc::new(ReftableRefStore::open_with_environment(
+            git_dir.to_path_buf(),
+            env.clone(),
+        )?),
     };
     Ok(store)
 }

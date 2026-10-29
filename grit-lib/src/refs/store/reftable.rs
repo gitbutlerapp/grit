@@ -8,12 +8,14 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use crate::environment::Environment;
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::reflog::ReflogEntry;
 use crate::reftable::{
-    read_write_options, reftable_storage_location, LogRecord, RefValue, ReftableError,
-    ReftableStack, ReftableTransactionUpdate, TablesListLock, WriteOptions,
+    read_write_options, read_write_options_with_environment, reftable_storage_location, LogRecord,
+    RefValue, ReftableError, ReftableStack, ReftableTransactionUpdate, TablesListLock,
+    WriteOptions,
 };
 use crate::repo::init_repository;
 
@@ -52,6 +54,7 @@ type StoreResult<T> = std::result::Result<T, RefStoreError>;
 /// resolves to it through the symbolic ref, and only `HEAD`'s own reflog line is missing.
 pub struct ReftableRefStore {
     git_dir: PathBuf,
+    environment: Environment,
     _keepalive: Option<tempfile::TempDir>,
     prepared: Mutex<Option<PreparedReftableBatch>>,
 }
@@ -84,13 +87,25 @@ impl ReftableRefStore {
     ///
     /// Returns [`Error::Io`] when the reftable stack cannot be read.
     pub fn open(git_dir: PathBuf) -> Result<Self> {
+        Self::open_with_environment(git_dir, Environment::empty())
+    }
+
+    pub(crate) fn open_with_environment(
+        git_dir: PathBuf,
+        environment: Environment,
+    ) -> Result<Self> {
         let store_git_dir = stack_root(&git_dir);
         let _ = ReftableStack::open(&store_git_dir)?;
         Ok(Self {
             git_dir,
+            environment,
             _keepalive: None,
             prepared: Mutex::new(None),
         })
+    }
+
+    fn write_options_for(&self, store_git_dir: &Path) -> WriteOptions {
+        read_write_options_with_environment(store_git_dir, &self.environment)
     }
 
     /// Create a new ephemeral reftable repository (tests).
@@ -110,6 +125,7 @@ impl ReftableRefStore {
         let git_dir = root.path().join(".git");
         let store = Self {
             git_dir: git_dir.clone(),
+            environment: Environment::empty(),
             _keepalive: Some(root),
             prepared: Mutex::new(None),
         };
@@ -160,7 +176,7 @@ impl ReftableRefStore {
         for (store_git_dir, group) in grouped {
             let mut stack = ReftableStack::open(&store_git_dir)
                 .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-            let opts = read_write_options(&store_git_dir);
+            let opts = self.write_options_for(&store_git_dir);
             stack
                 .write_transaction(group, &opts)
                 .map_err(map_reftable_err)?;
@@ -608,7 +624,7 @@ impl RefStore for ReftableRefStore {
             check_transaction_updates(&snapshot, &group)?;
             let refs = snapshot.refs;
             let rt_updates = build_reftable_updates_for_stack(&self.git_dir, &refs, &group)?;
-            let opts = read_write_options(&store_git_dir);
+            let opts = self.write_options_for(&store_git_dir);
             stacks.push(LockedStackBatch {
                 _store_git_dir: store_git_dir,
                 stack,
