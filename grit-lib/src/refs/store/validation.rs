@@ -139,7 +139,6 @@ pub fn verify_create_conflicts(
 ) -> Result<(), RefnameUnavailable> {
     let extras: BTreeSet<&str> = updates.iter().map(|u| u.name.as_str()).collect();
     verify_same_batch_conflicts(updates, &extras)?;
-    let existing_names: BTreeSet<&str> = existing.keys().map(String::as_str).collect();
 
     for update in updates {
         if update.new_value.is_none() || update.flags.log_only {
@@ -148,8 +147,61 @@ pub fn verify_create_conflicts(
         if existing.contains_key(&update.name) {
             continue;
         }
-        verify_name_available_for_create(&update.name, &existing_names, &extras)?;
+        verify_name_available_for_create_in_map(&update.name, existing, &extras)?;
     }
+    Ok(())
+}
+
+/// Whether `refname` can be created against a sorted ref map without scanning every key.
+fn verify_name_available_for_create_in_map(
+    refname: &str,
+    existing: &BTreeMap<String, RawRef>,
+    extras: &BTreeSet<&str>,
+) -> Result<(), RefnameUnavailable> {
+    let segments: Vec<&str> = refname.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.len() > 1 {
+        let mut dirname = String::new();
+        for part in &segments[..segments.len() - 1] {
+            if !dirname.is_empty() {
+                dirname.push('/');
+            }
+            dirname.push_str(part);
+            if existing.contains_key(&dirname) {
+                return Err(RefnameUnavailable::AncestorExists {
+                    blocking: dirname.clone(),
+                    new_ref: refname.to_owned(),
+                });
+            }
+            if extras.contains(dirname.as_str()) {
+                return Err(RefnameUnavailable::SameBatch {
+                    refname: refname.to_owned(),
+                    other: dirname.clone(),
+                });
+            }
+        }
+    }
+
+    let mut leaf_dir = String::with_capacity(refname.len() + 1);
+    leaf_dir.push_str(refname);
+    leaf_dir.push('/');
+
+    if let Some((blocking, _)) = existing
+        .range::<str, _>((Bound::Included(leaf_dir.as_str()), Bound::Unbounded))
+        .next()
+        .filter(|(name, _)| name.starts_with(leaf_dir.as_str()))
+    {
+        return Err(RefnameUnavailable::DescendantExists {
+            blocking: blocking.clone(),
+            new_ref: refname.to_owned(),
+        });
+    }
+    if let Some(blocking) = find_descendant_in_sorted(&leaf_dir, extras) {
+        return Err(RefnameUnavailable::SameBatch {
+            refname: refname.to_owned(),
+            other: (*blocking).to_owned(),
+        });
+    }
+
     Ok(())
 }
 
@@ -287,6 +339,34 @@ mod tests {
             ("refs/heads/q/r".to_owned(), RawRef::Direct(oid(2))),
         ]
         .into();
+        assert_eq!(
+            verify_create_conflicts(&existing, &[create("refs/heads/p/c")]),
+            Err(RefnameUnavailable::AncestorExists {
+                blocking: "refs/heads/p".to_owned(),
+                new_ref: "refs/heads/p/c".to_owned(),
+            })
+        );
+        assert_eq!(
+            verify_create_conflicts(&existing, &[create("refs/heads/q")]),
+            Err(RefnameUnavailable::DescendantExists {
+                blocking: "refs/heads/q/r".to_owned(),
+                new_ref: "refs/heads/q".to_owned(),
+            })
+        );
+        verify_create_conflicts(&existing, &[create("refs/heads/q!")]).expect("no conflict");
+    }
+
+    #[test]
+    fn large_unrelated_map_still_reports_df_conflicts() {
+        let mut existing: BTreeMap<String, RawRef> = BTreeMap::new();
+        for i in 0..25_000 {
+            existing.insert(
+                format!("refs/heads/unrelated/b{i:05}"),
+                RawRef::Direct(oid(2)),
+            );
+        }
+        existing.insert("refs/heads/p".to_owned(), RawRef::Direct(oid(2)));
+        existing.insert("refs/heads/q/r".to_owned(), RawRef::Direct(oid(2)));
         assert_eq!(
             verify_create_conflicts(&existing, &[create("refs/heads/p/c")]),
             Err(RefnameUnavailable::AncestorExists {

@@ -154,9 +154,7 @@ impl PreparedRefTransaction for MapPrepared<'_> {
         let Some(txn) = inner.locked.take() else {
             return Ok(());
         };
-        let mut next = inner.state.clone();
-        apply_transaction(&mut next, &txn)?;
-        inner.state = next;
+        apply_transaction(&mut inner.state, &txn)?;
         Ok(())
     }
 

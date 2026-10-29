@@ -1,5 +1,6 @@
 //! Shared ref-update semantics for in-memory simulation and commit application.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::diff::zero_oid;
@@ -7,10 +8,10 @@ use crate::objects::ObjectId;
 use crate::reflog::ReflogEntry;
 use crate::refs::SYMREF_MAXDEPTH;
 
-use super::backend::resolve_symbolic;
 use super::error::RefStoreError;
 use super::semantics::format_reflog_identity;
 use super::transaction::expected_matches;
+use super::transaction::RefTransaction;
 use super::types::{
     Expected, RawRef, RefCaseOnlyRename, RefReflogRename, RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
@@ -37,15 +38,97 @@ impl RefBatchState {
     }
 }
 
-/// Whether `update.expected` is satisfied given current batch state (including symref peel for CAS).
-pub fn expected_matches_for_update(state: &RefBatchState, update: &RefUpdate) -> bool {
-    if let Expected::Oid(want) = &update.expected {
-        if should_deref_symref_update(state, update) {
-            return reflog_old_oid_before(state, update) == *want;
+/// Ref map for batch simulation: reads fall through to `base`, writes stay in `overlay`.
+struct RefMapOverlay<'a> {
+    base: &'a BTreeMap<String, RawRef>,
+    overlay: HashMap<String, Option<RawRef>>,
+}
+
+impl<'a> RefMapOverlay<'a> {
+    fn new(base: &'a BTreeMap<String, RawRef>) -> Self {
+        Self {
+            base,
+            overlay: HashMap::new(),
         }
     }
-    let actual = state.refs.get(&update.name);
-    expected_matches(actual, &update.expected)
+
+    fn get(&self, name: &str) -> Option<Cow<'_, RawRef>> {
+        match self.overlay.get(name) {
+            Some(None) => None,
+            Some(Some(value)) => Some(Cow::Borrowed(value)),
+            None => self.base.get(name).map(Cow::Borrowed),
+        }
+    }
+
+    fn insert(&mut self, name: String, value: RawRef) {
+        self.overlay.insert(name, Some(value));
+    }
+
+    fn remove(&mut self, name: &str) {
+        self.overlay.insert(name.to_owned(), None);
+    }
+}
+
+enum RefsRead<'a, 'b> {
+    Batch(&'a RefBatchState),
+    Overlay(&'a RefMapOverlay<'b>),
+}
+
+impl RefsRead<'_, '_> {
+    fn get(&self, name: &str) -> Option<Cow<'_, RawRef>> {
+        match self {
+            Self::Batch(state) => state.refs.get(name).map(Cow::Borrowed),
+            Self::Overlay(overlay) => overlay.get(name),
+        }
+    }
+}
+
+enum RefsWrite<'a, 'b> {
+    Overlay(&'a mut RefMapOverlay<'b>),
+}
+
+impl RefsWrite<'_, '_> {
+    fn read(&self) -> RefsRead<'_, '_> {
+        match self {
+            Self::Overlay(overlay) => RefsRead::Overlay(overlay),
+        }
+    }
+
+    fn insert(&mut self, name: String, value: RawRef) {
+        match self {
+            Self::Overlay(overlay) => overlay.insert(name, value),
+        }
+    }
+
+    fn remove(&mut self, name: &str) {
+        match self {
+            Self::Overlay(overlay) => overlay.remove(name),
+        }
+    }
+
+    fn contains_key(&self, name: &str) -> bool {
+        self.read().get(name).is_some()
+    }
+}
+
+struct RefWriteCtx<'a, 'b> {
+    refs: RefsWrite<'a, 'b>,
+    reflogs: &'a mut BTreeMap<String, Vec<ReflogEntry>>,
+}
+
+/// Whether `update.expected` is satisfied given current batch state (including symref peel for CAS).
+pub fn expected_matches_for_update(state: &RefBatchState, update: &RefUpdate) -> bool {
+    expected_matches_for_update_read(&RefsRead::Batch(state), update)
+}
+
+fn expected_matches_for_update_read(refs: &RefsRead<'_, '_>, update: &RefUpdate) -> bool {
+    if let Expected::Oid(want) = &update.expected {
+        if should_deref_symref_update_read(refs, update) {
+            return reflog_old_oid_before_read(refs, update) == *want;
+        }
+    }
+    let actual = refs.get(&update.name);
+    expected_matches(actual.as_deref(), &update.expected)
 }
 
 /// One physical ref file affected by an update (directly or via symref peel).
@@ -55,13 +138,12 @@ pub(crate) enum StorageWriteKind {
     Written(ObjectId),
 }
 
-/// Reject batches that would touch the same storage ref twice, except delete-then-create.
-pub(crate) fn check_storage_write(
+fn check_storage_write_read(
     prior: &mut HashMap<String, StorageWriteKind>,
-    state: &RefBatchState,
+    refs: &RefsRead<'_, '_>,
     update: &RefUpdate,
 ) -> StoreResult<()> {
-    let Some((name, kind)) = storage_write_for_update(state, update)? else {
+    let Some((name, kind)) = storage_write_for_update_read(refs, update)? else {
         return Ok(());
     };
     match prior.get(&name) {
@@ -77,8 +159,8 @@ pub(crate) fn check_storage_write(
     }
 }
 
-fn storage_write_for_update(
-    state: &RefBatchState,
+fn storage_write_for_update_read(
+    refs: &RefsRead<'_, '_>,
     update: &RefUpdate,
 ) -> StoreResult<Option<(String, StorageWriteKind)>> {
     if update.flags.log_only {
@@ -86,15 +168,15 @@ fn storage_write_for_update(
     }
     match &update.new_value {
         None => {
-            if should_deref_symref(state, update) {
-                let target = symref_peel_write_target(&state.refs, &update.name)?;
+            if should_deref_symref_read(refs, update) {
+                let target = symref_peel_write_target_read(refs, &update.name)?;
                 Ok(Some((target, StorageWriteKind::Deleted)))
             } else {
                 Ok(Some((update.name.clone(), StorageWriteKind::Deleted)))
             }
         }
-        Some(RawRef::Direct(oid)) if should_deref_symref_update(state, update) => {
-            let target = symref_peel_write_target(&state.refs, &update.name)?;
+        Some(RawRef::Direct(oid)) if should_deref_symref_update_read(refs, update) => {
+            let target = symref_peel_write_target_read(refs, &update.name)?;
             Ok(Some((target, StorageWriteKind::Written(*oid))))
         }
         Some(RawRef::Direct(oid)) => {
@@ -111,24 +193,34 @@ pub fn simulate_batch_apply(
     reflog_renames: &[RefReflogRename],
     case_only_renames: &[RefCaseOnlyRename],
 ) -> StoreResult<()> {
-    let mut trial = state.snapshot();
+    let mut overlay = RefMapOverlay::new(&state.refs);
+    let mut reflogs = BTreeMap::new();
     let mut storage_writes = HashMap::new();
     for update in updates {
-        if !expected_matches_for_update(&trial, update) {
+        let read = RefsRead::Overlay(&overlay);
+        if !expected_matches_for_update_read(&read, update) {
             return Err(RefStoreError::ExpectedMismatch {
                 name: update.name.clone(),
                 expected: update.expected.clone(),
-                actual: trial.refs.get(&update.name).cloned(),
+                actual: read.get(&update.name).map(Cow::into_owned),
             });
         }
-        check_storage_write(&mut storage_writes, &trial, update)?;
-        apply_update(&mut trial, update)?;
+        check_storage_write_read(&mut storage_writes, &read, update)?;
+        let mut ctx = RefWriteCtx {
+            refs: RefsWrite::Overlay(&mut overlay),
+            reflogs: &mut reflogs,
+        };
+        apply_update_ctx(&mut ctx, update)?;
     }
     for rename in case_only_renames {
-        apply_case_only_ref_rename(&mut trial, rename)?;
+        let mut ctx = RefWriteCtx {
+            refs: RefsWrite::Overlay(&mut overlay),
+            reflogs: &mut reflogs,
+        };
+        apply_case_only_ref_rename_ctx(&mut ctx, rename)?;
     }
     for rename in reflog_renames {
-        apply_reflog_rename(&mut trial, rename)?;
+        apply_reflog_rename_map(&mut reflogs, rename)?;
     }
     Ok(())
 }
@@ -159,10 +251,45 @@ pub fn apply_case_only_ref_rename(
     Ok(())
 }
 
+fn apply_case_only_ref_rename_ctx(
+    ctx: &mut RefWriteCtx<'_, '_>,
+    rename: &RefCaseOnlyRename,
+) -> StoreResult<()> {
+    if rename.from == rename.to {
+        return Ok(());
+    }
+    let value = match ctx.refs.read().get(&rename.from) {
+        Some(v) => v.into_owned(),
+        None => {
+            return Err(RefStoreError::ExpectedMismatch {
+                name: rename.from.clone(),
+                expected: Expected::Exists,
+                actual: None,
+            });
+        }
+    };
+    ctx.refs.remove(&rename.from);
+    if ctx.refs.contains_key(&rename.to) {
+        return Err(RefStoreError::Corrupt(format!(
+            "case-only rename blocked: '{}' already exists",
+            rename.to
+        )));
+    }
+    ctx.refs.insert(rename.to.clone(), value);
+    Ok(())
+}
+
 /// Move `rename.from`'s reflog to `rename.to` and append `rename.append`.
 pub fn apply_reflog_rename(state: &mut RefBatchState, rename: &RefReflogRename) -> StoreResult<()> {
-    let mut entries = state.reflogs.remove(&rename.from).unwrap_or_default();
-    state.reflogs.remove(&rename.to);
+    apply_reflog_rename_map(&mut state.reflogs, rename)
+}
+
+fn apply_reflog_rename_map(
+    reflogs: &mut BTreeMap<String, Vec<ReflogEntry>>,
+    rename: &RefReflogRename,
+) -> StoreResult<()> {
+    let mut entries = reflogs.remove(&rename.from).unwrap_or_default();
+    reflogs.remove(&rename.to);
     let old_oid = rename
         .append
         .old_oid
@@ -174,7 +301,7 @@ pub fn apply_reflog_rename(state: &mut RefBatchState, rename: &RefReflogRename) 
         identity: format_reflog_identity(&rename.append.identity, rename.append.time),
         message: rename.append.message.clone(),
     });
-    state.reflogs.insert(rename.to.clone(), entries);
+    reflogs.insert(rename.to.clone(), entries);
     Ok(())
 }
 
@@ -196,9 +323,35 @@ pub fn apply_update(state: &mut RefBatchState, update: &RefUpdate) -> StoreResul
     apply_ref_change(state, update)?;
 
     if let (Some(log), Some((old_oid, new_oid))) = (&update.reflog, reflog_oids) {
-        append_reflog_entry(state, &update.name, old_oid, new_oid, log);
+        append_reflog_entry(&mut state.reflogs, &update.name, old_oid, new_oid, log);
         if let Some(target) = deref_target_reflog {
-            append_reflog_entry(state, &target, old_oid, new_oid, log);
+            append_reflog_entry(&mut state.reflogs, &target, old_oid, new_oid, log);
+        }
+    }
+    Ok(())
+}
+
+fn apply_update_ctx(ctx: &mut RefWriteCtx<'_, '_>, update: &RefUpdate) -> StoreResult<()> {
+    let read = ctx.refs.read();
+    let reflog_oids = update.reflog.as_ref().map(|_| {
+        (
+            reflog_old_oid_before_read(&read, update),
+            reflog_new_oid_before_read(&read, update),
+        )
+    });
+    let deref_target_reflog = update.reflog.as_ref().and_then(|_| {
+        if !should_deref_symref_update_read(&read, update) {
+            return None;
+        }
+        symref_peel_write_target_read(&read, &update.name).ok()
+    });
+
+    apply_ref_change_ctx(ctx, update)?;
+
+    if let (Some(log), Some((old_oid, new_oid))) = (&update.reflog, reflog_oids) {
+        append_reflog_entry(ctx.reflogs, &update.name, old_oid, new_oid, log);
+        if let Some(target) = deref_target_reflog {
+            append_reflog_entry(ctx.reflogs, &target, old_oid, new_oid, log);
         }
     }
     Ok(())
@@ -245,12 +398,49 @@ fn apply_ref_change(state: &mut RefBatchState, update: &RefUpdate) -> StoreResul
     Ok(())
 }
 
+fn apply_ref_change_ctx(ctx: &mut RefWriteCtx<'_, '_>, update: &RefUpdate) -> StoreResult<()> {
+    let Some(target) = ref_change_target_read(&ctx.refs.read(), update)? else {
+        return Ok(());
+    };
+    match &update.new_value {
+        None => ctx.refs.remove(&target),
+        Some(new_value) => ctx.refs.insert(target, new_value.clone()),
+    }
+    Ok(())
+}
+
+fn ref_change_target_read(
+    refs: &RefsRead<'_, '_>,
+    update: &RefUpdate,
+) -> StoreResult<Option<String>> {
+    if update.flags.log_only {
+        return Ok(None);
+    }
+    let deref = match &update.new_value {
+        None => should_deref_symref_read(refs, update),
+        Some(_) => should_deref_symref_update_read(refs, update),
+    };
+    if deref {
+        symref_peel_write_target_read(refs, &update.name).map(Some)
+    } else {
+        Ok(Some(update.name.clone()))
+    }
+}
+
 fn should_deref_symref(state: &RefBatchState, update: &RefUpdate) -> bool {
-    !update.flags.no_deref && matches!(state.refs.get(&update.name), Some(RawRef::Symbolic(_)))
+    should_deref_symref_read(&RefsRead::Batch(state), update)
+}
+
+fn should_deref_symref_read(refs: &RefsRead<'_, '_>, update: &RefUpdate) -> bool {
+    !update.flags.no_deref && matches!(refs.get(&update.name).as_deref(), Some(RawRef::Symbolic(_)))
 }
 
 fn should_deref_symref_update(state: &RefBatchState, update: &RefUpdate) -> bool {
-    should_deref_symref(state, update)
+    should_deref_symref_update_read(&RefsRead::Batch(state), update)
+}
+
+fn should_deref_symref_update_read(refs: &RefsRead<'_, '_>, update: &RefUpdate) -> bool {
+    should_deref_symref_read(refs, update)
         && matches!(update.new_value.as_ref(), Some(RawRef::Direct(_)))
 }
 
@@ -266,6 +456,20 @@ fn symref_peel_write_target(
     resolve_symref_peel_target(refs, first)
 }
 
+fn symref_peel_write_target_read(refs: &RefsRead<'_, '_>, sym_name: &str) -> StoreResult<String> {
+    let Some(value) = refs.get(sym_name) else {
+        return Err(RefStoreError::Corrupt(format!(
+            "not a symbolic ref: {sym_name}"
+        )));
+    };
+    let RawRef::Symbolic(first) = value.as_ref() else {
+        return Err(RefStoreError::Corrupt(format!(
+            "not a symbolic ref: {sym_name}"
+        )));
+    };
+    resolve_symref_peel_target_read(refs, first.as_str())
+}
+
 fn resolve_symref_peel_target(refs: &BTreeMap<String, RawRef>, start: &str) -> StoreResult<String> {
     let mut name = start.to_owned();
     let mut depth = 0;
@@ -276,7 +480,25 @@ fn resolve_symref_peel_target(refs: &BTreeMap<String, RawRef>, start: &str) -> S
         match refs.get(name.as_str()) {
             Some(RawRef::Direct(_)) => return Ok(name),
             Some(RawRef::Symbolic(next)) => {
-                name = next.clone();
+                name.clone_from(next);
+                depth += 1;
+            }
+            None => return Ok(name),
+        }
+    }
+}
+
+fn resolve_symref_peel_target_read(refs: &RefsRead<'_, '_>, start: &str) -> StoreResult<String> {
+    let mut name = start.to_owned();
+    let mut depth = 0;
+    loop {
+        if depth >= SYMREF_MAXDEPTH {
+            return Err(RefStoreError::SymrefLoop);
+        }
+        match refs.get(name.as_str()).as_deref() {
+            Some(RawRef::Direct(_)) => return Ok(name),
+            Some(RawRef::Symbolic(next)) => {
+                name.clone_from(next);
                 depth += 1;
             }
             None => return Ok(name),
@@ -285,7 +507,7 @@ fn resolve_symref_peel_target(refs: &BTreeMap<String, RawRef>, start: &str) -> S
 }
 
 fn append_reflog_entry(
-    state: &mut RefBatchState,
+    reflogs: &mut BTreeMap<String, Vec<ReflogEntry>>,
     name: &str,
     old_oid: ObjectId,
     new_oid: ObjectId,
@@ -298,11 +520,71 @@ fn append_reflog_entry(
         identity,
         message: log.message.clone(),
     };
-    state
-        .reflogs
-        .entry(name.to_owned())
-        .or_default()
-        .push(entry);
+    reflogs.entry(name.to_owned()).or_default().push(entry);
+}
+
+/// Ref and reflog values before [`apply_transaction`], for rolling back on error.
+pub(crate) struct ApplyRollbackGuard {
+    touched: BTreeSet<String>,
+    refs: BTreeMap<String, RawRef>,
+    reflogs: BTreeMap<String, Vec<ReflogEntry>>,
+}
+
+/// Capture refs and reflogs `txn` may change so a failed apply can be undone cheaply.
+#[must_use]
+pub(crate) fn snapshot_for_apply_rollback(
+    state: &RefBatchState,
+    txn: &RefTransaction,
+) -> ApplyRollbackGuard {
+    let mut touched = ref_lock_names_for_updates(state, txn.updates());
+    for update in txn.updates() {
+        touched.insert(update.name.clone());
+    }
+    for rename in txn.case_only_renames() {
+        touched.insert(rename.from.clone());
+        touched.insert(rename.to.clone());
+    }
+    for rename in txn.reflog_renames() {
+        touched.insert(rename.from.clone());
+        touched.insert(rename.to.clone());
+    }
+    let mut refs = BTreeMap::new();
+    let mut reflogs = BTreeMap::new();
+    for name in &touched {
+        if let Some(value) = state.refs.get(name) {
+            refs.insert(name.clone(), value.clone());
+        }
+        if let Some(entries) = state.reflogs.get(name) {
+            reflogs.insert(name.clone(), entries.clone());
+        }
+    }
+    ApplyRollbackGuard {
+        touched,
+        refs,
+        reflogs,
+    }
+}
+
+/// Restore state saved by [`snapshot_for_apply_rollback`] after a failed apply.
+pub(crate) fn rollback_failed_apply(state: &mut RefBatchState, backup: &ApplyRollbackGuard) {
+    for name in &backup.touched {
+        match backup.refs.get(name) {
+            Some(value) => {
+                state.refs.insert(name.clone(), value.clone());
+            }
+            None => {
+                state.refs.remove(name);
+            }
+        }
+        match backup.reflogs.get(name) {
+            Some(entries) => {
+                state.reflogs.insert(name.clone(), entries.clone());
+            }
+            None => {
+                state.reflogs.remove(name);
+            }
+        }
+    }
 }
 
 /// Ref names that must be locked for a batch (update targets plus symref peel targets).
@@ -331,13 +613,21 @@ pub(crate) fn ref_lock_names_for_updates(
 }
 
 fn reflog_old_oid_before(state: &RefBatchState, update: &RefUpdate) -> ObjectId {
+    reflog_old_oid_before_read(&RefsRead::Batch(state), update)
+}
+
+fn reflog_old_oid_before_read(refs: &RefsRead<'_, '_>, update: &RefUpdate) -> ObjectId {
     if let Some(oid) = update.reflog.as_ref().and_then(|log| log.old_oid) {
         return oid;
     }
-    resolved_oid_at_name(state, &update.name, update.flags).unwrap_or_else(|_| zero_oid())
+    resolved_oid_at_name_read(refs, &update.name, update.flags).unwrap_or_else(|_| zero_oid())
 }
 
 fn reflog_new_oid_before(state: &RefBatchState, update: &RefUpdate) -> ObjectId {
+    reflog_new_oid_before_read(&RefsRead::Batch(state), update)
+}
+
+fn reflog_new_oid_before_read(refs: &RefsRead<'_, '_>, update: &RefUpdate) -> ObjectId {
     if let Some(oid) = update.reflog.as_ref().and_then(|log| log.new_oid) {
         return oid;
     }
@@ -345,38 +635,52 @@ fn reflog_new_oid_before(state: &RefBatchState, update: &RefUpdate) -> ObjectId 
         if let Some(RawRef::Direct(oid)) = &update.new_value {
             return *oid;
         }
-        return reflog_old_oid_before(state, update);
+        return reflog_old_oid_before_read(refs, update);
     }
     match &update.new_value {
         None => zero_oid(),
-        Some(RawRef::Direct(oid)) if should_deref_symref_update(state, update) => *oid,
+        Some(RawRef::Direct(oid)) if should_deref_symref_update_read(refs, update) => *oid,
         Some(value) => {
-            oid_for_reflog_value(state, value, update.flags).unwrap_or_else(|_| zero_oid())
+            oid_for_reflog_value_read(refs, value, update.flags).unwrap_or_else(|_| zero_oid())
         }
     }
 }
 
-fn resolved_oid_at_name(
-    state: &RefBatchState,
+fn resolved_oid_at_name_read(
+    refs: &RefsRead<'_, '_>,
     name: &str,
     flags: RefUpdateFlags,
 ) -> StoreResult<ObjectId> {
-    let Some(value) = state.refs.get(name) else {
+    let Some(value) = refs.get(name) else {
         return Ok(zero_oid());
     };
-    oid_for_reflog_value(state, value, flags)
+    oid_for_reflog_value_read(refs, value.as_ref(), flags)
 }
 
-fn oid_for_reflog_value(
-    state: &RefBatchState,
+fn oid_for_reflog_value_read(
+    refs: &RefsRead<'_, '_>,
     value: &RawRef,
     flags: RefUpdateFlags,
 ) -> StoreResult<ObjectId> {
     match value {
         RawRef::Direct(oid) => Ok(*oid),
         RawRef::Symbolic(_target) if flags.no_deref => Ok(zero_oid()),
-        RawRef::Symbolic(target) => resolve_symbolic(&state.refs, target),
+        RawRef::Symbolic(target) => resolve_symbolic_read(refs, target),
     }
+}
+
+fn resolve_symbolic_read(refs: &RefsRead<'_, '_>, name: &str) -> Result<ObjectId, RefStoreError> {
+    let mut current = name.to_owned();
+    for _ in 0..SYMREF_MAXDEPTH {
+        match refs.get(current.as_str()) {
+            None => return Err(RefStoreError::not_found(&current)),
+            Some(value) => match value.as_ref() {
+                RawRef::Direct(oid) => return Ok(*oid),
+                RawRef::Symbolic(target) => current = target.clone(),
+            },
+        }
+    }
+    Err(RefStoreError::SymrefLoop)
 }
 
 #[cfg(test)]

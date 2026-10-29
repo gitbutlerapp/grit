@@ -8,6 +8,7 @@ use crate::error::Result;
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
 use crate::reflog::ReflogEntry;
 
+use super::apply::{rollback_failed_apply, snapshot_for_apply_rollback};
 use super::backend::{apply_transaction, check_transaction, resolve_symbolic, RefBatchState};
 use super::error::RefStoreError;
 use super::transaction::RefTransaction;
@@ -218,9 +219,12 @@ impl PreparedRefTransaction for MemoryPrepared<'_> {
         let Some(txn) = inner.prepared.take() else {
             return Ok(());
         };
-        let mut trial = inner.state.snapshot();
-        apply_transaction(&mut trial, &txn)?;
-        inner.state = Arc::new(trial);
+        let backup = snapshot_for_apply_rollback(&inner.state, &txn);
+        let state = inner.state_mut();
+        if let Err(err) = apply_transaction(state, &txn) {
+            rollback_failed_apply(state, &backup);
+            return Err(err);
+        }
         self.committed = true;
         Ok(())
     }
