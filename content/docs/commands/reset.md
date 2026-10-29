@@ -38,7 +38,7 @@ A successful reset (any mode except `--dry-run`) ends an in-progress merge, cher
 
 Every successful reset, in any mode and also to the commit `HEAD` is already on, records the commit `HEAD` was on before it in `ORIG_HEAD` (as `git reset` does, with no reflog), replacing any earlier value. `grit reset ORIG_HEAD` with the same mode undoes the reset, and `grit reset --hard ORIG_HEAD` is the usual way to undo a merge, rebase or pull, which record `ORIG_HEAD` too. `--dry-run` and a refused reset leave `ORIG_HEAD` alone.
 
-When resetting backward, grit lists commits that would become unreachable (not reachable from `<rev>` or any other ref, including branches, tags, remotes, stash, and other worktrees). A warning is printed when any would be orphaned. The check usually stays near the commits being left behind, so undoing the last commit stays fast on deep repositories; annotated tags are peeled from `packed-refs` when it records their targets, and without a commit-graph the tip commits of hundreds of refs are read in parallel, headers only. With a commit-graph the count is exact. Without one, the walk ends by commit date like Git's `git rev-list <previous> --not <refs>`, so under heavy clock skew (a ref that reaches a commit through history dated more than a day before it) the count can be wrong.
+When resetting backward, grit lists commits that would leave the branch (not reachable from `<rev>` or any other ref, including branches, tags, remotes, stash, and other worktrees). After a successful reset, human output reports how many commits are no longer on the branch, the previous tip (abbreviated), and how to recover with `grit reset <previous>` (also recorded in `ORIG_HEAD`, and in the reflog when reflogs are enabled). With `--dry-run`, the same count uses future tense (“would leave …”) because nothing has moved yet. The check usually stays near the commits being left behind, so undoing the last commit stays fast on deep repositories; annotated tags are peeled from `packed-refs` when it records their targets, and without a commit-graph the tip commits of hundreds of refs are read in parallel, headers only. With a commit-graph the count is exact. Without one, the walk ends by commit date like Git's `git rev-list <previous> --not <refs>`, so under heavy clock skew (a ref that reaches a commit through history dated more than a day before it) the count can be wrong.
 
 `<rev>` is any revision Grit understands: branch name, `HEAD~1`, full or abbreviated commit id, and so on.
 
@@ -60,7 +60,8 @@ Uncommit the last commit but keep changes staged:
 
 ```console
 $ grit reset --soft HEAD~1
-Reset main to a1b2c3d (soft)
+Reset refs/heads/main to a1b2c3d (soft)
+Warning: 1 commit is no longer on refs/heads/main (was d4e5f6a). Recover it with `grit reset d4e5f6a` (recorded in ORIG_HEAD and, when reflogs are on, the reflog).
 ```
 
 Move the tip back one commit and unstage, keeping file contents:
@@ -94,7 +95,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `dry_run` | boolean | True when nothing was written. |
 | `would_overwrite` | string[] | With `--dry-run --hard`: tracked paths whose local edits would be discarded. |
 | `would_block` | string[] | With `--dry-run --keep`: paths that would make the reset refuse. |
-| `orphaned_commits` | object[] | Sample of commits that would become unreachable (`oid`, `change_id`, `subject`). |
+| `orphaned_commits` | object[] | Sample of commits that would leave the branch (`oid`, `change_id`, `subject`). |
 | `orphaned_total` | number | Advisory unreachable count (may exceed `orphaned_commits.length`). Without a commit-graph, severe clock skew can make this inaccurate; it never controls the reset. |
 | `orphaned_truncated` | boolean | True when `-n`/`--limit` capped the orphan list. |
 
@@ -137,6 +138,7 @@ Pass `--markdown` for agent-friendly output: a short heading plus bullet list of
 - **previous:** `83352a61f6715ec3f0a297c6d6150725154fb833`
 - **dry_run:** `false`
 - **orphaned_total:** `1` (truncated: `false`)
+- **recovery:** `grit reset 83352a61f6715ec3f0a297c6d6150725154fb833` restores it (also recorded in ORIG_HEAD; reflog when enabled)
 ```
 
 Resetting to default `HEAD` on an unborn branch reports `branch_no_commits` (same message as [`grit log`](log.md)) instead of an opaque revision error.
