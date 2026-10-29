@@ -128,6 +128,141 @@ fn reset_and_revert_reject_tree_ish_without_panic() -> TestResult {
     Ok(())
 }
 
+fn parse_recovery_command_from_reset_output(stdout: &[u8]) -> Result<String, Box<dyn Error>> {
+    let text = String::from_utf8_lossy(stdout);
+    let marker = "Recover ";
+    let start = text
+        .find(marker)
+        .ok_or("reset output missing orphan recovery hint")?;
+    let after = &text[start + marker.len()..];
+    let backtick = after
+        .find('`')
+        .ok_or("recovery hint missing opening backtick")?;
+    let rest = &after[backtick + 1..];
+    let end = rest
+        .find('`')
+        .ok_or("recovery hint missing closing backtick")?;
+    Ok(rest[..end].to_string())
+}
+
+#[test]
+fn reset_hard_orphan_recovery_hint_restores_worktree() -> TestResult {
+    let scratch = Scratch::new("reset-hard-recover-hint")?;
+    let repo = scratch.path();
+    gs_ok(repo, ["init"])?;
+    git(repo, &["config", "user.name", "T"])?;
+    git(repo, &["config", "user.email", "t@e.com"])?;
+    for i in 1..=3 {
+        fs::write(repo.join(format!("f{i}")), format!("{i}\n"))?;
+        gs_ok(repo, ["commit", "-m", &format!("c{i}")])?;
+    }
+
+    let hard_out = gs(repo, ["reset", "--hard", "HEAD~2"]);
+    if !hard_out.status.success() {
+        return Err(format!(
+            "reset --hard failed: {}",
+            String::from_utf8_lossy(&hard_out.stderr)
+        )
+        .into());
+    }
+    let recovery = parse_recovery_command_from_reset_output(&hard_out.stdout)?;
+    assert!(
+        recovery.contains("--hard"),
+        "expected hard recovery command, got: {recovery}"
+    );
+
+    let parts: Vec<&str> = recovery.split_whitespace().collect();
+    let recover_args: Vec<&str> = parts.iter().copied().skip(1).collect();
+    gs_ok(repo, recover_args)?;
+
+    for name in ["f1", "f2", "f3"] {
+        assert!(
+            repo.join(name).is_file(),
+            "expected {name} after following recovery hint"
+        );
+    }
+    let status = Command::new("git")
+        .args(["status", "--short"])
+        .current_dir(repo)
+        .output()?;
+    assert!(
+        status.status.success(),
+        "git status failed: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    assert!(
+        status.stdout.is_empty(),
+        "worktree should be clean: {}",
+        String::from_utf8_lossy(&status.stdout)
+    );
+
+    Ok(())
+}
+
+#[test]
+fn reset_soft_orphan_recovery_hint_moves_head_only() -> TestResult {
+    let scratch = Scratch::new("reset-soft-recover-hint")?;
+    let repo = scratch.path();
+    gs_ok(repo, ["init"])?;
+    git(repo, &["config", "user.name", "T"])?;
+    git(repo, &["config", "user.email", "t@e.com"])?;
+    for i in 1..=3 {
+        fs::write(repo.join(format!("f{i}")), format!("{i}\n"))?;
+        gs_ok(repo, ["commit", "-m", &format!("c{i}")])?;
+    }
+
+    let soft_out = gs(repo, ["reset", "--soft", "HEAD~2"]);
+    if !soft_out.status.success() {
+        return Err(format!(
+            "reset --soft failed: {}",
+            String::from_utf8_lossy(&soft_out.stderr)
+        )
+        .into());
+    }
+    let recovery = parse_recovery_command_from_reset_output(&soft_out.stdout)?;
+    assert!(
+        recovery.contains("--soft"),
+        "expected soft recovery command, got: {recovery}"
+    );
+
+    let orig_head = Command::new("git")
+        .args(["rev-parse", "ORIG_HEAD"])
+        .current_dir(repo)
+        .output()?;
+    let orig_head = String::from_utf8_lossy(&orig_head.stdout).trim().to_owned();
+
+    let parts: Vec<&str> = recovery.split_whitespace().collect();
+    let recover_args: Vec<&str> = parts.iter().copied().skip(1).collect();
+    gs_ok(repo, recover_args)?;
+
+    let head = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo)
+        .output()?;
+    assert_eq!(
+        String::from_utf8_lossy(&head.stdout).trim(),
+        orig_head.as_str(),
+        "soft recovery should restore the previous tip"
+    );
+    for name in ["f1", "f2", "f3"] {
+        assert!(
+            repo.join(name).is_file(),
+            "expected {name} after soft recovery"
+        );
+    }
+    let status = Command::new("git")
+        .args(["status", "--short"])
+        .current_dir(repo)
+        .output()?;
+    assert!(
+        status.stdout.is_empty(),
+        "worktree should be clean after soft recovery: {}",
+        String::from_utf8_lossy(&status.stdout)
+    );
+
+    Ok(())
+}
+
 #[test]
 fn reset_soft_uncommit() -> TestResult {
     let scratch = Scratch::new("reset-soft")?;
