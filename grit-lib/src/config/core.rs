@@ -386,22 +386,23 @@ pub fn canonical_key(raw: &str) -> Result<String> {
         ));
     }
 
-    if first_dot == last_dot {
-        // No subsection: section.name
-        Ok(format!(
-            "{}.{}",
-            section.to_lowercase(),
-            name.to_lowercase()
-        ))
+    let mut key = String::with_capacity(raw.len());
+    push_lowercase(&mut key, section);
+    key.push('.');
+    if first_dot != last_dot {
+        key.push_str(&raw[first_dot + 1..last_dot]);
+        key.push('.');
+    }
+    push_lowercase(&mut key, name);
+    Ok(key)
+}
+
+/// Append `s` lowercased like [`str::to_lowercase`], without a temporary for ASCII input.
+fn push_lowercase(out: &mut String, s: &str) {
+    if s.is_ascii() {
+        out.extend(s.bytes().map(|b| char::from(b.to_ascii_lowercase())));
     } else {
-        // section.subsection.name
-        let subsection = &raw[first_dot + 1..last_dot];
-        Ok(format!(
-            "{}.{}.{}",
-            section.to_lowercase(),
-            subsection,
-            name.to_lowercase()
-        ))
+        out.push_str(&s.to_lowercase());
     }
 }
 
@@ -451,6 +452,9 @@ fn reject_valueless_negotiation_algorithm(
 struct Parser {
     section: String,
     subsection: Option<String>,
+    /// `section.` or `section.subsection.` in canonical case, shared by every key of the
+    /// current section.
+    key_prefix: String,
 }
 
 impl Parser {
@@ -458,23 +462,36 @@ impl Parser {
         Self {
             section: String::new(),
             subsection: None,
+            key_prefix: String::new(),
         }
     }
 
     fn valid_variable_name(name: &str) -> bool {
         let name = name.trim();
-        name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
-            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        name.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+            && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    }
+
+    fn set_section(&mut self, section: String, subsection: Option<String>) {
+        self.key_prefix.clear();
+        push_lowercase(&mut self.key_prefix, &section);
+        self.key_prefix.push('.');
+        if let Some(sub) = &subsection {
+            self.key_prefix.push_str(sub);
+            self.key_prefix.push('.');
+        }
+        self.section = section;
+        self.subsection = subsection;
     }
 
     /// Build the canonical key for a variable name in the current section.
+    ///
+    /// `name` must already satisfy [`Self::valid_variable_name`], so it is ASCII.
     fn make_key(&self, name: &str) -> String {
-        let sec = self.section.to_lowercase();
-        let var = name.to_lowercase();
-        match &self.subsection {
-            Some(sub) => format!("{sec}.{sub}.{var}"),
-            None => format!("{sec}.{var}"),
-        }
+        let mut key = String::with_capacity(self.key_prefix.len() + name.len());
+        key.push_str(&self.key_prefix);
+        push_lowercase(&mut key, name);
+        key
     }
 
     /// Parse a section header line like `[section]` or `[section "subsection"]`.
@@ -527,7 +544,7 @@ impl Parser {
         let inside = &trimmed[1..end];
         // Check for subsection: [section "subsection"]
         if let Some(quote_start) = inside.find('"') {
-            self.section = inside[..quote_start].trim().to_owned();
+            let section = inside[..quote_start].trim().to_owned();
             let rest = &inside[quote_start + 1..];
             // Find unescaped closing quote
             let mut sub = String::new();
@@ -543,10 +560,9 @@ impl Parser {
                     sub.push(ch);
                 }
             }
-            self.subsection = Some(sub);
+            self.set_section(section, Some(sub));
         } else {
-            self.section = inside.trim().to_owned();
-            self.subsection = None;
+            self.set_section(inside.trim().to_owned(), None);
         }
         // Check for inline content after the closing `]`
         let after = trimmed[end + 1..].trim();
@@ -586,8 +602,7 @@ impl Parser {
             }
             let raw_value = trimmed[eq_pos + 1..].trim();
             // Strip inline comment (not inside quotes)
-            let value = strip_inline_comment(raw_value);
-            let value = parse_config_value(&value);
+            let value = parse_config_value(strip_inline_comment(raw_value));
             let key = self.make_key(raw_name);
             Some((key, Some(value)))
         } else {
@@ -623,17 +638,19 @@ fn entry_line_value_has_unclosed_quote(line: &str) -> bool {
     let raw_value = trimmed[eq_pos + 1..].trim_start();
     let mut in_quote = false;
     let mut last_was_backslash = false;
-    for ch in raw_value.chars() {
-        match ch {
-            '"' if !last_was_backslash => {
+    // Every byte that matters is ASCII, and UTF-8 never reuses ASCII bytes inside a
+    // multi-byte character, so scanning bytes gives the same answer as scanning chars.
+    for b in raw_value.bytes() {
+        match b {
+            b'"' if !last_was_backslash => {
                 in_quote = !in_quote;
                 last_was_backslash = false;
             }
-            '\\' if !last_was_backslash => {
+            b'\\' if !last_was_backslash => {
                 last_was_backslash = true;
                 continue;
             }
-            '#' | ';' if !in_quote && !last_was_backslash => return false,
+            b'#' | b';' if !in_quote && !last_was_backslash => return false,
             _ => {
                 last_was_backslash = false;
             }
@@ -657,22 +674,22 @@ fn value_line_continues(line: &str) -> bool {
     let mut in_quote = false;
     let mut last_was_backslash = false;
     let mut in_comment = false;
-    for ch in value_part.chars() {
+    for b in value_part.bytes() {
         if in_comment {
             // Inside comment, backslash doesn't matter
             last_was_backslash = false;
             continue;
         }
-        match ch {
-            '"' if !last_was_backslash => {
+        match b {
+            b'"' if !last_was_backslash => {
                 in_quote = !in_quote;
                 last_was_backslash = false;
             }
-            '\\' if !last_was_backslash => {
+            b'\\' if !last_was_backslash => {
                 last_was_backslash = true;
                 continue;
             }
-            '#' | ';' if !in_quote && !last_was_backslash => {
+            b'#' | b';' if !in_quote && !last_was_backslash => {
                 in_comment = true;
                 last_was_backslash = false;
             }
@@ -685,40 +702,33 @@ fn value_line_continues(line: &str) -> bool {
     last_was_backslash && !in_comment
 }
 
-/// Strip an inline comment (`#` or `;`) that is not inside quotes.
-fn strip_inline_comment(s: &str) -> String {
+/// Strip an inline comment (`#` or `;`) that is not inside quotes, and the whitespace
+/// before it. The result is always a prefix of `s`.
+fn strip_inline_comment(s: &str) -> &str {
+    let bytes = s.as_bytes();
     let mut in_quote = false;
     let mut last_was_backslash = false;
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(ch) = chars.next() {
-        match ch {
-            '"' if !last_was_backslash => {
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' if !last_was_backslash => {
                 in_quote = !in_quote;
-                result.push(ch);
                 last_was_backslash = false;
             }
-            '\\' if !last_was_backslash => {
+            b'\\' if !last_was_backslash => {
                 last_was_backslash = true;
-                result.push(ch);
-                if in_quote {
-                    if let Some(&next) = chars.peek() {
-                        result.push(next);
-                        chars.next();
-                        last_was_backslash = false;
-                    }
+                if in_quote && i + 1 < bytes.len() {
+                    i += 1;
+                    last_was_backslash = false;
                 }
             }
-            '#' | ';' if !in_quote && !last_was_backslash => break,
-            _ => {
-                last_was_backslash = false;
-                result.push(ch);
-            }
+            b'#' | b';' if !in_quote && !last_was_backslash => break,
+            _ => last_was_backslash = false,
         }
+        i += 1;
     }
-    // Trim trailing whitespace that was before the comment
-    let trimmed = result.trim_end();
-    trimmed.to_owned()
+    // `i` stops on an ASCII byte or the end, so it is a char boundary.
+    s[..i].trim_end()
 }
 
 /// Parse a config value after `=` (comments already stripped).
@@ -963,23 +973,25 @@ impl ConfigFile {
 
             // For entry lines, we need to check continuation.
             // Build a logical line by joining continuations.
-            let mut logical_line = line.clone();
+            let mut logical_line = Cow::Borrowed(line.as_str());
             while value_line_continues(&logical_line) && idx < raw_lines.len() {
                 // Remove the trailing backslash
                 let t = logical_line.trim_end();
-                logical_line = t[..t.len() - 1].to_string();
+                let mut joined = t[..t.len() - 1].to_string();
                 // Append next line (trimmed of leading whitespace)
-                let next = raw_lines[idx].trim_start();
-                logical_line.push_str(next);
+                joined.push_str(raw_lines[idx].trim_start());
+                logical_line = Cow::Owned(joined);
                 idx += 1;
             }
 
-            while entry_line_value_has_unclosed_quote(&logical_line) && idx < raw_lines.len() {
+            let mut unclosed_quote = entry_line_value_has_unclosed_quote(&logical_line);
+            while unclosed_quote && idx < raw_lines.len() {
                 let next = raw_lines[idx].trim_start();
-                logical_line.push_str(next);
+                logical_line.to_mut().push_str(next);
                 idx += 1;
+                unclosed_quote = entry_line_value_has_unclosed_quote(&logical_line);
             }
-            if entry_line_value_has_unclosed_quote(&logical_line) {
+            if unclosed_quote {
                 let file_disp = config_error_path_display(path);
                 return Err(ConfigError::BadConfigLineInFile {
                     file: file_disp,
@@ -5211,5 +5223,214 @@ mod config_cache_tests {
             matches!(err, Error::Io(_)),
             "expected I/O error for symlink loop, got {err:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod line_scan_tests {
+    use super::*;
+
+    /// The char-at-a-time comment stripper the byte scan replaced, kept as the reference.
+    fn strip_inline_comment_by_chars(s: &str) -> String {
+        let mut in_quote = false;
+        let mut last_was_backslash = false;
+        let mut result = String::with_capacity(s.len());
+        let mut chars = s.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '"' if !last_was_backslash => {
+                    in_quote = !in_quote;
+                    result.push(ch);
+                    last_was_backslash = false;
+                }
+                '\\' if !last_was_backslash => {
+                    last_was_backslash = true;
+                    result.push(ch);
+                    if in_quote {
+                        if let Some(&next) = chars.peek() {
+                            result.push(next);
+                            chars.next();
+                            last_was_backslash = false;
+                        }
+                    }
+                }
+                '#' | ';' if !in_quote && !last_was_backslash => break,
+                _ => {
+                    last_was_backslash = false;
+                    result.push(ch);
+                }
+            }
+        }
+        result.trim_end().to_owned()
+    }
+
+    fn unclosed_quote_by_chars(line: &str) -> bool {
+        let trimmed = line.trim();
+        let Some(eq_pos) = trimmed.find('=') else {
+            return false;
+        };
+        let mut in_quote = false;
+        let mut last_was_backslash = false;
+        for ch in trimmed[eq_pos + 1..].trim_start().chars() {
+            match ch {
+                '"' if !last_was_backslash => {
+                    in_quote = !in_quote;
+                    last_was_backslash = false;
+                }
+                '\\' if !last_was_backslash => {
+                    last_was_backslash = true;
+                    continue;
+                }
+                '#' | ';' if !in_quote && !last_was_backslash => return false,
+                _ => last_was_backslash = false,
+            }
+        }
+        in_quote
+    }
+
+    fn continues_by_chars(line: &str) -> bool {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            return false;
+        }
+        let Some(pos) = trimmed.find('=') else {
+            return false;
+        };
+        let mut in_quote = false;
+        let mut last_was_backslash = false;
+        let mut in_comment = false;
+        for ch in trimmed[pos + 1..].chars() {
+            if in_comment {
+                last_was_backslash = false;
+                continue;
+            }
+            match ch {
+                '"' if !last_was_backslash => {
+                    in_quote = !in_quote;
+                    last_was_backslash = false;
+                }
+                '\\' if !last_was_backslash => {
+                    last_was_backslash = true;
+                    continue;
+                }
+                '#' | ';' if !in_quote && !last_was_backslash => {
+                    in_comment = true;
+                    last_was_backslash = false;
+                }
+                _ => last_was_backslash = false,
+            }
+        }
+        last_was_backslash && !in_comment
+    }
+
+    /// Every string of up to five tokens drawn from the characters the scanners treat
+    /// specially, plus ASCII and multi-byte text and Unicode whitespace.
+    fn corpus() -> Vec<String> {
+        const TOKENS: [&str; 11] = [
+            "a", "\"", "\\", "#", ";", " ", "=", "\t", "é", "日", "\u{2003}",
+        ];
+        let mut out = vec![String::new()];
+        let mut frontier = vec![String::new()];
+        for _ in 0..5 {
+            let mut next = Vec::with_capacity(frontier.len() * TOKENS.len());
+            for prefix in &frontier {
+                for token in TOKENS {
+                    next.push(format!("{prefix}{token}"));
+                }
+            }
+            out.extend(next.iter().cloned());
+            frontier = next;
+        }
+        out
+    }
+
+    #[test]
+    fn byte_scanners_match_char_scanners_on_every_short_line() {
+        for s in corpus() {
+            assert_eq!(
+                strip_inline_comment(&s),
+                strip_inline_comment_by_chars(&s),
+                "strip_inline_comment({s:?})"
+            );
+            let line = format!("k = {s}");
+            assert_eq!(
+                entry_line_value_has_unclosed_quote(&line),
+                unclosed_quote_by_chars(&line),
+                "unclosed quote in {line:?}"
+            );
+            assert_eq!(
+                value_line_continues(&line),
+                continues_by_chars(&line),
+                "continuation of {line:?}"
+            );
+            assert_eq!(
+                entry_line_value_has_unclosed_quote(&s),
+                unclosed_quote_by_chars(&s),
+                "unclosed quote in {s:?}"
+            );
+            assert_eq!(
+                value_line_continues(&s),
+                continues_by_chars(&s),
+                "continuation of {s:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn strip_inline_comment_borrows_a_prefix() {
+        let s = "\"a # b\" tail ; comment";
+        let stripped = strip_inline_comment(s);
+        assert_eq!(stripped, "\"a # b\" tail");
+        assert_eq!(stripped.as_ptr(), s.as_ptr());
+        assert_eq!(strip_inline_comment("\"\\\"#\" x"), "\"\\\"#\" x");
+        assert_eq!(strip_inline_comment("v\\#kept # gone"), "v\\#kept");
+    }
+
+    #[test]
+    fn canonical_key_lowercases_section_and_name_only() {
+        assert_eq!(canonical_key("core.bare").unwrap(), "core.bare");
+        assert_eq!(canonical_key("CORE.BARE").unwrap(), "core.bare");
+        assert_eq!(
+            canonical_key("Remote.Origin.URL").unwrap(),
+            "remote.Origin.url"
+        );
+        assert_eq!(canonical_key("a.B.C.D").unwrap(), "a.B.C.d");
+        assert!(canonical_key("nodot").is_err());
+        assert!(canonical_key("core.").is_err());
+        assert!(canonical_key("core.1bad").is_err());
+        assert!(canonical_key("core.ba\nre").is_err());
+    }
+
+    #[test]
+    fn parsed_keys_reuse_the_section_prefix_per_header() {
+        let text = "[Core]\n\tBare = false\n\tFileMode\n\
+                    [Remote \"Origin\"]\n\tURL = /x\n\
+                    [branch \"Main\"] Remote = origin\n\
+                    [core]\n\tEditor = vi ; trailing\n";
+        let file = ConfigFile::parse(Path::new("cfg"), text, ConfigScope::Local).unwrap();
+        let keys: Vec<(&str, Option<&str>)> = file
+            .entries
+            .iter()
+            .map(|e| (e.key.as_str(), e.value.as_deref()))
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                ("core.bare", Some("false")),
+                ("core.filemode", None),
+                ("remote.Origin.url", Some("/x")),
+                ("branch.Main.remote", Some("origin")),
+                ("core.editor", Some("vi")),
+            ]
+        );
+    }
+
+    #[test]
+    fn push_lowercase_matches_to_lowercase() {
+        for s in ["", "core", "MiXeD-09", "ÄBC", "İx", "ΣΑΣ"] {
+            let mut out = String::from("p.");
+            push_lowercase(&mut out, s);
+            assert_eq!(out, format!("p.{}", s.to_lowercase()));
+        }
     }
 }

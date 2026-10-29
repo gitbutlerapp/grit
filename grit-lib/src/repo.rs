@@ -490,6 +490,10 @@ struct ConfigSessionValidation {
     env_fingerprint: Vec<(String, Option<String>)>,
     base_stamps: Vec<(PathBuf, Option<(std::time::SystemTime, u64)>)>,
     extra_stamps: Vec<(PathBuf, Option<(std::time::SystemTime, u64)>)>,
+    /// The environment snapshot the stamps were last validated against. While the handle
+    /// still uses this very snapshot (and git dir), the fingerprint, cache key and cascade
+    /// paths cannot have changed, so validation only re-stats the stamped files.
+    environment: Arc<Environment>,
 }
 
 /// In-memory config session for one open [`Repository`] handle.
@@ -502,7 +506,21 @@ struct ConfigSession {
 }
 
 impl ConfigSessionValidation {
-    fn still_valid(&self, env: &Environment, git_dir: &Path, opts: &LoadConfigOptions) -> bool {
+    /// Whether the session's cascade still matches `env`, `git_dir` and the files on disk.
+    ///
+    /// `opts` builds the load options of the handle (always the same for one environment
+    /// and git dir); it is only called when `env` is not the snapshot last validated. A
+    /// full check that passes adopts `env` as that snapshot.
+    fn still_valid(
+        &mut self,
+        env: &Arc<Environment>,
+        git_dir: &Path,
+        opts: impl FnOnce() -> LoadConfigOptions,
+    ) -> bool {
+        if Arc::ptr_eq(env, &self.environment) && self.key.git_dir.as_deref() == Some(git_dir) {
+            return stamps_unchanged(&self.base_stamps) && stamps_unchanged(&self.extra_stamps);
+        }
+        let opts = &opts();
         let Some(env_fp) = env.config_fingerprint() else {
             return false;
         };
@@ -514,16 +532,20 @@ impl ConfigSessionValidation {
             return false;
         }
         let base_stamps = config_file_stamps(env, Some(git_dir), opts);
-        if self.base_stamps.as_slice() != base_stamps.as_slice() {
+        if self.base_stamps.as_slice() != base_stamps.as_slice()
+            || !stamps_unchanged(&self.extra_stamps)
+        {
             return false;
         }
-        for (path, stamp) in &self.extra_stamps {
-            if stamp_for_path(path) != *stamp {
-                return false;
-            }
-        }
+        self.environment = Arc::clone(env);
         true
     }
+}
+
+fn stamps_unchanged(stamps: &[(PathBuf, Option<(std::time::SystemTime, u64)>)]) -> bool {
+    stamps
+        .iter()
+        .all(|(path, stamp)| stamp_for_path(path) == *stamp)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -954,14 +976,14 @@ impl Repository {
 
     fn config_arc_with_validation(&self, validate_stamps: bool) -> Result<Arc<ConfigSet>> {
         if validate_stamps {
-            if let Ok(guard) = self.config_session.lock() {
-                if let Some(session) = guard.as_ref() {
-                    let opts = self.config_load_options(true);
-                    if session.validation.still_valid(
-                        self.environment.as_ref(),
-                        &self.git_dir,
-                        &opts,
-                    ) {
+            if let Ok(mut guard) = self.config_session.lock() {
+                if let Some(session) = guard.as_mut() {
+                    if session
+                        .validation
+                        .still_valid(&self.environment, &self.git_dir, || {
+                            self.config_load_options(true)
+                        })
+                    {
                         return Ok(Arc::clone(&session.config));
                     }
                 }
@@ -983,11 +1005,11 @@ impl Repository {
     fn refresh_config_session(&self) -> Result<()> {
         crate::trace::trace_span!("grit.config.load");
         let opts = self.config_load_options(true);
-        if let Ok(guard) = self.config_session.lock() {
-            if let Some(session) = guard.as_ref() {
+        if let Ok(mut guard) = self.config_session.lock() {
+            if let Some(session) = guard.as_mut() {
                 if session
                     .validation
-                    .still_valid(self.environment.as_ref(), &self.git_dir, &opts)
+                    .still_valid(&self.environment, &self.git_dir, || opts.clone())
                 {
                     return Ok(());
                 }
@@ -1024,6 +1046,7 @@ impl Repository {
                 env_fingerprint,
                 base_stamps,
                 extra_stamps,
+                environment: Arc::clone(&self.environment),
             },
             cached_settings,
             replace_lookup_inactive,
@@ -5044,3 +5067,98 @@ fn test_inject_index_write_fail() -> Result<()> {
 #[cfg(test)]
 #[path = "repo_line_coverage_tests.rs"]
 mod line_coverage_tests;
+
+#[cfg(test)]
+mod config_session_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use std::ffi::OsString;
+
+    fn options_with_global(home: &Path, global: &Path) -> RepositoryOptions {
+        RepositoryOptions {
+            environment: Environment::from_vars(
+                [
+                    ("HOME", home.as_os_str()),
+                    ("GIT_CONFIG_NOSYSTEM", "1".as_ref()),
+                    ("GIT_CONFIG_GLOBAL", global.as_os_str()),
+                ]
+                .map(|(k, v)| (OsString::from(k), v.to_owned())),
+                home.to_path_buf(),
+            ),
+            ..RepositoryOptions::default()
+        }
+    }
+
+    #[test]
+    fn config_is_reused_until_a_cascade_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.cfg");
+        fs::write(&global, "[user]\n\tname = First\n").unwrap();
+        let work = dir.path().join("work");
+        let options = options_with_global(dir.path(), &global);
+        Repository::init(
+            &work,
+            &InitOptions {
+                environment: Some(options.environment.clone()),
+                ..InitOptions::default()
+            },
+        )
+        .unwrap();
+        let repo = Repository::discover(Some(&work), &options).unwrap();
+
+        let first = repo.config().unwrap();
+        assert_eq!(first.get("user.name").as_deref(), Some("First"));
+        assert!(Arc::ptr_eq(&first, &repo.config().unwrap()));
+
+        fs::write(&global, "[user]\n\tname = Second one\n").unwrap();
+        assert_eq!(
+            repo.config().unwrap().get("user.name").as_deref(),
+            Some("Second one")
+        );
+
+        let local = repo.git_dir().join("config");
+        let mut text = fs::read_to_string(&local).unwrap();
+        text.push_str("[user]\n\tname = Local\n");
+        fs::write(&local, text).unwrap();
+        let reloaded = repo.config().unwrap();
+        assert_eq!(reloaded.get("user.name").as_deref(), Some("Local"));
+        assert!(Arc::ptr_eq(&reloaded, &repo.config().unwrap()));
+
+        fs::remove_file(&global).unwrap();
+        fs::write(&local, "[core]\n\trepositoryformatversion = 0\n").unwrap();
+        assert_eq!(repo.config().unwrap().get("user.name"), None);
+    }
+
+    #[test]
+    fn a_replaced_environment_is_checked_in_full_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.cfg");
+        fs::write(&global, "[user]\n\tname = Env\n").unwrap();
+        let work = dir.path().join("work");
+        let options = options_with_global(dir.path(), &global);
+        Repository::init(
+            &work,
+            &InitOptions {
+                environment: Some(options.environment.clone()),
+                ..InitOptions::default()
+            },
+        )
+        .unwrap();
+        let mut repo = Repository::discover(Some(&work), &options).unwrap();
+        let before = repo.config().unwrap();
+
+        // An equal snapshot in a new allocation passes the full check and keeps the session.
+        repo.environment = Arc::new(options.environment.clone());
+        assert!(Arc::ptr_eq(&before, &repo.config().unwrap()));
+
+        // A snapshot naming another global file must not reuse the old stamps.
+        let other = dir.path().join("other.cfg");
+        fs::write(&other, "[user]\n\tname = Other\n").unwrap();
+        repo.environment = Arc::new(options_with_global(dir.path(), &other).environment);
+        assert_eq!(
+            repo.config().unwrap().get("user.name").as_deref(),
+            Some("Other")
+        );
+    }
+}

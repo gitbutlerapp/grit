@@ -97,6 +97,10 @@ name = "environment"
 harness = false
 
 [[bench]]
+name = "config_parse"
+harness = false
+
+[[bench]]
 name = "objects"
 harness = false
 
