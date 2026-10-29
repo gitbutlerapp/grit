@@ -3503,10 +3503,12 @@ pub(crate) fn tree_changes_touch_gitattributes(changes: &[DiffEntry]) -> bool {
 /// Index after applying `changes`, used to resolve destination `.gitattributes` before writes land.
 fn prospective_index_for_checkout(index: &Index, changes: &[DiffEntry]) -> Index {
     let mut idx = index.clone();
+    let mut paths_to_remove: Vec<&[u8]> = Vec::with_capacity(changes.len());
+    let mut replacements: Vec<IndexEntry> = Vec::new();
     for change in changes {
         if change.status == DiffStatus::Deleted {
             if let Some(path) = &change.old_path {
-                idx.remove(path.as_bytes());
+                paths_to_remove.push(path.as_bytes());
             }
             continue;
         }
@@ -3515,13 +3517,13 @@ fn prospective_index_for_checkout(index: &Index, changes: &[DiffEntry]) -> Index
         };
         if let Some(old) = &change.old_path {
             if old != path {
-                idx.remove(old.as_bytes());
+                paths_to_remove.push(old.as_bytes());
             }
         }
         let mode = change.new_mode.bits();
-        idx.add_or_replace(prospective_index_entry(path, change.new_oid, mode));
+        replacements.push(prospective_index_entry(path, change.new_oid, mode));
     }
-    idx.sort();
+    idx.remove_paths_and_insert(paths_to_remove, replacements);
     idx
 }
 
@@ -5285,5 +5287,133 @@ mod tests {
         let index = repo.load_index().expect("index after");
         assert_eq!(index.cache_tree_root, Some(modified_tree));
         assert!(wt.join(format!("f{:05}.txt", count - 1)).is_file());
+    }
+
+    fn prospective_index_for_checkout_legacy(index: &Index, changes: &[DiffEntry]) -> Index {
+        let mut idx = index.clone();
+        for change in changes {
+            if change.status == DiffStatus::Deleted {
+                if let Some(path) = &change.old_path {
+                    idx.remove(path.as_bytes());
+                }
+                continue;
+            }
+            let Some(path) = &change.new_path else {
+                continue;
+            };
+            if let Some(old) = &change.old_path {
+                if old != path {
+                    idx.remove(old.as_bytes());
+                }
+            }
+            let mode = change.new_mode.bits();
+            idx.add_or_replace(prospective_index_entry(path, change.new_oid, mode));
+        }
+        idx.sort();
+        idx
+    }
+
+    #[test]
+    fn prospective_index_for_checkout_matches_legacy_on_mixed_changes() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let wt = repo.work_tree().expect("wt");
+        let mut index = repo.load_index().expect("index");
+        let paths = [
+            "a.txt",
+            "dir/b.txt",
+            "dir/c.txt",
+            "old.txt",
+            ".gitattributes",
+        ];
+        for path in paths {
+            let abs = wt.join(path);
+            if let Some(parent) = abs.parent() {
+                if !parent.as_os_str().is_empty() {
+                    fs::create_dir_all(parent).expect("mkdir");
+                }
+            }
+            fs::write(&abs, format!("content-{path}\n")).expect("write");
+            let oid = repo
+                .odb()
+                .write(ObjectKind::Blob, format!("content-{path}\n").as_bytes())
+                .expect("blob");
+            index.add_or_replace(
+                entry_from_stat(&abs, path.as_bytes(), oid, MODE_REGULAR).expect("entry"),
+            );
+        }
+        index.sort();
+        let new_a = repo
+            .odb()
+            .write(ObjectKind::Blob, b"new-a\n")
+            .expect("blob");
+        let attrs = repo
+            .odb()
+            .write(ObjectKind::Blob, b"*.txt text\n")
+            .expect("attrs");
+        let renamed = repo
+            .odb()
+            .write(ObjectKind::Blob, b"renamed\n")
+            .expect("blob");
+        let changes = vec![
+            DiffEntry {
+                status: DiffStatus::Deleted,
+                old_path: Some("dir/c.txt".into()),
+                new_path: None,
+                old_oid: ObjectId::zero(),
+                new_oid: zero_oid(),
+                old_mode: FileMode::REGULAR,
+                new_mode: FileMode::ABSENT,
+                score: None,
+            },
+            DiffEntry {
+                status: DiffStatus::Renamed,
+                old_path: Some("old.txt".into()),
+                new_path: Some("new.txt".into()),
+                old_oid: ObjectId::zero(),
+                new_oid: renamed,
+                old_mode: FileMode::REGULAR,
+                new_mode: FileMode::REGULAR,
+                score: Some(100),
+            },
+            DiffEntry {
+                status: DiffStatus::Modified,
+                old_path: Some("a.txt".into()),
+                new_path: Some("a.txt".into()),
+                old_oid: ObjectId::zero(),
+                new_oid: new_a,
+                old_mode: FileMode::REGULAR,
+                new_mode: FileMode::REGULAR,
+                score: None,
+            },
+            DiffEntry {
+                status: DiffStatus::Modified,
+                old_path: Some(".gitattributes".into()),
+                new_path: Some(".gitattributes".into()),
+                old_oid: ObjectId::zero(),
+                new_oid: attrs,
+                old_mode: FileMode::REGULAR,
+                new_mode: FileMode::REGULAR,
+                score: None,
+            },
+        ];
+        let legacy = prospective_index_for_checkout_legacy(&index, &changes);
+        let bulk = prospective_index_for_checkout(&index, &changes);
+        assert_eq!(legacy.entries.len(), bulk.entries.len());
+        for (a, b) in legacy.entries.iter().zip(bulk.entries.iter()) {
+            assert_eq!(a.path, b.path);
+            assert_eq!(a.stage(), b.stage());
+            assert_eq!(a.oid, b.oid);
+            assert_eq!(a.mode, b.mode);
+        }
+        let config = repo.config().expect("config");
+        checkout_worktree_rules(&repo, &index, &changes, config).expect("rules with attrs");
     }
 }

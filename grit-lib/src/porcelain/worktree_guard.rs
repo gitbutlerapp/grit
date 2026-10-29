@@ -794,20 +794,39 @@ fn scheduled_delete_skip_file_type_probe(index: &Index, rel: &str) -> bool {
     })
 }
 
+/// Directory prefixes of scheduled delete paths (strict ancestors only).
+///
+/// Built once per wholesale scan so descent checks are O(1) instead of O(|delete_paths|).
+fn delete_path_directory_prefixes(
+    delete_paths: &HashSet<String>,
+    ignorecase: bool,
+) -> HashSet<String> {
+    let mut prefixes = HashSet::with_capacity(delete_paths.len().saturating_mul(2));
+    for del in delete_paths {
+        let mut end = 0usize;
+        while let Some(slash) = del[end..].find('/') {
+            end += slash;
+            let prefix = &del[..end];
+            if ignorecase {
+                prefixes.insert(prefix.to_ascii_lowercase());
+            } else {
+                prefixes.insert(prefix.to_owned());
+            }
+            end += 1;
+        }
+    }
+    prefixes
+}
+
 fn delete_scheduled_path_needs_directory_descent(
     rel: &str,
-    delete_paths: &HashSet<String>,
+    prefix_dirs: &HashSet<String>,
     ignorecase: bool,
 ) -> bool {
     if ignorecase {
-        delete_paths.iter().any(|del| {
-            del.len() > rel.len()
-                && del.as_bytes().get(rel.len()) == Some(&b'/')
-                && del[..rel.len()].eq_ignore_ascii_case(rel)
-        })
+        prefix_dirs.contains(&rel.to_ascii_lowercase())
     } else {
-        let prefix = format!("{rel}/");
-        delete_paths.iter().any(|del| del.starts_with(&prefix))
+        prefix_dirs.contains(rel)
     }
 }
 
@@ -992,6 +1011,7 @@ fn scan_wholesale_delete_root(
     work_tree: &Path,
     root: &str,
     delete_paths: &HashSet<String>,
+    delete_prefix_dirs: &HashSet<String>,
     ignorecase: bool,
     precomputed_counts: Option<(usize, usize)>,
 ) -> WholesaleDeleteRootScan {
@@ -1033,14 +1053,14 @@ fn scan_wholesale_delete_root(
                 // other scheduled deletes live under this path; otherwise probe only when the
                 // path is not a known indexed blob (directory deletes, missing index rows).
                 let skip_probe = scheduled_delete_skip_file_type_probe(index, rel);
-                let needs_descent =
-                    delete_scheduled_path_needs_directory_descent(rel, delete_paths, ignorecase)
-                        || (!skip_probe
-                            && (delete_paths.contains(rel)
-                                || (ignorecase
-                                    && delete_paths
-                                        .iter()
-                                        .any(|del| del.eq_ignore_ascii_case(rel)))));
+                let needs_descent = delete_scheduled_path_needs_directory_descent(
+                    rel,
+                    delete_prefix_dirs,
+                    ignorecase,
+                ) || (!skip_probe
+                    && (delete_paths.contains(rel)
+                        || (ignorecase
+                            && delete_paths.iter().any(|del| del.eq_ignore_ascii_case(rel)))));
                 if needs_descent {
                     let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
                     if is_dir {
@@ -1113,6 +1133,7 @@ fn collect_untracked_for_wholesale_delete_roots(
         delete_roots,
         ignorecase,
     );
+    let delete_prefix_dirs = delete_path_directory_prefixes(delete_paths, ignorecase);
     let roots: Vec<String> = delete_roots.iter().cloned().collect();
     let work_tree_owned = work_tree.to_path_buf();
     let delete_paths_shared = Arc::new(delete_paths.clone());
@@ -1129,6 +1150,7 @@ fn collect_untracked_for_wholesale_delete_roots(
                 &work_tree_owned,
                 root,
                 delete_paths_shared.as_ref(),
+                &delete_prefix_dirs,
                 ignorecase,
                 counts,
             ))
@@ -1142,6 +1164,7 @@ fn collect_untracked_for_wholesale_delete_roots(
                         work_tree,
                         root,
                         delete_paths,
+                        &delete_prefix_dirs,
                         ignorecase,
                         root_counts.get(root).copied(),
                     )
@@ -1158,6 +1181,7 @@ fn collect_untracked_for_wholesale_delete_roots(
                     work_tree,
                     root,
                     delete_paths,
+                    &delete_prefix_dirs,
                     ignorecase,
                     root_counts.get(root).copied(),
                 )
@@ -1776,6 +1800,71 @@ mod tests {
             "expected extra untracked, got {untracked:?}"
         );
         let _ = tmp;
+    }
+
+    #[test]
+    fn wholesale_delete_untracked_scan_scales_with_many_scheduled_deletes() {
+        use crate::index::entry_from_stat;
+        use crate::objects::ObjectKind;
+        use std::time::{Duration, Instant};
+
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree().expect("wt");
+        let mut delete_paths = HashSet::new();
+        let mut index = repo.load_index().expect("index");
+        const DIRS: usize = 15;
+        const FILES_PER_DIR: usize = 700;
+        for d in 0..DIRS {
+            let dir = format!("svc{:02}", d);
+            std::fs::create_dir_all(wt.join(&dir)).expect("mkdir");
+            for f in 0..FILES_PER_DIR {
+                let rel = format!("{dir}/f{f:04}.txt");
+                let abs = wt.join(&rel);
+                std::fs::write(&abs, format!("body {d} {f}\n")).expect("write");
+                let oid = repo
+                    .odb()
+                    .write(ObjectKind::Blob, format!("body {d} {f}\n").as_bytes())
+                    .expect("blob");
+                index.add_or_replace(
+                    entry_from_stat(&abs, rel.as_bytes(), oid, crate::index::MODE_REGULAR)
+                        .expect("entry"),
+                );
+                delete_paths.insert(rel);
+            }
+        }
+        index.sort();
+        std::fs::write(wt.join("svc00/planted-untracked.txt"), b"extra\n").expect("untracked");
+        let gitignore = wt.join(".gitignore");
+        std::fs::write(&gitignore, "ignored-under-delete/\n").expect("gitignore");
+        std::fs::create_dir_all(wt.join("svc00/ignored-under-delete")).expect("mkdir");
+        std::fs::write(wt.join("svc00/ignored-under-delete/x.txt"), b"ignored\n").expect("ignored");
+        let delete_roots: BTreeSet<String> = (0..DIRS).map(|d| format!("svc{:02}", d)).collect();
+        let start = Instant::now();
+        let (untracked, ignored) = collect_untracked_for_wholesale_delete_roots(
+            &repo,
+            &index,
+            wt,
+            &delete_paths,
+            &delete_roots,
+            false,
+        )
+        .expect("scan");
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "wholesale scan took {elapsed:?} for {} deletes",
+            delete_paths.len()
+        );
+        assert!(
+            untracked.iter().any(|p| p == "svc00/planted-untracked.txt"),
+            "expected planted untracked, got {untracked:?}"
+        );
+        assert!(
+            ignored
+                .iter()
+                .any(|p| p == "svc00/ignored-under-delete/x.txt"),
+            "expected ignored file, got {ignored:?}"
+        );
     }
 
     #[test]
@@ -2823,7 +2912,9 @@ mod tests {
         let indexed = count_indexed_paths_under_root(&index, root);
         let deletes = count_delete_paths_under_root(&delete_paths, root, false);
         assert_eq!(indexed, deletes, "fixture must be index-aligned");
-        let scan = scan_wholesale_delete_root(&index, wt, root, &delete_paths, false, None);
+        let prefix_dirs = delete_path_directory_prefixes(&delete_paths, false);
+        let scan =
+            scan_wholesale_delete_root(&index, wt, root, &delete_paths, &prefix_dirs, false, None);
         assert!(
             scan.untracked.iter().any(|p| p == "wh/nested/block.pipe"),
             "special files under a scheduled-delete directory must be discovered"
