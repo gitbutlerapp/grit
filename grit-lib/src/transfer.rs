@@ -1060,7 +1060,8 @@ fn copy_objects_for_local_fetch(
     let pack_dir_before = pack_file_basenames(&local_objects.join("pack"));
     let remote_has_alternates = !crate::pack::read_alternates_recursive(remote_objects)?.is_empty();
 
-    if fetch_opts.link_source_objects
+    if local_odb.uses_files_primary()
+        && fetch_opts.link_source_objects
         && !remote_has_alternates
         && !pack_build.thin
         && try_pack_link
@@ -1150,7 +1151,8 @@ fn copy_objects_for_local_fetch(
 
     let mut copy = LocalCopyProgress::new(send.len() as u64);
 
-    if !pack_build.thin && try_pack_link {
+    if local_odb.uses_files_primary() && !pack_build.thin && try_pack_link {
+        progress.start(ProgressPhase::CopyingObjects, Some(send.len() as u64));
         let local_has = |oid: &ObjectId| local_odb.exists_materialized_local_without_rescan(oid);
         let linked = link_packs_within(
             remote_objects,
@@ -1183,18 +1185,24 @@ fn copy_objects_for_local_fetch(
     // Hard-link loose objects before building an in-memory pack. Re-reading and
     // recompressing large loose blobs (typical local clone) would spike RSS to several
     // times the object size; linking matches system `git clone` on the same filesystem.
-    let linked_loose = link_loose_objects_for_oids(
-        remote_objects,
-        local_objects,
-        &still_missing,
-        &mut crate::progress::NullProgress,
-        cancel,
-    )?;
     let loose_candidates: HashSet<ObjectId> = still_missing.iter().copied().collect();
-    if linked_loose > 0 {
-        refresh_local_odb_after_link(local_odb);
-        copy.add(progress, linked_loose as u64);
-        still_missing = local_odb.missing_oids(still_missing)?;
+    if local_odb.uses_files_primary() {
+        progress.start(
+            ProgressPhase::CopyingObjects,
+            Some(still_missing.len() as u64),
+        );
+        let linked_loose = link_loose_objects_for_oids(
+            remote_objects,
+            local_objects,
+            &still_missing,
+            progress,
+            cancel,
+        )?;
+        if linked_loose > 0 {
+            refresh_local_odb_after_link(local_odb);
+            still_missing = local_odb.missing_oids(still_missing)?;
+        }
+        progress.finish();
     }
     if still_missing.is_empty() {
         copy.finish(progress);
@@ -1299,7 +1307,8 @@ fn copy_objects_for_local_push(
 
     let mut progress = crate::progress::NullProgress;
     let dest_has = |oid: &ObjectId| dest_odb.exists_materialized_local_without_rescan(oid);
-    if !opts.thin
+    if local_odb.uses_files_primary()
+        && !opts.thin
         && link_packs_within(
             local_objects,
             dest_objects,
@@ -1317,7 +1326,7 @@ fn copy_objects_for_local_push(
         return Ok(());
     }
 
-    if !haves.is_empty() {
+    if local_odb.uses_files_primary() && !haves.is_empty() {
         let linked_loose = link_loose_objects_for_oids(
             local_objects,
             dest_objects,

@@ -107,12 +107,11 @@ Object reads and writes go through your store, so commits, staging (`porcelain::
 
 [`Repository::fsck`](rustdoc:grit_lib::repo::Repository::fsck) works too: it lists the store's objects with `ObjectStore::for_each_object`, re-hashes each one against its id and runs the usual object and connectivity checks. Read or hash failures are reported as `FsckIssue::BadObject`, since there is no loose file path to name.
 
-Some operations still install or verify packs under the on-disk `objects/` directory. With a custom primary they fail up front with [`Error::UnsupportedObjectStore`](rustdoc:grit_lib::error::Error::UnsupportedObjectStore), before they touch refs, the remote or `objects/`. The `operation` field names the refused call:
+[`Remote::fetch`](rustdoc:grit_lib::remote::Remote::fetch), [`Remote::push`](rustdoc:grit_lib::remote::Remote::push), pull, bundle fetch, and [`clone_into`](rustdoc:grit_lib::remote::clone::clone_into) read and write objects through the custom primary (pack bytes are resolved into the store with [`ingest_received_pack`](rustdoc:grit_lib::objects::index_pack::ingest_received_pack)). Partial-clone filters are not supported yet (`operation: "partial fetch"`). Some operations still install or verify packs under the on-disk `objects/` directory:
 
 | `operation` | Refused API |
 | ----------- | ----------- |
-| `fetch` | [`Remote::fetch`](rustdoc:grit_lib::remote::Remote::fetch), `repo.remotes().fetch` / `fetch_all`, pull, promisor lazy fetch (every transport, bundles included) |
-| `push` | [`Remote::push`](rustdoc:grit_lib::remote::Remote::push), `repo.remotes().push` |
+| `partial fetch` | Fetch or clone with an object filter on a custom primary |
 | `gc`, `commit-graph write`, `repack`, `midx write`, `prune` | Filesystem maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_store`, pack install with `index_pack::install_pack_*`, MIDX write) |
 
 Maintenance stays files-only by design: packs, `.idx`, multi-pack-index and commit-graph files are how the files backend stores objects, and a custom store owns its own layout. A custom store still gets a commit-graph, built in memory and kept in its own storage (see [Commit-graphs for a custom store](#commit-graphs-for-a-custom-store)). Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
@@ -192,7 +191,7 @@ The repository-level entry points use it automatically. [`ingest_received_pack`]
 cargo run -p grit-examples --bin ingest_pack_into_store
 ```
 
-`Remote::fetch` and `Remote::push` do not run on a custom primary yet. Until they do, fetch into a files-backed scratch repository, build a pack of what arrived with [`build_pack`](rustdoc:grit_lib::objects::pack_objects::build_pack), and feed it to `ingest_received_pack` on the custom repository. Going the other way, `build_pack` on the custom repository's `Odb` produces a pack that `git index-pack --strict` accepts.
+For a lower-level hook, [`fetch_remote_into`](rustdoc:grit_lib::remote::fetch::fetch_remote_into) drives wire negotiation on an open [`Connection`](rustdoc:grit_lib::remote::transport::Connection) and ingests into the repository's primary store. Set [`FetchOptions::pack_spool_only`](rustdoc:grit_lib::remote::transfer::FetchOptions::pack_spool_only) to receive the negotiated pack as a spool file and ingest it yourself with [`ingest_received_pack_path`](rustdoc:grit_lib::objects::index_pack::ingest_received_pack_path) or [`ingest_pack_into`](rustdoc:grit_lib::objects::unpack_objects::ingest_pack_into). Going the other way, [`build_pack`](rustdoc:grit_lib::objects::pack_objects::build_pack) on the custom repository's `Odb` produces a pack that `git index-pack --strict` accepts.
 
 ## Short ids and prefix lookup
 

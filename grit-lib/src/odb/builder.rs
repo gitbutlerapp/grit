@@ -72,15 +72,11 @@ impl OdbBuilder {
     /// [`Bundle::unbundle`](crate::bundle::Bundle::unbundle) resolve every delta and call
     /// [`WritableObjectStore::write`] instead of installing a pack under `objects/pack/`.
     ///
-    /// Operations that still need the on-disk `objects/` directory refuse up front with
-    /// [`Error::UnsupportedObjectStore`] (its `operation` names the refused call) and leave
-    /// refs and `objects/` untouched:
+    /// [`Remote::fetch`](crate::remote::Remote::fetch), [`Remote::push`](crate::remote::Remote::push),
+    /// pull, bundles, and [`clone_into`](crate::clone::clone_into) read and write objects through
+    /// the custom primary. Partial-clone filters (`operation: "partial fetch"`) and filesystem
+    /// maintenance still refuse when they need on-disk pack layout:
     ///
-    /// - `"fetch"`: [`Remote::fetch`](crate::remote::Remote::fetch) and everything built on it
-    ///   ([`RepositoryRemotes::fetch`](crate::repo_handles::RepositoryRemotes::fetch),
-    ///   `fetch_all`, pull, promisor lazy fetch), for every transport including bundles
-    /// - `"push"`: [`Remote::push`](crate::remote::Remote::push) and
-    ///   [`RepositoryRemotes::push`](crate::repo_handles::RepositoryRemotes::push)
     /// - maintenance: [`Odb::gc`], [`Odb::write_commit_graph`], repack, MIDX, and pack helpers
     ///
     /// History walks never read commit-graph files from `objects/` for a custom primary: such

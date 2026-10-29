@@ -1,11 +1,9 @@
 //! Transport, fsck, unbundle, and staging behavior for repositories whose object database
-//! uses a custom [`OdbBuilder::primary`] store (issue #1735).
+//! uses a custom [`OdbBuilder::primary`] store (issues #1735, #1892, #2288).
 //!
-//! Unbundling writes every object of the bundle's pack into the custom primary (issue #1892).
-//! Fetch and push still assume the files-backed `objects/` directory, so they must fail up
-//! front with a typed [`Error::UnsupportedObjectStore`] instead of writing packs the
-//! repository cannot read or moving refs to objects it does not have. Staging writes go
-//! through the custom primary, and fsck validates the objects the primary lists.
+//! Fetch and push read and write through the custom primary. Unbundling writes every object
+//! of the bundle's pack into the custom primary. Staging writes go through the custom primary,
+//! and fsck validates the objects the primary lists.
 
 use grit_test_support::{git, rev_parse};
 use std::fs;
@@ -25,7 +23,7 @@ use grit_lib::porcelain::stage_tracked::IndexStagingThresholds;
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::NoProgress;
-use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
+use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, UpdateMode};
 use grit_lib::remote::{Remote, RemoteError};
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 
@@ -139,22 +137,25 @@ fn commit_into(repo: &Repository, content: &[u8]) -> ObjectId {
     commit
 }
 
-fn is_unsupported(err: &RemoteError, op: &str) -> bool {
-    matches!(
-        err,
-        RemoteError::Library(Error::UnsupportedObjectStore { operation }) if *operation == op
-    )
+fn count_store_objects(store: &MemoryStore) -> usize {
+    let mut n = 0usize;
+    store
+        .for_each_object(&mut |_| {
+            n += 1;
+            std::ops::ControlFlow::Continue(())
+        })
+        .expect("enumerate");
+    n
 }
 
 #[test]
-fn fetch_into_custom_primary_fails_without_touching_refs_or_objects() {
+fn fetch_into_custom_primary_round_trips_with_git() {
     let upstream = git_upstream();
     let (_dir, repo, store) = memory_repo();
     let before = object_files(repo.git_dir());
 
     let remote = Remote::from_url(upstream.path().to_str().expect("utf8")).expect("remote");
-    let err = repo
-        .remotes()
+    repo.remotes()
         .fetch(
             &remote,
             fetch_all_branches(),
@@ -162,45 +163,34 @@ fn fetch_into_custom_primary_fails_without_touching_refs_or_objects() {
             &NeverCancel,
             None,
         )
-        .expect_err("fetch into a custom primary must not report success");
-    assert!(is_unsupported(&err, "fetch"), "unexpected error: {err:?}");
+        .expect("fetch into custom primary");
 
-    assert!(
-        resolve_ref(repo.git_dir(), "refs/remotes/origin/main").is_err(),
-        "no tracking ref may point at objects the repository cannot read"
-    );
+    let tip = resolve_ref(repo.git_dir(), "refs/remotes/origin/main").expect("tracking ref");
+    assert_eq!(tip, rev_parse(upstream.path(), "main"));
+    assert!(store.contains(&tip).expect("contains"));
+    assert!(repo.odb().read(&tip).is_ok());
+    assert!(count_store_objects(&store) > 0);
     assert_eq!(
         object_files(repo.git_dir()),
         before,
-        "fetch must not install packs or loose objects under objects/"
+        "fetch must not leave pack files under objects/ for a custom primary"
     );
-    let mut stored = 0usize;
-    store
-        .for_each_object(&mut |_| {
-            stored += 1;
-            std::ops::ControlFlow::Continue(())
-        })
-        .expect("enumerate");
-    assert_eq!(
-        stored, 0,
-        "fetch must not leave objects in the custom store"
-    );
+    git(upstream.path(), &["fsck", "--full"]);
 }
 
 #[test]
-fn fetch_from_bundle_into_custom_primary_is_rejected() {
+fn fetch_from_bundle_into_custom_primary_succeeds() {
     let upstream = git_upstream();
     let bundle = upstream.path().join("all.bundle");
     git(
         upstream.path(),
         &["bundle", "create", bundle.to_str().expect("utf8"), "main"],
     );
-    let (_dir, repo, _store) = memory_repo();
+    let (_dir, repo, store) = memory_repo();
     let before = object_files(repo.git_dir());
 
     let remote = Remote::from_url(bundle.to_str().expect("utf8")).expect("remote");
-    let err = repo
-        .remotes()
+    repo.remotes()
         .fetch(
             &remote,
             fetch_all_branches(),
@@ -208,10 +198,77 @@ fn fetch_from_bundle_into_custom_primary_is_rejected() {
             &NeverCancel,
             None,
         )
-        .expect_err("bundle fetch into a custom primary must fail");
-    assert!(is_unsupported(&err, "fetch"), "unexpected error: {err:?}");
-    assert!(resolve_ref(repo.git_dir(), "refs/remotes/origin/main").is_err());
+        .expect("bundle fetch into custom primary");
+    let tip = resolve_ref(repo.git_dir(), "refs/remotes/origin/main").expect("tracking ref");
+    assert_eq!(tip, rev_parse(upstream.path(), "main"));
+    assert!(store.contains(&tip).expect("contains"));
     assert_eq!(object_files(repo.git_dir()), before);
+}
+
+#[test]
+fn fetch_incremental_into_custom_primary_uses_haves_from_store() {
+    let upstream = git_upstream();
+    let (_dir, repo, store) = memory_repo();
+    let remote = Remote::from_url(upstream.path().to_str().expect("utf8")).expect("remote");
+    repo.remotes()
+        .fetch(
+            &remote,
+            FetchOptions {
+                refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".into()],
+                ..Default::default()
+            },
+            &mut NoProgress,
+            &NeverCancel,
+            None,
+        )
+        .expect("initial fetch");
+    let after_first = count_store_objects(&store);
+
+    fs::write(upstream.path().join("c.txt"), "three\n").expect("write");
+    git(upstream.path(), &["add", "c.txt"]);
+    git(upstream.path(), &["commit", "-q", "-m", "c3"]);
+
+    repo.remotes()
+        .fetch(
+            &remote,
+            FetchOptions {
+                refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".into()],
+                ..Default::default()
+            },
+            &mut NoProgress,
+            &NeverCancel,
+            None,
+        )
+        .expect("incremental fetch");
+    assert!(count_store_objects(&store) > after_first);
+    let tip = resolve_ref(repo.git_dir(), "refs/remotes/origin/main").expect("tracking ref");
+    assert_eq!(tip, rev_parse(upstream.path(), "main"));
+}
+
+#[test]
+fn fetch_dry_run_into_custom_primary_classifies_without_persisting() {
+    let upstream = git_upstream();
+    let (_dir, repo, store) = memory_repo();
+    let before_count = count_store_objects(&store);
+
+    let remote = Remote::from_url(upstream.path().to_str().expect("utf8")).expect("remote");
+    let outcome = repo
+        .remotes()
+        .fetch(
+            &remote,
+            FetchOptions {
+                refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".into()],
+                dry_run: true,
+                ..Default::default()
+            },
+            &mut NoProgress,
+            &NeverCancel,
+            None,
+        )
+        .expect("dry-run fetch");
+    assert!(outcome.updates.iter().any(|u| u.mode == UpdateMode::New));
+    assert_eq!(count_store_objects(&store), before_count);
+    assert!(resolve_ref(repo.git_dir(), "refs/remotes/origin/main").is_err());
 }
 
 #[test]
@@ -317,7 +374,7 @@ fn unbundle_into_custom_primary_reports_a_corrupt_pack() {
 }
 
 #[test]
-fn fetch_all_reports_typed_error_per_remote() {
+fn fetch_all_succeeds_with_custom_primary() {
     let upstream = git_upstream();
     let (_dir, repo, _store) = memory_repo();
     repo.remotes()
@@ -340,15 +397,12 @@ fn fetch_all_reports_typed_error_per_remote() {
     assert_eq!(results.len(), 1);
     let (name, outcome) = &results[0];
     assert_eq!(name, "origin");
-    let err = outcome
-        .as_ref()
-        .expect_err("custom primary fetch must fail");
-    assert!(is_unsupported(err, "fetch"), "unexpected error: {err:?}");
-    assert!(resolve_ref(repo.git_dir(), "refs/remotes/origin/main").is_err());
+    outcome.as_ref().expect("custom primary fetch");
+    assert!(resolve_ref(repo.git_dir(), "refs/remotes/origin/main").is_ok());
 }
 
 #[test]
-fn push_from_custom_primary_fails_without_touching_remote() {
+fn push_from_custom_primary_round_trips_with_git() {
     let bare = bare_git_repo();
     let (_dir, repo, store) = memory_repo();
     let tip = commit_into(&repo, b"only in memory\n");
@@ -365,8 +419,7 @@ fn push_from_custom_primary_fails_without_touching_remote() {
         expect_absent: false,
         hook_src_ref: None,
     };
-    let err = repo
-        .remotes()
+    repo.remotes()
         .push(
             &remote,
             &[spec],
@@ -375,10 +428,41 @@ fn push_from_custom_primary_fails_without_touching_remote() {
             &NeverCancel,
             None,
         )
-        .expect_err("push from a custom primary must fail");
-    assert!(is_unsupported(&err, "push"), "unexpected error: {err:?}");
-    assert!(resolve_ref(bare.path(), "refs/heads/main").is_err());
+        .expect("push from custom primary");
+    assert_eq!(rev_parse(bare.path(), "refs/heads/main"), tip);
     git(bare.path(), &["fsck", "--full"]);
+    git(bare.path(), &["cat-file", "-p", &tip.to_hex()]);
+}
+
+#[test]
+fn partial_fetch_custom_primary_is_refused() {
+    let upstream = git_upstream();
+    let (_dir, repo, _store) = memory_repo();
+    repo.remotes()
+        .add("origin", upstream.path().to_str().expect("utf8"))
+        .expect("add");
+    let remote = repo.remotes().get("origin").expect("get");
+    let err = repo
+        .remotes()
+        .fetch(
+            &remote,
+            FetchOptions {
+                refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".into()],
+                filter: Some(grit_lib::remote::partial_clone::ObjectFilterSpec::BlobNone),
+                ..Default::default()
+            },
+            &mut NoProgress,
+            &NeverCancel,
+            None,
+        )
+        .expect_err("partial fetch");
+    assert!(
+        matches!(
+            err,
+            RemoteError::Library(Error::UnsupportedObjectStore { operation }) if operation == "partial fetch"
+        ),
+        "{err:?}"
+    );
 }
 
 #[test]

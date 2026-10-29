@@ -1291,6 +1291,50 @@ fn skip_v2_section_until_boundary(reader: &mut dyn Read, sideband_all: bool) -> 
     }
 }
 
+/// Pack ingest target for network fetch [`FetchOptions::dry_run`]: objects are classified but not published.
+#[allow(clippy::large_enum_variant)]
+enum FetchDryRunIngest {
+    Quarantine(crate::receive_quarantine::ReceiveQuarantine),
+    Memory {
+        objects_dir: std::path::PathBuf,
+        pack: std::sync::Arc<crate::objects::odb::store::MemoryStore>,
+        read: std::sync::Arc<dyn crate::objects::odb::store::ObjectStore>,
+    },
+}
+
+impl FetchDryRunIngest {
+    fn create(local_odb: &crate::odb::Odb, git_dir: &Path) -> Result<Self> {
+        use crate::objects::odb::store::MemoryStore;
+        if local_odb.uses_files_primary() {
+            Ok(Self::Quarantine(
+                crate::receive_quarantine::ReceiveQuarantine::create(local_odb, git_dir)?,
+            ))
+        } else {
+            let pack = std::sync::Arc::new(MemoryStore::new(local_odb.hash_algo()));
+            Ok(Self::Memory {
+                objects_dir: local_odb.objects_dir().to_path_buf(),
+                pack: pack.clone(),
+                read: local_odb.read_store(),
+            })
+        }
+    }
+
+    fn odb(&self) -> crate::odb::Odb {
+        match self {
+            Self::Quarantine(q) => q.odb(),
+            Self::Memory {
+                objects_dir,
+                pack,
+                read,
+            } => crate::odb::OdbBuilder::files(objects_dir)
+                .primary(pack.clone())
+                .push_read_source(read.clone())
+                .alternates(false)
+                .build(),
+        }
+    }
+}
+
 /// Fetch from a remote over a live [`Connection`], driving the upload-pack
 /// negotiation and writing the resulting tracking-ref updates into
 /// `local_git_dir`.
@@ -1332,7 +1376,13 @@ pub(crate) fn open_fetch_target(local_git_dir: &Path, opts: &FetchOptions) -> Re
 }
 
 /// Like [`fetch_remote`], reading and writing objects through `local`'s object store.
-pub(crate) fn fetch_remote_into(
+///
+/// Received packs are ingested into `local`'s primary backend, including a custom
+/// [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary) store. Set
+/// [`FetchOptions::pack_spool_only`](crate::transfer::FetchOptions::pack_spool_only) to keep the
+/// negotiated pack on disk and ingest it with [`crate::index_pack::ingest_received_pack_path`]
+/// or [`crate::unpack_objects::ingest_pack_into`].
+pub fn fetch_remote_into(
     local: &Repository,
     conn: &mut dyn Connection,
     opts: &mut FetchOptions,
@@ -1437,6 +1487,11 @@ pub(crate) fn fetch_remote_into(
     let local = reopened.as_ref().unwrap_or(local);
     let local_git_dir = local.git_dir();
     let local_odb = local.odb();
+    if opts.filter.is_some() && !local_odb.uses_files_primary() {
+        return Err(Error::UnsupportedObjectStore {
+            operation: "partial fetch",
+        });
+    }
 
     let crate::transfer::FetchMatchSet {
         mut matched,
@@ -1550,7 +1605,7 @@ pub(crate) fn fetch_remote_into(
         t_begin.elapsed()
     );
 
-    let mut dry_run_quarantine: Option<crate::receive_quarantine::ReceiveQuarantine> = None;
+    let mut dry_run_ingest: Option<FetchDryRunIngest> = None;
 
     let v0_caps = if v2_caps.is_none() {
         Some(conn.capabilities().join(" "))
@@ -1632,14 +1687,11 @@ pub(crate) fn fetch_remote_into(
                 &pack_config,
                 opts.index_pack_threads,
             )?;
-            if opts.dry_run && dry_run_quarantine.is_none() {
-                dry_run_quarantine = Some(crate::receive_quarantine::ReceiveQuarantine::create(
-                    local_odb,
-                    local_git_dir,
-                )?);
+            if opts.dry_run && dry_run_ingest.is_none() {
+                dry_run_ingest = Some(FetchDryRunIngest::create(local_odb, local_git_dir)?);
             }
-            let ingested = if let Some(q) = dry_run_quarantine.as_ref() {
-                let q_odb = q.odb();
+            let ingested = if let Some(target) = dry_run_ingest.as_ref() {
+                let q_odb = target.odb();
                 crate::index_pack::ingest_received_pack_path_with_progress(
                     path,
                     &q_odb,
@@ -1701,9 +1753,9 @@ pub(crate) fn fetch_remote_into(
     // objects). All/None already handled; Following kept only when reachable.
     if opts.tags == crate::transfer::TagMode::Following {
         let t = std::time::Instant::now();
-        let tag_odb = dry_run_quarantine
+        let tag_odb = dry_run_ingest
             .as_ref()
-            .map(|q| q.odb())
+            .map(FetchDryRunIngest::odb)
             .unwrap_or_else(|| local_odb.clone());
         retain_following_tags(
             &tag_odb,
@@ -1721,7 +1773,7 @@ pub(crate) fn fetch_remote_into(
 
     // 5. Classify + apply ref updates (ancestry via the now-populated local repo).
     let t_apply = std::time::Instant::now();
-    let classify_odb = dry_run_quarantine.as_ref().map(|q| q.odb());
+    let classify_odb = dry_run_ingest.as_ref().map(FetchDryRunIngest::odb);
     let classify_repo = (!opts.dry_run).then_some(local);
     let d_repo_open = t_apply.elapsed();
 

@@ -528,11 +528,9 @@ impl Remote {
     ///
     /// # Errors
     ///
-    /// Returns [`RemoteError`] or transport errors on failure, and
-    /// [`Error::UnsupportedObjectStore`] (operation `"fetch"`) before contacting the remote
-    /// when `repo` uses a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary)
-    /// store: received objects are installed under the on-disk `objects/` directory, which
-    /// that repository does not read.
+    /// Returns [`RemoteError`] or transport errors on failure. Received pack bytes are written
+    /// into the repository's [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary) store
+    /// (including custom backends) via [`ingest_received_pack`](crate::index_pack::ingest_received_pack).
     pub fn fetch(
         &self,
         repo: &Repository,
@@ -541,7 +539,6 @@ impl Remote {
         cancel: &dyn crate::progress::Cancel,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> RemoteResult<FetchOutcome> {
-        repo.odb().require_files_primary("fetch")?;
         if opts.configured_refspecs.is_empty() {
             opts.configured_refspecs = self.fetch_refspecs.clone();
         }
@@ -588,10 +585,8 @@ impl Remote {
     /// # Errors
     ///
     /// Returns [`Error::Cancelled`] (see [`RemoteError::is_cancelled`]) once `cancel`
-    /// fires, [`RemoteError`] or transport errors on failure, and
-    /// [`Error::UnsupportedObjectStore`] (operation `"push"`) before contacting the remote
-    /// when `repo` uses a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary)
-    /// store: the pack is built from the on-disk `objects/` directory.
+    /// fires, or [`RemoteError`] / transport errors on failure. The pack is built from
+    /// [`Odb::read_store`](crate::odb::Odb::read_store), including custom primaries.
     pub fn push(
         &self,
         repo: &Repository,
@@ -601,7 +596,6 @@ impl Remote {
         cancel: &dyn crate::progress::Cancel,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> RemoteResult<PushOutcome> {
-        repo.odb().require_files_primary("push")?;
         if opts.tracking_remote.is_none() {
             opts.tracking_remote = self.name.clone();
         }
