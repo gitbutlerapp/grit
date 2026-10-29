@@ -1639,6 +1639,7 @@ pub fn fetch_remote_into(
         &advertised_peel,
         &negatives,
         &tags_present,
+        opts.force,
         &mut matched,
         &mut matched_oids,
         &mut seen_remote_ref,
@@ -2328,7 +2329,7 @@ pub(crate) fn finish_initial_remote_fetch_layout(
 /// [`following_tag_wants_with_local_peel`].
 ///
 /// Under `Following`, tags named in `already_local` (see [`tags_already_local`])
-/// are skipped: the local repository already has them at the advertised value.
+/// are skipped: the local repository already has a ref with that name.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn add_wire_tags(
     mode: crate::transfer::TagMode,
@@ -2336,6 +2337,7 @@ pub(crate) fn add_wire_tags(
     advertised_peel: &std::collections::HashMap<String, ObjectId>,
     negatives: &[RefspecItem],
     already_local: &HashSet<String>,
+    force_all_tags: bool,
     matched: &mut Vec<crate::transfer::MatchedRef>,
     matched_oids: &mut HashSet<ObjectId>,
     seen_remote_ref: &mut HashSet<String>,
@@ -2365,7 +2367,7 @@ pub(crate) fn add_wire_tags(
             remote_ref: name.clone(),
             local_ref: Some(name.clone()),
             oid: *oid,
-            force: false,
+            force: force_all_tags && mode == crate::transfer::TagMode::All,
             is_tag: true,
             auto_followed: mode == crate::transfer::TagMode::Following,
             dest_is_tag: true,
@@ -2593,10 +2595,10 @@ pub(crate) fn retain_following_tags(
 }
 
 /// Names of the remote `refs/tags/*` entries in `remote_refs` that the local
-/// repository already stores under the same name at the same object id.
+/// repository already stores under the same name (any object id).
 ///
 /// Tag-following never needs to consider these: Git's auto-follow skips tags
-/// that already exist locally, and there is nothing to fetch or write for them.
+/// that already exist locally, regardless of where the remote tag now points.
 /// Excluding them up front keeps the reachability walk off the whole history
 /// when the client already has every advertised tag (the common incremental
 /// fetch).
@@ -2615,9 +2617,7 @@ pub(crate) fn tags_already_local(
 ) -> HashSet<String> {
     remote_refs
         .iter()
-        .filter(|(name, oid)| {
-            name.starts_with("refs/tags/") && local_refs.resolve(name).ok() == Some(*oid)
-        })
+        .filter(|(name, _)| name.starts_with("refs/tags/") && local_refs.resolve(name).is_ok())
         .map(|(name, _)| name.clone())
         .collect()
 }
@@ -3000,6 +3000,7 @@ mod fetch_advertised_ref_tests {
             &advertised_peel,
             &negatives,
             &HashSet::new(),
+            false,
             &mut matched,
             &mut matched_oids,
             &mut seen,
@@ -3408,8 +3409,12 @@ mod fetch_advertised_ref_tests {
         let present = tags_already_local(store.as_ref(), &remote_refs);
         assert_eq!(
             present,
-            HashSet::from(["refs/tags/loose".to_owned(), "refs/tags/packed".to_owned()]),
-            "only tags stored locally at the advertised oid count as present"
+            HashSet::from([
+                "refs/tags/loose".to_owned(),
+                "refs/tags/packed".to_owned(),
+                "refs/tags/moved".to_owned(),
+            ]),
+            "every local tag name is skipped under Following"
         );
         assert!(tags_already_local(store.as_ref(), &remote_refs[..1]).is_empty());
     }
@@ -3442,6 +3447,7 @@ mod fetch_advertised_ref_tests {
                 &HashMap::new(),
                 &[],
                 &already_local,
+                false,
                 &mut matched,
                 &mut matched_oids,
                 &mut seen,

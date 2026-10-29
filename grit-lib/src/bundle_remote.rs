@@ -409,6 +409,7 @@ fn complete_bundle_fetch(
         &tag_shallow,
         &negatives,
         &tags_present,
+        opts.force,
         &mut matched,
         &mut matched_oids,
         &mut seen_remote_ref,

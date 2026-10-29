@@ -44,6 +44,9 @@ pub struct FetchArgs {
     /// Convert a shallow repository to a complete one (`git fetch --unshallow`).
     #[arg(long = "unshallow", conflicts_with_all = ["depth", "deepen"])]
     pub unshallow: bool,
+    /// Force ref updates that would be rejected (non-fast-forward, tag clobber with `--tags`).
+    #[arg(short = 'f', long = "force")]
+    pub force: bool,
 }
 
 impl FetchArgs {

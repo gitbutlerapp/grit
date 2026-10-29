@@ -8,7 +8,7 @@ order: 2
 ## Synopsis
 
 ```text
-grit fetch [<remote>] [<refspec>…] [--all] [--depth N] [--deepen N] [--unshallow] [--tags] [--no-tags] [--prune] [--no-prune] [--dry-run] [-q]
+grit fetch [<remote>] [<refspec>…] [--all] [--depth N] [--deepen N] [--unshallow] [--tags] [--no-tags] [--prune] [--no-prune] [--dry-run] [-f] [-q]
 ```
 
 ## Description
@@ -29,7 +29,7 @@ On a terminal, stderr first shows `Fetching <remote> <url>`, then one live progr
 
 By default grit follows tags, fetching every tag (lightweight or annotated) that points into the fetched history. That includes tags on commits, trees and blobs that arrive with the fetch, and tags on trees or blobs you already have. A tag on a commit you already have is followed only when the fetched refs reach that commit; Git also follows it when the commit is unreachable from them. In a partial clone, tag following never downloads missing objects. `--tags` fetches every remote tag, and `--no-tags` disables automatic tags. Tag following costs milliseconds even on large repositories. `remote.<name>.tagOpt` (`--tags` / `--no-tags`) applies when the CLI does not override it.
 
-A refspec that names tags (`refs/tags/rel:refs/tags/rel2`, `refs/tags/*:refs/tags/*`) is honoured like any other refspec, whatever the tag mode. Fetch never moves an existing local tag unless the refspec is forced: when the remote retargets a tag, `grit fetch origin '+refs/tags/rel:refs/tags/rel'` updates it (status `forced`), and without `+` the update is rejected.
+Default tag following never updates a tag you already have locally, even when the remote retargets it — a plain `grit fetch` stays quiet and exits **0**, matching Git. To refresh moved release tags, use `grit fetch --tags` (reports a rejection until you accept the move) or `grit fetch --tags --force`. A refspec that names tags (`refs/tags/rel:refs/tags/rel2`, `refs/tags/*:refs/tags/*`) is honoured like any other refspec; a leading `+` or `--force` on the fetch forces the update (status `forced`).
 
 `--dry-run` negotiates and reports updates without writing refs, objects, or `FETCH_HEAD`. Human output ends with **Would fetch N update(s) from …** when anything would change, or **Already up to date with …** when nothing would.
 
@@ -58,6 +58,7 @@ Local fetches reuse the repository's ref store across tracking refs and tags. An
 | `--depth N` | Shallow fetch: keep at most N commits from each tip. |
 | `--deepen N` | Deepen a shallow clone by N commits (relative). |
 | `--unshallow` | Fetch full history and drop shallow boundaries. |
+| `-f`, `--force` | Force non-fast-forward branch updates and tag moves when combined with `--tags` or a forced refspec. Does not move existing tags on a default fetch. |
 | `-q`, `--quiet` | Suppress progress and human stdout/stderr. |
 
 ## Examples

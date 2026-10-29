@@ -103,6 +103,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     options.fetch = FetchOptions {
         refspecs: invocation.user_refspecs,
         tags: resolve_fetch_tags(&config, &invocation.remote, args.fetch.tag_mode_override()),
+        force: args.fetch.force,
         thread_policy: repo.thread_policy(),
         environment: context::environment(),
         prune: resolve_fetch_prune(&config, &invocation.remote, args.fetch.prune_override())

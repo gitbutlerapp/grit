@@ -212,6 +212,10 @@ pub struct FetchOptions {
     pub configured_refspecs: Vec<String>,
     /// Clone-only reflog entries for `refs/remotes/{remote}/HEAD` (not remote branches).
     pub clone_reflog: Option<CloneReflog>,
+    /// Force ref updates that would otherwise be rejected (non-fast-forward branches,
+    /// tag clobber under [`TagMode::All`] or explicit refspecs). Does not move tags
+    /// that already exist locally under default tag following.
+    pub force: bool,
     /// Diagnostic sink for [`crate::diagnostics::Trace::Network`] events.
     pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
     /// When true with [`Self::diagnostics`], fetch paths may emit network trace events.
@@ -290,6 +294,7 @@ impl Default for FetchOptions {
             object_wants: Vec::new(),
             promisor_object_fetch: false,
             link_source_objects: false,
+            force: false,
         }
     }
 }
@@ -333,6 +338,7 @@ impl Clone for FetchOptions {
             object_wants: self.object_wants.clone(),
             promisor_object_fetch: self.promisor_object_fetch,
             link_source_objects: self.link_source_objects,
+            force: self.force,
         }
     }
 }
@@ -1728,8 +1734,15 @@ pub(crate) fn build_fetch_matched_set(
         );
     }
 
-    let matched =
+    let mut matched =
         crate::fetch_request::matched_refs_with_negatives(&plan, remote, &negatives, opts.prune)?;
+    if opts.force {
+        for m in &mut matched {
+            if !m.auto_followed {
+                m.force = true;
+            }
+        }
+    }
     Ok(FetchMatchSet {
         matched,
         positive,
@@ -1880,6 +1893,7 @@ pub(crate) fn fetch_local_into(
             &remote_shallow,
             &negatives,
             &HashSet::new(),
+            opts.force,
             &mut matched,
             &mut matched_oids,
             &mut seen_remote_ref,
@@ -1932,6 +1946,7 @@ pub(crate) fn fetch_local_into(
             &tag_shallow,
             &negatives,
             &tags_present,
+            opts.force,
             &mut matched,
             &mut matched_oids,
             &mut seen_remote_ref,
@@ -3360,7 +3375,7 @@ fn glob_matches(pattern: &str, refname: &str) -> bool {
 ///
 /// Under `Following`, tags named in `already_local` (see
 /// [`crate::fetch::tags_already_local`]) are skipped, matching Git's auto-follow,
-/// which never reconsiders a tag the local repository already has.
+/// which never reconsiders a tag the local repository already has by name.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_tag_mode(
     mode: TagMode,
@@ -3369,6 +3384,7 @@ pub(crate) fn apply_tag_mode(
     shallow_boundaries: &HashSet<ObjectId>,
     negatives: &[RefspecItem],
     already_local: &HashSet<String>,
+    force_all_tags: bool,
     matched: &mut Vec<MatchedRef>,
     matched_oids: &mut HashSet<ObjectId>,
     seen_remote_ref: &mut HashSet<String>,
@@ -3434,7 +3450,7 @@ pub(crate) fn apply_tag_mode(
                 remote_ref: name.clone(),
                 local_ref: Some(name.clone()),
                 oid,
-                force: false,
+                force: force_all_tags && mode == TagMode::All,
                 is_tag: true,
                 auto_followed: mode == TagMode::Following,
                 dest_is_tag: true,
