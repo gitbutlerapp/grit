@@ -2272,6 +2272,23 @@ mod merge_call_tests {
         sig: &str,
         file_count: usize,
     ) -> (ObjectId, ObjectId, ObjectId) {
+        wide_rename_fork_onto_inner(repo, sig, file_count, false)
+    }
+
+    fn wide_rename_fork_onto_pure_renames(
+        repo: &Repository,
+        sig: &str,
+        file_count: usize,
+    ) -> (ObjectId, ObjectId, ObjectId) {
+        wide_rename_fork_onto_inner(repo, sig, file_count, true)
+    }
+
+    fn wide_rename_fork_onto_inner(
+        repo: &Repository,
+        sig: &str,
+        file_count: usize,
+        pure_renames: bool,
+    ) -> (ObjectId, ObjectId, ObjectId) {
         use crate::objects::{serialize_commit, CommitData};
 
         let mut fork_tree =
@@ -2308,8 +2325,12 @@ mod merge_call_tests {
         for i in 0..file_count {
             let old = format!("dir/f{i}.txt");
             let new = format!("moved/f{i}.txt");
-            onto_tree = tree_with_file(&repo, onto_tree, &new, &rename_friendly_blob(i, "onto"))
-                .expect("moved add");
+            let moved_bytes = if pure_renames {
+                rename_friendly_blob(i, "fork")
+            } else {
+                rename_friendly_blob(i, "onto")
+            };
+            onto_tree = tree_with_file(&repo, onto_tree, &new, &moved_bytes).expect("moved add");
             onto_tree = tree_without_path(&repo, onto_tree, &old).expect("moved rm");
         }
         let onto_raw = serialize_commit(&CommitData {
@@ -2495,6 +2516,52 @@ mod merge_call_tests {
                 committer_raw: Vec::new(),
                 encoding: None,
                 message: format!("under dir {i}\n"),
+                raw_message: None,
+                extra_headers: Vec::new(),
+            });
+            stack_parent = repo
+                .odb()
+                .write(ObjectKind::Commit, &raw)
+                .expect("stack commit");
+        }
+        let tip = stack_parent;
+        write_ref(repo.git_dir(), "refs/heads/main", &tip).expect("ref");
+        plan_overlap_rebase(&repo, fork, onto, tip);
+    }
+
+    #[test]
+    fn rebase_overlap_edit_pre_rename_path_uses_cached_renames() {
+        use crate::objects::{serialize_commit, CommitData};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let sig = ident(1);
+        let (fork, onto, fork_tree) = wide_rename_fork_onto_pure_renames(&repo, &sig, 80);
+
+        let mut stack_parent = fork;
+        let mut stack_tree = fork_tree;
+        for i in 0..12 {
+            let file_idx = i % 80;
+            let path = format!("dir/f{file_idx}.txt");
+            let mut bytes = rename_friendly_blob(file_idx, "fork");
+            bytes.extend_from_slice(format!("# stack note {i}\n").as_bytes());
+            stack_tree = tree_with_file(&repo, stack_tree, &path, &bytes)
+                .expect("stack edit pre-rename path");
+            let raw = serialize_commit(&CommitData {
+                tree: stack_tree,
+                parents: vec![stack_parent],
+                author: sig.clone(),
+                committer: sig.clone(),
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: None,
+                message: format!("edit pre-move {i}\n"),
                 raw_message: None,
                 extra_headers: Vec::new(),
             });

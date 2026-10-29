@@ -282,8 +282,9 @@ impl ReplayMergeSession {
         let odb = repo.odb();
         let entries = diff_trees(odb, Some(&old_parent_tree), Some(&subject_tree), "")
             .map_err(HistoryError::from)?;
+        let paths = paths_from_diff_entries(&entries);
         self.replayed_touched
-            .extend(paths_from_diff_entries(&entries));
+            .extend(expand_replayed_paths(self.upstream.as_ref(), &paths));
         Ok(())
     }
 
@@ -441,6 +442,76 @@ fn diff_only_touches_replayed(
 fn paths_overlap(a: &[u8], b: &[u8]) -> bool {
     a.starts_with(b) && (a.len() == b.len() || a.get(b.len()) == Some(&b'/'))
         || b.starts_with(a) && (b.len() == a.len() || b.get(a.len()) == Some(&b'/'))
+}
+
+fn expand_replayed_paths(
+    upstream: Option<&UpstreamDeltaCache>,
+    paths: &HashSet<Vec<u8>>,
+) -> HashSet<Vec<u8>> {
+    let Some(upstream) = upstream else {
+        return paths.clone();
+    };
+    let dir_map = directory_renames_from_file_renames(
+        &upstream
+            .file_old_to_new
+            .iter()
+            .map(|(o, n)| (o.clone(), n.clone()))
+            .collect::<Vec<_>>(),
+    );
+    let mut out = paths.clone();
+    for path in paths {
+        out.insert(path.clone());
+        if let Some(new) = upstream.file_old_to_new.get(path) {
+            out.insert(new.clone());
+        }
+        for (old, new) in &upstream.file_old_to_new {
+            if new == path {
+                out.insert(old.clone());
+            }
+        }
+        if let Some(mapped) = map_path_dir_prefix(path, &dir_map) {
+            out.insert(mapped);
+        }
+        for (old_dir, new_dir) in &dir_map {
+            if path.starts_with(new_dir)
+                && (path.len() == new_dir.len() || path.get(new_dir.len()) == Some(&b'/'))
+            {
+                let mut old_path = old_dir.clone();
+                if path.len() > new_dir.len() {
+                    if !old_path.is_empty() {
+                        old_path.push(b'/');
+                    }
+                    old_path.extend_from_slice(&path[new_dir.len() + 1..]);
+                }
+                out.insert(old_path);
+            }
+        }
+    }
+    out
+}
+
+fn map_path_dir_prefix(path: &[u8], dir_map: &HashMap<Vec<u8>, Vec<u8>>) -> Option<Vec<u8>> {
+    let mut best: Option<(usize, &Vec<u8>, &Vec<u8>)> = None;
+    for (old_dir, new_dir) in dir_map {
+        if path.starts_with(old_dir)
+            && (path.len() == old_dir.len() || path.get(old_dir.len()) == Some(&b'/'))
+        {
+            let len = old_dir.len();
+            if best.is_none_or(|(bl, _, _)| len > bl) {
+                best = Some((len, old_dir, new_dir));
+            }
+        }
+    }
+    best.map(|(len, _old_dir, new_dir)| {
+        let mut out = new_dir.clone();
+        if path.len() > len {
+            if !out.is_empty() {
+                out.push(b'/');
+            }
+            out.extend_from_slice(&path[len + 1..]);
+        }
+        out
+    })
 }
 
 fn paths_from_diff_entries(entries: &[DiffEntry]) -> HashSet<Vec<u8>> {
