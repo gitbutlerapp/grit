@@ -234,7 +234,7 @@ impl RepoCaches {
                 .lock()
                 .map_err(|e| Error::Message(format!("config cache lock poisoned: {e}")))?;
             if let Some(cached) = config_cache_lookup(&cache, &key, &env_fp, &base_stamps) {
-                return Ok(Arc::new(cached));
+                return Ok(cached);
             }
         }
         #[cfg(test)]
@@ -244,6 +244,7 @@ impl RepoCaches {
         included_files.sort_unstable();
         included_files.dedup();
         let extra_stamps = crate::config::stamp_paths(included_files);
+        let set = Arc::new(set);
         let mut cache = self
             .config_cache
             .lock()
@@ -254,9 +255,9 @@ impl RepoCaches {
             env_fp,
             base_stamps,
             extra_stamps,
-            Arc::new(set.clone()),
+            Arc::clone(&set),
         );
-        Ok(Arc::new(set))
+        Ok(set)
     }
 
     /// Drop cached repository-local `config` body and derived parse (not the full cascade cache).

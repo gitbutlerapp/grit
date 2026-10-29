@@ -46,9 +46,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-#[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use crate::error::{BadNumericSource, ConfigError, Error, Result};
 
 /// Test-only counters for config cascade load activity (see `porcelain_ops_load_config_cascade_once`).
@@ -56,14 +53,13 @@ use crate::error::{BadNumericSource, ConfigError, Error, Result};
 pub mod cascade_load_counters {
     use std::cell::Cell;
 
-    use super::{AtomicUsize, Ordering};
-
+    // Counters are per thread like `MEASURING`, so tests measuring on parallel threads do not
+    // add to or reset each other's counts.
     thread_local! {
         static MEASURING: Cell<bool> = const { Cell::new(false) };
+        static UNCACHED: Cell<usize> = const { Cell::new(0) };
+        static CACHE_VALIDATED: Cell<usize> = const { Cell::new(0) };
     }
-
-    static UNCACHED: AtomicUsize = AtomicUsize::new(0);
-    static CACHE_VALIDATED: AtomicUsize = AtomicUsize::new(0);
 
     /// Run `f` while recording cascade loads on this thread only (parallel-safe).
     pub fn measure<R>(f: impl FnOnce() -> R) -> R {
@@ -78,20 +74,20 @@ pub mod cascade_load_counters {
 
     /// Reset counters before an operation under test.
     pub fn reset() {
-        UNCACHED.store(0, Ordering::SeqCst);
-        CACHE_VALIDATED.store(0, Ordering::SeqCst);
+        UNCACHED.with(|c| c.set(0));
+        CACHE_VALIDATED.with(|c| c.set(0));
     }
 
     /// Full cascade parses (cache miss).
     #[must_use]
     pub fn uncached_loads() -> usize {
-        UNCACHED.load(Ordering::SeqCst)
+        UNCACHED.with(Cell::get)
     }
 
     /// Served from the process-global config cache after stat revalidation.
     #[must_use]
     pub fn cache_validated_loads() -> usize {
-        CACHE_VALIDATED.load(Ordering::SeqCst)
+        CACHE_VALIDATED.with(Cell::get)
     }
 
     /// Total [`ConfigSet::load`] / [`ConfigSet::load_with_options`] invocations.
@@ -101,11 +97,9 @@ pub mod cascade_load_counters {
     }
 
     pub(crate) fn record_uncached() {
-        MEASURING.with(|m| {
-            if m.get() {
-                UNCACHED.fetch_add(1, Ordering::SeqCst);
-            }
-        });
+        if MEASURING.with(Cell::get) {
+            UNCACHED.with(|c| c.set(c.get() + 1));
+        }
     }
 }
 use crate::refs;
@@ -285,6 +279,31 @@ impl Default for LoadConfigOptions {
             include_ctx: IncludeContext::default(),
             diagnostics: None,
             repo_caches: None,
+        }
+    }
+}
+
+impl LoadConfigOptions {
+    /// Options for the full cascade of the repository at `git_dir`, as its
+    /// [`crate::repo::Repository`] handle loads it: system config included, `gitdir:`
+    /// conditions matched against `git_dir`, and the local `config` read through `repo_caches`.
+    ///
+    /// Every loader of one repository's cascade must use these options so they share a single
+    /// [`crate::repo_caches::RepoCaches`] cache entry instead of parsing the files again.
+    pub(crate) fn for_repository(
+        env: &Environment,
+        git_dir: Option<&Path>,
+        repo_caches: Option<Arc<crate::repo_caches::RepoCaches>>,
+    ) -> Self {
+        Self {
+            include_ctx: IncludeContext {
+                git_dir: git_dir.map(Path::to_path_buf),
+                cwd: env.cwd.clone(),
+                pwd: env.pwd.clone(),
+                ..IncludeContext::default()
+            },
+            repo_caches,
+            ..Self::default()
         }
     }
 }
@@ -3110,7 +3129,7 @@ pub(crate) fn config_cache_lookup(
     key: &ConfigCacheKey,
     env_fp: &[(String, Option<String>)],
     base_stamps: &[ConfigFileStamp],
-) -> Option<ConfigSet> {
+) -> Option<Arc<ConfigSet>> {
     let entry = cache.get(key)?;
     if entry.env_fingerprint.as_slice() != env_fp || entry.base_stamps.as_slice() != base_stamps {
         return None;
@@ -3120,7 +3139,7 @@ pub(crate) fn config_cache_lookup(
             return None;
         }
     }
-    Some((*entry.set).clone())
+    Some(Arc::clone(&entry.set))
 }
 
 pub(crate) fn config_cache_store(

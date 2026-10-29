@@ -754,23 +754,29 @@ impl Odb {
             .unwrap_or_else(|| Arc::new(NullDiagnostics))
     }
 
-    fn load_config_cascade(&self) -> Result<ConfigSet> {
-        if let (Some(caches), Some(env)) = (&self.shared_config_state, &self.shared_environment) {
-            let git_dir = self
-                .config_git_dir
-                .as_deref()
-                .or_else(|| self.objects_dir.parent());
-            let cfg = caches.load_config(env.as_ref(), git_dir, true)?;
-            return Ok(cfg.as_ref().clone());
-        }
+    /// The config cascade for this object database's repository.
+    ///
+    /// With a shared repository config state this is the repository's own snapshot: the load
+    /// uses the same options (and so the same cache entry) as
+    /// [`crate::repo::Repository::config`], so opening a repository parses the cascade once.
+    pub(crate) fn load_config_cascade(&self) -> Result<Arc<ConfigSet>> {
         let git_dir = self
             .config_git_dir
             .as_deref()
             .or_else(|| self.objects_dir.parent());
-        if let Some(git_dir) = git_dir {
-            ConfigSet::load(self.config_environment(), Some(git_dir), true)
-        } else {
-            Ok(ConfigSet::new())
+        if let (Some(caches), Some(env)) = (&self.shared_config_state, &self.shared_environment) {
+            let opts = crate::config::LoadConfigOptions::for_repository(
+                env,
+                git_dir,
+                Some(Arc::clone(caches)),
+            );
+            return caches.load_config_with_options(env.as_ref(), git_dir, &opts);
+        }
+        match git_dir {
+            Some(git_dir) => {
+                ConfigSet::load(self.config_environment(), Some(git_dir), true).map(Arc::new)
+            }
+            None => Ok(Arc::new(ConfigSet::new())),
         }
     }
 
@@ -1318,7 +1324,8 @@ impl Odb {
         self.delta_base_cache_sync.get_or_init(|| {
             if self.config_git_dir.is_some() {
                 let cfg = self.load_config_cascade().unwrap_or_default();
-                self.pack_store.configure_delta_base_from_config(Some(&cfg));
+                self.pack_store
+                    .configure_delta_base_from_config(Some(cfg.as_ref()));
             }
         });
     }
