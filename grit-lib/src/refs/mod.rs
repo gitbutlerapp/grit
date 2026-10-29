@@ -243,13 +243,9 @@ fn prepare_retrying(
     )
 }
 
-/// How long ref writes wait for a busy store when the caller has no config at hand: the files
-/// backend's own `core.filesRefLockTimeout`, else Git's 100 ms default.
+/// How long ref writes wait for a busy store when the caller has no config at hand.
 fn default_ref_lock_wait(store: &dyn RefStore) -> LockWait {
-    store.as_files().map_or_else(
-        || LockWait::files_ref_lock(None),
-        |files| LockWait::files_ref_lock_for_git_dir(files.git_dir()),
-    )
+    store.ref_lock_wait()
 }
 
 /// Point `refname` at `oid` using `store`, optionally running loose-files prechecks when

@@ -47,6 +47,7 @@ use std::fmt::Debug;
 use std::ops::ControlFlow;
 
 use crate::error::Result;
+use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
 use crate::reflog::ReflogEntry;
 use crate::refs::SYMREF_MAXDEPTH;
@@ -258,6 +259,17 @@ pub trait RefStore: Send + Sync + Debug {
     /// including injected ones, return `None`.
     fn as_files(&self) -> Option<&FilesRefStore> {
         None
+    }
+
+    /// How long grit-lib retries [`RefStoreError::LockHeld`] from [`Self::prepare`].
+    ///
+    /// The files backend reads `core.filesRefLockTimeout` from its git directory. Injected
+    /// backends return Git's 100 ms default unless a wrapper (such as the store returned by
+    /// [`crate::repo::Repository::refs`]) overrides this from the repository git directory.
+    fn ref_lock_wait(&self) -> LockWait {
+        self.as_files()
+            .map(|files| LockWait::files_ref_lock_for_git_dir(files.git_dir()))
+            .unwrap_or_else(|| LockWait::files_ref_lock(None))
     }
 }
 

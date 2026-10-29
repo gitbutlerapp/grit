@@ -23,6 +23,7 @@ use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::porcelain::add::{stage, StageOptions};
+use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions, TrackMode};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::store::RefName;
@@ -292,6 +293,97 @@ fn stage_and_commit(
 /// The generous `core.filesRefLockTimeout` keeps an overloaded test machine (a lock holder
 /// descheduled for longer than the 100 ms default) from failing the run; without the retry
 /// every overlap fails immediately whatever the budget.
+#[test]
+fn repository_injected_store_uses_core_files_ref_lock_timeout_from_git_dir() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let git_dir = tmp.path().join("g");
+    let work_tree = tmp.path().join("wt");
+    fs::create_dir_all(&git_dir).expect("git dir");
+    fs::create_dir_all(&work_tree).expect("work tree");
+    fs::write(
+        git_dir.join("config"),
+        "[user]\n\tname = T\n\temail = t@e.x\n[core]\n\tfilesRefLockTimeout = 7500\n",
+    )
+    .expect("config");
+    let repo = RepositoryBuilder::new(options())
+        .odb_builder(
+            OdbBuilder::files(git_dir.join("objects"))
+                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                .alternates(false),
+        )
+        .ref_store(Arc::new(MemoryRefStore::new()))
+        .initial_branch("main")
+        .open(&git_dir, Some(&work_tree))
+        .expect("open");
+    match repo.refs().ref_lock_wait() {
+        LockWait::Backoff { budget } => assert_eq!(budget, Duration::from_millis(7500)),
+        other => panic!("expected Backoff from config, got {other:?}"),
+    }
+}
+
+/// Dogfood repro (#2181): many threads each call [`create_branch`] on one shared injected store.
+#[test]
+fn concurrent_create_branch_on_injected_store_never_lock_held() {
+    const THREADS: usize = 12;
+    const CREATES: usize = 80;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let git_dir = tmp.path().join("g");
+    let work_tree = tmp.path().join("wt");
+    fs::create_dir_all(&git_dir).expect("git dir");
+    fs::create_dir_all(&work_tree).expect("work tree");
+    fs::write(
+        git_dir.join("config"),
+        "[user]\n\tname = T\n\temail = t@e.x\n[core]\n\tfilesRefLockTimeout = 30000\n",
+    )
+    .expect("config");
+    let repo = Arc::new(
+        RepositoryBuilder::new(options())
+            .odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .ref_store(Arc::new(MemoryRefStore::new()))
+            .initial_branch("main")
+            .open(&git_dir, Some(&work_tree))
+            .expect("open"),
+    );
+    stage_and_commit(&repo, &work_tree, "base").expect("base commit");
+
+    let start = Barrier::new(THREADS);
+    let failures: Vec<String> = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..THREADS)
+            .map(|t| {
+                let repo = Arc::clone(&repo);
+                let start = &start;
+                s.spawn(move || {
+                    start.wait();
+                    (0..CREATES)
+                        .filter_map(|k| {
+                            let name = format!("t{t}/b{k}");
+                            let opts = CreateBranchOptions {
+                                name,
+                                start: None,
+                                force: false,
+                                track: TrackMode::Never,
+                                dry_run: false,
+                            };
+                            create_branch(&repo, &opts)
+                                .err()
+                                .map(|e| format!("thread {t} create {k}: {e}"))
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().expect("worker"))
+            .collect()
+    });
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
 #[test]
 fn concurrent_commits_in_linked_worktrees_over_shared_stores() {
     const THREADS: usize = 6;

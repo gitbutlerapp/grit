@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::hooks::RefHookContext;
+use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::reflog::ReflogEntry;
@@ -175,5 +176,18 @@ impl RefStore for ObjectCheckedRefStore {
 
     fn reference_transaction_null_oid(&self) -> ObjectId {
         self.null_oid()
+    }
+
+    fn ref_lock_wait(&self) -> LockWait {
+        if let Some(ctx) = self.hooks.as_ref() {
+            return LockWait::files_ref_lock_for_git_dir(ctx.git_dir());
+        }
+        if let Some(files) = self.inner.as_files() {
+            return LockWait::files_ref_lock_for_git_dir(files.git_dir());
+        }
+        if let Some(git_dir) = self.odb.config_git_dir() {
+            return LockWait::files_ref_lock_for_git_dir(git_dir);
+        }
+        LockWait::files_ref_lock(None)
     }
 }

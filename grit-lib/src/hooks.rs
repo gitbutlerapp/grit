@@ -1401,6 +1401,12 @@ impl RefHookContext {
         }
     }
 
+    /// Git directory this context was opened for (main or linked worktree admin dir).
+    #[must_use]
+    pub(crate) fn git_dir(&self) -> &Path {
+        &self.git_dir
+    }
+
     /// Null object id for this repository's hash algorithm.
     #[must_use]
     pub(crate) fn null_oid(&self) -> ObjectId {
