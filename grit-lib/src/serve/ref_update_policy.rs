@@ -60,7 +60,7 @@ pub fn validate_ref_update(
     if hide_refs::ref_is_hidden(&cmd.refname, &cmd.refname, hidden_refs) {
         return Ok(Some(RefUpdateRefusal::HiddenRef));
     }
-    let current = crate::refs::resolve_ref(repo.git_dir(), &cmd.refname).ok();
+    let current = repo.refs().resolve(&cmd.refname).ok();
     if current != cmd.old {
         return Ok(Some(RefUpdateRefusal::StaleInfo));
     }

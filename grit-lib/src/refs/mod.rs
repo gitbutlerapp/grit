@@ -413,12 +413,20 @@ pub(crate) fn commit_initial_ref_updates_on_store(
     store: &dyn RefStore,
     updates: Vec<RefUpdate>,
 ) -> Result<()> {
+    commit_initial_ref_updates_on_store_with_wait(store, updates, || default_ref_lock_wait(store))
+}
+
+/// [`commit_initial_ref_updates_on_store`] retrying a busy store for `wait` (see
+/// [`prepare_with_lock_wait`]); `wait` is only evaluated once the store reports a held lock.
+pub(crate) fn commit_initial_ref_updates_on_store_with_wait(
+    store: &dyn RefStore,
+    updates: Vec<RefUpdate>,
+    wait: impl FnOnce() -> LockWait,
+) -> Result<()> {
     if updates.is_empty() {
         return Ok(());
     }
-    commit_owned_ref_batch_on_store(store, updates, Vec::new(), Vec::new(), true, || {
-        default_ref_lock_wait(store)
-    })
+    commit_owned_ref_batch_on_store(store, updates, Vec::new(), Vec::new(), true, wait)
 }
 
 fn commit_owned_ref_batch_on_store(
