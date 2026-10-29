@@ -2386,6 +2386,24 @@ impl Odb {
         )?))
     }
 
+    /// Fetch a batch of missing promisor objects before bulk blob reads (tree diffs, checkout).
+    ///
+    /// No-ops when lazy promisor fetch is unavailable; per-object lazy fetch remains the fallback.
+    ///
+    /// # Errors
+    ///
+    /// Propagates transport and pack ingest failures from the promisor fetcher.
+    pub(crate) fn prefetch_promisor_read_batch(
+        &self,
+        oids: impl IntoIterator<Item = ObjectId>,
+    ) -> Result<()> {
+        let (Some(caches), Some(env)) = (&self.shared_config_state, &self.shared_environment)
+        else {
+            return Ok(());
+        };
+        crate::promisor_fetch::prefetch_promisor_read_batch(caches, self, env.as_ref(), oids)
+    }
+
     /// Read and decompress an object into `buf`, reusing its capacity across calls.
     ///
     /// Resolution order matches [`Self::read`]. Returns a borrowed view of the payload

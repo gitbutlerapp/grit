@@ -8,6 +8,7 @@ use crate::objects::pack_store::PackReadContextGuard;
 use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
+use crate::objects::OidHashSet;
 use crate::odb::Odb;
 use crate::parallel::run_ordered_batches;
 use crate::parallel::{try_par_map_with_local, ParallelHashError};
@@ -26,6 +27,32 @@ fn note_blob_read(counter: Option<&AtomicUsize>) {
     if let Some(c) = counter {
         c.fetch_add(1, Ordering::Relaxed);
     }
+}
+
+fn collect_tree_diff_blob_oids(entries: &[DiffEntry]) -> Vec<ObjectId> {
+    let mut set = OidHashSet::default();
+    for entry in entries {
+        if entry.old_mode != FileMode::GITLINK
+            && entry.old_mode != FileMode::ABSENT
+            && !entry.old_oid.is_zero()
+        {
+            set.insert(entry.old_oid);
+        }
+        if entry.new_mode != FileMode::GITLINK
+            && entry.new_mode != FileMode::ABSENT
+            && !entry.new_oid.is_zero()
+        {
+            set.insert(entry.new_oid);
+        }
+    }
+    set.into_iter().collect()
+}
+
+pub(crate) fn prefetch_tree_diff_blobs(odb: &Odb, entries: &[DiffEntry]) -> Result<()> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    odb.prefetch_promisor_read_batch(collect_tree_diff_blob_oids(entries))
 }
 
 /// Pool options for per-entry content work that should fan out whenever it can.
@@ -94,6 +121,7 @@ pub fn tree_diff_contents_parallel(
     if entries.is_empty() {
         return Ok(Vec::new());
     }
+    prefetch_tree_diff_blobs(odb, &entries)?;
     let mut par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
     par_opts.min_items = par_opts.min_items.min(8);
     let est_bytes = entries.len().saturating_mul(8192);
@@ -126,6 +154,7 @@ pub fn tree_diff_stat_parallel(
     if entries.is_empty() {
         return Ok(Vec::new());
     }
+    prefetch_tree_diff_blobs(odb, &entries)?;
     let par_opts = per_entry_parallel_options(thread_policy, config, entries.len());
     let line_diff_opts = diff_options;
     let blob_counter = line_diff_opts.blob_read_counter.clone();
@@ -250,6 +279,7 @@ pub fn for_each_tree_diff_structured(
     if entries.is_empty() {
         return Ok(());
     }
+    prefetch_tree_diff_blobs(odb, entries)?;
     let diff_options = diff_options.cap_word_level_inline_for_changed_files(entries.len());
     let par_opts = per_entry_parallel_options(thread_policy, config, entries.len());
     let n_workers = par_opts.threads.get();
@@ -291,6 +321,7 @@ pub fn tree_diff_structured_parallel(
     if entries.is_empty() {
         return Ok(Vec::new());
     }
+    prefetch_tree_diff_blobs(odb, &entries)?;
     let diff_options = diff_options.cap_word_level_inline_for_changed_files(entries.len());
     let par_opts = per_entry_parallel_options(thread_policy, config, entries.len());
     let line_diff_opts = diff_options;

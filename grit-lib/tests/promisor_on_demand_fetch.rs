@@ -13,10 +13,12 @@ use std::thread;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigFile;
 use grit_lib::config::ConfigScope;
+use grit_lib::diff::{build_file_diffs, DiffDetail, DiffOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::{parse_commit, ObjectId};
+use grit_lib::parallel::ThreadPolicy;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::clone::{clone, CloneOptions};
@@ -119,6 +121,72 @@ fn promisor_sidecar_count(objects: &Path) -> usize {
         .count()
 }
 
+fn pack_file_count(objects: &Path) -> usize {
+    fs::read_dir(objects.join("pack"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .count()
+}
+
+fn setup_many_file_blobless_upstream(file_count: usize) -> (TempDir, PathBuf) {
+    let layout = TempDir::new().expect("layout");
+    let upstream = layout.path().join("upstream");
+    git_in(layout.path(), &["init", "-q", "-b", "main", "upstream"]);
+    git_in(&upstream, &["config", "user.email", "t@t"]);
+    for i in 1..=file_count {
+        fs::write(
+            upstream.join(format!("file-{i}.txt")),
+            format!("file {i}\n{}", "payload\n".repeat(20)),
+        )
+        .expect("write");
+    }
+    git_in(&upstream, &["add", "."]);
+    git_in(&upstream, &["commit", "-m", "base", "-q"]);
+    for i in 1..=file_count {
+        fs::write(
+            upstream.join(format!("file-{i}.txt")),
+            format!("file {i} v2\n{}", "payload\n".repeat(20)),
+        )
+        .expect("rewrite");
+    }
+    git_in(&upstream, &["add", "."]);
+    git_in(&upstream, &["commit", "-m", "changed", "-q"]);
+
+    let bare = layout.path().join("remote.git");
+    git_in(
+        layout.path(),
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            upstream.to_str().unwrap(),
+            "remote.git",
+        ],
+    );
+    git_in(&bare, &["config", "uploadpack.allowFilter", "true"]);
+    (layout, bare)
+}
+
+fn tree_diff_entries_between_commits(
+    repo: &Repository,
+    old: &str,
+    new: &str,
+) -> Vec<grit_lib::diff::DiffEntry> {
+    let old_commit = revision(repo, old);
+    let new_commit = revision(repo, new);
+    let old_tree = parse_commit(&repo.odb().read(&old_commit).expect("old commit").data)
+        .expect("parse old")
+        .tree;
+    let new_tree = parse_commit(&repo.odb().read(&new_commit).expect("new commit").data)
+        .expect("parse new")
+        .tree;
+    repo.diff()
+        .tree_to_tree(Some(&old_tree), Some(&new_tree))
+        .expect("tree diff")
+}
+
 struct CountingFetcher {
     calls: Arc<AtomicUsize>,
     inner: DefaultPromisorFetcher,
@@ -173,6 +241,74 @@ fn no_fetcher_returns_typed_promised_missing() {
     assert!(
         matches!(err, Error::PromisedObjectMissing(_)),
         "expected PromisedObjectMissing, got {err:?}"
+    );
+}
+
+#[test]
+fn tree_diff_prefetch_uses_single_request() {
+    let file_count = 40;
+    let (_layout, bare) = setup_many_file_blobless_upstream(file_count);
+    let url = format!("file://{}", bare.canonicalize().unwrap().display());
+    let dest = TempDir::new().expect("dest");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let fetcher = Arc::new(CountingFetcher {
+        calls: Arc::clone(&calls),
+        inner: DefaultPromisorFetcher::new(Arc::new(DefaultHttpClientFactory::new())),
+    });
+    let repo = grit_blobless_clone(&url, dest.path(), Some(fetcher));
+
+    let objects = repo.git_dir().join("objects");
+    assert_eq!(promisor_sidecar_count(&objects), 1);
+    let packs_before = pack_file_count(&objects);
+    let entries = tree_diff_entries_between_commits(&repo, "HEAD~1", "HEAD");
+    assert_eq!(entries.len(), file_count);
+    let config = repo.config().expect("config");
+    let thread_policy = ThreadPolicy::default();
+
+    build_file_diffs(
+        repo.odb(),
+        entries.clone(),
+        DiffDetail::NameOnly,
+        DiffOptions::default(),
+        config.as_ref(),
+        &thread_policy,
+    )
+    .expect("name-only");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "name-only must not promisor-fetch blobs"
+    );
+
+    build_file_diffs(
+        repo.odb(),
+        entries.clone(),
+        DiffDetail::Stat,
+        DiffOptions::default(),
+        config.as_ref(),
+        &thread_policy,
+    )
+    .expect("stat");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "stat diff should batch missing blobs into one promisor fetch"
+    );
+    assert_eq!(pack_file_count(&objects), packs_before + 1);
+
+    build_file_diffs(
+        repo.odb(),
+        entries,
+        DiffDetail::Patch,
+        DiffOptions::default(),
+        config.as_ref(),
+        &thread_policy,
+    )
+    .expect("patch");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "patch after stat must not refetch blobs already local"
     );
 }
 

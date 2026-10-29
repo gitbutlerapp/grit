@@ -2588,20 +2588,7 @@ fn prefetch_promisor_blobs(
     repo: &Repository,
     oids: impl IntoIterator<Item = ObjectId>,
 ) -> Result<()> {
-    let config = repo.config()?;
-    if !crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config.as_ref())
-        || !crate::promisor_fetch::promisor_lazy_fetch_enabled(config.as_ref(), repo.environment())
-        || repo.caches().promisor_fetcher().is_none()
-    {
-        return Ok(());
-    }
-    let unique: crate::objects::OidHashSet =
-        oids.into_iter().filter(|oid| !oid.is_zero()).collect();
-    let missing = repo.odb().missing_stored_oids(unique)?;
-    if missing.is_empty() {
-        return Ok(());
-    }
-    repo.prefetch_promised(&missing)
+    repo.odb().prefetch_promisor_read_batch(oids)
 }
 
 /// Apply `changes` to the work tree and index as one pass that is undone on failure.

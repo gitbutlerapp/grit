@@ -187,6 +187,45 @@ pub(crate) enum PromisorMissResolution {
     PromisedMissing(Error),
 }
 
+/// Batch-fetch missing promisor objects before many reads (checkout, tree diffs).
+///
+/// No-ops when the repository is not promisor-backed, lazy fetch is disabled, no fetcher
+/// is installed, or [`Odb`] has no shared repository config snapshot.
+pub(crate) fn prefetch_promisor_read_batch(
+    repo_caches: &crate::repo::RepositoryConfigSnapshot,
+    odb: &crate::odb::Odb,
+    env: &Environment,
+    oids: impl IntoIterator<Item = ObjectId>,
+) -> Result<()> {
+    let Some(git_dir) = odb.config_git_dir() else {
+        return Ok(());
+    };
+    let config = repo_caches.load_config(env, Some(git_dir), true)?;
+    if !repo_treats_promisor_packs(git_dir, config.as_ref())
+        || !promisor_lazy_fetch_enabled(config.as_ref(), env)
+    {
+        return Ok(());
+    }
+    let Some(fetcher) = repo_caches.promisor_fetcher() else {
+        return Ok(());
+    };
+    let unique: OidHashSet = oids.into_iter().filter(|oid| !oid.is_zero()).collect();
+    if unique.is_empty() {
+        return Ok(());
+    }
+    let missing = odb.missing_stored_oids(unique)?;
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    let _nest = PromisorLazyNestGuard::enter()?;
+    let repo = open_repo_for_promisor_fetch(git_dir, env, repo_caches)?;
+    fetcher.fetch_missing(&repo, &missing)?;
+    odb.reprepare_local_packs();
+    odb.invalidate_packs();
+    Ok(())
+}
+
 /// After an ODB read miss, optionally fetch from the promisor remote and signal retry.
 pub(crate) fn resolve_promisor_read_miss(
     repo_caches: &crate::repo_caches::RepoCaches,

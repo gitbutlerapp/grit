@@ -125,6 +125,7 @@ pub fn write_patch<W: Write>(
         return Ok(());
     }
     let odb = repo.odb();
+    super::tree_content::prefetch_tree_diff_blobs(odb, entries)?;
     let config = repo.config()?.clone();
     let thread_policy = repo.thread_policy();
     let log_opts = LogPatchOptions {
