@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -90,6 +90,38 @@ fn git_env(cmd: &mut Command) {
         .env("GIT_AUTHOR_EMAIL", "b@example.com")
         .env("GIT_COMMITTER_NAME", "Bench")
         .env("GIT_COMMITTER_EMAIL", "b@example.com");
+}
+
+/// Pack every loose object into a new `.pack`, prune redundant loose copies, and leave
+/// existing packfiles untouched.
+///
+/// Matches incremental pushes that add a packfile per batch instead of consolidating.
+pub(crate) fn pack_unpacked_objects(git: &Path, dir: &Path) -> Result<()> {
+    let mut rev_list = Command::new(git);
+    rev_list
+        .args(["rev-list", "--objects", "--all", "--unpacked"])
+        .current_dir(dir)
+        .stdout(Stdio::piped());
+    git_env(&mut rev_list);
+    let mut pack = Command::new(git);
+    pack.args(["pack-objects", "-q", ".git/objects/pack/pack"])
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null());
+    git_env(&mut pack);
+    let mut rev_list = rev_list.spawn().context("git rev-list --unpacked")?;
+    let rev_stdout = rev_list.stdout.take().context("rev-list stdout")?;
+    pack.stdin(rev_stdout);
+    let mut pack = pack.spawn().context("git pack-objects")?;
+    let rev_status = rev_list.wait().context("rev-list wait")?;
+    let pack_status = pack.wait().context("pack-objects wait")?;
+    if !rev_status.success() {
+        bail!("git rev-list --objects --all --unpacked failed");
+    }
+    if !pack_status.success() {
+        bail!("git pack-objects failed");
+    }
+    run_git(git, dir, &["prune-packed", "-q"])
 }
 
 pub(crate) fn run_git(git: &Path, dir: &Path, args: &[&str]) -> Result<()> {
