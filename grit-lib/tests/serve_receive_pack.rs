@@ -907,3 +907,62 @@ fn shallow_update_records_the_new_boundary_on_both_storage_paths() {
         assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 }
+
+#[test]
+fn non_atomic_receive_pack_many_creates_one_reftable_table() {
+    use grit_lib::refs::ref_storage::RefStorageFormat;
+    use grit_lib::repo::InitOptions;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let tip = source_repo(&tmp.path().join("src"), 1);
+    let pack = pack_for(&tmp.path().join("src"), &[tip.to_hex()]);
+    let bare = tmp.path().join("rt.git");
+    std::fs::create_dir_all(&bare).expect("mkdir");
+    Repository::init(
+        &bare,
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(RefStorageFormat::Reftable),
+    )
+    .expect("reftable bare init");
+    let repo = open(&bare);
+    let table_count = |dir: &Path| {
+        std::fs::read_to_string(dir.join("reftable/tables.list"))
+            .map(|s| s.lines().filter(|l| !l.is_empty()).count())
+            .unwrap_or(0)
+    };
+    let before = table_count(&bare);
+
+    let names: Vec<String> = (0..32).map(|i| format!("refs/heads/b{i}")).collect();
+    let commands: Vec<(Option<ObjectId>, Option<ObjectId>, &str)> = names
+        .iter()
+        .map(|name| (None, Some(tip), name.as_str()))
+        .collect();
+    let body = push_body(&commands, &pack);
+    let (outcome, _report) = serve(&repo, &body, &ReceivePolicy::default(), &());
+    assert!(
+        outcome.unpack_error.is_none(),
+        "unpack failed: {:?}",
+        outcome.unpack_error
+    );
+    assert_eq!(
+        outcome.updates.len(),
+        32,
+        "expected one result per ref command"
+    );
+    assert!(outcome.updates.iter().all(|u| u.error.is_none()));
+    let after = table_count(&bare);
+    assert!(
+        after <= before + 1,
+        "non-atomic receive-pack must batch ref updates (before={before} after={after}, \
+         per-ref tables would be >= {})",
+        before + 32
+    );
+    for i in 0..32 {
+        assert_eq!(
+            resolve_ref(&bare, &format!("refs/heads/b{i}")).ok(),
+            Some(tip)
+        );
+    }
+}

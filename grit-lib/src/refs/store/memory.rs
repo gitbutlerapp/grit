@@ -9,7 +9,10 @@ type StoreResult<T> = std::result::Result<T, RefStoreError>;
 use crate::reflog::ReflogEntry;
 
 use super::apply::{rollback_failed_apply, snapshot_for_apply_rollback};
-use super::backend::{apply_transaction, check_transaction, resolve_symbolic, RefBatchState};
+use super::backend::{
+    apply_transaction, check_transaction, partition_updates_allowing_failures, resolve_symbolic,
+    RefBatchState,
+};
 use super::error::RefStoreError;
 use super::transaction::RefTransaction;
 use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore};
@@ -21,6 +24,8 @@ struct MemoryRefStoreInner {
     state: Arc<RefBatchState>,
     /// The single writer slot: the transaction between `prepare` and commit or abort.
     prepared: Option<RefTransaction>,
+    /// Per-ref rejections from the last [`RefTransaction::allowing_failures`] prepare.
+    rejections: Vec<(String, RefStoreError)>,
 }
 
 impl MemoryRefStoreInner {
@@ -54,6 +59,7 @@ impl MemoryRefStore {
             inner: Mutex::new(MemoryRefStoreInner {
                 state: Arc::default(),
                 prepared: None,
+                rejections: Vec::new(),
             }),
         }
     }
@@ -131,12 +137,37 @@ impl RefStore for MemoryRefStore {
             });
         }
 
+        let allow_failures = txn.allows_failures();
+        let txn = if allow_failures {
+            let (updates, reflog_renames, case_only) = {
+                let updates = txn.updates().to_vec();
+                let reflog_renames = txn.reflog_renames().to_vec();
+                let case_only = txn.case_only_renames().to_vec();
+                (updates, reflog_renames, case_only)
+            };
+            let (accepted, rejected) = partition_updates_allowing_failures(&inner.state, updates)?;
+            inner.rejections = rejected;
+            let mut accepted_txn = RefTransaction::from_updates(accepted)?;
+            for rename in reflog_renames {
+                accepted_txn = accepted_txn.with_reflog_rename(rename);
+            }
+            for rename in case_only {
+                accepted_txn = accepted_txn.with_case_only_rename(rename);
+            }
+            accepted_txn
+        } else {
+            inner.rejections.clear();
+            txn
+        };
+
         check_transaction(&inner.state, &txn)?;
+        let rejections = inner.rejections.clone();
         inner.prepared = Some(txn);
 
         Ok(Box::new(MemoryPrepared {
             store: self,
             committed: false,
+            rejections,
         }))
     }
 
@@ -219,9 +250,14 @@ impl RefStore for MemoryRefStore {
 struct MemoryPrepared<'a> {
     store: &'a MemoryRefStore,
     committed: bool,
+    rejections: Vec<(String, RefStoreError)>,
 }
 
 impl PreparedRefTransaction for MemoryPrepared<'_> {
+    fn rejected_updates(&self) -> &[(String, RefStoreError)] {
+        &self.rejections
+    }
+
     fn commit(mut self: Box<Self>) -> StoreResult<()> {
         let mut inner = self.store.lock();
         let Some(txn) = inner.prepared.take() else {

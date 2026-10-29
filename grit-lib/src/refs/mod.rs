@@ -332,6 +332,18 @@ pub fn commit_ref_store_batch(git_dir: &Path, updates: &[RefUpdate]) -> Result<(
     commit_ref_updates_on_store(&store::open_checked_ref_store(git_dir)?, updates, &[])
 }
 
+/// [`commit_ref_updates_non_atomic_on_store`] for a repository git directory.
+///
+/// # Errors
+///
+/// Same as [`commit_ref_updates_non_atomic_on_store`].
+pub fn commit_ref_updates_non_atomic(
+    git_dir: &Path,
+    updates: Vec<RefUpdate>,
+) -> Result<Vec<RefUpdateCommitOutcome>> {
+    commit_ref_updates_non_atomic_on_store(&store::open_checked_ref_store(git_dir)?, updates)
+}
+
 /// Apply several ref updates atomically through an existing [`crate::refs::store::RefStore`].
 ///
 /// Object checks are those of `store`: the store from [`crate::repo::Repository::refs`]
@@ -370,6 +382,131 @@ pub fn commit_ref_batch_on_store(
         false,
         || default_ref_lock_wait(store),
     )
+}
+
+/// Per-ref result from [`commit_ref_updates_non_atomic_on_store`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefUpdateCommitOutcome {
+    /// Full ref name from the input batch.
+    pub name: String,
+    /// `Ok(())` when the ref was updated; store errors otherwise.
+    pub result: std::result::Result<(), store::RefStoreError>,
+}
+
+/// Apply ref updates like Git non-atomic receive-pack: deletions in one transaction, then
+/// creates and updates in another, with per-ref rejections inside each phase.
+///
+/// Matches Git `execute_commands_non_atomic` (two store transactions, not one per ref).
+/// Compare-and-swap, directory/file, and object-target failures reject only that ref; siblings
+/// in the same phase still commit in one reftable table / one files batch.
+///
+/// # Errors
+///
+/// Propagates whole-transaction failures (duplicate names in the batch, I/O, lock timeout).
+pub fn commit_ref_updates_non_atomic_on_store(
+    store: &dyn RefStore,
+    updates: Vec<RefUpdate>,
+) -> Result<Vec<RefUpdateCommitOutcome>> {
+    if updates.is_empty() {
+        return Ok(Vec::new());
+    }
+    let order: Vec<String> = updates.iter().map(|u| u.name.clone()).collect();
+    let (deletes, rest): (Vec<_>, Vec<_>) = updates
+        .into_iter()
+        .partition(|u| u.new_value.is_none() && !u.flags.log_only);
+    let mut results: std::collections::HashMap<String, store::RefStoreError> =
+        std::collections::HashMap::new();
+    for phase in [deletes, rest] {
+        if phase.is_empty() {
+            continue;
+        }
+        for outcome in commit_ref_updates_allowing_failures_on_store(store, phase)? {
+            if let Err(err) = outcome.result {
+                results.insert(outcome.name, err);
+            }
+        }
+    }
+    Ok(order
+        .into_iter()
+        .map(|name| RefUpdateCommitOutcome {
+            result: results.remove(&name).map_or(Ok(()), Err),
+            name,
+        })
+        .collect())
+}
+
+/// Commit `updates` in one store transaction, recording per-ref rejections instead of failing
+/// the whole batch when [`RefTransaction::allowing_failures`] applies.
+///
+/// # Errors
+///
+/// Propagates whole-transaction failures from [`RefStore::prepare`] or commit.
+pub fn commit_ref_updates_allowing_failures_on_store(
+    store: &dyn RefStore,
+    updates: Vec<RefUpdate>,
+) -> Result<Vec<RefUpdateCommitOutcome>> {
+    use store::backend::is_per_ref_rejectable;
+
+    if updates.is_empty() {
+        return Ok(Vec::new());
+    }
+    let order: Vec<String> = updates.iter().map(|u| u.name.clone()).collect();
+    let mut object_rejections: std::collections::HashMap<String, store::RefStoreError> =
+        std::collections::HashMap::new();
+    let mut object_ok = Vec::with_capacity(updates.len());
+    for update in updates {
+        match store.verify_update_targets(std::slice::from_ref(&update)) {
+            Ok(()) => object_ok.push(update),
+            Err(err) if is_per_ref_rejectable(&err) => {
+                object_rejections.insert(update.name.clone(), err);
+            }
+            Err(err) => {
+                let name = update.name.clone();
+                return Err(map_public_ref_store_error(Error::from(err), &name));
+            }
+        }
+    }
+
+    let mut store_rejections: std::collections::HashMap<String, store::RefStoreError> =
+        std::collections::HashMap::new();
+    if !object_ok.is_empty() {
+        for update in &object_ok {
+            if let Some(ref log) = update.reflog {
+                validate_reflog_update(log)?;
+            }
+        }
+        let label = object_ok
+            .first()
+            .map(|u| u.name.clone())
+            .unwrap_or_else(|| "refs".to_owned());
+        let txn = RefTransaction::from_updates(object_ok).map_err(|e| {
+            let name = match &e {
+                store::RefStoreError::DuplicateUpdate { name } => name.clone(),
+                _ => label.clone(),
+            };
+            map_public_ref_store_error(Error::from(e), &name)
+        })?;
+        let txn = txn.allowing_failures();
+        let prepared = prepare_retrying(store, txn, || default_ref_lock_wait(store))
+            .map_err(|e| map_public_ref_store_error(Error::from(e), &label))?;
+        for (name, err) in prepared.rejected_updates() {
+            store_rejections.insert(name.clone(), err.clone());
+        }
+        prepared
+            .commit()
+            .map_err(|e| map_public_ref_store_error(Error::from(e), &label))?;
+    }
+
+    Ok(order
+        .into_iter()
+        .map(|name| {
+            let result = object_rejections
+                .remove(&name)
+                .or_else(|| store_rejections.remove(&name))
+                .map_or(Ok(()), Err);
+            RefUpdateCommitOutcome { name, result }
+        })
+        .collect())
 }
 
 /// [`commit_ref_updates_on_store`] retrying a busy store for `wait` (see

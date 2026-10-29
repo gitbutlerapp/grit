@@ -2451,9 +2451,10 @@ pub(crate) fn push_local_from(
     #[cfg(test)]
     tests::run_push_hook(tests::PushHookPoint::BeforeRefCommit);
 
-    // Second pass: apply ref updates (one transaction per ref unless `atomic`).
+    // Second pass: apply ref updates (one batch unless `atomic`, then batched non-atomic).
     let mut ref_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
-    for d in &mut decisions {
+    let mut non_atomic_batch: Vec<(usize, crate::refs::store::RefUpdate)> = Vec::new();
+    for (idx, d) in decisions.iter_mut().enumerate() {
         if !d.apply || opts.dry_run {
             continue;
         }
@@ -2466,8 +2467,8 @@ pub(crate) fn push_local_from(
                 );
                 if opts.atomic {
                     ref_batch.push(update);
-                } else if let Err(err) = crate::refs::commit_store_update(remote_git_dir, update) {
-                    apply_ref_store_error_to_push_decision(d, &err, false);
+                } else {
+                    non_atomic_batch.push((idx, update));
                 }
             }
             PushAction::Delete => {
@@ -2475,8 +2476,8 @@ pub(crate) fn push_local_from(
                     push_store_ref_update(d.result.remote_ref.as_str(), None, d.result.old_oid);
                 if opts.atomic {
                     ref_batch.push(update);
-                } else if let Err(err) = crate::refs::commit_store_update(remote_git_dir, update) {
-                    apply_ref_store_error_to_push_decision(d, &err, false);
+                } else {
+                    non_atomic_batch.push((idx, update));
                 }
             }
             PushAction::None => {}
@@ -2485,6 +2486,27 @@ pub(crate) fn push_local_from(
     if opts.atomic && !opts.dry_run && !ref_batch.is_empty() {
         if let Err(err) = crate::refs::commit_ref_store_batch(remote_git_dir, &ref_batch) {
             apply_atomic_batch_ref_store_error(&mut decisions, &ref_batch, err);
+        }
+    } else if !opts.dry_run && !non_atomic_batch.is_empty() {
+        let indices: Vec<_> = non_atomic_batch.iter().map(|(idx, _)| *idx).collect();
+        let updates: Vec<_> = non_atomic_batch.into_iter().map(|(_, u)| u).collect();
+        match crate::refs::commit_ref_updates_non_atomic_on_store(remote_repo.refs(), updates) {
+            Ok(outcomes) => {
+                for (idx, outcome) in indices.into_iter().zip(outcomes) {
+                    if let Err(err) = outcome.result {
+                        apply_ref_store_error_to_push_decision(
+                            &mut decisions[idx],
+                            &Error::RefStore(err),
+                            false,
+                        );
+                    }
+                }
+            }
+            Err(err) => {
+                for idx in indices {
+                    apply_ref_store_error_to_push_decision(&mut decisions[idx], &err, false);
+                }
+            }
         }
     }
 
