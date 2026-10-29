@@ -27,6 +27,7 @@ mod peel;
 mod read_store;
 pub mod store;
 mod stream;
+mod tree;
 
 #[doc(inline)]
 pub use builder::OdbBuilder;

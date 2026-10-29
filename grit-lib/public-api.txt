@@ -10814,6 +10814,8 @@ pub fn grit_lib::objects::odb::Odb::peel_tags(&self, grit_lib::objects::ObjectId
 pub fn grit_lib::objects::odb::Odb::peel_to_commit(&self, grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 impl grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::read_store(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::objects::odb::store::ObjectStore>
+impl grit_lib::objects::odb::Odb
+pub fn grit_lib::objects::odb::Odb::tree_entry_at_path(&self, &grit_lib::objects::ObjectId, &[u8]) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::TreeEntry>>
 impl core::clone::Clone for grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::objects::odb::Odb
@@ -17458,6 +17460,8 @@ pub fn grit_lib::objects::odb::Odb::peel_tags(&self, grit_lib::objects::ObjectId
 pub fn grit_lib::objects::odb::Odb::peel_to_commit(&self, grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 impl grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::read_store(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::objects::odb::store::ObjectStore>
+impl grit_lib::objects::odb::Odb
+pub fn grit_lib::objects::odb::Odb::tree_entry_at_path(&self, &grit_lib::objects::ObjectId, &[u8]) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::TreeEntry>>
 impl core::clone::Clone for grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::objects::odb::Odb
