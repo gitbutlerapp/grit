@@ -15,7 +15,8 @@
 //!
 //! A typical store loads the refs (and reflogs) a transaction touches into a
 //! [`RefBatchState`], calls [`check_transaction`] in `prepare` while holding its lock, and
-//! at commit applies [`apply_transaction`] to a copy and persists the difference.
+//! at commit applies [`apply_transaction`] in place on that map when it owns the state (or
+//! on a copy while iterators still share it) and persists the difference.
 //! `MemoryRefStore` is implemented exactly this way. Run the
 //! `grit_test_support::refstore_conformance` suite to check a backend against the built-ins.
 
@@ -70,7 +71,9 @@ pub fn validate_transaction(txn: &RefTransaction) -> Result<(), RefStoreError> {
 /// `state.refs` must contain every stored ref the transaction names, the targets of any
 /// symbolic refs among them, and every stored ref that is an ancestor or descendant (in the
 /// `a` / `a/b` directory sense) of a ref the transaction creates. Loading the whole store is
-/// always correct. `state.reflogs` may be empty; reflogs are not consulted by the checks.
+/// always correct; [`check_transaction`] still costs only `O` of the transaction's names,
+/// symref depth, and directory probes—not the size of `state.refs`. `state.reflogs` may be
+/// empty; reflogs are not consulted by the checks.
 ///
 /// # Errors
 ///
@@ -295,6 +298,59 @@ mod tests {
         );
         assert!(validate_storable_refname("HEAD").is_ok());
         assert!(validate_storable_refname("refs/heads/ok").is_ok());
+    }
+
+    #[test]
+    fn check_transaction_cost_is_flat_in_store_size() {
+        use std::time::Instant;
+
+        fn oid_n(n: u32) -> ObjectId {
+            let mut b = [0u8; 20];
+            b[..4].copy_from_slice(&(n + 1).to_be_bytes());
+            ObjectId::from_bytes(&b).expect("valid oid")
+        }
+
+        let mut large = RefBatchState::default();
+        for i in 0..20_000u32 {
+            large
+                .refs
+                .insert(format!("refs/heads/b{i:05}"), RawRef::Direct(oid_n(i)));
+        }
+        let small = RefBatchState::default();
+        let txn = |i: u32| {
+            RefTransaction::new()
+                .update(RefUpdate {
+                    name: format!("refs/heads/new{i}"),
+                    new_value: Some(RawRef::Direct(oid_n(i))),
+                    expected: Expected::Missing,
+                    reflog: None,
+                    flags: RefUpdateFlags::default(),
+                })
+                .expect("txn")
+        };
+        let samples = 30u32;
+        let start = Instant::now();
+        for i in 0..samples {
+            check_transaction(&large, &txn(i)).expect("large");
+        }
+        let large_elapsed = start.elapsed();
+        let start = Instant::now();
+        for i in 0..samples {
+            check_transaction(&small, &txn(i + samples)).expect("small");
+        }
+        let small_elapsed = start.elapsed();
+        assert!(
+            large_elapsed.as_secs() < 1,
+            "large map checks took {:?}",
+            large_elapsed
+        );
+        assert!(
+            large_elapsed
+                <= small_elapsed * 8 + small_elapsed / 2 + std::time::Duration::from_millis(1),
+            "large {:?} vs small {:?}",
+            large_elapsed,
+            small_elapsed
+        );
     }
 
     #[test]
