@@ -100,6 +100,17 @@ impl ResetCliOutcome {
         }
     }
 
+    /// Recovery command shown in orphan warnings; mode flags match the reset that produced them.
+    fn recovery_command(&self, previous_oid: &str) -> String {
+        let mode_flag = match self.mode {
+            ResetCliMode::Mixed => "",
+            ResetCliMode::Soft => " --soft",
+            ResetCliMode::Hard => " --hard",
+            ResetCliMode::Keep => " --keep",
+        };
+        format!("grit reset{mode_flag} {previous_oid}")
+    }
+
     fn render_orphan_warning(&self, w: &mut dyn Write) -> Result<()> {
         if self.orphaned_total == 0 {
             return Ok(());
@@ -112,17 +123,18 @@ impl ResetCliOutcome {
         } else {
             ("commit", "it")
         };
+        let recovery_cmd = self.recovery_command(previous);
         if self.dry_run {
             outln!(
                 w,
-                "Warning: {count} {noun} would leave {} (was {previous}). Recover {recover} with `grit reset {previous}`.",
+                "Warning: {count} {noun} would leave {} (was {previous}). Recover {recover} with `{recovery_cmd}`.",
                 self.r#ref,
             );
         } else {
             let verb = if plural { "are" } else { "is" };
             outln!(
                 w,
-                "Warning: {count} {noun} {verb} no longer on {} (was {previous}). Recover {recover} with `grit reset {previous}` (recorded in ORIG_HEAD and, when reflogs are on, the reflog).",
+                "Warning: {count} {noun} {verb} no longer on {} (was {previous}). Recover {recover} with `{recovery_cmd}` (recorded in ORIG_HEAD and, when reflogs are on, the reflog).",
                 self.r#ref,
             );
         }
@@ -188,8 +200,8 @@ impl MarkdownRender for ResetCliOutcome {
             };
             outln!(
                 w,
-                "- **recovery:** `grit reset {}` restores {recover} (also recorded in ORIG_HEAD; reflog when enabled)",
-                self.previous
+                "- **recovery:** `{}` restores {recover} (also recorded in ORIG_HEAD; reflog when enabled)",
+                self.recovery_command(&self.previous)
             );
         }
         Ok(())
@@ -270,12 +282,13 @@ mod tests {
     use time::OffsetDateTime;
 
     fn sample_outcome(
+        mode: ResetCliMode,
         dry_run: bool,
         orphaned_total: usize,
         orphaned_truncated: bool,
     ) -> ResetCliOutcome {
         ResetCliOutcome {
-            mode: ResetCliMode::Soft,
+            mode,
             target: "062ca6e74f5603f4d09063c0f46cd07d8c96e019".into(),
             previous: "83352a61f6715ec3f0a297c6d6150725154fb833".into(),
             r#ref: "refs/heads/main".into(),
@@ -286,6 +299,17 @@ mod tests {
             orphaned_total,
             orphaned_truncated,
         }
+    }
+
+    fn render_markdown_text(outcome: &ResetCliOutcome) -> String {
+        let ctx = RenderContext {
+            now: OffsetDateTime::UNIX_EPOCH,
+        };
+        let mut buf = Vec::new();
+        outcome
+            .render_markdown(&mut buf, &ctx)
+            .expect("render markdown");
+        String::from_utf8(buf).expect("utf8")
     }
 
     fn render_human_text(outcome: &ResetCliOutcome) -> String {
@@ -299,7 +323,7 @@ mod tests {
 
     #[test]
     fn orphan_warning_past_tense_after_reset() {
-        let text = render_human_text(&sample_outcome(false, 1, false));
+        let text = render_human_text(&sample_outcome(ResetCliMode::Mixed, false, 1, false));
         assert!(text.contains("83352a6"), "{text}");
         assert!(text.contains("is no longer on refs/heads/main"));
         assert!(text.contains("Recover it with `grit reset 83352a6`"));
@@ -307,18 +331,63 @@ mod tests {
     }
 
     #[test]
+    fn orphan_warning_includes_mode_flag_per_reset_mode() {
+        let previous = "83352a6";
+        let mixed = render_human_text(&sample_outcome(ResetCliMode::Mixed, false, 1, false));
+        assert!(
+            mixed.contains(&format!("`grit reset {previous}`")),
+            "{mixed}"
+        );
+        let soft = render_human_text(&sample_outcome(ResetCliMode::Soft, false, 1, false));
+        assert!(
+            soft.contains(&format!("`grit reset --soft {previous}`")),
+            "{soft}"
+        );
+        let hard = render_human_text(&sample_outcome(ResetCliMode::Hard, false, 1, false));
+        assert!(
+            hard.contains(&format!("`grit reset --hard {previous}`")),
+            "{hard}"
+        );
+        let keep = render_human_text(&sample_outcome(ResetCliMode::Keep, false, 1, false));
+        assert!(
+            keep.contains(&format!("`grit reset --keep {previous}`")),
+            "{keep}"
+        );
+    }
+
+    #[test]
     fn orphan_warning_future_tense_on_dry_run() {
-        let text = render_human_text(&sample_outcome(true, 1, false));
+        let text = render_human_text(&sample_outcome(ResetCliMode::Mixed, true, 1, false));
         assert!(text.contains("83352a6"), "{text}");
         assert!(text.contains("would leave refs/heads/main"));
         assert!(!text.contains("is no longer"));
     }
 
     #[test]
+    fn orphan_warning_hard_dry_run_includes_hard_in_recovery() {
+        let text = render_human_text(&sample_outcome(ResetCliMode::Hard, true, 1, false));
+        assert!(
+            text.contains("Recover it with `grit reset --hard 83352a6`"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn orphan_warning_markdown_recovery_uses_full_oid_and_mode() {
+        let md = render_markdown_text(&sample_outcome(ResetCliMode::Soft, false, 1, false));
+        assert!(
+            md.contains(
+                "**recovery:** `grit reset --soft 83352a61f6715ec3f0a297c6d6150725154fb833`"
+            ),
+            "{md}"
+        );
+    }
+
+    #[test]
     fn orphan_warning_plural_and_truncated() {
-        let text = render_human_text(&sample_outcome(false, 25, true));
+        let text = render_human_text(&sample_outcome(ResetCliMode::Mixed, false, 25, true));
         assert!(text.contains("25+ commits are no longer"), "{text}");
-        let dry = render_human_text(&sample_outcome(true, 25, true));
+        let dry = render_human_text(&sample_outcome(ResetCliMode::Mixed, true, 25, true));
         assert!(dry.contains("25+ commits would leave"), "{dry}");
     }
 }
