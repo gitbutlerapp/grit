@@ -27,21 +27,30 @@ struct XdFile<'a> {
     /// Records compared when sliding, one per line. Unlike `lines`, these must tell a final line
     /// without a newline apart from the same text with one.
     keys: &'a [&'a str],
+    /// Dense interned compare keys; avoids memcmp on long repeated lines when present.
+    compare_ids: Option<&'a [u32]>,
     /// `changed[i]` matches Git's `xdf->changed`: length `nrec + 1`, last entry always false.
-    changed: Vec<bool>,
+    changed: Vec<u8>,
 }
 
 impl<'a> XdFile<'a> {
-    fn from_mask(lines: &'a [&'a str], keys: &'a [&'a str], mut changed: Vec<bool>) -> Self {
+    fn from_mask(
+        lines: &'a [&'a str],
+        keys: &'a [&'a str],
+        compare_ids: Option<&'a [u32]>,
+        mut changed: Vec<bool>,
+    ) -> Self {
         debug_assert_eq!(lines.len(), keys.len());
         let n = lines.len();
         changed.resize(n + 1, false);
         if !changed.is_empty() {
             changed[n] = false;
         }
+        let changed = changed.into_iter().map(u8::from).collect();
         Self {
             lines,
             keys,
+            compare_ids,
             changed,
         }
     }
@@ -58,20 +67,18 @@ impl<'a> XdFile<'a> {
         if u >= self.changed.len() {
             return false;
         }
-        self.changed[u]
+        self.changed[u] != 0
     }
 
     fn set_changed(&mut self, i: usize, v: bool) {
         if i < self.changed.len() {
-            self.changed[i] = v;
+            self.changed[i] = u8::from(v);
         }
     }
 
     fn into_changed(self) -> Vec<bool> {
         let n = self.lines.len();
-        let mut c = self.changed;
-        c.truncate(n);
-        c
+        self.changed.into_iter().take(n).map(|b| b != 0).collect()
     }
 }
 
@@ -266,6 +273,8 @@ fn recs_match(xdf: &XdFile<'_>, i: isize, j: isize, ws: WhitespaceMode) -> bool 
     }
     if ws.normalizes_line_compare() {
         ws.normalize_line_for_compare(xdf.keys[ui]) == ws.normalize_line_for_compare(xdf.keys[uj])
+    } else if let Some(ids) = xdf.compare_ids {
+        ids[ui] == ids[uj]
     } else {
         xdf.keys[ui] == xdf.keys[uj]
     }
@@ -462,12 +471,18 @@ pub(crate) struct CompactSide<'a> {
     pub(crate) lines: &'a [&'a str],
     /// Compare records, one per line; equal keys mean equal lines.
     pub(crate) keys: &'a [&'a str],
+    /// Optional interned ids parallel to `keys` for fast equality.
+    pub(crate) compare_ids: Option<&'a [u32]>,
 }
 
 impl<'a> CompactSide<'a> {
     /// A side whose bodies double as compare keys (no newline-at-EOF distinction).
     fn bodies(lines: &'a [&'a str]) -> Self {
-        Self { lines, keys: lines }
+        Self {
+            lines,
+            keys: lines,
+            compare_ids: None,
+        }
     }
 }
 
@@ -482,15 +497,25 @@ fn change_compact_both_passes(
 ) {
     let c_old = std::mem::take(changed_old);
     let c_new = std::mem::take(changed_new);
-    let mut xdf = XdFile::from_mask(old.lines, old.keys, c_old);
-    let mut xdfo = XdFile::from_mask(new.lines, new.keys, c_new);
+    let mut xdf = XdFile::from_mask(old.lines, old.keys, old.compare_ids, c_old);
+    let mut xdfo = XdFile::from_mask(new.lines, new.keys, new.compare_ids, c_new);
 
     change_compact_one(&mut xdf, &mut xdfo, indent_heuristic, ws, histogram_rediff);
     *changed_old = xdf.into_changed();
     *changed_new = xdfo.into_changed();
 
-    let mut xdf2 = XdFile::from_mask(new.lines, new.keys, std::mem::take(changed_new));
-    let mut xdfo2 = XdFile::from_mask(old.lines, old.keys, std::mem::take(changed_old));
+    let mut xdf2 = XdFile::from_mask(
+        new.lines,
+        new.keys,
+        new.compare_ids,
+        std::mem::take(changed_new),
+    );
+    let mut xdfo2 = XdFile::from_mask(
+        old.lines,
+        old.keys,
+        old.compare_ids,
+        std::mem::take(changed_old),
+    );
     change_compact_one(
         &mut xdf2,
         &mut xdfo2,

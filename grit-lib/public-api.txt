@@ -5029,6 +5029,7 @@ pub struct grit_lib::diff::FileDiff
 pub grit_lib::diff::FileDiff::binary: bool
 pub grit_lib::diff::FileDiff::content_changed: bool
 pub grit_lib::diff::FileDiff::hunks: alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>
+pub grit_lib::diff::FileDiff::line_stat: core::option::Option<grit_lib::diff::LineStat>
 pub grit_lib::diff::FileDiff::new_encoding_lossy: bool
 pub grit_lib::diff::FileDiff::new_mode: core::option::Option<alloc::string::String>
 pub grit_lib::diff::FileDiff::new_oid: grit_lib::objects::ObjectId
@@ -5457,7 +5458,7 @@ pub fn grit_lib::diff::diff_index_to_worktree(&grit_lib::objects::odb::Odb, &mut
 pub fn grit_lib::diff::diff_index_to_worktree_for_staging(&grit_lib::objects::odb::Odb, &std::path::Path, &mut grit_lib::index::Index, &std::path::Path, grit_lib::diff::DiffIndexToWorktreeOptions) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::diff::DiffEntry>, bool, alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::index::IndexStatFields>)>
 pub fn grit_lib::diff::diff_index_to_worktree_with_options(&grit_lib::objects::odb::Odb, &mut grit_lib::index::Index, &std::path::Path, grit_lib::diff::DiffIndexToWorktreeOptions) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::diff::DiffEntry>, bool)>
 pub fn grit_lib::diff::diff_index_to_worktree_with_renames(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &std::path::Path, grit_lib::diff::DiffIndexToWorktreeOptions, u32) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::diff::DiffEntry>, bool)>
-pub fn grit_lib::diff::diff_paths(&std::path::Path, &std::path::Path, &grit_lib::diff::DiffOptions) -> core::result::Result<alloc::vec::Vec<grit_lib::diff::FileDiff>, grit_lib::diff::NoIndexError>
+pub fn grit_lib::diff::diff_paths(&std::path::Path, &std::path::Path, &grit_lib::diff::DiffOptions, bool) -> core::result::Result<alloc::vec::Vec<grit_lib::diff::FileDiff>, grit_lib::diff::NoIndexError>
 pub fn grit_lib::diff::diff_slice_ops_compacted(&[&str], &[&str], similar::types::Algorithm, bool) -> alloc::vec::Vec<similar::types::DiffOp>
 pub fn grit_lib::diff::diff_tree_path_change_count(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<usize>
 pub fn grit_lib::diff::diff_tree_to_worktree(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, &std::path::Path, &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>

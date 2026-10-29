@@ -245,6 +245,21 @@ mod tests {
     }
 
     #[test]
+    fn myers_stat_repetitive_po_like_fixture_matches_git() {
+        let options = DiffOptions::default();
+        let repeated = "msgid \"entry\"\nmsgstr \"same translation line\"\n".repeat(15_000);
+        let mut old = repeated.clone();
+        old.push_str("msgid \"removed\"\nmsgstr \"gone\"\n");
+        let mut new = repeated;
+        new.push_str("msgid \"added-a\"\nmsgstr \"one\"\n");
+        new.push_str("msgid \"added-b\"\nmsgstr \"two\"\n");
+        let grit = line_change_counts(&old, &new, &options);
+        let git = git_numstat(&old, &new, DiffAlgorithm::Myers);
+        assert_eq!(grit, git, "repetitive .po-like numstat vs git");
+        assert_eq!(grit, patch_oracle_stat(&old, &new, &options));
+    }
+
+    #[test]
     fn line_stat_matches_git_and_repeated_anchor_fixture() {
         let anchor = "fn anchor() {\n";
         let old = format!("{anchor}{anchor}// old body\n");

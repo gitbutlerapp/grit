@@ -687,10 +687,12 @@ pub fn run_no_index(opts: DiffRunOptions) -> Result<DiffOutcome> {
     diff_options.word_level_inline = opts.word_level_inline;
     let detail = opts.format.detail();
     let format = opts.format;
+    let stat_only = detail == DiffDetail::Stat;
     let files = grit_lib::diff::diff_paths(
         std::path::Path::new(&path_args[0]),
         std::path::Path::new(&path_args[1]),
         &diff_options,
+        stat_only,
     )
     .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     let cli_files: Vec<FileDiff> = files
@@ -1253,7 +1255,9 @@ fn file_diff_from_lib(f: grit_lib::diff::FileDiff, detail: DiffDetail) -> FileDi
     let stat = if f.binary {
         None
     } else if detail == DiffDetail::Stat {
-        Some(LineStat::from_hunks(&f.hunks).into())
+        f.line_stat
+            .map(Into::into)
+            .or_else(|| Some(LineStat::from_hunks(&f.hunks).into()))
     } else {
         None
     };
