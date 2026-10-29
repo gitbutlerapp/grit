@@ -442,12 +442,9 @@ fn upper_bound_oid(idx: &PackIndex, needle: &[u8]) -> usize {
 /// Freshen `pack_path` (like rewriting objects it already holds) so age-based pruning
 /// treats its objects as new. Returns `false` when the times cannot be set.
 pub(crate) fn touch_pack_mtime(pack_path: &std::path::Path) -> bool {
-    let now = filetime::FileTime::now();
-    if filetime::set_file_times(pack_path, now, now).is_err() {
+    let Some(touched) = crate::fs_readonly::set_file_times_now(pack_path) else {
         return false;
-    }
-    let touched = std::time::UNIX_EPOCH
-        + std::time::Duration::new(now.unix_seconds() as u64, now.nanoseconds());
+    };
     pack::refresh_pack_bytes_signature(pack_path, touched);
     true
 }

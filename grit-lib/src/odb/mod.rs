@@ -3672,13 +3672,7 @@ impl Odb {
     fn touch_object_mtime(&self, path: &Path) -> Option<std::time::SystemTime> {
         #[cfg(test)]
         self.hot_path_test_metrics.record_freshen();
-        // `utime(path, NULL)` sets both atime and mtime to the current time.
-        let now = filetime::FileTime::now();
-        filetime::set_file_times(path, now, now).ok()?;
-        Some(
-            std::time::UNIX_EPOCH
-                + std::time::Duration::new(now.unix_seconds() as u64, now.nanoseconds()),
-        )
+        crate::fs_readonly::set_file_times_now(path)
     }
 }
 

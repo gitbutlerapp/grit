@@ -700,6 +700,24 @@ fn bulk_stage_write_skips_blob_already_in_regular_pack_and_freshens_it() {
     let touched = filetime::FileTime::from_last_modification_time(&pack.metadata().unwrap());
     assert!(touched > old, "the pack holding the blob is freshened");
 
+    let mut perms = pack.metadata().unwrap().permissions();
+    perms.set_readonly(false);
+    std::fs::set_permissions(&pack, perms.clone()).unwrap();
+    filetime::set_file_mtime(&pack, old).unwrap();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&pack, perms).unwrap();
+    let odb_readonly = Odb::new(&repo.objects_dir());
+    assert!(
+        odb_readonly.freshen_object(&oid),
+        "freshen must succeed on a read-only pack"
+    );
+    let touched_ro = filetime::FileTime::from_last_modification_time(&pack.metadata().unwrap());
+    assert!(touched_ro > old, "readonly pack mtime must be freshened");
+    assert!(
+        pack.metadata().unwrap().permissions().readonly(),
+        "pack must stay read-only after freshen"
+    );
+
     let new_oid = odb
         .write_with_options(ObjectKind::Blob, b"brand new\n", opts)
         .expect("bulk stage write of new blob");

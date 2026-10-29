@@ -5,6 +5,9 @@ use std::io::Write;
 
 use crate::bloom::{BloomBuildOutcome, BloomFilterSettings};
 use crate::commit_graph_file::CommitGraphChain;
+#[cfg(windows)]
+use crate::fs_readonly::clear_readonly_attribute;
+use crate::fs_readonly::clear_readonly_tree;
 use crate::objects::{
     oid_hash_map_from, oid_hash_set, parse_commit, tag_object_line_oid, HashAlgo, ObjectId,
     ObjectKind, OidHashMap, OidHashSet,
@@ -631,43 +634,6 @@ pub fn collect_reachable_commit_oids(
         .collect())
 }
 
-/// Clear the read-only attribute when present so replace/remove can succeed.
-///
-/// Git marks commit-graph (and pack) files read-only on Windows; same-directory
-/// rename over an existing read-only file fails with access denied until cleared.
-fn clear_readonly_attribute(path: &std::path::Path, required: bool) -> crate::error::Result<()> {
-    use std::fs;
-    let meta = match fs::symlink_metadata(path) {
-        Ok(m) => m,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(crate::error::Error::Io(e)),
-    };
-    let mut perms = meta.permissions();
-    if !perms.readonly() {
-        return Ok(());
-    }
-    #[cfg(windows)]
-    {
-        perms.set_readonly(false);
-        fs::set_permissions(path, perms).map_err(crate::error::Error::Io)?;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut mode = perms.mode();
-        mode |= 0o200;
-        perms.set_mode(mode);
-        if let Err(e) = fs::set_permissions(path, perms) {
-            if required {
-                return Err(crate::error::Error::Io(e));
-            }
-        }
-    }
-    #[cfg(windows)]
-    let _ = required;
-    Ok(())
-}
-
 /// Directory in the repository tree, not a symlink/junction entry.
 fn is_repository_directory(path: &std::path::Path) -> bool {
     use std::fs;
@@ -676,26 +642,6 @@ fn is_repository_directory(path: &std::path::Path) -> bool {
     };
     let file_type = meta.file_type();
     file_type.is_dir() && !file_type.is_symlink()
-}
-
-fn clear_readonly_tree(path: &std::path::Path) -> crate::error::Result<()> {
-    use std::fs;
-    let meta = fs::symlink_metadata(path).map_err(crate::error::Error::Io)?;
-    let file_type = meta.file_type();
-    if file_type.is_symlink() {
-        return Ok(());
-    }
-    if file_type.is_dir() {
-        for entry in fs::read_dir(path).map_err(crate::error::Error::Io)? {
-            let entry = entry.map_err(crate::error::Error::Io)?;
-            let child_type = entry.file_type().map_err(crate::error::Error::Io)?;
-            if child_type.is_symlink() {
-                continue;
-            }
-            clear_readonly_tree(&entry.path())?;
-        }
-    }
-    clear_readonly_attribute(path, cfg!(windows))
 }
 
 /// Replace `objects/info/commit-graph` atomically (lock + tempfile + rename).

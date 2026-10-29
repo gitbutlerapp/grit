@@ -259,8 +259,7 @@ impl LooseStore {
     }
 
     fn touch_mtime(path: &Path) -> bool {
-        let now = filetime::FileTime::now();
-        filetime::set_file_times(path, now, now).is_ok()
+        crate::fs_readonly::set_file_times_now(path).is_some()
     }
 }
 
