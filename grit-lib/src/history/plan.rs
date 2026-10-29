@@ -1942,8 +1942,43 @@ mod merge_call_tests {
         write_tree_from_index(repo.odb(), &index, "")
     }
 
+    fn tree_with_file(
+        repo: &Repository,
+        parent_tree: ObjectId,
+        path: &str,
+        bytes: &[u8],
+    ) -> crate::error::Result<ObjectId> {
+        use crate::porcelain::merge::tree_to_index_entries;
+        let blob = repo.odb().write(ObjectKind::Blob, bytes)?;
+        let mut index = Index::new();
+        index.hash_algo = repo.odb().hash_algo();
+        for mut entry in tree_to_index_entries(repo, &parent_tree, "")? {
+            entry.base_index_pos = 0;
+            index.add_or_replace(entry);
+        }
+        index.add_or_replace(IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: bytes.len() as u32,
+            oid: blob,
+            flags: path.len().min(0xfff) as u16,
+            flags_extended: None,
+            path: path.as_bytes().to_vec(),
+            base_index_pos: 0,
+        });
+        write_tree_from_index(repo.odb(), &index, "")
+    }
+
     use super::super::replay_merge_session::{
         test_merge_tree_call_count, test_reset_merge_tree_call_count,
+        test_reset_upstream_delta_scan_count, test_upstream_delta_scan_count,
     };
 
     #[test]
@@ -2040,40 +2075,6 @@ mod merge_call_tests {
             .odb()
             .write(ObjectKind::Commit, &fork_raw)
             .expect("fork");
-        fn tree_with_file(
-            repo: &Repository,
-            parent_tree: ObjectId,
-            path: &str,
-            bytes: &[u8],
-        ) -> crate::error::Result<ObjectId> {
-            use crate::porcelain::merge::tree_to_index_entries;
-            let blob = repo.odb().write(ObjectKind::Blob, bytes)?;
-            let mut index = Index::new();
-            index.hash_algo = repo.odb().hash_algo();
-            for mut entry in tree_to_index_entries(repo, &parent_tree, "")? {
-                entry.base_index_pos = 0;
-                index.add_or_replace(entry);
-            }
-            index.add_or_replace(IndexEntry {
-                ctime_sec: 0,
-                ctime_nsec: 0,
-                mtime_sec: 0,
-                mtime_nsec: 0,
-                dev: 0,
-                ino: 0,
-                mode: MODE_REGULAR,
-                uid: 0,
-                gid: 0,
-                size: bytes.len() as u32,
-                oid: blob,
-                flags: path.len().min(0xfff) as u16,
-                flags_extended: None,
-                path: path.as_bytes().to_vec(),
-                base_index_pos: 0,
-            });
-            write_tree_from_index(repo.odb(), &index, "")
-        }
-
         let mut parent = fork;
         let mut onto_tree = fork_tree;
         for i in 0..80 {
@@ -2265,5 +2266,137 @@ mod merge_call_tests {
             grit_tree, git_tree,
             "delete replay tree must match git (no empty dir tree)"
         );
+    }
+
+    #[test]
+    fn rebase_add_only_over_many_upstream_renames_scans_once() {
+        use crate::objects::{serialize_commit, CommitData};
+        use crate::revwalk::history::{plan_rebase, RebaseOntoOptions, RebaseRequest};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let sig = ident(1);
+        let mut fork_tree = blob_tree(&repo, "base.txt", b"base\n").expect("tree");
+        for i in 0..200 {
+            let path = format!("dir/f{i}.txt");
+            fork_tree = tree_with_file(&repo, fork_tree, &path, b"x\n").expect("fork wide");
+        }
+        let fork_raw = serialize_commit(&CommitData {
+            tree: fork_tree,
+            parents: vec![],
+            author: sig.clone(),
+            committer: sig.clone(),
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: "fork\n".into(),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        });
+        let fork = repo
+            .odb()
+            .write(ObjectKind::Commit, &fork_raw)
+            .expect("fork");
+
+        let mut onto_tree = fork_tree;
+        for i in 0..200 {
+            let old = format!("dir/f{i}.txt");
+            let new = format!("moved/f{i}.txt");
+            onto_tree = tree_with_file(&repo, onto_tree, &new, b"y\n").expect("moved add");
+            onto_tree = tree_without_path(&repo, onto_tree, &old).expect("moved rm");
+        }
+        let onto_raw = serialize_commit(&CommitData {
+            tree: onto_tree,
+            parents: vec![fork],
+            author: sig.clone(),
+            committer: sig.clone(),
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: "onto\n".into(),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        });
+        let onto = repo
+            .odb()
+            .write(ObjectKind::Commit, &onto_raw)
+            .expect("onto");
+
+        let mut stack_parent = fork;
+        let mut stack_tree = fork_tree;
+        for i in 0..30 {
+            let path = format!("feat/n{i}.txt");
+            stack_tree = tree_with_file(&repo, stack_tree, &path, format!("{i}\n").as_bytes())
+                .expect("stack tree");
+            let raw = serialize_commit(&CommitData {
+                tree: stack_tree,
+                parents: vec![stack_parent],
+                author: sig.clone(),
+                committer: sig.clone(),
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: None,
+                message: format!("feat {i}\n"),
+                raw_message: None,
+                extra_headers: Vec::new(),
+            });
+            stack_parent = repo
+                .odb()
+                .write(ObjectKind::Commit, &raw)
+                .expect("stack commit");
+        }
+        let tip = stack_parent;
+        write_ref(repo.git_dir(), "refs/heads/main", &tip).expect("ref");
+
+        let opts = RebaseOntoOptions::new(RewriteOptions {
+            scope: RefScope::Head,
+            empty: EmptyPolicy::Drop,
+            committer: ident(2).parse().expect("signature"),
+            preserve_committer: false,
+            sign: false,
+        });
+        let request = RebaseRequest {
+            upstream: fork,
+            onto: Some(onto),
+            branch_tip: tip,
+        };
+        test_reset_merge_tree_call_count();
+        test_reset_upstream_delta_scan_count();
+        plan_rebase(&repo, &request, &opts).expect("plan");
+        assert_eq!(
+            test_upstream_delta_scan_count(),
+            1,
+            "fork→onto rename map should be built once per replay session"
+        );
+        assert_eq!(
+            test_merge_tree_call_count(),
+            0,
+            "disjoint add-only stack should not call full tree merge per commit"
+        );
+    }
+
+    fn tree_without_path(
+        repo: &Repository,
+        parent_tree: ObjectId,
+        path: &str,
+    ) -> crate::error::Result<ObjectId> {
+        use crate::porcelain::merge::tree_to_index_entries;
+        let mut index = Index::new();
+        index.hash_algo = repo.odb().hash_algo();
+        let path_bytes = path.as_bytes();
+        for mut entry in tree_to_index_entries(repo, &parent_tree, "")? {
+            if entry.path == path_bytes {
+                continue;
+            }
+            entry.base_index_pos = 0;
+            index.add_or_replace(entry);
+        }
+        write_tree_from_index(repo.odb(), &index, "")
     }
 }
