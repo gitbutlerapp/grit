@@ -810,3 +810,55 @@ fn patch_id_hashes_gitlink_changes_without_reading_the_submodule_commit() {
         assert_eq!(from_range, expected, "range {flag}");
     }
 }
+
+fn tail_lines_bytes(content: &[u8], n: usize) -> Vec<u8> {
+    let mut lines: Vec<&[u8]> = content.split(|&b| b == b'\n').collect();
+    if lines.last() == Some(&&b""[..]) {
+        lines.pop();
+    }
+    let start = lines.len().saturating_sub(n);
+    let mut out = Vec::new();
+    for line in &lines[start..] {
+        out.extend_from_slice(line);
+        out.push(b'\n');
+    }
+    out
+}
+
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
+#[test]
+fn patch_id_stable_matches_git_git_t4201_shortlog_invalid_utf8() {
+    let git_src = std::path::Path::new("/tmp/git-src");
+    if !git_src.join("HEAD").exists() {
+        eprintln!(
+            "skip patch_id_stable_matches_git_git_t4201_shortlog_invalid_utf8: no /tmp/git-src"
+        );
+        return;
+    }
+    const C: &str = "253118d1d99b28b1c809e3607c0a182e141f3e45";
+    let old_blob = git_in(git_src, &["show", &format!("{C}^:t/t4201-shortlog.sh")]);
+    let new_blob = git_in(git_src, &["show", &format!("{C}:t/t4201-shortlog.sh")]);
+
+    let dir = TempDir::new().unwrap();
+    git_in(dir.path(), &["init", "-q", "-b", "main"]);
+    std::fs::write(dir.path().join("f"), &old_blob).unwrap();
+    git_in(dir.path(), &["add", "f"]);
+    git_in(dir.path(), &["commit", "-qm", "base"]);
+    std::fs::write(dir.path().join("f"), &new_blob).unwrap();
+    git_in(dir.path(), &["commit", "-qam", "change"]);
+    assert_patch_id_matches_normal_patch(dir.path(), &[], "git t4201 shortlog full file");
+
+    let dir = TempDir::new().unwrap();
+    git_in(dir.path(), &["init", "-q", "-b", "main"]);
+    let old_tail = tail_lines_bytes(old_blob.as_bytes(), 320);
+    let new_tail = tail_lines_bytes(new_blob.as_bytes(), 320);
+    std::fs::write(dir.path().join("f"), &old_tail).unwrap();
+    git_in(dir.path(), &["add", "f"]);
+    git_in(dir.path(), &["commit", "-qm", "base"]);
+    std::fs::write(dir.path().join("f"), &new_tail).unwrap();
+    git_in(dir.path(), &["commit", "-qam", "change"]);
+    assert_patch_id_matches_normal_patch(dir.path(), &[], "git t4201 shortlog tail-320");
+}

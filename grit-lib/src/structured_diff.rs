@@ -136,15 +136,20 @@ impl<'a> TextLines<'a> {
     }
 }
 
-/// Decode side bytes as UTF-8 when valid to avoid an extra allocation on the hot path.
-fn side_text_for_diff(side: &SideBytes) -> Cow<'_, str> {
-    if side.data.is_empty() {
+/// Decode blob bytes for text diffing and patch-ID hashing (borrow when valid UTF-8).
+pub(crate) fn text_bytes_for_diff(data: &[u8]) -> Cow<'_, str> {
+    if data.is_empty() {
         return Cow::Borrowed("");
     }
-    match std::str::from_utf8(&side.data) {
+    match std::str::from_utf8(data) {
         Ok(text) => Cow::Borrowed(text),
-        Err(_) => Cow::Owned(String::from_utf8_lossy(&side.data).into_owned()),
+        Err(_) => Cow::Owned(String::from_utf8_lossy(data).into_owned()),
     }
+}
+
+/// Decode side bytes as UTF-8 when valid to avoid an extra allocation on the hot path.
+fn side_text_for_diff(side: &SideBytes) -> Cow<'_, str> {
+    text_bytes_for_diff(&side.data)
 }
 
 /// Like [`structured_text_diff`] but accepts borrowed text when sides are valid UTF-8.

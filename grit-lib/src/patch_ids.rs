@@ -14,10 +14,14 @@
 //! - [`compute_patch_ids_from_text`] parses unified diff text from stdin (e.g.
 //!   output of `git log -p` or `git diff-tree --patch --stdin`), matching the
 //!   behaviour of `git patch-id`.
+//!
+//! Non-UTF-8 bytes in text blobs are decoded with the same lossy UTF-8 rules as
+//! [`crate::diff::structured`] text diffs so context lines stay aligned with `git diff`.
 
 use crate::diff::{
-    diff_trees_with_renames, gitlink_line, unified_diff_with_prefix_and_funcname,
-    unified_hunk_body_for_diff_options, zero_oid, DiffEntry, DiffOptions, DiffStatus,
+    diff_trees_with_renames, gitlink_line, structured::text_bytes_for_diff,
+    unified_diff_with_prefix_and_funcname, unified_hunk_body_for_diff_options, zero_oid, DiffEntry,
+    DiffOptions, DiffStatus,
 };
 use crate::error::Result;
 use crate::hash::ChecksumHasher;
@@ -428,6 +432,9 @@ fn split_lines_with_nl(input: &[u8]) -> Vec<&[u8]> {
 /// # Errors
 ///
 /// Returns errors from object-database reads or object-parse failures.
+///
+/// Text blobs that are not valid UTF-8 are still diffed (lossy decode), matching
+/// `git diff` and `git patch-id` on the same commit.
 pub fn compute_patch_id(
     algo: HashAlgo,
     odb: &Odb,
@@ -743,8 +750,8 @@ fn patch_id_append_git_show_entry(odb: &Odb, entry: &DiffEntry, out: &mut Vec<u8
         return Ok(());
     }
 
-    let old_str = std::str::from_utf8(&old_bytes).unwrap_or("");
-    let new_str = std::str::from_utf8(&new_bytes).unwrap_or("");
+    let old_str = text_bytes_for_diff(&old_bytes);
+    let new_str = text_bytes_for_diff(&new_bytes);
     let old_path = if old_mode == 0 {
         "/dev/null".to_owned()
     } else {
@@ -756,7 +763,17 @@ fn patch_id_append_git_show_entry(odb: &Odb, entry: &DiffEntry, out: &mut Vec<u8
         format!("b/{git_new}")
     };
     let unified = unified_diff_with_prefix_and_funcname(
-        old_str, new_str, &old_path, &new_path, 3, 0, "", "", None, true, false,
+        old_str.as_ref(),
+        new_str.as_ref(),
+        &old_path,
+        &new_path,
+        3,
+        0,
+        "",
+        "",
+        None,
+        true,
+        false,
     );
     out.extend_from_slice(unified.as_bytes());
     Ok(())
@@ -839,8 +856,8 @@ fn patch_id_hash_file_entry_into_ctx(
         ctx.update(a.as_bytes());
         ctx.update(b.as_bytes());
     } else {
-        let old_str = std::str::from_utf8(&old_bytes).unwrap_or("");
-        let new_str = std::str::from_utf8(&new_bytes).unwrap_or("");
+        let old_str = text_bytes_for_diff(&old_bytes);
+        let new_str = text_bytes_for_diff(&new_bytes);
 
         if old_mode == 0 {
             patch_id_add_string(ctx, b"---/dev/null");
@@ -857,7 +874,7 @@ fn patch_id_hash_file_entry_into_ctx(
             ctx.update(&new_path_buf[..len2]);
         }
 
-        patch_id_hash_text_hunks(ctx, old_str, new_str);
+        patch_id_hash_text_hunks(ctx, old_str.as_ref(), new_str.as_ref());
     }
     Ok(())
 }
@@ -907,13 +924,13 @@ fn patch_id_hash_rename_entry_into_ctx(
             ctx.update(a.as_bytes());
             ctx.update(b.as_bytes());
         } else {
-            let old_str = std::str::from_utf8(&old_bytes).unwrap_or("");
-            let new_str = std::str::from_utf8(&new_bytes).unwrap_or("");
+            let old_str = text_bytes_for_diff(&old_bytes);
+            let new_str = text_bytes_for_diff(&new_bytes);
             patch_id_add_string(ctx, b"---a/");
             ctx.update(&old_path_buf[..len1]);
             patch_id_add_string(ctx, b"+++b/");
             ctx.update(&new_path_buf[..len2]);
-            patch_id_hash_text_hunks(ctx, old_str, new_str);
+            patch_id_hash_text_hunks(ctx, old_str.as_ref(), new_str.as_ref());
         }
     }
 
@@ -1465,5 +1482,58 @@ mod tests {
                 assert_eq!(grit, git, "{label} {flag}");
             }
         }
+    }
+
+    #[test]
+    fn stable_patch_id_matches_git_with_invalid_utf8_in_unchanged_context() {
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path();
+        git_in(path, &["init", "-q", "--initial-branch=main", "."]);
+        let mut base = Vec::new();
+        for i in 0..420 {
+            base.extend_from_slice(format!("line{i}\n").as_bytes());
+        }
+        base.extend_from_slice(b"context one\n");
+        base.extend_from_slice(b"invalid \xF8 in line\n");
+        base.extend_from_slice(b"context two\n");
+        base.extend_from_slice(b"near end one\n");
+        base.extend_from_slice(b"near end two\n");
+        base.extend_from_slice(b"near end three\n");
+        base.extend_from_slice(b"\n");
+        base.extend_from_slice(b"test_done\n");
+
+        let mut new = base.clone();
+        let insert_at = base.len() - b"test_done\n".len();
+        new.splice(
+            insert_at..insert_at,
+            b"inserted one\ninserted two\ninserted three\ninserted four\ninserted five\ninserted six\n"
+                .iter()
+                .copied(),
+        );
+
+        std::fs::write(path.join("f"), &base).unwrap();
+        git_in(path, &["add", "f"]);
+        git_in(path, &["commit", "-q", "-m", "base"]);
+        std::fs::write(path.join("f"), &new).unwrap();
+        git_in(path, &["add", "f"]);
+        git_in(path, &["commit", "-q", "-m", "change"]);
+
+        let commit: ObjectId = git_in(path, &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .expect("commit oid");
+        let repo = crate::repo::Repository::open(
+            &path.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(path),
+        )
+        .expect("open repo");
+        let grit = compute_patch_id(HashAlgo::Sha1, &repo.odb(), &commit, PatchIdMode::Stable)
+            .expect("patch id")
+            .expect("non-empty patch");
+        let git = git_show_patch_id(path, commit.to_hex().as_str(), "--stable");
+        assert_eq!(
+            grit, git,
+            "stable patch-id with invalid utf8 in unchanged context"
+        );
     }
 }
