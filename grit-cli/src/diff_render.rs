@@ -86,6 +86,12 @@ impl JsonSchema for DiffStat {
     }
 }
 
+impl From<LibDiffStat> for DiffStat {
+    fn from(stat: LibDiffStat) -> Self {
+        Self(stat)
+    }
+}
+
 impl DiffStat {
     /// The library model behind this diffstat.
     #[must_use]

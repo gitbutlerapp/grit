@@ -8,6 +8,7 @@ use crate::pathspec_args::TrailingPathspecArgs;
 use anyhow::{Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::diff::hunk_id::HunkId;
+use grit_lib::diff::DiffOptions;
 use grit_lib::error::Error;
 use grit_lib::error::Error as LibError;
 use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError};
@@ -496,12 +497,12 @@ pub fn run_show(
 ) -> Result<StashShowOutcome> {
     let repo = context::discover()?;
     let n = parse_stash_index(index.as_deref())?;
-    let diff_options = StashDiffOptions { include_untracked };
-    let entries = repo
-        .stash()
-        .diff(n, &diff_options)
-        .map_err(map_stash_error)?;
+    let stash_options = StashDiffOptions { include_untracked };
     if patch {
+        let entries = repo
+            .stash()
+            .diff(n, &stash_options)
+            .map_err(map_stash_error)?;
         let patch = diff::outcome_from_tree_entries(&repo, entries)?;
         return Ok(StashShowOutcome {
             index: n,
@@ -510,12 +511,15 @@ pub fn run_show(
             patch: Some(patch),
         });
     }
-    let full = diff::outcome_from_tree_entries(&repo, entries)?;
-    let stat = diff_render::diffstat_from_files(&full.files);
+    let config = repo.config().context("could not load config")?;
+    let stat = repo
+        .stash()
+        .diff_stat(n, &stash_options, DiffOptions::from_config(&config))
+        .map_err(map_stash_error)?;
     Ok(StashShowOutcome {
         index: n,
         include_untracked,
-        stat: Some(stat),
+        stat: Some(stat.into()),
         patch: None,
     })
 }
