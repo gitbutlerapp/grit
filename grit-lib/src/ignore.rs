@@ -566,6 +566,21 @@ impl IgnoreMatcher {
         Ok(())
     }
 
+    /// Record that the walk entered work-tree directory `dir_rel` without reading its
+    /// per-directory exclude file yet.
+    ///
+    /// The file is read by the first query for a path inside the directory, so a directory
+    /// whose entries are all tracked never opens it (as in Git, where exclude rules are only
+    /// consulted for untracked paths).
+    pub(crate) fn note_directory_known(&mut self, dir_rel: &str) {
+        if self.read_per_directory
+            && !self.gitignore_cache.contains_key(dir_rel)
+            && !self.known_worktree_directories.contains(dir_rel)
+        {
+            self.known_worktree_directories.insert(dir_rel.to_owned());
+        }
+    }
+
     fn ensure_per_dir_rules_loaded(
         &mut self,
         repo: &Repository,
@@ -1510,6 +1525,40 @@ mod normalization_tests {
             normalize_repo_relative(&repo, dir.path(), "missing/file"),
             Err(Error::PathError(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod per_directory_load_tests {
+    use super::*;
+
+    #[test]
+    fn known_directory_reads_its_exclude_file_on_first_query() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let repo =
+            crate::repo::init_repository(root, false, "main", None, crate::RefStorageFormat::Files)
+                .unwrap();
+        fs::create_dir_all(root.join("d/sub")).unwrap();
+        fs::write(root.join("d/.gitignore"), "*.tmp\n").unwrap();
+
+        let mut matcher = IgnoreMatcher::from_repository(&repo).unwrap();
+        matcher.note_directory_known("d");
+        matcher.note_directory_known("d/sub");
+        assert!(
+            matcher.gitignore_cache.is_empty(),
+            "entering a directory must not read its exclude file"
+        );
+        assert!(matcher.known_worktree_directories.contains("d/sub"));
+
+        assert!(matcher
+            .is_path_ignored(&repo, None, "d/sub/x.tmp", false)
+            .unwrap());
+        assert!(!matcher
+            .is_path_ignored(&repo, None, "d/sub/x.txt", false)
+            .unwrap());
+        assert!(matcher.gitignore_cache.contains_key("d"));
+        assert!(matcher.gitignore_cache.contains_key("d/sub"));
     }
 }
 

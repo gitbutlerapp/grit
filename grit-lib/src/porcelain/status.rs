@@ -692,9 +692,7 @@ pub struct UntrackedCollectMeta {
     pub clean_collapsed_unit: HashSet<String>,
 }
 
-fn poll_untracked_cancel(
-    watch: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
-) -> Result<()> {
+fn poll_untracked_cancel(watch: Option<&std::sync::atomic::AtomicBool>) -> Result<()> {
     if let Some(flag) = watch {
         crate::progress::poll_watch(flag)?;
     }
@@ -711,7 +709,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
     rules: &crate::worktree_rules::WorktreeRules,
     cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<(Vec<String>, Vec<String>, UntrackedCollectMeta)> {
-    poll_untracked_cancel(cancel_watch.as_ref())?;
+    poll_untracked_cancel(cancel_watch.as_deref())?;
     let UntrackedScan {
         ignored_mode,
         show_all,
@@ -748,7 +746,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
                     return Ok((untracked, Vec::new(), UntrackedCollectMeta::default()));
                 }
                 if cache_miss == UntrackedCacheMissAction::RefreshFull {
-                    poll_untracked_cancel(cancel_watch.as_ref())?;
+                    poll_untracked_cancel(cancel_watch.as_deref())?;
                     crate::untracked_cache::refresh_untracked_cache_for_status(
                         repo,
                         index,
@@ -759,7 +757,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
                         ignored_mode_to_untracked_cache(ignored_mode),
                         cancel_watch.as_deref(),
                     )?;
-                    poll_untracked_cancel(cancel_watch.as_ref())?;
+                    poll_untracked_cancel(cancel_watch.as_deref())?;
                     let untracked = crate::untracked_cache::collect_untracked_from_cache(&uc);
                     index.untracked_cache = Some(uc);
                     return Ok((
@@ -793,7 +791,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
         effective_core_precomposeunicode_with_config(Some(repo.git_dir()), Some(rules.config()));
 
     if effective_pathspecs.is_empty() {
-        poll_untracked_cancel(cancel_watch.as_ref())?;
+        poll_untracked_cancel(cancel_watch.as_deref())?;
         let (mut par_untracked, mut par_ignored) = collect_untracked_parallel_top_level(
             repo,
             index,
@@ -806,7 +804,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
             &rules.ignore(),
             rules.config(),
             effective_pathspecs,
-            cancel_watch.clone(),
+            cancel_watch.as_deref(),
             clean_unit_dirs,
         )?;
         if sort_paths {
@@ -823,7 +821,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
         ));
     }
 
-    poll_untracked_cancel(cancel_watch.as_ref())?;
+    poll_untracked_cancel(cancel_watch.as_deref())?;
     visit_untracked_node(
         repo,
         index,
@@ -842,7 +840,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
         Some(rules),
         &mut untracked,
         &mut ignored,
-        cancel_watch,
+        cancel_watch.as_deref(),
         clean_unit_dirs,
     )?;
 
@@ -1015,10 +1013,10 @@ fn collect_untracked_parallel_top_level(
     matcher_template: &IgnoreMatcher,
     config: &ConfigSet,
     pathspecs: &[String],
-    cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    cancel_watch: Option<&std::sync::atomic::AtomicBool>,
     clean_unit_dirs: &CleanUnitDirHints,
 ) -> Result<(Vec<String>, Vec<String>)> {
-    poll_untracked_cancel(cancel_watch.as_ref())?;
+    poll_untracked_cancel(cancel_watch)?;
     let entries = named_entries_sorted(fs::read_dir(work_tree).map_err(crate::error::Error::Io)?);
 
     let mut root_files = Vec::new();
@@ -1066,7 +1064,7 @@ fn collect_untracked_parallel_top_level(
                 None,
                 local_untracked,
                 local_ignored,
-                cancel_watch.clone(),
+                cancel_watch,
                 clean_unit_dirs,
             )?;
             Ok::<(), crate::error::Error>(())
@@ -1108,7 +1106,7 @@ fn collect_untracked_parallel_top_level(
                     None,
                     &mut untracked,
                     &mut ignored,
-                    cancel_watch.clone(),
+                    cancel_watch,
                     clean_unit_dirs,
                 )?;
             }
@@ -1189,7 +1187,7 @@ fn collect_untracked_parallel_top_level(
                 None,
                 &mut local_untracked,
                 &mut local_ignored,
-                cancel_watch.clone(),
+                cancel_watch,
                 clean_unit_dirs,
             )?;
             Ok((local_untracked, local_ignored))
@@ -1343,7 +1341,7 @@ fn visit_untracked_dir_entry(
     rules: Option<&crate::worktree_rules::WorktreeRules>,
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
-    cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    cancel_watch: Option<&std::sync::atomic::AtomicBool>,
     clean_unit_dirs: &CleanUnitDirHints,
 ) -> Result<UntrackedWalkStep> {
     if name == b".git" {
@@ -1444,11 +1442,11 @@ fn visit_untracked_read_dir_lazy(
     rules: Option<&crate::worktree_rules::WorktreeRules>,
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
-    cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    cancel_watch: Option<&std::sync::atomic::AtomicBool>,
     clean_unit_dirs: &CleanUnitDirHints,
 ) -> Result<()> {
     for entry in entries {
-        poll_untracked_cancel(cancel_watch.as_ref())?;
+        poll_untracked_cancel(cancel_watch)?;
         if visible_out.is_some_and(|out| out.get()) {
             return Ok(());
         }
@@ -1479,7 +1477,7 @@ fn visit_untracked_read_dir_lazy(
                 rules,
                 untracked_out,
                 ignored_out,
-                cancel_watch.clone(),
+                cancel_watch,
                 clean_unit_dirs,
             )?,
             UntrackedWalkStep::Stop
@@ -1509,7 +1507,7 @@ fn visit_untracked_node(
     rules: Option<&crate::worktree_rules::WorktreeRules>,
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
-    cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    cancel_watch: Option<&std::sync::atomic::AtomicBool>,
     clean_unit_dirs: &CleanUnitDirHints,
 ) -> Result<()> {
     if check_only && visible_out.is_some_and(|out| out.get()) {
@@ -1547,18 +1545,17 @@ fn visit_untracked_node(
         );
     }
 
-    let named = named_entries_sorted(entries);
-    // The listing shows whether `.git` exists, so most directories skip the submodule probe.
-    if tracked_subdir
-        && named
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case(b".git"))
-        && dir_is_nested_submodule_worktree(repo.git_dir(), abs)
-    {
-        return Ok(());
-    }
-
     if check_only {
+        let named = named_entries_sorted(entries);
+        // The listing shows whether `.git` exists, so most directories skip the submodule probe.
+        if tracked_subdir
+            && named
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case(b".git"))
+            && dir_is_nested_submodule_worktree(repo.git_dir(), abs)
+        {
+            return Ok(());
+        }
         return visit_untracked_read_dir_lazy(
             named.into_iter().map(|(_, entry)| Ok(entry)),
             repo,
@@ -1581,8 +1578,16 @@ fn visit_untracked_node(
         );
     }
 
-    for (name, entry) in &named {
-        poll_untracked_cancel(cancel_watch.as_ref())?;
+    let listing = untracked_candidates_sorted(entries, index, rel, precompose_unicode);
+    if tracked_subdir
+        && listing.has_dot_git
+        && dir_is_nested_submodule_worktree(repo.git_dir(), abs)
+    {
+        return Ok(());
+    }
+
+    for (name, entry) in &listing.candidates {
+        poll_untracked_cancel(cancel_watch)?;
         if matches!(
             visit_untracked_dir_entry(
                 repo,
@@ -1603,7 +1608,7 @@ fn visit_untracked_node(
                 rules,
                 untracked_out,
                 ignored_out,
-                cancel_watch.clone(),
+                cancel_watch,
                 clean_unit_dirs,
             )?,
             UntrackedWalkStep::Stop
@@ -1613,6 +1618,53 @@ fn visit_untracked_node(
     }
 
     Ok(())
+}
+
+/// One directory's listing for the untracked walk, see [`untracked_candidates_sorted`].
+struct UntrackedListing {
+    /// Entries that still need [`visit_untracked_dir_entry`], ordered by name bytes.
+    candidates: Vec<(Vec<u8>, DirEntry)>,
+    /// Whether any entry (left out or not) is named `.git` in any ASCII case.
+    has_dot_git: bool,
+}
+
+/// Read the directory stored as `rel`, leaving out non-directories tracked at exactly
+/// `rel/<name>` (any stage).
+///
+/// The walk reports nothing for those, and they are nearly every entry of a typical
+/// directory: dropping them while reading spares building their path, looking it up in
+/// [`crate::path_icase::Stage0TrackedPaths`], and keeping and sorting them. Names are matched
+/// against the directory's run of index entries; when the index is not known to be sorted,
+/// or a name needs precomposing first, the entry is kept and [`visit_untracked_dir_entry`]
+/// settles it as before.
+fn untracked_candidates_sorted(
+    entries: ReadDir,
+    index: &Index,
+    rel: &str,
+    precompose_unicode: bool,
+) -> UntrackedListing {
+    let dir = crate::repo_relpath::storage_bytes(rel);
+    let tracked = index.sorted_entries_under(&dir).unwrap_or_default();
+    let prefix_len = if dir.is_empty() { 0 } else { dir.len() + 1 };
+    let mut has_dot_git = false;
+    let mut candidates = Vec::new();
+    for entry in entries.filter_map(|e| e.ok()) {
+        let name = dir_entry_name_bytes(&entry);
+        has_dot_git |= name.eq_ignore_ascii_case(b".git");
+        let tracked_file = !(precompose_unicode && !name.is_ascii())
+            && tracked
+                .binary_search_by(|e| e.path[prefix_len..].cmp(name.as_slice()))
+                .is_ok()
+            && !crate::read_dir_kind::entry_is_dir(&entry).unwrap_or(false);
+        if !tracked_file {
+            candidates.push((name, entry));
+        }
+    }
+    candidates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    UntrackedListing {
+        candidates,
+        has_dot_git,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1634,10 +1686,10 @@ fn visit_untracked_directory(
     rules: Option<&crate::worktree_rules::WorktreeRules>,
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
-    cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    cancel_watch: Option<&std::sync::atomic::AtomicBool>,
     clean_unit_dirs: &CleanUnitDirHints,
 ) -> Result<()> {
-    let _ = matcher.note_directory_entered(repo, Some(index), rel);
+    matcher.note_directory_known(rel);
 
     if has_tracked_under(index, gitlinks, tracked_paths, rel) {
         visit_untracked_node(
@@ -1658,7 +1710,7 @@ fn visit_untracked_directory(
             rules,
             untracked_out,
             ignored_out,
-            cancel_watch.clone(),
+            cancel_watch,
             clean_unit_dirs,
         )?;
         return Ok(());
@@ -1719,7 +1771,7 @@ fn visit_untracked_directory(
             rules,
             untracked_out,
             ignored_out,
-            cancel_watch.clone(),
+            cancel_watch,
             clean_unit_dirs,
         )?;
         return Ok(());
@@ -1750,7 +1802,7 @@ fn visit_untracked_directory(
             rules,
             untracked_out,
             ignored_out,
-            cancel_watch.clone(),
+            cancel_watch,
             clean_unit_dirs,
         )?;
         if found.get() {
@@ -1785,7 +1837,7 @@ fn visit_untracked_directory(
         rules,
         &mut sub_untracked,
         &mut sub_ignored,
-        cancel_watch.clone(),
+        cancel_watch,
         clean_unit_dirs,
     )?;
 
@@ -3565,6 +3617,135 @@ mod status_op_tests {
             limited,
             vec!["d7/sub/f.txt".to_owned(), "loose.txt".to_owned()],
             "collapsed directories are filtered by pathspec; listed files pass through"
+        );
+    }
+
+    fn listing_entry(path: &str, stage: u8) -> crate::index::IndexEntry {
+        let mut entry = crate::index::IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: crate::index::MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid: ObjectId::from_bytes(&[0u8; 20]).unwrap(),
+            flags: 0,
+            flags_extended: None,
+            path: path.as_bytes().to_vec(),
+            base_index_pos: 0,
+        };
+        entry.set_stage(stage);
+        entry
+    }
+
+    fn listing_names(listing: &UntrackedListing) -> Vec<&str> {
+        listing
+            .candidates
+            .iter()
+            .map(|(name, _)| std::str::from_utf8(name).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn untracked_listing_drops_only_tracked_files() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("sub");
+        for name in ["z.txt", "a.txt", "both.txt", "new.txt", "A.TXT"] {
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join(name), name).unwrap();
+        }
+        fs::create_dir_all(dir.join("tracked-dir")).unwrap();
+        fs::create_dir_all(dir.join(".git")).unwrap();
+        let mut index = Index::new();
+        index.entries = vec![
+            listing_entry("sub/a.txt", 0),
+            listing_entry("sub/both.txt", 2),
+            listing_entry("sub/both.txt", 3),
+            listing_entry("sub/tracked-dir", 0),
+            listing_entry("sub/tracked-dir/x", 0),
+            listing_entry("sub/z.txt", 0),
+            listing_entry("subz.txt", 0),
+        ];
+        index.sort();
+
+        let listing =
+            untracked_candidates_sorted(fs::read_dir(&dir).unwrap(), &index, "sub", false);
+        assert_eq!(
+            listing_names(&listing),
+            vec![".git", "A.TXT", "new.txt", "tracked-dir"],
+            "tracked files (any stage) are dropped; directories, case variants and \
+             untracked files stay, ordered by name bytes"
+        );
+        assert!(listing.has_dot_git);
+
+        index.mark_entries_unsorted();
+        let unsorted =
+            untracked_candidates_sorted(fs::read_dir(&dir).unwrap(), &index, "sub", false);
+        assert_eq!(
+            listing_names(&unsorted),
+            vec![
+                ".git",
+                "A.TXT",
+                "a.txt",
+                "both.txt",
+                "new.txt",
+                "tracked-dir",
+                "z.txt"
+            ],
+            "an index not known to be sorted keeps every entry for the full check"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untracked_listing_matches_raw_bytes_of_a_non_utf8_directory() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let tmp = TempDir::new().unwrap();
+        let raw_dir: &[u8] = b"raw-\xff";
+        let dir = tmp.path().join(std::ffi::OsStr::from_bytes(raw_dir));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("t.txt"), b"x").unwrap();
+        fs::write(dir.join("u.txt"), b"x").unwrap();
+        let mut index = Index::new();
+        let mut tracked = listing_entry("t.txt", 0);
+        tracked.path = [raw_dir, b"/t.txt"].concat();
+        index.entries = vec![tracked];
+        index.sort();
+
+        let rel = crate::repo_relpath::storage_string(raw_dir);
+        assert_ne!(rel.as_bytes(), raw_dir, "the directory is stored encoded");
+        let listing = untracked_candidates_sorted(fs::read_dir(&dir).unwrap(), &index, &rel, false);
+        assert_eq!(listing_names(&listing), vec!["u.txt"]);
+    }
+
+    #[test]
+    fn untracked_listing_at_root_and_with_precompose() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::write(root.join("top.txt"), b"x").unwrap();
+        fs::write(root.join("caf\u{e9}.txt"), b"x").unwrap();
+        fs::write(root.join("new.txt"), b"x").unwrap();
+        let mut index = Index::new();
+        index.entries = vec![
+            listing_entry("caf\u{e9}.txt", 0),
+            listing_entry("top.txt", 0),
+        ];
+        index.sort();
+
+        let plain = untracked_candidates_sorted(fs::read_dir(root).unwrap(), &index, "", false);
+        assert_eq!(listing_names(&plain), vec!["new.txt"]);
+        assert!(!plain.has_dot_git);
+
+        let precompose = untracked_candidates_sorted(fs::read_dir(root).unwrap(), &index, "", true);
+        assert_eq!(
+            listing_names(&precompose),
+            vec!["caf\u{e9}.txt", "new.txt"],
+            "non-ASCII names are left to the precomposing check"
         );
     }
 
