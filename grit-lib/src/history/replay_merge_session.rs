@@ -82,7 +82,7 @@ struct UpstreamDeltaCache {
 
 enum OverlapTransplant {
     Applied(ObjectId),
-    Conflict(TreeMergeOutput),
+    Conflict(Box<TreeMergeOutput>),
     NotApplicable,
 }
 
@@ -242,7 +242,7 @@ impl ReplayMergeSession {
                         self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
                         return Ok(result);
                     }
-                    OverlapTransplant::Conflict(merge) => return on_conflict(commit, merge),
+                    OverlapTransplant::Conflict(merge) => return on_conflict(commit, *merge),
                     OverlapTransplant::NotApplicable => {}
                 }
             } else {
@@ -401,7 +401,7 @@ impl ReplayMergeSession {
         .map_err(HistoryError::from)?;
 
         if crate::operation::tree_merge_has_conflicts(&merge) {
-            return Ok(OverlapTransplant::Conflict(merge));
+            return Ok(OverlapTransplant::Conflict(Box::new(merge)));
         }
         Ok(OverlapTransplant::Applied(merge.result_tree))
     }
