@@ -989,8 +989,6 @@ fn ingest_pack_options_for_fetch(
 struct LocalCopyProgress {
     total: u64,
     done: u64,
-    /// Objects examined while deciding which packs qualify (before any are linked).
-    pipeline: u64,
     last_reported: u64,
     phase_active: bool,
 }
@@ -1012,7 +1010,6 @@ impl LocalCopyProgress {
         Self {
             total,
             done: 0,
-            pipeline: 0,
             last_reported: 0,
             phase_active: false,
         }
@@ -1025,47 +1022,23 @@ impl LocalCopyProgress {
         }
     }
 
-    fn report_scan(&mut self, progress: &mut dyn Progress, n: u64) {
-        if n == 0 {
-            return;
-        }
-        self.pipeline = self.pipeline.saturating_add(n).min(self.total);
-        let through = self.pipeline.max(self.done);
-        self.report_through(progress, through);
-        if progress.wants_received_objects() {
-            progress.received_objects(ReceivedObjects {
-                received: through,
-                total: self.total,
-                deltas: 0,
-            });
-        }
-    }
-
-    fn report_through(&mut self, progress: &mut dyn Progress, through: u64) {
-        let through = through.min(self.total);
-        if through <= self.last_reported {
-            return;
-        }
-        self.ensure_started(progress);
-        crate::progress::report_object_progress_stride(
-            progress,
-            through,
-            &mut self.last_reported,
-            Some(self.total),
-        );
-    }
-
     fn add(&mut self, progress: &mut dyn Progress, n: u64) {
         if n == 0 {
             return;
         }
         self.ensure_started(progress);
         self.done = self.done.saturating_add(n).min(self.total);
-        let through = self.done.max(self.pipeline);
-        self.report_through(progress, through);
+        if self.last_reported < self.done {
+            crate::progress::report_object_progress_stride(
+                progress,
+                self.done,
+                &mut self.last_reported,
+                Some(self.total),
+            );
+        }
         if progress.wants_received_objects() {
             progress.received_objects(ReceivedObjects {
-                received: through,
+                received: self.done,
                 total: self.total,
                 deltas: 0,
             });
@@ -1076,10 +1049,9 @@ impl LocalCopyProgress {
         if !self.phase_active {
             return;
         }
-        let final_count = self.done.max(self.pipeline).min(self.total);
-        if self.last_reported < final_count {
-            progress.set(final_count);
-            self.last_reported = final_count;
+        if self.last_reported < self.done {
+            progress.set(self.done);
+            self.last_reported = self.done;
         }
         progress.finish();
         self.phase_active = false;
@@ -1205,14 +1177,30 @@ fn copy_objects_for_local_fetch(
         &mut enum_last,
     )?;
     let send = &send_set.objects;
-    progress.set(send.len() as u64);
-    progress.finish();
+    let send_len = send.len() as u64;
+    progress.set(send_len);
 
-    let mut copy = LocalCopyProgress::new(send.len() as u64);
+    let will_scan_packs =
+        local_odb.uses_files_primary() && !pack_build.thin && try_pack_link && !send.is_empty();
+    if !will_scan_packs {
+        progress.finish();
+    }
 
-    if local_odb.uses_files_primary() && !pack_build.thin && try_pack_link {
+    let mut copy = LocalCopyProgress::new(send_len);
+
+    if will_scan_packs {
         let local_has = |oid: &ObjectId| local_odb.exists_materialized_local_without_rescan(oid);
-        let mut on_pack_scan = |n: u64| copy.report_scan(progress, n);
+        let mut pack_scan = send_len;
+        let mut pack_scan_last = send_len;
+        let mut on_pack_scan = |n: u64| {
+            pack_scan = pack_scan.saturating_add(n);
+            crate::progress::report_object_progress_stride(
+                progress,
+                pack_scan,
+                &mut pack_scan_last,
+                None,
+            );
+        };
         let linked = link_packs_within(
             remote_objects,
             local_objects,
@@ -1222,6 +1210,7 @@ fn copy_objects_for_local_fetch(
             cancel,
             Some(&mut on_pack_scan),
         )?;
+        progress.finish();
         if linked > 0 {
             refresh_local_odb_after_link(local_odb);
             copy.add(progress, linked as u64);
@@ -3873,6 +3862,7 @@ mod tests {
         started: Vec<(ProgressPhase, Option<u64>)>,
         finished: Vec<ProgressPhase>,
         counts: Vec<u64>,
+        enumerating_counts: Vec<u64>,
         copying_counts: Vec<u64>,
         active: Option<ProgressPhase>,
         current: u64,
@@ -3908,8 +3898,14 @@ mod tests {
     impl PhaseRecorder {
         fn record_count(&mut self) {
             self.counts.push(self.current);
-            if self.active == Some(ProgressPhase::CopyingObjects) {
-                self.copying_counts.push(self.current);
+            match self.active {
+                Some(ProgressPhase::EnumeratingObjects) => {
+                    self.enumerating_counts.push(self.current);
+                }
+                Some(ProgressPhase::CopyingObjects) => {
+                    self.copying_counts.push(self.current);
+                }
+                _ => {}
             }
         }
     }
@@ -3920,6 +3916,16 @@ mod tests {
         }
 
         fn received_objects(&mut self, counts: ReceivedObjects) {
+            assert_eq!(
+                self.active,
+                Some(ProgressPhase::CopyingObjects),
+                "received_objects must run only during CopyingObjects (active={active:?}, counts={counts:?})",
+                active = self.active,
+            );
+            assert!(
+                counts.received <= counts.total,
+                "received must not exceed total: {counts:?}"
+            );
             self.received.push(counts);
         }
     }
@@ -4307,6 +4313,12 @@ mod tests {
             outcome.transfer.objects > 500,
             "expected a large hardlinked pack transfer"
         );
+        assert!(
+            rec.enumerating_counts.len() >= 3,
+            "expected pack index scan progress under EnumeratingObjects, got {:?}",
+            rec.enumerating_counts
+        );
+        assert_monotonic(&rec.enumerating_counts);
         assert_eq!(
             rec.started
                 .iter()
@@ -4317,11 +4329,15 @@ mod tests {
             rec.started
         );
         assert!(
-            rec.copying_counts.len() >= 3,
-            "expected scan progress while checking pack indexes, got {:?}",
+            !rec.copying_counts.is_empty(),
+            "expected copy progress after pack install, got {:?}",
             rec.copying_counts
         );
         assert_monotonic(&rec.copying_counts);
+        assert!(
+            rec.received.last().is_some_and(|s| s.received > 0),
+            "expected received_objects only after objects were installed"
+        );
     }
 
     #[test]
