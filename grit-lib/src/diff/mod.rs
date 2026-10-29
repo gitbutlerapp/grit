@@ -12,6 +12,7 @@
 //! # Ok(())
 //! # }
 //! ```
+mod changes;
 mod commit_files_many;
 mod core;
 pub(crate) use core::myers_rediff_changed_masks_for_region;
@@ -39,6 +40,7 @@ pub use tree_content::{bytes_for_diff, load_odb_blob_side_for_diff};
 mod unified_emit;
 mod whitespace_mode;
 
+pub use changes::{load_object_changes, FileChange, UncommittedDiff};
 pub use commit_files_many::{CommitFilesManyInput, CommitFilesManyOptions, CommitFilesResult};
 pub use core::*;
 pub use detail::FileDiff as ListedFileDiff;
@@ -83,7 +85,7 @@ pub use targets::hunk_diff_bundle;
 pub use targets::HunkDiffBundle;
 pub(crate) use targets::{
     collect_files_for_target, unstaged_file_diffs_with_peer_hunks,
-    unstaged_raw_changes_with_peer_hunks, unstaged_raw_changes_with_peer_hunks_in, FileChange,
+    unstaged_raw_changes_with_peer_hunks, unstaged_raw_changes_with_peer_hunks_in,
 };
 pub use targets::{
     resolve_commit_diff_pathspecs, resolve_diff_arguments, resolve_diff_request, DiffArguments,

@@ -1929,6 +1929,9 @@ mod typed_errors_config_refs_filter;
 #[path = "typed_reports.rs"]
 mod typed_reports;
 #[cfg(feature = "full-tests")]
+#[path = "uncommitted_diff_git_compat.rs"]
+mod uncommitted_diff_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "untracked_cache_git_compat.rs"]
 mod untracked_cache_git_compat;
 #[cfg(feature = "full-tests")]

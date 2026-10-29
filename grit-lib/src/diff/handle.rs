@@ -1,7 +1,7 @@
 //! Repository-scoped tree and index diffs via [`Diff`].
 use crate::diff::targets::collect_files_for_target;
 use crate::diff::{diff_index_to_tree, diff_index_to_worktree, diff_trees, DiffEntry, DiffOptions};
-use crate::diff::{DiffTarget, FileDiff};
+use crate::diff::{DiffTarget, FileDiff, UncommittedDiff};
 use crate::error::Result;
 use crate::index::Index;
 use crate::objects::ObjectId;
@@ -88,6 +88,16 @@ impl<'repo> Diff<'repo> {
             ignore_submodule_untracked,
             simplify_gitlinks,
         )
+    }
+
+    /// Staged, unstaged, and working-tree diffs over the repository's on-disk index.
+    ///
+    /// # Errors
+    ///
+    /// Returns index read errors.
+    pub fn uncommitted(&self) -> Result<UncommittedDiff<'repo>> {
+        let index = self.repo.index_handle().load()?;
+        Ok(UncommittedDiff::new(self.repo, index))
     }
 
     /// Structured per-file diffs for `target`, honoring `pathspecs` and line-diff `opts`.

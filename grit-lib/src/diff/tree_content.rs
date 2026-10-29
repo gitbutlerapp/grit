@@ -308,7 +308,7 @@ pub fn tree_diff_structured_parallel(
     }
 }
 
-fn load_old_side(
+pub(crate) fn load_old_side(
     odb: &Odb,
     e: &DiffEntry,
     blob_reads: Option<&AtomicUsize>,
@@ -326,7 +326,7 @@ fn load_old_side(
     load_odb_blob_side_for_diff(odb, &e.old_oid, path, blob_reads, false)
 }
 
-fn load_new_side(
+pub(crate) fn load_new_side(
     odb: &Odb,
     e: &DiffEntry,
     blob_reads: Option<&AtomicUsize>,
