@@ -1,5 +1,7 @@
 # cargo-nextest settings (https://nexte.st). `make test` and the gate use nextest
 # when it is installed (`cargo install cargo-nextest --locked`).
+
+experimental = ["setup-scripts"]
 #
 # nextest runs every test in its own process and runs test binaries in parallel,
 # so a test that changes the working directory or environment cannot disturb
@@ -54,11 +56,11 @@ slow-timeout = { period = "60s", terminate-after = 10 }
 [scripts.setup.checkout-wide-tree-rss-grit]
 command = 'scripts/nextest-checkout-wide-tree-rss-env.sh'
 
-[[profile.default.overrides]]
+[[profile.default.scripts]]
 filter = 'test(checkout_between_wide_trees_peak_rss_within_twice_git)'
 setup = 'checkout-wide-tree-rss-grit'
 
-[[profile.ci.overrides]]
+[[profile.ci.scripts]]
 filter = 'test(checkout_between_wide_trees_peak_rss_within_twice_git)'
 setup = 'checkout-wide-tree-rss-grit'
 
