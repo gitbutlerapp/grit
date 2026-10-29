@@ -19309,6 +19309,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::backend::Re
 pub fn grit_lib::refs::store::backend::apply_transaction(&mut grit_lib::refs::store::backend::RefBatchState, &grit_lib::refs::store::RefTransaction) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::check_transaction(&grit_lib::refs::store::backend::RefBatchState, &grit_lib::refs::store::RefTransaction) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::expected_matches(core::option::Option<&grit_lib::refs::store::RawRef>, &grit_lib::refs::store::Expected) -> bool
+pub fn grit_lib::refs::store::backend::is_per_ref_rejectable(&grit_lib::refs::store::RefStoreError) -> bool
+pub fn grit_lib::refs::store::backend::partition_updates_allowing_failures(&grit_lib::refs::store::backend::RefBatchState, alloc::vec::Vec<grit_lib::refs::store::RefUpdate>) -> core::result::Result<(alloc::vec::Vec<grit_lib::refs::store::RefUpdate>, alloc::vec::Vec<(alloc::string::String, grit_lib::refs::store::RefStoreError)>), grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::resolve_symbolic(&alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::refs::store::RawRef>, &str) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::validate_storable_refname(&str) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::validate_transaction(&grit_lib::refs::store::RefTransaction) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
@@ -19651,6 +19653,8 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::RefReflo
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefReflogRename
 pub struct grit_lib::refs::store::RefTransaction
 impl grit_lib::refs::store::RefTransaction
+pub fn grit_lib::refs::store::RefTransaction::allowing_failures(self) -> Self
+pub fn grit_lib::refs::store::RefTransaction::allows_failures(&self) -> bool
 pub fn grit_lib::refs::store::RefTransaction::case_only_renames(&self) -> &[grit_lib::refs::store::RefCaseOnlyRename]
 pub fn grit_lib::refs::store::RefTransaction::initial(self) -> Self
 pub fn grit_lib::refs::store::RefTransaction::into_parts(self) -> (alloc::vec::Vec<grit_lib::refs::store::RefUpdate>, alloc::vec::Vec<grit_lib::refs::store::RefReflogRename>, alloc::vec::Vec<grit_lib::refs::store::RefCaseOnlyRename>)
@@ -19778,6 +19782,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::ReftableRef
 pub trait grit_lib::refs::store::PreparedRefTransaction: core::marker::Send
 pub fn grit_lib::refs::store::PreparedRefTransaction::abort(alloc::boxed::Box<Self>) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::PreparedRefTransaction::commit(alloc::boxed::Box<Self>) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
+pub fn grit_lib::refs::store::PreparedRefTransaction::rejected_updates(&self) -> &[(alloc::string::String, grit_lib::refs::store::RefStoreError)]
 pub trait grit_lib::refs::store::RefStore: core::marker::Send + core::marker::Sync + core::fmt::Debug
 pub fn grit_lib::refs::store::RefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
 pub fn grit_lib::refs::store::RefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
@@ -20017,11 +20022,19 @@ pub grit_lib::refs::RefUpdateCommitOutcome::name: alloc::string::String
 pub grit_lib::refs::RefUpdateCommitOutcome::result: core::result::Result<(), grit_lib::refs::store::RefStoreError>
 impl core::clone::Clone for grit_lib::refs::RefUpdateCommitOutcome
 pub fn grit_lib::refs::RefUpdateCommitOutcome::clone(&self) -> Self
-impl core::fmt::Debug for grit_lib::refs::RefUpdateCommitOutcome
-pub fn grit_lib::refs::RefUpdateCommitOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::cmp::Eq for grit_lib::refs::RefUpdateCommitOutcome
 impl core::cmp::PartialEq for grit_lib::refs::RefUpdateCommitOutcome
 pub fn grit_lib::refs::RefUpdateCommitOutcome::eq(&self, &Self) -> bool
-impl core::cmp::Eq for grit_lib::refs::RefUpdateCommitOutcome
+impl core::fmt::Debug for grit_lib::refs::RefUpdateCommitOutcome
+pub fn grit_lib::refs::RefUpdateCommitOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::refs::RefUpdateCommitOutcome
+impl core::marker::Freeze for grit_lib::refs::RefUpdateCommitOutcome
+impl core::marker::Send for grit_lib::refs::RefUpdateCommitOutcome
+impl core::marker::Sync for grit_lib::refs::RefUpdateCommitOutcome
+impl core::marker::Unpin for grit_lib::refs::RefUpdateCommitOutcome
+impl core::marker::UnsafeUnpin for grit_lib::refs::RefUpdateCommitOutcome
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::RefUpdateCommitOutcome
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::refs::RefUpdateCommitOutcome
 pub struct grit_lib::refs::References<'repo>
 impl<'repo> grit_lib::refs::handle::References<'repo>
 pub fn grit_lib::refs::handle::References<'repo>::list(&self, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
