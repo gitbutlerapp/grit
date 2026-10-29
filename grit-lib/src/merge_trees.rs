@@ -30,6 +30,8 @@ use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::write_tree_from_index;
 
+type RenameTriple = (Vec<u8>, Vec<u8>, u32);
+
 /// Result of merging three trees with optional conflict-marker blobs for checkout.
 #[derive(Debug)]
 pub struct TreeMergeOutput {
@@ -363,7 +365,87 @@ pub(crate) fn merge_trees_three_way_cached(
         presentation,
         directory_renames,
         0,
+        None,
     )
+}
+
+/// Precomputed fork→onto file renames for [`merge_trees_replay_transplant`].
+pub(crate) struct ReplayUpstreamRenames<'a> {
+    pub cached_ours_old_to_new: &'a HashMap<Vec<u8>, Vec<u8>>,
+    pub fork_onto_rename_triples: &'a [(Vec<u8>, Vec<u8>, u32)],
+    pub upstream_touched: &'a HashSet<Vec<u8>>,
+    pub commit_theirs_diff: Vec<crate::diff::DiffEntry>,
+}
+
+/// Three-way merge for replay transplant when upstream fork→onto renames are precomputed.
+///
+/// Skips diffing `base_tree`→`ours_tree` (the expensive upstream delta) and reuses
+/// `cached_ours_old_to_new` for rename alignment. `commit_theirs_diff` must be `base_tree`→`theirs_tree`.
+#[expect(clippy::too_many_arguments)]
+pub(crate) fn merge_trees_replay_transplant(
+    repo: &Repository,
+    cache: &mut MergeTreeCache,
+    base_tree: ObjectId,
+    ours_tree: ObjectId,
+    theirs_tree: ObjectId,
+    commit_theirs_diff: Vec<crate::diff::DiffEntry>,
+    cached_ours_old_to_new: &HashMap<Vec<u8>, Vec<u8>>,
+    fork_onto_rename_triples: &[(Vec<u8>, Vec<u8>, u32)],
+    upstream_touched: &HashSet<Vec<u8>>,
+    favor: MergeFavor,
+    ws: WhitespaceMergeOptions,
+    diff_algorithm: Option<&str>,
+    presentation: TreeMergeConflictPresentation<'_>,
+    directory_renames: DirectoryRenameMode,
+) -> crate::error::Result<TreeMergeOutput> {
+    merge_trees_at_depth(
+        repo,
+        cache,
+        base_tree,
+        ours_tree,
+        theirs_tree,
+        favor,
+        ws,
+        diff_algorithm,
+        presentation,
+        directory_renames,
+        0,
+        Some(ReplayUpstreamRenames {
+            cached_ours_old_to_new,
+            fork_onto_rename_triples,
+            upstream_touched,
+            commit_theirs_diff,
+        }),
+    )
+}
+
+fn paths_overlap_for_merge(a: &[u8], b: &[u8]) -> bool {
+    a.starts_with(b) && (a.len() == b.len() || a.get(b.len()) == Some(&b'/'))
+        || b.starts_with(a) && (b.len() == a.len() || b.get(a.len()) == Some(&b'/'))
+}
+
+fn map_path_dir_prefix(path: &[u8], dir_map: &HashMap<Vec<u8>, Vec<u8>>) -> Option<Vec<u8>> {
+    let mut best: Option<(usize, &Vec<u8>, &Vec<u8>)> = None;
+    for (old_dir, new_dir) in dir_map {
+        if path.starts_with(old_dir)
+            && (path.len() == old_dir.len() || path.get(old_dir.len()) == Some(&b'/'))
+        {
+            let len = old_dir.len();
+            if best.is_none_or(|(bl, _, _)| len > bl) {
+                best = Some((len, old_dir, new_dir));
+            }
+        }
+    }
+    best.map(|(len, _old_dir, new_dir)| {
+        let mut out = new_dir.clone();
+        if path.len() > len {
+            if !out.is_empty() {
+                out.push(b'/');
+            }
+            out.extend_from_slice(&path[len + 1..]);
+        }
+        out
+    })
 }
 
 /// Three-way tree merge at recursion level `call_depth` of a multi-base merge.
@@ -388,17 +470,77 @@ pub(crate) fn merge_trees_at_depth(
     presentation: TreeMergeConflictPresentation<'_>,
     directory_renames: DirectoryRenameMode,
     call_depth: usize,
+    replay_upstream: Option<ReplayUpstreamRenames<'_>>,
 ) -> crate::error::Result<TreeMergeOutput> {
+    use crate::porcelain::cherry_pick::directory_renames_from_file_renames;
+
     let directory_renames = if call_depth > 0 {
         DirectoryRenameMode::Off
     } else {
         directory_renames
     };
     let odb = &repo.odb();
-    let ours_diff = diff_trees(odb, Some(&base_tree), Some(&ours_tree), "")?;
-    let theirs_diff = diff_trees(odb, Some(&base_tree), Some(&theirs_tree), "")?;
-    let mut touched = paths_from_diff_entries(&ours_diff);
-    touched.extend(paths_from_diff_entries(&theirs_diff));
+
+    let (mut touched, mut ours_old_to_new_pairs, mut theirs_pairs) = if let Some(replay) =
+        replay_upstream
+    {
+        let dir_map = directory_renames_from_file_renames(
+            &replay
+                .cached_ours_old_to_new
+                .iter()
+                .map(|(o, n)| (o.clone(), n.clone()))
+                .collect::<Vec<_>>(),
+        );
+        let mut touched = paths_from_diff_entries(&replay.commit_theirs_diff);
+        for path in touched.clone() {
+            if let Some(new) = replay.cached_ours_old_to_new.get(&path) {
+                touched.insert(new.clone());
+            }
+            if let Some(mapped) = map_path_dir_prefix(&path, &dir_map) {
+                touched.insert(mapped);
+            }
+        }
+        let commit_touched = touched.clone();
+        if commit_touched.iter().any(|p| {
+            replay.upstream_touched.contains(p) && !replay.cached_ours_old_to_new.contains_key(p)
+        }) {
+            touched.extend(replay.cached_ours_old_to_new.keys().cloned());
+            touched.extend(replay.cached_ours_old_to_new.values().cloned());
+            touched.extend(replay.upstream_touched.iter().cloned());
+        } else {
+            for path in replay.upstream_touched.iter() {
+                if touched.iter().any(|t| paths_overlap_for_merge(t, path)) {
+                    touched.insert(path.clone());
+                }
+            }
+        }
+        for (old, new) in replay.cached_ours_old_to_new {
+            if old != new
+                && (touched.contains(old)
+                    || touched.contains(new)
+                    || touched.iter().any(|t| paths_overlap_for_merge(t, old)))
+            {
+                touched.insert(old.clone());
+                touched.insert(new.clone());
+            }
+        }
+        let ours_old_to_new_pairs: Vec<RenameTriple> = replay
+            .fork_onto_rename_triples
+            .iter()
+            .filter(|(old, new, _)| old != new && (touched.contains(old) || touched.contains(new)))
+            .cloned()
+            .collect();
+        let theirs_pairs = rename_pairs_from_diff_entries(odb, replay.commit_theirs_diff)?;
+        (touched, ours_old_to_new_pairs, theirs_pairs)
+    } else {
+        let ours_diff = diff_trees(odb, Some(&base_tree), Some(&ours_tree), "")?;
+        let theirs_diff = diff_trees(odb, Some(&base_tree), Some(&theirs_tree), "")?;
+        let mut touched = paths_from_diff_entries(&ours_diff);
+        touched.extend(paths_from_diff_entries(&theirs_diff));
+        let ours_old_to_new_pairs = rename_pairs_from_diff_entries(odb, ours_diff)?;
+        let theirs_pairs = rename_pairs_from_diff_entries(odb, theirs_diff)?;
+        (touched, ours_old_to_new_pairs, theirs_pairs)
+    };
 
     let (mut base, mut ours, mut theirs) = merge_trees_walk::build_sparse_maps(
         cache,
@@ -409,9 +551,7 @@ pub(crate) fn merge_trees_at_depth(
         &touched,
     )?;
 
-    let mut ours_old_to_new_pairs = rename_pairs_from_diff_entries(odb, ours_diff)?;
     augment_renames_with_same_blob(&base, &ours, &mut ours_old_to_new_pairs);
-    let mut theirs_pairs = rename_pairs_from_diff_entries(odb, theirs_diff)?;
     augment_renames_with_same_blob(&base, &theirs, &mut theirs_pairs);
 
     let mut df_escapes = DfEscapes::default();
