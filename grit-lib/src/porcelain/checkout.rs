@@ -1611,6 +1611,9 @@ pub(crate) struct CheckoutApplyOptions {
     pub defer_chunk_index_finalize: bool,
     /// Skip promisor blob prefetch in this pass (caller already prefetched the full diff).
     pub skip_promisor_prefetch: bool,
+    /// Top-level directories that must not be wholesale-removed for this apply (from the full
+    /// tree diff when checkout runs in chunks).
+    pub wholesale_blocked_top_level_dirs: BTreeSet<String>,
 }
 
 /// How a checkout persists the index it updates.
@@ -1771,6 +1774,47 @@ pub(crate) fn wholesale_deleted_directories(
         }
     }
     wholesale
+}
+
+/// Top-level directory names that must not be removed wholesale because the transition adds or
+/// modifies paths under them (for example replacing `src/bin/old/` with `src/bin/new/`).
+pub(crate) fn wholesale_blocked_top_level_directories(changes: &[DiffEntry]) -> BTreeSet<String> {
+    let mut blocked = BTreeSet::new();
+    for change in changes {
+        if matches!(change.status, DiffStatus::Deleted | DiffStatus::Unmerged) {
+            continue;
+        }
+        let Some(path) = change.new_path.as_deref().or(change.old_path.as_deref()) else {
+            continue;
+        };
+        if let Some((dir, _rest)) = path.split_once('/') {
+            blocked.insert(dir.to_owned());
+        }
+    }
+    blocked
+}
+
+pub(crate) fn filter_wholesale_dirs_by_blocked(
+    dirs: BTreeSet<String>,
+    blocked: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    if blocked.is_empty() {
+        return dirs;
+    }
+    dirs.into_iter()
+        .filter(|dir| !blocked.contains(dir))
+        .collect()
+}
+
+fn resolve_wholesale_blocked_dirs(
+    apply: &CheckoutApplyOptions,
+    chunk_changes: &[DiffEntry],
+) -> BTreeSet<String> {
+    if !apply.wholesale_blocked_top_level_dirs.is_empty() {
+        apply.wholesale_blocked_top_level_dirs.clone()
+    } else {
+        wholesale_blocked_top_level_directories(chunk_changes)
+    }
 }
 
 /// True when every file under `work_tree`/`dir` is listed in `delete_paths` (Git keeps untracked/ignored extras).
@@ -2488,11 +2532,16 @@ fn checkout_bulk_added_tree_changes(
         &mut dir_cache,
         &mut new_entries,
     )?;
+    let wholesale_blocked = resolve_wholesale_blocked_dirs(&apply, changes);
+    let wholesale_dirs = filter_wholesale_dirs_by_blocked(
+        apply.preverified_wholesale_dirs.clone(),
+        &wholesale_blocked,
+    );
     if apply.wholesale_safety_precomputed {
         let _ = remove_wholesale_directories_on_disk(
             repo,
             work_tree,
-            &apply.preverified_wholesale_dirs,
+            &wholesale_dirs,
             config,
             journal,
         )?;
@@ -2501,7 +2550,7 @@ fn checkout_bulk_added_tree_changes(
     checkout_commit_index_update(
         repo,
         index_mut,
-        &apply.preverified_wholesale_dirs,
+        &wholesale_dirs,
         Vec::new(),
         new_entries,
         true,
@@ -2547,20 +2596,22 @@ fn checkout_bulk_mod_delete_tree_changes(
             (c.old_mode.bits() == MODE_GITLINK).then(|| path.clone())
         })
         .collect();
-    let owned_wholesale_candidates;
-    let wholesale_index_prefixes: &BTreeSet<String> = if apply.wholesale_safety_precomputed {
-        &apply.preverified_wholesale_dirs
-    } else {
-        owned_wholesale_candidates = wholesale_deleted_directories_on_disk(
-            repo,
-            work_tree,
-            index,
-            &delete_paths,
-            ignorecase,
-            &apply,
-            &gitlink_deletes,
-        );
-        &owned_wholesale_candidates
+    let wholesale_blocked = resolve_wholesale_blocked_dirs(&apply, changes);
+    let wholesale_index_prefixes = {
+        let raw = if apply.wholesale_safety_precomputed {
+            apply.preverified_wholesale_dirs.clone()
+        } else {
+            wholesale_deleted_directories_on_disk(
+                repo,
+                work_tree,
+                index,
+                &delete_paths,
+                ignorecase,
+                &apply,
+                &gitlink_deletes,
+            )
+        };
+        filter_wholesale_dirs_by_blocked(raw, &wholesale_blocked)
     };
 
     let write_changes: Vec<&DiffEntry> = changes
@@ -2573,7 +2624,7 @@ fn checkout_bulk_mod_delete_tree_changes(
     let wholesale_dirs_removed = remove_wholesale_directories_on_disk(
         repo,
         work_tree,
-        wholesale_index_prefixes,
+        &wholesale_index_prefixes,
         config,
         journal,
     )?;
@@ -2587,7 +2638,7 @@ fn checkout_bulk_mod_delete_tree_changes(
             continue;
         };
         if change.old_mode.bits() == MODE_GITLINK
-            || path_under_wholesale_directory(path, wholesale_index_prefixes)
+            || path_under_wholesale_directory(path, &wholesale_index_prefixes)
         {
             continue;
         }
@@ -2625,7 +2676,7 @@ fn checkout_bulk_mod_delete_tree_changes(
                 deleted_abs_paths.push(checkout_stored_worktree_abs(work_tree, path));
             }
         }
-        if !path_under_wholesale_directory(path, wholesale_index_prefixes) {
+        if !path_under_wholesale_directory(path, &wholesale_index_prefixes) {
             paths_to_remove.push(checkout_stored_index_path_bytes(path));
         }
         if !parallel_deleted_paths.contains(path) {
@@ -2675,7 +2726,7 @@ fn checkout_bulk_mod_delete_tree_changes(
     checkout_commit_index_update(
         repo,
         index_mut,
-        wholesale_index_prefixes,
+        &wholesale_index_prefixes,
         paths_to_remove,
         new_entries,
         true,
@@ -2859,6 +2910,11 @@ fn apply_tree_changes_in_chunks(
     index_write: CheckoutIndexWrite<'_>,
     journal: &mut CheckoutJournal,
 ) -> Result<()> {
+    apply.wholesale_blocked_top_level_dirs = wholesale_blocked_top_level_directories(changes);
+    apply.preverified_wholesale_dirs = filter_wholesale_dirs_by_blocked(
+        apply.preverified_wholesale_dirs.clone(),
+        &apply.wholesale_blocked_top_level_dirs,
+    );
     if changes.len() <= POPULATED_TREE_CHECKOUT_CHUNK {
         return apply_tree_changes(
             repo,
@@ -3013,6 +3069,7 @@ fn apply_tree_changes(
     let worktree_changes =
         split_sparse_tree_changes(sparse.as_ref(), work_tree, index_mut, changes, &mut apply);
     let changes: &[DiffEntry] = &worktree_changes;
+    let wholesale_blocked = resolve_wholesale_blocked_dirs(&apply, changes);
 
     if !apply.skip_promisor_prefetch {
         prefetch_promisor_blobs_for_checkout(repo, changes)?;
@@ -3113,7 +3170,8 @@ fn apply_tree_changes(
                     &gitlink_deletes,
                 )
             };
-            let wholesale_index_prefixes = wholesale_candidates;
+            let wholesale_index_prefixes =
+                filter_wholesale_dirs_by_blocked(wholesale_candidates, &wholesale_blocked);
             let mut wholesale_dirs_removed = BTreeSet::new();
             let mut deleted_abs_paths: Vec<PathBuf> = Vec::new();
             if !wholesale_index_prefixes.is_empty() {
@@ -3191,7 +3249,8 @@ fn apply_tree_changes(
             &gitlink_deletes,
         )
     };
-    let wholesale_index_prefixes = wholesale_candidates;
+    let wholesale_index_prefixes =
+        filter_wholesale_dirs_by_blocked(wholesale_candidates, &wholesale_blocked);
     let mut wholesale_dirs_removed = BTreeSet::new();
     if !wholesale_index_prefixes.is_empty() {
         let policy = repo.thread_policy();
@@ -3795,8 +3854,11 @@ pub(crate) fn trusted_wholesale_directories_for_switch(
     index: &Index,
     delete_paths: &[String],
     gitlink_deletes: &HashSet<String>,
+    tree_changes: &[DiffEntry],
 ) -> BTreeSet<String> {
+    let blocked = wholesale_blocked_top_level_directories(tree_changes);
     let candidates = wholesale_deleted_directories(index, delete_paths);
+    let candidates = filter_wholesale_dirs_by_blocked(candidates, &blocked);
     filter_wholesale_dirs_with_populated_gitlinks(work_tree, candidates, gitlink_deletes)
 }
 
@@ -4782,6 +4844,37 @@ mod tests {
             });
         }
         assert!(bulk_mod_delete_checkout_eligible(&changes, &rules));
+    }
+
+    #[test]
+    fn wholesale_blocked_top_level_directories_skips_recreated_src() {
+        let changes = vec![
+            DiffEntry {
+                status: DiffStatus::Deleted,
+                old_path: Some("src/bin/cargo/c1.rs".into()),
+                new_path: None,
+                old_mode: FileMode::REGULAR,
+                new_mode: FileMode::ABSENT,
+                old_oid: ObjectId::zero(),
+                new_oid: ObjectId::zero(),
+                score: None,
+            },
+            DiffEntry {
+                status: DiffStatus::Added,
+                old_path: None,
+                new_path: Some("src/bin/b1.rs".into()),
+                old_mode: FileMode::ABSENT,
+                new_mode: FileMode::REGULAR,
+                old_oid: ObjectId::zero(),
+                new_oid: ObjectId::zero(),
+                score: None,
+            },
+        ];
+        let blocked = super::wholesale_blocked_top_level_directories(&changes);
+        assert_eq!(blocked, BTreeSet::from(["src".to_owned()]));
+        let wholesale = BTreeSet::from(["src".to_owned(), "crates".to_owned()]);
+        let filtered = super::filter_wholesale_dirs_by_blocked(wholesale, &blocked);
+        assert_eq!(filtered, BTreeSet::from(["crates".to_owned()]));
     }
 
     #[test]

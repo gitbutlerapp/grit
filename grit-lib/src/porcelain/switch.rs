@@ -12,8 +12,9 @@ use crate::objects::ObjectId;
 use crate::porcelain::branch::resolve_create_tracking;
 use crate::porcelain::branch_error::{BranchError, TrackMode};
 use crate::porcelain::checkout::{
-    checkout_tree_changes_with_index_opts, precompute_wholesale_safe_directories,
-    trusted_wholesale_directories_for_switch, CheckoutApplyOptions, CheckoutIndexWrite,
+    checkout_tree_changes_with_index_opts, filter_wholesale_dirs_by_blocked,
+    precompute_wholesale_safe_directories, trusted_wholesale_directories_for_switch,
+    wholesale_blocked_top_level_directories, CheckoutApplyOptions, CheckoutIndexWrite,
     WholesalePrecomputeResult, WholesaleWorktreeScan,
 };
 use crate::porcelain::checkout_reflog::{
@@ -882,6 +883,7 @@ fn plan_allow_local_tree_transition_core(
                 &snapshot.index,
                 &delete_paths,
                 &gitlink_deletes,
+                &tree_changes,
             ),
             true,
         )
@@ -900,7 +902,11 @@ fn plan_allow_local_tree_transition_core(
             scan.as_ref(),
             &gitlink_deletes,
         );
-        (safe_directories, true)
+        let blocked = wholesale_blocked_top_level_directories(&tree_changes);
+        (
+            filter_wholesale_dirs_by_blocked(safe_directories, &blocked),
+            true,
+        )
     };
     Ok(AllowLocalTreeTransitionCore {
         tree_changes,
