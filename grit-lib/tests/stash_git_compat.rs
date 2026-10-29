@@ -370,6 +370,7 @@ fn pop_stash_with_index_restores_staged_deletion_like_git() {
             0,
             &StashApplyOptions {
                 restore_index: true,
+                ..Default::default()
             },
             &mut NullProgress,
             &NeverCancel,
@@ -700,6 +701,7 @@ fn t3903_grit_stash_read_by_git_and_reverse() {
             &stash_oid,
             &StashApplyOptions {
                 restore_index: true,
+                ..Default::default()
             },
             &mut NullProgress,
             &NeverCancel,
@@ -1665,6 +1667,7 @@ fn stash_pop_many_files_without_index_matches_git() {
             0,
             &StashApplyOptions {
                 restore_index: false,
+                ..Default::default()
             },
             &mut NullProgress,
             &NeverCancel,
@@ -1758,4 +1761,88 @@ fn wide_sparse_pop_keeps_conflicts_and_unrelated_local_content() {
         std::fs::read(grit_dir.path().join("d000/f000")).expect("grit conflict"),
         std::fs::read(git_dir.path().join("d000/f000")).expect("git conflict")
     );
+}
+
+#[test]
+fn apply_stash_skips_identical_untracked_collision_with_overwrite_flag() {
+    let root = tempfile::tempdir().expect("tmpdir");
+    init_repo(root.path());
+    std::fs::write(root.path().join("tracked.txt"), "base\n").expect("tracked");
+    git_cmd(root.path(), &["add", "tracked.txt"]);
+    git_cmd(root.path(), &["commit", "-qm", "base"]);
+    std::fs::write(root.path().join("u.txt"), "same bytes\n").expect("untracked");
+    let ident = "Test <t@example.com> 1700000000 +0000"
+        .parse()
+        .expect("signature");
+    let stash_oid = open_grit(root.path())
+        .stash()
+        .create(&StashPushOptions {
+            message: None,
+            include_untracked: true,
+            identity: ident,
+            selection: None,
+            pathspecs: Vec::new(),
+            dry_run: false,
+            mode: Default::default(),
+        })
+        .expect("create")
+        .expect("oid");
+    git_cmd(root.path(), &["reset", "--hard", "HEAD"]);
+    assert!(root.path().join("u.txt").is_file());
+    open_grit(root.path())
+        .stash()
+        .apply_commit(
+            &stash_oid,
+            &StashApplyOptions {
+                overwrite_identical_untracked: true,
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("apply identical untracked");
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("u.txt")).expect("u"),
+        "same bytes\n"
+    );
+}
+
+#[test]
+fn apply_stash_still_refuses_differing_untracked_with_overwrite_flag() {
+    let root = tempfile::tempdir().expect("tmpdir");
+    init_repo(root.path());
+    std::fs::write(root.path().join("tracked.txt"), "base\n").expect("tracked");
+    git_cmd(root.path(), &["add", "tracked.txt"]);
+    git_cmd(root.path(), &["commit", "-qm", "base"]);
+    std::fs::write(root.path().join("u.txt"), "stashed\n").expect("untracked");
+    let ident = "Test <t@example.com> 1700000000 +0000"
+        .parse()
+        .expect("signature");
+    let stash_oid = open_grit(root.path())
+        .stash()
+        .create(&StashPushOptions {
+            message: None,
+            include_untracked: true,
+            identity: ident,
+            selection: None,
+            pathspecs: Vec::new(),
+            dry_run: false,
+            mode: Default::default(),
+        })
+        .expect("create")
+        .expect("oid");
+    std::fs::write(root.path().join("u.txt"), "different\n").expect("overwrite");
+    let err = open_grit(root.path())
+        .stash()
+        .apply_commit(
+            &stash_oid,
+            &StashApplyOptions {
+                overwrite_identical_untracked: true,
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect_err("differing untracked");
+    assert!(matches!(err, Error::StashCouldNotRestoreUntracked { .. }));
 }

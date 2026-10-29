@@ -101,6 +101,7 @@ fn git_stash_applies_via_handle() {
             0,
             &StashApplyOptions {
                 restore_index: true,
+                ..Default::default()
             },
             &mut grit_lib::progress::NullProgress,
             &NeverCancel,

@@ -683,6 +683,17 @@ pub fn detect_in_progress(git_dir: &Path) -> Vec<InProgressOperation> {
     ops
 }
 
+/// Remove in-progress operation sentinels without moving `HEAD`, refs, or the worktree.
+///
+/// Returns the operations that were active before clearing (same order as [`detect_in_progress`]).
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when sentinel files cannot be removed.
+pub fn clear_in_progress(repo: &Repository) -> Result<Vec<InProgressOperation>> {
+    crate::porcelain::workspace_snapshot::clear_in_progress(repo)
+}
+
 /// The paused operation that must finish before `HEAD` may move to another branch or commit.
 ///
 /// Merge, rebase (grit's or git's), am, cherry-pick and revert all keep state that refers to

@@ -1243,6 +1243,12 @@ impl Repository {
         crate::repo_handles::RepositoryStash::new(self)
     }
 
+    /// Capture and restore workspace state (index with conflict stages, worktree, refs, sentinels).
+    #[must_use]
+    pub fn workspace_snapshot(&self) -> crate::repo_handles::RepositoryWorkspaceSnapshot<'_> {
+        crate::repo_handles::RepositoryWorkspaceSnapshot::new(self)
+    }
+
     /// Git notes read/write for this repository.
     #[must_use]
     pub fn notes(&self) -> crate::repo_handles::RepositoryNotes<'_> {

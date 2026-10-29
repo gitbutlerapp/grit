@@ -93,7 +93,7 @@ The feature covers [`StatusModel`](rustdoc:grit_lib::porcelain::status::StatusMo
 | [`ObjectId`](rustdoc:grit_lib::objects::ObjectId), [`ChangeId`](rustdoc:grit_lib::change_id::ChangeId) | hex string |
 | [`FileMode`](rustdoc:grit_lib::objects::FileMode) | octal string such as `"100644"`; `"000000"` for the missing side of an add or delete |
 | [`Signature`](rustdoc:grit_lib::ident::Signature) | `{"name", "email", "date"}`, with `date` in RFC 3339 keeping the recorded offset |
-| [`Error`](rustdoc:grit_lib::error::Error) | `{"kind", "message"}`, where `kind` is [`Error::kind_name`](rustdoc:grit_lib::error::Error::kind_name) |
+| [`Error`](rustdoc:grit_lib::error::Error) | Always `kind` and `message` ([`Error::kind_name`](rustdoc:grit_lib::error::Error::kind_name)). Selected variants also expose structured fields: `LockHeld` → `path`, optional `holder` `{pid, running}`; `WouldOverwrite` → `reason`, `paths`; `StashCouldNotRestoreUntracked` → `path`; `DirtyWorktree` → `operation`, `paths`; `UnmergedConflictMarkers` → `paths` |
 | enums | snake_case variant names (`"type_changed"`, `"merge"`); hook names use Git's spelling (`"pre-commit"`) |
 
 `LoadedCommit` holds typed author and committer signatures. A commit whose identity line has a malformed date still loads, with the Unix epoch as its date, the way `git log` shows it ([`Signature::from_header_lossy`](rustdoc:grit_lib::ident::Signature::from_header_lossy)).
