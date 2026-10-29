@@ -1226,6 +1226,32 @@ fn rev_list_broad_ordering_and_limit_flags_match_git() {
     assert_rev_list_commits_match_git(
         wt,
         &grit,
+        &["--merges", "--max-count=4", "main"],
+        &[String::from("main")],
+        &[],
+        RevListOptions {
+            min_parents: Some(2),
+            max_count: Some(4),
+            ..RevListOptions::default()
+        },
+        "merges max-count",
+    );
+    assert_rev_list_commits_match_git(
+        wt,
+        &grit,
+        &["--no-merges", "--max-count=6", "main"],
+        &[String::from("main")],
+        &[],
+        RevListOptions {
+            max_parents: Some(1),
+            max_count: Some(6),
+            ..RevListOptions::default()
+        },
+        "no-merges max-count",
+    );
+    assert_rev_list_commits_match_git(
+        wt,
+        &grit,
         &["--reverse", "--topo-order", "main"],
         &[String::from("main")],
         &[],
