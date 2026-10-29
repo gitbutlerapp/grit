@@ -33,6 +33,8 @@ const FILES: usize = 300;
 struct CancelAfter {
     phase: Option<ProgressPhase>,
     limit: u64,
+    /// When set, cancel as soon as this phase calls [`ProgressSink::finish`].
+    cancel_when_phase_finishes: Option<ProgressPhase>,
     active: Option<ProgressPhase>,
     seen: u64,
     started: Vec<ProgressPhase>,
@@ -45,6 +47,20 @@ impl CancelAfter {
         Self {
             phase: Some(phase),
             limit,
+            cancel_when_phase_finishes: None,
+            active: None,
+            seen: 0,
+            started: Vec::new(),
+            flag: FlagCancel::new(),
+        }
+    }
+
+    /// Cancel at the first [`ProgressSink::finish`] after this phase ran (after checkout).
+    fn cancel_when_phase_finishes(phase: ProgressPhase) -> Self {
+        Self {
+            phase: None,
+            limit: 0,
+            cancel_when_phase_finishes: Some(phase),
             active: None,
             seen: 0,
             started: Vec::new(),
@@ -56,6 +72,7 @@ impl CancelAfter {
     fn recorder() -> Self {
         Self {
             phase: None,
+            cancel_when_phase_finishes: None,
             ..Self::new(ProgressPhase::StagingFiles, 0)
         }
     }
@@ -84,6 +101,14 @@ impl ProgressSink for CancelAfter {
         }
         self.seen += units;
         if self.phase.is_some() && self.phase == self.active && self.seen >= self.limit {
+            self.flag.cancel();
+        }
+    }
+
+    fn finish(&mut self) {
+        if self.cancel_when_phase_finishes.is_some()
+            && self.cancel_when_phase_finishes == self.active
+        {
             self.flag.cancel();
         }
     }
@@ -567,6 +592,49 @@ fn conflicting_merge_cancel_restores_the_index() {
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
     assert!(repo.git_dir().join("MERGE_HEAD").exists());
+}
+
+#[test]
+fn conflicting_merge_cancel_after_checkout_rolls_back_worktree() {
+    let (tmp, repo) = init_repo();
+    let root = tmp.path();
+    fs::write(root.join("c.txt"), "base\n").expect("write");
+    let base = commit_all(&repo, "base");
+    fs::write(root.join("c.txt"), "side\n").expect("write");
+    write_files(root, "side", "side");
+    let side = commit_all(&repo, "side");
+    reset_to_commit(
+        &repo,
+        &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("reset");
+    fs::write(root.join("c.txt"), "main\n").expect("write");
+    let main = commit_all(&repo, "main");
+    let before = index_bytes(&repo);
+
+    let mut sink = CancelAfter::cancel_when_phase_finishes(ProgressPhase::CheckingOutFiles);
+    assert_cancelled(integrate_branch(
+        &repo,
+        "refs/heads/main",
+        main,
+        side,
+        "side",
+        &mut sink,
+        &NeverCancel,
+    ));
+    assert_eq!(branch(&repo, "main"), main);
+    assert_index_untouched(&repo, &before);
+    assert!(!repo.git_dir().join("MERGE_HEAD").exists());
+    assert!(
+        !root.join("side/f0299.txt").exists(),
+        "post-checkout cancel must roll back checked-out files"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("c.txt")).expect("read"),
+        "main\n"
+    );
 }
 
 fn rebase_start(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {

@@ -13,7 +13,8 @@ use crate::merge_trees::{
 };
 use crate::objects::ObjectId;
 use crate::porcelain::checkout::{
-    checkout_tree_changes_with_index_opts, CheckoutApplyOptions, CheckoutIndexWrite,
+    checkout_tree_changes_with_index_deferred, checkout_tree_changes_with_index_opts,
+    CheckoutApplyOptions, CheckoutIndexWrite,
 };
 use crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths;
 use crate::porcelain::switch::{prepare_tree_transition_allow_local, TreeTransitionPrepareError};
@@ -212,7 +213,7 @@ pub(crate) fn apply_conflict_tree_merge_to_worktree(
     let wholesale_precomputed = prepared.wholesale_safety_precomputed();
     let mut lock = repo.lock_index()?;
     let mut index = prepared.into_index();
-    checkout_tree_changes_with_index_opts(
+    let mut journal = checkout_tree_changes_with_index_deferred(
         repo,
         &filtered_tree_changes,
         &mut index,
@@ -227,44 +228,54 @@ pub(crate) fn apply_conflict_tree_merge_to_worktree(
             ..CheckoutApplyOptions::default()
         },
         None,
-        CheckoutIndexWrite::Defer(&lock),
+        &lock,
     )?;
 
-    apply_tree_merge_output_to_index(&mut index, merged);
-    if index.has_unmerged_entries() {
-        index.clear_cache_tree();
-    }
-    poll_cancel(progress, cancel)?;
-
-    let rules = WorktreeRules::from_repository(repo, &index)?;
-    for (path, oid) in &merged.conflict_content {
-        let mode = index
-            .get(path, 2)
-            .or_else(|| index.get(path, 3))
-            .map(|e| e.mode)
-            .unwrap_or(0o100644);
-        let rel = String::from_utf8_lossy(path);
-        crate::porcelain::checkout::write_smudged_blob_to_worktree(
-            repo,
-            work_tree,
-            &rules,
-            rel.as_ref(),
-            oid,
-            mode,
-        )?;
-    }
-
-    let mut stat_paths = BTreeSet::<String>::new();
-    for change in &filtered_tree_changes {
-        if let Some(path) = path_from_diff(change) {
-            stat_paths.insert(path.to_owned());
+    let result = (|| -> Result<()> {
+        apply_tree_merge_output_to_index(&mut index, merged);
+        if index.has_unmerged_entries() {
+            index.clear_cache_tree();
         }
-    }
-    for path in merged.conflict_content.keys() {
-        stat_paths.insert(String::from_utf8_lossy(path).into_owned());
-    }
-    let stat_ref: BTreeSet<&str> = stat_paths.iter().map(String::as_str).collect();
-    refresh_stage0_index_stats_for_paths(repo, work_tree, &mut index, &stat_ref)?;
+        poll_cancel(progress, cancel)?;
 
-    write_index_after_merge_checkout(repo, &mut index, &mut lock)
+        let rules = WorktreeRules::from_repository(repo, &index)?;
+        for (path, oid) in &merged.conflict_content {
+            let mode = index
+                .get(path, 2)
+                .or_else(|| index.get(path, 3))
+                .map(|e| e.mode)
+                .unwrap_or(0o100644);
+            let rel = String::from_utf8_lossy(path);
+            crate::porcelain::checkout::write_smudged_blob_to_worktree(
+                repo,
+                work_tree,
+                &rules,
+                rel.as_ref(),
+                oid,
+                mode,
+            )?;
+        }
+
+        let mut stat_paths = BTreeSet::<String>::new();
+        for change in &filtered_tree_changes {
+            if let Some(path) = path_from_diff(change) {
+                stat_paths.insert(path.to_owned());
+            }
+        }
+        for path in merged.conflict_content.keys() {
+            stat_paths.insert(String::from_utf8_lossy(path).into_owned());
+        }
+        let stat_ref: BTreeSet<&str> = stat_paths.iter().map(String::as_str).collect();
+        refresh_stage0_index_stats_for_paths(repo, work_tree, &mut index, &stat_ref)?;
+
+        write_index_after_merge_checkout(repo, &mut index, &mut lock)
+    })();
+
+    match result {
+        Ok(()) => {
+            journal.commit();
+            Ok(())
+        }
+        Err(err) => journal.finish(repo, Err(err)),
+    }
 }
