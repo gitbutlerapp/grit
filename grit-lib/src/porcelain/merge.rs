@@ -1704,6 +1704,50 @@ fn merge_abort_index_for_diff(index: &Index) -> Index {
     diff_index
 }
 
+fn merge_abort_changed_paths(changes: &[crate::diff::DiffEntry]) -> HashSet<Vec<u8>> {
+    changes
+        .iter()
+        .filter_map(|change| {
+            change
+                .new_path
+                .as_deref()
+                .or(change.old_path.as_deref())
+                .map(|path| crate::repo_relpath::storage_bytes(path).into_owned())
+        })
+        .collect()
+}
+
+fn merge_abort_finalize_index_stats(
+    repo: &Repository,
+    old_index: &Index,
+    changes: &[crate::diff::DiffEntry],
+) -> Result<()> {
+    let Some(work_tree) = repo.work_tree() else {
+        return Ok(());
+    };
+    let changed = merge_abort_changed_paths(changes);
+    let mut index = repo.index_handle().load()?;
+    crate::porcelain::index_from_tree::reseed_stage0_stat_data_excluding_paths(
+        &mut index, old_index, &changed,
+    );
+    let unset_paths: Vec<String> = index
+        .entries()
+        .iter()
+        .filter(|entry| {
+            entry.stage() == 0 && entry.stat_cache_unset() && !changed.contains(&entry.path)
+        })
+        .filter_map(|entry| std::str::from_utf8(&entry.path).ok().map(str::to_owned))
+        .collect();
+    if !unset_paths.is_empty() {
+        let unset: BTreeSet<&str> = unset_paths.iter().map(String::as_str).collect();
+        crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths(
+            repo, work_tree, &mut index, &unset,
+        )?;
+    }
+    repo.index_handle().write(&mut index)?;
+    Ok(())
+}
+
 fn merge_abort_append_unmerged_tree_checkouts(
     odb: &crate::odb::Odb,
     head_tree: &ObjectId,
@@ -1790,6 +1834,7 @@ fn restore_pre_merge_state(repo: &Repository) -> Result<()> {
         None,
         checkout::CheckoutIndexWrite::Commit(&mut lock),
     )?;
+    merge_abort_finalize_index_stats(repo, &old_index, &changes)?;
     if let Some(work_tree) = repo.work_tree() {
         let mut remove_paths = conflict_only;
         for entry in old_index.entries() {
