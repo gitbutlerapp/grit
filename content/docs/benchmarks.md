@@ -9,6 +9,30 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds. The daily census behind the [Performance overview](performance-overview.md) measures the shipped **`dist`** build since 2026-10-28; see [Benchmarking](benchmarking.md#grit-bench-daily-factory-census) for what that switch did to every baseline.
 
+## Deepening a shallow fetch negotiates (2026-10-29)
+
+A fetch with `--deepen`, `--depth` or into a shallow repository used to send the server no `have` lines, so the server packed every object of the deepened history. On `fetch/deepen@git-git` (a depth-1 `master` deepened by 50 commits, served by `git http-backend`), grit received 59k objects (43 MiB) that the client already held through its other branches, and spent most of its 5.5 s waiting for the server to build that pack and then indexing it. Git negotiates and receives 175 objects.
+
+`grit-lib` now negotiates shallow fetches the way Git does. The skipping negotiator already treats local shallow commits as parentless, and the server limits each `have` to the client's side of its `shallow` lines. The tips being deepened are offered as haves too. On the serving side, `grit upload-pack` no longer uses reachability bitmaps when the client is shallow, because a bitmap closure of a `have` runs past the client's boundary. Before this change, a system `git fetch --unshallow` (protocol v2) from a bitmapped repository failed with "remote did not send all necessary objects". Git's `pack-objects` also turns bitmaps off for shallow clients.
+
+Rows from `grit-bench daily` (10 runs, 2 warmups, `release` builds) against the system `git` in the same sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0. "base" is `e97f684a5`. Reports: `daily-fetch-deepen-5548-before.json` → `daily-fetch-deepen-5548-after.json`.
+
+| Scenario | git ms / MB | base | + change |
+| --- | ---: | ---: | ---: |
+| `fetch/deepen@git-git` | 656.6 / 271.4 | 5498.0 / 81.5 | **119.3** / 57.4 |
+| `fetch/one-branch@git-git` | 106.2 / 70.9 | 48.3 / 51.5 | 47.9 / 51.4 |
+| `fetch/incremental@git-git` | 106.0 / 70.9 | 47.1 / 51.5 | 47.7 / 51.2 |
+| `fetch/incremental-http@git-git` | 126.8 / 71.1 | 51.1 / 51.4 | 49.7 / 50.9 |
+| `fetch/dry-run@git-git` | 105.7 / 70.7 | 46.9 / 51.8 | 46.7 / 52.0 |
+| `fetch/noop@git-git` | 25.2 / 56.3 | 10.7 / 20.0 | 11.4 / 20.0 |
+| `fetch/noop-local@many-refs` | 20.7 / 23.6 | 20.6 / 20.9 | 16.6 / 21.1 |
+| `fetch/noop-local-no-tags@many-refs` | 19.2 / 23.8 | 15.3 / 20.9 | 12.8 / 20.8 |
+| `clone/shallow@git-git` | 1579.7 / 40.0 | 1671.7 / 57.7 | 1686.4 / 56.5 |
+| `clone/shallow-depth1@synth-10k` | 180.2 / 32.2 | 183.3 / 32.2 | 181.6 / 32.4 |
+| `clone/shallow-depth1-http@synth-10k` | 185.2 / 32.2 | 188.5 / 32.3 | 189.0 / 31.7 |
+
+Only the deepen row changes. A shallow clone has no local refs to offer, and the other fetches were not shallow requests. The protocol v0 fetch path still skips haves for shallow requests.
+
 ## Log pages: one config parse, one pack reader (2026-10-29)
 
 `grit log --limit 100` on git.git spends about as long per commit as Git (grit's
