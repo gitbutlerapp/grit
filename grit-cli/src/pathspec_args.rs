@@ -110,13 +110,14 @@ impl TrailingPathspecArgs {
     }
 
     /// Pathspec tokens for rev walks (`RevWalkListOptions::paths`): argv plus file lines.
-    pub fn rev_walk_tokens(&self, repo: &Repository) -> Result<Vec<String>> {
+    ///
+    /// Returns unresolved tokens; [`Repository::resolve_rev_walk_pathspecs`] runs once when the
+    /// walk is built in `grit-lib`.
+    pub fn rev_walk_tokens(&self, _repo: &Repository) -> Result<Vec<String>> {
         if !self.has_any() {
             return Ok(Vec::new());
         }
-        let tokens = self.pathspec_source_tokens(&[])?;
-        repo.resolve_rev_walk_pathspecs(&tokens)
-            .map_err(|e| anyhow::anyhow!("{e}"))
+        self.pathspec_source_tokens(&[])
     }
 
     /// Resolve argv and optional from-file pathspecs against `repo` and the process cwd.
