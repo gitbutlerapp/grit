@@ -5906,8 +5906,6 @@ pub grit_lib::error::Error::PackedRefsUnexpectedLine::line: alloc::string::Strin
 pub grit_lib::error::Error::PackedRefsUnexpectedLine::path: alloc::string::String
 pub grit_lib::error::Error::PartialCommitDuringMerge
 pub grit_lib::error::Error::PartialCommitDuringReplay
-pub grit_lib::error::Error::ReplayContinueDirtyIndex
-pub grit_lib::error::Error::ReplaySkipAlreadyCommitted
 pub grit_lib::error::Error::PathError(alloc::string::String)
 pub grit_lib::error::Error::PathOutsideRepo(grit_lib::error::PathOutsideRepoError)
 pub grit_lib::error::Error::PathspecBeyondSymlink
@@ -5942,7 +5940,9 @@ pub grit_lib::error::Error::RemoveBlocked
 pub grit_lib::error::Error::RemoveBlocked::paths: alloc::vec::Vec<grit_lib::porcelain::paths::BlockedRemoval>
 pub grit_lib::error::Error::RemovePathsRequired
 pub grit_lib::error::Error::ReplayAbortHeadMoved
+pub grit_lib::error::Error::ReplayContinueDirtyIndex
 pub grit_lib::error::Error::ReplayContinueUnmerged
+pub grit_lib::error::Error::ReplaySkipAlreadyCommitted
 pub grit_lib::error::Error::ReplaySourceAtHead
 pub grit_lib::error::Error::RequiresWorkTree
 pub grit_lib::error::Error::RestoreConflictMissingOurs
@@ -6023,6 +6023,7 @@ pub fn grit_lib::error::Error::dirty_worktree(grit_lib::error::WorktreeOperation
 pub fn grit_lib::error::Error::git_stderr_message(&self) -> alloc::string::String
 pub fn grit_lib::error::Error::invalid_path_component(impl core::convert::Into<alloc::string::String>, grit_lib::path_validate::PathComponentError) -> Self
 pub fn grit_lib::error::Error::is_cancelled(&self) -> bool
+pub fn grit_lib::error::Error::is_git_dir_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::error::Error::is_worktree_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::kind_name(&self) -> &'static str
@@ -15075,6 +15076,25 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay::Re
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay::ReplayRequest
 pub fn grit_lib::porcelain::replay::replay_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::replay::ReplayRequest, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::replay::ReplayOutcome>
 pub mod grit_lib::porcelain::replay_sequence
+pub enum grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+pub grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::ClearedInPlace
+pub grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::Rewound
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+pub fn grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::cmp::PartialEq for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+pub fn grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+pub fn grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
 pub enum grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
 pub grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::Drop
 pub grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::Keep
@@ -15210,9 +15230,6 @@ impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplaySequenc
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
-pub enum grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
-pub grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::ClearedInPlace
-pub grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::Rewound
 pub fn grit_lib::porcelain::replay_sequence::abort_replay_sequence(&grit_lib::repo::Repository) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::ReplayAbortOutcome>
 pub fn grit_lib::porcelain::replay_sequence::commits_to_replay(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::porcelain::replay_sequence::continue_replay_sequence(&grit_lib::repo::Repository, &grit_lib::ident::Signature) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
@@ -16472,8 +16489,6 @@ pub grit_lib::prelude::Error::PackedRefsUnexpectedLine::line: alloc::string::Str
 pub grit_lib::prelude::Error::PackedRefsUnexpectedLine::path: alloc::string::String
 pub grit_lib::prelude::Error::PartialCommitDuringMerge
 pub grit_lib::prelude::Error::PartialCommitDuringReplay
-pub grit_lib::prelude::Error::ReplayContinueDirtyIndex
-pub grit_lib::prelude::Error::ReplaySkipAlreadyCommitted
 pub grit_lib::prelude::Error::PathError(alloc::string::String)
 pub grit_lib::prelude::Error::PathOutsideRepo(grit_lib::error::PathOutsideRepoError)
 pub grit_lib::prelude::Error::PathspecBeyondSymlink
@@ -16508,7 +16523,9 @@ pub grit_lib::prelude::Error::RemoveBlocked
 pub grit_lib::prelude::Error::RemoveBlocked::paths: alloc::vec::Vec<grit_lib::porcelain::paths::BlockedRemoval>
 pub grit_lib::prelude::Error::RemovePathsRequired
 pub grit_lib::prelude::Error::ReplayAbortHeadMoved
+pub grit_lib::prelude::Error::ReplayContinueDirtyIndex
 pub grit_lib::prelude::Error::ReplayContinueUnmerged
+pub grit_lib::prelude::Error::ReplaySkipAlreadyCommitted
 pub grit_lib::prelude::Error::ReplaySourceAtHead
 pub grit_lib::prelude::Error::RequiresWorkTree
 pub grit_lib::prelude::Error::RestoreConflictMissingOurs
@@ -16589,6 +16606,7 @@ pub fn grit_lib::error::Error::dirty_worktree(grit_lib::error::WorktreeOperation
 pub fn grit_lib::error::Error::git_stderr_message(&self) -> alloc::string::String
 pub fn grit_lib::error::Error::invalid_path_component(impl core::convert::Into<alloc::string::String>, grit_lib::path_validate::PathComponentError) -> Self
 pub fn grit_lib::error::Error::is_cancelled(&self) -> bool
+pub fn grit_lib::error::Error::is_git_dir_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::error::Error::is_worktree_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::kind_name(&self) -> &'static str
@@ -19391,10 +19409,10 @@ pub grit_lib::refs::store::RefStoreError::GitDirPathIo::path: alloc::string::Str
 pub grit_lib::refs::store::RefStoreError::Hook(grit_lib::refs::store::error::ReferenceTransactionHookErr)
 pub grit_lib::refs::store::RefStoreError::InvalidRefName
 pub grit_lib::refs::store::RefStoreError::InvalidRefName::name: alloc::string::String
+pub grit_lib::refs::store::RefStoreError::InvalidReflog(grit_lib::ident::SignatureError)
 pub grit_lib::refs::store::RefStoreError::InvalidSymrefTarget
 pub grit_lib::refs::store::RefStoreError::InvalidSymrefTarget::name: alloc::string::String
 pub grit_lib::refs::store::RefStoreError::InvalidSymrefTarget::target: alloc::string::String
-pub grit_lib::refs::store::RefStoreError::InvalidReflog(grit_lib::ident::SignatureError)
 pub grit_lib::refs::store::RefStoreError::LockHeld
 pub grit_lib::refs::store::RefStoreError::LockHeld::name: alloc::string::String
 pub grit_lib::refs::store::RefStoreError::MissingObject
@@ -26474,24 +26492,6 @@ impl core::marker::Unpin for grit_lib::revwalk::history::UnassignedReason
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::UnassignedReason
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::UnassignedReason
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::UnassignedReason
-pub struct grit_lib::revwalk::history::AbsorbOptions
-pub grit_lib::revwalk::history::AbsorbOptions::base: core::option::Option<grit_lib::objects::ObjectId>
-pub grit_lib::revwalk::history::AbsorbOptions::rewrite: grit_lib::revwalk::history::RewriteOptions
-impl core::clone::Clone for grit_lib::revwalk::history::AbsorbOptions
-pub fn grit_lib::revwalk::history::AbsorbOptions::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::revwalk::history::AbsorbOptions
-impl core::cmp::PartialEq for grit_lib::revwalk::history::AbsorbOptions
-pub fn grit_lib::revwalk::history::AbsorbOptions::eq(&self, &Self) -> bool
-impl core::fmt::Debug for grit_lib::revwalk::history::AbsorbOptions
-pub fn grit_lib::revwalk::history::AbsorbOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for grit_lib::revwalk::history::AbsorbOptions
-impl core::marker::Freeze for grit_lib::revwalk::history::AbsorbOptions
-impl core::marker::Send for grit_lib::revwalk::history::AbsorbOptions
-impl core::marker::Sync for grit_lib::revwalk::history::AbsorbOptions
-impl core::marker::Unpin for grit_lib::revwalk::history::AbsorbOptions
-impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::AbsorbOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::AbsorbOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::AbsorbOptions
 pub struct grit_lib::revwalk::history::AbsorbExcludedRef
 pub grit_lib::revwalk::history::AbsorbExcludedRef::ref_name: alloc::string::String
 pub grit_lib::revwalk::history::AbsorbExcludedRef::tip: grit_lib::objects::ObjectId
@@ -26510,6 +26510,24 @@ impl core::marker::Unpin for grit_lib::revwalk::history::AbsorbExcludedRef
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::AbsorbExcludedRef
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::AbsorbExcludedRef
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::AbsorbExcludedRef
+pub struct grit_lib::revwalk::history::AbsorbOptions
+pub grit_lib::revwalk::history::AbsorbOptions::base: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::revwalk::history::AbsorbOptions::rewrite: grit_lib::revwalk::history::RewriteOptions
+impl core::clone::Clone for grit_lib::revwalk::history::AbsorbOptions
+pub fn grit_lib::revwalk::history::AbsorbOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::revwalk::history::AbsorbOptions
+impl core::cmp::PartialEq for grit_lib::revwalk::history::AbsorbOptions
+pub fn grit_lib::revwalk::history::AbsorbOptions::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::revwalk::history::AbsorbOptions
+pub fn grit_lib::revwalk::history::AbsorbOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::revwalk::history::AbsorbOptions
+impl core::marker::Freeze for grit_lib::revwalk::history::AbsorbOptions
+impl core::marker::Send for grit_lib::revwalk::history::AbsorbOptions
+impl core::marker::Sync for grit_lib::revwalk::history::AbsorbOptions
+impl core::marker::Unpin for grit_lib::revwalk::history::AbsorbOptions
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::AbsorbOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::AbsorbOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::AbsorbOptions
 pub struct grit_lib::revwalk::history::AbsorbPlan
 pub grit_lib::revwalk::history::AbsorbPlan::assignments: alloc::vec::Vec<grit_lib::revwalk::history::HunkAssignment>
 pub grit_lib::revwalk::history::AbsorbPlan::excluded_refs: alloc::vec::Vec<grit_lib::revwalk::history::AbsorbExcludedRef>

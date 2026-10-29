@@ -1608,7 +1608,9 @@ pub enum Error {
         command: String,
     },
 
-    /// Legacy: abort no longer fails when `HEAD` moved; [`ReplayAbortOutcome::ClearedInPlace`] is returned instead.
+    /// Legacy: abort no longer fails when `HEAD` moved;
+    /// [`abort_replay_sequence`](crate::porcelain::replay_sequence::abort_replay_sequence) returns
+    /// [`ReplayAbortOutcome::ClearedInPlace`](crate::porcelain::replay_sequence::ReplayAbortOutcome::ClearedInPlace) instead.
     #[error("cannot abort replay: HEAD moved since replay started")]
     ReplayAbortHeadMoved,
 
