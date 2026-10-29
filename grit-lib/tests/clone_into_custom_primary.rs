@@ -146,7 +146,10 @@ fn clone_into_memory_store_and_memory_ref_store_checks_out() {
     )
     .expect("clone_into with MemoryStore + MemoryRefStore");
 
-    assert!(outcome.transfer.objects >= 3, "fetched pack must contain objects");
+    assert!(
+        outcome.transfer.objects >= 3,
+        "fetched pack must contain objects"
+    );
     assert_eq!(
         ref_store
             .read_raw("refs/remotes/origin/main")

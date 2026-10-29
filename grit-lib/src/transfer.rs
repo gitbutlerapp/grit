@@ -1152,7 +1152,6 @@ fn copy_objects_for_local_fetch(
     let mut copy = LocalCopyProgress::new(send.len() as u64);
 
     if local_odb.uses_files_primary() && !pack_build.thin && try_pack_link {
-        progress.start(ProgressPhase::CopyingObjects, Some(send.len() as u64));
         let local_has = |oid: &ObjectId| local_odb.exists_materialized_local_without_rescan(oid);
         let linked = link_packs_within(
             remote_objects,
@@ -1187,22 +1186,18 @@ fn copy_objects_for_local_fetch(
     // times the object size; linking matches system `git clone` on the same filesystem.
     let loose_candidates: HashSet<ObjectId> = still_missing.iter().copied().collect();
     if local_odb.uses_files_primary() {
-        progress.start(
-            ProgressPhase::CopyingObjects,
-            Some(still_missing.len() as u64),
-        );
         let linked_loose = link_loose_objects_for_oids(
             remote_objects,
             local_objects,
             &still_missing,
-            progress,
+            &mut crate::progress::NullProgress,
             cancel,
         )?;
         if linked_loose > 0 {
             refresh_local_odb_after_link(local_odb);
+            copy.add(progress, linked_loose as u64);
             still_missing = local_odb.missing_oids(still_missing)?;
         }
-        progress.finish();
     }
     if still_missing.is_empty() {
         copy.finish(progress);
