@@ -4662,6 +4662,12 @@ mod status_op_tests {
             model.unstaged
         );
     }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
     fn warm_status_after_git_status_reuses_untr_without_rescanning() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();

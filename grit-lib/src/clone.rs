@@ -1824,7 +1824,6 @@ mod tests {
         }
         git_cmd(&["branch", "feature", "HEAD~2"], &wt);
         git_cmd(&["tag", "v1", "HEAD~1"], &wt);
-        let url = format!("file://{}", bare.to_string_lossy());
         git_cmd(&["clone", "-q", "--bare", ".", bare.to_str().unwrap()], &wt);
     }
 

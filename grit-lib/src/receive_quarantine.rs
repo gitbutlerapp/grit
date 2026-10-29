@@ -204,13 +204,6 @@ impl ReceiveQuarantine {
         odb
     }
 
-    /// Quarantine `objects/` root (for tests and pack staging).
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn path(&self) -> &Path {
-        &self.path
-    }
-
     /// Environment pairs for hook subprocesses (absolute paths when possible).
     #[must_use]
     pub fn hook_env(&self) -> Vec<(String, String)> {

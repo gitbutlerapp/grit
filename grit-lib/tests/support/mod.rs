@@ -69,4 +69,5 @@ pub use revwalk_fixtures::{
     setup_dual_merge_back_simplify_oracle, setup_first_parent_boundary_history,
     setup_path_simplify_history, setup_treesame_history,
 };
+#[allow(unused_imports)]
 pub use signature_harness::{parse_reflog_signature, reflog_signature};

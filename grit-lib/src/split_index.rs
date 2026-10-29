@@ -1186,7 +1186,7 @@ mod tests {
         fs::write(&index_path, b"live").expect("write index");
         fs::set_permissions(&index_path, fs::Permissions::from_mode(0o644)).expect("index mode");
 
-        let mut lock = crate::index::IndexLock::acquire(&index_path, None).expect("lock");
+        let lock = crate::index::IndexLock::acquire(&index_path, None).expect("lock");
         fs::write(&lock.lock_path, b"staged").expect("write lock");
         fs::set_permissions(&lock.lock_path, fs::Permissions::from_mode(0o644)).expect("lock mode");
 
