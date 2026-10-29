@@ -2064,6 +2064,14 @@ mod inject_and_apply_tests {
             self.inner.replace_reflog(name, entries)
         }
 
+        fn rewrite_reflog(
+            &self,
+            name: &str,
+            transform: &mut dyn FnMut(Vec<ReflogEntry>) -> crate::error::Result<Vec<ReflogEntry>>,
+        ) -> crate::error::Result<()> {
+            self.inner.rewrite_reflog(name, transform)
+        }
+
         fn for_each_reflog_ref(
             &self,
             f: &mut dyn FnMut(&str) -> ControlFlow<()>,

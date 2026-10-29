@@ -694,16 +694,29 @@ impl RefStore for ReftableRefStore {
     }
 
     fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()> {
+        self.rewrite_reflog(name, &mut |_| Ok(entries.clone()))
+    }
+
+    fn rewrite_reflog(
+        &self,
+        name: &str,
+        transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
+    ) -> Result<()> {
         let (store_git_dir, storage_refname) = reftable_storage_location(&self.git_dir, name);
+        let mut stack = ReftableStack::open(&store_git_dir)?;
+        let mut empty = false;
+        stack.rewrite_logs_for_ref(&storage_refname, &mut |current| {
+            let rewritten = transform(current)?;
+            empty = rewritten.is_empty();
+            Ok(rewritten)
+        })?;
         let mut markers = read_empty_reflog_markers(&store_git_dir);
-        if entries.is_empty() {
-            markers.insert(storage_refname.clone());
+        if empty {
+            markers.insert(storage_refname);
         } else {
             markers.remove(&storage_refname);
         }
-        write_empty_reflog_markers(&store_git_dir, &markers)?;
-        let mut stack = ReftableStack::open(&store_git_dir)?;
-        stack.replace_logs_for_ref(&storage_refname, &entries)
+        write_empty_reflog_markers(&store_git_dir, &markers)
     }
 
     fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {

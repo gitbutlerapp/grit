@@ -120,6 +120,14 @@ impl RefStore for CountingRefStore {
         self.inner.replace_reflog(name, entries)
     }
 
+    fn rewrite_reflog(
+        &self,
+        name: &str,
+        transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
+    ) -> Result<()> {
+        self.inner.rewrite_reflog(name, transform)
+    }
+
     fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
         self.inner.for_each_reflog_ref(f)
     }

@@ -247,6 +247,33 @@ pub trait RefStore: Send + Sync + Debug {
     /// Replace the entire reflog (used by expire/delete-entries).
     fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()>;
 
+    /// Read a reflog under the backend writer lock, transform it, and write it back atomically.
+    ///
+    /// The closure must not call back into this store. Implementations hold the per-ref lock
+    /// (files backend) or an equivalent writer lock for the whole read-transform-write.
+    ///
+    /// The default reads entries, runs `transform`, and calls [`Self::replace_reflog`], which is
+    /// not safe under concurrent ref updates; built-in backends override this method.
+    ///
+    /// # Errors
+    ///
+    /// Propagates lock, I/O, and transform failures. [`RefStoreError::ReflogRewriteStale`] is
+    /// returned when a caller compares against a snapshot and the locked re-read no longer
+    /// matches (retry the outer operation).
+    fn rewrite_reflog(
+        &self,
+        name: &str,
+        transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
+    ) -> Result<()> {
+        let mut entries = Vec::new();
+        self.for_each_reflog_entry(name, false, &mut |entry| {
+            entries.push(entry.clone());
+            ControlFlow::Continue(())
+        })?;
+        let rewritten = transform(entries)?;
+        self.replace_reflog(name, rewritten)
+    }
+
     /// Invoke `f` for each ref name that has a reflog, in sorted order.
     ///
     /// `f` may call back into the store; see [re-entrant callbacks](Self#re-entrant-callbacks).

@@ -190,10 +190,18 @@ impl RefStore for MemoryRefStore {
     }
 
     fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()> {
-        self.lock()
-            .state_mut()
-            .reflogs
-            .insert(name.to_owned(), entries);
+        self.rewrite_reflog(name, &mut |_| Ok(entries.clone()))
+    }
+
+    fn rewrite_reflog(
+        &self,
+        name: &str,
+        transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
+    ) -> Result<()> {
+        let mut inner = self.lock();
+        let current = inner.state.reflogs.get(name).cloned().unwrap_or_default();
+        let rewritten = transform(current)?;
+        inner.state_mut().reflogs.insert(name.to_owned(), rewritten);
         Ok(())
     }
 

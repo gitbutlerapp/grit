@@ -595,6 +595,9 @@ pub(crate) fn ref_lock_names_for_updates(
     let mut names = BTreeSet::new();
     for update in updates {
         if update.flags.log_only {
+            if update.reflog.is_some() {
+                names.insert(update.name.clone());
+            }
             continue;
         }
         names.insert(update.name.clone());

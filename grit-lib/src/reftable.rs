@@ -2464,13 +2464,68 @@ impl ReftableStack {
         refname: &str,
         entries: &[crate::reflog::ReflogEntry],
     ) -> Result<()> {
+        let entries = entries.to_vec();
+        self.rewrite_logs_for_ref(refname, &mut |_| Ok(entries.clone()))
+    }
+
+    /// Replace one ref's log records under `tables.list.lock`, re-reading the stack under the lock.
+    pub fn rewrite_logs_for_ref(
+        &mut self,
+        refname: &str,
+        transform: &mut dyn FnMut(
+            Vec<crate::reflog::ReflogEntry>,
+        ) -> Result<Vec<crate::reflog::ReflogEntry>>,
+    ) -> Result<()> {
+        let mut guard = self.acquire_tables_list_lock()?;
+        self.reload_table_names();
+        let current = self.read_reflog_entries_for_ref(refname)?;
+        let entries = transform(current)?;
+        self.replace_logs_for_ref_under_lock(&mut guard, refname, &entries)
+    }
+
+    fn read_reflog_entries_for_ref(
+        &self,
+        refname: &str,
+    ) -> Result<Vec<crate::reflog::ReflogEntry>> {
+        let mut entries = Vec::new();
+        for log in self.read_logs_for_ref(refname)? {
+            let tz_sign = if log.tz_offset >= 0 { '+' } else { '-' };
+            let tz_abs = log.tz_offset.unsigned_abs();
+            let tz_hours = tz_abs / 100;
+            let tz_mins = tz_abs % 100;
+            let identity = format!(
+                "{} <{}> {} {}{:02}{:02}",
+                log.name, log.email, log.time_seconds, tz_sign, tz_hours, tz_mins
+            );
+            let message = log
+                .message
+                .strip_suffix('\n')
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| log.message.clone());
+            entries.push(crate::reflog::ReflogEntry {
+                old_oid: log.old_id,
+                new_oid: log.new_id,
+                identity,
+                message,
+            });
+        }
+        entries.reverse();
+        Ok(entries)
+    }
+
+    fn replace_logs_for_ref_under_lock(
+        &mut self,
+        guard: &mut TablesListLock,
+        refname: &str,
+        entries: &[crate::reflog::ReflogEntry],
+    ) -> Result<()> {
         let refs = self.read_refs()?;
         let mut logs: Vec<LogRecord> = self
             .read_all_logs()?
             .into_iter()
             .filter(|log| log.refname != refname)
             .collect();
-        let mut next_update_index = self.max_update_index()? + 1;
+        let mut next_update_index = self.max_update_index_unlocked()? + 1;
         let hash_size = self.hash_size();
         for entry in entries {
             let (name, email, time_secs, tz) = parse_identity_string(&entry.identity);
@@ -2517,7 +2572,7 @@ impl ReftableStack {
         let old_names = self.table_names.clone();
         let name = self.write_table_file(&data, max_idx)?;
         self.table_names = vec![name];
-        self.write_tables_list()?;
+        self.write_tables_list_locked(guard)?;
         for old in &old_names {
             let _ = fs::remove_file(self.reftable_dir.join(old));
         }
@@ -3049,6 +3104,7 @@ impl ReftableStack {
     /// by a write to be atomic (e.g. [`add_table`]) should instead acquire the
     /// lock with [`acquire_tables_list_lock`] and call
     /// [`write_tables_list_locked`] while holding it.
+    #[expect(dead_code)]
     fn write_tables_list(&self) -> Result<()> {
         let mut guard = self.acquire_tables_list_lock()?;
         self.write_tables_list_locked(&mut guard)

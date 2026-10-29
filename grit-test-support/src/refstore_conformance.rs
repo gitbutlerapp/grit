@@ -119,6 +119,7 @@ pub const CASES: &[(&str, Case)] = &[
     ),
     ("concurrent_prepare_lock_held", concurrent_prepare_lock_held),
     ("reflog_roundtrip", reflog_roundtrip),
+    ("rewrite_reflog_roundtrip", rewrite_reflog_roundtrip),
     ("reentrant_callbacks", reentrant_callbacks),
 ];
 
@@ -1112,6 +1113,33 @@ pub fn reflog_roundtrip(store: Arc<dyn RefStore>) {
         })
         .expect("list");
     assert_eq!(reflog_refs, vec!["refs/heads/rr"]);
+}
+
+/// Locked [`RefStore::rewrite_reflog`] read-transform-write keeps other entries intact.
+pub fn rewrite_reflog_roundtrip(store: Arc<dyn RefStore>) {
+    let log = |byte: u8| ReflogEntry {
+        old_oid: oid(0),
+        new_oid: oid(byte),
+        identity: "A <a@a.com> 1 +0000".to_owned(),
+        message: format!("m{byte}"),
+    };
+    store
+        .replace_reflog("refs/heads/r", vec![log(1), log(2), log(3)])
+        .expect("seed");
+    store
+        .rewrite_reflog("refs/heads/r", &mut |entries| {
+            assert_eq!(entries.len(), 3);
+            Ok(vec![entries[0].clone(), entries[2].clone()])
+        })
+        .expect("rewrite");
+    let mut kept = Vec::new();
+    store
+        .for_each_reflog_entry("refs/heads/r", false, &mut |e| {
+            kept.push(e.clone());
+            ControlFlow::Continue(())
+        })
+        .expect("read");
+    assert_eq!(kept, vec![log(1), log(3)]);
 }
 
 /// Iteration callbacks may read and write the store they are iterating. A backend that holds

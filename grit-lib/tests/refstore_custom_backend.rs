@@ -135,6 +135,18 @@ impl RefStore for MapStore {
         Ok(())
     }
 
+    fn rewrite_reflog(
+        &self,
+        name: &str,
+        transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
+    ) -> Result<()> {
+        let mut inner = self.inner();
+        let current = inner.state.reflogs.get(name).cloned().unwrap_or_default();
+        let rewritten = transform(current)?;
+        inner.state.reflogs.insert(name.to_owned(), rewritten);
+        Ok(())
+    }
+
     fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
         let state = self.snapshot();
         state.reflogs.keys().any(|name| f(name).is_break());
