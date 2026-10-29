@@ -1377,6 +1377,32 @@ fn replay_merge_tree(
     Ok(result_tree)
 }
 
+/// Write the commit for a staged conflict resolution during [`super::rebase_session::continue_rebase`].
+pub(crate) fn write_rebase_staged_resolution(
+    repo: &Repository,
+    opts: &RewriteOptions,
+    stopped_commit: ObjectId,
+    tree: ObjectId,
+    parents: &[ObjectId],
+) -> Result<ObjectId, HistoryError> {
+    let old = load_commit(repo, stopped_commit)?;
+    let change_ids = ChangeIdWriteContext::from_repo(repo)?;
+    let committer = opts.committer_line()?;
+    write_replacement_commit(
+        repo,
+        opts,
+        &change_ids,
+        &old,
+        stopped_commit,
+        tree,
+        parents,
+        &old.author,
+        &committer,
+        &old.message,
+        false,
+    )
+}
+
 /// Write a replacement commit for `old_oid`, honoring [`RewriteOptions::empty`].
 ///
 /// When `split_rest_commit` is true (history split rest commit after an insert parent), the

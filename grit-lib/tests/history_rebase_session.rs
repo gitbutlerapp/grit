@@ -3692,23 +3692,10 @@ fn rebase_merge_replay_one_conflict_keeps_merge_parents_issue_2245() {
         "side branch should replay before feat:a conflict"
     );
 
-    use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
     std::fs::write(wt.join("shared.txt"), "resolved1\n").expect("resolve");
-    let grit = open_grit(wt);
-    commit_with_scope(
-        &grit,
-        &CommitRequest {
-            message: "resolved feat: a (shared)".into(),
-            committer: Some(IDENT.parse().expect("IDENT")),
-            ..Default::default()
-        },
-        CommitScope::AutoStage,
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
-    )
-    .expect("commit resolution");
+    git(wt, &["add", "shared.txt"]);
     let outcome = continue_rebase(
-        &grit,
+        &open_grit(wt),
         &opts,
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
