@@ -803,8 +803,9 @@ impl<'a, W: Write + ?Sized> CrcWriter<'a, W> {
 
 impl<W: Write + ?Sized> Write for CrcWriter<'_, W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.crc.update(buf);
-        self.inner.write(buf)
+        let n = self.inner.write(buf)?;
+        self.crc.update(&buf[..n]);
+        Ok(n)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {

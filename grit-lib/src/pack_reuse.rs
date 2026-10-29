@@ -111,13 +111,13 @@ impl StreamingReuse {
             .parent()
             .and_then(|p| p.parent())
             .ok_or_else(|| Error::CorruptObject("pack path layout".to_owned()))?;
-        match write_whole_reused(w, objects_dir, oid, opts) {
-            Ok(n) => {
-                self.note_verbatim(n);
-                Ok(Some(n))
-            }
-            Err(_) => Ok(None),
-        }
+        let Some((bytes, start, end)) = crate::pack::packed_full_object_range(objects_dir, oid)?
+        else {
+            return Ok(None);
+        };
+        let n = write_whole_reused(w, &bytes[start..end])?;
+        self.note_verbatim(n);
+        Ok(Some(n))
     }
 }
 
@@ -424,22 +424,9 @@ fn delta_base_oid(
     }))
 }
 
-fn write_whole_reused(
-    w: &mut dyn Write,
-    objects_dir: &Path,
-    oid: &ObjectId,
-    opts: &PackBuildOptions,
-) -> Result<u64> {
-    if opts.reuse_objects {
-        if let Some((bytes, start, end)) = crate::pack::packed_full_object_range(objects_dir, oid)?
-        {
-            for chunk in bytes[start..end].chunks(64 * 1024) {
-                w.write_all(chunk).map_err(Error::Io)?;
-            }
-            return Ok((end - start) as u64);
-        }
+fn write_whole_reused(w: &mut dyn Write, entry: &[u8]) -> Result<u64> {
+    for chunk in entry.chunks(64 * 1024) {
+        w.write_all(chunk).map_err(Error::Io)?;
     }
-    Err(Error::CorruptObject(
-        "expected reusable whole object in pack".to_owned(),
-    ))
+    Ok(entry.len() as u64)
 }

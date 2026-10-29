@@ -998,3 +998,79 @@ fn upload_pack_reuses_on_disk_deltas_when_pack_depth_is_zero() {
         "pack.depth=0 only stops new delta search; existing deltas are copied as git does"
     );
 }
+
+/// Fails the first `write` once at least `fail_after` payload bytes were accepted.
+struct BrokenPipeAfter {
+    accepted: usize,
+    fail_after: usize,
+    armed: bool,
+}
+
+impl Write for BrokenPipeAfter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.armed && self.accepted >= self.fail_after {
+            self.armed = false;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "injected",
+            ));
+        }
+        self.accepted += buf.len();
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn upload_pack_propagates_verbatim_reuse_io_error_without_fallback() {
+    let fx = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    git_ok(&fx, &["config", "core.bigFileThreshold", "1m"]);
+    let blob_path = fx.path().join("blob.bin");
+    std::fs::write(&blob_path, vec![0u8; 512 * 1024]).expect("blob");
+    git_ok(&fx, &["add", "blob.bin"]);
+    git_ok(&fx, &["commit", "-qm", "big"]);
+    git_ok(&fx, &["repack", "-adb"]);
+    git_ok(&fx, &["config", "pack.writeBitmapHashCache", "true"]);
+    git_ok(&fx, &["repack", "-adb"]);
+    let blob: ObjectId = fx
+        .git(&["rev-parse", "HEAD:blob.bin"])
+        .stdout
+        .trim()
+        .parse()
+        .expect("oid");
+    let git_dir = fx.path().join(".git");
+    let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open");
+    let opts = PackBuildOptions {
+        reuse_objects: true,
+        use_bitmaps: true,
+        ..PackBuildOptions::default()
+    };
+    let mut writer = BrokenPipeAfter {
+        accepted: 0,
+        fail_after: 100,
+        armed: true,
+    };
+    let err = write_upload_pack_stream(
+        &repo,
+        &[blob],
+        &[],
+        &HashSet::new(),
+        &HashSet::new(),
+        None,
+        &opts,
+        &mut |_p: PackProgress| {},
+        &mut writer,
+    )
+    .expect_err("broken pipe must abort the pack");
+    assert!(
+        matches!(err, grit_lib::error::Error::Io(_)),
+        "expected Io error, got {err:?}"
+    );
+    assert!(
+        writer.accepted >= 100,
+        "writer should have accepted bytes before the error"
+    );
+}
