@@ -1323,15 +1323,28 @@ impl Index {
                 &view,
                 protect,
             )?;
-            if expected.is_empty() {
-                continue;
-            }
             let mut directory = pref.clone();
             directory.push(b'/');
             let start = self.entries.partition_point(|e| e.path < directory);
             let end =
                 start + self.entries[start..].partition_point(|e| e.path.starts_with(&directory));
             let rows = &self.entries[start..end];
+            if expected.is_empty() {
+                if try_collapse_directory_of_sparse_placeholders(
+                    odb,
+                    &directory,
+                    rows,
+                    &subtree_oid,
+                )? {
+                    collapsed.insert(directory.clone(), subtree_oid);
+                    if let Ok(p) = std::str::from_utf8(&directory) {
+                        self.invalidate_untracked_cache_for_path(p);
+                    }
+                    self.invalidate_cache_tree_for_path(&directory);
+                    self.touch_fsmonitor_after_entry_change();
+                }
+                continue;
+            }
             if rows.iter().any(|e| e.stage() != 0) {
                 continue;
             }
@@ -3789,6 +3802,45 @@ impl PrefixTreeResolver {
         self.resolved.insert(prefix.to_vec(), found);
         Ok(found)
     }
+}
+
+/// When every stage-0 row under `directory` is a sparse-directory placeholder whose OID
+/// matches the corresponding `HEAD` tree entry, the directory can collapse to one placeholder.
+fn try_collapse_directory_of_sparse_placeholders(
+    odb: &Odb,
+    directory: &[u8],
+    rows: &[IndexEntry],
+    head_subtree: &ObjectId,
+) -> Result<bool> {
+    if rows.is_empty() || rows.iter().any(|e| e.stage() != 0) {
+        return Ok(false);
+    }
+    if !rows.iter().all(|e| e.is_sparse_directory_placeholder()) {
+        return Ok(false);
+    }
+    let obj = odb.read(head_subtree)?;
+    if obj.kind != crate::objects::ObjectKind::Tree {
+        return Ok(false);
+    }
+    let tree_entries = crate::objects::parse_tree(&obj.data)?;
+    if tree_entries.len() != rows.len() {
+        return Ok(false);
+    }
+    for te in &tree_entries {
+        if te.mode != MODE_TREE {
+            return Ok(false);
+        }
+        let mut path = directory.to_vec();
+        path.extend_from_slice(&te.name);
+        path.push(b'/');
+        let Some(row) = rows.iter().find(|e| e.path == path) else {
+            return Ok(false);
+        };
+        if row.oid != te.oid || !row.skip_worktree() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Build the list of blob index entries under `prefix` that match `HEAD` at `tree_oid`,
