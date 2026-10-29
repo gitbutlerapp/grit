@@ -9,6 +9,69 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds. The daily census behind the [Performance overview](performance-overview.md) measures the shipped **`dist`** build since 2026-10-28; see [Benchmarking](benchmarking.md#grit-bench-daily-factory-census) for what that switch did to every baseline.
 
+## Clean status: tracked files leave the untracked walk early (2026-10-29)
+
+Most entries in a work-tree directory are tracked files, and the untracked walk has nothing to report for them. It still copied each name, built the file's path, looked it up in a hash set of every index path, and sorted the whole listing. That set took one insert per entry and was built serially before the walk could start. The walk also opened every directory's `.gitignore` as it entered the directory. On `status/clean@synth-10k` the walk used about 6 ms of CPU across four threads, where Git's single-threaded walk uses about 2.3 ms.
+
+Three changes in `grit-lib`:
+
+- Each directory's names are matched against that directory's run of the sorted index while it is read. Tracked files are dropped immediately, and only the remaining entries are kept and sorted. Exact-case tracked lookups binary-search the sorted index instead of building the set.
+- A directory's `.gitignore` is read on the first ignore check for a path inside it. As in Git, a directory whose entries are all tracked never opens it. Results do not change, because ignore checks already loaded missing parent rules on demand.
+- The worktree diff no longer allocates a slot per index entry for stat-refresh content checks when no entry needs one. On 10k entries that was about 400 KB written on the serial path.
+
+On `synth-10k` the untracked walk dropped from about 2.1 ms to 1.3 ms of wall time (6.0 ms to 3.6 ms of CPU), and the stat-refresh step dropped from 0.16 ms to 0.05 ms.
+
+The status rows below come from `grit-bench daily` (20 runs, 5 warmups) on `dist` builds, measured against the system `git` in the same sitting. The setup was a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0, and "base" is `e6e6f6c21`. Reports: `daily-perf-5414-status-before.json` → `daily-perf-5414-status-after.json`.
+
+| Scenario | git ms / MB | dist base | dist + change |
+| --- | ---: | ---: | ---: |
+| `status/clean@synth-10k` | 7.22 / 9.2 | 8.83 / 16.2 | **7.74** / 15.3 |
+| `status/dirty@synth-10k` | 11.40 / 9.4 | 9.57 / 17.8 | **8.39** / 18.4 |
+| `status/renamed@synth-10k` | 7.03 / 9.4 | 8.85 / 18.9 | **7.12** / 15.4 |
+| `status/clean@synth-100k` | 68.20 / 29.0 | 67.04 / 34.0 | **50.33** / 34.1 |
+| `status/dirty@synth-100k` | 99.31 / 29.0 | 61.69 / 39.1 | **50.47** / 37.7 |
+| `status/paths@synth-100k` | 44.51 / 29.0 | 47.86 / 39.3 | **42.21** / 37.8 |
+| `status/clean@deep-tree` | 1103.34 / 38.7 | 534.49 / 40.9 | **375.27** / 41.1 |
+| `status/dirty@deep-tree` | 1191.14 / 39.5 | 586.60 / 52.6 | **423.87** / 51.6 |
+| `status/clean@small` | 1.84 / 7.2 | 3.03 / 13.9 | 3.08 / 14.8 |
+| `status/dirty@small` | 1.84 / 7.2 | 3.01 / 14.4 | 3.04 / 14.8 |
+
+The `small` rows (100 files) are within noise: five alternating hyperfine rounds of 150 runs put base and change at 2.59 and 2.53 ms on `dist` (12.5 and 12.4 MB). For the headline row, five alternating rounds of 120 runs (median of medians) give:
+
+| `status/clean@synth-10k` | ms | peak RSS MB |
+| --- | ---: | ---: |
+| git | 6.67 | 7.0 |
+| `dist` base → change | 7.86 → **6.71** | 14.0 → 13.9 |
+| `release` base → change | 8.06 → **7.26** | 18.4 → 18.1 |
+
+The memory gap is the binary, not data. At exit, a `release` status on `synth-10k` holds about 1.6 MB of anonymous memory and about 16.7 MB of file-backed pages, most of them instruction pages mapped by 64 KB fault-around (see [`show` HEAD is startup-bound](#show-head-is-startup-bound-2026-10-28)).
+
+Commands that share the walk or the worktree diff, from `daily-perf-5414-related-before.json` → `daily-perf-5414-related-after.json` (15 runs each):
+
+| Scenario | git ms | dist base | dist + change |
+| --- | ---: | ---: | ---: |
+| `clean/untracked@synth-10k` | 4.39 | 5.61 | **5.07** |
+| `clean/only-ignored@synth-10k` | 4.26 | 5.50 | **4.89** |
+| `commit/small@synth-10k` | 27.32 | 18.89 | **17.37** |
+| `add/all@synth-100k` | 145.23 | 654.97 | **615.87** |
+| `add/update@synth-100k` | 99.08 | 90.27 | 89.41 |
+| `stash/push-pop@synth-10k` | 204.66 | 126.23 | 126.43 |
+| `diff/worktree@synth-100k` | 117.32 | 92.55 | 93.31 |
+
+Five single-sitting rows in that report read 4–11% slower: `add/dry-run`, `add/modified` and `commit/dry-run` on `synth-10k`, `diff/worktree@synth-10k`, and `commit/small@small`. Alternating hyperfine rounds on the same fixtures show no regression:
+
+- `add --dry-run`: 7.66 → 6.94 ms.
+- `commit --dry-run`: 24.47 → 23.85 ms.
+- `diff`: 6.95 → 6.89 ms.
+- Staging the modified files: 9.97 → 9.88 ms.
+- `commit` on `small`, with base and change taking turns going first: 21.81 → 21.51 ms.
+
+```bash
+cargo build --profile dist -p grit-cli
+./target/release/grit-bench daily --only status/clean@synth-10k,status/dirty@synth-10k,status/renamed@synth-10k,status/clean@synth-100k,status/dirty@synth-100k,status/paths@synth-100k,status/clean@deep-tree,status/dirty@deep-tree,status/clean@small,status/dirty@small \
+  --min-runs 20 --warmup 5 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-perf-5414-status-after.json
+```
+
 ## `show` HEAD is startup-bound (2026-10-28)
 
 Tree diffs now walk entries borrowed from the raw tree payload instead of parsing each tree into owned entries. The ODB session cache keeps either form under one byte budget, so `show` on a one-file commit in git.git's 530-entry root tree makes 4,232 allocations instead of 5,304, with a 403 KB heap peak instead of 463 KB.
