@@ -530,6 +530,12 @@ mod tests {
 
     #[test]
     fn push_update_batch_build_scales_linearly() {
+        if cfg!(debug_assertions) {
+            // Wall-clock ratios are too noisy in unoptimized builds; release-only
+            // `push_update_100k_build_under_one_second` covers large batches.
+            push_unique_updates(100);
+            return;
+        }
         let small = push_unique_updates(2_000);
         let large = push_unique_updates(8_000);
         let ratio = large.as_secs_f64() / small.as_secs_f64().max(1e-9);
