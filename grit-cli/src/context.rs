@@ -1,6 +1,6 @@
 //! Shared repository helpers used across `grit` commands.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use grit_lib::change_id::resolved_change_id;
 use grit_lib::command_runner::hooks::HookStdio;
 use grit_lib::config::environment::Environment;
@@ -9,7 +9,7 @@ use grit_lib::config::ident_resolve::{
 };
 use grit_lib::config::ConfigSet;
 use grit_lib::ident::Signature;
-use grit_lib::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
+use grit_lib::objects::{parse_commit, CommitData, ObjectId};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::Repository;
 use std::path::PathBuf;
@@ -241,14 +241,9 @@ pub fn commit_tree(repo: &Repository, oid: &ObjectId) -> Result<ObjectId> {
 
 /// Read and parse a commit object.
 pub fn read_commit(repo: &Repository, oid: &ObjectId) -> Result<CommitData> {
-    let object = repo
-        .odb()
-        .read(oid)
-        .with_context(|| format!("could not read commit {oid}"))?;
-    if object.kind != ObjectKind::Commit {
-        bail!("object {oid} is a {}, not a commit", object.kind);
-    }
-    parse_commit(&object.data).with_context(|| format!("could not parse commit {oid}"))
+    repo.odb()
+        .read_commit(oid)
+        .with_context(|| format!("could not read commit {oid}"))
 }
 
 /// The first non-blank line of a commit message.
