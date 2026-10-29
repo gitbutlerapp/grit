@@ -263,6 +263,51 @@ fn rebase_continue_finishes_and_moves_refs() -> TestResult {
 }
 
 #[test]
+fn rebase_commit_then_continue_replays_remainder() -> TestResult {
+    let scratch = Scratch::new("commit-continue")?;
+    let dir = scratch.path();
+    git(dir, &["init", "-b", "main"])?;
+    fs::write(dir.join("f"), "1\n2\n3\n")?;
+    fs::write(dir.join("g"), "x\n")?;
+    git(dir, &["add", "f", "g"])?;
+    git(dir, &["commit", "-m", "base"])?;
+    git(dir, &["checkout", "-b", "o"])?;
+    fs::write(dir.join("f"), "1\nO\n3\n")?;
+    git(dir, &["add", "f"])?;
+    git(dir, &["commit", "-m", "o1"])?;
+    fs::write(dir.join("g"), "y\n")?;
+    git(dir, &["add", "g"])?;
+    git(dir, &["commit", "-m", "o2"])?;
+    git(dir, &["checkout", "main"])?;
+    fs::write(dir.join("f"), "1\nM\n3\n")?;
+    git(dir, &["add", "f"])?;
+    git(dir, &["commit", "-m", "m"])?;
+    git(dir, &["checkout", "o"])?;
+    let out = gs(dir, ["rebase", "main"])?;
+    assert_eq!(out.status, Some(1), "{}\n{}", out.stdout, out.stderr);
+    fs::write(dir.join("f"), "1\nR\n3\n")?;
+    let commit = gs(dir, ["commit", "-m", "resolved o1"])?;
+    assert_eq!(
+        commit.status,
+        Some(0),
+        "{}\n{}",
+        commit.stdout,
+        commit.stderr
+    );
+    let cont = gs(dir, ["rebase", "--continue"])?;
+    assert_eq!(cont.status, Some(0), "{}\n{}", cont.stdout, cont.stderr);
+    assert_eq!(fs::read_to_string(dir.join("f"))?, "1\nR\n3\n");
+    assert_eq!(git(dir, &["show", "HEAD:g"])?, "y\n");
+    assert_eq!(
+        git(dir, &["log", "-1", "--format=%s", "HEAD~1"])?.trim(),
+        "resolved o1"
+    );
+    assert!(!dir.join(".git/rebase-merge").exists());
+    git(dir, &["fsck", "--strict"])?;
+    Ok(())
+}
+
+#[test]
 fn rebase_skip_json() -> TestResult {
     let scratch = Scratch::new("skip")?;
     let dir = scratch.path();

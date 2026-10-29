@@ -6,16 +6,20 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::change_id::logical_change_id_for_commit;
 use crate::hooks::{
     run_post_checkout, run_post_rewrite, HookName, PostOperationHooks, RewriteKind,
 };
 use crate::lockfile::{LockFile, LockWait};
+use crate::merge_base::is_ancestor;
 use crate::objects::ObjectId;
 use crate::operation::conflicts_from_tree_merge;
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::merge::apply_conflict_merge_worktree;
 use crate::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use crate::porcelain::worktree_guard::ensure_safe_for_rebase_stop;
+use crate::porcelain::worktree_guard::{
+    ensure_safe_for_rebase_stop, ensure_worktree_clean_for_rebase_exec,
+};
 use crate::progress::{
     poll_cancel, Cancel, NeverCancel, NullProgress, ProgressSink, UncancellableProgress,
 };
@@ -140,6 +144,16 @@ pub enum RebaseSessionError {
     #[error("nothing to commit after conflict resolution")]
     NothingToCommit,
 
+    /// `HEAD` is not the recorded conflict parent and is not a descendant of it, so grit
+    /// cannot tell which commit finished the stopped pick.
+    #[error(
+        "HEAD moved away from the conflict resolution parent (expected {expected}); save commits on a branch or reset before `grit rebase --continue`"
+    )]
+    ResolutionHeadChanged {
+        /// Detached replay parent written when the rebase stopped.
+        expected: ObjectId,
+    },
+
     /// Branch rebase requires a symbolic `HEAD`.
     #[error("rebase session requires HEAD on a branch")]
     NotOnBranch,
@@ -197,6 +211,7 @@ impl RebaseSessionError {
             | Self::ForeignRebaseInProgress
             | Self::UnmergedPaths
             | Self::NothingToCommit
+            | Self::ResolutionHeadChanged { .. }
             | Self::NotOnBranch
             | Self::ExecHeadChanged { .. }
             | Self::StaleExecPlan { .. }
@@ -406,6 +421,63 @@ fn up_to_date_outcome(head: ObjectId) -> RebaseOutcome {
     }
 }
 
+fn stopped_head_for_continue(
+    state: &LoadedState,
+    repo: &Repository,
+) -> Result<ObjectId, RebaseSessionError> {
+    if let Some(oid) = state.stopped_head {
+        return Ok(oid);
+    }
+    let head = resolve_head_oid(repo)?;
+    if head == state.onto || state.mapping.values().any(|mapped| *mapped == head) {
+        return Ok(head);
+    }
+    Err(RebaseSessionError::NoRebaseInProgress)
+}
+
+fn advance_after_user_resolution_commit(
+    repo: &Repository,
+    state: &LoadedState,
+    opts: &StartRebaseOptions,
+    current: ObjectId,
+    head_oid: ObjectId,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+) -> Result<RebaseOutcome, RebaseSessionError> {
+    let current_data = load_commit(repo, current)?;
+    let mut mapping = state.mapping.clone();
+    mapping.insert(current, head_oid);
+    let mut rewritten = state.rewritten.clone();
+    rewritten.push(RewrittenCommit {
+        old: current,
+        new: Some(head_oid),
+        change_id: logical_change_id_for_commit(repo, head_oid).map_err(map_lib)?,
+        subject: super::subject::subject_for_rewrite_row(repo, &current_data, Some(head_oid))
+            .map_err(RebaseSessionError::from)?,
+        reused: false,
+    });
+    let rewrite = replan_rewrite_options(state);
+    let outcome = plan_rewrite_with_order_resumable_seeded(
+        repo,
+        &state.edits,
+        &rewrite,
+        Some(&state.replay_order),
+        state.flatten_leaf_merges.then_some(state.onto),
+        state.rebase.favor,
+        Some((mapping, rewritten)),
+        Some(state.scoped_refs.clone()),
+    )?;
+    advance_after_plan(
+        repo,
+        state,
+        &opts.apply,
+        outcome,
+        head_oid,
+        progress,
+        cancel,
+    )
+}
+
 /// Finish the current conflicted commit and replay remaining commits.
 ///
 /// For an exec stop, requires a clean index/worktree at the recorded replay HEAD,
@@ -452,7 +524,19 @@ pub fn continue_rebase(
     let head_oid = resolve_head_oid(repo)?;
     let head_tree = commit_tree(repo, head_oid)?;
     if new_tree == head_tree {
-        return Err(RebaseSessionError::NothingToCommit);
+        let stopped_head = stopped_head_for_continue(&state, repo)?;
+        if head_oid == stopped_head {
+            return Err(RebaseSessionError::NothingToCommit);
+        }
+        if is_ancestor(repo, stopped_head, head_oid).map_err(map_lib)? && head_oid != stopped_head {
+            ensure_worktree_clean_for_rebase_exec(repo).map_err(map_lib)?;
+            return advance_after_user_resolution_commit(
+                repo, &state, opts, current, head_oid, progress, cancel,
+            );
+        }
+        return Err(RebaseSessionError::ResolutionHeadChanged {
+            expected: stopped_head,
+        });
     }
 
     let original_parents = commit_parents(repo, current).map_err(RebaseSessionError::from)?;
@@ -704,6 +788,9 @@ struct PersistedRebaseState {
     branch_tip: String,
     flatten_leaf_merges: bool,
     scoped_refs: Vec<(String, String)>,
+    /// Detached `HEAD` at the conflict stop (`conflict.replayed_parent`).
+    #[serde(default)]
+    stopped_head: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -901,6 +988,7 @@ fn state_from_partial(
             .iter()
             .map(|(n, o)| (n.clone(), oid_hex(o)))
             .collect(),
+        stopped_head: None,
     }
 }
 
@@ -919,6 +1007,7 @@ struct LoadedState {
     branch_tip: ObjectId,
     flatten_leaf_merges: bool,
     scoped_refs: Vec<(String, ObjectId)>,
+    stopped_head: Option<ObjectId>,
 }
 
 fn load_persisted_state(git_dir: &Path) -> Result<LoadedState, RebaseSessionError> {
@@ -971,6 +1060,7 @@ fn load_persisted_state(git_dir: &Path) -> Result<LoadedState, RebaseSessionErro
             .iter()
             .map(|(name, hex)| parse_oid(hex).map(|oid| (name.clone(), oid)))
             .collect::<Result<_, _>>()?,
+        stopped_head: parsed.stopped_head.as_deref().map(parse_oid).transpose()?,
     })
 }
 
@@ -1005,7 +1095,7 @@ fn install_stopped_rebase(
     poll_cancel(progress, cancel).map_err(map_lib)?;
     let effective_onto = request.onto.unwrap_or(request.upstream);
     let fork = super::rebase::rebase_fork(repo, request.upstream, request.branch_tip)?;
-    let persisted = state_from_partial(
+    let mut persisted = state_from_partial(
         &partial,
         head_ref,
         orig_head,
@@ -1016,6 +1106,7 @@ fn install_stopped_rebase(
         fork,
     );
     let conflict = partial.conflict;
+    persisted.stopped_head = Some(oid_hex(&conflict.replayed_parent));
     let done = persisted
         .done
         .iter()

@@ -36,7 +36,7 @@ A commit whose patch is already upstream (for example one you cherry-picked from
 
 When `<upstream>` is omitted, grit uses `@{upstream}` of the current branch. If no upstream is configured, the command fails with a hint to run [`grit branch -u`](branch.md).
 
-When replay stops on conflicts, grit writes Git-compatible `.git/rebase-merge/` state (including `grit-plan`), leaves conflict markers in the worktree, and exits **1**. As with [`grit pick`](pick.md) (and `git rebase`), the incoming `>>>>>>>` marker names the commit being replayed as `<abbrev> (<subject>)`, so each stop shows which commit it came from; the current side is `HEAD`. The branch tip recorded in `orig-head` is unchanged until you `--continue`, `--skip`, or `--abort`. Resume with the same conflict model as [`grit pick`](pick.md) and [`grit revert`](revert.md): inspect (`grit diff`), resolve, stage (`grit add`), then `grit rebase --continue`, or use `--skip` / `--abort`. [`grit pull --rebase`](pull.md) stops the same way.
+When replay stops on conflicts, grit writes Git-compatible `.git/rebase-merge/` state (including `grit-plan`), leaves conflict markers in the worktree, and exits **1**. As with [`grit pick`](pick.md) (and `git rebase`), the incoming `>>>>>>>` marker names the commit being replayed as `<abbrev> (<subject>)`, so each stop shows which commit it came from; the current side is `HEAD`. The branch tip recorded in `orig-head` is unchanged until you `--continue`, `--skip`, or `--abort`. Resume with the same conflict model as [`grit pick`](pick.md) and [`grit revert`](revert.md): inspect (`grit diff`), resolve, then either stage and `grit rebase --continue` (`grit add` + `--continue`) or record the resolution with [`grit commit`](commit.md) (auto-staging applies) and run `grit rebase --continue` to replay only the remaining commits. Use `--skip` / `--abort` to drop the stopped pick or restore the branch. [`grit pull --rebase`](pull.md) stops the same way.
 
 When the replayed range contains merge commits (the default, unlike `git pull --rebase`), grit keeps merge topology like `git rebase --rebase-merges`: the first-parent chain from your branch tip is replayed onto the new base, side branches merged in stay on their own parentage until mapping moves them, and resolving a conflict on a merge commit with `--continue` keeps every parent (the current `HEAD` as the first parent, mapped originals for the rest). Merged-in files and refs on side branches are not dropped silently.
 
@@ -231,7 +231,7 @@ Pass `--json` on `grit rebase` or `grit history rebase`:
 
 For completed results, `head.old` is the OID immediately before this command and `head.new` is the final OID. On `--continue` and `--skip`, this compares the stopped, detached `HEAD` with the completed branch tip after reattachment. `refs` and `rewritten` still describe the whole rebase, so their old OIDs can differ from `head.old`. Skipping the final conflicting commit can reattach `HEAD` without changing its OID; then `head` is `null`.
 
-After resolving and staging a conflict, `grit rebase --continue --json` reports:
+After resolving a conflict (with `grit add` or `grit commit`), `grit rebase --continue --json` reports:
 
 ```json
 {

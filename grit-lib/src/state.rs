@@ -606,6 +606,25 @@ fn grit_rebase_plan_active(rebase_merge: &Path) -> bool {
     rebase_merge.join("grit-plan").is_file() || rebase_merge.join("grit-exec").is_file()
 }
 
+/// True when grit stopped a resumable rebase on replay conflicts (`stopped-sha` is set).
+pub(crate) fn grit_rebase_conflict_stop_active(git_dir: &Path) -> bool {
+    let merge = git_dir.join("rebase-merge");
+    merge.is_dir() && merge.join("grit-plan").is_file() && merge.join("stopped-sha").is_file()
+}
+
+/// Source commit being replayed when [`grit_rebase_conflict_stop_active`] is true.
+pub(crate) fn read_grit_rebase_stopped_source(
+    git_dir: &Path,
+) -> crate::error::Result<Option<ObjectId>> {
+    if !grit_rebase_conflict_stop_active(git_dir) {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(git_dir.join("rebase-merge/stopped-sha"))?;
+    let oid =
+        ObjectId::from_hex(raw.trim()).map_err(|e| crate::error::Error::Message(e.to_string()))?;
+    Ok(Some(oid))
+}
+
 /// Detect in-progress operations by checking for sentinel files.
 ///
 /// # Parameters

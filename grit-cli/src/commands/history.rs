@@ -1551,6 +1551,10 @@ fn map_rebase_session_error(repo: &Repository, err: RebaseSessionError) -> anyho
         RebaseSessionError::NothingToCommit => {
             anyhow::anyhow!("nothing to commit after conflict resolution")
         }
+        RebaseSessionError::ResolutionHeadChanged { expected } => anyhow::anyhow!(
+            "HEAD moved away from the conflict resolution parent (expected {}); save commits on a branch or reset before `grit rebase --continue`",
+            short(&expected.to_hex())
+        ),
         RebaseSessionError::NotOnBranch => {
             anyhow::anyhow!("rebase session requires HEAD on a branch")
         }

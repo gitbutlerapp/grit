@@ -53,7 +53,8 @@ use crate::signing::{
     extra_headers_without_commit_signatures, should_sign_commit, sign_serialized_commit, GpgConfig,
 };
 use crate::state::{
-    finish_merge_state, read_cherry_pick_head, read_merge_heads, read_merge_msg, read_revert_head,
+    finish_merge_state, grit_rebase_conflict_stop_active, read_cherry_pick_head,
+    read_grit_rebase_stopped_source, read_merge_heads, read_merge_msg, read_revert_head,
     resolve_head_for_repository, HeadState, InProgressOperation,
 };
 use crate::stripspace::{process, Mode};
@@ -400,6 +401,17 @@ pub fn pending_commit_message(repo: &Repository) -> Result<Option<String>> {
         return read_merge_msg(git_dir);
     }
     if read_cherry_pick_head(git_dir)?.is_some() || read_revert_head(git_dir)?.is_some() {
+        let Some(raw) = read_merge_msg(git_dir)? else {
+            return Ok(None);
+        };
+        let processed = process(raw.as_bytes(), &Mode::StripComments("#".to_owned()));
+        let message = String::from_utf8(processed).map_err(|_| Error::EmptyCommitMessage)?;
+        if message.trim().is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(message));
+    }
+    if grit_rebase_conflict_stop_active(git_dir) {
         let Some(raw) = read_merge_msg(git_dir)? else {
             return Ok(None);
         };
@@ -1300,6 +1312,15 @@ fn resolve_author_for_commit(
                 now,
             )?);
         }
+        if let Some(stopped) = read_grit_rebase_stopped_source(repo.git_dir())? {
+            let stopped_commit = repo.odb().read_commit(&stopped)?;
+            return Ok(prepare_commit_author_from_parent(
+                &stopped_commit.author,
+                &stopped_commit.author_raw,
+                req.author_date.as_deref(),
+                now,
+            )?);
+        }
     }
     if req_amend {
         let author = amend_author.unwrap_or_default();
@@ -1617,6 +1638,11 @@ fn create_commit_with_index(
                     set_change_id(&mut commit_data, &ChangeId::derived_from_commit_id(&tip));
                 }
             }
+        } else if let Some(stopped) = read_grit_rebase_stopped_source(repo.git_dir())? {
+            let template = repo.odb().read_commit(&stopped)?;
+            let id =
+                change_id(&template).unwrap_or_else(|| ChangeId::derived_from_commit_id(&stopped));
+            set_change_id(&mut commit_data, &id);
         } else {
             stamp_change_id_on_new_commit(repo, &policy, &mut commit_data)?;
         }

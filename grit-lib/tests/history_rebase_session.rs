@@ -289,6 +289,115 @@ fn rebase_session_conflict_stop_continue_and_abort() {
 }
 
 #[test]
+fn continue_after_commit_during_rebase_conflict() {
+    use grit_lib::change_id::change_id;
+    use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "f", "1\n2\n3\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "o"]);
+    commit_file(wt, "f", "1\nO\n3\n", "o1");
+    let o1 = git_oid(wt, "HEAD");
+    let o1_author = git(wt, &["log", "-1", "--format=%an <%ae>", &o1.to_hex()]);
+    let o1_change_id = change_id(&open_grit(wt).odb().read_commit(&o1).expect("o1 commit"));
+    std::fs::write(wt.join("g"), "y\n").expect("g");
+    git(wt, &["add", "g"]);
+    git(wt, &["commit", "-qm", "o2"]);
+    let tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "f", "1\nM\n3\n", "m");
+    let onto = git_oid(wt, "HEAD");
+
+    let grit = open_grit(wt);
+    git(wt, &["switch", "o"]);
+    let orig_tip = git_oid(wt, "o");
+    let out = start_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("start conflict");
+    assert!(matches!(out, RebaseOutcome::Stopped(_)));
+
+    std::fs::write(wt.join("f"), "1\nR\n3\n").expect("resolve");
+    commit_with_scope(
+        &grit,
+        &CommitRequest {
+            message: "resolved o1\n".into(),
+            committer: Some(IDENT.parse().expect("IDENT")),
+            ..Default::default()
+        },
+        CommitScope::AutoStage,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("commit resolution");
+
+    let done = continue_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("continue after commit");
+    assert!(matches!(done, RebaseOutcome::Done { .. }));
+    assert!(!grit.git_dir().join("rebase-merge").exists());
+    assert_ne!(git_oid(wt, "o"), orig_tip);
+    assert_eq!(git(wt, &["show", "HEAD:f"]), "1\nR\n3\n");
+    assert_eq!(git(wt, &["show", "HEAD:g"]), "y\n");
+    assert_eq!(
+        git(wt, &["log", "-1", "--format=%s", "HEAD~1"]).trim(),
+        "resolved o1"
+    );
+    assert_eq!(
+        git(wt, &["log", "-1", "--format=%an <%ae>", "HEAD~1"]).trim(),
+        o1_author.trim()
+    );
+    if let Some(expected_id) = o1_change_id {
+        let resolved = git_oid(wt, "HEAD~1");
+        let resolved_id = change_id(&grit.odb().read_commit(&resolved).expect("resolved commit"));
+        assert_eq!(resolved_id, Some(expected_id));
+    }
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn continue_nothing_to_commit_when_index_matches_stop_head() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "f.txt", "base\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "topic"]);
+    commit_file(wt, "f.txt", "topic change\n", "topic commit");
+    let tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "f.txt", "main change\n", "main commit");
+    let onto = git_oid(wt, "HEAD");
+    let grit = open_grit(wt);
+    git(wt, &["switch", "topic"]);
+    let _ = start_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("stop");
+    git(wt, &["reset", "--mixed", "HEAD"]);
+    let err = continue_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("empty resolution continue");
+    assert!(matches!(err, RebaseSessionError::NothingToCommit));
+    assert!(grit.git_dir().join("rebase-merge/grit-plan").is_file());
+}
+
+#[test]
 fn skip_drops_conflicting_commit() {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
