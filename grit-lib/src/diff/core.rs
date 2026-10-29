@@ -3834,6 +3834,25 @@ fn diff_index_to_tree_flatten(
             continue;
         }
         if ie.stage() == 0 && ie.is_sparse_directory_placeholder() {
+            let dir = path.strip_suffix('/').unwrap_or(path.as_str());
+            if let Some(head_root) = tree_oid {
+                if let Some(head_sub) = subtree_oid_at_path(odb, head_root, dir)? {
+                    if head_sub == ie.oid {
+                        continue;
+                    }
+                    let head_flat = flatten_tree(odb, &head_sub, dir)?;
+                    let index_flat = flatten_tree(odb, &ie.oid, dir)?;
+                    diff_flattened_subtrees(
+                        &head_flat,
+                        &index_flat,
+                        ignore_submodules,
+                        &mut result,
+                        &mut stage0_paths,
+                        &mut tree_map,
+                    );
+                    continue;
+                }
+            }
             let _ = tree_map.remove(path.as_str());
             continue;
         }
@@ -4142,10 +4161,29 @@ fn diff_index_tree_at(
     if !dir_prefix.is_empty() {
         let mut path = dir_prefix.to_vec();
         path.push(b'/');
-        if let Some(entry) = walk.index.entries.get(*walk.idx_cursor).filter(|entry| {
-            entry.path == path && entry.is_sparse_directory_placeholder() && entry.oid == *tree_oid
-        }) {
-            let _ = entry;
+        if let Some(entry) = walk
+            .index
+            .entries
+            .get(*walk.idx_cursor)
+            .filter(|entry| entry.path == path && entry.is_sparse_directory_placeholder())
+        {
+            if entry.oid == *tree_oid {
+                *walk.idx_cursor += 1;
+                return Ok(());
+            }
+            let dir = String::from_utf8_lossy(dir_prefix);
+            let head_flat = flatten_tree(walk.odb, tree_oid, dir.as_ref())?;
+            let index_flat = flatten_tree(walk.odb, &entry.oid, dir.as_ref())?;
+            let mut stage0_paths = std::collections::BTreeSet::new();
+            let mut tree_map = std::collections::BTreeMap::new();
+            diff_flattened_subtrees(
+                &head_flat,
+                &index_flat,
+                walk.ignore_submodules,
+                walk.result,
+                &mut stage0_paths,
+                &mut tree_map,
+            );
             *walk.idx_cursor += 1;
             return Ok(());
         }
@@ -11865,6 +11903,88 @@ fn sparse_index_skips_tree_descent(index: &Index, dir_path: &str, tree_oid: &Obj
         let entry = &index.entries[pos];
         entry.is_sparse_directory_placeholder() && entry.oid == *tree_oid
     })
+}
+
+/// Tree OID at `path` (slash-separated, no trailing slash) under `root`, if every component is a tree.
+fn subtree_oid_at_path(odb: &Odb, root: &ObjectId, path: &str) -> Result<Option<ObjectId>> {
+    let mut oid = *root;
+    for component in path.split('/').filter(|c| !c.is_empty()) {
+        let entries = read_tree(odb, &oid)?;
+        let Some(entry) = entries
+            .iter()
+            .find(|e| e.name.as_slice() == component.as_bytes())
+        else {
+            return Ok(None);
+        };
+        if !is_tree_mode(entry.mode) {
+            return Ok(None);
+        }
+        oid = entry.oid;
+    }
+    Ok(Some(oid))
+}
+
+/// Compare two flattened subtrees and append staged diff entries.
+fn diff_flattened_subtrees(
+    head: &[FlatEntry],
+    index: &[FlatEntry],
+    ignore_submodules: bool,
+    result: &mut Vec<DiffEntry>,
+    stage0_paths: &mut std::collections::BTreeSet<String>,
+    tree_map: &mut std::collections::BTreeMap<&str, &FlatEntry>,
+) {
+    let mut head_map: std::collections::BTreeMap<&str, &FlatEntry> = head
+        .iter()
+        .map(|entry| (entry.path.as_str(), entry))
+        .collect();
+    for entry in index {
+        stage0_paths.insert(entry.path.clone());
+        tree_map.remove(entry.path.as_str());
+        match head_map.remove(entry.path.as_str()) {
+            Some(te) => {
+                if te.oid != entry.oid || te.mode != entry.mode {
+                    result.push(DiffEntry {
+                        status: DiffStatus::for_content_change(te.mode, entry.mode),
+                        old_path: Some(entry.path.clone()),
+                        new_path: Some(entry.path.clone()),
+                        old_mode: FileMode::new(te.mode),
+                        new_mode: FileMode::new(entry.mode),
+                        old_oid: te.oid,
+                        new_oid: entry.oid,
+                        score: None,
+                    });
+                }
+            }
+            None => {
+                result.push(DiffEntry {
+                    status: DiffStatus::Added,
+                    old_path: None,
+                    new_path: Some(entry.path.clone()),
+                    old_mode: FileMode::ABSENT,
+                    new_mode: FileMode::new(entry.mode),
+                    old_oid: zero_oid(),
+                    new_oid: entry.oid,
+                    score: None,
+                });
+            }
+        }
+    }
+    for (path, te) in head_map {
+        if ignore_submodules && te.mode == 0o160000 {
+            continue;
+        }
+        tree_map.remove(path);
+        result.push(DiffEntry {
+            status: DiffStatus::Deleted,
+            old_path: Some(path.to_owned()),
+            new_path: None,
+            old_mode: FileMode::new(te.mode),
+            new_mode: FileMode::ABSENT,
+            old_oid: te.oid,
+            new_oid: zero_oid(),
+            score: None,
+        });
+    }
 }
 
 fn flatten_tree_with_index(
