@@ -11,11 +11,8 @@ use crate::commit::signing::extra_headers_without_commit_signatures;
 use crate::commit_encoding::identity_raw_for_serialized_commit;
 use crate::error::Error;
 use crate::merge_base::is_ancestor;
-use crate::merge_file::{ConflictStyle, MergeFavor};
-use crate::merge_trees::{
-    merge_trees_three_way, DirectoryRenameMode, ReplayConflictLabels, TreeMergeOutput,
-    WhitespaceMergeOptions,
-};
+use crate::merge_file::MergeFavor;
+use crate::merge_trees::{ReplayConflictLabels, TreeMergeOutput};
 use crate::objects::{serialize_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
 use crate::porcelain::commit::prepare_commit_bytes;
 use crate::repo::Repository;
@@ -24,6 +21,7 @@ use crate::state::resolve_head_for_repository;
 use crate::worktree::{find_worktree_with_branch_checked_out, worktree_admin_dir};
 
 use super::error::HistoryError;
+use super::replay_merge_session::ReplayMergeSession;
 use super::subject::{
     commit_message_subject_line, replay_conflict_labels, subject_for_rewrite_row,
 };
@@ -32,10 +30,8 @@ use super::types::{
     RewritePlan, RewrittenCommit,
 };
 
-// hygiene: resumable replay control and merge-tree call counter (thread-local for parallel tests)
+// hygiene: resumable replay control (thread-local for parallel tests)
 thread_local! {
-    #[cfg(any(test, feature = "unstable-bench-helpers"))]
-    static MERGE_TREE_CALLS: Cell<usize> = const { Cell::new(0) };
     static RESUMABLE_REPLAY: Cell<bool> = const { Cell::new(false) };
     static REPLAY_STOP_PARENT: Cell<Option<ObjectId>> = const { Cell::new(None) };
     static REPLAY_STOP_COMMIT: Cell<Option<ObjectId>> = const { Cell::new(None) };
@@ -110,34 +106,6 @@ fn take_resumable_conflict() -> Option<PartialReplayConflict> {
         replayed_parent,
         merge,
     })
-}
-
-/// Test hook: number of three-way tree merges performed by planning.
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-#[doc(hidden)]
-#[must_use]
-pub fn test_merge_tree_call_count() -> usize {
-    #[cfg(any(test, feature = "unstable-bench-helpers"))]
-    {
-        MERGE_TREE_CALLS.with(|c| c.get())
-    }
-    #[cfg(not(any(test, feature = "unstable-bench-helpers")))]
-    {
-        0
-    }
-}
-
-/// Reset [`test_merge_tree_call_count`].
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-#[doc(hidden)]
-pub fn test_reset_merge_tree_call_count() {
-    #[cfg(any(test, feature = "unstable-bench-helpers"))]
-    MERGE_TREE_CALLS.with(|c| c.set(0));
-}
-
-fn record_merge_call() {
-    #[cfg(any(test, feature = "unstable-bench-helpers"))]
-    MERGE_TREE_CALLS.with(|c| c.set(c.get() + 1));
 }
 
 struct ChangeIdWriteContext {
@@ -400,6 +368,7 @@ fn plan_rewrite_with_order_impl(
     // Tip of the linear chain built so far when linearizing; every replay-order entry maps to
     // the tip as it stood once that entry was handled.
     let mut linear_tip = linearize_onto;
+    let mut replay_session = ReplayMergeSession::default();
 
     for &old_oid in &commits_to_replay {
         if skip_replayed.contains(&old_oid) {
@@ -494,7 +463,7 @@ fn plan_rewrite_with_order_impl(
             }
         }
 
-        let replay_step = || -> Result<(ObjectId, Option<ObjectId>), HistoryError> {
+        let mut replay_step = || -> Result<(ObjectId, Option<ObjectId>), HistoryError> {
             match edit {
                 None => {
                     let oid = replay_commit_descendant(
@@ -506,6 +475,7 @@ fn plan_rewrite_with_order_impl(
                         insert_parent,
                         merge_favor,
                         opts,
+                        &mut replay_session,
                     )?;
                     Ok((oid, Some(oid)))
                 }
@@ -519,6 +489,7 @@ fn plan_rewrite_with_order_impl(
                         insert_parent,
                         merge_favor,
                         opts,
+                        &mut replay_session,
                     )?;
                     Ok((oid, Some(oid)))
                 }
@@ -564,6 +535,7 @@ fn plan_rewrite_with_order_impl(
                             merge_favor,
                             opts,
                             Some(&parent_list),
+                            &mut replay_session,
                         )?
                     } else {
                         replay_edited_commit(
@@ -577,6 +549,7 @@ fn plan_rewrite_with_order_impl(
                             &old.message,
                             merge_favor,
                             opts,
+                            &mut replay_session,
                         )?
                     };
                     Ok((oid, Some(oid)))
@@ -634,6 +607,7 @@ fn plan_rewrite_with_order_impl(
                             message,
                             merge_favor,
                             opts,
+                            &mut replay_session,
                         )?
                     };
                     Ok((oid, Some(oid)))
@@ -749,6 +723,7 @@ pub fn plan_replay_linear_segment(
 
     let mut mapping: HashMap<ObjectId, ObjectId> = HashMap::new();
     let mut parent: Option<ObjectId> = parents_of_oldest.first().copied();
+    let mut replay_session = ReplayMergeSession::default();
 
     for &old_oid in replay_order {
         let old = load_commit(repo, old_oid)?;
@@ -764,6 +739,7 @@ pub fn plan_replay_linear_segment(
             &old.message,
             MergeFavor::default(),
             opts,
+            &mut replay_session,
         )?;
         mapping.insert(old_oid, new_oid);
         parent = Some(new_oid);
@@ -1076,6 +1052,7 @@ fn replay_commit_descendant(
     extra_parent: Option<ObjectId>,
     merge_favor: MergeFavor,
     opts: &RewriteOptions,
+    replay_session: &mut ReplayMergeSession,
 ) -> Result<ObjectId, HistoryError> {
     if old.parents.len() > 1 {
         return replay_merge_descendant(
@@ -1088,6 +1065,7 @@ fn replay_commit_descendant(
             merge_favor,
             opts,
             None,
+            replay_session,
         );
     }
     replay_descendant(
@@ -1099,6 +1077,7 @@ fn replay_commit_descendant(
         extra_parent,
         merge_favor,
         opts,
+        replay_session,
     )
 }
 
@@ -1120,6 +1099,7 @@ pub(crate) fn replay_commit_onto_mapping(
 ) -> Result<ObjectId, HistoryError> {
     let change_ids = ChangeIdWriteContext::from_repo(repo)?;
     let old = load_commit(repo, commit)?;
+    let mut replay_session = ReplayMergeSession::default();
     replay_commit_descendant(
         repo,
         &change_ids,
@@ -1129,6 +1109,7 @@ pub(crate) fn replay_commit_onto_mapping(
         None,
         MergeFavor::default(),
         opts,
+        &mut replay_session,
     )
 }
 
@@ -1176,6 +1157,7 @@ fn replay_descendant(
     extra_parent: Option<ObjectId>,
     merge_favor: MergeFavor,
     opts: &RewriteOptions,
+    replay_session: &mut ReplayMergeSession,
 ) -> Result<ObjectId, HistoryError> {
     let committer_line = opts.committer_line()?;
     let (_, new_parent) = replay_parent_pair(repo, old, mapping, extra_parent)?;
@@ -1190,6 +1172,7 @@ fn replay_descendant(
         &old.message,
         merge_favor,
         opts,
+        replay_session,
     )
 }
 
@@ -1204,12 +1187,20 @@ fn replay_merge_descendant(
     merge_favor: MergeFavor,
     opts: &RewriteOptions,
     parent_list_override: Option<&[ObjectId]>,
+    replay_session: &mut ReplayMergeSession,
 ) -> Result<ObjectId, HistoryError> {
     let committer_line = opts.committer_line()?;
     let parent_list = parent_list_override
         .map(<[_]>::to_vec)
         .unwrap_or_else(|| mapped_merge_parents(old, mapping, extra_parent));
-    let result_tree = replay_merge_tree(repo, old, old_oid, &parent_list, merge_favor)?;
+    let result_tree = replay_merge_tree(
+        repo,
+        old,
+        old_oid,
+        &parent_list,
+        merge_favor,
+        replay_session,
+    )?;
 
     let committer = if opts.preserve_committer {
         old.committer.as_str()
@@ -1364,6 +1355,7 @@ fn replay_merge_tree(
     old_oid: ObjectId,
     new_parents: &[ObjectId],
     merge_favor: MergeFavor,
+    replay_session: &mut ReplayMergeSession,
 ) -> Result<ObjectId, HistoryError> {
     if old.parents.len() != new_parents.len() {
         return Err(HistoryError::Planning {
@@ -1387,6 +1379,7 @@ fn replay_merge_tree(
             old_parent_tree,
             new_parent_tree,
             merge_favor,
+            replay_session,
         )?;
     }
     Ok(result_tree)
@@ -1470,6 +1463,7 @@ fn replay_edited_commit(
     message: &str,
     merge_favor: MergeFavor,
     opts: &RewriteOptions,
+    replay_session: &mut ReplayMergeSession,
 ) -> Result<ObjectId, HistoryError> {
     let committer = if opts.preserve_committer {
         old.committer.as_str()
@@ -1497,6 +1491,7 @@ fn replay_edited_commit(
         old_parent_tree,
         new_parent_tree,
         merge_favor,
+        replay_session,
     )?;
     write_replacement_commit(
         repo,
@@ -1541,6 +1536,7 @@ fn compute_replayed_tree(
     old_parent_tree: ObjectId,
     new_parent_tree: ObjectId,
     merge_favor: MergeFavor,
+    replay_session: &mut ReplayMergeSession,
 ) -> Result<ObjectId, HistoryError> {
     transplant_tree_across_parent_move(
         repo,
@@ -1550,6 +1546,7 @@ fn compute_replayed_tree(
         old_parent_tree,
         new_parent_tree,
         merge_favor,
+        replay_session,
     )
 }
 
@@ -1564,34 +1561,26 @@ fn transplant_tree_across_parent_move(
     old_parent_tree: ObjectId,
     new_parent_tree: ObjectId,
     merge_favor: MergeFavor,
+    replay_session: &mut ReplayMergeSession,
 ) -> Result<ObjectId, HistoryError> {
-    if old_parent_tree == new_parent_tree {
-        return Ok(subject_tree);
-    }
-    record_merge_call();
-    let merge = merge_trees_three_way(
+    replay_session.transplant_tree(
         repo,
+        commit,
+        labels,
+        subject_tree,
         old_parent_tree,
         new_parent_tree,
-        subject_tree,
         merge_favor,
-        WhitespaceMergeOptions::default(),
-        None,
-        labels.presentation(ConflictStyle::Merge),
-        DirectoryRenameMode::from_repo(repo).map_err(library_err)?,
-    )
-    .map_err(library_err)?;
-
-    if crate::operation::tree_merge_has_conflicts(&merge) {
-        let err = conflict_error(repo, commit, &merge);
-        if REPLAY_STOP_COMMIT.with(|c| c.get()) == Some(commit) {
-            if let Some(replayed_parent) = REPLAY_STOP_PARENT.with(|p| p.get()) {
-                note_resumable_conflict(commit, replayed_parent, merge);
+        |commit, merge| {
+            let err = conflict_error(repo, commit, &merge);
+            if REPLAY_STOP_COMMIT.with(|c| c.get()) == Some(commit) {
+                if let Some(replayed_parent) = REPLAY_STOP_PARENT.with(|p| p.get()) {
+                    note_resumable_conflict(commit, replayed_parent, merge);
+                }
             }
-        }
-        return Err(err);
-    }
-    Ok(merge.result_tree)
+            Err(err)
+        },
+    )
 }
 
 /// [`HistoryError::Conflict`] for `commit` from a conflicted tree merge, with no refs attributed.
@@ -1953,6 +1942,10 @@ mod merge_call_tests {
         write_tree_from_index(repo.odb(), &index, "")
     }
 
+    use super::super::replay_merge_session::{
+        test_merge_tree_call_count, test_reset_merge_tree_call_count,
+    };
+
     #[test]
     fn reword_parent_only_replay_skips_merge_tree() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -2014,5 +2007,136 @@ mod merge_call_tests {
         )
         .expect("plan");
         assert_eq!(test_merge_tree_call_count(), 0);
+    }
+
+    #[test]
+    fn add_only_rebase_stack_skips_three_way_merge() {
+        use crate::objects::{serialize_commit, CommitData};
+        use crate::revwalk::history::{plan_rebase, RebaseOntoOptions, RebaseRequest};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let sig = ident(1);
+        let fork_tree = blob_tree(&repo, "base.txt", b"base\n").expect("tree");
+        let fork_raw = serialize_commit(&CommitData {
+            tree: fork_tree,
+            parents: vec![],
+            author: sig.clone(),
+            committer: sig.clone(),
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: "fork\n".into(),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        });
+        let fork = repo
+            .odb()
+            .write(ObjectKind::Commit, &fork_raw)
+            .expect("fork");
+        let mut parent = fork;
+        for i in 0..80 {
+            let tree = blob_tree(
+                &repo,
+                &format!("wide/n{i}.txt"),
+                format!("w{i}\n").as_bytes(),
+            )
+            .expect("tree");
+            let raw = serialize_commit(&CommitData {
+                tree,
+                parents: vec![parent],
+                author: sig.clone(),
+                committer: sig.clone(),
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: None,
+                message: format!("wide {i}\n"),
+                raw_message: None,
+                extra_headers: Vec::new(),
+            });
+            parent = repo.odb().write(ObjectKind::Commit, &raw).expect("commit");
+        }
+        let onto = parent;
+        fn tree_with_file(
+            repo: &Repository,
+            parent_tree: ObjectId,
+            path: &str,
+            bytes: &[u8],
+        ) -> crate::error::Result<ObjectId> {
+            use crate::porcelain::merge::tree_to_index_entries;
+            let blob = repo.odb().write(ObjectKind::Blob, bytes)?;
+            let mut index = Index::new();
+            index.hash_algo = repo.odb().hash_algo();
+            for mut entry in tree_to_index_entries(repo, &parent_tree, "")? {
+                entry.base_index_pos = 0;
+                index.add_or_replace(entry);
+            }
+            index.add_or_replace(IndexEntry {
+                ctime_sec: 0,
+                ctime_nsec: 0,
+                mtime_sec: 0,
+                mtime_nsec: 0,
+                dev: 0,
+                ino: 0,
+                mode: MODE_REGULAR,
+                uid: 0,
+                gid: 0,
+                size: bytes.len() as u32,
+                oid: blob,
+                flags: path.len().min(0xfff) as u16,
+                flags_extended: None,
+                path: path.as_bytes().to_vec(),
+                base_index_pos: 0,
+            });
+            write_tree_from_index(repo.odb(), &index, "")
+        }
+
+        let mut stack_parent = fork;
+        let mut stack_tree = fork_tree;
+        for i in 0..40 {
+            let path = format!("team/f{i}.txt");
+            stack_tree = tree_with_file(&repo, stack_tree, &path, format!("{i}\n").as_bytes())
+                .expect("tree");
+            let raw = serialize_commit(&CommitData {
+                tree: stack_tree,
+                parents: vec![stack_parent],
+                author: sig.clone(),
+                committer: sig.clone(),
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: None,
+                message: format!("feat {i}\n"),
+                raw_message: None,
+                extra_headers: Vec::new(),
+            });
+            stack_parent = repo.odb().write(ObjectKind::Commit, &raw).expect("commit");
+        }
+        let tip = stack_parent;
+        write_ref(repo.git_dir(), "refs/heads/main", &tip).expect("ref");
+        let opts = RebaseOntoOptions::new(RewriteOptions {
+            scope: RefScope::Head,
+            empty: EmptyPolicy::Drop,
+            committer: ident(2).parse().expect("signature"),
+            preserve_committer: false,
+            sign: false,
+        });
+        let request = RebaseRequest {
+            upstream: fork,
+            onto: Some(onto),
+            branch_tip: tip,
+        };
+        test_reset_merge_tree_call_count();
+        plan_rebase(&repo, &request, &opts).expect("plan");
+        assert_eq!(
+            test_merge_tree_call_count(),
+            0,
+            "add-only stack should not call three-way merge per commit"
+        );
     }
 }

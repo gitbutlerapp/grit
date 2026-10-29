@@ -56,6 +56,7 @@ mod r#move;
 mod plan;
 mod rebase;
 mod rebase_session;
+mod replay_merge_session;
 mod reword;
 mod split;
 mod squash;
@@ -82,8 +83,6 @@ pub use fixup::{
 };
 pub use last::{read_history_last, HistoryLastRecord};
 pub use plan::plan_rewrite;
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-pub use plan::{test_merge_tree_call_count, test_reset_merge_tree_call_count};
 pub use r#move::{move_commit, Placement};
 pub use rebase::{
     plan_rebase, plan_rebase_check, plan_rebase_with_hook, rebase_onto, PreRebase, RebaseCheckPlan,
@@ -95,6 +94,8 @@ pub use rebase_session::{
     abort_rebase, continue_rebase, skip_rebase, start_rebase, start_rebase_with_exec, RebaseAbort,
     RebaseOutcome, RebaseSessionError, RebaseStop, StartRebaseOptions,
 };
+#[cfg(any(test, feature = "unstable-bench-helpers"))]
+pub use replay_merge_session::{test_merge_tree_call_count, test_reset_merge_tree_call_count};
 pub use reword::{normalize_rewrite_message, reword, reword_with, RewordOptions};
 pub use split::split;
 pub use squash::{squash, SquashMessage, SquashOptions};
