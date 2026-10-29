@@ -4878,6 +4878,7 @@ fn parallel_process_blob_worktree_jobs(
     hash_blobs_without_write: bool,
     conv: &crate::crlf::ConversionConfig,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
+    icase_collisions: Option<&crate::path_icase::IcaseCheckoutCollisionMap>,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
     use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
@@ -4931,6 +4932,15 @@ fn parallel_process_blob_worktree_jobs(
             };
             let eff_oid = content.object_id(odb, store_dirty_blobs)?;
             if eff_oid != job.entry.oid || job.worktree_mode != job.entry.mode {
+                if icase_collisions.is_some_and(|map| {
+                    map.worktree_oid_is_collision_sibling_blob(
+                        job.entry.path.as_slice(),
+                        eff_oid,
+                        job.entry.oid,
+                    )
+                }) {
+                    return Ok(None);
+                }
                 let new_oid = if eff_oid != job.entry.oid && !materialize_dirty_blobs {
                     zero_oid()
                 } else {
@@ -5059,6 +5069,7 @@ fn push_index_blob_worktree_diff(
     hash_blobs_without_write: bool,
     for_status: bool,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
+    icase_collisions: Option<&crate::path_icase::IcaseCheckoutCollisionMap>,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
     if meta.is_dir() {
@@ -5110,17 +5121,19 @@ fn push_index_blob_worktree_diff(
     }
 
     let file_attrs = file_attrs_for(path_str_ref);
-    if try_push_status_modified_on_size_mismatch(
-        odb,
-        ie,
-        path_str_ref,
-        crate::index::munge_index_size(meta.len()),
-        worktree_mode,
-        meta.len(),
-        for_status,
-        || crate::crlf::git_conversion_is_identity(conv, &file_attrs),
-        result,
-    )? {
+    if !icase_collisions.is_some_and(|map| map.diff_requires_worktree_hash(ie.path.as_slice()))
+        && try_push_status_modified_on_size_mismatch(
+            odb,
+            ie,
+            path_str_ref,
+            crate::index::munge_index_size(meta.len()),
+            worktree_mode,
+            meta.len(),
+            for_status,
+            || crate::crlf::git_conversion_is_identity(conv, &file_attrs),
+            result,
+        )?
+    {
         return Ok(());
     }
 
@@ -5157,6 +5170,11 @@ fn push_index_blob_worktree_diff(
     let eff_oid = content.object_id(odb, store)?;
 
     if eff_oid != ie.oid || worktree_mode != ie.mode {
+        if icase_collisions.is_some_and(|map| {
+            map.worktree_oid_is_collision_sibling_blob(ie.path.as_slice(), eff_oid, ie.oid)
+        }) {
+            return Ok(());
+        }
         // `git diff-files --raw` uses the null OID for the worktree side when content differs.
         // Staging (`diff_index_to_worktree_for_staging`) materializes blobs and needs the real OID.
         let new_oid = if eff_oid != ie.oid && !materialize_dirty_blobs {
@@ -5802,12 +5820,25 @@ fn diff_index_to_worktree_inner(
                     && stat.git_mode != crate::index::MODE_SYMLINK
                     && RefreshContent::differs(refresh_checks.get(entry_index), &ie.oid)
                 {
-                    result.push(worktree_content_change_entry(
-                        ie,
-                        path_str_ref,
-                        worktree_mode,
-                        zero_oid(),
-                    ));
+                    let suppress = icase_collisions.as_ref().is_some_and(|map| {
+                        matches!(
+                            refresh_checks.get(entry_index),
+                            Some(RefreshContent::Hashed(wt_oid))
+                                if map.worktree_oid_is_collision_sibling_blob(
+                                    &ie.path,
+                                    wt_oid,
+                                    ie.oid,
+                                )
+                        )
+                    });
+                    if !suppress {
+                        result.push(worktree_content_change_entry(
+                            ie,
+                            path_str_ref,
+                            worktree_mode,
+                            zero_oid(),
+                        ));
+                    }
                     return Ok(());
                 }
                 // Streaming jobs read regular files. Links and directories need the shared
@@ -5833,7 +5864,9 @@ fn diff_index_to_worktree_inner(
                             worktree_mode,
                             ie.oid,
                         ));
-                    } else if try_push_status_modified_on_size_mismatch(
+                    } else if !icase_collisions.as_ref().is_some_and(|map| {
+                        map.diff_requires_worktree_hash(&index.entries[entry_index].path)
+                    }) && try_push_status_modified_on_size_mismatch(
                         odb,
                         ie,
                         path_str_ref,
@@ -5900,6 +5933,7 @@ fn diff_index_to_worktree_inner(
                         hash_blobs_without_write,
                         options.for_status,
                         filter_fp,
+                        icase_collisions.as_ref(),
                         &mut result,
                     )?;
                 }
@@ -5917,6 +5951,7 @@ fn diff_index_to_worktree_inner(
             hash_blobs_without_write,
             &conv,
             filter_fp,
+            icase_collisions.as_ref(),
             &mut result,
         )?;
     }

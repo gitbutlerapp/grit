@@ -922,6 +922,11 @@ fn refresh_present_tracked_path(
                 }
                 return Ok(PresentRefresh::Unchanged);
             }
+            if icase_collisions.is_some_and(|map| {
+                map.worktree_oid_is_collision_sibling_blob(raw_path, staged_oid, idx_oid)
+            }) {
+                return Ok(PresentRefresh::Unchanged);
+            }
             match payload {
                 RestagePayload::Stored => {}
                 RestagePayload::Bytes(data) => {
@@ -945,6 +950,11 @@ fn refresh_present_tracked_path(
             let meta = fs::symlink_metadata(abs_path).map_err(Error::Io)?;
             let oid = read_worktree_blob_oid_raw(repo, abs_path, &meta)?;
             if !idx_intent_to_add && idx_oid == oid && wt_mode == idx_mode {
+                return Ok(PresentRefresh::Unchanged);
+            }
+            if icase_collisions.is_some_and(|map| {
+                map.worktree_oid_is_collision_sibling_blob(raw_path, oid, idx_oid)
+            }) {
                 return Ok(PresentRefresh::Unchanged);
             }
             oid
@@ -1091,6 +1101,11 @@ fn restage_deferred_chunk(
         // The read pass's stat precedes the read, like the serial path.
         let entry = entry_from_metadata(&prep.blob.meta, raw_path, prep.blob.oid, mode_for_index);
         if icase_collisions.is_some_and(|map| map.is_auto_stage_loser(raw_path)) {
+            continue;
+        }
+        if icase_collisions.is_some_and(|map| {
+            map.worktree_oid_is_collision_sibling_blob(raw_path, prep.blob.oid, idx_e.oid)
+        }) {
             continue;
         }
         if prep.blob.oid == idx_e.oid && mode_for_index == idx_e.mode {

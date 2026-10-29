@@ -628,21 +628,62 @@ pub(crate) struct IcaseCheckoutCollisionMap {
     groups: IcaseIndexCollisionGroups,
     /// Dentry winner of each group, indexed like `groups.members_by_group`.
     winner_by_group: Vec<String>,
+    /// Stage-0 blob oids for each group member, parallel to `groups.members_by_group`.
+    oids_by_group: Vec<Vec<crate::objects::ObjectId>>,
 }
 
 impl IcaseCheckoutCollisionMap {
     pub(crate) fn from_index(work_tree: &Path, index: &Index, ignorecase: bool) -> Self {
         let groups = IcaseIndexCollisionGroups::from_index(index, ignorecase);
         let mut dentries = DentrySpellingCache::new(work_tree);
-        let winner_by_group = groups
-            .members_by_group
-            .iter()
-            .map(|members| resolve_collision_group_dentry_winner(members, &mut dentries))
-            .collect();
+        let mut winner_by_group = Vec::with_capacity(groups.members_by_group.len());
+        let mut oids_by_group = Vec::with_capacity(groups.members_by_group.len());
+        for members in &groups.members_by_group {
+            winner_by_group.push(resolve_collision_group_dentry_winner(
+                members,
+                &mut dentries,
+            ));
+            let oids: Vec<_> = members
+                .iter()
+                .filter_map(|path| index.get(path.as_bytes(), 0).map(|e| e.oid))
+                .collect();
+            debug_assert_eq!(oids.len(), members.len());
+            oids_by_group.push(oids);
+        }
         Self {
             groups,
             winner_by_group,
+            oids_by_group,
         }
+    }
+
+    /// Worktree bytes match a collision sibling's index blob, not this row's.
+    ///
+    /// On a shared dentry the winner spelling can still hash to a sibling's oid; leave the
+    /// index row unchanged so auto-stage does not rewrite the loser's recorded blob.
+    pub(crate) fn worktree_oid_is_collision_sibling_blob(
+        &self,
+        raw_path: &[u8],
+        worktree_oid: crate::objects::ObjectId,
+        index_oid: crate::objects::ObjectId,
+    ) -> bool {
+        if worktree_oid == index_oid {
+            return false;
+        }
+        let Some(&key) = self.groups.path_to_group.get(raw_path) else {
+            return false;
+        };
+        let members = &self.groups.members_by_group[key];
+        let oids = &self.oids_by_group[key];
+        members
+            .iter()
+            .zip(oids.iter())
+            .any(|(member, oid)| member.as_bytes() != raw_path && *oid == worktree_oid)
+    }
+
+    /// Collision paths must hash worktree content before reporting modified (size alone lies).
+    pub(crate) fn diff_requires_worktree_hash(&self, raw_path: &[u8]) -> bool {
+        self.groups.path_to_group.contains_key(raw_path) && !self.is_auto_stage_loser(raw_path)
     }
 
     /// Skip auto-stage refresh for collision aliases; the dentry winner is never a loser.
@@ -1325,6 +1366,29 @@ mod tests {
         let map = IcaseCheckoutCollisionMap::from_index(wt, &index, true);
         assert!(!map.is_auto_stage_loser(b"file.txt"));
         assert!(map.is_auto_stage_loser(b"File.txt"));
+    }
+
+    #[test]
+    fn directory_collision_winner_skips_sibling_worktree_bytes() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        std::fs::create_dir_all(wt.join("Docs")).expect("mkdir");
+        std::fs::write(wt.join("Docs/guide.md"), b"two\n").expect("write");
+        let one = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
+        let two = ObjectId::from_hex("2222222222222222222222222222222222222222").unwrap();
+        let mut index = Index::new();
+        let mut upper = dummy_entry("Docs/guide.md");
+        upper.oid = one;
+        let mut lower = dummy_entry("docs/guide.md");
+        lower.oid = two;
+        index.push_entry_unsorted(upper);
+        index.push_entry_unsorted(lower);
+        index.sort();
+        let map = IcaseCheckoutCollisionMap::from_index(wt, &index, true);
+        assert!(!map.is_auto_stage_loser(b"Docs/guide.md"));
+        assert!(map.is_auto_stage_loser(b"docs/guide.md"));
+        assert!(map.worktree_oid_is_collision_sibling_blob(b"Docs/guide.md", two, one));
+        assert!(!map.worktree_oid_is_collision_sibling_blob(b"Docs/guide.md", one, one));
     }
 
     #[test]

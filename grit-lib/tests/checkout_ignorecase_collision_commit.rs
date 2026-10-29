@@ -343,6 +343,124 @@ fn collision_loser_auto_stage_commit_is_noop() {
     );
 }
 
+fn build_directory_name_collision_index(
+    repo: &Repository,
+    dest: &Path,
+) -> (grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) {
+    let oid_one = repo.odb().write(ObjectKind::Blob, b"one\n").expect("one");
+    let oid_two = repo.odb().write(ObjectKind::Blob, b"two\n").expect("two");
+    fs::create_dir_all(dest.join("Docs")).expect("mkdir");
+    fs::write(dest.join("Docs/guide.md"), b"two\n").expect("on-disk bytes match docs/");
+    let mut index = Index::new();
+    index.add_or_replace(
+        entry_from_stat(
+            &dest.join("Docs/guide.md"),
+            b"Docs/guide.md",
+            oid_one,
+            MODE_REGULAR,
+        )
+        .expect("entry"),
+    );
+    index.add_or_replace(
+        entry_from_stat(
+            &dest.join("Docs/guide.md"),
+            b"docs/guide.md",
+            oid_two,
+            MODE_REGULAR,
+        )
+        .expect("entry"),
+    );
+    index.sort();
+    write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent()).expect("tree");
+    repo.index_handle().write(&mut index).expect("write index");
+    (oid_one, oid_two)
+}
+
+fn commit_directory_collision_head(
+    fx: &TestRepo,
+) -> (grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) {
+    let oids = build_directory_name_collision_index(&fx.repo, &fx.dest);
+    commit_with_scope(
+        &fx.repo,
+        &commit_request("base"),
+        CommitScope::Staged,
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("seed HEAD");
+    oids
+}
+
+#[test]
+fn directory_collision_auto_stage_commit_preserves_both_index_oids() {
+    let fx = init_collision_repo();
+    let (docs_upper_oid, docs_lower_oid) = commit_directory_collision_head(&fx);
+
+    fs::write(fx.dest.join("unrelated.txt"), "edit\n").expect("unrelated");
+    stage_tracked_modifications(&fx.repo, &fx.dest).expect("stage tracked");
+
+    let mid = fx.repo.index_handle().load().expect("mid index");
+    assert_eq!(
+        mid.get(b"Docs/guide.md", 0).expect("Docs/guide.md").oid,
+        docs_upper_oid,
+        "dentry winner must keep its index oid when worktree holds sibling bytes"
+    );
+    assert_eq!(
+        mid.get(b"docs/guide.md", 0).expect("docs/guide.md").oid,
+        docs_lower_oid
+    );
+
+    auto_stage_unrelated_and_commit(&fx.repo, &fx.dest);
+
+    let post = fx.repo.index_handle().load().expect("post commit");
+    assert_eq!(
+        post.get(b"Docs/guide.md", 0).expect("Docs/guide.md").oid,
+        docs_upper_oid
+    );
+    assert_eq!(
+        post.get(b"docs/guide.md", 0).expect("docs/guide.md").oid,
+        docs_lower_oid
+    );
+}
+
+#[test]
+fn directory_collision_winner_omitted_from_status_when_bytes_match_sibling() {
+    let fx = init_collision_repo();
+    commit_directory_collision_head(&fx);
+
+    let model = status(
+        &fx.repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("status");
+    assert!(
+        !model.unstaged.iter().any(|e| e.path() == "Docs/guide.md"),
+        "shared worktree bytes matching a sibling must not show as modified: {:?}",
+        model.unstaged.iter().map(|e| e.path()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn directory_collision_edited_winner_updates_only_dentry_spelling() {
+    let fx = init_collision_repo();
+    let (docs_upper_oid, docs_lower_oid) = commit_directory_collision_head(&fx);
+
+    fs::write(fx.dest.join("Docs/guide.md"), b"brand-new\n").expect("edit");
+    stage_tracked_modifications(&fx.repo, &fx.dest).expect("stage");
+
+    let mid = fx.repo.index_handle().load().expect("mid");
+    assert_ne!(
+        mid.get(b"Docs/guide.md", 0).expect("Docs/guide.md").oid,
+        docs_upper_oid
+    );
+    assert_eq!(
+        mid.get(b"docs/guide.md", 0).expect("docs/guide.md").oid,
+        docs_lower_oid
+    );
+}
+
 #[test]
 fn collision_loser_omitted_from_status_unstaged() {
     let fx = init_collision_repo();
