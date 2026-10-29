@@ -347,6 +347,8 @@ mod log_loose_tags_memory;
 #[cfg(feature = "full-tests")]
 #[path = "log_pickaxe_json.rs"]
 mod log_pickaxe_json;
+#[path = "log_terminal_cli.rs"]
+mod log_terminal_cli;
 #[cfg(feature = "full-tests")]
 #[path = "maintenance_commands.rs"]
 mod maintenance_commands;
@@ -448,7 +450,7 @@ mod rebase_cli;
 #[cfg(feature = "full-tests")]
 #[path = "rebase_conflicts_cli.rs"]
 mod rebase_conflicts_cli;
-#[cfg(unix)]
+#[cfg(feature = "full-tests")]
 #[path = "rebase_exec_interrupt.rs"]
 mod rebase_exec_interrupt;
 #[cfg(feature = "full-tests")]

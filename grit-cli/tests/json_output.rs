@@ -583,18 +583,18 @@ fn log_json_pages_with_next_cursor() -> TestResult {
     fs::create_dir_all(&repo)?;
     gs_ok(&repo, &["init", "."]);
 
-    // 11 commits → one full page (10) plus a `next` cursor.
-    for i in 0..11 {
+    // 21 commits → one full page (20) plus a `next` cursor.
+    for i in 0..21 {
         write_file(&repo.join("a.txt"), &format!("v{i}\n"));
         gs_ok(&repo, &["add", "a.txt"]);
         gs_ok(&repo, &["commit", &format!("commit {i}")]);
     }
     let v = gs_json(&repo, &["log"]);
-    assert_eq!(v["commits"].as_array().unwrap().len(), 10);
+    assert_eq!(v["commits"].as_array().unwrap().len(), 20);
     assert_eq!(v["truncated"], Value::Bool(true));
     assert!(v["next"].as_str().is_some(), "expected a next cursor: {v}");
     let first = &v["commits"][0];
-    assert_eq!(first["subject"], "commit 10");
+    assert_eq!(first["subject"], "commit 20");
     assert_eq!(first["oid"].as_str().unwrap().len(), 40);
 
     // Last page: follow `next`, expect no further cursor.

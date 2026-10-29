@@ -39,6 +39,7 @@ mod merge_strategy_args;
 mod message_input;
 mod operation_output;
 mod output;
+mod pager;
 mod patch_selection;
 mod pathspec_args;
 mod progress;
@@ -914,7 +915,7 @@ enum Command {
         rev: rev_select::RevSelectArgs,
         #[command(flatten)]
         pathspecs: pathspec_args::TrailingPathspecArgs,
-        /// Continue a paged walk (`TOKEN`), or with no value include a short cursor on the `→ more` line.
+        /// Continue a paged walk from the `TOKEN` a previous page printed (an empty value is ignored).
         #[arg(
             long = "cursor",
             value_name = "TOKEN",
@@ -939,6 +940,9 @@ enum Command {
         /// Draw a commit graph in human output (implies topological order; Unicode by default).
         #[arg(long)]
         graph: bool,
+        /// Write straight to the terminal instead of through the pager.
+        #[arg(long = "no-pager")]
+        no_pager: bool,
         /// Use ASCII `*|` lane characters in `--graph` output instead of Unicode box-drawing.
         #[arg(long = "graph-ascii")]
         graph_ascii: bool,
@@ -2608,6 +2612,15 @@ fn reject_non_human_plumbing(cli: &Cli, opts: &OutputOptions) -> Result<()> {
     bail!("`grit {name}` does not support --json or --markdown");
 }
 
+/// Whether `err` comes from writing to a reader that has gone away (a quit pager).
+fn is_broken_pipe(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|e| e.kind() == std::io::ErrorKind::BrokenPipe)
+    })
+}
+
 fn emit_success<T: output::HumanRender + output::MarkdownRender + serde::Serialize>(
     value: &T,
     opts: &OutputOptions,
@@ -2889,10 +2902,15 @@ fn dispatch(
             graph,
             graph_ascii,
             graph_unicode,
+            no_pager,
         } => {
             if count && group_by.is_none() {
                 bail!("`--count` requires `--group-by`");
             }
+            // A person at a terminal gets the whole history through the pager; scripts, agents
+            // and pipes get pages with a `--cursor` token.
+            let terminal = opts.mode == OutputMode::Human
+                && std::io::IsTerminal::is_terminal(&std::io::stdout());
             let graph = graph || graph_unicode;
             let display = commands::log::LogDisplayOptions {
                 oneline,
@@ -2903,15 +2921,47 @@ fn dispatch(
                 group_count_only: count,
                 graph,
                 graph_ascii: graph_ascii && !graph_unicode,
+                line_counts: terminal,
+                columns: None,
             };
             if format.patch_text && opts.mode != OutputMode::Human {
                 bail!("`--patch-text` cannot be used with --json or --markdown");
             }
-            emit_success(
-                &commands::log::run(rev, pathspecs, cursor, format, display, opts.mode)?,
-                opts,
-                ctx,
-            )
+            if !terminal {
+                let page = commands::log::LogPage::Paged;
+                let outcome =
+                    commands::log::run(rev, pathspecs, cursor, format, display, opts.mode, page)?;
+                return emit_success(&outcome, opts, ctx);
+            }
+            // With no `-n` or `--cursor`, the whole history, walked a batch at a time.
+            let view = if cursor.is_none() && rev.max_count().is_none() {
+                commands::log::TerminalLog::Stream(Box::new(commands::log::LogStream::start(
+                    rev, pathspecs, format, display,
+                )?))
+            } else {
+                let page = commands::log::LogPage::Paged;
+                commands::log::TerminalLog::Listing(Box::new(commands::log::run(
+                    rev, pathspecs, cursor, format, display, opts.mode, page,
+                )?))
+            };
+            // Start the pager only once the first batch is walked, so errors and Ctrl-C during
+            // a slow start behave as usual.
+            let mut pager = if no_pager {
+                None
+            } else {
+                pager::Pager::start(context::discover().ok().as_ref())
+            };
+            let stdout = std::io::stdout();
+            let mut stdout = stdout.lock();
+            let w: &mut dyn std::io::Write = match pager.as_mut() {
+                Some(pager) => pager,
+                None => &mut stdout,
+            };
+            let result = stdio::with_sigpipe_ignored(|| view.render(w, ctx));
+            match result {
+                Err(e) if !is_broken_pipe(&e) => Err(e),
+                _ => Ok(ExitStatus::Success),
+            }
         }
         Command::Revs {
             rev,

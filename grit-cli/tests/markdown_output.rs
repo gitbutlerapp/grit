@@ -52,9 +52,10 @@ fn log_markdown_uses_commit_bullets_not_json_blob() {
     );
 }
 
-fn eleven_commit_repo(dir: &std::path::Path) {
+/// One commit more than a page of `grit log`.
+fn twenty_one_commit_repo(dir: &std::path::Path) {
     init_repo(dir);
-    for i in 0..11 {
+    for i in 0..21 {
         std::fs::write(dir.join("a.txt"), format!("v{i}\n")).unwrap();
         assert!(Command::new(GRIT)
             .args(["add", "a.txt"])
@@ -74,7 +75,8 @@ fn eleven_commit_repo(dir: &std::path::Path) {
 #[test]
 fn log_human_continuation_emits_full_opaque_cursor() {
     let dir = tempfile::tempdir().expect("tempdir");
-    eleven_commit_repo(dir.path());
+    twenty_one_commit_repo(dir.path());
+    // Piped human output is paged, and the hint carries the token for the next page.
     let out = Command::new(GRIT)
         .args(["log"])
         .current_dir(dir.path())
@@ -86,17 +88,15 @@ fn log_human_continuation_emits_full_opaque_cursor() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("→ more: grit log\n") || stdout.contains("→ more: grit log\r\n"),
-        "default hint omits cursor token: {stdout}"
+    assert_eq!(
+        stdout.lines().filter(|l| l.contains("commit ")).count(),
+        20,
+        "one page of twenty commits: {stdout}"
     );
-    let with_cursor = Command::new(GRIT)
-        .args(["log", "--cursor"])
-        .current_dir(dir.path())
-        .output()
-        .expect("log --cursor");
-    assert!(with_cursor.status.success());
-    let stdout = String::from_utf8_lossy(&with_cursor.stdout);
+    assert!(
+        !stdout.contains('●'),
+        "piped output does not draw the graph by default: {stdout}"
+    );
     let line = stdout
         .lines()
         .find(|l| l.contains("→ more: grit log --cursor="))
@@ -117,14 +117,20 @@ fn log_human_continuation_emits_full_opaque_cursor() {
         "second page failed: {}",
         String::from_utf8_lossy(&next_page.stderr)
     );
+    let stdout = String::from_utf8_lossy(&next_page.stdout);
+    assert!(stdout.contains("commit 0"), "last page: {stdout}");
+    assert!(
+        !stdout.contains("→ more"),
+        "no page after the last: {stdout}"
+    );
 }
 
 #[test]
 fn log_markdown_continuation_emits_full_opaque_cursor() {
     let dir = tempfile::tempdir().expect("tempdir");
-    eleven_commit_repo(dir.path());
+    twenty_one_commit_repo(dir.path());
     let out = Command::new(GRIT)
-        .args(["log", "--markdown", "--cursor"])
+        .args(["log", "--markdown"])
         .current_dir(dir.path())
         .output()
         .expect("log");

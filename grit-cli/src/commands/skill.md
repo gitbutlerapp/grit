@@ -44,7 +44,7 @@ The target branch is the first that exists of: the `target.branch` config value,
 | Several commits at once | `grit show <A> <B>` (`--json` → `{ "objects": [ … ] }`) |
 | Blob or tree at a revision | `grit show <rev>:<path>` (same resolution as `grit cat`) |
 | A commit's message and diffstat only | `grit show [<commit-or-branch-or-tag>] --stat` |
-| Recent history, ten at a time | `grit log`, then `grit log --cursor <next>` using the `next` value from `--json` (passing a cursor to `--before` is deprecated) |
+| Recent history, twenty at a time | `grit log`, then `grit log --cursor=<token>` using the token on the `→ more` line (or `next` from `--json`; passing a cursor to `--before` is deprecated) |
 | History with patches or file lists | `grit log -p`, `grit log --stat`, `grit log --name-status`, … (same format flags as `grit diff`) |
 | Commits on this branch not on the target | `grit shortlog` or `grit ahead` (`-n` / `--max-count`, `--behind`, `--stat`, `--name-only`; add `--target <REF>` to pick the base) |
 | Who last touched each line | `grit blame [<rev>] [--] <file>`; slice with `-L` (`10,25`, `10,+20`, `/pattern/`, `:funcname`); **`--group`** for smaller `hunks[]` in `--json` on large files. Without a revision the working-tree file is blamed (uncommitted lines have `not_committed: true` and an all-zeros commit); `--rev HEAD` blames the committed file; `--contents <file\|->` blames an unsaved buffer |

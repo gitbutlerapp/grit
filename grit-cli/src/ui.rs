@@ -125,10 +125,18 @@ const LABEL_WIDTH: usize = 12;
 
 /// ANSI reset.
 const RESET: &str = "\x1b[0m";
-/// Dim gray for the abbreviated sha and the relative date.
+/// Dim gray for the abbreviated sha.
 const FG_DIM: &str = "38;5;244";
 /// Soft blue for the author column.
 const FG_AUTHOR: &str = "38;5;110";
+/// Muted violet for the change id.
+const FG_CHANGE: &str = "38;5;139";
+/// Soft amber for the relative date.
+const FG_DATE: &str = "38;5;179";
+/// Green for the insertions of a line summary.
+const FG_ADDED: &str = "32";
+/// Red for the deletions of a line summary.
+const FG_REMOVED: &str = "31";
 
 /// Whether to emit ANSI color: only when stdout is a TTY and `NO_COLOR` is unset
 /// (the de-facto standard for opting out — <https://no-color.org>).
@@ -170,8 +178,81 @@ pub fn change_short_code(change_id: &str) -> String {
 /// at [`AUTHOR_MAX`], and on a terminal the subject is truncated so the row never
 /// wraps.
 pub fn commit_rows(commits: &[CommitSummary], now: i64) -> Vec<String> {
+    commit_rows_with(commits, now, &CommitRowOptions::default())
+}
+
+/// Widths of the author and date columns of [`commit_rows`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CommitColumns {
+    /// Author column width; longer names are cut with `…`.
+    pub author: usize,
+    /// Relative date column width.
+    pub date: usize,
+}
+
+impl CommitColumns {
+    /// Widths that fit `commits`, and that a later, older batch of commits also fits.
+    ///
+    /// Relative dates of commits older than a day are at most `11 months ago` wide, so the
+    /// date column is never narrower than that; names longer than the first batch's are cut.
+    #[must_use]
+    pub fn for_stream(commits: &[CommitSummary], now: i64) -> Self {
+        let measured = Self::measure(commits, now);
+        Self {
+            author: measured.author,
+            date: measured.date.max("11 months ago".len()),
+        }
+    }
+
+    fn measure(commits: &[CommitSummary], now: i64) -> Self {
+        let width = |s: &str| s.chars().count();
+        Self {
+            author: commits
+                .iter()
+                .map(|c| width(&truncate(&c.author, AUTHOR_MAX)))
+                .max()
+                .unwrap_or(0),
+            date: commits
+                .iter()
+                .map(|c| width(&context::relative_date_from(c.timestamp, now)))
+                .max()
+                .unwrap_or(0),
+        }
+    }
+}
+
+/// Lines a commit added and removed, for the summary at the end of a [`commit_rows`] row.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LineCounts {
+    /// Lines added.
+    pub added: usize,
+    /// Lines removed.
+    pub removed: usize,
+}
+
+/// Per-row extras for [`commit_rows_with`]; missing entries mean nothing extra for that row.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CommitRowOptions<'a> {
+    /// Columns left free on row `i` for text the caller adds to it (a graph prefix,
+    /// decorations).
+    pub reserved: &'a [usize],
+    /// A `+added -removed` summary drawn at the right edge of row `i`.
+    pub line_counts: &'a [Option<LineCounts>],
+    /// Column widths to use instead of measuring these rows, so batches line up.
+    pub columns: Option<CommitColumns>,
+}
+
+/// Like [`commit_rows`], with the per-row extras in `opts`.
+pub fn commit_rows_with(
+    commits: &[CommitSummary],
+    now: i64,
+    opts: &CommitRowOptions<'_>,
+) -> Vec<String> {
     let color = use_color();
-    let term_width = terminal_size::terminal_size().map(|(w, _)| w.0 as usize);
+    let term_width = terminal_width();
+    let columns = opts
+        .columns
+        .unwrap_or_else(|| CommitColumns::measure(commits, now));
 
     let cells: Vec<(String, String, String, String, &str)> = commits
         .iter()
@@ -179,36 +260,121 @@ pub fn commit_rows(commits: &[CommitSummary], now: i64) -> Vec<String> {
             let full = c.oid.to_hex();
             let sha = full.get(..7).unwrap_or(&full).to_owned();
             let change = change_display_segment(&c.change_id);
-            let author = truncate(&c.author, AUTHOR_MAX);
+            let author = truncate(&c.author, AUTHOR_MAX.min(columns.author.max(1)));
             let date = context::relative_date_from(c.timestamp, now);
             (sha, change, author, date, c.subject.as_str())
         })
         .collect();
 
-    let change_w = cells.iter().map(|c| c.1.chars().count()).max().unwrap_or(0);
-    let author_w = cells.iter().map(|c| c.2.chars().count()).max().unwrap_or(0);
-    let date_w = cells.iter().map(|c| c.3.chars().count()).max().unwrap_or(0);
+    let change_w = cells
+        .iter()
+        .map(|c| c.1.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(if opts.columns.is_some() {
+            CHANGE_ID_DISPLAY_LEN
+        } else {
+            0
+        });
+    let author_w = columns.author;
+    let date_w = columns.date;
     // Columns before the subject: "  " + sha(7) + "  " + change + "  " + author + "  " + date + "  ".
     let prefix_w = 2 + 7 + 2 + change_w + 2 + author_w + 2 + date_w + 2;
+    let digits = |n: usize| n.to_string().len();
+    let added_w = opts
+        .line_counts
+        .iter()
+        .flatten()
+        .map(|c| digits(c.added))
+        .max()
+        .unwrap_or(0);
+    let removed_w = opts
+        .line_counts
+        .iter()
+        .flatten()
+        .map(|c| digits(c.removed))
+        .max()
+        .unwrap_or(0);
 
     cells
         .iter()
-        .map(|(sha, change, author, date, subject)| {
+        .enumerate()
+        .map(|(i, (sha, change, author, date, subject))| {
+            let counts = opts.line_counts.get(i).copied().flatten();
+            // `  +added -removed`, right-aligned so every row's summary ends at the same column.
+            let counts_w = counts.map_or(0, |_| 2 + 1 + added_w + 2 + removed_w);
             // Truncate the subject to the terminal width so the row doesn't wrap.
             // When not on a terminal (piped), leave it intact.
+            let used = prefix_w + counts_w + opts.reserved.get(i).copied().unwrap_or(0);
+            // With no room left, keep just the `…` so the row wraps as little as possible.
             let subject = match term_width {
-                Some(w) if w > prefix_w => truncate(subject, w - prefix_w),
-                _ => (*subject).to_owned(),
+                Some(w) => truncate(subject, w.saturating_sub(used).max(1)),
+                None => (*subject).to_owned(),
             };
-            format!(
+            let mut row = format!(
                 "  {}  {}  {}  {}  {subject}",
                 paint(color, FG_DIM, sha),
-                paint(color, FG_DIM, &format!("{change:<change_w$}")),
+                paint(color, FG_CHANGE, &format!("{change:<change_w$}")),
                 paint(color, FG_AUTHOR, &format!("{author:<author_w$}")),
-                paint(color, FG_DIM, &format!("{date:<date_w$}")),
-            )
+                paint(color, FG_DATE, &format!("{date:<date_w$}")),
+            );
+            if let Some(counts) = counts {
+                let fill =
+                    term_width.map_or(0, |w| w.saturating_sub(used + subject.chars().count()));
+                row.push_str(&" ".repeat(fill + 2));
+                let added = format!("+{}", counts.added);
+                let removed = format!("-{}", counts.removed);
+                row.push_str(&paint(
+                    color,
+                    FG_ADDED,
+                    &format!("{added:>0$}", added_w + 1),
+                ));
+                row.push(' ');
+                row.push_str(&paint(
+                    color,
+                    FG_REMOVED,
+                    &format!("{removed:>0$}", removed_w + 1),
+                ));
+            }
+            row
         })
         .collect()
+}
+
+/// Width of the terminal stdout is attached to, or `None` when it is not a terminal.
+#[must_use]
+pub fn terminal_width() -> Option<usize> {
+    terminal_size::terminal_size().map(|(w, _)| usize::from(w.0))
+}
+
+/// Columns `s` takes on screen: its characters, not counting ANSI SGR color sequences.
+#[must_use]
+pub fn display_width(s: &str) -> usize {
+    let mut width = 0;
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Skip `ESC [ … m`.
+            for c in chars.by_ref() {
+                if c == 'm' {
+                    break;
+                }
+            }
+        } else {
+            width += 1;
+        }
+    }
+    width
+}
+
+/// Cut `s` to `max` columns with a trailing `…`; `None` leaves it whole, and so does color
+/// in `s` (cutting could split an escape sequence).
+#[must_use]
+pub fn fit_width(s: &str, max: Option<usize>) -> String {
+    match max {
+        Some(max) if max > 0 && !s.contains('\x1b') => truncate(s, max),
+        _ => s.to_owned(),
+    }
 }
 
 /// Truncate `s` to at most `max` display columns, using `…` for the last cell

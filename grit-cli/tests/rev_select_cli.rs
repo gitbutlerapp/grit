@@ -179,7 +179,7 @@ fn log_before_cursor_rejected() -> TestResult {
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
-    seed_linear_repo(&dir, 12);
+    seed_linear_repo(&dir, 22);
     let page1 = grit_json(&dir, &["log"]);
     let cursor = page1["next"].as_str().expect("next").to_owned();
     let out = grit_run(&dir, &["log", &format!("--before={cursor}")]);
@@ -201,7 +201,7 @@ fn log_cursor_pages_through_range() -> TestResult {
     let _ = fs::remove_dir_all(&dir);
     seed_linear_repo(&dir, 3);
     assert!(grit_run(&dir, &["branch", "base"]).status.success());
-    for i in 0..12 {
+    for i in 0..22 {
         fs::write(dir.join("f.txt"), format!("main{i}\n")).expect("write");
         assert!(grit_run(&dir, &["add", "f.txt"]).status.success());
         assert!(grit_run(&dir, &["commit", &format!("m{i}")])
@@ -210,7 +210,7 @@ fn log_cursor_pages_through_range() -> TestResult {
     }
     let git = git_oids(&dir, &["base..HEAD"]);
     let page1 = grit_json(&dir, &["log", "base..HEAD"]);
-    assert_eq!(page1["commits"].as_array().expect("commits").len(), 10);
+    assert_eq!(page1["commits"].as_array().expect("commits").len(), 20);
     let cursor = page1["next"].as_str().expect("next cursor for range walk");
     let page2 = grit_json(&dir, &["log", &format!("--cursor={cursor}")]);
     assert!(page2["next"].is_null());
@@ -232,8 +232,8 @@ fn log_cursor_continues_range_with_cursor_only() -> TestResult {
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
-    seed_linear_repo(&dir, 13);
-    git_branch(&dir, "base", "HEAD~12");
+    seed_linear_repo(&dir, 23);
+    git_branch(&dir, "base", "HEAD~22");
     let page1 = grit_json(&dir, &["log", "base..HEAD"]);
     let cursor = page1["next"].as_str().expect("next").to_owned();
     let page2 = grit_json(&dir, &["log", &format!("--cursor={cursor}")]);
@@ -251,12 +251,12 @@ fn log_cursor_continues_range_with_cursor_only() -> TestResult {
 #[test]
 fn log_cursor_rejects_revision_selection() -> TestResult {
     let dir = std::env::temp_dir().join(format!(
-        "grit-rev-select-cursor-reject-{}",
+        "grit-rev-select-cursor-reject-revs-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
-    seed_linear_repo(&dir, 13);
-    git_branch(&dir, "base", "HEAD~12");
+    seed_linear_repo(&dir, 23);
+    git_branch(&dir, "base", "HEAD~22");
     let page1 = grit_json(&dir, &["log", "base..HEAD"]);
     let cursor = page1["next"].as_str().expect("next").to_owned();
     let out = grit_run(&dir, &["log", &format!("--cursor={cursor}"), "base..HEAD"]);
@@ -276,8 +276,8 @@ fn log_cursor_rejects_date_selectors() -> TestResult {
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
-    seed_linear_repo(&dir, 13);
-    git_branch(&dir, "base", "HEAD~12");
+    seed_linear_repo(&dir, 23);
+    git_branch(&dir, "base", "HEAD~22");
     let page1 = grit_json(&dir, &["log", "base..HEAD"]);
     let cursor = page1["next"].as_str().expect("next").to_owned();
     for extra in [
@@ -304,7 +304,7 @@ fn log_cursor_rejects_ref_set_selectors() -> TestResult {
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
-    seed_linear_repo(&dir, 12);
+    seed_linear_repo(&dir, 22);
     let page1 = grit_json(&dir, &["log"]);
     let cursor = page1["next"].as_str().expect("next").to_owned();
     for extra in ["--all", "--branches", "--tags", "--remotes"] {
@@ -578,7 +578,7 @@ fn log_cursor_rejects_mismatched_revision_selection() -> TestResult {
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
-    seed_linear_repo(&dir, 12);
+    seed_linear_repo(&dir, 22);
     let page1 = grit_json(&dir, &["log"]);
     let cursor = page1["next"].as_str().expect("next").to_owned();
     let out = grit_run(&dir, &["log", "HEAD~3", &format!("--cursor={cursor}")]);
@@ -598,7 +598,7 @@ fn log_cursor_rejects_incompatible_flags() -> TestResult {
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
-    seed_linear_repo(&dir, 12);
+    seed_linear_repo(&dir, 22);
     let page1 = grit_json(&dir, &["log"]);
     let cursor = page1["next"].as_str().expect("next").to_owned();
     for extra in [
@@ -628,7 +628,7 @@ fn log_cursor_continuation_hint_is_cursor_only_and_runs() -> TestResult {
     let _ = fs::remove_dir_all(&dir);
     seed_linear_repo(&dir, 3);
     assert!(grit_run(&dir, &["branch", "base"]).status.success());
-    for i in 0..12 {
+    for i in 0..22 {
         fs::write(dir.join("f.txt"), format!("main{i}\n")).expect("write");
         assert!(grit_run(&dir, &["add", "f.txt"]).status.success());
         assert!(grit_run(&dir, &["commit", &format!("m{i}")])
@@ -692,10 +692,10 @@ fn chmod_readonly_recursive(path: &Path) {
 }
 
 #[test]
-fn log_default_human_does_not_write_cursor_snapshots() -> TestResult {
+fn log_piped_human_stores_one_cursor_per_page() -> TestResult {
     let dir = std::env::temp_dir().join(format!("grit-log-cursor-no-write-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
-    seed_linear_repo(&dir, 12);
+    seed_linear_repo(&dir, 22);
     let git_dir = dir.join(".git");
     assert_eq!(log_walk_snapshot_count(&git_dir), 0);
     let out = grit_run(&dir, &["log"]);
@@ -706,16 +706,20 @@ fn log_default_human_does_not_write_cursor_snapshots() -> TestResult {
     );
     assert_eq!(
         log_walk_snapshot_count(&git_dir),
-        0,
-        "plain log must not persist cursor files"
+        1,
+        "the next page's cursor is stored for the hint"
     );
-    let out2 = grit_run(&dir, &["log"]);
-    assert!(out2.status.success());
-    assert_eq!(log_walk_snapshot_count(&git_dir), 0);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("→ more: grit log") && !stdout.contains("--cursor="),
+        stdout.contains("→ more: grit log --cursor=lw1.s."),
         "{stdout}"
+    );
+    let out2 = grit_run(&dir, &["log", "-n", "3"]);
+    assert!(out2.status.success());
+    assert_eq!(
+        log_walk_snapshot_count(&git_dir),
+        1,
+        "a one-shot `-n` stores no cursor"
     );
     Ok(())
 }
@@ -725,13 +729,26 @@ fn log_default_human_does_not_write_cursor_snapshots() -> TestResult {
 fn log_default_human_succeeds_with_read_only_git_dir() -> TestResult {
     let dir = std::env::temp_dir().join(format!("grit-log-readonly-git-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
-    seed_linear_repo(&dir, 12);
+    seed_linear_repo(&dir, 22);
     chmod_readonly_recursive(&dir.join(".git"));
     let out = grit_run(&dir, &["log"]);
     assert!(
         out.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
+    );
+    // The cursor cannot be stored, so the hint carries the long self-contained form.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let token = stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("→ more: grit log --cursor="))
+        .expect("continuation with a cursor");
+    assert!(!token.starts_with("lw1.s."), "long token: {token}");
+    let next = grit_run(&dir, &["log", &format!("--cursor={token}")]);
+    assert!(
+        next.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&next.stderr)
     );
     Ok(())
 }
@@ -741,7 +758,7 @@ fn log_cursor_flag_persists_snapshot_for_hint() -> TestResult {
     let dir =
         std::env::temp_dir().join(format!("grit-log-cursor-hint-write-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
-    seed_linear_repo(&dir, 12);
+    seed_linear_repo(&dir, 22);
     let git_dir = dir.join(".git");
     assert_eq!(log_walk_snapshot_count(&git_dir), 0);
     let out = grit_run(&dir, &["log", "--cursor"]);

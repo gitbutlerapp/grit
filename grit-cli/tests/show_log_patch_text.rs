@@ -392,7 +392,7 @@ fn log_patch_text_continuation_follows_patch_and_resumes() {
     let dir = TempDir::new().expect("tempdir");
     let root = dir.path();
     init_two_commit_repo(root);
-    for i in 3..=22 {
+    for i in 3..=42 {
         fs::write(root.join("a.txt"), format!("commit {i}\n")).expect("write");
         git_in(root, &["add", "a.txt"]);
         git_in(root, &["commit", "-m", &format!("commit {i}")]);
@@ -403,7 +403,7 @@ fn log_patch_text_continuation_follows_patch_and_resumes() {
         "--patch-text".to_owned(),
         "--cursor".to_owned(),
     ];
-    for expected in [10, 10, 2] {
+    for expected in [20, 20, 2] {
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
         let bytes = grit_patch_stdout(root, &arg_refs);
         let out = String::from_utf8_lossy(&bytes);
