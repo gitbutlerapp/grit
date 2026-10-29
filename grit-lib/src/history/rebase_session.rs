@@ -440,6 +440,10 @@ pub(crate) fn persist_rebase_stopped_head_if_missing(
     write_persisted_state(repo.git_dir(), &parsed)
 }
 
+fn replay_base_parent(state: &LoadedState, oid: ObjectId) -> bool {
+    oid == state.onto || state.mapping.values().any(|mapped| *mapped == oid)
+}
+
 fn stopped_head_for_continue(
     state: &LoadedState,
     repo: &Repository,
@@ -448,12 +452,22 @@ fn stopped_head_for_continue(
         return Ok(oid);
     }
     let head = resolve_head_oid(repo)?;
-    if head == state.onto || state.mapping.values().any(|mapped| *mapped == head) {
+    if replay_base_parent(state, head) {
         return Ok(head);
     }
     let head_commit = load_commit(repo, head)?;
-    if let Some(&parent) = head_commit.parents.first() {
-        return Ok(parent);
+    if head_commit.parents.len() == 1 {
+        if let Some(&parent) = head_commit.parents.first() {
+            if replay_base_parent(state, parent) {
+                return Ok(parent);
+            }
+        }
+    } else {
+        for &parent in &head_commit.parents {
+            if replay_base_parent(state, parent) {
+                return Ok(parent);
+            }
+        }
     }
     Err(RebaseSessionError::NoRebaseInProgress)
 }

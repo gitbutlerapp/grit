@@ -516,6 +516,63 @@ fn continue_rejects_resolution_merge_with_stop_as_second_parent_only() {
 }
 
 #[test]
+fn legacy_plan_rejects_merge_with_stop_as_second_parent_only() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "f.txt", "base\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "topic"]);
+    commit_file(wt, "f.txt", "topic change\n", "topic commit");
+    let topic_tip = git_oid(wt, "topic");
+    let tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "f.txt", "main change\n", "main commit");
+    let onto = git_oid(wt, "HEAD");
+    let grit = open_grit(wt);
+    git(wt, &["switch", "topic"]);
+    let _ = start_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("stop");
+    strip_stopped_head_from_grit_plan(grit.git_dir());
+    std::fs::write(wt.join("f.txt"), "resolved\n").expect("resolve");
+    git(wt, &["add", "f.txt"]);
+    let stopped_head = git_oid(wt, "HEAD");
+    let tree = git(wt, &["write-tree"]).trim().to_string();
+    let bogus = git(
+        wt,
+        &[
+            "commit-tree",
+            &tree,
+            "-p",
+            &topic_tip.to_hex(),
+            "-p",
+            &stopped_head.to_hex(),
+            "-m",
+            "bogus merge resolution",
+        ],
+    )
+    .trim()
+    .to_string();
+    git(wt, &["reset", "--hard", &bogus]);
+    let err = continue_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("legacy bogus merge continue");
+    assert!(matches!(
+        err,
+        RebaseSessionError::ResolutionHeadChanged { .. }
+    ));
+    assert!(grit.git_dir().join("rebase-merge/grit-plan").is_file());
+}
+
+#[test]
 fn continue_resolution_head_changed_leaves_rebase_state() {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
