@@ -1586,6 +1586,12 @@ pub(crate) struct CheckoutApplyOptions {
     /// few files. Set by callers that already observed cancellation between earlier calls, so
     /// only their first call needs the small chunks that stop quickly after a cancel.
     pub skip_parallel_write_ramp: bool,
+    /// When set by [`apply_tree_changes_in_chunks`], merge index rows per slice but defer
+    /// canonical sort, cache-tree attach, mtime scans, and index write until the caller
+    /// finalizes once after the last slice.
+    pub defer_chunk_index_finalize: bool,
+    /// Skip promisor blob prefetch in this pass (caller already prefetched the full diff).
+    pub skip_promisor_prefetch: bool,
 }
 
 /// How a checkout persists the index it updates.
@@ -2066,12 +2072,16 @@ fn checkout_commit_index_update(
     new_entries.extend_from_slice(&apply.skip_worktree_rows);
     paths_to_remove.extend_from_slice(&apply.sparse_removed_index_paths);
     let change_count = paths_to_remove.len() + new_entries.len();
-    let pre_mtime_max = crate::index::stage0_mtime_max(&index_mut.entries);
-    let new_mtime_max = crate::index::stage0_mtime_max(&new_entries);
-    let index_mtime_hint = Some(crate::index::max_stage0_mtime_pair(
-        pre_mtime_max,
-        new_mtime_max,
-    ));
+    let index_mtime_hint = if apply.defer_chunk_index_finalize {
+        None
+    } else {
+        let pre_mtime_max = crate::index::stage0_mtime_max(&index_mut.entries);
+        let new_mtime_max = crate::index::stage0_mtime_max(&new_entries);
+        Some(crate::index::max_stage0_mtime_pair(
+            pre_mtime_max,
+            new_mtime_max,
+        ))
+    };
     index_mut.defer_untracked_cache_invalidation =
         bulk_index_rewrite || !wholesale_dirs_removed.is_empty();
     if bulk_index_rewrite || !wholesale_dirs_removed.is_empty() {
@@ -2107,6 +2117,11 @@ fn checkout_commit_index_update(
             paths_to_remove.iter().map(|p| p.as_slice()),
             new_entries,
         );
+    }
+    if apply.defer_chunk_index_finalize {
+        return match index_write {
+            CheckoutIndexWrite::Commit(_) | CheckoutIndexWrite::Defer(_) => Ok(()),
+        };
     }
     index_mut.ensure_canonical_order();
     if let Some(tree) = apply.checkout_result_tree {
@@ -2829,49 +2844,111 @@ fn apply_tree_changes_in_chunks(
             journal,
         );
     }
-    let chunk_count = changes.len().div_ceil(POPULATED_TREE_CHECKOUT_CHUNK);
-    match index_write {
-        CheckoutIndexWrite::Commit(lock) => {
-            for (i, chunk) in changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK).enumerate() {
-                if i > 0 {
-                    apply.skip_parallel_write_ramp = true;
-                }
-                let write = if i + 1 == chunk_count {
-                    CheckoutIndexWrite::Commit(lock)
-                } else {
-                    CheckoutIndexWrite::Defer(lock)
-                };
-                apply_tree_changes(
-                    repo,
-                    chunk,
-                    progress,
-                    cancel,
-                    index_mut,
-                    apply.clone(),
-                    attribute_changes,
-                    write,
-                    journal,
-                )?;
+
+    let config = repo.config()?;
+    let attr_source = attribute_changes.unwrap_or(changes);
+    if apply.precomputed_worktree_rules.is_none() {
+        let rules = checkout_worktree_rules(repo, index_mut, attr_source, config.clone())?;
+        apply.precomputed_worktree_rules = Some(Rc::new(rules));
+    }
+    let rules = apply.precomputed_worktree_rules.as_ref().ok_or_else(|| {
+        Error::PathError("internal error: missing precomputed checkout rules".into())
+    })?;
+
+    if !apply.skip_bulk_checkout_fast_path {
+        if bulk_mod_delete_checkout_eligible(changes, rules.as_ref()) {
+            return apply_tree_changes(
+                repo,
+                changes,
+                progress,
+                cancel,
+                index_mut,
+                apply,
+                attribute_changes,
+                index_write,
+                journal,
+            );
+        }
+        if bulk_write_checkout_eligible(changes, rules.as_ref())
+            && (tree_changes_are_all_additions(changes)
+                || tree_changes_are_all_modifications(changes))
+        {
+            return apply_tree_changes(
+                repo,
+                changes,
+                progress,
+                cancel,
+                index_mut,
+                apply,
+                attribute_changes,
+                index_write,
+                journal,
+            );
+        }
+        if changes.len() >= BULK_DELETE_CHECKOUT_MIN && tree_changes_are_all_deletions(changes) {
+            return apply_tree_changes(
+                repo,
+                changes,
+                progress,
+                cancel,
+                index_mut,
+                apply,
+                attribute_changes,
+                index_write,
+                journal,
+            );
+        }
+    }
+
+    let saved_result_tree = apply.checkout_result_tree.take();
+    apply.defer_chunk_index_finalize = true;
+    apply.skip_promisor_prefetch = true;
+    prefetch_promisor_blobs_for_checkout(repo, changes)?;
+    if let Some(extra) = attribute_changes {
+        let protect = ProtectOptions::from_config(config.as_ref());
+        validate_diff_changes_for_worktree(extra, protect)?;
+    }
+
+    let mut apply_slices = |lock: &IndexLock| -> Result<()> {
+        for (i, chunk) in changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK).enumerate() {
+            if i > 0 {
+                apply.skip_parallel_write_ramp = true;
             }
+            apply_tree_changes(
+                repo,
+                chunk,
+                progress,
+                cancel,
+                index_mut,
+                apply.clone(),
+                attribute_changes,
+                CheckoutIndexWrite::Defer(lock),
+                journal,
+            )?;
+        }
+        Ok(())
+    };
+
+    let commit_lock = match index_write {
+        CheckoutIndexWrite::Commit(lock) => {
+            apply_slices(lock)?;
+            Some(lock)
         }
         CheckoutIndexWrite::Defer(lock) => {
-            for (i, chunk) in changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK).enumerate() {
-                if i > 0 {
-                    apply.skip_parallel_write_ramp = true;
-                }
-                apply_tree_changes(
-                    repo,
-                    chunk,
-                    progress,
-                    cancel,
-                    index_mut,
-                    apply.clone(),
-                    attribute_changes,
-                    CheckoutIndexWrite::Defer(lock),
-                    journal,
-                )?;
-            }
+            apply_slices(lock)?;
+            None
         }
+    };
+
+    apply.defer_chunk_index_finalize = false;
+    apply.checkout_result_tree = saved_result_tree;
+    index_mut.ensure_canonical_order();
+    if let Some(tree) = apply.checkout_result_tree {
+        attach_checkout_result_cache_tree(repo, index_mut, &tree)?;
+    }
+    if let Some(lock) = commit_lock {
+        let bulk_index_rewrite = changes.len() >= BULK_INDEX_REWRITE_MIN;
+        write_checkout_index(repo, index_mut, lock, bulk_index_rewrite, None, journal)?;
     }
     Ok(())
 }
@@ -2909,7 +2986,9 @@ fn apply_tree_changes(
         split_sparse_tree_changes(sparse.as_ref(), work_tree, index_mut, changes, &mut apply);
     let changes: &[DiffEntry] = &worktree_changes;
 
-    prefetch_promisor_blobs_for_checkout(repo, changes)?;
+    if !apply.skip_promisor_prefetch {
+        prefetch_promisor_blobs_for_checkout(repo, changes)?;
+    }
     if let Some(extra) = attribute_changes {
         validate_diff_changes_for_worktree(extra, protect)?;
     }
@@ -5145,6 +5224,48 @@ mod tests {
             index.cache_tree.as_ref().map(|t| t.entry_count),
             Some(i32::try_from(count).expect("count fits"))
         );
+        assert!(wt.join(format!("f{:05}.txt", count - 1)).is_file());
+    }
+
+    #[test]
+    fn between_trees_modifications_build_cache_tree_once_across_chunks() {
+        let count = 2 * POPULATED_TREE_CHECKOUT_CHUNK + 5;
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let wt = repo.work_tree().expect("wt");
+        for i in 0..count {
+            fs::write(wt.join(format!("f{i:05}.txt")), format!("base {i}\n")).expect("write");
+        }
+        let base_tree = commit_all(&repo, "base");
+        for i in 0..count {
+            fs::write(wt.join(format!("f{i:05}.txt")), format!("modified {i}\n")).expect("rewrite");
+        }
+        let modified_tree = commit_all(&repo, "modified");
+        checkout_between_trees(&repo, Some(&modified_tree), &base_tree).expect("sync base");
+
+        PREFETCH_PROMISOR_FOR_CHECKOUT_CALLS.with(|c| *c.borrow_mut() = 0);
+        let builds_before = repo.odb().hot_path_metrics().cache_tree_builds();
+        checkout_between_trees(&repo, Some(&base_tree), &modified_tree).expect("apply mods");
+        let builds = repo.odb().hot_path_metrics().cache_tree_builds() - builds_before;
+        let prefetch_calls = PREFETCH_PROMISOR_FOR_CHECKOUT_CALLS.with(|c| *c.borrow());
+
+        assert_eq!(
+            builds, 1,
+            "tree-to-tree modification checkout should build the cache tree once"
+        );
+        assert_eq!(
+            prefetch_calls, 1,
+            "tree-to-tree modification checkout should prefetch promisor blobs once, got {prefetch_calls}"
+        );
+        let index = repo.load_index().expect("index after");
+        assert_eq!(index.cache_tree_root, Some(modified_tree));
         assert!(wt.join(format!("f{:05}.txt", count - 1)).is_file());
     }
 }
