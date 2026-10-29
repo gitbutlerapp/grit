@@ -878,6 +878,162 @@ fn retained_page_from_git_pack_matches_git_order_and_commit_bodies() {
 }
 
 #[test]
+fn bounded_parent_filter_limits_match_git_on_merge_heavy_history() {
+    let dir = tempdir().expect("tempdir");
+    let repo = open_bare(dir.path()).expect("repo");
+    let commits = write_tied_skewed_history_commits(repo.odb(), 900);
+    let tip_hex = commits.last().expect("tip").to_hex();
+    let hide_hex = commits[200].to_hex();
+
+    let cases: [(&[&str], RevListOptions); 6] = [
+        (
+            &["--merges", "-n", "20"],
+            RevListOptions {
+                min_parents: Some(2),
+                max_count: Some(20),
+                ..Default::default()
+            },
+        ),
+        (
+            &["--no-merges", "-n", "20"],
+            RevListOptions {
+                max_parents: Some(1),
+                max_count: Some(20),
+                ..Default::default()
+            },
+        ),
+        (
+            &["--first-parent", "-n", "20"],
+            RevListOptions {
+                first_parent: true,
+                max_count: Some(20),
+                ..Default::default()
+            },
+        ),
+        (
+            &["--first-parent", "--merges", "-n", "15"],
+            RevListOptions {
+                first_parent: true,
+                min_parents: Some(2),
+                max_count: Some(15),
+                ..Default::default()
+            },
+        ),
+        (
+            &["--merges", "-n", "12", "--skip", "3"],
+            RevListOptions {
+                min_parents: Some(2),
+                max_count: Some(12),
+                skip: 3,
+                ..Default::default()
+            },
+        ),
+        (
+            &["--no-merges", "-n", "40"],
+            RevListOptions {
+                max_parents: Some(1),
+                max_count: Some(40),
+                ..Default::default()
+            },
+        ),
+    ];
+    for (git_args, opts) in cases {
+        let mut args: Vec<&str> = git_args.to_vec();
+        args.push(&tip_hex);
+        let expected = support::git_rev_list(dir.path(), &args);
+        let actual = rev_list(&repo, std::slice::from_ref(&tip_hex), &[], &opts)
+            .expect("rev-list")
+            .commits;
+        assert_eq!(actual, expected, "git args {git_args:?}");
+    }
+
+    let range_spec = format!("{hide_hex}..{tip_hex}");
+    let expected_range = support::git_rev_list(dir.path(), &["--merges", "-n", "10", &range_spec]);
+    let range_opts = RevListOptions {
+        min_parents: Some(2),
+        max_count: Some(10),
+        ..Default::default()
+    };
+    let actual_range = rev_list(
+        &repo,
+        std::slice::from_ref(&tip_hex),
+        std::slice::from_ref(&hide_hex),
+        &range_opts,
+    )
+    .expect("rev-list range")
+    .commits;
+    assert_eq!(actual_range, expected_range);
+}
+
+#[test]
+fn bounded_parent_filter_count_with_max_count_sets_reachable_count() {
+    let dir = tempdir().expect("tempdir");
+    let repo = open_bare(dir.path()).expect("repo");
+    let commits = write_tied_skewed_history_commits(repo.odb(), 900);
+    let tip_hex = commits.last().expect("tip").to_hex();
+    let list_opts = RevListOptions {
+        min_parents: Some(2),
+        max_count: Some(20),
+        ..Default::default()
+    };
+    let expected = support::git_rev_list(dir.path(), &["--merges", "-n", "20", &tip_hex]);
+    let result = rev_list(
+        &repo,
+        std::slice::from_ref(&tip_hex),
+        &[],
+        &RevListOptions {
+            count: true,
+            ..list_opts
+        },
+    )
+    .expect("rev-list");
+    assert_eq!(result.commits, expected);
+    assert_eq!(result.reachable_commit_count, Some(expected.len()));
+    let git_count: usize = support::git(
+        dir.path(),
+        &["rev-list", "--count", "--merges", "-n", "20", &tip_hex],
+    )
+    .trim()
+    .parse()
+    .expect("git count");
+    assert_eq!(result.reachable_commit_count, Some(git_count));
+}
+
+#[test]
+fn bounded_parent_filter_rev_walk_matches_git() {
+    let repo = packed_merge_history();
+    let wt = repo.worktree();
+    let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
+    for (limit, merges_only) in [(20usize, true), (20, false), (5, true)] {
+        let n = limit.to_string();
+        let expected = if merges_only {
+            support::git_rev_list(wt, &["--merges", "-n", &n, "HEAD"])
+        } else {
+            support::git_rev_list(wt, &["--no-merges", "-n", &n, "HEAD"])
+        };
+        let result = grit_repo
+            .rev_walk()
+            .rev_list_result(
+                &["HEAD"],
+                &RevWalkListOptions {
+                    limit: Some(limit),
+                    merges: if merges_only {
+                        grit_lib::revwalk::queries::MergeFilter::OnlyMerges
+                    } else {
+                        grit_lib::revwalk::queries::MergeFilter::NoMerges
+                    },
+                    ..Default::default()
+                },
+            )
+            .expect("rev walk");
+        assert_eq!(
+            result.commits, expected,
+            "limit {limit} merges_only {merges_only}"
+        );
+    }
+}
+
+#[test]
 fn bounded_path_limit_extreme_max_count_does_not_panic() {
     let repo = support::HistoryRepo::init();
     let wt = repo.worktree();

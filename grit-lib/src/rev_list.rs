@@ -1274,6 +1274,10 @@ pub fn rev_list(
         return Ok(result);
     }
 
+    if let Some(result) = try_bounded_parent_filter_limit_list(repo, &include, &exclude, options)? {
+        return Ok(result);
+    }
+
     if let Some(result) = try_bounded_limit_list(repo, &include, &exclude, options)? {
         return Ok(result);
     }
@@ -6977,6 +6981,93 @@ fn try_bounded_commit_filter_limit_list(
     Ok(Some(result))
 }
 
+fn rev_list_options_without_parent_selectors(options: &RevListOptions) -> RevListOptions {
+    RevListOptions {
+        first_parent: false,
+        min_parents: None,
+        max_parents: None,
+        ..options.clone()
+    }
+}
+
+fn can_use_bounded_parent_filter_limit_list(options: &RevListOptions) -> bool {
+    let parent_selector =
+        options.first_parent || options.min_parents.is_some() || options.max_parents.is_some();
+    if !parent_selector {
+        return false;
+    }
+    let stripped = rev_list_options_without_parent_selectors(options);
+    options.ordering == OrderingMode::Default
+        && bounded_limit_list_common_inner(&stripped, false)
+        && plain_commit_walk(&stripped, false)
+}
+
+fn try_bounded_parent_filter_limit_list(
+    repo: &Repository,
+    include: &[ObjectId],
+    exclude: &[ObjectId],
+    options: &RevListOptions,
+) -> Result<Option<RevListResult>> {
+    if include.is_empty() || !can_use_bounded_parent_filter_limit_list(options) {
+        return Ok(None);
+    }
+    let max_count = options.max_count;
+    if max_count == Some(0) {
+        let mut result = rev_list_result_from_commits(Vec::new());
+        if options.count {
+            result.reachable_commit_count = Some(0);
+        }
+        return Ok(Some(result));
+    }
+    let min_p = options.min_parents.unwrap_or(0);
+    let max_p = options.max_parents.unwrap_or(usize::MAX);
+
+    let mut ordered = Vec::with_capacity(max_count.unwrap_or(64).min(64));
+    let mut commit_data = oid_hash_map();
+    repo.odb().with_pack_read_context(|| -> Result<()> {
+        let mut graph =
+            CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
+        let excluded = if exclude.is_empty() {
+            HashSet::new()
+        } else {
+            walk_closure(&mut graph, exclude)?
+        };
+        if options.retain_commit_data {
+            graph.retain_parsed_commits(expected_parsed_commits(
+                options.skip.saturating_add(max_count.unwrap_or(64)),
+            ));
+        }
+
+        let mut matched_seen = 0usize;
+        streaming_date_walk(&mut graph, include, &excluded, false, None, |graph, oid| {
+            let parent_count = graph.parent_count_for_filter(oid)?;
+            if parent_count >= min_p && parent_count <= max_p {
+                matched_seen += 1;
+                if matched_seen > options.skip && max_count.is_none_or(|m| ordered.len() < m) {
+                    ordered.push(oid);
+                }
+            }
+            Ok(if max_count.is_some_and(|m| ordered.len() >= m) {
+                WalkControl::Stop
+            } else {
+                WalkControl::Continue
+            })
+        })?;
+        commit_data = graph.take_retained_commits(&ordered);
+        Ok(())
+    })?;
+
+    if options.reverse {
+        ordered.reverse();
+    }
+    let mut result = rev_list_result_from_commits(ordered);
+    if options.count {
+        result.reachable_commit_count = Some(result.commits.len());
+    }
+    result.commit_data = commit_data;
+    Ok(Some(result))
+}
+
 /// `--date-order` is left to the full path: Git topo-sorts the whole range there, which a walk
 /// that stops early cannot reproduce.
 fn can_use_bounded_limit_list(options: &RevListOptions) -> bool {
@@ -7814,6 +7905,8 @@ pub(crate) struct CommitGraph<'r> {
     shallow_boundaries: OidHashSet,
     graft_parents: OidHashMap<Vec<ObjectId>>,
     subjects: HashMap<ObjectId, String>,
+    /// Full parent count before [`Self::first_parent_only`] truncation, when that mode is on.
+    full_parent_counts: OidHashMap<usize>,
     /// Parsed commits kept for the caller once [`Self::retain_parsed_commits`] is called.
     ///
     /// Retained commits are the only record of their tree and author time; those side maps
@@ -7878,6 +7971,7 @@ impl<'r> CommitGraph<'r> {
             shallow_boundaries,
             graft_parents,
             subjects: HashMap::new(),
+            full_parent_counts: oid_hash_map(),
             retained: None,
             read_buf: Vec::new(),
             unreleased_bytes: None,
@@ -7952,6 +8046,23 @@ impl<'r> CommitGraph<'r> {
     pub(crate) fn parents_of(&mut self, oid: ObjectId) -> Result<Vec<ObjectId>> {
         self.populate(oid)?;
         Ok(self.parents.get(&oid).cloned().unwrap_or_default())
+    }
+
+    /// Parent count for `--merges` / `--no-merges` output filtering.
+    ///
+    /// Under [`Self::first_parent_only`], traversal follows only the first parent but merge
+    /// filters still use the commit's real parent count.
+    pub(crate) fn parent_count_for_filter(&mut self, oid: ObjectId) -> Result<usize> {
+        self.populate(oid)?;
+        if self.first_parent_only {
+            Ok(self
+                .full_parent_counts
+                .get(&oid)
+                .copied()
+                .unwrap_or_else(|| self.parents.get(&oid).map(|p| p.len()).unwrap_or(0)))
+        } else {
+            Ok(self.parents.get(&oid).map(|p| p.len()).unwrap_or(0))
+        }
     }
 
     fn committer_time(&mut self, oid: ObjectId) -> i64 {
@@ -8060,8 +8171,11 @@ impl<'r> CommitGraph<'r> {
                 if let Some(graft_parents) = self.graft_parents.get(&oid) {
                     parents = graft_parents.clone();
                 }
-                if self.first_parent_only && parents.len() > 1 {
-                    parents.truncate(1);
+                if self.first_parent_only {
+                    self.full_parent_counts.insert(oid, parents.len());
+                    if parents.len() > 1 {
+                        parents.truncate(1);
+                    }
                 }
                 self.committer_time.insert(oid, ctime);
                 self.parents.insert(oid, parents);
@@ -8079,8 +8193,11 @@ impl<'r> CommitGraph<'r> {
             if let Some(graft_parents) = self.graft_parents.get(&oid) {
                 parents = graft_parents.clone();
             }
-            if self.first_parent_only && parents.len() > 1 {
-                parents.truncate(1);
+            if self.first_parent_only {
+                self.full_parent_counts.insert(oid, parents.len());
+                if parents.len() > 1 {
+                    parents.truncate(1);
+                }
             }
             self.committer_time
                 .insert(oid, committer_unix_seconds_for_ordering(&commit.committer));
@@ -8116,8 +8233,11 @@ impl<'r> CommitGraph<'r> {
         if let Some(graft_parents) = self.graft_parents.get(&oid) {
             parents = graft_parents.clone();
         }
-        if self.first_parent_only && parents.len() > 1 {
-            parents.truncate(1);
+        if self.first_parent_only {
+            self.full_parent_counts.insert(oid, parents.len());
+            if parents.len() > 1 {
+                parents.truncate(1);
+            }
         }
         self.committer_time.insert(oid, ctime);
         self.author_time.insert(oid, atime);
