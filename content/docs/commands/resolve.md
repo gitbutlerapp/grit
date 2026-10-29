@@ -17,6 +17,8 @@ Resolves one or more revision specs to an object id, plus the object type and un
 
 Each spec prints on its own line as `OID TYPE` (full hex by default). With `--short`, oids are abbreviated using the same uniqueness rules as elsewhere in grit.
 
+The `:/<text>` message search resolves to the **youngest** matching commit by committer date among all commits reachable from any ref (including `HEAD`), not merely the first match walking back from one branch tip.
+
 With `--abbrev-ref` or `--symbolic-full-name`, output switches to ref names (one line per spec): the shortest unambiguous short name, or the full symbolic ref name, matching `git rev-parse` for the same flags. Specs that are not refs (commit oids, peeled objects, unknown names) produce no line for that spec; exit status stays `0` unless a spec fails for another reason (for example `@{u}` with no upstream).
 
 With `--verify <SPEC>`, exactly one spec is resolved strictly (like `git rev-parse --verify`): revision ranges (`A..B`, `A...B`), revision-set excludes (`^ref`), and other multi-revision forms are rejected with a typed error. Full hex ids must exist in the object database, and peel suffixes such as `^{commit}` are honored. Clap rejects extra positional specs when `--verify` is used (usage exit `2`). Success prints one object id line (abbreviated when `--short` is set). Combine with `-q` / `--quiet` to suppress all stdout and stderr and answer with exit status only (`0` = exists, `1` = not). `--json --quiet` prints nothing; the exit code alone answers.
