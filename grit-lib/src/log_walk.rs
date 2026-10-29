@@ -929,6 +929,78 @@ mod tests {
         Ok(())
     }
 
+    /// Run system `git` in `dir`, isolated from the user's and system config.
+    fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .expect("git");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn walk_reads_loose_and_alternate_commits_beside_the_single_local_pack() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let source = dir.path().join("source");
+        let clone = dir.path().join("clone");
+        std::fs::create_dir(&source).map_err(Error::Io)?;
+        git_in(&source, &["init", "-q", "-b", "main"]);
+        let ident = [
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+        ];
+        for msg in ["one", "two", "three"] {
+            git_in(&source, &[&ident[..], &[msg]].concat());
+        }
+        git_in(&source, &["repack", "-a", "-d", "-q"]);
+        git_in(dir.path(), &["clone", "-q", "--shared", "source", "clone"]);
+        for msg in ["four", "five"] {
+            git_in(&clone, &[&ident[..], &[msg]].concat());
+        }
+        // One local pack with the clone's own commits; the first three live only in the
+        // alternate and the newest is loose, so the single-pack reader cannot answer for them.
+        git_in(&clone, &["repack", "-a", "-d", "-l", "-q"]);
+        git_in(&clone, &["prune-packed"]);
+        git_in(&clone, &[&ident[..], &["six"]].concat());
+        let git_order: Vec<ObjectId> = git_in(&clone, &["rev-list", "HEAD"])
+            .lines()
+            .filter_map(|line| line.parse().ok())
+            .collect();
+        assert_eq!(git_order.len(), 6);
+
+        let repo = Repository::discover(Some(&clone), &RepositoryOptions::empty())?;
+        let query = LogWalkQuery {
+            tips: vec![git_order[0]],
+            hide: Vec::new(),
+            cutoffs: ReachableWalkCommitterCutoffs::default(),
+        };
+        let page = LogWalkCursor::step(&repo, &query, None, 10)?;
+        let mut walked = page.commits.clone();
+        let mut expected = git_order.clone();
+        walked.sort();
+        expected.sort();
+        assert_eq!(walked, expected, "the walk lost loose or alternate commits");
+        assert_commit_data_matches_odb(&repo, &page)
+    }
+
     fn assert_commit_data_matches_odb(repo: &Repository, page: &LogWalkPage) -> Result<()> {
         let emitted: HashSet<ObjectId> = page.commits.iter().copied().collect();
         let mut walked = page.commit_data.clone();
