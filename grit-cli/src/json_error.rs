@@ -321,6 +321,20 @@ pub fn operation_in_progress(
     })
 }
 
+/// Refuse to commit on a GitButler workspace, whose branch GitButler rewrites.
+pub fn gitbutler_workspace_commit() -> Error {
+    let human =
+        "HEAD is a GitButler workspace, which GitButler rewrites, so grit does not commit to it"
+            .to_owned();
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            hint: Some("commit with `but commit`, or switch to a branch first".to_owned()),
+            ..StructuredJsonError::new(human.clone(), ErrorKind::GitButlerWorkspace)
+        },
+        human,
+    })
+}
+
 /// Build a structured CLI error for a revision that names nothing.
 pub fn revision_not_found(spec: &str) -> Error {
     structured_revision_not_found(format!("no branch, tag or commit named '{spec}'"))

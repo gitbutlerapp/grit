@@ -146,6 +146,27 @@
       ],
       "type": "object"
     },
+    "GitButlerWorkspaceJson": {
+      "description": "A GitButler workspace in `grit status --json`: GitButler's merge of the applied branches.",
+      "properties": {
+        "commit": {
+          "description": "The workspace commit at the tip of `gitbutler/workspace` (full oid).",
+          "type": "string"
+        },
+        "heads": {
+          "description": "The heads merged into the workspace, in its parent order.",
+          "items": {
+            "$ref": "#/definitions/WorkspaceHeadJson"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "commit",
+        "heads"
+      ],
+      "type": "object"
+    },
     "InterruptedRewriteJson": {
       "description": "Recovery of an interrupted rebase or history edit, in `--json` output.",
       "oneOf": [
@@ -251,6 +272,41 @@
         "ref"
       ],
       "type": "object"
+    },
+    "WorkspaceHeadJson": {
+      "description": "One head merged into a GitButler workspace.",
+      "properties": {
+        "ahead": {
+          "description": "Commits on this head not on `target`, or `null` when counts were skipped or there is no target.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "branches": {
+          "description": "Local branches that point at it, sorted; empty when none does.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "commit": {
+          "description": "The head commit (full oid).",
+          "type": "string"
+        },
+        "subject": {
+          "description": "The head commit's subject.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "branches",
+        "commit",
+        "subject"
+      ],
+      "type": "object"
     }
   },
   "description": "Result of `grit status`.",
@@ -299,6 +355,17 @@
     },
     "detached": {
       "type": "boolean"
+    },
+    "gitbutler_workspace": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GitButlerWorkspaceJson"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The GitButler workspace `HEAD` is on, when it is on one. `head` is then the workspace commit, and `commits` and `ahead` leave it out."
     },
     "head": {
       "description": "HEAD commit (full oid), or `null` on an unborn / invalid HEAD.",

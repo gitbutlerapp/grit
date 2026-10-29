@@ -6624,6 +6624,48 @@ pub fn grit_lib::fsmonitor::fsmonitor_enabled(&grit_lib::config::ConfigSet) -> b
 pub fn grit_lib::fsmonitor::git_style_windows_pipe_name_from_absolute_ipc(&str) -> alloc::string::String
 pub fn grit_lib::fsmonitor::refresh_index(&mut grit_lib::index::Index, &std::path::Path, &std::path::Path, &grit_lib::config::ConfigSet, core::option::Option<&dyn grit_lib::command_runner::CommandRunner>, &grit_lib::worktree::fsmonitor::FsmonitorRefreshOptions) -> grit_lib::error::Result<grit_lib::worktree::fsmonitor::FsmonitorRefreshResult>
 pub fn grit_lib::fsmonitor::v1_hook_token(grit_lib::worktree::fsmonitor::FsmonitorQueryBoundary) -> alloc::string::String
+pub mod grit_lib::gitbutler
+pub struct grit_lib::gitbutler::GitButlerWorkspace
+pub grit_lib::gitbutler::GitButlerWorkspace::commit: grit_lib::objects::ObjectId
+pub grit_lib::gitbutler::GitButlerWorkspace::heads: alloc::vec::Vec<grit_lib::gitbutler::WorkspaceHead>
+impl grit_lib::gitbutler::GitButlerWorkspace
+pub fn grit_lib::gitbutler::GitButlerWorkspace::detect(&grit_lib::repo::Repository) -> grit_lib::error::Result<core::option::Option<Self>>
+pub fn grit_lib::gitbutler::GitButlerWorkspace::head_commits(&self) -> alloc::vec::Vec<grit_lib::objects::ObjectId>
+impl core::clone::Clone for grit_lib::gitbutler::GitButlerWorkspace
+pub fn grit_lib::gitbutler::GitButlerWorkspace::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::gitbutler::GitButlerWorkspace
+impl core::cmp::PartialEq for grit_lib::gitbutler::GitButlerWorkspace
+pub fn grit_lib::gitbutler::GitButlerWorkspace::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::gitbutler::GitButlerWorkspace
+pub fn grit_lib::gitbutler::GitButlerWorkspace::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::gitbutler::GitButlerWorkspace
+impl core::marker::Freeze for grit_lib::gitbutler::GitButlerWorkspace
+impl core::marker::Send for grit_lib::gitbutler::GitButlerWorkspace
+impl core::marker::Sync for grit_lib::gitbutler::GitButlerWorkspace
+impl core::marker::Unpin for grit_lib::gitbutler::GitButlerWorkspace
+impl core::marker::UnsafeUnpin for grit_lib::gitbutler::GitButlerWorkspace
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::gitbutler::GitButlerWorkspace
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::gitbutler::GitButlerWorkspace
+pub struct grit_lib::gitbutler::WorkspaceHead
+pub grit_lib::gitbutler::WorkspaceHead::branches: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::gitbutler::WorkspaceHead::commit: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::gitbutler::WorkspaceHead
+pub fn grit_lib::gitbutler::WorkspaceHead::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::gitbutler::WorkspaceHead
+impl core::cmp::PartialEq for grit_lib::gitbutler::WorkspaceHead
+pub fn grit_lib::gitbutler::WorkspaceHead::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::gitbutler::WorkspaceHead
+pub fn grit_lib::gitbutler::WorkspaceHead::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::gitbutler::WorkspaceHead
+impl core::marker::Freeze for grit_lib::gitbutler::WorkspaceHead
+impl core::marker::Send for grit_lib::gitbutler::WorkspaceHead
+impl core::marker::Sync for grit_lib::gitbutler::WorkspaceHead
+impl core::marker::Unpin for grit_lib::gitbutler::WorkspaceHead
+impl core::marker::UnsafeUnpin for grit_lib::gitbutler::WorkspaceHead
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::gitbutler::WorkspaceHead
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::gitbutler::WorkspaceHead
+pub const grit_lib::gitbutler::WORKSPACE_BRANCH: &str
+pub const grit_lib::gitbutler::WORKSPACE_COMMIT_MARKER: &str
 pub mod grit_lib::ident
 pub enum grit_lib::ident::AuthorArgError
 pub grit_lib::ident::AuthorArgError::EmptyEmail

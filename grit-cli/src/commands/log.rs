@@ -8,6 +8,7 @@ use anyhow::{bail, Context, Result};
 use grit_lib::diff::{
     CommitFilesManyInput, CommitFilesManyOptions, DiffDetail, DiffOptions, DiffTotals,
 };
+use grit_lib::gitbutler::GitButlerWorkspace;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::log::CommitReuse;
 use grit_lib::revwalk::graph::{
@@ -438,7 +439,9 @@ pub fn run(
     let env = repo.environment();
     let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
     let path_args = walk_paths.as_slice();
-    let opts = rev.to_rev_walk_options(&repo, env, &["HEAD"], path_args)?;
+    let default_tips = default_tips(&repo, &rev)?;
+    let default_tips: Vec<&str> = default_tips.iter().map(String::as_str).collect();
+    let opts = rev.to_rev_walk_options(&repo, env, &default_tips, path_args)?;
     let continuation = cursor.filter(|token| !token.is_empty());
     if display.group_by.is_some() && continuation.is_some() {
         bail!("`grit log` cannot combine `--cursor` with `--group-by`");
@@ -493,7 +496,7 @@ pub fn run(
         );
     }
 
-    let token_refs = rev.rev_tokens(&["HEAD"]);
+    let token_refs = rev.rev_tokens(&default_tips);
     let page_size = rev.max_count().unwrap_or(page.cursor_page());
 
     let mut walk_opts = opts.clone();
@@ -611,6 +614,23 @@ pub fn run(
     )?;
     outcome.resume = resume;
     Ok(outcome)
+}
+
+/// Where the walk starts when no revision is given: `HEAD`, or on a GitButler workspace the
+/// branches merged into it, so GitButler's own workspace commit is not listed.
+fn default_tips(repo: &grit_lib::repo::Repository, rev: &RevSelectArgs) -> Result<Vec<String>> {
+    if !rev.revs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let workspace = GitButlerWorkspace::detect(repo).context("could not read HEAD")?;
+    Ok(match workspace.filter(|w| !w.heads.is_empty()) {
+        Some(workspace) => workspace
+            .head_commits()
+            .iter()
+            .map(ObjectId::to_hex)
+            .collect(),
+        None => vec!["HEAD".to_owned()],
+    })
 }
 
 #[derive(Clone, Default)]

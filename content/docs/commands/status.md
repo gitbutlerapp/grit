@@ -76,6 +76,22 @@ Nothing to commit — working tree clean.
 
 Paths are shown relative to the directory you run `grit` from. Valid UTF-8 file names print as-is in human and `--markdown` output (unlike Git’s default `core.quotepath=true`, which octal-escapes non-ASCII bytes). Names that contain C0 control characters (including ESC and BEL) are still C-quoted so a malicious repository cannot inject terminal escape sequences. Set `core.quotepath=true` in config if you want Git-style octal escaping for all non-ASCII bytes. `--json` path fields are always unquoted UTF-8 strings (JSON escapes controls as `\uXXXX`).
 
+### GitButler workspaces
+
+[GitButler](https://gitbutler.com) applies several branches at once by checking out `gitbutler/workspace`, topped by a merge of the applied branches that it maintains itself (its message says `GitButler Workspace Commit`). That commit is GitButler's bookkeeping, so on such a workspace `grit status` lists the applied branches instead of the commits ahead, and leaves the workspace commit out of `commits` and `ahead`. The next-step hint suggests `but commit`, because [`grit commit`](../commit/) refuses to commit there.
+
+```console
+$ grit status
+On GitButler workspace  ·  2 branches applied  ·  3 behind origin/main
+
+  login-form   4f2a9c1  qzvtyxkl  Ada Lovelace  2 hours ago  Validate the login form
+  api-retries  9b3e0d2  mrnwkpst  Ada Lovelace  1 day ago    Retry failed API calls
+
+Nothing to commit — working tree clean.
+```
+
+`--json` describes the workspace in `gitbutler_workspace`.
+
 ### The target branch
 
 The target is the branch your work is compared against in the header line (`target`, `ahead`, and `behind` in JSON). It uses the first of these that exists:
@@ -276,6 +292,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `ignored` | array | Ignored paths when `--ignored` was passed; omitted otherwise. |
 | `stash_count` | number | Entries on the stash reflog (`0` when empty). |
 | `interrupted_rewrite` | string | Recovery of a rebase or history edit that was killed after moving refs: `finished_checkout` (the rewrite stands), `rolled_back` (it was undone) or `pending` (another process holds `.git/index.lock`). Omitted when nothing was pending. |
+| `gitbutler_workspace` | object | Only on a [GitButler workspace](#gitbutler-workspaces): `commit` (the workspace commit, which `head` names and `commits` and `ahead` leave out) and `heads`, the merged branch tips in the workspace's parent order, each with `commit`, `branches` (local branches pointing there, sorted; empty when none), `subject` and `ahead` (commits not on `target`, or `null` when counts were skipped). Omitted otherwise. |
 
 Example:
 

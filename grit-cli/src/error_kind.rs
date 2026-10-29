@@ -83,6 +83,9 @@ pub enum ErrorKind {
     NothingStaged,
     /// Genuinely nothing to commit (clean tree or auto-stage cancel-out).
     NothingToCommit,
+    /// `HEAD` is on a GitButler workspace, which GitButler rewrites; commit with `but commit`.
+    #[serde(rename = "gitbutler_workspace")]
+    GitButlerWorkspace,
 }
 
 impl ErrorKind {
@@ -145,6 +148,7 @@ impl ErrorKind {
             Self::GitDirPathIo,
             Self::NothingStaged,
             Self::NothingToCommit,
+            Self::GitButlerWorkspace,
         ]
     }
 }

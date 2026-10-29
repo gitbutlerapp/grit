@@ -266,6 +266,9 @@ mod git_dir_path_io_1970;
 #[path = "git_habit_hints.rs"]
 mod git_habit_hints;
 #[cfg(feature = "full-tests")]
+#[path = "gitbutler_workspace_cli.rs"]
+mod gitbutler_workspace_cli;
+#[cfg(feature = "full-tests")]
 #[path = "global_repo_options.rs"]
 mod global_repo_options;
 #[cfg(feature = "full-tests")]

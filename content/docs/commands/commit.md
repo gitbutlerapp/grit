@@ -27,6 +27,8 @@ grit commit --patch-file <file|-> -m <message>
 
 By default, `grit commit` **auto-stages** every change in the working tree (modified, deleted and untracked files) and records a new commit on the current branch. With `core.ignorecase=true` on a case-folding volume, auto-staging keeps indexed path spellings (same as [`grit add`](add.md)) and does not rewrite either spelling of a case-colliding path when the shared on-disk file already matches one of the indexed blobs (including directory-name collisions such as `Docs/` vs `docs/`); use [`grit mv`](mv.md) to change a path's case on purpose.
 
+On a [GitButler workspace](../status/#gitbutler-workspaces), `grit commit` refuses (exit **1**, `kind: "gitbutler_workspace"`) and changes nothing, because GitButler rewrites the `gitbutler/workspace` branch and would lose the commit. Commit with `but commit`, or switch to a branch first.
+
 Use **`--staged`** to commit the index as-is without auto-staging (Git’s `git commit` without `-a`). Use **`-a` / `--all`** to force auto-staging even when `commit.autoStage=false`.
 
 Use **trailing paths** (`grit commit -m msg -- a b`) or **`--pathspec-from-file`** to commit only those paths from the worktree while leaving other staged changes in the index (Git’s `git commit --only --` paths). Partial path commits are refused while a merge, cherry-pick, or revert is in progress.

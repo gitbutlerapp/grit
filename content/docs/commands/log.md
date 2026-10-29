@@ -32,6 +32,8 @@ How much it shows depends on who is reading:
 
 The pager is `GRIT_PAGER`, then the `core.pager` config, then `PAGER`, then `less`; an empty value or `cat` turns paging off. As in Git, `LESS=FRX` and `LV=-c` are set unless you set them, so a history that fits on one screen prints and exits.
 
+On a [GitButler workspace](../status/#gitbutler-workspaces), `grit log` with no revision starts from the applied branches instead of `HEAD`, so GitButler's workspace commit is not listed. Naming a revision (`grit log HEAD`) walks exactly that.
+
 Revision selection matches [`grit revs`](../revs/): plain tips, `A..B`, `A...B`, `^tip`, and the same ref-set flags (`--all`, `--branches`, and so on). Path operands after `--` limit to commits that touch those paths (same cwd rules as [`grit diff`](../diff/)). Path filters use the same author/date output as the default log, not the bare oid list from `grit revs`. Without `-n`, every matching commit is listed when paths are set (not capped at a page).
 
 The continuation token is short and local to the repository (`lw1.s.` plus eight characters, stored under `.git/grit/log-walk/`; in a read-only repository it is the longer self-contained `lw1.` form instead); it encodes the revision selection, so the next page needs only `--cursor=<token>`. Path filters, commit filters (`--author`, `--grep`, …), pickaxe filters (`-S`, `-G`), `--reverse`, `--first-parent`, merge filters, `--skip`, and a one-shot `-n` without `--cursor` do not emit a continuation cursor; when such a listing stops early, the hint is ``→ more: rerun with a larger `-n` ``.

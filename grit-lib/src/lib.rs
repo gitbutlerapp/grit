@@ -201,6 +201,7 @@ pub(crate) mod environment;
 pub mod error;
 mod ewah_bitmap;
 pub(crate) mod git_dir;
+pub mod gitbutler;
 pub(crate) mod github_auth;
 pub(crate) mod grit_server_auth;
 pub(crate) mod line_interner;

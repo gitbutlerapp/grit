@@ -191,6 +191,7 @@ pub fn run_hunks(
     lines: &[String],
 ) -> Result<CommitOutcome> {
     let repo = context::discover()?;
+    refuse_gitbutler_workspace(&repo)?;
     let resolved = paths.resolve(&repo)?;
     let (pathspecs, _) = resolved.into_pathspec_lists();
     let mut selection = parse_hunk_id_list(hunks).map_err(map_hunk_parse)?;
@@ -255,6 +256,7 @@ pub fn run_patch_file(
     patch_file: &str,
 ) -> Result<CommitOutcome> {
     let repo = context::discover()?;
+    refuse_gitbutler_workspace(&repo)?;
     let patches = crate::patch_selection::parse_patch_file(patch_file)?;
     if patches.is_empty() {
         bail!("patch file contains no applicable hunks");
@@ -296,6 +298,15 @@ pub fn run_patch_file(
     )
 }
 
+/// Fail when `HEAD` is on a GitButler workspace: GitButler rewrites that branch, so a commit
+/// made on it would be lost.
+fn refuse_gitbutler_workspace(repo: &grit_lib::repo::Repository) -> Result<()> {
+    match grit_lib::gitbutler::GitButlerWorkspace::detect(repo).context("could not read HEAD")? {
+        Some(_) => Err(crate::json_error::gitbutler_workspace_commit()),
+        None => Ok(()),
+    }
+}
+
 /// Run `grit commit` with the given message, flags, and optional path scope.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
@@ -319,6 +330,7 @@ pub fn run(
     progress: &mut dyn ProgressSink,
 ) -> Result<CommitOutcome> {
     let repo = context::discover()?;
+    refuse_gitbutler_workspace(&repo)?;
 
     match resolve_head(repo.git_dir())? {
         HeadState::Branch { .. } | HeadState::Detached { .. } => {}

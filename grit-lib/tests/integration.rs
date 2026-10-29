@@ -704,6 +704,9 @@ mod git_dir_path_io_1970;
 #[path = "gitattributes_crlf_patterns_git_compat.rs"]
 mod gitattributes_crlf_patterns_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "gitbutler_workspace.rs"]
+mod gitbutler_workspace;
+#[cfg(feature = "full-tests")]
 #[path = "graph_layout_git_compat.rs"]
 mod graph_layout_git_compat;
 #[cfg(feature = "full-tests")]
