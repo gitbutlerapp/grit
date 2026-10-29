@@ -416,7 +416,8 @@ fn build_commit_request(
     } else if amend || reuse_message_from.is_some() {
         None
     } else {
-        Some(context::signature(repo, IdentRole::Author, now)?)
+        // Leave unset so grit-lib picks author from CHERRY_PICK_HEAD, config, or identity.
+        None
     };
 
     let parsed_author_date = author_date.as_deref().map(parse_trailer_date).transpose()?;
