@@ -252,6 +252,28 @@ fn clean_fd_hint() {
 }
 
 #[test]
+fn mutating_dash_n_suggests_dry_run() {
+    let (repo, home) = fresh_repo();
+    fs::write(repo.path().join("u"), "u\n").expect("write u");
+    let fragment = "use --dry-run (`-n` is a list limit in grit)";
+    for args in [
+        &["clean", "-n"][..],
+        &["add", "-n", "u"][..],
+        &["rm", "-n", "a"][..],
+        &["mv", "-n", "a", "b"][..],
+        &["push", "-n"][..],
+    ] {
+        let failure = fails(repo.path(), home.path(), args);
+        failure.assert_usage_hint(fragment);
+    }
+    let out = grit(repo.path(), home.path(), &["--json", "clean", "-n"]);
+    assert_eq!(out.status.code(), Some(2));
+    let body: Value = serde_json::from_slice(&out.stdout).expect("json");
+    assert_eq!(body["kind"], "usage");
+    assert!(body["hint"].as_str().unwrap().contains(fragment));
+}
+
+#[test]
 fn stash_save_hint() {
     let (repo, home) = fresh_repo();
     let failure = fails(repo.path(), home.path(), &["stash", "save", "wip"]);

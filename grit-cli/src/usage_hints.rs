@@ -121,6 +121,12 @@ fn migration_hint(argv: &[OsString], err: &clap::Error) -> Option<String> {
         );
     }
 
+    let git_n_dry_run_habit =
+        bad == "-n" || (sub == "clean" && matches!(bad.as_str(), "-fn" | "-nf"));
+    if matches!(sub.as_str(), "add" | "rm" | "mv" | "clean" | "push") && git_n_dry_run_habit {
+        return Some("use --dry-run (`-n` is a list limit in grit)".to_owned());
+    }
+
     if sub == "stash" && bad == "save" {
         let msg = stash_save_message(argv);
         return Some(if let Some(text) = msg {
@@ -370,6 +376,13 @@ mod tests {
             #[arg(short, long)]
             force: bool,
         },
+        Rm {
+            paths: Vec<String>,
+        },
+        Mv {
+            paths: Vec<String>,
+        },
+        Push {},
         Stash {},
     }
 
@@ -460,6 +473,21 @@ mod tests {
         let hint = hint_for(&["grit", "clean", "-fd"]);
         assert!(hint.contains("grit clean -f"));
         assert!(hint.contains("drop `-d`"));
+    }
+
+    #[test]
+    fn mutating_dash_n_points_at_dry_run() {
+        let expected = "use --dry-run (`-n` is a list limit in grit)";
+        for argv in [
+            &["grit", "add", "-n"][..],
+            &["grit", "rm", "-n", "a"][..],
+            &["grit", "mv", "-n", "a", "b"][..],
+            &["grit", "clean", "-n"][..],
+            &["grit", "clean", "-fn"][..],
+            &["grit", "push", "-n"][..],
+        ] {
+            assert_eq!(hint_for(argv), expected, "{argv:?}");
+        }
     }
 
     #[test]
