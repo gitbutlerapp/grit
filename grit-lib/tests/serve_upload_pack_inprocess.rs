@@ -4,8 +4,11 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::progress::FlagCancel;
 use grit_lib::refs::ref_storage::RefStorageFormat;
-use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
+use grit_lib::remote::serve::{
+    upload_pack, upload_pack_cancellable, ProtocolVersion, ServeError, ServeOptions,
+};
 use grit_lib::repo::{InitOptions, Repository};
 use std::io::Cursor;
 
@@ -50,6 +53,17 @@ fn seed_bare_main(repo: &Repository) -> ObjectId {
         .expect("commit");
     std::fs::write(repo.git_dir().join("refs/heads/main"), format!("{tip}\n")).expect("ref");
     tip
+}
+
+fn v0_stateless_fetch_with_have_flush(want: ObjectId, have: ObjectId) -> Vec<u8> {
+    let caps = "multi_ack_detailed side-band-64k thin-pack no-progress include-tag ofs-delta";
+    let mut body = pkt_line(&format!("want {} {caps}\n", want.to_hex()));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line(&format!("have {}\n", have.to_hex())));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line("done"));
+    body.extend_from_slice(b"0000");
+    body
 }
 
 fn v0_stateless_fetch_body(want: ObjectId) -> Vec<u8> {
@@ -848,6 +862,56 @@ fn upload_pack_v0_git_client_sees_ready_with_few_haves() {
     );
 
     grit_test_support::git(&client, &["fsck", "--full"]);
+}
+
+#[test]
+fn upload_pack_v0_have_flush_counts_negotiation_round() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let tip = seed_bare_main(&repo);
+    let body = v0_stateless_fetch_with_have_flush(tip, tip);
+    let mut out = Vec::new();
+    let mut opts = test_serve_opts(ProtocolVersion::V0, false, true);
+    let summary = upload_pack(&repo, &mut Cursor::new(body), &mut out, &mut opts).expect("fetch");
+    assert_eq!(summary.negotiation_rounds, 1);
+    assert!(summary.bytes_written > 0);
+}
+
+#[test]
+fn upload_pack_cancelled_before_start_writes_no_pack() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let tip = seed_bare_main(&repo);
+    let cancel = FlagCancel::new();
+    cancel.cancel();
+    let mut out = Vec::new();
+    let mut opts = test_serve_opts(ProtocolVersion::V0, false, true);
+    let err = upload_pack_cancellable(
+        &repo,
+        &mut Cursor::new(v0_stateless_fetch_body(tip)),
+        &mut out,
+        &mut opts,
+        &cancel,
+    )
+    .expect_err("cancelled");
+    assert!(matches!(err, ServeError::Cancelled));
+    assert!(!out.windows(4).any(|w| w == b"PACK"));
 }
 
 /// Annotated tag on a blob reachable from `main`, with the tag ref removed (smart HTTP race).

@@ -700,6 +700,7 @@ fn write_upload_pack_stream_in_context(
             opts,
             progress,
             w,
+            stop,
         )? {
             return Ok(stats);
         }

@@ -147,6 +147,7 @@ pub fn try_write_streaming_pack(
         opts,
         progress,
         w,
+        &crate::progress::CancelSignal::never(),
     )
 }
 
@@ -167,15 +168,18 @@ pub(crate) fn try_write_streaming_pack_including_tags(
     opts: &PackBuildOptions,
     progress: &mut dyn FnMut(PackProgress),
     w: &mut dyn Write,
+    stop: &crate::progress::CancelSignal<'_>,
 ) -> Result<Option<PackStats>> {
     if !source_shallow.is_empty() || !have_shallow.is_empty() {
         return Ok(None);
     }
+    stop.poll()?;
     let Some((send_set, peer_held)) =
         try_bitmap_reachable_for_upload(repo.odb(), wants, haves, filter, source_shallow)?
     else {
         return Ok(None);
     };
+    stop.poll()?;
     let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
     let index = send_set.bitmap_index();
     let objects_dir = repo.odb().objects_dir();
@@ -205,9 +209,10 @@ pub(crate) fn try_write_streaming_pack_including_tags(
         opts,
         &blob_name_hashes,
         None,
-        &crate::progress::CancelSignal::never(),
+        stop,
     )?;
     progress(PackProgress::PlannedDeltas);
+    stop.poll()?;
 
     let mut reuse = StreamingReuse::new(pack, reuse_bits, &send_set);
     let stats = write_delta_pack_stream(repo.odb(), &plan, opts, w, Some(&mut reuse))?;

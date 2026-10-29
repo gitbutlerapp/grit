@@ -21813,6 +21813,7 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::serve::RefUpdateRefusal
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::RefUpdateRefusal
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::RefUpdateRefusal
 pub enum grit_lib::remote::serve::ServeError
+pub grit_lib::remote::serve::ServeError::Cancelled
 pub grit_lib::remote::serve::ServeError::InvalidDeepenNot
 pub grit_lib::remote::serve::ServeError::InvalidDeepenNot::reason: grit_lib::remote::serve::DeepenNotError
 pub grit_lib::remote::serve::ServeError::InvalidDeepenNot::spec: alloc::string::String
@@ -21843,6 +21844,7 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::serve::ServeError
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::ServeError
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::ServeError
 #[non_exhaustive] pub enum grit_lib::remote::serve::UnpackError
+pub grit_lib::remote::serve::UnpackError::Cancelled
 pub grit_lib::remote::serve::UnpackError::FsckSkipList(grit_lib::maintenance::fsck::SkipListError)
 pub grit_lib::remote::serve::UnpackError::Ingest(alloc::boxed::Box<grit_lib::error::Error>)
 pub grit_lib::remote::serve::UnpackError::Io(core::io::error::Error)
@@ -21912,6 +21914,22 @@ impl core::marker::Unpin for grit_lib::remote::serve::HookRunRecord
 impl core::marker::UnsafeUnpin for grit_lib::remote::serve::HookRunRecord
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::HookRunRecord
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::HookRunRecord
+pub struct grit_lib::remote::serve::ReceiveHookContext<'a>
+pub grit_lib::remote::serve::ReceiveHookContext::push_options: &'a [alloc::string::String]
+impl<'a> core::clone::Clone for grit_lib::remote::serve::ReceiveHookContext<'a>
+pub fn grit_lib::remote::serve::ReceiveHookContext<'a>::clone(&self) -> Self
+impl<'a> core::default::Default for grit_lib::remote::serve::ReceiveHookContext<'a>
+pub fn grit_lib::remote::serve::ReceiveHookContext<'a>::default() -> Self
+impl<'a> core::fmt::Debug for grit_lib::remote::serve::ReceiveHookContext<'a>
+pub fn grit_lib::remote::serve::ReceiveHookContext<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for grit_lib::remote::serve::ReceiveHookContext<'a>
+impl<'a> core::marker::Freeze for grit_lib::remote::serve::ReceiveHookContext<'a>
+impl<'a> core::marker::Send for grit_lib::remote::serve::ReceiveHookContext<'a>
+impl<'a> core::marker::Sync for grit_lib::remote::serve::ReceiveHookContext<'a>
+impl<'a> core::marker::Unpin for grit_lib::remote::serve::ReceiveHookContext<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::remote::serve::ReceiveHookContext<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::ReceiveHookContext<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::ReceiveHookContext<'a>
 pub struct grit_lib::remote::serve::ReceiveOutcome
 pub grit_lib::remote::serve::ReceiveOutcome::hooks: alloc::vec::Vec<grit_lib::remote::serve::HookRunRecord>
 pub grit_lib::remote::serve::ReceiveOutcome::push_options: alloc::vec::Vec<alloc::string::String>
@@ -22036,28 +22054,61 @@ impl core::marker::Unpin for grit_lib::remote::serve::ServeOptions
 impl core::marker::UnsafeUnpin for grit_lib::remote::serve::ServeOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::ServeOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::ServeOptions
+pub struct grit_lib::remote::serve::UploadOutcome
+pub grit_lib::remote::serve::UploadOutcome::bytes_written: u64
+pub grit_lib::remote::serve::UploadOutcome::negotiation_rounds: u32
+pub grit_lib::remote::serve::UploadOutcome::objects_sent: u32
+pub grit_lib::remote::serve::UploadOutcome::pack: core::option::Option<grit_lib::objects::pack_objects::PackStats>
+impl core::clone::Clone for grit_lib::remote::serve::UploadOutcome
+pub fn grit_lib::remote::serve::UploadOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::serve::UploadOutcome
+impl core::cmp::PartialEq for grit_lib::remote::serve::UploadOutcome
+pub fn grit_lib::remote::serve::UploadOutcome::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::remote::serve::UploadOutcome
+pub fn grit_lib::remote::serve::UploadOutcome::default() -> Self
+impl core::fmt::Debug for grit_lib::remote::serve::UploadOutcome
+pub fn grit_lib::remote::serve::UploadOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::serve::UploadOutcome
+impl core::marker::StructuralPartialEq for grit_lib::remote::serve::UploadOutcome
+impl core::marker::Freeze for grit_lib::remote::serve::UploadOutcome
+impl core::marker::Send for grit_lib::remote::serve::UploadOutcome
+impl core::marker::Sync for grit_lib::remote::serve::UploadOutcome
+impl core::marker::Unpin for grit_lib::remote::serve::UploadOutcome
+impl core::marker::UnsafeUnpin for grit_lib::remote::serve::UploadOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::UploadOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::UploadOutcome
 pub const grit_lib::remote::serve::PUSH_BUNDLE_CAPABILITY: &str
 pub trait grit_lib::remote::serve::ReceiveHook
 pub fn grit_lib::remote::serve::ReceiveHook::message(&self, &[grit_lib::remote::serve::RefUpdateResult]) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::remote::serve::ReceiveHook::pre_receive(&self, &[grit_lib::remote::serve::RefCommand], &grit_lib::objects::odb::Odb) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
+pub fn grit_lib::remote::serve::ReceiveHook::pre_receive_ctx(&self, &[grit_lib::remote::serve::RefCommand], &grit_lib::objects::odb::Odb, &grit_lib::remote::serve::ReceiveHookContext<'_>) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
 pub fn grit_lib::remote::serve::ReceiveHook::update(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects::odb::Odb) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
+pub fn grit_lib::remote::serve::ReceiveHook::update_ctx(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects::odb::Odb, &grit_lib::remote::serve::ReceiveHookContext<'_>) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
 impl grit_lib::remote::serve::ReceiveHook for ()
 pub fn ()::message(&self, &[grit_lib::remote::serve::RefUpdateResult]) -> core::option::Option<alloc::string::String>
 pub fn ()::pre_receive(&self, &[grit_lib::remote::serve::RefCommand], &grit_lib::objects::odb::Odb) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
+pub fn ()::pre_receive_ctx(&self, &[grit_lib::remote::serve::RefCommand], &grit_lib::objects::odb::Odb, &grit_lib::remote::serve::ReceiveHookContext<'_>) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
 pub fn ()::update(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects::odb::Odb) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
+pub fn ()::update_ctx(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects::odb::Odb, &grit_lib::remote::serve::ReceiveHookContext<'_>) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
 impl grit_lib::remote::serve::ReceiveHook for grit_lib::remote::snapshot_checkout::TargetGuard
 pub fn grit_lib::remote::snapshot_checkout::TargetGuard::message(&self, &[grit_lib::remote::serve::RefUpdateResult]) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::remote::snapshot_checkout::TargetGuard::pre_receive(&self, &[grit_lib::remote::serve::RefCommand], &grit_lib::objects::odb::Odb) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
+pub fn grit_lib::remote::snapshot_checkout::TargetGuard::pre_receive_ctx(&self, &[grit_lib::remote::serve::RefCommand], &grit_lib::objects::odb::Odb, &grit_lib::remote::serve::ReceiveHookContext<'_>) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
 pub fn grit_lib::remote::snapshot_checkout::TargetGuard::update(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects::odb::Odb) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
+pub fn grit_lib::remote::snapshot_checkout::TargetGuard::update_ctx(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects::odb::Odb, &grit_lib::remote::serve::ReceiveHookContext<'_>) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
 impl<F> grit_lib::remote::serve::ReceiveHook for F where F: core::ops::function::Fn(&grit_lib::remote::serve::RefCommand, &grit_lib::objects::odb::Odb) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
 pub fn F::message(&self, &[grit_lib::remote::serve::RefUpdateResult]) -> core::option::Option<alloc::string::String>
 pub fn F::pre_receive(&self, &[grit_lib::remote::serve::RefCommand], &grit_lib::objects::odb::Odb) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
+pub fn F::pre_receive_ctx(&self, &[grit_lib::remote::serve::RefCommand], &grit_lib::objects::odb::Odb, &grit_lib::remote::serve::ReceiveHookContext<'_>) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
 pub fn F::update(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects::odb::Odb) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
+pub fn F::update_ctx(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects::odb::Odb, &grit_lib::remote::serve::ReceiveHookContext<'_>) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
 pub fn grit_lib::remote::serve::checked_out_branch(&grit_lib::repo::Repository) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::remote::serve::head_branch(&grit_lib::repo::Repository) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::remote::serve::receive_pack(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions, &grit_lib::remote::serve::ReceivePolicy) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::ReceiveOutcome>
 pub fn grit_lib::remote::serve::receive_pack_with_hook(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions, &grit_lib::remote::serve::ReceivePolicy, &dyn grit_lib::remote::serve::ReceiveHook) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::ReceiveOutcome>
-pub fn grit_lib::remote::serve::upload_pack(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &mut grit_lib::remote::serve::ServeOptions) -> grit_lib::remote::serve::Result<()>
+pub fn grit_lib::remote::serve::receive_pack_with_hook_cancellable(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions, &grit_lib::remote::serve::ReceivePolicy, &dyn grit_lib::remote::serve::ReceiveHook, &dyn grit_lib::progress::Cancel) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::ReceiveOutcome>
+pub fn grit_lib::remote::serve::upload_pack(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &mut grit_lib::remote::serve::ServeOptions) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::UploadOutcome>
+pub fn grit_lib::remote::serve::upload_pack_cancellable(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &mut grit_lib::remote::serve::ServeOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::UploadOutcome>
 pub fn grit_lib::remote::serve::validate_ref_update(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::odb::Odb>, &grit_lib::remote::serve::RefCommand, &grit_lib::remote::serve::ReceivePolicy, &[alloc::string::String], grit_lib::remote::serve::HeadBranches<'_>) -> grit_lib::remote::serve::Result<core::option::Option<grit_lib::remote::serve::RefUpdateRefusal>>
 pub type grit_lib::remote::serve::Result<T> = core::result::Result<T, grit_lib::remote::serve::ServeError>
 pub mod grit_lib::remote::shallow
@@ -23507,7 +23558,9 @@ impl core::marker::StructuralPartialEq for grit_lib::remote::snapshot_checkout::
 impl grit_lib::remote::serve::ReceiveHook for grit_lib::remote::snapshot_checkout::TargetGuard
 pub fn grit_lib::remote::snapshot_checkout::TargetGuard::message(&self, &[grit_lib::remote::serve::RefUpdateResult]) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::remote::snapshot_checkout::TargetGuard::pre_receive(&self, &[grit_lib::remote::serve::RefCommand], &grit_lib::objects::odb::Odb) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
+pub fn grit_lib::remote::snapshot_checkout::TargetGuard::pre_receive_ctx(&self, &[grit_lib::remote::serve::RefCommand], &grit_lib::objects::odb::Odb, &grit_lib::remote::serve::ReceiveHookContext<'_>) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
 pub fn grit_lib::remote::snapshot_checkout::TargetGuard::update(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects::odb::Odb) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
+pub fn grit_lib::remote::snapshot_checkout::TargetGuard::update_ctx(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects::odb::Odb, &grit_lib::remote::serve::ReceiveHookContext<'_>) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
 impl core::marker::Freeze for grit_lib::remote::snapshot_checkout::TargetGuard
 impl core::marker::Send for grit_lib::remote::snapshot_checkout::TargetGuard
 impl core::marker::Sync for grit_lib::remote::snapshot_checkout::TargetGuard

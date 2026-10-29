@@ -581,7 +581,8 @@ fn serve_request(repo: &Repository, request_file: &str) -> Result<()> {
         hidden_refs: Vec::new(),
         ..ServeOptions::default()
     };
-    upload_pack(repo, &mut input, &mut sink, &mut opts).context("upload-pack serve-clone")?;
+    let _summary =
+        upload_pack(repo, &mut input, &mut sink, &mut opts).context("upload-pack serve-clone")?;
     println!("{}", sink.bytes);
     Ok(())
 }

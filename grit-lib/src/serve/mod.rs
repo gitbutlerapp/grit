@@ -28,11 +28,12 @@ pub(crate) use receive_pack::ReceiveHookScripts;
 pub(crate) use shallow_upload::{compute_shallow_response, ShallowRequest};
 
 pub use receive_pack::{
-    receive_pack, receive_pack_with_hook, HookRunRecord, ReceiveHook, ReceiveOutcome,
-    ReceivePolicy, RefCommand, RefUpdateRefusal, RefUpdateResult, RejectedObject, UnpackError,
+    receive_pack, receive_pack_with_hook, receive_pack_with_hook_cancellable, HookRunRecord,
+    ReceiveHook, ReceiveHookContext, ReceiveOutcome, ReceivePolicy, RefCommand, RefUpdateRefusal,
+    RefUpdateResult, RejectedObject, UnpackError,
 };
 pub use ref_update_policy::{checked_out_branch, head_branch, validate_ref_update, HeadBranches};
-pub use upload_pack::upload_pack;
+pub use upload_pack::{upload_pack, upload_pack_cancellable, UploadOutcome};
 
 use std::ops::ControlFlow;
 
@@ -80,6 +81,9 @@ pub enum ServeError {
     /// The underlying stream failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    /// The session was stopped by a cancel signal before finishing.
+    #[error("cancelled")]
+    Cancelled,
 }
 
 /// Why a `deepen-not` argument was rejected; see [`ServeError::InvalidDeepenNot`].

@@ -70,7 +70,9 @@ pub fn run(
     let mut input = stdin.lock();
     let mut output = BufWriter::new(std::io::stdout().lock());
     match service {
-        Service::UploadPack => serve::upload_pack(&repo, &mut input, &mut output, &mut opts)?,
+        Service::UploadPack => {
+            let _summary = serve::upload_pack(&repo, &mut input, &mut output, &mut opts)?;
+        }
         Service::ReceivePack => {
             let policy = ReceivePolicy::from_config(&config);
             let guard = grit_protocol::PushGuard::for_repository(&repo);

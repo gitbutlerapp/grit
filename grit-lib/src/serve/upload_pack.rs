@@ -10,10 +10,12 @@ use super::{
     ServeOptions,
 };
 use crate::config::ConfigSet;
+use crate::objects::pack_objects::PackStats;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::pack_object_select::TagCandidate;
 use crate::pack_objects::{write_upload_pack_stream_with_cancel, PackProgress};
 use crate::pkt_line::SidebandChannel1Writer;
+use crate::progress::{Cancel, CancelSignal, NeverCancel};
 use crate::repo::Repository;
 use crate::rev_list::ObjectFilter;
 use crate::transfer::PackBuildOptions;
@@ -33,6 +35,60 @@ const V0_CAPABILITIES: &[&str] = &[
     "deepen-since",
     "deepen-not",
 ];
+
+/// Summary of one completed or partial upload-pack session.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct UploadOutcome {
+    /// Bytes written to the client (advertisement, negotiation, sideband, pack).
+    pub bytes_written: u64,
+    /// Objects sent in the pack, when a pack was written.
+    pub objects_sent: u32,
+    /// Negotiation rounds answered (v0 flush rounds and v2 acknowledgment sections).
+    pub negotiation_rounds: u32,
+    /// Pack build counters when a pack was sent.
+    pub pack: Option<PackStats>,
+}
+
+struct CountingWriter<'a> {
+    inner: &'a mut dyn Write,
+    bytes: u64,
+}
+
+impl Write for CountingWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.bytes += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+#[derive(Default)]
+struct UploadSession {
+    pack: Option<PackStats>,
+    negotiation_rounds: u32,
+}
+
+impl UploadSession {
+    fn into_outcome(self, bytes_written: u64) -> UploadOutcome {
+        UploadOutcome {
+            bytes_written,
+            objects_sent: self.pack.map(|p| p.object_count).unwrap_or(0),
+            negotiation_rounds: self.negotiation_rounds,
+            pack: self.pack,
+        }
+    }
+}
+
+fn map_repo_cancel(err: ServeError) -> ServeError {
+    match err {
+        ServeError::Repository(crate::error::Error::Cancelled) => ServeError::Cancelled,
+        other => other,
+    }
+}
 
 /// Serve one fetch session: advertise refs, negotiate, and send a pack.
 ///
@@ -65,26 +121,61 @@ pub fn upload_pack(
     input: &mut dyn Read,
     output: &mut dyn Write,
     opts: &mut ServeOptions,
-) -> Result<()> {
+) -> Result<UploadOutcome> {
+    upload_pack_cancellable(repo, input, output, opts, &NeverCancel)
+}
+
+/// Serve one fetch session, stopping when `cancel` fires.
+///
+/// Same as [`upload_pack`], but object enumeration and pack generation poll
+/// `cancel` and return [`ServeError::Cancelled`] without writing a pack when it
+/// fires.
+pub fn upload_pack_cancellable(
+    repo: &Repository,
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    opts: &mut ServeOptions,
+    cancel: &dyn Cancel,
+) -> Result<UploadOutcome> {
+    let stop = CancelSignal::new(cancel);
+    stop.poll().map_err(|_| ServeError::Cancelled)?;
+    let mut counter = CountingWriter {
+        inner: output,
+        bytes: 0,
+    };
     let result = match opts.protocol {
-        ProtocolVersion::V2 => serve_v2(repo, input, output, opts),
-        ProtocolVersion::V0 | ProtocolVersion::V1 => serve_v0(repo, input, output, opts),
+        ProtocolVersion::V2 => serve_v2(repo, input, &mut counter, opts, &stop),
+        ProtocolVersion::V0 | ProtocolVersion::V1 => {
+            serve_v0(repo, input, &mut counter, opts, &stop)
+        }
     };
     match result {
-        Ok(()) => {
-            output.flush()?;
-            Ok(())
-        }
-        Err(err) if opts.stateless_rpc && opts.protocol == ProtocolVersion::V2 => {
-            let msg = serve_error_client_message(&err);
-            write_line(output, &format!("ERR {msg}"))?;
-            write_flush(output)?;
-            output.flush()?;
-            Ok(())
+        Ok(session) => {
+            counter.flush()?;
+            Ok(session.into_outcome(counter.bytes))
         }
         Err(err) => {
-            output.flush()?;
-            Err(err)
+            let err = map_repo_cancel(err);
+            match err {
+                ServeError::Cancelled => {
+                    counter.flush()?;
+                    Err(ServeError::Cancelled)
+                }
+                err if opts.stateless_rpc && opts.protocol == ProtocolVersion::V2 => {
+                    let msg = serve_error_client_message(&err);
+                    write_line(&mut counter, &format!("ERR {msg}"))?;
+                    write_flush(&mut counter)?;
+                    counter.flush()?;
+                    Ok(UploadOutcome {
+                        bytes_written: counter.bytes,
+                        ..UploadOutcome::default()
+                    })
+                }
+                err => {
+                    counter.flush()?;
+                    Err(err)
+                }
+            }
         }
     }
 }
@@ -101,6 +192,7 @@ fn serve_error_client_message(err: &ServeError) -> String {
         }
         ServeError::Repository(e) => e.to_string(),
         ServeError::Io(e) => e.to_string(),
+        ServeError::Cancelled => "cancelled".to_owned(),
     }
 }
 
@@ -117,7 +209,9 @@ fn serve_v0(
     input: &mut dyn Read,
     output: &mut dyn Write,
     opts: &ServeOptions,
-) -> Result<()> {
+    stop: &CancelSignal<'_>,
+) -> Result<UploadSession> {
+    stop.poll().map_err(|_| ServeError::Cancelled)?;
     let config = repo_config(repo);
     let policy = UploadPackPolicy::from_config(&config);
     let refs = advertised_refs(repo, &opts.hidden_refs, &[], Peel::Yes)?;
@@ -129,13 +223,13 @@ fn serve_v0(
         }
         write_v0_advertisement(repo, output, &refs, &head, opts)?;
         if opts.advertise_refs {
-            return Ok(());
+            return Ok(UploadSession::default());
         }
         output.flush()?;
     }
 
-    let Some(request) = read_v0_request(repo, input, &config, &policy)? else {
-        return Ok(());
+    let Some(request) = read_v0_request(repo, input, &config, &policy, stop)? else {
+        return Ok(UploadSession::default());
     };
     if request.filter.is_some() {
         validate_wants_filtered(repo, &request.wants)?;
@@ -174,7 +268,9 @@ fn serve_v0(
     let mut round_got_common = false;
     let mut round_got_other = false;
     let mut round_last_common: Option<ObjectId> = None;
+    let mut negotiation_rounds = 0u32;
     loop {
+        stop.poll().map_err(|_| ServeError::Cancelled)?;
         match read_packet(input)? {
             None => {
                 if opts.stateless_rpc {
@@ -183,7 +279,10 @@ fn serve_v0(
                         write_flush(output)?;
                     }
                 }
-                return Ok(());
+                return Ok(UploadSession {
+                    negotiation_rounds,
+                    ..UploadSession::default()
+                });
             }
             Some(Packet::Data(line)) if line == "done" => break,
             Some(Packet::Data(line)) => {
@@ -215,6 +314,7 @@ fn serve_v0(
                 }
             }
             Some(Packet::Flush) => {
+                negotiation_rounds = negotiation_rounds.saturating_add(1);
                 if detailed {
                     if round_got_common
                         && !round_got_other
@@ -253,7 +353,8 @@ fn serve_v0(
     }
     output.flush()?;
     let sideband = request.caps.contains("side-band-64k");
-    write_response_pack_from_v0(
+    stop.poll().map_err(|_| ServeError::Cancelled)?;
+    let pack = write_response_pack_from_v0(
         repo,
         &refs,
         &request,
@@ -262,7 +363,12 @@ fn serve_v0(
         shallow_resp.as_ref(),
         output,
         sideband,
-    )
+        stop,
+    )?;
+    Ok(UploadSession {
+        pack: Some(pack),
+        negotiation_rounds,
+    })
 }
 
 /// Write the v0 ref advertisement: `HEAD` and every ref, capabilities on the
@@ -330,12 +436,14 @@ fn read_v0_request(
     input: &mut dyn Read,
     config: &ConfigSet,
     policy: &UploadPackPolicy,
+    stop: &CancelSignal<'_>,
 ) -> Result<Option<V0Request>> {
     let mut wants = Vec::new();
     let mut caps = HashSet::new();
     let mut shallow = ShallowRequest::default();
     let mut filter: Option<ObjectFilter> = None;
     loop {
+        stop.poll().map_err(|_| ServeError::Cancelled)?;
         match read_packet(input)? {
             None | Some(Packet::Flush) => break,
             Some(Packet::Data(line)) => {
@@ -481,7 +589,8 @@ fn write_response_pack_from_v0(
     shallow: Option<&ShallowResponse>,
     output: &mut dyn Write,
     sideband: bool,
-) -> Result<()> {
+    stop: &CancelSignal<'_>,
+) -> Result<PackStats> {
     let mut pack_wants = request.wants.clone();
     if let Some(sh) = shallow {
         pack_wants.extend(sh.extra_wants.iter().copied());
@@ -517,6 +626,7 @@ fn write_response_pack_from_v0(
         },
         output,
         sideband,
+        stop,
     )
 }
 
@@ -525,7 +635,9 @@ fn serve_v2(
     input: &mut dyn Read,
     output: &mut dyn Write,
     opts: &mut ServeOptions,
-) -> Result<()> {
+    stop: &CancelSignal<'_>,
+) -> Result<UploadSession> {
+    stop.poll().map_err(|_| ServeError::Cancelled)?;
     let policy = upload_policy(repo);
     if opts.advertise_refs || !opts.stateless_rpc {
         write_line(output, "version 2")?;
@@ -550,29 +662,37 @@ fn serve_v2(
         }
         write_flush(output)?;
         if opts.advertise_refs {
-            return Ok(());
+            return Ok(UploadSession::default());
         }
         output.flush()?;
     }
 
     loop {
+        stop.poll().map_err(|_| ServeError::Cancelled)?;
         opts.server_options.clear();
         let Some(request) = read_v2_request(input, opts)? else {
-            return Ok(());
+            return Ok(UploadSession::default());
         };
         check_object_format(repo, request.object_format.as_deref())?;
-        match request.command.as_str() {
-            "ls-refs" => ls_refs(repo, output, &request.args, opts)?,
-            "fetch" => fetch_v2(repo, output, &request.args, opts)?,
-            "object-info" if policy.advertise_object_info => {
-                super::object_info::write_object_info_response(repo, output, &request.args)?
+        let session = match request.command.as_str() {
+            "ls-refs" => {
+                ls_refs(repo, output, &request.args, opts)?;
+                UploadSession::default()
             }
-            "bundle-uri" if opts.bundle_list.is_some() => bundle_uri(output, opts)?,
+            "fetch" => fetch_v2(repo, output, &request.args, opts, stop)?,
+            "object-info" if policy.advertise_object_info => {
+                super::object_info::write_object_info_response(repo, output, &request.args)?;
+                UploadSession::default()
+            }
+            "bundle-uri" if opts.bundle_list.is_some() => {
+                bundle_uri(output, opts)?;
+                UploadSession::default()
+            }
             other => return Err(ServeError::UnknownCommand(other.to_owned())),
-        }
+        };
         output.flush()?;
         if opts.stateless_rpc {
-            return Ok(());
+            return Ok(session);
         }
     }
 }
@@ -699,7 +819,9 @@ fn fetch_v2(
     output: &mut dyn Write,
     args: &[String],
     opts: &mut ServeOptions,
-) -> Result<()> {
+    stop: &CancelSignal<'_>,
+) -> Result<UploadSession> {
+    stop.poll().map_err(|_| ServeError::Cancelled)?;
     let config = repo_config(repo);
     let policy = UploadPackPolicy::from_config(&config);
     let mut wants = Vec::new();
@@ -789,7 +911,9 @@ fn fetch_v2(
         .odb()
         .present_oids(haves.into_iter().filter(|h| seen.insert(*h)))?;
 
+    let mut negotiation_rounds = 0u32;
     if !done {
+        negotiation_rounds = 1;
         write_v2_fetch_line(output, "acknowledgments", sideband_all)?;
         if common.is_empty() {
             write_v2_fetch_line(output, "NAK", sideband_all)?;
@@ -798,7 +922,11 @@ fn fetch_v2(
             write_v2_fetch_line(output, &format!("ACK {}", oid.to_hex()), sideband_all)?;
         }
         if wait_for_done || !ready_to_send_pack(repo, &wants, &common)? {
-            return write_flush(output);
+            write_flush(output)?;
+            return Ok(UploadSession {
+                negotiation_rounds,
+                ..UploadSession::default()
+            });
         }
         // After `ready` the pack follows in this same response.
         write_v2_fetch_line(output, "ready", sideband_all)?;
@@ -851,9 +979,10 @@ fn fetch_v2(
 
     let have_shallow: HashSet<ObjectId> = client_shallow.iter().copied().collect();
     write_v2_fetch_line(output, "packfile", sideband_all)?;
+    stop.poll().map_err(|_| ServeError::Cancelled)?;
     // Protocol v2 always side-band-64k frames the packfile section payload (band 1),
     // even when `sideband-all` was not negotiated.
-    write_response_pack(
+    let pack = write_response_pack(
         ResponsePackInput {
             repo,
             refs: &refs,
@@ -866,7 +995,12 @@ fn fetch_v2(
         },
         output,
         true,
-    )
+        stop,
+    )?;
+    Ok(UploadSession {
+        pack: Some(pack),
+        negotiation_rounds,
+    })
 }
 
 /// Whether a v2 negotiation can stop at this round: some have was acknowledged
@@ -941,7 +1075,9 @@ fn write_response_pack(
     input: ResponsePackInput<'_>,
     output: &mut dyn Write,
     sideband: bool,
-) -> Result<()> {
+    stop: &CancelSignal<'_>,
+) -> Result<PackStats> {
+    stop.poll().map_err(|_| ServeError::Cancelled)?;
     let include_tags = if input.caps.contains("include-tag") {
         tag_candidates(input.refs)
     } else {
@@ -954,7 +1090,7 @@ fn write_response_pack(
         input.caps.contains("ofs-delta"),
     );
     let mut progress = |_ev: PackProgress| {};
-    let mut write = |w: &mut dyn Write| {
+    let stats = if !sideband {
         write_upload_pack_stream_with_cancel(
             input.repo,
             input.wants,
@@ -965,18 +1101,31 @@ fn write_response_pack(
             &include_tags,
             &pack_opts,
             &mut progress,
-            w,
-            &crate::progress::CancelSignal::never(),
+            output,
+            stop,
         )
+        .map_err(ServeError::Repository)?
+    } else {
+        let mut band = SidebandChannel1Writer::new(output);
+        let stats = write_upload_pack_stream_with_cancel(
+            input.repo,
+            input.wants,
+            input.common,
+            input.source_shallow,
+            input.have_shallow,
+            input.filter,
+            &include_tags,
+            &pack_opts,
+            &mut progress,
+            &mut band,
+            stop,
+        )
+        .map_err(ServeError::Repository)?;
+        band.finish()?;
+        write_flush(output)?;
+        stats
     };
-    if !sideband {
-        write(output)?;
-        return Ok(());
-    }
-    let mut band = SidebandChannel1Writer::new(output);
-    write(&mut band)?;
-    band.finish()?;
-    write_flush(output)
+    Ok(stats)
 }
 
 /// The annotated tags under `refs/tags/` that `include-tag` may add to the pack.
@@ -1061,7 +1210,7 @@ mod tests {
     fn packed_tags(input: ResponsePackInput<'_>) -> Vec<ObjectId> {
         let refs = input.refs;
         let mut pack = Vec::new();
-        write_response_pack(input, &mut pack, false).unwrap();
+        write_response_pack(input, &mut pack, false, &CancelSignal::never()).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let unpacked = crate::odb::Odb::new(dir.path());
         crate::unpack_objects::unpack_objects(
@@ -1270,6 +1419,7 @@ mod tests {
                 },
                 &mut pack,
                 false,
+                &CancelSignal::never(),
             )
             .unwrap();
             let dir = tempfile::tempdir().unwrap();

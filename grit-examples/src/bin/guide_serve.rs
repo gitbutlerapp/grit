@@ -17,7 +17,8 @@ use std::path::Path;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::remote::serve::{
-    self, ProtocolVersion, ReceivePolicy, RefCommand, RefUpdateRefusal, ServeOptions,
+    self, ProtocolVersion, ReceiveHook, ReceiveHookContext, ReceivePolicy, RefCommand,
+    RefUpdateRefusal, ServeOptions,
 };
 use grit_lib::repo::Repository;
 
@@ -28,6 +29,29 @@ fn protect_branches(cmd: &RefCommand, _odb: &Odb) -> Result<(), RefUpdateRefusal
         return Err(RefUpdateRefusal::Policy("protected branch".to_owned()));
     }
     Ok(())
+}
+
+/// Refuse pushes that carry a specific push option (for example `git push -o ci.skip`).
+struct DenyPushOption(&'static str);
+
+struct ServerHook;
+
+impl ReceiveHook for ServerHook {
+    fn pre_receive_ctx(
+        &self,
+        _commands: &[RefCommand],
+        _odb: &Odb,
+        ctx: &ReceiveHookContext<'_>,
+    ) -> Result<(), RefUpdateRefusal> {
+        if ctx.push_options.iter().any(|o| o == "ci.skip") {
+            return Err(RefUpdateRefusal::Policy("ci.skip".to_owned()));
+        }
+        Ok(())
+    }
+
+    fn update(&self, command: &RefCommand, odb: &Odb) -> Result<(), RefUpdateRefusal> {
+        protect_branches(command, odb)
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -53,7 +77,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut input = std::io::stdin().lock();
     let mut output = BufWriter::new(std::io::stdout().lock());
     match service.as_str() {
-        "upload-pack" => serve::upload_pack(&repo, &mut input, &mut output, &mut opts)?,
+        "upload-pack" => {
+            let summary = serve::upload_pack(&repo, &mut input, &mut output, &mut opts)?;
+            eprintln!(
+                "upload-pack: {} bytes, {} objects, {} negotiation rounds",
+                summary.bytes_written, summary.objects_sent, summary.negotiation_rounds
+            );
+        }
         "receive-pack" => {
             let policy = ReceivePolicy::from_config(&*repo.config()?);
             let outcome = serve::receive_pack_with_hook(
@@ -62,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &mut output,
                 &opts,
                 &policy,
-                &protect_branches,
+                &ServerHook,
             )?;
             // Typed results: match on the refusal, never on its text.
             for update in &outcome.updates {

@@ -198,7 +198,7 @@ pub(crate) fn run_upload_pack(
         ..ServeOptions::default()
     };
     let mut output = Vec::new();
-    serve::upload_pack(&repo, &mut &*input, &mut output, &mut opts)?;
+    let _summary = serve::upload_pack(&repo, &mut &*input, &mut output, &mut opts)?;
     Ok(output)
 }
 

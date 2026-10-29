@@ -16,6 +16,7 @@ use crate::objects::pack_stream_scan::{PackStreamScanError, PackStreamScanner};
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
+use crate::progress::{Cancel, CancelSignal, NeverCancel};
 use crate::receive_pack::{max_input_size_from_config, should_use_unpack_objects};
 use crate::receive_quarantine::ReceiveQuarantine;
 use crate::repo::Repository;
@@ -306,6 +307,9 @@ pub enum UnpackError {
     /// Reading the client stream or writing the spooled pack failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    /// The session was stopped by a cancel signal while reading the pack.
+    #[error("cancelled")]
+    Cancelled,
 }
 
 impl From<crate::error::Error> for UnpackError {
@@ -324,6 +328,10 @@ impl From<crate::error::Error> for UnpackError {
 ///
 /// Refusals are usually [`RefUpdateRefusal::Policy`] with a reason the client
 /// will see.
+///
+/// Push options from the client are passed in [`ReceiveHookContext`] to
+/// [`Self::pre_receive_ctx`] and [`Self::update_ctx`]; the default methods ignore
+/// them and call [`Self::pre_receive`] and [`Self::update`].
 pub trait ReceiveHook {
     /// Inspect the whole push before any ref changes, like a `pre-receive` hook.
     ///
@@ -349,6 +357,17 @@ pub trait ReceiveHook {
         Ok(())
     }
 
+    /// Like [`Self::pre_receive`], with push options from the client request.
+    fn pre_receive_ctx(
+        &self,
+        commands: &[RefCommand],
+        odb: &Odb,
+        ctx: &ReceiveHookContext<'_>,
+    ) -> std::result::Result<(), RefUpdateRefusal> {
+        let _ = ctx;
+        self.pre_receive(commands, odb)
+    }
+
     /// Inspect one update, like an `update` hook.
     ///
     /// Runs before the `update` script for the same ref, after the pushed
@@ -366,6 +385,17 @@ pub trait ReceiveHook {
     fn update(&self, command: &RefCommand, odb: &Odb) -> std::result::Result<(), RefUpdateRefusal> {
         let _ = (command, odb);
         Ok(())
+    }
+
+    /// Like [`Self::update`], with push options from the client request.
+    fn update_ctx(
+        &self,
+        command: &RefCommand,
+        odb: &Odb,
+        ctx: &ReceiveHookContext<'_>,
+    ) -> std::result::Result<(), RefUpdateRefusal> {
+        let _ = ctx;
+        self.update(command, odb)
     }
 
     /// What to tell the pushing client once every update has been decided,
@@ -387,6 +417,13 @@ pub trait ReceiveHook {
         let _ = updates;
         None
     }
+}
+
+/// Push options and other session context for [`ReceiveHook`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ReceiveHookContext<'a> {
+    /// Values the client sent after the command list (`push-options` capability).
+    pub push_options: &'a [String],
 }
 
 impl ReceiveHook for () {}
@@ -503,6 +540,29 @@ pub fn receive_pack_with_hook(
     policy: &ReceivePolicy,
     hook: &dyn ReceiveHook,
 ) -> Result<ReceiveOutcome> {
+    receive_pack_with_hook_cancellable(repo, input, output, opts, policy, hook, &NeverCancel)
+}
+
+/// Serve one push session with a cancel signal, running `hook` alongside hook scripts.
+///
+/// Same as [`receive_pack_with_hook`], but stops without moving refs when `cancel`
+/// fires while reading the pack or before updates are applied.
+///
+/// # Errors
+///
+/// Returns [`ServeError::Cancelled`] when `cancel` is already set or fires during
+/// the session before ref updates are committed.
+pub fn receive_pack_with_hook_cancellable(
+    repo: &Repository,
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    opts: &ServeOptions,
+    policy: &ReceivePolicy,
+    hook: &dyn ReceiveHook,
+    cancel: &dyn Cancel,
+) -> Result<ReceiveOutcome> {
+    let stop = CancelSignal::new(cancel);
+    stop.poll().map_err(|_| ServeError::Cancelled)?;
     if opts.advertise_refs || !opts.stateless_rpc {
         if opts.protocol == ProtocolVersion::V1 {
             write_line(output, "version 1")?;
@@ -543,7 +603,7 @@ pub fn receive_pack_with_hook(
     let unpack_error = match quarantine.as_ref() {
         Some(q) => {
             let odb = q.odb();
-            spool_push_pack(input, &odb, max_input)
+            spool_push_pack(input, &odb, max_input, &stop)
                 .and_then(|pack| ingest_spooled_pack(&odb, pack, cfg.as_ref(), &client_boundaries))
                 .and_then(|indexed| match &policy.fsck_objects {
                     Some(fsck) => check_received_objects(repo, &odb, indexed, cfg.as_ref(), fsck),
@@ -553,6 +613,9 @@ pub fn receive_pack_with_hook(
         }
         None => None,
     };
+    if matches!(unpack_error, Some(UnpackError::Cancelled)) {
+        return Err(ServeError::Cancelled);
+    }
 
     let shallow = match quarantine.as_ref() {
         Some(q) if unpack_error.is_none() => {
@@ -577,6 +640,7 @@ pub fn receive_pack_with_hook(
             .map(|c| c.refused(RefUpdateRefusal::UnpackerError))
             .collect()
     } else {
+        stop.poll().map_err(|_| ServeError::Cancelled)?;
         apply_commands_with_hooks(
             repo,
             &request,
@@ -915,9 +979,15 @@ fn apply_commands_with_hooks(
         .filter(|(_, r)| r.error.is_none())
         .map(|(c, _)| c.clone())
         .collect();
+    let hook_ctx = ReceiveHookContext {
+        push_options: &request.push_options,
+    };
     if !accepted.is_empty() {
-        if let Err(refusal) = hook.pre_receive(&accepted, lookup_odb.as_ref().unwrap_or(repo.odb()))
-        {
+        if let Err(refusal) = hook.pre_receive_ctx(
+            &accepted,
+            lookup_odb.as_ref().unwrap_or(repo.odb()),
+            &hook_ctx,
+        ) {
             refuse_remaining(&mut results, &refusal);
             return Ok(results);
         }
@@ -947,7 +1017,7 @@ fn apply_commands_with_hooks(
         if result.error.is_some() {
             continue;
         }
-        if let Err(refusal) = hook.update(cmd, repo.odb()) {
+        if let Err(refusal) = hook.update_ctx(cmd, repo.odb(), &hook_ctx) {
             result.error = Some(refusal);
             continue;
         }
@@ -1244,6 +1314,7 @@ fn spool_push_pack(
     input: &mut dyn Read,
     odb: &Odb,
     max_bytes: Option<u64>,
+    stop: &CancelSignal<'_>,
 ) -> std::result::Result<SpooledPack, UnpackError> {
     let hash = odb.hash_algo();
     let mut file = tempfile::Builder::new()
@@ -1256,6 +1327,7 @@ fn spool_push_pack(
     let mut pack_len: Option<u64> = None;
     let mut out = BufWriter::with_capacity(SPOOL_CHUNK, file.as_file_mut());
     loop {
+        stop.poll().map_err(|_| UnpackError::Cancelled)?;
         let want = match pack_len {
             Some(len) if written >= len => break,
             Some(len) => usize::try_from(len - written).map_or(chunk.len(), |n| n.min(chunk.len())),
@@ -1547,7 +1619,8 @@ mod tests {
         let odb = test_odb(tmp.path());
         let pack = sample_pack();
         let mut input = NoReadPastEnd { data: &pack };
-        let spooled = spool_push_pack(&mut input, &odb, None).unwrap_or_else(|e| panic!("{e}"));
+        let spooled = spool_push_pack(&mut input, &odb, None, &CancelSignal::never())
+            .unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(std::fs::read(spooled.file.path()).unwrap_or_default(), pack);
         assert_eq!(&spooled.header[..], &pack[..12]);
     }
@@ -1559,8 +1632,8 @@ mod tests {
         let pack = sample_pack();
         let mut stream = pack.clone();
         stream.extend_from_slice(b"trailing junk");
-        let spooled =
-            spool_push_pack(&mut stream.as_slice(), &odb, None).unwrap_or_else(|e| panic!("{e}"));
+        let spooled = spool_push_pack(&mut stream.as_slice(), &odb, None, &CancelSignal::never())
+            .unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(std::fs::read(spooled.file.path()).unwrap_or_default(), pack);
     }
 
@@ -1571,20 +1644,23 @@ mod tests {
         let pack = sample_pack();
 
         let truncated = &pack[..pack.len() - 5];
+        let never = CancelSignal::never();
         assert!(matches!(
-            spool_push_pack(&mut &truncated[..], &odb, None),
+            spool_push_pack(&mut &truncated[..], &odb, None, &never),
             Err(UnpackError::Truncated)
         ));
 
         let limit = (pack.len() - 1) as u64;
         assert!(matches!(
-            spool_push_pack(&mut pack.as_slice(), &odb, Some(limit)),
+            spool_push_pack(&mut pack.as_slice(), &odb, Some(limit), &never),
             Err(UnpackError::TooLarge { limit: l }) if l == limit
         ));
-        assert!(spool_push_pack(&mut pack.as_slice(), &odb, Some(pack.len() as u64)).is_ok());
+        assert!(
+            spool_push_pack(&mut pack.as_slice(), &odb, Some(pack.len() as u64), &never).is_ok()
+        );
 
         assert!(matches!(
-            spool_push_pack(&mut &b"JUNK\0\0\0\x02\0\0\0\x01"[..], &odb, None),
+            spool_push_pack(&mut &b"JUNK\0\0\0\x02\0\0\0\x01"[..], &odb, None, &never),
             Err(UnpackError::Malformed(PackStreamScanError::BadSignature))
         ));
 
