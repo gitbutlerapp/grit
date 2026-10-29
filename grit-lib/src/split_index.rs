@@ -1,17 +1,15 @@
 //! Split index: `link` extension and `sharedindex.<sha1>` (Git `split-index.c`).
 
-use crate::git_path::CanonicalizeExt;
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, UNIX_EPOCH};
-
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::ewah_bitmap::EwahBitmap;
 use crate::git_date::approx::approxidate_careful;
+use crate::git_path::CanonicalizeExt;
 use crate::index::{Index, IndexEntry};
 use crate::objects::{HashAlgo, ObjectId};
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
 
 /// Split-index metadata carried on an [`Index`] (in-memory; bitmaps cleared after merge/write).
 #[derive(Debug, Clone)]
@@ -529,6 +527,7 @@ pub(crate) fn freshen_shared_index(path: &Path) {
 
 #[cfg(unix)]
 fn filetime_set_to_now(path: &Path) -> io::Result<()> {
+    use std::time::{Duration, UNIX_EPOCH};
     let t = UNIX_EPOCH + Duration::from_secs(crate::git_date::tm::process_wall_clock_sec() as u64);
     let ft = filetime::FileTime::from_system_time(t);
     filetime::set_file_mtime(path, ft)

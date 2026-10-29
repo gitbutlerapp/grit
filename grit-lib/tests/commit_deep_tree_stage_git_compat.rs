@@ -104,8 +104,6 @@ fn create_commit_nothing_to_commit_without_second_stat_refresh() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: true,
-            skip_pre_commit_tree_match: false,
-            staged_change_count: None,
             ..Default::default()
         },
         &mut NullProgress,
@@ -176,8 +174,6 @@ fn grit_commit_on_deep_tree_leaves_clean_tree_for_git() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: true,
-            skip_pre_commit_tree_match: false,
-            staged_change_count: None,
             ..Default::default()
         },
         &mut NullProgress,
@@ -403,18 +399,13 @@ fn commit_worktree_allow_empty_clean_tree_single_staging_pass() {
     .expect("warm UNTR");
 
     let ident = "Test <t@example.com> 1 +0000".to_string();
-    let mut req = CommitRequest {
-        message: "empty".into(),
-        author: Some(ident.parse().expect("signature")),
-        committer: Some(ident.parse().expect("signature")),
-        allow_empty: true,
-        sign_override: None,
-        amend: false,
-        assume_worktree_synced: true,
-        skip_pre_commit_tree_match: true,
-        staged_change_count: None,
-        ..Default::default()
-    };
+    let mut req = CommitRequest::new("empty");
+    let sig = ident.parse().expect("signature");
+    req.author = Some(sig.clone());
+    req.committer = Some(sig);
+    req.allow_empty = true;
+    req.assume_worktree_synced = true;
+    req = req.skip_pre_commit_tree_match(true);
 
     let _probe = reset_worktree_metadata_probe(root);
     commit_worktree(&repo, &req, &mut NullProgress, &NeverCancel).expect("allow-empty commit");

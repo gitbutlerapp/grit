@@ -95,6 +95,7 @@ fn split_octal_prefix(s: &str) -> (&str, &str) {
 
 /// Git's `calc_shared_perm` (`path.c`).
 #[must_use]
+#[cfg_attr(not(unix), allow(dead_code))]
 pub fn calc_shared_perm(shared_repo: i32, mode: u32) -> u32 {
     let tweak = if shared_repo < 0 {
         (-shared_repo) as u32

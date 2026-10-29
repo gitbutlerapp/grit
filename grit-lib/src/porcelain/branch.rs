@@ -873,6 +873,7 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
     use super::*;
+    use crate::ident::Signature;
     use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::progress::NullProgress;
     use crate::refs;
@@ -885,26 +886,12 @@ mod tests {
     }
 
     fn commit(repo: &Repository, message: &str) -> ObjectId {
-        let req = CommitRequest {
-            message: message.into(),
-            author: Some(
-                "T <t@example.com> 1700000000 +0000"
-                    .parse()
-                    .expect("signature"),
-            ),
-            committer: Some(
-                "T <t@example.com> 1700000000 +0000"
-                    .parse()
-                    .expect("signature"),
-            ),
-            allow_empty: true,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            skip_pre_commit_tree_match: false,
-            staged_change_count: None,
-            ..Default::default()
-        };
+        let ident = "T <t@example.com> 1 +0000".to_string();
+        let sig: Signature = ident.parse().expect("signature");
+        let mut req = CommitRequest::new(message);
+        req.author = Some(sig.clone());
+        req.committer = Some(sig);
+        req.allow_empty = true;
         create_commit(repo, &req, &mut NullProgress, &crate::progress::NeverCancel)
             .expect("commit")
             .oid

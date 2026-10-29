@@ -128,8 +128,6 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
                 sign_override: None,
                 amend: false,
                 assume_worktree_synced: false,
-                skip_pre_commit_tree_match: false,
-                staged_change_count: None,
                 ..Default::default()
             },
             &mut NullProgress,
@@ -1810,8 +1808,6 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
-            skip_pre_commit_tree_match: false,
-            staged_change_count: None,
             ..Default::default()
         },
         &mut NullProgress,
@@ -1834,8 +1830,6 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
-            skip_pre_commit_tree_match: false,
-            staged_change_count: None,
             ..Default::default()
         },
         &mut NullProgress,
@@ -2554,8 +2548,6 @@ fn grit_commit_all(repo: &Repository, path: &Path, message: &str) {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
-            skip_pre_commit_tree_match: false,
-            staged_change_count: None,
             ..Default::default()
         },
         &mut NullProgress,

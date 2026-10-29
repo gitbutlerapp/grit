@@ -1543,14 +1543,13 @@ mod tests {
         )
         .unwrap();
         let ident = "T <t@example.com> 1 +0000".to_string();
+        let mut req = crate::porcelain::commit::CommitRequest::new("big");
+        let sig: crate::ident::Signature = ident.parse().unwrap();
+        req.author = Some(sig.clone());
+        req.committer = Some(sig);
         crate::porcelain::commit::create_commit(
             &repo,
-            &crate::porcelain::commit::CommitRequest {
-                message: "big".into(),
-                author: Some(ident.parse().unwrap()),
-                committer: Some(ident.parse().unwrap()),
-                ..Default::default()
-            },
+            &req,
             &mut crate::progress::NullProgress,
             &crate::progress::NeverCancel,
         )

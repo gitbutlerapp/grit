@@ -455,22 +455,20 @@ fn build_commit_request(
         HookPolicy::Run
     };
 
-    Ok(CommitRequest {
-        message: message_text.to_owned(),
-        author,
-        committer,
-        allow_empty,
-        sign_override,
-        amend,
-        hooks,
-        author_date: parsed_author_date,
-        trailers: parsed_trailers,
-        signoff,
-        reset_author,
-        reuse_message_from,
-        dry_run,
-        ..Default::default()
-    })
+    let mut req = CommitRequest::new(message_text);
+    req.author = author;
+    req.committer = committer;
+    req.allow_empty = allow_empty;
+    req.sign_override = sign_override;
+    req.amend = amend;
+    req.hooks = hooks;
+    req.author_date = parsed_author_date;
+    req.trailers = parsed_trailers;
+    req.signoff = signoff;
+    req.reset_author = reset_author;
+    req.reuse_message_from = reuse_message_from;
+    req.dry_run = dry_run;
+    Ok(req)
 }
 
 fn finish_commit_outcome(

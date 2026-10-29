@@ -700,7 +700,7 @@ fn cross_device_restore_from_spool(
     Ok(())
 }
 
-fn create_symlink_at(target: &Path, link: &Path) -> std::io::Result<()> {
+pub(crate) fn create_symlink_at(target: &Path, link: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;

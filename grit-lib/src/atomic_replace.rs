@@ -139,7 +139,6 @@ fn paths_related_to_lock(lock_path: &Path) -> Vec<PathBuf> {
 
 #[cfg(windows)]
 fn path_has_delete_pending(path: &Path) -> bool {
-    use std::ffi::OsStr;
     use std::mem::size_of;
     use std::os::windows::ffi::OsStrExt;
     use std::ptr;
@@ -182,7 +181,6 @@ fn path_has_delete_pending(path: &Path) -> bool {
 
 #[cfg(windows)]
 fn windows_replace_file(from: &Path, to: &Path) -> io::Result<()> {
-    use std::ffi::OsStr;
     use std::mem::{align_of, size_of};
     use std::os::windows::ffi::OsStrExt;
     use std::ptr;

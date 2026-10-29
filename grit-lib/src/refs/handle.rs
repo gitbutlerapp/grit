@@ -59,17 +59,10 @@ impl<'repo> References<'repo> {
     /// use grit_lib::progress::NullProgress;
     /// let dir = std::env::temp_dir().join("grit-refs-resolve-doc");
     /// let repo = Repository::init(&dir, &InitOptions::default())?;
-    /// let req = CommitRequest {
-    ///     message: "doc".into(),
-    ///     author: Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?),
-    ///     committer: Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?),
-    ///     allow_empty: true,
-    ///     sign_override: None,
-    ///     amend: false,
-    ///     assume_worktree_synced: false,
-    ///     skip_pre_commit_tree_match: false,
-    ///     ..Default::default()
-    /// };
+    /// let mut req = CommitRequest::new("doc");
+    /// req.author = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
+    /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
+    /// req.allow_empty = true;
     /// let _ = create_commit(&repo, &req, &mut NullProgress, &grit_lib::progress::NeverCancel)?;
     /// let main = RefName::try_from("refs/heads/main").expect("valid ref");
     /// let head = repo.references().resolve(&main)?;
@@ -187,17 +180,10 @@ impl<'repo> References<'repo> {
     /// use grit_lib::progress::NullProgress;
     /// let dir = std::env::temp_dir().join("grit-refs-write-doc");
     /// let repo = Repository::init(&dir, &InitOptions::default())?;
-    /// let req = CommitRequest {
-    ///     message: "doc".into(),
-    ///     author: Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?),
-    ///     committer: Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?),
-    ///     allow_empty: true,
-    ///     sign_override: None,
-    ///     amend: false,
-    ///     assume_worktree_synced: false,
-    ///     skip_pre_commit_tree_match: false,
-    ///     ..Default::default()
-    /// };
+    /// let mut req = CommitRequest::new("doc");
+    /// req.author = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
+    /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
+    /// req.allow_empty = true;
     /// let commit = create_commit(&repo, &req, &mut NullProgress, &grit_lib::progress::NeverCancel)?.oid;
     /// let name = RefName::try_from("refs/heads/handle-demo").expect("valid ref");
     /// repo.references().update(&name, &commit)?;

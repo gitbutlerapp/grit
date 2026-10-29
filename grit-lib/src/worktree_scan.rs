@@ -163,6 +163,7 @@ pub(crate) fn probe_worktree_path_resolution(path: &Path) {
 pub const PARALLEL_STAT_MIN_ENTRIES: usize = 1000;
 
 /// Minimum entries per parallel slice so Linux amortizes one `open_stat_directory` handle.
+#[cfg(not(windows))]
 const PARALLEL_STAT_MIN_SLICE_ENTRIES: usize = 8;
 
 /// Parallelism controls for directory-grouped blob scans (honors `core.preloadIndex`).
@@ -1201,6 +1202,7 @@ fn lookup_lone_blob_in_directory(
     symlink_metadata_blob_lookup(&target_abs())
 }
 
+#[cfg(not(windows))]
 fn dir_range_for_index_pos(plan: &BlobScanPlan, index_pos: usize) -> std::ops::Range<usize> {
     for range in &plan.dir_ranges {
         if range.contains(&index_pos) {
@@ -1217,6 +1219,7 @@ fn first_dir_index_at_or_after(plan: &BlobScanPlan, index_pos: usize) -> usize {
 }
 
 /// Move an index cut off a small directory interior onto the nearest directory boundary.
+#[cfg(not(windows))]
 fn snap_index_parallel_cut(plan: &BlobScanPlan, cut: usize, fair_share: usize) -> usize {
     if cut == 0 || cut >= plan.len() {
         return cut;

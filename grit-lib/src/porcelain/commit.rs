@@ -187,8 +187,7 @@ pub struct CommitRequest {
     pub message: String,
     /// Tell `prepare-commit-msg` that [`Self::message`] is the in-progress merge's `MERGE_MSG`
     /// (source `merge` instead of `message`), as when finishing a merge.
-    #[doc(hidden)]
-    pub message_from_merge: bool,
+    pub(crate) message_from_merge: bool,
     /// Author to record. `None` keeps the replaced commit's author for [`Self::amend`] and the
     /// source commit's author for [`Self::reuse_message_from`]; otherwise the repository's
     /// author identity ([`Repository::identity`]) is used. [`Self::author_date`] and
@@ -211,13 +210,11 @@ pub struct CommitRequest {
     /// staging pass already refreshed the index; only [`create_commit`] callers need to choose.
     pub assume_worktree_synced: bool,
     /// When true with [`Self::assume_worktree_synced`], skip the pre-commit index↔parent tree
-    /// match; the post-`write_tree` parent comparison still rejects empty commits (issue #1064).
-    #[doc(hidden)]
-    pub skip_pre_commit_tree_match: bool,
+    /// match; the post-`write_tree` parent comparison still rejects empty commits.
+    pub(crate) skip_pre_commit_tree_match: bool,
     /// When set with [`Self::skip_pre_commit_tree_match`], use this instead of a full tree diff for
-    /// [`CommitOutcome::changes`] (issue #1064).
-    #[doc(hidden)]
-    pub staged_change_count: Option<usize>,
+    /// [`CommitOutcome::changes`].
+    pub(crate) staged_change_count: Option<usize>,
     /// Hook execution policy for `pre-commit` and `commit-msg`; `prepare-commit-msg` runs either
     /// way.
     #[doc(alias = "no-verify")]
@@ -235,12 +232,36 @@ pub struct CommitRequest {
     /// When true, compute the commit tree and file list without writing objects, updating refs, or running hooks.
     pub dry_run: bool,
     /// When true, a [`Error::NothingToCommit`] is upgraded to [`Error::NothingStagedToCommit`] if the
-    /// work tree still has unstaged or untracked paths (index-only commit; issue #1969).
-    #[doc(hidden)]
-    pub index_only: bool,
+    /// work tree still has unstaged or untracked paths (index-only commit).
+    pub(crate) index_only: bool,
     /// Whether an amend runs `post-rewrite amend` ([`PostOperationHooks::Skip`] is Git's
     /// `--no-post-rewrite`). `post-commit` runs either way.
     pub post_rewrite: PostOperationHooks,
+}
+
+impl CommitRequest {
+    /// Start a commit request with `message`; set other fields on the returned value.
+    #[must_use]
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Skip the pre-commit index↔parent tree match (integration tests and scoped commits).
+    #[doc(hidden)]
+    pub fn skip_pre_commit_tree_match(mut self, skip: bool) -> Self {
+        self.skip_pre_commit_tree_match = skip;
+        self
+    }
+
+    /// Index-only commit scope (see [`Self::index_only`]).
+    #[doc(hidden)]
+    pub fn index_only_commit(mut self, index_only: bool) -> Self {
+        self.index_only = index_only;
+        self
+    }
 }
 
 /// One path-level change that would be recorded in a commit.
@@ -2058,12 +2079,11 @@ mod tests {
 
     fn commit_req(message: &str) -> CommitRequest {
         let ident = ident();
-        CommitRequest {
-            message: message.to_owned(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            ..Default::default()
-        }
+        let sig: crate::ident::Signature = ident.parse().expect("signature");
+        let mut req = CommitRequest::new(message);
+        req.author = Some(sig.clone());
+        req.committer = Some(sig);
+        req
     }
 
     fn repo_snapshot(repo: &Repository) -> (Vec<u8>, String, usize, bool, usize) {

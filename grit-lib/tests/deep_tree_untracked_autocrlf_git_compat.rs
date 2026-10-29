@@ -141,8 +141,6 @@ fn full_tree_add_and_commit_store_lf_with_autocrlf() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
-            skip_pre_commit_tree_match: false,
-            staged_change_count: None,
             ..Default::default()
         },
         &mut NullProgress,

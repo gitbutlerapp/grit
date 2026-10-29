@@ -1778,13 +1778,11 @@ impl ConfigFile {
                 }
             })?;
 
+        #[cfg(unix)]
         if let Ok(meta) = fs::metadata(&self.path) {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mode = meta.permissions().mode();
-                let _ = fs::set_permissions(&lock_path, fs::Permissions::from_mode(mode));
-            }
+            use std::os::unix::fs::PermissionsExt;
+            let mode = meta.permissions().mode();
+            let _ = fs::set_permissions(&lock_path, fs::Permissions::from_mode(mode));
         }
 
         use std::io::Write as _;

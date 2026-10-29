@@ -62,26 +62,12 @@ mod tests {
         tracing::subscriber::with_default(subscriber, || {
             let dir = tempfile::tempdir().unwrap();
             let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
-            let req = crate::porcelain::commit::CommitRequest {
-                message: "trace test".into(),
-                author: Some(
-                    "T <t@example.com> 1700000000 +0000"
-                        .parse()
-                        .expect("signature"),
-                ),
-                committer: Some(
-                    "T <t@example.com> 1700000000 +0000"
-                        .parse()
-                        .expect("signature"),
-                ),
-                allow_empty: true,
-                sign_override: None,
-                amend: false,
-                assume_worktree_synced: false,
-                skip_pre_commit_tree_match: false,
-                staged_change_count: None,
-                ..Default::default()
-            };
+            let ident = "T <t@example.com> 1 +0000".to_string();
+            let sig = ident.parse().unwrap();
+            let mut req = crate::porcelain::commit::CommitRequest::new("trace test");
+            req.author = Some(sig.clone());
+            req.committer = Some(sig);
+            req.allow_empty = true;
             let _ = crate::porcelain::commit::create_commit(
                 &repo,
                 &req,

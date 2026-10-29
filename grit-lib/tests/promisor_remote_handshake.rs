@@ -218,13 +218,11 @@ fn fetch_from(
     auto_filter: bool,
 ) -> (FetchOutcome, String, ServeOptions) {
     let (mut conn, sent) = InProcessConn::connect(&server.git_dir);
-    let mut opts = FetchOptions {
-        refspecs: vec![format!("+refs/heads/*:refs/remotes/{remote}/*")],
-        remote_name: Some(remote.to_owned()),
-        filter,
-        auto_filter,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec![format!("+refs/heads/*:refs/remotes/{remote}/*")];
+    opts.remote_name = Some(remote.to_owned());
+    opts.filter = filter;
+    opts.auto_filter = auto_filter;
     let outcome =
         fetch_remote(client, &mut conn, &mut opts, &mut NoProgress, &NeverCancel).expect("fetch");
     let served = conn.finish();
@@ -427,13 +425,9 @@ fn object_want_fetch_sends_no_reply() {
     assert!(!has_object(client.path(), &server.big));
 
     let (mut conn, sent) = InProcessConn::connect(&server.git_dir);
-    let mut opts = FetchOptions {
-        remote_name: Some("origin".to_owned()),
-        filter: Some(ObjectFilterSpec::BlobNone),
-        object_wants: vec![server.big],
-        promisor_object_fetch: true,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new().promisor_object_wants(vec![server.big]);
+    opts.remote_name = Some("origin".to_owned());
+    opts.filter = Some(ObjectFilterSpec::BlobNone);
     let outcome = fetch_remote(
         client.path(),
         &mut conn,

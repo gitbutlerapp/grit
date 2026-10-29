@@ -21,19 +21,11 @@ fn init_repo() -> Harness {
     let ident: Signature = "Test User <test@example.com> 0 +0000"
         .parse()
         .expect("ident");
-    create_commit(
-        &repo,
-        &CommitRequest {
-            message: "root".into(),
-            author: Some(ident.clone()),
-            committer: Some(ident),
-            allow_empty: true,
-            ..Default::default()
-        },
-        &mut NullProgress,
-        &NeverCancel,
-    )
-    .expect("root commit");
+    let mut root =
+        grit_test_support::empty_commit_request("root", "Test User <test@example.com> 0 +0000");
+    root.author = Some(ident.clone());
+    root.committer = Some(ident);
+    create_commit(&repo, &root, &mut NullProgress, &NeverCancel).expect("root commit");
     Harness { _dir: dir, repo }
 }
 
@@ -51,13 +43,12 @@ fn concurrent_allow_empty_commits_avoid_permission_errors() {
             thread::spawn(move || {
                 let mut errors = Vec::new();
                 for i in 0..30 {
-                    let req = CommitRequest {
-                        message: format!("t{t} i{i}"),
-                        author: Some(ident.clone()),
-                        committer: Some(ident.clone()),
-                        allow_empty: true,
-                        ..Default::default()
-                    };
+                    let mut req = grit_test_support::empty_commit_request(
+                        format!("t{t} i{i}"),
+                        "Test User <test@example.com> 0 +0000",
+                    );
+                    req.author = Some(ident.clone());
+                    req.committer = Some(ident.clone());
                     if let Err(e) = create_commit(&repo, &req, &mut NullProgress, &NeverCancel) {
                         errors.push(e);
                     }
@@ -134,13 +125,12 @@ fn concurrent_commit_while_index_and_ref_handles_open() {
             thread::spawn(move || {
                 let mut errors = Vec::new();
                 for i in 0..30 {
-                    let req = CommitRequest {
-                        message: format!("held t{t} i{i}"),
-                        author: Some(ident.clone()),
-                        committer: Some(ident.clone()),
-                        allow_empty: true,
-                        ..Default::default()
-                    };
+                    let mut req = grit_test_support::empty_commit_request(
+                        format!("held t{t} i{i}"),
+                        "Test User <test@example.com> 0 +0000",
+                    );
+                    req.author = Some(ident.clone());
+                    req.committer = Some(ident.clone());
                     if let Err(e) = create_commit(&repo, &req, &mut NullProgress, &NeverCancel) {
                         errors.push(e);
                     }

@@ -176,6 +176,7 @@ impl FetchDepth {
 }
 
 /// Options controlling a fetch.
+#[non_exhaustive]
 pub struct FetchOptions {
     /// Positive refspecs selecting what to fetch.
     pub refspecs: Vec<String>,
@@ -201,7 +202,7 @@ pub struct FetchOptions {
     pub deepen_not: Vec<String>,
     /// First fetch populating a remote-tracking namespace (clone): write `packed-refs`
     /// and `refs/remotes/{remote}/HEAD`.
-    pub initial_remote_fetch: bool,
+    pub(crate) initial_remote_fetch: bool,
     /// Remote name paired with [`Self::initial_remote_fetch`] (e.g. `"origin"`).
     pub remote_name: Option<String>,
     /// Source label written into [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion).
@@ -227,7 +228,7 @@ pub struct FetchOptions {
     /// Discovery/config environment for pack ingest (`GIT_CONFIG_*`, `-c`); defaults to empty.
     pub environment: crate::environment::Environment,
     /// When true, spool the negotiated pack to disk and return without index-pack or ref updates.
-    pub pack_spool_only: bool,
+    pub(crate) pack_spool_only: bool,
     /// Override the HTTP `Git-Protocol` header for this fetch (`None` → client default, usually v2).
     pub http_protocol_version: Option<u8>,
     /// When true, omit the `no-progress` capability/argument so the remote may
@@ -246,11 +247,11 @@ pub struct FetchOptions {
     ///
     /// Set by the fetch driver when a filter was sent on the wire; callers should
     /// leave this `false`.
-    pub mark_received_pack_promisor: bool,
+    pub(crate) mark_received_pack_promisor: bool,
     /// Explicit object ids to fetch (promisor on-demand); skips refspec matching and ref updates.
-    pub object_wants: Vec<ObjectId>,
+    pub(crate) object_wants: Vec<ObjectId>,
     /// On-demand promisor object fetch: always mark the received pack promisor.
-    pub promisor_object_fetch: bool,
+    pub(crate) promisor_object_fetch: bool,
     /// Initial fetch from a plain local path: hard-link the source's packfiles and
     /// loose objects wholesale instead of walking the requested refs (Git's
     /// `clone --local`).
@@ -344,6 +345,36 @@ impl Clone for FetchOptions {
 }
 
 impl FetchOptions {
+    /// Default fetch options for callers that set fields individually.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Clone layout fetch: populate `refs/remotes/{remote}/HEAD` and packed refs.
+    #[must_use]
+    pub fn initial_remote_fetch(mut self, enabled: bool) -> Self {
+        self.initial_remote_fetch = enabled;
+        self
+    }
+
+    /// Spool the received pack without index-pack (transport tests and diagnostics).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn pack_spool_only(mut self, enabled: bool) -> Self {
+        self.pack_spool_only = enabled;
+        self
+    }
+
+    /// Promisor on-demand object fetch by oid (see [`crate::promisor_fetch`]).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn promisor_object_wants(mut self, wants: Vec<ObjectId>) -> Self {
+        self.object_wants = wants;
+        self.promisor_object_fetch = true;
+        self
+    }
+
     /// Whether this fetch carries any shallow/deepen request (an explicit
     /// `fetch_depth`/`deepen-since`/`deepen-not`). Note this does NOT cover the
     /// "already shallow, fetching more of the same boundary" case — that is
@@ -4233,11 +4264,12 @@ mod tests {
             .set_ref("refs/remotes/origin/main", RawRef::Direct(tip))
             .unwrap();
         let repo = repo.with_ref_store(store);
-        let opts = FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-            tags: TagMode::None,
-            dry_run: true,
-            ..Default::default()
+        let opts = {
+            let mut opts = FetchOptions::new();
+            opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+            opts.tags = TagMode::None;
+            opts.dry_run = true;
+            opts
         };
         let outcome = fetch_local_into(
             &repo,
@@ -4371,11 +4403,12 @@ mod tests {
         let local = tempfile::tempdir().expect("local");
         init_repository(local.path(), false, "main", None, RefStorageFormat::Files).expect("init");
 
-        let opts = FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-            initial_remote_fetch: true,
-            tags: TagMode::None,
-            ..Default::default()
+        let opts = {
+            let mut opts = FetchOptions::new();
+            opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+            opts.tags = TagMode::None;
+            opts = opts.initial_remote_fetch(true);
+            opts
         };
         let mut rec = PhaseRecorder {
             want_received: true,
@@ -4463,12 +4496,13 @@ mod tests {
             init_repository(local.path(), false, "main", None, RefStorageFormat::Files)
                 .expect("init");
 
-            let opts = FetchOptions {
-                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-                initial_remote_fetch: true,
-                link_source_objects: true,
-                tags: TagMode::None,
-                ..Default::default()
+            let opts = {
+                let mut opts = FetchOptions::new();
+                opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+                opts.tags = TagMode::None;
+                opts.link_source_objects = true;
+                opts = opts.initial_remote_fetch(true);
+                opts
             };
             let mut rec = PhaseRecorder {
                 want_received,
@@ -4528,11 +4562,12 @@ mod tests {
         let local = tempfile::tempdir().expect("local");
         init_repository(local.path(), false, "main", None, RefStorageFormat::Files).expect("init");
 
-        let opts = FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-            initial_remote_fetch: true,
-            tags: TagMode::None,
-            ..Default::default()
+        let opts = {
+            let mut opts = FetchOptions::new();
+            opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+            opts.tags = TagMode::None;
+            opts = opts.initial_remote_fetch(true);
+            opts
         };
         let mut rec = PhaseRecorder::default();
         fetch_local_with_progress(

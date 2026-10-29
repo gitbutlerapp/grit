@@ -53,7 +53,9 @@
 
 use std::io::{IsTerminal, Write};
 
-use anyhow::{anyhow, bail, Context, Result};
+#[cfg(not(windows))]
+use anyhow::bail;
+use anyhow::{anyhow, Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::remote::credentials::Credential;
 use grit_lib::remote::credentials::{CredentialProvider, HelperCredentialProvider};

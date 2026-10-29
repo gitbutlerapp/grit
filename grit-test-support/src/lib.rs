@@ -7,6 +7,7 @@
 pub mod binaries;
 pub mod blame;
 pub mod cli_fixture;
+pub mod commit;
 pub mod net;
 pub mod objects;
 pub mod odb_conformance;
@@ -21,6 +22,7 @@ pub use cli_fixture::{
     CliFixtureWithUpstream, ModeCapture, NetworkSnapshotOptions, PreparedNetworkRun,
     SnapshotExitCodes, SnapshotOutputMode,
 };
+pub use commit::{commit_request, empty_commit_request};
 pub use net::free_port;
 pub use objects::{
     git_cat_file_batch_check, git_commit_graph_verify, git_fsck, git_hash_object_literally,

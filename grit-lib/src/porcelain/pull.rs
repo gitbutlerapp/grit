@@ -395,13 +395,14 @@ impl PullOptions {
             autostash: false,
             check: false,
             mode: cli_mode,
-            fetch: FetchOptions {
-                tags: TagMode::Following,
-                thread_policy: repo.thread_policy(),
-                environment,
-                prune,
-                remote_name: Some(remote_name),
-                ..Default::default()
+            fetch: {
+                let mut opts = FetchOptions::new();
+                opts.tags = TagMode::Following;
+                opts.thread_policy = repo.thread_policy();
+                opts.environment = environment;
+                opts.prune = prune;
+                opts.remote_name = Some(remote_name);
+                opts
             },
             upstream: None,
             stop_on_conflict: false,

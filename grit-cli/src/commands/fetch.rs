@@ -424,14 +424,12 @@ fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
         .context("could not load config")?;
     let factory = crate::context::http_client_factory();
     let mut progress = args.quiet.progress(mode);
-    let base = FetchOptions {
-        dry_run: args.dry_run,
-        fetch_depth: args.fetch_depth(),
-        force: args.force,
-        thread_policy: repo.thread_policy(),
-        environment: crate::context::environment(),
-        ..Default::default()
-    };
+    let mut base = FetchOptions::new();
+    base.dry_run = args.dry_run;
+    base.fetch_depth = args.fetch_depth();
+    base.force = args.force;
+    base.thread_policy = repo.thread_policy();
+    base.environment = crate::context::environment();
     let raw = repo
         .remotes()
         .fetch_all(
@@ -554,16 +552,17 @@ fn fetch_once(
     remote
         .fetch(
             repo,
-            FetchOptions {
-                refspecs: invocation.user_refspecs.clone(),
-                tags,
-                force,
-                thread_policy: repo.thread_policy(),
-                environment: crate::context::environment(),
-                prune,
-                dry_run,
-                fetch_depth,
-                ..Default::default()
+            {
+                let mut opts = FetchOptions::new();
+                opts.refspecs = invocation.user_refspecs.clone();
+                opts.tags = tags;
+                opts.force = force;
+                opts.thread_policy = repo.thread_policy();
+                opts.environment = crate::context::environment();
+                opts.prune = prune;
+                opts.dry_run = dry_run;
+                opts.fetch_depth = fetch_depth;
+                opts
             },
             progress,
             &NeverCancel,

@@ -30,10 +30,11 @@ pub use group_by::{
     GroupByAuthorOptions,
 };
 pub use handle::RevWalk;
+pub use handle::RevWalkCommitIter;
 pub use queries::{
     committer_cutoff_from_date, parse_rev_walk_tokens, resolve_log_walk_tips_and_hide,
     rev_list_commits_for_author_group, LeftRightCounts, MergeFilter, RefSelection,
-    RevWalkListOptions, RevWalkParsedSpecs,
+    RevWalkCommitIterOptions, RevWalkListOptions, RevWalkParsedSpecs,
 };
 
 pub mod rev_list {

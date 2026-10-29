@@ -1374,6 +1374,7 @@ pub struct RefHookContext {
     environment: Arc<Environment>,
     command_runner: Arc<dyn CommandRunner>,
     hook_stdio: HookStdio,
+    #[cfg_attr(not(unix), allow(dead_code))]
     diagnostics: crate::diagnostics::DiagnosticsHandle,
     hash_algo: HashAlgo,
 }

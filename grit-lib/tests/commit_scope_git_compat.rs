@@ -23,8 +23,6 @@ fn commit_req(message: &str) -> CommitRequest {
         sign_override: None,
         amend: false,
         assume_worktree_synced: false,
-        skip_pre_commit_tree_match: false,
-        staged_change_count: None,
         ..Default::default()
     }
 }

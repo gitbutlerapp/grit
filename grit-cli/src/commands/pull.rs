@@ -100,18 +100,19 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     }
     options.autostash = args.autostash;
     options.check = args.check;
-    options.fetch = FetchOptions {
-        refspecs: invocation.user_refspecs,
-        tags: resolve_fetch_tags(&config, &invocation.remote, args.fetch.tag_mode_override()),
-        force: args.fetch.force,
-        thread_policy: repo.thread_policy(),
-        environment: context::environment(),
-        prune: resolve_fetch_prune(&config, &invocation.remote, args.fetch.prune_override())
-            .context("could not resolve fetch prune settings")?,
-        dry_run: args.fetch.dry_run,
-        remote_name: Some(invocation.remote.clone()),
-        ..Default::default()
-    };
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.refspecs = invocation.user_refspecs;
+    fetch_opts.tags =
+        resolve_fetch_tags(&config, &invocation.remote, args.fetch.tag_mode_override());
+    fetch_opts.force = args.fetch.force;
+    fetch_opts.thread_policy = repo.thread_policy();
+    fetch_opts.environment = context::environment();
+    fetch_opts.prune =
+        resolve_fetch_prune(&config, &invocation.remote, args.fetch.prune_override())
+            .context("could not resolve fetch prune settings")?;
+    fetch_opts.dry_run = args.fetch.dry_run;
+    fetch_opts.remote_name = Some(invocation.remote.clone());
+    options.fetch = fetch_opts;
     let remote_name = invocation.remote;
     let factory = crate::context::http_client_factory();
     // The work-tree update after the fetch reports no progress, so the overall
@@ -248,11 +249,9 @@ fn pull_server_branch(
         );
     }
     let info = client.branch(&marker.id, name)?;
-    let fetch = FetchOptions {
-        thread_policy: repo.thread_policy(),
-        environment: context::environment(),
-        ..Default::default()
-    };
+    let mut fetch = FetchOptions::new();
+    fetch.thread_policy = repo.thread_policy();
+    fetch.environment = context::environment();
     let transfer = fetch_branch(
         repo,
         marker,
@@ -306,10 +305,11 @@ fn refresh_checkout(
         mode: cli_mode(args),
         autostash: args.autostash,
         check: args.check,
-        fetch: FetchOptions {
-            thread_policy: repo.thread_policy(),
-            environment: context::environment(),
-            ..Default::default()
+        fetch: {
+            let mut fetch = FetchOptions::new();
+            fetch.thread_policy = repo.thread_policy();
+            fetch.environment = context::environment();
+            fetch
         },
         ..Default::default()
     };

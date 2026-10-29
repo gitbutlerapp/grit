@@ -9,12 +9,10 @@
 //!
 //! Following the [library/CLI contract](crate::porcelain), the library produces
 //! only the structured model: which ref decorates which commit, its display name,
-//! and its [`DecorationKind`]. The `grit` binary owns everything presentational —
-//! mapping a `DecorationKind` to a `color.decorate.*` sequence, folding
-//! `HEAD -> branch`, the parentheses/separators of `%d`, and reading the clap args
-//! that build the [`DecorationFilter`]. The bulk of `grit log` (rev-walk, pretty
-//! formatting, the pager, graph drawing) still lives in
-//! `grit/src/commands/log.rs`; this module is the first colour-free slice of it.
+//! and its [`DecorationKind`]. The `grit` binary owns presentation — mapping a
+//! [`DecorationKind`] to `color.decorate.*`, folding `HEAD -> branch`, and the
+//! parentheses around `%d` — while this module supplies the colour-free decoration
+//! map the rev-walk and JSON log paths share.
 
 use std::collections::{HashMap, HashSet};
 
@@ -119,8 +117,7 @@ impl DecorationFilter {
         self.include.is_empty() && self.exclude.is_empty() && self.exclude_config.is_empty()
     }
 
-    /// Mirror Git's `ref_filter_match` (log-tree.c). Returns true if `refname`
-    /// (a full ref like `refs/heads/foo`) should be decorated.
+    /// Returns true when `refname` (a full ref like `refs/heads/foo`) should be decorated.
     pub fn matches(&self, refname: &str) -> bool {
         // `--decorate-refs-exclude` (command line) is checked first.
         for pat in &self.exclude {
@@ -128,9 +125,7 @@ impl DecorationFilter {
                 return false;
             }
         }
-        // An explicit `--decorate-refs` include is decisive and overrides the
-        // config-based `log.excludeDecoration` exclusions (matching Git's
-        // `ref_filter_match` ordering).
+        // An explicit `--decorate-refs` include overrides config exclusions.
         if !self.include.is_empty() {
             for pat in &self.include {
                 if decoration_pattern_matches(pat, refname) {
@@ -172,7 +167,7 @@ fn decoration_pattern_matches(pattern: &str, refname: &str) -> bool {
     if has_glob {
         crate::wildmatch::wildmatch(pattern.as_bytes(), refname.as_bytes(), 0)
     } else {
-        // `skip_prefix(refname, pattern, &rest) && (!*rest || *rest == '/')`.
+        // Prefix match at a ref component boundary (`pattern` or `pattern/...`).
         if let Some(rest) = refname.strip_prefix(pattern) {
             rest.is_empty() || rest.starts_with('/')
         } else {

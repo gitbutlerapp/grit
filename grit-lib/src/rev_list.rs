@@ -3488,6 +3488,14 @@ fn resolve_specs_with_options(
     Ok(out)
 }
 
+/// Resolve revision tokens for [`open_commit_stream`] / [`RevWalk::commits_iter`].
+pub fn resolve_specs_for_commit_stream(
+    repo: &Repository,
+    specs: &[String],
+) -> Result<Vec<ObjectId>> {
+    resolve_specs_with_options(repo, specs, false)
+}
+
 /// Resolve revision strings to commit tips and non-commit roots (tags, trees, blobs, `rev:path`).
 ///
 /// Used by `test-tool path-walk` and similar object walks that mirror `git` revision parsing.
@@ -6807,6 +6815,145 @@ fn streaming_date_walk<'r>(
         }
     }
     Ok(())
+}
+
+/// Parameters for [`open_commit_stream`].
+#[derive(Debug, Clone, Default)]
+pub struct CommitStreamParams {
+    /// Skip this many matching commits before yielding.
+    pub skip: usize,
+    /// Maximum commits to yield (`None` = unbounded).
+    pub limit: Option<usize>,
+    /// Exclude commits with committer date strictly before this Unix timestamp.
+    pub since: Option<i64>,
+    /// Exclude commits with committer date strictly after this Unix timestamp.
+    pub until: Option<i64>,
+    /// Follow only the first parent at merges when walking history.
+    pub first_parent: bool,
+}
+
+/// Lazy commit-only walk in default date order (no object/cherry side tables).
+pub struct CommitStream<'repo> {
+    graph: CommitGraph<'repo>,
+    heap: BinaryHeap<CommitDateKey>,
+    excluded: HashSet<ObjectId>,
+    queued: OidHashSet,
+    next_seq: u64,
+    skip: usize,
+    limit: Option<usize>,
+    since: Option<i64>,
+    until: Option<i64>,
+    seen: usize,
+    emitted: usize,
+    errored: Option<Error>,
+    _pack: crate::pack_store::PackReadContextGuard,
+}
+
+impl<'repo> CommitStream<'repo> {
+    fn push_tip(&mut self, tip: ObjectId) {
+        if self.excluded.contains(&tip) || !self.queued.insert(tip) {
+            return;
+        }
+        let date = self.graph.sort_key(tip, false);
+        self.heap.push(CommitDateKey {
+            oid: tip,
+            date,
+            seq: self.next_seq,
+        });
+        self.next_seq += 1;
+    }
+
+    fn enqueue_parents(&mut self, oid: ObjectId) {
+        let parents = match self.graph.parents_of(oid) {
+            Ok(p) => p,
+            Err(e) => {
+                self.errored = Some(e);
+                return;
+            }
+        };
+        for parent in parents {
+            self.push_tip(parent);
+        }
+    }
+}
+
+impl Iterator for CommitStream<'_> {
+    type Item = Result<ObjectId>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(err) = self.errored.take() {
+            return Some(Err(err));
+        }
+        loop {
+            let CommitDateKey { oid, date, .. } = self.heap.pop()?;
+            if self
+                .until
+                .is_some_and(|until| self.graph.committer_time(oid) > until)
+            {
+                self.enqueue_parents(oid);
+                continue;
+            }
+            if let Some(since) = self.since {
+                if date < since {
+                    if date_heap_past_since_frontier(&self.heap, since) {
+                        return None;
+                    }
+                    self.enqueue_parents(oid);
+                    continue;
+                }
+            }
+            self.seen += 1;
+            if self.seen <= self.skip {
+                self.enqueue_parents(oid);
+                continue;
+            }
+            if self.limit.is_some_and(|limit| self.emitted >= limit) {
+                return None;
+            }
+            self.emitted += 1;
+            self.enqueue_parents(oid);
+            return Some(Ok(oid));
+        }
+    }
+}
+
+/// Open a lazy commit walk; see [`CommitStream`].
+///
+/// # Errors
+///
+/// Propagates rev-list setup errors (for example invalid tips).
+pub fn open_commit_stream<'repo>(
+    repo: &'repo Repository,
+    include: &[ObjectId],
+    exclude: &[ObjectId],
+    params: &CommitStreamParams,
+) -> Result<CommitStream<'repo>> {
+    let pack = repo.odb().pack_read_context_guard();
+    let mut graph = CommitGraph::with_commit_graph(repo, params.first_parent, true);
+    let excluded = if exclude.is_empty() {
+        HashSet::new()
+    } else {
+        walk_closure(&mut graph, exclude)?
+    };
+    let mut stream = CommitStream {
+        graph,
+        heap: BinaryHeap::new(),
+        excluded,
+        queued: oid_hash_set(),
+        next_seq: 0,
+        skip: params.skip,
+        limit: params.limit,
+        since: params.since,
+        until: params.until,
+        seen: 0,
+        emitted: 0,
+        errored: None,
+        _pack: pack,
+    };
+    for &tip in include {
+        stream.push_tip(tip);
+    }
+    Ok(stream)
 }
 
 fn can_use_bounded_commit_filter_list(options: &RevListOptions) -> bool {

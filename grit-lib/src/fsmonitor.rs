@@ -10,7 +10,6 @@
 //! ```
 
 use std::ffi::OsString;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::command_runner::{
@@ -315,7 +314,7 @@ fn query_ipc(git_dir: &Path, index: &Index) -> Result<QueryOutcome> {
 fn ipc_send_query(ipc_path: &Path, message: &[u8]) -> Result<Vec<u8>> {
     #[cfg(unix)]
     {
-        use std::io::BufReader;
+        use std::io::{BufReader, Write};
         use std::os::unix::net::UnixStream;
         use std::time::Duration;
 

@@ -55,12 +55,7 @@ fn repo_with_one_commit() -> (tempfile::TempDir, Repository, ObjectId) {
     .expect("init");
     std::fs::write(base.path().join("w/a"), "x\n").expect("write");
     stage_worktree_changes(&repo, &[]).expect("stage");
-    let req = CommitRequest {
-        message: "m\n".into(),
-        author: Some("A <a@b> 0 +0000".parse().expect("signature")),
-        committer: Some("A <a@b> 0 +0000".parse().expect("signature")),
-        ..Default::default()
-    };
+    let req = grit_test_support::commit_request("m\n", "A <a@b> 0 +0000");
     let outcome = create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
     (base, repo, outcome.oid)
 }
@@ -116,12 +111,7 @@ fn deep_parent_navigation_is_revision_out_of_range() {
     .expect("init");
     std::fs::write(base.path().join("w/a"), "x\n").expect("write");
     stage_worktree_changes(&repo, &[]).expect("stage");
-    let req = CommitRequest {
-        message: "m\n".into(),
-        author: Some("A <a@b> 0 +0000".parse().expect("signature")),
-        committer: Some("A <a@b> 0 +0000".parse().expect("signature")),
-        ..Default::default()
-    };
+    let req = grit_test_support::commit_request("m\n", "A <a@b> 0 +0000");
     create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
 
     let err = repo.rev_walk().resolve("main~99").unwrap_err();
@@ -144,19 +134,11 @@ fn empty_commit_message_is_typed() {
     .expect("init");
     std::fs::write(base.path().join("w/a"), "x\n").expect("write");
     stage_worktree_changes(&repo, &[]).expect("stage");
-    let req = CommitRequest {
-        message: "m\n".into(),
-        author: Some("A <a@b> 0 +0000".parse().expect("signature")),
-        committer: Some("A <a@b> 0 +0000".parse().expect("signature")),
-        ..Default::default()
-    };
+    let req = grit_test_support::commit_request("m\n", "A <a@b> 0 +0000");
     create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
 
-    let empty = CommitRequest {
-        message: String::new(),
-        allow_empty: true,
-        ..req
-    };
+    let mut empty = CommitRequest::new("");
+    empty.allow_empty = true;
     let err = create_commit(&repo, &empty, &mut NullProgress, &NeverCancel).unwrap_err();
     assert!(matches!(err, Error::EmptyCommitMessage), "got {err:?}");
 }

@@ -474,8 +474,6 @@ fn notes_on_reftable_repository_use_the_ref_store() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
-            skip_pre_commit_tree_match: false,
-            staged_change_count: None,
             ..Default::default()
         },
         &mut NullProgress,

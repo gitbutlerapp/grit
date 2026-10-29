@@ -48,6 +48,7 @@ use crate::worktree_rules::WorktreeRules;
 mod checkout_journal;
 #[path = "checkout_parallel.rs"]
 mod checkout_parallel;
+pub(crate) use checkout_journal::create_symlink_at;
 pub(crate) use checkout_journal::CheckoutJournal;
 use checkout_journal::SharedCheckoutDeleteRollback;
 pub(crate) use checkout_parallel::is_eligible_for_parallel_checkout;

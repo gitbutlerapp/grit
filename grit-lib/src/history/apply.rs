@@ -1912,10 +1912,78 @@ fn clear_worktree_path_before_restore(
     Ok(())
 }
 
+fn symlink_target_from_snapshot_bytes(bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
+    #[cfg(unix)]
+    {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        Ok(std::path::PathBuf::from(OsStr::from_bytes(bytes)))
+    }
+    #[cfg(windows)]
+    {
+        let text = std::str::from_utf8(bytes).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "symlink restore requires a UTF-8 target on Windows",
+            )
+        })?;
+        Ok(std::path::PathBuf::from(text))
+    }
+    #[cfg(all(not(unix), not(windows)))]
+    {
+        let _ = bytes;
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "symlink restore is not supported on this platform",
+        ))
+    }
+}
+
+fn write_symlink_from_snapshot(abs: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let target = symlink_target_from_snapshot_bytes(bytes)?;
+    if let Some(parent) = abs.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::{symlink_dir, symlink_file};
+        let lookup = if target.is_relative() {
+            abs.parent()
+                .map(|parent| parent.join(&target))
+                .unwrap_or_else(|| target.clone())
+        } else {
+            target.clone()
+        };
+        if lookup.is_dir() {
+            symlink_dir(&target, abs)
+        } else {
+            symlink_file(&target, abs)
+        }
+    }
+    #[cfg(unix)]
+    {
+        use crate::porcelain::checkout::create_symlink_at;
+        create_symlink_at(&target, abs)
+    }
+    #[cfg(all(not(unix), not(windows)))]
+    {
+        let _ = (abs, target);
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "symlink restore is not supported on this platform",
+        ))
+    }
+}
+
 pub(crate) fn restore_worktree_path(
     abs: &Path,
     saved: &WorktreePathSnapshot,
 ) -> std::io::Result<()> {
+    if matches!(saved.kind, WorktreePathKind::Symlink) {
+        if let Some(bytes) = saved.bytes.as_ref() {
+            symlink_target_from_snapshot_bytes(bytes)?;
+        }
+    }
     if !matches!(saved.kind, WorktreePathKind::Absent) {
         clear_worktree_path_before_restore(abs, saved)?;
     }
@@ -1929,28 +1997,7 @@ pub(crate) fn restore_worktree_path(
             let Some(bytes) = saved.bytes.as_ref() else {
                 return Ok(());
             };
-            if abs.is_symlink() || abs.is_file() {
-                fs::remove_file(abs)?;
-            }
-            #[cfg(unix)]
-            {
-                use std::ffi::OsStr;
-                use std::os::unix::ffi::OsStrExt;
-                use std::os::unix::fs::symlink;
-                let target = OsStr::from_bytes(bytes);
-                if let Some(parent) = abs.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                symlink(target, abs)?;
-            }
-            #[cfg(not(unix))]
-            {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "symlink restore requires unix",
-                ));
-            }
-            Ok(())
+            write_symlink_from_snapshot(abs, bytes)
         }
         WorktreePathKind::Regular => {
             let Some(bytes) = saved.bytes.as_ref() else {
@@ -2687,6 +2734,26 @@ mod inject_and_apply_tests {
         let err = read_worktree_path_snapshot(dir.path(), "secret.txt").expect_err("read denied");
         assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("restore mode");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn restore_worktree_symlink_invalid_target_leaves_existing_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tracked = dir.path().join("tracked.txt");
+        fs::write(&tracked, "keep me\n").expect("write");
+        let saved = WorktreePathSnapshot {
+            kind: WorktreePathKind::Symlink,
+            bytes: Some(vec![0xff]),
+            from_old_tree: false,
+        };
+        let err = restore_worktree_path(&tracked, &saved).expect_err("non-utf8 target");
+        assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
+        assert_eq!(
+            fs::read_to_string(&tracked).expect("read"),
+            "keep me\n",
+            "must not remove the file when symlink restore is unsupported"
+        );
     }
 
     #[cfg(unix)]

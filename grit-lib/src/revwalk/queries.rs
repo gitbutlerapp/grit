@@ -58,6 +58,24 @@ pub struct LeftRightCounts {
     pub right: usize,
 }
 
+/// Options for [`RevWalk::commits_iter`]: lazy commit-only walks without object/cherry tables.
+///
+/// For token lists, ref selections, path limits, or symmetric diff markers, use
+/// [`RevWalkListOptions`] with [`RevWalk::commits`] or [`RevWalk::rev_list_result`].
+#[derive(Debug, Clone, Default)]
+pub struct RevWalkCommitIterOptions {
+    /// Skip this many matching commits before yielding.
+    pub skip: usize,
+    /// Maximum commits to yield (`None` = unbounded).
+    pub limit: Option<usize>,
+    /// Exclude commits with committer date strictly before this Unix timestamp.
+    pub since: Option<i64>,
+    /// Exclude commits with committer date strictly after this Unix timestamp.
+    pub until: Option<i64>,
+    /// Follow only the first parent at merges when walking history.
+    pub first_parent: bool,
+}
+
 /// Options for listing or counting commits through [`RevWalk`].
 ///
 /// This is the high-level, token-based API: pass these to [`RevWalk::commits`],

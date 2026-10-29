@@ -86,18 +86,13 @@ fn noop_tracked_restage_preserves_cache_tree_at_campaign_scale() {
 }
 
 fn commit_worktree_req(message: &str, allow_empty: bool) -> CommitRequest {
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(ident().parse().expect("signature")),
-        committer: Some(ident().parse().expect("signature")),
-        allow_empty,
-        sign_override: None,
-        amend: false,
-        assume_worktree_synced: true,
-        skip_pre_commit_tree_match: true,
-        staged_change_count: None,
-        ..Default::default()
-    }
+    let mut req = CommitRequest::new(message);
+    let sig = ident().parse().expect("signature");
+    req.author = Some(sig.clone());
+    req.committer = Some(sig);
+    req.allow_empty = allow_empty;
+    req.assume_worktree_synced = true;
+    req.skip_pre_commit_tree_match(true)
 }
 
 #[test]

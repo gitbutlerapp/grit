@@ -50,8 +50,6 @@ fn status_skips_stale_opportunistic_write_after_concurrent_commit() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
-            skip_pre_commit_tree_match: false,
-            staged_change_count: None,
             ..Default::default()
         };
         create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit in hook");

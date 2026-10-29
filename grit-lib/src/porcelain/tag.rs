@@ -788,26 +788,12 @@ mod tests {
     fn repo_with_commit() -> (tempfile::TempDir, Repository, ObjectId) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
-        let req = CommitRequest {
-            message: "one".into(),
-            author: Some(
-                "T <t@example.com> 1700000000 +0000"
-                    .parse()
-                    .expect("signature"),
-            ),
-            committer: Some(
-                "T <t@example.com> 1700000000 +0000"
-                    .parse()
-                    .expect("signature"),
-            ),
-            allow_empty: true,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            skip_pre_commit_tree_match: false,
-            staged_change_count: None,
-            ..Default::default()
-        };
+        let ident = "T <t@example.com> 1 +0000".to_string();
+        let sig: crate::ident::Signature = ident.parse().expect("signature");
+        let mut req = CommitRequest::new("one");
+        req.author = Some(sig.clone());
+        req.committer = Some(sig);
+        req.allow_empty = true;
         let oid = create_commit(
             &repo,
             &req,

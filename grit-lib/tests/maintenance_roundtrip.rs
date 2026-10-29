@@ -560,8 +560,6 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
-            skip_pre_commit_tree_match: false,
-            staged_change_count: None,
             ..Default::default()
         },
         &mut NullProgress,

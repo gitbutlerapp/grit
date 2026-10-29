@@ -37,8 +37,6 @@ fn commit_req(message: &str) -> CommitRequest {
         sign_override: None,
         amend: false,
         assume_worktree_synced: true,
-        skip_pre_commit_tree_match: false,
-        staged_change_count: None,
         ..Default::default()
     }
 }
@@ -260,18 +258,11 @@ fn large_index_fixture(root: &std::path::Path) {
 
 fn commit_worktree_req(message: &str) -> CommitRequest {
     let id = ident();
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(id.parse().expect("signature")),
-        committer: Some(id.parse().expect("signature")),
-        allow_empty: false,
-        sign_override: None,
-        amend: false,
-        assume_worktree_synced: true,
-        skip_pre_commit_tree_match: true,
-        staged_change_count: None,
-        ..Default::default()
-    }
+    let mut req = CommitRequest::new(message);
+    req.author = Some(id.parse().expect("signature"));
+    req.committer = Some(id.parse().expect("signature"));
+    req.assume_worktree_synced = true;
+    req.skip_pre_commit_tree_match(true)
 }
 
 /// Tracked edit in `d0000` and a new nested untracked file under an unrelated directory tree.

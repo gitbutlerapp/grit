@@ -303,9 +303,10 @@ pub fn refresh_branch(
             landed: Some(own.from),
             copies: own.copies,
         }),
-        fetch: FetchOptions {
-            thread_policy: repo.thread_policy(),
-            ..Default::default()
+        fetch: {
+            let mut opts = FetchOptions::new();
+            opts.thread_policy = repo.thread_policy();
+            opts
         },
         ..Default::default()
     };

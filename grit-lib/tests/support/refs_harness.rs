@@ -240,18 +240,7 @@ fn grit_empty_commit_with_message(worktree: &Path, message: &str) -> ObjectId {
     let ident = format!("{AUTHOR_NAME} <{AUTHOR_EMAIL}> {DETERMINISTIC_DATE}");
     let outcome = create_commit(
         &repo,
-        &CommitRequest {
-            message: message.to_owned(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: true,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            skip_pre_commit_tree_match: false,
-            staged_change_count: None,
-            ..Default::default()
-        },
+        &grit_test_support::empty_commit_request(message, &ident),
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )

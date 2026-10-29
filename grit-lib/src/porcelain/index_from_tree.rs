@@ -693,14 +693,12 @@ mod tests {
         )
         .expect("stage");
         let ident = "T <t@example.com> 1 +0000".to_owned();
+        let mut req = CommitRequest::new("init");
+        req.author = Some(ident.parse().expect("signature"));
+        req.committer = Some(ident.parse().expect("signature"));
         create_commit(
             &repo,
-            &CommitRequest {
-                message: "init".into(),
-                author: Some(ident.parse().expect("signature")),
-                committer: Some(ident.parse().expect("signature")),
-                ..Default::default()
-            },
+            &req,
             &mut NullProgress,
             &crate::progress::NeverCancel,
         )
@@ -752,18 +750,11 @@ mod tests {
         )
         .expect("stage");
         let ident = "T <t@example.com> 1 +0000".to_owned();
-        create_commit(
-            repo,
-            &CommitRequest {
-                message: "c".into(),
-                author: Some(ident.parse().expect("signature")),
-                committer: Some(ident.parse().expect("signature")),
-                ..Default::default()
-            },
-            &mut NullProgress,
-            &crate::progress::NeverCancel,
-        )
-        .expect("commit");
+        let mut req = CommitRequest::new("c");
+        req.author = Some(ident.parse().expect("signature"));
+        req.committer = Some(ident.parse().expect("signature"));
+        create_commit(repo, &req, &mut NullProgress, &crate::progress::NeverCancel)
+            .expect("commit");
         let head = resolve_head_for_repository(repo).expect("head");
         let commit = repo.odb().read(head.oid().expect("oid")).expect("read");
         crate::objects::parse_commit(&commit.data)

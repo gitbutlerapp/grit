@@ -318,21 +318,19 @@ impl<'repo> RepositoryRemotes<'repo> {
             }
             let prune = resolve_fetch_prune(config, &name, cli_prune)?;
             let tags = resolve_fetch_tags(config, &name, cli_tags);
-            let opts = FetchOptions {
-                tags,
-                prune,
-                dry_run: base.dry_run,
-                fetch_depth: base.fetch_depth,
-                deepen_since: base.deepen_since.clone(),
-                deepen_not: base.deepen_not.clone(),
-                index_pack_threads: base.index_pack_threads,
-                thread_policy: self.repo.thread_policy(),
-                environment: base.environment.clone(),
-                pack_spool_only: base.pack_spool_only,
-                http_protocol_version: base.http_protocol_version,
-                remote_progress: base.remote_progress,
-                ..Default::default()
-            };
+            let mut opts = FetchOptions::new();
+            opts.tags = tags;
+            opts.prune = prune;
+            opts.dry_run = base.dry_run;
+            opts.fetch_depth = base.fetch_depth;
+            opts.deepen_since = base.deepen_since.clone();
+            opts.deepen_not = base.deepen_not.clone();
+            opts.index_pack_threads = base.index_pack_threads;
+            opts.thread_policy = self.repo.thread_policy();
+            opts.environment = base.environment.clone();
+            opts.pack_spool_only = base.pack_spool_only;
+            opts.http_protocol_version = base.http_protocol_version;
+            opts.remote_progress = base.remote_progress;
             let outcome = self
                 .get(&name)
                 .and_then(|remote| self.fetch(&remote, opts, progress, cancel, http_factory));
