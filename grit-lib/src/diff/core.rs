@@ -2814,16 +2814,15 @@ pub fn diff_trees_with_renames_and_policy(
 ///
 /// # Errors
 ///
-/// Returns object read/parse errors when `commit_oid` is missing or not a commit.
+/// Returns [`Error::InvalidRef`] when `commit_oid` is not a commit, and object read/parse
+/// errors when it is missing or malformed.
 pub fn tree_oid_of_commit(odb: &Odb, commit_oid: &ObjectId) -> Result<ObjectId> {
-    let obj = odb.read(commit_oid)?;
-    if obj.kind != ObjectKind::Commit {
-        return Err(Error::InvalidRef(format!(
-            "invalid ref: {commit_oid} is not a commit"
-        )));
-    }
-    let commit = parse_commit(&obj.data)?;
-    Ok(commit.tree)
+    odb.commit_tree(commit_oid).map_err(|err| match err {
+        Error::UnexpectedObjectKind { .. } => {
+            Error::InvalidRef(format!("invalid ref: {commit_oid} is not a commit"))
+        }
+        other => other,
+    })
 }
 
 /// Like [`tree_oid_of_commit`], but uses the repository commit-graph cache when available.
@@ -14922,6 +14921,30 @@ mod line_coverage_tests {
         let _ = entry_is_racy(&index.entries()[0], mtime);
         let _ = entry_is_racy_with_policy(&index.entries()[0], mtime, StatMatchPolicy::default());
         Ok(())
+    }
+
+    #[test]
+    fn tree_oid_of_commit_reports_invalid_ref_for_non_commits() {
+        let temp = TempDir::new().expect("tempdir");
+        let odb = Odb::new(temp.path());
+        let tree = odb.write(ObjectKind::Tree, &[]).expect("tree");
+        let body = format!(
+            "tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\nm\n"
+        );
+        let commit = odb
+            .write(ObjectKind::Commit, body.as_bytes())
+            .expect("commit");
+        let blob = odb.write(ObjectKind::Blob, b"x\n").expect("blob");
+
+        assert_eq!(tree_oid_of_commit(&odb, &commit).expect("tree"), tree);
+        assert!(matches!(
+            tree_oid_of_commit(&odb, &blob),
+            Err(Error::InvalidRef(_))
+        ));
+        assert!(matches!(
+            tree_oid_of_commit(&odb, &tree),
+            Err(Error::InvalidRef(_))
+        ));
     }
 
     #[test]

@@ -207,7 +207,7 @@ pub fn project(
     let mut map: HashMap<ObjectId, ObjectId> = HashMap::new();
     let mut commits = Vec::with_capacity(newest_first.len());
     for real in parents_first(repo, &newest_first)? {
-        let mut data = parse_commit(&odb.read(&real)?.data)?;
+        let mut data = odb.read_commit(&real)?;
         let mut parents: Vec<ObjectId> = Vec::with_capacity(data.parents.len());
         for parent in &data.parents {
             let mapped = match map.get(parent) {
@@ -329,7 +329,7 @@ fn projected_tree(
     let Some(parent) = parent else {
         return Ok(tree);
     };
-    let parent_tree = parse_commit(&odb.read(&parent)?.data)?.tree;
+    let parent_tree = odb.commit_tree(&parent)?;
     let mut extras = Vec::new();
     outside_files(odb, parent_tree, paths, &mut Vec::new(), &mut extras)?;
     let mut edits = Vec::new();

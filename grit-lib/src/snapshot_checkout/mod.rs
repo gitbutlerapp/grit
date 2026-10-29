@@ -104,9 +104,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::fetch::Progress;
-use crate::objects::{
-    parse_commit, parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind, TreeEntry,
-};
+use crate::objects::{parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
 use crate::progress::Cancel;
 use crate::repo::{InitOptions, Repository};
@@ -982,7 +980,7 @@ pub fn make_snapshot(
     parent: Option<ObjectId>,
 ) -> Result<Snapshot> {
     let odb = repo.odb();
-    let commit = parse_commit(&odb.read(&base)?.data)?;
+    let commit = odb.read_commit(&base)?;
     let tree = filtered_tree(odb, commit.tree, paths).map_err(|e| match e {
         CheckoutError::MissingPath { path, .. } => CheckoutError::MissingPath {
             path,

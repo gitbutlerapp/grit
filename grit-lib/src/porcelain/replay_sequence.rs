@@ -21,7 +21,7 @@ use crate::merge_trees::{
     merge_trees_three_way, merge_trees_three_way_cached, DirectoryRenameMode, MergeTreeCache,
     ReplayConflictLabels, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
-use crate::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, CommitData, ObjectId};
 use crate::operation::Conflict;
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::commit::{stamp_change_id_on_new_commit, write_commit_object};
@@ -163,7 +163,7 @@ pub fn predict_replay_sequence(
 ) -> Result<SequencePrediction> {
     let (_, head_oid) = branch_head(repo)?;
     if req.commits.is_empty() {
-        let tree = commit_tree(repo, &head_oid)?;
+        let tree = repo.odb().commit_tree(&head_oid)?;
         return Ok(SequencePrediction::Clean {
             tree,
             dropped: Vec::new(),
@@ -337,7 +337,7 @@ pub fn continue_replay_sequence(
     let step_head_present =
         read_cherry_pick_head(git_dir)?.is_some() || read_revert_head(git_dir)?.is_some();
     if !step_head_present && !active.opts.no_commit {
-        let head_tree = commit_tree(repo, &head_oid)?;
+        let head_tree = repo.odb().commit_tree(&head_oid)?;
         let index_tree = write_tree_update_index(
             repo.odb(),
             &mut index,
@@ -397,7 +397,7 @@ pub fn continue_replay_sequence(
     )?;
     let allow_empty = active.opts.empty == ReplayEmptyPolicy::Keep;
     if !allow_empty {
-        let head_tree = commit_tree(repo, &head_oid)?;
+        let head_tree = repo.odb().commit_tree(&head_oid)?;
         if new_tree == head_tree {
             return Err(Error::NothingToCommit);
         }
@@ -406,7 +406,7 @@ pub fn continue_replay_sequence(
     let mut created_records = read_created_records(repo)?;
     let mut created_so_far: Vec<ObjectId> = created_records.iter().map(|r| r.new_oid).collect();
     if active.opts.no_commit {
-        let head_tree = commit_tree(repo, &head_oid)?;
+        let head_tree = repo.odb().commit_tree(&head_oid)?;
         repo.write_index(&mut index)?;
         checkout_between_trees(repo, Some(&head_tree), &new_tree)?;
         clear_step_heads(repo.git_dir(), active.direction)?;
@@ -708,7 +708,7 @@ fn run_sequence(
     let config = repo.config()?;
     let change_id_policy = ChangeIdPolicy::from_config(&config);
     let mut merge_cache = MergeTreeCache::default();
-    let mut cached_head_tree = commit_tree(repo, &head)?;
+    let mut cached_head_tree = repo.odb().commit_tree(&head)?;
     let mut worktree_snapshot = match initial_worktree {
         Some(snapshot) => Some(snapshot),
         None => repo
@@ -889,7 +889,7 @@ fn predict_sequence(
     mut dropped: Vec<ObjectId>,
 ) -> Result<SequencePrediction> {
     let mut head_commit = head_oid;
-    let mut head_tree = commit_tree(repo, &head_oid)?;
+    let mut head_tree = repo.odb().commit_tree(&head_oid)?;
     let directory_renames = DirectoryRenameMode::from_repo(repo)?;
     for entry in todo {
         match predict_one_step(
@@ -1226,7 +1226,7 @@ fn merge_trees_for_replay(
     mainline: Option<NonZeroU32>,
     source_oid: ObjectId,
 ) -> Result<(ObjectId, ObjectId, ObjectId)> {
-    let parent_tree = |parent: &ObjectId| commit_tree(repo, parent);
+    let parent_tree = |parent: &ObjectId| repo.odb().commit_tree(parent);
     let empty = || repo.odb().empty_tree_oid();
     match direction {
         ReplayDirection::Pick => {
@@ -1351,7 +1351,7 @@ fn write_replay_commit(
     config: &ConfigSet,
     change_id_policy: &ChangeIdPolicy,
 ) -> Result<ObjectId> {
-    let head_tree = commit_tree(repo, &head_oid)?;
+    let head_tree = repo.odb().commit_tree(&head_oid)?;
     let source_obj = repo.odb().read(source)?;
     let source_commit = parse_commit(&source_obj.data)?;
     write_replay_commit_with_head_tree(
@@ -1895,7 +1895,7 @@ fn read_created_records(repo: &Repository) -> Result<Vec<ReplayCreated>> {
 }
 
 fn reset_index_worktree_to_head(repo: &Repository, head_oid: &ObjectId) -> Result<()> {
-    let head_tree = commit_tree(repo, head_oid)?;
+    let head_tree = repo.odb().commit_tree(head_oid)?;
     let mut index = index_from_tree_with_worktree_stats(repo, &head_tree)?;
     repo.write_index(&mut index)?;
     checkout_between_trees(repo, None, &head_tree)?;
@@ -1942,15 +1942,4 @@ fn apply_git_sequencer_opts(git_dir: &Path, opts: &mut ReplayOptions) {
             opts.record_origin = true;
         }
     }
-}
-
-fn commit_tree(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
-    let obj = repo.odb().read(commit_oid)?;
-    if obj.kind != ObjectKind::Commit {
-        return Err(Error::CorruptObject(format!(
-            "expected commit, got {}",
-            obj.kind.as_str()
-        )));
-    }
-    Ok(parse_commit(&obj.data)?.tree)
 }

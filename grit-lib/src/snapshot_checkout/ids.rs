@@ -25,7 +25,7 @@ use time::OffsetDateTime;
 use crate::change_id::{change_id, resolved_change_id, set_change_id, ChangeId, ChangeIdPolicy};
 use crate::ident_resolve::resolve_loose_committer_identity_with;
 use crate::merge_base::{walk_commits_reachable_excluding_ancestors_of, ReachableWalkLimit};
-use crate::objects::{parse_commit, serialize_commit, ObjectId, ObjectKind};
+use crate::objects::{serialize_commit, ObjectId, ObjectKind};
 use crate::repo::Repository;
 use crate::state::{detect_in_progress, resolve_head_for_repository, HeadState};
 
@@ -71,7 +71,7 @@ pub fn change_keys(
     parents_first(repo, &newest_first)?
         .into_iter()
         .map(|oid| {
-            let data = parse_commit(&odb.read(&oid)?.data)?;
+            let data = odb.read_commit(&oid)?;
             Ok((oid, resolved_change_id(&oid, &data).id))
         })
         .collect()
@@ -138,9 +138,9 @@ fn changes_outside(repo: &Repository, commit: ObjectId, paths: &[String]) -> Res
         return Ok(Vec::new());
     }
     let odb = repo.odb();
-    let data = parse_commit(&odb.read(&commit)?.data)?;
+    let data = odb.read_commit(&commit)?;
     let parent_tree = match data.parents.first() {
-        Some(parent) => Some(parse_commit(&odb.read(parent)?.data)?.tree),
+        Some(parent) => Some(odb.commit_tree(parent)?),
         None => None,
     };
     Ok(diff(odb, parent_tree, Some(data.tree))?
@@ -157,7 +157,7 @@ fn one_holds(repo: &Repository, commits: &[ObjectId], changes: &[Change]) -> Res
     }
     let odb = repo.odb();
     'commits: for commit in commits {
-        let tree = parse_commit(&odb.read(commit)?.data)?.tree;
+        let tree = odb.commit_tree(commit)?;
         for change in changes {
             if lookup(odb, tree, &change.path)? != change.new {
                 continue 'commits;
@@ -254,7 +254,7 @@ pub fn give_change_ids(
     let mut rewritten: HashMap<ObjectId, ObjectId> = HashMap::new();
     let mut given = 0;
     for commit in parents_first(repo, &newest_first)? {
-        let mut data = parse_commit(&odb.read(&commit)?.data)?;
+        let mut data = odb.read_commit(&commit)?;
         let mut moved = false;
         for parent in &mut data.parents {
             if let Some(new) = rewritten.get(parent) {
@@ -430,7 +430,7 @@ mod tests {
         }
 
         fn read(&self, oid: ObjectId) -> crate::objects::CommitData {
-            parse_commit(&self.repo.odb().read(&oid).expect("read").data).expect("parse")
+            self.repo.odb().read_commit(&oid).expect("read")
         }
 
         fn branch(&self, name: &str, tip: ObjectId) {

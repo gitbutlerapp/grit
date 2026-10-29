@@ -2,7 +2,7 @@
 
 use crate::diff::{diff_trees_with_renames, DiffEntry, DiffStatus};
 use crate::index::{Index, IndexEntry};
-use crate::objects::{parse_commit, ObjectId, ObjectKind};
+use crate::objects::{ObjectId, ObjectKind};
 use crate::pathspec::{matches_pathspec_list_with_context, PathspecMatchContext};
 use crate::porcelain::index_from_tree::index_from_tree;
 use crate::repo::Repository;
@@ -44,13 +44,7 @@ pub fn split(
         .map(|m| normalize_rewrite_message(m))
         .transpose()?;
 
-    let raw = repo.odb().read(&commit)?;
-    if raw.kind != ObjectKind::Commit {
-        return Err(HistoryError::Planning {
-            message: format!("expected commit, got {}", raw.kind.as_str()),
-        });
-    }
-    let parsed = parse_commit(&raw.data)?;
+    let parsed = repo.odb().read_commit(&commit)?;
 
     if parsed.parents.len() > 1 {
         return Err(HistoryError::InsertBeforeOnMerge { commit });
@@ -60,7 +54,7 @@ pub fn split(
         repo.odb().write(ObjectKind::Tree, &[])?
     } else {
         let parent = parsed.parents[0];
-        parse_commit(&repo.odb().read(&parent)?.data)?.tree
+        repo.odb().commit_tree(&parent)?
     };
 
     let ctx = repo.pathspec_match_context();

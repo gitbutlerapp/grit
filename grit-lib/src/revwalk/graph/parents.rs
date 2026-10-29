@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::error::Result;
-use crate::objects::{parse_commit, read_commit_subject_line, ObjectId, ObjectKind};
+use crate::objects::{read_commit_subject_line, ObjectId, ObjectKind};
 use crate::repo::Repository;
 use crate::rev_list::CommitGraph;
 
@@ -152,18 +152,7 @@ fn load_parents(
     if let Some(parents) = cache.get(&oid) {
         return Ok(parents.clone());
     }
-    let commit = read_commit(repo, oid)?;
+    let commit = repo.odb().read_commit(&oid)?;
     cache.insert(oid, commit.parents.clone());
     Ok(commit.parents)
-}
-
-fn read_commit(repo: &Repository, oid: ObjectId) -> Result<crate::objects::CommitData> {
-    let object = repo.odb().read(&oid)?;
-    if object.kind != ObjectKind::Commit {
-        return Err(crate::error::Error::CorruptObject(format!(
-            "expected commit object, got {:?} for {oid}",
-            object.kind
-        )));
-    }
-    parse_commit(&object.data)
 }

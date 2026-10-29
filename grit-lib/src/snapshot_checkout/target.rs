@@ -29,7 +29,7 @@ use crate::merge_trees::{
     merge_trees_three_way, DirectoryRenameMode, TreeMergeConflictPresentation,
     WhitespaceMergeOptions,
 };
-use crate::objects::{parse_commit, ObjectId, ObjectKind};
+use crate::objects::{ObjectId, ObjectKind};
 use crate::repo::Repository;
 
 use super::refs::{log_head_move, swap_ref, Swap};
@@ -231,10 +231,6 @@ fn write_commit(
     repo.odb().write(ObjectKind::Commit, s.as_bytes())
 }
 
-fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId> {
-    Ok(parse_commit(&repo.odb().read(&commit)?.data)?.tree)
-}
-
 /// What [`move_target`] did.
 enum Move {
     /// The target moved; `worktree` says whether the served worktree moved too.
@@ -274,8 +270,8 @@ fn move_target(
     if tip(repo, target_ref) != Some(previous) {
         return Ok(Move::Lost);
     }
-    let from = commit_tree(repo, previous)?;
-    let to = commit_tree(repo, new)?;
+    let from = repo.odb().commit_tree(&previous)?;
+    let to = repo.odb().commit_tree(&new)?;
     if let Some(paths) = keep_worktree(repo, from, to)? {
         return Ok(Move::Blocked(paths));
     }
@@ -398,9 +394,9 @@ pub fn integrate(
         };
         let merged = merge_trees_three_way(
             repo,
-            commit_tree(repo, base)?,
-            commit_tree(repo, previous)?,
-            commit_tree(repo, branch)?,
+            repo.odb().commit_tree(&base)?,
+            repo.odb().commit_tree(&previous)?,
+            repo.odb().commit_tree(&branch)?,
             MergeFavor::default(),
             WhitespaceMergeOptions::default(),
             None,
@@ -522,7 +518,7 @@ pub fn render_slices(slices: &[Slice]) -> String {
 /// Object read failures and a malformed slices file.
 pub fn read_slices(repo: &Repository, commit: ObjectId) -> Result<Vec<Slice>> {
     let odb = repo.odb();
-    let tree = parse_commit(&odb.read(&commit)?.data)?.tree;
+    let tree = odb.commit_tree(&commit)?;
     match lookup(odb, tree, SLICES_PATH.as_bytes())? {
         Some((_, blob)) => parse_slices(&String::from_utf8_lossy(&odb.read(&blob)?.data)),
         None => Ok(Vec::new()),
@@ -548,7 +544,7 @@ pub fn valid_slice_name(name: &str) -> bool {
 /// Object read failures.
 pub fn missing_paths(repo: &Repository, commit: ObjectId, paths: &[String]) -> Result<Vec<String>> {
     let odb = repo.odb();
-    let tree = parse_commit(&odb.read(&commit)?.data)?.tree;
+    let tree = odb.commit_tree(&commit)?;
     let mut missing = Vec::new();
     for p in paths {
         if lookup(odb, tree, p.as_bytes())?.is_none() {
@@ -712,7 +708,7 @@ pub fn edit_slices(
             Err(refusal) => return Ok(Err(refusal)),
         };
         let odb = repo.odb();
-        let tree = commit_tree(repo, previous)?;
+        let tree = repo.odb().commit_tree(&previous)?;
         let entry = if slices.is_empty() {
             None
         } else {
@@ -848,7 +844,10 @@ mod tests {
 
         /// A branch `name` on `parent` that sets `files`.
         fn branch(&self, name: &str, parent: ObjectId, files: &[(&str, Option<&str>)]) -> ObjectId {
-            let tree = self.tree(Some(commit_tree(&self.repo, parent).expect("tree")), files);
+            let tree = self.tree(
+                Some(self.repo.odb().commit_tree(&parent).expect("tree")),
+                files,
+            );
             let tip = self.commit(tree, &[parent], name);
             crate::refs::write_ref(self.repo.git_dir(), &format!("refs/heads/{name}"), &tip)
                 .expect("ref");
@@ -868,7 +867,7 @@ mod tests {
             crate::porcelain::checkout::checkout_between_trees(
                 &self.repo,
                 None,
-                &commit_tree(&self.repo, self.main()).expect("tree"),
+                &self.repo.odb().commit_tree(&self.main()).expect("tree"),
             )
             .expect("checkout");
         }
@@ -941,9 +940,7 @@ mod tests {
         assert!(!merged.change.worktree_moved, "a bare repository has none");
         let head = merged.change.head;
         assert_eq!(f.main(), head);
-        let parents = parse_commit(&f.repo.odb().read(&head).expect("read").data)
-            .expect("commit")
-            .parents;
+        let parents = f.repo.odb().read_commit(&head).expect("commit").parents;
         assert_eq!(parents, vec![f.base, work]);
         assert_eq!(
             f.integrate("topic"),
@@ -1077,7 +1074,7 @@ mod tests {
         // lands on the new tip, not on the one it was asked about.
         let second = f.integrate("two").expect("merged");
         assert_eq!(second.change.previous, first.change.head);
-        let tree = commit_tree(&f.repo, f.main()).expect("tree");
+        let tree = f.repo.odb().commit_tree(&f.main()).expect("tree");
         for path in ["one", "two", "a"] {
             assert!(lookup(f.repo.odb(), tree, path.as_bytes())
                 .expect("lookup")
@@ -1089,7 +1086,7 @@ mod tests {
         let stale = f.branch("three", f.base, &[("three", Some("3\n"))]);
         let message = "integrate: test";
         let moved = f.commit(
-            commit_tree(&f.repo, tip_now).expect("tree"),
+            f.repo.odb().commit_tree(&tip_now).expect("tree"),
             &[tip_now],
             "other",
         );
@@ -1202,7 +1199,7 @@ mod tests {
             .iter()
             .map(|e| (String::from_utf8_lossy(&e.path).into_owned(), e.oid))
             .collect();
-        let head_tree = commit_tree(&f.repo, f.main()).expect("tree");
+        let head_tree = f.repo.odb().commit_tree(&f.main()).expect("tree");
         for (path, oid) in &staged {
             let in_head = lookup(f.repo.odb(), head_tree, path.as_bytes())
                 .expect("lookup")

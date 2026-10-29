@@ -11,8 +11,8 @@ use crate::error::{Error, Result};
 use crate::ewah_bitmap::Bitmap;
 use crate::log_walk::WalkedCommits;
 use crate::objects::{
-    oid_hash_map, oid_hash_set, oid_hash_set_from, parse_commit, CommitRef, ObjectId, ObjectKind,
-    OidHashMap, OidHashSet,
+    oid_hash_map, oid_hash_set, oid_hash_set_from, CommitRef, ObjectId, ObjectKind, OidHashMap,
+    OidHashSet,
 };
 use crate::pack_bitmap::BitmapIndex;
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
@@ -1768,13 +1768,7 @@ fn first_parent_chain(repo: &Repository, start: ObjectId) -> Result<Vec<ObjectId
 }
 
 fn first_parent(repo: &Repository, oid: ObjectId) -> Result<Option<ObjectId>> {
-    let object = repo.odb().read(&oid)?;
-    if object.kind != ObjectKind::Commit {
-        return Err(Error::CorruptObject(format!(
-            "object {oid} is not a commit"
-        )));
-    }
-    let commit = parse_commit(&object.data)?;
+    let commit = repo.odb().read_commit(&oid)?;
     Ok(commit.parents.first().copied())
 }
 

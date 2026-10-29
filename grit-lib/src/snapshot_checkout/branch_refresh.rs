@@ -21,7 +21,7 @@ use crate::merge_base::{
     count_symmetric_ahead_behind, is_ancestor, merge_bases_first_vs_rest,
     walk_commits_reachable_excluding_ancestors_of, ReachableWalkLimit,
 };
-use crate::objects::{parse_commit, ObjectId};
+use crate::objects::ObjectId;
 use crate::operation::Conflict;
 use crate::patch_ids::{compute_patch_id, PatchIdMode};
 use crate::porcelain::checkout_reflog::checkout_reflog_identity;
@@ -457,7 +457,7 @@ fn own_commits(
     let mut own = 0;
     let mut leading = true;
     for (commit, key) in change_keys(repo, &[tip], &[from])? {
-        let data = parse_commit(&odb.read(&commit)?.data)?;
+        let data = odb.read_commit(&commit)?;
         let merge = data.parents.len() > 1;
         let copy = !merge
             && (keys.contains(&key)
@@ -639,11 +639,11 @@ mod tests {
         let theirs = oid(&info.projected);
         let key = crate::change_id::resolved_change_id(
             &theirs,
-            &parse_commit(&repo.odb().read(&theirs).expect("read").data).expect("parse"),
+            &repo.odb().read_commit(&theirs).expect("read"),
         )
         .id;
         let tip = oid(&git(&co, &["rev-parse", "feature"]));
-        let mut copy = parse_commit(&repo.odb().read(&tip).expect("read").data).expect("parse");
+        let mut copy = repo.odb().read_commit(&tip).expect("read");
         copy.parents = vec![tip];
         copy.message = "My copy of Bob again\n".to_owned();
         crate::change_id::set_change_id(&mut copy, &key);

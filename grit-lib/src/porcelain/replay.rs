@@ -17,7 +17,7 @@ use crate::merge_trees::{
     merge_trees_three_way, DirectoryRenameMode, TreeMergeConflictPresentation,
     WhitespaceMergeOptions,
 };
-use crate::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, CommitData, ObjectId};
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::commit::{stamp_change_id_on_new_commit, write_commit_object};
 use crate::porcelain::revert::merge_commit_message_for_revert;
@@ -129,7 +129,7 @@ pub fn replay_commit(
         return Err(Error::MergeCommit { oid: req.commit });
     }
 
-    let head_tree = commit_tree(repo, &head_oid)?;
+    let head_tree = repo.odb().commit_tree(&head_oid)?;
     let (base_tree, ours_tree, theirs_tree) =
         merge_trees_for_direction(repo, req.direction, &source, head_tree)?;
 
@@ -307,7 +307,7 @@ fn merge_trees_for_direction(
     head_tree: ObjectId,
 ) -> Result<(ObjectId, ObjectId, ObjectId)> {
     let parent_tree = if let Some(parent) = source.parents.first() {
-        commit_tree(repo, parent)?
+        repo.odb().commit_tree(parent)?
     } else {
         empty_tree(repo)?
     };
@@ -330,17 +330,6 @@ fn commit_message(req: &ReplayRequest, source: &CommitData) -> Result<String> {
             Ok(format!("{title}\n{body}"))
         }
     }
-}
-
-fn commit_tree(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
-    let obj = repo.odb().read(commit_oid)?;
-    if obj.kind != ObjectKind::Commit {
-        return Err(Error::CorruptObject(format!(
-            "expected commit, got {}",
-            obj.kind.as_str()
-        )));
-    }
-    Ok(parse_commit(&obj.data)?.tree)
 }
 
 fn empty_tree(repo: &Repository) -> Result<ObjectId> {

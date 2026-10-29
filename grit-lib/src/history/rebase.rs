@@ -767,7 +767,7 @@ fn paths_changed_by_commit(
     let mut parent_trees = parsed
         .parents
         .iter()
-        .map(|parent| Ok(Some(parse_commit(&repo.odb().read(parent)?.data)?.tree)))
+        .map(|parent| Ok(Some(repo.odb().commit_tree(parent)?)))
         .collect::<Result<Vec<_>, HistoryError>>()?;
     if parent_trees.is_empty() {
         // A root commit adds its whole tree; `None` diffs against the empty tree.

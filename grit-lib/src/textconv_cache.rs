@@ -68,15 +68,9 @@ fn read_notes_entries(
     let Ok(commit_oid) = resolve_ref(git_dir, notes_ref) else {
         return Ok(Vec::new());
     };
-    let commit_obj = odb.read(&commit_oid)?;
-    if commit_obj.kind != ObjectKind::Commit {
-        return Err(crate::error::Error::CorruptObject(
-            "notes ref does not point to a commit".to_owned(),
-        ));
-    }
-    let commit = parse_commit(&commit_obj.data)?;
+    let tree = odb.commit_tree(&commit_oid)?;
     let mut out = Vec::new();
-    collect_tree_entries(odb, &commit.tree, b"", &mut out)?;
+    collect_tree_entries(odb, &tree, b"", &mut out)?;
     Ok(out)
 }
 

@@ -45,7 +45,7 @@ use crate::merge_trees::{
     merge_trees_three_way, DirectoryRenameMode, TreeMergeConflictPresentation,
     WhitespaceMergeOptions,
 };
-use crate::objects::{parse_commit, remove_header_lines, serialize_commit, ObjectId, ObjectKind};
+use crate::objects::{remove_header_lines, serialize_commit, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::repo::Repository;
 
@@ -187,7 +187,7 @@ pub fn graft(
             continue;
         }
         let short = commit.to_hex()[..12].to_owned();
-        let mut data = parse_commit(&odb.read(&commit)?.data)?;
+        let mut data = odb.read_commit(&commit)?;
         let Some(first) = data.parents.first().copied() else {
             return Ok(Err(GraftError::NotOnSnapshot { commit: short }));
         };
@@ -198,9 +198,9 @@ pub fn graft(
                 None => return Ok(Err(GraftError::NotOnSnapshot { commit: short })),
             }
         }
-        let parent_tree = commit_tree(odb, first)?;
+        let parent_tree = odb.commit_tree(&first)?;
         let replayed = if mapped.len() == 1 {
-            replay(odb, commit_tree(odb, mapped[0])?, parent_tree, data.tree)?
+            replay(odb, odb.commit_tree(&mapped[0])?, parent_tree, data.tree)?
         } else {
             replay_merge(repo, &mapped, parent_tree, data.tree, paths)?
         };
@@ -246,10 +246,6 @@ pub(crate) fn without_signatures(headers: &[u8]) -> Vec<u8> {
     remove_header_lines(headers, |key| {
         matches!(key, b"gpgsig" | b"gpgsig-sha256" | b"mergetag")
     })
-}
-
-fn commit_tree(odb: &Odb, commit: ObjectId) -> crate::error::Result<ObjectId> {
-    Ok(parse_commit(&odb.read(&commit)?.data)?.tree)
 }
 
 /// Whether `change`, made against the snapshot-space tree `from`, applies to
@@ -336,15 +332,15 @@ fn replay_merge(
 /// its merge base with those before it), and the paths that conflict.
 fn merge_parents(repo: &Repository, commits: &[ObjectId]) -> Result<(ObjectId, Vec<String>)> {
     let odb = repo.odb();
-    let mut tree = commit_tree(odb, commits[0])?;
+    let mut tree = odb.commit_tree(&commits[0])?;
     let mut conflicts = Vec::new();
     for (i, other) in commits.iter().enumerate().skip(1) {
-        let theirs = commit_tree(odb, *other)?;
+        let theirs = odb.commit_tree(other)?;
         if theirs == tree {
             continue;
         }
         let base = match merge_bases_first_vs_rest(repo, *other, &commits[..i])?.first() {
-            Some(base) => commit_tree(odb, *base)?,
+            Some(base) => odb.commit_tree(base)?,
             None => edit(odb, None, &[])?,
         };
         let merged = merge_trees_three_way(
@@ -375,7 +371,7 @@ pub(crate) fn parents_first(repo: &Repository, commits: &[ObjectId]) -> Result<V
     let set: HashSet<ObjectId> = commits.iter().copied().collect();
     let mut parents: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
     for c in commits {
-        let data = parse_commit(&repo.odb().read(c)?.data)?;
+        let data = repo.odb().read_commit(c)?;
         parents.insert(
             *c,
             data.parents

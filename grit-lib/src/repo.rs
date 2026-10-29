@@ -49,7 +49,7 @@ use crate::git_path::path_for_error_message;
 use crate::hooks::run_hook;
 use crate::index::Index;
 use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
-use crate::objects::{parse_commit, HashAlgo, ObjectId};
+use crate::objects::{HashAlgo, ObjectId};
 use crate::odb::Odb;
 use crate::repo_caches::RepoCaches;
 use crate::rev_parse::is_inside_work_tree;
@@ -2627,7 +2627,7 @@ impl Repository {
         let tree_oid = match index.cache_tree_root {
             Some(tree) => Some(tree),
             None => match resolve_head(&self.git_dir)?.oid() {
-                Some(oid) => Some(parse_commit(&self.odb.read(oid)?.data)?.tree),
+                Some(oid) => Some(self.odb.commit_tree(oid)?),
                 None => None,
             },
         };

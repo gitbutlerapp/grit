@@ -22,7 +22,7 @@ use crate::change_id::{resolved_change_id, ChangeId};
 use crate::config::{parse_bool, ConfigSet};
 use crate::error::Result;
 use crate::ident::Signature;
-use crate::objects::{parse_commit, CommitData, ObjectId, ObjectKind, OidHashMap, OidHashSet};
+use crate::objects::{CommitData, ObjectId, ObjectKind, OidHashMap, OidHashSet};
 use crate::odb::Odb;
 use crate::refs::{PackedPeel, PackedRefPeels};
 use crate::repo::Repository;
@@ -284,7 +284,7 @@ pub fn load_commits_with_decorations_reusing(
     for oid in oids {
         let data = match parsed.take_commit(oid) {
             Some(data) => data?,
-            None => parse_commit(&odb.read(oid)?.data)?,
+            None => odb.read_commit(oid)?,
         };
         let resolved = resolved_change_id(oid, &data);
         let hex = oid.to_hex();

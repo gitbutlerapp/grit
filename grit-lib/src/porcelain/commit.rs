@@ -646,7 +646,7 @@ fn commit_paths_scope(
     let head = resolve_head_for_repository(repo)?;
     let parent_tree = match &head {
         HeadState::Branch { oid: Some(p), .. } | HeadState::Detached { oid: p } => {
-            Some(commit_tree_oid(repo, p)?)
+            Some(repo.odb().commit_tree(p)?)
         }
         HeadState::Branch { oid: None, .. } => None,
         HeadState::Invalid => {
@@ -1292,14 +1292,7 @@ fn resolve_author_for_commit(
     }
     if !req_amend && !req.reset_author && req.author.is_none() {
         if let Some(picked) = read_cherry_pick_head(repo.git_dir())? {
-            let obj = repo.odb().read(&picked)?;
-            if obj.kind != ObjectKind::Commit {
-                return Err(Error::CorruptObject(format!(
-                    "expected commit for CHERRY_PICK_HEAD, got {}",
-                    obj.kind.as_str()
-                )));
-            }
-            let picked_commit = parse_commit(&obj.data)?;
+            let picked_commit = repo.odb().read_commit(&picked)?;
             return Ok(prepare_commit_author_from_parent(
                 &picked_commit.author,
                 &picked_commit.author_raw,
@@ -1407,14 +1400,7 @@ fn create_commit_with_index(
     let mut reuse_author_raw = Vec::new();
     let mut reuse_message = None;
     if let Some(reuse_oid) = req.reuse_message_from {
-        let obj = repo.odb().read(&reuse_oid)?;
-        if obj.kind != ObjectKind::Commit {
-            return Err(Error::CorruptObject(format!(
-                "expected commit for reuse-message, got {}",
-                obj.kind.as_str()
-            )));
-        }
-        let source = parse_commit(&obj.data)?;
+        let source = repo.odb().read_commit(&reuse_oid)?;
         reuse_message = Some(source.message);
         reuse_author = Some(source.author);
         reuse_author_raw = source.author_raw;
@@ -1426,14 +1412,7 @@ fn create_commit_with_index(
         let Some(tip) = parent.take() else {
             return Err(Error::AmendUnborn);
         };
-        let obj = repo.odb().read(&tip)?;
-        if obj.kind != ObjectKind::Commit {
-            return Err(Error::CorruptObject(format!(
-                "expected commit, got {}",
-                obj.kind.as_str()
-            )));
-        }
-        let old = parse_commit(&obj.data)?;
+        let old = repo.odb().read_commit(&tip)?;
         amend_parents = old.parents.clone();
         parent = old.parents.first().copied();
         amend_author = Some(old.author);
@@ -1451,7 +1430,7 @@ fn create_commit_with_index(
     let index_path = repo.git_dir().join("index");
     let parent_tree = parent
         .as_ref()
-        .map(|parent_oid| commit_tree_oid(repo, parent_oid))
+        .map(|parent_oid| repo.odb().commit_tree(parent_oid))
         .transpose()?;
 
     if !req.allow_empty && !req.amend && !concluding_merge {
@@ -1910,17 +1889,6 @@ fn index_staged_tree_matches(
     crate::diff::diff_index_to_tree(odb, index, Some(tree_oid), false)
         .map(|d| d.is_empty())
         .unwrap_or(false)
-}
-
-fn commit_tree_oid(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
-    let obj = repo.odb().read(commit_oid)?;
-    if obj.kind != ObjectKind::Commit {
-        return Err(Error::CorruptObject(format!(
-            "expected commit, got {}",
-            obj.kind.as_str()
-        )));
-    }
-    Ok(parse_commit(&obj.data)?.tree)
 }
 
 fn commit_subject(message: &str) -> &str {

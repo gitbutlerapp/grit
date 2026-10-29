@@ -58,17 +58,21 @@ fn parse_commit_time(committer: &str) -> u64 {
 }
 
 /// Load commit metadata from the ODB for graph writing.
+///
+/// # Errors
+///
+/// [`crate::error::Error::CorruptObject`] when `oid` is not a commit, plus any read or
+/// parse error from [`Odb::read_commit`].
 pub fn load_commit_graph_commit_info(
     odb: &Odb,
     oid: ObjectId,
 ) -> crate::error::Result<CommitGraphCommitInfo> {
-    let obj = odb.read(&oid)?;
-    if obj.kind != ObjectKind::Commit {
-        return Err(crate::error::Error::CorruptObject(format!(
-            "object {oid} is not a commit"
-        )));
-    }
-    let c = parse_commit(&obj.data)?;
+    let c = odb.read_commit(&oid).map_err(|err| match err {
+        crate::error::Error::UnexpectedObjectKind { .. } => {
+            crate::error::Error::CorruptObject(format!("object {oid} is not a commit"))
+        }
+        other => other,
+    })?;
     Ok(CommitGraphCommitInfo {
         tree: c.tree,
         parents: c.parents.clone(),

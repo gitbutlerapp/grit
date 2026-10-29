@@ -8,7 +8,7 @@ use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, OverwriteReason, Result};
 use crate::hooks::{run_post_checkout, HookName, PostOperationHooks};
 use crate::index::{Index, IndexLock, MODE_GITLINK};
-use crate::objects::{parse_commit, ObjectId};
+use crate::objects::ObjectId;
 use crate::porcelain::branch::resolve_create_tracking;
 use crate::porcelain::branch_error::{BranchError, TrackMode};
 use crate::porcelain::checkout::{
@@ -537,15 +537,15 @@ fn switch_to_target(
         head_before.oid().copied()
     };
     let (target_tree, head_tree) = match checkout_head {
-        None => (commit_tree(repo, &target_oid)?, None),
+        None => (repo.odb().commit_tree(&target_oid)?, None),
         Some(head) if head == target_oid => {
-            let tree = commit_tree(repo, &target_oid)?;
+            let tree = repo.odb().commit_tree(&target_oid)?;
             (tree, Some(tree))
         }
         Some(head) => {
             let (target_res, head_res) = std::thread::scope(|scope| {
-                let target = scope.spawn(|| commit_tree(repo, &target_oid));
-                let head = scope.spawn(|| commit_tree(repo, &head));
+                let target = scope.spawn(|| repo.odb().commit_tree(&target_oid));
+                let head = scope.spawn(|| repo.odb().commit_tree(&head));
                 (target.join(), head.join())
             });
             (
@@ -919,11 +919,6 @@ pub(crate) fn keep_style_transition_would_block_paths_for_preview(
                 }
             })?;
     Ok(merge_keep_style_block_paths(&core))
-}
-
-fn commit_tree(repo: &Repository, commit: &ObjectId) -> Result<ObjectId> {
-    let obj = repo.odb().read(commit)?;
-    Ok(parse_commit(&obj.data)?.tree)
 }
 
 fn path_from_diff(entry: &DiffEntry) -> Option<&str> {
@@ -2065,7 +2060,7 @@ mod tests {
     fn skewed_dates_do_not_strand_a_commit_branches_hold() {
         let (_dir, repo) = init_repo();
         let main_tip = commit_on_branch(&repo, "main", "f", "one\n", None);
-        let tree = commit_tree(&repo, &main_tip).expect("tree");
+        let tree = repo.odb().commit_tree(&main_tip).expect("tree");
         let skewed = commit_dated(&repo, tree, main_tip, 1_000);
         let old_tip = commit_dated(&repo, tree, skewed, 1_100);
         let behind = commit_dated(&repo, tree, skewed, 150);

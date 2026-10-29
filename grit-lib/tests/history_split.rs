@@ -6,7 +6,7 @@ use crate::support;
 
 use std::process::Command;
 
-use grit_lib::objects::{parse_commit, ObjectId};
+use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     split, EmptyPolicy, HistoryError, RefScope, RewriteOptions, SplitOptions,
@@ -241,6 +241,41 @@ fn split_rejects_merge_commit() {
     )
     .unwrap_err();
     assert!(matches!(err, HistoryError::InsertBeforeOnMerge { .. }));
+}
+
+#[test]
+fn split_rejects_non_commit_with_typed_error() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
+    let grit = open_grit(wt);
+    let tree = grit.odb().commit_tree(&oids["b"]).expect("tree");
+    let err = split(
+        &grit,
+        tree,
+        &["any".to_string()],
+        "split\n".into(),
+        &SplitOptions::default(),
+        &RewriteOptions {
+            scope: RefScope::Branches,
+            empty: EmptyPolicy::Drop,
+            committer: committer(5).parse().expect("signature"),
+            preserve_committer: false,
+            sign: true,
+        },
+    )
+    .unwrap_err();
+    let HistoryError::Library(inner) = err else {
+        panic!("expected a library error, got {err:?}");
+    };
+    assert!(matches!(
+        *inner,
+        grit_lib::error::Error::UnexpectedObjectKind {
+            oid,
+            expected: ObjectKind::Commit,
+            actual: ObjectKind::Tree,
+        } if oid == tree
+    ));
 }
 
 #[test]

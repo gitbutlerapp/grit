@@ -112,9 +112,7 @@ pub fn commit_diff_files(
     let commit = parse_commit(&data)?;
     if commit.parents.len() < 2 || merges == DiffMerges::FirstParent {
         let old_tree = match commit.parents.first() {
-            Some(parent) => {
-                Some(crate::objects::parse_commit(&repo.odb().read(parent)?.data)?.tree)
-            }
+            Some(parent) => Some(repo.odb().commit_tree(parent)?),
             None => None,
         };
         let entries = tree_diff_entries(
@@ -186,7 +184,7 @@ pub(crate) fn commit_first_parent_diff_entries(
 ) -> Result<Vec<DiffEntry>> {
     let odb = repo.odb();
     let old_tree = match commit.parents.first() {
-        Some(parent) => Some(parse_commit(&odb.read(parent)?.data)?.tree),
+        Some(parent) => Some(odb.commit_tree(parent)?),
         None => None,
     };
     let entries = tree_diff_entries(
@@ -236,7 +234,7 @@ fn combined_commit_diff_files(
     let odb = repo.odb();
     let mut parent_trees = Vec::with_capacity(parent_commits.len());
     for p in parent_commits {
-        parent_trees.push(parse_commit(&odb.read(p)?.data)?.tree);
+        parent_trees.push(odb.commit_tree(p)?);
     }
 
     let walk = CombinedTreeDiffOptions::default();
