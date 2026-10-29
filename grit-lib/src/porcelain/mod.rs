@@ -88,6 +88,7 @@ pub mod status;
 pub mod switch;
 pub mod tag;
 pub(crate) mod tree_merge_checkout;
+pub mod workspace_snapshot;
 pub mod worktree_guard;
 
 /// Terminal capability probes for porcelain output.

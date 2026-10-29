@@ -1645,6 +1645,10 @@ pub enum Error {
     #[error("no cherry-pick or revert in progress")]
     NoReplayInProgress,
 
+    /// [`crate::porcelain::merge::abort_branch_merge`] was called with no merge in progress.
+    #[error("there is no merge in progress")]
+    NoMergeInProgress,
+
     /// The command would move `HEAD` while a paused operation still depends on it
     /// (see [`operation_blocking_switch`](crate::state::operation_blocking_switch)).
     #[error("{} in progress", .0.description())]
@@ -2148,6 +2152,7 @@ impl Error {
             Self::ReplayAbortHeadMoved => "replay_abort_head_moved",
             Self::ReplayContinueUnmerged => "replay_continue_unmerged",
             Self::NoReplayInProgress => "no_replay_in_progress",
+            Self::NoMergeInProgress => "no_merge_in_progress",
             Self::OperationInProgress(..) => "operation_in_progress",
             Self::BranchCheckedOutInWorktree { .. } => "branch_checked_out_in_worktree",
             Self::BranchNotFound { .. } => "branch_not_found",
@@ -2377,9 +2382,66 @@ impl serde::Serialize for Error {
     {
         use serde::ser::SerializeStruct;
 
-        let mut out = serializer.serialize_struct("Error", 2)?;
-        out.serialize_field("kind", self.kind_name())?;
-        out.serialize_field("message", &self.to_string())?;
-        out.end()
+        match self {
+            Self::LockHeld { path, holder } => {
+                let mut out = serializer.serialize_struct("Error", 3)?;
+                out.serialize_field("kind", self.kind_name())?;
+                out.serialize_field("message", &self.to_string())?;
+                out.serialize_field("path", &crate::git_path::user_display_path(path.as_path()))?;
+                if let Some(holder) = holder {
+                    out.serialize_field(
+                        "holder",
+                        &LockHolderSerde {
+                            pid: holder.pid,
+                            running: holder.running,
+                        },
+                    )?;
+                }
+                out.end()
+            }
+            Self::WouldOverwrite { reason, paths, .. } => {
+                let mut out = serializer.serialize_struct("Error", 4)?;
+                out.serialize_field("kind", self.kind_name())?;
+                out.serialize_field("message", &self.to_string())?;
+                out.serialize_field("reason", &reason.to_string())?;
+                out.serialize_field("paths", paths)?;
+                out.end()
+            }
+            Self::StashCouldNotRestoreUntracked { path } => {
+                let mut out = serializer.serialize_struct("Error", 3)?;
+                out.serialize_field("kind", self.kind_name())?;
+                out.serialize_field("message", &self.to_string())?;
+                out.serialize_field("path", path)?;
+                out.end()
+            }
+            Self::DirtyWorktree { operation, paths } => {
+                let mut out = serializer.serialize_struct("Error", 4)?;
+                out.serialize_field("kind", self.kind_name())?;
+                out.serialize_field("message", &self.to_string())?;
+                out.serialize_field("operation", &operation.to_string())?;
+                out.serialize_field("paths", paths)?;
+                out.end()
+            }
+            Self::UnmergedConflictMarkers { paths } => {
+                let mut out = serializer.serialize_struct("Error", 3)?;
+                out.serialize_field("kind", self.kind_name())?;
+                out.serialize_field("message", &self.to_string())?;
+                out.serialize_field("paths", paths)?;
+                out.end()
+            }
+            _ => {
+                let mut out = serializer.serialize_struct("Error", 2)?;
+                out.serialize_field("kind", self.kind_name())?;
+                out.serialize_field("message", &self.to_string())?;
+                out.end()
+            }
+        }
     }
+}
+
+#[cfg(feature = "serde-models")]
+#[derive(serde::Serialize)]
+struct LockHolderSerde {
+    pid: u64,
+    running: bool,
 }

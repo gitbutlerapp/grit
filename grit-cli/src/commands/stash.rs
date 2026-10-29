@@ -699,7 +699,10 @@ pub fn run_apply(
         .stash()
         .apply(
             n,
-            &StashApplyOptions { restore_index },
+            &StashApplyOptions {
+                restore_index,
+                ..Default::default()
+            },
             progress,
             &interrupt,
         )
@@ -726,7 +729,10 @@ pub fn run_pop(
         .stash()
         .pop(
             n,
-            &StashApplyOptions { restore_index },
+            &StashApplyOptions {
+                restore_index,
+                ..Default::default()
+            },
             progress,
             &interrupt,
         )

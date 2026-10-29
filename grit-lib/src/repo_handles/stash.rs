@@ -81,19 +81,14 @@ impl<'repo> RepositoryStash<'repo> {
     /// ```
     /// # use grit_lib::repo::Repository;
     /// # use grit_lib::config::ident_resolve::IdentRole;
-    /// # use grit_lib::stash::{StashMode, StashPushOptions};
+    /// # use grit_lib::stash::StashPushOptions;
     /// # use std::path::Path;
     /// # fn demo() -> grit_lib::error::Result<()> {
     /// let repo = Repository::discover(Some(Path::new(".")), &grit_lib::config::environment::RepositoryOptions::empty())?;
-    /// let opts = StashPushOptions {
-    ///     message: Some("wip".into()),
-    ///     include_untracked: false,
-    ///     identity: repo.identity(IdentRole::Committer, repo.identity_now())?,
-    ///     selection: None,
-    ///     pathspecs: Vec::new(),
-    ///     dry_run: false,
-    ///     mode: StashMode::default(),
-    /// };
+    /// let mut opts = StashPushOptions::new(
+    ///     repo.identity(IdentRole::Committer, repo.identity_now())?,
+    /// );
+    /// opts.message = Some("wip".into());
     /// let _ = repo.stash().push(
     ///     &opts,
     ///     &mut grit_lib::progress::NullProgress,

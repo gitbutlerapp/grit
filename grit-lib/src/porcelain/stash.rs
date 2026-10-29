@@ -356,6 +356,20 @@ pub struct StashPushOptions {
 }
 
 impl StashPushOptions {
+    /// Push options with only [`Self::identity`] required; other fields match Git defaults.
+    #[must_use]
+    pub fn new(identity: Signature) -> Self {
+        Self {
+            message: None,
+            include_untracked: false,
+            identity,
+            selection: None,
+            pathspecs: Vec::new(),
+            dry_run: false,
+            mode: StashMode::default(),
+        }
+    }
+
     /// Reject flag combinations Git and grit do not support.
     ///
     /// # Errors
@@ -436,6 +450,9 @@ impl StashPushOptions {
 pub struct StashApplyOptions {
     /// Restore the stashed index parent instead of keeping the current index at touched paths.
     pub restore_index: bool,
+    /// When true, an existing untracked file blocks restore only if its on-disk bytes differ
+    /// from the stashed untracked parent (Git still refuses in all cases).
+    pub overwrite_identical_untracked: bool,
 }
 
 /// Options for [`RepositoryStash::diff`](crate::repo_handles::RepositoryStash::diff).
@@ -626,7 +643,7 @@ fn has_stashable_changes(
     found(plain.then_some(unstaged))
 }
 
-fn collect_untracked_paths(repo: &Repository, work_tree: &Path) -> Result<Vec<String>> {
+pub(crate) fn collect_untracked_paths(repo: &Repository, work_tree: &Path) -> Result<Vec<String>> {
     let mut index = repo.load_index()?;
     let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, &index)?;
     let (untracked, _, _) = collect_untracked_and_ignored_inner(
@@ -1984,6 +2001,7 @@ pub(crate) fn stash_branch(repo: &Repository, name: &str, n: usize) -> Result<St
         n,
         &StashApplyOptions {
             restore_index: true,
+            ..Default::default()
         },
         &mut NullProgress,
         &NeverCancel,
@@ -2255,6 +2273,7 @@ fn check_stash_untracked_restore(
     stash_commit: &CommitData,
     index: &mut Index,
     wt_deletions: &BTreeSet<Vec<u8>>,
+    options: &StashApplyOptions,
 ) -> Result<()> {
     if stash_commit.parents.len() < 3 {
         return Ok(());
@@ -2298,12 +2317,57 @@ fn check_stash_untracked_restore(
             score: None,
         })
         .collect();
-    if let Some(path) =
-        untracked_would_be_overwritten_by_tree_changes(&existing_paths, &tree_changes).first()
-    {
+    let collisions = untracked_would_be_overwritten_by_tree_changes(&existing_paths, &tree_changes);
+    for path in &collisions {
+        if options.overwrite_identical_untracked
+            && untracked_on_disk_matches_stash(repo, work_tree, index, ut_oid, &ut_entries, path)?
+        {
+            continue;
+        }
         return Err(Error::StashCouldNotRestoreUntracked { path: path.clone() });
     }
     Ok(())
+}
+
+fn untracked_on_disk_matches_stash(
+    repo: &Repository,
+    work_tree: &Path,
+    index: &Index,
+    ut_commit: &ObjectId,
+    ut_entries: &[FlatTreeEntry],
+    path: &str,
+) -> Result<bool> {
+    let _ = ut_commit;
+    let Some(entry) = ut_entries.iter().find(|e| e.path == path) else {
+        return Ok(false);
+    };
+    if entry.mode == MODE_GITLINK || entry.mode == MODE_TREE {
+        return Ok(false);
+    }
+    let abs = crate::index::worktree_path_from_index_rel(work_tree, path.as_bytes());
+    let meta = match fs::symlink_metadata(&abs) {
+        Ok(m) => m,
+        Err(_) => return Ok(false),
+    };
+    if meta.is_dir() {
+        return Ok(false);
+    }
+    let rules = crate::worktree_rules::WorktreeRules::from_repository(repo, index)?;
+    let stash_blob = repo.odb().read(&entry.oid)?;
+    let worktree_bytes = smudge_bytes_for_worktree_path(
+        repo,
+        &rules,
+        path,
+        entry.mode,
+        &stash_blob.data,
+        &entry.oid,
+    )?;
+    if meta.file_type().is_symlink() {
+        let target = fs::read_link(&abs).map_err(Error::Io)?;
+        return Ok(target.as_os_str().as_encoded_bytes() == worktree_bytes);
+    }
+    let disk = fs::read(&abs).map_err(Error::Io)?;
+    Ok(disk == worktree_bytes)
 }
 
 /// Apply a stash commit onto the current worktree and index.
@@ -2325,14 +2389,7 @@ pub(crate) fn apply_stash_oid(
     cancel: &dyn Cancel,
 ) -> Result<StashApplyOutcome> {
     let work_tree = repo.work_tree().ok_or(Error::StashBareRepository)?;
-    apply_stash_commit(
-        repo,
-        work_tree,
-        stash_oid,
-        options.restore_index,
-        progress,
-        cancel,
-    )
+    apply_stash_commit(repo, work_tree, stash_oid, options, progress, cancel)
 }
 
 /// Result of [`RepositoryStash::apply`](crate::repo_handles::RepositoryStash::apply),
@@ -2399,10 +2456,11 @@ fn apply_stash_commit(
     repo: &Repository,
     work_tree: &Path,
     stash_oid: &ObjectId,
-    restore_index: bool,
+    options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<StashApplyOutcome> {
+    let restore_index = options.restore_index;
     let stash_commit = repo.odb().read_commit(stash_oid)?;
 
     if stash_commit.parents.len() < 2 {
@@ -2438,7 +2496,14 @@ fn apply_stash_commit(
         .filter(|(_, e)| e.is_none())
         .map(|(p, _)| p.clone())
         .collect();
-    check_stash_untracked_restore(repo, work_tree, &stash_commit, &mut new_index, &deletions)?;
+    check_stash_untracked_restore(
+        repo,
+        work_tree,
+        &stash_commit,
+        &mut new_index,
+        &deletions,
+        options,
+    )?;
     drop(deletions);
 
     // Include the index delta even when a staged addition was removed again in the worktree.

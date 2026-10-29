@@ -313,6 +313,7 @@ fn stash_apply_index_restores_staged_state() {
             0,
             &StashApplyOptions {
                 restore_index: true,
+                ..Default::default()
             },
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::NeverCancel,
@@ -355,6 +356,7 @@ fn stash_pop_index_conflict_keeps_entry() {
             0,
             &StashApplyOptions {
                 restore_index: true,
+                ..Default::default()
             },
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::NeverCancel,
@@ -436,6 +438,7 @@ fn grit_apply_index_on_git_stash() {
             0,
             &StashApplyOptions {
                 restore_index: true,
+                ..Default::default()
             },
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::NeverCancel,

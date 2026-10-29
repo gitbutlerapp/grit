@@ -1662,16 +1662,15 @@ fn resolved_not_staged_paths(repo: &Repository, index: &Index, unmerged: &[Strin
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when no merge is in progress, or propagates checkout and I/O errors.
+/// Returns [`Error::NoMergeInProgress`] when no merge is in progress, or propagates checkout and
+/// I/O errors.
 pub fn abort_branch_merge(repo: &Repository) -> Result<()> {
     let git_dir = repo.git_dir();
     let in_merge = !read_merge_heads(git_dir)?.is_empty();
     let squash_conflict =
         git_dir.join("SQUASH_MSG").is_file() && git_dir.join("MERGE_MSG").is_file();
     if !in_merge && !squash_conflict {
-        return Err(Error::Message(
-            "there is no merge in progress — nothing to abort".into(),
-        ));
+        return Err(Error::NoMergeInProgress);
     }
     restore_pre_merge_state(repo)
 }

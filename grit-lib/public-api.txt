@@ -5884,6 +5884,7 @@ pub grit_lib::error::Error::MoveNothingToMove
 pub grit_lib::error::Error::MoveNothingToMove::src: alloc::string::String
 pub grit_lib::error::Error::MoveSourceNotTracked
 pub grit_lib::error::Error::MoveSourceNotTracked::src: alloc::string::String
+pub grit_lib::error::Error::NoMergeInProgress
 pub grit_lib::error::Error::NoPromisorRemote
 pub grit_lib::error::Error::NoPromisorRemote::operation: &'static str
 pub grit_lib::error::Error::NoReplayInProgress
@@ -16224,6 +16225,7 @@ impl core::marker::UnsafeUnpin for grit_lib::stash::FlatTreeEntry
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::FlatTreeEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::FlatTreeEntry
 pub struct grit_lib::porcelain::stash::StashApplyOptions
+pub grit_lib::porcelain::stash::StashApplyOptions::overwrite_identical_untracked: bool
 pub grit_lib::porcelain::stash::StashApplyOptions::restore_index: bool
 impl core::clone::Clone for grit_lib::stash::StashApplyOptions
 pub fn grit_lib::stash::StashApplyOptions::clone(&self) -> Self
@@ -16353,6 +16355,7 @@ pub grit_lib::porcelain::stash::StashPushOptions::mode: grit_lib::stash::StashMo
 pub grit_lib::porcelain::stash::StashPushOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::stash::StashPushOptions::selection: core::option::Option<grit_lib::porcelain::hunk_select::HunkSelection>
 impl grit_lib::stash::StashPushOptions
+pub fn grit_lib::stash::StashPushOptions::new(grit_lib::ident::Signature) -> Self
 pub fn grit_lib::stash::StashPushOptions::validate(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::stash::StashPushOptions::validate_staged_worktree(&self, &grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 impl core::clone::Clone for grit_lib::stash::StashPushOptions
@@ -16975,6 +16978,70 @@ pub mod grit_lib::porcelain::terminal
 pub fn grit_lib::porcelain::terminal::ansi_supported() -> bool
 pub fn grit_lib::porcelain::terminal::stderr_supports_color() -> bool
 pub fn grit_lib::porcelain::terminal::stdout_supports_color() -> bool
+pub mod grit_lib::porcelain::workspace_snapshot
+pub struct grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+pub grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions::include_untracked: bool
+pub grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions::refs: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+pub fn grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+impl core::cmp::PartialEq for grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+pub fn grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+pub fn grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+pub fn grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+impl core::marker::Freeze for grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+impl core::marker::Send for grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+impl core::marker::Sync for grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+impl core::marker::Unpin for grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions
+pub struct grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+impl core::clone::Clone for grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+pub fn grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+impl core::cmp::PartialEq for grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+pub fn grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+pub fn grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+pub fn grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+impl core::marker::Freeze for grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+impl core::marker::Send for grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+impl core::marker::Sync for grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+impl core::marker::Unpin for grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions
+pub struct grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+pub grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot::head: grit_lib::state::HeadState
+pub grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot::index_bytes: alloc::vec::Vec<u8>
+pub grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot::index_mtime: core::option::Option<std::time::SystemTime>
+pub grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot::operation_state: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<u8>>
+pub grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot::refs: alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<grit_lib::refs::store::RawRef>>
+pub grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot::worktree_tree: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+pub fn grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+impl core::cmp::PartialEq for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+pub fn grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+pub fn grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+impl core::marker::Freeze for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+impl core::marker::Send for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+impl core::marker::Sync for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+impl core::marker::Unpin for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+pub fn grit_lib::porcelain::workspace_snapshot::capture_workspace_snapshot(&grit_lib::repo::Repository, &grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions) -> grit_lib::error::Result<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>
+pub fn grit_lib::porcelain::workspace_snapshot::clear_in_progress(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::state::InProgressOperation>>
+pub fn grit_lib::porcelain::workspace_snapshot::restore_workspace_snapshot(&grit_lib::repo::Repository, &grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot, &grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
 pub mod grit_lib::porcelain::worktree_guard
 pub struct grit_lib::porcelain::worktree_guard::TreeSwitchPlan
 pub grit_lib::porcelain::worktree_guard::TreeSwitchPlan::tree_changes: alloc::vec::Vec<grit_lib::diff::DiffEntry>
@@ -17141,6 +17208,7 @@ pub grit_lib::prelude::Error::MoveNothingToMove
 pub grit_lib::prelude::Error::MoveNothingToMove::src: alloc::string::String
 pub grit_lib::prelude::Error::MoveSourceNotTracked
 pub grit_lib::prelude::Error::MoveSourceNotTracked::src: alloc::string::String
+pub grit_lib::prelude::Error::NoMergeInProgress
 pub grit_lib::prelude::Error::NoPromisorRemote
 pub grit_lib::prelude::Error::NoPromisorRemote::operation: &'static str
 pub grit_lib::prelude::Error::NoReplayInProgress
@@ -18206,6 +18274,7 @@ pub fn grit_lib::repo::Repository::wall_clock_epoch(&self) -> i64
 pub fn grit_lib::repo::Repository::with_ref_store(self, alloc::rcs::arc::Arc<dyn grit_lib::refs::store::RefStore>) -> Self
 pub fn grit_lib::repo::Repository::with_thread_policy(self, grit_lib::parallel::ThreadPolicy) -> Self
 pub fn grit_lib::repo::Repository::work_tree(&self) -> core::option::Option<&std::path::Path>
+pub fn grit_lib::repo::Repository::workspace_snapshot(&self) -> grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'_>
 pub fn grit_lib::repo::Repository::worktrees(&self) -> grit_lib::repo_handles::RepositoryWorktrees<'_>
 pub fn grit_lib::repo::Repository::write_largest_pack_bitmap(&self, &grit_lib::objects::bitmap::PackBitmapWriteOptions, std::time::SystemTime) -> core::result::Result<std::path::PathBuf, grit_lib::objects::bitmap::PackBitmapWriteError>
 impl grit_lib::repo::Repository
@@ -25755,6 +25824,7 @@ pub fn grit_lib::repo::Repository::wall_clock_epoch(&self) -> i64
 pub fn grit_lib::repo::Repository::with_ref_store(self, alloc::rcs::arc::Arc<dyn grit_lib::refs::store::RefStore>) -> Self
 pub fn grit_lib::repo::Repository::with_thread_policy(self, grit_lib::parallel::ThreadPolicy) -> Self
 pub fn grit_lib::repo::Repository::work_tree(&self) -> core::option::Option<&std::path::Path>
+pub fn grit_lib::repo::Repository::workspace_snapshot(&self) -> grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'_>
 pub fn grit_lib::repo::Repository::worktrees(&self) -> grit_lib::repo_handles::RepositoryWorktrees<'_>
 pub fn grit_lib::repo::Repository::write_largest_pack_bitmap(&self, &grit_lib::objects::bitmap::PackBitmapWriteOptions, std::time::SystemTime) -> core::result::Result<std::path::PathBuf, grit_lib::objects::bitmap::PackBitmapWriteError>
 impl grit_lib::repo::Repository
@@ -26496,6 +26566,23 @@ impl<'repo> core::marker::Unpin for grit_lib::repo_handles::RepositoryStash<'rep
 impl<'repo> core::marker::UnsafeUnpin for grit_lib::repo_handles::RepositoryStash<'repo>
 impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::RepositoryStash<'repo>
 impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::RepositoryStash<'repo>
+pub struct grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
+impl<'repo> grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
+pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::capture(&self, &grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions) -> grit_lib::error::Result<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>
+pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
+pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::restore(&self, &grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot, &grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
+impl<'repo> core::clone::Clone for grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
+pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::clone(&self) -> Self
+impl<'repo> core::fmt::Debug for grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
+pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'repo> core::marker::Copy for grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
+impl<'repo> core::marker::Freeze for grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
+impl<'repo> core::marker::Send for grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
+impl<'repo> core::marker::Sync for grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
+impl<'repo> core::marker::Unpin for grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
+impl<'repo> core::marker::UnsafeUnpin for grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
+impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
+impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
 pub struct grit_lib::repo_handles::RepositoryWorktrees<'repo>
 impl<'repo> grit_lib::repo_handles::RepositoryWorktrees<'repo>
 pub fn grit_lib::repo_handles::RepositoryWorktrees<'repo>::add(&self, &grit_lib::worktree::AddLinkedWorktreeOptions) -> grit_lib::error::Result<grit_lib::worktree::WorktreeEntry>
@@ -29583,6 +29670,7 @@ impl core::marker::UnsafeUnpin for grit_lib::stash::FlatTreeEntry
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::FlatTreeEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::FlatTreeEntry
 pub struct grit_lib::stash::StashApplyOptions
+pub grit_lib::stash::StashApplyOptions::overwrite_identical_untracked: bool
 pub grit_lib::stash::StashApplyOptions::restore_index: bool
 impl core::clone::Clone for grit_lib::stash::StashApplyOptions
 pub fn grit_lib::stash::StashApplyOptions::clone(&self) -> Self
@@ -29712,6 +29800,7 @@ pub grit_lib::stash::StashPushOptions::mode: grit_lib::stash::StashMode
 pub grit_lib::stash::StashPushOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::stash::StashPushOptions::selection: core::option::Option<grit_lib::porcelain::hunk_select::HunkSelection>
 impl grit_lib::stash::StashPushOptions
+pub fn grit_lib::stash::StashPushOptions::new(grit_lib::ident::Signature) -> Self
 pub fn grit_lib::stash::StashPushOptions::validate(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::stash::StashPushOptions::validate_staged_worktree(&self, &grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 impl core::clone::Clone for grit_lib::stash::StashPushOptions
@@ -29904,6 +29993,7 @@ impl core::marker::Unpin for grit_lib::state::WtStatusState
 impl core::marker::UnsafeUnpin for grit_lib::state::WtStatusState
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::state::WtStatusState
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::state::WtStatusState
+pub fn grit_lib::state::clear_in_progress(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::state::InProgressOperation>>
 pub fn grit_lib::state::clear_merge_state(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::state::clear_replay_state(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::state::detect_in_progress(&std::path::Path) -> alloc::vec::Vec<grit_lib::state::InProgressOperation>

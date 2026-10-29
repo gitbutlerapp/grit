@@ -23,6 +23,7 @@ mod reflog;
 mod remote;
 mod remote_rename;
 mod stash;
+mod workspace_snapshot;
 mod worktree;
 
 pub use crate::reflog::MessageMatcher;
@@ -47,4 +48,5 @@ pub use remote::{
 };
 pub use remote_rename::RemoteRename;
 pub use stash::RepositoryStash;
+pub use workspace_snapshot::RepositoryWorkspaceSnapshot;
 pub use worktree::{LockWorktreeOptions, RepositoryWorktrees};

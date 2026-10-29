@@ -118,6 +118,7 @@ fn apply_stash_with_index_matches_git_staged_porcelain() {
             &ObjectId::from_hex(&stash_oid_hex).expect("stash"),
             &StashApplyOptions {
                 restore_index: true,
+                ..Default::default()
             },
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::NeverCancel,
@@ -201,7 +202,10 @@ fn wide_sparse_apply_preserves_index_and_untouched_changes_like_git() {
                 .stash()
                 .apply_commit(
                     &stash,
-                    &StashApplyOptions { restore_index },
+                    &StashApplyOptions {
+                        restore_index,
+                        ..Default::default()
+                    },
                     &mut grit_lib::progress::NullProgress,
                     &grit_lib::progress::NeverCancel,
                 )
@@ -374,7 +378,10 @@ mod raw_stash_paths {
             let expected = tempfile::tempdir().unwrap();
             copy_repo(root.path(), expected.path());
             let repo = open(root.path());
-            let options = StashApplyOptions { restore_index };
+            let options = StashApplyOptions {
+                restore_index,
+                ..Default::default()
+            };
             let outcome = if pop {
                 repo.stash().pop(
                     0,
@@ -494,6 +501,7 @@ mod raw_stash_paths {
                     0,
                     &StashApplyOptions {
                         restore_index: true,
+                        ..Default::default()
                     },
                     &mut grit_lib::progress::NullProgress,
                     &grit_lib::progress::NeverCancel,
