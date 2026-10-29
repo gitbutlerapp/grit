@@ -379,7 +379,16 @@ impl ReplayMergeSession {
             })
         });
         if !has_overlap {
-            return Ok(OverlapTransplant::NotApplicable);
+            let mut paths_from_index = HashSet::new();
+            for entry in &commit_diff {
+                paths_from_index.extend(diff_entry_paths(entry));
+            }
+            let index = index_from_commit_diff(repo, &commit_diff)?;
+            let result =
+                write_tree_partial_from_index(odb, &index, &new_parent_tree, &paths_from_index)
+                    .map_err(HistoryError::from)?;
+            self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
+            return Ok(OverlapTransplant::Applied(result));
         }
 
         let directory_renames = self.directory_renames(repo)?;

@@ -3686,6 +3686,11 @@ fn rebase_merge_replay_one_conflict_keeps_merge_parents_issue_2245() {
     };
     assert_eq!(first.conflicts.len(), 1);
     assert_eq!(first.conflicts[0].path, "shared.txt");
+    assert_eq!(
+        first.done.len(),
+        2,
+        "side branch should replay before feat:a conflict"
+    );
 
     std::fs::write(wt.join("shared.txt"), "resolved1\n").expect("resolve");
     git(wt, &["add", "shared.txt"]);

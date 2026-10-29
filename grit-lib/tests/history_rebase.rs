@@ -1694,6 +1694,310 @@ fn rebase_merge_side_branch_keeps_side_parentage_like_git_rebase_merges() {
     assert_git_fsck_strict(wt_git);
 }
 
+fn init_merge_only_integration_branch(wt: &std::path::Path) {
+    commit_file(wt, "base.txt", "base\n", "base");
+    git(wt, &["switch", "-qc", "feat", "main"]);
+    git(wt, &["switch", "-qc", "topic"]);
+    commit_file(wt, "t.txt", "t\n", "topic 1");
+    git(wt, &["switch", "-q", "feat"]);
+    git(
+        wt,
+        &["merge", "-q", "--no-ff", "-m", "Merge topic", "topic"],
+    );
+    git(wt, &["branch", "-D", "topic"]);
+    git(wt, &["switch", "-q", "main"]);
+    commit_file(wt, "u.txt", "u\n", "upstream");
+    git(wt, &["switch", "-q", "feat"]);
+}
+
+#[test]
+fn rebase_merge_only_integration_branch_replays_issue_2321() {
+    let grit_repo = HistoryRepo::init();
+    let git_repo = HistoryRepo::init();
+    let wt_g = grit_repo.worktree();
+    let wt_git = git_repo.worktree();
+    git(wt_g, &["config", "grit.changeIds", "false"]);
+    git(wt_git, &["config", "grit.changeIds", "false"]);
+    init_merge_only_integration_branch(wt_g);
+    init_merge_only_integration_branch(wt_git);
+
+    let fork = git_rev_parse(wt_g, "main~1");
+    let onto = git_rev_parse(wt_g, "main");
+    let tip = git_rev_parse(wt_g, "feat");
+    let fork_git = git_rev_parse(wt_git, "main~1");
+    let onto_git = git_rev_parse(wt_git, "main");
+
+    let grit = open_grit(wt_g);
+    let opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, false);
+    match plan_rebase(&grit, &rebase_request(fork, Some(onto), tip), &opts).expect("plan") {
+        RebasePlan::UpToDate => panic!("merge-only integration branch must not be up to date"),
+        RebasePlan::Conflict { .. } => panic!("unexpected conflict"),
+        RebasePlan::Plan(plan) => {
+            assert_eq!(plan.commits.len(), 2, "topic commit and merge");
+        }
+    }
+    match plan_rebase_check(&grit, &rebase_request(fork, Some(onto), tip), &opts).expect("check") {
+        RebaseCheckPlan::UpToDate => panic!("check must not report up to date"),
+        RebaseCheckPlan::Clean { commits } => assert_eq!(commits.len(), 2),
+        other => panic!("unexpected check plan: {other:?}"),
+    }
+
+    plan_apply(&grit, rebase_request(fork, Some(onto), tip), &opts);
+
+    let rebase = std::process::Command::new("git")
+        .current_dir(wt_git)
+        .args([
+            "rebase",
+            "--rebase-merges",
+            "--onto",
+            &onto_git.to_hex(),
+            &fork_git.to_hex(),
+            "feat",
+        ])
+        .env("GIT_AUTHOR_NAME", "Refs Harness Author")
+        .env("GIT_AUTHOR_EMAIL", "refs-harness@example.com")
+        .env("GIT_COMMITTER_NAME", "Refs Harness Author")
+        .env("GIT_COMMITTER_EMAIL", "refs-harness@example.com")
+        .env("GIT_COMMITTER_DATE", "1700001000 +0000")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git rebase");
+    assert!(rebase.success(), "git rebase --rebase-merges failed");
+
+    let grit_tip = git_rev_parse(wt_g, "feat");
+    let git_tip = git_rev_parse(wt_git, "feat");
+    let grit_merge =
+        parse_commit(&grit.odb().read(&grit_tip).expect("read").data).expect("parse grit tip");
+    let git_merge = parse_commit(&open_grit(wt_git).odb().read(&git_tip).expect("read").data)
+        .expect("parse git tip");
+    assert_eq!(grit_merge.parents.len(), git_merge.parents.len());
+    assert_eq!(grit_merge.tree, git_merge.tree);
+    assert_eq!(
+        grit_merge.message.trim(),
+        git_merge.message.trim(),
+        "merge subject"
+    );
+    assert_eq!(
+        grit_merge.parents[0], onto,
+        "merge first parent is upstream tip"
+    );
+    let grit_topic = grit_merge.parents[1];
+    let git_topic = git_merge.parents[1];
+    let grit_topic_commit =
+        parse_commit(&grit.odb().read(&grit_topic).expect("read").data).expect("parse grit topic");
+    let git_topic_commit =
+        parse_commit(&open_grit(wt_git).odb().read(&git_topic).expect("read").data)
+            .expect("parse git topic");
+    assert_eq!(
+        grit_topic_commit.parents[0], onto,
+        "topic reparented onto main"
+    );
+    assert_eq!(grit_topic_commit.message.trim(), "topic 1");
+    assert_eq!(grit_topic_commit.tree, git_topic_commit.tree);
+    assert_git_fsck_strict(wt_g);
+    assert_git_fsck_strict(wt_git);
+}
+
+fn init_multi_commit_topic_merge(wt: &std::path::Path) -> ObjectId {
+    commit_file(wt, "base.txt", "base\n", "base");
+    git(wt, &["switch", "-qc", "feat", "main"]);
+    git(wt, &["switch", "-qc", "topic"]);
+    commit_file(wt, "t1.txt", "1\n", "topic 1");
+    commit_file(wt, "t2.txt", "2\n", "topic 2");
+    let topic2 = git_rev_parse(wt, "HEAD");
+    git(wt, &["switch", "-q", "feat"]);
+    git(
+        wt,
+        &["merge", "-q", "--no-ff", "-m", "Merge topic", "topic"],
+    );
+    git(wt, &["branch", "-D", "topic"]);
+    git(wt, &["switch", "-q", "main"]);
+    commit_file(wt, "u.txt", "u\n", "upstream");
+    git(wt, &["switch", "-q", "feat"]);
+    topic2
+}
+
+#[test]
+fn rebase_multi_commit_boundary_topic_reparents_root_issue_2321() {
+    let grit_repo = HistoryRepo::init();
+    let git_repo = HistoryRepo::init();
+    let wt_g = grit_repo.worktree();
+    let wt_git = git_repo.worktree();
+    git(wt_g, &["config", "grit.changeIds", "false"]);
+    git(wt_git, &["config", "grit.changeIds", "false"]);
+    let old_topic2 = init_multi_commit_topic_merge(wt_g);
+    init_multi_commit_topic_merge(wt_git);
+    let old_topic1 = git_rev_parse(wt_g, &format!("{old_topic2}~1"));
+
+    let fork = git_rev_parse(wt_g, "main~1");
+    let onto = git_rev_parse(wt_g, "main");
+    let tip = git_rev_parse(wt_g, "feat");
+    let fork_git = git_rev_parse(wt_git, "main~1");
+    let onto_git = git_rev_parse(wt_git, "main");
+
+    let grit = open_grit(wt_g);
+    let opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, false);
+    match plan_rebase(&grit, &rebase_request(fork, Some(onto), tip), &opts).expect("plan") {
+        RebasePlan::UpToDate => panic!("must not be up to date"),
+        RebasePlan::Conflict { .. } => panic!("unexpected conflict"),
+        RebasePlan::Plan(plan) => assert_eq!(plan.commits.len(), 3, "topic1, topic2, merge"),
+    }
+
+    plan_apply(&grit, rebase_request(fork, Some(onto), tip), &opts);
+
+    let rebase = std::process::Command::new("git")
+        .current_dir(wt_git)
+        .args([
+            "rebase",
+            "--rebase-merges",
+            "--onto",
+            &onto_git.to_hex(),
+            &fork_git.to_hex(),
+            "feat",
+        ])
+        .env("GIT_AUTHOR_NAME", "Refs Harness Author")
+        .env("GIT_AUTHOR_EMAIL", "refs-harness@example.com")
+        .env("GIT_COMMITTER_NAME", "Refs Harness Author")
+        .env("GIT_COMMITTER_EMAIL", "refs-harness@example.com")
+        .env("GIT_COMMITTER_DATE", "1700001000 +0000")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git rebase");
+    assert!(rebase.success(), "git rebase --rebase-merges failed");
+
+    let grit_tip = git_rev_parse(wt_g, "feat");
+    let git_tip = git_rev_parse(wt_git, "feat");
+    let grit_merge =
+        parse_commit(&grit.odb().read(&grit_tip).expect("read").data).expect("parse grit tip");
+    let git_merge = parse_commit(&open_grit(wt_git).odb().read(&git_tip).expect("read").data)
+        .expect("parse git tip");
+    assert_eq!(grit_merge.tree, git_merge.tree);
+    let grit_topic2 = grit_merge.parents[1];
+    let git_topic2 = git_merge.parents[1];
+    assert_ne!(grit_topic2, old_topic2, "topic2 must be rewritten");
+    assert_ne!(git_topic2, old_topic2);
+    let grit_topic2_commit =
+        parse_commit(&grit.odb().read(&grit_topic2).expect("read").data).expect("parse");
+    let git_topic2_commit = parse_commit(
+        &open_grit(wt_git)
+            .odb()
+            .read(&git_topic2)
+            .expect("read")
+            .data,
+    )
+    .expect("parse");
+    let grit_topic1 = grit_topic2_commit.parents[0];
+    let git_topic1 = git_topic2_commit.parents[0];
+    assert_ne!(grit_topic1, old_topic1, "topic1 must be rewritten");
+    assert_ne!(git_topic1, old_topic1);
+    let grit_topic1_commit =
+        parse_commit(&grit.odb().read(&grit_topic1).expect("read").data).expect("parse");
+    let git_topic1_commit = parse_commit(
+        &open_grit(wt_git)
+            .odb()
+            .read(&git_topic1)
+            .expect("read")
+            .data,
+    )
+    .expect("parse");
+    assert_eq!(
+        grit_topic1_commit.parents[0], onto,
+        "topic root parent is upstream tip"
+    );
+    assert_eq!(git_topic1_commit.parents[0], onto_git);
+    assert_eq!(grit_topic2_commit.tree, git_topic2_commit.tree);
+    assert_git_fsck_strict(wt_g);
+    assert_git_fsck_strict(wt_git);
+}
+
+#[test]
+fn rebase_chain_of_merge_only_integration_branches_replays_issue_2321() {
+    let grit_repo = HistoryRepo::init();
+    let git_repo = HistoryRepo::init();
+    let wt_g = grit_repo.worktree();
+    let wt_git = git_repo.worktree();
+    git(wt_g, &["config", "grit.changeIds", "false"]);
+    git(wt_git, &["config", "grit.changeIds", "false"]);
+    for wt in [wt_g, wt_git] {
+        commit_file(wt, "base.txt", "base\n", "base");
+        git(wt, &["switch", "-qc", "feat", "main"]);
+        for (topic, file, msg) in [
+            ("topic1", "t1.txt", "topic 1"),
+            ("topic2", "t2.txt", "topic 2"),
+            ("topic3", "t3.txt", "topic 3"),
+        ] {
+            git(wt, &["switch", "-qc", topic]);
+            commit_file(wt, file, "x\n", msg);
+            git(wt, &["switch", "-q", "feat"]);
+            git(
+                wt,
+                &[
+                    "merge",
+                    "-q",
+                    "--no-ff",
+                    "-m",
+                    &format!("Merge {topic}"),
+                    topic,
+                ],
+            );
+            git(wt, &["branch", "-D", topic]);
+        }
+        git(wt, &["switch", "-q", "main"]);
+        commit_file(wt, "u.txt", "u\n", "upstream");
+        git(wt, &["switch", "-q", "feat"]);
+    }
+
+    let fork = git_rev_parse(wt_g, "main~1");
+    let onto = git_rev_parse(wt_g, "main");
+    let tip = git_rev_parse(wt_g, "feat");
+    let fork_git = git_rev_parse(wt_git, "main~1");
+    let onto_git = git_rev_parse(wt_git, "main");
+
+    let grit = open_grit(wt_g);
+    let opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, false);
+    match plan_rebase(&grit, &rebase_request(fork, Some(onto), tip), &opts).expect("plan") {
+        RebasePlan::UpToDate => panic!("merge-only chain must not be up to date"),
+        RebasePlan::Conflict { .. } => panic!("unexpected conflict"),
+        RebasePlan::Plan(plan) => assert_eq!(plan.commits.len(), 6, "3 topics + 3 merges"),
+    }
+    plan_apply(&grit, rebase_request(fork, Some(onto), tip), &opts);
+
+    let rebase = std::process::Command::new("git")
+        .current_dir(wt_git)
+        .args([
+            "rebase",
+            "--rebase-merges",
+            "--onto",
+            &onto_git.to_hex(),
+            &fork_git.to_hex(),
+            "feat",
+        ])
+        .env("GIT_AUTHOR_NAME", "Refs Harness Author")
+        .env("GIT_AUTHOR_EMAIL", "refs-harness@example.com")
+        .env("GIT_COMMITTER_NAME", "Refs Harness Author")
+        .env("GIT_COMMITTER_EMAIL", "refs-harness@example.com")
+        .env("GIT_COMMITTER_DATE", "1700001000 +0000")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git rebase");
+    assert!(rebase.success(), "git rebase --rebase-merges failed");
+
+    let grit_tip = git_rev_parse(wt_g, "feat");
+    let git_tip = git_rev_parse(wt_git, "feat");
+    assert_ne!(grit_tip, tip, "feat must move");
+    let grit_merge =
+        parse_commit(&grit.odb().read(&grit_tip).expect("read").data).expect("parse grit tip");
+    let git_merge = parse_commit(&open_grit(wt_git).odb().read(&git_tip).expect("read").data)
+        .expect("parse git tip");
+    assert_eq!(grit_merge.parents.len(), git_merge.parents.len());
+    assert_eq!(grit_merge.tree, git_merge.tree);
+    assert_git_fsck_strict(wt_g);
+    assert_git_fsck_strict(wt_git);
+}
+
 /// The fixture from issue #2182: `feature` (X, Y) with `mid` at X and `backup` at Y, while
 /// `main` gained M. `feature` is checked out.
 fn init_backup_fixture(wt: &std::path::Path) {

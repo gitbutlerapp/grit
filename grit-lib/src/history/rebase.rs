@@ -91,8 +91,8 @@ pub struct RebaseOntoOptions {
     /// of its own commits and ends on top of the onto commit. All tips are chained into that one
     /// line, so pass a single tip. When `false`, merges are replayed as merges (like
     /// `git rebase --rebase-merges`): only the first-parent chain from each tip to the fork
-    /// is reparented onto `onto`; commits on merged side branches keep their original parent
-    /// until mapping moves it.
+    /// is reparented onto `onto`; a side branch that forked at the rebase boundary is replayed
+    /// onto the new base, while one that forked inside the range follows its rewritten parent.
     pub flatten_leaf_merges: bool,
     /// Auto-resolve replay conflicts the same way as `git rebase -X ours|theirs`.
     ///
@@ -433,7 +433,13 @@ pub(crate) fn build_rebase_rewrite_inputs(
         merge_preserving_rebase_edits(repo, fork, onto, tips, &range, &skip_map)?
     };
 
-    let replay_order = extend_rebase_replay_order(repo, fork, &range, &opts.rewrite, &skip_map)?;
+    let mut replay_order =
+        extend_rebase_replay_order(repo, fork, &range, &opts.rewrite, &skip_map)?;
+    if !opts.flatten_leaf_merges {
+        let range_set: HashSet<ObjectId> = range.iter().copied().collect();
+        let mainline = mainline_commits_in_range(repo, fork, tips, &range_set)?;
+        replay_order = reorder_side_branches_before_mainline(&mainline, &replay_order);
+    }
     Ok((edits, replay_order, range))
 }
 
@@ -474,9 +480,11 @@ fn linear_rebase_edits(
     Ok(edits)
 }
 
-/// Edits that replay `range` onto `onto` keeping its shape: only the first-parent chain from
-/// each tip back to `fork` is reparented onto `onto`; side branches merged in keep their
-/// original parent until mapping moves it, and merge commits are replayed with two parents.
+/// Edits that replay `range` onto `onto` keeping its shape: the first-parent chain from each
+/// tip back to `fork` is reparented onto `onto` when its first parent is the fork or outside
+/// the range (even if other merge parents are still in the range); side branches that forked
+/// at the boundary (first parent is the fork) are reparented onto `onto`, and merge commits are
+/// replayed with two parents.
 ///
 /// A commit whose patch is already in `fork..onto` is skipped: what follows it continues from
 /// where the commit itself would have been replayed onto, never from the upstream equivalent.
@@ -493,13 +501,12 @@ fn merge_preserving_rebase_edits(
     let mut edits = HistoryEdits::new();
     for &commit in range {
         let parents = commit_parents(repo, commit)?;
-        let is_local_root = parents
-            .iter()
-            .all(|parent| *parent == fork || !range_set.contains(parent));
-        let reparent_onto = if is_local_root && mainline.contains(&commit) {
-            Some(onto)
-        } else {
-            None
+        let first_parent = parents.first().copied();
+        let reparent_onto = match first_parent {
+            Some(fp) if mainline.contains(&commit) && fp == fork => Some(onto),
+            Some(fp) if mainline.contains(&commit) && !range_set.contains(&fp) => Some(onto),
+            Some(fp) if !mainline.contains(&commit) && fp == fork => Some(onto),
+            _ => None,
         };
         if let Some(&existing) = skip_map.get(&commit) {
             let parent = reparent_onto.or(parents.first().copied()).unwrap_or(onto);
@@ -511,6 +518,25 @@ fn merge_preserving_rebase_edits(
         }
     }
     Ok(edits)
+}
+
+/// Replay merged side branches before mainline commits, matching `git rebase --rebase-merges`
+/// (topological order alone can pick a parallel mainline root before its merged topic).
+fn reorder_side_branches_before_mainline(
+    mainline: &HashSet<ObjectId>,
+    replay_order: &[ObjectId],
+) -> Vec<ObjectId> {
+    let side: Vec<ObjectId> = replay_order
+        .iter()
+        .copied()
+        .filter(|commit| !mainline.contains(commit))
+        .collect();
+    let mainline_part: Vec<ObjectId> = replay_order
+        .iter()
+        .copied()
+        .filter(|commit| mainline.contains(commit))
+        .collect();
+    side.into_iter().chain(mainline_part).collect()
 }
 
 /// First-parent commits from each rebase tip back to `fork` (exclusive).

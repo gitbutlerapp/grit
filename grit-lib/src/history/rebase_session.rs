@@ -31,7 +31,10 @@ use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
 use super::apply::{apply_rewrite, log_head_move};
 use super::error::HistoryError;
 use super::last::{write_history_last, HistoryLastRecord};
-use super::plan::{commit_parents, plan_rewrite_with_order_resumable_seeded, ResumablePlanOutcome};
+use super::plan::{
+    commit_parents, plan_rewrite_with_order_resumable_seeded, write_rebase_staged_resolution,
+    ResumablePlanOutcome,
+};
 use super::rebase::{
     commits_in_rebase_range, plan_rebase_resumable, PreRebase, RebaseOntoOptions, RebasePlan,
     RebaseRequest,
@@ -516,12 +519,18 @@ fn advance_after_user_resolution_commit(
             .map_err(RebaseSessionError::from)?,
         reused: false,
     });
+    let resume_order: Vec<ObjectId> = replay_order_for_resume(state, current)
+        .into_iter()
+        .filter(|commit| *commit != current)
+        .collect();
+    let mut edits = state.edits.clone();
+    edits.retain(|commit, _| resume_order.contains(commit));
     let rewrite = replan_rewrite_options(state);
     let outcome = plan_rewrite_with_order_resumable_seeded(
         repo,
-        &state.edits,
+        &edits,
         &rewrite,
-        Some(&state.replay_order),
+        Some(&resume_order),
         state.flatten_leaf_merges.then_some(state.onto),
         state.rebase.favor,
         Some((mapping, rewritten)),
@@ -572,9 +581,8 @@ pub fn continue_rebase(
         return Err(RebaseSessionError::UnmergedPaths);
     }
     let current = state
-        .remaining
-        .first()
-        .copied()
+        .stopped_commit
+        .or_else(|| state.remaining.first().copied())
         .ok_or(RebaseSessionError::NoRebaseInProgress)?;
     let new_tree = {
         let mut index = repo.load_index()?;
@@ -612,6 +620,28 @@ pub fn continue_rebase(
         mapped
     };
 
+    // Merge-preserving replay with side branches before mainline needs the resolution
+    // recorded as a real commit before resuming; a single-commit stop can plan the staged
+    // tree directly (matches the linear `git rebase --continue` path).
+    if state.remaining.len() > 1 {
+        let stopped_head = stopped_head_for_continue(&state, repo)?;
+        if head_oid != stopped_head {
+            return Err(RebaseSessionError::ResolutionHeadChanged {
+                expected: stopped_head,
+            });
+        }
+        let resolved =
+            write_rebase_staged_resolution(repo, &state.rewrite, current, new_tree, &parents)
+                .map_err(RebaseSessionError::from)?;
+        refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &resolved)
+            .map_err(map_lib)?;
+        ensure_worktree_clean_for_rebase_exec(repo).map_err(map_lib)?;
+        return advance_after_user_resolution_commit(
+            repo, &state, opts, current, resolved, progress, cancel,
+        );
+    }
+
+    let resume_order = replay_order_for_resume(&state, current);
     let mut edits = state.edits.clone();
     edits.insert(
         current,
@@ -622,6 +652,7 @@ pub fn continue_rebase(
             parents: Some(parents),
         },
     );
+    edits.retain(|commit, _| resume_order.contains(commit));
 
     let seed = (state.mapping.clone(), state.rewritten.clone());
     let rewrite = replan_rewrite_options(&state);
@@ -629,7 +660,7 @@ pub fn continue_rebase(
         repo,
         &edits,
         &rewrite,
-        Some(&state.replay_order),
+        Some(&resume_order),
         state.flatten_leaf_merges.then_some(state.onto),
         state.rebase.favor,
         Some(seed),
@@ -689,12 +720,20 @@ pub fn skip_rebase(
         reused: false,
     });
 
+    let resume_order: Vec<ObjectId> = state
+        .remaining
+        .iter()
+        .copied()
+        .filter(|c| *c != current)
+        .collect();
+    let mut edits = state.edits.clone();
+    edits.retain(|commit, _| resume_order.contains(commit));
     let rewrite = replan_rewrite_options(&state);
     let outcome = plan_rewrite_with_order_resumable_seeded(
         repo,
-        &state.edits,
+        &edits,
         &rewrite,
-        Some(&state.replay_order),
+        Some(&resume_order),
         state.flatten_leaf_merges.then_some(state.onto),
         state.rebase.favor,
         Some((mapping, rewritten)),
@@ -851,6 +890,9 @@ struct PersistedRebaseState {
     /// Detached `HEAD` at the conflict stop (`conflict.replayed_parent`).
     #[serde(default)]
     stopped_head: Option<String>,
+    /// Original commit being replayed when the rebase stopped (`partial.conflict.commit`).
+    #[serde(default)]
+    stopped_commit: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -995,6 +1037,25 @@ fn mapping_from_persist(
         .collect()
 }
 
+/// Commits still to replay when resuming after a stop (not the full initial replay order).
+fn replay_order_for_resume(state: &LoadedState, current: ObjectId) -> Vec<ObjectId> {
+    if let Some(pos) = state.replay_order.iter().position(|c| *c == current) {
+        return state.replay_order[pos..].to_vec();
+    }
+    let mut order = if state.remaining.is_empty() {
+        state.replay_order.clone()
+    } else {
+        state.remaining.clone()
+    };
+    if !order.contains(&current) {
+        order.insert(0, current);
+    } else if order.first() != Some(&current) {
+        order.retain(|c| *c != current);
+        order.insert(0, current);
+    }
+    order
+}
+
 #[allow(clippy::too_many_arguments)]
 fn state_from_partial(
     partial: &super::plan::PartialRewritePlan,
@@ -1006,18 +1067,18 @@ fn state_from_partial(
     effective_onto: ObjectId,
     fork: ObjectId,
 ) -> PersistedRebaseState {
-    let done: Vec<ObjectId> = partial
+    let conflict = partial.conflict.commit;
+    let stop_idx = partial
         .commits_to_replay
+        .iter()
+        .position(|c| *c == conflict)
+        .unwrap_or(0);
+    let done: Vec<ObjectId> = partial.commits_to_replay[..stop_idx]
         .iter()
         .copied()
         .filter(|c| partial.mapping.contains_key(c))
         .collect();
-    let remaining: Vec<ObjectId> = partial
-        .commits_to_replay
-        .iter()
-        .copied()
-        .filter(|c| !partial.mapping.contains_key(c))
-        .collect();
+    let remaining: Vec<ObjectId> = partial.commits_to_replay[stop_idx..].to_vec();
     PersistedRebaseState {
         mapping: mapping_to_persist(&partial.mapping),
         rewritten: partial
@@ -1049,6 +1110,7 @@ fn state_from_partial(
             .map(|(n, o)| (n.clone(), oid_hex(o)))
             .collect(),
         stopped_head: None,
+        stopped_commit: Some(oid_hex(&conflict)),
     }
 }
 
@@ -1068,6 +1130,7 @@ struct LoadedState {
     flatten_leaf_merges: bool,
     scoped_refs: Vec<(String, ObjectId)>,
     stopped_head: Option<ObjectId>,
+    stopped_commit: Option<ObjectId>,
 }
 
 fn load_persisted_state(git_dir: &Path) -> Result<LoadedState, RebaseSessionError> {
@@ -1121,6 +1184,11 @@ fn load_persisted_state(git_dir: &Path) -> Result<LoadedState, RebaseSessionErro
             .map(|(name, hex)| parse_oid(hex).map(|oid| (name.clone(), oid)))
             .collect::<Result<_, _>>()?,
         stopped_head: parsed.stopped_head.as_deref().map(parse_oid).transpose()?,
+        stopped_commit: parsed
+            .stopped_commit
+            .as_deref()
+            .map(parse_oid)
+            .transpose()?,
     })
 }
 
