@@ -59,6 +59,8 @@ mod blame_range_memory;
 #[cfg(feature = "full-tests")]
 #[path = "blame_stored_path_cli.rs"]
 mod blame_stored_path_cli;
+#[path = "blame_subdir_cli.rs"]
+mod blame_subdir_cli;
 #[cfg(feature = "full-tests")]
 #[path = "blame_whitespace_cli.rs"]
 mod blame_whitespace_cli;

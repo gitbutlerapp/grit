@@ -5,8 +5,10 @@ use std::process::Command;
 
 use grit_lib::blame::{blame_file, BlameOptions};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
+use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::rev_parse_error::RevParseError;
 
 fn git_env(cmd: &mut Command) {
     cmd.env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -243,7 +245,7 @@ fn build_blame_fixture() -> (tempfile::TempDir, Repository, String) {
 }
 
 #[test]
-fn blame_from_subdirectory_cwd_matches_git() {
+fn blame_from_subdirectory_cwd_is_repository_relative() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     git_run(root, &["init", "-q", "-b", "main"]);
@@ -264,7 +266,15 @@ fn blame_from_subdirectory_cwd_matches_git() {
     opts.environment = env;
     let repo = Repository::discover(Some(root), &opts).expect("open grit repo from subdir cwd");
 
-    assert_blame_matches(&repo, &sub, "f.txt", None, None);
+    assert_blame_matches(&repo, root, "sub/f.txt", None, None);
+
+    let err = blame_file(&repo, "f.txt", &BlameOptions::default()).unwrap_err();
+    match err {
+        Error::RevParse(RevParseError::PathNotInRevision { path, .. }) => {
+            assert_eq!(path, "f.txt");
+        }
+        other => panic!("expected PathNotInRevision, got {other:?}"),
+    }
 }
 
 #[test]

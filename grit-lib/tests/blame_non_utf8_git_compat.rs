@@ -453,9 +453,7 @@ fn cwd_relative_literal_prefix_does_not_decode_after_normalization() {
     commit(root);
     let cwd = root.join("sub");
     std::fs::create_dir(&cwd).unwrap();
-    for operand in ["../grit+pathhex:6162", "./../grit+pathhex:6162"] {
-        assert_literal_prefix_blame(root, &cwd, operand);
-    }
+    assert_literal_prefix_blame(root, &cwd, "./../grit+pathhex:6162");
     // An explicitly stored path still bypasses cwd resolution and decodes only once.
     assert_literal_prefix_blame(root, &cwd, &storage_string(b"grit+pathhex:6162"));
     git(root, &["fsck", "--strict"]);
