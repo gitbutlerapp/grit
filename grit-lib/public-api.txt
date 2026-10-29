@@ -26478,6 +26478,8 @@ pub grit_lib::revwalk::history::RebaseSessionError::NoRebaseInProgress
 pub grit_lib::revwalk::history::RebaseSessionError::NotOnBranch
 pub grit_lib::revwalk::history::RebaseSessionError::NothingToCommit
 pub grit_lib::revwalk::history::RebaseSessionError::RebaseAlreadyInProgress
+pub grit_lib::revwalk::history::RebaseSessionError::ResolutionHeadChanged
+pub grit_lib::revwalk::history::RebaseSessionError::ResolutionHeadChanged::expected: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::RebaseSessionError::StaleExecPlan
 pub grit_lib::revwalk::history::RebaseSessionError::StaleExecPlan::actual: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::revwalk::history::RebaseSessionError::StaleExecPlan::expected: grit_lib::objects::ObjectId
