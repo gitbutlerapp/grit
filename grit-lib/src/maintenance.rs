@@ -27,7 +27,7 @@ use crate::commit_graph_write::{
     collect_reachable_commit_oids_for_repository, load_commit_graph_commit_info,
     remove_commit_graph_chain_dir, remove_commit_graph_files, BloomWriteStats,
 };
-use crate::config::ConfigSet;
+use crate::config::{canonical_key, parse_bool, ConfigSet};
 use crate::diff::bloom::BloomFilterSettings;
 use crate::environment::Environment;
 use crate::error::{ConfigError, Error, Result};
@@ -1206,11 +1206,54 @@ fn apply_gc_prune_policy_to_repack(repack: &mut RepackOptions, policy: &GcLooseP
     }
 }
 
-fn gc_repack_writes_bitmap(repo: &Repository, config: &ConfigSet) -> bool {
-    if let Some(Ok(v)) = config.get_bool("repack.writeBitmaps") {
-        return v;
+fn config_bool_or_error(config: &ConfigSet, key: &str) -> Result<Option<bool>> {
+    match config.get_bool(key) {
+        None => Ok(None),
+        Some(Ok(v)) => Ok(Some(v)),
+        Some(Err(e)) => Err(Error::Config(ConfigError::Other(format!(
+            "bad config value for '{key}': {e}"
+        )))),
     }
-    repo.work_tree().is_none()
+}
+
+/// Last `repack.writeBitmaps` or `pack.writeBitmaps` entry in load order (Git synonym).
+fn gc_repack_writes_bitmap(repo: &Repository, config: &ConfigSet) -> Result<bool> {
+    let repack_key = canonical_key("repack.writeBitmaps").ok();
+    let pack_key = canonical_key("pack.writeBitmaps").ok();
+    let mut last: Option<bool> = None;
+    for entry in config.entries() {
+        let key = entry.key.as_str();
+        if repack_key.as_deref() == Some(key) || pack_key.as_deref() == Some(key) {
+            let raw = entry.value.as_deref().unwrap_or("true").trim().to_owned();
+            last = Some(parse_bool(&raw).map_err(|_| {
+                Error::Config(ConfigError::Other(format!(
+                    "bad config value '{raw}' for '{key}'"
+                )))
+            })?);
+        }
+    }
+    Ok(last.unwrap_or_else(|| repo.work_tree().is_none()))
+}
+
+fn gc_should_pack_refs(repo: &Repository, config: &ConfigSet) -> Result<bool> {
+    let Some(spec) = config.get("gc.packRefs") else {
+        return Ok(true);
+    };
+    if spec.eq_ignore_ascii_case("notbare") {
+        return Ok(repo.work_tree().is_some());
+    }
+    parse_bool(&spec).map_err(|e| {
+        Error::Config(ConfigError::Other(format!(
+            "bad config value '{spec}' for 'gc.packRefs': {e}"
+        )))
+    })
+}
+
+fn gc_should_write_commit_graph(config: &ConfigSet) -> Result<bool> {
+    if config_bool_or_error(config, "gc.writeCommitGraph")? == Some(false) {
+        return Ok(false);
+    }
+    Ok(config_bool_or_error(config, "core.commitGraph")? != Some(false))
 }
 
 /// Loose objects reachable from the maintenance roots: what Git's incremental `repack -d`
@@ -1757,7 +1800,7 @@ fn gc_locked(repo: &Repository, opts: &GcOptions, now: i64) -> Result<GcStats> {
     let prune_policy = gc_loose_prune_policy(&cfg, now)?;
     let dry_run = opts.repack.dry_run;
 
-    if opts.pack_refs && !dry_run {
+    if opts.pack_refs && gc_should_pack_refs(repo, &cfg)? && !dry_run {
         let start = Instant::now();
         stats.pack_refs = Some(pack_refs(repo, &PackRefsOptions::with_all(true))?);
         stats.phase_timings.pack_refs_ms = duration_ms(start.elapsed());
@@ -1778,7 +1821,7 @@ fn gc_locked(repo: &Repository, opts: &GcOptions, now: i64) -> Result<GcStats> {
     // Incremental runs skip bitmaps, as Git's `gc --auto` does: a bitmap covers the whole
     // object graph and costs far more than packing the loose objects.
     if !repack_opts.write_bitmap && !repack_opts.incremental {
-        repack_opts.write_bitmap = gc_repack_writes_bitmap(repo, &cfg);
+        repack_opts.write_bitmap = gc_repack_writes_bitmap(repo, &cfg)?;
     }
     let repack_start = Instant::now();
     stats.repack = repack_all(repo, &repack_opts)?;
@@ -1798,7 +1841,7 @@ fn gc_locked(repo: &Repository, opts: &GcOptions, now: i64) -> Result<GcStats> {
         kept: stats.repack.unreachable_loose_kept,
     };
 
-    if opts.write_commit_graph {
+    if opts.write_commit_graph && gc_should_write_commit_graph(&cfg)? {
         let start = Instant::now();
         stats.commit_graph = Some(write_commit_graph(
             repo,

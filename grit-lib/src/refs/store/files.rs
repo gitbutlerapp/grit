@@ -2939,8 +2939,12 @@ mod tests {
             )
         );
         assert!(
-            !path.join("refs/remotes").exists(),
-            "emptied dirs are pruned"
+            path.join("refs/remotes").is_dir(),
+            "refs/remotes/ namespace kept"
+        );
+        assert!(
+            !path.join("refs/remotes/o").exists(),
+            "emptied child dirs are pruned"
         );
         assert!(!path.join("packed-refs.lock").exists());
         assert!(path.join("refs/heads").is_dir());

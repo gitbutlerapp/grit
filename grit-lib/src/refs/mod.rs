@@ -2550,12 +2550,19 @@ pub(crate) fn prune_empty_loose_ref_parents(storage_dir: &Path, ref_path: &Path)
 
 /// Remove `dir` and then its parents while they hold no files, stopping at `refs/`.
 ///
-/// `refs/` itself is never removed: Git does not recognize a repository without it.
+/// `refs/` itself and its direct children (`refs/heads`, `refs/tags`, …) are never
+/// removed: Git keeps those namespace directories even when empty.
 pub(crate) fn prune_empty_ref_dirs(storage_dir: &Path, dir: &Path) {
     let refs_root = storage_dir.join("refs");
     let mut current = Some(dir);
     while let Some(dir) = current {
         if dir == refs_root.as_path() || !dir.starts_with(&refs_root) {
+            break;
+        }
+        if dir
+            .parent()
+            .is_some_and(|parent| parent == refs_root.as_path())
+        {
             break;
         }
         if dir_tree_has_files(dir) {
@@ -6690,7 +6697,9 @@ mod pack_refs_tests {
             }],
         )
         .expect("write packed-refs");
-        assert!(!git_dir.join("refs/heads").exists());
+        assert!(!git_dir.join("refs/heads/topic/a").exists());
+        assert!(!git_dir.join("refs/heads/topic").exists());
+        assert!(git_dir.join("refs/heads").is_dir(), "refs/heads/ kept");
         assert!(git_dir.join("refs").is_dir(), "refs/ must remain");
     }
 

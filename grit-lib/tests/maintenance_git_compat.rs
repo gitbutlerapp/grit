@@ -232,6 +232,10 @@ fn gc_pack_refs_packs_branch_refs() {
         0,
         "expected no loose refs/heads after gc pack-refs --all"
     );
+    assert!(
+        git_dir.join("refs/heads").is_dir(),
+        "refs/heads/ namespace kept after packing all branches"
+    );
 
     git(dir.path(), &["fsck", "--strict"]);
 }
@@ -2828,4 +2832,203 @@ fn gc_prunes_loose_duplicate_when_alternate_holds_object_in_pack() {
         "git gc prunes the local loose duplicate in this fixture"
     );
     git_fsck(grit_clone.path(), true);
+}
+
+#[test]
+fn gc_honors_write_commit_graph_false_like_git() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["gc", "--quiet"]);
+    let git_dir = dir.path().join(".git");
+    assert!(git_dir.join("objects/info/commit-graph").is_file());
+    git(dir.path(), &["config", "gc.writeCommitGraph", "false"]);
+    git(dir.path(), &["branch", "t1"]);
+
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let git_copy = TempDir::new().expect("git");
+    duplicate_repo_tree(dir.path(), git_copy.path());
+
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    git(git_copy.path(), &["gc", "--quiet"]);
+
+    assert!(
+        stats.commit_graph.is_none(),
+        "gc.writeCommitGraph=false must skip commit-graph during gc"
+    );
+    let grit_git = grit_copy.path().join(".git");
+    assert!(
+        grit_git.join("objects/info/commit-graph").is_file(),
+        "existing commit-graph must be kept"
+    );
+    assert!(
+        git_copy
+            .path()
+            .join(".git/objects/info/commit-graph")
+            .is_file(),
+        "git fixture keeps commit-graph"
+    );
+    assert_eq!(
+        count_loose_head_ref_files(&grit_git),
+        0,
+        "pack-refs still runs when only writeCommitGraph is false"
+    );
+    assert!(
+        grit_git.join("refs/heads").is_dir(),
+        "refs/heads/ kept after pack-refs"
+    );
+    git_fsck(grit_copy.path(), true);
+}
+
+#[test]
+fn gc_honors_pack_refs_false_and_notbare_like_git() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["config", "gc.packRefs", "false"]);
+    git(dir.path(), &["branch", "t1"]);
+
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    assert!(stats.pack_refs.is_none());
+    let git_dir = grit_copy.path().join(".git");
+    assert!(
+        count_loose_head_ref_files(&git_dir) >= 2,
+        "gc.packRefs=false must leave loose branch refs"
+    );
+
+    git(dir.path(), &["config", "--unset", "gc.packRefs"]);
+    git(dir.path(), &["config", "gc.packRefs", "notbare"]);
+    let notbare_copy = TempDir::new().expect("notbare");
+    duplicate_repo_tree(dir.path(), notbare_copy.path());
+    let notbare_repo =
+        Repository::discover(Some(notbare_copy.path()), &RepositoryOptions::empty()).expect("open");
+    let notbare_stats = gc(
+        &notbare_repo,
+        &GcOptions::with_reflog_policy(1_700_000_000, false),
+    )
+    .expect("gc");
+    assert!(notbare_stats.pack_refs.is_some());
+    assert_eq!(
+        count_loose_head_ref_files(&notbare_copy.path().join(".git")),
+        0
+    );
+
+    let bare = TempDir::new().expect("bare");
+    git(
+        dir.path(),
+        &["clone", "--bare", ".", bare.path().to_str().expect("bare")],
+    );
+    git(bare.path(), &["config", "gc.packRefs", "notbare"]);
+    git(
+        bare.path(),
+        &[
+            "update-ref",
+            "refs/heads/t2",
+            &git_rev_parse(bare.path(), "HEAD"),
+        ],
+    );
+    let bare_repo =
+        Repository::discover(Some(bare.path()), &RepositoryOptions::empty()).expect("open");
+    let bare_stats = gc(
+        &bare_repo,
+        &GcOptions::with_reflog_policy(1_700_000_000, false),
+    )
+    .expect("gc");
+    assert!(
+        bare_stats.pack_refs.is_none(),
+        "gc.packRefs=notbare must not pack refs in a bare repo"
+    );
+}
+
+#[test]
+fn gc_rejects_invalid_gc_pack_refs_config() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["config", "gc.packRefs", "maybe"]);
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+    let err = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).unwrap_err();
+    assert!(matches!(err, Error::Config(_)), "unexpected error: {err:?}");
+}
+
+#[test]
+fn gc_honors_pack_write_bitmaps_synonym_and_scope_order() {
+    fn pack_has_bitmap(git_dir: &Path) -> bool {
+        std::fs::read_dir(git_dir.join("objects/pack"))
+            .expect("pack dir")
+            .filter_map(|e| e.ok())
+            .any(|e| e.path().extension().is_some_and(|x| x == "bitmap"))
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    git(dir.path(), &["config", "pack.writeBitmaps", "true"]);
+
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    assert!(
+        pack_has_bitmap(&grit_copy.path().join(".git")),
+        "pack.writeBitmaps alone must enable gc repack bitmaps"
+    );
+
+    let order_base = TempDir::new().expect("order base");
+    git(order_base.path(), &["init", "-b", "main"]);
+    git(order_base.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(order_base.path(), &["repack", "-a", "-d"]);
+    let order_dir = TempDir::new().expect("order");
+    duplicate_repo_tree(order_base.path(), order_dir.path());
+    git(
+        order_dir.path(),
+        &["config", "repack.writeBitmaps", "false"],
+    );
+    git(order_dir.path(), &["config", "pack.writeBitmaps", "true"]);
+    let order_repo =
+        Repository::discover(Some(order_dir.path()), &RepositoryOptions::empty()).expect("open");
+    gc(
+        &order_repo,
+        &GcOptions::with_reflog_policy(1_700_000_000, false),
+    )
+    .expect("gc");
+    assert!(
+        pack_has_bitmap(&order_dir.path().join(".git")),
+        "later pack.writeBitmaps must override earlier repack.writeBitmaps=false"
+    );
+
+    let reverse_base = TempDir::new().expect("reverse base");
+    git(reverse_base.path(), &["init", "-b", "main"]);
+    git(
+        reverse_base.path(),
+        &["commit", "--allow-empty", "-m", "c1"],
+    );
+    git(reverse_base.path(), &["repack", "-a", "-d"]);
+    let reverse_dir = TempDir::new().expect("reverse");
+    duplicate_repo_tree(reverse_base.path(), reverse_dir.path());
+    git(reverse_dir.path(), &["config", "pack.writeBitmaps", "true"]);
+    git(
+        reverse_dir.path(),
+        &["config", "repack.writeBitmaps", "false"],
+    );
+    let reverse_repo =
+        Repository::discover(Some(reverse_dir.path()), &RepositoryOptions::empty()).expect("open");
+    gc(
+        &reverse_repo,
+        &GcOptions::with_reflog_policy(1_700_000_000, false),
+    )
+    .expect("gc");
+    assert!(
+        !pack_has_bitmap(&reverse_dir.path().join(".git")),
+        "later repack.writeBitmaps=false must override earlier pack.writeBitmaps=true"
+    );
 }
