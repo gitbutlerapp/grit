@@ -4818,6 +4818,7 @@ impl core::marker::UnsafeUnpin for grit_lib::diff::DiffFilter
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffFilter
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffFilter
 pub struct grit_lib::diff::DiffIndexToWorktreeOptions
+pub grit_lib::diff::DiffIndexToWorktreeOptions::cancel_poll: core::option::Option<alloc::rcs::arc::Arc<grit_lib::progress::StackCancelPoll>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::cancel_watch: core::option::Option<alloc::rcs::arc::Arc<core::sync::atomic::AtomicBool>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::command_runner: core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::config: core::option::Option<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
@@ -17836,6 +17837,12 @@ impl<'a> core::marker::Unpin for grit_lib::progress::WatchProgress<'a>
 impl<'a> core::marker::UnsafeUnpin for grit_lib::progress::WatchProgress<'a>
 impl<'a> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::progress::WatchProgress<'a>
 impl<'a> !core::panic::unwind_safe::UnwindSafe for grit_lib::progress::WatchProgress<'a>
+pub struct grit_lib::progress::StackCancelPoll
+impl grit_lib::progress::StackCancelPoll
+pub fn grit_lib::progress::StackCancelPoll::new(&mut grit_lib::progress::WatchProgress<'_>, alloc::rcs::arc::Arc<core::sync::atomic::AtomicBool>) -> Self
+pub unsafe fn grit_lib::progress::StackCancelPoll::poll(&self) -> grit_lib::error::Result<()>
+impl core::marker::Send for grit_lib::progress::StackCancelPoll
+impl core::marker::Sync for grit_lib::progress::StackCancelPoll
 pub trait grit_lib::progress::Cancel
 pub fn grit_lib::progress::Cancel::is_cancelled(&self) -> bool
 pub fn grit_lib::progress::Cancel::shared_watch(&self) -> core::option::Option<alloc::rcs::arc::Arc<core::sync::atomic::AtomicBool>>

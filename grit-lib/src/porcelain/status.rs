@@ -2326,6 +2326,10 @@ pub fn status(
             && i64::from(e.mtime_sec) < now_unix_seconds
     });
     crate::progress::poll_cancel_watch(&mut progress, cancel, &watch)?;
+    let cancel_poll = std::sync::Arc::new(crate::progress::StackCancelPoll::new(
+        &mut progress,
+        std::sync::Arc::clone(&watch),
+    ));
     let (unstaged_raw, index_stat_refresh_changed) =
         crate::diff::diff_index_to_worktree_with_options(
             repo.odb(),
@@ -2344,6 +2348,7 @@ pub fn status(
                 command_runner: Some(repo.command_runner()),
                 fsmonitor_query_boundary: opts.fsmonitor_query_boundary,
                 cancel_watch: Some(std::sync::Arc::clone(&watch)),
+                cancel_poll: Some(cancel_poll),
                 ..Default::default()
             },
         )?;

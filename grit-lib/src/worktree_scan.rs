@@ -21,10 +21,34 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
+
+use crate::error::{Error, Result};
+use crate::progress::{poll_watch, CANCEL_POLL_STRIDE};
 
 type DirAbsFn = dyn Fn(&[u8]) -> PathBuf + Send + Sync;
+
+fn poll_blob_scan_directory(cancel_watch: Option<&Arc<AtomicBool>>) -> Result<()> {
+    if let Some(w) = cancel_watch {
+        poll_watch(w)?;
+    }
+    Ok(())
+}
+
+fn poll_blob_scan_stride(
+    cancel_watch: Option<&Arc<AtomicBool>>,
+    counter: &mut usize,
+) -> Result<()> {
+    *counter = counter.wrapping_add(1);
+    if counter.is_multiple_of(CANCEL_POLL_STRIDE) {
+        if let Some(w) = cancel_watch {
+            poll_watch(w)?;
+        }
+    }
+    Ok(())
+}
 
 /// Whether tracked files are stat-ed through one `read_dir` of their parent (see module docs).
 /// On NTFS, one listing per parent beats a path stat per indexed file even for single-file
@@ -267,7 +291,6 @@ fn align_lookup_stat_with_index_path_windows(
 
 use std::collections::BTreeSet;
 
-use crate::error::{Error, Result};
 use crate::index::{Index, MODE_GITLINK};
 
 /// Directory-grouped blob scan plan: index entry indices grouped by parent directory.
@@ -760,6 +783,8 @@ fn collect_blob_lookups_in_directory(
     out: &mut Vec<(usize, BlobDiskLookup)>,
     sparse: BlobScanSparseMode,
     scanned: &mut usize,
+    cancel_watch: Option<&Arc<AtomicBool>>,
+    cancel_stride: &mut usize,
 ) -> Result<()> {
     let mut sink = BlobLookupCollectSink {
         out,
@@ -774,6 +799,8 @@ fn collect_blob_lookups_in_directory(
         file_abs,
         literal_paths,
         under_symlink,
+        cancel_watch,
+        cancel_stride,
         &mut |entry_index, rel_path, lookup| {
             #[cfg(not(windows))]
             let _ = rel_path;
@@ -817,6 +844,8 @@ fn for_each_blob_in_one_directory<F>(
     file_abs: &dyn Fn(&[u8]) -> PathBuf,
     literal_paths: bool,
     under_symlink: bool,
+    cancel_watch: Option<&Arc<AtomicBool>>,
+    cancel_stride: &mut usize,
     visit: &mut F,
 ) -> Result<()>
 where
@@ -824,6 +853,7 @@ where
 {
     if under_symlink {
         for &entry_index in entry_indices {
+            poll_blob_scan_stride(cancel_watch, cancel_stride)?;
             let rel_path = entry_rel_path(index, entry_index)?;
             visit(entry_index, rel_path, BlobDiskLookup::Missing)?;
         }
@@ -837,7 +867,15 @@ where
     if literal_paths && entry_indices.len() >= 8 {
         let abs_dir = dir_abs(dir);
         if let Ok(handle) = open_stat_directory(&abs_dir) {
-            return for_each_blob_at_directory(index, entry_indices, &handle, &abs_dir, visit);
+            return for_each_blob_at_directory(
+                index,
+                entry_indices,
+                &handle,
+                &abs_dir,
+                cancel_watch,
+                cancel_stride,
+                visit,
+            );
         }
     }
 
@@ -847,6 +885,7 @@ where
         // `file_abs`, which may probe and list the directory to find another spelling.
         let abs_dir = dir_abs(dir);
         for &entry_index in entry_indices {
+            poll_blob_scan_stride(cancel_watch, cancel_stride)?;
             let rel_path = entry_rel_path(index, entry_index)?;
             let file_name = entry_file_name(index, entry_index)?;
             let direct = crate::index::worktree_path_from_index_rel(&abs_dir, file_name);
@@ -872,6 +911,7 @@ where
     let abs_dir = dir_abs(dir);
     #[cfg(windows)]
     if entry_indices.len() == 1 {
+        poll_blob_scan_stride(cancel_watch, cancel_stride)?;
         let entry_index = entry_indices[0];
         let rel_path = entry_rel_path(index, entry_index)?;
         let file_name = entry_file_name(index, entry_index)?;
@@ -882,6 +922,7 @@ where
 
     let (dir_readable, on_disk) = read_directory_map(&abs_dir, entry_indices.len())?;
     for &entry_index in entry_indices {
+        poll_blob_scan_stride(cancel_watch, cancel_stride)?;
         let rel_path = entry_rel_path(index, entry_index)?;
         let file_name = entry_file_name(index, entry_index)?;
         let lookup = if !dir_readable {
@@ -995,6 +1036,8 @@ fn for_each_blob_at_directory<F>(
     entry_indices: &[usize],
     directory: &fs::File,
     abs_dir: &Path,
+    cancel_watch: Option<&Arc<AtomicBool>>,
+    cancel_stride: &mut usize,
     visit: &mut F,
 ) -> Result<()>
 where
@@ -1004,6 +1047,7 @@ where
     let count_probes = probe_counts(abs_dir);
     let mut name = Vec::new();
     for &entry_index in entry_indices {
+        poll_blob_scan_stride(cancel_watch, cancel_stride)?;
         let rel = entry_rel_path(index, entry_index)?;
         let file_name = entry_file_name(index, entry_index)?;
         if file_name.contains(&0) {
@@ -1046,6 +1090,7 @@ where
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_blob_lookups_serial(
     index: &Index,
     plan: &BlobScanPlan,
@@ -1054,13 +1099,16 @@ fn collect_blob_lookups_serial(
     file_abs: &dyn Fn(&[u8]) -> PathBuf,
     literal_paths: bool,
     sparse: BlobScanSparseMode,
+    cancel_watch: Option<&Arc<AtomicBool>>,
 ) -> Result<(Vec<(usize, BlobDiskLookup)>, usize)> {
     let mut out = match sparse {
         BlobScanSparseMode::Dense => Vec::with_capacity(plan.len()),
         _ => Vec::new(),
     };
     let mut scanned = 0usize;
+    let mut cancel_stride = 0usize;
     for (dir_idx, dir) in plan.dirs.iter().enumerate() {
+        poll_blob_scan_directory(cancel_watch)?;
         let Some(range) = plan.dir_ranges.get(dir_idx) else {
             continue;
         };
@@ -1077,6 +1125,8 @@ fn collect_blob_lookups_serial(
             &mut out,
             sparse,
             &mut scanned,
+            cancel_watch,
+            &mut cancel_stride,
         )?;
     }
     Ok((out, scanned))
@@ -1250,6 +1300,8 @@ fn collect_blob_lookups_for_index_slice<S, P>(
     sparse: BlobScanSparseMode,
     local: &mut Vec<(usize, BlobDiskLookup)>,
     scanned: &mut usize,
+    cancel_watch: Option<&Arc<AtomicBool>>,
+    cancel_stride: &mut usize,
 ) -> Result<()>
 where
     S: Fn() -> P,
@@ -1261,6 +1313,7 @@ where
     let mut has_symlink_ancestor = symlink_probe();
     let mut dir_idx = first_dir_index_at_or_after(plan, slice.start);
     while dir_idx < plan.dirs.len() {
+        poll_blob_scan_directory(cancel_watch)?;
         let Some(dir_range) = plan.dir_ranges.get(dir_idx) else {
             dir_idx += 1;
             continue;
@@ -1286,6 +1339,8 @@ where
                 local,
                 sparse,
                 scanned,
+                cancel_watch,
+                cancel_stride,
             )?;
         }
         dir_idx += 1;
@@ -1303,6 +1358,7 @@ fn preload_blob_lookups_parallel<S, P>(
     file_abs: Arc<DirAbsFn>,
     literal_paths: bool,
     sparse: BlobScanSparseMode,
+    cancel_watch: Option<Arc<AtomicBool>>,
 ) -> Result<Vec<Vec<(usize, BlobDiskLookup)>>>
 where
     S: Fn() -> P + Sync,
@@ -1315,14 +1371,31 @@ where
     let slices = partition_blob_lookup_slices(plan, threads);
     let mut batches = Vec::with_capacity(slices.len());
     std::thread::scope(|scope| {
+        let poller_done = Arc::new(AtomicBool::new(false));
+        if cancel_watch.is_some() {
+            let poller_done = Arc::clone(&poller_done);
+            let watch = cancel_watch.clone();
+            scope.spawn(move || {
+                while !poller_done.load(Ordering::Relaxed) {
+                    if let Some(w) = watch.as_ref() {
+                        if poll_watch(w).is_err() {
+                            break;
+                        }
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            });
+        }
         let mut handles = Vec::new();
         for slice in slices {
             let dir_abs = Arc::clone(&dir_abs);
             let file_abs = Arc::clone(&file_abs);
+            let cancel_watch = cancel_watch.clone();
             handles.push(
                 scope.spawn(move || -> Result<(Vec<(usize, BlobDiskLookup)>, usize)> {
                     let mut local = Vec::new();
                     let mut scanned = 0usize;
+                    let mut cancel_stride = 0usize;
                     collect_blob_lookups_for_index_slice(
                         index,
                         plan,
@@ -1334,6 +1407,8 @@ where
                         sparse,
                         &mut local,
                         &mut scanned,
+                        cancel_watch.as_ref(),
+                        &mut cancel_stride,
                     )?;
                     Ok((local, scanned))
                 }),
@@ -1346,14 +1421,19 @@ where
                     scanned_total += scanned;
                     batches.push(local);
                 }
-                Ok(Err(e)) => return Err(e),
+                Ok(Err(e)) => {
+                    poller_done.store(true, Ordering::Relaxed);
+                    return Err(e);
+                }
                 Err(_) => {
+                    poller_done.store(true, Ordering::Relaxed);
                     return Err(Error::Message(
                         "parallel blob stat worker thread panicked".to_owned(),
                     ));
                 }
             }
         }
+        poller_done.store(true, Ordering::Relaxed);
         if scanned_total != blob_count {
             return Err(Error::Message(format!(
                 "parallel blob stat preload expected {blob_count} scanned entries, got {scanned_total}"
@@ -1388,6 +1468,7 @@ where
         &file_abs,
         false,
         BlobScanSparseMode::Dense,
+        None,
     )?;
     if scanned != plan.len() {
         return Err(Error::Message(format!(
@@ -1435,6 +1516,7 @@ where
         false,
         symlink_probe,
         sparse,
+        None,
     )
 }
 
@@ -1461,6 +1543,7 @@ pub(crate) fn collect_blob_lookup_batches_with_literal_paths<S, P>(
     literal_paths: bool,
     symlink_probe: S,
     sparse: BlobScanSparseMode,
+    cancel_watch: Option<Arc<AtomicBool>>,
 ) -> Result<Vec<Vec<(usize, BlobDiskLookup)>>>
 where
     S: Fn() -> P + Sync,
@@ -1483,6 +1566,7 @@ where
             Arc::clone(&file_abs_arc),
             literal_paths,
             sparse,
+            cancel_watch,
         )?
     } else {
         let (batch, scanned) = collect_blob_lookups_serial(
@@ -1493,6 +1577,7 @@ where
             file_abs_arc.as_ref(),
             literal_paths,
             sparse,
+            cancel_watch.as_ref(),
         )?;
         if scanned != blob_count {
             return Err(Error::Message(format!(
@@ -1738,8 +1823,15 @@ mod tests {
         fs::set_permissions(root, fs::Permissions::from_mode(0o111)).unwrap();
         let handle = open_stat_directory(root).unwrap();
         let indices: Vec<_> = (0..index.entries.len()).collect();
-        let result =
-            for_each_blob_at_directory(&index, &indices, &handle, root, &mut |i, rel, lookup| {
+        let mut cancel_stride = 0usize;
+        let result = for_each_blob_at_directory(
+            &index,
+            &indices,
+            &handle,
+            root,
+            None,
+            &mut cancel_stride,
+            &mut |i, rel, lookup| {
                 let expected =
                     fs::symlink_metadata(crate::index::worktree_path_from_index_rel(root, rel));
                 match (lookup, expected) {
@@ -1759,7 +1851,8 @@ mod tests {
                     _ => panic!("relative stat disagrees with path metadata for entry {i}"),
                 }
                 Ok(())
-            });
+            },
+        );
         fs::set_permissions(root, fs::Permissions::from_mode(0o755)).unwrap();
         result.unwrap();
     }
@@ -1774,11 +1867,17 @@ mod tests {
         let mut index = Index::new();
         index.add_or_replace(entry_from_stat(&path, b"file\0suffix", oid, 0o100644).unwrap());
         let handle = open_stat_directory(tmp.path()).unwrap();
-        let error =
-            for_each_blob_at_directory(&index, &[0], &handle, tmp.path(), &mut |_, _, _| {
-                panic!("invalid name must not be truncated and visited")
-            })
-            .unwrap_err();
+        let mut cancel_stride = 0usize;
+        let error = for_each_blob_at_directory(
+            &index,
+            &[0],
+            &handle,
+            tmp.path(),
+            None,
+            &mut cancel_stride,
+            &mut |_, _, _| panic!("invalid name must not be truncated and visited"),
+        )
+        .unwrap_err();
         assert!(matches!(error, Error::Io(error) if error.kind() == io::ErrorKind::InvalidInput));
     }
 

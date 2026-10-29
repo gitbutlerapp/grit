@@ -205,6 +205,9 @@ impl Cancel for NeverCancel {
 /// How often long object walks and pack builds report [`ProgressSink::set`].
 pub(crate) const OBJECT_PROGRESS_STRIDE: u64 = 256;
 
+/// How often worktree blob stat scans and similar loops poll [`poll_watch`].
+pub(crate) const CANCEL_POLL_STRIDE: usize = 256;
+
 /// Report monotonic object progress at [`OBJECT_PROGRESS_STRIDE`] boundaries.
 ///
 /// `done` is the absolute number of objects processed so far; `last_reported` is
@@ -280,6 +283,50 @@ pub fn poll_watch(watch: &std::sync::atomic::AtomicBool) -> crate::error::Result
         Err(crate::error::Error::Cancelled)
     } else {
         Ok(())
+    }
+}
+
+/// Poll hook for long [`crate::diff::diff_index_to_worktree_with_options`] scans on the stack
+/// frame that owns `progress` and `cancel`.
+///
+/// Marked `Send` so parallel stat preload can share the same [`Arc`] with worker threads; callers
+/// must only invoke [`Self::poll`] from the thread that owns the stack locals (or accept that
+/// parallel workers rely on [`cancel_watch_arc`] alone).
+pub struct StackCancelPoll {
+    progress: usize,
+    watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+// Pointer refers to a stack-local `WatchProgress` for the duration of one diff call.
+unsafe impl Send for StackCancelPoll {}
+unsafe impl Sync for StackCancelPoll {}
+
+impl StackCancelPoll {
+    /// Capture `progress` and `watch` for [`Self::poll`].
+    #[must_use]
+    pub fn new(
+        progress: &mut WatchProgress<'_>,
+        watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        Self {
+            progress: std::ptr::from_mut(progress).addr(),
+            watch,
+        }
+    }
+
+    /// Mirror [`ProgressSink::should_cancel`] into `watch`, then [`poll_watch`].
+    ///
+    /// # Safety
+    ///
+    /// Must run on the thread that owns the captured `progress` local, and only while it is live
+    /// (during a single diff call).
+    pub unsafe fn poll(&self) -> crate::error::Result<()> {
+        let progress = &mut *(self.progress as *mut WatchProgress<'_>);
+        if progress.should_cancel() {
+            self.watch.store(true, std::sync::atomic::Ordering::Relaxed);
+            return Err(crate::error::Error::Cancelled);
+        }
+        poll_watch(&self.watch)
     }
 }
 
