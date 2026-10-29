@@ -197,9 +197,11 @@ fn serve_v0(
                     continue;
                 }
                 if !repo.odb().contains(&oid)? {
-                    if detailed && ready_to_send_pack(repo, wants, &common)? {
-                        write_line(output, &format!("ACK {} ready", oid.to_hex()))?;
+                    if detailed {
                         round_got_other = true;
+                        if ready_to_send_pack(repo, wants, &common)? {
+                            write_line(output, &format!("ACK {} ready", oid.to_hex()))?;
+                        }
                     }
                     continue;
                 }

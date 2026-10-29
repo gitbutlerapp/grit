@@ -713,6 +713,53 @@ fn upload_pack_v0_multi_ack_detailed_ready_on_absent_have_not_on_flush() {
     );
 }
 
+/// Absent have before a covering common have: Git suppresses flush `ready` (common+NAK only).
+#[test]
+fn upload_pack_v0_multi_ack_detailed_absent_have_before_common_suppresses_flush_ready() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let chain = seed_linear_commits(&repo, 4);
+    let tip = chain[3];
+    let ancestor = chain[1];
+    let absent =
+        ObjectId::from_hex("1234567890123456789012345678901234567890").expect("absent oid");
+
+    let caps = v0_multi_ack_caps();
+    let mut body = pkt_line(&format!("want {} {caps}\n", tip.to_hex()));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line(&format!("have {}", absent.to_hex())));
+    body.extend_from_slice(&pkt_line(&format!("have {}", ancestor.to_hex())));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line("done\n"));
+
+    let mut out = Vec::new();
+    upload_pack(
+        &repo,
+        &mut Cursor::new(body),
+        &mut out,
+        &mut test_serve_opts(ProtocolVersion::V0, false, false),
+    )
+    .expect("negotiation");
+    let text = String::from_utf8_lossy(&out);
+    assert!(
+        text.contains(&format!("ACK {} common", ancestor.to_hex())),
+        "expected common ACK: {text}"
+    );
+    assert!(
+        !text.contains(" ready\n"),
+        "must not emit ready on flush after absent-then-common round: {text}"
+    );
+    assert!(text.contains("NAK"), "expected NAK: {text}");
+}
+
 #[test]
 fn upload_pack_stateless_v0_multi_ack_detailed_ready_without_done() {
     let dir = tempfile::tempdir().expect("tempdir");
