@@ -425,6 +425,7 @@ mod tests {
             None,
             crate::RefStorageFormat::Files,
             crate::objects::HashAlgo::Sha1,
+            &crate::environment::Environment::empty(),
         )
         .unwrap();
         fs::write(

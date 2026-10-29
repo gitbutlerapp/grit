@@ -133,7 +133,10 @@ pub struct InitOptions {
     ///
     /// When `None`, new repositories default to SHA-1; reinit preserves the existing format.
     pub object_format: Option<HashAlgo>,
-    /// Environment used to resolve `init.defaultBranch` (and other init-time config).
+    /// Environment used to resolve `init.defaultBranch` and other init-time config, and stored
+    /// on the returned [`Repository`] when set (identity, `core.autocrlf`, `safe.directory`, and
+    /// related cascade). When `None`, init uses [`Environment::empty`] and the handle stays
+    /// hermetic like [`RepositoryOptions::empty`].
     pub environment: Option<Environment>,
 }
 
@@ -1679,6 +1682,7 @@ impl Repository {
                 options.template_dir.as_deref(),
                 options.ref_storage,
                 object_format,
+                &env,
             )?
         } else if separate_layout {
             init_repository_separate_git_dir(
@@ -1688,6 +1692,7 @@ impl Repository {
                 options.template_dir.as_deref(),
                 options.ref_storage,
                 object_format,
+                &env,
             )?
         } else {
             init_repository_with_object_format(
@@ -1697,6 +1702,7 @@ impl Repository {
                 options.template_dir.as_deref(),
                 options.ref_storage,
                 object_format,
+                &env,
             )?
         };
         Ok((
@@ -4568,6 +4574,7 @@ fn ensure_git_directory_layout(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_fresh_git_directory(
     git_dir: &Path,
     bare: bool,
@@ -4576,6 +4583,7 @@ fn write_fresh_git_directory(
     ref_storage: crate::ref_storage::RefStorageFormat,
     object_format: HashAlgo,
     skip_hooks_and_info: bool,
+    environment: &Environment,
 ) -> Result<()> {
     ensure_git_directory_layout(git_dir, bare, ref_storage, skip_hooks_and_info)?;
 
@@ -4640,11 +4648,7 @@ fn write_fresh_git_directory(
         crate::refs::store::RawRef::Symbolic(format!("refs/heads/{initial_branch}")),
     )?;
 
-    apply_init_filesystem_config(
-        git_dir,
-        InitFilesystemConfigOptions::default(),
-        &Environment::empty(),
-    )?;
+    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default(), environment)?;
 
     fs::write(
         git_dir.join("description"),
@@ -4668,6 +4672,7 @@ pub(crate) fn init_repository_separate_git_dir(
     template_dir: Option<&Path>,
     ref_storage: crate::ref_storage::RefStorageFormat,
     object_format: HashAlgo,
+    environment: &Environment,
 ) -> Result<Repository> {
     let skip_hooks_info = template_dir.is_some_and(|p| p.as_os_str().is_empty());
     fs::create_dir_all(work_tree)?;
@@ -4684,6 +4689,7 @@ pub(crate) fn init_repository_separate_git_dir(
             ref_storage,
             object_format,
             skip_hooks_info,
+            environment,
         )?;
     }
 
@@ -4698,7 +4704,7 @@ pub(crate) fn init_repository_separate_git_dir(
 
     Repository::open(
         git_dir,
-        &RepositoryOptions::empty().with_work_tree(work_tree),
+        &RepositoryOptions::with_environment(environment.clone()).with_work_tree(work_tree),
     )
 }
 
@@ -4750,6 +4756,7 @@ pub(crate) fn init_repository(
         template_dir,
         ref_storage,
         HashAlgo::Sha1,
+        &Environment::empty(),
     )
 }
 
@@ -4760,6 +4767,7 @@ pub(crate) fn init_repository_with_object_format(
     template_dir: Option<&Path>,
     ref_storage: crate::ref_storage::RefStorageFormat,
     object_format: HashAlgo,
+    environment: &Environment,
 ) -> Result<Repository> {
     let skip_hooks_info = !bare && template_dir.is_some_and(|p| p.as_os_str().is_empty());
     let git_dir = if bare {
@@ -4784,15 +4792,20 @@ pub(crate) fn init_repository_with_object_format(
             ref_storage,
             object_format,
             skip_hooks_info,
+            environment,
         )?;
     }
 
     if bare {
-        Repository::open(&git_dir, &RepositoryOptions::empty())
+        Repository::open(
+            &git_dir,
+            &RepositoryOptions::with_environment(environment.clone()),
+        )
     } else {
         Repository::open(
             &git_dir,
-            &RepositoryOptions::empty().with_work_tree(path.to_path_buf()),
+            &RepositoryOptions::with_environment(environment.clone())
+                .with_work_tree(path.to_path_buf()),
         )
     }
 }
@@ -4812,6 +4825,7 @@ pub(crate) fn init_bare_with_env_worktree(
     template_dir: Option<&Path>,
     ref_storage: crate::ref_storage::RefStorageFormat,
     object_format: HashAlgo,
+    environment: &Environment,
 ) -> Result<Repository> {
     fs::create_dir_all(git_dir)?;
     fs::create_dir_all(work_tree)?;
@@ -4827,6 +4841,7 @@ pub(crate) fn init_bare_with_env_worktree(
             ref_storage,
             object_format,
             false,
+            environment,
         )?;
     }
     let work_tree_abs = work_tree
@@ -4841,7 +4856,7 @@ pub(crate) fn init_bare_with_env_worktree(
     config.write()?;
     Repository::open(
         git_dir,
-        &RepositoryOptions::empty().with_work_tree(work_tree),
+        &RepositoryOptions::with_environment(environment.clone()).with_work_tree(work_tree),
     )
 }
 

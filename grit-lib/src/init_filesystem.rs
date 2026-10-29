@@ -26,7 +26,7 @@ fn config_bool_from_parameters(env: &Environment, key: &str) -> Option<bool> {
     let key_lower = key.to_ascii_lowercase();
     let mut last: Option<bool> = None;
     for entry in parse_config_parameters(raw) {
-        let Some((k, v)) = entry.split_once('=') else {
+        let Some((k, v)) = entry.split_once('\u{1}') else {
             continue;
         };
         if !k.trim().eq_ignore_ascii_case(&key_lower) {
@@ -169,9 +169,6 @@ pub fn apply_init_filesystem_config(
 
     let precompose_from_cmdline = precompose_from_git_config_parameters(environment).is_some();
     let ignorecase_from_cmdline = ignorecase_from_git_config_parameters(environment).is_some();
-    let filemode_from_cmdline = filemode_from_git_config_parameters(environment).is_some();
-    let symlinks_from_cmdline = symlinks_from_git_config_parameters(environment).is_some();
-
     let force_precompose_probe = opts.force_precompose_probe;
 
     let filemode = probe_trust_filemode(git_dir).unwrap_or(true);
@@ -184,14 +181,18 @@ pub fn apply_init_filesystem_config(
     let precompose_locally_set = cfg.get("core.precomposeunicode").is_some();
     let ignorecase_locally_set = cfg.get("core.ignorecase").is_some();
 
-    if !filemode_from_cmdline {
-        cfg.set("core.filemode", if filemode { "true" } else { "false" })?;
-        changed = true;
-    }
+    let filemode_value = filemode_from_git_config_parameters(environment)
+        .map(|v| if v { "true" } else { "false" })
+        .unwrap_or_else(|| if filemode { "true" } else { "false" });
+    cfg.set("core.filemode", filemode_value)?;
+    changed |= true;
 
-    if !symlinks_from_cmdline && !symlinks {
+    if let Some(from_cmdline) = symlinks_from_git_config_parameters(environment) {
+        cfg.set("core.symlinks", if from_cmdline { "true" } else { "false" })?;
+        changed |= true;
+    } else if !symlinks {
         cfg.set("core.symlinks", "false")?;
-        changed = true;
+        changed |= true;
     }
 
     if !precompose_from_cmdline && !precompose_locally_set {
@@ -199,7 +200,7 @@ pub fn apply_init_filesystem_config(
             || probe_filesystem_normalizes_nfd_to_nfc(git_dir).unwrap_or(false);
         if probe_ok {
             cfg.set("core.precomposeunicode", "true")?;
-            changed = true;
+            changed |= true;
         }
     }
 
@@ -208,7 +209,7 @@ pub fn apply_init_filesystem_config(
         && probe_filesystem_case_insensitive(git_dir).unwrap_or(false)
     {
         cfg.set("core.ignorecase", "true")?;
-        changed = true;
+        changed |= true;
     }
 
     if changed {
@@ -230,6 +231,30 @@ mod tests {
         fs::create_dir_all(&git_dir).expect("mkdir");
         fs::write(git_dir.join("config"), "[core]\n").expect("config");
         assert!(!probe_filesystem_case_insensitive(&git_dir).expect("probe"));
+    }
+
+    #[test]
+    fn apply_honors_git_config_parameters_filemode() {
+        use crate::config::environment::ConfigOverride;
+
+        let td = TempDir::new().expect("tempdir");
+        let git_dir = td.path().join(".git");
+        fs::create_dir_all(&git_dir).expect("mkdir");
+        fs::write(
+            git_dir.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n",
+        )
+        .expect("config");
+        let mut env = Environment::empty();
+        env.push_config_override(
+            &"core.filemode=false"
+                .parse::<ConfigOverride>()
+                .expect("override"),
+        );
+        apply_init_filesystem_config(&git_dir, InitFilesystemConfigOptions::default(), &env)
+            .expect("apply");
+        let text = fs::read_to_string(git_dir.join("config")).expect("read");
+        assert!(text.contains("filemode = false"), "{text}");
     }
 
     #[test]
