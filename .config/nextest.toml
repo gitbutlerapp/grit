@@ -50,5 +50,17 @@ test-group = 'grit-bench-scratch'
 filter = 'package(grit-utils) & (binary(daily_e2e) | binary(daily_remotes_e2e) | test(/^tag_tree_sha256_scenario_e2e::/))'
 slow-timeout = { period = "60s", terminate-after = 10 }
 
+# Peak-RSS test execs release grit; build it before the test runs (test-full / CI profile).
+[scripts.setup.checkout-wide-tree-rss-grit]
+command = 'scripts/nextest-checkout-wide-tree-rss-env.sh'
+
+[[profile.default.overrides]]
+filter = 'test(checkout_between_wide_trees_peak_rss_within_twice_git)'
+setup = 'checkout-wide-tree-rss-grit'
+
+[[profile.ci.overrides]]
+filter = 'test(checkout_between_wide_trees_peak_rss_within_twice_git)'
+setup = 'checkout-wide-tree-rss-grit'
+
 [profile.ci.junit]
 path = "junit.xml"

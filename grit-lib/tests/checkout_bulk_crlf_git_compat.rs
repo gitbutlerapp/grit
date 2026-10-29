@@ -10,15 +10,24 @@ use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
-const FILE_COUNT: usize = 41;
+const LF_FILE_COUNT: usize = 21;
+const CRLF_FILE_COUNT: usize = 20;
+const TOTAL_FILES: usize = LF_FILE_COUNT + CRLF_FILE_COUNT;
 
-fn init_crlf_repo(root: &Path) -> (ObjectId, ObjectId) {
+fn init_mixed_eol_repo(root: &Path) -> (ObjectId, ObjectId) {
     git(root, &["init", "-q", "-b", "main"]);
     git(root, &["config", "user.name", "Test"]);
     git(root, &["config", "user.email", "t@example.com"]);
-    fs::write(root.join(".gitattributes"), "*.crlf text eol=crlf\n").expect("attrs");
-    for i in 0..FILE_COUNT {
-        fs::write(root.join(format!("f{i}.crlf")), b"base\n").expect("base file");
+    fs::write(
+        root.join(".gitattributes"),
+        "*.txt text eol=lf\n*.crlf text eol=crlf\n",
+    )
+    .expect("attrs");
+    for i in 0..LF_FILE_COUNT {
+        fs::write(root.join(format!("f{i}.txt")), b"base\n").expect("base txt");
+    }
+    for i in 0..CRLF_FILE_COUNT {
+        fs::write(root.join(format!("f{i}.crlf")), b"base\n").expect("base crlf");
     }
     git(root, &["add", "-A"]);
     git(root, &["commit", "-qm", "base"]);
@@ -26,8 +35,11 @@ fn init_crlf_repo(root: &Path) -> (ObjectId, ObjectId) {
         ObjectId::from_hex(git(root, &["rev-parse", "main^{tree}"]).trim()).expect("main tree");
 
     git(root, &["checkout", "-q", "-b", "other"]);
-    for i in 0..FILE_COUNT {
-        fs::write(root.join(format!("f{i}.crlf")), b"other\n").expect("other file");
+    for i in 0..LF_FILE_COUNT {
+        fs::write(root.join(format!("f{i}.txt")), b"other\n").expect("other txt");
+    }
+    for i in 0..CRLF_FILE_COUNT {
+        fs::write(root.join(format!("f{i}.crlf")), b"other\n").expect("other crlf");
     }
     git(root, &["commit", "-qam", "other"]);
     let other_tree =
@@ -38,9 +50,13 @@ fn init_crlf_repo(root: &Path) -> (ObjectId, ObjectId) {
 
 #[test]
 fn bulk_checkout_applies_path_specific_eol_crlf() {
+    assert!(
+        TOTAL_FILES > 32,
+        "fixture must exceed bulk checkout threshold ({TOTAL_FILES} paths)"
+    );
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    let (main_tree, other_tree) = init_crlf_repo(root);
+    let (main_tree, other_tree) = init_mixed_eol_repo(root);
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
 
     checkout_between_trees_with_progress(
@@ -52,17 +68,27 @@ fn bulk_checkout_applies_path_specific_eol_crlf() {
     )
     .expect("grit checkout");
 
-    let git_bytes = fs::read(root.join("f0.crlf")).expect("grit file");
+    let lf_bytes = fs::read(root.join("f0.txt")).expect("grit lf file");
     assert_eq!(
-        git_bytes, b"other\r\n",
+        lf_bytes, b"other\n",
+        "bulk checkout must keep eol=lf paths on LF line endings"
+    );
+    let crlf_bytes = fs::read(root.join("f0.crlf")).expect("grit crlf file");
+    assert_eq!(
+        crlf_bytes, b"other\r\n",
         "bulk checkout must smudge eol=crlf paths to CRLF on disk"
     );
 
     git(root, &["checkout", "-q", "main"]);
     git(root, &["checkout", "-q", "other"]);
-    let reference = fs::read(root.join("f0.crlf")).expect("git file");
     assert_eq!(
-        git_bytes, reference,
+        lf_bytes,
+        fs::read(root.join("f0.txt")).expect("git lf file"),
+        "grit and git must materialize identical bytes for *.txt"
+    );
+    assert_eq!(
+        crlf_bytes,
+        fs::read(root.join("f0.crlf")).expect("git crlf file"),
         "grit and git must materialize identical bytes for *.crlf"
     );
     git(root, &["fsck", "--strict"]);

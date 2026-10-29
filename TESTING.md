@@ -36,7 +36,11 @@ start the system `git` (comparisons with Git, fixtures built with `git`) or buil
 heavy fixtures (scale, memory and benchmark-style tests, grit-bench scenarios)
 are left out of it: each crate compiles them only with its `full-tests`
 feature. `make test-full` enables that feature in every crate; CI runs it in the
-nightly **test-full** job, not on every branch.
+nightly **test-full** job, not on every branch. That target builds release
+`grit-cli` and sets **`GRIT_BIN`** for `grit-lib`'s `checkout_wide_tree_rss` test
+(fork/`wait4` peak RSS against the CLI under test). CI and local nextest runs use
+`scripts/nextest-checkout-wide-tree-rss-env.sh` (see `.config/nextest.toml`) to
+build release `grit` and export **`GRIT_BIN`** before that test.
 
 [`scripts/classify_tests.py`](scripts/classify_tests.py) decides which tests are
 full-only: a test that calls `Command::new("git")`, or a helper that does

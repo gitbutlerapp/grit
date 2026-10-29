@@ -57,10 +57,12 @@ test:
 FULL_TESTS = --features grit-lib/full-tests,grit-cli/full-tests,grit-utils/full-tests,grit-examples/full-tests,grit-protocol/full-tests,grit-http-server/full-tests,grit-test-support/full-tests
 
 test-full:
+	$(CARGO) build --release -p grit-cli
 	@if $(CARGO) nextest --version >/dev/null 2>&1; then \
-		$(CARGO) nextest run --workspace $(FULL_TESTS) && $(CARGO) test --workspace --doc $(FULL_TESTS); \
+		GRIT_BIN=$$(pwd)/target/release/grit $(CARGO) nextest run --workspace $(FULL_TESTS) && \
+		GRIT_BIN=$$(pwd)/target/release/grit $(CARGO) test --workspace --doc $(FULL_TESTS); \
 	else \
-		$(CARGO) test --workspace $(FULL_TESTS); \
+		GRIT_BIN=$$(pwd)/target/release/grit $(CARGO) test --workspace $(FULL_TESTS); \
 	fi
 
 clippy:

@@ -2,6 +2,9 @@
 //!
 //! Peak RSS is measured on the process that execs `git` or `grit` via `fork`/`wait4`,
 //! matching the review harness (not in-process library calls).
+//!
+//! Requires `GRIT_BIN` pointing at a release `grit` built from this workspace
+//! (`make test-full` and CI test-full set it after `cargo build --release -p grit-cli`).
 
 #![cfg(target_os = "linux")]
 
@@ -45,10 +48,23 @@ fn git(root: &Path, args: &[&str], input: &[u8]) -> String {
     String::from_utf8(out.stdout).expect("UTF-8 output")
 }
 
+const GRIT_BIN_ENV: &str = "GRIT_BIN";
+
 fn grit_bin() -> PathBuf {
-    std::env::var_os("CARGO_BIN_EXE_grit")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/release/grit"))
+    let path = std::env::var_os(GRIT_BIN_ENV).unwrap_or_else(|| {
+        panic!(
+            "{GRIT_BIN_ENV} must point at a release grit binary from this workspace \
+             (build with `cargo build --release -p grit-cli` before running this test)"
+        )
+    });
+    let path = PathBuf::from(path);
+    assert!(
+        path.is_file(),
+        "{}={} is not an executable file",
+        GRIT_BIN_ENV,
+        path.display()
+    );
+    path
 }
 
 fn peak_rss_for_exec(mut cmd: Command) -> i64 {
