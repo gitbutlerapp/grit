@@ -58,12 +58,8 @@ impl From<NoIndexError> for crate::error::Error {
 /// # Errors
 ///
 /// Returns [`NoIndexError::PathNotAccessible`] when either top-level path cannot be accessed.
-pub fn diff_paths(
-    a: &Path,
-    b: &Path,
-    opts: &DiffOptions,
-    stat_only: bool,
-) -> Result<Vec<FileDiff>, NoIndexError> {
+pub fn diff_paths(a: &Path, b: &Path, opts: &DiffOptions) -> Result<Vec<FileDiff>, NoIndexError> {
+    let stat_only = opts.no_index_stat_only;
     let temp = tempfile::tempdir().map_err(|e| NoIndexError::PathNotAccessible {
         path: e.to_string(),
     })?;

@@ -41,8 +41,42 @@ fn grit_name_status_line(f: &FileDiff) -> String {
 fn grit_name_status(old: &Path, new: &Path) -> Vec<String> {
     let mut opts = DiffOptions::default();
     opts.renames = RenameDetection::Off;
-    let files = diff_paths(old, new, &opts, false).expect("diff_paths");
+    let files = diff_paths(old, new, &opts).expect("diff_paths");
     files.iter().map(grit_name_status_line).collect()
+}
+
+#[test]
+fn no_index_stat_only_populates_line_stat_without_hunks() {
+    let dir = TempDir::new().expect("tempdir");
+    let a = dir.path().join("a.txt");
+    let b = dir.path().join("b.txt");
+    std::fs::write(&a, b"one\n").expect("write");
+    std::fs::write(&b, b"two\nextra\n").expect("write");
+    let opts = DiffOptions::default()
+        .with_no_index_stat_only(true)
+        .with_renames(RenameDetection::Off);
+    let files = diff_paths(&a, &b, &opts).expect("diff_paths");
+    assert_eq!(files.len(), 1);
+    assert!(files[0].hunks.is_empty());
+    let stat = files[0].line_stat.expect("line_stat");
+    assert_eq!(stat.insertions, 2);
+    assert_eq!(stat.deletions, 1);
+
+    let out = Command::new("git")
+        .args(["diff", "--no-index", "--numstat"])
+        .arg(&a)
+        .arg(&b)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git numstat");
+    let line = String::from_utf8_lossy(&out.stdout);
+    let line = line.lines().next().unwrap_or("");
+    let mut parts = line.split('\t');
+    let git_ins: usize = parts.next().unwrap_or("0").parse().unwrap_or(0);
+    let git_del: usize = parts.next().unwrap_or("0").parse().unwrap_or(0);
+    assert_eq!(stat.insertions, git_ins);
+    assert_eq!(stat.deletions, git_del);
 }
 
 #[test]
@@ -55,7 +89,7 @@ fn no_index_file_vs_file_matches_git() {
     assert_eq!(grit_name_status(&a, &b), git_name_status(&a, &b));
     let mut opts = DiffOptions::default();
     opts.renames = RenameDetection::Off;
-    let files = diff_paths(&a, &b, &opts, false).expect("diff");
+    let files = diff_paths(&a, &b, &opts).expect("diff");
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].path, b.to_string_lossy());
     assert_eq!(files[0].old_path.as_deref(), Some(a.to_str().unwrap()));
@@ -121,7 +155,7 @@ fn no_index_missing_path_is_typed_error() {
     let a = dir.path().join("missing");
     let b = dir.path().join("b.txt");
     std::fs::write(&b, b"x\n").expect("write");
-    let err = diff_paths(&a, &b, &DiffOptions::default(), false).unwrap_err();
+    let err = diff_paths(&a, &b, &DiffOptions::default()).unwrap_err();
     assert!(matches!(err, NoIndexError::PathNotAccessible { .. }));
 }
 
@@ -137,7 +171,7 @@ fn no_index_rename_detection_matches_git() {
     let git_lines = git_name_status(&a, &b);
     assert_eq!(git_lines.len(), 1);
     assert!(git_lines[0].starts_with('R'));
-    let files = diff_paths(&a, &b, &DiffOptions::default(), false).expect("diff");
+    let files = diff_paths(&a, &b, &DiffOptions::default()).expect("diff");
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].status, DiffStatus::Renamed);
     assert!(files[0].path.ends_with("/b/g") || files[0].path.ends_with("b/g"));
@@ -162,7 +196,7 @@ fn no_index_symlink_and_mode() {
     symlink("target", b.join("link")).expect("symlink");
     let mut opts = DiffOptions::default();
     opts.renames = RenameDetection::Off;
-    let files = diff_paths(&a, &b, &opts, false).expect("diff");
+    let files = diff_paths(&a, &b, &opts).expect("diff");
     assert_eq!(files.len(), 0);
     std::fs::write(a.join("run.sh"), b"#!/bin/sh\n").expect("write");
     let mut perms = std::fs::metadata(a.join("run.sh"))
@@ -172,7 +206,7 @@ fn no_index_symlink_and_mode() {
     perms.set_mode(0o755);
     std::fs::set_permissions(a.join("run.sh"), perms).expect("chmod");
     std::fs::write(b.join("run.sh"), b"#!/bin/sh\n").expect("write");
-    let files = diff_paths(&a, &b, &opts, false).expect("diff");
+    let files = diff_paths(&a, &b, &opts).expect("diff");
     let mode_only = files
         .iter()
         .find(|f| f.path.ends_with("run.sh"))
@@ -200,7 +234,7 @@ fn no_index_file_vs_root_matches_git() {
         "unexpected git stderr: {stderr}"
     );
 
-    let err = diff_paths(&manifest, Path::new("/"), &DiffOptions::default(), false).unwrap_err();
+    let err = diff_paths(&manifest, Path::new("/"), &DiffOptions::default()).unwrap_err();
     assert!(matches!(err, NoIndexError::PathNotAccessible { .. }));
     let msg = err.to_string();
     assert!(

@@ -1605,7 +1605,7 @@ mod git_xdiff {
         }
     }
 
-    thread_local! {
+    thread_local! { // hygiene: per-thread xdiff Myers scratch (class counts, K-vectors) reused across files
         static XDIFF_SCRATCH: RefCell<XdiffScratch> = const {
             RefCell::new(XdiffScratch {
                 count1: Vec::new(),
