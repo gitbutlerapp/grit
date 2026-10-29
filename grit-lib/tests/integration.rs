@@ -849,6 +849,8 @@ mod ingest_pack_into_store;
 #[cfg(feature = "full-tests")]
 #[path = "init_branch_format_git_compat.rs"]
 mod init_branch_format_git_compat;
+#[path = "init_environment_identity.rs"]
+mod init_environment_identity;
 #[path = "init_filesystem_config.rs"]
 mod init_filesystem_config;
 #[path = "init_template_precompose_probe.rs"]

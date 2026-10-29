@@ -1149,6 +1149,7 @@ mod git_path_component_tests {
             None,
             RefStorageFormat::Files,
             HashAlgo::Sha1,
+            &crate::environment::Environment::empty(),
         )
         .expect("init separate git dir");
         let gitfile = std::fs::read_to_string(work.join(".git")).expect("read gitfile");

@@ -646,6 +646,7 @@ pub fn clone(
         None,
         RefStorageFormat::Files,
         object_format,
+        &Environment::empty(),
     )
     .map_err(|e| {
         CloneError::Library(Error::Message(format!("could not initialize '{dir}': {e}")))

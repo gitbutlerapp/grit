@@ -98,6 +98,7 @@ fn separate_git_dir_and_bare_init_paths() -> crate::error::Result<()> {
         None,
         RefStorageFormat::Files,
         crate::objects::HashAlgo::Sha1,
+        &crate::environment::Environment::empty(),
     )?;
     let repo =
         RepositoryBuilder::new(RepositoryOptions::empty()).open(&separate, Some(wt.path()))?;
@@ -116,6 +117,7 @@ fn separate_git_dir_and_bare_init_paths() -> crate::error::Result<()> {
         None,
         RefStorageFormat::Files,
         crate::objects::HashAlgo::Sha1,
+        &crate::environment::Environment::empty(),
     )?;
 
     let nested = tempdir().map_err(crate::error::Error::Io)?;

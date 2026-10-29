@@ -1496,29 +1496,6 @@ fn create_commit_with_index(
         hooks_run.push(HookName::PreCommit);
     }
 
-    let tree = write_tree_update_index(repo.odb(), index, "", WriteTreeFlags::silent())?;
-    let root_files = parent_tree
-        .is_none()
-        .then(|| root_commit_files_from_index(index))
-        .flatten();
-    let commit_files = match root_files {
-        Some(files) => files,
-        None => commit_files_between_trees(repo.odb(), parent_tree.as_ref(), &tree)?,
-    };
-
-    if !req.allow_empty && !req.amend {
-        if parent_tree.is_none() && is_empty_tree_oid(repo.odb(), &tree) {
-            return Err(empty_commit_error(repo, index, req));
-        }
-        if !concluding_merge {
-            if let Some(ref old) = parent_tree {
-                if old == &tree {
-                    return Err(empty_commit_error(repo, index, req));
-                }
-            }
-        }
-    }
-
     let message_source = if req.message_from_merge {
         MessageSource::Merge
     } else if !req.message.trim().is_empty() {
@@ -1583,6 +1560,30 @@ fn create_commit_with_index(
         reuse_author_raw,
         req.amend,
     )?;
+
+    let tree = write_tree_update_index(repo.odb(), index, "", WriteTreeFlags::silent())?;
+    let root_files = parent_tree
+        .is_none()
+        .then(|| root_commit_files_from_index(index))
+        .flatten();
+    let commit_files = match root_files {
+        Some(files) => files,
+        None => commit_files_between_trees(repo.odb(), parent_tree.as_ref(), &tree)?,
+    };
+
+    if !req.allow_empty && !req.amend {
+        if parent_tree.is_none() && is_empty_tree_oid(repo.odb(), &tree) {
+            return Err(empty_commit_error(repo, index, req));
+        }
+        if !concluding_merge {
+            if let Some(ref old) = parent_tree {
+                if old == &tree {
+                    return Err(empty_commit_error(repo, index, req));
+                }
+            }
+        }
+    }
+
     let mut commit_parents = if req.amend {
         amend_parents
     } else {
@@ -2257,6 +2258,63 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, Error::NothingToCommit));
+    }
+
+    #[test]
+    fn missing_identity_does_not_write_dangling_tree() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+        let objects_before = fs::read_dir(repo.git_dir().join("objects"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .count();
+        let err = commit_worktree(
+            &repo,
+            &CommitRequest {
+                message: "first".into(),
+                ..CommitRequest::default()
+            },
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            Error::Identity(
+                crate::config::ident_resolve::IdentityError::MissingConfiguredEmail { .. }
+            )
+        ));
+        let objects_after = fs::read_dir(repo.git_dir().join("objects"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .count();
+        assert_eq!(
+            objects_before, objects_after,
+            "commit must not store objects"
+        );
+        let fsck = Command::new("git")
+            .args(["--git-dir", &repo.git_dir().to_string_lossy(), "fsck"])
+            .output()
+            .unwrap();
+        assert!(
+            fsck.status.success(),
+            "{}",
+            String::from_utf8_lossy(&fsck.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&fsck.stderr);
+        assert!(
+            !stderr.contains("dangling tree"),
+            "unexpected dangling tree: {stderr}"
+        );
     }
 
     #[test]
