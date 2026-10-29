@@ -1,7 +1,9 @@
 //! Accepting pushes (`receive-pack`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, BufWriter, Read, Write};
+
+use super::connectivity::{PushedObjects, Unconnected};
 
 use super::{
     advertised_refs, check_object_format, parse_oid, read_packet, ref_update_policy, write_flush,
@@ -213,6 +215,19 @@ pub enum RefUpdateRefusal {
     /// The new value is not in the repository or the pushed pack.
     #[error("missing necessary objects")]
     MissingObjects,
+    /// The new value is there, but an object its history reaches (below what the
+    /// repository's refs already reached) is in neither the push nor the
+    /// repository, and no promisor remote of the repository promises it. The new
+    /// value may have been in the repository before the push: objects a refused
+    /// ref leaves behind do not make its history complete. Git clients see the
+    /// same reason as for [`Self::MissingObjects`].
+    #[error("missing necessary objects")]
+    Unconnected {
+        /// The first missing object found.
+        missing: ObjectId,
+        /// The object that names it.
+        referrer: ObjectId,
+    },
     /// The branch update would discard commits (`receive.denyNonFastForwards`).
     #[error("non-fast-forward")]
     NonFastForward,
@@ -607,6 +622,14 @@ pub fn receive_pack_with_hook_cancellable(
     } else {
         None
     };
+    // What the refs reached before the push: the connectivity walk stops there.
+    let existing = if needs_pack {
+        existing_ref_values(repo)?
+    } else {
+        HashSet::new()
+    };
+    // New tips that reach a missing object: refused below.
+    let mut unconnected: HashMap<ObjectId, Unconnected> = HashMap::new();
     let unpack_error = match quarantine.as_ref() {
         Some(q) => {
             let odb = q.odb();
@@ -620,9 +643,30 @@ pub fn receive_pack_with_hook_cancellable(
                         promises.as_ref(),
                     )
                 })
-                .and_then(|indexed| match &policy.fsck_objects {
-                    Some(fsck) => check_received_objects(repo, &odb, indexed, cfg.as_ref(), fsck),
-                    None => Ok(()),
+                .and_then(|indexed| {
+                    if let Some(fsck) = &policy.fsck_objects {
+                        check_received_objects(repo, &odb, indexed.as_ref(), cfg.as_ref(), fsck)?;
+                    }
+                    // Every push, loose or packed (even empty): objects the
+                    // repository already had are not proof of a complete history.
+                    let received = match indexed {
+                        Some(received) => received,
+                        None => odb
+                            .enumerate_local_loose_objects()?
+                            .into_iter()
+                            .map(|(oid, _)| oid)
+                            .collect(),
+                    };
+                    unconnected = unconnected_tips(
+                        repo,
+                        &odb,
+                        &received,
+                        &existing,
+                        &request.commands,
+                        &client_boundaries,
+                        promises.as_ref(),
+                    )?;
+                    Ok(())
                 })
                 .err()
         }
@@ -663,6 +707,7 @@ pub fn receive_pack_with_hook_cancellable(
             policy,
             hook,
             quarantine.as_mut(),
+            &unconnected,
             &shallow,
             sideband.then_some(&mut *output),
             &mut hook_records,
@@ -946,6 +991,7 @@ fn apply_commands_with_hooks(
     policy: &ReceivePolicy,
     hook: &dyn ReceiveHook,
     quarantine: Option<&mut ReceiveQuarantine>,
+    unconnected: &HashMap<ObjectId, Unconnected>,
     shallow: &ShallowPlan,
     mut sideband_out: Option<&mut dyn Write>,
     hook_records: &mut Vec<HookRunRecord>,
@@ -975,7 +1021,13 @@ fn apply_commands_with_hooks(
                     branches,
                 )? {
                     Some(reason) => c.refused(reason),
-                    None => c.accepted(),
+                    None => match c.new.and_then(|new| unconnected.get(&new)) {
+                        Some(gap) => c.refused(RefUpdateRefusal::Unconnected {
+                            missing: gap.oid,
+                            referrer: gap.referrer,
+                        }),
+                        None => c.accepted(),
+                    },
                 },
             )
         })
@@ -1452,13 +1504,13 @@ fn read_some(input: &mut dyn Read, buf: &mut [u8]) -> std::io::Result<usize> {
 fn check_received_objects(
     repo: &Repository,
     odb: &Odb,
-    indexed: Option<HashSet<ObjectId>>,
+    indexed: Option<&HashSet<ObjectId>>,
     cfg: &ConfigSet,
     fsck: &ObjectFsckPolicy,
 ) -> std::result::Result<(), UnpackError> {
     let checker = fsck.checker(odb.hash_algo(), repo.git_dir(), repo.environment())?;
     let mut received: Vec<ObjectId> = match indexed {
-        Some(ids) => ids.into_iter().collect(),
+        Some(ids) => ids.iter().copied().collect(),
         None => odb
             .enumerate_local_loose_objects()?
             .into_iter()
@@ -1489,6 +1541,57 @@ fn check_received_objects(
         Some(rejected) => Err(UnpackError::Rejected(rejected)),
         None => Ok(()),
     }
+}
+
+/// The new tips among `commands` that reach an object that is in neither the push
+/// (`received`, read through the quarantine `odb`) nor `repo`, unless a promisor
+/// remote promises it, with the first such object. The walk stops at what
+/// `existing` (the values of `repo`'s refs and `HEAD` before the push) reaches
+/// (see [`super::connectivity`]).
+fn unconnected_tips(
+    repo: &Repository,
+    odb: &Odb,
+    received: &HashSet<ObjectId>,
+    existing: &HashSet<ObjectId>,
+    commands: &[RefCommand],
+    shallow_boundaries: &HashSet<ObjectId>,
+    promises: Option<&super::promised_objects::PromisorObjects<'_>>,
+) -> std::result::Result<HashMap<ObjectId, Unconnected>, UnpackError> {
+    let mut tips: Vec<ObjectId> = commands.iter().filter_map(|c| c.new).collect();
+    tips.sort_unstable();
+    tips.dedup();
+    if tips.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let receiver_grafts = load_shallow_boundaries(repo.git_dir());
+    let graph = repo.odb().commit_graph_chain();
+    let pushed = PushedObjects {
+        odb,
+        repo_odb: repo.odb(),
+        graph: graph.as_deref(),
+        received,
+        existing,
+        shallow_boundaries,
+        receiver_grafts: &receiver_grafts,
+        promises,
+    };
+    let gaps = pushed.unconnected_tips(&tips)?;
+    Ok(tips
+        .into_iter()
+        .zip(gaps)
+        .filter_map(|(tip, gap)| Some((tip, gap?)))
+        .collect())
+}
+
+/// The values of every ref of `repo` and of `HEAD`, with tags also peeled.
+fn existing_ref_values(repo: &Repository) -> Result<HashSet<ObjectId>> {
+    let mut existing = HashSet::new();
+    for r in advertised_refs(repo, &[], &[], Peel::Yes)? {
+        existing.insert(r.oid);
+        existing.extend(r.peeled);
+    }
+    existing.extend(crate::refs::resolve_ref(repo.git_dir(), "HEAD").ok());
+    Ok(existing)
 }
 
 /// Store a spooled push pack: explode small packs into loose objects, index and
@@ -1611,6 +1714,13 @@ mod tests {
             ),
             (
                 RefUpdateRefusal::MissingObjects,
+                "missing necessary objects",
+            ),
+            (
+                RefUpdateRefusal::Unconnected {
+                    missing: ObjectId::zero(),
+                    referrer: ObjectId::zero(),
+                },
                 "missing necessary objects",
             ),
             (RefUpdateRefusal::NonFastForward, "non-fast-forward"),

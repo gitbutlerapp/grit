@@ -22528,6 +22528,9 @@ pub grit_lib::remote::serve::RefUpdateRefusal::ShallowUpdateNotAllowed
 pub grit_lib::remote::serve::RefUpdateRefusal::StaleInfo
 pub grit_lib::remote::serve::RefUpdateRefusal::TargetBranch
 pub grit_lib::remote::serve::RefUpdateRefusal::TargetBranch::target: alloc::string::String
+pub grit_lib::remote::serve::RefUpdateRefusal::Unconnected
+pub grit_lib::remote::serve::RefUpdateRefusal::Unconnected::missing: grit_lib::objects::ObjectId
+pub grit_lib::remote::serve::RefUpdateRefusal::Unconnected::referrer: grit_lib::objects::ObjectId
 pub grit_lib::remote::serve::RefUpdateRefusal::UnpackerError
 pub grit_lib::remote::serve::RefUpdateRefusal::UpdateHookDeclined
 impl core::clone::Clone for grit_lib::remote::serve::RefUpdateRefusal

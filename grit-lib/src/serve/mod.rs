@@ -17,6 +17,7 @@
 //! expected to map `GIT_PROTOCOL` to a [`ProtocolVersion`] and to load
 //! configuration at their own boundary.
 
+mod connectivity;
 mod object_info;
 pub(crate) mod promised_objects;
 mod receive_pack;

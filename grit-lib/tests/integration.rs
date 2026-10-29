@@ -1689,6 +1689,9 @@ mod serve_ls_refs_prefix;
 #[path = "serve_promisor_remote.rs"]
 mod serve_promisor_remote;
 #[cfg(feature = "full-tests")]
+#[path = "serve_receive_connectivity.rs"]
+mod serve_receive_connectivity;
+#[cfg(feature = "full-tests")]
 #[path = "serve_receive_deny_non_ff.rs"]
 mod serve_receive_deny_non_ff;
 #[cfg(feature = "full-tests")]
