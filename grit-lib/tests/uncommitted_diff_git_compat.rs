@@ -131,6 +131,10 @@ fn unstaged_entries_and_worktree_contents_match_git_diff() {
     let entries = diff.unstaged_entries(RENAMES).expect("unstaged");
     assert_eq!(
         names(&entries),
+        ["M\tadded.txt", "M\tboth.txt", "M\tworktree-only.txt"]
+    );
+    assert_eq!(
+        names(&entries),
         git_lines(dir.path(), &["diff", "--name-status", "-M"])
     );
 
@@ -155,6 +159,16 @@ fn worktree_entries_match_git_diff_against_a_tree() {
     let entries = diff
         .worktree_entries(Some(&head_tree), RENAMES)
         .expect("worktree vs HEAD");
+    assert_eq!(
+        names(&entries),
+        [
+            "A\tadded.txt",
+            "M\tboth.txt",
+            "R100\tdir/move-me.txt\tdir/moved.txt",
+            "D\tgone.txt",
+            "M\tworktree-only.txt",
+        ]
+    );
     assert_eq!(
         names(&entries),
         git_lines(dir.path(), &["diff", "HEAD", "--name-status", "-M"])
