@@ -167,8 +167,28 @@ impl PreparedSwitch {
         &self.plan.tree_changes
     }
 
+    pub(crate) fn untracked_for_overwrite_check(&self) -> &[String] {
+        &self.plan.untracked
+    }
+
+    pub(crate) fn trust_wholesale_dir_removal(&self) -> bool {
+        self.trust_wholesale_dir_removal
+    }
+
+    pub(crate) fn preverified_wholesale_dirs(&self) -> &BTreeSet<String> {
+        &self.preverified_wholesale_dirs
+    }
+
+    pub(crate) fn wholesale_safety_precomputed(&self) -> bool {
+        self.wholesale_safety_precomputed
+    }
+
     pub(crate) fn index(&self) -> &crate::index::Index {
         &self.index
+    }
+
+    pub(crate) fn into_index(self) -> crate::index::Index {
+        self.index
     }
 }
 

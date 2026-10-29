@@ -18,8 +18,9 @@ use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::merge_file::{ConflictStyle, MergeFavor};
 use crate::merge_trees::{
-    merge_trees_three_way, merge_trees_three_way_cached, DirectoryRenameMode, MergeTreeCache,
-    ReplayConflictLabels, TreeMergeConflictPresentation, WhitespaceMergeOptions,
+    materialized_merge_result_tree, merge_trees_three_way, merge_trees_three_way_cached,
+    DirectoryRenameMode, MergeTreeCache, ReplayConflictLabels, TreeMergeConflictPresentation,
+    WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, CommitData, ObjectId};
 use crate::operation::Conflict;
@@ -1131,7 +1132,15 @@ fn apply_one_step(
     )?;
 
     if crate::operation::tree_merge_has_conflicts(&merged) {
-        apply_conflict_merge_worktree(repo, &ours_tree, &merged, &mut NullProgress, &NeverCancel)?;
+        let materialized = materialized_merge_result_tree(repo.odb(), &merged)?;
+        apply_conflict_merge_worktree(
+            repo,
+            &ours_tree,
+            &merged,
+            &materialized,
+            &mut NullProgress,
+            &NeverCancel,
+        )?;
         return Ok(StepResult::Conflicts {
             conflicts: crate::operation::conflicts_from_tree_merge(&merged),
         });

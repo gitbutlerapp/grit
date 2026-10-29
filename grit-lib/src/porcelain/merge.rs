@@ -32,7 +32,6 @@ use std::path::Path;
 use crate::change_id::{change_id, ChangeId, ChangeIdPolicy};
 use crate::config::ConfigSet;
 use crate::diagnostics::Warning;
-use crate::diff::diff_trees;
 use crate::error::{Error, OverwriteReason, Result};
 use crate::hooks::{run_post_merge, PostOperationHooks};
 use crate::ident::{parse_signature_times, Signature};
@@ -44,9 +43,9 @@ use crate::merge_base::{
 };
 use crate::merge_file::{ConflictStyle, MergeFavor};
 use crate::merge_trees::{
-    apply_tree_merge_output_to_index, materialized_merge_result_tree, merge_trees_at_depth,
-    merge_trees_three_way, DirectoryRenameMode, MergeTreeCache, TheirsConflictLabel,
-    TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
+    materialized_merge_result_tree, merge_trees_at_depth, merge_trees_three_way,
+    DirectoryRenameMode, MergeTreeCache, TheirsConflictLabel, TreeMergeConflictPresentation,
+    TreeMergeOutput, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::operation::{conflicts_from_tree_merge, tree_merge_has_conflicts, Conflict};
@@ -56,16 +55,14 @@ use crate::porcelain::checkout;
 use crate::porcelain::commit::{
     normalize_commit_message, stamp_change_id_on_new_commit, write_commit_object,
 };
-use crate::porcelain::index_from_tree::{
-    index_from_tree_with_worktree_stats, refresh_stage0_index_stats_from_worktree,
-};
 use crate::porcelain::restore::conflict_style_from_config;
 use crate::porcelain::switch::{
     checkout_prepared_tree_transition_for_merge, prepare_tree_transition_allow_local,
     verify_tree_transition_allow_local, TreeTransitionPrepareError, TreeTransitionVerifyError,
 };
 use crate::porcelain::tree_merge_checkout::{
-    finalize_clean_tree_merge_index, write_index_after_merge_checkout,
+    apply_conflict_tree_merge_to_worktree, finalize_clean_tree_merge_index,
+    write_index_after_merge_checkout,
 };
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
@@ -1208,7 +1205,7 @@ fn integrate_at_tip_without_hooks(
         let paths: Vec<String> = details.iter().map(|c| c.path.clone()).collect();
         let materialized = materialized_merge_result_tree(repo.odb(), &merged)?;
         ensure_merge_tree_transition_allowed(repo, Some(&into_tree), &materialized)?;
-        apply_conflict_merge_worktree(repo, &into_tree, &merged, progress, cancel)?;
+        apply_conflict_merge_worktree(repo, &into_tree, &merged, &materialized, progress, cancel)?;
         let merge_msg = merge_message_text(label, options.message.as_deref());
         if matches!(options.commit, MergeCommitMode::Squash) {
             write_squash_msg_file(repo, into_oid, other_oid)?;
@@ -1685,23 +1682,36 @@ fn restore_pre_merge_state(repo: &Repository) -> Result<()> {
     let head_tree = repo.odb().commit_tree(&orig)?;
 
     let old_index = repo.load_index()?;
-    let from_tree = write_tree_from_index(repo.odb(), &old_index, "")?;
-    let mut clean_index = index_from_tree_with_worktree_stats(repo, &head_tree)?;
-    // `from_tree` leaves out unmerged paths, so the diff never deletes a conflicted file the
-    // merge wrote at a path the pre-merge commit does not have.
-    let mut conflict_only: Vec<&[u8]> = old_index
+    // Paths only introduced by the conflicted merge (absent from the pre-merge tree) must be
+    // removed after the hard reset realigns tracked paths to `head_tree`.
+    let mut conflict_only: Vec<Vec<u8>> = old_index
         .entries()
         .iter()
-        .filter(|e| e.stage() != 0 && clean_index.get(&e.path, 0).is_none())
-        .map(|e| e.path.as_slice())
+        .filter(|e| {
+            e.stage() != 0
+                && repo
+                    .odb()
+                    .tree_entry_at_path(&head_tree, &e.path)
+                    .ok()
+                    .flatten()
+                    .is_none()
+        })
+        .map(|e| e.path.clone())
         .collect();
+    conflict_only.sort();
     conflict_only.dedup();
-    repo.write_index(&mut clean_index)?;
-    let changes = diff_trees(repo.odb(), Some(&from_tree), Some(&head_tree), "")?;
-    checkout::checkout_tree_changes(repo, &changes)?;
+    drop(old_index);
+
+    checkout::checkout_hard_to_tree_from_head_tree(
+        repo,
+        &head_tree,
+        &head_tree,
+        &mut crate::progress::NullProgress,
+        &crate::progress::NeverCancel,
+    )?;
     if let Some(work_tree) = repo.work_tree() {
         for path in conflict_only {
-            let abs = crate::index::worktree_path_from_index_rel(work_tree, path);
+            let abs = crate::index::worktree_path_from_index_rel(work_tree, &path);
             if abs.symlink_metadata().is_ok_and(|meta| !meta.is_dir()) {
                 fs::remove_file(&abs)?;
                 checkout::remove_empty_parent_dirs(work_tree, &abs);
@@ -1794,64 +1804,19 @@ pub(crate) fn apply_conflict_merge_worktree(
     repo: &Repository,
     head_tree: &ObjectId,
     merged: &TreeMergeOutput,
+    materialized: &ObjectId,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<()> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
-    let materialized = materialized_merge_result_tree(repo.odb(), merged)?;
-    let prepared =
-        prepare_tree_transition_allow_local(repo, Some(head_tree), &materialized, &HashSet::new())
-            .map_err(map_tree_transition_prepare_error_for_merge)?;
-    let preserve_worktree_paths = prepared.preserve_worktree_paths().clone();
-    let conflict_paths = conflict_path_set(merged);
-    let mut index = repo.load_index()?;
-    apply_tree_merge_output_to_index(&mut index, merged);
-    if index.has_unmerged_entries() {
-        index.clear_cache_tree();
-    }
-    poll_cancel(progress, cancel)?;
-    let index_path = repo.index_path();
-    let previous_index = fs::read(&index_path).ok();
-    repo.write_index(&mut index)?;
-
-    let stage0_tree = write_tree_from_index(repo.odb(), &index, "")?;
-    let changes = diff_trees(repo.odb(), Some(head_tree), Some(&stage0_tree), "")?;
-    let filtered: Vec<_> = changes
-        .into_iter()
-        .filter(|change| {
-            let path = change
-                .new_path
-                .as_deref()
-                .or(change.old_path.as_deref())
-                .unwrap_or("");
-            !conflict_paths.contains(path.as_bytes()) && !preserve_worktree_paths.contains(path)
-        })
-        .collect();
-    if let Err(err) = checkout::checkout_tree_changes_reporting(repo, &filtered, progress, cancel) {
-        if matches!(err, Error::Cancelled) {
-            match &previous_index {
-                Some(bytes) => fs::write(&index_path, bytes)?,
-                None => fs::remove_file(&index_path)?,
-            }
-        }
-        return Err(err);
-    }
-
-    let rules = WorktreeRules::from_repository(repo, &index)?;
-    for (path, oid) in &merged.conflict_content {
-        let mode = index
-            .get(path, 2)
-            .or_else(|| index.get(path, 3))
-            .map(|e| e.mode)
-            .unwrap_or(0o100644);
-        let rel = String::from_utf8_lossy(path);
-        checkout::write_smudged_blob_to_worktree(repo, work_tree, &rules, rel.as_ref(), oid, mode)?;
-    }
-    refresh_stage0_index_stats_from_worktree(repo, work_tree, &mut index)?;
-    repo.write_index(&mut index)?;
-    Ok(())
+    apply_conflict_tree_merge_to_worktree(
+        repo,
+        head_tree,
+        merged,
+        materialized,
+        &conflict_path_set(merged),
+        progress,
+        cancel,
+    )
 }
 
 fn record_merge_in_progress(git_dir: &Path, other_oid: ObjectId, merge_msg: String) -> Result<()> {

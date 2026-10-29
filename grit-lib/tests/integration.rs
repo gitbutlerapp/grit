@@ -930,6 +930,9 @@ mod merge_base_line_coverage;
 #[path = "merge_check_git_compat.rs"]
 mod merge_check_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "merge_conflict_rss.rs"]
+mod merge_conflict_rss;
+#[cfg(feature = "full-tests")]
 #[path = "merge_conflicts_git_compat.rs"]
 mod merge_conflicts_git_compat;
 #[cfg(feature = "full-tests")]

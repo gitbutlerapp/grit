@@ -1498,6 +1498,43 @@ pub(crate) fn checkout_tree_changes_with_index_opts(
     )
 }
 
+/// Like [`checkout_tree_changes_with_index_opts`] with [`CheckoutIndexWrite::Defer`], but keeps
+/// an uncommitted [`CheckoutJournal`] on success so callers can roll back work-tree changes when
+/// a later cancellation happens before the index is written.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn checkout_tree_changes_with_index_deferred(
+    repo: &Repository,
+    changes: &[DiffEntry],
+    index: &mut Index,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+    apply: CheckoutApplyOptions,
+    attribute_changes: Option<&[DiffEntry]>,
+    lock: &IndexLock,
+) -> Result<CheckoutJournal> {
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
+    let mut journal = CheckoutJournal::new(work_tree)?;
+    let result = apply_tree_changes_in_chunks(
+        repo,
+        changes,
+        progress,
+        cancel,
+        index,
+        apply,
+        attribute_changes,
+        CheckoutIndexWrite::Defer(lock),
+        &mut journal,
+    );
+    match result {
+        Ok(()) => Ok(journal),
+        Err(err) => journal
+            .finish(repo, Err::<(), _>(err))
+            .map(|_| unreachable!()),
+    }
+}
+
 /// Top-level directories whose tracked files are entirely removed by `delete_paths`.
 pub(crate) fn wholesale_deleted_directories(
     index: &Index,
