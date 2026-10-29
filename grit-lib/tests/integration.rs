@@ -1415,6 +1415,9 @@ mod reftable_format;
 #[path = "reftable_stack_coverage.rs"]
 mod reftable_stack_coverage;
 #[cfg(feature = "full-tests")]
+#[path = "reftable_stack_for_each.rs"]
+mod reftable_stack_for_each;
+#[cfg(feature = "full-tests")]
 #[path = "reftable_stack_interop.rs"]
 mod reftable_stack_interop;
 #[cfg(feature = "full-tests")]

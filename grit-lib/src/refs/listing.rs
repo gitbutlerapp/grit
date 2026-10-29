@@ -518,6 +518,7 @@ pub(crate) fn query_refs_peeling(
     let store = repo.refs();
     let namespaces = effective_namespaces(query);
     let linked_worktree = crate::worktree_ref::is_linked_worktree_git_dir(git_dir);
+    let early_limit = early_ref_collection_limit(query, options);
     let mut collected = Vec::new();
     for ns in &namespaces {
         let prefix = ns.prefix();
@@ -528,8 +529,14 @@ pub(crate) fn query_refs_peeling(
                 return ControlFlow::Continue(());
             }
             insert_collected_ref(&mut collected, entry, store, &namespaces, query, options);
+            if early_limit.is_some_and(|limit| collected.len() >= limit) {
+                return ControlFlow::Break(());
+            }
             ControlFlow::Continue(())
         })?;
+        if early_limit.is_some_and(|limit| collected.len() >= limit) {
+            break;
+        }
     }
     finish_query(
         dedup_collected(collected),
@@ -639,6 +646,21 @@ fn query_has_reachability(query: &RefQuery) -> bool {
         || !query.merged.is_empty()
         || !query.no_merged.is_empty()
         || !query.points_at.is_empty()
+}
+
+/// When refs arrive in name order from the store, stop collecting once enough match.
+fn early_ref_collection_limit(query: &RefQuery, options: &RefQueryOptions) -> Option<usize> {
+    let limit = query.limit?;
+    if query.sort.key != SortKey::Name || query.sort.reverse {
+        return None;
+    }
+    if !query.patterns.is_empty() || options.ignore_case {
+        return None;
+    }
+    if query_has_reachability(query) {
+        return None;
+    }
+    Some(limit)
 }
 
 fn finish_query(

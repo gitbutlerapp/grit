@@ -525,40 +525,29 @@ impl ReftableRefStore {
             }
         }
         let stack = ReftableStack::open(stack_git_dir)?;
-        let mut names: Vec<String> = stack
-            .read_refs()?
-            .into_iter()
-            .filter_map(|rec| {
-                if rec.name != "HEAD"
-                    && record_to_raw(&rec).is_some()
-                    && (rec.name.starts_with(prefix)
-                        || (prefix.ends_with('/') && rec.name == prefix.trim_end_matches('/')))
-                {
-                    Some(rec.name)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        names.sort();
-        for name in names {
-            let Some(value) = self.read_raw_at(&name)? else {
-                continue;
+        stack.for_each_merged_ref_under_prefix(prefix, |rec| {
+            if rec.name == "HEAD" {
+                return ControlFlow::Continue(());
+            }
+            let Some(value) = record_to_raw(rec) else {
+                return ControlFlow::Continue(());
             };
+            if !rec.name.starts_with(prefix)
+                && !(prefix.ends_with('/') && rec.name == prefix.trim_end_matches('/'))
+            {
+                return ControlFlow::Continue(());
+            }
             let peeled = match &value {
                 RawRef::Direct(_) => None,
-                RawRef::Symbolic(_) => self.resolve(&name).ok(),
+                RawRef::Symbolic(_) => self.resolve(&rec.name).ok(),
             };
             let entry = RefEntry {
-                name,
+                name: rec.name.clone(),
                 value,
                 peeled,
             };
-            if f(&entry).is_break() {
-                break;
-            }
-        }
-        Ok(())
+            f(&entry)
+        })
     }
 }
 

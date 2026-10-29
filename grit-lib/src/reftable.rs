@@ -1439,12 +1439,20 @@ impl ReftableReader {
     /// Look up a single ref by name.
     pub fn lookup_ref(&self, name: &str) -> Result<Option<RefRecord>> {
         if self.ref_index_position > 0 {
-            if let Some(rec) = self.lookup_ref_via_index(name)? {
-                return Ok(Some(rec));
-            }
+            return self.lookup_ref_via_index(name);
         }
-        let refs = self.read_refs()?;
-        Ok(refs.into_iter().find(|r| r.name == name))
+        let mut found = None;
+        self.for_each_ref_in_range(name, None, |rec| {
+            if rec.name == name {
+                found = Some(rec.clone());
+                return ControlFlow::Break(());
+            }
+            if rec.name.as_str() > name {
+                return ControlFlow::Break(());
+            }
+            ControlFlow::Continue(())
+        })?;
+        Ok(found)
     }
 
     /// Resolve a ref name to a record using ref index blocks when present.
@@ -2381,35 +2389,31 @@ impl ReftableStack {
         Ok(merged.into_values().collect())
     }
 
-    /// List direct ref names and oids under `prefix`, using cached table bytes and
-    /// index/restart seeking when the stack is a single table.
+    /// Visit merged ref records under `prefix` across all stack tables.
     ///
-    /// An empty `prefix` lists the refs under `refs/` only, leaving out root refs such as
-    /// `HEAD` and `ORIG_HEAD`, the same as [`RefStore::for_each_ref`](crate::refs::store::RefStore::for_each_ref).
-    pub fn list_refs_under_prefix(
+    /// Later tables override earlier ones; deletions omit the ref. Uses index block
+    /// seeking per table when available. An empty `prefix` is treated as `refs/`.
+    pub fn for_each_merged_ref_under_prefix(
         &self,
-        git_dir: &Path,
         prefix: &str,
-    ) -> Result<Vec<(String, ObjectId)>> {
+        mut f: impl FnMut(&RefRecord) -> ControlFlow<()>,
+    ) -> Result<()> {
         let prefix = if prefix.is_empty() { "refs/" } else { prefix };
         let names = self.table_names_for_read()?;
         let cached = cached_stack_tables_for_names(&self.reftable_dir, &names)?;
         let readers = self.stack_readers(&cached)?;
         let lower = prefix;
         let upper = prefix_upper_exclusive(prefix);
-        let mut out = Vec::new();
+
+        let mut visit = |rec: &RefRecord| -> ControlFlow<()> {
+            if prefix.ends_with('/') && !rec.name.starts_with(prefix) {
+                return ControlFlow::Continue(());
+            }
+            f(rec)
+        };
 
         if readers.len() == 1 {
-            let reader = readers[0];
-            reader.for_each_ref_in_range(lower, upper.as_deref(), |rec| {
-                if prefix.ends_with('/') && !rec.name.starts_with(prefix) {
-                    return ControlFlow::<()>::Continue(());
-                }
-                push_list_ref_entry(git_dir, rec, &mut out);
-                ControlFlow::<()>::Continue(())
-            })?;
-            out.sort_by(|a, b| a.0.cmp(&b.0));
-            return Ok(out);
+            return readers[0].for_each_ref_in_range(lower, upper.as_deref(), |rec| visit(rec));
         }
 
         let mut merged: BTreeMap<String, RefRecord> = BTreeMap::new();
@@ -2429,9 +2433,29 @@ impl ReftableStack {
                 ControlFlow::<()>::Continue(())
             })?;
         }
-        for rec in merged.into_values() {
-            push_list_ref_entry(git_dir, &rec, &mut out);
+        for rec in merged.values() {
+            if visit(rec).is_break() {
+                break;
+            }
         }
+        Ok(())
+    }
+
+    /// List direct ref names and oids under `prefix`, using cached table bytes and
+    /// index/restart seeking when the stack is a single table.
+    ///
+    /// An empty `prefix` lists the refs under `refs/` only, leaving out root refs such as
+    /// `HEAD` and `ORIG_HEAD`, the same as [`RefStore::for_each_ref`](crate::refs::store::RefStore::for_each_ref).
+    pub fn list_refs_under_prefix(
+        &self,
+        git_dir: &Path,
+        prefix: &str,
+    ) -> Result<Vec<(String, ObjectId)>> {
+        let mut out = Vec::new();
+        self.for_each_merged_ref_under_prefix(prefix, |rec| {
+            push_list_ref_entry(git_dir, rec, &mut out);
+            ControlFlow::<()>::Continue(())
+        })?;
         out.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(out)
     }
