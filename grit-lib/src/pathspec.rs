@@ -677,6 +677,13 @@ pub fn bloom_lookup_prefix_with_cwd(
         } else {
             format!("{cwd}/{pattern}")
         }
+    } else if let Some(prefix) = magic.prefix.as_deref() {
+        let base = prefix.trim_end_matches('/');
+        if base.is_empty() {
+            pattern.to_string()
+        } else {
+            normalize_relative_path_str(&format!("{base}/{pattern}"))
+        }
     } else {
         pattern.to_string()
     };
@@ -741,16 +748,37 @@ pub fn pathspec_contributes_match(spec: &str, path: &str) -> bool {
     pathspec_matches(spec, path) || pathspec_exclude_matches(spec, path)
 }
 
+/// Path under `prefix:` magic (e.g. `sub/`) for repository-relative `path`, including the
+/// directory entry `sub` when the prefix is `sub/`.
+fn path_for_match_under_magic_prefix<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
+    let base = prefix.trim_end_matches('/');
+    if base.is_empty() {
+        return Some(path);
+    }
+    if path == base {
+        return Some("");
+    }
+    if let Some(rest) = path.strip_prefix(prefix) {
+        return Some(rest);
+    }
+    let anchored = if prefix.ends_with('/') {
+        prefix.to_string()
+    } else {
+        format!("{prefix}/")
+    };
+    path.starts_with(&anchored).then(|| &path[anchored.len()..])
+}
+
 fn path_matches_pathspec_tail(raw_pattern: &str, path: &str, magic: PathspecMagic) -> bool {
     if magic.literal && magic.glob {
         return false;
     }
     let pattern = strip_top_magic(raw_pattern);
     let path_for_match = if let Some(prefix) = magic.prefix.as_deref() {
-        if !path.starts_with(prefix) {
-            return false;
+        match path_for_match_under_magic_prefix(path, prefix) {
+            Some(rest) => rest,
+            None => return false,
         }
-        &path[prefix.len()..]
     } else {
         path
     };
@@ -831,6 +859,12 @@ pub fn pathspec_wants_descent_into_tree(spec: &str, full_name: &str) -> bool {
     let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
     if pattern.is_empty() || pattern == "." {
         return true;
+    }
+    if let Some(prefix) = magic.prefix.as_deref() {
+        let base = prefix.trim_end_matches('/');
+        if !base.is_empty() && (full_name == base || base.starts_with(&format!("{full_name}/"))) {
+            return true;
+        }
     }
     let dir_prefix = format!("{full_name}/");
     if pattern.starts_with(&dir_prefix) {
@@ -1023,10 +1057,10 @@ fn pathspec_match_one_positive(path: &str, magic: PathspecMagic, raw_pattern: &s
     }
     let pattern = strip_top_magic(raw_pattern);
     let path_for_match = if let Some(prefix) = magic.prefix.as_deref() {
-        if !path.starts_with(prefix) {
-            return false;
+        match path_for_match_under_magic_prefix(path, prefix) {
+            Some(rest) => rest,
+            None => return false,
         }
-        &path[prefix.len()..]
     } else {
         path
     };
@@ -1115,10 +1149,10 @@ fn matches_pathspec_element_with_context(
     }
     let pattern = strip_top_magic(raw_pattern);
     let path_for_match = if let Some(prefix) = magic.prefix.as_deref() {
-        if !path.starts_with(prefix) {
-            return false;
+        match path_for_match_under_magic_prefix(path, prefix) {
+            Some(rest) => rest,
+            None => return false,
         }
-        &path[prefix.len()..]
     } else {
         path
     };
@@ -1149,10 +1183,10 @@ fn pathspec_exclude_element_matches_with_context(
     }
     let pattern = strip_top_magic(raw_pattern);
     let path_for_match = if let Some(prefix) = magic.prefix.as_deref() {
-        if !path.starts_with(prefix) {
-            return false;
+        match path_for_match_under_magic_prefix(path, prefix) {
+            Some(rest) => rest,
+            None => return false,
         }
-        &path[prefix.len()..]
     } else {
         path
     };
@@ -1193,7 +1227,8 @@ pub fn extend_pathspec_list_implicit_cwd(
         return specs.to_vec();
     }
     let mut out = Vec::with_capacity(specs.len() + 1);
-    out.push(format!("{cwd}/"));
+    // Git `parse_pathspec` with `PATHSPEC_PREFER_CWD` adds `.` (see pathspec.c), not `{cwd}/`.
+    out.push(".".to_owned());
     out.extend_from_slice(specs);
     out
 }
@@ -1481,10 +1516,10 @@ fn matches_pathspec_exclude_for_object(
     }
     let pattern = strip_top_magic(raw_pattern);
     let path_for_match = if let Some(prefix) = magic.prefix.as_deref() {
-        if !path.starts_with(prefix) {
-            return false;
+        match path_for_match_under_magic_prefix(path, prefix) {
+            Some(rest) => rest,
+            None => return false,
         }
-        &path[prefix.len()..]
     } else {
         path
     };
@@ -1676,10 +1711,10 @@ pub fn matches_pathspec_with_context(spec: &str, path: &str, ctx: PathspecMatchC
 
     let pattern = strip_top_magic(raw_pattern);
     let path_for_match = if let Some(prefix) = magic.prefix.as_deref() {
-        if !path.starts_with(prefix) {
-            return false;
+        match path_for_match_under_magic_prefix(path, prefix) {
+            Some(rest) => rest,
+            None => return false,
         }
-        &path[prefix.len()..]
     } else {
         path
     };
@@ -1784,10 +1819,10 @@ pub fn matches_ls_tree_pathspec(
 
     let pattern = strip_top_magic(raw_pattern);
     let path_for_match = if let Some(prefix) = magic.prefix.as_deref() {
-        if !path.starts_with(prefix) {
-            return false;
+        match path_for_match_under_magic_prefix(path, prefix) {
+            Some(rest) => rest,
+            None => return false,
         }
-        &path[prefix.len()..]
     } else {
         path
     };
@@ -1867,10 +1902,10 @@ fn matches_pathspec_for_object_with_attrs(
 
     let pattern = strip_top_magic(raw_pattern);
     let path_for_match = if let Some(prefix) = magic.prefix.as_deref() {
-        if !path.starts_with(prefix) {
-            return false;
+        match path_for_match_under_magic_prefix(path, prefix) {
+            Some(rest) => rest,
+            None => return false,
         }
-        &path[prefix.len()..]
     } else {
         path
     };
@@ -2058,43 +2093,26 @@ pub fn pathdiff(cwd: &Path, work_tree: &Path) -> Option<String> {
     }
 }
 
-/// For exclude (and other cwd-relative) pathspec magic from a subdirectory, Git resolves the
-/// pattern against the current directory (`:!sub/` from `repo/sub` → exclude `sub/sub/`).
+/// For short exclude magic from a subdirectory, Git applies the worktree prefix to the pattern
+/// tail (via `prefix_path`) while keeping argv spelling. Long-form `:(exclude,prefix:…)` matches
+/// [`resolve_worktree_pathspec`] for `:(exclude)…` under a cwd prefix.
 fn prepend_cwd_to_short_exclude_pathspec(spec: &str, cwd: &str) -> Option<String> {
     let cwd = cwd.trim_end_matches('/');
     if cwd.is_empty() {
         return None;
     }
-    let bytes = spec.as_bytes();
-    if bytes.first().copied() != Some(b':') {
+    let (elem_magic, pattern) = parse_element_magic(spec);
+    let magic = combine_magic(elem_magic);
+    if !magic.exclude || magic.top {
         return None;
     }
-    // `:/path` is `:(top)` short form — exclude is relative to repo root, not cwd (t6132).
-    if bytes.get(1).copied() == Some(b'/') {
-        return None;
-    }
-    let mut i = 1usize;
-    while i < bytes.len() && bytes[i] != b':' {
-        let ch = bytes[i];
-        if ch == b'^' {
-            i += 1;
-            continue;
-        }
-        let is_magic = matches!(ch, b'!' | b'/');
-        if is_magic {
-            i += 1;
-            continue;
-        }
-        break;
-    }
-    if i < bytes.len() && bytes[i] == b':' {
-        i += 1;
-    }
-    let pattern = spec.get(i..)?;
     if pattern.is_empty() || pattern.starts_with('/') {
         return None;
     }
-    Some(format!("{}{}/{pattern}", &spec[..i], cwd))
+    if magic.glob || magic.literal || magic.icase || !magic.attr_requirements.is_empty() {
+        return None;
+    }
+    Some(format!(":(exclude,prefix:{cwd}/){pattern}"))
 }
 
 /// Build [`PathspecMatchContext`] with optional NFC path normalization for comparisons.
@@ -2918,5 +2936,62 @@ mod resolved_pathspecs_tests {
         let resolved = ResolvedPathspecs::resolve(&repo, dir.path(), &[], None).expect("ok");
         assert!(resolved.is_entire_tree());
         assert!(resolved.specs.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod rev_walk_pathspec_resolution_tests {
+    use super::*;
+    use crate::config::environment::{Environment, RepositoryOptions};
+    use crate::repo::{InitOptions, Repository};
+
+    fn repo_from_sub(worktree: &std::path::Path, sub: &std::path::Path) -> Repository {
+        let mut env = Environment::empty();
+        env.cwd = sub.to_path_buf();
+        let mut opts = RepositoryOptions::empty();
+        opts.environment = env;
+        Repository::discover(Some(worktree), &opts).expect("discover")
+    }
+
+    #[test]
+    fn glob_magic_from_subdirectory_gets_prefix_and_matches() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let wt = dir.path();
+        std::fs::create_dir_all(wt.join("sub")).expect("mkdir");
+        std::fs::write(wt.join("sub/f.txt"), b"x").expect("write");
+        Repository::init(wt, &InitOptions::default()).expect("init");
+        let repo = repo_from_sub(wt, &wt.join("sub"));
+        let specs = repo
+            .resolve_rev_walk_pathspecs(&[":(glob)**/f.txt".to_owned()])
+            .expect("resolve");
+        assert_eq!(specs, [":(glob,prefix:sub/)**/f.txt"]);
+        assert!(pathspec_matches(&specs[0], "sub/f.txt"));
+        assert!(!pathspec_matches(&specs[0], "other/f.txt"));
+    }
+
+    #[test]
+    fn short_exclude_from_subdirectory_uses_prefix_magic() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let wt = dir.path();
+        std::fs::create_dir_all(wt.join("sub")).expect("mkdir");
+        Repository::init(wt, &InitOptions::default()).expect("init");
+        let repo = repo_from_sub(wt, &wt.join("sub"));
+        let specs = repo
+            .resolve_rev_walk_pathspecs(&[":!f.txt".to_owned()])
+            .expect("resolve");
+        assert_eq!(specs, [".", ":(exclude,prefix:sub/)f.txt"]);
+        assert!(matches_pathspec_list("other/g.txt", &specs));
+        assert!(!matches_pathspec_list("sub/f.txt", &specs));
+    }
+
+    #[test]
+    fn glob_with_prefix_descends_into_cwd_directory() {
+        let spec = ":(glob,prefix:sub/)**/f.txt";
+        assert!(pathspec_wants_descent_into_tree(spec, "sub"));
+        assert!(pathspec_entry_is_relevant(
+            "sub/f.txt",
+            false,
+            &[spec.to_owned()]
+        ));
     }
 }

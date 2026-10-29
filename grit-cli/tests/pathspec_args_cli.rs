@@ -693,6 +693,9 @@ fn log_and_revs_trailing_pathspec_from_subdirectory_matches_git() {
         &["../sub/f.txt"],
         &[":(top)sub/f.txt"],
         &["*.txt"],
+        &[":!f.txt"],
+        &[":!g.txt"],
+        &[":(glob)**/f.txt"],
     ];
 
     for paths in cases {

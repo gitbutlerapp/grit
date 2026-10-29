@@ -596,6 +596,32 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
         )
         .expect("grit top count");
     assert_eq!(grit_top_count, git_top_count);
+
+    for path_spec in [":!f.txt", ":!g.txt", ":(glob)**/f.txt", "*.txt"] {
+        let git_count = Command::new("git")
+            .current_dir(&sub)
+            .args(["rev-list", "--count", "HEAD", "--", path_spec])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git rev-list pathspec")
+            .stdout;
+        let git_count: usize = String::from_utf8_lossy(&git_count)
+            .trim()
+            .parse()
+            .expect("git count");
+        let grit_count = repo
+            .rev_walk()
+            .count(
+                &["HEAD"],
+                &RevWalkListOptions {
+                    paths: vec![path_spec.to_owned()],
+                    ..RevWalkListOptions::default()
+                },
+            )
+            .expect("grit count pathspec");
+        assert_eq!(grit_count, git_count, "pathspec {path_spec:?}");
+    }
 }
 
 #[test]
