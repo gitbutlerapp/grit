@@ -150,12 +150,9 @@ fn pick_conflict_commit_keeps_picked_author() {
         &["commit", "-qam", "side", "--author=Other <o@example.com>"],
     );
     let pick = git(&dir, &["rev-parse", "HEAD"]).trim().to_owned();
-    let source_author = git(
-        &dir,
-        &["log", "-1", "--format=%an|%ae|%at", &pick],
-    )
-    .trim()
-    .to_owned();
+    let source_author = git(&dir, &["log", "-1", "--format=%an|%ae|%at", &pick])
+        .trim()
+        .to_owned();
     git(&dir, &["switch", "main"]);
     fs::write(dir.join("f.txt"), "main\n").unwrap();
     git(&dir, &["commit", "-qam", "main"]);
@@ -165,10 +162,7 @@ fn pick_conflict_commit_keeps_picked_author() {
     let conflict = grit(&dir, &["pick", &pick]);
     assert!(!conflict.ok(), "expected pick conflict");
     fs::write(dir.join("f.txt"), "resolved\n").unwrap();
-    let commit = json_stdout(
-        &["commit", "-m", "resolved via commit", "--json"],
-        &dir,
-    );
+    let commit = json_stdout(&["commit", "-m", "resolved via commit", "--json"], &dir);
     assert_eq!(commit["author"]["name"], "Other");
     assert_eq!(commit["author"]["email"], "o@example.com");
     assert_eq!(
