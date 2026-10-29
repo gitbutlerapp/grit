@@ -6809,7 +6809,10 @@ fn can_use_bounded_commit_filter_list(options: &RevListOptions) -> bool {
         .is_some_and(|f| f.is_active())
         || options.pickaxe.is_some();
     output_filter
-        && (options.max_count.is_some() || options.skip > 0 || options.count)
+        && (options.max_count.is_some()
+            || options.skip > 0
+            || options.count
+            || options.since_cutoff.is_some())
         && options.ordering == OrderingMode::Default
         && plain_commit_walk(
             &RevListOptions {
@@ -6837,7 +6840,11 @@ fn try_bounded_commit_filter_limit_list(
     if include.is_empty() || !can_use_bounded_commit_filter_list(options) {
         return Ok(None);
     }
-    if !options.count && options.max_count.is_none() && options.skip == 0 {
+    if !options.count
+        && options.max_count.is_none()
+        && options.skip == 0
+        && options.since_cutoff.is_none()
+    {
         return Ok(None);
     }
     let max_count = options.max_count;
@@ -7327,18 +7334,28 @@ fn streaming_default_order_list(
 }
 
 fn can_use_bounded_path_limit_list(options: &RevListOptions) -> bool {
-    options.max_count.is_some()
+    let since_date_bounded = options.since_cutoff.is_some()
+        && options.ordering == OrderingMode::Default
+        && plain_commit_walk(
+            &RevListOptions {
+                paths: Vec::new(),
+                pickaxe: None,
+                ..options.clone()
+            },
+            false,
+        );
+    (options.max_count.is_some() || since_date_bounded)
         && !options.paths.is_empty()
         && !options.full_history
         && !options.ancestry_path
         && !options.simplify_merges
         && !options.sparse
         && !options.count
-        && can_use_bounded_limit_list(&RevListOptions {
+        && (can_use_bounded_limit_list(&RevListOptions {
             paths: Vec::new(),
             pickaxe: None,
             ..options.clone()
-        })
+        }) || since_date_bounded)
 }
 
 fn repo_commit_graph_enabled(repo: &Repository, cfg: &ConfigSet) -> bool {
@@ -7401,12 +7418,11 @@ fn try_bounded_path_limit_list(
         return Ok(None);
     }
 
-    let Some(max_count) = options.max_count else {
-        return Ok(None);
+    let max_count = match options.max_count {
+        Some(0) => return Ok(Some(Vec::new())),
+        Some(n) => n,
+        None => usize::MAX,
     };
-    if max_count == 0 {
-        return Ok(Some(Vec::new()));
-    }
     let mut graph =
         CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
     let excluded = if exclude.is_empty() {

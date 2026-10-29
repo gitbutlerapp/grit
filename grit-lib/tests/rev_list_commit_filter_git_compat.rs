@@ -979,6 +979,37 @@ fn bounded_filter_since_until_matches_git() {
         &repo,
         &["--count", "-n", "0", "--author=Alice", "--since=@0", "main"],
     );
+
+    // Default `grit log` passes no `-n` (unbounded fetch within `--since` only).
+    let git_oids = git_rev_list(
+        wt,
+        &[
+            "--author=Alice",
+            "--since=1970-01-01 00:41:40 +0000",
+            "main",
+        ],
+    );
+    let parsed = parse_rev_list_cli(&[
+        "--author=Alice",
+        "--since=1970-01-01 00:41:40 +0000",
+        "main",
+    ]);
+    let (positive, negative) = support::expand_revision_tokens(
+        &parsed
+            .rev_args
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    );
+    let opts = RevListOptions {
+        max_count: None,
+        since_cutoff: parsed.since_cutoff,
+        commit_filter: parsed.filter,
+        use_commit_graph: false,
+        ..RevListOptions::default()
+    };
+    let result = rev_list(&repo, &positive, &negative, &opts).expect("rev_list without max_count");
+    assert_eq!(result.commits, git_oids);
 }
 
 fn commit_with_committer_timestamps(
@@ -1132,6 +1163,20 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
         rev_list(&repo, &["main".to_owned()], &[], &opts).is_err(),
         "unbounded walk must read the missing grandparent"
     );
+    let list_filter = CommitFilterBuilder::new()
+        .author("Alice")
+        .build()
+        .expect("filter");
+    let opts = RevListOptions {
+        max_count: None,
+        since_cutoff: parsed.since_cutoff,
+        commit_filter: Some(Arc::new(list_filter)),
+        missing_action: MissingAction::Error,
+        use_commit_graph: false,
+        ..RevListOptions::default()
+    };
+    let result = rev_list(&repo, &positive, &negative, &opts).expect("since-bounded without -n");
+    assert_eq!(result.commits, git_oids);
     let count_filter = CommitFilterBuilder::new()
         .author("Alice")
         .build()
