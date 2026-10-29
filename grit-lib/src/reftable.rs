@@ -31,10 +31,11 @@ use crate::objects::ObjectId;
 use crate::refs::store::RefStoreError;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1999,6 +2000,24 @@ fn stack_table_cache() -> &'static Mutex<HashMap<StackCacheKey, Arc<CachedStackT
     STACK_TABLE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// How long readers retry when a listed table disappears or is still being written.
+const STACK_TABLE_RELOAD_DEADLINE: Duration = Duration::from_secs(3);
+const STACK_TABLE_RELOAD_SLEEP: Duration = Duration::from_millis(1);
+
+fn is_transient_stack_table_error(err: &Error) -> bool {
+    match err {
+        Error::Io(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+        Error::Reftable(ReftableError::TooSmall { len: 0 }) => true,
+        _ => false,
+    }
+}
+
+fn random_table_suffix() -> Result<u32> {
+    let mut buf = [0u8; 4];
+    getrandom::getrandom(&mut buf).map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
+    Ok(u32::from_le_bytes(buf))
+}
+
 fn invalidate_stack_table_cache(reftable_dir: &Path) {
     let Ok(mut guard) = stack_table_cache().lock() else {
         return;
@@ -2044,6 +2063,33 @@ fn build_cached_stack_tables(
     })
 }
 
+/// Load every table named in `table_names`, re-reading `tables.list` when compaction
+/// removes a file or a writer has not finished publishing table bytes yet.
+fn build_cached_stack_tables_with_reload(
+    reftable_dir: &Path,
+    mut table_names: Vec<String>,
+) -> Result<CachedStackTables> {
+    let started = Instant::now();
+    loop {
+        match build_cached_stack_tables(reftable_dir, &table_names) {
+            Ok(cached) => return Ok(cached),
+            Err(e) if is_transient_stack_table_error(&e) => {
+                if started.elapsed() >= STACK_TABLE_RELOAD_DEADLINE {
+                    return Err(e);
+                }
+                invalidate_stack_table_cache(reftable_dir);
+                let fresh = read_tables_list_names(reftable_dir)?;
+                let unchanged = fresh == table_names;
+                table_names = fresh;
+                if unchanged {
+                    std::thread::sleep(STACK_TABLE_RELOAD_SLEEP);
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 fn load_cached_stack_tables(reftable_dir: &Path) -> Result<Arc<CachedStackTables>> {
     let key = tables_list_cache_key(reftable_dir)?;
     if let Ok(guard) = stack_table_cache().lock() {
@@ -2062,7 +2108,10 @@ fn load_cached_stack_tables(reftable_dir: &Path) -> Result<Arc<CachedStackTables
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => return Err(Error::Io(e)),
     };
-    let cached = Arc::new(build_cached_stack_tables(reftable_dir, &table_names)?);
+    let cached = Arc::new(build_cached_stack_tables_with_reload(
+        reftable_dir,
+        table_names,
+    )?);
     if let Ok(mut guard) = stack_table_cache().lock() {
         guard.insert(key, Arc::clone(&cached));
     }
@@ -2088,7 +2137,10 @@ fn cached_stack_tables_for_names(
         return Ok(cached);
     }
     let key = tables_list_cache_key(reftable_dir)?;
-    let rebuilt = Arc::new(build_cached_stack_tables(reftable_dir, table_names)?);
+    let rebuilt = Arc::new(build_cached_stack_tables_with_reload(
+        reftable_dir,
+        table_names.to_vec(),
+    )?);
     if let Ok(mut guard) = stack_table_cache().lock() {
         guard.insert(key, Arc::clone(&rebuilt));
     }
@@ -2214,7 +2266,7 @@ impl ReftableStack {
     fn first_ref_name_with_prefix(&self, prefix: &str) -> Result<Option<String>> {
         let names = self.table_names_for_read()?;
         let cached = cached_stack_tables_for_names(&self.reftable_dir, &names)?;
-        let readers = self.stack_readers(&cached, &names)?;
+        let readers = self.stack_readers(&cached)?;
         let upper = prefix_upper_exclusive(prefix.trim_end_matches('/'));
         let mut merged: BTreeMap<String, RefRecord> = BTreeMap::new();
         for reader in readers {
@@ -2249,9 +2301,9 @@ impl ReftableStack {
     fn stack_readers<'a>(
         &self,
         cached: &'a CachedStackTables,
-        table_names: &[String],
     ) -> Result<Vec<&'a ReftableReader>> {
-        table_names
+        cached
+            .table_names
             .iter()
             .map(|name| cached_reader_for_name(cached, name))
             .collect()
@@ -2264,7 +2316,7 @@ impl ReftableStack {
     pub fn read_refs(&self) -> Result<Vec<RefRecord>> {
         let names = self.table_names_for_read()?;
         let cached = cached_stack_tables_for_names(&self.reftable_dir, &names)?;
-        let readers = self.stack_readers(&cached, &names)?;
+        let readers = self.stack_readers(&cached)?;
         let mut merged: BTreeMap<String, RefRecord> = BTreeMap::new();
         for reader in readers {
             reader.for_each_ref(|rec| {
@@ -2295,7 +2347,7 @@ impl ReftableStack {
         let prefix = if prefix.is_empty() { "refs/" } else { prefix };
         let names = self.table_names_for_read()?;
         let cached = cached_stack_tables_for_names(&self.reftable_dir, &names)?;
-        let readers = self.stack_readers(&cached, &names)?;
+        let readers = self.stack_readers(&cached)?;
         let lower = prefix;
         let upper = prefix_upper_exclusive(prefix);
         let mut out = Vec::new();
@@ -2341,7 +2393,7 @@ impl ReftableStack {
         let names = self.table_names_for_read()?;
         let cached = cached_stack_tables_for_names(&self.reftable_dir, &names)?;
         Ok(self
-            .stack_readers(&cached, &names)?
+            .stack_readers(&cached)?
             .into_iter()
             .map(ReftableReader::payload_size)
             .collect())
@@ -2399,7 +2451,7 @@ impl ReftableStack {
             writer.add_log(log)?;
         }
         let data = writer.finish()?;
-        let filename = self.write_table_file(&data, max_idx)?;
+        let filename = self.write_table_file(&data, min_idx, max_idx)?;
 
         let mut new_names: Vec<String> = self.table_names[..first].to_vec();
         new_names.push(filename.clone());
@@ -2429,7 +2481,7 @@ impl ReftableStack {
     pub fn lookup_ref(&self, name: &str) -> Result<Option<RefRecord>> {
         let names = self.table_names_for_read()?;
         let cached = cached_stack_tables_for_names(&self.reftable_dir, &names)?;
-        for reader in self.stack_readers(&cached, &names)?.into_iter().rev() {
+        for reader in self.stack_readers(&cached)?.into_iter().rev() {
             if let Some(rec) = reader.lookup_ref(name)? {
                 return match rec.value {
                     RefValue::Deletion => Ok(None),
@@ -2442,8 +2494,30 @@ impl ReftableStack {
 
     /// Read merged log records for a specific ref.
     pub fn read_logs_for_ref(&self, refname: &str) -> Result<Vec<LogRecord>> {
+        let started = Instant::now();
+        loop {
+            let table_names = self.table_names_for_read()?;
+            match self.read_logs_for_ref_from_names(&table_names, refname) {
+                Ok(logs) => return Ok(logs),
+                Err(e) if is_transient_stack_table_error(&e) => {
+                    if started.elapsed() >= STACK_TABLE_RELOAD_DEADLINE {
+                        return Err(e);
+                    }
+                    invalidate_stack_table_cache(&self.reftable_dir);
+                    std::thread::sleep(STACK_TABLE_RELOAD_SLEEP);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    fn read_logs_for_ref_from_names(
+        &self,
+        table_names: &[String],
+        refname: &str,
+    ) -> Result<Vec<LogRecord>> {
         let mut logs = Vec::new();
-        for table_name in &self.table_names {
+        for table_name in table_names {
             let path = self.reftable_dir.join(table_name);
             let data = fs::read(&path).map_err(Error::Io)?;
             let reader = ReftableReader::new(data)?;
@@ -2453,7 +2527,6 @@ impl ReftableStack {
                 }
             }
         }
-        // Sort by update_index descending (most recent first)
         logs.sort_by_key(|a| std::cmp::Reverse(a.update_index));
         Ok(logs)
     }
@@ -2570,7 +2643,7 @@ impl ReftableStack {
         }
         let data = writer.finish()?;
         let old_names = self.table_names.clone();
-        let name = self.write_table_file(&data, max_idx)?;
+        let name = self.write_table_file(&data, min_idx, max_idx)?;
         self.table_names = vec![name];
         self.write_tables_list_locked(guard)?;
         for old in &old_names {
@@ -2581,8 +2654,26 @@ impl ReftableStack {
 
     /// Read all log records across all tables.
     pub fn read_all_logs(&self) -> Result<Vec<LogRecord>> {
+        let started = Instant::now();
+        loop {
+            let table_names = self.table_names_for_read()?;
+            match self.read_all_logs_from_names(&table_names) {
+                Ok(logs) => return Ok(logs),
+                Err(e) if is_transient_stack_table_error(&e) => {
+                    if started.elapsed() >= STACK_TABLE_RELOAD_DEADLINE {
+                        return Err(e);
+                    }
+                    invalidate_stack_table_cache(&self.reftable_dir);
+                    std::thread::sleep(STACK_TABLE_RELOAD_SLEEP);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    fn read_all_logs_from_names(&self, table_names: &[String]) -> Result<Vec<LogRecord>> {
         let mut logs = Vec::new();
-        for table_name in &self.table_names {
+        for table_name in table_names {
             let path = self.reftable_dir.join(table_name);
             let data = fs::read(&path).map_err(Error::Io)?;
             let reader = ReftableReader::new(data)?;
@@ -2636,28 +2727,15 @@ impl ReftableStack {
         update_index: u64,
         opts: &WriteOptions,
     ) -> Result<String> {
-        let table_has_deletion = ReftableReader::new(data.to_vec())
-            .and_then(|reader| reader.read_refs())
-            .map(|records| {
-                records
-                    .iter()
-                    .any(|record| matches!(record.value, RefValue::Deletion))
-            })
-            .unwrap_or(false);
-        let random: u64 = {
-            // Simple random from /dev/urandom or time-based fallback
-            let mut buf = [0u8; 8];
-            if let Ok(mut f) = fs::File::open("/dev/urandom") {
-                let _ = f.read(&mut buf);
-            }
-            u64::from_le_bytes(buf)
-        };
-        let filename = format!(
-            "{:08x}-{:08x}-{:08x}.ref",
-            update_index, update_index, random as u32
-        );
-        let path = self.reftable_dir.join(&filename);
-        fs::write(&path, data).map_err(Error::Io)?;
+        let reader = ReftableReader::new(data.to_vec())?;
+        let table_has_deletion = reader
+            .read_refs()?
+            .iter()
+            .any(|record| matches!(record.value, RefValue::Deletion));
+        let min_idx = reader.min_update_index();
+        let max_idx = reader.max_update_index();
+        let _ = update_index;
+        let filename = self.write_table_file(data, min_idx, max_idx)?;
 
         // Serialize the read-modify-write of `tables.list` so concurrent writers
         // do not clobber each other (and so we never compact away a table that a
@@ -2732,7 +2810,7 @@ impl ReftableStack {
             writer.add_log(log)?;
         }
         let data = writer.finish()?;
-        let filename = self.write_table_file(&data, max_idx)?;
+        let filename = self.write_table_file(&data, min_idx, max_idx)?;
         let keep: Vec<String> = vec![filename.clone(), newest.clone()];
         self.table_names = keep;
         self.write_tables_list_locked(&mut guard)?;
@@ -2792,7 +2870,7 @@ impl ReftableStack {
             writer.add_log(log)?;
         }
         let data = writer.finish()?;
-        let compacted = self.write_table_file(&data, max_idx)?;
+        let compacted = self.write_table_file(&data, min_idx, max_idx)?;
 
         self.table_names = locked_prefix;
         self.table_names.push(compacted.clone());
@@ -2838,7 +2916,7 @@ impl ReftableStack {
                 writer.add_log(log_rec)?;
             }
             let data = writer.finish()?;
-            let filename = self.write_table_file(&data, update_index)?;
+            let filename = self.write_table_file(&data, update_index, update_index)?;
             self.table_names.push(filename);
             self.write_tables_list_locked(&mut guard)?;
         }
@@ -2922,7 +3000,7 @@ impl ReftableStack {
         }
 
         let data = writer.finish()?;
-        let filename = self.write_table_file(&data, update_index)?;
+        let filename = self.write_table_file(&data, update_index, update_index)?;
         self.table_names.push(filename);
         self.write_tables_list_locked(guard)?;
         Ok(())
@@ -2942,7 +3020,7 @@ impl ReftableStack {
         }
         let table_names = self.table_names_for_read()?;
         let cached = cached_stack_tables_for_names(&self.reftable_dir, &table_names)?;
-        let readers = self.stack_readers(&cached, &table_names)?;
+        let readers = self.stack_readers(&cached)?;
         for reader in readers.iter().rev() {
             reader.for_each_ref(|rec| {
                 if !want.contains(&rec.name) || resolved.contains(&rec.name) {
@@ -3064,7 +3142,7 @@ impl ReftableStack {
         // Write new compacted table
         let old_names = self.table_names.clone();
         self.table_names.clear();
-        let name = self.write_table_file(&data, max_idx)?;
+        let name = self.write_table_file(&data, min_idx, max_idx)?;
         self.table_names.push(name.clone());
         self.write_tables_list_locked(&mut guard)?;
 
@@ -3080,21 +3158,37 @@ impl ReftableStack {
         Ok(())
     }
 
-    fn write_table_file(&self, data: &[u8], update_index: u64) -> Result<String> {
-        let random: u64 = {
-            let mut buf = [0u8; 8];
-            if let Ok(mut f) = fs::File::open("/dev/urandom") {
-                let _ = f.read(&mut buf);
+    fn write_table_file(
+        &self,
+        data: &[u8],
+        min_update_index: u64,
+        max_update_index: u64,
+    ) -> Result<String> {
+        const MAX_ATTEMPTS: u32 = 32;
+        for _ in 0..MAX_ATTEMPTS {
+            let suffix = random_table_suffix()?;
+            let filename = format!(
+                "{:08x}-{:08x}-{:08x}.ref",
+                min_update_index, max_update_index, suffix
+            );
+            let path = self.reftable_dir.join(&filename);
+            if path.exists() {
+                continue;
             }
-            u64::from_le_bytes(buf)
-        };
-        let filename = format!(
-            "{:08x}-{:08x}-{:08x}.ref",
-            update_index, update_index, random as u32
-        );
-        let path = self.reftable_dir.join(&filename);
-        fs::write(&path, data).map_err(Error::Io)?;
-        Ok(filename)
+            let tmp_name = format!(".writ-{suffix:08x}.tmp");
+            let tmp_path = self.reftable_dir.join(&tmp_name);
+            {
+                let mut file = fs::File::create(&tmp_path).map_err(Error::Io)?;
+                file.write_all(data).map_err(Error::Io)?;
+                file.sync_all().map_err(Error::Io)?;
+            }
+            crate::atomic_replace::replace_file(&tmp_path, &path).map_err(Error::Io)?;
+            return Ok(filename);
+        }
+        Err(Error::Io(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "could not allocate a unique reftable file name",
+        )))
     }
 
     /// Write `tables.list` atomically.
@@ -4714,6 +4808,112 @@ mod tests {
             })
             .to_string(),
             "reftable: symref target is not valid UTF-8"
+        );
+    }
+
+    #[test]
+    fn write_table_file_uses_distinct_suffixes() {
+        use crate::repo::init_repository;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .expect("init");
+        let git_dir = dir.path().join(".git");
+        let stack = ReftableStack::open(&git_dir).expect("open");
+        let data = ReftableWriter::new(WriteOptions::default(), 1, 1)
+            .finish()
+            .expect("empty table");
+        let first = stack
+            .write_table_file(&data, 1, 1)
+            .expect("first table file");
+        let second = stack
+            .write_table_file(&data, 1, 1)
+            .expect("second table file");
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn concurrent_readers_survive_autocompact_writes() {
+        use crate::objects::ObjectId;
+        use crate::repo::init_repository;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .expect("init");
+        let git_dir = dir.path().join(".git");
+        let opts = read_write_options(&git_dir);
+        let stop = Arc::new(AtomicBool::new(false));
+
+        let git_dir_writer = git_dir.clone();
+        let opts_writer = opts.clone();
+        let stop_writer = Arc::clone(&stop);
+        let writer = thread::spawn(move || {
+            let mut stack = ReftableStack::open(&git_dir_writer).expect("writer open");
+            for i in 0..120u8 {
+                let oid = ObjectId::from_bytes(&[i; 20]).expect("oid");
+                stack
+                    .write_ref(
+                        &format!("refs/heads/stress/{i}"),
+                        RefValue::Val1(oid),
+                        None,
+                        &opts_writer,
+                    )
+                    .expect("write_ref");
+            }
+            stop_writer.store(true, Ordering::Release);
+        });
+
+        let mut readers = Vec::new();
+        for _ in 0..4 {
+            let git_dir_reader = git_dir.clone();
+            let stop_reader = Arc::clone(&stop);
+            readers.push(thread::spawn(move || {
+                let stack = ReftableStack::open(&git_dir_reader).expect("reader open");
+                while !stop_reader.load(Ordering::Acquire) {
+                    stack.read_refs().expect("read_refs");
+                    stack
+                        .list_refs_under_prefix(&git_dir_reader, "refs/heads/stress/")
+                        .expect("list refs");
+                    thread::sleep(Duration::from_millis(1));
+                }
+                for _ in 0..30 {
+                    stack.read_refs().expect("read_refs tail");
+                    stack.read_all_logs().expect("read_all_logs tail");
+                }
+            }));
+        }
+
+        writer.join().expect("writer join");
+        for reader in readers {
+            reader.join().expect("reader join");
+        }
+
+        let refs = ReftableStack::open(&git_dir)
+            .expect("final open")
+            .read_refs()
+            .expect("final read");
+        assert!(
+            refs.iter()
+                .filter(|r| r.name.starts_with("refs/heads/stress/"))
+                .count()
+                >= 120,
+            "expected every stress ref to survive concurrent autocompaction"
         );
     }
 }

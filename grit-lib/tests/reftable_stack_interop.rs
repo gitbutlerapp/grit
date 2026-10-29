@@ -624,6 +624,74 @@ fn concurrent_grit_writers_serialize_and_preserve_updates() {
 }
 
 #[test]
+fn concurrent_readers_survive_autocompact_writes() {
+    if !require_reftable_git() {
+        return;
+    }
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    let root = git_init_reftable_repo("main");
+    let git_dir = root.path().join(".git");
+    let opts = read_write_options(&git_dir);
+    let stop = Arc::new(AtomicBool::new(false));
+
+    let git_dir_writer = git_dir.clone();
+    let opts_writer = opts.clone();
+    let stop_writer = Arc::clone(&stop);
+    let writer = thread::spawn(move || {
+        let mut stack = ReftableStack::open(&git_dir_writer).expect("writer open");
+        for i in 0..120u8 {
+            let oid = ObjectId::from_bytes(&[i; 20]).expect("oid");
+            stack
+                .write_ref(
+                    &format!("refs/heads/stress/{i}"),
+                    RefValue::Val1(oid),
+                    None,
+                    &opts_writer,
+                )
+                .expect("write_ref");
+        }
+        stop_writer.store(true, Ordering::Release);
+    });
+
+    let mut readers = Vec::new();
+    for _ in 0..4 {
+        let git_dir_reader = git_dir.clone();
+        let stop_reader = Arc::clone(&stop);
+        readers.push(thread::spawn(move || {
+            let stack = ReftableStack::open(&git_dir_reader).expect("reader open");
+            while !stop_reader.load(Ordering::Acquire) {
+                stack.read_refs().expect("read_refs");
+                stack
+                    .list_refs_under_prefix(&git_dir_reader, "refs/heads/stress/")
+                    .expect("list refs");
+                thread::sleep(Duration::from_millis(1));
+            }
+            for _ in 0..30 {
+                stack.read_refs().expect("read_refs tail");
+                stack.read_all_logs().expect("read_all_logs tail");
+            }
+        }));
+    }
+
+    writer.join().expect("writer join");
+    for reader in readers {
+        reader.join().expect("reader join");
+    }
+
+    assert!(git_fsck_strict(root.path()));
+    if git_supports_refs_verify() {
+        git_refs_verify(root.path());
+    }
+    let show = git_show_ref(root.path());
+    for i in 0..120u8 {
+        let name = format!("refs/heads/stress/{i}");
+        assert!(show.contains_key(&name), "missing {name}");
+    }
+}
+
+#[test]
 fn resolve_head_after_git_commit_tree_on_reftable() {
     if !require_reftable_git() {
         return;
