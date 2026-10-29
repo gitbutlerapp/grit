@@ -445,7 +445,7 @@ mod rebase_cli;
 #[cfg(feature = "full-tests")]
 #[path = "rebase_conflicts_cli.rs"]
 mod rebase_conflicts_cli;
-#[cfg(unix)]
+#[cfg(feature = "full-tests")]
 #[path = "rebase_exec_interrupt.rs"]
 mod rebase_exec_interrupt;
 #[cfg(feature = "full-tests")]
@@ -479,6 +479,9 @@ mod remote_set_url_cli;
 #[cfg(feature = "full-tests")]
 #[path = "remote_show_cli.rs"]
 mod remote_show_cli;
+#[cfg(feature = "full-tests")]
+#[path = "reset_hard_memory.rs"]
+mod reset_hard_memory;
 #[cfg(feature = "full-tests")]
 #[path = "reset_interrupt.rs"]
 mod reset_interrupt;
