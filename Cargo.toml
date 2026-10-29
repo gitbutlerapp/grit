@@ -27,7 +27,6 @@ sha2 = "0.11"
 sha1dc = "=0.1.5"
 tempfile = "3"
 similar = "3"
-imara-diff = { version = "0.2", features = ["unified_diff"] }
 merge3 = "0.2"
 regex = "1"
 # Same engine and feature set `regex` already enables; listed so filters can set meta options.

@@ -41,7 +41,7 @@ where noted). Highlights:
 | ---- | ------ |
 | Hashing | `sha1`, `sha2`, `crc32fast` |
 | Compression | `flate2` |
-| Diff / merge | `similar`, `merge3`, `imara-diff` |
+| Diff / merge | `similar`, `merge3` |
 | Text / paths | `regex`, `hex`, `unicode-width`, `icu_normalizer`, `shell-words` |
 | Time / TZ | `time`, `tzdb`, `tz` |
 | I/O helpers | `tempfile`, `memmap2`, `filetime` |

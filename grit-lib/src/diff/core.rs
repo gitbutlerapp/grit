@@ -16,7 +16,8 @@
 //! ## Content diff
 //!
 //! Line-level diffing uses the `similar` crate (Myers, patience, minimal) and,
-//! for Git's `histogram` algorithm, `imara-diff` for output compatible with upstream Git.
+//! for Git's `histogram` algorithm, grit's own histogram engine for output compatible with
+//! upstream Git.
 //! Output formats: unified patch, raw (`:old-mode new-mode ...`), stat,
 //! numstat.
 
@@ -1503,8 +1504,8 @@ pub fn resolve_indent_heuristic(
 // flags). Git's word diff runs the *default* xdiff Myers over the per-word
 // token streams; matching Git's exact change-record selection requires
 // reproducing its preprocessing (record classification + `xdl_cleanup_records`
-// + `xdl_trim_ends`) and its divide-and-conquer split, because `imara-diff`
-// (and `similar`) pick different — but equally minimal — alignments for inputs
+// + `xdl_trim_ends`) and its divide-and-conquer split, because the histogram
+// engine (and `similar`) pick different — but equally minimal — alignments for inputs
 // with many repeated tokens (e.g. the `{`/`}`/`,` in the `bibtex` driver).
 mod git_xdiff {
     use std::cell::RefCell;
@@ -10955,8 +10956,8 @@ fn get_func_line_forward(
 /// This produces diffs where the anchored text stays as context and surrounding
 /// lines are shown as additions/removals.
 ///
-/// Segment diffs use `algorithm`. When `use_git_histogram` is true, histogram uses imara-diff
-/// (Git-compatible); otherwise `algorithm` is passed to `similar`.
+/// Segment diffs use `algorithm`. When `use_git_histogram` is true, histogram uses the
+/// Git-compatible histogram engine; otherwise `algorithm` is passed to `similar`.
 pub fn anchored_unified_diff(
     old_content: &str,
     new_content: &str,

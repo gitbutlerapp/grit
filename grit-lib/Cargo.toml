@@ -59,7 +59,6 @@ hex.workspace = true
 tempfile.workspace = true
 similar = { workspace = true, features = ["inline"] }
 merge3.workspace = true
-imara-diff.workspace = true
 regex.workspace = true
 regex-automata.workspace = true
 libc.workspace = true

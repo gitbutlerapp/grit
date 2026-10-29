@@ -383,7 +383,6 @@ dependencies = [
  "getrandom 0.2.17",
  "hex",
  "icu_normalizer",
- "imara-diff",
  "libc",
  "memmap2",
  "merge3",
@@ -572,16 +571,6 @@ checksum = "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
-]
-
-[[package]]
-name = "imara-diff"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f01d462f766df78ab820dd06f5eb700233c51f0f4c2e846520eaf4ba6aa5c5c"
-dependencies = [
- "hashbrown",
- "memchr",
 ]
 
 [[package]]

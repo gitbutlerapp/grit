@@ -50,7 +50,7 @@ impl DiffAlgorithm {
         }
     }
 
-    /// Whether this selection uses Git's histogram engine (`imara-diff`).
+    /// Whether this selection uses the histogram line-diff engine.
     #[must_use]
     pub fn uses_git_histogram(self) -> bool {
         matches!(self, Self::Histogram)
