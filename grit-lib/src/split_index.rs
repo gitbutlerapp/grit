@@ -767,6 +767,7 @@ pub(crate) fn write_index_file_split(
             content_verified: std::collections::HashMap::new(),
             fsmonitor_refresh_ran: false,
             suppress_pre_write_index_housekeeping: false,
+            entry_modes_repaired_on_load: false,
         };
         let tmp = match tempfile::NamedTempFile::new_in(git_dir) {
             Ok(t) => t,
@@ -932,6 +933,7 @@ pub(crate) fn write_index_file_split(
         content_verified: std::collections::HashMap::new(),
         fsmonitor_refresh_ran: index.fsmonitor_refresh_ran,
         suppress_pre_write_index_housekeeping: index.suppress_pre_write_index_housekeeping,
+        entry_modes_repaired_on_load: index.entry_modes_repaired_on_load,
     };
 
     let perm_lock = staged_lock_path_buf_for_perm(existing_lock.as_deref(), commit_lock);

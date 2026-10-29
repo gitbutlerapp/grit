@@ -2371,7 +2371,9 @@ pub fn status(
             },
             Some(cancel_poll),
         )?;
-    let mut persist_index = index_stat_refresh_changed || rewrite_clears_racy_entries;
+    let mut persist_index = index_stat_refresh_changed
+        || rewrite_clears_racy_entries
+        || index.entry_modes_repaired_on_load;
     let mut unstaged: Vec<DiffEntry> = unstaged_raw
         .into_iter()
         .filter(|e| status_diff_entry_matches_pathspec(e, &opts.pathspecs))
@@ -2449,6 +2451,7 @@ pub fn status(
         if written? {
             crate::index::advance_index_file_mtime_past_entries(&index, &index_path, None)?;
             index.source_mtime = crate::index::index_file_mtime(&index_path);
+            index.entry_modes_repaired_on_load = false;
         }
     }
 

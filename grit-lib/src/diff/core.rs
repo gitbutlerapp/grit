@@ -3124,7 +3124,9 @@ fn diff_tree_entries_count(
                         ni += 1;
                     }
                     std::cmp::Ordering::Equal => {
-                        if o.oid != n.oid || o.mode != n.mode {
+                        if o.oid != n.oid
+                            || crate::index::canon_mode(o.mode) != crate::index::canon_mode(n.mode)
+                        {
                             let path = crate::repo_relpath::format_path_stored(prefix, &o.name);
                             if is_tree_mode(o.mode) && is_tree_mode(n.mode) {
                                 if show_trees {
@@ -3236,7 +3238,9 @@ fn diff_tree_entries_opts(
                     }
                     std::cmp::Ordering::Equal => {
                         // Both present — check for changes
-                        if o.oid != n.oid || o.mode != n.mode {
+                        if o.oid != n.oid
+                            || crate::index::canon_mode(o.mode) != crate::index::canon_mode(n.mode)
+                        {
                             let path = crate::repo_relpath::format_path_stored(prefix, o.name);
                             if is_tree_mode(o.mode) && is_tree_mode(n.mode) {
                                 // Both are trees
@@ -3245,8 +3249,8 @@ fn diff_tree_entries_opts(
                                         status: DiffStatus::Modified,
                                         old_path: Some(path.clone()),
                                         new_path: Some(path.clone()),
-                                        old_mode: FileMode::new(o.mode),
-                                        new_mode: FileMode::new(n.mode),
+                                        old_mode: FileMode::new(crate::index::canon_mode(o.mode)),
+                                        new_mode: FileMode::new(crate::index::canon_mode(n.mode)),
                                         old_oid: o.oid,
                                         new_oid: n.oid,
                                         score: None,
@@ -3851,13 +3855,17 @@ fn diff_index_to_tree_flatten(
         match tree_map.remove(path.as_str()) {
             Some(te) => {
                 // Present in both — check for differences
-                if te.oid != ie.oid || te.mode != ie.mode {
+                if te.oid != ie.oid
+                    || crate::index::canon_mode(te.mode) != crate::index::canon_mode(ie.mode)
+                {
+                    let tree_mode = crate::index::canon_mode(te.mode);
+                    let index_mode = crate::index::canon_mode(ie.mode);
                     result.push(DiffEntry {
-                        status: DiffStatus::for_content_change(te.mode, ie.mode),
+                        status: DiffStatus::for_content_change(tree_mode, index_mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path),
-                        old_mode: FileMode::new(te.mode),
-                        new_mode: FileMode::new(ie.mode),
+                        old_mode: FileMode::new(tree_mode),
+                        new_mode: FileMode::new(index_mode),
                         old_oid: te.oid,
                         new_oid: ie.oid,
                         score: None,
@@ -4192,14 +4200,19 @@ fn diff_index_tree_at(
                                 continue;
                             };
                             *walk.idx_cursor += 1;
-                            if t_entry.oid != ie.oid || t_entry.mode != ie.mode {
+                            if t_entry.oid != ie.oid
+                                || crate::index::canon_mode(t_entry.mode)
+                                    != crate::index::canon_mode(ie.mode)
+                            {
                                 let path = String::from_utf8_lossy(&ie.path).into_owned();
+                                let tree_mode = crate::index::canon_mode(t_entry.mode);
+                                let index_mode = crate::index::canon_mode(ie.mode);
                                 walk.result.push(DiffEntry {
-                                    status: DiffStatus::for_content_change(t_entry.mode, ie.mode),
+                                    status: DiffStatus::for_content_change(tree_mode, index_mode),
                                     old_path: Some(path.clone()),
                                     new_path: Some(path),
-                                    old_mode: FileMode::new(t_entry.mode),
-                                    new_mode: FileMode::new(ie.mode),
+                                    old_mode: FileMode::new(tree_mode),
+                                    new_mode: FileMode::new(index_mode),
                                     old_oid: t_entry.oid,
                                     new_oid: ie.oid,
                                     score: None,
@@ -4636,10 +4649,13 @@ fn hard_reset_align_index_tree_at(
                                 continue;
                             };
                             *walk.idx_cursor += 1;
-                            if t_entry.oid != ie.oid || t_entry.mode != ie.mode {
+                            if t_entry.oid != ie.oid
+                                || crate::index::canon_mode(t_entry.mode)
+                                    != crate::index::canon_mode(ie.mode)
+                            {
                                 walk.plan.updates.push((
                                     ie.path.clone(),
-                                    t_entry.mode,
+                                    crate::index::canon_mode(t_entry.mode),
                                     t_entry.oid,
                                 ));
                             }
@@ -4746,7 +4762,7 @@ fn hard_reset_index_tree_row(path: Vec<u8>, mode: u32, oid: ObjectId) -> IndexEn
         mtime_nsec: 0,
         dev: 0,
         ino: 0,
-        mode,
+        mode: crate::index::canon_mode(mode),
         uid: 0,
         gid: 0,
         size: 0,
@@ -8259,6 +8275,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
 
         if unmerged_only_paths.contains(path) {
             if let (Some(te), Some(meta)) = (tree_entry, wt_meta.as_ref()) {
+                let tree_mode = crate::index::canon_mode(te.mode);
                 let file_attrs = file_attrs_for(path);
                 let wt_oid = hash_worktree_file(
                     odb,
@@ -8271,13 +8288,13 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                     filter_fp,
                 )?;
                 let wt_mode =
-                    mode_policy.index_mode_for_worktree(mode_from_metadata(meta), Some(te.mode));
-                if wt_oid != te.oid || wt_mode != te.mode {
+                    mode_policy.index_mode_for_worktree(mode_from_metadata(meta), Some(tree_mode));
+                if wt_oid != te.oid || wt_mode != tree_mode {
                     result.push(DiffEntry {
-                        status: DiffStatus::for_content_change(te.mode, wt_mode),
+                        status: DiffStatus::for_content_change(tree_mode, wt_mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path.clone()),
-                        old_mode: FileMode::new(te.mode),
+                        old_mode: FileMode::new(tree_mode),
                         new_mode: FileMode::new(wt_mode),
                         old_oid: te.oid,
                         new_oid: wt_oid,
@@ -8290,18 +8307,19 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
 
         match (tree_entry, wt_meta) {
             (Some(te), Some(ref meta)) => {
+                let tree_mode = crate::index::canon_mode(te.mode);
                 let Some(ie) = index_entries.get(path.as_bytes()) else {
                     continue;
                 };
                 let wt_mode =
                     mode_policy.index_mode_for_worktree(mode_from_metadata(meta), Some(ie.mode));
 
-                let index_matches_tree = ie.oid == te.oid && ie.mode == te.mode;
+                let index_matches_tree = ie.oid == te.oid && ie.mode == tree_mode;
 
                 // Fully clean: index matches `HEAD`, worktree matches index, stat cache fresh.
                 let stat_trusted = stat_matches_with_policy(ie, meta, stat_policy)
                     && !entry_is_racy_with_policy(ie, index_mtime, stat_policy);
-                if index_matches_tree && stat_trusted && wt_mode == te.mode {
+                if index_matches_tree && stat_trusted && wt_mode == tree_mode {
                     continue;
                 }
 
@@ -8312,12 +8330,12 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                 // the worktree still matching the index. `core.filemode=false` does not discard
                 // an explicit index chmod vs HEAD. Once the worktree drifts from the index, the
                 // diff must describe the worktree side, so fall through.
-                if ie.oid == te.oid && ie.mode != te.mode && stat_trusted && wt_mode == ie.mode {
+                if ie.oid == te.oid && ie.mode != tree_mode && stat_trusted && wt_mode == ie.mode {
                     result.push(DiffEntry {
-                        status: DiffStatus::for_content_change(te.mode, ie.mode),
+                        status: DiffStatus::for_content_change(tree_mode, ie.mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path.clone()),
-                        old_mode: FileMode::new(te.mode),
+                        old_mode: FileMode::new(tree_mode),
                         new_mode: FileMode::new(ie.mode),
                         old_oid: te.oid,
                         new_oid: te.oid,
@@ -8341,10 +8359,10 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                     )?;
                     if wt_oid != te.oid {
                         result.push(DiffEntry {
-                            status: DiffStatus::for_content_change(te.mode, wt_mode),
+                            status: DiffStatus::for_content_change(tree_mode, wt_mode),
                             old_path: Some(path.clone()),
                             new_path: Some(path.clone()),
-                            old_mode: FileMode::new(te.mode),
+                            old_mode: FileMode::new(tree_mode),
                             new_mode: FileMode::new(wt_mode),
                             old_oid: te.oid,
                             // Raw `git diff <tree>` uses a null OID on the worktree side (patch
@@ -8352,12 +8370,12 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                             new_oid: zero_oid(),
                             score: None,
                         });
-                    } else if wt_mode != te.mode {
+                    } else if wt_mode != tree_mode {
                         result.push(DiffEntry {
-                            status: DiffStatus::for_content_change(te.mode, wt_mode),
+                            status: DiffStatus::for_content_change(tree_mode, wt_mode),
                             old_path: Some(path.clone()),
                             new_path: Some(path.clone()),
-                            old_mode: FileMode::new(te.mode),
+                            old_mode: FileMode::new(tree_mode),
                             new_mode: FileMode::new(wt_mode),
                             old_oid: te.oid,
                             new_oid: te.oid,
@@ -8378,13 +8396,13 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                     idx_ent,
                     filter_fp,
                 )?;
-                if wt_oid != te.oid || wt_mode != te.mode {
+                if wt_oid != te.oid || wt_mode != tree_mode {
                     let new_oid = if wt_oid != te.oid { zero_oid() } else { te.oid };
                     result.push(DiffEntry {
-                        status: DiffStatus::for_content_change(te.mode, wt_mode),
+                        status: DiffStatus::for_content_change(tree_mode, wt_mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path.clone()),
-                        old_mode: FileMode::new(te.mode),
+                        old_mode: FileMode::new(tree_mode),
                         new_mode: FileMode::new(wt_mode),
                         old_oid: te.oid,
                         new_oid,
@@ -8393,12 +8411,13 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                 }
             }
             (Some(te), None) => {
+                let tree_mode = crate::index::canon_mode(te.mode);
                 // In tree but missing from worktree
                 result.push(DiffEntry {
                     status: DiffStatus::Deleted,
                     old_path: Some(path.clone()),
                     new_path: None,
-                    old_mode: FileMode::new(te.mode),
+                    old_mode: FileMode::new(tree_mode),
                     new_mode: FileMode::ABSENT,
                     old_oid: te.oid,
                     new_oid: zero_oid(),
@@ -11845,7 +11864,7 @@ pub fn head_path_states(
 
 /// Whether a mode represents a tree (directory).
 fn is_tree_mode(mode: u32) -> bool {
-    mode == 0o040000
+    crate::index::is_tree_mode(mode)
 }
 
 /// Git orders diff lists by raw path bytes, which differs from the stored form of

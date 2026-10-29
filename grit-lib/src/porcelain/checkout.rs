@@ -183,7 +183,7 @@ impl<'a> PopulatedTreeWalk<'a> {
                 entry.mode,
                 self.protect,
             )?;
-            if entry.mode == MODE_TREE {
+            if crate::index::is_tree_mode(entry.mode) {
                 let entries = (*self.odb.cached_tree_entries(&entry.oid)?).clone();
                 self.stack.push(PopulatedTreeWalkFrame {
                     prefix: path,
@@ -194,7 +194,7 @@ impl<'a> PopulatedTreeWalk<'a> {
             }
             return Ok(Some(PopulatedTreeBlob {
                 path,
-                mode: entry.mode,
+                mode: crate::index::canon_mode(entry.mode),
                 oid: entry.oid,
             }));
         }

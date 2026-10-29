@@ -475,13 +475,14 @@ impl TreeIndexWalk<'_> {
         for te in parse_tree(&obj.data)? {
             validate_tree_walk_entry(prefix, &te.name, te.mode, self.protect)?;
             let path = join_rel(prefix, &te.name);
-            if te.mode == MODE_TREE {
+            if crate::index::is_tree_mode(te.mode) {
                 let child_seed = seed_node.and_then(|n| find_child(n, &te.name));
                 let child = self.walk(&te.oid, &path, te.name, child_seed)?;
                 entry_count = entry_count.saturating_add(child.entry_count.max(0));
                 children.push(child);
             } else {
-                self.entries.push(tree_entry(path, te.mode, te.oid));
+                self.entries
+                    .push(tree_entry(path, crate::index::canon_mode(te.mode), te.oid));
                 entry_count = entry_count.saturating_add(1);
             }
         }
@@ -499,7 +500,7 @@ fn tree_entry(path: Vec<u8>, mode: u32, oid: ObjectId) -> IndexEntry {
         mtime_nsec: 0,
         dev: 0,
         ino: 0,
-        mode,
+        mode: crate::index::canon_mode(mode),
         uid: 0,
         gid: 0,
         size: 0,
