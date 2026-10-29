@@ -1464,6 +1464,8 @@ mod reset_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "reset_hard_at_head_preserves_mtime.rs"]
 mod reset_hard_at_head_preserves_mtime;
+#[path = "reset_hard_at_head_restores_worktree.rs"]
+mod reset_hard_at_head_restores_worktree;
 #[cfg(feature = "full-tests")]
 #[path = "reset_hard_cancel.rs"]
 mod reset_hard_cancel;
