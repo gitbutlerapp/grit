@@ -612,6 +612,121 @@ fn diff_pathspec_from_file_in_bare_repo_matches_git() {
     assert_eq!(grit_names, git_names);
 }
 
+fn init_issue_2298_fixture(dir: &std::path::Path) {
+    assert!(run_git(dir, &["init", "-b", "main"]).status.success());
+    fs::create_dir_all(dir.join("sub")).expect("sub");
+    fs::create_dir_all(dir.join("other")).expect("other");
+    fs::write(dir.join("sub/f.txt"), b"1\n").expect("sub/f");
+    fs::write(dir.join("other/g.txt"), b"1\n").expect("other/g");
+    assert!(run_git(dir, &["add", "-A"]).status.success());
+    assert!(run_git(dir, &["commit", "-qm", "one"]).status.success());
+    fs::OpenOptions::new()
+        .append(true)
+        .open(dir.join("other/g.txt"))
+        .expect("open g")
+        .write_all(b"2\n")
+        .expect("append g");
+    assert!(run_git(dir, &["commit", "-qam", "two"]).status.success());
+    fs::OpenOptions::new()
+        .append(true)
+        .open(dir.join("sub/f.txt"))
+        .expect("open f")
+        .write_all(b"2\n")
+        .expect("append f");
+    assert!(run_git(dir, &["commit", "-qam", "three"]).status.success());
+}
+
+fn rev_count_git(dir: &std::path::Path, extra: &[&str]) -> u64 {
+    let mut args = vec!["rev-list", "--count", "HEAD", "--"];
+    args.extend_from_slice(extra);
+    let out = run_git(dir, &args);
+    assert!(
+        out.status.success(),
+        "git rev-list: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .expect("count")
+}
+
+fn rev_count_grit(grit: &str, dir: &std::path::Path, extra: &[&str]) -> u64 {
+    let mut args = vec!["revs", "--count", "HEAD", "--"];
+    args.extend_from_slice(extra);
+    let out = run_grit(grit, dir, &args);
+    assert!(
+        out.status.success(),
+        "grit revs: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .expect("count")
+}
+
+fn log_count_grit_json(grit: &str, dir: &std::path::Path, paths: &[&str]) -> usize {
+    let mut extra = vec!["--"];
+    extra.extend(paths.iter().copied());
+    log_oids_grit(grit, dir, &extra).len()
+}
+
+fn log_count_git(dir: &std::path::Path, paths: &[&str]) -> usize {
+    let mut extra = vec!["--"];
+    extra.extend(paths.iter().copied());
+    log_oids_git(dir, &extra).len()
+}
+
+/// Regression for #2298: cwd-relative pathspecs must not be prefixed twice (CLI + rev walk).
+#[test]
+fn log_and_revs_trailing_pathspec_from_subdirectory_matches_git() {
+    let grit = env!("CARGO_BIN_EXE_grit");
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    init_issue_2298_fixture(dir.path());
+    let sub = dir.path().join("sub");
+
+    let cases: &[&[&str]] = &[
+        &["f.txt"],
+        &["."],
+        &["./f.txt"],
+        &["../sub/f.txt"],
+        &[":(top)sub/f.txt"],
+        &["*.txt"],
+        &[":!f.txt"],
+        &[":!g.txt"],
+        &[":(glob)**/f.txt"],
+    ];
+
+    for paths in cases {
+        let git_n = log_count_git(&sub, paths);
+        let grit_n = log_count_grit_json(grit, &sub, paths);
+        assert_eq!(
+            grit_n, git_n,
+            "log from sub/ paths {:?}: grit {grit_n} git {git_n}",
+            paths
+        );
+
+        let git_c = rev_count_git(&sub, paths);
+        let grit_c = rev_count_grit(grit, &sub, paths);
+        assert_eq!(
+            grit_c, git_c,
+            "revs --count from sub/ paths {:?}: grit {grit_c} git {git_c}",
+            paths
+        );
+    }
+
+    let list = sub.join("paths.txt");
+    fs::write(&list, b"f.txt\n").expect("write list");
+    let list_arg = list.to_str().unwrap();
+    let paths = pathspec_lines_from_file(&list);
+    let mut git_args = vec!["--"];
+    git_args.extend(paths.iter().map(String::as_str));
+    let git_from_file = log_oids_git(&sub, &git_args);
+    let grit_from_file = log_oids_grit(grit, &sub, &["--pathspec-from-file", list_arg]);
+    assert_eq!(grit_from_file, git_from_file);
+}
+
 #[test]
 fn show_pathspec_from_file_in_bare_repo_succeeds() {
     let grit = env!("CARGO_BIN_EXE_grit");
