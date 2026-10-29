@@ -245,6 +245,34 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
         "{gitmodules_link:?}"
     );
 
+    let ntfs_gitmodules_link = repo.objects().write_tree([TreeEntry {
+        mode: 0o120000,
+        name: b"foo\\.gitmodules".to_vec(),
+        oid: blob,
+    }]);
+    assert!(
+        matches!(
+            ntfs_gitmodules_link,
+            Err(Error::InvalidTreeEntry(TreeEntryError::ForbiddenDotSymlink {
+                ref name,
+                reserved_file: ".gitmodules",
+            })) if name == b"foo\\.gitmodules"
+        ),
+        "{ntfs_gitmodules_link:?}"
+    );
+    let ntfs_would_be = repo
+        .objects()
+        .hash(
+            ObjectKind::Tree,
+            &serialize_tree(&[TreeEntry {
+                mode: 0o120000,
+                name: b"foo\\.gitmodules".to_vec(),
+                oid: blob,
+            }]),
+        )
+        .expect("hash");
+    assert!(!repo.objects().contains(&ntfs_would_be).unwrap());
+
     let would_be = repo
         .objects()
         .hash(
@@ -321,6 +349,41 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
             })
         ),
         "{still_wrong:?}"
+    );
+}
+
+#[test]
+fn write_tree_rejects_ntfs_backslash_gitmodules_symlink_git_fsck() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repo = init_bare(dir.path(), HashAlgo::Sha1);
+    let blob = blob(&repo, b"x\n");
+    let entry = TreeEntry {
+        mode: 0o120000,
+        name: b"foo\\.gitmodules".to_vec(),
+        oid: blob,
+    };
+    assert!(
+        matches!(
+            repo.objects().write_tree([entry.clone()]),
+            Err(Error::InvalidTreeEntry(
+                TreeEntryError::ForbiddenDotSymlink {
+                    reserved_file: ".gitmodules",
+                    ..
+                }
+            ))
+        ),
+        "typed write_tree must reject NTFS backslash spelling"
+    );
+    repo.objects()
+        .write_literally(ObjectKind::Tree, &serialize_tree(&[entry]))
+        .expect("literal write for git fsck regression");
+    let fsck = git_cmd(&["fsck", "--strict", "--no-dangling"])
+        .in_dir(dir.path())
+        .with_status(1);
+    assert!(
+        fsck.stderr.contains("gitmodulesSymlink"),
+        "stderr: {}",
+        fsck.stderr
     );
 }
 

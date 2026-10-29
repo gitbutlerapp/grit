@@ -187,8 +187,9 @@ impl<'repo> Objects<'repo> {
     /// Write a tree object from `entries`, given in any order.
     ///
     /// Entries are sorted into Git's tree order. Each entry's object must exist in this
-    /// repository with the kind implied by its mode (tree, blob, or commit for gitlinks),
-    /// matching `git mktree` without `--missing`. Use
+    /// repository with the kind implied by its mode (tree or blob; gitlink `160000` entries
+    /// may reference a commit that is not stored), matching `git mktree` without `--missing`.
+    /// Use
     /// [`Self::write_tree_with`] with [`WriteTreeOptions::allow_missing`] when building
     /// trees bottom-up or referencing objects a partial clone has not fetched.
     ///
