@@ -4665,7 +4665,7 @@ fn write_fresh_git_directory(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] on filesystem failures.
+/// Returns [`Error::WorktreePathIo`] or [`Error::GitDirPathIo`] on filesystem failures.
 pub(crate) fn init_repository_separate_git_dir(
     work_tree: &Path,
     git_dir: &Path,
@@ -4842,7 +4842,7 @@ pub(crate) fn init_repository_with_object_format(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] on filesystem failures.
+/// Returns [`Error::WorktreePathIo`] or [`Error::GitDirPathIo`] on filesystem failures.
 pub(crate) fn init_bare_with_env_worktree(
     git_dir: &Path,
     work_tree: &Path,

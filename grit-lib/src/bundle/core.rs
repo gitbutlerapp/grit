@@ -1258,7 +1258,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn open_missing_file_names_path() {
         let path = std::path::Path::new("/no/such/bundle/path.bundle");
         let err = Bundle::open(path).unwrap_err();

@@ -181,6 +181,31 @@ fn unknown_revision_errors_include_revision_not_found_kind() {
     assert_eq!(v["kind"].as_str(), Some("branch_invalid_start_point"));
 }
 
+#[test]
+fn pick_and_revert_malformed_reflog_date_json_has_no_revision_not_found_kind() {
+    let root = init_repo();
+    fs::write(root.path().join("a.txt"), "a").expect("write");
+    let (code, _) = grit(root.path(), &["commit", "-m", "seed", "--json"]);
+    assert_eq!(code, 0);
+
+    let bad = "HEAD@{definitely-not-a-date}";
+    for cmd in ["pick", "revert"] {
+        let (code, stdout) = grit(root.path(), &[cmd, bad, "--json"]);
+        assert_eq!(code, 1, "{cmd}: {stdout}");
+        let v: Value = serde_json::from_str(stdout.trim()).expect(cmd);
+        assert!(
+            v["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("invalid reflog date")),
+            "{cmd}: {v}"
+        );
+        assert!(
+            v.get("kind").is_none(),
+            "{cmd} must not use revision_not_found kind: {v}"
+        );
+    }
+}
+
 /// Port with nothing listening (bound, then released).
 fn closed_port() -> u16 {
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");

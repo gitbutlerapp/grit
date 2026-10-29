@@ -45,14 +45,23 @@ pub fn map_lib_revision_error(err: &LibError) -> Option<String> {
 /// Map an error from expanding commit arguments (`grit pick` / `grit revert`) to a user-facing error.
 #[must_use]
 pub fn map_commit_spec_error(err: LibError) -> AnyhowError {
-    if let Some(msg) = map_lib_revision_error(&err) {
-        return json_error::structured_revision_not_found(msg);
-    }
     match err {
-        LibError::InvalidRef(msg) => AnyhowError::msg(msg),
-        LibError::ObjectNotFound(msg) => {
-            AnyhowError::msg(format!("could not resolve commit: {msg}"))
+        LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
+            json_error::structured_revision_not_found(format!("revision '{name}' not found"))
         }
+        LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
+            json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
+        }
+        LibError::ObjectNotFound(spec) => {
+            json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
+        }
+        LibError::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates }) => {
+            AnyhowError::msg(format_ambiguous_change_id(&prefix, &candidates))
+        }
+        LibError::RevParse(RevParseError::ReflogDateUnparseable { date }) => {
+            AnyhowError::msg(format!("invalid reflog date '{date}'"))
+        }
+        LibError::InvalidRef(msg) => AnyhowError::msg(msg),
         other => AnyhowError::new(other),
     }
 }
