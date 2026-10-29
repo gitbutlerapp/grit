@@ -1150,6 +1150,9 @@ mod pack_deltas;
 #[path = "pack_descriptor_pressure.rs"]
 mod pack_descriptor_pressure;
 #[cfg(feature = "full-tests")]
+#[path = "pack_enumerate_shallow_bitmaps.rs"]
+mod pack_enumerate_shallow_bitmaps;
+#[cfg(feature = "full-tests")]
 #[path = "pack_index_formats.rs"]
 mod pack_index_formats;
 #[cfg(feature = "full-tests")]
