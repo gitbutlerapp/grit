@@ -127,6 +127,13 @@ pub fn update_branch_for_commit_on_store(
         )
     };
     let mut updates = Vec::with_capacity(2);
+    updates.push(RefUpdate {
+        name: update.branch_ref.to_owned(),
+        new_value: Some(RawRef::Direct(update.new_oid)),
+        expected: expected_tip(update.expected_old),
+        reflog: reflog_wanted(store, config, update.branch_ref)?.then(reflog),
+        flags: RefUpdateFlags::default(),
+    });
     if reflog_wanted(store, config, "HEAD")? {
         updates.push(RefUpdate {
             name: "HEAD".to_owned(),
@@ -140,13 +147,6 @@ pub fn update_branch_for_commit_on_store(
             },
         });
     }
-    updates.push(RefUpdate {
-        name: update.branch_ref.to_owned(),
-        new_value: Some(RawRef::Direct(update.new_oid)),
-        expected: expected_tip(update.expected_old),
-        reflog: reflog_wanted(store, config, update.branch_ref)?.then(reflog),
-        flags: RefUpdateFlags::default(),
-    });
     commit_ref_updates_on_store_with_wait(store, &updates, || {
         LockWait::files_ref_lock(Some(config))
     })

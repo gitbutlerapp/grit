@@ -152,8 +152,9 @@ pub trait RefStore: Send + Sync + Debug {
     /// unchanged and unlocked. A store must:
     ///
     /// 1. Before taking locks, reject names Git refuses to store (an update name or either
-    ///    side of a reflog or case-only rename) with [`RefStoreError::InvalidRefName`], an
-    ///    update other than a reflog-only one that would store the null object id with
+    ///    side of a reflog or case-only rename) with [`RefStoreError::InvalidRefName`], a
+    ///    symbolic value Git refuses with [`RefStoreError::InvalidSymrefTarget`], an update
+    ///    other than a reflog-only one that would store the null object id with
     ///    [`RefStoreError::NullOid`], and malformed reflog identity or message fields with
     ///    [`RefStoreError::InvalidReflog`].
     /// 2. While another writer holds a lock this transaction needs, fail promptly with
@@ -183,9 +184,9 @@ pub trait RefStore: Send + Sync + Debug {
     /// more check before calling the backend. Each direct value must name an object the
     /// repository stores ([`RefStoreError::MissingObject`]). A branch (`refs/heads/…`) or
     /// `HEAD` must name a commit ([`RefStoreError::NotACommit`]). An object that cannot be
-    /// read fails with [`RefStoreError::ObjectLookup`]. Deletes, symbolic values,
-    /// reflog-only updates and updates flagged [`RefUpdateFlags::skip_oid_verification`] are
-    /// not looked up.
+    /// read fails with [`RefStoreError::ObjectLookup`]. Deletes and symbolic values are not
+    /// looked up. Reflog-only updates and explicit reflog object ids are checked like direct
+    /// values. Updates flagged [`RefUpdateFlags::skip_oid_verification`] are not looked up.
     fn prepare(
         &self,
         txn: RefTransaction,

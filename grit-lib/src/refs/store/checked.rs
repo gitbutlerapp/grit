@@ -20,8 +20,8 @@ use super::{
     RefStoreError, RefTransaction, RefUpdate,
 };
 
-/// Check `updates` against `odb`: every direct value must name a stored object, and a
-/// branch or `HEAD` must name a commit (see [`verify_direct_targets`]).
+/// Check `updates` against `odb`: direct values and explicit reflog object ids must name
+/// stored objects; a branch or `HEAD` must name a commit (see [`verify_direct_targets`]).
 ///
 /// # Errors
 ///

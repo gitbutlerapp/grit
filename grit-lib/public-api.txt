@@ -19377,6 +19377,9 @@ pub grit_lib::refs::store::RefStoreError::GitDirPathIo::path: alloc::string::Str
 pub grit_lib::refs::store::RefStoreError::Hook(grit_lib::refs::store::error::ReferenceTransactionHookErr)
 pub grit_lib::refs::store::RefStoreError::InvalidRefName
 pub grit_lib::refs::store::RefStoreError::InvalidRefName::name: alloc::string::String
+pub grit_lib::refs::store::RefStoreError::InvalidSymrefTarget
+pub grit_lib::refs::store::RefStoreError::InvalidSymrefTarget::name: alloc::string::String
+pub grit_lib::refs::store::RefStoreError::InvalidSymrefTarget::target: alloc::string::String
 pub grit_lib::refs::store::RefStoreError::InvalidReflog(grit_lib::ident::SignatureError)
 pub grit_lib::refs::store::RefStoreError::LockHeld
 pub grit_lib::refs::store::RefStoreError::LockHeld::name: alloc::string::String

@@ -11,12 +11,14 @@ use grit_lib::error::Error;
 use grit_lib::ident::Signature;
 use grit_lib::objects::{NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::refs::ref_storage::RefStorageFormat;
+use grit_lib::refs::reflog::read_reflog;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefName, RefStore, RefStoreError, RefTransaction, RefUpdate,
     RefUpdateFlags, ReflogUpdate,
 };
 use grit_lib::refs::{
-    update_branch_for_commit, update_branch_for_commit_on_store, BranchCommitRefUpdate,
+    commit_ref_update_on_store, update_branch_for_commit, update_branch_for_commit_on_store,
+    BranchCommitRefUpdate,
 };
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 
@@ -232,7 +234,7 @@ fn tags_and_remote_tracking_refs_may_point_at_any_object() {
 }
 
 #[test]
-fn deletes_symbolic_updates_and_log_only_updates_are_not_checked() {
+fn deletes_and_well_formed_symbolic_updates_commit_without_object_lookup() {
     each_format(|format, fx| {
         commit_updates(fx.repo.refs(), vec![put("refs/heads/gone", fx.commit)]).expect("seed");
         let delete = RefUpdate {
@@ -252,7 +254,21 @@ fn deletes_symbolic_updates_and_log_only_updates_are_not_checked() {
                 ..RefUpdateFlags::default()
             },
         };
-        let mut log_only = put("refs/heads/main", bogus());
+        commit_updates(fx.repo.refs(), vec![delete, symbolic])
+            .unwrap_or_else(|err| panic!("{format:?}: {err}"));
+        assert_eq!(fx.raw("refs/heads/gone"), None, "{format:?}");
+        assert_eq!(
+            fx.raw("refs/heads/alias"),
+            Some(RawRef::Symbolic("refs/heads/not-yet".to_owned())),
+            "{format:?}"
+        );
+    });
+}
+
+#[test]
+fn log_only_updates_with_missing_reflog_objects_are_refused() {
+    each_format(|format, fx| {
+        let mut log_only = put("refs/heads/main", fx.commit);
         log_only.flags.log_only = true;
         log_only.reflog = Some(ReflogUpdate {
             identity: "Ref Verify <verify@example.com>".to_owned(),
@@ -261,12 +277,9 @@ fn deletes_symbolic_updates_and_log_only_updates_are_not_checked() {
             old_oid: Some(fx.commit),
             new_oid: Some(bogus()),
         });
-        commit_updates(fx.repo.refs(), vec![delete, symbolic, log_only])
-            .unwrap_or_else(|err| panic!("{format:?}: {err}"));
-        assert_eq!(fx.raw("refs/heads/gone"), None, "{format:?}");
         assert_eq!(
-            fx.raw("refs/heads/alias"),
-            Some(RawRef::Symbolic("refs/heads/not-yet".to_owned())),
+            commit_updates(fx.repo.refs(), vec![log_only]),
+            Err(missing("refs/heads/main", bogus())),
             "{format:?}"
         );
         assert_eq!(
@@ -274,6 +287,85 @@ fn deletes_symbolic_updates_and_log_only_updates_are_not_checked() {
             Some(RawRef::Direct(fx.commit)),
             "{format:?}"
         );
+    });
+}
+
+#[test]
+fn log_only_with_no_new_value_still_checks_explicit_reflog_objects() {
+    each_format(|format, fx| {
+        let git_dir = fx.repo.git_dir();
+        let log_len = || read_reflog(git_dir, "refs/heads/main").map_or(0, |e| e.len());
+        let before = log_len();
+        let log_only = RefUpdate {
+            name: "refs/heads/main".to_owned(),
+            new_value: None,
+            expected: Expected::Any,
+            reflog: Some(ReflogUpdate {
+                identity: "Ref Verify <verify@example.com>".to_owned(),
+                message: "log only".to_owned(),
+                time: time::OffsetDateTime::UNIX_EPOCH,
+                old_oid: Some(fx.commit),
+                new_oid: Some(bogus()),
+            }),
+            flags: RefUpdateFlags {
+                log_only: true,
+                ..RefUpdateFlags::default()
+            },
+        };
+        let err = commit_ref_update_on_store(fx.repo.refs(), log_only).expect_err("{format:?}");
+        assert!(
+            matches!(&err, Error::RefStore(e) if *e == missing("refs/heads/main", bogus())),
+            "{format:?}: {err:?}"
+        );
+        assert_eq!(
+            fx.raw("refs/heads/main"),
+            Some(RawRef::Direct(fx.commit)),
+            "{format:?}"
+        );
+        assert_eq!(log_len(), before, "{format:?}: reflog must be unchanged");
+    });
+}
+
+fn invalid_symref(name: &str, target: &str) -> RefStoreError {
+    RefStoreError::InvalidSymrefTarget {
+        name: name.to_owned(),
+        target: target.to_owned(),
+    }
+}
+
+fn symref_update(name: &str, target: &str) -> RefUpdate {
+    RefUpdate {
+        name: name.to_owned(),
+        new_value: Some(RawRef::Symbolic(target.to_owned())),
+        expected: Expected::Any,
+        reflog: None,
+        flags: RefUpdateFlags::default(),
+    }
+}
+
+#[test]
+fn issue_2258_invalid_symref_targets_are_refused_and_store_is_unchanged() {
+    each_format(|format, fx| {
+        let head_before = fx.raw("HEAD");
+        let main_before = fx.raw("refs/heads/main");
+        for (name, target) in [
+            ("HEAD", "foo"),
+            ("refs/heads/sym1", "foo"),
+            ("refs/heads/loop", "refs/heads/loop"),
+            ("HEAD", "refs/heads/a..b"),
+        ] {
+            let err = commit_ref_update_on_store(fx.repo.refs(), symref_update(name, target))
+                .expect_err("{format:?} {name} -> {target}");
+            assert!(
+                matches!(&err, Error::RefStore(e) if *e == invalid_symref(name, target)),
+                "{format:?} {name} -> {target}: {err:?}"
+            );
+            assert_eq!(fx.raw("HEAD"), head_before, "{format:?} {name}");
+            assert_eq!(fx.raw("refs/heads/main"), main_before, "{format:?} {name}");
+            if name != "HEAD" {
+                assert_eq!(fx.raw(name), None, "{format:?} {name}");
+            }
+        }
     });
 }
 

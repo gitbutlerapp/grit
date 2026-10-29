@@ -87,6 +87,16 @@ pub enum RefStoreError {
         name: String,
     },
 
+    /// A symbolic ref would point at a target Git refuses (outside `refs/` for `HEAD`, not
+    /// safe to store, or the same name as the ref being updated).
+    #[error("refusing to point '{name}' at symbolic target '{target}'")]
+    InvalidSymrefTarget {
+        /// The ref being updated.
+        name: String,
+        /// The symbolic target that was rejected.
+        target: String,
+    },
+
     /// An update would store the all-zero (null) object id as a direct ref value.
     ///
     /// The null id names no object, so Git treats such a ref as broken. Delete a ref with

@@ -4,7 +4,9 @@ use std::collections::HashSet;
 
 use super::error::RefStoreError;
 use super::types::{Expected, RawRef, RefCaseOnlyRename, RefReflogRename, RefUpdate};
-use super::validation::{validate_reflog_update, validate_storable_refname};
+use super::validation::{
+    validate_reflog_update, validate_storable_refname, validate_symref_target,
+};
 
 /// Batch of ref updates prepared for [`super::RefStore::prepare`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -157,6 +159,9 @@ impl RefTransaction {
             }
             if let Some(ref log) = update.reflog {
                 validate_reflog_update(log)?;
+            }
+            if let Some(RawRef::Symbolic(target)) = &update.new_value {
+                validate_symref_target(&update.name, target)?;
             }
         }
         for rename in &self.reflog_renames {
@@ -397,6 +402,22 @@ mod tests {
             })
             .unwrap()
             .update(RefUpdate {
+                name: "refs/heads/alias".to_owned(),
+                new_value: Some(RawRef::Symbolic("refs/heads/not-yet".to_owned())),
+                expected: Expected::Any,
+                reflog: None,
+                flags: Default::default(),
+            })
+            .unwrap()
+            .update(RefUpdate {
+                name: "FETCH_HEAD".to_owned(),
+                new_value: Some(RawRef::Symbolic("ORIG_HEAD".to_owned())),
+                expected: Expected::Any,
+                reflog: None,
+                flags: Default::default(),
+            })
+            .unwrap()
+            .update(RefUpdate {
                 name: "refs/heads/gone".to_owned(),
                 new_value: None,
                 expected: Expected::Any,
@@ -405,6 +426,40 @@ mod tests {
             })
             .unwrap();
         assert!(txn.validate().is_ok());
+    }
+
+    fn symref(name: &str, target: &str) -> RefUpdate {
+        RefUpdate {
+            name: name.to_owned(),
+            new_value: Some(RawRef::Symbolic(target.to_owned())),
+            expected: Expected::Any,
+            reflog: None,
+            flags: Default::default(),
+        }
+    }
+
+    fn invalid_symref(name: &str, target: &str) -> RefStoreError {
+        RefStoreError::InvalidSymrefTarget {
+            name: name.to_owned(),
+            target: target.to_owned(),
+        }
+    }
+
+    #[test]
+    fn validate_rejects_invalid_symref_targets() {
+        for (name, target) in [
+            ("HEAD", "foo"),
+            ("refs/heads/sym1", "foo"),
+            ("refs/heads/loop", "refs/heads/loop"),
+            ("HEAD", "refs/heads/a..b"),
+        ] {
+            let err = RefTransaction::new()
+                .update(symref(name, target))
+                .unwrap()
+                .validate()
+                .unwrap_err();
+            assert_eq!(err, invalid_symref(name, target), "{name} -> {target}");
+        }
     }
 
     #[test]

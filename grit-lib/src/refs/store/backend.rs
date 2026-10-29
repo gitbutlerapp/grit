@@ -58,6 +58,7 @@ pub fn validate_storable_refname(name: &str) -> Result<(), RefStoreError> {
 /// # Errors
 ///
 /// Returns [`RefStoreError::InvalidRefName`] for the first name Git would refuse to store,
+/// [`RefStoreError::InvalidSymrefTarget`] for a symbolic value Git would refuse,
 /// [`RefStoreError::NullOid`] for an update pointing a ref at the null id, or
 /// [`RefStoreError::InvalidReflog`] for forged reflog metadata.
 pub fn validate_transaction(txn: &RefTransaction) -> Result<(), RefStoreError> {
@@ -75,7 +76,8 @@ pub fn validate_transaction(txn: &RefTransaction) -> Result<(), RefStoreError> {
 ///
 /// - [`RefStoreError::DuplicateUpdate`] when two updates name, or dereference to, the same
 ///   stored ref.
-/// - [`RefStoreError::InvalidRefName`] for a name Git refuses to store, and
+/// - [`RefStoreError::InvalidRefName`] for a name Git refuses to store,
+///   [`RefStoreError::InvalidSymrefTarget`] for a symbolic target Git refuses, and
 ///   [`RefStoreError::NullOid`] for an update storing the null id.
 /// - [`RefStoreError::NameUnavailable`] for a directory/file conflict with a stored ref or
 ///   another ref in the batch.
@@ -96,8 +98,9 @@ pub fn check_transaction(state: &RefBatchState, txn: &RefTransaction) -> Result<
 /// names a commit.
 ///
 /// `kind_of` reports the stored kind of an object, or `None` when it is absent. Deletes,
-/// symbolic values, reflog-only updates, the null id (rejected as
-/// [`RefStoreError::NullOid`] by [`validate_transaction`]) and updates flagged
+/// symbolic values and the null id (rejected as [`RefStoreError::NullOid`] by
+/// [`validate_transaction`]) are not looked up. Reflog-only updates and explicit reflog
+/// object ids on other updates are checked like direct values. Updates flagged
 /// [`RefUpdateFlags::skip_oid_verification`](super::RefUpdateFlags::skip_oid_verification)
 /// are not looked up. The branch rule applies to the name the update gives, before any
 /// symbolic dereference.
@@ -112,35 +115,69 @@ pub(crate) fn verify_direct_targets(
     mut kind_of: impl FnMut(&ObjectId) -> crate::error::Result<Option<ObjectKind>>,
 ) -> Result<(), RefStoreError> {
     for update in updates {
-        let Some(RawRef::Direct(oid)) = &update.new_value else {
-            continue;
-        };
-        if update.flags.log_only || update.flags.skip_oid_verification || oid.is_zero() {
+        if update.flags.skip_oid_verification {
             continue;
         }
-        let kind = kind_of(oid).map_err(|err| RefStoreError::ObjectLookup {
-            name: update.name.clone(),
-            oid: *oid,
-            source: BackendError::new(err),
-        })?;
-        match kind {
-            None => {
-                return Err(RefStoreError::MissingObject {
-                    name: update.name.clone(),
-                    oid: *oid,
-                })
-            }
-            Some(kind) if kind != ObjectKind::Commit && names_branch(&update.name) => {
-                return Err(RefStoreError::NotACommit {
-                    name: update.name.clone(),
-                    oid: *oid,
-                    kind,
-                })
-            }
-            Some(_) => {}
+        for oid in oids_to_verify_for_update(update) {
+            verify_stored_oid_for_ref(&update.name, oid, &mut kind_of)?;
         }
     }
     Ok(())
+}
+
+fn oids_to_verify_for_update(update: &RefUpdate) -> Vec<ObjectId> {
+    if update.new_value.is_none() && !update.flags.log_only {
+        return Vec::new();
+    }
+    let mut oids = Vec::new();
+    if update.flags.log_only {
+        if let Some(oid) = update.reflog.as_ref().and_then(|log| log.new_oid) {
+            push_nonzero_oid(&mut oids, oid);
+        } else if let Some(RawRef::Direct(oid)) = &update.new_value {
+            push_nonzero_oid(&mut oids, *oid);
+        }
+    } else if let Some(RawRef::Direct(oid)) = &update.new_value {
+        push_nonzero_oid(&mut oids, *oid);
+    }
+    if let Some(oid) = update.reflog.as_ref().and_then(|log| log.new_oid) {
+        push_nonzero_oid(&mut oids, oid);
+    }
+    if let Some(oid) = update.reflog.as_ref().and_then(|log| log.old_oid) {
+        push_nonzero_oid(&mut oids, oid);
+    }
+    oids
+}
+
+fn push_nonzero_oid(out: &mut Vec<ObjectId>, oid: ObjectId) {
+    if !oid.is_zero() && !out.contains(&oid) {
+        out.push(oid);
+    }
+}
+
+fn verify_stored_oid_for_ref(
+    name: &str,
+    oid: ObjectId,
+    kind_of: &mut impl FnMut(&ObjectId) -> crate::error::Result<Option<ObjectKind>>,
+) -> Result<(), RefStoreError> {
+    let kind = kind_of(&oid).map_err(|err| RefStoreError::ObjectLookup {
+        name: name.to_owned(),
+        oid,
+        source: BackendError::new(err),
+    })?;
+    match kind {
+        None => Err(RefStoreError::MissingObject {
+            name: name.to_owned(),
+            oid,
+        }),
+        Some(kind) if kind != ObjectKind::Commit && names_branch(name) => {
+            Err(RefStoreError::NotACommit {
+                name: name.to_owned(),
+                oid,
+                kind,
+            })
+        }
+        Some(_) => Ok(()),
+    }
 }
 
 /// Whether Git requires `name` to point at a commit.
@@ -433,8 +470,61 @@ mod tests {
             probes += 1;
             Ok(None)
         });
-        assert_eq!(result, Ok(()));
-        assert_eq!(probes, 0);
+        assert_eq!(
+            result,
+            Err(RefStoreError::MissingObject {
+                name: "refs/heads/a".to_owned(),
+                oid: oid(9)
+            })
+        );
+        assert_eq!(probes, 1);
+    }
+
+    #[test]
+    fn verify_direct_targets_checks_log_only_explicit_reflog_oids_without_new_value() {
+        let log_only = RefUpdate {
+            name: "refs/heads/main".to_owned(),
+            new_value: None,
+            expected: Expected::Any,
+            reflog: Some(super::super::ReflogUpdate {
+                identity: "A <a@example.com>".to_owned(),
+                message: "log".to_owned(),
+                time: time::OffsetDateTime::UNIX_EPOCH,
+                old_oid: Some(oid(1)),
+                new_oid: Some(oid(9)),
+            }),
+            flags: RefUpdateFlags {
+                log_only: true,
+                ..Default::default()
+            },
+        };
+        assert_eq!(
+            verify_direct_targets(&[log_only], |_| Ok(None)),
+            Err(RefStoreError::MissingObject {
+                name: "refs/heads/main".to_owned(),
+                oid: oid(9)
+            })
+        );
+        let ok = RefUpdate {
+            name: "refs/heads/main".to_owned(),
+            new_value: None,
+            expected: Expected::Any,
+            reflog: Some(super::super::ReflogUpdate {
+                identity: "A <a@example.com>".to_owned(),
+                message: "log".to_owned(),
+                time: time::OffsetDateTime::UNIX_EPOCH,
+                old_oid: Some(oid(1)),
+                new_oid: Some(oid(1)),
+            }),
+            flags: RefUpdateFlags {
+                log_only: true,
+                ..Default::default()
+            },
+        };
+        assert_eq!(
+            verify_direct_targets(&[ok], |_| Ok(Some(ObjectKind::Commit))),
+            Ok(())
+        );
     }
 
     #[test]
