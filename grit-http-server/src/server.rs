@@ -182,10 +182,11 @@ pub struct ServeConfig {
     /// Environment used to load global and system config for each repository.
     ///
     /// A [`RepositoryOptions::promisor_fetcher`] here is given only to upload-pack
-    /// requests that may lazily fetch promised objects (`uploadpack.lazyFetch`,
-    /// `GIT_NO_LAZY_FETCH=0`). Everything else the server opens a repository for
-    /// (snapshot checkouts, clone bundles, pushes, the web pages) gets no fetcher,
-    /// so reading a blob kept on a large-object promisor never pulls it back in.
+    /// and snapshot-checkout requests that may lazily fetch promised objects
+    /// (`uploadpack.lazyFetch`, `GIT_NO_LAZY_FETCH=0`). Everything else the server
+    /// opens a repository for (clone bundles, pushes, the web pages) gets no
+    /// fetcher, so reading a blob kept on a large-object promisor never pulls it
+    /// back in.
     pub repository_options: RepositoryOptions,
     /// When clone bundles are built ([`crate::bundles`]).
     pub bundles: BundleSettings,
@@ -197,9 +198,9 @@ pub(crate) struct ServerState {
     logins: Mutex<PendingLogins>,
     /// [`ServeConfig::repository_options`] without the promisor fetcher.
     pub(crate) options: RepositoryOptions,
-    /// [`ServeConfig::repository_options`] as given, for smart-protocol requests:
-    /// upload-pack keeps the fetcher only when lazy fetch is on.
-    smart_options: RepositoryOptions,
+    /// [`ServeConfig::repository_options`] as given, for smart-protocol and
+    /// snapshot-checkout requests: they keep the fetcher only when lazy fetch is on.
+    pub(crate) smart_options: RepositoryOptions,
     /// Checked when a sign-in names no user, so it takes as long as a real one.
     pub(crate) stand_in_password: HashedPassword,
     bundles: BundleSettings,

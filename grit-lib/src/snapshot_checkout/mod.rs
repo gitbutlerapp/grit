@@ -22,7 +22,7 @@
 //!
 //! - Wire types: [`CheckoutServerInfo`], [`CheckoutRequest`], [`CheckoutInfo`].
 //! - Server side: [`normalize_paths`], [`filtered_tree`], [`snapshot_object`],
-//!   [`make_snapshot`], [`project_branch`].
+//!   [`make_snapshot`], [`fetch_promised_blobs`], [`project_branch`].
 //! - Client side: [`CheckoutUrl`], [`CheckoutClient`], [`materialize`],
 //!   [`CheckoutMarker`], [`push_for_checkin`], [`fetch_snapshot`], [`refresh`],
 //!   [`fetch_branch`], [`refresh_branch`].
@@ -104,7 +104,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::fetch::Progress;
-use crate::objects::{parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind, TreeEntry};
+use crate::objects::{
+    parse_commit, parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind, TreeEntry,
+};
 use crate::odb::Odb;
 use crate::progress::Cancel;
 use crate::repo::{InitOptions, Repository};
@@ -685,6 +687,29 @@ pub enum CheckoutError {
     /// The download failed.
     #[error(transparent)]
     Download(Box<crate::resumable::ResumableError>),
+    /// The snapshot needs blobs the repository keeps on a promisor remote (a
+    /// large-object promisor), and lazy fetch is off, so they cannot be brought in.
+    /// As for upload-pack, lazy fetch is turned on with `uploadpack.lazyFetch` or
+    /// `GIT_NO_LAZY_FETCH=0` on the server (see [`fetch_promised_blobs`]).
+    #[error("the snapshot needs {count} blob(s) kept on a promisor remote, starting with {oid}, and this server does not fetch from its promisor remotes (uploadpack.lazyFetch is off)")]
+    PromisedBlobs {
+        /// The first missing blob.
+        oid: ObjectId,
+        /// How many blobs the snapshot lacks.
+        count: usize,
+    },
+    /// The snapshot's blobs kept on a promisor remote were fetched, but the fetch
+    /// failed or did not bring them all.
+    #[error("the snapshot needs {count} blob(s) kept on a promisor remote, starting with {oid}, and fetching them failed: {source}")]
+    PromisedBlobsNotFetched {
+        /// The first blob still missing.
+        oid: ObjectId,
+        /// How many blobs were missing before the fetch.
+        count: usize,
+        /// Why the fetch failed.
+        #[source]
+        source: Box<crate::error::Error>,
+    },
     /// A repository operation failed.
     #[error(transparent)]
     Library(Box<crate::error::Error>),
@@ -969,9 +994,15 @@ pub struct Snapshot {
 /// Write the snapshot of `base` filtered to `paths` (see [`filtered_tree`])
 /// on `parent` into `repo`, with the number and size of its files.
 ///
+/// A snapshot holds every file it names, so in a repository whose large blobs
+/// live on a promisor remote, the ones the snapshot needs are fetched first
+/// ([`fetch_promised_blobs`]).
+///
 /// # Errors
 ///
-/// [`CheckoutError::MissingPath`] for a path `base` lacks, and object read or
+/// [`CheckoutError::MissingPath`] for a path `base` lacks,
+/// [`CheckoutError::PromisedBlobs`] and [`CheckoutError::PromisedBlobsNotFetched`]
+/// for blobs on a promisor remote that cannot be fetched, and object read or
 /// write failures.
 pub fn make_snapshot(
     repo: &Repository,
@@ -992,6 +1023,7 @@ pub fn make_snapshot(
         .map(|t| t.unix_seconds)
         .unwrap_or(0);
     let object = snapshot_object(tree, parent, base, time, &commit.message);
+    fetch_promised_tree_blobs(repo, tree)?;
     let id = odb.write(ObjectKind::Commit, &object)?;
     let (files, bytes) = tree_stats(odb, tree)?;
     Ok(Snapshot {
@@ -1002,6 +1034,100 @@ pub fn make_snapshot(
         files,
         bytes,
     })
+}
+
+/// Make sure `repo` stores every blob of the snapshot commit `snapshot`, fetching
+/// the ones it keeps on a promisor remote.
+///
+/// A server whose large blobs were offloaded to a large-object promisor lacks
+/// them locally, but a snapshot (and its bundle) must hold every file. This
+/// follows upload-pack's rule for a client that accepted no promisor remote: the
+/// blobs are fetched from the repository's promisor remotes when lazy fetch is on,
+/// which the host decides by installing a
+/// [`PromisorFetcher`](crate::promisor_fetch::PromisorFetcher) on the repository
+/// (as [`crate::serve::ServeOptions::attach_promisor_fetcher`] does for
+/// upload-pack), and the request fails otherwise. Every missing blob is fetched in
+/// one request. A repository without promisor remotes is not checked.
+///
+/// # Parameters
+///
+/// - `repo`: the served repository.
+/// - `snapshot`: a snapshot commit (or any commit) whose tree must be complete.
+///
+/// # Returns
+///
+/// How many blobs were fetched (`0` when nothing was missing).
+///
+/// # Errors
+///
+/// [`CheckoutError::PromisedBlobs`] when blobs are missing and the repository has
+/// no promisor fetcher, [`CheckoutError::PromisedBlobsNotFetched`] when the fetch
+/// failed or left some missing, [`CheckoutError::Library`] with
+/// [`crate::error::Error::ObjectNotFound`] for a missing blob nothing promises,
+/// and object read failures.
+pub fn fetch_promised_blobs(repo: &Repository, snapshot: ObjectId) -> Result<usize> {
+    let tree = parse_commit(&repo.odb().read(&snapshot)?.data)?.tree;
+    fetch_promised_tree_blobs(repo, tree)
+}
+
+/// [`fetch_promised_blobs`] for the snapshot tree `tree`.
+fn fetch_promised_tree_blobs(repo: &Repository, tree: ObjectId) -> Result<usize> {
+    let config = repo.config()?;
+    if !crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config.as_ref()) {
+        return Ok(0);
+    }
+    let odb = repo.odb();
+    // Each missing blob with the tree that names it, for the promise check.
+    let mut blobs: Vec<(ObjectId, ObjectId)> = Vec::new();
+    let mut seen = crate::objects::OidHashSet::default();
+    let mut stack = vec![tree];
+    while let Some(oid) = stack.pop() {
+        for entry in parse_tree(&odb.read(&oid)?.data)? {
+            match entry.mode {
+                TREE_MODE => stack.push(entry.oid),
+                GITLINK_MODE => {}
+                _ if seen.insert(entry.oid) => blobs.push((entry.oid, oid)),
+                _ => {}
+            }
+        }
+    }
+    let missing: crate::objects::OidHashSet = odb
+        .missing_stored_oids(blobs.iter().map(|(blob, _)| *blob))?
+        .into_iter()
+        .collect();
+    let Some(&(first, referrer)) = blobs.iter().find(|(blob, _)| missing.contains(blob)) else {
+        return Ok(0);
+    };
+    let promised = crate::serve::promised_objects::PromisorObjects::new(repo)?;
+    if !promised.is_promised(&first, Some(&referrer))? {
+        return Err(crate::error::Error::ObjectNotFound(first.to_hex()).into());
+    }
+    let count = missing.len();
+    if repo.caches().promisor_fetcher().is_none() {
+        return Err(CheckoutError::PromisedBlobs { oid: first, count });
+    }
+    let wanted: Vec<ObjectId> = blobs
+        .iter()
+        .map(|(blob, _)| *blob)
+        .filter(|blob| missing.contains(blob))
+        .collect();
+    let not_fetched =
+        |oid: ObjectId, source: crate::error::Error| CheckoutError::PromisedBlobsNotFetched {
+            oid,
+            count,
+            source: Box::new(source),
+        };
+    repo.prefetch_promised(&wanted)
+        .map_err(|e| not_fetched(first, e))?;
+    odb.reprepare_local_packs();
+    odb.invalidate_packs();
+    if let Some(&still) = odb.missing_stored_oids(wanted.iter().copied())?.first() {
+        return Err(not_fetched(
+            still,
+            crate::error::Error::PromisedObjectMissing(still),
+        ));
+    }
+    Ok(count)
 }
 
 /// Files under `tree` and their total size, without reading file contents.
@@ -1713,5 +1839,158 @@ mod tests {
             "alice-b/amber-brook"
         );
         assert_eq!(suggest_work_branch(None, [2, 3]), "checkout/cedar-dune");
+    }
+
+    /// A bare repository whose large blob `src/big` lives on the promisor `lop`:
+    /// its commit and trees are in a promisor pack, `src/a` in an ordinary pack,
+    /// `src/big` nowhere. Returns the commit and the big blob's id and data.
+    fn offloaded(dir: &Path) -> (ObjectId, ObjectId, Vec<u8>) {
+        use crate::objects::ObjectKind;
+        let repo = Repository::init(dir, &InitOptions::new().with_bare(true)).unwrap();
+        let odb = repo.odb();
+        let small = odb
+            .write_loose_materialize(ObjectKind::Blob, b"a\n")
+            .unwrap();
+        let data = vec![b'x'; 4096];
+        let big = odb
+            .write_loose_materialize(ObjectKind::Blob, &data)
+            .unwrap();
+        let tree_of = |entries: &[(&str, &str, ObjectId)]| {
+            let mut body = Vec::new();
+            for (mode, name, oid) in entries {
+                body.extend_from_slice(format!("{mode} {name}\0").as_bytes());
+                body.extend_from_slice(oid.as_bytes());
+            }
+            odb.write_loose_materialize(ObjectKind::Tree, &body)
+                .unwrap()
+        };
+        let src = tree_of(&[("100644", "a", small), ("100644", "big", big)]);
+        let root = tree_of(&[("40000", "src", src)]);
+        let commit =
+            format!("tree {root}\nauthor A <a@e> 1 +0000\ncommitter A <a@e> 1 +0000\n\nc\n");
+        let commit = odb
+            .write_loose_materialize(ObjectKind::Commit, commit.as_bytes())
+            .unwrap();
+        for (oids, promisor) in [(vec![commit, root, src], true), (vec![small], false)] {
+            let pack = crate::pack_objects::build_pack_from_send_list(
+                odb,
+                &oids,
+                &std::collections::HashSet::new(),
+                &crate::pack_objects::PackBuildOptions::default(),
+                &std::collections::HashMap::new(),
+            )
+            .unwrap();
+            crate::index_pack::install_pack_bytes(
+                pack,
+                odb,
+                &crate::index_pack::IngestPackOptions {
+                    mark_promisor_pack: promisor,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        crate::prune_packed::prune_packed_objects(odb.objects_dir(), Default::default()).unwrap();
+        let hex = big.to_hex();
+        std::fs::remove_file(dir.join("objects").join(&hex[..2]).join(&hex[2..])).unwrap();
+        let mut config = std::fs::read_to_string(dir.join("config")).unwrap();
+        config.push_str("[remote \"lop\"]\n\turl = /nowhere\n\tpromisor = true\n");
+        std::fs::write(dir.join("config"), config).unwrap();
+        crate::pack::clear_pack_cache();
+        (commit, big, data)
+    }
+
+    /// Writes the blobs it is asked for from `blobs`, or nothing.
+    struct StubFetcher {
+        blobs: Vec<(ObjectId, Vec<u8>)>,
+        calls: std::sync::Mutex<Vec<Vec<ObjectId>>>,
+    }
+
+    impl crate::promisor_fetch::PromisorFetcher for StubFetcher {
+        fn fetch_missing(&self, repo: &Repository, oids: &[ObjectId]) -> crate::error::Result<()> {
+            self.calls
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(oids.to_vec());
+            for (oid, data) in &self.blobs {
+                if oids.contains(oid) {
+                    repo.odb()
+                        .write_loose_materialize(crate::objects::ObjectKind::Blob, data)?;
+                }
+            }
+            Ok(())
+        }
+    }
+
+    fn open_with(dir: &Path, fetcher: Option<std::sync::Arc<StubFetcher>>) -> Repository {
+        let fetcher =
+            fetcher.map(|f| f as std::sync::Arc<dyn crate::promisor_fetch::PromisorFetcher>);
+        Repository::open(
+            dir,
+            &crate::config::environment::RepositoryOptions::empty().with_promisor_fetcher(fetcher),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_snapshot_of_offloaded_blobs_is_refused_without_lazy_fetch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (commit, big, _) = offloaded(tmp.path());
+        let repo = open_with(tmp.path(), None);
+        let err = make_snapshot(&repo, commit, &["src".to_owned()], None).unwrap_err();
+        assert!(
+            matches!(err, CheckoutError::PromisedBlobs { oid, count: 1 } if oid == big),
+            "{err:?}"
+        );
+        assert!(err.to_string().contains("uploadpack.lazyFetch"), "{err}");
+    }
+
+    #[test]
+    fn a_snapshot_of_offloaded_blobs_fetches_them_in_one_request() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (commit, big, data) = offloaded(tmp.path());
+        let fetcher = std::sync::Arc::new(StubFetcher {
+            blobs: vec![(big, data)],
+            calls: std::sync::Mutex::default(),
+        });
+        let repo = open_with(tmp.path(), Some(std::sync::Arc::clone(&fetcher)));
+        let snap = make_snapshot(&repo, commit, &["src".to_owned()], None).unwrap();
+        assert_eq!((snap.files, snap.bytes), (2, 4096 + 2));
+        assert_eq!(*fetcher.calls.lock().unwrap(), vec![vec![big]]);
+        // Everything is here now; the bundle path finds nothing to fetch.
+        assert_eq!(fetch_promised_blobs(&repo, snap.commit).unwrap(), 0);
+        assert_eq!(fetcher.calls.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_fetch_that_brings_nothing_is_reported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (commit, big, _) = offloaded(tmp.path());
+        let fetcher = std::sync::Arc::new(StubFetcher {
+            blobs: Vec::new(),
+            calls: std::sync::Mutex::default(),
+        });
+        let repo = open_with(tmp.path(), Some(fetcher));
+        let err = fetch_promised_blobs(&repo, commit).unwrap_err();
+        assert!(
+            matches!(err, CheckoutError::PromisedBlobsNotFetched { oid, count: 1, .. } if oid == big),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn a_repository_without_promisor_remotes_is_not_checked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (commit, _, _) = offloaded(tmp.path());
+        let config = std::fs::read_to_string(tmp.path().join("config")).unwrap();
+        let plain = config.replace("\tpromisor = true\n", "");
+        std::fs::write(tmp.path().join("config"), plain).unwrap();
+        let repo = open_with(tmp.path(), None);
+        // Not a partial repository: the check is skipped and the stats read fails.
+        let err = make_snapshot(&repo, commit, &["src".to_owned()], None).unwrap_err();
+        assert!(
+            !matches!(err, CheckoutError::PromisedBlobs { .. }),
+            "{err:?}"
+        );
     }
 }

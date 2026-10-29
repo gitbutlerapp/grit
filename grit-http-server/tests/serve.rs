@@ -1030,3 +1030,104 @@ fn tus_uploads_resume_and_apply_as_a_push() {
     let (status, _, _) = http_raw(addr, "HEAD", &upload, &[bearer(ADMIN_TOKEN), tus], b"");
     assert!(status.contains("404"), "{status}");
 }
+
+/// No HTTP promisor remotes here.
+struct NoHttp;
+
+impl grit_lib::remote::HttpClientFactory for NoHttp {
+    fn create(
+        &self,
+        _: &grit_lib::config::ConfigSet,
+    ) -> grit_lib::remote::RemoteResult<Box<dyn grit_lib::remote::transport::http::HttpClient>>
+    {
+        Err(grit_lib::remote::RemoteError::UnsupportedScheme)
+    }
+
+    fn create_for_probe(
+        &self,
+        _: &grit_lib::config::ConfigSet,
+    ) -> grit_lib::remote::RemoteResult<Box<dyn grit_lib::remote::transport::http::HttpClient>>
+    {
+        Err(grit_lib::remote::RemoteError::UnsupportedScheme)
+    }
+}
+
+#[test]
+fn snapshot_checkouts_of_offloaded_blobs_follow_lazy_fetch() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let database = fixture(root);
+    let seed = root.join("seed");
+    let big: Vec<u8> = (0..64 * 1024u32).map(|i| (i * 7 % 251) as u8).collect();
+    std::fs::write(seed.join("big.bin"), &big).expect("write");
+    git(&seed, &["add", "big.bin"]);
+    git(&seed, &["commit", "-q", "-m", "big"]);
+    let project = root.join("repos/project.git");
+    git(
+        &seed,
+        &["push", "-q", project.to_str().expect("utf-8"), "main"],
+    );
+    let lop = root.join("lop.git");
+    git(root, &["init", "-q", "--bare", "lop.git"]);
+    git(
+        &project,
+        &["remote", "add", "lop", lop.to_str().expect("utf-8")],
+    );
+    {
+        let repo = grit_lib::repo::Repository::open(&project, &Default::default()).expect("open");
+        let mut opts = grit_lib::maintenance::OffloadOptions::new("lop", 4_000_000_000);
+        opts.filter = Some(grit_lib::remote::partial_clone::ObjectFilterSpec::BlobLimit(10 * 1024));
+        opts.configure_lop = true;
+        let report = grit_lib::maintenance::offload_blobs(&repo, &opts).expect("offload");
+        assert_eq!(report.dropped_from_main, 1);
+        grit_lib::objects::pack::clear_pack_cache();
+    }
+
+    let fetcher: std::sync::Arc<dyn grit_lib::objects::promisor::PromisorFetcher> =
+        std::sync::Arc::new(grit_lib::objects::promisor::DefaultPromisorFetcher::new(
+            std::sync::Arc::new(NoHttp),
+        ));
+    let server = Server::bind(
+        ServeConfig {
+            root: root.join("repos"),
+            database,
+            repository_options: grit_protocol::repository_options_from_process()
+                .with_promisor_fetcher(Some(fetcher)),
+            bundles: BundleSettings {
+                enabled: false,
+                ..BundleSettings::default()
+            },
+        },
+        "127.0.0.1:0",
+    )
+    .expect("bind server");
+    let addr = server.local_addr().expect("local addr");
+    std::thread::spawn(move || server.run());
+    let auth = [bearer(ADMIN_TOKEN)];
+    let request = br#"{"paths":[]}"#;
+
+    // Lazy fetch is off: the snapshot would need the offloaded blob.
+    let (status, _, body) = http_raw(addr, "POST", "/.grit/checkouts/project", &auth, request);
+    let body = String::from_utf8_lossy(&body).into_owned();
+    assert!(status.contains("409"), "{status}: {body}");
+    assert!(body.contains("uploadpack.lazyFetch"), "{body}");
+
+    // With lazy fetch on, the server fetches it from the LOP and serves the bundle.
+    git(&project, &["config", "uploadpack.lazyFetch", "true"]);
+    let (status, _, body) = http_raw(addr, "POST", "/.grit/checkouts/project", &auth, request);
+    let body = String::from_utf8_lossy(&body).into_owned();
+    assert!(status.contains("200"), "{status}: {body}");
+    let info: serde_json::Value = serde_json::from_str(&body).expect("checkout info");
+    let id = info["id"].as_str().expect("id");
+    let (status, _, bundle) = http_raw(
+        addr,
+        "GET",
+        &format!("/.grit/checkouts/project/{id}/bundle"),
+        &auth,
+        b"",
+    );
+    assert!(status.contains("200"), "{status}");
+    std::fs::write(root.join("snap.bundle"), bundle).expect("write bundle");
+    git(root, &["clone", "-q", "-b", "main", "snap.bundle", "snap"]);
+    assert_eq!(std::fs::read(root.join("snap/big.bin")).expect("big"), big);
+}

@@ -23077,6 +23077,13 @@ pub grit_lib::remote::snapshot_checkout::CheckoutError::NotOffered
 pub grit_lib::remote::snapshot_checkout::CheckoutError::NotOffered::endpoint: alloc::string::String
 pub grit_lib::remote::snapshot_checkout::CheckoutError::NotOffered::url: alloc::string::String
 pub grit_lib::remote::snapshot_checkout::CheckoutError::OperationInProgress(grit_lib::state::InProgressOperation)
+pub grit_lib::remote::snapshot_checkout::CheckoutError::PromisedBlobs
+pub grit_lib::remote::snapshot_checkout::CheckoutError::PromisedBlobs::count: usize
+pub grit_lib::remote::snapshot_checkout::CheckoutError::PromisedBlobs::oid: grit_lib::objects::ObjectId
+pub grit_lib::remote::snapshot_checkout::CheckoutError::PromisedBlobsNotFetched
+pub grit_lib::remote::snapshot_checkout::CheckoutError::PromisedBlobsNotFetched::count: usize
+pub grit_lib::remote::snapshot_checkout::CheckoutError::PromisedBlobsNotFetched::oid: grit_lib::objects::ObjectId
+pub grit_lib::remote::snapshot_checkout::CheckoutError::PromisedBlobsNotFetched::source: alloc::boxed::Box<grit_lib::error::Error>
 pub grit_lib::remote::snapshot_checkout::CheckoutError::Protocol
 pub grit_lib::remote::snapshot_checkout::CheckoutError::Protocol::detail: alloc::string::String
 pub grit_lib::remote::snapshot_checkout::CheckoutError::Protocol::url: alloc::string::String
@@ -24367,6 +24374,7 @@ pub fn grit_lib::remote::snapshot_checkout::decide_checkin(&grit_lib::repo::Repo
 pub fn grit_lib::remote::snapshot_checkout::edit_slices(&grit_lib::repo::Repository, &str, &grit_lib::remote::snapshot_checkout::SliceEdit, &grit_lib::ident::Signature) -> grit_lib::remote::snapshot_checkout::Result<core::result::Result<grit_lib::remote::snapshot_checkout::SlicesEdited, grit_lib::remote::snapshot_checkout::TargetRefusal>>
 pub fn grit_lib::remote::snapshot_checkout::ensure_refreshable(&grit_lib::repo::Repository) -> grit_lib::remote::snapshot_checkout::Result<()>
 pub fn grit_lib::remote::snapshot_checkout::fetch_branch(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutMarker, &grit_lib::remote::snapshot_checkout::BranchInfo, grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::transfer::TransferStats>
+pub fn grit_lib::remote::snapshot_checkout::fetch_promised_blobs(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::remote::snapshot_checkout::Result<usize>
 pub fn grit_lib::remote::snapshot_checkout::fetch_snapshot(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutMarker, &grit_lib::remote::snapshot_checkout::CheckoutInfo, grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::snapshot_checkout::FetchedSnapshot>
 pub fn grit_lib::remote::snapshot_checkout::filtered_tree(&grit_lib::objects::odb::Odb, grit_lib::objects::ObjectId, &[alloc::string::String]) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::remote::snapshot_checkout::give_change_ids(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutMarker, core::option::Option<&[alloc::string::String]>, time::offset_date_time::OffsetDateTime) -> grit_lib::remote::snapshot_checkout::Result<usize>

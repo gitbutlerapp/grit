@@ -55,15 +55,16 @@ use futures_util::future::BoxFuture;
 use grit_lib::bundle::BundleSpec;
 use grit_lib::ident::Signature;
 use grit_lib::objects::ObjectId;
+use grit_lib::remote::serve::ServeOptions;
 use grit_lib::remote::snapshot_checkout::{
-    edit_slices, graft_checkin_branch, integrate, make_snapshot, normalize_paths, project_branch,
-    read_slices, set_checked_in_branch, target_branch, target_ref, valid_checkout_id,
-    BranchRequest, CheckinBranch, CheckinRefusal, CheckinRequest, CheckinResponse, CheckinResult,
-    CheckinRule, CheckinStatus, CheckoutError, CheckoutErrorBody, CheckoutInfo, CheckoutRecord,
-    CheckoutRequest, CheckoutServerInfo, CheckoutState, CheckoutStore, Ident, IntegrateRequest,
-    IntegrateResponse, ProjectError, Slice, SliceChange, SliceDeleteRequest, SliceEdit,
-    SliceRequest, SlicesEdited, SlicesResponse, SnapshotRoot, StoredCheckout, TargetChange,
-    TargetRefusal, WorkBranchRequest, WorkBranchResponse,
+    edit_slices, fetch_promised_blobs, graft_checkin_branch, integrate, make_snapshot,
+    normalize_paths, project_branch, read_slices, set_checked_in_branch, target_branch, target_ref,
+    valid_checkout_id, BranchRequest, CheckinBranch, CheckinRefusal, CheckinRequest,
+    CheckinResponse, CheckinResult, CheckinRule, CheckinStatus, CheckoutError, CheckoutErrorBody,
+    CheckoutInfo, CheckoutRecord, CheckoutRequest, CheckoutServerInfo, CheckoutState,
+    CheckoutStore, Ident, IntegrateRequest, IntegrateResponse, ProjectError, Slice, SliceChange,
+    SliceDeleteRequest, SliceEdit, SliceRequest, SlicesEdited, SlicesResponse, SnapshotRoot,
+    StoredCheckout, TargetChange, TargetRefusal, WorkBranchRequest, WorkBranchResponse,
 };
 use grit_lib::repo::Repository;
 use grit_protocol::RepositoryOptions;
@@ -92,6 +93,11 @@ pub trait CheckoutHost: Send + Sync + 'static {
     ) -> BoxFuture<'a, Result<Authorized, Rejection>>;
 
     /// Environment used to open repositories and load their config.
+    ///
+    /// A [`RepositoryOptions::promisor_fetcher`] here is installed only when the
+    /// repository's lazy fetch is on (`uploadpack.lazyFetch`, `GIT_NO_LAZY_FETCH=0`),
+    /// as for upload-pack: a snapshot that needs blobs kept on a large-object
+    /// promisor then fetches them, and is refused with `409` otherwise.
     fn repository_options(&self) -> &RepositoryOptions;
 
     /// The locks checkout requests take turns on, kept as long as the server runs.
@@ -142,7 +148,8 @@ impl CheckoutHost for ServerState {
     }
 
     fn repository_options(&self) -> &RepositoryOptions {
-        &self.options
+        // The fetcher is used only under lazy fetch (see `open`).
+        &self.smart_options
     }
 
     fn checkout_locks(&self) -> &CheckoutLocks {
@@ -278,9 +285,36 @@ fn error(status: StatusCode, message: impl Into<String>) -> Rejection {
     )
 }
 
+/// Open a served repository. As for upload-pack, it gets the promisor fetcher in
+/// `options` only when lazy fetch is on (`uploadpack.lazyFetch`, or
+/// `GIT_NO_LAZY_FETCH=0`), so a snapshot of blobs kept on a large-object promisor
+/// is fetched then and refused otherwise ([`CheckoutError::PromisedBlobs`]).
 fn open(repo: &ServedRepository, options: &RepositoryOptions) -> Result<Repository, Rejection> {
-    Repository::open(&repo.path, &options.clone().for_serving())
-        .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+    let served = Repository::open(
+        &repo.path,
+        &options.clone().with_promisor_fetcher(None).for_serving(),
+    )
+    .map_err(|e| internal(&e))?;
+    let config = served.config().map_err(|e| internal(&e))?;
+    ServeOptions {
+        lazy_fetch: ServeOptions::lazy_fetch_from_environment(served.environment()),
+        ..ServeOptions::default()
+    }
+    .attach_promisor_fetcher(&served, &config, options.promisor_fetcher.clone());
+    Ok(served)
+}
+
+/// The response for a snapshot that could not be made: `409` when its blobs are on
+/// a promisor remote this server does not fetch from, `502` when fetching them
+/// failed, `500` otherwise.
+fn snapshot_failed(e: &CheckoutError) -> Rejection {
+    match e {
+        CheckoutError::PromisedBlobs { .. } => error(StatusCode::CONFLICT, e.to_string()),
+        CheckoutError::PromisedBlobsNotFetched { .. } => {
+            error(StatusCode::BAD_GATEWAY, e.to_string())
+        }
+        other => internal(other),
+    }
 }
 
 /// The tip of `branch`, which a checkout is made or refreshed from.
@@ -462,13 +496,13 @@ fn create_blocking(
         CheckoutError::MissingPath { .. } | CheckoutError::InvalidPath { .. } => {
             error(StatusCode::BAD_REQUEST, e.to_string())
         }
-        other => internal(&other),
+        other => snapshot_failed(&other),
     })?;
     let store = CheckoutStore::for_repository(repo);
     std::fs::create_dir_all(store.dir().join("bundles")).map_err(|e| internal(&e))?;
     let bundle = bundle_path(&store, &snapshot.commit.to_hex());
     if !bundle.is_file() {
-        build_bundle(repo, snapshot.commit, &branch, &bundle).map_err(|e| internal(&e))?;
+        build_bundle(repo, snapshot.commit, &branch, &bundle)?;
     }
     let bundle_bytes = std::fs::metadata(&bundle).map(|m| m.len()).unwrap_or(0);
     let work = request
@@ -544,8 +578,19 @@ fn bundle_path(store: &CheckoutStore, commit: &str) -> std::path::PathBuf {
     store.dir().join("bundles").join(format!("{commit}.bundle"))
 }
 
-/// Write the bundle of `commit` (with the branch's name in its header).
+/// Write the bundle of `commit` (with the branch's name in its header), first
+/// fetching blobs it needs that the repository keeps on a promisor remote.
 fn build_bundle(
+    repo: &Repository,
+    commit: ObjectId,
+    branch: &str,
+    path: &Path,
+) -> Result<(), Rejection> {
+    fetch_promised_blobs(repo, commit).map_err(|e| snapshot_failed(&e))?;
+    write_bundle_file(repo, commit, branch, path).map_err(|e| internal(&e))
+}
+
+fn write_bundle_file(
     repo: &Repository,
     commit: ObjectId,
     branch: &str,
@@ -638,8 +683,7 @@ async fn bundle<H: CheckoutHost>(
         if !path.is_file() {
             let commit = ObjectId::from_hex(&info.root)
                 .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-            build_bundle(&repo, commit, &info.branch, &path)
-                .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            build_bundle(&repo, commit, &info.branch, &path)?;
         }
         Ok((path, info.root))
     })
@@ -810,7 +854,7 @@ async fn update<H: CheckoutHost>(
                             StatusCode::CONFLICT,
                             format!("{e}; the checkout's paths are gone from {}", info.branch),
                         ),
-                        other => internal(&other),
+                        other => snapshot_failed(&other),
                     })?;
                 // The checkout's own ref, written only while its lock is held.
                 grit_lib::refs::write_ref(repo.git_dir(), &target_ref(&id), &snapshot.commit)

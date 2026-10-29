@@ -18,7 +18,7 @@
 //! configuration at their own boundary.
 
 mod object_info;
-mod promised_objects;
+pub(crate) mod promised_objects;
 mod receive_pack;
 mod ref_update_policy;
 mod shallow_upload;
