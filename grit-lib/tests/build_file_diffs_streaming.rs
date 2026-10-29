@@ -5,7 +5,7 @@
 use grit_lib::diff::{
     build_file_diffs, build_file_diffs_streaming, diff_trees, DiffDetail, DiffOptions,
 };
-use grit_lib::error::{DiffPathError, Error};
+use grit_lib::error::Error;
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
@@ -93,15 +93,8 @@ fn streaming_propagates_callback_errors() {
         DiffOptions::default(),
         config.as_ref(),
         &thread_policy,
-        |_| {
-            Err(Error::DiffPath(DiffPathError::NoSuchPathInDiff {
-                path: "missing".into(),
-            }))
-        },
+        |_| Err(Error::Cancelled),
     )
     .expect_err("callback error");
-    assert!(matches!(
-        err,
-        Error::DiffPath(DiffPathError::NoSuchPathInDiff { .. })
-    ));
+    assert!(matches!(err, Error::Cancelled));
 }

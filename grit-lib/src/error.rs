@@ -644,18 +644,6 @@ pub enum ApplyError {
     Cancelled,
 }
 
-/// Path lookup failures while formatting a diff.
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum DiffPathError {
-    /// The requested path is not part of the diff being formatted.
-    #[error("No such path '{path}' in the diff")]
-    NoSuchPathInDiff {
-        /// Path that was requested from the diff.
-        path: String,
-    },
-}
-
 /// `--pathspec-from-file` / `--pathspec-file-nul` parse failure.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -1194,10 +1182,6 @@ pub enum Error {
     /// Patch application failure.
     #[error(transparent)]
     Apply(#[from] ApplyError),
-
-    /// Diff path selection failure.
-    #[error(transparent)]
-    DiffPath(#[from] DiffPathError),
 
     /// Path resolves outside the repository.
     #[error(transparent)]
@@ -2034,7 +2018,6 @@ impl Error {
             Self::Reftable(..) => "reftable",
             Self::Filter(..) => "filter",
             Self::Apply(..) => "apply",
-            Self::DiffPath(..) => "diff_path",
             Self::PathOutsideRepo(..) => "path_outside_repo",
             Self::Signing(..) => "signing",
             Self::Auth { .. } => "auth",
@@ -2249,11 +2232,7 @@ impl Error {
     pub fn wants_fatal_prefix(&self) -> bool {
         matches!(
             self,
-            Error::Config(_)
-                | Error::RefLock(_)
-                | Error::Filter(_)
-                | Error::PathOutsideRepo(_)
-                | Error::DiffPath(_)
+            Error::Config(_) | Error::RefLock(_) | Error::Filter(_) | Error::PathOutsideRepo(_)
         )
     }
 

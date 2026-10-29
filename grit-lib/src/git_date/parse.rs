@@ -1,4 +1,4 @@
-//! Git-compatible date parsing (`parse_date_basic`, `parse_date`).
+//! Git-compatible date parsing (`parse_date_basic_at`, `parse_date`).
 
 use thiserror::Error;
 
@@ -309,12 +309,8 @@ fn tz_hhmm_to_offset_minutes(hhmm: i32) -> i32 {
     sign * ((abs / 100) * 60 + (abs % 100)) as i32
 }
 
-/// Git `parse_date_basic` — UTC seconds and timezone offset in **minutes** (signed).
-pub fn parse_date_basic(date: &str) -> Result<(u64, i32), DateParseError> {
-    parse_date_basic_at(date, process_wall_clock_sec())
-}
-
-/// Like [`parse_date_basic`] but uses `now_sec` for relative and fuzzy fields.
+/// Parse `date` with Git's `parse_date_basic` rules into UTC seconds and a timezone offset
+/// in **minutes** (signed), using `now_sec` for relative and fuzzy fields.
 pub fn parse_date_basic_at(date: &str, now_sec: i64) -> Result<(u64, i32), DateParseError> {
     let bytes = date.as_bytes();
     let mut tm = init_tm_unknown();

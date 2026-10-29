@@ -14,17 +14,13 @@
 //!
 //! # What this module owns
 //!
-//! - [`reduce_octopus_merge_heads`] — Git's "reduce parents": drop any merge
-//!   head that is an ancestor of another listed head, preserving input order.
 //! - [`compose_fast_forward_index`] — build the post-fast-forward index from the
 //!   target tree, carrying forward staged additions that the fast-forward does
 //!   not touch.
-//! - [`compose_octopus_final_index`] — fold staged paths from before an octopus
-//!   merge back into the merge result.
 //! - [`tree_to_index_entries`] / [`tree_to_map`] — flatten a tree object into a
 //!   recursive list (or path-keyed map) of [`IndexEntry`] values; the shared
-//!   building block the three transforms above (and most of the CLI merge code)
-//!   are written against.
+//!   building block the transform above (and most of the CLI merge code)
+//!   is written against.
 //! - [`resolve_merge_source`] — turn a merge argument (branch, tag, object id or any
 //!   revision expression) into the commit to merge.
 
@@ -204,56 +200,6 @@ pub fn compose_fast_forward_index(
     // only one per path. Restore that invariant so status/diff against HEAD is consistent.
     index.dedup_paths_keep_last();
     Ok(index)
-}
-
-/// Preserve staged paths from before an octopus merge that the merge result does not touch
-/// (e.g. unrelated `git add`), matching Git's index composition.
-pub fn compose_octopus_final_index(pre_merge_index: &Index, final_index: &mut Index) {
-    let final_paths: BTreeSet<Vec<u8>> = final_index
-        .entries
-        .iter()
-        .filter(|e| e.stage() == 0)
-        .map(|e| e.path.clone())
-        .collect();
-    for e in &pre_merge_index.entries {
-        if e.stage() != 0 {
-            continue;
-        }
-        if final_paths.contains(&e.path) {
-            continue;
-        }
-        final_index.push_entry_unsorted(e.clone());
-    }
-    final_index.sort();
-}
-
-/// Drop merge heads that are ancestors of another listed head (Git's "reduce parents").
-///
-/// Order of the remaining heads matches the first occurrence in the input (t7603).
-///
-/// # Errors
-///
-/// Returns an error if a commit-graph walk required for an ancestry test fails.
-pub fn reduce_octopus_merge_heads(
-    repo: &Repository,
-    merge_oids: &[ObjectId],
-    merge_names: &[String],
-) -> Result<(Vec<ObjectId>, Vec<String>)> {
-    debug_assert_eq!(merge_oids.len(), merge_names.len());
-    let mut out_oids = Vec::with_capacity(merge_oids.len());
-    let mut out_names = Vec::with_capacity(merge_names.len());
-    for i in 0..merge_oids.len() {
-        let oid = merge_oids[i];
-        let redundant = merge_oids
-            .iter()
-            .enumerate()
-            .any(|(j, &other)| j != i && is_ancestor(repo, oid, other).unwrap_or(false));
-        if !redundant {
-            out_oids.push(oid);
-            out_names.push(merge_names[i].clone());
-        }
-    }
-    Ok((out_oids, out_names))
 }
 
 /// Fast-forward policy for branch integration.
@@ -1991,36 +1937,6 @@ mod integrate_tests {
         ignore = "starts system git or is heavy; run with --features full-tests"
     )]
     #[test]
-    fn reduce_octopus_merge_heads_drops_ancestor() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        grit_test_support::git(tmp.path(), &["init", "-q"]);
-        let repo =
-            Repository::discover(Some(tmp.path()), &RepositoryOptions::empty()).expect("repo");
-        std::fs::write(tmp.path().join("f.txt"), "a\n").expect("write");
-        grit_test_support::git(tmp.path(), &["add", "f.txt"]);
-        grit_test_support::git(tmp.path(), &["commit", "-m", "a"]);
-        let a: ObjectId = grit_test_support::git(tmp.path(), &["rev-parse", "HEAD"])
-            .trim()
-            .parse()
-            .expect("a");
-        std::fs::write(tmp.path().join("f.txt"), "b\n").expect("write");
-        grit_test_support::git(tmp.path(), &["add", "f.txt"]);
-        grit_test_support::git(tmp.path(), &["commit", "-m", "b"]);
-        let b: ObjectId = grit_test_support::git(tmp.path(), &["rev-parse", "HEAD"])
-            .trim()
-            .parse()
-            .expect("b");
-        let (oids, names) =
-            reduce_octopus_merge_heads(&repo, &[a, b], &["a".into(), "b".into()]).expect("reduce");
-        assert_eq!(oids, vec![b]);
-        assert_eq!(names, vec!["b".to_owned()]);
-    }
-
-    #[cfg_attr(
-        not(feature = "full-tests"),
-        ignore = "starts system git or is heavy; run with --features full-tests"
-    )]
-    #[test]
     fn compose_fast_forward_index_keeps_staged_additions() {
         let tmp = tempfile::tempdir().expect("tempdir");
         grit_test_support::git(tmp.path(), &["init", "-q"]);
@@ -2185,17 +2101,6 @@ mod integrate_tests {
         )
         .expect("ff");
         assert!(matches!(ff, IntegrateBranchOutcome::FastForward { .. }));
-    }
-
-    #[test]
-    fn compose_octopus_final_index_carries_staged_paths() {
-        let mut pre = Index::new();
-        pre.add_or_replace(index_entry("staged.txt", 0));
-        let mut final_index = Index::new();
-        final_index.add_or_replace(index_entry("merged.txt", 0));
-        compose_octopus_final_index(&pre, &mut final_index);
-        assert!(final_index.get(b"staged.txt", 0).is_some());
-        assert!(final_index.get(b"merged.txt", 0).is_some());
     }
 
     #[cfg_attr(

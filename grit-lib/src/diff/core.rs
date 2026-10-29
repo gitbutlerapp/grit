@@ -1264,36 +1264,6 @@ pub fn unified_diff_histogram_hunks_only(
         super::WhitespaceMode::default(),
     )
 }
-#[expect(clippy::too_many_arguments)]
-/// Full unified diff (`---` / `+++` / hunks) using Git's histogram algorithm.
-#[must_use]
-pub fn unified_diff_histogram_with_prefix_and_funcname(
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    inter_hunk_context: usize,
-    src_prefix: &str,
-    dst_prefix: &str,
-    funcname_matcher: Option<&FuncnameMatcher>,
-    indent_heuristic: bool,
-    quote_path_fully: bool,
-) -> String {
-    unified_diff_histogram_with_prefix_and_funcname_indent(
-        old_content,
-        new_content,
-        old_path,
-        new_path,
-        context_lines,
-        inter_hunk_context,
-        src_prefix,
-        dst_prefix,
-        funcname_matcher,
-        indent_heuristic,
-        quote_path_fully,
-    )
-}
 
 #[expect(clippy::too_many_arguments)]
 fn unified_diff_histogram_with_prefix_and_funcname_indent(
@@ -1377,7 +1347,7 @@ fn unified_diff_histogram_with_prefix_and_funcname_indent(
 /// Full unified diff (`---` / `+++` / hunks) using Git's histogram algorithm,
 /// applying `--ignore-blank-lines` / `-I` change-record suppression
 /// (`histogram_unified_body_ignore_fc`) and then attaching function-name hunk
-/// headers exactly like [`unified_diff_histogram_with_prefix_and_funcname`].
+/// headers like `unified_diff_histogram_with_prefix_and_funcname_indent`.
 ///
 /// `is_ignorable_change` is given the removed/added line slices (without
 /// trailing newlines) of one change record and returns whether the whole change
@@ -2556,24 +2526,6 @@ pub(crate) fn xdiff_new_line_changed_flags(
         }
     }
     flags
-}
-
-/// Map each line in `new_joined` to its origin in `old_joined` after Git-style compaction (for blame).
-#[must_use]
-pub fn map_new_to_old_lines_compacted(
-    old_joined: &str,
-    new_joined: &str,
-    algorithm: similar::Algorithm,
-    indent_heuristic: bool,
-    new_line_count: usize,
-) -> Vec<Option<usize>> {
-    let ops = diff_indent_heuristic::diff_lines_ops_compacted(
-        old_joined,
-        new_joined,
-        algorithm,
-        indent_heuristic,
-    );
-    diff_indent_heuristic::map_new_to_old_from_ops(&ops, new_line_count)
 }
 
 /// The kind of change between two sides of a diff.
@@ -7340,42 +7292,15 @@ fn refresh_index_blob_stat_from_scan(
 
 /// Whether path-only checkout can skip writing a blob because the worktree is up to date.
 ///
-/// Git's `checkout_entry` trusts matching stat data via `ie_match_stat` unless the entry is
-/// racy relative to the on-disk index mtime, in which case blob content must match the expected
-/// OID using the repository hash algorithm and clean/filter conversion ([`hash_worktree_file`]).
+/// Matching stat data is trusted unless the entry is racy relative to the on-disk index mtime;
+/// then the worktree content (after clean/filter conversion) must hash to `expected_oid`
+/// ([`hash_worktree_file`]). `config` is an optional preloaded configuration.
 ///
 /// Returns `Ok(true)` when the caller should skip rewriting the path.
 ///
 /// # Errors
 ///
 /// Propagates I/O or hashing failures from [`hash_worktree_file`].
-#[allow(clippy::too_many_arguments)] // mirrors Git `checkout_entry` stat/OID inputs
-pub fn path_checkout_skip_blob_write_when_up_to_date(
-    odb: &Odb,
-    git_dir: &Path,
-    work_tree: &Path,
-    index: &Index,
-    entry: &IndexEntry,
-    expected_oid: &ObjectId,
-    expected_mode: u32,
-    rel_path: &str,
-    filter_process: Option<&crate::filter_process::FilterProcessState>,
-) -> Result<bool> {
-    path_checkout_skip_blob_write_when_up_to_date_with_config(
-        odb,
-        git_dir,
-        work_tree,
-        index,
-        entry,
-        expected_oid,
-        expected_mode,
-        rel_path,
-        filter_process,
-        None,
-    )
-}
-
-/// Like [`path_checkout_skip_blob_write_when_up_to_date`], with an optional preloaded config.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn path_checkout_skip_blob_write_when_up_to_date_with_config(
     odb: &Odb,
@@ -9609,102 +9534,6 @@ pub fn status_apply_rename_copy_detection(
     )
 }
 
-/// Format a rename pair using Git's compact path format.
-///
-/// Examples:
-/// - `a/b/c` → `c/b/a` → `a/b/c => c/b/a`
-/// - `c/b/a` → `c/d/e` → `c/{b/a => d/e}`
-/// - `c/d/e` → `d/e` → `{c/d => d}/e`
-/// - `d/e` → `d/f/e` → `d/{ => f}/e`
-pub fn format_rename_path(old: &str, new: &str) -> String {
-    let ob = old.as_bytes();
-    let nb = new.as_bytes();
-
-    // Find common prefix length, snapped to '/' boundary.
-    let pfx = {
-        let mut last_sep = 0usize;
-        let min_len = ob.len().min(nb.len());
-        for i in 0..min_len {
-            if ob[i] != nb[i] {
-                break;
-            }
-            if ob[i] == b'/' {
-                last_sep = i + 1;
-            }
-        }
-        last_sep
-    };
-
-    // Find common suffix length, snapped to '/' boundary.
-    let mut sfx = {
-        let mut last_sep = 0usize;
-        let min_len = ob.len().min(nb.len());
-        for i in 0..min_len {
-            let oi = ob.len() - 1 - i;
-            let ni = nb.len() - 1 - i;
-            if ob[oi] != nb[ni] {
-                break;
-            }
-            if ob[oi] == b'/' {
-                last_sep = i + 1;
-            }
-        }
-        last_sep
-    };
-
-    // Suffix starts at this position in each string.
-    let mut sfx_at_old = ob.len() - sfx;
-    let mut sfx_at_new = nb.len() - sfx;
-
-    // If prefix and suffix overlap in both strings (both middles empty),
-    // reduce the suffix so that at least the longer string has a non-empty middle.
-    while pfx > sfx_at_old && pfx > sfx_at_new && sfx > 0 {
-        // Reduce suffix by snapping to the next smaller '/' boundary.
-        let suffix_bytes = &ob[sfx_at_old..];
-        let mut new_sfx = 0;
-        // Find the next '/' after sfx_at_old (i.e., reduce suffix).
-        for (i, &b) in suffix_bytes.iter().enumerate().skip(1) {
-            if b == b'/' {
-                new_sfx = sfx - i;
-                break;
-            }
-        }
-        if new_sfx == 0 || new_sfx >= sfx {
-            sfx_at_old = ob.len();
-            sfx_at_new = nb.len();
-            break;
-        }
-        sfx = new_sfx;
-        sfx_at_old = ob.len() - sfx;
-        sfx_at_new = nb.len() - sfx;
-    }
-
-    // When prefix and suffix overlap in the shorter string, they share
-    // the '/' boundary character. In the output format, the shared '/'
-    // appears in both positions (e.g. "d/{ => f}/e" for d/e → d/f/e).
-    // Compute the middle parts. When prefix and suffix overlap in a
-    // string, the middle for that string is empty. The shared '/' shows
-    // in both prefix (trailing) and suffix (leading) positions.
-    let prefix = &old[..pfx];
-    let suffix = &old[sfx_at_old..];
-    let old_mid = if pfx <= sfx_at_old {
-        &old[pfx..sfx_at_old]
-    } else {
-        ""
-    };
-    let new_mid = if pfx <= sfx_at_new {
-        &new[pfx..sfx_at_new]
-    } else {
-        ""
-    };
-
-    if prefix.is_empty() && suffix.is_empty() {
-        return format!("{old} => {new}");
-    }
-
-    format!("{prefix}{{{old_mid} => {new_mid}}}{suffix}")
-}
-
 /// Check if two entries share the same filename (basename).
 fn same_basename(del: &DiffEntry, add: &DiffEntry) -> bool {
     let old = del.old_path.as_deref().unwrap_or("");
@@ -11540,13 +11369,6 @@ pub fn normalize_ignore_space_change(content: &str) -> String {
         .join("\n")
 }
 
-/// Count insertions and deletions between two strings.
-///
-/// Returns `(insertions, deletions)`.
-pub fn count_changes(old_content: &str, new_content: &str) -> (usize, usize) {
-    count_changes_with_algorithm(old_content, new_content, similar::Algorithm::Myers, false)
-}
-
 /// Count insertions and deletions using the given line-diff algorithm.
 ///
 /// Uses the same compacted line alignment as unified patches and [`crate::diff::line_change_counts`].
@@ -11616,9 +11438,6 @@ const DIFF_MINIMUM_BREAK_SIZE: usize = 400;
 const DIFF_DEFAULT_BREAK_SCORE: u64 = 30_000;
 /// Default break threshold (`DEFAULT_BREAK_SCORE` in `diffcore.h`), internal 0–[`GIT_DIFF_MAX_SCORE`] scale.
 pub const GIT_DIFF_DEFAULT_BREAK_SCORE: u64 = DIFF_DEFAULT_BREAK_SCORE;
-/// Default merge threshold after a break (`DEFAULT_MERGE_SCORE` in `diffcore.h`): pairs broken for
-/// rename/copy but not consumed are merged back when deletion-weight is below this (60% by default).
-pub const GIT_DIFF_DEFAULT_MERGE_SCORE_AFTER_BREAK: u64 = 36_000;
 const DIFF_HASHBASE: u32 = 107_927;
 
 #[derive(Clone, Copy, Default)]
@@ -11820,13 +11639,6 @@ pub fn diffcore_count_changes(old: &[u8], new: &[u8]) -> (u64, u64) {
         di += 1;
     }
     (sc, la)
-}
-
-/// Whether this modified blob pair should use Git's "complete rewrite" diffstat path when
-/// `--break-rewrites` is in effect (`should_break` in `diffcore-break.c`).
-#[must_use]
-pub fn should_break_rewrite_for_stat(old: &[u8], new: &[u8]) -> bool {
-    should_break_rewrite_inner(old, new, DIFF_DEFAULT_BREAK_SCORE)
 }
 
 /// Whether an in-place blob edit should be split into delete+create for rename/copy (`should_break`
@@ -12409,235 +12221,6 @@ fn submodule_dir_has_untracked_inner(
         }
     }
     false
-}
-
-/// Reorder diff entries by a `-O<orderfile>` (`diff.orderFile`): entries are sorted by the index of
-/// the first orderfile glob pattern that matches their path; unmatched entries sort last (stable).
-pub fn apply_orderfile_entries(
-    entries: Vec<DiffEntry>,
-    order_path: &str,
-    cwd: &Path,
-) -> Result<Vec<DiffEntry>> {
-    apply_orderfile(entries, order_path, cwd)
-}
-
-fn apply_orderfile(
-    mut entries: Vec<DiffEntry>,
-    order_path: &str,
-    cwd: &Path,
-) -> Result<Vec<DiffEntry>> {
-    let patterns = read_orderfile_patterns(order_path, cwd)?;
-    let sort_key = |entry: &DiffEntry| -> usize {
-        let path = entry
-            .new_path
-            .as_ref()
-            .or(entry.old_path.as_ref())
-            .cloned()
-            .unwrap_or_default();
-        for (i, pat) in patterns.iter().enumerate() {
-            if orderfile_pattern_matches(pat, &path) {
-                return i;
-            }
-        }
-        patterns.len()
-    };
-    entries.sort_by_key(|e| sort_key(e));
-    Ok(entries)
-}
-
-/// Read non-empty, non-comment glob patterns (one per line) from a `-O<orderfile>` file.
-pub fn read_orderfile_patterns(order_path: &str, cwd: &Path) -> Result<Vec<String>> {
-    let path = Path::new(order_path);
-    let resolved = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
-    let _meta = std::fs::metadata(&resolved)
-        .map_err(|e| Error::Message(format!("could not read orderfile {order_path}: {e}")))?;
-    let mut f = std::fs::File::open(&resolved)
-        .map_err(|e| Error::Message(format!("could not read orderfile {order_path}: {e}")))?;
-    let mut content = String::new();
-    std::io::Read::read_to_string(&mut f, &mut content)
-        .map_err(|e| Error::Message(format!("could not read orderfile {order_path}: {e}")))?;
-    Ok(content
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .collect())
-}
-
-/// Reorder diff entries for `git diff` `--rotate-to` / `--skip-to` (changed paths only).
-pub fn apply_rotate_skip_entries(
-    mut entries: Vec<DiffEntry>,
-    rotate_to: Option<&str>,
-    skip_to: Option<&str>,
-) -> Result<Vec<DiffEntry>> {
-    let Some(needle) = rotate_to.or(skip_to) else {
-        return Ok(entries);
-    };
-    let needle = needle.trim();
-    if needle.is_empty() {
-        return Ok(entries);
-    }
-    let idx = entries
-        .iter()
-        .position(|e| e.path() == needle)
-        .ok_or_else(|| {
-            Error::DiffPath(crate::error::DiffPathError::NoSuchPathInDiff {
-                path: needle.to_owned(),
-            })
-        })?;
-    if rotate_to.is_some() {
-        entries.rotate_left(idx);
-    }
-    if let Some(skip) = skip_to.filter(|s| !s.trim().is_empty()) {
-        let pos = entries
-            .iter()
-            .position(|e| e.path() == skip)
-            .ok_or_else(|| {
-                Error::DiffPath(crate::error::DiffPathError::NoSuchPathInDiff {
-                    path: skip.to_owned(),
-                })
-            })?;
-        entries.drain(..pos);
-    }
-    Ok(entries)
-}
-
-/// `git log` rotate/skip: reorder using the **commit tree** path order (all blobs), then keep only
-/// paths present in `entries` — matches Git's `diff --rotate-to` with history walks.
-pub fn apply_rotate_skip_log_entries(
-    odb: &Odb,
-    commit_tree: &ObjectId,
-    entries: Vec<DiffEntry>,
-    rotate_to: Option<&str>,
-    skip_to: Option<&str>,
-) -> Result<Vec<DiffEntry>> {
-    // Without --rotate-to/--skip-to this is a no-op (the ordered-paths helper
-    // returns the entries untouched), so skip the full-tree walk that
-    // `all_blob_paths_in_tree_order` performs — per displayed commit it read
-    // every subtree of the commit's tree just to discard the result.
-    fn trimmed(s: Option<&str>) -> Option<&str> {
-        s.map(str::trim).filter(|t| !t.is_empty())
-    }
-    if trimmed(rotate_to).is_none() && trimmed(skip_to).is_none() {
-        return Ok(entries);
-    }
-    let tree_paths = crate::merge_diff::all_blob_paths_in_tree_order(odb, commit_tree);
-    apply_rotate_skip_ordered_paths(&tree_paths, entries, rotate_to, skip_to)
-}
-
-fn apply_rotate_skip_ordered_paths(
-    tree_paths: &[String],
-    entries: Vec<DiffEntry>,
-    rotate_to: Option<&str>,
-    skip_to: Option<&str>,
-) -> Result<Vec<DiffEntry>> {
-    let rotate = rotate_to.and_then(|s| {
-        let t = s.trim();
-        (!t.is_empty()).then_some(t)
-    });
-    let skip = skip_to.and_then(|s| {
-        let t = s.trim();
-        (!t.is_empty()).then_some(t)
-    });
-    if rotate.is_none() && skip.is_none() {
-        return Ok(entries);
-    }
-
-    use std::collections::HashMap;
-    let mut by_path: HashMap<String, DiffEntry> = HashMap::new();
-    for e in entries {
-        by_path.insert(e.path().to_string(), e);
-    }
-
-    // `git log --skip-to`: only list changed paths from the skip point onward (unmodified paths
-    // in the tree-order suffix are omitted). `--rotate-to` still lists every changed file in order.
-    if rotate.is_none() {
-        let Some(skip_path) = skip else {
-            return Ok(by_path.into_values().collect());
-        };
-        let idx = tree_paths
-            .iter()
-            .position(|p| p == skip_path)
-            .ok_or_else(|| {
-                Error::DiffPath(crate::error::DiffPathError::NoSuchPathInDiff {
-                    path: skip_path.to_owned(),
-                })
-            })?;
-        let mut out = Vec::new();
-        for p in tree_paths.iter().skip(idx) {
-            if let Some(e) = by_path.remove(p) {
-                out.push(e);
-            }
-        }
-        return Ok(out);
-    }
-
-    let Some(needle) = rotate else {
-        return Ok(by_path.into_values().collect());
-    };
-    let idx = tree_paths.iter().position(|p| p == needle).ok_or_else(|| {
-        Error::DiffPath(crate::error::DiffPathError::NoSuchPathInDiff {
-            path: needle.to_owned(),
-        })
-    })?;
-    let mut order: Vec<String> = tree_paths.to_vec();
-    order.rotate_left(idx);
-    if let Some(skip_path) = skip {
-        let pos = order.iter().position(|p| p == skip_path).ok_or_else(|| {
-            Error::DiffPath(crate::error::DiffPathError::NoSuchPathInDiff {
-                path: skip_path.to_owned(),
-            })
-        })?;
-        order.drain(..pos);
-    }
-    let mut out = Vec::new();
-    for p in order {
-        if let Some(e) = by_path.remove(&p) {
-            out.push(e);
-        }
-    }
-    Ok(out)
-}
-
-/// Check if an orderfile pattern matches a path (matches the basename or the full path).
-/// Supports basic glob patterns: `*` matches any sequence, `?` matches one char.
-pub fn orderfile_pattern_matches(pattern: &str, path: &str) -> bool {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    orderfile_glob_match(pattern, name) || orderfile_glob_match(pattern, path)
-}
-
-/// Basic glob matching (supports `*` and `?`).
-fn orderfile_glob_match(pattern: &str, text: &str) -> bool {
-    let mut pi = 0;
-    let mut ti = 0;
-    let pb = pattern.as_bytes();
-    let tb = text.as_bytes();
-    let mut star_pi = usize::MAX;
-    let mut star_ti = 0;
-
-    while ti < tb.len() {
-        if pi < pb.len() && (pb[pi] == b'?' || pb[pi] == tb[ti]) {
-            pi += 1;
-            ti += 1;
-        } else if pi < pb.len() && pb[pi] == b'*' {
-            star_pi = pi;
-            star_ti = ti;
-            pi += 1;
-        } else if star_pi != usize::MAX {
-            pi = star_pi + 1;
-            star_ti += 1;
-            ti = star_ti;
-        } else {
-            return false;
-        }
-    }
-    while pi < pb.len() && pb[pi] == b'*' {
-        pi += 1;
-    }
-    pi == pb.len()
 }
 
 #[cfg(test)]
@@ -15367,22 +14950,17 @@ mod line_coverage_tests {
         let new = "alpha BETA\ngamma delta\n";
         let _ = normalize_ignore_space_change(old);
         let _ = normalize_ignore_space_change_line("- alpha  beta ");
-        let _ = count_changes(old, new);
         let _ = count_git_lines(old.as_bytes());
         let _ = diffcore_count_changes(old.as_bytes(), new.as_bytes());
-        let _ = should_break_rewrite_for_stat(b"x", b"totally different content");
         assert!(parse_diff_rename_score_token("50%").is_some());
         let _ = rewrite_merge_score(b"a", b"b");
         let _ = rewrite_dissimilarity_index_percent(b"abc", b"abd");
         assert_eq!(format_mode(0o100644), "100644");
-        assert!(!format_rename_path("a/old", "b/new").is_empty());
 
         let old_lines = ["a", "b", "c"];
         let new_lines = ["a", "b", "d"];
         let compact = diff_slice_ops_compacted(&old_lines, &new_lines, Algorithm::Myers, false);
         assert!(!compact.is_empty());
-        let _ =
-            map_new_to_old_lines_compacted("a\nb\nc\n", "a\nb\nd\n", Algorithm::Myers, false, 3);
     }
 
     #[test]
@@ -15587,7 +15165,7 @@ mod line_coverage_tests {
     }
 
     #[test]
-    fn extended_diff_helpers_and_rotate_order() -> Result<()> {
+    fn extended_diff_helpers_sweep() -> Result<()> {
         use crate::crlf::{ConversionConfig, FileAttrs};
         let temp = TempDir::new().expect("tempdir");
         let wt = temp.path();
@@ -15606,21 +15184,11 @@ mod line_coverage_tests {
         );
         let entries = diff_trees(&odb, Some(&old_tree), Some(&new_tree), "")?;
         assert!(entries.len() >= 2);
-        let rotated = apply_rotate_skip_entries(entries.clone(), Some("b.txt"), None)?;
-        assert!(!rotated.is_empty());
-        let _ =
-            apply_rotate_skip_log_entries(&odb, &new_tree, entries.clone(), Some("a.txt"), None);
-        let _ =
-            apply_rotate_skip_log_entries(&odb, &new_tree, entries.clone(), None, Some("a.txt"));
-        let order_path = wt.join("order");
-        std::fs::write(&order_path, b"c.txt\na.txt\n").expect("order");
-        let _ = apply_orderfile_entries(entries.clone(), order_path.to_str().expect("utf8"), wt);
-        let _ = read_orderfile_patterns(order_path.to_str().expect("utf8"), wt)?;
 
         let cfg = ConfigSet::new();
         assert!(indent_heuristic_from_config(&cfg));
         let _ = unified_diff_histogram_hunks_only("a\nb\n", "a\nB\n", 3, 0, false);
-        let _ = unified_diff_histogram_with_prefix_and_funcname(
+        let _ = unified_diff_histogram_with_prefix_and_funcname_indent(
             "x\n", "y\n", "a/f", "b/f", 3, 0, "", "", None, false, false,
         );
         let _ = count_changes_with_algorithm("a\n", "b\n", Algorithm::Myers, false);
@@ -15698,7 +15266,7 @@ mod line_coverage_tests {
             None,
             None,
         )?;
-        let _ = path_checkout_skip_blob_write_when_up_to_date(
+        let _ = path_checkout_skip_blob_write_when_up_to_date_with_config(
             &odb,
             &git_dir,
             wt,
@@ -15707,6 +15275,7 @@ mod line_coverage_tests {
             &b_old,
             MODE_REGULAR,
             "tracked.txt",
+            None,
             None,
         )?;
         let patch = anchored_unified_diff(

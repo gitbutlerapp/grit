@@ -1473,33 +1473,8 @@ pub(crate) enum CheckoutIndexWrite<'a> {
     Defer(&'a IndexLock),
 }
 
-/// Like [`checkout_tree_changes`], but updates `index` in place instead of loading from disk.
-///
-/// Callers such as `grit switch` use this after a tree-diff guard pass that already loaded the index.
-///
-/// # Errors
-///
-/// Same as [`checkout_tree_changes`]: a held `index.lock` fails before any work-tree change.
-pub fn checkout_tree_changes_with_index(
-    repo: &Repository,
-    changes: &[DiffEntry],
-    index: &mut Index,
-) -> Result<()> {
-    let mut lock = repo.lock_index()?;
-    checkout_tree_changes_with_index_opts(
-        repo,
-        changes,
-        index,
-        &mut NullProgress,
-        &NeverCancel,
-        CheckoutApplyOptions::default(),
-        None,
-        CheckoutIndexWrite::Commit(&mut lock),
-    )
-}
-
-/// Like [`checkout_tree_changes_with_index`], with apply-time tuning for trusted callers that
-/// already hold `index.lock`.
+/// Like [`checkout_tree_changes`], but updates `index` in place instead of loading from disk,
+/// with apply-time tuning for trusted callers that already hold `index.lock`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn checkout_tree_changes_with_index_opts(
     repo: &Repository,

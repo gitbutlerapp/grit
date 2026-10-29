@@ -6,19 +6,12 @@
 //! path quoting, and the comment prefix). This is the reference example of the
 //! library/CLI split described on [`crate::porcelain`].
 //!
-//! # Status of the extraction
-//!
-//! This module currently defines the data contract ([`StatusOptions`] in,
-//! [`StatusModel`] out). The computation that produces the model is being moved
-//! out of `grit/src/commands/status.rs::run` in stages; once it lands here as
-//! [`status`], the three CLI formatters (`format_porcelain_v2`, `format_short`,
-//! `format_long`) consume a `&StatusModel` instead of a dozen loose arguments.
-//!
-//! The model's shape is taken directly from the inputs those three formatters
-//! share today: HEAD + its tree, the staged (index-vs-HEAD) and unstaged
-//! (index-vs-worktree) diffs, the untracked and ignored path lists, the
-//! in-progress operation [`state`](crate::state::WtStatusState), the loaded and
-//! sparse-expanded index, and the stash count.
+//! [`status`] computes the model from [`StatusOptions`]: HEAD and its tree, the
+//! staged (index-vs-HEAD) and unstaged (index-vs-worktree) diffs, the untracked
+//! and ignored path lists, the in-progress operation
+//! [`state`](crate::state::WtStatusState), the loaded and sparse-expanded index,
+//! and the stash count. [`short_status_lines`] derives the two-column short form
+//! from it, and [`format_porcelain_v2`] renders Git's porcelain v2 lines.
 
 use crate::git_path::CanonicalizeExt;
 use std::borrow::Cow;
@@ -246,9 +239,7 @@ fn config_for_status_rename_detection(config: &ConfigSet) -> ConfigSet {
 /// The computed result of `git status`: everything the renderers need, with no
 /// presentation applied.
 ///
-/// Fields mirror what the CLI's `format_porcelain_v2`, `format_short`, and
-/// `format_long` read today, so a renderer can be a pure function of this model
-/// plus the user's chosen output format.
+/// A renderer is a pure function of this model plus the chosen output format.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct StatusModel {
@@ -585,29 +576,7 @@ pub(crate) fn count_unstaged_and_untracked_paths(
 
 /// Like [`collect_untracked_and_ignored`], reusing an existing
 /// [`crate::worktree_rules::WorktreeRules`] so ignore and attribute files already loaded by the
-/// same operation are not read again.
-pub fn collect_untracked_and_ignored_with_rules(
-    repo: &Repository,
-    index: &mut Index,
-    work_tree: &Path,
-    ignored_mode: IgnoredMode,
-    show_all: bool,
-    pathspecs: &[String],
-    rules: &crate::worktree_rules::WorktreeRules,
-) -> Result<(Vec<String>, Vec<String>, UntrackedCollectMeta)> {
-    collect_untracked_and_ignored_with_rules_and_cancel(
-        repo,
-        index,
-        work_tree,
-        ignored_mode,
-        show_all,
-        pathspecs,
-        rules,
-        None,
-    )
-}
-
-/// Like [`collect_untracked_and_ignored_with_rules`], checking `cancel` during the walk.
+/// same operation are not read again, and checking `cancel_watch` during the walk.
 #[allow(clippy::too_many_arguments)]
 pub fn collect_untracked_and_ignored_with_rules_and_cancel(
     repo: &Repository,
@@ -2849,17 +2818,6 @@ pub fn short_status_lines(model: &StatusModel) -> Vec<StatusShortLine> {
 
 fn short_status_line_sort_key(line: &StatusShortLine) -> String {
     line.render_with(|p| p.to_owned())
-}
-
-/// Render [`StatusModel`] as compact two-column status lines (repository-relative paths).
-///
-/// Prefer [`short_status_lines`] when paths need cwd-relative display or quoting.
-#[must_use]
-pub fn format_short(model: &StatusModel) -> Vec<String> {
-    short_status_lines(model)
-        .into_iter()
-        .map(|line| line.render_with(|p| p.to_owned()))
-        .collect()
 }
 
 fn short_status_path(

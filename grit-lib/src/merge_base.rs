@@ -1535,9 +1535,10 @@ fn try_count_without_paint(
     Ok(None)
 }
 
-/// Like [`first_parent_commits_with_cutoffs`] but only when every visited commit has at most
-/// one parent (linear history). Returns `None` when a merge is encountered so callers can
-/// fall back to a full-graph bounded walk.
+/// Newest-first commits from `tip` applying committer-date cutoffs, stopping after `limit`
+/// matches, but only when every visited commit has at most one parent (linear history).
+/// Returns `None` when a merge is encountered so callers can fall back to a full-graph
+/// bounded walk.
 pub fn try_linear_chain_commits_with_cutoffs(
     repo: &Repository,
     tip: ObjectId,
@@ -1570,39 +1571,6 @@ pub fn try_linear_chain_commits_with_cutoffs(
         }
     }
     Ok(Some(out))
-}
-
-/// Newest-first commits on the first-parent chain from `tip`, applying committer-date
-/// cutoffs, stopping after `limit` matches (or when the chain ends).
-pub fn first_parent_commits_with_cutoffs(
-    repo: &Repository,
-    tip: ObjectId,
-    limit: usize,
-    cutoffs: ReachableWalkCommitterCutoffs,
-) -> Result<Vec<ObjectId>> {
-    let mut cache = CommitGraphCache::new(repo);
-    let mut out = Vec::with_capacity(limit.min(64));
-    let mut stack = vec![tip];
-    while let Some(cur) = stack.pop() {
-        if out.len() >= limit {
-            break;
-        }
-        let time = cache.commit_time(cur)?;
-        let below_since = cutoffs.since.is_some_and(|since| time < since);
-        let above_until = cutoffs.until.is_some_and(|until| time > until);
-        if !below_since && !above_until {
-            out.push(cur);
-        }
-        let parents = cache.parents_of(cur)?;
-        if below_since {
-            stack.extend(parents);
-            continue;
-        }
-        if let Some(&parent) = parents.first() {
-            stack.push(parent);
-        }
-    }
-    Ok(out)
 }
 
 /// Count commits on `tip`'s first-parent chain above `hide`.

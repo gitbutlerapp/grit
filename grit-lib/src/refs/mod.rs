@@ -2157,45 +2157,9 @@ pub fn ref_update_flags(refname: &str) -> RefUpdateFlags {
     legacy_ref_update_flags(refname)
 }
 
-/// Create a new direct ref and its initial reflog line in one store transaction.
-///
-/// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
-/// [`crate::refs::store::RefStore`]. Prefer [`commit_ref_update_on_store`] on
-/// [`crate::repo::Repository::refs`] when you already have a
-/// [`crate::repo::Repository`].
-///
-/// # Errors
-///
-/// Returns an error when the ref already exists, the name is invalid, `oid` is missing from
-/// `git_dir`'s objects or (for a branch) is not a commit (see [`write_ref`]), or ref/reflog
-/// I/O fails.
-pub fn create_ref_with_reflog(
-    git_dir: &Path,
-    refname: &str,
-    oid: &ObjectId,
-    identity: &str,
-    message: &str,
-) -> Result<()> {
-    let config = ConfigSet::load(
-        &crate::environment::Environment::empty(),
-        Some(git_dir),
-        true,
-    )
-    .unwrap_or_default();
-    create_ref_with_reflog_on_store(
-        &store::open_checked_ref_store(git_dir)?,
-        git_dir,
-        &config,
-        refname,
-        oid,
-        identity,
-        message,
-    )
-}
-
-/// [`create_ref_with_reflog`] through an already-open store with already-loaded `config`, so
-/// a caller holding a [`crate::repo::Repository`] reuses its packed-refs and config caches.
+/// Create a new direct ref and its initial reflog line in one store transaction, through an
+/// already-open store with already-loaded `config`, so a caller holding a
+/// [`crate::repo::Repository`] reuses its packed-refs and config caches.
 pub(crate) fn create_ref_with_reflog_on_store(
     store: &dyn RefStore,
     git_dir: &Path,

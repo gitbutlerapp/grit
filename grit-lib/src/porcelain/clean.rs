@@ -1,7 +1,7 @@
 //! Remove untracked (and optionally ignored) paths from the work tree.
 //!
 //! [`clean_untracked`] reuses the same untracked/ignored walk as [`super::status`]
-//! ([`super::status::collect_untracked_and_ignored_with_rules`]) so results stay aligned with
+//! ([`super::status::collect_untracked_and_ignored_with_rules_and_cancel`]) so results stay aligned with
 //! `grit status` and system `git status`.
 
 use std::collections::BTreeSet;

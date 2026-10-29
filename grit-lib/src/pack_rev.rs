@@ -148,16 +148,6 @@ fn shared_repo_from_pack_index_path(idx_path: &Path) -> i32 {
         .unwrap_or(PERM_UMASK)
 }
 
-/// Write a valid `.rev` sidecar for `index` when missing or corrupt.
-///
-/// # Errors
-///
-/// Propagates pack read or I/O failures while building or publishing the sidecar.
-pub fn write_pack_rev_sidecar(index: &PackIndex) -> Result<()> {
-    let shared_repo = shared_repo_from_pack_index_path(&index.idx_path);
-    write_pack_rev_sidecar_with_shared(index, shared_repo)
-}
-
 fn write_pack_rev_sidecar_with_shared(index: &PackIndex, shared_repo: i32) -> Result<()> {
     let rev_path = rev_path_for_index(&index.idx_path);
     if rev_path.is_file() && verify_pack_rev_file(&rev_path, index).is_ok() {
