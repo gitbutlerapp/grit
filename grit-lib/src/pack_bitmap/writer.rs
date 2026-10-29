@@ -673,8 +673,7 @@ fn tip_needs_flags(
         needs.extend(tips.iter().copied());
         return Ok(needs);
     }
-    let git_dir = &repo.git_dir();
-    for (name, oid) in refs::list_refs(git_dir, "refs/")
+    for (name, oid) in refs::list_refs_for_repository(repo, "refs/")
         .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?
     {
         let peeled = peel_to_commit(repo, oid)?;

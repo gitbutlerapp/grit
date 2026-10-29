@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use grit_examples::resolve_name;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::refs;
+use grit_lib::refs::store::RefName;
 use grit_lib::repo::Repository;
 
 #[derive(Debug, Parser)]
@@ -23,6 +23,8 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
     let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
     let oid = resolve_name(&repo, &cli.new_value)?;
-    refs::write_ref(repo.git_dir(), &cli.refname, &oid)?;
+    let name = RefName::try_from(cli.refname.as_str())
+        .map_err(|e| anyhow::anyhow!("invalid ref name: {e}"))?;
+    repo.references().update(&name, &oid)?;
     Ok(())
 }

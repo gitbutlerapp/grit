@@ -8,9 +8,10 @@ use grit_lib::porcelain::branch::list_branches;
 use grit_lib::porcelain::tag::list_tags;
 use grit_lib::refs::listing::{RefNamespace, RefQuery, RefSort, SortKey};
 use grit_lib::refs::reflog::read_reflog;
+use grit_lib::refs::store::RefName;
 use grit_lib::refs::{self, Ref};
 use grit_lib::repo::Repository;
-use grit_lib::state::resolve_head;
+use grit_lib::state::resolve_head_for_repository;
 use std::path::{Path, PathBuf};
 
 const DEMO_BRANCH: &str = "refs/heads/library-guide-demo";
@@ -42,7 +43,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let repo = open_repo(&root)?;
     let git_dir = repo.git_dir();
 
-    let head = resolve_head(git_dir)?;
+    let head = resolve_head_for_repository(&repo)?;
     match &head {
         grit_lib::state::HeadState::Branch { refname, oid, .. } => {
             println!("head_symbolic={refname}");
@@ -84,8 +85,10 @@ fn main() -> Result<(), grit_lib::error::Error> {
         .cloned()
         .ok_or_else(|| grit_lib::error::Error::Message("HEAD has no commit".into()))?;
 
-    let old = refs::resolve_ref(git_dir, DEMO_BRANCH).ok();
-    refs::write_ref(git_dir, DEMO_BRANCH, &target)?;
+    let demo = RefName::try_from(DEMO_BRANCH)
+        .map_err(|e| grit_lib::error::Error::Message(format!("invalid demo ref name: {e}")))?;
+    let old = repo.references().resolve(&demo).ok();
+    repo.references().update(&demo, &target)?;
 
     let zero = ObjectId::zero();
     let old_oid = old.as_ref().unwrap_or(&zero);

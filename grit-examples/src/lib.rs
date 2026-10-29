@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use grit_lib::index::{Index, IndexEntry, MODE_EXECUTABLE, MODE_REGULAR};
 use grit_lib::objects::{parse_tree, ObjectId, ObjectKind};
+use grit_lib::refs::store::RefName;
 use grit_lib::repo::Repository;
 
 pub mod counting_ref_store;
@@ -14,14 +15,23 @@ pub mod sqlite_odb;
 
 /// Resolve a revision-like string as a ref first, then as a raw object id.
 pub fn resolve_name(repo: &Repository, name: &str) -> Result<ObjectId> {
-    grit_lib::refs::resolve_ref(repo.git_dir(), name)
-        .or_else(|_| name.parse::<ObjectId>().map_err(anyhow::Error::from))
+    if let Ok(ref_name) = RefName::try_from(name) {
+        if let Ok(oid) = repo.references().resolve(&ref_name) {
+            return Ok(oid);
+        }
+    }
+    name.parse::<ObjectId>()
+        .map_err(anyhow::Error::from)
         .with_context(|| format!("could not resolve {name}"))
 }
 
 /// Return the current HEAD object id.
 pub fn head_oid(repo: &Repository) -> Result<ObjectId> {
-    grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").context("could not resolve HEAD")
+    let head =
+        RefName::try_from("HEAD").map_err(|e| anyhow::anyhow!("invalid HEAD ref name: {e}"))?;
+    repo.references()
+        .resolve(&head)
+        .context("could not resolve HEAD")
 }
 
 /// Return the object id of a commit's tree.

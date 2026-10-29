@@ -715,7 +715,7 @@ pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource
     ]
     .into_iter()
     .find_map(|(prefix, kind)| {
-        refs::resolve_ref(repo.git_dir(), &format!("{prefix}{spec}"))
+        refs::resolve_ref_in(repo, &format!("{prefix}{spec}"))
             .ok()
             .map(|oid| (oid, kind))
     });

@@ -624,7 +624,7 @@ pub fn expire_reflog_unreachable(
     {
         return Ok(0);
     }
-    let tip = match refs::resolve_ref(git_dir, refname) {
+    let tip = match refs::resolve_ref_in(repo, refname) {
         Ok(o) => o,
         Err(_) => return Ok(0),
     };
@@ -1606,10 +1606,10 @@ pub fn load_gc_reflog_expire_config(config: &ConfigSet, now: i64) -> GcReflogExp
 /// Best-effort object set for `--stale-fix` (refs + reflog mentions).
 pub fn mark_stalefix_reachable(repo: &Repository, git_dir: &Path) -> Result<HashSet<ObjectId>> {
     let mut seeds: Vec<ObjectId> = Vec::new();
-    if let Ok(oid) = refs::resolve_ref(git_dir, "HEAD") {
+    if let Ok(oid) = refs::resolve_ref_in(repo, "HEAD") {
         seeds.push(oid);
     }
-    if let Ok(refs) = refs::list_refs(git_dir, "refs/") {
+    if let Ok(refs) = refs::list_refs_for_repository(repo, "refs/") {
         for (_, oid) in refs {
             seeds.push(oid);
         }
