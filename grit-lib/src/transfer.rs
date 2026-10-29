@@ -27,7 +27,7 @@ use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::fetch::{NoProgress, Progress};
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
-use crate::progress::{ProgressPhase, ProgressSink};
+use crate::progress::{ProgressPhase, ProgressSink, ReceivedObjects};
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use std::num::NonZeroU32;
@@ -971,6 +971,65 @@ fn ingest_pack_options_for_fetch(
     })
 }
 
+/// Incremental [`ProgressPhase::CopyingObjects`] reporting for local fetch/push copies.
+struct LocalCopyProgress {
+    total: u64,
+    done: u64,
+    last_reported: u64,
+    phase_active: bool,
+}
+
+impl LocalCopyProgress {
+    fn new(total: u64) -> Self {
+        Self {
+            total,
+            done: 0,
+            last_reported: 0,
+            phase_active: false,
+        }
+    }
+
+    fn ensure_started(&mut self, progress: &mut dyn Progress) {
+        if !self.phase_active {
+            progress.start(ProgressPhase::CopyingObjects, Some(self.total));
+            self.phase_active = true;
+        }
+    }
+
+    fn add(&mut self, progress: &mut dyn Progress, n: u64) {
+        if n == 0 {
+            return;
+        }
+        self.ensure_started(progress);
+        self.done += n;
+        crate::progress::report_object_progress_stride(
+            progress,
+            self.done,
+            &mut self.last_reported,
+            Some(self.total),
+        );
+        if progress.wants_received_objects() {
+            progress.received_objects(ReceivedObjects {
+                received: self.done,
+                total: self.total,
+                deltas: 0,
+            });
+        }
+    }
+
+    fn finish(&mut self, progress: &mut dyn Progress) {
+        if !self.phase_active {
+            return;
+        }
+        if self.last_reported < self.done {
+            progress.set(self.done);
+            self.last_reported = self.done;
+        }
+        progress.finish();
+        self.phase_active = false;
+    }
+}
+
 /// Copy objects for a local fetch: link remote packfiles that hold only objects
 /// the fetch must send, then link or pack any remainder.
 ///
@@ -988,7 +1047,7 @@ fn copy_objects_for_local_fetch(
     try_pack_link: bool,
     pack_build: &PackBuildOptions,
     fetch_opts: &FetchOptions,
-    progress: &mut dyn ProgressSink,
+    progress: &mut dyn Progress,
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<(HashSet<ObjectId>, TransferStats)> {
     use crate::local_object_copy::{
@@ -1008,24 +1067,33 @@ fn copy_objects_for_local_fetch(
         && haves.is_empty()
         && !wants.is_empty()
     {
-        progress.start(ProgressPhase::CopyingObjects, Some(wants.len() as u64));
         crate::progress::poll_cancel(progress, cancel)?;
-        let linked_packs =
-            link_remote_pack_files(remote_objects, local_objects, progress, cancel, wants.len())?;
+        let mut copy = LocalCopyProgress::new(wants.len() as u64);
+        let linked_packs = link_remote_pack_files(
+            remote_objects,
+            local_objects,
+            &mut crate::progress::NullProgress,
+            cancel,
+            0,
+        )?;
         if linked_packs > 0 {
             refresh_local_odb_after_link(local_odb);
+            copy.add(progress, linked_packs as u64);
         }
         let pack_alone_satisfies_wants =
             linked_packs > 0 && wants.iter().all(|oid| local_odb.exists(oid));
-        let linked_loose = link_loose_objects(remote_objects, local_objects, progress, cancel)?;
-        if linked_packs > 0 || linked_loose > 0 {
+        let linked_loose = link_loose_objects(
+            remote_objects,
+            local_objects,
+            &mut crate::progress::NullProgress,
+            cancel,
+        )?;
+        if linked_loose > 0 {
             refresh_local_odb_after_link(local_odb);
+            copy.add(progress, linked_loose as u64);
         }
         if (linked_packs > 0 || linked_loose > 0) && wants.iter().all(|oid| local_odb.exists(oid)) {
-            if linked_loose == 0 {
-                progress.set(wants.len() as u64);
-            }
-            progress.finish();
+            copy.finish(progress);
             let stats_loose = if pack_alone_satisfies_wants {
                 HashSet::new()
             } else {
@@ -1055,11 +1123,13 @@ fn copy_objects_for_local_fetch(
             )?;
             return Ok((oids, transfer));
         }
-        progress.finish();
+        copy.finish(progress);
     }
 
     let stop = crate::progress::CancelSignal::new(cancel);
     let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
+    progress.start(ProgressPhase::EnumeratingObjects, None);
+    let mut enum_last = 0u64;
     let send_set = collect_reachable_excluding_peer(
         remote_odb,
         wants,
@@ -1068,29 +1138,34 @@ fn copy_objects_for_local_fetch(
         false,
         source_shallow,
         &stop,
+        progress,
+        &mut enum_last,
     )?;
     let send = &send_set.objects;
+    progress.set(send.len() as u64);
+    progress.finish();
+
+    let mut copy = LocalCopyProgress::new(send.len() as u64);
 
     if !pack_build.thin && try_pack_link {
-        progress.start(ProgressPhase::CopyingObjects, Some(send.len() as u64));
         let local_has = |oid: &ObjectId| local_odb.exists_materialized_local_without_rescan(oid);
         let linked = link_packs_within(
             remote_objects,
             local_objects,
             send,
             &local_has,
-            progress,
+            &mut crate::progress::NullProgress,
             cancel,
         )?;
         if linked > 0 {
             refresh_local_odb_after_link(local_odb);
-            progress.set(linked as u64);
+            copy.add(progress, linked as u64);
         }
-        progress.finish();
     }
 
     let mut still_missing = objects_missing_from_peer(local_odb, send);
     if still_missing.is_empty() {
+        copy.finish(progress);
         // Every object in `send` is stored locally now, and only packs were installed.
         let oids: HashSet<ObjectId> = send.iter().copied().collect();
         let transfer = transfer_stats_for_local_operation(
@@ -1105,24 +1180,21 @@ fn copy_objects_for_local_fetch(
     // Hard-link loose objects before building an in-memory pack. Re-reading and
     // recompressing large loose blobs (typical local clone) would spike RSS to several
     // times the object size; linking matches system `git clone` on the same filesystem.
-    progress.start(
-        ProgressPhase::CopyingObjects,
-        Some(still_missing.len() as u64),
-    );
     let linked_loose = link_loose_objects_for_oids(
         remote_objects,
         local_objects,
         &still_missing,
-        progress,
+        &mut crate::progress::NullProgress,
         cancel,
     )?;
     let loose_candidates: HashSet<ObjectId> = still_missing.iter().copied().collect();
     if linked_loose > 0 {
         refresh_local_odb_after_link(local_odb);
+        copy.add(progress, linked_loose as u64);
         still_missing = local_odb.missing_oids(still_missing)?;
     }
-    progress.finish();
     if still_missing.is_empty() {
+        copy.finish(progress);
         // Every object in `send` is stored locally now; the loose links covered the rest.
         let oids: HashSet<ObjectId> = send.iter().copied().collect();
         let transfer = transfer_stats_for_local_operation(
@@ -1135,10 +1207,6 @@ fn copy_objects_for_local_fetch(
     }
 
     let pack_opts = pack_build_options_for_send(remote_odb, &still_missing, pack_build);
-    progress.start(
-        ProgressPhase::CopyingObjects,
-        Some(still_missing.len() as u64),
-    );
     crate::progress::poll_cancel(progress, cancel)?;
     // Stream the pack into a spool in `objects/pack` rather than memory, as a local push
     // does; a cancelled or failed copy removes the spool.
@@ -1154,7 +1222,9 @@ fn copy_objects_for_local_fetch(
         &pack_opts,
         &stop,
         &mut spool,
+        Some((&mut copy, progress)),
     )?;
+    copy.finish(progress);
     crate::progress::poll_cancel(progress, cancel)?;
     let ingested = match spool.finish()? {
         Some(pack_path) => {
@@ -1163,14 +1233,12 @@ fn copy_objects_for_local_fetch(
                 pack_path,
                 local_odb,
                 &ingest_opts,
-                None,
+                Some(progress),
                 Some(cancel),
             )?
         }
         None => crate::index_pack::IngestedPack::default(),
     };
-    progress.inc(ingested.object_ids.len() as u64);
-    progress.finish();
     refresh_local_odb_after_link(local_odb);
     // Every object in `send` is stored locally now: linked, or in the new pack.
     let mut out: HashSet<ObjectId> = send.iter().copied().collect();
@@ -1211,6 +1279,8 @@ fn copy_objects_for_local_push(
     let stop = crate::progress::CancelSignal::new(cancel);
 
     let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
+    let mut enum_last = 0u64;
+    let mut enum_sink = crate::progress::NullProgress;
     let send_set = collect_reachable_excluding_peer(
         local_odb,
         wants,
@@ -1219,6 +1289,8 @@ fn copy_objects_for_local_push(
         false,
         source_shallow,
         &stop,
+        &mut enum_sink,
+        &mut enum_last,
     )?;
     let send = &send_set.objects;
 
@@ -1272,6 +1344,7 @@ fn copy_objects_for_local_push(
         &pack_opts,
         &stop,
         &mut spool,
+        None,
     )?;
     let Some(pack_path) = spool.finish()? else {
         return Ok(());
@@ -1328,16 +1401,39 @@ fn write_pack_for_local_transfer(
     opts: &PackBuildOptions,
     stop: &crate::progress::CancelSignal<'_>,
     w: &mut dyn Write,
+    copy: Option<(&mut LocalCopyProgress, &mut dyn Progress)>,
 ) -> Result<()> {
     if !opts.thin && have_shallow.is_empty() {
-        crate::pack_objects::write_pack_from_send_list(
-            source_odb,
-            missing,
-            opts,
-            &send_set.name_hashes,
-            stop,
-            w,
-        )?;
+        let pack_budget = missing.len() as u64;
+        if let Some((copy, progress)) = copy {
+            let mut pack_reported = 0u64;
+            let mut on_pack = |n: u64| {
+                let add = n.min(pack_budget.saturating_sub(pack_reported));
+                if add > 0 {
+                    pack_reported += add;
+                    copy.add(progress, add);
+                }
+            };
+            crate::pack_objects::write_pack_from_send_list(
+                source_odb,
+                missing,
+                opts,
+                &send_set.name_hashes,
+                stop,
+                w,
+                Some(&mut on_pack),
+            )?;
+        } else {
+            crate::pack_objects::write_pack_from_send_list(
+                source_odb,
+                missing,
+                opts,
+                &send_set.name_hashes,
+                stop,
+                w,
+                None,
+            )?;
+        }
     } else {
         write_pack_for_local_fetch(
             source_odb,
@@ -1366,6 +1462,7 @@ struct PeerSendSet {
 /// `peer_odb` as a boundary (plus explicit `peer_boundary` tips). Used for local
 /// file fetch/push so incremental transfers do not walk full history from `haves`.
 /// `stop` is polled for every object read.
+#[allow(clippy::too_many_arguments)]
 fn collect_reachable_excluding_peer(
     source_odb: &Odb,
     roots: &[ObjectId],
@@ -1374,12 +1471,15 @@ fn collect_reachable_excluding_peer(
     skip_missing: bool,
     shallow_grafts: &HashSet<ObjectId>,
     stop: &crate::progress::CancelSignal<'_>,
+    enum_sink: &mut dyn ProgressSink,
+    enum_last: &mut u64,
 ) -> Result<PeerSendSet> {
     use crate::pack_name_hash::pack_name_hash_extend;
 
     stop.poll()?;
     if peer_boundary.is_empty() && shallow_grafts.is_empty() {
-        if let Some(send_set) = bitmap_send_set(source_odb, roots, peer_odb)? {
+        if let Some(send_set) = bitmap_send_set(source_odb, roots, peer_odb, enum_sink, enum_last)?
+        {
             stop.poll()?;
             return Ok(send_set);
         }
@@ -1473,6 +1573,8 @@ fn collect_reachable_excluding_peer(
             }
             ObjectKind::Blob => {}
         }
+        let n = ordered.len() as u64;
+        crate::progress::report_object_progress_stride(enum_sink, n, enum_last, None);
     }
 
     Ok(PeerSendSet {
@@ -1489,6 +1591,8 @@ fn bitmap_send_set(
     source_odb: &Odb,
     roots: &[ObjectId],
     peer_odb: &Odb,
+    enum_sink: &mut dyn ProgressSink,
+    enum_last: &mut u64,
 ) -> Result<Option<PeerSendSet>> {
     let no_haves = HashSet::new();
     let Some((reachable, _)) = crate::pack_object_select::try_bitmap_reachable_for_upload(
@@ -1502,10 +1606,15 @@ fn bitmap_send_set(
         return Ok(None);
     };
     peer_odb.reprepare_local_packs();
-    let objects: Vec<ObjectId> = reachable
+    let mut objects: Vec<ObjectId> = Vec::new();
+    for oid in reachable
         .iter_grouped_by_kind()
         .filter(|oid| !peer_odb.exists_materialized_local_without_rescan(oid))
-        .collect();
+    {
+        objects.push(oid);
+        let n = objects.len() as u64;
+        crate::progress::report_object_progress_stride(enum_sink, n, enum_last, None);
+    }
     let name_hashes = crate::pack_object_select::name_hashes_for_send(
         reachable.bitmap_index(),
         &objects,
@@ -3656,8 +3765,11 @@ mod tests {
         started: Vec<(ProgressPhase, Option<u64>)>,
         finished: Vec<ProgressPhase>,
         counts: Vec<u64>,
+        copying_counts: Vec<u64>,
         active: Option<ProgressPhase>,
         current: u64,
+        received: Vec<ReceivedObjects>,
+        want_received: bool,
     }
 
     impl ProgressSink for PhaseRecorder {
@@ -3670,12 +3782,12 @@ mod tests {
         fn inc(&mut self, units: u64) {
             self.events.push("inc");
             self.current += units;
-            self.counts.push(self.current);
+            self.record_count();
         }
         fn set(&mut self, current: u64) {
             self.events.push("set");
             self.current = current;
-            self.counts.push(self.current);
+            self.record_count();
         }
         fn finish(&mut self) {
             self.events.push("finish");
@@ -3685,7 +3797,24 @@ mod tests {
         }
     }
 
-    impl Progress for PhaseRecorder {}
+    impl PhaseRecorder {
+        fn record_count(&mut self) {
+            self.counts.push(self.current);
+            if self.active == Some(ProgressPhase::CopyingObjects) {
+                self.copying_counts.push(self.current);
+            }
+        }
+    }
+
+    impl Progress for PhaseRecorder {
+        fn wants_received_objects(&self) -> bool {
+            self.want_received
+        }
+
+        fn received_objects(&mut self, counts: ReceivedObjects) {
+            self.received.push(counts);
+        }
+    }
 
     fn git_ok(dir: &Path, args: &[&str]) -> bool {
         Command::new("git") // hygiene: git fixture comparison in cfg(test) module
@@ -3944,6 +4073,109 @@ mod tests {
         assert_eq!(outcome.updates.len(), 1);
         assert_eq!(outcome.updates[0].old_oid, Some(tip));
         assert_eq!(outcome.updates[0].mode, UpdateMode::UpToDate);
+    }
+
+    fn write_linear_commits(objects: &Path, depth: usize) -> (Odb, ObjectId) {
+        use crate::objects::{serialize_commit, CommitData};
+        let odb = Odb::new(objects);
+        let mut parent = None;
+        for i in 0..depth {
+            let blob = odb
+                .write(ObjectKind::Blob, format!("payload {i}\n").as_bytes())
+                .expect("blob");
+            let mut tree = b"100644 f.txt\0".to_vec();
+            tree.extend_from_slice(blob.as_bytes());
+            let tree_oid = odb.write(ObjectKind::Tree, &tree).expect("tree");
+            let commit = CommitData {
+                tree: tree_oid,
+                parents: parent.into_iter().collect(),
+                author: "T <t@e.com> 0 +0000".into(),
+                committer: "T <t@e.com> 0 +0000".into(),
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: None,
+                message: format!("c{i}\n"),
+                raw_message: None,
+                extra_headers: Vec::new(),
+            };
+            parent = Some(
+                odb.write(ObjectKind::Commit, &serialize_commit(&commit))
+                    .expect("commit"),
+            );
+        }
+        (odb, parent.expect("tip"))
+    }
+
+    #[test]
+    fn fetch_local_packed_remote_reports_incremental_copy_progress() {
+        let remote = tempfile::tempdir().expect("remote");
+        init_repository(remote.path(), true, "main", None, RefStorageFormat::Files)
+            .expect("remote init");
+        let objects = remote.path().join("objects");
+        let (remote_odb, tip) = write_linear_commits(&objects, 280);
+        crate::refs::write_ref(remote.path(), "refs/heads/main", &tip).expect("main ref");
+        remote_odb
+            .write(ObjectKind::Blob, b"unreachable orphan blob\n")
+            .expect("orphan");
+
+        let local = tempfile::tempdir().expect("local");
+        init_repository(local.path(), false, "main", None, RefStorageFormat::Files).expect("init");
+
+        let opts = FetchOptions {
+            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+            initial_remote_fetch: true,
+            tags: TagMode::None,
+            ..Default::default()
+        };
+        let mut rec = PhaseRecorder::default();
+        let outcome = fetch_local_with_progress(
+            &local.path().join(".git"),
+            remote.path(),
+            &opts,
+            &mut rec,
+            &crate::progress::NeverCancel,
+        )
+        .expect("fetch_local");
+
+        let enum_pos = rec
+            .started
+            .iter()
+            .position(|(p, _)| *p == ProgressPhase::EnumeratingObjects)
+            .expect("EnumeratingObjects");
+        let copy_pos = rec
+            .started
+            .iter()
+            .position(|(p, _)| *p == ProgressPhase::CopyingObjects)
+            .expect("CopyingObjects");
+        assert!(
+            enum_pos < copy_pos,
+            "enumerate before copy: {:?}",
+            rec.started
+        );
+        assert_eq!(
+            rec.started
+                .iter()
+                .filter(|(p, _)| *p == ProgressPhase::CopyingObjects)
+                .count(),
+            1,
+            "expected a single CopyingObjects phase, got {:?}",
+            rec.started
+        );
+        assert!(
+            rec.counts.len() >= 3,
+            "expected >=3 progress samples overall, got {:?}",
+            rec.counts
+        );
+        assert!(
+            rec.copying_counts.len() >= 3,
+            "expected >=3 copy progress samples, got {:?}",
+            rec.copying_counts
+        );
+        assert_monotonic(&rec.copying_counts);
+        assert!(
+            rec.copying_counts.last().copied().unwrap_or(0) >= outcome.transfer.objects as u64,
+            "final copy count should reach transferred objects"
+        );
     }
 
     #[cfg_attr(

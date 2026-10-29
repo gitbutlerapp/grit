@@ -456,6 +456,7 @@ pub(crate) fn paint(color: bool, sgr: &str, text: &str) -> String {
 pub(crate) fn phase_palette(phase: ProgressPhase) -> [u8; 5] {
     match phase {
         ProgressPhase::ReceivingObjects => [24, 31, 38, 45, 51],
+        ProgressPhase::EnumeratingObjects => [59, 66, 73, 79, 145],
         ProgressPhase::IndexingObjects => [97, 134, 171, 207, 213],
         ProgressPhase::ResolvingDeltas => [130, 172, 178, 214, 220],
         ProgressPhase::CopyingObjects => [23, 30, 37, 44, 87],
@@ -470,6 +471,7 @@ pub(crate) fn phase_palette(phase: ProgressPhase) -> [u8; 5] {
 pub(crate) fn phase_label(phase: ProgressPhase) -> &'static str {
     match phase {
         ProgressPhase::ReceivingObjects => "Receiving",
+        ProgressPhase::EnumeratingObjects => "Enumerating",
         ProgressPhase::IndexingObjects => "Indexing",
         ProgressPhase::ResolvingDeltas => "Resolving",
         ProgressPhase::CopyingObjects => "Copying",

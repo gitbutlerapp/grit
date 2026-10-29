@@ -33,6 +33,7 @@ impl TerminalProgress {
     fn phase_label(phase: ProgressPhase) -> &'static str {
         match phase {
             ProgressPhase::ReceivingObjects => "Receiving objects",
+            ProgressPhase::EnumeratingObjects => "Enumerating objects",
             ProgressPhase::IndexingObjects => "Indexing objects",
             ProgressPhase::ResolvingDeltas => "Resolving deltas",
             ProgressPhase::CopyingObjects => "Copying objects",

@@ -37,6 +37,8 @@ pub use estimate::{OverallEstimate, OverallEstimator, PhaseRates};
 pub enum ProgressPhase {
     /// Receiving a pack or loose objects from a remote or bundle stream.
     ReceivingObjects,
+    /// Walking reachability to decide which objects a local fetch must copy.
+    EnumeratingObjects,
     /// Building or reading a pack index after objects are on disk.
     IndexingObjects,
     /// Applying delta chains inside a pack.
@@ -60,6 +62,7 @@ impl ProgressPhase {
     pub fn default_unit(self) -> ProgressUnit {
         match self {
             Self::ReceivingObjects
+            | Self::EnumeratingObjects
             | Self::IndexingObjects
             | Self::ResolvingDeltas
             | Self::CopyingObjects => ProgressUnit::Objects,
@@ -196,6 +199,30 @@ pub struct NeverCancel;
 impl Cancel for NeverCancel {
     fn is_cancelled(&self) -> bool {
         false
+    }
+}
+
+/// How often long object walks and pack builds report [`ProgressSink::set`].
+pub(crate) const OBJECT_PROGRESS_STRIDE: u64 = 256;
+
+/// Report monotonic object progress at [`OBJECT_PROGRESS_STRIDE`] boundaries.
+///
+/// `done` is the absolute number of objects processed so far; `last_reported` is
+/// updated to match each emitted `set`.
+pub(crate) fn report_object_progress_stride(
+    sink: &mut dyn ProgressSink,
+    done: u64,
+    last_reported: &mut u64,
+    total: Option<u64>,
+) {
+    let stride = OBJECT_PROGRESS_STRIDE;
+    while done.saturating_sub(*last_reported) >= stride {
+        *last_reported += stride;
+        sink.set(*last_reported);
+    }
+    if total == Some(done) && *last_reported < done {
+        sink.set(done);
+        *last_reported = done;
     }
 }
 

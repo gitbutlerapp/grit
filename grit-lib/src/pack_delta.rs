@@ -114,6 +114,7 @@ pub(crate) fn serialize_pack_with_deltas(
         &mut bytes,
         Some(&mut index_rows),
         &CancelSignal::never(),
+        None,
     )?;
     Ok(crate::pack_objects::SerializedDeltaPack {
         bytes,
@@ -142,6 +143,7 @@ const WRITE_BATCH_ENTRIES: usize = 256;
 /// pack is not thin (`opts.thin` unset) and a delta comes before its base (a base
 /// missing from `entries`, or a delta cycle), [`Error::Io`] when writing to `w`
 /// fails, and [`Error::Cancelled`] once `stop` fires.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn write_pack_with_deltas(
     odb: &Odb,
     entries: &[PlannedEntry],
@@ -150,6 +152,7 @@ pub(crate) fn write_pack_with_deltas(
     w: &mut dyn Write,
     index_rows: Option<&mut Vec<(ObjectId, u64, u32)>>,
     stop: &CancelSignal<'_>,
+    on_objects: Option<&mut dyn FnMut(u64)>,
 ) -> Result<PackStats> {
     write_pack_in_batches(
         odb,
@@ -160,6 +163,7 @@ pub(crate) fn write_pack_with_deltas(
         index_rows,
         WRITE_BATCH_ENTRIES,
         stop,
+        on_objects,
     )
 }
 
@@ -173,6 +177,7 @@ fn write_pack_in_batches(
     mut index_rows: Option<&mut Vec<(ObjectId, u64, u32)>>,
     batch_entries: usize,
     stop: &CancelSignal<'_>,
+    mut on_objects: Option<&mut dyn FnMut(u64)>,
 ) -> Result<PackStats> {
     let par_opts = pack_write_parallel_options(odb, write_threads)?;
     let compression = pack_zlib_compression(odb)?;
@@ -260,6 +265,9 @@ fn write_pack_in_batches(
                     for (entry, prep) in batch.iter().zip(&preps) {
                         emit(entry, prep)?;
                     }
+                    if let Some(on) = on_objects.as_deref_mut() {
+                        on(batch.len() as u64);
+                    }
                 }
                 Ok(())
             },
@@ -268,6 +276,9 @@ fn write_pack_in_batches(
         for batch in batches {
             for (entry, prep) in batch.iter().zip(&prepare(batch)?) {
                 emit(entry, prep)?;
+            }
+            if let Some(on) = on_objects.as_deref_mut() {
+                on(batch.len() as u64);
             }
         }
     }
@@ -484,6 +495,7 @@ mod tests {
             &mut Vec::new(),
             None,
             &CancelSignal::never(),
+            None,
         )
     }
 
@@ -546,6 +558,7 @@ mod tests {
                 &mut out,
                 None,
                 &CancelSignal::new(&cancel),
+                None,
             )
             .unwrap_err();
             assert!(matches!(err, Error::Cancelled), "{err:?}");
@@ -580,6 +593,7 @@ mod tests {
                 &mut out,
                 Some(&mut rows),
                 &CancelSignal::never(),
+                None,
             )
             .unwrap();
             (out, stats, rows)
@@ -635,6 +649,7 @@ mod tests {
                 Some(&mut rows),
                 batch,
                 &CancelSignal::never(),
+                None,
             )
             .unwrap();
             (bytes, rows, stats)

@@ -370,6 +370,7 @@ impl<'a> PackObjects<'a> {
             w,
             None,
             stop,
+            None,
         )
     }
 }
@@ -600,7 +601,7 @@ fn write_pack_with_shallow_and_filter(
         None,
         stop,
     )?;
-    crate::pack_delta::write_pack_with_deltas(odb, &plan.entries, opts, None, w, None, stop)
+    crate::pack_delta::write_pack_with_deltas(odb, &plan.entries, opts, None, w, None, stop, None)
 }
 
 /// Stream a pack for upload-pack: pack reuse when bitmaps allow, otherwise pack-objects.
@@ -1095,11 +1096,15 @@ pub(crate) fn write_pack_from_send_list(
     name_hashes: &HashMap<ObjectId, u32>,
     stop: &CancelSignal<'_>,
     w: &mut dyn Write,
+    mut on_objects: Option<&mut dyn FnMut(u64)>,
 ) -> Result<PackStats> {
     if !opts.delta {
         let bytes = serialize_pack(odb, send, opts)?;
         stop.poll()?;
         w.write_all(&bytes).map_err(Error::Io)?;
+        if let Some(on) = on_objects.as_deref_mut() {
+            on(send.len() as u64);
+        }
         return Ok(PackStats {
             object_count: u32::try_from(send.len()).unwrap_or(u32::MAX),
             pack_bytes: bytes.len() as u64,
@@ -1107,6 +1112,8 @@ pub(crate) fn write_pack_from_send_list(
         });
     }
     odb.with_pack_read_context(|| {
+        read_object_infos_with_progress(odb, send, None, stop, &mut on_objects)?;
+        stop.poll()?;
         let plan = plan_deltas(
             odb,
             send,
@@ -1117,7 +1124,17 @@ pub(crate) fn write_pack_from_send_list(
             None,
             stop,
         )?;
-        crate::pack_delta::write_pack_with_deltas(odb, &plan.entries, opts, None, w, None, stop)
+        stop.poll()?;
+        crate::pack_delta::write_pack_with_deltas(
+            odb,
+            &plan.entries,
+            opts,
+            None,
+            w,
+            None,
+            stop,
+            on_objects,
+        )
     })
 }
 
@@ -1378,10 +1395,38 @@ fn read_object_infos(
     oids: &[ObjectId],
     search_threads: Option<usize>,
 ) -> Result<Vec<ObjectInfo>> {
+    let mut none: Option<&mut dyn FnMut(u64)> = None;
+    read_object_infos_with_progress(odb, oids, search_threads, &CancelSignal::never(), &mut none)
+}
+
+fn read_object_infos_with_progress(
+    odb: &Odb,
+    oids: &[ObjectId],
+    search_threads: Option<usize>,
+    stop: &CancelSignal<'_>,
+    on_objects: &mut Option<&mut dyn FnMut(u64)>,
+) -> Result<Vec<ObjectInfo>> {
     let par = crate::pack_delta::pack_delta_search_parallel_options(odb, search_threads)?;
     let read = |oid: &ObjectId| odb.read_info(oid);
+    let stride = crate::progress::OBJECT_PROGRESS_STRIDE as usize;
     if par.threads.get() <= 1 || oids.len() < 32 {
-        return oids.iter().map(read).collect();
+        let mut out = Vec::with_capacity(oids.len());
+        for (i, oid) in oids.iter().enumerate() {
+            stop.poll()?;
+            out.push(read(oid)?);
+            if (i + 1).is_multiple_of(stride) {
+                if let Some(on) = on_objects.as_deref_mut() {
+                    on(stride as u64);
+                }
+            }
+        }
+        let rem = oids.len() % stride;
+        if rem != 0 {
+            if let Some(on) = on_objects.as_deref_mut() {
+                on(rem as u64);
+            }
+        }
+        return Ok(out);
     }
     try_par_map_force(oids, par, read).map_err(|e| match e {
         ParallelHashError::Task(err) => err,

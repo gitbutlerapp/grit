@@ -80,7 +80,9 @@ const STAGES: [Stage; 4] = [
 impl Stage {
     fn of(phase: ProgressPhase) -> Option<Self> {
         match phase {
-            ProgressPhase::ReceivingObjects | ProgressPhase::CopyingObjects => Some(Self::Transfer),
+            ProgressPhase::ReceivingObjects
+            | ProgressPhase::EnumeratingObjects
+            | ProgressPhase::CopyingObjects => Some(Self::Transfer),
             ProgressPhase::IndexingObjects => Some(Self::Indexing),
             ProgressPhase::ResolvingDeltas => Some(Self::Resolving),
             ProgressPhase::CheckingOutFiles => Some(Self::Checkout),
