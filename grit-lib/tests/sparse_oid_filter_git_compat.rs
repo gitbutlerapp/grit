@@ -166,6 +166,104 @@ fn sparse_oid_non_cone_src_nested_matches_git() {
     );
 }
 
+/// Same subtree OID linked from an excluded path and an included path (sparse depends on prefix).
+fn sparse_same_tree_oid_two_paths_fixture(dir: &Path) -> String {
+    let work = dir.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&["init", "-q"], &work);
+    // Build inner tree and root with two directory entries pointing at it (via git mktree).
+    let mut child = Command::new("git")
+        .args(["hash-object", "-w", "--stdin"])
+        .current_dir(&work)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"shared\n").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    let blob = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let mut inner_tree = Command::new("git")
+        .args(["mktree"])
+        .current_dir(&work)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let inner_line = format!("100644 blob {blob}\tshared\n");
+    inner_tree
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(inner_line.as_bytes())
+        .unwrap();
+    let inner_out = inner_tree.wait_with_output().unwrap();
+    assert!(inner_out.status.success());
+    let inner_tree = String::from_utf8_lossy(&inner_out.stdout)
+        .trim()
+        .to_string();
+    let mut root_tree = Command::new("git")
+        .args(["mktree"])
+        .current_dir(&work)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let root_lines =
+        format!("040000 tree {inner_tree}\ta-excluded\n040000 tree {inner_tree}\tz-included\n");
+    root_tree
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(root_lines.as_bytes())
+        .unwrap();
+    let root_out = root_tree.wait_with_output().unwrap();
+    assert!(root_out.status.success());
+    let root_tree = String::from_utf8_lossy(&root_out.stdout).trim().to_string();
+    let commit = Command::new("git")
+        .args(["commit-tree", &root_tree, "-m", "alias-tree"])
+        .current_dir(&work)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(commit.status.success());
+    let head = String::from_utf8_lossy(&commit.stdout).trim().to_string();
+    git(&["update-ref", "refs/heads/main", &head], &work);
+    git(&["symbolic-ref", "HEAD", "refs/heads/main"], &work);
+    let bare = dir.join("bare.git");
+    git(
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            work.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+        dir,
+    );
+    bare.to_str().unwrap().to_string()
+}
+
+#[test]
+fn sparse_oid_same_tree_oid_excluded_and_included_paths_matches_git() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bare = sparse_same_tree_oid_two_paths_fixture(tmp.path());
+    let bare_path = Path::new(&bare);
+    let patterns = "/*\n!/*/\n/z-included/\n";
+    assert_eq!(
+        grit_blob_paths(bare_path, patterns),
+        git_blob_paths(bare_path, patterns),
+        "shared subtree linked from excluded and included top-level dirs"
+    );
+}
+
 #[test]
 fn sparse_oid_non_cone_d1_and_star_neg_other_matches_git() {
     let tmp = tempfile::tempdir().unwrap();

@@ -8836,8 +8836,8 @@ struct TreeWalkState {
     cancel_poll_counter: u32,
     /// Cached [`ParsedSparsePatterns::includes`] results for this walk.
     sparse_match_cache: HashMap<String, bool>,
-    /// Trees whose blob children were fully classified under a sparse filter.
-    sparse_complete_trees: HashSet<ObjectId>,
+    /// Trees whose blob children were fully classified under a sparse filter at a given path.
+    sparse_complete_trees: HashSet<(ObjectId, String)>,
 }
 
 impl TreeWalkState {
@@ -9486,7 +9486,11 @@ fn collect_tree_objects_filtered(
             }
         }
     }
-    if sparse_patterns.is_some() && tree_state.sparse_complete_trees.contains(&tree_oid) {
+    if sparse_patterns.is_some()
+        && tree_state
+            .sparse_complete_trees
+            .contains(&(tree_oid, prefix.to_owned()))
+    {
         if !packed_set.is_some_and(|p| p.contains(&tree_oid)) && emitted.insert(tree_oid) {
             let out_path = if omit_object_paths {
                 String::new()
@@ -9789,7 +9793,9 @@ fn collect_tree_objects_filtered(
     }
 
     if sparse_patterns.is_some() {
-        tree_state.sparse_complete_trees.insert(tree_oid);
+        tree_state
+            .sparse_complete_trees
+            .insert((tree_oid, prefix.to_owned()));
     }
     tree_state.tree_blobs.remove(&tree_oid);
 
