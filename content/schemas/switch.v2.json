@@ -62,6 +62,13 @@
       },
       "type": "array"
     },
+    "path_collisions": {
+      "description": "Index paths that collided during checkout on a case-insensitive filesystem.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "stranded_commits": {
       "description": "Newest-first commits only the previous detached `HEAD` reached (capped at 20).",
       "items": {

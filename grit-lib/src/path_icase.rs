@@ -683,7 +683,7 @@ impl IcaseCheckoutCollisionMap {
 
     /// Collision paths must hash worktree content before reporting modified (size alone lies).
     pub(crate) fn diff_requires_worktree_hash(&self, raw_path: &[u8]) -> bool {
-        self.groups.path_to_group.contains_key(raw_path) && !self.is_auto_stage_loser(raw_path)
+        self.groups.path_to_group.contains_key(raw_path)
     }
 
     /// Skip auto-stage refresh for collision aliases; the dentry winner is never a loser.
@@ -704,6 +704,75 @@ impl IcaseCheckoutCollisionMap {
     pub(crate) fn collision_groups(&self) -> &IcaseIndexCollisionGroups {
         &self.groups
     }
+}
+
+/// Clear cached stat on collision index rows whose blob does not match the shared dentry.
+///
+/// After checkout only one spelling exists on disk; entries for sibling paths can inherit
+/// matching stat data while still recording a different oid. Size zero forces the next
+/// status/diff pass to hash worktree content instead of trusting stat alone.
+pub(crate) fn smudge_ignorecase_collision_stat_mismatches(
+    odb: &crate::odb::Odb,
+    work_tree: &Path,
+    index: &mut Index,
+    config: &crate::config::ConfigSet,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
+) -> bool {
+    let ignorecase = config
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    if !ignorecase {
+        return false;
+    }
+    let map = IcaseCheckoutCollisionMap::from_index(work_tree, index, true);
+    if map.collision_groups().members_by_group.is_empty() {
+        return false;
+    }
+    let conv = crate::crlf::ConversionConfig::from_config(config);
+    let attrs = crate::crlf::load_gitattributes(work_tree);
+    let mut changed = false;
+    for members in &map.collision_groups().members_by_group {
+        for member in members {
+            let Some(pos) = index.find_entry_pos(member.as_bytes(), 0) else {
+                continue;
+            };
+            let ie = &index.entries[pos];
+            if ie.stage() != 0 || ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add()
+            {
+                continue;
+            }
+            if ie.mode != crate::index::MODE_REGULAR && ie.mode != crate::index::MODE_EXECUTABLE {
+                continue;
+            }
+            let abs = worktree_path_for_index_entry(work_tree, member, true);
+            let Ok(meta) = std::fs::symlink_metadata(&abs) else {
+                continue;
+            };
+            if meta.is_dir() {
+                continue;
+            }
+            let file_attrs = crate::crlf::get_file_attrs(&attrs, member, false, config);
+            let content_matches = crate::diff::hash_worktree_file(
+                odb,
+                &abs,
+                &meta,
+                &conv,
+                &file_attrs,
+                member,
+                Some(ie),
+                filter_process,
+            )
+            .map(|oid| oid == ie.oid)
+            .unwrap_or(false);
+            if content_matches {
+                continue;
+            }
+            index.entries[pos].size = 0;
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn stage0_blob_paths(index: &Index) -> Vec<&str> {

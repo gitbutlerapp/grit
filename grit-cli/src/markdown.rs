@@ -1570,6 +1570,15 @@ pub fn print_switch_outcome(w: &mut dyn Write, outcome: &SwitchOutcome) -> anyho
     if !outcome.hooks_run.is_empty() {
         outln!(w, "- Hooks: `{}`", outcome.hooks_run.join("`, `"));
     }
+    if !outcome.path_collisions.is_empty() {
+        outln!(
+            w,
+            "- **Path collisions** (case-insensitive paths share one file):"
+        );
+        for path in &outcome.path_collisions {
+            outln!(w, "  - `{path}`");
+        }
+    }
     print_switch_stranded(w, outcome)
 }
 

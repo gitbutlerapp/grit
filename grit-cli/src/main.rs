@@ -3793,11 +3793,11 @@ fn dispatch(
             create,
             detach,
             dry_run,
-        } => emit_success(
-            &commands::switch::run(branch, start_point, create, detach, dry_run)?,
-            opts,
-            ctx,
-        ),
+        } => {
+            let outcome = commands::switch::run(branch, start_point, create, detach, dry_run)?;
+            commands::clone::emit_path_collision_warning(opts.mode, &outcome.path_collisions);
+            emit_success(&outcome, opts, ctx)
+        }
         Command::Reset {
             rev,
             soft,

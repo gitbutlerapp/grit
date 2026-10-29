@@ -11,6 +11,7 @@ use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::pathspec::ResolvedPathspecs;
@@ -305,7 +306,13 @@ fn collision_loser_path_commit_leaves_index_and_head_unchanged() {
         &NeverCancel,
     )
     .expect_err("path commit must not delete collision loser");
-    assert!(matches!(err, Error::NothingToCommit), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            Error::NothingToCommit | Error::NothingStagedToCommit { .. }
+        ),
+        "{err:?}"
+    );
 
     assert_eq!(head_oid(&fx.repo), head_before);
     let after = fx.repo.index_handle().load().expect("index after");
@@ -333,7 +340,10 @@ fn collision_loser_auto_stage_commit_is_noop() {
         &NeverCancel,
     )
     .expect_err("auto-stage must not commit phantom loser changes");
-    assert!(matches!(err, Error::NothingToCommit), "{err:?}");
+    assert!(
+        matches!(err, Error::NothingStagedToCommit { .. }),
+        "collision drift must not read as a clean worktree: {err:?}"
+    );
 
     assert_eq!(head_oid(&fx.repo), head_before);
     let after = fx.repo.index_handle().load().expect("index after");
@@ -436,8 +446,8 @@ fn directory_collision_winner_omitted_from_status_when_bytes_match_sibling() {
     )
     .expect("status");
     assert!(
-        !model.unstaged.iter().any(|e| e.path() == "Docs/guide.md"),
-        "shared worktree bytes matching a sibling must not show as modified: {:?}",
+        model.unstaged.iter().any(|e| e.path() == "Docs/guide.md"),
+        "index row whose oid differs from on-disk bytes must be unstaged: {:?}",
         model.unstaged.iter().map(|e| e.path()).collect::<Vec<_>>()
     );
 }
@@ -465,6 +475,8 @@ fn directory_collision_edited_winner_updates_only_dentry_spelling() {
 fn collision_loser_omitted_from_status_unstaged() {
     let fx = init_collision_repo();
     collision_clone_worktree(&fx);
+    let _ = fs::remove_file(fx.dest.join("file.txt"));
+    let _ = fs::remove_file(fx.dest.join("dir/A.txt"));
 
     let model = status(
         &fx.repo,
@@ -475,7 +487,109 @@ fn collision_loser_omitted_from_status_unstaged() {
     .expect("status");
     assert!(
         !model.unstaged.iter().any(|e| e.path() == "File.txt"),
-        "collision loser must not appear as unstaged: {:?}",
+        "missing collision loser must not appear as unstaged or deleted: {:?}",
+        model.unstaged.iter().map(|e| e.path()).collect::<Vec<_>>()
+    );
+}
+
+fn build_flat_name_collision_tree(repo: &Repository, dest: &Path) -> grit_lib::objects::ObjectId {
+    let oid_one = repo.odb().write(ObjectKind::Blob, b"one\n").expect("one");
+    let oid_two = repo
+        .odb()
+        .write(ObjectKind::Blob, b"twotwotwo\n")
+        .expect("two");
+    fs::write(dest.join("a.txt"), b"twotwotwo\n").expect("on-disk bytes match a.txt");
+    let mut index = Index::new();
+    index.add_or_replace(
+        entry_from_stat(&dest.join("a.txt"), b"A.txt", oid_one, MODE_REGULAR).expect("A"),
+    );
+    index.add_or_replace(
+        entry_from_stat(&dest.join("a.txt"), b"a.txt", oid_two, MODE_REGULAR).expect("a"),
+    );
+    index.sort();
+    let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
+        .expect("tree");
+    repo.index_handle().write(&mut index).expect("write index");
+    tree
+}
+
+#[test]
+fn switch_reports_collisions_and_status_lists_mismatched_index_row() {
+    let fx = init_collision_repo();
+    let empty = CommitRequest {
+        message: "empty".into(),
+        allow_empty: true,
+        ..commit_request("empty")
+    };
+    commit_with_scope(
+        &fx.repo,
+        &empty,
+        CommitScope::Staged,
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("empty main");
+    let main_tip = head_oid(&fx.repo);
+
+    build_flat_name_collision_tree(&fx.repo, &fx.dest);
+    commit_with_scope(
+        &fx.repo,
+        &commit_request("collide"),
+        CommitScope::Staged,
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("collide commit");
+    let collide_tip = head_oid(&fx.repo);
+    grit_lib::refs::write_ref(fx.repo.git_dir(), "refs/heads/collide", &collide_tip)
+        .expect("collide ref");
+    grit_lib::refs::write_ref(fx.repo.git_dir(), "refs/heads/master", &main_tip).expect("main");
+    grit_lib::refs::write_symbolic_ref(fx.repo.git_dir(), "HEAD", "refs/heads/master")
+        .expect("head main");
+    let _ = fs::remove_file(fx.dest.join("A.txt"));
+    let _ = fs::remove_file(fx.dest.join("a.txt"));
+    fx.repo
+        .index_handle()
+        .write(&mut Index::new())
+        .expect("empty index");
+
+    let outcome = switch_repository(
+        &fx.repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "collide".into(),
+                oid: collide_tip,
+            },
+            dry_run: false,
+            hooks: Default::default(),
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("switch");
+    assert!(
+        outcome
+            .path_collisions
+            .iter()
+            .any(|p| p == "A.txt" || p == "a.txt"),
+        "expected collision paths, got {:?}",
+        outcome.path_collisions
+    );
+    let _ = fs::remove_file(fx.dest.join("A.txt"));
+    if !fx.dest.join("a.txt").exists() {
+        fs::write(fx.dest.join("a.txt"), b"twotwotwo\n").expect("a.txt");
+    }
+
+    let model = status(
+        &fx.repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("status");
+    assert!(
+        model.unstaged.iter().any(|e| e.path() == "A.txt"),
+        "mismatched collision member must be unstaged: {:?}",
         model.unstaged.iter().map(|e| e.path()).collect::<Vec<_>>()
     );
 }

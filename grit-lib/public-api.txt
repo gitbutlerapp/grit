@@ -16727,6 +16727,7 @@ pub grit_lib::porcelain::switch::SwitchOutcome::hooks_run: alloc::vec::Vec<grit_
 pub grit_lib::porcelain::switch::SwitchOutcome::stranded_commits: alloc::vec::Vec<grit_lib::porcelain::reset::OrphanedCommitSummary>
 pub grit_lib::porcelain::switch::SwitchOutcome::stranded_total: usize
 pub grit_lib::porcelain::switch::SwitchOutcome::stranded_truncated: bool
+pub grit_lib::porcelain::switch::SwitchOutcome::path_collisions: alloc::vec::Vec<alloc::string::String>
 impl grit_lib::porcelain::switch::SwitchOutcome
 pub fn grit_lib::porcelain::switch::SwitchOutcome::is_detached(&self) -> bool
 impl core::clone::Clone for grit_lib::porcelain::switch::SwitchOutcome

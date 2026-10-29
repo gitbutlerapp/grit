@@ -995,6 +995,15 @@ fn checkout_hard_to_tree_journaled(
     index.sort();
     index.sparse_directories = index.has_sparse_directory_placeholders();
     hard_reset_finish_cache_tree(repo, &mut index, target_tree);
+    if let Ok(config) = repo.config() {
+        let _ = crate::path_icase::smudge_ignorecase_collision_stat_mismatches(
+            repo.odb(),
+            work_tree,
+            &mut index,
+            config.as_ref(),
+            None,
+        );
+    }
     let mtime_hint = Some(crate::index::stage0_mtime_max(&index.entries));
     crate::progress::poll_cancel(progress, cancel)?;
     if trees_differ && !written_by_tree_diff.is_empty() {
@@ -2128,6 +2137,15 @@ fn checkout_commit_index_update(
         attach_checkout_result_cache_tree(repo, index_mut, &tree)?;
     }
     index_mut.defer_untracked_cache_invalidation = false;
+    if let (Some(work_tree), Ok(config)) = (repo.work_tree(), repo.config()) {
+        let _ = crate::path_icase::smudge_ignorecase_collision_stat_mismatches(
+            repo.odb(),
+            work_tree,
+            index_mut,
+            config.as_ref(),
+            None,
+        );
+    }
     match index_write {
         CheckoutIndexWrite::Commit(lock) => write_checkout_index(
             repo,

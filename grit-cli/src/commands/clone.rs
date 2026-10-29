@@ -513,7 +513,7 @@ fn emit_submodule_note(mode: OutputMode, paths: &[String]) {
     }
 }
 
-fn emit_path_collision_warning(mode: OutputMode, paths: &[String]) {
+pub(crate) fn emit_path_collision_warning(mode: OutputMode, paths: &[String]) {
     if paths.is_empty() {
         return;
     }
