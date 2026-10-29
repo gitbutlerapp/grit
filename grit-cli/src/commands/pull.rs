@@ -14,6 +14,7 @@ use crate::output::OutputMode;
 use crate::progress::summary::transfer_header;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
+use grit_lib::error::Error as LibError;
 use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch_request::resolve_pull_invocation;
@@ -77,8 +78,14 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
         None => {}
     }
     let mut options =
-        PullOptions::for_working_branch(&repo, context::environment(), cli_mode(args))
-            .map_err(anyhow::Error::new)?;
+        PullOptions::for_working_branch(&repo, context::environment(), cli_mode(args)).map_err(
+            |err| match err {
+                PullError::Repository(LibError::OperationInProgress(kind)) => {
+                    crate::json_error::operation_in_progress_for_repo(&repo, "pull", kind)
+                }
+                other => anyhow::Error::new(other),
+            },
+        )?;
     let head = resolve_head_for_repository(&repo)?;
     let invocation = resolve_pull_invocation(
         &config,
@@ -143,6 +150,11 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
                     } else {
                         anyhow::Error::new(hook)
                     }
+                }
+                PullError::Repository(LibError::OperationInProgress(kind)) => {
+                    return Err(crate::json_error::operation_in_progress_for_repo(
+                        &repo, "pull", kind,
+                    ));
                 }
                 rest => anyhow::Error::new(rest),
             });

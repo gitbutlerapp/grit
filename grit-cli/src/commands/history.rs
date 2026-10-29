@@ -1314,7 +1314,7 @@ fn run_rebase_with_exec(
                 &completed_runs,
             ));
         }
-        Err(other) => return Err(map_rebase_session_error(other)),
+        Err(other) => return Err(map_rebase_session_error(repo, other)),
     };
     Ok(RebaseRunOutcome::Rebase(outcome))
 }
@@ -1333,7 +1333,7 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
             RebaseSessionError::ForeignRebaseInProgress => anyhow::anyhow!(
                 "this rebase was started by git and cannot be restored by grit; cancel it with `git rebase --abort`"
             ),
-            other => map_rebase_session_error(other),
+            other => map_rebase_session_error(&repo, other),
         })?;
         let mut outcome = RebaseCliOutcome::aborted();
         outcome.refs = abort
@@ -1411,7 +1411,7 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
                     &completed_runs,
                 ));
             }
-            Err(other) => return Err(map_rebase_session_error(other)),
+            Err(other) => return Err(map_rebase_session_error(&rewrite.repo, other)),
         };
         return Ok(RebaseRunOutcome::Rebase(rendered));
     }
@@ -1486,7 +1486,7 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     )
-    .map_err(map_rebase_session_error)?;
+    .map_err(|err| map_rebase_session_error(&rewrite.repo, err))?;
     Ok(RebaseRunOutcome::Rebase(map_rebase_outcome(outcome)?))
 }
 
@@ -1532,11 +1532,15 @@ fn map_rebase_outcome(outcome: RebaseOutcome) -> Result<RebaseCliOutcome> {
     }
 }
 
-fn map_rebase_session_error(err: RebaseSessionError) -> anyhow::Error {
+fn map_rebase_session_error(repo: &Repository, err: RebaseSessionError) -> anyhow::Error {
     match err {
         RebaseSessionError::NoRebaseInProgress => anyhow::anyhow!("no rebase in progress"),
         RebaseSessionError::RebaseAlreadyInProgress => {
-            anyhow::anyhow!("rebase is already in progress")
+            let kind = grit_lib::state::operation_blocking_switch(repo.git_dir())
+                .ok()
+                .flatten()
+                .unwrap_or(grit_lib::state::InProgressOperation::Rebase);
+            json_error::operation_in_progress_for_repo(repo, "rebase", kind)
         }
         RebaseSessionError::ForeignRebaseInProgress => anyhow::anyhow!(
             "this rebase was started by git; finish it with `git rebase --continue` or `git rebase --skip`, or cancel it with `grit rebase --abort`"

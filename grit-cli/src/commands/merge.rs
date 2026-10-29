@@ -515,6 +515,14 @@ pub fn run(
 
     let branch = branch.context("branch name required unless using --abort or --continue")?;
 
+    if let Some(op) = grit_lib::state::operation_blocking_switch(repo.git_dir())? {
+        if !matches!(op, grit_lib::state::InProgressOperation::Merge) {
+            return Err(crate::json_error::operation_in_progress_for_repo(
+                &repo, "merge", op,
+            ));
+        }
+    }
+
     let (refname, head_short, head_oid) = match resolve_head(repo.git_dir())? {
         HeadState::Branch {
             refname,

@@ -227,7 +227,7 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
     let repo = context::discover()?;
     if opts.abort {
         use grit_lib::porcelain::replay_sequence::ReplayAbortOutcome;
-        match abort_replay_sequence(&repo).map_err(map_replay_error)? {
+        match abort_replay_sequence(&repo).map_err(|e| map_replay_error(&repo, e))? {
             ReplayAbortOutcome::Rewound => {}
             ReplayAbortOutcome::ClearedInPlace => {
                 eprintln!(
@@ -243,11 +243,13 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
     let committer = context::signature(&repo, IdentRole::Committer, now)?;
 
     if opts.continue_revert {
-        let outcome = continue_replay_sequence(&repo, &committer).map_err(map_replay_error)?;
+        let outcome =
+            continue_replay_sequence(&repo, &committer).map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_sequence_outcome(outcome));
     }
     if opts.skip {
-        let outcome = skip_replay_step(&repo, &committer).map_err(map_replay_error)?;
+        let outcome =
+            skip_replay_step(&repo, &committer).map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_sequence_outcome(outcome));
     }
 
@@ -281,10 +283,11 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
         },
     };
     if opts.check {
-        let prediction = predict_replay_sequence(&repo, &req).map_err(map_replay_error)?;
+        let prediction =
+            predict_replay_sequence(&repo, &req).map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_prediction_outcome(prediction));
     }
-    let outcome = start_replay_sequence(&repo, &req).map_err(map_replay_error)?;
+    let outcome = start_replay_sequence(&repo, &req).map_err(|e| map_replay_error(&repo, e))?;
     Ok(map_sequence_outcome(outcome))
 }
 
@@ -355,8 +358,11 @@ fn map_sequence_outcome(outcome: SequenceOutcome) -> RevertOutcome {
     }
 }
 
-fn map_replay_error(err: Error) -> anyhow::Error {
+fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Error {
     match err {
+        Error::OperationInProgress(kind) => {
+            crate::json_error::operation_in_progress_for_repo(repo, "revert", kind)
+        }
         Error::DetachedHead => anyhow::anyhow!("HEAD is detached; grit revert needs a branch"),
         Error::UnbornHead => anyhow::anyhow!("no commits yet on this branch to revert onto"),
         Error::MergeCommit { oid } => {

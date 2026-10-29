@@ -423,3 +423,55 @@ fn rebase_skip_with_remaining_replay_reports_head_change() -> TestResult {
     }
     Ok(())
 }
+
+fn assert_rebase_in_progress_message(stderr: &str, from_pick: bool) {
+    assert!(stderr.contains("rebase is in progress"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("grit rebase --continue"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("grit rebase --abort"), "stderr: {stderr}");
+    if from_pick {
+        assert!(
+            !stderr.contains("grit commit"),
+            "pick must not suggest commit: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn mid_rebase_refused_commands_name_rebase() -> TestResult {
+    let scratch = Scratch::new("issue-2295")?;
+    let dir = scratch.path();
+    gs(dir, ["init"])?;
+    fs::write(dir.join("f"), "1\n2\n3\n")?;
+    gs(dir, ["commit", "-m", "base"])?;
+    gs(dir, ["switch", "-c", "o"])?;
+    fs::write(dir.join("f"), "1\nO\n3\n")?;
+    gs(dir, ["commit", "-m", "o"])?;
+    gs(dir, ["switch", "main"])?;
+    fs::write(dir.join("f"), "1\nM\n3\n")?;
+    gs(dir, ["commit", "-m", "m"])?;
+    gs(dir, ["switch", "o"])?;
+    let rebase = gs(dir, ["rebase", "main"])?;
+    assert_ne!(
+        rebase.status,
+        Some(0),
+        "{}\n{}",
+        rebase.stdout,
+        rebase.stderr
+    );
+
+    for (args, from_pick) in [
+        (vec!["pull"], false),
+        (vec!["merge", "main"], false),
+        (vec!["rebase", "main"], false),
+        (vec!["pick", "main"], true),
+        (vec!["branch", "-m", "x"], false),
+    ] {
+        let out = gs(dir, args)?;
+        assert_ne!(out.status, Some(0), "{}\n{}", out.stdout, out.stderr);
+        assert_rebase_in_progress_message(&out.stderr, from_pick);
+    }
+    Ok(())
+}

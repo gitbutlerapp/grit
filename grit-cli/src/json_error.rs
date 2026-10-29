@@ -12,7 +12,8 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::RemoteError;
-use grit_lib::state::{InProgressOperation, NextStep, Operation};
+use grit_lib::repo::Repository;
+use grit_lib::state::{wt_status_get_state, HeadState, InProgressOperation, NextStep, Operation};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -272,6 +273,18 @@ pub fn would_overwrite_error(
 /// Build a structured CLI error for a command refused while `kind` is paused.
 ///
 /// `operation` supplies the finish / cancel commands named in the message, when grit knows them.
+/// Like [`operation_in_progress`], loading finish/cancel commands from the repository state.
+pub fn operation_in_progress_for_repo(
+    repo: &Repository,
+    action: &str,
+    kind: InProgressOperation,
+) -> Error {
+    let operation = wt_status_get_state(repo.git_dir(), &HeadState::Invalid, false)
+        .ok()
+        .and_then(|state| grit_lib::state::status_operation(&state, false));
+    operation_in_progress(action, kind, operation.as_ref())
+}
+
 pub fn operation_in_progress(
     action: &str,
     kind: InProgressOperation,

@@ -215,6 +215,13 @@ $ grit merge nonexist
 error: no branch, tag or commit named 'nonexist'
 ```
 
+While a rebase is paused, starting another merge is refused (same wording as [`grit switch`](../switch/)):
+
+```console
+$ grit merge main
+error: cannot merge while a rebase is in progress; finish it with `grit rebase --continue` or cancel it with `grit rebase --abort`
+```
+
 When `--continue` runs while conflict markers are still in a file:
 
 ```console
