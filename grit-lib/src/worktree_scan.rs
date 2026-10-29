@@ -11,10 +11,12 @@
 //!
 //! When [`WorktreeBlobScanOptions::preload_index`] is true and the tracked blob count is at
 //! least [`PARALLEL_STAT_MIN_ENTRIES`], stat collection preloads disk lookups in parallel by
-//! partitioning sorted parent-directory keys across a small thread pool (`std::thread::scope`).
-//! Visit order stays directory-sorted so diff output matches the serial path; only the metadata
-//! probes are parallelized. A later shared thread pool can replace the scoped helper without
-//! changing callers.
+//! partitioning sorted index entries across a small thread pool (`std::thread::scope`). Cuts
+//! prefer parent-directory boundaries unless one directory holds more entries than a fair
+//! worker share (Git `preload-index` style). On Windows each parent directory stays on one
+//! worker because listing is shared via `read_dir`. Visit order stays directory-sorted so diff
+//! output matches the serial path; only the metadata probes are parallelized. A later shared
+//! thread pool can replace the scoped helper without changing callers.
 
 use std::fs;
 use std::io;
@@ -117,6 +119,9 @@ pub(crate) fn probe_worktree_path_resolution(path: &Path) {
 
 /// Minimum tracked blob entries before parallel stat preload is considered.
 pub const PARALLEL_STAT_MIN_ENTRIES: usize = 1000;
+
+/// Minimum entries per parallel slice so Linux amortizes one `open_stat_directory` handle.
+const PARALLEL_STAT_MIN_SLICE_ENTRIES: usize = 8;
 
 /// Parallelism controls for directory-grouped blob scans (honors `core.preloadIndex`).
 #[derive(Debug, Clone, Copy, Default)]
@@ -1127,6 +1132,167 @@ fn lookup_lone_blob_in_directory(
     symlink_metadata_blob_lookup(&target_abs())
 }
 
+fn dir_range_for_index_pos(plan: &BlobScanPlan, index_pos: usize) -> std::ops::Range<usize> {
+    for range in &plan.dir_ranges {
+        if range.contains(&index_pos) {
+            return range.clone();
+        }
+    }
+    index_pos..index_pos.saturating_add(1)
+}
+
+fn first_dir_index_at_or_after(plan: &BlobScanPlan, index_pos: usize) -> usize {
+    plan.dir_ranges
+        .partition_point(|range| range.end <= index_pos)
+        .min(plan.dirs.len().saturating_sub(1))
+}
+
+/// Move an index cut off a small directory interior onto the nearest directory boundary.
+fn snap_index_parallel_cut(plan: &BlobScanPlan, cut: usize, fair_share: usize) -> usize {
+    if cut == 0 || cut >= plan.len() {
+        return cut;
+    }
+    let dir_range = dir_range_for_index_pos(plan, cut - 1);
+    if cut <= dir_range.start || cut >= dir_range.end {
+        return cut;
+    }
+    let dir_len = dir_range.end - dir_range.start;
+    if dir_len > fair_share {
+        return cut;
+    }
+    if cut - dir_range.start <= dir_range.end - cut {
+        dir_range.start
+    } else {
+        dir_range.end
+    }
+}
+
+#[cfg(windows)]
+fn partition_blob_lookup_slices(
+    plan: &BlobScanPlan,
+    threads: usize,
+) -> Vec<std::ops::Range<usize>> {
+    let num_dirs = plan.dirs.len();
+    if num_dirs == 0 {
+        return Vec::new();
+    }
+    if threads <= 1 {
+        let n = plan.len();
+        return if n == 0 {
+            Vec::new()
+        } else {
+            std::iter::once(0..n).collect()
+        };
+    }
+    let chunk_size = num_dirs.div_ceil(threads);
+    let num_chunks = num_dirs.div_ceil(chunk_size);
+    (0..num_chunks)
+        .map(|chunk_idx| {
+            let chunk_start = chunk_idx * chunk_size;
+            let chunk_end = (chunk_start + chunk_size).min(num_dirs);
+            let start = plan.dir_ranges[chunk_start].start;
+            let end = plan.dir_ranges[chunk_end - 1].end;
+            start..end
+        })
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn partition_blob_lookup_slices(
+    plan: &BlobScanPlan,
+    threads: usize,
+) -> Vec<std::ops::Range<usize>> {
+    let n = plan.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    if threads <= 1 {
+        return if n == 0 {
+            Vec::new()
+        } else {
+            std::iter::once(0..n).collect()
+        };
+    }
+    let fair_share = n.div_ceil(threads);
+    let mut cuts = vec![0usize];
+    for worker in 1..threads {
+        let mut cut = worker * n / threads;
+        cut = snap_index_parallel_cut(plan, cut, fair_share);
+        let prev = cuts[cuts.len() - 1];
+        let min_step = PARALLEL_STAT_MIN_SLICE_ENTRIES.min(n.saturating_sub(prev));
+        if min_step == 0 {
+            break;
+        }
+        cut = cut.max(prev + min_step).min(n);
+        if cut <= prev {
+            break;
+        }
+        cuts.push(cut);
+    }
+    if cuts.last().copied() != Some(n) {
+        cuts.push(n);
+    }
+    cuts.windows(2)
+        .map(|pair| pair[0]..pair[1])
+        .filter(|range| !range.is_empty())
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_blob_lookups_for_index_slice<S, P>(
+    index: &Index,
+    plan: &BlobScanPlan,
+    slice: std::ops::Range<usize>,
+    symlink_probe: &S,
+    dir_abs: &DirAbsFn,
+    file_abs: &DirAbsFn,
+    literal_paths: bool,
+    sparse: BlobScanSparseMode,
+    local: &mut Vec<(usize, BlobDiskLookup)>,
+    scanned: &mut usize,
+) -> Result<()>
+where
+    S: Fn() -> P,
+    P: FnMut(&[u8]) -> bool,
+{
+    if slice.is_empty() {
+        return Ok(());
+    }
+    let mut has_symlink_ancestor = symlink_probe();
+    let mut dir_idx = first_dir_index_at_or_after(plan, slice.start);
+    while dir_idx < plan.dirs.len() {
+        let Some(dir_range) = plan.dir_ranges.get(dir_idx) else {
+            dir_idx += 1;
+            continue;
+        };
+        if dir_range.start >= slice.end {
+            break;
+        }
+        let overlap_start = dir_range.start.max(slice.start);
+        let overlap_end = dir_range.end.min(slice.end);
+        if overlap_start < overlap_end {
+            let dir = &plan.dirs[dir_idx];
+            let entry_indices = &plan.indices[overlap_start..overlap_end];
+            let under_symlink =
+                dir_has_symlink_ancestor(index, entry_indices, &mut has_symlink_ancestor);
+            collect_blob_lookups_in_directory(
+                index,
+                dir,
+                entry_indices,
+                dir_abs,
+                file_abs,
+                literal_paths,
+                under_symlink,
+                local,
+                sparse,
+                scanned,
+            )?;
+        }
+        dir_idx += 1;
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn preload_blob_lookups_parallel<S, P>(
     index: &Index,
@@ -1146,45 +1312,29 @@ where
     if plan.dirs.is_empty() {
         return Ok(Vec::new());
     }
-    let chunk_size = plan.dirs.len().div_ceil(threads);
-    let num_chunks = plan.dirs.len().div_ceil(chunk_size);
-    let mut batches = Vec::with_capacity(num_chunks);
+    let slices = partition_blob_lookup_slices(plan, threads);
+    let mut batches = Vec::with_capacity(slices.len());
     std::thread::scope(|scope| {
         let mut handles = Vec::new();
-        for chunk_idx in 0..num_chunks {
-            let chunk_start = chunk_idx * chunk_size;
-            let chunk_end = (chunk_start + chunk_size).min(plan.dirs.len());
+        for slice in slices {
             let dir_abs = Arc::clone(&dir_abs);
             let file_abs = Arc::clone(&file_abs);
             handles.push(
                 scope.spawn(move || -> Result<(Vec<(usize, BlobDiskLookup)>, usize)> {
                     let mut local = Vec::new();
                     let mut scanned = 0usize;
-                    let mut has_symlink_ancestor = symlink_probe();
-                    for dir_idx in chunk_start..chunk_end {
-                        let dir = &plan.dirs[dir_idx];
-                        let Some(range) = plan.dir_ranges.get(dir_idx) else {
-                            continue;
-                        };
-                        let entry_indices = &plan.indices[range.clone()];
-                        let under_symlink = dir_has_symlink_ancestor(
-                            index,
-                            entry_indices,
-                            &mut has_symlink_ancestor,
-                        );
-                        collect_blob_lookups_in_directory(
-                            index,
-                            dir,
-                            entry_indices,
-                            dir_abs.as_ref(),
-                            file_abs.as_ref(),
-                            literal_paths,
-                            under_symlink,
-                            &mut local,
-                            sparse,
-                            &mut scanned,
-                        )?;
-                    }
+                    collect_blob_lookups_for_index_slice(
+                        index,
+                        plan,
+                        slice,
+                        symlink_probe,
+                        dir_abs.as_ref(),
+                        file_abs.as_ref(),
+                        literal_paths,
+                        sparse,
+                        &mut local,
+                        &mut scanned,
+                    )?;
                     Ok((local, scanned))
                 }),
             );
@@ -1324,8 +1474,6 @@ where
     let dir_abs_arc: Arc<DirAbsFn> = Arc::new(dir_abs);
     let file_abs_arc: Arc<DirAbsFn> = Arc::new(file_abs);
     let batches = if threads > 1 {
-        // Partition by directory groups so each parent is listed (Windows) or its symlinked
-        // ancestors are checked once per worker, never split across workers.
         preload_blob_lookups_parallel(
             index,
             plan,
@@ -1988,6 +2136,103 @@ mod tests {
         assert!(
             worktree_metadata_probe_count() <= tracked + DIRS + 8,
             "metadata probes {} exceeded budget for grouped scan",
+            worktree_metadata_probe_count()
+        );
+    }
+
+    #[test]
+    fn fat_single_directory_splits_parallel_stat_batches() {
+        let tmp = TempDir::new().unwrap();
+        let wt = tmp.path().to_path_buf();
+        fs::create_dir_all(wt.join(".git/objects")).unwrap();
+        const FILES: usize = PARALLEL_STAT_MIN_ENTRIES + 500;
+        let mut index = Index::new();
+        for i in 0..FILES {
+            let rel = format!("data/file_{i:07}.txt");
+            let oid = write_blob_file(&wt, &rel, format!("content {i}\n").as_bytes());
+            index.add_or_replace(
+                entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, 0o100644).unwrap(),
+            );
+        }
+        let plan = group_blob_entries_by_dir(&index, false);
+        assert_eq!(plan.dirs.len(), 1);
+        let wt_dir = wt.clone();
+        let dir_abs = move |dir: &[u8]| {
+            if dir.is_empty() {
+                wt_dir.clone()
+            } else {
+                crate::index::worktree_path_from_index_rel(&wt_dir, dir)
+            }
+        };
+        let wt_file = wt.clone();
+        let file_abs = move |rel: &[u8]| crate::index::worktree_path_from_index_rel(&wt_file, rel);
+        let policy = crate::parallel::ThreadPolicy::default();
+        let config = crate::config::ConfigSet::new();
+        let batches = collect_blob_lookup_batches(
+            &index,
+            &plan,
+            WorktreeBlobScanOptions {
+                preload_index: true,
+                stat_parallel_threads: Some(4),
+            },
+            &policy,
+            &config,
+            dir_abs,
+            file_abs,
+            no_symlink_probe,
+            BlobScanSparseMode::Dense,
+        )
+        .unwrap();
+        assert!(
+            batches.len() > 1,
+            "one huge directory should split across workers, got {} batches",
+            batches.len()
+        );
+        let mut seen = std::collections::BTreeSet::new();
+        for batch in &batches {
+            for (entry_index, lookup) in batch {
+                assert!(matches!(lookup, BlobDiskLookup::Present(_)));
+                assert!(seen.insert(*entry_index));
+            }
+        }
+        assert_eq!(seen.len(), FILES);
+        let _probe = reset_worktree_metadata_probe(&wt);
+        let mut rescanned = 0usize;
+        for_each_blob_by_directory_parallel(
+            &index,
+            &plan,
+            WorktreeBlobScanOptions {
+                preload_index: true,
+                stat_parallel_threads: Some(4),
+            },
+            &policy,
+            &config,
+            {
+                let wt_dir = wt.clone();
+                move |dir: &[u8]| {
+                    if dir.is_empty() {
+                        wt_dir.clone()
+                    } else {
+                        crate::index::worktree_path_from_index_rel(&wt_dir, dir)
+                    }
+                }
+            },
+            {
+                let wt_file = wt.clone();
+                move |rel: &[u8]| crate::index::worktree_path_from_index_rel(&wt_file, rel)
+            },
+            no_symlink_probe,
+            |_, lookup| {
+                assert!(matches!(lookup, BlobDiskLookup::Present(_)));
+                rescanned += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(rescanned, FILES);
+        assert!(
+            worktree_metadata_probe_count() <= FILES + 4,
+            "parallel fat-dir scan should stat about once per file, got {}",
             worktree_metadata_probe_count()
         );
     }
