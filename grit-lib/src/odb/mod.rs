@@ -1674,7 +1674,9 @@ impl Odb {
     ///
     /// Propagates pack directory listing and index parse failures.
     pub(crate) fn local_pack_indexes(&self) -> Result<Vec<Arc<pack::PackIndex>>> {
-        pack::read_local_pack_indexes_cached(&self.objects_dir)
+        // Outside this database's pack-read context the listing would come from a fresh
+        // store, which maps every index a second time beside the copies object reads use.
+        self.with_primary_read_context(|| pack::read_local_pack_indexes_cached(&self.objects_dir))
     }
 
     /// Whether `oid` is stored in a non-promisor pack under any alternate object directory.
