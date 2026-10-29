@@ -1708,6 +1708,10 @@ impl RefStore for FilesRefStore {
                 }));
             }
         }
+
+        #[cfg(windows)]
+        self.reject_win32_unstorable_ref_paths(&txn)?;
+
         let (updates, reflog_renames, case_only_renames) = txn.into_parts();
 
         let mut preliminary = self
