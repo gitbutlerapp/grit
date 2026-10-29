@@ -1802,17 +1802,20 @@ fn print_worktree_table(w: &mut dyn Write, worktrees: &[WorktreeRow]) -> anyhow:
     outln!(w, "| Path | Branch | HEAD | Current | Locked | Prunable |");
     outln!(w, "| --- | --- | --- | --- | --- | --- |");
     for wt in worktrees {
-        let branch = wt
-            .branch
-            .as_deref()
-            .map(|b| format!("`{}`", escape_table_cell(b)))
-            .unwrap_or_else(|| {
-                if wt.detached {
-                    "_(detached)_".into()
-                } else {
-                    "—".into()
-                }
-            });
+        let branch = if wt.bare {
+            "_(bare)_".into()
+        } else {
+            wt.branch
+                .as_deref()
+                .map(|b| format!("`{}`", escape_table_cell(b)))
+                .unwrap_or_else(|| {
+                    if wt.detached {
+                        "_(detached)_".into()
+                    } else {
+                        "—".into()
+                    }
+                })
+        };
         let head = if wt.head.is_empty() {
             "—".to_owned()
         } else {

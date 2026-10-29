@@ -28,7 +28,7 @@ grit worktree prune
 
 ## Description
 
-Git linked worktrees share one object database but have separate working trees and `HEAD`. `grit worktree list` shows the main worktree first, then linked worktrees (same order as `git worktree list`). The current worktree is prefixed with `*` in human output. Detached checkouts are labeled `(detached HEAD)` in human output (same idea as `git worktree list`). Linked rows whose working tree directory is gone are marked `prunable`, matching `git worktree list --porcelain` reason text in JSON.
+Git linked worktrees share one object database but have separate working trees and `HEAD`. `grit worktree list` shows the main worktree first, then linked worktrees (same order as `git worktree list`). The current worktree is prefixed with `*` in human output. Detached checkouts are labeled `(detached HEAD)` in human output (same idea as `git worktree list`). When the repository was opened from a bare clone, the main row is shown as `(bare)` without `*` or a branch name — bare `HEAD` is not a checkout and does not block `grit worktree add` for that branch. Linked rows whose working tree directory is gone are marked `prunable`, matching `git worktree list --porcelain` reason text in JSON.
 
 Paths in human, `--json`, and `--markdown` output use normal absolute paths (no Windows `\\?\` verbatim prefix) with forward slashes, so scripts can pass them to `cd` or `grit worktree remove` unchanged.
 
