@@ -445,65 +445,42 @@ pub fn commit_ref_updates_allowing_failures_on_store(
     store: &dyn RefStore,
     updates: Vec<RefUpdate>,
 ) -> Result<Vec<RefUpdateCommitOutcome>> {
-    use store::backend::is_per_ref_rejectable;
-
     if updates.is_empty() {
         return Ok(Vec::new());
     }
     let order: Vec<String> = updates.iter().map(|u| u.name.clone()).collect();
-    let mut object_rejections: std::collections::HashMap<String, store::RefStoreError> =
-        std::collections::HashMap::new();
-    let mut object_ok = Vec::with_capacity(updates.len());
-    for update in updates {
-        match store.verify_update_targets(std::slice::from_ref(&update)) {
-            Ok(()) => object_ok.push(update),
-            Err(err) if is_per_ref_rejectable(&err) => {
-                object_rejections.insert(update.name.clone(), err);
-            }
-            Err(err) => {
-                let name = update.name.clone();
-                return Err(map_public_ref_store_error(Error::from(err), &name));
-            }
+    for update in &updates {
+        if let Some(ref log) = update.reflog {
+            validate_reflog_update(log)?;
         }
     }
-
-    let mut store_rejections: std::collections::HashMap<String, store::RefStoreError> =
-        std::collections::HashMap::new();
-    if !object_ok.is_empty() {
-        for update in &object_ok {
-            if let Some(ref log) = update.reflog {
-                validate_reflog_update(log)?;
-            }
-        }
-        let label = object_ok
-            .first()
-            .map(|u| u.name.clone())
-            .unwrap_or_else(|| "refs".to_owned());
-        let txn = RefTransaction::from_updates(object_ok).map_err(|e| {
-            let name = match &e {
-                store::RefStoreError::DuplicateUpdate { name } => name.clone(),
-                _ => label.clone(),
-            };
-            map_public_ref_store_error(Error::from(e), &name)
-        })?;
-        let txn = txn.allowing_failures();
-        let prepared = prepare_retrying(store, txn, || default_ref_lock_wait(store))
-            .map_err(|e| map_public_ref_store_error(Error::from(e), &label))?;
-        for (name, err) in prepared.rejected_updates() {
-            store_rejections.insert(name.clone(), err.clone());
-        }
-        prepared
-            .commit()
-            .map_err(|e| map_public_ref_store_error(Error::from(e), &label))?;
-    }
+    let label = updates
+        .first()
+        .map(|u| u.name.clone())
+        .unwrap_or_else(|| "refs".to_owned());
+    let txn = RefTransaction::from_updates(updates).map_err(|e| {
+        let name = match &e {
+            store::RefStoreError::DuplicateUpdate { name } => name.clone(),
+            _ => label.clone(),
+        };
+        map_public_ref_store_error(Error::from(e), &name)
+    })?;
+    let txn = txn.allowing_failures();
+    let prepared = prepare_retrying(store, txn, || default_ref_lock_wait(store))
+        .map_err(|e| map_public_ref_store_error(Error::from(e), &label))?;
+    let rejections: std::collections::HashMap<String, store::RefStoreError> = prepared
+        .rejected_updates()
+        .iter()
+        .map(|(name, err)| (name.clone(), err.clone()))
+        .collect();
+    prepared
+        .commit()
+        .map_err(|e| map_public_ref_store_error(Error::from(e), &label))?;
 
     Ok(order
         .into_iter()
         .map(|name| {
-            let result = object_rejections
-                .remove(&name)
-                .or_else(|| store_rejections.remove(&name))
-                .map_or(Ok(()), Err);
+            let result = rejections.get(&name).cloned().map_or(Ok(()), Err);
             RefUpdateCommitOutcome { name, result }
         })
         .collect())

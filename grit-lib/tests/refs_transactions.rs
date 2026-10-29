@@ -690,3 +690,44 @@ fn non_atomic_allow_failure_updates_siblings_in_one_table() {
         assert_fsck_when_git_interop(&repo);
     });
 }
+
+#[test]
+fn non_atomic_delete_then_create_two_reftable_tables() {
+    use grit_lib::refs::commit_ref_updates_non_atomic;
+    use grit_lib::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
+
+    each_backend(|backend, repo| {
+        if backend != Backend::Reftable {
+            return;
+        }
+        let git_dir = repo.git_dir();
+        let (_, tip) = two_commit_oids(&repo);
+        grit_lib::refs::write_ref(&git_dir, "refs/heads/to-drop", &tip).expect("seed delete");
+        let updates = vec![
+            RefUpdate {
+                name: "refs/heads/to-drop".to_owned(),
+                new_value: None,
+                expected: Expected::Any,
+                reflog: None,
+                flags: RefUpdateFlags::default(),
+            },
+            RefUpdate {
+                name: "refs/heads/fresh".to_owned(),
+                new_value: Some(RawRef::Direct(tip)),
+                expected: Expected::Any,
+                reflog: None,
+                flags: RefUpdateFlags::default(),
+            },
+        ];
+        let (_, count_before) = reftable_tables_snapshot(&git_dir);
+        commit_ref_updates_non_atomic(&git_dir, updates).expect("delete then create");
+        assert!(resolve_ref(&git_dir, "refs/heads/to-drop").is_err());
+        assert_eq!(resolve_ref(&git_dir, "refs/heads/fresh").ok(), Some(tip));
+        let (_, count_after) = reftable_tables_snapshot(&git_dir);
+        assert_eq!(
+            count_after,
+            count_before + 2,
+            "delete phase and create phase must each add one reftable table"
+        );
+    });
+}
