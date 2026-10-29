@@ -91,14 +91,10 @@ pub struct CommitSummary {
     /// Author display name: the identity name when present, otherwise the email
     /// local-part (e.g. `schacon` from `schacon@gmail.com`).
     pub author: String,
-    /// Raw `author` line from the commit object (`Name <email> <epoch> <tz>`).
-    pub author_ident: String,
     /// Author date as a Unix timestamp (for relative-date rendering).
     pub timestamp: i64,
-    /// Full reverse-hex change id for display and JSON bridging.
+    /// Full reverse-hex change id for display.
     pub change_id: String,
-    /// `true` when the change id was stored in a `change-id` header.
-    pub change_id_stored: bool,
 }
 
 /// Discover the repository containing the current directory.
@@ -127,10 +123,8 @@ pub fn commit_summaries(repo: &Repository, oids: &[ObjectId]) -> Result<Vec<Comm
                 oid: *oid,
                 subject: subject_line(&commit.message),
                 author,
-                author_ident: commit.author,
                 timestamp,
                 change_id: resolved.id.as_str().to_owned(),
-                change_id_stored: resolved.stored,
             })
         })
         .collect()
