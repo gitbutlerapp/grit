@@ -31,6 +31,8 @@ Positional arguments are applied **oldest first**. Each argument is either:
 
 Resolve conflicts, then either run [`grit commit`](../commit/) (auto-stages the worktree and finishes the step, keeping the picked author) or stage with [`grit add`](../add/) and run `grit pick --continue`. Use `grit pick --skip` to drop the current step, or `grit pick --abort` to cancel. If the branch tip moved because you already committed the resolution, `--abort` clears replay state without moving the branch (Git warns and exits 0 in the same situation).
 
+Pick either completes a step, stops for conflicts or an empty commit, or changes nothing. Pressing Ctrl+C, or sending `SIGTERM` or `SIGHUP` on Unix, while files are being checked out stops the pick with `error: operation cancelled`; `HEAD`, the index and the work tree are left as they were before the pick started (no `CHERRY_PICK_HEAD`), no `.git/index.lock` is left behind, and the same pick can simply be run again. This works the same in a Windows console, where Ctrl+Break counts as Ctrl+C. A second interrupt terminates grit at once, without that cleanup; only `SIGKILL` skips rollback.
+
 ## Options
 
 | Option | Description |

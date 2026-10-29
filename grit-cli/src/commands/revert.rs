@@ -242,14 +242,17 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
     let now = context::wall_clock_now(env);
     let committer = context::signature(&repo, IdentRole::Committer, now)?;
 
+    let interrupt = crate::interrupt::InterruptCancel::install();
+    let mut progress = grit_lib::progress::NullProgress;
+
     if opts.continue_revert {
-        let outcome =
-            continue_replay_sequence(&repo, &committer).map_err(|e| map_replay_error(&repo, e))?;
+        let outcome = continue_replay_sequence(&repo, &committer, &mut progress, &interrupt)
+            .map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_sequence_outcome(outcome));
     }
     if opts.skip {
-        let outcome =
-            skip_replay_step(&repo, &committer).map_err(|e| map_replay_error(&repo, e))?;
+        let outcome = skip_replay_step(&repo, &committer, &mut progress, &interrupt)
+            .map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_sequence_outcome(outcome));
     }
 
@@ -287,7 +290,8 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
             predict_replay_sequence(&repo, &req).map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_prediction_outcome(prediction));
     }
-    let outcome = start_replay_sequence(&repo, &req).map_err(|e| map_replay_error(&repo, e))?;
+    let outcome = start_replay_sequence(&repo, &req, &mut progress, &interrupt)
+        .map_err(|e| map_replay_error(&repo, e))?;
     Ok(map_sequence_outcome(outcome))
 }
 

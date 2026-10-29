@@ -12,7 +12,7 @@ use grit_lib::porcelain::commit::{
     CommitPatchError, CommitPatchInput, CommitRequest, CommitScope, HookPolicy,
 };
 use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError};
-use grit_lib::progress::{NeverCancel, NullProgress, ProgressSink};
+use grit_lib::progress::{NullProgress, ProgressSink};
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
@@ -217,13 +217,14 @@ pub fn run_hunks(
         amend,
         allow_empty,
     )?;
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let outcome = commit_with_patch(
         &repo,
         &req,
         CommitPatchInput::Hunks(selection),
         &pathspecs,
         &mut NullProgress,
-        &NeverCancel,
+        &interrupt,
     )
     .map_err(map_patch_error)?;
     finish_commit_outcome(
@@ -279,13 +280,14 @@ pub fn run_patch_file(
         amend,
         allow_empty,
     )?;
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let outcome = commit_with_patch(
         &repo,
         &req,
         CommitPatchInput::Patches(patches),
         &[],
         &mut NullProgress,
-        &NeverCancel,
+        &interrupt,
     )
     .map_err(map_patch_error)?;
     finish_commit_outcome(
@@ -357,8 +359,9 @@ pub fn run(
         amend,
         allow_empty,
     )?;
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let outcome =
-        commit_with_scope(&repo, &req, scope, progress, &NeverCancel).map_err(map_commit_error)?;
+        commit_with_scope(&repo, &req, scope, progress, &interrupt).map_err(map_commit_error)?;
     finish_commit_outcome(
         &repo,
         req,

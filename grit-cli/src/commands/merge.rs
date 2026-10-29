@@ -26,7 +26,7 @@ use grit_lib::porcelain::merge::{
     IntegrateBranchOutcome, MergeCommitMode, MergeDryRunPlan, MergeOptions, MergePrediction,
     MergePredictionOptions,
 };
-use grit_lib::progress::{NeverCancel, ProgressSink};
+use grit_lib::progress::{Cancel, ProgressSink};
 use grit_lib::repo::Repository;
 use grit_lib::state::{read_merge_msg, resolve_head, HeadState};
 use schemars::JsonSchema;
@@ -536,6 +536,7 @@ pub fn run(
     progress: &mut dyn ProgressSink,
 ) -> Result<MergeOutcome> {
     let repo = context::discover()?;
+    let interrupt = crate::interrupt::InterruptCancel::install();
 
     if abort {
         abort_branch_merge(&repo).map_err(anyhow::Error::new)?;
@@ -547,7 +548,7 @@ pub fn run(
             bail!("cannot merge a branch while finishing a merge with --continue");
         }
         let continue_message = read_message_input(&options.message)?;
-        return run_continue(&repo, continue_message.as_deref(), progress);
+        return run_continue(&repo, continue_message.as_deref(), progress, &interrupt);
     }
 
     let branch = branch.context("branch name required unless using --abort or --continue")?;
@@ -595,6 +596,7 @@ pub fn run(
                 &short_name,
                 &merge_options,
                 progress,
+                &interrupt,
             )
         }
         HeadState::Branch { .. } => bail!("no commits yet on this branch"),
@@ -622,6 +624,7 @@ pub fn run(
                 branch,
                 &merge_options,
                 progress,
+                &interrupt,
             )
         }
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
@@ -683,6 +686,7 @@ fn run_continue(
     repo: &Repository,
     message: Option<&str>,
     progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<MergeOutcome> {
     let label = merge_continue_label(repo.git_dir());
     let detached = matches!(resolve_head(repo.git_dir())?, HeadState::Detached { .. });
@@ -692,7 +696,7 @@ fn run_continue(
         author: Some(context::signature(repo, IdentRole::Author, now)?),
         committer: Some(context::signature(repo, IdentRole::Committer, now)?),
     };
-    match continue_merge(repo, &options, progress, &NeverCancel) {
+    match continue_merge(repo, &options, progress, cancel) {
         Ok(outcome) => {
             let mut merged = MergeOutcome::merged(&label, outcome.oid, outcome.change_id);
             if detached {
@@ -773,6 +777,7 @@ fn integrate_with_options(
     head_short: &str,
     options: &MergeOptions,
     progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<MergeOutcome> {
     match integrate_branch_with(
         repo,
@@ -782,7 +787,7 @@ fn integrate_with_options(
         label,
         options,
         progress,
-        &NeverCancel,
+        cancel,
     ) {
         Ok(outcome) => Ok(map_integrate_outcome(outcome, label, head_short)),
         Err(Error::NotFastForward) => Ok(MergeOutcome::refused_not_ff(label)),
@@ -801,6 +806,7 @@ fn integrate_detached_with_options(
     label: &str,
     options: &MergeOptions,
     progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<MergeOutcome> {
     match integrate_detached_head_with(
         repo,
@@ -809,7 +815,7 @@ fn integrate_detached_with_options(
         label,
         options,
         progress,
-        &NeverCancel,
+        cancel,
     ) {
         Ok(outcome) => Ok(map_integrate_outcome(outcome, label, "HEAD").for_detached_head()),
         Err(Error::NotFastForward) => Ok(MergeOutcome::refused_not_ff(label).for_detached_head()),

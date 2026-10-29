@@ -37,6 +37,8 @@ When a stash was created with `-u` / `--include-untracked`, `apply` and `pop` re
 
 On an interactive terminal (human output, not `--json` or `--markdown`), push shows a live **Staging** line while it hashes local changes and a **Checkout** line while it resets them, and apply and pop show a **Checkout** line; nothing is drawn when stderr is not a TTY.
 
+Push, apply, and pop either complete or change nothing. Pressing Ctrl+C, or sending `SIGTERM` or `SIGHUP` on Unix, while the index or work tree is being updated stops the command with `error: operation cancelled`; `HEAD`, the index and the work tree are left as they were, no `.git/index.lock` is left behind, and the same stash command can simply be run again. This works the same in a Windows console, where Ctrl+Break counts as Ctrl+C. A second interrupt terminates grit at once, without that cleanup; only `SIGKILL` skips rollback. Staging may leave unreachable loose blobs if you interrupt mid-write; they are harmless.
+
 ## Options
 
 | Option | Description |

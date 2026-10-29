@@ -23,6 +23,8 @@ When a step would conflict, grit stops with conflict markers in the worktree and
 
 Merge commits require `--mainline <n>` (1-based parent number, long option only) so grit knows which parent line to replay.
 
+Revert either completes a step, stops for conflicts or an empty commit, or changes nothing. Pressing Ctrl+C, or sending `SIGTERM` or `SIGHUP` on Unix, while files are being checked out stops the revert with `error: operation cancelled`; `HEAD`, the index and the work tree are left as they were before the revert started (no `REVERT_HEAD`), no `.git/index.lock` is left behind, and the same revert can simply be run again. This works the same in a Windows console, where Ctrl+Break counts as Ctrl+C. A second interrupt terminates grit at once, without that cleanup; only `SIGKILL` skips rollback.
+
 ## Options
 
 | Option | Description |

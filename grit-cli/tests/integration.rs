@@ -162,6 +162,8 @@ mod commit_hunks;
 #[cfg(feature = "full-tests")]
 #[path = "commit_hyphen_values.rs"]
 mod commit_hyphen_values;
+#[path = "commit_interrupt.rs"]
+mod commit_interrupt;
 #[cfg(feature = "full-tests")]
 #[path = "commit_message_author_hooks.rs"]
 mod commit_message_author_hooks;
@@ -319,6 +321,8 @@ mod init_reftable_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "intent_to_add_add_commit.rs"]
 mod intent_to_add_add_commit;
+#[path = "interrupt_common.rs"]
+mod interrupt_common;
 #[cfg(feature = "full-tests")]
 #[path = "issue_1653_gc_repack.rs"]
 mod issue_1653_gc_repack;
@@ -372,6 +376,9 @@ mod merge_continue_json;
 #[path = "merge_dry_run.rs"]
 mod merge_dry_run;
 #[cfg(feature = "full-tests")]
+#[path = "merge_interrupt.rs"]
+mod merge_interrupt;
+#[cfg(feature = "full-tests")]
 #[path = "merge_missing_identity.rs"]
 mod merge_missing_identity;
 #[cfg(feature = "full-tests")]
@@ -412,6 +419,9 @@ mod output_snapshots_network;
 #[cfg(feature = "full-tests")]
 #[path = "pathspec_args_cli.rs"]
 mod pathspec_args_cli;
+#[cfg(feature = "full-tests")]
+#[path = "pick_interrupt.rs"]
+mod pick_interrupt;
 #[cfg(feature = "full-tests")]
 #[path = "pick_revert_check.rs"]
 mod pick_revert_check;
@@ -567,6 +577,8 @@ mod skill_recipes;
 #[cfg(feature = "full-tests")]
 #[path = "stash.rs"]
 mod stash;
+#[path = "stash_interrupt.rs"]
+mod stash_interrupt;
 #[path = "stash_pop_conflict_cli.rs"]
 mod stash_pop_conflict_cli;
 #[cfg(feature = "full-tests")]

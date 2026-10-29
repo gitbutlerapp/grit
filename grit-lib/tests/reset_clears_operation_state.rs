@@ -19,7 +19,7 @@ use grit_lib::porcelain::replay_sequence::{
     start_replay_sequence, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
 };
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::state::{primary_in_progress_operation, resolve_head_for_repository};
 
@@ -137,7 +137,13 @@ fn conflicted_pick_repo() -> (tempfile::TempDir, Repository, ObjectId) {
     let main = ObjectId::from_hex(git(root.path(), &["rev-parse", "HEAD"]).trim()).expect("main");
 
     let repo = open_repo(root.path());
-    let out = start_replay_sequence(&repo, &pick_req(vec![pick])).expect("pick");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick]),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
     assert!(repo.git_dir().join("CHERRY_PICK_HEAD").exists());
     (root, repo, main)

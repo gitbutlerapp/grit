@@ -7,7 +7,7 @@
 //!
 //! Single-commit callers should keep using [`crate::porcelain::replay::replay_commit`].
 
-use crate::progress::{NeverCancel, NullProgress};
+use crate::progress::{Cancel, ProgressSink};
 use std::fs;
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -274,6 +274,8 @@ pub fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<Vec<Obje
 pub fn start_replay_sequence(
     repo: &Repository,
     req: &ReplaySequenceRequest,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<SequenceOutcome> {
     if replay_in_progress(repo.git_dir())? {
         return Err(Error::Message(
@@ -316,6 +318,8 @@ pub fn start_replay_sequence(
         Vec::new(),
         &mut Vec::new(),
         worktree,
+        progress,
+        cancel,
     )
 }
 
@@ -328,6 +332,8 @@ pub fn start_replay_sequence(
 pub fn continue_replay_sequence(
     repo: &Repository,
     identity: &crate::ident::Signature,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<SequenceOutcome> {
     identity.validate().map_err(Error::InvalidSignature)?;
     let committer = identity.header_line();
@@ -389,6 +395,8 @@ pub fn continue_replay_sequence(
             Vec::new(),
             &mut created_records,
             None,
+            progress,
+            cancel,
         );
     }
     let source = active.current_source()?.ok_or(Error::NoReplayInProgress)?;
@@ -412,7 +420,13 @@ pub fn continue_replay_sequence(
     if active.opts.no_commit {
         let head_tree = repo.odb().commit_tree(&head_oid)?;
         repo.write_index(&mut index)?;
-        checkout_between_trees(repo, Some(&head_tree), &new_tree)?;
+        crate::porcelain::checkout::checkout_between_trees_with_progress(
+            repo,
+            Some(&head_tree),
+            &new_tree,
+            progress,
+            cancel,
+        )?;
         clear_step_heads(repo.git_dir(), active.direction)?;
     } else {
         let config = repo.config()?;
@@ -472,6 +486,8 @@ pub fn continue_replay_sequence(
         Vec::new(),
         &mut created_records,
         None,
+        progress,
+        cancel,
     )
 }
 
@@ -485,6 +501,8 @@ pub fn continue_replay_sequence(
 pub fn skip_replay_step(
     repo: &Repository,
     identity: &crate::ident::Signature,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<SequenceOutcome> {
     identity.validate().map_err(Error::InvalidSignature)?;
     let committer = identity.header_line();
@@ -529,6 +547,8 @@ pub fn skip_replay_step(
         dropped,
         &mut created_records,
         None,
+        progress,
+        cancel,
     )? {
         SequenceOutcome::Completed { created, dropped } => {
             Ok(SequenceOutcome::Completed { created, dropped })
@@ -706,6 +726,8 @@ fn run_sequence(
     mut dropped: Vec<ObjectId>,
     created_records: &mut Vec<ReplayCreated>,
     initial_worktree: Option<WorktreeSnapshot>,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<SequenceOutcome> {
     let mut head = head_oid;
     let _ = abort_safety;
@@ -736,6 +758,8 @@ fn run_sequence(
             &change_id_policy,
             &mut merge_cache,
             &mut worktree_snapshot,
+            progress,
+            cancel,
         ) {
             Ok(result) => result,
             Err(err) => {
@@ -1063,6 +1087,8 @@ fn apply_one_step(
     change_id_policy: &ChangeIdPolicy,
     merge_cache: &mut MergeTreeCache,
     worktree_snapshot: &mut Option<WorktreeSnapshot>,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<StepResult> {
     let source_oid = entry.oid;
     if direction == ReplayDirection::Pick && source_oid == *head {
@@ -1133,14 +1159,7 @@ fn apply_one_step(
 
     if crate::operation::tree_merge_has_conflicts(&merged) {
         let materialized = materialized_merge_result_tree(repo.odb(), &merged)?;
-        apply_conflict_merge_worktree(
-            repo,
-            &ours_tree,
-            &merged,
-            &materialized,
-            &mut NullProgress,
-            &NeverCancel,
-        )?;
+        apply_conflict_merge_worktree(repo, &ours_tree, &merged, &materialized, progress, cancel)?;
         return Ok(StepResult::Conflicts {
             conflicts: crate::operation::conflicts_from_tree_merge(&merged),
         });
@@ -1180,12 +1199,26 @@ fn apply_one_step(
     }
 
     if opts.no_commit {
-        apply_clean_merge_worktree(repo, &ours_tree, &merged, worktree_snapshot)?;
+        apply_clean_merge_worktree(
+            repo,
+            &ours_tree,
+            &merged,
+            worktree_snapshot,
+            progress,
+            cancel,
+        )?;
         return Ok(StepResult::AppliedNoCommit { tree: new_tree });
     }
 
     let message = replay_message(config, opts, direction, &source, source_oid, committer)?;
-    apply_clean_merge_worktree(repo, &head_tree, &merged, worktree_snapshot)?;
+    apply_clean_merge_worktree(
+        repo,
+        &head_tree,
+        &merged,
+        worktree_snapshot,
+        progress,
+        cancel,
+    )?;
     let new_oid = write_replay_commit_with_head_tree(
         repo,
         refname,
@@ -1212,21 +1245,17 @@ fn apply_clean_merge_worktree(
     from_tree: &ObjectId,
     merged: &crate::merge_trees::TreeMergeOutput,
     worktree_snapshot: &mut Option<WorktreeSnapshot>,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<()> {
     if worktree_snapshot.is_none() {
         *worktree_snapshot = Some(load_worktree_snapshot(repo)?);
     }
-    let (mut progress, cancel) = (NullProgress, NeverCancel);
     match worktree_snapshot.as_mut() {
         Some(snapshot) => apply_clean_tree_merge_to_worktree_with_snapshot(
-            repo,
-            from_tree,
-            merged,
-            snapshot,
-            &mut progress,
-            &cancel,
+            repo, from_tree, merged, snapshot, progress, cancel,
         ),
-        None => apply_clean_tree_merge_to_worktree(repo, from_tree, merged, &mut progress, &cancel),
+        None => apply_clean_tree_merge_to_worktree(repo, from_tree, merged, progress, cancel),
     }
 }
 

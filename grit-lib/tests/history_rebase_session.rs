@@ -831,7 +831,8 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
         committer: COMMITTER.parse().expect("signature"),
         options: ReplayOptions::default(),
     };
-    let pick_err = start_replay_sequence(&grit, &pick_req).unwrap_err();
+    let pick_err =
+        start_replay_sequence(&grit, &pick_req, &mut NullProgress, &NeverCancel).unwrap_err();
     assert!(
         matches!(
             pick_err,

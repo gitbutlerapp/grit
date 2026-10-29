@@ -164,7 +164,7 @@ fn pick_conflicts_and_status_report_the_same_conflict() {
         options: ReplayOptions::default(),
     };
     let SequenceOutcome::Conflicts { conflicts, .. } =
-        start_replay_sequence(&repo, &req).expect("pick")
+        start_replay_sequence(&repo, &req, &mut NullProgress, &NeverCancel).expect("pick")
     else {
         panic!("expected the pick to stop on f");
     };

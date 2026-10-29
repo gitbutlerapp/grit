@@ -174,8 +174,13 @@ fn pick_range_clean_matches_git_cherry_pick_trees() {
     git(git_wt.path(), &["cherry-pick", &c1.to_hex(), &c2.to_hex()]);
 
     let repo = open_repo(root.path());
-    let out = start_replay_sequence(&repo, &pick_req(vec![c1, c2], ReplayOptions::default()))
-        .expect("pick");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![c1, c2], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
     assert_eq!(head_tree_hex(root.path()), head_tree_hex(git_wt.path()));
     git_fsck_strict(root.path());
@@ -195,8 +200,13 @@ fn pick_stops_with_markers_and_cherry_pick_head() {
     git(root.path(), &["commit", "-qam", "main"]);
 
     let repo = open_repo(root.path());
-    let out = start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default()))
-        .expect("pick");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
     assert!(root.path().join(".git/CHERRY_PICK_HEAD").is_file());
     assert!(root.path().join(".git/MERGE_MSG").is_file());
@@ -222,7 +232,13 @@ fn commit_after_pick_conflict_finishes_sequence_issue_2262() {
     git(root.path(), &["commit", "-qam", "mainchg"]);
 
     let repo = open_repo(root.path());
-    start_replay_sequence(&repo, &pick_req(vec![side], ReplayOptions::default())).expect("pick");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![side], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     fs::write(root.path().join("f.txt"), "a\nRES\nc\n").unwrap();
 
     let req = CommitRequest {
@@ -262,7 +278,13 @@ fn git_status_recognizes_grit_stop() {
     git(root.path(), &["commit", "-qam", "main"]);
 
     let repo = open_repo(root.path());
-    start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default())).expect("pick");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     let st = git(root.path(), &["status", "--porcelain"]);
     assert!(st.contains("UU f") || st.contains("U f"));
     git_fsck_strict(root.path());
@@ -282,7 +304,13 @@ fn grit_stop_then_git_cherry_pick_continue() {
     git(root.path(), &["commit", "-qam", "main"]);
 
     let repo = open_repo(root.path());
-    start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default())).expect("pick");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     fs::write(root.path().join("f"), "resolved\n").unwrap();
     git(root.path(), &["add", "f"]);
     git(root.path(), &["cherry-pick", "--continue", "--no-gpg-sign"]);
@@ -315,7 +343,8 @@ fn git_cherry_pick_stop_then_grit_continue() {
     fs::write(root.path().join("f"), "resolved\n").unwrap();
     git(root.path(), &["add", "f"]);
     let repo = open_repo(root.path());
-    let out = continue_replay_sequence(&repo, &replay_ident()).expect("continue");
+    let out = continue_replay_sequence(&repo, &replay_ident(), &mut NullProgress, &NeverCancel)
+        .expect("continue");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
     git_fsck_strict(root.path());
 }
@@ -334,8 +363,13 @@ fn revert_stops_with_markers_and_revert_head() {
     git(root.path(), &["commit", "-qam", "main"]);
 
     let repo = open_repo(root.path());
-    let out = start_replay_sequence(&repo, &revert_req(vec![revert], ReplayOptions::default()))
-        .expect("revert");
+    let out = start_replay_sequence(
+        &repo,
+        &revert_req(vec![revert], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("revert");
     assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
     assert!(root.path().join(".git/REVERT_HEAD").is_file());
     git_fsck_strict(root.path());
@@ -355,8 +389,13 @@ fn revert_grit_stop_then_git_revert_continue() {
     git(root.path(), &["commit", "-qam", "main"]);
 
     let repo = open_repo(root.path());
-    start_replay_sequence(&repo, &revert_req(vec![rev], ReplayOptions::default()))
-        .expect("conflict");
+    start_replay_sequence(
+        &repo,
+        &revert_req(vec![rev], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("conflict");
     fs::write(root.path().join("f"), "base\n").unwrap();
     git(root.path(), &["add", "f"]);
     git(root.path(), &["revert", "--continue", "--no-gpg-sign"]);
@@ -379,8 +418,15 @@ fn skip_moves_to_next() {
     git(root.path(), &["commit", "-qam", "main"]);
 
     let repo = open_repo(root.path());
-    start_replay_sequence(&repo, &pick_req(vec![c1, c2], ReplayOptions::default())).expect("pick");
-    let out = skip_replay_step(&repo, &replay_ident()).expect("skip");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![c1, c2], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
+    let out =
+        skip_replay_step(&repo, &replay_ident(), &mut NullProgress, &NeverCancel).expect("skip");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
     assert!(root.path().join("a.txt").is_file());
     git_fsck_strict(root.path());
@@ -401,7 +447,13 @@ fn abort_restores_branch_index_worktree() {
     let before = oid_from_rev(root.path(), "HEAD");
 
     let repo = open_repo(root.path());
-    start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default())).expect("pick");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     abort_replay_sequence(&repo).expect("abort");
     assert_eq!(oid_from_rev(root.path(), "HEAD"), before);
     assert_eq!(fs::read_to_string(root.path().join("f")).unwrap(), "main\n");
@@ -422,7 +474,13 @@ fn abort_clears_state_when_head_moved() {
     git(root.path(), &["commit", "-qam", "main"]);
 
     let repo = open_repo(root.path());
-    start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default())).expect("pick");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     git(root.path(), &["update-ref", "refs/heads/main", "HEAD~1"]);
     let outcome = abort_replay_sequence(&repo).expect("abort clears without rewind");
     assert_eq!(outcome, ReplayAbortOutcome::ClearedInPlace);
@@ -443,8 +501,15 @@ fn continue_refuses_unmerged() {
     git(root.path(), &["commit", "-qam", "main"]);
 
     let repo = open_repo(root.path());
-    start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default())).expect("pick");
-    let err = continue_replay_sequence(&repo, &replay_ident()).unwrap_err();
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
+    let err = continue_replay_sequence(&repo, &replay_ident(), &mut NullProgress, &NeverCancel)
+        .unwrap_err();
     assert!(matches!(
         err,
         grit_lib::error::Error::ReplayContinueUnmerged
@@ -484,7 +549,13 @@ fn revert_mainline_matches_git_revert_m1_tree() {
     let repo = open_repo(root.path());
     let mut opts = ReplayOptions::default();
     opts.mainline = std::num::NonZeroU32::new(1);
-    let out = start_replay_sequence(&repo, &revert_req(vec![merge], opts)).expect("revert");
+    let out = start_replay_sequence(
+        &repo,
+        &revert_req(vec![merge], opts),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("revert");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
     assert_eq!(head_tree_hex(root.path()), head_tree_hex(git_wt.path()));
     let msg = git(root.path(), &["log", "-1", "--format=%B"]);
@@ -515,8 +586,13 @@ fn merge_source_without_mainline_errors() {
     commit_file(root.path(), "after.txt", "after\n", "after");
 
     let repo = open_repo(root.path());
-    let err =
-        start_replay_sequence(&repo, &pick_req(vec![merge], ReplayOptions::default())).unwrap_err();
+    let err = start_replay_sequence(
+        &repo,
+        &pick_req(vec![merge], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .unwrap_err();
     assert!(matches!(err, grit_lib::error::Error::MergeCommit { .. }));
     assert_no_replay_state(root.path());
 }
@@ -534,19 +610,37 @@ fn empty_stop_drop_keep() {
     let repo = open_repo(root.path());
     let mut stop_opts = ReplayOptions::default();
     stop_opts.empty = ReplayEmptyPolicy::Stop;
-    let out = start_replay_sequence(&repo, &pick_req(vec![empty], stop_opts)).expect("stop");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![empty], stop_opts),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("stop");
     assert!(matches!(out, SequenceOutcome::Empty { .. }));
     abort_replay_sequence(&repo).expect("abort");
 
     let mut drop_opts = ReplayOptions::default();
     drop_opts.empty = ReplayEmptyPolicy::Drop;
-    let out = start_replay_sequence(&repo, &pick_req(vec![empty], drop_opts)).expect("drop");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![empty], drop_opts),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("drop");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
 
     git(root.path(), &["reset", "--hard", "HEAD"]);
     let mut keep_opts = ReplayOptions::default();
     keep_opts.empty = ReplayEmptyPolicy::Keep;
-    let out = start_replay_sequence(&repo, &pick_req(vec![empty], keep_opts)).expect("keep");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![empty], keep_opts),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("keep");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
     git_fsck_strict(root.path());
 }
@@ -565,7 +659,13 @@ fn record_origin_appends_cherry_picked_from_line() {
     let repo = open_repo(root.path());
     let mut opts = ReplayOptions::default();
     opts.record_origin = true;
-    start_replay_sequence(&repo, &pick_req(vec![pick], opts)).expect("pick");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], opts),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     let log_msg = git(root.path(), &["log", "-1", "--format=%B"]);
     assert!(log_msg.contains("(cherry picked from commit"));
     git_fsck_strict(root.path());
@@ -590,8 +690,13 @@ fn abort_after_clean_step_then_conflict_restores_original_head() {
     let start = oid_from_rev(root.path(), "HEAD");
 
     let repo = open_repo(root.path());
-    let out = start_replay_sequence(&repo, &pick_req(vec![c1, c2], ReplayOptions::default()))
-        .expect("pick");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![c1, c2], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
     assert!(root.path().join(".git/sequencer/todo").is_file());
     abort_replay_sequence(&repo).expect("abort");
@@ -616,7 +721,13 @@ fn no_commit_range_accumulates_staged_changes() {
     let repo = open_repo(root.path());
     let mut opts = ReplayOptions::default();
     opts.no_commit = true;
-    let out = start_replay_sequence(&repo, &pick_req(vec![c1, c2], opts)).expect("pick");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![c1, c2], opts),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
     assert_eq!(oid_from_rev(root.path(), "HEAD"), start);
     let staged = git(root.path(), &["show", ":a.txt"]);
@@ -642,7 +753,13 @@ fn grit_stop_record_origin_git_cherry_pick_continue() {
     let repo = open_repo(root.path());
     let mut opts = ReplayOptions::default();
     opts.record_origin = true;
-    start_replay_sequence(&repo, &pick_req(vec![pick], opts)).expect("pick");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], opts),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     fs::write(root.path().join("f"), "resolved\n").unwrap();
     git(root.path(), &["add", "f"]);
     git(root.path(), &["cherry-pick", "--continue", "--no-gpg-sign"]);
@@ -676,6 +793,8 @@ fn abort_after_clean_step_then_merge_error_restores_start() {
     let err = start_replay_sequence(
         &repo,
         &pick_req(vec![clean, merge], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
     )
     .unwrap_err();
     assert!(matches!(err, grit_lib::error::Error::MergeCommit { .. }));
@@ -703,7 +822,13 @@ fn clean_pick_preserves_preexisting_orig_head() {
     .expect("write ORIG_HEAD");
 
     let repo = open_repo(root.path());
-    start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default())).expect("pick");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     let kept = fs::read_to_string(root.path().join(".git/ORIG_HEAD")).expect("read");
     assert_eq!(kept.trim(), sentinel.to_hex());
     git_fsck_strict(root.path());
@@ -726,11 +851,18 @@ fn continue_after_no_commit_conflict_leaves_head() {
     let repo = open_repo(root.path());
     let mut opts = ReplayOptions::default();
     opts.no_commit = true;
-    let out = start_replay_sequence(&repo, &pick_req(vec![pick], opts)).expect("pick");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], opts),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
     fs::write(root.path().join("f"), "resolved\n").unwrap();
     git(root.path(), &["add", "f"]);
-    let done = continue_replay_sequence(&repo, &replay_ident()).expect("continue");
+    let done = continue_replay_sequence(&repo, &replay_ident(), &mut NullProgress, &NeverCancel)
+        .expect("continue");
     assert!(matches!(done, SequenceOutcome::Completed { .. }));
     assert_eq!(oid_from_rev(root.path(), "HEAD"), start);
     git_fsck_strict(root.path());
@@ -765,12 +897,18 @@ fn continue_after_range_conflict_pairs_all_created_sources() {
     git(root.path(), &["commit", "-qm", "main"]);
 
     let repo = open_repo(root.path());
-    let out = start_replay_sequence(&repo, &pick_req(vec![c1, c2], ReplayOptions::default()))
-        .expect("pick");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![c1, c2], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
     fs::write(root.path().join("shared.txt"), "resolved\n").unwrap();
     git(root.path(), &["add", "shared.txt"]);
-    let done = continue_replay_sequence(&repo, &replay_ident()).expect("continue");
+    let done = continue_replay_sequence(&repo, &replay_ident(), &mut NullProgress, &NeverCancel)
+        .expect("continue");
     let created = match done {
         SequenceOutcome::Completed { created, .. } => created,
         _ => panic!("expected completed"),
@@ -811,7 +949,13 @@ fn continue_omits_conflict_comment_lines_from_merge_msg() {
     git(root.path(), &["commit", "-qam", "main"]);
 
     let repo = open_repo(root.path());
-    start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default())).expect("pick");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     fs::write(root.path().join("f"), "resolved\n").unwrap();
     git(root.path(), &["add", "f"]);
     fs::write(
@@ -819,7 +963,8 @@ fn continue_omits_conflict_comment_lines_from_merge_msg() {
         "topic-f\n\n# Conflicts:\n# f\n",
     )
     .unwrap();
-    continue_replay_sequence(&repo, &replay_ident()).expect("continue");
+    continue_replay_sequence(&repo, &replay_ident(), &mut NullProgress, &NeverCancel)
+        .expect("continue");
     let msg = git(root.path(), &["log", "-1", "--format=%B"]);
     assert!(!msg.contains("# Conflicts:"));
     assert!(msg.contains("topic-f"));
@@ -844,8 +989,15 @@ fn skip_after_partial_range_returns_earlier_created_records() {
     git(root.path(), &["commit", "-qm", "main"]);
 
     let repo = open_repo(root.path());
-    start_replay_sequence(&repo, &pick_req(vec![c1, c2], ReplayOptions::default())).expect("pick");
-    let out = skip_replay_step(&repo, &replay_ident()).expect("skip");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![c1, c2], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
+    let out =
+        skip_replay_step(&repo, &replay_ident(), &mut NullProgress, &NeverCancel).expect("skip");
     match out {
         SequenceOutcome::Completed { created, .. } => {
             assert_eq!(created.len(), 1);
@@ -873,11 +1025,18 @@ fn continue_honours_persisted_no_commit() {
     let repo = open_repo(root.path());
     let mut opts = ReplayOptions::default();
     opts.no_commit = true;
-    let out = start_replay_sequence(&repo, &pick_req(vec![pick], opts)).expect("pick");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], opts),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
     fs::write(root.path().join("f"), "resolved\n").unwrap();
     git(root.path(), &["add", "f"]);
-    let done = continue_replay_sequence(&repo, &replay_ident()).expect("continue");
+    let done = continue_replay_sequence(&repo, &replay_ident(), &mut NullProgress, &NeverCancel)
+        .expect("continue");
     assert!(matches!(done, SequenceOutcome::Completed { .. }));
     assert_eq!(oid_from_rev(root.path(), "HEAD"), start);
     git_fsck_strict(root.path());
@@ -895,7 +1054,8 @@ fn commits_to_replay_empty_range_does_not_resolve_tip_alone() {
     let req = pick_req(vec![], ReplayOptions::default());
     let mut req_with_empty = req.clone();
     req_with_empty.commits = expanded;
-    let out = start_replay_sequence(&repo, &req_with_empty).expect("start");
+    let out = start_replay_sequence(&repo, &req_with_empty, &mut NullProgress, &NeverCancel)
+        .expect("start");
     assert!(matches!(
         out,
         SequenceOutcome::Completed {
@@ -919,10 +1079,17 @@ fn continued_commit_gets_new_change_id() {
     git(root.path(), &["commit", "-qam", "main"]);
 
     let repo = open_repo(root.path());
-    start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default())).expect("pick");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     fs::write(root.path().join("f"), "merged\n").unwrap();
     git(root.path(), &["add", "f"]);
-    let out = continue_replay_sequence(&repo, &replay_ident()).expect("continue");
+    let out = continue_replay_sequence(&repo, &replay_ident(), &mut NullProgress, &NeverCancel)
+        .expect("continue");
     let created = match out {
         SequenceOutcome::Completed { created, .. } => created,
         _ => panic!("expected completed"),
@@ -993,16 +1160,26 @@ fn pick_and_revert_keep_valid_cache_tree() {
     );
 
     let repo = open_repo(root.path());
-    let out = start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default()))
-        .expect("pick");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     let picked = match out {
         SequenceOutcome::Completed { created, .. } => created[0].new_oid,
         _ => panic!("expected completed pick"),
     };
     assert_untouched_cache_tree_kept(root.path(), "src/b");
 
-    let out = start_replay_sequence(&repo, &revert_req(vec![picked], ReplayOptions::default()))
-        .expect("revert");
+    let out = start_replay_sequence(
+        &repo,
+        &revert_req(vec![picked], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("revert");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
     assert_eq!(oid_from_rev(root.path(), "HEAD^{tree}"), main_tree);
     assert_untouched_cache_tree_kept(root.path(), "docs");
@@ -1023,15 +1200,25 @@ fn pick_refuses_staged_or_unstaged_changes_without_state() {
 
     fs::write(root.path().join("src/a/f0.txt"), "staged\n").unwrap();
     git(root.path(), &["add", "src/a/f0.txt"]);
-    start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default()))
-        .expect_err("staged change must refuse the pick");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect_err("staged change must refuse the pick");
     assert_no_replay_state(root.path());
     assert_eq!(oid_from_rev(root.path(), "HEAD"), head);
     git(root.path(), &["reset", "-q", "--hard"]);
 
     fs::write(root.path().join("tests/deep/er/f2.txt"), "unstaged\n").unwrap();
-    start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default()))
-        .expect_err("unstaged change must refuse the pick");
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect_err("unstaged change must refuse the pick");
     assert_no_replay_state(root.path());
     assert_eq!(oid_from_rev(root.path(), "HEAD"), head);
     assert_eq!(
@@ -1058,6 +1245,8 @@ fn revert_continue_reports_subjects_and_change_ids_of_earlier_steps() {
     let out = start_replay_sequence(
         &repo,
         &revert_req(vec![add_clean, edit_shared], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
     )
     .expect("revert");
     let SequenceOutcome::Conflicts {
@@ -1077,7 +1266,8 @@ fn revert_continue_reports_subjects_and_change_ids_of_earlier_steps() {
     fs::write(root.path().join("shared.txt"), "resolved\n").unwrap();
     git(root.path(), &["add", "shared.txt"]);
     let SequenceOutcome::Completed { created, .. } =
-        continue_replay_sequence(&repo, &replay_ident()).expect("continue")
+        continue_replay_sequence(&repo, &replay_ident(), &mut NullProgress, &NeverCancel)
+            .expect("continue")
     else {
         panic!("expected completed");
     };
@@ -1119,8 +1309,13 @@ fn empty_stop_and_prediction_report_current_subject() {
         }
     );
 
-    let out = start_replay_sequence(&repo, &pick_req(vec![empty], ReplayOptions::default()))
-        .expect("pick");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![empty], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
     let SequenceOutcome::Empty {
         current,
         current_subject,
@@ -1179,7 +1374,7 @@ fn subjects_skip_leading_blank_message_lines_like_git() {
         SequencePrediction::Conflicts { subject, .. } => assert_eq!(subject, "blank-led subject"),
         other => panic!("expected predicted conflicts, got {other:?}"),
     }
-    match start_replay_sequence(&repo, &req).expect("pick") {
+    match start_replay_sequence(&repo, &req, &mut NullProgress, &NeverCancel).expect("pick") {
         SequenceOutcome::Conflicts {
             current_subject, ..
         } => assert_eq!(current_subject, "blank-led subject"),
@@ -1194,7 +1389,8 @@ fn subjects_skip_leading_blank_message_lines_like_git() {
     fs::write(root.path().join("f"), "resolved\n").unwrap();
     git(root.path(), &["add", "f"]);
     let SequenceOutcome::Completed { created, .. } =
-        continue_replay_sequence(&repo, &replay_ident()).expect("continue")
+        continue_replay_sequence(&repo, &replay_ident(), &mut NullProgress, &NeverCancel)
+            .expect("continue")
     else {
         panic!("expected completed");
     };

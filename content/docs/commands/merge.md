@@ -37,6 +37,8 @@ $ grit merge --abort
 Merge aborted.
 ```
 
+A merge either completes, stops for conflicts, or changes nothing. Pressing Ctrl+C, or sending `SIGTERM` or `SIGHUP` on Unix, while files are being checked out during a fast-forward or three-way merge stops the merge with `error: operation cancelled`; `HEAD`, the index and the work tree are left as they were before the merge started (no `MERGE_HEAD`), no `.git/index.lock` is left behind, and the same merge can simply be run again. This works the same in a Windows console, where Ctrl+Break counts as Ctrl+C. A second interrupt terminates grit at once, without that cleanup; only `SIGKILL` skips rollback. In the rare case that a path cannot be put back during checkout rollback, the error has kind `checkout_incomplete` and lists those paths in `paths`.
+
 With `--json` the error carries the hook's output and the same `hint`:
 
 ```json

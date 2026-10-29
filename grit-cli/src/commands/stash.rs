@@ -1,6 +1,6 @@
 //! `grit stash` — save and restore shelved work.
 
-use grit_lib::progress::{NeverCancel, ProgressSink};
+use grit_lib::progress::ProgressSink;
 use std::io::IsTerminal;
 use std::io::Write;
 
@@ -450,9 +450,10 @@ pub fn run_push(args: StashPushRunArgs<'_>) -> Result<StashPushOutcome> {
             None => StashPushOutcome::Nothing { stashed: false },
         });
     }
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let pushed = repo
         .stash()
-        .push(&options, progress, &NeverCancel)
+        .push(&options, progress, &interrupt)
         .map_err(map_stash_error)?;
     Ok(match pushed {
         Some(result) => StashPushOutcome::Saved {
@@ -693,13 +694,14 @@ pub fn run_apply(
     repo.work_tree()
         .context("grit stash apply needs a working tree")?;
     let n = parse_stash_index(index.as_deref())?;
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let applied = repo
         .stash()
         .apply(
             n,
             &StashApplyOptions { restore_index },
             progress,
-            &NeverCancel,
+            &interrupt,
         )
         .map_err(map_stash_error)?;
     Ok(StashApplyOutcome {
@@ -719,13 +721,14 @@ pub fn run_pop(
     repo.work_tree()
         .context("grit stash pop needs a working tree")?;
     let n = parse_stash_index(index.as_deref())?;
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let popped = repo
         .stash()
         .pop(
             n,
             &StashApplyOptions { restore_index },
             progress,
-            &NeverCancel,
+            &interrupt,
         )
         .map_err(map_stash_error)?;
     let conflicts = popped.has_conflicts();
