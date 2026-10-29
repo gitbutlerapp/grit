@@ -356,6 +356,7 @@ fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
         prune_enabled,
         args.dry_run,
         fetch_depth,
+        args.force,
         &factory,
         &mut progress,
     ) {
@@ -370,6 +371,7 @@ fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
                     prune_enabled,
                     args.dry_run,
                     fetch_depth,
+                    args.force,
                     &factory,
                     &mut progress,
                 )?
@@ -425,6 +427,7 @@ fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
     let base = FetchOptions {
         dry_run: args.dry_run,
         fetch_depth: args.fetch_depth(),
+        force: args.force,
         thread_policy: repo.thread_policy(),
         environment: crate::context::environment(),
         ..Default::default()
@@ -523,9 +526,9 @@ fn rejection_reason(mode: UpdateMode, note: &Option<String>) -> Option<String> {
         UpdateMode::NonFastForwardRejected => {
             Some("not a fast-forward — use a leading `+` on the refspec to force".to_owned())
         }
-        UpdateMode::TagUpdateRejected => {
-            Some("tag already exists locally and did not move".to_owned())
-        }
+        UpdateMode::TagUpdateRejected => Some(
+            "local tag would be replaced — use --force, or a leading + on the refspec".to_owned(),
+        ),
         UpdateMode::SourceObjectNotFound => Some("source ref not found on the remote".to_owned()),
         UpdateMode::RefLockRejected => note
             .clone()
@@ -543,6 +546,7 @@ fn fetch_once(
     prune: bool,
     dry_run: bool,
     fetch_depth: Option<FetchDepth>,
+    force: bool,
     factory: &DefaultHttpClientFactory,
     progress: &mut TerminalProgress,
 ) -> Result<grit_lib::remote::transfer::FetchOutcome> {
@@ -553,6 +557,7 @@ fn fetch_once(
             FetchOptions {
                 refspecs: invocation.user_refspecs.clone(),
                 tags,
+                force,
                 thread_policy: repo.thread_policy(),
                 environment: crate::context::environment(),
                 prune,

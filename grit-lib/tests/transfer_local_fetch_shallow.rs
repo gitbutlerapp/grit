@@ -429,12 +429,18 @@ fn unshallow_preserves_negative_refspecs_and_existing_tags() {
         )
         .unwrap();
         if existing {
-            let moved = outcome
-                .updates
-                .iter()
-                .find(|u| u.remote_ref == "refs/tags/v1")
-                .unwrap();
-            assert_eq!(moved.mode, UpdateMode::TagUpdateRejected);
+            assert!(
+                !outcome.has_rejections(),
+                "Following must not reject an existing local tag: {:?}",
+                outcome.updates
+            );
+            assert!(
+                outcome
+                    .updates
+                    .iter()
+                    .all(|u| u.remote_ref != "refs/tags/v1"),
+                "unchanged local tag must not appear in updates"
+            );
             assert!(!outcome
                 .updates
                 .iter()

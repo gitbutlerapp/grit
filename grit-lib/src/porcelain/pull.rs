@@ -523,10 +523,15 @@ where
         if options.upstream.is_none() && remote_name != "." {
             let remote = resolve_remote_argument(config.as_ref(), &remote_name)
                 .map_err(PullError::Remote)?;
-            transfer = remote
+            let fetch_outcome = remote
                 .fetch(repo, fetch_opts, progress, cancel, http_factory)
-                .map_err(PullError::Remote)?
-                .transfer;
+                .map_err(PullError::Remote)?;
+            if fetch_outcome.has_rejections() {
+                return Err(PullError::Repository(Error::Message(
+                    "some ref updates from the remote were rejected".into(),
+                )));
+            }
+            transfer = fetch_outcome.transfer;
         }
 
         if fetch_dry_run {

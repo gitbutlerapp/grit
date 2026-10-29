@@ -168,6 +168,7 @@ Failures with a known next step carry a `hint` in `--json` (and a `hint:` line o
 | Download without changing your branch | `grit fetch [<remote>]` |
 | Fetch one branch or ref | `grit fetch origin main` (or `grit fetch origin pull/123/head:pr-123` for a PR) |
 | Shallow fetch controls | `grit fetch --depth N`, `--deepen N`, or `--unshallow` (same semantics as Git; mutually exclusive) |
+| Force tag or branch updates | `grit fetch -f` / `--force` with `--tags` or a `+refs/…` refspec; default fetch ignores moved tags you already have |
 | Fetch and merge the remote copy of this branch | `grit pull` |
 | Pull only when a fast-forward is possible | `grit pull --ff-only` (exit **0** on success, **128** with `refused_not_ff` when diverged; branch unchanged) |
 | Fetch and replay local commits on top of upstream | `grit pull --rebase` (or `pull.rebase` in config; a conflict stops with markers, exit **1**, `operation: rebase` and `next_steps` in `--json`: resolve, `grit add`, `grit rebase --continue`, or `--abort` / `--skip`; `grit pull --check` predicts it) |

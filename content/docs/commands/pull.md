@@ -124,6 +124,7 @@ A merge commit a `--no-rebase` refresh makes checks in as a merge whose result k
 | `--unshallow` | Fetch full history and drop shallow boundaries (same as fetch). |
 | `--prune` / `--no-prune` | Prune stale remote-tracking refs after fetch. |
 | `--dry-run` | Fetch dry-run only: report ref updates without writing refs or objects; integration is skipped. |
+| `-f`, `--force` | Same as [`grit fetch --force`](../fetch/) (tag clobber with `--tags`, forced refspecs). |
 | `-q`, `--quiet` | Suppress fetch progress (human mode). |
 | `--ff-only` | Refuse to create a merge commit when the current branch has local commits; exit with `refused_not_ff` in `--json` output instead. Honors `pull.ff=only` when set. Conflicts with `--rebase`, `--no-rebase`, and `--check`. |
 | `--rebase` | Rebase local commits onto the upstream tip, overriding `pull.rebase=false`. As with `git pull --rebase`, merge commits on the branch (such as an earlier merge pull) are dropped, and the branch's own commits are replayed one after another on top of the upstream tip, skipping any whose change is already upstream. Conflicts with `--ff-only`, `--no-rebase`, and `--check`. |
