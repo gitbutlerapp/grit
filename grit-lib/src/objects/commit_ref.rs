@@ -32,6 +32,9 @@ impl<'a> CommitRef<'a> {
     /// # Errors
     ///
     /// Returns [`Error::CorruptObject`] when required headers are missing or malformed.
+    ///
+    /// A header block that ends at EOF (no blank line before the message) is accepted with
+    /// an empty message, matching Git's commit parser.
     pub fn parse(data: &'a [u8]) -> Result<Self> {
         parse_one_pass(data)
     }
@@ -206,7 +209,6 @@ fn parse_oid_fast(value: &[u8]) -> Result<ObjectId> {
 struct CommitScan<'a> {
     headers_block: &'a [u8],
     message: &'a [u8],
-    has_blank_line: bool,
     tree: Option<ObjectId>,
     parents: SmallVec<[ObjectId; 2]>,
     author_raw: Option<Cow<'a, [u8]>>,
@@ -325,7 +327,6 @@ fn scan_commit(data: &[u8], lenient: bool) -> Result<CommitScan<'_>> {
     Ok(CommitScan {
         headers_block: &data[..headers_end],
         message,
-        has_blank_line,
         tree,
         parents,
         author_raw,
@@ -336,11 +337,6 @@ fn scan_commit(data: &[u8], lenient: bool) -> Result<CommitScan<'_>> {
 
 fn parse_one_pass<'a>(data: &'a [u8]) -> Result<CommitRef<'a>> {
     let scan = scan_commit(data, false)?;
-    if !scan.has_blank_line {
-        return Err(Error::CorruptObject(
-            "commit missing blank line before message".to_owned(),
-        ));
-    }
     let author_bytes = scan
         .author_raw
         .ok_or_else(|| Error::CorruptObject("commit missing author header".to_owned()))?;
@@ -564,7 +560,8 @@ mod tests {
         assert_eq!(message, "m\n");
 
         let no_blank = format!("{tree}author A <a@x> 1 +0000\ncommitter C <c@x> 2 +0000\n");
-        assert!(CommitRef::parse(no_blank.as_bytes()).is_err());
+        let parsed = CommitRef::parse(no_blank.as_bytes()).expect("headers-only commit");
+        assert_eq!(parsed.message(), "");
         assert_eq!(
             commit_author_and_message_lenient(no_blank.as_bytes()),
             (Some("A <a@x> 1 +0000".to_owned()), String::new())

@@ -414,6 +414,9 @@ mod commit_scope_git_compat;
 #[path = "commit_scope_hook_index.rs"]
 mod commit_scope_hook_index;
 #[cfg(feature = "full-tests")]
+#[path = "commit_tag_no_blank_line_git_compat.rs"]
+mod commit_tag_no_blank_line_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "commit_trailers_git_compat.rs"]
 mod commit_trailers_git_compat;
 #[cfg(feature = "full-tests")]

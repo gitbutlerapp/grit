@@ -1301,13 +1301,10 @@ pub fn commit_subject_pretty(message: &str) -> String {
 ///
 /// Returns [`Error::CorruptObject`] when the commit headers are malformed.
 pub fn read_commit_subject_pretty(data: &[u8]) -> Result<String> {
-    let message_start = data
-        .windows(2)
-        .position(|w| w == b"\n\n")
-        .map(|p| p + 2)
-        .ok_or_else(|| {
-            Error::CorruptObject("commit missing blank line before message".to_owned())
-        })?;
+    let message_start = data.windows(2).position(|w| w == b"\n\n").map(|p| p + 2);
+    let Some(message_start) = message_start else {
+        return Ok(String::new());
+    };
     let body = std::str::from_utf8(data.get(message_start..).unwrap_or_default()).unwrap_or("");
     Ok(commit_subject_pretty(body))
 }
@@ -1354,9 +1351,7 @@ pub fn read_commit_subject_line(data: &[u8]) -> Result<String> {
         }
         pos = after_nl;
     }
-    Err(Error::CorruptObject(
-        "commit missing blank line before message".to_owned(),
-    ))
+    Ok("(no subject)".to_owned())
 }
 
 pub(crate) fn parse_oid_field(value: &[u8]) -> Result<ObjectId> {
@@ -1486,6 +1481,8 @@ pub struct TagData {
 /// # Errors
 ///
 /// Returns [`Error::CorruptObject`] if required headers are missing or malformed.
+///
+/// When the header block ends at EOF without a blank line, the message is empty (Git accepts this).
 pub fn parse_tag(data: &[u8]) -> Result<TagData> {
     use super::extra_headers::next_header_block;
 
@@ -1602,9 +1599,16 @@ pub fn parse_tag(data: &[u8]) -> Result<TagData> {
         pos = after_nl;
     }
 
-    Err(Error::CorruptObject(
-        "tag missing blank line before message".to_owned(),
-    ))
+    Ok(TagData {
+        object: object
+            .ok_or_else(|| Error::CorruptObject("tag missing object header".to_owned()))?,
+        object_type: object_type
+            .ok_or_else(|| Error::CorruptObject("tag missing type header".to_owned()))?,
+        tag: tag_name.ok_or_else(|| Error::CorruptObject("tag missing tag header".to_owned()))?,
+        tagger,
+        extra_headers,
+        message: String::new(),
+    })
 }
 
 /// Serialize a [`TagData`] into the raw bytes suitable for storage as a tag object.
