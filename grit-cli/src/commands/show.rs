@@ -32,6 +32,7 @@ use crate::context;
 use crate::diff_format::DiffFormatArgs;
 pub use crate::diff_render::DiffStat;
 use crate::diff_render::{self, diffstat_from_files};
+use crate::markdown::print_fenced_text;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Inputs for `grit show`.
@@ -541,9 +542,7 @@ impl MarkdownRender for ShowPathOutcome {
                 if *binary {
                     outln!(w, "_binary blob (see `data_base64` in JSON)_");
                 } else if let Some(t) = text {
-                    outln!(w, "```text");
-                    outln!(w, "{t}");
-                    outln!(w, "```");
+                    print_fenced_text(w, t)?;
                 }
             }
             ShowPathOutcome::Tree { spec, entries, .. } => {
@@ -584,7 +583,7 @@ impl MarkdownRender for ShowOutcome {
             }
             if !tag.message.trim().is_empty() {
                 outln!(w);
-                print_markdown_message(w, &tag.message)?;
+                print_fenced_text(w, &tag.message)?;
             }
             outln!(w);
         } else if self.kind == ShowKind::Branch {
@@ -635,7 +634,7 @@ impl MarkdownRender for ShowOutcome {
         }
         let body = message_body(&self.commit.message, &self.commit.subject);
         if !body.is_empty() {
-            print_markdown_message(w, &body)?;
+            print_fenced_text(w, &body)?;
             outln!(w);
         }
         crate::diff_render::render_markdown_stat(w, &self.stat, None)?;
@@ -726,13 +725,6 @@ fn print_message(w: &mut dyn Write, message: &str) -> Result<()> {
         } else {
             outln!(w, "    {line}");
         }
-    }
-    Ok(())
-}
-
-fn print_markdown_message(w: &mut dyn Write, message: &str) -> Result<()> {
-    for line in message.lines() {
-        outln!(w, "{line}");
     }
     Ok(())
 }

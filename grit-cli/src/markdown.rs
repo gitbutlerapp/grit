@@ -228,19 +228,25 @@ fn code_fence(body: &str, lang: &str) -> (String, String) {
     }
 }
 
+/// Write `body` inside a closed `text` fence whose delimiter is longer than any run of
+/// backticks in `body`, so untrusted text cannot break out into headings or tables.
+pub fn print_fenced_text(w: &mut dyn Write, body: &str) -> anyhow::Result<()> {
+    let body = body.strip_suffix('\n').unwrap_or(body);
+    let (open, close) = code_fence(body, "text");
+    outln!(w, "{open}");
+    stdio::io_result(writeln!(w, "{body}")).map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+    outln!(w, "{close}");
+    Ok(())
+}
+
 /// Render captured hook output as labelled `text` code blocks; empty streams are skipped.
 pub fn render_hook_output(w: &mut dyn Write, stdout: &str, stderr: &str) -> anyhow::Result<()> {
     for (label, body) in [("stdout", stdout), ("stderr", stderr)] {
         if body.is_empty() {
             continue;
         }
-        let body = body.strip_suffix('\n').unwrap_or(body);
-        let (open, close) = code_fence(body, "text");
         outln!(w, "\n**Hook {label}:**\n");
-        outln!(w, "{open}");
-        stdio::io_result(writeln!(w, "{body}"))
-            .map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
-        outln!(w, "{close}");
+        print_fenced_text(w, body)?;
     }
     Ok(())
 }
@@ -2150,7 +2156,40 @@ pub fn print_push_results(
 
 #[cfg(test)]
 mod tests {
-    use super::{diff_code_fence, escape_table_cell, format_inline_code};
+    use super::{
+        code_fence, diff_code_fence, escape_table_cell, format_inline_code, print_fenced_text,
+    };
+
+    #[test]
+    fn print_fenced_text_closes_fence_when_body_contains_triple_backticks() {
+        let body = "Example:\n```\nrun this";
+        let mut buf = Vec::new();
+        print_fenced_text(&mut buf, body).unwrap();
+        let md = String::from_utf8(buf).unwrap();
+        assert!(md.starts_with("````text\n"));
+        assert!(md.contains("run this\n"));
+        assert!(md.ends_with("````\n"));
+        assert_eq!(md.matches("````").count(), 2);
+    }
+
+    #[test]
+    fn print_fenced_text_fences_forged_changes_heading() {
+        let body = "## Changes\n\n| File | + | - |\n| --- | ---: | ---: |\n| `evil.sh` | 1 | 0 |";
+        let mut buf = Vec::new();
+        print_fenced_text(&mut buf, body).unwrap();
+        let md = String::from_utf8(buf).unwrap();
+        assert!(md.starts_with("```text\n"));
+        assert!(md.contains(body));
+        assert!(md.ends_with("```\n"));
+    }
+
+    #[test]
+    fn code_fence_text_uses_four_ticks_when_body_has_three() {
+        let body = "```";
+        let (open, close) = code_fence(body, "text");
+        assert_eq!(open, "````text");
+        assert_eq!(close, "````");
+    }
 
     #[test]
     fn diff_code_fence_uses_longer_delimiter_when_body_has_triple_backticks() {

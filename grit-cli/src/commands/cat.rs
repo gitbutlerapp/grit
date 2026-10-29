@@ -13,6 +13,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::context;
+use crate::markdown::print_fenced_text;
 use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
 
 /// Blob payload in JSON (`--json` contract).
@@ -106,9 +107,7 @@ impl MarkdownRender for CatOutcome {
                         "_large binary blob (streamed in human mode; omitted from JSON)_"
                     );
                 } else if let Some(text) = &b.text {
-                    outln!(w, "```text");
-                    outln!(w, "{text}");
-                    outln!(w, "```");
+                    print_fenced_text(w, text)?;
                 } else {
                     outln!(w, "_binary blob (base64 in JSON)_");
                 }
@@ -129,9 +128,7 @@ impl MarkdownRender for CatOutcome {
             }
             CatContentJson::Commit(t) | CatContentJson::Tag(t) => {
                 if let Some(text) = &t.text {
-                    outln!(w, "```text");
-                    outln!(w, "{}", text.trim_end());
-                    outln!(w, "```");
+                    print_fenced_text(w, text.trim_end())?;
                 } else {
                     outln!(w, "_non-UTF-8 object payload (base64 in JSON)_");
                 }
