@@ -843,8 +843,8 @@ pub(crate) fn pathspec_entry_is_relevant(path: &str, is_tree: bool, specs: &[Str
 
 /// Whether a path-limited tree walk should recurse into directory `full_name` for pathspec `spec`.
 ///
-/// Used by revision history path limiting ([`crate::rev_list`]) and diff tree pruning
-/// ([`crate::diff::core::DiffTreesWalkHint`]). Matches Git `tree-walk.c` `do_match` recursive
+/// Used by revision history path limiting ([`crate::revwalk::rev_list`]) and diff tree pruning.
+/// Matches Git `tree-walk.c` `do_match` recursive
 /// directory interest: a directory is entered when a positive spec's leading literal segment
 /// matches it, or when the pattern begins with a glob metacharacter (`simple_length` zero).
 ///
