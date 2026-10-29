@@ -156,6 +156,136 @@ fn delete_remote_branch_json_uses_short_name_for_qualified_ref() {
         "branch must be short name even when --delete uses refs/heads/: {json}"
     );
     assert_eq!(json["results"][0]["ref"].as_str(), Some("refs/heads/topic"));
+    assert_eq!(json["results"][0]["deleted"].as_bool(), Some(true));
+}
+
+fn assert_delete_human_stdout(stdout: &str) {
+    assert!(
+        stdout.contains("deleted"),
+        "stdout should mention deletion: {stdout}"
+    );
+    assert!(
+        !stdout.contains("pushed"),
+        "stdout should not look like a normal push: {stdout}"
+    );
+}
+
+#[test]
+fn delete_remote_branch_human_output_says_deleted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let origin = root.join("origin.git");
+    std::fs::create_dir_all(&origin).unwrap();
+    git(&origin, &["init", "-q", "--bare", "-b", "main"]);
+
+    let local = root.join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main"]);
+    std::fs::write(local.join("f"), "x\n").unwrap();
+    git(&local, &["add", "f"]);
+    git(&local, &["commit", "-qm", "seed"]);
+    git(
+        &local,
+        &["remote", "add", "origin", origin.to_str().unwrap()],
+    );
+    git(&local, &["push", "-q", "origin", "HEAD:refs/heads/main"]);
+    git(&local, &["branch", "tmpdel"]);
+    git(&local, &["push", "-q", "origin", "HEAD:refs/heads/tmpdel"]);
+    git(&local, &["checkout", "main"]);
+    git(&local, &["branch", "-D", "tmpdel"]);
+
+    let out = grit(
+        &local,
+        &["push", "--delete", "tmpdel", "--remote", "origin"],
+    );
+    assert!(
+        out.status.success(),
+        "grit push --delete: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_delete_human_stdout(&stdout);
+    assert!(stdout.contains("deleted tmpdel from origin"), "{stdout}");
+
+    git(&local, &["push", "-q", "origin", "main:refs/heads/tmpdel"]);
+    let out = grit(
+        &local,
+        &[
+            "push",
+            "--delete",
+            "tmpdel",
+            "--remote",
+            "origin",
+            "--dry-run",
+        ],
+    );
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("would delete tmpdel from origin"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("pushed"), "{stdout}");
+}
+
+#[test]
+fn delete_remote_tag_human_and_json() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let origin = root.join("origin.git");
+    std::fs::create_dir_all(&origin).unwrap();
+    git(&origin, &["init", "-q", "--bare", "-b", "main"]);
+
+    let local = root.join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main"]);
+    std::fs::write(local.join("f"), "x\n").unwrap();
+    git(&local, &["add", "f"]);
+    git(&local, &["commit", "-qm", "seed"]);
+    git(
+        &local,
+        &["remote", "add", "origin", origin.to_str().unwrap()],
+    );
+    git(&local, &["push", "-q", "origin", "HEAD:refs/heads/main"]);
+    git(&local, &["tag", "v-del"]);
+    git(&local, &["push", "-q", "origin", "refs/tags/v-del"]);
+
+    let out = grit(&local, &["push", "--delete", "v-del", "--remote", "origin"]);
+    assert!(out.status.success());
+    assert_delete_human_stdout(&String::from_utf8_lossy(&out.stdout));
+
+    git(&local, &["push", "-q", "origin", "refs/tags/v-del"]);
+    let out = grit(
+        &local,
+        &["push", "--delete", "v-del", "--remote", "origin", "--json"],
+    );
+    assert!(out.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    assert_eq!(json["kind"].as_str(), Some("delete"));
+    assert_eq!(json["results"][0]["deleted"].as_bool(), Some(true));
+}
+
+#[test]
+fn colon_refspec_delete_uses_deleted_output() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (origin, local) = remote_with_branches(tmp.path());
+
+    let out = grit(&local, &["push", "origin", ":a"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_delete_human_stdout(&String::from_utf8_lossy(&out.stdout));
+    assert!(
+        !ls_remote_heads(&origin).contains(&"refs/heads/a".to_owned()),
+        "branch a should be gone"
+    );
+
+    let out = grit(&local, &["push", "origin", ":b", "--json"]);
+    assert!(out.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    assert_eq!(json["results"][0]["deleted"].as_bool(), Some(true));
 }
 
 /// A work tree whose `origin` bare remote has `main`, `a`, `b` and `c`.
@@ -211,6 +341,9 @@ fn delete_two_remote_branches_in_one_push() {
         .map(|r| (r["ref"].as_str().unwrap(), r["status"].as_str().unwrap()))
         .collect();
     assert_eq!(refs, [("refs/heads/a", "ok"), ("refs/heads/b", "ok")]);
+    for row in json["results"].as_array().unwrap() {
+        assert_eq!(row["deleted"].as_bool(), Some(true));
+    }
     assert_eq!(
         ls_remote_heads(&origin),
         ["refs/heads/c", "refs/heads/main"]
