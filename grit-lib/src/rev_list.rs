@@ -9093,9 +9093,9 @@ fn collect_reachable_objects_segmented(
                 result.push((tag_oid, "tag".to_owned()));
             }
         }
-        let parent_trees_slice = if filter.is_some_and(|f| {
-            f.is_depth_sensitive() || matches!(f, ObjectFilter::SparseOid(_))
-        }) {
+        let parent_trees_slice = if filter
+            .is_some_and(|f| f.is_depth_sensitive() || matches!(f, ObjectFilter::SparseOid(_)))
+        {
             None
         } else {
             Some(graph.parent_commit_trees(commit_oid)?)
