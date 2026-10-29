@@ -4,8 +4,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::{
     add_linked_worktree, ensure_branch_not_checked_out_elsewhere,
-    find_worktree_with_branch_checked_out, list_worktrees, remove_linked_worktree,
-    AddLinkedWorktreeOptions, WorktreeBranch,
+    ensure_branch_not_checked_out_in_any_worktree, find_worktree_with_branch_checked_out,
+    list_worktrees, remove_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch,
 };
 use grit_test_support::git;
 use std::fs;
@@ -176,4 +176,80 @@ fn second_worktree_same_branch_is_rejected() {
     let found = find_worktree_with_branch_checked_out(&repo, "shared", None).expect("find");
     assert!(found.is_some());
     assert!(ensure_branch_not_checked_out_elsewhere(&repo, "shared").is_err());
+}
+
+#[test]
+fn bare_repo_head_does_not_block_worktree_add_on_default_branch() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).expect("mkdir");
+    init_repo(&src);
+    fs::write(src.join("a"), "a\n").unwrap();
+    git_cmd(&src, &["add", "a"]);
+    git_cmd(&src, &["commit", "-qm", "a"]);
+
+    let bare = tmp.path().join("bare.git");
+    git_cmd(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            src.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(
+        git_cmd(&bare, &["symbolic-ref", "HEAD"]).trim(),
+        "refs/heads/main"
+    );
+
+    let repo =
+        Repository::discover(Some(bare.as_path()), &RepositoryOptions::empty()).expect("discover");
+    assert!(
+        find_worktree_with_branch_checked_out(&repo, "main", None)
+            .expect("find")
+            .is_none(),
+        "bare HEAD must not count as checking out main"
+    );
+    assert!(ensure_branch_not_checked_out_in_any_worktree(&repo, "main").is_ok());
+
+    let wt = tmp.path().join("wt");
+    add_linked_worktree(
+        &repo,
+        &AddLinkedWorktreeOptions {
+            path: wt.clone(),
+            branch: Some(WorktreeBranch::Existing("main".into())),
+            start_point: None,
+            force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
+        },
+    )
+    .expect("add main from bare repo");
+
+    git_cmd(&wt, &["status"]);
+    git_cmd(&wt, &["fsck"]);
+    assert!(wt.join("a").is_file());
+
+    let second = tmp.path().join("wt2");
+    assert!(
+        add_linked_worktree(
+            &repo,
+            &AddLinkedWorktreeOptions {
+                path: second,
+                branch: Some(WorktreeBranch::Existing("main".into())),
+                start_point: None,
+                force: false,
+                lock: None,
+                no_checkout: false,
+                track: false,
+            },
+        )
+        .is_err(),
+        "second checkout of main must still fail"
+    );
+
+    remove_linked_worktree(&repo, &wt, true).expect("cleanup");
 }

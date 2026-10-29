@@ -98,6 +98,10 @@ impl HumanRender for WorktreeOutcome {
         match self {
             WorktreeOutcome::List { worktrees } => {
                 for wt in worktrees {
+                    if wt.bare {
+                        outln!(w, "  {}  (bare)", wt.path);
+                        continue;
+                    }
                     let branch = wt
                         .branch
                         .as_deref()

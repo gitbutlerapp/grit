@@ -187,7 +187,8 @@ pub(crate) fn admin_dirs_match(a: &Path, b: &Path) -> bool {
 /// Find a worktree that has `branch_short_name` checked out, optionally skipping one admin dir.
 ///
 /// A worktree has the branch checked out when its `HEAD` is the branch, or when a rebase or
-/// bisect there is working on it (with `HEAD` detached until it ends).
+/// bisect there is working on it (with `HEAD` detached until it ends). Bare repository entries
+/// are skipped: their symbolic `HEAD` is not a checkout (same as Git `wt->is_bare`).
 ///
 /// `exclude_admin_dir` is typically the current worktree's admin dir so a switch to the branch
 /// already checked out here is allowed.
@@ -197,6 +198,9 @@ pub fn find_worktree_with_branch_checked_out(
     exclude_admin_dir: Option<&Path>,
 ) -> Result<Option<BranchWorktreeCheckout>> {
     for entry in list_worktrees(repo)? {
+        if entry.is_bare {
+            continue;
+        }
         if exclude_admin_dir.is_some_and(|ex| admin_dirs_match(&entry.admin_dir, ex)) {
             continue;
         }
@@ -578,8 +582,8 @@ pub struct PrunedWorktreeEntry {
 ///
 /// # Errors
 ///
-/// Fails when the repository is bare, the path is occupied, the branch is already
-/// checked out elsewhere, or checkout cannot complete.
+/// Fails when the path is occupied, the branch is already checked out in a non-bare
+/// worktree, or checkout cannot complete.
 pub fn add_linked_worktree(
     repo: &Repository,
     opts: &AddLinkedWorktreeOptions,
@@ -606,7 +610,10 @@ pub fn add_linked_worktree(
         (Some(start_oid), Some(tree_oid), plan)
     };
     if let Some(ref branch_ref) = plan.head_ref {
-        branch_checked_out_elsewhere(repo, branch_ref)?;
+        let short = branch_ref
+            .strip_prefix("refs/heads/")
+            .unwrap_or(branch_ref.as_str());
+        ensure_branch_not_checked_out_in_any_worktree(repo, short)?;
     }
 
     let admin = admin_plan.admin_dir;
@@ -1362,20 +1369,6 @@ fn resolve_existing_branch(repo: &Repository, spec: &str) -> Option<String> {
     };
     repo.resolve_ref_oid(&full).ok()?;
     Some(full)
-}
-
-fn branch_checked_out_elsewhere(repo: &Repository, branch_ref: &str) -> Result<()> {
-    for wt in list_worktrees(repo)? {
-        if let HeadState::Branch { refname, .. } = &wt.head {
-            if refname == branch_ref {
-                return Err(branch_checked_out_error(
-                    branch_ref.strip_prefix("refs/heads/").unwrap_or(branch_ref),
-                    &wt.path,
-                ));
-            }
-        }
-    }
-    Ok(())
 }
 
 fn ensure_empty_or_missing(path: &Path) -> Result<()> {

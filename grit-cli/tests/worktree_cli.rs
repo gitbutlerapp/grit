@@ -457,3 +457,73 @@ fn reftable_add_and_switch_json_match_git_visible_head() {
     );
     git(&dir, &["fsck", "--strict"]);
 }
+
+#[derive(serde::Deserialize)]
+struct BareWorktreeListJson {
+    worktrees: Vec<BareWorktreeListRow>,
+}
+
+#[derive(serde::Deserialize)]
+struct BareWorktreeListRow {
+    bare: bool,
+    branch: Option<String>,
+}
+
+#[test]
+fn worktree_list_bare_repo_marks_main_as_bare() {
+    let tmp = unique_tmp("bare-list");
+    let src = tmp.join("src");
+    std::fs::create_dir_all(&src).expect("mkdir");
+    git(&src, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(src.join("f"), b"1\n").unwrap();
+    git(&src, &["add", "f"]);
+    git(&src, &["commit", "-qm", "init"]);
+
+    let bare = tmp.join("bare.git");
+    git(
+        &tmp,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            src.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+    );
+
+    let human = grit(&bare, &["worktree", "list"]);
+    assert!(
+        human.status.success(),
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
+    let human_out = String::from_utf8_lossy(&human.stdout);
+    assert!(
+        human_out.contains("(bare)"),
+        "expected (bare) marker: {human_out}"
+    );
+    assert!(
+        !human_out.contains("[main]"),
+        "bare row must not show branch: {human_out}"
+    );
+    assert!(
+        !human_out.starts_with('*'),
+        "bare row must not be marked current: {human_out}"
+    );
+
+    let json = grit(&bare, &["worktree", "list", "--json"]);
+    assert!(
+        json.status.success(),
+        "{}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let parsed: BareWorktreeListJson =
+        serde_json::from_slice(&json.stdout).expect("parse worktree list json");
+    let main_row = parsed
+        .worktrees
+        .iter()
+        .find(|w| w.bare)
+        .expect("bare worktree row");
+    assert!(main_row.bare);
+    assert!(main_row.branch.is_some(), "json still includes branch ref");
+}
