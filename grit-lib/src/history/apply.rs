@@ -10,7 +10,7 @@ use crate::hooks::{run_post_checkout, run_post_rewrite, HookName, RewriteKind};
 use crate::index::MODE_REGULAR;
 use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
-use crate::objects::{parse_tree, ObjectKind};
+use crate::objects::ObjectKind;
 use crate::porcelain::checkout::{
     materialize_gitlink_worktree, write_blob_to_worktree, LeadingDirCache,
 };
@@ -944,34 +944,13 @@ fn tree_entry_at_path(
     tree: ObjectId,
     path: &str,
 ) -> Result<Option<(ObjectId, u32)>, HistoryError> {
-    let mut current = tree;
-    let mut components = path.split('/').peekable();
-    while let Some(name) = components.next() {
-        let raw = repo
-            .odb()
-            .read(&current)
-            .map_err(|e| HistoryError::WorktreeApply {
-                message: e.to_string(),
-            })?;
-        let entries = parse_tree(&raw.data).map_err(|e| HistoryError::WorktreeApply {
+    let entry = repo
+        .odb()
+        .tree_entry_at_path(&tree, path.as_bytes())
+        .map_err(|e| HistoryError::WorktreeApply {
             message: e.to_string(),
         })?;
-        let Some(entry) = entries
-            .iter()
-            .find(|e| e.name.as_slice() == name.as_bytes())
-        else {
-            return Ok(None);
-        };
-        if components.peek().is_some() {
-            if entry.mode != crate::index::MODE_TREE {
-                return Ok(None);
-            }
-            current = entry.oid;
-        } else {
-            return Ok(Some((entry.oid, entry.mode)));
-        }
-    }
-    Ok(None)
+    Ok(entry.map(|e| (e.oid, e.mode)))
 }
 
 pub(crate) fn commit_tree_for_apply(

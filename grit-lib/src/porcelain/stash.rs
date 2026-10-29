@@ -199,32 +199,21 @@ impl StashTreeDelta {
     }
 }
 
-/// Look up affected paths through the ODB's bounded parsed-tree cache.
+/// The file at `path` in `tree`; a directory in HEAD is not a file at this path.
 fn stash_tree_entry_at_path(
     repo: &Repository,
-    mut tree: ObjectId,
+    tree: ObjectId,
     path: &[u8],
 ) -> Result<Option<StashTreeEntry>> {
-    let mut components = path.split(|&b| b == b'/').peekable();
-    while let Some(name) = components.next() {
-        let entries = repo.odb().cached_tree_entries(&tree)?;
-        let Some(entry) = entries.iter().find(|e| e.name == name) else {
-            return Ok(None);
-        };
-        if components.peek().is_none() {
-            // A directory in HEAD is not a file at this path.
-            return Ok((entry.mode != MODE_TREE).then(|| StashTreeEntry {
-                path: path.to_owned(),
-                mode: entry.mode,
-                oid: entry.oid,
-            }));
-        }
-        if entry.mode != MODE_TREE {
-            return Ok(None);
-        }
-        tree = entry.oid;
-    }
-    Ok(None)
+    Ok(repo
+        .odb()
+        .tree_entry_at_path(&tree, path)?
+        .filter(|entry| entry.mode != MODE_TREE)
+        .map(|entry| StashTreeEntry {
+            path: path.to_owned(),
+            mode: entry.mode,
+            oid: entry.oid,
+        }))
 }
 
 fn load_stash_index(repo: &Repository) -> Result<Index> {

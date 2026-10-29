@@ -86,18 +86,9 @@ fn diff_into(
 
 /// The entry at `path` under `tree`.
 pub(crate) fn lookup(odb: &Odb, tree: ObjectId, path: &[u8]) -> Result<Option<Entry>> {
-    let mut current = (TREE_MODE, tree);
-    for component in path.split(|b| *b == b'/') {
-        if current.0 != TREE_MODE {
-            return Ok(None);
-        }
-        let entries = parse_tree(&odb.read(&current.1)?.data)?;
-        match entries.into_iter().find(|e| e.name == component) {
-            Some(e) => current = (e.mode, e.oid),
-            None => return Ok(None),
-        }
-    }
-    Ok(Some(current))
+    Ok(odb
+        .tree_entry_at_path(&tree, path)?
+        .map(|e| (e.mode, e.oid)))
 }
 
 /// `base` (or an empty tree) with each `(path, entry)` set, or removed when

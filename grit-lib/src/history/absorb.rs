@@ -15,7 +15,7 @@ use crate::merge_trees::{
     merge_trees_three_way, DirectoryRenameMode, TreeMergeConflictPresentation,
     WhitespaceMergeOptions,
 };
-use crate::objects::{parse_tree, CommitData, ObjectId, ObjectKind};
+use crate::objects::{CommitData, ObjectId, ObjectKind};
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::state::{resolve_head_for_repository, HeadState};
@@ -1054,7 +1054,12 @@ pub(crate) fn remaining_index_blob_for_path(
     Ok(apply_patch_hunks_bottom_up(&post_head_blob, &translated))
 }
 
-fn index_blob_at_path(repo: &Repository, index: &crate::index::Index, path: &str) -> Vec<u8> {
+/// Contents of the stage-0 index entry at `path`, or empty when there is none.
+pub(super) fn index_blob_at_path(
+    repo: &Repository,
+    index: &crate::index::Index,
+    path: &str,
+) -> Vec<u8> {
     index
         .get(path.as_bytes(), 0)
         .and_then(|entry| repo.odb().read(&entry.oid).ok().map(|raw| raw.data))
@@ -1517,28 +1522,20 @@ mod patch_tests {
     }
 }
 
-fn blob_at_path(repo: &Repository, tree: ObjectId, path: &str) -> Result<Vec<u8>, HistoryError> {
-    let mut current = tree;
-    for (idx, part) in path.split('/').enumerate() {
-        let raw = repo.odb().read(&current).map_err(library_err)?;
-        let entries = parse_tree(&raw.data).map_err(library_err)?;
-        let Some(entry) = entries
-            .iter()
-            .find(|e| e.name.as_slice() == part.as_bytes())
-        else {
-            return Err(HistoryError::Planning {
-                message: format!("path '{path}' not found in tree"),
-            });
-        };
-        if idx + 1 == path.split('/').count() {
-            let blob = repo.odb().read(&entry.oid).map_err(library_err)?;
-            return Ok(blob.data);
-        }
-        current = entry.oid;
-    }
-    Err(HistoryError::Planning {
-        message: format!("path '{path}' not found in tree"),
-    })
+/// Contents of the object at `path` in `tree`; a missing path is a planning error.
+pub(super) fn blob_at_path(
+    repo: &Repository,
+    tree: ObjectId,
+    path: &str,
+) -> Result<Vec<u8>, HistoryError> {
+    let odb = repo.odb();
+    let entry = odb
+        .tree_entry_at_path(&tree, path.as_bytes())
+        .map_err(library_err)?
+        .ok_or_else(|| HistoryError::Planning {
+            message: format!("path '{path}' not found in tree"),
+        })?;
+    Ok(odb.read(&entry.oid).map_err(library_err)?.data)
 }
 
 #[cfg(test)]

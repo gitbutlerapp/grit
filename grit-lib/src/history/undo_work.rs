@@ -407,36 +407,24 @@ fn tree_blob_at_path(
     tree: ObjectId,
     path: &str,
 ) -> Result<Option<IndexBlob>, HistoryError> {
-    let mut current = tree;
-    let mut components = path.split('/').peekable();
-    while let Some(name) = components.next() {
-        let raw = repo.odb().read(&current).map_err(apply_err)?;
-        let entries = crate::objects::parse_tree(&raw.data).map_err(apply_err)?;
-        let Some(entry) = entries.iter().find(|e| e.name == name.as_bytes()) else {
-            return Ok(None);
-        };
-        if components.peek().is_some() {
-            if entry.mode != MODE_TREE {
-                return Ok(None);
-            }
-            current = entry.oid;
-            continue;
-        }
-        if entry.mode == MODE_TREE {
-            return Ok(None);
-        }
-        let data = if entry.mode == MODE_GITLINK {
-            Vec::new()
-        } else {
-            repo.odb().read(&entry.oid).map_err(apply_err)?.data
-        };
-        return Ok(Some(IndexBlob {
-            mode: entry.mode,
-            oid: entry.oid,
-            data,
-        }));
-    }
-    Ok(None)
+    let odb = repo.odb();
+    let Some(entry) = odb
+        .tree_entry_at_path(&tree, path.as_bytes())
+        .map_err(apply_err)?
+        .filter(|entry| entry.mode != MODE_TREE)
+    else {
+        return Ok(None);
+    };
+    let data = if entry.mode == MODE_GITLINK {
+        Vec::new()
+    } else {
+        odb.read(&entry.oid).map_err(apply_err)?.data
+    };
+    Ok(Some(IndexBlob {
+        mode: entry.mode,
+        oid: entry.oid,
+        data,
+    }))
 }
 
 fn hash_blob(algo: HashAlgo, data: &[u8]) -> Result<ObjectId, HistoryError> {

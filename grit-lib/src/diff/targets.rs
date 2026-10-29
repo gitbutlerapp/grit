@@ -20,9 +20,8 @@ use crate::diff::{
 use crate::error::{Error, PathspecResolveError, Result};
 use crate::index::Index;
 use crate::index::MODE_TREE;
-use crate::objects::odb::Odb;
 use crate::objects::FileMode;
-use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
 use crate::parallel::{par_map, ParallelOp, ThreadPolicy};
 use crate::pathspec::{exact_literal_pathspec_set, PathspecMatchContext, PathspecMatcher};
 use crate::porcelain::pathspec_match::{
@@ -764,30 +763,6 @@ fn unstaged_changes_inner(
     load_changes(repo.odb(), entries, Some(&side))
 }
 
-fn tree_blob_at_path(odb: &Odb, tree: &ObjectId, path: &str) -> Result<Option<(ObjectId, u32)>> {
-    let mut current = *tree;
-    let mut components = path.split('/').peekable();
-    while let Some(name) = components.next() {
-        let raw = odb.read(&current)?;
-        let entries = parse_tree(&raw.data)?;
-        let Some(entry) = entries
-            .iter()
-            .find(|e| e.name.as_slice() == name.as_bytes())
-        else {
-            return Ok(None);
-        };
-        if components.peek().is_some() {
-            if entry.mode != MODE_TREE {
-                return Ok(None);
-            }
-            current = entry.oid;
-        } else {
-            return Ok(Some((entry.oid, entry.mode)));
-        }
-    }
-    Ok(None)
-}
-
 pub(super) fn diff_index_to_tree_for_paths(
     repo: &Repository,
     index: &Index,
@@ -802,7 +777,9 @@ pub(super) fn diff_index_to_tree_for_paths(
             continue;
         }
         let tree_side = match head_tree {
-            Some(t) => tree_blob_at_path(odb, t, path)?,
+            Some(t) => odb
+                .tree_entry_at_path(t, path.as_bytes())?
+                .map(|e| (e.oid, e.mode)),
             None => None,
         };
         let (idx_oid, idx_mode) = index_entry
@@ -1083,28 +1060,6 @@ pub(crate) fn unstaged_raw_changes_with_peer_hunks_in(
     Ok((unstaged, peer_hunks))
 }
 
-fn blob_oid_in_tree(repo: &Repository, tree: ObjectId, path: &str) -> Result<Option<ObjectId>> {
-    use crate::objects::parse_tree;
-    let mut cur = tree;
-    let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    for (i, name) in components.iter().enumerate() {
-        let raw = repo.odb().read(&cur)?;
-        let entries = parse_tree(&raw.data)?;
-        let name_bytes = name.as_bytes();
-        let Some(entry) = entries.iter().find(|e| e.name.as_slice() == name_bytes) else {
-            return Ok(None);
-        };
-        if i + 1 == components.len() {
-            return Ok(Some(entry.oid));
-        }
-        if entry.mode != crate::index::MODE_TREE {
-            return Ok(None);
-        }
-        cur = entry.oid;
-    }
-    Ok(None)
-}
-
 fn path_has_staged_delta_vs_head_with_index(
     repo: &Repository,
     index: &Index,
@@ -1116,7 +1071,10 @@ fn path_has_staged_delta_vs_head_with_index(
         return Ok(true);
     }
     let head_blob = match head_tree {
-        Some(tree) => blob_oid_in_tree(repo, tree, path)?,
+        Some(tree) => repo
+            .odb()
+            .tree_entry_at_path(&tree, path_bytes)?
+            .map(|e| e.oid),
         None => None,
     };
     let Some(idx_entry) = index.get(path_bytes, 0) else {
@@ -1139,7 +1097,7 @@ fn path_is_exact_tracked_file(
         return Ok(entry.mode != MODE_TREE);
     }
     match head_tree {
-        Some(tree) => Ok(blob_oid_in_tree(repo, tree, path)?.is_some()),
+        Some(tree) => Ok(repo.odb().tree_entry_at_path(&tree, path_bytes)?.is_some()),
         None => Ok(false),
     }
 }

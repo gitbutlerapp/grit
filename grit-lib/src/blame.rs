@@ -1376,26 +1376,10 @@ fn resolve_path_in_tree_entry(
     tree_oid: &ObjectId,
     path: &str,
 ) -> Result<Option<(ObjectId, u32)>> {
-    let bytes = storage_bytes(path);
-    let parts: Vec<&[u8]> = bytes.split(|&b| b == b'/').collect();
-    let mut current = *tree_oid;
-
-    for (i, part) in parts.iter().enumerate() {
-        let obj = read_object_for_blame(odb, &current, None)?;
-        let entries = parse_tree(&obj.data)?;
-        match entries.iter().find(|e| e.name == *part) {
-            Some(e) if i == parts.len() - 1 => {
-                if e.mode == 0o040000 {
-                    return Ok(None);
-                }
-                return Ok(Some((e.oid, e.mode)));
-            }
-            Some(e) if e.mode == 0o040000 => current = e.oid,
-            Some(_) => return Ok(None),
-            None => return Ok(None),
-        }
-    }
-    Ok(None)
+    Ok(odb
+        .tree_entry_at_path(tree_oid, &storage_bytes(path))?
+        .filter(|e| e.mode != 0o040000)
+        .map(|e| (e.oid, e.mode)))
 }
 
 /// Split content into lines. A final line without a trailing newline is still a line

@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use super::absorb::remaining_index_blob_for_path;
+use super::absorb::{blob_at_path, index_blob_at_path, remaining_index_blob_for_path};
 use super::apply::{apply_fixup_rewrite_then, apply_index_to_worktree_delta};
 use super::error::HistoryError;
 use super::plan::{conflict_error, plan_rewrite};
@@ -20,7 +20,7 @@ use crate::merge_trees::{
     merge_trees_three_way, DirectoryRenameMode, TreeMergeConflictPresentation,
     WhitespaceMergeOptions,
 };
-use crate::objects::{parse_tree, CommitData, ObjectId, ObjectKind};
+use crate::objects::{CommitData, ObjectId, ObjectKind};
 use crate::porcelain::hunk_select::{
     diff_options_for_hunk_select, resolve_selection, stage_hunks, HunkSelection,
 };
@@ -342,13 +342,6 @@ fn restore_after_hunk_fixup_apply(
     Ok(())
 }
 
-fn index_blob_at_path(repo: &Repository, index: &Index, path: &str) -> Vec<u8> {
-    index
-        .get(path.as_bytes(), 0)
-        .and_then(|entry| repo.odb().read(&entry.oid).ok().map(|raw| raw.data))
-        .unwrap_or_default()
-}
-
 fn upsert_index_blob(
     repo: &Repository,
     index: &mut Index,
@@ -383,31 +376,6 @@ fn upsert_index_blob(
         });
     }
     Ok(())
-}
-
-fn blob_at_path(repo: &Repository, tree: ObjectId, path: &str) -> Result<Vec<u8>, HistoryError> {
-    let mut current = tree;
-    let parts: Vec<&str> = path.split('/').collect();
-    for (idx, part) in parts.iter().enumerate() {
-        let raw = repo.odb().read(&current).map_err(library_err)?;
-        let entries = parse_tree(&raw.data).map_err(library_err)?;
-        let Some(entry) = entries
-            .iter()
-            .find(|e| e.name.as_slice() == part.as_bytes())
-        else {
-            return Err(HistoryError::Planning {
-                message: format!("path '{path}' not found in tree"),
-            });
-        };
-        if idx + 1 == parts.len() {
-            let blob = repo.odb().read(&entry.oid).map_err(library_err)?;
-            return Ok(blob.data);
-        }
-        current = entry.oid;
-    }
-    Err(HistoryError::Planning {
-        message: format!("path '{path}' not found in tree"),
-    })
 }
 
 /// Build the blob folded into the fixup target: `HEAD` plus selected unstaged edits only.
