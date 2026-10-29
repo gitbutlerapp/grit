@@ -3124,7 +3124,9 @@ fn diff_tree_entries_count(
                         ni += 1;
                     }
                     std::cmp::Ordering::Equal => {
-                        if o.oid != n.oid || o.mode != n.mode {
+                        if o.oid != n.oid
+                            || crate::index::canon_mode(o.mode) != crate::index::canon_mode(n.mode)
+                        {
                             let path = crate::repo_relpath::format_path_stored(prefix, &o.name);
                             if is_tree_mode(o.mode) && is_tree_mode(n.mode) {
                                 if show_trees {
@@ -3236,7 +3238,9 @@ fn diff_tree_entries_opts(
                     }
                     std::cmp::Ordering::Equal => {
                         // Both present — check for changes
-                        if o.oid != n.oid || o.mode != n.mode {
+                        if o.oid != n.oid
+                            || crate::index::canon_mode(o.mode) != crate::index::canon_mode(n.mode)
+                        {
                             let path = crate::repo_relpath::format_path_stored(prefix, o.name);
                             if is_tree_mode(o.mode) && is_tree_mode(n.mode) {
                                 // Both are trees
@@ -3245,8 +3249,8 @@ fn diff_tree_entries_opts(
                                         status: DiffStatus::Modified,
                                         old_path: Some(path.clone()),
                                         new_path: Some(path.clone()),
-                                        old_mode: FileMode::new(o.mode),
-                                        new_mode: FileMode::new(n.mode),
+                                        old_mode: FileMode::new(crate::index::canon_mode(o.mode)),
+                                        new_mode: FileMode::new(crate::index::canon_mode(n.mode)),
                                         old_oid: o.oid,
                                         new_oid: n.oid,
                                         score: None,
@@ -3851,13 +3855,17 @@ fn diff_index_to_tree_flatten(
         match tree_map.remove(path.as_str()) {
             Some(te) => {
                 // Present in both — check for differences
-                if te.oid != ie.oid || te.mode != ie.mode {
+                if te.oid != ie.oid
+                    || crate::index::canon_mode(te.mode) != crate::index::canon_mode(ie.mode)
+                {
+                    let tree_mode = crate::index::canon_mode(te.mode);
+                    let index_mode = crate::index::canon_mode(ie.mode);
                     result.push(DiffEntry {
-                        status: DiffStatus::for_content_change(te.mode, ie.mode),
+                        status: DiffStatus::for_content_change(tree_mode, index_mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path),
-                        old_mode: FileMode::new(te.mode),
-                        new_mode: FileMode::new(ie.mode),
+                        old_mode: FileMode::new(tree_mode),
+                        new_mode: FileMode::new(index_mode),
                         old_oid: te.oid,
                         new_oid: ie.oid,
                         score: None,
@@ -4192,14 +4200,19 @@ fn diff_index_tree_at(
                                 continue;
                             };
                             *walk.idx_cursor += 1;
-                            if t_entry.oid != ie.oid || t_entry.mode != ie.mode {
+                            if t_entry.oid != ie.oid
+                                || crate::index::canon_mode(t_entry.mode)
+                                    != crate::index::canon_mode(ie.mode)
+                            {
                                 let path = String::from_utf8_lossy(&ie.path).into_owned();
+                                let tree_mode = crate::index::canon_mode(t_entry.mode);
+                                let index_mode = crate::index::canon_mode(ie.mode);
                                 walk.result.push(DiffEntry {
-                                    status: DiffStatus::for_content_change(t_entry.mode, ie.mode),
+                                    status: DiffStatus::for_content_change(tree_mode, index_mode),
                                     old_path: Some(path.clone()),
                                     new_path: Some(path),
-                                    old_mode: FileMode::new(t_entry.mode),
-                                    new_mode: FileMode::new(ie.mode),
+                                    old_mode: FileMode::new(tree_mode),
+                                    new_mode: FileMode::new(index_mode),
                                     old_oid: t_entry.oid,
                                     new_oid: ie.oid,
                                     score: None,
@@ -11845,7 +11858,7 @@ pub fn head_path_states(
 
 /// Whether a mode represents a tree (directory).
 fn is_tree_mode(mode: u32) -> bool {
-    mode == 0o040000
+    crate::index::is_tree_mode(mode)
 }
 
 /// Git orders diff lists by raw path bytes, which differs from the stored form of

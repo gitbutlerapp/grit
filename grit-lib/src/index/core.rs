@@ -49,6 +49,37 @@ pub const MODE_GITLINK: u32 = 0o160000;
 /// File mode for a directory (tree) entry — only used in tree objects, not index.
 pub const MODE_TREE: u32 = 0o040000;
 
+/// Whether `mode` is a tree (directory) by Git type bits, including `040755`.
+#[must_use]
+pub(crate) fn is_tree_mode(mode: u32) -> bool {
+    (mode & 0o170000) == MODE_TREE
+}
+
+/// Canonical index/tree-entry mode, mirroring Git's `canon_mode` / `create_ce_from_modes`.
+///
+/// Legacy tree object modes such as `100664` and `100775` collapse to `100644` / `100755`.
+/// Only canonical modes may be stored in the index.
+#[must_use]
+pub(crate) fn canon_mode(mode: u32) -> u32 {
+    const S_IFMT: u32 = 0o170000;
+    const S_IFREG: u32 = 0o100000;
+    const S_IFLNK: u32 = 0o120000;
+    const S_IFGITLINK: u32 = 0o160000;
+    match mode & S_IFMT {
+        S_IFREG => {
+            if mode & 0o111 != 0 {
+                MODE_EXECUTABLE
+            } else {
+                MODE_REGULAR
+            }
+        }
+        S_IFLNK => MODE_SYMLINK,
+        S_IFGITLINK => MODE_GITLINK,
+        MODE_TREE => MODE_TREE,
+        _ => MODE_REGULAR,
+    }
+}
+
 /// Git `match_stat_data` policy (`core.trustctime`, `core.checkstat`, `core.usenanosec`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StatMatchPolicy {
@@ -451,6 +482,8 @@ pub struct Index {
     pub(crate) fsmonitor_refresh_ran: bool,
     /// Skip racy smudge and UNTR shell setup on the next index write (checkout fast path).
     pub(crate) suppress_pre_write_index_housekeeping: bool,
+    /// Set when a loaded on-disk index had non-canonical entry modes repaired in memory.
+    pub(crate) entry_modes_repaired_on_load: bool,
 }
 
 impl Default for Index {
@@ -825,7 +858,26 @@ impl Index {
             content_verified: HashMap::new(),
             fsmonitor_refresh_ran: false,
             suppress_pre_write_index_housekeeping: false,
+            entry_modes_repaired_on_load: false,
         }
+    }
+
+    /// Normalize any legacy or non-canonical entry modes to Git index form.
+    pub(crate) fn repair_noncanonical_entry_modes(&mut self) -> bool {
+        let mut repaired = false;
+        for entry in &mut self.entries {
+            let canon = canon_mode(entry.mode);
+            if entry.mode != canon {
+                entry.mode = canon;
+                repaired = true;
+            }
+        }
+        if repaired {
+            self.entry_modes_repaired_on_load = true;
+            self.cache_tree_root = None;
+            self.cache_tree = None;
+        }
+        repaired
     }
 
     /// Index entries used for `.gitattributes` fallback when the worktree copy is missing.
@@ -879,6 +931,7 @@ impl Index {
             content_verified: HashMap::new(),
             fsmonitor_refresh_ran: false,
             suppress_pre_write_index_housekeeping: false,
+            entry_modes_repaired_on_load: false,
         }
     }
 
@@ -913,6 +966,7 @@ impl Index {
                 content_verified: HashMap::new(),
                 fsmonitor_refresh_ran: false,
                 suppress_pre_write_index_housekeeping: false,
+                entry_modes_repaired_on_load: false,
             };
         }
 
@@ -955,6 +1009,7 @@ impl Index {
             content_verified: HashMap::new(),
             fsmonitor_refresh_ran: false,
             suppress_pre_write_index_housekeeping: false,
+            entry_modes_repaired_on_load: false,
         }
     }
 
@@ -987,6 +1042,7 @@ impl Index {
                 content_verified: HashMap::new(),
                 fsmonitor_refresh_ran: false,
                 suppress_pre_write_index_housekeeping: false,
+                entry_modes_repaired_on_load: false,
             };
         }
 
@@ -1032,6 +1088,7 @@ impl Index {
             content_verified: HashMap::new(),
             fsmonitor_refresh_ran: false,
             suppress_pre_write_index_housekeeping: false,
+            entry_modes_repaired_on_load: false,
         }
     }
 
@@ -1481,7 +1538,7 @@ impl Index {
             (entries, ext_fields)
         };
 
-        Ok(Self {
+        let mut index = Self {
             version,
             entries,
             entries_sorted: true,
@@ -1503,7 +1560,10 @@ impl Index {
             content_verified: HashMap::new(),
             fsmonitor_refresh_ran: false,
             suppress_pre_write_index_housekeeping: false,
-        })
+            entry_modes_repaired_on_load: false,
+        };
+        index.repair_noncanonical_entry_modes();
+        Ok(index)
     }
 
     /// Write the index to a file, computing and appending the trailing SHA-1.
@@ -3845,7 +3905,7 @@ fn flatten_tree_blobs(
             p
         };
         crate::path_population::validate_tree_walk_entry(prefix, &te.name, te.mode, protect)?;
-        if te.mode == MODE_TREE {
+        if is_tree_mode(te.mode) {
             let sub = flatten_tree_blobs(odb, &te.oid, &path, protect)?;
             out.extend(sub);
         } else {
@@ -3857,7 +3917,7 @@ fn flatten_tree_blobs(
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: te.mode,
+                mode: canon_mode(te.mode),
                 uid: 0,
                 gid: 0,
                 size: 0,

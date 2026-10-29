@@ -879,6 +879,9 @@ mod issue_1614_merge_no_dangling_empty_tree;
 #[cfg(feature = "full-tests")]
 #[path = "large_blob_memory.rs"]
 mod large_blob_memory;
+#[cfg(feature = "full-tests")]
+#[path = "legacy_tree_mode_2322.rs"]
+mod legacy_tree_mode_2322;
 #[path = "library_subprocess_hygiene.rs"]
 mod library_subprocess_hygiene;
 #[path = "linked_worktree_injected_ref_store.rs"]

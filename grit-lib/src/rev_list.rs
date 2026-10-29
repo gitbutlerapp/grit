@@ -5919,7 +5919,9 @@ fn trees_differ_tree_entries(
                         let relevant =
                             pathspec_entry_is_relevant(&path, o_is_tree || n_is_tree, pathspecs);
                         if relevant {
-                            if o.oid != n.oid || canon_tree_mode(o.mode) != canon_tree_mode(n.mode)
+                            if o.oid != n.oid
+                                || crate::index::canon_mode(o.mode)
+                                    != crate::index::canon_mode(n.mode)
                             {
                                 if o_is_tree && n_is_tree {
                                     if trees_differ_for_pathspecs_optional(
@@ -6088,7 +6090,8 @@ fn trees_differ_at_literal_path(
                 (None, None) => false,
                 (None, Some(_)) | (Some(_), None) => true,
                 (Some((o_oid, o_mode)), Some((n_oid, n_mode))) => {
-                    o_oid != n_oid || canon_tree_mode(o_mode) != canon_tree_mode(n_mode)
+                    o_oid != n_oid
+                        || crate::index::canon_mode(o_mode) != crate::index::canon_mode(n_mode)
                 }
             };
             if let (Some(old), Some(new)) = (old_o, new_o) {
@@ -10211,35 +10214,13 @@ fn flatten_tree_with_mode(
         if child_info.kind == ObjectKind::Tree {
             subtrees.push((entry.oid, path));
         } else {
-            result.push((path, (entry.oid, canon_tree_mode(entry.mode))));
+            result.push((path, (entry.oid, crate::index::canon_mode(entry.mode))));
         }
     }
     for (child_oid, path) in subtrees {
         result.extend(flatten_tree_with_mode(repo, child_oid, &path, buf)?);
     }
     Ok(result)
-}
-
-/// Canonicalize a tree entry mode for path-change comparison, mirroring Git's `canon_mode`:
-/// regular files collapse to `0100644`/`0100755`, symlinks to `0120000`, gitlinks to
-/// `0160000`. This keeps mode comparison stable regardless of incidental low-bit noise.
-fn canon_tree_mode(mode: u32) -> u32 {
-    const S_IFMT: u32 = 0o170000;
-    const S_IFREG: u32 = 0o100000;
-    const S_IFLNK: u32 = 0o120000;
-    const S_IFGITLINK: u32 = 0o160000;
-    match mode & S_IFMT {
-        S_IFREG => {
-            if mode & 0o111 != 0 {
-                0o100755
-            } else {
-                0o100644
-            }
-        }
-        S_IFLNK => 0o120000,
-        S_IFGITLINK => 0o160000,
-        _ => mode,
-    }
 }
 
 /// Compute merge bases between two commits.

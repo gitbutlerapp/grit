@@ -123,7 +123,7 @@ fn tree_to_index_entries_with_protect(
         let path_bytes = crate::repo_relpath::join_rel(prefix, &te.name);
         validate_tree_walk_entry(prefix, &te.name, te.mode, protect)?;
 
-        if te.mode == 0o040000 {
+        if crate::index::is_tree_mode(te.mode) {
             let sub = tree_to_index_entries_with_protect(repo, &te.oid, &path_bytes, protect)?;
             result.extend(sub);
         } else {
@@ -134,7 +134,7 @@ fn tree_to_index_entries_with_protect(
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: te.mode,
+                mode: crate::index::canon_mode(te.mode),
                 uid: 0,
                 gid: 0,
                 size: 0,
