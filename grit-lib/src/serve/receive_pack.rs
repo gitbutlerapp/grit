@@ -1063,9 +1063,13 @@ fn apply_commands_with_hooks(
         .map(|(idx, (cmd, _))| (idx, receive_command_store_update(cmd)))
         .collect();
 
+    let store = repo.refs();
+    let ref_lock_wait = store.ref_lock_wait();
     if atomic {
         let batch: Vec<_> = pending.iter().map(|(_, u)| u.clone()).collect();
-        if let Err(e) = crate::refs::commit_ref_updates_on_store(repo.refs(), &batch, &[]) {
+        if let Err(e) =
+            crate::refs::commit_ref_updates_on_store_with_wait(store, &batch, || ref_lock_wait)
+        {
             let refusal = RefUpdateRefusal::RefStore(e.to_string());
             for (idx, _) in pending {
                 if results[idx].error.is_none() {
@@ -1074,10 +1078,8 @@ fn apply_commands_with_hooks(
             }
         }
     } else {
-        for (idx, update) in pending {
-            if let Err(e) = crate::refs::commit_ref_update_on_store(repo.refs(), update) {
-                results[idx].error = Some(RefUpdateRefusal::RefStore(e.to_string()));
-            }
+        for (idx, message) in commit_receive_ref_updates_on_store(store, pending, ref_lock_wait) {
+            results[idx].error = Some(RefUpdateRefusal::RefStore(message));
         }
     }
 
@@ -1233,6 +1235,50 @@ impl<'a> ReceiveHookScripts<'a> {
 
 fn pairs(env: &[(String, String)]) -> Vec<(&str, &str)> {
     env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
+}
+
+fn receive_updates_eligible_for_initial_packed(updates: &[crate::refs::store::RefUpdate]) -> bool {
+    use crate::refs::store::{Expected, RawRef};
+    updates.iter().all(|update| {
+        matches!(update.new_value, Some(RawRef::Direct(_)))
+            && matches!(update.expected, Expected::Missing)
+            && !update.flags.log_only
+            && update.reflog.is_none()
+    })
+}
+
+/// Apply a non-atomic receive-pack ref batch in one store transaction when possible.
+///
+/// Plain creates use the initial packed-refs path; mixed batches use a regular transaction.
+/// When a batch fails, fall back to per-ref commits so one bad update does not block the rest.
+fn commit_receive_ref_updates_on_store(
+    store: &dyn crate::refs::store::RefStore,
+    pending: Vec<(usize, crate::refs::store::RefUpdate)>,
+    ref_lock_wait: crate::lockfile::LockWait,
+) -> Vec<(usize, String)> {
+    if pending.is_empty() {
+        return Vec::new();
+    }
+    let updates: Vec<_> = pending.iter().map(|(_, u)| u.clone()).collect();
+    let batch_ok = if receive_updates_eligible_for_initial_packed(&updates) {
+        crate::refs::commit_initial_ref_updates_on_store_with_wait(store, updates.clone(), || {
+            ref_lock_wait
+        })
+    } else {
+        crate::refs::commit_ref_updates_on_store_with_wait(store, &updates, || ref_lock_wait)
+    };
+    if batch_ok.is_ok() {
+        return Vec::new();
+    }
+    let mut failures = Vec::new();
+    for (idx, update) in pending {
+        if let Err(e) =
+            crate::refs::commit_ref_update_on_store_with_wait(store, update, || ref_lock_wait)
+        {
+            failures.push((idx, e.to_string()));
+        }
+    }
+    failures
 }
 
 fn receive_command_store_update(cmd: &RefCommand) -> crate::refs::store::RefUpdate {
