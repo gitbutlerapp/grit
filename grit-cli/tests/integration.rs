@@ -486,6 +486,9 @@ mod remote_set_url_cli;
 #[path = "remote_show_cli.rs"]
 mod remote_show_cli;
 #[cfg(feature = "full-tests")]
+#[path = "reset_hard_memory.rs"]
+mod reset_hard_memory;
+#[cfg(feature = "full-tests")]
 #[path = "reset_interrupt.rs"]
 mod reset_interrupt;
 #[cfg(feature = "full-tests")]

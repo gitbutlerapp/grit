@@ -392,6 +392,30 @@ pub(crate) fn plan_blob_entries_by_dir(index: &Index, honor_fsmonitor_valid: boo
     plan.finish()
 }
 
+/// Like [`plan_blob_entries_by_dir`], but only for the given index entry positions.
+#[must_use]
+pub(crate) fn plan_blob_entries_by_dir_for_positions(
+    index: &Index,
+    positions: &[usize],
+    honor_fsmonitor_valid: bool,
+) -> BlobScanPlan {
+    let mut plan = BlobScanPlan {
+        dirs: Vec::new(),
+        dir_ranges: Vec::new(),
+        indices: Vec::new(),
+    };
+    for &entry_index in positions {
+        let Some(ie) = index.entries.get(entry_index) else {
+            continue;
+        };
+        if !index_blob_scan_eligible(ie, index, honor_fsmonitor_valid) {
+            continue;
+        }
+        plan.push_entry(parent_dir_bytes(&ie.path), entry_index);
+    }
+    plan.finish()
+}
+
 /// Like [`plan_blob_entries_by_dir`], but only for repository-relative paths in `paths`.
 #[must_use]
 pub(crate) fn plan_blob_entries_by_dir_for_paths(
