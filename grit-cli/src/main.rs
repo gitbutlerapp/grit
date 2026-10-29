@@ -2303,6 +2303,13 @@ fn normalize_tag_verify_argv(mut args: Vec<OsString>) -> Vec<OsString> {
     args
 }
 
+/// [`Cli::try_parse_from`] over [`cli_command::parse_command`]'s tree.
+fn parse_cli(argv: &[OsString]) -> Result<Cli, clap::Error> {
+    use clap::{CommandFactory, FromArgMatches};
+    let mut matches = cli_command::parse_command(argv).try_get_matches_from(argv)?;
+    Cli::from_arg_matches_mut(&mut matches).map_err(|err| err.format(&mut Cli::command()))
+}
+
 fn main() {
     stdio::configure();
     grit_trace::maybe_init_from_env();
@@ -2320,7 +2327,7 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
     let parse_argv = normalize_tag_verify_argv(normalize_log_limit_argv(
         diff_args::normalize_diff_argv(std::env::args_os().collect()),
     ));
-    let cli = match Cli::try_parse_from(&parse_argv).and_then(|cli| {
+    let cli = match parse_cli(&parse_argv).and_then(|cli| {
         validate_cli(&cli)?;
         Ok(cli)
     }) {
