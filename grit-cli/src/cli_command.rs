@@ -207,11 +207,15 @@ mod tests {
             let argv: Vec<OsString> = ["grit", "--json", "branch"].map(OsString::from).to_vec();
             let mut cmd = super::parse_command(&argv);
             cmd.build();
-            let global_ids = ["json", "markdown", "filter", "threads"];
+            let global_ids: Vec<clap::Id> = Cli::command()
+                .get_arguments()
+                .filter(|arg| arg.is_global_set())
+                .map(|arg| arg.get_id().clone())
+                .collect();
             for sub in cmd.get_subcommands() {
                 let has_globals = global_ids
                     .iter()
-                    .all(|id| sub.get_arguments().any(|arg| arg.get_id() == *id));
+                    .all(|id| sub.get_arguments().any(|arg| arg.get_id() == id));
                 assert_eq!(
                     has_globals,
                     sub.get_name() == "branch",
@@ -226,6 +230,10 @@ mod tests {
     #[test]
     fn parse_command_keeps_the_stock_tree_without_a_known_subcommand() {
         crate::cli_test_stack::run(|| {
+            let expected_globals = Cli::command()
+                .get_arguments()
+                .filter(|arg| arg.is_global_set())
+                .count();
             for args in [vec!["grit"], vec!["grit", "--json"], vec!["grit", "brnch"]] {
                 let argv: Vec<OsString> = args.into_iter().map(OsString::from).collect();
                 let cmd = super::parse_command(&argv);
@@ -233,7 +241,7 @@ mod tests {
                     .get_arguments()
                     .filter(|arg| arg.is_global_set())
                     .count();
-                assert_eq!(globals, 4, "argv {argv:?}");
+                assert_eq!(globals, expected_globals, "argv {argv:?}");
             }
         });
     }
