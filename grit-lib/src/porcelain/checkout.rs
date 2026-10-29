@@ -53,8 +53,8 @@ pub(crate) use checkout_journal::CheckoutJournal;
 use checkout_journal::SharedCheckoutDeleteRollback;
 pub(crate) use checkout_parallel::is_eligible_for_parallel_checkout;
 use checkout_parallel::{
-    cancellable_chunks, execute_write_jobs, paths_needing_serial_checkout_str, CheckoutPlanSlot,
-    CheckoutWriteJob, WriteJobOutcome,
+    cancellable_chunks, execute_write_jobs, execute_write_jobs_unrecorded,
+    paths_needing_serial_checkout_str, CheckoutPlanSlot, CheckoutWriteJob, WriteJobOutcome,
 };
 
 const PARALLEL_PER_FILE_DELETE_MIN: usize = 32;
@@ -90,6 +90,239 @@ fn remove_checkout_files_parallel_cancellable(
         }
     }
     Ok((parallel_deleted_paths, deleted_abs_paths))
+}
+
+/// One path to put back during checkout journal rollback (pre-checkout blob and mode).
+pub(crate) struct CheckoutRollbackRestore {
+    pub path: String,
+    pub oid: ObjectId,
+    pub mode: u32,
+}
+
+/// Remove paths the checkout created, using the checkout delete pool when the list is large.
+pub(crate) fn remove_created_checkout_paths(
+    repo: &Repository,
+    work_tree: &Path,
+    paths: &[String],
+) -> (Vec<PathBuf>, Vec<String>) {
+    let mut removed_abs = Vec::with_capacity(paths.len());
+    let mut failed = Vec::new();
+    if paths.is_empty() {
+        return (removed_abs, failed);
+    }
+    let remove_one = |rel: &str| {
+        let abs = checkout_stored_worktree_abs(work_tree, rel);
+        remove_created_checkout_path(&abs).map(|_| abs)
+    };
+    if paths.len() < PARALLEL_PER_FILE_DELETE_MIN {
+        for rel in paths {
+            match remove_one(rel) {
+                Ok(abs) => removed_abs.push(abs),
+                Err(_) => failed.push(rel.clone()),
+            }
+        }
+        return (removed_abs, failed);
+    }
+    let Ok(config) = repo.config() else {
+        for rel in paths {
+            match remove_one(rel) {
+                Ok(abs) => removed_abs.push(abs),
+                Err(_) => failed.push(rel.clone()),
+            }
+        }
+        return (removed_abs, failed);
+    };
+    let options = repo
+        .thread_policy()
+        .resolve(ParallelOp::Checkout, config.as_ref());
+    let (chunks, options) = cancellable_chunks(paths, options);
+    for chunk in chunks {
+        match try_par_map(chunk, options, 0, |rel| remove_one(rel)) {
+            Ok(abs_paths) => removed_abs.extend(abs_paths),
+            Err(_) => {
+                for rel in chunk {
+                    match remove_one(rel) {
+                        Ok(abs) => removed_abs.push(abs),
+                        Err(_) => failed.push(rel.clone()),
+                    }
+                }
+            }
+        }
+    }
+    (removed_abs, failed)
+}
+
+/// Restore regular files and symlinks after a failed checkout, parallel when eligible.
+pub(crate) fn restore_checkout_rollback_paths(
+    repo: &Repository,
+    work_tree: &Path,
+    targets: &[CheckoutRollbackRestore],
+    progress: &mut dyn ProgressSink,
+) -> Vec<String> {
+    if targets.is_empty() {
+        return Vec::new();
+    }
+    let Ok(config) = repo.config() else {
+        return targets.iter().map(|t| t.path.clone()).collect();
+    };
+    let config = Arc::new(config);
+    let Ok(index) = repo.load_index() else {
+        return targets.iter().map(|t| t.path.clone()).collect();
+    };
+    let Ok(rules) =
+        WorktreeRules::from_parts_index_attributes_only(repo, &index, Arc::clone(&config))
+    else {
+        return targets.iter().map(|t| t.path.clone()).collect();
+    };
+    let conv = rules.conversion().clone();
+    let ignorecase = config
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    let precompose = repo.pathspec_precompose_enabled();
+
+    let mut changes: Vec<DiffEntry> = Vec::with_capacity(targets.len());
+    for target in targets {
+        // Treat rollback as materializing the pre-checkout blob, not an in-place truncate of
+        // whatever partial checkout wrote (symlinks, type changes, and new paths included).
+        changes.push(DiffEntry {
+            status: DiffStatus::Added,
+            old_path: None,
+            new_path: Some(target.path.clone()),
+            old_mode: FileMode::ABSENT,
+            new_mode: FileMode::new(target.mode),
+            old_oid: zero_oid(),
+            new_oid: target.oid,
+            score: None,
+        });
+    }
+
+    let mut failed = Vec::new();
+    for chunk in changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK) {
+        let chunk_failed = restore_checkout_rollback_chunk(
+            repo, work_tree, chunk, &rules, &config, &conv, precompose, ignorecase, progress,
+        );
+        failed.extend(chunk_failed);
+    }
+    failed
+}
+
+#[allow(clippy::too_many_arguments)]
+fn restore_checkout_rollback_chunk(
+    repo: &Repository,
+    work_tree: &Path,
+    changes: &[DiffEntry],
+    rules: &WorktreeRules,
+    config: &Arc<ConfigSet>,
+    conv: &ConversionConfig,
+    precompose: bool,
+    ignorecase: bool,
+    progress: &mut dyn ProgressSink,
+) -> Vec<String> {
+    let mut write_jobs: Vec<CheckoutWriteJob<'_>> = Vec::with_capacity(changes.len());
+    for change in changes {
+        let Some(path) = change.new_path.as_deref() else {
+            continue;
+        };
+        let mode = change.new_mode.bits();
+        let file_attrs = Arc::new(rules.file_attrs(path, false));
+        write_jobs.push(CheckoutWriteJob::new(
+            path.to_owned(),
+            mode,
+            change,
+            file_attrs,
+            None,
+        ));
+    }
+    let path_refs: Vec<&str> = write_jobs.iter().map(|j| j.path.as_str()).collect();
+    let serial_indices = paths_needing_serial_checkout_str(&path_refs, ignorecase, precompose);
+    let parallel_indices: HashSet<usize> = write_jobs
+        .iter()
+        .enumerate()
+        .filter(|(i, job)| {
+            is_eligible_for_parallel_checkout(job.mode, &job.file_attrs)
+                && !serial_indices.contains(i)
+        })
+        .map(|(i, _)| i)
+        .collect();
+    let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
+    if write_jobs.len() >= BULK_ADD_CHECKOUT_MIN {
+        precreate_checkout_parent_dirs(work_tree, &write_jobs, &mut dir_cache);
+    } else {
+        for job in &write_jobs {
+            if dir_cache.ensure_parents(work_tree, &job.path).is_err() {
+                return write_jobs.iter().map(|j| j.path.clone()).collect();
+            }
+        }
+    }
+    let mut delayed = DelayedProcessCheckout::default();
+    let mut progress = CancelProgress::new(progress, &NeverCancel);
+    match execute_write_jobs_unrecorded(
+        repo,
+        rules,
+        config,
+        conv,
+        work_tree,
+        &mut dir_cache,
+        &mut delayed,
+        &write_jobs,
+        &parallel_indices,
+        true,
+        None,
+        true,
+        &mut progress,
+        &NeverCancel,
+    ) {
+        Ok(_) => Vec::new(),
+        Err(_) => {
+            restore_checkout_rollback_chunk_serial(repo, work_tree, changes, rules, &mut dir_cache)
+        }
+    }
+}
+
+fn restore_checkout_rollback_chunk_serial(
+    repo: &Repository,
+    work_tree: &Path,
+    changes: &[DiffEntry],
+    rules: &WorktreeRules,
+    dir_cache: &mut LeadingDirCache,
+) -> Vec<String> {
+    let mut failed = Vec::new();
+    for change in changes {
+        let Some(path) = change.new_path.as_deref() else {
+            continue;
+        };
+        let mode = change.new_mode.bits();
+        if mode == MODE_GITLINK {
+            if materialize_gitlink_worktree(work_tree, path, dir_cache).is_err() {
+                failed.push(path.to_owned());
+            }
+            continue;
+        }
+        let oid = change.new_oid;
+        let ok = matches!(
+            write_blob_to_worktree(repo, rules, work_tree, path, &oid, mode, dir_cache),
+            Ok(Some(_))
+        );
+        if !ok {
+            failed.push(path.to_owned());
+        }
+    }
+    failed
+}
+
+/// Remove a path the checkout created: a file, a symlink or an empty gitlink directory.
+pub(crate) fn remove_created_checkout_path(abs: &Path) -> std::io::Result<()> {
+    let meta = match fs::symlink_metadata(abs) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if meta.is_dir() {
+        fs::remove_dir(abs)
+    } else {
+        fs::remove_file(abs)
+    }
 }
 
 fn remove_wholesale_dirs_parallel_cancellable(

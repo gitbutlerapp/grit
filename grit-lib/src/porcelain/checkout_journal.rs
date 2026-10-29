@@ -14,18 +14,18 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use super::{
+    materialize_gitlink_worktree, path_under_wholesale_directory, remove_created_checkout_paths,
+    remove_empty_parent_dirs_batch, remove_uninitialized_gitlink_worktree,
+    restore_checkout_rollback_paths, CheckoutRollbackRestore, LeadingDirCache,
+};
 use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, Result};
 use crate::index::{Index, MODE_GITLINK};
 use crate::objects::ObjectId;
+use crate::progress::NullProgress;
 use crate::repo::Repository;
 use crate::worktree::{io_with_path, WorktreePathOperation};
-use crate::worktree_rules::WorktreeRules;
-
-use super::{
-    materialize_gitlink_worktree, path_under_wholesale_directory, remove_empty_parent_dirs_batch,
-    remove_uninitialized_gitlink_worktree, write_blob_to_worktree, LeadingDirCache,
-};
 
 static SPOOL_NAME_SEQ: AtomicUsize = AtomicUsize::new(0);
 
@@ -161,10 +161,6 @@ impl PathList {
     fn push(&mut self, path: &str) {
         self.bytes.push_str(path);
         self.ends.push(self.bytes.len());
-    }
-
-    fn len(&self) -> usize {
-        self.ends.len()
     }
 
     /// Paths, newest first.
@@ -359,14 +355,10 @@ impl CheckoutJournal {
     fn rollback(&mut self, repo: &Repository) -> Vec<String> {
         let mut unrestored = Vec::new();
         let created = std::mem::take(&mut self.created);
-        let mut removed = Vec::with_capacity(created.len());
-        for rel in created.iter_rev() {
-            let abs = crate::repo_relpath::worktree_abs(&self.work_tree, rel);
-            match remove_created_path(&abs) {
-                Ok(()) => removed.push(abs),
-                Err(_) => unrestored.push(rel.to_owned()),
-            }
-        }
+        let created_paths: Vec<String> = created.iter_rev().map(str::to_owned).collect();
+        let (mut removed, create_failed) =
+            remove_created_checkout_paths(repo, &self.work_tree, &created_paths);
+        unrestored.extend(create_failed);
         removed.extend(
             self.unwritten
                 .drain(..)
@@ -399,25 +391,92 @@ impl CheckoutJournal {
         if replaced.is_empty() && removed_gitlinks.is_empty() && removed_dirs.is_empty() {
             return unrestored;
         }
-        let mut restore = RestoreFromIndex::new(repo, &self.work_tree);
+
+        let index = repo.load_index().ok();
+        let mut restore_targets: Vec<CheckoutRollbackRestore> = Vec::new();
+        let mut restore_paths = HashSet::new();
+        let mut dir_cache = LeadingDirCache::new();
         for entry in replaced.iter().rev() {
             if spooled.contains(&entry.path) {
                 continue;
             }
-            if !restore.path(&entry.path, Some((entry.oid, entry.mode))) {
-                unrestored.push(entry.path.clone());
+            let (oid, mode) =
+                index_entry_or_fallback(index.as_ref(), &entry.path, entry.oid, entry.mode);
+            if mode == MODE_GITLINK {
+                if materialize_gitlink_worktree(&self.work_tree, &entry.path, &mut dir_cache)
+                    .is_err()
+                {
+                    unrestored.push(entry.path.clone());
+                }
+                continue;
+            }
+            if restore_paths.insert(entry.path.clone()) {
+                restore_targets.push(CheckoutRollbackRestore {
+                    path: entry.path.clone(),
+                    oid,
+                    mode,
+                });
             }
         }
+        if let Some(index) = index.as_ref() {
+            for entry in &index.entries {
+                if entry.stage() != 0
+                    || entry.skip_worktree()
+                    || entry.is_sparse_directory_placeholder()
+                {
+                    continue;
+                }
+                let rel = crate::repo_relpath::storage_string(&entry.path);
+                if !path_under_wholesale_directory(&rel, &removed_dirs) || spooled.contains(&rel) {
+                    continue;
+                }
+                if entry.mode == MODE_GITLINK {
+                    if materialize_gitlink_worktree(&self.work_tree, &rel, &mut dir_cache).is_err()
+                    {
+                        unrestored.push(rel);
+                    }
+                    continue;
+                }
+                if restore_paths.insert(rel.clone()) {
+                    restore_targets.push(CheckoutRollbackRestore {
+                        path: rel,
+                        oid: entry.oid,
+                        mode: entry.mode,
+                    });
+                }
+            }
+        } else if !removed_dirs.is_empty() {
+            unrestored.extend(removed_dirs.iter().cloned());
+        }
         for rel in &removed_gitlinks {
-            if !restore.path(rel, Some((ObjectId::zero(), MODE_GITLINK))) {
+            if materialize_gitlink_worktree(&self.work_tree, rel, &mut dir_cache).is_err() {
                 unrestored.push(rel.clone());
             }
         }
-        if !removed_dirs.is_empty() {
-            unrestored.extend(restore.directories(&removed_dirs, &spooled));
-        }
+
+        let mut progress = NullProgress;
+        unrestored.extend(restore_checkout_rollback_paths(
+            repo,
+            &self.work_tree,
+            &restore_targets,
+            &mut progress,
+        ));
         unrestored
     }
+}
+
+fn index_entry_or_fallback(
+    index: Option<&Index>,
+    rel: &str,
+    fallback_oid: ObjectId,
+    fallback_mode: u32,
+) -> (ObjectId, u32) {
+    let key = crate::repo_relpath::storage_bytes(rel);
+    index
+        .and_then(|index| index.get(&key, 0))
+        .filter(|entry| !entry.skip_worktree())
+        .map(|entry| (entry.oid, entry.mode))
+        .unwrap_or((fallback_oid, fallback_mode))
 }
 
 impl Drop for CheckoutJournal {
@@ -429,109 +488,6 @@ impl Drop for CheckoutJournal {
                 .unwrap_or_else(|e| e.into_inner())
                 .restore_all(&self.work_tree);
         }
-    }
-}
-
-/// Writes paths back as the on-disk index (the pre-checkout state) records them.
-struct RestoreFromIndex<'a> {
-    repo: &'a Repository,
-    work_tree: &'a Path,
-    index: Option<Index>,
-    rules: Option<WorktreeRules>,
-    dir_cache: LeadingDirCache,
-}
-
-impl<'a> RestoreFromIndex<'a> {
-    fn new(repo: &'a Repository, work_tree: &'a Path) -> Self {
-        let index = repo.load_index().ok();
-        let rules = index.as_ref().and_then(|index| {
-            let config = repo.config().ok()?;
-            WorktreeRules::from_parts_index_attributes_only(repo, index, config).ok()
-        });
-        Self {
-            repo,
-            work_tree,
-            index,
-            rules,
-            dir_cache: LeadingDirCache::new(),
-        }
-    }
-
-    /// Restore `rel` from its stage-0 index entry, else from `fallback` (`oid`, `mode`).
-    /// Returns `false` when the path could not be written.
-    fn path(&mut self, rel: &str, fallback: Option<(ObjectId, u32)>) -> bool {
-        let key = crate::repo_relpath::storage_bytes(rel);
-        let tracked = self
-            .index
-            .as_ref()
-            .and_then(|index| index.get(&key, 0))
-            .filter(|entry| !entry.skip_worktree())
-            .map(|entry| (entry.oid, entry.mode));
-        match tracked.or(fallback) {
-            Some((oid, mode)) => self.write(rel, oid, mode),
-            None => true,
-        }
-    }
-
-    /// Restore every stage-0 index entry under `dirs` except `skip`; returns the paths that
-    /// failed (or the directories themselves when the index could not be read).
-    fn directories(&mut self, dirs: &BTreeSet<String>, skip: &HashSet<String>) -> Vec<String> {
-        let Some(index) = self.index.take() else {
-            return dirs.iter().cloned().collect();
-        };
-        let mut failed = Vec::new();
-        for entry in &index.entries {
-            if entry.stage() != 0
-                || entry.skip_worktree()
-                || entry.is_sparse_directory_placeholder()
-            {
-                continue;
-            }
-            let rel = crate::repo_relpath::storage_string(&entry.path);
-            if path_under_wholesale_directory(&rel, dirs)
-                && !skip.contains(&rel)
-                && !self.write(&rel, entry.oid, entry.mode)
-            {
-                failed.push(rel);
-            }
-        }
-        self.index = Some(index);
-        failed
-    }
-
-    fn write(&mut self, rel: &str, oid: ObjectId, mode: u32) -> bool {
-        if mode == MODE_GITLINK {
-            return materialize_gitlink_worktree(self.work_tree, rel, &mut self.dir_cache).is_ok();
-        }
-        let Some(rules) = &self.rules else {
-            return false;
-        };
-        matches!(
-            write_blob_to_worktree(
-                self.repo,
-                rules,
-                self.work_tree,
-                rel,
-                &oid,
-                mode,
-                &mut self.dir_cache
-            ),
-            Ok(Some(_))
-        )
-    }
-}
-
-/// Remove a path the checkout created: a file, a symlink or an empty gitlink directory.
-fn remove_created_path(abs: &Path) -> std::io::Result<()> {
-    let meta = match fs::symlink_metadata(abs) {
-        Ok(meta) => meta,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e),
-    };
-    if meta.is_dir() {
-        fs::remove_dir(abs)
-    } else {
-        fs::remove_file(abs)
     }
 }
 
@@ -727,7 +683,7 @@ mod path_list_tests {
         for path in ["a", "dir/b.txt", "dir/sub/ünï.txt", "c"] {
             list.push(path);
         }
-        assert_eq!(list.len(), 4);
+        assert_eq!(list.ends.len(), 4);
         assert_eq!(
             list.iter_rev().collect::<Vec<_>>(),
             ["c", "dir/sub/ünï.txt", "dir/b.txt", "a"]

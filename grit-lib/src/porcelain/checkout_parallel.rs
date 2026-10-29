@@ -692,7 +692,7 @@ pub(crate) fn execute_write_jobs(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn execute_write_jobs_unrecorded(
+pub(crate) fn execute_write_jobs_unrecorded(
     repo: &Repository,
     rules: &WorktreeRules,
     config: &Arc<ConfigSet>,
