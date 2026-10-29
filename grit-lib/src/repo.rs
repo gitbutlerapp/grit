@@ -2366,7 +2366,17 @@ impl Repository {
         if !self.environment().git_optional_locks {
             return Ok(false);
         }
-        match self.write_index_at(path, index) {
+        let cfg = self.config().ok();
+        let mut lock = match crate::index::IndexLock::acquire(path, cfg.as_deref()) {
+            Ok(lock) => lock,
+            Err(e) if Self::opportunistic_index_write_skippable(&e) => return Ok(false),
+            Err(e) => return Err(e),
+        };
+        let on_disk = crate::index::read_index_on_disk_identity(path, index.hash_algo)?;
+        if !crate::index::opportunistic_index_write_still_current(index, &on_disk) {
+            return Ok(false);
+        }
+        match self.write_index_with_lock(&mut lock, index, false) {
             Ok(()) => Ok(true),
             Err(e) if Self::opportunistic_index_write_skippable(&e) => Ok(false),
             Err(e) => Err(e),

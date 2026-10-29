@@ -19,6 +19,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::{self, Write};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use crate::hash::verify_trailer;
@@ -432,6 +433,10 @@ pub struct Index {
     pub hash_algo: HashAlgo,
     /// On-disk index mtime when this index was last read (Git `istate->timestamp`).
     pub source_mtime: Option<(u32, u32)>,
+    /// Trailing checksum bytes from the on-disk index at load time (not recomputed after stat refresh).
+    pub(crate) source_checksum: Option<Vec<u8>>,
+    /// On-disk index byte length at load time (pairs with [`Self::source_checksum`] under `index.skipHash`).
+    pub(crate) source_file_len: Option<u64>,
     /// When set, [`Self::invalidate_untracked_cache_for_path`] is a no-op (bulk staging defers invalidation).
     pub(crate) defer_untracked_cache_invalidation: bool,
     /// Skip the pre-write racy smudge walk (checkout just aligned worktree and index entries).
@@ -813,6 +818,8 @@ impl Index {
             cache_tree: None,
             hash_algo: HashAlgo::Sha1,
             source_mtime: None,
+            source_checksum: None,
+            source_file_len: None,
             defer_untracked_cache_invalidation: false,
             skip_racy_smudge_on_write: false,
             content_verified: HashMap::new(),
@@ -865,6 +872,8 @@ impl Index {
             cache_tree: None,
             hash_algo: HashAlgo::Sha1,
             source_mtime: None,
+            source_checksum: None,
+            source_file_len: None,
             defer_untracked_cache_invalidation: false,
             skip_racy_smudge_on_write: false,
             content_verified: HashMap::new(),
@@ -897,6 +906,8 @@ impl Index {
                 cache_tree: None,
                 hash_algo: HashAlgo::default(),
                 source_mtime: None,
+                source_checksum: None,
+                source_file_len: None,
                 defer_untracked_cache_invalidation: false,
                 skip_racy_smudge_on_write: false,
                 content_verified: HashMap::new(),
@@ -937,6 +948,8 @@ impl Index {
             cache_tree: None,
             hash_algo: HashAlgo::default(),
             source_mtime: None,
+            source_checksum: None,
+            source_file_len: None,
             defer_untracked_cache_invalidation: false,
             skip_racy_smudge_on_write: false,
             content_verified: HashMap::new(),
@@ -967,6 +980,8 @@ impl Index {
                 cache_tree: None,
                 hash_algo: HashAlgo::default(),
                 source_mtime: None,
+                source_checksum: None,
+                source_file_len: None,
                 defer_untracked_cache_invalidation: false,
                 skip_racy_smudge_on_write: false,
                 content_verified: HashMap::new(),
@@ -1010,6 +1025,8 @@ impl Index {
             cache_tree: None,
             hash_algo: HashAlgo::default(),
             source_mtime: None,
+            source_checksum: None,
+            source_file_len: None,
             defer_untracked_cache_invalidation: false,
             skip_racy_smudge_on_write: false,
             content_verified: HashMap::new(),
@@ -1029,7 +1046,7 @@ impl Index {
         match read_index_file(path) {
             Ok((data, mtime)) => {
                 let mut idx = Self::parse(&data)?;
-                idx.source_mtime = Some(mtime);
+                record_loaded_index_identity(&mut idx, &data, mtime);
                 Ok(idx)
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Self {
@@ -1046,10 +1063,11 @@ impl Index {
     /// placeholder is replaced by the blob entries from the referenced tree.
     pub fn load_expand_sparse(path: &Path, odb: &Odb) -> Result<Self> {
         let mut idx = match read_index_file(path) {
-            Ok((data, mtime)) => Self {
-                source_mtime: Some(mtime),
-                ..Self::parse_with_algo(&data, odb.hash_algo())?
-            },
+            Ok((data, mtime)) => {
+                let mut idx = Self::parse_with_algo(&data, odb.hash_algo())?;
+                record_loaded_index_identity(&mut idx, &data, mtime);
+                idx
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Self {
                 sparse_directories: false,
                 hash_algo: odb.hash_algo(),
@@ -1116,10 +1134,11 @@ impl Index {
     ) -> Result<Self> {
         let algo = odb.hash_algo();
         let idx = match read_index_file(path) {
-            Ok((data, mtime)) => Self {
-                source_mtime: Some(mtime),
-                ..Self::parse_with_algo_and_config(&data, algo, config, parse_context)?
-            },
+            Ok((data, mtime)) => {
+                let mut idx = Self::parse_with_algo_and_config(&data, algo, config, parse_context)?;
+                record_loaded_index_identity(&mut idx, &data, mtime);
+                idx
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Self {
                 hash_algo: algo,
                 ..Self::new()
@@ -1477,6 +1496,8 @@ impl Index {
             cache_tree: ext_fields.cache_tree,
             hash_algo,
             source_mtime: None,
+            source_checksum: None,
+            source_file_len: None,
             defer_untracked_cache_invalidation: false,
             skip_racy_smudge_on_write: false,
             content_verified: HashMap::new(),
@@ -4366,6 +4387,79 @@ impl std::ops::Deref for IndexFileBytes {
     }
 }
 
+/// Trailing checksum bytes from a full on-disk index file (including the trailer).
+#[must_use]
+pub(crate) fn index_file_trailer(data: &[u8], hash_algo: HashAlgo) -> Option<Vec<u8>> {
+    let hash_len = hash_algo.len();
+    (data.len() >= hash_len).then(|| data[data.len() - hash_len..].to_vec())
+}
+
+fn record_loaded_index_identity(index: &mut Index, data: &[u8], mtime: (u32, u32)) {
+    index.source_mtime = Some(mtime);
+    index.source_file_len = Some(u64::try_from(data.len()).unwrap_or(u64::MAX));
+    index.source_checksum = index_file_trailer(data, index.hash_algo);
+}
+
+/// On-disk identity of `.git/index` for opportunistic writers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct IndexOnDiskIdentity {
+    pub checksum: Option<Vec<u8>>,
+    pub mtime: Option<(u32, u32)>,
+    pub len: u64,
+}
+
+/// Read checksum, mtime, and length for an existing index file.
+pub(crate) fn read_index_on_disk_identity(
+    path: &Path,
+    hash_algo: HashAlgo,
+) -> io::Result<IndexOnDiskIdentity> {
+    match read_index_file(path) {
+        Ok((data, mtime)) => {
+            let bytes = data.deref();
+            Ok(IndexOnDiskIdentity {
+                checksum: index_file_trailer(bytes, hash_algo),
+                mtime: Some(mtime),
+                len: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+            })
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(IndexOnDiskIdentity {
+            checksum: None,
+            mtime: None,
+            len: 0,
+        }),
+        Err(e) => Err(e),
+    }
+}
+
+/// Whether an opportunistic index write may still replace the on-disk file.
+///
+/// Mandatory writers (`write_index`, commit, staging) do not call this.
+#[must_use]
+pub(crate) fn opportunistic_index_write_still_current(
+    loaded: &Index,
+    on_disk: &IndexOnDiskIdentity,
+) -> bool {
+    let had_disk_index = loaded.source_checksum.is_some()
+        || loaded.source_mtime.is_some()
+        || loaded.source_file_len.is_some();
+    if !had_disk_index {
+        return on_disk.len == 0;
+    }
+    if on_disk.len == 0 {
+        return false;
+    }
+    if let (Some(loaded_cs), Some(disk_cs)) = (&loaded.source_checksum, &on_disk.checksum) {
+        if loaded_cs != disk_cs {
+            return false;
+        }
+        if loaded_cs.iter().all(|&b| b == 0) {
+            return loaded.source_mtime == on_disk.mtime
+                && loaded.source_file_len == Some(on_disk.len);
+        }
+    }
+    true
+}
+
 /// Read an index file along with the mtime of the same open file.
 ///
 /// Large files are mapped read-only: index writers replace the file by renaming a lock file
@@ -4936,6 +5030,57 @@ mod tests {
 
         let loaded = Index::load(&path).unwrap();
         assert_eq!(loaded.entries.len(), 0);
+    }
+
+    #[test]
+    fn opportunistic_write_still_current_logic() {
+        use super::{opportunistic_index_write_still_current, IndexOnDiskIdentity};
+
+        let mut loaded = Index::new();
+        loaded.source_checksum = Some(vec![1; 20]);
+        loaded.source_mtime = Some((1, 0));
+        loaded.source_file_len = Some(100);
+        let same = IndexOnDiskIdentity {
+            checksum: Some(vec![1; 20]),
+            mtime: Some((1, 0)),
+            len: 100,
+        };
+        assert!(opportunistic_index_write_still_current(&loaded, &same));
+
+        let changed = IndexOnDiskIdentity {
+            checksum: Some(vec![2; 20]),
+            mtime: Some((1, 0)),
+            len: 100,
+        };
+        assert!(!opportunistic_index_write_still_current(&loaded, &changed));
+
+        loaded.source_checksum = Some(vec![0; 20]);
+        assert!(!opportunistic_index_write_still_current(
+            &loaded,
+            &IndexOnDiskIdentity {
+                checksum: Some(vec![0; 20]),
+                mtime: Some((2, 0)),
+                len: 100,
+            }
+        ));
+
+        let empty_loaded = Index::new();
+        assert!(opportunistic_index_write_still_current(
+            &empty_loaded,
+            &IndexOnDiskIdentity {
+                checksum: None,
+                mtime: None,
+                len: 0,
+            }
+        ));
+        assert!(!opportunistic_index_write_still_current(
+            &empty_loaded,
+            &IndexOnDiskIdentity {
+                checksum: Some(vec![1; 20]),
+                mtime: Some((1, 0)),
+                len: 50,
+            }
+        ));
     }
 
     #[test]

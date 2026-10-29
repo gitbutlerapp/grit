@@ -73,6 +73,19 @@ pub struct RenameDetection {
     pub copies: bool,
 }
 
+/// Test hook type so [`StatusOptions`] stays `Debug`/`Clone`.
+#[derive(Clone)]
+#[doc(hidden)]
+pub struct BeforeOpportunisticIndexWriteHook(
+    #[doc(hidden)] pub std::sync::Arc<dyn Fn() + Send + Sync>,
+);
+
+impl std::fmt::Debug for BeforeOpportunisticIndexWriteHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<before_opportunistic_index_write>")
+    }
+}
+
 /// Inputs that drive **what** `status` computes.
 ///
 /// The CLI translates clap arguments and config (`status.showUntrackedFiles`,
@@ -109,6 +122,9 @@ pub struct StatusOptions {
     /// read-only status (for example when `GIT_OPTIONAL_LOCKS=0`) set this to `false`; the
     /// default is `true`.
     pub write_index: bool,
+    /// Test hook invoked immediately before an opportunistic index write (deterministic races).
+    #[doc(hidden)]
+    pub before_opportunistic_index_write: Option<BeforeOpportunisticIndexWriteHook>,
 }
 
 /// Map `status.showUntrackedFiles` to [`UntrackedMode`].
@@ -160,6 +176,7 @@ impl Default for StatusOptions {
             now_unix_seconds: None,
             count_stash: false,
             write_index: true,
+            before_opportunistic_index_write: None,
         }
     }
 }
@@ -2227,7 +2244,9 @@ use crate::progress::ProgressSink;
 /// When [`StatusOptions::write_index`] is `true` and the repository
 /// [`Environment`](crate::environment::Environment) allows optional locks, this function may
 /// rewrite `.git/index` after refreshing cached stat data (and may finish an interrupted rewrite
-/// apply). Set `write_index` to `false` or capture `GIT_OPTIONAL_LOCKS=0` in the environment for
+/// apply). If another command updates the index after this call loaded it (for example a
+/// concurrent commit), the opportunistic write is skipped so the fresher on-disk index is kept.
+/// Set `write_index` to `false` or capture `GIT_OPTIONAL_LOCKS=0` in the environment for
 /// read-only status that leaves the index file untouched.
 pub fn status(
     repo: &Repository,
@@ -2422,6 +2441,9 @@ pub fn status(
         // The refresh pass already re-hashed every racily clean entry and invalidated the
         // ones whose content changed, so the write must not hash them a second time.
         index.skip_racy_smudge_on_write = true;
+        if let Some(hook) = &opts.before_opportunistic_index_write {
+            (hook.0)();
+        }
         let written = repo.try_write_index_at(&index_path, &mut index);
         index.skip_racy_smudge_on_write = false;
         if written? {
