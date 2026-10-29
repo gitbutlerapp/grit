@@ -163,7 +163,6 @@ pub mod prelude {
 
 pub mod revwalk;
 pub mod stash;
-pub mod workspace_snapshot;
 
 pub mod apply;
 pub(crate) mod attributes;

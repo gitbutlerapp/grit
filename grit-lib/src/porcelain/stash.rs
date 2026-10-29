@@ -2317,13 +2317,12 @@ fn check_stash_untracked_restore(
             score: None,
         })
         .collect();
-    if let Some(path) =
-        untracked_would_be_overwritten_by_tree_changes(&existing_paths, &tree_changes).first()
-    {
+    let collisions = untracked_would_be_overwritten_by_tree_changes(&existing_paths, &tree_changes);
+    for path in &collisions {
         if options.overwrite_identical_untracked
             && untracked_on_disk_matches_stash(repo, work_tree, index, ut_oid, &ut_entries, path)?
         {
-            return Ok(());
+            continue;
         }
         return Err(Error::StashCouldNotRestoreUntracked { path: path.clone() });
     }

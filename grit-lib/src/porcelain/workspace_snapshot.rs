@@ -53,10 +53,7 @@ pub struct WorkspaceSnapshot {
 
 /// Options for [`restore_workspace_snapshot`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct WorkspaceRestoreOptions {
-    /// Reflog message for ref updates performed during restore (empty omits reflog entries).
-    pub reflog_message: Option<String>,
-}
+pub struct WorkspaceRestoreOptions {}
 
 /// Capture the current workspace without mutating the repository.
 ///
@@ -119,13 +116,23 @@ pub fn restore_workspace_snapshot(
 pub fn clear_in_progress(repo: &Repository) -> Result<Vec<InProgressOperation>> {
     let git_dir = repo.git_dir();
     let ops = crate::state::detect_in_progress(git_dir);
+    clear_managed_operation_sentinels(git_dir)?;
+    Ok(ops)
+}
+
+/// Remove every operation sentinel path [`capture_operation_state`] may record.
+pub(crate) fn clear_managed_operation_sentinels(git_dir: &Path) -> Result<()> {
     crate::state::clear_merge_state(git_dir)?;
     crate::state::clear_replay_state(git_dir)?;
-    remove_dir_if_present(&git_dir.join("rebase-merge"))?;
-    remove_dir_if_present(&git_dir.join("rebase-apply"))?;
-    let journal = git_dir.join("grit/rewrite-apply");
-    remove_dir_if_present(&journal)?;
-    Ok(ops)
+    for dir in [
+        "sequencer",
+        "rebase-merge",
+        "rebase-apply",
+        "grit/rewrite-apply",
+    ] {
+        remove_dir_if_present(&git_dir.join(dir))?;
+    }
+    Ok(())
 }
 
 fn remove_dir_if_present(path: &Path) -> Result<()> {
@@ -322,6 +329,7 @@ fn capture_dir_recursive(abs: &Path, rel: &str, out: &mut BTreeMap<String, Vec<u
 }
 
 fn restore_operation_state(git_dir: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<()> {
+    clear_managed_operation_sentinels(git_dir)?;
     for (rel, bytes) in files {
         let abs = git_dir.join(rel);
         if let Some(parent) = abs.parent() {
@@ -523,5 +531,42 @@ mod tests {
         assert!(cleared.contains(&InProgressOperation::Merge));
         assert!(!repo.git_dir().join("MERGE_HEAD").exists());
         assert_eq!(fs::read_to_string(root.join("a.txt")).unwrap(), before);
+    }
+
+    #[test]
+    fn restore_clears_later_operation_sentinels_not_in_snapshot() {
+        let (_tmp, repo) = setup_merge_conflict();
+        let root = repo.work_tree().unwrap();
+        let snap = capture_workspace_snapshot(
+            &repo,
+            &WorkspaceCaptureOptions {
+                refs: vec![],
+                include_untracked: false,
+            },
+        )
+        .unwrap();
+        assert!(snap.operation_state.is_empty());
+        assert!(crate::state::detect_in_progress(repo.git_dir()).is_empty());
+
+        fs::write(
+            repo.git_dir().join("MERGE_HEAD"),
+            git(root, &["rev-parse", "HEAD"]),
+        )
+        .unwrap();
+        assert_eq!(
+            crate::state::detect_in_progress(repo.git_dir()),
+            vec![InProgressOperation::Merge]
+        );
+
+        restore_workspace_snapshot(
+            &repo,
+            &snap,
+            &WorkspaceRestoreOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+        assert!(crate::state::detect_in_progress(repo.git_dir()).is_empty());
+        assert!(!repo.git_dir().join("MERGE_HEAD").exists());
     }
 }

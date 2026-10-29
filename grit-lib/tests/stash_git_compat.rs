@@ -1846,3 +1846,50 @@ fn apply_stash_still_refuses_differing_untracked_with_overwrite_flag() {
         .expect_err("differing untracked");
     assert!(matches!(err, Error::StashCouldNotRestoreUntracked { .. }));
 }
+
+#[test]
+fn apply_stash_overwrite_identical_rejects_when_any_collision_differs() {
+    let root = tempfile::tempdir().expect("tmpdir");
+    init_repo(root.path());
+    std::fs::write(root.path().join("tracked.txt"), "base\n").expect("tracked");
+    git_cmd(root.path(), &["add", "tracked.txt"]);
+    git_cmd(root.path(), &["commit", "-qm", "base"]);
+    std::fs::write(root.path().join("a.txt"), "same\n").expect("a");
+    std::fs::write(root.path().join("z.txt"), "stashed z\n").expect("z");
+    let ident = "Test <t@example.com> 1700000000 +0000"
+        .parse()
+        .expect("signature");
+    let stash_oid = open_grit(root.path())
+        .stash()
+        .create(&StashPushOptions {
+            message: None,
+            include_untracked: true,
+            identity: ident,
+            selection: None,
+            pathspecs: Vec::new(),
+            dry_run: false,
+            mode: Default::default(),
+        })
+        .expect("create")
+        .expect("oid");
+    git_cmd(root.path(), &["reset", "--hard", "HEAD"]);
+    std::fs::write(root.path().join("a.txt"), "same\n").expect("identical a");
+    std::fs::write(root.path().join("z.txt"), "local z\n").expect("different z");
+    let err = open_grit(root.path())
+        .stash()
+        .apply_commit(
+            &stash_oid,
+            &StashApplyOptions {
+                overwrite_identical_untracked: true,
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect_err("differing z must block apply");
+    assert!(matches!(err, Error::StashCouldNotRestoreUntracked { .. }));
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("z.txt")).expect("z"),
+        "local z\n"
+    );
+}
