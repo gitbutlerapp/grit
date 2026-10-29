@@ -5,15 +5,21 @@
 //! and `git write-tree`.
 
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
+use grit_lib::porcelain::stage_tracked::{
+    stage_tracked_modifications_with_thresholds, IndexStagingThresholds,
+};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, unique_tmp};
 
 const FILES: usize = 50;
+/// Matches [`IndexStagingThresholds::parallel_tracked_restage`] and the #2328 repro scale.
+const TRACKED_RESTAGE_FILES: usize = 5_000;
 
 fn seed_packed_repo(name: &str) -> std::path::PathBuf {
     let root = unique_tmp("add-packed-2190", name);
@@ -134,6 +140,75 @@ fn stage_new_files_into_packed_repo_writes_them_loose() {
 }
 
 #[test]
+fn tracked_restage_after_gc_matches_mod_branch_blobs_without_loose_writes() {
+    let root = unique_tmp("add-packed-2190", "tracked-restage-5k");
+    git(&root, &["init", "-q", "-b", "main", "."]);
+    git(&root, &["config", "user.email", "t@example.com"]);
+    git(&root, &["config", "user.name", "Test"]);
+    git(&root, &["config", "gc.auto", "0"]);
+    for i in 0..TRACKED_RESTAGE_FILES {
+        let dir = root.join(format!("d{:02}", i % 50));
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(
+            dir.join(format!("f{i:04}.txt")),
+            format!("file {}\n", i * 10),
+        )
+        .expect("write");
+    }
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "base"]);
+    git(&root, &["switch", "-qc", "mod"]);
+    for i in 0..TRACKED_RESTAGE_FILES {
+        fs::OpenOptions::new()
+            .append(true)
+            .open(root.join(format!("d{:02}/f{i:04}.txt", i % 50)))
+            .expect("open")
+            .write_all(b"modified\n")
+            .expect("append");
+    }
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "mod"]);
+    git(&root, &["gc", "-q", "--prune=now"]);
+    assert_eq!(loose_object_count(&root), 0);
+    git(&root, &["switch", "-q", "main"]);
+    for i in 0..TRACKED_RESTAGE_FILES {
+        fs::OpenOptions::new()
+            .append(true)
+            .open(root.join(format!("d{:02}/f{i:04}.txt", i % 50)))
+            .expect("open")
+            .write_all(b"modified\n")
+            .expect("append");
+    }
+    if let Ok(entries) = fs::read_dir(root.join(".git/objects/pack")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "pack") {
+                let mut perms = fs::metadata(&path).expect("meta").permissions();
+                perms.set_readonly(true);
+                fs::set_permissions(&path, perms).expect("readonly pack like git gc on Windows");
+            }
+        }
+    }
+    let repo = Repository::discover(Some(&root), &RepositoryOptions::empty()).expect("open repo");
+    let thresholds = IndexStagingThresholds {
+        parallel_tracked_restage: 4_096,
+        ..IndexStagingThresholds::default()
+    };
+    let summary =
+        stage_tracked_modifications_with_thresholds(&repo, &root, thresholds).expect("restage");
+    assert_eq!(
+        summary.modified.len(),
+        TRACKED_RESTAGE_FILES,
+        "every file should be restaged"
+    );
+    assert_eq!(
+        loose_object_count(&root),
+        0,
+        "tracked restage of blobs already in pack must not write loose objects (#2328)"
+    );
+    git(&root, &["fsck", "--strict", "--no-dangling"]);
+}
+
 fn stage_after_rm_cached_in_shared_clone_writes_no_loose_objects() {
     let origin = seed_packed_repo("shared-origin");
     let clone = unique_tmp("add-packed-2190", "shared-clone");
