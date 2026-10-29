@@ -17,6 +17,7 @@ use super::core::{
     apply_rename_detection_to_diff_entries, mode_from_metadata, read_worktree_bytes_for_mode,
     zero_oid, DiffEntry, DiffStatus,
 };
+use super::detail::line_change_counts;
 use super::options::DiffOptions;
 use super::patch_log::{write_patch, PatchTextOptions};
 use super::structured::{structured_file_diff, SideBytes};
@@ -58,6 +59,7 @@ impl From<NoIndexError> for crate::error::Error {
 ///
 /// Returns [`NoIndexError::PathNotAccessible`] when either top-level path cannot be accessed.
 pub fn diff_paths(a: &Path, b: &Path, opts: &DiffOptions) -> Result<Vec<FileDiff>, NoIndexError> {
+    let stat_only = opts.no_index_stat_only;
     let temp = tempfile::tempdir().map_err(|e| NoIndexError::PathNotAccessible {
         path: e.to_string(),
     })?;
@@ -71,7 +73,7 @@ pub fn diff_paths(a: &Path, b: &Path, opts: &DiffOptions) -> Result<Vec<FileDiff
         .cap_word_level_inline_for_changed_files(entries.len());
     Ok(entries
         .into_iter()
-        .filter_map(|entry| file_diff_from_entry(&odb, &entry, diff_options.clone()))
+        .filter_map(|entry| file_diff_from_entry(&odb, &entry, diff_options.clone(), stat_only))
         .collect())
 }
 
@@ -147,7 +149,12 @@ fn no_index_prepared_entries(
     }
 }
 
-fn file_diff_from_entry(odb: &Odb, entry: &DiffEntry, opts: DiffOptions) -> Option<FileDiff> {
+fn file_diff_from_entry(
+    odb: &Odb,
+    entry: &DiffEntry,
+    opts: DiffOptions,
+    stat_only: bool,
+) -> Option<FileDiff> {
     let path_unchanged = entry.old_path == entry.new_path;
     if entry.old_oid == entry.new_oid
         && entry.old_mode == entry.new_mode
@@ -168,16 +175,32 @@ fn file_diff_from_entry(odb: &Odb, entry: &DiffEntry, opts: DiffOptions) -> Opti
         .old_path
         .clone()
         .filter(|op| entry.new_path.as_ref() != Some(op));
-    let structured = if binary {
-        super::structured::StructuredFileDiff {
-            old_mode: entry.old_mode.octal_if_present(),
-            new_mode: entry.new_mode.octal_if_present(),
-            old_encoding_lossy: old_bytes.encoding_lossy,
-            new_encoding_lossy: new_bytes.encoding_lossy,
-            hunks: Vec::new(),
-        }
+    let (old_encoding_lossy, new_encoding_lossy, hunks, line_stat) = if binary {
+        (
+            old_bytes.encoding_lossy,
+            new_bytes.encoding_lossy,
+            Vec::new(),
+            None,
+        )
+    } else if stat_only {
+        let old_text = String::from_utf8_lossy(&old_bytes.data);
+        let new_text = String::from_utf8_lossy(&new_bytes.data);
+        let stat = line_change_counts(old_text.as_ref(), new_text.as_ref(), &opts);
+        (
+            old_bytes.encoding_lossy,
+            new_bytes.encoding_lossy,
+            Vec::new(),
+            Some(stat),
+        )
     } else {
-        structured_file_diff(entry.old_mode, entry.new_mode, &old_bytes, &new_bytes, opts)
+        let structured =
+            structured_file_diff(entry.old_mode, entry.new_mode, &old_bytes, &new_bytes, opts);
+        (
+            structured.old_encoding_lossy,
+            structured.new_encoding_lossy,
+            structured.hunks,
+            None,
+        )
     };
     Some(FileDiff {
         path,
@@ -189,9 +212,10 @@ fn file_diff_from_entry(odb: &Odb, entry: &DiffEntry, opts: DiffOptions) -> Opti
         new_oid: entry.new_oid,
         binary,
         content_changed: entry.old_oid != entry.new_oid,
-        old_encoding_lossy: structured.old_encoding_lossy,
-        new_encoding_lossy: structured.new_encoding_lossy,
-        hunks: structured.hunks,
+        old_encoding_lossy,
+        new_encoding_lossy,
+        hunks,
+        line_stat,
     })
 }
 

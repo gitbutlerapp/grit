@@ -11,6 +11,7 @@ use crate::diff::changes::{
     head_tree, load_changes, load_object_changes, staged_entries_in, unstaged_entries_in,
     worktree_entries_in, FileChange, WorktreeSide,
 };
+use crate::diff::detail::LineStat;
 use crate::diff::diff_trees_with_renames_and_policy;
 use crate::diff::structured::StructuredHunk;
 use crate::diff::{
@@ -88,6 +89,8 @@ pub struct FileDiff {
     pub new_encoding_lossy: bool,
     /// Structured line hunks for text files.
     pub hunks: Vec<StructuredHunk>,
+    /// Precomputed line counts when stat was requested without building hunks.
+    pub line_stat: Option<LineStat>,
 }
 
 /// Resolved diff mode and normalized pathspecs.
@@ -536,6 +539,7 @@ fn file_diff_from_tree_structured(t: TreeDiffStructured) -> FileDiff {
         old_encoding_lossy: t.structured.old_encoding_lossy,
         new_encoding_lossy: t.structured.new_encoding_lossy,
         hunks: t.structured.hunks,
+        line_stat: None,
     }
 }
 
@@ -572,6 +576,7 @@ fn build_file_diff(fc: &FileChange, diff_options: DiffOptions) -> FileDiff {
         old_encoding_lossy: structured.old_encoding_lossy,
         new_encoding_lossy: structured.new_encoding_lossy,
         hunks: structured.hunks,
+        line_stat: None,
     }
 }
 
@@ -1228,6 +1233,7 @@ mod tests {
             old_encoding_lossy: false,
             new_encoding_lossy: false,
             hunks: Vec::new(),
+            line_stat: None,
         };
         let opts =
             DiffOptions::default().with_whitespace(crate::diff::WhitespaceMode::ignore_all_space());
@@ -1250,6 +1256,7 @@ mod tests {
             old_encoding_lossy: false,
             new_encoding_lossy: false,
             hunks: Vec::new(),
+            line_stat: None,
         };
         let opts =
             DiffOptions::default().with_whitespace(crate::diff::WhitespaceMode::ignore_all_space());
@@ -1272,6 +1279,7 @@ mod tests {
             old_encoding_lossy: false,
             new_encoding_lossy: false,
             hunks: Vec::new(),
+            line_stat: None,
         };
         let opts =
             DiffOptions::default().with_whitespace(crate::diff::WhitespaceMode::ignore_all_space());
@@ -1293,6 +1301,7 @@ mod tests {
             old_encoding_lossy: false,
             new_encoding_lossy: false,
             hunks: Vec::new(),
+            line_stat: None,
         };
         let opts =
             DiffOptions::default().with_whitespace(crate::diff::WhitespaceMode::ignore_all_space());

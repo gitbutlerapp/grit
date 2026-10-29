@@ -117,6 +117,8 @@ pub struct DiffOptions {
     /// When set, incremented on each blob ODB read during tree content loading (tests only).
     #[doc(hidden)]
     pub blob_read_counter: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+    /// For [`super::diff_paths`] only: count lines via [`super::line_change_counts`] without hunks.
+    pub(crate) no_index_stat_only: bool,
 }
 
 impl Default for DiffOptions {
@@ -132,6 +134,7 @@ impl Default for DiffOptions {
             word_level_inline: true,
             function_context: false,
             blob_read_counter: None,
+            no_index_stat_only: false,
         }
     }
 }
@@ -147,6 +150,7 @@ impl PartialEq for DiffOptions {
             && self.whitespace == other.whitespace
             && self.word_level_inline == other.word_level_inline
             && self.function_context == other.function_context
+            && self.no_index_stat_only == other.no_index_stat_only
     }
 }
 
@@ -220,6 +224,13 @@ impl DiffOptions {
     #[must_use]
     pub fn with_whitespace(mut self, whitespace: WhitespaceMode) -> Self {
         self.whitespace = whitespace;
+        self
+    }
+
+    /// When true, [`super::diff_paths`] uses [`super::line_change_counts`] instead of building hunks.
+    #[must_use]
+    pub fn with_no_index_stat_only(mut self, stat_only: bool) -> Self {
+        self.no_index_stat_only = stat_only;
         self
     }
 

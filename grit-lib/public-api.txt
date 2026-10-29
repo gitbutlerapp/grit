@@ -4865,6 +4865,7 @@ pub fn grit_lib::diff::DiffOptions::with_context_lines(self, usize) -> Self
 pub fn grit_lib::diff::DiffOptions::with_filter(self, core::option::Option<grit_lib::diff::DiffFilter>) -> Self
 pub fn grit_lib::diff::DiffOptions::with_indent_heuristic(self, bool) -> Self
 pub fn grit_lib::diff::DiffOptions::with_inter_hunk_context(self, usize) -> Self
+pub fn grit_lib::diff::DiffOptions::with_no_index_stat_only(self, bool) -> Self
 pub fn grit_lib::diff::DiffOptions::with_renames(self, grit_lib::diff::RenameDetection) -> Self
 pub fn grit_lib::diff::DiffOptions::with_whitespace(self, grit_lib::diff::WhitespaceMode) -> Self
 pub fn grit_lib::diff::DiffOptions::with_word_level_inline(self, bool) -> Self
@@ -5029,6 +5030,7 @@ pub struct grit_lib::diff::FileDiff
 pub grit_lib::diff::FileDiff::binary: bool
 pub grit_lib::diff::FileDiff::content_changed: bool
 pub grit_lib::diff::FileDiff::hunks: alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>
+pub grit_lib::diff::FileDiff::line_stat: core::option::Option<grit_lib::diff::LineStat>
 pub grit_lib::diff::FileDiff::new_encoding_lossy: bool
 pub grit_lib::diff::FileDiff::new_mode: core::option::Option<alloc::string::String>
 pub grit_lib::diff::FileDiff::new_oid: grit_lib::objects::ObjectId

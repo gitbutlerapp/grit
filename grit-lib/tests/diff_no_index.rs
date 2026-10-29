@@ -46,6 +46,40 @@ fn grit_name_status(old: &Path, new: &Path) -> Vec<String> {
 }
 
 #[test]
+fn no_index_stat_only_populates_line_stat_without_hunks() {
+    let dir = TempDir::new().expect("tempdir");
+    let a = dir.path().join("a.txt");
+    let b = dir.path().join("b.txt");
+    std::fs::write(&a, b"one\n").expect("write");
+    std::fs::write(&b, b"two\nextra\n").expect("write");
+    let opts = DiffOptions::default()
+        .with_no_index_stat_only(true)
+        .with_renames(RenameDetection::Off);
+    let files = diff_paths(&a, &b, &opts).expect("diff_paths");
+    assert_eq!(files.len(), 1);
+    assert!(files[0].hunks.is_empty());
+    let stat = files[0].line_stat.expect("line_stat");
+    assert_eq!(stat.insertions, 2);
+    assert_eq!(stat.deletions, 1);
+
+    let out = Command::new("git")
+        .args(["diff", "--no-index", "--numstat"])
+        .arg(&a)
+        .arg(&b)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git numstat");
+    let line = String::from_utf8_lossy(&out.stdout);
+    let line = line.lines().next().unwrap_or("");
+    let mut parts = line.split('\t');
+    let git_ins: usize = parts.next().unwrap_or("0").parse().unwrap_or(0);
+    let git_del: usize = parts.next().unwrap_or("0").parse().unwrap_or(0);
+    assert_eq!(stat.insertions, git_ins);
+    assert_eq!(stat.deletions, git_del);
+}
+
+#[test]
 fn no_index_file_vs_file_matches_git() {
     let dir = TempDir::new().expect("tempdir");
     let a = dir.path().join("a.txt");

@@ -589,6 +589,7 @@ fn build_file_diff_for_stale(change: &FileChange, opts: &DiffOptions) -> FileDif
         old_encoding_lossy: structured.old_encoding_lossy,
         new_encoding_lossy: structured.new_encoding_lossy,
         hunks: structured.hunks,
+        line_stat: None,
     }
 }
 

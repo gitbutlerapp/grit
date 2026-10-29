@@ -127,10 +127,12 @@ pub(crate) fn histogram_compacted_line_ops(
         diff_indent_heuristic::CompactSide {
             lines: &old_lines,
             keys: &old_compare,
+            compare_ids: None,
         },
         diff_indent_heuristic::CompactSide {
             lines: &new_lines,
             keys: &new_compare,
+            compare_ids: None,
         },
         indent_heuristic,
         ws,
@@ -346,10 +348,12 @@ pub(crate) fn compacted_line_ops_for_options(
                 diff_indent_heuristic::CompactSide {
                     lines: &old_refs,
                     keys: &old_compare,
+                    compare_ids: None,
                 },
                 diff_indent_heuristic::CompactSide {
                     lines: &new_refs,
                     keys: &new_compare,
+                    compare_ids: None,
                 },
                 options.indent_heuristic,
                 ws,
@@ -402,69 +406,71 @@ pub(crate) fn count_line_changes_with_options(
     (insertions, deletions)
 }
 
-/// Myers/minimal changed flags with Git occurrence semantics, trimming equal ends via
-/// [`git_xdiff::changed_flags_with_shared`] so large unchanged regions are not re-interned.
-fn xdiff_changed_flags_trimmed(
+/// Myers changed flags (via [`git_xdiff::changed_flags_with_shared`]) plus interned compare keys.
+type XdiffTrimmedIds = ((Vec<bool>, Vec<bool>), Vec<u32>, Vec<u32>);
+
+fn xdiff_changed_flags_trimmed_ids(
     old_compare: &[&str],
     new_compare: &[&str],
     need_min: bool,
-) -> (Vec<bool>, Vec<bool>) {
+) -> XdiffTrimmedIds {
     use crate::line_interner::LineInterner;
 
     let nrec1 = old_compare.len();
     let nrec2 = new_compare.len();
     if nrec1 == 0 && nrec2 == 0 {
-        return (Vec::new(), Vec::new());
+        return ((Vec::new(), Vec::new()), Vec::new(), Vec::new());
     }
+    let mut interner = LineInterner::with_capacity(nrec1 + nrec2);
+    let ids1_full = interner.intern_all(old_compare);
+    let ids2_full = interner.intern_all(new_compare);
+
     let lim = nrec1.min(nrec2);
     let mut head = 0usize;
-    while head < lim && old_compare[head] == new_compare[head] {
+    while head < lim && ids1_full[head] == ids2_full[head] {
         head += 1;
     }
     let mut tail = 0usize;
     let rem = lim - head;
-    while tail < rem && old_compare[nrec1 - 1 - tail] == new_compare[nrec2 - 1 - tail] {
+    while tail < rem && ids1_full[nrec1 - 1 - tail] == ids2_full[nrec2 - 1 - tail] {
         tail += 1;
     }
     let shared_records = head + tail;
-    if shared_records == 0 {
-        let mut interner = LineInterner::with_capacity(nrec1 + nrec2);
-        let ids1 = interner.intern_all(old_compare);
-        let ids2 = interner.intern_all(new_compare);
-        return git_xdiff::changed_flags(&ids1, &ids2, need_min);
-    }
-
-    let cut_old = &old_compare[head..nrec1 - tail];
-    let cut_new = &new_compare[head..nrec2 - tail];
-    let mut cut_interner =
-        LineInterner::with_capacity(cut_old.len() + cut_new.len() + shared_records);
-    let ids1 = cut_interner.intern_all(cut_old);
-    let ids2 = cut_interner.intern_all(cut_new);
-    let mut shared_counts = vec![0u32; cut_interner.len()];
-    for line in old_compare[..head]
-        .iter()
-        .chain(&old_compare[nrec1 - tail..])
-    {
-        if let Some(id) = cut_interner.get(line) {
+    let (full1, full2) = if shared_records == 0 {
+        git_xdiff::changed_flags(&ids1_full, &ids2_full, need_min)
+    } else {
+        let cut_ids1 = &ids1_full[head..nrec1 - tail];
+        let cut_ids2 = &ids2_full[head..nrec2 - tail];
+        let nclasses = ids1_full
+            .iter()
+            .chain(&ids2_full)
+            .max()
+            .map_or(0, |&max| max as usize + 1);
+        let mut shared_counts = vec![0u32; nclasses];
+        for &id in &ids1_full[..head] {
             shared_counts[id as usize] += 1;
         }
-    }
-    let (mid1, mid2) = git_xdiff::changed_flags_with_shared(
-        &ids1,
-        &ids2,
-        &shared_counts,
-        shared_records,
-        need_min,
-    );
-    let mut full1 = vec![false; nrec1];
-    let mut full2 = vec![false; nrec2];
-    if !mid1.is_empty() {
-        full1[head..nrec1 - tail].copy_from_slice(&mid1);
-    }
-    if !mid2.is_empty() {
-        full2[head..nrec2 - tail].copy_from_slice(&mid2);
-    }
-    (full1, full2)
+        for &id in &ids1_full[nrec1 - tail..] {
+            shared_counts[id as usize] += 1;
+        }
+        let (mid1, mid2) = git_xdiff::changed_flags_with_shared(
+            cut_ids1,
+            cut_ids2,
+            &shared_counts,
+            shared_records,
+            need_min,
+        );
+        let mut full1 = vec![false; nrec1];
+        let mut full2 = vec![false; nrec2];
+        if !mid1.is_empty() {
+            full1[head..nrec1 - tail].copy_from_slice(&mid1);
+        }
+        if !mid2.is_empty() {
+            full2[head..nrec2 - tail].copy_from_slice(&mid2);
+        }
+        (full1, full2)
+    };
+    ((full1, full2), ids1_full, ids2_full)
 }
 
 pub(crate) fn git_xdiff_compacted_line_ops(
@@ -475,7 +481,8 @@ pub(crate) fn git_xdiff_compacted_line_ops(
     indent_heuristic: bool,
     need_min: bool,
 ) -> Vec<similar::DiffOp> {
-    let (changed1, changed2) = xdiff_changed_flags_trimmed(old_compare, new_compare, need_min);
+    let ((changed1, changed2), old_key_ids, new_key_ids) =
+        xdiff_changed_flags_trimmed_ids(old_compare, new_compare, need_min);
     let old_lines = line_bodies(before);
     let new_lines = line_bodies(after);
     diff_indent_heuristic::apply_change_compact_to_masks(
@@ -484,10 +491,12 @@ pub(crate) fn git_xdiff_compacted_line_ops(
         diff_indent_heuristic::CompactSide {
             lines: &old_lines,
             keys: old_compare,
+            compare_ids: Some(&old_key_ids),
         },
         diff_indent_heuristic::CompactSide {
             lines: &new_lines,
             keys: new_compare,
+            compare_ids: Some(&new_key_ids),
         },
         indent_heuristic,
     )
@@ -651,10 +660,12 @@ where
         diff_indent_heuristic::CompactSide {
             lines: &old_refs,
             keys: &old_compare,
+            compare_ids: None,
         },
         diff_indent_heuristic::CompactSide {
             lines: &new_refs,
             keys: &new_compare,
+            compare_ids: None,
         },
         indent_heuristic,
         ws,
@@ -871,10 +882,12 @@ fn git_patience_unified_body_raw(
         diff_indent_heuristic::CompactSide {
             lines: &old_refs,
             keys: &old_compare,
+            compare_ids: None,
         },
         diff_indent_heuristic::CompactSide {
             lines: &new_refs,
             keys: &new_compare,
+            compare_ids: None,
         },
         indent_heuristic,
         ws,
@@ -1494,6 +1507,8 @@ pub fn resolve_indent_heuristic(
 // (and `similar`) pick different — but equally minimal — alignments for inputs
 // with many repeated tokens (e.g. the `{`/`}`/`,` in the `bibtex` driver).
 mod git_xdiff {
+    use std::cell::RefCell;
+
     const XDL_MAX_COST_MIN: i64 = 256;
     const XDL_HEUR_MIN_COST: i64 = 256;
     const XDL_SNAKE_CNT: i64 = 20;
@@ -1534,18 +1549,76 @@ mod git_xdiff {
     /// A single side of the diff: token ids plus the `changed` flags and the
     /// `reference_index` mapping from effective record -> original record.
     struct XdFile<'a> {
+        #[allow(dead_code)]
         ids: &'a [u32],
-        changed: Vec<bool>,
+        changed: Vec<u8>,
         reference_index: Vec<usize>,
+        /// Interned token id per effective record (parallel to `reference_index`).
+        effective_ids: Vec<u32>,
         dstart: i64,
         dend: i64,
         nreff: i64,
     }
 
-    /// Hash/id lookup over the *effective* records: index into `reference_index`.
     #[inline]
-    fn get_id(xdf: &XdFile<'_>, idx: i64) -> u32 {
-        xdf.ids[xdf.reference_index[idx as usize]]
+    fn effective_id(xdf: &XdFile<'_>, idx: i64) -> u32 {
+        xdf.effective_ids[idx as usize]
+    }
+
+    struct XdiffScratch {
+        count1: Vec<i64>,
+        count2: Vec<i64>,
+        action1: Vec<u8>,
+        action2: Vec<u8>,
+        kvd: Vec<i64>,
+    }
+
+    impl XdiffScratch {
+        fn prepare_counts(&mut self, nclasses: usize) {
+            if self.count1.len() < nclasses {
+                self.count1.resize(nclasses, 0);
+                self.count2.resize(nclasses, 0);
+            }
+            self.count1[..nclasses].fill(0);
+            self.count2[..nclasses].fill(0);
+        }
+
+        fn prepare_actions(&mut self, nrec1: usize, nrec2: usize) {
+            let a1 = nrec1 + 1;
+            let a2 = nrec2 + 1;
+            if self.action1.len() < a1 {
+                self.action1.resize(a1, 0);
+            } else {
+                self.action1[..a1].fill(0);
+            }
+            if self.action2.len() < a2 {
+                self.action2.resize(a2, 0);
+            } else {
+                self.action2[..a2].fill(0);
+            }
+        }
+
+        fn prepare_kvd(&mut self, kvd_len: usize) {
+            if self.kvd.len() < kvd_len {
+                self.kvd.resize(kvd_len, 0);
+            }
+        }
+    }
+
+    thread_local! { // hygiene: per-thread xdiff Myers scratch (class counts, K-vectors) reused across files
+        static XDIFF_SCRATCH: RefCell<XdiffScratch> = const {
+            RefCell::new(XdiffScratch {
+                count1: Vec::new(),
+                count2: Vec::new(),
+                action1: Vec::new(),
+                action2: Vec::new(),
+                kvd: Vec::new(),
+            })
+        };
+    }
+
+    fn bool_changed(changed: Vec<u8>) -> Vec<bool> {
+        changed.into_iter().map(|b| b != 0).collect()
     }
 
     /// Faithful port of `xdl_split` (the middle-snake finder). `kvdf`/`kvdb` are
@@ -1606,7 +1679,7 @@ mod git_xdiff {
                 };
                 let prev1 = i1;
                 let mut i2 = i1 - d;
-                while i1 < lim1 && i2 < lim2 && get_id(xdf1, i1) == get_id(xdf2, i2) {
+                while i1 < lim1 && i2 < lim2 && effective_id(xdf1, i1) == effective_id(xdf2, i2) {
                     i1 += 1;
                     i2 += 1;
                 }
@@ -1646,7 +1719,10 @@ mod git_xdiff {
                 };
                 let prev1 = i1;
                 let mut i2 = i1 - d;
-                while i1 > off1 && i2 > off2 && get_id(xdf1, i1 - 1) == get_id(xdf2, i2 - 1) {
+                while i1 > off1
+                    && i2 > off2
+                    && effective_id(xdf1, i1 - 1) == effective_id(xdf2, i2 - 1)
+                {
                     i1 -= 1;
                     i2 -= 1;
                 }
@@ -1685,7 +1761,7 @@ mod git_xdiff {
                         && i2 < lim2
                     {
                         let mut k = 1i64;
-                        while get_id(xdf1, i1 - k) == get_id(xdf2, i2 - k) {
+                        while effective_id(xdf1, i1 - k) == effective_id(xdf2, i2 - k) {
                             if k == xenv.snake_cnt {
                                 best = v;
                                 spl.i1 = i1;
@@ -1718,7 +1794,7 @@ mod git_xdiff {
                         && i2 <= lim2 - xenv.snake_cnt
                     {
                         let mut k = 0i64;
-                        while get_id(xdf1, i1 + k) == get_id(xdf2, i2 + k) {
+                        while effective_id(xdf1, i1 + k) == effective_id(xdf2, i2 + k) {
                             if k == xenv.snake_cnt - 1 {
                                 best = v;
                                 spl.i1 = i1;
@@ -1805,11 +1881,14 @@ mod git_xdiff {
         need_min: bool,
         xenv: &XdAlgoEnv,
     ) {
-        while off1 < lim1 && off2 < lim2 && get_id(xdf1, off1) == get_id(xdf2, off2) {
+        while off1 < lim1 && off2 < lim2 && effective_id(xdf1, off1) == effective_id(xdf2, off2) {
             off1 += 1;
             off2 += 1;
         }
-        while off1 < lim1 && off2 < lim2 && get_id(xdf1, lim1 - 1) == get_id(xdf2, lim2 - 1) {
+        while off1 < lim1
+            && off2 < lim2
+            && effective_id(xdf1, lim1 - 1) == effective_id(xdf2, lim2 - 1)
+        {
             lim1 -= 1;
             lim2 -= 1;
         }
@@ -1817,13 +1896,13 @@ mod git_xdiff {
         if off1 == lim1 {
             while off2 < lim2 {
                 let r = xdf2.reference_index[off2 as usize];
-                xdf2.changed[r] = true;
+                xdf2.changed[r] = 1;
                 off2 += 1;
             }
         } else if off2 == lim2 {
             while off1 < lim1 {
                 let r = xdf1.reference_index[off1 as usize];
-                xdf1.changed[r] = true;
+                xdf1.changed[r] = 1;
                 off1 += 1;
             }
         } else {
@@ -1909,6 +1988,26 @@ mod git_xdiff {
         shared_records: usize,
         need_min: bool,
     ) -> (Vec<bool>, Vec<bool>) {
+        XDIFF_SCRATCH.with(|cell| {
+            changed_flags_with_shared_inner(
+                cell,
+                ids1,
+                ids2,
+                shared_counts,
+                shared_records,
+                need_min,
+            )
+        })
+    }
+
+    fn changed_flags_with_shared_inner(
+        scratch: &RefCell<XdiffScratch>,
+        ids1: &[u32],
+        ids2: &[u32],
+        shared_counts: &[u32],
+        shared_records: usize,
+        need_min: bool,
+    ) -> (Vec<bool>, Vec<bool>) {
         let nrec1 = ids1.len();
         let nrec2 = ids2.len();
 
@@ -1918,31 +2017,33 @@ mod git_xdiff {
             .chain(ids2)
             .max()
             .map_or(0, |&max| max as usize + 1);
-        let mut count1 = vec![0i64; nclasses];
-        let mut count2 = vec![0i64; nclasses];
+        let mut work = scratch.borrow_mut();
+        work.prepare_counts(nclasses);
         for &id in ids1 {
-            count1[id as usize] += 1;
+            work.count1[id as usize] += 1;
         }
         for &id in ids2 {
-            count2[id as usize] += 1;
+            work.count2[id as usize] += 1;
         }
         for (id, &shared) in shared_counts.iter().enumerate().take(nclasses) {
-            count1[id] += i64::from(shared);
-            count2[id] += i64::from(shared);
+            work.count1[id] += i64::from(shared);
+            work.count2[id] += i64::from(shared);
         }
 
         let mut xdf1 = XdFile {
             ids: ids1,
-            changed: vec![false; nrec1],
+            changed: vec![0u8; nrec1],
             reference_index: Vec::new(),
+            effective_ids: Vec::new(),
             dstart: 0,
             dend: nrec1 as i64 - 1,
             nreff: 0,
         };
         let mut xdf2 = XdFile {
             ids: ids2,
-            changed: vec![false; nrec2],
+            changed: vec![0u8; nrec2],
             reference_index: Vec::new(),
+            effective_ids: Vec::new(),
             dstart: 0,
             dend: nrec2 as i64 - 1,
             nreff: 0,
@@ -1965,8 +2066,7 @@ mod git_xdiff {
         xdf2.dend = nrec2 as i64 - j - 1;
 
         // xdl_cleanup_records: classify and reduce to effective records.
-        let mut action1 = vec![0u8; nrec1 + 1];
-        let mut action2 = vec![0u8; nrec2 + 1];
+        work.prepare_actions(nrec1, nrec2);
 
         let mlim1 = if need_min {
             i64::MAX
@@ -1980,8 +2080,8 @@ mod git_xdiff {
         let mut idx = xdf1.dstart;
         while idx <= xdf1.dend {
             let id = ids1[idx as usize];
-            let nm = count2[id as usize];
-            action1[idx as usize] = if nm == 0 {
+            let nm = work.count2[id as usize];
+            work.action1[idx as usize] = if nm == 0 {
                 DISCARD
             } else if nm >= mlim1 {
                 INVESTIGATE
@@ -2003,8 +2103,8 @@ mod git_xdiff {
         let mut idx = xdf2.dstart;
         while idx <= xdf2.dend {
             let id = ids2[idx as usize];
-            let nm = count1[id as usize];
-            action2[idx as usize] = if nm == 0 {
+            let nm = work.count1[id as usize];
+            work.action2[idx as usize] = if nm == 0 {
                 DISCARD
             } else if nm >= mlim2 {
                 INVESTIGATE
@@ -2016,13 +2116,16 @@ mod git_xdiff {
 
         let mut idx = xdf1.dstart;
         while idx <= xdf1.dend {
-            let a = action1[idx as usize];
+            let id = ids1[idx as usize];
+            let a = work.action1[idx as usize];
             if a == KEEP
-                || (a == INVESTIGATE && !clean_mmatch(&action1, idx, xdf1.dstart, xdf1.dend))
+                || (a == INVESTIGATE
+                    && !clean_mmatch(&work.action1[..nrec1 + 1], idx, xdf1.dstart, xdf1.dend))
             {
                 xdf1.reference_index.push(idx as usize);
+                xdf1.effective_ids.push(id);
             } else {
-                xdf1.changed[idx as usize] = true;
+                xdf1.changed[idx as usize] = 1;
             }
             idx += 1;
         }
@@ -2030,13 +2133,16 @@ mod git_xdiff {
 
         let mut idx = xdf2.dstart;
         while idx <= xdf2.dend {
-            let a = action2[idx as usize];
+            let id = ids2[idx as usize];
+            let a = work.action2[idx as usize];
             if a == KEEP
-                || (a == INVESTIGATE && !clean_mmatch(&action2, idx, xdf2.dstart, xdf2.dend))
+                || (a == INVESTIGATE
+                    && !clean_mmatch(&work.action2[..nrec2 + 1], idx, xdf2.dstart, xdf2.dend))
             {
                 xdf2.reference_index.push(idx as usize);
+                xdf2.effective_ids.push(id);
             } else {
-                xdf2.changed[idx as usize] = true;
+                xdf2.changed[idx as usize] = 1;
             }
             idx += 1;
         }
@@ -2045,7 +2151,8 @@ mod git_xdiff {
         // Allocate K vectors (xdl_do_diff). koff lets us use negative diagonals.
         let ndiags = xdf1.nreff + xdf2.nreff + 3;
         let kvd_len = (2 * ndiags + 2) as usize;
-        let mut kvd = vec![0i64; kvd_len];
+        work.prepare_kvd(kvd_len);
+        let kvd = &mut work.kvd[..kvd_len];
         // kvdf base offset = nreff2 + 1; kvdb base offset = ndiags + nreff2 + 1.
         let koff = xdf2.nreff + 1;
         let (kvdf_slice, kvdb_slice) = kvd.split_at_mut(ndiags as usize);
@@ -2064,7 +2171,7 @@ mod git_xdiff {
             &xenv,
         );
 
-        (xdf1.changed, xdf2.changed)
+        (bool_changed(xdf1.changed), bool_changed(xdf2.changed))
     }
 
     /// Patience diff: match unique lines, then recurse on gaps with xdiff Myers.
