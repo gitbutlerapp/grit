@@ -761,14 +761,6 @@ pub(crate) fn parse_v2_ls_refs_response(reader: &mut dyn Read) -> Result<LsRefsA
     Ok((advertised, head_symref, advertised_peel, head_oid))
 }
 
-/// Build the ordered `have` candidate list for a v2 fetch from the local ref
-/// tips, peeled to commits and excluding the wants, driven
-/// through the [`SkippingNegotiator`]'s skipping schedule.
-///
-/// Shared by the streaming (`negotiate_pack_v2`) and stateless-HTTP v2 fetch
-/// paths so both offer the server the same `have`s in the same order. The wire
-/// rounds (how many haves per request, when to send `done`) are batched by the
-/// caller, which differs between a duplex socket and stateless POSTs.
 /// The ordered local `have` list for a v2 fetch, produced on demand.
 ///
 /// Draining the skipping negotiator walks the whole local history, so only as many haves are
@@ -799,13 +791,21 @@ impl V2LocalHaves<'_> {
     }
 }
 
+/// Build the ordered `have` candidate list for a v2 fetch from the local ref
+/// tips, peeled to commits and skipping those in `exclude`, driven through the
+/// [`SkippingNegotiator`]'s skipping schedule.
+///
+/// `exclude` is normally the wants; a deepen passes none, since the tips it
+/// deepens are already local and are the best haves it has. The wire rounds
+/// (how many haves per request, when to send `done`) are batched by the caller,
+/// which differs between a duplex socket and stateless POSTs.
 pub(crate) fn v2_local_haves<'r>(
     local: &'r Repository,
-    wants: &[ObjectId],
+    exclude: &[ObjectId],
 ) -> Result<V2LocalHaves<'r>> {
-    let want_set: HashSet<ObjectId> = wants.iter().copied().collect();
+    let exclude: HashSet<ObjectId> = exclude.iter().copied().collect();
     let mut negotiator = SkippingNegotiator::new(local);
-    add_negotiation_tips(&mut negotiator, &want_set)?;
+    add_negotiation_tips(&mut negotiator, &exclude)?;
     Ok(V2LocalHaves {
         negotiator,
         taken: Vec::new(),
@@ -887,18 +887,21 @@ fn negotiate_pack_v2(
     let cap_echo = protocol_v2::cap_lines_for_command_request(server_caps);
     let sideband_all = protocol_v2::fetch_supports_sideband_all(server_caps);
 
-    // A deepen/shallow request does not offer local haves (the local objects
-    // bottom out at grafts and are not a usable negotiation base), forcing the
-    // single-round path so the server sends a `shallow-info` section + pack.
-    let shallow_request = deepen.is_shallow_request();
-
-    // The ordered `have` list is produced lazily from local ref tips. Empty for
-    // a shallow request or promisor object-want fetch (Git
-    // `negotiationAlgorithm=noop`).
-    let mut haves = if shallow_request || skip_local_haves {
+    // The ordered `have` list is produced lazily from local ref tips. Empty for a
+    // promisor object-want fetch (Git `negotiationAlgorithm=noop`). A
+    // deepen/shallow request negotiates too: the walk stops at local shallow
+    // commits, and the server bounds the haves by the `shallow` lines we send, so
+    // a deepen only ships history the client lacks. Its wants are usually already
+    // local (the tips being deepened) and are offered as haves as well.
+    let mut haves = if skip_local_haves {
         None
     } else {
-        Some(v2_local_haves(local, wants)?)
+        let exclude: &[ObjectId] = if deepen.is_shallow_request() {
+            &[]
+        } else {
+            wants
+        };
+        Some(v2_local_haves(local, exclude)?)
     };
 
     let mut pack_receive = crate::pack_receive::TempPackReceive::create(local_odb.objects_dir())?;
@@ -1020,7 +1023,7 @@ impl V2DeepenArgs {
     }
 
     /// Whether any deepen/shallow argument is present (drives `shallow-info`
-    /// handling and the "skip offering haves" decision).
+    /// handling and whether the wanted tips may also be offered as haves).
     pub(crate) fn is_shallow_request(&self) -> bool {
         self.depth.is_some()
             || self.deepen_relative

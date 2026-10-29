@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use grit_lib::error::Error;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch::{fetch_remote, NoProgress};
-use grit_lib::remote::transfer::{fetch_local, FetchDepth, FetchOptions, TagMode};
+use grit_lib::remote::transfer::{fetch_local, FetchDepth, FetchOptions, FetchOutcome, TagMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 
 fn git_out(dir: &Path, args: &[&str]) -> String {
@@ -259,7 +259,23 @@ fn grit_fetch_daemon(
     url: &str,
     fetch_depth: Option<FetchDepth>,
     protocol_version: u8,
-) {
+) -> FetchOutcome {
+    grit_fetch_daemon_refspec(
+        work,
+        url,
+        "+refs/heads/*:refs/remotes/origin/*",
+        fetch_depth,
+        protocol_version,
+    )
+}
+
+fn grit_fetch_daemon_refspec(
+    work: &Path,
+    url: &str,
+    refspec: &str,
+    fetch_depth: Option<FetchDepth>,
+    protocol_version: u8,
+) -> FetchOutcome {
     let git_dir = work.join(".git");
     let transport = GitDaemonTransport::new();
     let connect_opts = ConnectOptions {
@@ -270,7 +286,7 @@ fn grit_fetch_daemon(
         .connect(url, Service::UploadPack, &connect_opts)
         .expect("connect git daemon");
     let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+        refspecs: vec![refspec.to_owned()],
         tags: TagMode::Following,
         fetch_depth,
         ..Default::default()
@@ -282,7 +298,107 @@ fn grit_fetch_daemon(
         &mut NoProgress,
         &NeverCancel,
     )
-    .expect("fetch_remote");
+    .expect("fetch_remote")
+}
+
+/// Loose objects in `work` (git unpacks small fetched packs into loose objects).
+fn loose_object_count(work: &Path) -> u64 {
+    git_out(work, &["count-objects", "-v"])
+        .lines()
+        .find_map(|l| l.strip_prefix("count: "))
+        .and_then(|n| n.parse().ok())
+        .expect("count-objects")
+}
+
+struct ServedRepo {
+    _guard: DaemonGuard,
+    url: String,
+    served: PathBuf,
+}
+
+/// `bare` cloned under a fresh `git daemon` root, served over `git://`.
+fn serve_with_daemon(tmp: &Path, bare: &Path) -> ServedRepo {
+    let base = tmp.join("srv");
+    std::fs::create_dir_all(&base).unwrap();
+    let served = base.join("repo.git");
+    git(
+        tmp,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            bare.to_str().unwrap(),
+            served.to_str().unwrap(),
+        ],
+    );
+    let port = daemon_free_port();
+    let guard = DaemonGuard(spawn_git_daemon(&base, port));
+    wait_daemon_ready(port);
+    ServedRepo {
+        _guard: guard,
+        url: format!("git://127.0.0.1:{port}/repo.git"),
+        served,
+    }
+}
+
+/// A depth-1 clone deepened by 3 receives only the new commits' objects, the same
+/// ones git receives.
+#[test]
+fn deepen_over_system_git_daemon_v2_sends_only_new_history() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bare = build_linear_bare(tmp.path(), 12);
+    let srv = serve_with_daemon(tmp.path(), &bare);
+
+    let git_client = init_shallow_client_from_daemon(tmp.path(), &srv.url, "git-deepen");
+    let grit_client = init_shallow_client_from_daemon(tmp.path(), &srv.url, "grit-deepen");
+    let git_before = loose_object_count(&git_client);
+    git_fetch(&git_client, &["fetch", "--deepen", "3", "origin"]);
+    let git_received = loose_object_count(&git_client) - git_before;
+
+    let outcome = grit_fetch_daemon(&grit_client, &srv.url, FetchDepth::deepen(3), 2);
+    assert_twin_matches(&git_client, &grit_client);
+    assert_eq!(rev_list_count(&grit_client), 4);
+    // Three new commits, each with its own tree and blob; the tip is not resent.
+    assert_eq!(git_received, 9, "git baseline");
+    assert_eq!(outcome.transfer.objects, git_received);
+}
+
+/// The benchmark shape: a full clone made shallow by `fetch --depth 1`, then
+/// deepened. Another branch's complete history covers most of what the deepen
+/// reaches, so only the commit above it is transferred.
+#[test]
+fn deepen_of_refetched_shallow_tip_uses_other_branches_as_haves() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bare = build_linear_bare(tmp.path(), 12);
+    git(&bare, &["branch", "old", "main~2"]);
+    let srv = serve_with_daemon(tmp.path(), &bare);
+
+    let mut clients = Vec::new();
+    for name in ["git-refetch", "grit-refetch"] {
+        let dest = tmp.path().join(name);
+        git(
+            tmp.path(),
+            &["clone", "-q", &srv.url, dest.to_str().unwrap()],
+        );
+        git(&dest, &["fetch", "-q", "--depth", "1", "origin", "main"]);
+        assert_eq!(read_shallow_set(&dest.join(".git")).len(), 1);
+        clients.push(dest);
+    }
+    let (git_client, grit_client) = (&clients[0], &clients[1]);
+    let tip = git_out(&srv.served, &["rev-parse", "main"]);
+
+    git_fetch(git_client, &["fetch", "--deepen", "3", "origin", "main"]);
+    let outcome = grit_fetch_daemon_refspec(
+        grit_client,
+        &srv.url,
+        "+refs/heads/main:refs/remotes/origin/main",
+        FetchDepth::deepen(3),
+        2,
+    );
+    assert_twin_matches(git_client, grit_client);
+    assert!(!read_shallow_set(&grit_client.join(".git")).contains(&tip));
+    // main~1's commit, tree and blob: main~2 and below are held through `old`.
+    assert_eq!(outcome.transfer.objects, 3);
 }
 
 fn init_shallow_client_from_daemon(tmp: &Path, url: &str, name: &str) -> PathBuf {

@@ -80,7 +80,9 @@ pub struct PackEnumerateOptions<'a> {
     /// skipped and the object walk is used.
     pub shallow_grafts: &'a HashSet<ObjectId>,
     /// Shallow graft boundaries when walking client `haves` to build the peer
-    /// closure. Defaults to [`Self::shallow_grafts`] when unset.
+    /// closure. Defaults to [`Self::shallow_grafts`] when unset. When non-empty,
+    /// bitmaps are not used: a bitmap closure of a `have` runs past the client's
+    /// shallow boundary into history the client does not hold.
     pub have_shallow_grafts: Option<&'a HashSet<ObjectId>>,
     /// When false, always use the object walk even if bitmaps exist.
     pub use_bitmaps: bool,
@@ -90,6 +92,14 @@ pub struct PackEnumerateOptions<'a> {
     pub peer_odb: Option<&'a Odb>,
     /// Whether `haves` are expanded to a full commit closure before the want walk.
     pub have_boundary: HaveBoundary,
+}
+
+impl PackEnumerateOptions<'_> {
+    /// Whether any shallow graft bounds either side of the walk, which rules out
+    /// bitmap reachability (bitmaps record full, ungrafted closures).
+    fn has_shallow_grafts(&self) -> bool {
+        !self.shallow_grafts.is_empty() || self.have_shallow_grafts.is_some_and(|g| !g.is_empty())
+    }
 }
 
 /// Select pack objects using bitmap reachability when possible, otherwise the object walk.
@@ -219,6 +229,9 @@ fn try_bitmap_enumeration(
     haves: &[ObjectId],
     opts: &PackEnumerateOptions<'_>,
 ) -> Result<Option<PackObjectSelection>> {
+    if opts.has_shallow_grafts() {
+        return Ok(None);
+    }
     let Some((send_set, peer_held)) =
         try_bitmap_reachable_for_upload(odb, wants, haves, opts.filter, opts.shallow_grafts)?
     else {
@@ -754,7 +767,7 @@ fn try_peer_held_bitmap(
     haves: &[ObjectId],
     opts: &PackEnumerateOptions<'_>,
 ) -> Result<Option<Arc<ReachableSet>>> {
-    if haves.is_empty() || !opts.use_bitmaps {
+    if haves.is_empty() || !opts.use_bitmaps || opts.has_shallow_grafts() {
         return Ok(None);
     }
     let Some(peer) = try_bitmap_peer_held(odb, haves, opts.shallow_grafts)? else {
