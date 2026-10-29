@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::merge_base::is_ancestor;
-use crate::objects::{CommitData, ObjectId};
+use crate::objects::ObjectId;
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::revwalk::rev_parse::{peel_to_commit_for_merge_base, resolve_revision_for_range_end};
@@ -11,6 +11,7 @@ use crate::revwalk::{parse_rev_walk_tokens, RevWalkParsedSpecs};
 use crate::state::resolve_head_for_repository;
 
 use super::error::HistoryError;
+use super::load_commit;
 use super::message::{
     append_nth_squash_message, append_skipped_squash_message, commit_subject_single_line,
     fixup_replacement_message, message_body_after_subject, skip_fixupish_prefix,
@@ -54,7 +55,10 @@ struct ResolvedSquashRange {
 ///
 /// # Errors
 ///
-/// Returns [`HistoryError`] when the range is invalid, markers refuse, or planning fails.
+/// Returns [`HistoryError::Planning`] when `range` is empty, is not a `<base>..<tip>` range, or
+/// selects fewer than two commits; [`HistoryError::Library`] when a revision does not resolve or
+/// an object, ref or revision-walk read fails; and other [`HistoryError`] variants when markers
+/// refuse or planning fails.
 pub fn squash(
     repo: &Repository,
     range: &[&str],
@@ -108,16 +112,6 @@ pub fn squash(
     plan_rewrite(repo, &edits, &opts.rewrite)
 }
 
-fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
-    repo.odb().read_commit(&oid).map_err(planning_err)
-}
-
-fn planning_err(err: crate::error::Error) -> HistoryError {
-    HistoryError::Planning {
-        message: err.to_string(),
-    }
-}
-
 fn resolve_squash_range(
     repo: &Repository,
     range: &[&str],
@@ -125,7 +119,7 @@ fn resolve_squash_range(
 ) -> Result<ResolvedSquashRange, HistoryError> {
     let RevWalkParsedSpecs {
         positive, negative, ..
-    } = parse_rev_walk_tokens(repo, range).map_err(planning_err)?;
+    } = parse_rev_walk_tokens(repo, range)?;
     if negative.is_empty() {
         return Err(HistoryError::Planning {
             message: "not a '<base>..<tip>' revision range".into(),
@@ -139,7 +133,7 @@ fn resolve_squash_range(
         use_commit_graph: true,
         ..RevListOptions::default()
     };
-    let walk = rev_list(repo, &positive, &negative, &walk_opts).map_err(planning_err)?;
+    let walk = rev_list(repo, &positive, &negative, &walk_opts)?;
     let commits = walk.commits;
     if commits.is_empty() {
         return Err(HistoryError::Planning {
@@ -190,41 +184,33 @@ fn check_divergent_branch_tips(
         return Ok(());
     }
     let selected: HashSet<ObjectId> = commits.iter().copied().collect();
-    let branches = repo
-        .references()
-        .list("refs/heads/")
-        .map_err(planning_err)?;
+    let branches = repo.references().list("refs/heads/")?;
     for (name, branch_tip) in branches {
         if branch_tip == tip {
             continue;
         }
-        if !is_ancestor(repo, oldest, branch_tip).map_err(planning_err)? {
+        if !is_ancestor(repo, oldest, branch_tip)? {
             continue;
         }
-        if is_ancestor(repo, tip, branch_tip).map_err(planning_err)? {
+        if is_ancestor(repo, tip, branch_tip)? {
             continue;
         }
-        if is_ancestor(repo, branch_tip, tip).map_err(planning_err)?
-            && selected.contains(&branch_tip)
-        {
+        if is_ancestor(repo, branch_tip, tip)? && selected.contains(&branch_tip) {
             return Err(HistoryError::DivergentBranch { name });
         }
-        if !is_ancestor(repo, branch_tip, tip).map_err(planning_err)? {
+        if !is_ancestor(repo, branch_tip, tip)? {
             return Err(HistoryError::DivergentBranch { name });
         }
     }
     if let Ok(crate::state::HeadState::Detached { oid }) = resolve_head_for_repository(repo) {
-        if oid != tip
-            && is_ancestor(repo, oldest, oid).map_err(planning_err)?
-            && !is_ancestor(repo, tip, oid).map_err(planning_err)?
-        {
+        if oid != tip && is_ancestor(repo, oldest, oid)? && !is_ancestor(repo, tip, oid)? {
             return Err(HistoryError::DivergentBranch {
                 name: "HEAD".into(),
             });
         }
         if oid != tip
-            && is_ancestor(repo, oldest, oid).map_err(planning_err)?
-            && is_ancestor(repo, oid, tip).map_err(planning_err)?
+            && is_ancestor(repo, oldest, oid)?
+            && is_ancestor(repo, oid, tip)?
             && selected.contains(&oid)
         {
             return Err(HistoryError::DivergentBranch {
@@ -499,7 +485,7 @@ impl MarkerTarget {
             return Ok(Self::InRange { oid });
         }
         if let Ok(rev) = resolve_revision_for_range_end(repo, label) {
-            let oid = peel_to_commit_for_merge_base(repo, rev).map_err(planning_err)?;
+            let oid = peel_to_commit_for_merge_base(repo, rev)?;
             if selected.contains(&oid) {
                 if oid == oldest {
                     return Ok(Self::OldestAnchor);

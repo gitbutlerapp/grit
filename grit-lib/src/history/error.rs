@@ -52,7 +52,9 @@ pub enum HistoryError {
     #[error("pathspec selected every change in the commit")]
     SplitSelectsEverything,
 
-    /// Object database, revwalk, or other repository read failed during planning.
+    /// A planning input is invalid (for example a squash range that is not `<base>..<tip>`), or
+    /// [`plan_rewrite`](crate::history::plan_rewrite) hit a repository read failure other than a
+    /// missing object. Other entry points report library failures as [`Self::Library`].
     #[error("history rewrite planning failed: {message}")]
     Planning {
         /// Underlying failure summary.

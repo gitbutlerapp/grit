@@ -5,11 +5,8 @@ use crate::objects::{CommitData, ObjectId};
 use crate::repo::Repository;
 
 use super::error::HistoryError;
+use super::load_commit;
 use super::types::RewrittenCommit;
-
-fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
-    repo.odb().read_commit(&oid).map_err(HistoryError::from)
-}
 
 /// First line of a commit message, without trailing newline on that line.
 ///

@@ -106,3 +106,133 @@ pub use types::{
     SplitOptions, UndoOutcome,
 };
 pub use undo::undo_last_rewrite;
+
+/// Read and parse commit `oid`; failures stay typed as [`HistoryError::Library`].
+fn load_commit(
+    repo: &crate::repo::Repository,
+    oid: crate::objects::ObjectId,
+) -> Result<crate::objects::CommitData, HistoryError> {
+    Ok(repo.odb().read_commit(&oid)?)
+}
+
+/// Root tree of commit `commit`; failures stay typed as [`HistoryError::Library`].
+fn commit_tree(
+    repo: &crate::repo::Repository,
+    commit: crate::objects::ObjectId,
+) -> Result<crate::objects::ObjectId, HistoryError> {
+    Ok(repo.odb().commit_tree(&commit)?)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
+
+    use super::*;
+    use crate::error::Error;
+    use crate::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
+    use crate::repo::{init_repository, Repository};
+    use crate::RefStorageFormat;
+
+    fn rewrite_opts() -> RewriteOptions {
+        RewriteOptions {
+            scope: RefScope::Head,
+            empty: EmptyPolicy::Drop,
+            committer: "Committer <c@example.com> 3 +0000"
+                .parse()
+                .expect("signature"),
+            preserve_committer: false,
+            sign: false,
+        }
+    }
+
+    /// A repository with `main` at a two-commit history; returns the tip and a blob.
+    fn repo_with_history() -> (tempfile::TempDir, Repository, ObjectId, ObjectId) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
+            .expect("init");
+        let tree = repo.odb().write(ObjectKind::Tree, &[]).expect("tree");
+        let mut parent = Vec::new();
+        let mut tip = tree;
+        for message in ["first\n", "second\n"] {
+            let bytes = serialize_commit(&CommitData {
+                tree,
+                parents: parent.clone(),
+                author: "Author <a@example.com> 1 +0000".into(),
+                committer: "Committer <c@example.com> 2 +0000".into(),
+                author_raw: vec![],
+                committer_raw: vec![],
+                encoding: None,
+                message: message.into(),
+                raw_message: None,
+                extra_headers: vec![],
+            });
+            tip = repo
+                .odb()
+                .write(ObjectKind::Commit, &bytes)
+                .expect("commit");
+            parent = vec![tip];
+        }
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &tip).expect("ref");
+        crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("head");
+        let blob = repo
+            .odb()
+            .write(ObjectKind::Blob, b"not a commit")
+            .expect("blob");
+        (dir, repo, tip, blob)
+    }
+
+    #[test]
+    fn load_commit_and_commit_tree_read_commits() {
+        let (_dir, repo, tip, _blob) = repo_with_history();
+        let commit = load_commit(&repo, tip).expect("load");
+        assert_eq!(commit.message, "second\n");
+        assert_eq!(commit_tree(&repo, tip).expect("tree"), commit.tree);
+    }
+
+    #[test]
+    fn load_commit_keeps_object_errors_typed() {
+        let (_dir, repo, _tip, blob) = repo_with_history();
+        let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("hex");
+        let err = load_commit(&repo, missing).unwrap_err();
+        assert!(
+            matches!(&err, HistoryError::Library(inner) if matches!(**inner, Error::ObjectNotFound(_))),
+            "{err:?}"
+        );
+        let err = commit_tree(&repo, blob).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                HistoryError::Library(inner) if matches!(
+                    **inner,
+                    Error::UnexpectedObjectKind { oid, expected: ObjectKind::Commit, actual: ObjectKind::Blob }
+                        if oid == blob
+                )
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn drop_of_a_non_commit_is_a_typed_library_error() {
+        let (_dir, repo, _tip, blob) = repo_with_history();
+        let err = drop(&repo, blob, &rewrite_opts()).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                HistoryError::Library(inner) if matches!(**inner, Error::UnexpectedObjectKind { .. })
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn squash_with_an_unknown_revision_is_a_typed_library_error() {
+        let (_dir, repo, _tip, _blob) = repo_with_history();
+        let opts = SquashOptions {
+            message: SquashMessage::Oldest,
+            rewrite: rewrite_opts(),
+        };
+        let err = squash(&repo, &["no-such-branch..main"], &opts).unwrap_err();
+        assert!(matches!(err, HistoryError::Library(_)), "{err:?}");
+    }
+}

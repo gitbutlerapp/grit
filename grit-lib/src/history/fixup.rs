@@ -10,6 +10,7 @@ use super::reword::normalize_rewrite_message;
 use super::types::{AppliedRewrite, ApplyOptions};
 use super::types::{CommitEdit, EmptyPolicy, HistoryEdits, RewriteOptions, RewritePlan};
 use super::undo_work::capture_path_states;
+use super::{commit_tree, load_commit};
 use crate::apply::{apply_patch_to_blob, BlobApplyOptions};
 use crate::diff::diff_index_to_tree;
 use crate::diff::hunk_id::DiffSide;
@@ -67,13 +68,12 @@ pub fn fixup(
     let index_tree = if let Some(selection) = &opts.selection {
         index_tree_for_fixup_selection(repo, head_tree, selection, &opts.pathspecs)?
     } else {
-        let index = repo.load_index().map_err(library_err)?;
-        let staged =
-            diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false).map_err(library_err)?;
+        let index = repo.load_index()?;
+        let staged = diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false)?;
         if staged.is_empty() {
             return Err(HistoryError::NothingStaged);
         }
-        write_tree_from_index(repo.odb(), &index, "").map_err(library_err)?
+        write_tree_from_index(repo.odb(), &index, "")?
     };
     let target_commit = load_commit(repo, target)?;
     let target_tree = target_commit.tree;
@@ -88,9 +88,8 @@ pub fn fixup(
         WhitespaceMergeOptions::default(),
         None,
         TreeMergeConflictPresentation::default(),
-        DirectoryRenameMode::from_repo(repo).map_err(library_err)?,
-    )
-    .map_err(library_err)?;
+        DirectoryRenameMode::from_repo(repo)?,
+    )?;
 
     if crate::operation::tree_merge_has_conflicts(&merge) {
         return Err(conflict_error(repo, target, &merge));
@@ -152,7 +151,7 @@ pub fn fixup_selection_paths(
     selection: &HunkSelection,
     pathspecs: &[String],
 ) -> Result<Vec<String>, HistoryError> {
-    let diff_opts = diff_options_for_hunk_select(repo).map_err(library_err)?;
+    let diff_opts = diff_options_for_hunk_select(repo)?;
     let patches = resolve_selection(repo, DiffSide::Unstaged, selection, pathspecs, diff_opts)?;
     let mut paths: Vec<String> = patches
         .iter()
@@ -184,7 +183,7 @@ pub fn apply_fixup_hunk_selection(
         Some(_) => Some(capture_path_states(repo, &paths)?),
         None => None,
     };
-    let diff_opts = diff_options_for_hunk_select(repo).map_err(library_err)?;
+    let diff_opts = diff_options_for_hunk_select(repo)?;
     if let Err(err) = stage_hunks(
         repo,
         DiffSide::Unstaged,
@@ -227,7 +226,7 @@ fn capture_hunk_fixup_apply_snapshot(
         message: e.to_string(),
     })?;
     let pre_head_tree = commit_tree(repo, repo.head_commit()?)?;
-    let index = repo.load_index().map_err(library_err)?;
+    let index = repo.load_index()?;
     let mut path_states = Vec::with_capacity(paths.len());
     for path in paths {
         let pre_head_blob = blob_at_path(repo, pre_head_tree, path).unwrap_or_default();
@@ -294,7 +293,7 @@ fn restore_after_hunk_fixup_apply(
     snapshot: &HunkFixupApplySnapshot,
 ) -> Result<(), HistoryError> {
     let post_head_tree = commit_tree(repo, repo.head_commit()?)?;
-    let mut index = repo.load_index().map_err(library_err)?;
+    let mut index = repo.load_index()?;
     let mut index_changed = false;
     let worktree = repo.work_tree();
     for path_state in &snapshot.paths {
@@ -348,10 +347,7 @@ fn upsert_index_blob(
     path: &str,
     bytes: &[u8],
 ) -> Result<(), HistoryError> {
-    let oid = repo
-        .odb()
-        .write(ObjectKind::Blob, bytes)
-        .map_err(library_err)?;
+    let oid = repo.odb().write(ObjectKind::Blob, bytes)?;
     let key = path.as_bytes();
     if let Some(entry) = index.get_mut(key, 0) {
         entry.oid = oid;
@@ -400,14 +396,14 @@ fn index_tree_for_fixup_selection(
     selection: &HunkSelection,
     pathspecs: &[String],
 ) -> Result<ObjectId, HistoryError> {
-    let diff_opts = diff_options_for_hunk_select(repo).map_err(library_err)?;
+    let diff_opts = diff_options_for_hunk_select(repo)?;
     let patches = resolve_selection(repo, DiffSide::Unstaged, selection, pathspecs, diff_opts)
         .map_err(HistoryError::HunkSelect)?;
     if patches.is_empty() {
         return Err(HistoryError::NothingStaged);
     }
-    let disk_index = repo.load_index().map_err(library_err)?;
-    let mut index = index_from_tree(repo, &head_tree).map_err(library_err)?;
+    let disk_index = repo.load_index()?;
+    let mut index = index_from_tree(repo, &head_tree)?;
     for patch in &patches {
         let path = patch
             .effective_path()
@@ -417,32 +413,16 @@ fn index_tree_for_fixup_selection(
         let head_blob = blob_at_path(repo, head_tree, path)?;
         let index_blob = index_blob_at_path(repo, &disk_index, path);
         let after_index = apply_patch_to_blob(&index_blob, patch, &BlobApplyOptions::default())
-            .map_err(|e| HistoryError::Planning {
-                message: e.to_string(),
-            })?;
+            .map_err(crate::error::Error::from)?;
         let planning_blob =
             planning_blob_for_fixup_selection(&head_blob, &index_blob, &after_index)?;
         upsert_index_blob(repo, &mut index, path, &planning_blob)?;
     }
-    write_tree_from_index(repo.odb(), &index, "").map_err(library_err)
-}
-
-fn library_err(err: crate::error::Error) -> HistoryError {
-    HistoryError::Planning {
-        message: err.to_string(),
-    }
-}
-
-fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
-    repo.odb().read_commit(&oid).map_err(library_err)
-}
-
-fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId, HistoryError> {
-    repo.odb().commit_tree(&commit).map_err(library_err)
+    Ok(write_tree_from_index(repo.odb(), &index, "")?)
 }
 
 fn empty_tree_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
-    repo.odb().empty_tree_oid().map_err(library_err)
+    Ok(repo.odb().empty_tree_oid()?)
 }
 
 fn first_parent_tree(repo: &Repository, commit: &CommitData) -> Result<ObjectId, HistoryError> {
@@ -481,9 +461,8 @@ pub fn staged_fixup_paths(repo: &Repository) -> Result<Vec<String>, HistoryError
     }
     let head_oid = repo.head_commit()?;
     let head_tree = commit_tree(repo, head_oid)?;
-    let index = repo.load_index().map_err(library_err)?;
-    let staged =
-        diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false).map_err(library_err)?;
+    let index = repo.load_index()?;
+    let staged = diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false)?;
     let mut paths: Vec<String> = staged
         .into_iter()
         .filter_map(|e| e.new_path.or(e.old_path))

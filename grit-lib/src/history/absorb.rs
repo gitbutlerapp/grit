@@ -15,7 +15,7 @@ use crate::merge_trees::{
     merge_trees_three_way, DirectoryRenameMode, TreeMergeConflictPresentation,
     WhitespaceMergeOptions,
 };
-use crate::objects::{CommitData, ObjectId, ObjectKind};
+use crate::objects::{ObjectId, ObjectKind};
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::state::{resolve_head_for_repository, HeadState};
@@ -25,6 +25,7 @@ use super::fixup::staged_fixup_paths;
 use super::message::commit_subject_single_line;
 use super::plan::{conflict_error, plan_rewrite};
 use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
+use super::{commit_tree, load_commit};
 
 /// Default maximum number of commits considered when `--base` is omitted.
 pub const DEFAULT_ABSORB_STACK_LIMIT: usize = 10;
@@ -187,9 +188,8 @@ pub fn absorb(repo: &Repository, opts: &AbsorbOptions) -> Result<AbsorbPlan, His
 
     let head = repo.head_commit()?;
     let head_tree = commit_tree(repo, head)?;
-    let index = repo.load_index().map_err(library_err)?;
-    let staged_entries =
-        diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false).map_err(library_err)?;
+    let index = repo.load_index()?;
+    let staged_entries = diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false)?;
     if staged_entries.is_empty() {
         return Err(HistoryError::NothingStaged);
     }
@@ -613,10 +613,7 @@ fn blame_candidates(
             first_parent_only: true,
             ..Default::default()
         },
-    )
-    .map_err(|_| HistoryError::Planning {
-        message: "blame failed".into(),
-    })?;
+    )?;
 
     let all_commits: HashSet<ObjectId> = blame.lines.iter().map(|line| line.commit).collect();
     let commits: HashSet<ObjectId> = all_commits
@@ -669,10 +666,7 @@ fn blame_candidates_for_pure_add(
                 first_parent_only: true,
                 ..Default::default()
             },
-        )
-        .map_err(|_| HistoryError::Planning {
-            message: "blame failed".into(),
-        })?;
+        )?;
         for entry in blame.lines {
             all_commits.insert(entry.commit);
             if stack_bounds.stack_set.contains(&entry.commit) {
@@ -720,7 +714,7 @@ fn hidden_by_ref_detail_for_blame(
         if bounds.stack_set.contains(commit) {
             continue;
         }
-        if !is_ancestor(repo, *commit, head).map_err(library_err)? {
+        if !is_ancestor(repo, *commit, head)? {
             continue;
         }
         if !bounds.stack_set_without_branch_tips.contains(commit) {
@@ -810,8 +804,7 @@ fn absorb_stack_commits(
             max_count,
             ..RevListOptions::default()
         },
-    )
-    .map_err(library_err)?;
+    )?;
 
     let mut stack: Vec<ObjectId> = walk.commits;
     stack.retain(|commit| {
@@ -1124,7 +1117,7 @@ fn merged_tree_for_target_with_trees(
 ) -> Result<ObjectId, HistoryError> {
     let partial_index =
         partial_index_for_target(repo, head_tree, index, target, assignments, unassigned)?;
-    let index_tree = write_tree_from_index(repo.odb(), &partial_index, "").map_err(library_err)?;
+    let index_tree = write_tree_from_index(repo.odb(), &partial_index, "")?;
 
     let merge = merge_trees_three_way(
         repo,
@@ -1135,9 +1128,8 @@ fn merged_tree_for_target_with_trees(
         WhitespaceMergeOptions::default(),
         None,
         TreeMergeConflictPresentation::default(),
-        DirectoryRenameMode::from_repo(repo).map_err(library_err)?,
-    )
-    .map_err(library_err)?;
+        DirectoryRenameMode::from_repo(repo)?,
+    )?;
 
     if crate::operation::tree_merge_has_conflicts(&merge) {
         return Err(conflict_error(repo, target, &merge));
@@ -1344,10 +1336,7 @@ fn write_index_blob(
     path: &str,
     blob: &[u8],
 ) -> Result<(), HistoryError> {
-    let oid = repo
-        .odb()
-        .write(ObjectKind::Blob, blob)
-        .map_err(library_err)?;
+    let oid = repo.odb().write(ObjectKind::Blob, blob)?;
     let key = path.as_bytes();
     if let Some(entry) = index.get_mut(key, 0) {
         entry.oid = oid;
@@ -1420,14 +1409,14 @@ fn hide_other_branch_tips(
     repo: &Repository,
     hidden: &mut HashSet<ObjectId>,
 ) -> Result<Vec<AbsorbExcludedRef>, HistoryError> {
-    let head_ref = resolve_head_for_repository(repo).map_err(library_err)?;
+    let head_ref = resolve_head_for_repository(repo)?;
     let (current, head_tip) = match head_ref {
         HeadState::Branch { refname, oid, .. } => (Some(refname), oid),
         HeadState::Detached { oid } => (None, Some(oid)),
         HeadState::Invalid => return Ok(Vec::new()),
     };
     let mut excluded = Vec::new();
-    for (name, oid) in repo.references().list("refs/heads/").map_err(library_err)? {
+    for (name, oid) in repo.references().list("refs/heads/")? {
         if Some(name.as_str()) == current.as_deref() {
             continue;
         }
@@ -1444,7 +1433,7 @@ fn hide_other_branch_tips(
 }
 
 fn current_branch_short(repo: &Repository) -> Result<Option<String>, HistoryError> {
-    match resolve_head_for_repository(repo).map_err(library_err)? {
+    match resolve_head_for_repository(repo)? {
         HeadState::Branch { refname, .. } => {
             Ok(refname.strip_prefix("refs/heads/").map(str::to_owned))
         }
@@ -1452,24 +1441,10 @@ fn current_branch_short(repo: &Repository) -> Result<Option<String>, HistoryErro
     }
 }
 
-fn library_err(err: crate::error::Error) -> HistoryError {
-    HistoryError::Planning {
-        message: err.to_string(),
-    }
-}
-
 fn commit_subject(repo: &Repository, commit: ObjectId) -> String {
     load_commit(repo, commit)
         .map(|data| commit_subject_single_line(&data.message))
         .unwrap_or_default()
-}
-
-fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
-    repo.odb().read_commit(&oid).map_err(library_err)
-}
-
-fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId, HistoryError> {
-    repo.odb().commit_tree(&commit).map_err(library_err)
 }
 
 fn first_parent(repo: &Repository, commit: ObjectId) -> Result<Option<ObjectId>, HistoryError> {
@@ -1530,12 +1505,11 @@ pub(super) fn blob_at_path(
 ) -> Result<Vec<u8>, HistoryError> {
     let odb = repo.odb();
     let entry = odb
-        .tree_entry_at_path(&tree, path.as_bytes())
-        .map_err(library_err)?
+        .tree_entry_at_path(&tree, path.as_bytes())?
         .ok_or_else(|| HistoryError::Planning {
             message: format!("path '{path}' not found in tree"),
         })?;
-    Ok(odb.read(&entry.oid).map_err(library_err)?.data)
+    Ok(odb.read(&entry.oid)?.data)
 }
 
 #[cfg(test)]

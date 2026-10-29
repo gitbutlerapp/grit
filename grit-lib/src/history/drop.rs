@@ -1,6 +1,6 @@
 //! Drop a single commit and replay descendants onto its parent.
 
-use crate::objects::{parse_commit, ObjectId};
+use crate::objects::ObjectId;
 use crate::repo::Repository;
 
 use super::error::HistoryError;
@@ -15,22 +15,16 @@ use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
 /// # Errors
 ///
 /// Returns [`HistoryError::RootCommit`] when `commit` has no parents, or
-/// [`HistoryError::MergeCommitInReplay`] when `commit` is a merge. Other failures come from
-/// [`plan_rewrite`].
+/// [`HistoryError::MergeCommitInReplay`] when `commit` is a merge, and [`HistoryError::Library`]
+/// when `commit` cannot be read as a commit (for example
+/// [`Error::UnexpectedObjectKind`](crate::error::Error::UnexpectedObjectKind)). Other failures
+/// come from [`plan_rewrite`].
 pub fn drop(
     repo: &Repository,
     commit: ObjectId,
     opts: &RewriteOptions,
 ) -> Result<RewritePlan, HistoryError> {
-    let raw = repo
-        .odb()
-        .read(&commit)
-        .map_err(|e| HistoryError::Planning {
-            message: e.to_string(),
-        })?;
-    let parsed = parse_commit(&raw.data).map_err(|e| HistoryError::Planning {
-        message: e.to_string(),
-    })?;
+    let parsed = super::load_commit(repo, commit)?;
     if parsed.parents.is_empty() {
         return Err(HistoryError::RootCommit { commit });
     }
