@@ -42,6 +42,9 @@ CRATES = [
 ENTRY = "integration.rs"
 
 # Integration modules that must stay in the default suite despite using system git.
+DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
+    ("grit-lib", "reset_hard_at_head_restores_worktree"),
+}
 MODULE_CFG_OVERRIDE: dict[tuple[str, str], str] = {
     ("grit-cli", "rebase_exec_interrupt"): "unix",
 }
@@ -118,8 +121,9 @@ def render(crate: str, modules: list[tuple[str, bool]], helpers: list[str]) -> s
         lines += [f"mod {h};" for h in helpers]
         lines.append("")
     for stem, full in modules:
-        cfg = MODULE_CFG_OVERRIDE.get((crate, stem))
-        if cfg:
+        if (crate, stem) in DEFAULT_SUITE_OVERRIDE:
+            pass
+        elif cfg := MODULE_CFG_OVERRIDE.get((crate, stem)):
             lines.append(f"#[cfg({cfg})]")
         elif full:
             lines.append('#[cfg(feature = "full-tests")]')
