@@ -1560,6 +1560,8 @@ mod rev_list_commit_filter_git_compat;
 mod rev_list_commit_graph_walk;
 #[path = "rev_list_diff_coverage_sweep.rs"]
 mod rev_list_diff_coverage_sweep;
+#[path = "rev_list_follow_git_compat.rs"]
+mod rev_list_follow_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "rev_list_format_git_compat.rs"]
 mod rev_list_format_git_compat;

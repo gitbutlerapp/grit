@@ -10,7 +10,7 @@ order: 3
 ```text
 grit revs <RANGE>... [-n <N>] [--count] [--left-right] [--cherry-mark]
   [--skip <N>] [--since|--after <date>] [--until|--before <date>]
-  [--first-parent] [--merges | --no-merges] [--reverse]
+  [--first-parent] [--follow] [--merges | --no-merges] [--reverse]
   [--author <pat>] [--committer <pat>] [--grep <pat>]
   [-S <string>] [-G <pat>] [--pickaxe-regex]
   [-i] [--all-match] [--invert-grep] [-F] [--no-mailmap]
@@ -62,6 +62,7 @@ Author, committer, message, and pickaxe filters use the same rules as [`grit log
 | `--since`, `--after <date>` | Exclude commits older than this date (committer date). |
 | `--until`, `--before <date>` | Exclude commits newer than this date. |
 | `--first-parent` | Follow first parents only at merges. |
+| `--follow` | With exactly one literal file path after `--`, walk history across renames (Git `log --follow`). |
 | `--merges` | Only merge commits (conflicts with `--no-merges`). |
 | `--no-merges` | Exclude merge commits (conflicts with `--merges`). |
 | `--reverse` | Oldest commits first. |

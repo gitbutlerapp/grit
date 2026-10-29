@@ -5,6 +5,7 @@
 //! limits, ordering (`--topo-order`, `--date-order`, `--reverse`), and basic
 //! output shaping (`--count`, `--parents`, `--format`).
 
+use std::borrow::Cow;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fs;
@@ -17,6 +18,7 @@ use crate::commit_graph_file::{BloomPrecheck, BloomWalkStatsHandle, CommitGraphC
 use crate::config::ConfigSet;
 use crate::diff::pickaxe::PickaxeRenames;
 use crate::diff::zero_oid;
+use crate::diff::{detect_renames, diff_trees, DiffStatus};
 use crate::error::{Error, Result};
 use crate::ident::{committer_unix_seconds_for_ordering, parse_signature_times};
 use crate::ignore::{parse_sparse_patterns_from_blob, ParsedSparsePatterns};
@@ -608,6 +610,9 @@ pub struct RevListOptions {
     /// Keep the commits a walk parses anyway in [`RevListResult::commit_data`], so callers that
     /// render the listed commits do not read and inflate them a second time.
     pub retain_commit_data: bool,
+    /// Follow renames when history is limited to a single literal file path (Git `log --follow`).
+    /// Requires exactly one plain file pathspec in [`Self::paths`]; ignored when empty.
+    pub follow: bool,
     /// When set, filtered object walks poll this flag and stop with [`Error::Cancelled`].
     #[doc(hidden)]
     pub cancel_watch: Option<Arc<AtomicBool>>,
@@ -720,6 +725,7 @@ impl Default for RevListOptions {
             commit_filter: None,
             pickaxe: None,
             retain_commit_data: false,
+            follow: false,
             cancel_watch: None,
         }
     }
@@ -1143,6 +1149,9 @@ pub fn rev_list(
         .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
     let mut walk_options = options.clone();
     walk_options.normalize_for_walk(repo, repo_config.as_ref());
+    if walk_options.follow {
+        crate::revwalk::queries::validate_follow_pathspecs(&walk_options.paths)?;
+    }
     let options = &walk_options;
 
     let (mut include, mut object_roots, tip_annotated_tag_by_commit) = if options.objects {
@@ -1434,6 +1443,11 @@ pub fn rev_list(
             stats: options.bloom_stats.as_ref(),
             cwd: bloom_cwd.as_deref(),
         };
+        let follow_threshold = if options.follow {
+            log_follow_rename_threshold(repo_config.as_ref())
+        } else {
+            100
+        };
         let (selected, walked, walk_order) = repo.odb().with_pack_read_context(|| {
             walk_dense_path_limited_closure(
                 repo,
@@ -1444,6 +1458,8 @@ pub fn rev_list(
                 options.sparse,
                 options.show_pulls,
                 Some(&bloom_ctx),
+                options.follow,
+                follow_threshold,
             )
         })?;
         included = selected;
@@ -5533,6 +5549,63 @@ fn dense_path_limited_count_from_included(
     Ok(included.len())
 }
 
+const LOG_FOLLOW_RENAME_THRESHOLD_DEFAULT: u32 = 50;
+
+fn log_follow_rename_threshold(cfg: &ConfigSet) -> u32 {
+    let Some(raw) = cfg.get("diff.renames") else {
+        return LOG_FOLLOW_RENAME_THRESHOLD_DEFAULT;
+    };
+    if let Ok(n) = raw.trim().parse::<u32>() {
+        return n.min(100);
+    }
+    if let Some(n) = crate::diff::parse_diff_rename_threshold_percent(raw.trim()) {
+        return u32::from(n);
+    }
+    LOG_FOLLOW_RENAME_THRESHOLD_DEFAULT
+}
+
+fn follow_path_for_parent(
+    repo: &Repository,
+    parent_tree: ObjectId,
+    commit_tree: ObjectId,
+    follow_path: &str,
+    threshold: u32,
+) -> Result<String> {
+    let path_vec = [follow_path.to_owned()];
+    if tree_has_pathspec_match(repo, parent_tree, "", &path_vec)? {
+        return Ok(follow_path.to_owned());
+    }
+    if !tree_has_pathspec_match(repo, commit_tree, "", &path_vec)? || threshold >= 100 {
+        return Ok(follow_path.to_owned());
+    }
+    let odb = repo.odb();
+    let entries = diff_trees(odb, Some(&parent_tree), Some(&commit_tree), "")?;
+    let entries = detect_renames(odb, None, entries, threshold);
+    Ok(entries
+        .into_iter()
+        .find(|e| e.status == DiffStatus::Renamed && e.new_path.as_deref() == Some(follow_path))
+        .and_then(|e| e.old_path)
+        .unwrap_or_else(|| follow_path.to_owned()))
+}
+
+fn dense_check_paths<'a>(paths: &'a [String], follow_path: Option<&'a str>) -> Cow<'a, [String]> {
+    match follow_path {
+        Some(p) => Cow::Owned(vec![p.to_owned()]),
+        None => Cow::Borrowed(paths),
+    }
+}
+
+fn bloom_for_follow_path<'a>(
+    bloom: Option<&'a DenseBloomCtx<'_>>,
+    argv_path: &str,
+    follow_path: Option<&str>,
+) -> Option<&'a DenseBloomCtx<'a>> {
+    match follow_path {
+        Some(p) if p != argv_path => None,
+        _ => bloom,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn walk_dense_path_limited_closure(
     repo: &Repository,
@@ -5543,29 +5616,74 @@ fn walk_dense_path_limited_closure(
     sparse: bool,
     show_pulls: bool,
     bloom: Option<&DenseBloomCtx<'_>>,
+    follow: bool,
+    follow_rename_threshold: u32,
 ) -> Result<(HashSet<ObjectId>, HashSet<ObjectId>, Vec<ObjectId>)> {
     let mut walked = HashSet::new();
     let mut selected = HashSet::new();
     let mut walk_order = Vec::new();
-    let mut queue: VecDeque<ObjectId> = tips.iter().copied().collect();
     let mut cache = DenseWalkCache::default();
 
-    while let Some(oid) = queue.pop_front() {
-        if excluded.contains(&oid) || !walked.insert(oid) {
-            continue;
+    if follow {
+        let initial = paths[0].clone();
+        let argv_path = initial.as_str();
+        let mut queue: VecDeque<(ObjectId, String)> =
+            tips.iter().map(|t| (*t, initial.clone())).collect();
+        while let Some((oid, follow_path)) = queue.pop_front() {
+            if excluded.contains(&oid) || !walked.insert(oid) {
+                continue;
+            }
+            walk_order.push(oid);
+            let bloom_use = bloom_for_follow_path(bloom, argv_path, Some(follow_path.as_str()));
+            let action = dense_path_limited_action(
+                repo,
+                graph,
+                oid,
+                paths,
+                sparse,
+                show_pulls,
+                bloom_use,
+                &mut cache,
+                Some(follow_path.as_str()),
+            )?;
+            if action.visible {
+                selected.insert(oid);
+            }
+            let commit_tree = graph.commit_tree(oid)?;
+            for parent in action.parents_to_walk {
+                if excluded.contains(&parent) || walked.contains(&parent) {
+                    continue;
+                }
+                let parent_tree = graph.commit_tree(parent)?;
+                let next_path = follow_path_for_parent(
+                    repo,
+                    parent_tree,
+                    commit_tree,
+                    &follow_path,
+                    follow_rename_threshold,
+                )?;
+                queue.push_back((parent, next_path));
+            }
         }
-        walk_order.push(oid);
+    } else {
+        let mut queue: VecDeque<ObjectId> = tips.iter().copied().collect();
+        while let Some(oid) = queue.pop_front() {
+            if excluded.contains(&oid) || !walked.insert(oid) {
+                continue;
+            }
+            walk_order.push(oid);
 
-        let action = dense_path_limited_action(
-            repo, graph, oid, paths, sparse, show_pulls, bloom, &mut cache,
-        )?;
-        if action.visible {
-            selected.insert(oid);
-        }
+            let action = dense_path_limited_action(
+                repo, graph, oid, paths, sparse, show_pulls, bloom, &mut cache, None,
+            )?;
+            if action.visible {
+                selected.insert(oid);
+            }
 
-        for parent in action.parents_to_walk {
-            if !excluded.contains(&parent) && !walked.contains(&parent) {
-                queue.push_back(parent);
+            for parent in action.parents_to_walk {
+                if !excluded.contains(&parent) && !walked.contains(&parent) {
+                    queue.push_back(parent);
+                }
             }
         }
     }
@@ -5588,12 +5706,15 @@ fn dense_path_limited_action(
     show_pulls: bool,
     bloom: Option<&DenseBloomCtx<'_>>,
     cache: &mut DenseWalkCache,
+    follow_path: Option<&str>,
 ) -> Result<DensePathAction> {
+    let check_paths = dense_check_paths(paths, follow_path);
     let commit_tree = graph.commit_tree(oid)?;
     let parents = graph.parents_of(oid)?;
 
     if parents.is_empty() {
-        let visible = sparse || tree_has_pathspec_match(repo, commit_tree, "", paths)?;
+        let visible =
+            sparse || tree_has_pathspec_match(repo, commit_tree, "", check_paths.as_ref())?;
         return Ok(DensePathAction {
             visible,
             parents_to_walk: Vec::new(),
@@ -5616,7 +5737,7 @@ fn dense_path_limited_action(
             commit_tree,
             parent_tree,
             "",
-            paths,
+            check_paths.as_ref(),
             nth == 0,
             bloom,
             oid,
@@ -7448,6 +7569,20 @@ fn try_bounded_path_limit_list(
         options.since_cutoff
     };
     let paths = &options.paths;
+    let follow = options.follow;
+    let follow_threshold = if follow {
+        log_follow_rename_threshold(repo_config)
+    } else {
+        100
+    };
+    let argv_path = paths.first().map(String::as_str).unwrap_or("");
+    let mut follow_paths: HashMap<ObjectId, String> = HashMap::new();
+    if follow {
+        let initial = paths[0].clone();
+        for &tip in include {
+            follow_paths.insert(tip, initial.clone());
+        }
+    }
     let mut heap = BinaryHeap::new();
     let mut queued = HashSet::new();
     let mut next_seq = 0u64;
@@ -7474,6 +7609,13 @@ fn try_bounded_path_limit_list(
             continue;
         }
 
+        let follow_path = follow.then(|| {
+            follow_paths
+                .get(&oid)
+                .cloned()
+                .unwrap_or_else(|| paths[0].clone())
+        });
+        let bloom_use = bloom_for_follow_path(Some(&bloom_ctx), argv_path, follow_path.as_deref());
         let action = dense_path_limited_action(
             repo,
             &mut graph,
@@ -7481,8 +7623,9 @@ fn try_bounded_path_limit_list(
             paths,
             options.sparse,
             options.show_pulls,
-            Some(&bloom_ctx),
+            bloom_use,
             &mut cache,
+            follow_path.as_deref(),
         )?;
 
         let filter_ok = options
@@ -7515,9 +7658,16 @@ fn try_bounded_path_limit_list(
             break;
         }
 
+        let commit_tree = graph.commit_tree(oid)?;
         for parent in action.parents_to_walk {
             if excluded.contains(&parent) || !queued.insert(parent) {
                 continue;
+            }
+            if let Some(ref fp) = follow_path {
+                let parent_tree = graph.commit_tree(parent)?;
+                let next_path =
+                    follow_path_for_parent(repo, parent_tree, commit_tree, fp, follow_threshold)?;
+                follow_paths.insert(parent, next_path);
             }
             heap.push(CommitDateKey {
                 oid: parent,

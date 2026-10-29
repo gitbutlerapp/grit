@@ -27660,6 +27660,7 @@ pub struct grit_lib::revwalk::queries::RevWalkListOptions
 pub grit_lib::revwalk::queries::RevWalkListOptions::cherry_mark: bool
 pub grit_lib::revwalk::queries::RevWalkListOptions::commit_filter: core::option::Option<alloc::rcs::arc::Arc<grit_lib::revwalk::filter::CommitFilter>>
 pub grit_lib::revwalk::queries::RevWalkListOptions::first_parent: bool
+pub grit_lib::revwalk::queries::RevWalkListOptions::follow: bool
 pub grit_lib::revwalk::queries::RevWalkListOptions::graph: bool
 pub grit_lib::revwalk::queries::RevWalkListOptions::left_right: bool
 pub grit_lib::revwalk::queries::RevWalkListOptions::limit: core::option::Option<usize>
@@ -27708,6 +27709,7 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::queries::RevWalkParsedSpec
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::queries::RevWalkParsedSpecs
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::queries::RevWalkParsedSpecs
 pub fn grit_lib::revwalk::queries::committer_cutoff_from_date(&str, i64) -> core::result::Result<i64, grit_lib::config::git_date::parse::DateParseError>
+pub fn grit_lib::revwalk::queries::validate_follow_pathspecs(&[alloc::string::String]) -> grit_lib::error::Result<()>
 pub fn grit_lib::revwalk::queries::parse_rev_walk_tokens(&grit_lib::repo::Repository, &[&str]) -> grit_lib::error::Result<grit_lib::revwalk::queries::RevWalkParsedSpecs>
 pub fn grit_lib::revwalk::queries::resolve_log_walk_tips_and_hide(&grit_lib::repo::Repository, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::objects::ObjectId>, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
 pub fn grit_lib::revwalk::queries::rev_list_commits_for_author_group(&grit_lib::repo::Repository, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
@@ -27937,6 +27939,7 @@ pub grit_lib::revwalk::rev_list::RevListOptions::filter_print_omitted: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::filter_provided_objects: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::filter_raw_specs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::revwalk::rev_list::RevListOptions::first_parent: bool
+pub grit_lib::revwalk::rev_list::RevListOptions::follow: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::full_history: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::ignore_missing: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::in_commit_order: bool
@@ -28058,6 +28061,8 @@ pub fn grit_lib::revwalk::rev_list::tag_targets(&grit_lib::repo::Repository) -> 
 pub fn grit_lib::revwalk::rev_list::url_encode_object_filter_subspec(&str) -> alloc::string::String
 pub mod grit_lib::revwalk::rev_list_error
 #[non_exhaustive] pub enum grit_lib::revwalk::rev_list_error::RevListError
+pub grit_lib::revwalk::rev_list_error::RevListError::FollowRequiresLiteralPath
+pub grit_lib::revwalk::rev_list_error::RevListError::FollowRequiresSinglePath
 pub grit_lib::revwalk::rev_list_error::RevListError::InvalidNoWalkArgument
 pub grit_lib::revwalk::rev_list_error::RevListError::InvalidStdinOption
 pub grit_lib::revwalk::rev_list_error::RevListError::InvalidStdinOption::line: alloc::string::String

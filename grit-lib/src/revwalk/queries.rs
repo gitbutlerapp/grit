@@ -86,6 +86,8 @@ pub struct RevWalkListOptions {
     pub first_parent: bool,
     /// Limit history to commits that touch these paths (same rules as `rev-list --`).
     pub paths: Vec<String>,
+    /// Follow renames for a single literal file path (Git `log --follow`).
+    pub follow: bool,
     /// Author/committer/grep filter (same semantics as `git rev-list` / `git log`).
     pub commit_filter: Option<Arc<CommitFilter>>,
     /// Pickaxe filter (`-S` / `-G`).
@@ -225,6 +227,22 @@ fn merge_filter_to_parent_bounds(merges: MergeFilter) -> (Option<usize>, Option<
     }
 }
 
+/// Validate [`RevWalkListOptions::follow`] path constraints before walking.
+///
+/// # Errors
+///
+/// Returns [`RevListError::FollowRequiresSinglePath`] or [`RevListError::FollowRequiresLiteralPath`].
+pub fn validate_follow_pathspecs(paths: &[String]) -> Result<()> {
+    if paths.len() != 1 {
+        return Err(crate::rev_list_error::RevListError::FollowRequiresSinglePath.into());
+    }
+    use crate::pathspec::{exact_literal_pathspec_set, PathspecMatchContext};
+    if exact_literal_pathspec_set(paths, PathspecMatchContext::default()).is_none() {
+        return Err(crate::rev_list_error::RevListError::FollowRequiresLiteralPath.into());
+    }
+    Ok(())
+}
+
 pub(crate) fn rev_list_options_from_walk(
     repo: &Repository,
     walk: &RevWalkListOptions,
@@ -232,6 +250,9 @@ pub(crate) fn rev_list_options_from_walk(
     all_refs: bool,
     count: bool,
 ) -> Result<RevListOptions> {
+    if walk.follow {
+        validate_follow_pathspecs(&walk.paths)?;
+    }
     let paths = repo.resolve_rev_walk_pathspecs(&walk.paths)?;
     let (min_parents, max_parents) = merge_filter_to_parent_bounds(walk.merges);
     let graph = walk.graph;
@@ -265,6 +286,7 @@ pub(crate) fn rev_list_options_from_walk(
         retain_commit_data: walk.retain_commit_data,
         left_right: walk.left_right || walk.cherry_mark,
         cherry_mark: walk.cherry_mark,
+        follow: walk.follow,
         ..RevListOptions::default()
     })
 }
