@@ -62,16 +62,27 @@ fn bucket_has_path<P: AsRef<[u8]>>(bucket: &[P], path: &[u8]) -> bool {
         .any(|candidate| candidate.as_ref().eq_ignore_ascii_case(path))
 }
 
-/// Stage-0 tracked paths for O(1) average lookups during untracked scans.
+/// Stage-0 tracked paths for fast lookups during untracked scans.
 ///
-/// Borrows path bytes from the [`Index`] it was built from, so building the table does not
-/// copy every indexed path.
+/// Borrows from the [`Index`] it was built from, so building the table does not copy every
+/// indexed path.
 #[derive(Debug)]
 pub struct Stage0TrackedPaths<'a> {
-    exact: hashbrown::HashSet<&'a [u8]>,
+    exact: ExactPaths<'a>,
     folded: Option<HashMap<u32, Vec<&'a [u8]>>>,
     /// Leading directories of stage-0 entries, bucketed by case-folded hash (`ignorecase` only).
     folded_dirs: Option<HashMap<u32, Vec<&'a [u8]>>>,
+}
+
+/// Exact-case membership for [`Stage0TrackedPaths`].
+#[derive(Debug)]
+enum ExactPaths<'a> {
+    /// Binary search in the (sorted) index itself: nothing to build before the walk starts.
+    Sorted(&'a Index),
+    /// Hash set over the paths of an index whose entries are not known to be sorted.
+    Hashed(hashbrown::HashSet<&'a [u8]>),
+    /// Case-insensitive tables answer every lookup.
+    Unused,
 }
 
 impl<'a> Stage0TrackedPaths<'a> {
@@ -96,13 +107,18 @@ impl<'a> Stage0TrackedPaths<'a> {
                 folded_dirs.entry(memihash(dir)).or_default().push(dir);
             }
             Self {
-                exact: hashbrown::HashSet::new(),
+                exact: ExactPaths::Unused,
                 folded: Some(folded),
                 folded_dirs: Some(folded_dirs),
             }
         } else {
+            let exact = if index.entries_sorted {
+                ExactPaths::Sorted(index)
+            } else {
+                ExactPaths::Hashed(index.entries.iter().map(|e| e.path.as_slice()).collect())
+            };
             Self {
-                exact: index.entries.iter().map(|e| e.path.as_slice()).collect(),
+                exact,
                 folded: None,
                 folded_dirs: None,
             }
@@ -126,11 +142,14 @@ impl<'a> Stage0TrackedPaths<'a> {
     #[must_use]
     pub fn contains_bytes(&self, path: &[u8]) -> bool {
         if let Some(folded) = &self.folded {
-            folded
+            return folded
                 .get(&memihash(path))
-                .is_some_and(|bucket| bucket_has_path(bucket, path))
-        } else {
-            self.exact.contains(path)
+                .is_some_and(|bucket| bucket_has_path(bucket, path));
+        }
+        match &self.exact {
+            ExactPaths::Sorted(index) => index.sorted_contains_path(path).unwrap_or(false),
+            ExactPaths::Hashed(paths) => paths.contains(path),
+            ExactPaths::Unused => false,
         }
     }
 }
@@ -1022,6 +1041,29 @@ mod tests {
         }
         let exact = Stage0TrackedPaths::from_index_for_untracked_scan(&index, false);
         assert!(!exact.has_dir_ignoring_case(b"build"));
+    }
+
+    #[test]
+    fn exact_tracked_paths_answer_from_sorted_and_unsorted_indexes() {
+        let mut conflicted = dummy_entry("dir/both.txt");
+        conflicted.set_stage(2);
+        let mut sorted = Index::new();
+        for entry in [dummy_entry("dir/a.txt"), conflicted, dummy_entry("README")] {
+            sorted.push_entry_unsorted(entry);
+        }
+        let mut unsorted = Index::new();
+        unsorted.entries = sorted.entries.clone();
+        unsorted.mark_entries_unsorted();
+        sorted.sort();
+        for index in [&sorted, &unsorted] {
+            let tracked = Stage0TrackedPaths::from_index_for_untracked_scan(index, false);
+            for path in ["dir/a.txt", "dir/both.txt", "README"] {
+                assert!(tracked.contains_bytes(path.as_bytes()), "{path}");
+            }
+            for path in ["dir", "dir/A.txt", "readme", "dir/a", ""] {
+                assert!(!tracked.contains_bytes(path.as_bytes()), "{path}");
+            }
+        }
     }
 
     #[test]

@@ -2114,8 +2114,12 @@ impl Index {
             return self.entries.iter().any(|e| e.stage() == 0);
         }
         if self.entries_sorted {
-            let (start, end) = self.descendant_run_range_sorted(rel_dir);
-            return self.entries[start..end].iter().any(|e| e.stage() == 0);
+            let prefix = rel_dir.as_bytes();
+            let start = self.descendant_run_start_sorted(prefix);
+            return self.entries[start..]
+                .iter()
+                .take_while(|e| path_is_under_dir(&e.path, prefix))
+                .any(|e| e.stage() == 0);
         }
         let prefix = format!("{rel_dir}/");
         self.entries
@@ -2123,27 +2127,50 @@ impl Index {
             .any(|e| e.stage() == 0 && e.path.starts_with(prefix.as_bytes()))
     }
 
-    /// Inclusive start and exclusive end of entries strictly under `path/` (sorted indexes only).
-    fn descendant_run_range_sorted(&self, path: &str) -> (usize, usize) {
-        debug_assert!(self.entries_sorted);
-        let prefix = path.as_bytes();
-        let plen = prefix.len();
-        let mut prefix_slash = Vec::with_capacity(plen + 1);
-        prefix_slash.extend_from_slice(prefix);
-        prefix_slash.push(b'/');
-        let start = self.entries.partition_point(|e| {
-            Self::cmp_paths(e.path.as_slice(), prefix_slash.as_slice()).is_lt()
-        });
-        let mut end = start;
-        while end < self.entries.len() {
-            let ep = self.entries[end].path.as_slice();
-            if ep.len() > plen && ep.starts_with(prefix) && ep[plen] == b'/' {
-                end += 1;
-            } else {
-                break;
-            }
+    /// Entries strictly under `dir/` (raw path bytes; every entry when `dir` is empty), in
+    /// index order.
+    ///
+    /// Returns `None` when the entries are not known to be sorted.
+    pub(crate) fn sorted_entries_under(&self, dir: &[u8]) -> Option<&[IndexEntry]> {
+        if !self.entries_sorted {
+            return None;
         }
-        (start, end)
+        if dir.is_empty() {
+            return Some(&self.entries);
+        }
+        let (start, end) = self.descendant_run_range_sorted(dir);
+        Some(&self.entries[start..end])
+    }
+
+    /// Whether some entry (at any stage) has exactly `path`; `None` when the entries are not
+    /// known to be sorted.
+    pub(crate) fn sorted_contains_path(&self, path: &[u8]) -> Option<bool> {
+        self.entries_sorted.then(|| {
+            self.entries
+                .binary_search_by(|e| Self::cmp_paths(e.path.as_slice(), path))
+                .is_ok()
+        })
+    }
+
+    /// Inclusive start and exclusive end of entries strictly under `path/` (sorted indexes only).
+    fn descendant_run_range_sorted(&self, path: &[u8]) -> (usize, usize) {
+        let start = self.descendant_run_start_sorted(path);
+        let len = self.entries[start..]
+            .iter()
+            .take_while(|e| path_is_under_dir(&e.path, path))
+            .count();
+        (start, start + len)
+    }
+
+    /// Position of the first entry that sorts at or after `path/` (sorted indexes only).
+    fn descendant_run_start_sorted(&self, path: &[u8]) -> usize {
+        debug_assert!(self.entries_sorted);
+        let mut prefix_slash = Vec::with_capacity(path.len() + 1);
+        prefix_slash.extend_from_slice(path);
+        prefix_slash.push(b'/');
+        self.entries.partition_point(|e| {
+            Self::cmp_paths(e.path.as_slice(), prefix_slash.as_slice()).is_lt()
+        })
     }
 
     fn record_resolve_undo_for_path(&mut self, path: &[u8]) {
@@ -2851,7 +2878,7 @@ impl Index {
         }
         let plen = prefix.len();
         if self.entries_sorted {
-            let (start, end) = self.descendant_run_range_sorted(path);
+            let (start, end) = self.descendant_run_range_sorted(prefix);
             if start < end {
                 self.record_resolve_undo_for_run(start, end);
                 self.entries.drain(start..end);
@@ -3916,6 +3943,11 @@ impl Drop for IndexLock {
             let _ = fs::remove_file(&self.pid_path);
         }
     }
+}
+
+/// Whether `path` lies strictly under directory `dir` (`dir/…`).
+fn path_is_under_dir(path: &[u8], dir: &[u8]) -> bool {
+    path.len() > dir.len() && path[dir.len()] == b'/' && path.starts_with(dir)
 }
 
 /// Hash an index body with the given algorithm, returning the raw checksum.
@@ -5359,6 +5391,80 @@ mod tests {
             cmps < bound,
             "sorted miss path comparisons {cmps} should stay under {bound} (N={N}, M={M})"
         );
+    }
+
+    fn sorted_index(entries: Vec<IndexEntry>) -> Index {
+        let mut idx = Index::new();
+        idx.entries = entries;
+        idx.sort();
+        idx
+    }
+
+    fn paths_of(entries: &[IndexEntry]) -> Vec<&str> {
+        entries
+            .iter()
+            .map(|e| std::str::from_utf8(&e.path).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn sorted_entries_under_returns_the_directory_run_at_every_stage() {
+        let idx = sorted_index(vec![
+            make_entry("a-b"),
+            make_entry("a.txt"),
+            make_entry("a/x"),
+            make_staged_entry("a/y", 2),
+            make_staged_entry("a/y", 3),
+            make_entry("a/z/deep"),
+            make_entry("a0"),
+            make_entry("ab/c"),
+        ]);
+        let run = idx.sorted_entries_under(b"a").unwrap();
+        assert_eq!(paths_of(run), vec!["a/x", "a/y", "a/y", "a/z/deep"]);
+        assert_eq!(
+            paths_of(idx.sorted_entries_under(b"a/z").unwrap()),
+            vec!["a/z/deep"]
+        );
+        assert!(idx.sorted_entries_under(b"a.txt").unwrap().is_empty());
+        assert!(idx.sorted_entries_under(b"missing").unwrap().is_empty());
+        assert_eq!(idx.sorted_entries_under(b"").unwrap().len(), 8);
+    }
+
+    #[test]
+    fn sorted_lookups_decline_unsorted_indexes() {
+        let mut idx = sorted_index(vec![make_entry("b"), make_entry("a/x")]);
+        assert_eq!(idx.sorted_contains_path(b"a/x"), Some(true));
+        assert_eq!(idx.sorted_contains_path(b"a"), Some(false));
+        idx.mark_entries_unsorted();
+        assert!(idx.sorted_entries_under(b"a").is_none());
+        assert_eq!(idx.sorted_contains_path(b"a/x"), None);
+    }
+
+    #[test]
+    fn sorted_contains_path_matches_conflict_stages() {
+        let idx = sorted_index(vec![
+            make_staged_entry("both.txt", 2),
+            make_staged_entry("both.txt", 3),
+            make_entry("plain.txt"),
+        ]);
+        assert_eq!(idx.sorted_contains_path(b"both.txt"), Some(true));
+        assert_eq!(idx.sorted_contains_path(b"plain.txt"), Some(true));
+        assert_eq!(idx.sorted_contains_path(b"both"), Some(false));
+    }
+
+    #[test]
+    fn has_stage0_descendant_under_skips_conflict_only_directories() {
+        let idx = sorted_index(vec![
+            make_staged_entry("conf/f", 1),
+            make_staged_entry("conf/f", 2),
+            make_entry("conf.txt"),
+            make_entry("mixed/a"),
+            make_staged_entry("mixed/b", 3),
+        ]);
+        assert!(!idx.has_stage0_descendant_under("conf"));
+        assert!(idx.has_stage0_descendant_under("mixed"));
+        assert!(!idx.has_stage0_descendant_under("conf.txt"));
+        assert!(!idx.has_stage0_descendant_under("mix"));
     }
 
     #[test]
