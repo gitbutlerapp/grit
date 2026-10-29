@@ -2331,7 +2331,7 @@ pub fn status(
         std::sync::Arc::clone(&watch),
     ));
     let (unstaged_raw, index_stat_refresh_changed) =
-        crate::diff::diff_index_to_worktree_with_options(
+        crate::diff::diff_index_to_worktree_with_owner_poll(
             repo.odb(),
             &mut index,
             work_tree,
@@ -2348,9 +2348,9 @@ pub fn status(
                 command_runner: Some(repo.command_runner()),
                 fsmonitor_query_boundary: opts.fsmonitor_query_boundary,
                 cancel_watch: Some(std::sync::Arc::clone(&watch)),
-                cancel_poll: Some(cancel_poll),
                 ..Default::default()
             },
+            Some(cancel_poll),
         )?;
     let mut persist_index = index_stat_refresh_changed || rewrite_clears_racy_entries;
     let mut unstaged: Vec<DiffEntry> = unstaged_raw

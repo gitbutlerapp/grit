@@ -4882,9 +4882,6 @@ pub struct DiffIndexToWorktreeOptions {
     /// When set, long loops abort with [`crate::error::Error::Cancelled`] once the flag is raised
     /// (see [`crate::progress::cancel_watch_arc`] and [`crate::progress::poll_cancel_watch`]).
     pub cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    /// Owner-thread progress poll hook (see [`crate::progress::StackCancelPoll`]).
-    #[doc(hidden)]
-    pub cancel_poll: Option<std::sync::Arc<crate::progress::StackCancelPoll>>,
 }
 
 impl Default for DiffIndexToWorktreeOptions {
@@ -4907,7 +4904,6 @@ impl Default for DiffIndexToWorktreeOptions {
             restrict_to_paths: None,
             hash_blobs_without_write: false,
             cancel_watch: None,
-            cancel_poll: None,
         }
     }
 }
@@ -4923,8 +4919,11 @@ fn poll_diff_cancel_watch(
 }
 
 #[inline]
-fn poll_diff_cancel(options: &DiffIndexToWorktreeOptions) -> crate::error::Result<()> {
-    if let Some(poll) = options.cancel_poll.as_ref() {
+fn poll_diff_cancel(
+    options: &DiffIndexToWorktreeOptions,
+    owner_poll: Option<&std::sync::Arc<crate::progress::StackCancelPoll>>,
+) -> crate::error::Result<()> {
+    if let Some(poll) = owner_poll {
         poll.poll_owner()?;
     } else {
         poll_diff_cancel_watch(options.cancel_watch.as_ref())?;
@@ -5286,7 +5285,25 @@ pub fn diff_index_to_worktree_with_options(
         .repository_git_dir
         .clone()
         .unwrap_or(default_git_dir);
-    diff_index_to_worktree_inner(odb, index, work_tree, &git_dir, options, false)
+    diff_index_to_worktree_inner(odb, index, work_tree, &git_dir, options, false, None)
+        .map(|(entries, changed, _)| (entries, changed))
+}
+
+/// Like [`diff_index_to_worktree_with_options`], with an owner-thread progress poll hook for
+/// long stat scans (used by [`crate::porcelain::status::status`]).
+pub(crate) fn diff_index_to_worktree_with_owner_poll(
+    odb: &Odb,
+    index: &mut Index,
+    work_tree: &Path,
+    options: DiffIndexToWorktreeOptions,
+    owner_poll: Option<std::sync::Arc<crate::progress::StackCancelPoll>>,
+) -> Result<(Vec<DiffEntry>, bool)> {
+    let default_git_dir = work_tree.join(".git");
+    let git_dir = options
+        .repository_git_dir
+        .clone()
+        .unwrap_or(default_git_dir);
+    diff_index_to_worktree_inner(odb, index, work_tree, &git_dir, options, false, owner_poll)
         .map(|(entries, changed, _)| (entries, changed))
 }
 
@@ -5306,7 +5323,15 @@ pub fn diff_index_to_worktree_for_staging(
     bool,
     std::collections::BTreeMap<String, crate::index::IndexStatFields>,
 )> {
-    diff_index_to_worktree_inner(odb, index, work_tree, repository_git_dir, options, true)
+    diff_index_to_worktree_inner(
+        odb,
+        index,
+        work_tree,
+        repository_git_dir,
+        options,
+        true,
+        None,
+    )
 }
 
 /// First pass of [`diff_index_to_worktree_inner`]: gitlinks and intent-to-add paths only.
@@ -5508,6 +5533,7 @@ fn diff_index_to_worktree_inner(
     repository_git_dir: &Path,
     options: DiffIndexToWorktreeOptions,
     materialize_dirty_blobs: bool,
+    owner_poll: Option<std::sync::Arc<crate::progress::StackCancelPoll>>,
 ) -> Result<(
     Vec<DiffEntry>,
     bool,
@@ -5518,7 +5544,7 @@ fn diff_index_to_worktree_inner(
     use std::collections::BTreeMap;
 
     let mut staging_stat_cache = BTreeMap::new();
-    poll_diff_cancel(&options)?;
+    poll_diff_cancel(&options, owner_poll.as_ref())?;
     let index_mtime = index_mtime_for_diff(index, options.index_mtime);
 
     let ignore_submodule_untracked = options.ignore_submodule_untracked;
@@ -5614,7 +5640,7 @@ fn diff_index_to_worktree_inner(
     let error_on_broken_gitlinks = options.error_on_broken_gitlinks;
     if options.restrict_to_paths.is_none() {
         for ie in &index.entries {
-            poll_diff_cancel(&options)?;
+            poll_diff_cancel(&options, owner_poll.as_ref())?;
             if ie.stage() != 0 {
                 let path = String::from_utf8_lossy(&ie.path).to_string();
                 let rank = match ie.stage() {
@@ -5660,7 +5686,7 @@ fn diff_index_to_worktree_inner(
         }
     } else {
         for ie in &index.entries {
-            poll_diff_cancel(&options)?;
+            poll_diff_cancel(&options, owner_poll.as_ref())?;
             if ie.stage() != 0 {
                 continue;
             }
@@ -5763,7 +5789,7 @@ fn diff_index_to_worktree_inner(
         },
         sparse,
         options.cancel_watch.clone(),
-        options.cancel_poll.clone(),
+        owner_poll.clone(),
     )?;
     // Size-changed entries ask whether their clean conversion is the identity in both the stat
     // refresh and the visit below; resolve each one's attributes once.
@@ -5813,9 +5839,9 @@ fn diff_index_to_worktree_inner(
     } else {
         RefreshChecks::default()
     };
-    poll_diff_cancel(&options)?;
+    poll_diff_cancel(&options, owner_poll.as_ref())?;
     visit_blob_lookup_batches(blob_stat_batches, |entry_index, lookup| {
-        poll_diff_cancel(&options)?;
+        poll_diff_cancel(&options, owner_poll.as_ref())?;
         if icase_collisions
             .as_ref()
             .is_some_and(|map| map.is_auto_stage_loser(&index.entries[entry_index].path))
@@ -8035,6 +8061,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                     repository_git_dir,
                     options,
                     false,
+                    None,
                 )?;
                 return Ok(entries);
             }
