@@ -152,6 +152,9 @@ Pass `--json` for stable, scripting-friendly output:
 | `stranded_commits` | array | Commits only the previous detached `HEAD` reached, newest first, at most 20. Each has `oid`, `change_id` and `subject`. Omitted when nothing is left behind. |
 | `stranded_total` | integer | Advisory count of commits left behind (may exceed the length of `stranded_commits`). Without a commit-graph, severe clock skew can make this inaccurate; it never controls the switch. Omitted when zero. |
 | `stranded_truncated` | boolean | `true` when `stranded_commits` was capped (omitted when false). |
+| `path_collisions` | array of strings | Index paths that collided during checkout on a case-insensitive filesystem. Omitted when empty. |
+
+On a case-insensitive filesystem (`core.ignorecase`), when the destination tree contains paths that differ only by case (or other spellings that map to one on-disk file), grit prints a **warning** on **stderr** in human mode listing every colliding index path, the same message as [`grit clone`](clone/). Only one path from each group exists on disk; status and diff treat index rows whose blob does not match the shared dentry as modified.
 
 Example (branch switch):
 

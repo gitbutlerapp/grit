@@ -1004,6 +1004,22 @@ pub fn commit_worktree(
     {
         repo.write_index(&mut index)?;
     }
+    if matches!(result, Err(Error::NothingToCommit)) && staged_count == 0 {
+        let mut worktree_index = match repo.load_index() {
+            Ok(real) => real,
+            Err(_) => index.clone(),
+        };
+        if let Ok((unstaged, untracked)) =
+            crate::porcelain::status::count_unstaged_and_untracked_paths(repo, &mut worktree_index)
+        {
+            if unstaged + untracked > 0 {
+                return Err(Error::NothingStagedToCommit {
+                    unstaged,
+                    untracked,
+                });
+            }
+        }
+    }
     result
 }
 

@@ -104,6 +104,8 @@ pub struct SwitchOutcome {
     pub stranded_total: usize,
     /// True when [`Self::stranded_commits`] was capped at [`DEFAULT_ORPHAN_LIMIT`].
     pub stranded_truncated: bool,
+    /// Stage-0 paths that share a worktree slot when `core.ignorecase` is set.
+    pub path_collisions: Vec<String>,
 }
 
 impl SwitchOutcome {
@@ -131,6 +133,7 @@ impl SwitchOutcome {
             stranded_commits: Vec::new(),
             stranded_total: 0,
             stranded_truncated: false,
+            path_collisions: Vec::new(),
         }
     }
 
@@ -142,6 +145,24 @@ impl SwitchOutcome {
             ..self
         }
     }
+
+    fn with_path_collisions(mut self, path_collisions: Vec<String>) -> Self {
+        self.path_collisions = path_collisions;
+        self
+    }
+}
+
+fn switch_path_collisions(repo: &Repository, index: &Index) -> Result<Vec<String>> {
+    let config = repo.config()?;
+    let ignorecase = config
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    Ok(if ignorecase {
+        crate::path_icase::icase_checkout_collision_paths(index, true)
+    } else {
+        Vec::new()
+    })
 }
 
 pub(crate) struct PreparedSwitch {
@@ -464,15 +485,13 @@ fn switch_without_hooks(
         && is_already_on_branch(repo, &branch_ref, target_oid)?
         && repo.index_path_for_env()?.try_exists()?
     {
+        let index = repo.load_index()?;
         if opts.dry_run {
-            return Ok(SwitchOutcome::new(
-                &branch_label,
-                created,
-                detached,
-                target_oid,
-                true,
-                0,
-            ));
+            let collisions = switch_path_collisions(repo, &index)?;
+            return Ok(
+                SwitchOutcome::new(&branch_label, created, detached, target_oid, true, 0)
+                    .with_path_collisions(collisions),
+            );
         }
         let head_before = resolve_head_for_repository(repo)?;
         if let Some(from_label) = checkout_reflog_from_label(&head_before) {
@@ -482,19 +501,18 @@ fn switch_without_hooks(
                 .unwrap_or_else(crate::diff::zero_oid);
             append_head_checkout_reflog(repo, old_oid, target_oid, &from_label, &branch_label)?;
         }
-        return Ok(SwitchOutcome::new(
-            &branch_label,
-            created,
-            detached,
-            target_oid,
-            false,
-            0,
-        ));
+        let collisions = switch_path_collisions(repo, &index)?;
+        return Ok(
+            SwitchOutcome::new(&branch_label, created, detached, target_oid, false, 0)
+                .with_path_collisions(collisions),
+        );
     }
     if detached
         && is_already_detached_at(repo, target_oid)?
         && repo.index_path_for_env()?.try_exists()?
     {
+        let index = repo.load_index()?;
+        let collisions = switch_path_collisions(repo, &index)?;
         return Ok(SwitchOutcome::new(
             &branch_label,
             created,
@@ -502,7 +520,8 @@ fn switch_without_hooks(
             target_oid,
             opts.dry_run,
             0,
-        ));
+        )
+        .with_path_collisions(collisions));
     }
 
     // A real switch reads the index under `index.lock`, so a held lock refuses it before any
@@ -588,6 +607,7 @@ fn switch_to_target(
     let prepared = prepare_tree_switch_allow_local_with_snapshot(repo, &target_tree, snapshot)?;
     let changed_paths = count_unique_tree_change_paths(&prepared.plan.tree_changes);
     let stranded = stranded_by_leaving_detached_head(repo, &head_before, target_oid)?;
+    let dry_run_collisions = switch_path_collisions(repo, &prepared.index)?;
     if dry_run {
         return Ok(SwitchOutcome::new(
             branch_label,
@@ -597,7 +617,8 @@ fn switch_to_target(
             true,
             changed_paths,
         )
-        .with_stranded(stranded));
+        .with_stranded(stranded)
+        .with_path_collisions(dry_run_collisions));
     }
     checkout_prepared_tree_transition(repo, prepared, index_lock, progress, cancel)?;
 
@@ -633,9 +654,12 @@ fn switch_to_target(
         }
     }
 
+    let index = repo.load_index()?;
+    let path_collisions = switch_path_collisions(repo, &index)?;
     Ok(
         SwitchOutcome::new(branch_label, created, detached, target_oid, false, 0)
-            .with_stranded(stranded),
+            .with_stranded(stranded)
+            .with_path_collisions(path_collisions),
     )
 }
 

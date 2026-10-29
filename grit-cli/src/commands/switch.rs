@@ -52,6 +52,10 @@ pub struct SwitchOutcome {
     #[serde(default, skip_serializing_if = "is_false")]
     #[schemars(default)]
     pub stranded_truncated: bool,
+    /// Index paths that collided during checkout on a case-insensitive filesystem.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub path_collisions: Vec<String>,
 }
 
 fn is_zero(value: &usize) -> bool {
@@ -218,5 +222,6 @@ pub fn run(
             .collect(),
         stranded_total: outcome.stranded_total,
         stranded_truncated: outcome.stranded_truncated,
+        path_collisions: outcome.path_collisions,
     })
 }
