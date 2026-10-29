@@ -279,6 +279,9 @@ pub fn start_replay_sequence(
             "cherry-pick or revert is already in progress".into(),
         ));
     }
+    if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
+        return Err(Error::OperationInProgress(op));
+    }
     let worktree = prepare_worktree_for_pick(repo)?;
     let (refname, head_oid) = branch_head(repo)?;
     if req.commits.is_empty() {

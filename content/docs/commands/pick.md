@@ -67,6 +67,13 @@ Picked a1b2c3d → d4e5f6a First change
 Picked b2c3d4e → e5f6a7b Second change
 ```
 
+While a rebase is paused, `grit pick` refuses (it does not treat conflict markers as a dirty worktree):
+
+```console
+$ grit pick main
+error: cannot pick while a rebase is in progress; finish it with `grit rebase --continue` or cancel it with `grit rebase --abort`
+```
+
 Conflict, then continue:
 
 ```console

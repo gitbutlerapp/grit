@@ -374,6 +374,11 @@ impl PullOptions {
         environment: Environment,
         cli_mode: Option<PullMode>,
     ) -> std::result::Result<Self, PullError> {
+        if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())
+            .map_err(PullError::Repository)?
+        {
+            return Err(PullError::Repository(Error::OperationInProgress(op)));
+        }
         let short_name = match resolve_head_for_repository(repo).map_err(PullError::Repository)? {
             HeadState::Branch { short_name, .. } => short_name,
             HeadState::Detached { .. } => return Err(PullError::DetachedHead),
@@ -467,6 +472,9 @@ pub fn pull<P>(
 where
     P: Progress,
 {
+    if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
+        return Err(PullError::Repository(Error::OperationInProgress(op)));
+    }
     let (refname, short_name, head_oid) = match resolve_head_for_repository(repo)? {
         HeadState::Branch {
             refname,

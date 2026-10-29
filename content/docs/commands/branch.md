@@ -100,6 +100,13 @@ $ grit branch -u origin/main renamed
 Set upstream of renamed to origin/main
 ```
 
+While a rebase is paused and `HEAD` is detached, renaming the branch being rebased is refused:
+
+```console
+$ grit branch -m renamed
+error: cannot rename the branch while a rebase is in progress; finish it with `grit rebase --continue` or cancel it with `grit rebase --abort`
+```
+
 Deleting a branch with unmerged work:
 
 ```console

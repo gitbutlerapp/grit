@@ -201,7 +201,7 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
     }
 
     if opts.abort {
-        match abort_replay_sequence(&repo).map_err(map_replay_error)? {
+        match abort_replay_sequence(&repo).map_err(|e| map_replay_error(&repo, e))? {
             ReplayAbortOutcome::Rewound => {}
             ReplayAbortOutcome::ClearedInPlace => {
                 eprintln!(
@@ -213,12 +213,14 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
     }
 
     if opts.continue_pick {
-        let outcome = continue_replay_sequence(&repo, &committer).map_err(map_replay_error)?;
+        let outcome =
+            continue_replay_sequence(&repo, &committer).map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_sequence_outcome(outcome, PickResult::Picked));
     }
 
     if opts.skip {
-        let outcome = skip_replay_step(&repo, &committer).map_err(map_replay_error)?;
+        let outcome =
+            skip_replay_step(&repo, &committer).map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_sequence_outcome(outcome, PickResult::Skipped));
     }
 
@@ -267,10 +269,11 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
         },
     };
     if opts.check {
-        let prediction = predict_replay_sequence(&repo, &req).map_err(map_replay_error)?;
+        let prediction =
+            predict_replay_sequence(&repo, &req).map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_prediction_outcome(prediction));
     }
-    let outcome = start_replay_sequence(&repo, &req).map_err(map_replay_error)?;
+    let outcome = start_replay_sequence(&repo, &req).map_err(|e| map_replay_error(&repo, e))?;
     Ok(map_sequence_outcome(outcome, PickResult::Picked))
 }
 
@@ -382,8 +385,11 @@ fn map_prediction_outcome(prediction: SequencePrediction) -> PickOutcome {
     }
 }
 
-fn map_replay_error(err: Error) -> anyhow::Error {
+fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Error {
     match err {
+        Error::OperationInProgress(kind) => {
+            crate::json_error::operation_in_progress_for_repo(repo, "pick", kind)
+        }
         Error::DetachedHead => anyhow::anyhow!("HEAD is detached; grit pick needs a branch"),
         Error::UnbornHead => anyhow::anyhow!("no commits yet on this branch to pick onto"),
         Error::MergeCommit { oid } => {

@@ -180,6 +180,13 @@ error: no upstream configured for branch main
 hint: pull a branch by name with `grit pull origin main`, or publish this one and track it with `grit push -u origin main`
 ```
 
+While a rebase is paused (for example after a conflict), `grit pull` refuses with the same guidance as [`grit switch`](../switch/):
+
+```console
+$ grit pull
+error: cannot pull while a rebase is in progress; finish it with `grit rebase --continue` or cancel it with `grit rebase --abort`
+```
+
 With `--json` that is `{"error":"no upstream configured for branch main","hint":"…","kind":"branch_no_upstream"}`. A missing remote is `kind` `remote_not_found` and an authentication failure `auth_required` or `auth_rejected`, each with a `hint` (see [Exit codes](../exit-codes/)).
 
 ## JSON output

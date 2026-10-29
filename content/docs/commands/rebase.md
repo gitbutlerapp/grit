@@ -137,6 +137,13 @@ recovery record is kept at the detached replay commit. `grit status` reports the
 interrupted rebase and suggests `--continue` or `--abort`; `--abort` restores the
 branch tip, index, and worktree from before the rebase started.
 
+Starting a second rebase while one is already paused:
+
+```console
+$ grit rebase main
+error: cannot rebase while a rebase is in progress; finish it with `grit rebase --continue` or cancel it with `grit rebase --abort`
+```
+
 ### When the branch moves during a stop
 
 Something else may move the rebased branch while the rebase is stopped: a commit from

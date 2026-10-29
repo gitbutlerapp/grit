@@ -66,6 +66,13 @@ Reverted f1e2d3c → … Revert "Prepare release"
 Reverted a1b2c3d → … Revert "Bump version"
 ```
 
+While a rebase is paused:
+
+```console
+$ grit revert main
+error: cannot revert while a rebase is in progress; finish it with `grit rebase --continue` or cancel it with `grit rebase --abort`
+```
+
 When the revert conflicts:
 
 ```console

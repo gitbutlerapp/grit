@@ -407,6 +407,84 @@ fn start_rebase_refuses_when_session_active() {
     assert!(matches!(err, RebaseSessionError::RebaseAlreadyInProgress));
 }
 
+#[test]
+fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
+    use grit_lib::error::Error;
+    use grit_lib::porcelain::pull::{pull, PullOptions};
+    use grit_lib::porcelain::replay::ReplayDirection;
+    use grit_lib::porcelain::replay_sequence::{
+        start_replay_sequence, ReplayOptions, ReplaySequenceRequest,
+    };
+    use grit_lib::progress::{NeverCancel, NullProgress};
+    use grit_lib::remote::fetch::NoProgress;
+
+    let (repo, upstream, onto, tip, orig_tip) = conflict_rebase_fixture();
+    let wt = repo.worktree();
+    let grit = open_grit(wt);
+    git(wt, &["switch", "topic"]);
+    let _ = start_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("stop");
+    let head_before = git_oid(wt, "HEAD");
+    let branch_before = resolve_ref(grit.git_dir(), "refs/heads/topic").unwrap();
+
+    let mut pull_progress = NoProgress;
+    let pull_err = pull(
+        &grit,
+        &PullOptions::default(),
+        &mut pull_progress,
+        &NeverCancel,
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            pull_err,
+            grit_lib::porcelain::pull::PullError::Repository(Error::OperationInProgress(
+                InProgressOperation::Rebase
+            ))
+        ),
+        "pull: {pull_err:?}"
+    );
+
+    let pick_req = ReplaySequenceRequest {
+        commits: vec![onto],
+        direction: ReplayDirection::Pick,
+        committer: COMMITTER.parse().expect("signature"),
+        options: ReplayOptions::default(),
+    };
+    let pick_err = start_replay_sequence(&grit, &pick_req).unwrap_err();
+    assert!(
+        matches!(
+            pick_err,
+            Error::OperationInProgress(InProgressOperation::Rebase)
+        ),
+        "pick: {pick_err:?}"
+    );
+
+    let err = start_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .unwrap_err();
+    assert!(matches!(err, RebaseSessionError::RebaseAlreadyInProgress));
+
+    assert_eq!(git_oid(wt, "HEAD"), head_before);
+    assert_eq!(
+        resolve_ref(grit.git_dir(), "refs/heads/topic").unwrap(),
+        branch_before
+    );
+    assert_eq!(branch_before, orig_tip);
+    assert!(wt.join(".git/rebase-merge").is_dir());
+    assert_git_fsck_strict(wt);
+}
+
 fn conflict_rebase_fixture() -> (HistoryRepo, ObjectId, ObjectId, ObjectId, ObjectId) {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
@@ -1447,7 +1525,7 @@ fn continue_and_skip_refuse_git_started_rebase_without_touching_it() {
             &grit_lib::progress::NeverCancel
         )
         .unwrap_err(),
-        RebaseSessionError::RebaseAlreadyInProgress
+        RebaseSessionError::ForeignRebaseInProgress
     ));
     assert!(wt.join(".git/rebase-merge").is_dir());
     assert!(!wt.join(".git/rebase-merge/grit-plan").exists());

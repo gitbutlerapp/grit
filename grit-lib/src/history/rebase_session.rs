@@ -242,8 +242,11 @@ pub fn start_rebase(
     cancel: &dyn Cancel,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
     super::ensure_rewrite_apply_ready(repo)?;
-    if active_rebase(repo.git_dir()).is_some() {
-        return Err(RebaseSessionError::RebaseAlreadyInProgress);
+    if let Some(active) = active_rebase(repo.git_dir()) {
+        return Err(match active {
+            ActiveRebase::Foreign(_) => RebaseSessionError::ForeignRebaseInProgress,
+            ActiveRebase::Exec | ActiveRebase::Grit => RebaseSessionError::RebaseAlreadyInProgress,
+        });
     }
     let (head_ref, orig_head) = branch_head(repo)?;
     let plan = plan_rebase_resumable(repo, &opts.request, &opts.rebase, &opts.pre_rebase)?;
