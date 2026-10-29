@@ -1550,7 +1550,9 @@ impl FilesRefStore {
             }
             let write_result = (|| -> Result<()> {
                 if let (Some(old), Some(new)) = (old, new) {
-                    if new.starts_with(old) && self.append_reflog_entries(name, &new[old.len()..])? {
+                    if new.starts_with(old)
+                        && self.append_reflog_entries(name, &new[old.len()..])?
+                    {
                         return Ok(());
                     }
                 }

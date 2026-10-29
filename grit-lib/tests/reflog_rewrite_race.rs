@@ -11,11 +11,11 @@ use crate::support::{
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::lockfile::LockWait;
 use grit_lib::objects::ObjectId;
+use grit_lib::refs::prepare_with_lock_wait;
+use grit_lib::refs::store::RefStorageFormat;
 use grit_lib::refs::store::{
     Expected, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
-use grit_lib::refs::prepare_with_lock_wait;
-use grit_lib::refs::store::RefStorageFormat;
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::ExpireOptions;
 

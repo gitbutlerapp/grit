@@ -2974,28 +2974,67 @@ const STASH_REF: &str = "refs/stash";
 ///
 /// Propagates ref and reflog update failures.
 pub(crate) fn drop_stash_commit(repo: &Repository, stash_oid: &ObjectId) -> Result<bool> {
+    const RETRIES: u32 = 128;
     let store = repo.refs();
-    if read_reflog_on_store(store, STASH_REF)?
-        .last()
-        .is_none_or(|tip| tip.new_oid != *stash_oid)
-    {
-        return Ok(false);
-    }
-    store.rewrite_reflog(STASH_REF, &mut |mut entries| {
-        if entries.last().is_none_or(|tip| tip.new_oid != *stash_oid) {
-            return Ok(entries);
+    let git_dir = repo.git_dir();
+    for _ in 0..RETRIES {
+        if store
+            .resolve(STASH_REF)
+            .ok()
+            .is_none_or(|tip| tip != *stash_oid)
+        {
+            return Ok(false);
         }
-        entries.pop();
-        Ok(entries)
-    })?;
-    let prev = read_reflog_on_store(store, STASH_REF)?
-        .last()
-        .map(|entry| entry.new_oid);
-    match prev {
-        None => delete_ref_on_store(store, STASH_REF)?,
-        Some(prev) => update_direct_ref_on_store(store, repo.git_dir(), STASH_REF, &prev)?,
+        let mut new_tip = None;
+        match store.rewrite_reflog(STASH_REF, &mut |mut entries| {
+            if entries.last().is_none_or(|tip| tip.new_oid != *stash_oid) {
+                return Err(crate::error::Error::RefStore(
+                    crate::refs::store::RefStoreError::ReflogRewriteStale {
+                        name: STASH_REF.to_owned(),
+                    },
+                ));
+            }
+            entries.pop();
+            new_tip = entries.last().map(|entry| entry.new_oid);
+            Ok(entries)
+        }) {
+            Ok(()) => {}
+            Err(crate::error::Error::RefStore(
+                crate::refs::store::RefStoreError::ReflogRewriteStale { .. },
+            )) => continue,
+            Err(err) => return Err(err),
+        }
+        let ref_result = match new_tip {
+            None => crate::refs::store_write_value_on_store(
+                store,
+                git_dir,
+                STASH_REF,
+                None,
+                crate::refs::store::Expected::Oid(*stash_oid),
+                None,
+            ),
+            Some(prev) => crate::refs::store_write_value_on_store(
+                store,
+                git_dir,
+                STASH_REF,
+                Some(crate::refs::store::RawRef::Direct(prev)),
+                crate::refs::store::Expected::Oid(*stash_oid),
+                None,
+            ),
+        };
+        match ref_result {
+            Ok(()) => return Ok(true),
+            Err(crate::error::Error::RefStore(
+                crate::refs::store::RefStoreError::ExpectedMismatch { .. },
+            )) => continue,
+            Err(err) => return Err(err),
+        }
     }
-    Ok(true)
+    Err(crate::error::Error::RefStore(
+        crate::refs::store::RefStoreError::Corrupt(
+            "refs/stash changed too often during drop".to_owned(),
+        ),
+    ))
 }
 
 /// Stash dirty worktree/index changes before `pull --autostash` / merge autostash.
@@ -3302,6 +3341,50 @@ mod coverage_tests {
         assert!(push_stash(&repo, &opts, &mut NullProgress, &NeverCancel)
             .expect("push")
             .is_none());
+    }
+
+    #[test]
+    fn drop_stash_commit_races_concurrent_stash_push() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let tmp = TempDir::new().unwrap();
+        let repo = Arc::new(init_repo(tmp.path()));
+        let ident = "T <t@t> 1 +0000";
+        fs::write(tmp.path().join("f"), b"dirty\n").unwrap();
+        let opts = StashPushOptions {
+            message: Some("m".into()),
+            include_untracked: false,
+            identity: ident.parse().expect("signature"),
+            selection: None,
+            pathspecs: Vec::new(),
+            dry_run: false,
+            mode: StashMode::default(),
+        };
+        let oid = create_stash(&repo, &opts).expect("create").expect("some");
+        store_stash(&repo, oid, "On main: m", ident).expect("store");
+        let drop_repo = repo.clone();
+        let drop_oid = oid;
+        let dropper = thread::spawn(move || {
+            for _ in 0..50 {
+                let _ = drop_stash_commit(drop_repo.as_ref(), &drop_oid);
+            }
+        });
+        let mut pushed = 0usize;
+        while !dropper.is_finished() {
+            fs::write(tmp.path().join("f"), format!("v{pushed}\n")).unwrap();
+            if push_stash(&repo, &opts, &mut NullProgress, &NeverCancel)
+                .expect("push")
+                .is_some()
+            {
+                pushed += 1;
+            }
+        }
+        dropper.join().expect("join");
+        assert!(
+            list_stashes(&repo).expect("list").len() >= pushed,
+            "concurrent stash pushes lost during drop_stash_commit"
+        );
     }
 
     #[test]

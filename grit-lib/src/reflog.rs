@@ -485,16 +485,14 @@ pub fn delete_reflog_entries(git_dir: &Path, refname: &str, indices: &[usize]) -
     delete_reflog_entries_on_store(store.as_ref(), refname, indices)
 }
 
-/// Oldest-first entries of `refname` in `store` without those at the newest-first `indices`,
-/// plus whether the oldest entry was among the removed ones. `None` when the log is empty.
-fn reflog_without_indices(
-    store: &dyn crate::refs::store::RefStore,
-    refname: &str,
+/// Oldest-first `entries` without those at the newest-first `indices`, plus whether the
+/// oldest entry was among the removed ones. `None` when `entries` is empty.
+fn filter_reflog_without_indices(
+    entries: Vec<ReflogEntry>,
     indices: &[usize],
-) -> Result<Option<(Vec<ReflogEntry>, bool)>> {
-    let entries = read_reflog_on_store(store, refname)?;
+) -> Option<(Vec<ReflogEntry>, bool)> {
     if entries.is_empty() {
-        return Ok(None);
+        return None;
     }
     let len = entries.len();
     let indices_set: HashSet<usize> = indices.iter().copied().collect();
@@ -505,7 +503,22 @@ fn reflog_without_indices(
         .filter(|(oldest_first, _)| !indices_set.contains(&(len - 1 - oldest_first)))
         .map(|(_, e)| e)
         .collect();
-    Ok(Some((kept, removed_oldest)))
+    Some((kept, removed_oldest))
+}
+
+fn rechain_reflog_after_delete(
+    mut kept: Vec<ReflogEntry>,
+    removed_oldest: bool,
+) -> Vec<ReflogEntry> {
+    if removed_oldest {
+        if let Some(first) = kept.first_mut() {
+            first.old_oid = ObjectId::zero();
+        }
+    }
+    for i in 1..kept.len() {
+        kept[i].old_oid = kept[i - 1].new_oid;
+    }
+    kept
 }
 
 /// [`delete_reflog_entries`] through an already-selected ref store (for example
@@ -515,10 +528,12 @@ pub(crate) fn delete_reflog_entries_on_store(
     refname: &str,
     indices: &[usize],
 ) -> Result<()> {
-    let Some((kept, _)) = reflog_without_indices(store, refname, indices)? else {
-        return Ok(());
-    };
-    store.rewrite_reflog(refname, &mut |_| Ok(kept.clone()))
+    let indices: Vec<usize> = indices.to_vec();
+    store.rewrite_reflog(refname, &mut move |current| {
+        Ok(filter_reflog_without_indices(current, &indices)
+            .map(|(kept, _)| kept)
+            .unwrap_or_default())
+    })
 }
 
 /// Like [`delete_reflog_entries_on_store`], but reconnects surviving `old_oid` values after
@@ -528,18 +543,12 @@ pub(crate) fn delete_reflog_entries_rechain_on_store(
     refname: &str,
     indices: &[usize],
 ) -> Result<()> {
-    let Some((mut kept, removed_oldest)) = reflog_without_indices(store, refname, indices)? else {
-        return Ok(());
-    };
-    if removed_oldest {
-        if let Some(first) = kept.first_mut() {
-            first.old_oid = ObjectId::zero();
-        }
-    }
-    for i in 1..kept.len() {
-        kept[i].old_oid = kept[i - 1].new_oid;
-    }
-    store.rewrite_reflog(refname, &mut |_| Ok(kept.clone()))
+    let indices: Vec<usize> = indices.to_vec();
+    store.rewrite_reflog(refname, &mut move |current| {
+        Ok(filter_reflog_without_indices(current, &indices)
+            .map(|(kept, removed_oldest)| rechain_reflog_after_delete(kept, removed_oldest))
+            .unwrap_or_default())
+    })
 }
 
 /// Read every reflog entry for `refname` from `store`, oldest first; empty when it has none.
@@ -566,34 +575,28 @@ pub(crate) fn read_reflog_on_store(
 ///
 /// If `expire_time` is `None`, removes all entries.
 pub fn expire_reflog(git_dir: &Path, refname: &str, expire_time: Option<i64>) -> Result<usize> {
-    let entries = read_reflog(git_dir, refname)?;
-    if entries.is_empty() {
-        return Ok(0);
-    }
-
-    let mut kept = Vec::new();
-    let mut kept_entries = Vec::new();
-    let mut pruned = 0usize;
-
-    for entry in &entries {
-        let ts = parse_timestamp_from_identity(&entry.identity);
-        let dominated = match (expire_time, ts) {
-            (Some(cutoff), Some(t)) => t < cutoff,
-            (None, _) => true,        // expire all
-            (Some(_), None) => false, // can't parse => keep
-        };
-        if dominated {
-            pruned += 1;
-        } else {
-            kept_entries.push(entry.clone());
-            kept.push(format_reflog_entry(entry));
-        }
-    }
-
     let store = crate::refs::store::open_ref_store(git_dir)?;
-    if pruned > 0 {
-        store.rewrite_reflog(refname, &mut |_| Ok(kept_entries.clone()))?;
-    }
+    let mut pruned = 0usize;
+    store.rewrite_reflog(refname, &mut |current| {
+        if current.is_empty() {
+            return Ok(current);
+        }
+        let mut kept = Vec::with_capacity(current.len());
+        for entry in current {
+            let ts = parse_timestamp_from_identity(&entry.identity);
+            let dominated = match (expire_time, ts) {
+                (Some(cutoff), Some(t)) => t < cutoff,
+                (None, _) => true,
+                (Some(_), None) => false,
+            };
+            if dominated {
+                pruned += 1;
+            } else {
+                kept.push(entry);
+            }
+        }
+        Ok(kept)
+    })?;
     Ok(pruned)
 }
 
@@ -604,21 +607,15 @@ pub fn expire_reflog(git_dir: &Path, refname: &str, expire_time: Option<i64>) ->
 ///
 /// When `cutoff` is `None`, no entries are removed.
 ///
-/// Reftable-backed repositories are skipped until reflog rewrite is implemented there.
 pub fn expire_reflog_unreachable(
     repo: &Repository,
-    git_dir: &Path,
+    _git_dir: &Path,
     refname: &str,
     cutoff: Option<i64>,
 ) -> Result<usize> {
     let Some(cutoff) = cutoff else {
         return Ok(0);
     };
-    if crate::refs::store::open_ref_store(git_dir)?.format()
-        != crate::refs::store::RefStorageFormat::Files
-    {
-        return Ok(0);
-    }
     let tip = match refs::resolve_ref_in(repo, refname) {
         Ok(o) => o,
         Err(_) => return Ok(0),
@@ -628,31 +625,30 @@ pub fn expire_reflog_unreachable(
         Err(_) => return Ok(0),
     };
 
-    let entries = read_reflog(git_dir, refname)?;
-    if entries.is_empty() {
+    let store = repo.refs();
+    let snapshot = read_reflog_on_store(store, refname)?;
+    if snapshot.is_empty() {
         return Ok(0);
     }
 
-    let path = reflog_path(git_dir, refname);
-    let mut kept = Vec::new();
-    let mut pruned = 0usize;
-
-    for entry in &entries {
-        let ts = parse_timestamp_from_identity(&entry.identity);
-        let unreachable = !entry.new_oid.is_zero() && !ancestors.contains(&entry.new_oid);
-        let should_prune = unreachable && matches!(ts, Some(t) if t < cutoff);
-        if should_prune {
-            pruned += 1;
-        } else {
-            kept.push(format_reflog_entry(entry));
-        }
+    let drop_flags: Vec<bool> = snapshot
+        .iter()
+        .map(|entry| {
+            let ts = parse_timestamp_from_identity(&entry.identity);
+            let unreachable = !entry.new_oid.is_zero() && !ancestors.contains(&entry.new_oid);
+            unreachable && matches!(ts, Some(t) if t < cutoff)
+        })
+        .collect();
+    let pruned = drop_flags.iter().filter(|&&drop| drop).count();
+    if pruned == 0 {
+        return Ok(0);
     }
-
-    fs::write(&path, kept.join(""))?;
+    rewrite_reflog_from_snapshot(store, refname, &snapshot, &drop_flags)?;
     Ok(pruned)
 }
 
 /// Format a reflog entry back into the on-disk line format.
+#[cfg_attr(not(test), allow(dead_code))]
 fn format_reflog_entry(entry: &ReflogEntry) -> String {
     if entry.message.is_empty() {
         format!("{} {} {}\n", entry.old_oid, entry.new_oid, entry.identity)
@@ -2150,6 +2146,159 @@ mod default_expire_tests {
             .any(|a| a.action == ReflogExpireActionKind::Prune && a.entry.message == "prune-me"));
         assert!(read_reflog(git_dir, refname).expect("empty").is_empty());
         let _ = tmp;
+    }
+}
+
+#[cfg(test)]
+mod rewrite_concurrency_tests {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    use crate::lockfile::LockWait;
+    use crate::objects::ObjectId;
+    use crate::refs::prepare_with_lock_wait;
+    use crate::refs::store::{
+        Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
+        ReflogUpdate,
+    };
+
+    use super::{
+        delete_reflog_entries_on_store, delete_reflog_entries_rechain_on_store, ReflogEntry,
+    };
+
+    fn oid(byte: u8) -> ObjectId {
+        let mut bytes = [0u8; 20];
+        bytes[19] = byte;
+        ObjectId::from_bytes(&bytes).expect("oid")
+    }
+
+    fn append(
+        store: &dyn RefStore,
+        refname: &str,
+        oid: ObjectId,
+        ts: i64,
+    ) -> crate::error::Result<()> {
+        let txn = RefTransaction::new().update(RefUpdate {
+            name: refname.to_owned(),
+            new_value: Some(RawRef::Direct(oid)),
+            expected: Expected::Any,
+            reflog: Some(ReflogUpdate {
+                identity: format!("T <t@example.com> {ts} +0000"),
+                message: "x".into(),
+                time: time::OffsetDateTime::from_unix_timestamp(ts).expect("ts"),
+                old_oid: None,
+                new_oid: Some(oid),
+            }),
+            flags: RefUpdateFlags::default(),
+        })?;
+        prepare_with_lock_wait(store, txn, LockWait::Indefinitely)?.commit()?;
+        Ok(())
+    }
+
+    fn read_entries(store: &dyn RefStore, refname: &str) -> Vec<ReflogEntry> {
+        let mut out = Vec::new();
+        store
+            .for_each_reflog_entry(refname, false, &mut |e| {
+                out.push(e.clone());
+                std::ops::ControlFlow::Continue(())
+            })
+            .expect("read");
+        out
+    }
+
+    #[test]
+    fn delete_on_store_uses_locked_entries_not_stale_snapshot() {
+        let store = Arc::new(MemoryRefStore::new());
+        let refname = "refs/heads/r";
+        let o1 = oid(1);
+        let o2 = oid(2);
+        let o3 = oid(3);
+        store
+            .replace_reflog(
+                refname,
+                vec![
+                    ReflogEntry {
+                        old_oid: ObjectId::zero(),
+                        new_oid: o1,
+                        identity: "T <t@e.com> 100 +0000".into(),
+                        message: String::new(),
+                    },
+                    ReflogEntry {
+                        old_oid: o1,
+                        new_oid: o2,
+                        identity: "T <t@e.com> 200 +0000".into(),
+                        message: String::new(),
+                    },
+                ],
+            )
+            .expect("seed");
+        let barrier = Arc::new(Barrier::new(2));
+        let s_delete = store.clone();
+        let b_delete = barrier.clone();
+        let deleter = thread::spawn(move || {
+            b_delete.wait();
+            delete_reflog_entries_on_store(s_delete.as_ref(), refname, &[1]).expect("delete");
+        });
+        let b_append = barrier.clone();
+        let s_append = store.clone();
+        let appender = thread::spawn(move || {
+            b_append.wait();
+            append(s_append.as_ref(), refname, o3, 9_000_000_000).expect("append");
+        });
+        deleter.join().expect("deleter");
+        appender.join().expect("appender");
+        let entries = read_entries(store.as_ref(), refname);
+        assert!(
+            entries.iter().any(|e| e.new_oid == o3),
+            "concurrent append missing after delete rewrite"
+        );
+        assert_eq!(entries.len(), 2, "expected oldest removed and append kept");
+    }
+
+    #[test]
+    fn delete_rechain_on_store_uses_locked_entries_not_stale_snapshot() {
+        let store = Arc::new(MemoryRefStore::new());
+        let refname = "refs/heads/r";
+        let o1 = oid(1);
+        let o2 = oid(2);
+        let o3 = oid(3);
+        store
+            .replace_reflog(
+                refname,
+                vec![
+                    ReflogEntry {
+                        old_oid: ObjectId::zero(),
+                        new_oid: o1,
+                        identity: "T <t@e.com> 100 +0000".into(),
+                        message: String::new(),
+                    },
+                    ReflogEntry {
+                        old_oid: o1,
+                        new_oid: o2,
+                        identity: "T <t@e.com> 200 +0000".into(),
+                        message: String::new(),
+                    },
+                ],
+            )
+            .expect("seed");
+        let barrier = Arc::new(Barrier::new(2));
+        let s_delete = store.clone();
+        let b_delete = barrier.clone();
+        let deleter = thread::spawn(move || {
+            b_delete.wait();
+            delete_reflog_entries_rechain_on_store(s_delete.as_ref(), refname, &[1])
+                .expect("rechain delete");
+        });
+        let b_append = barrier.clone();
+        let s_append = store.clone();
+        let appender = thread::spawn(move || {
+            b_append.wait();
+            append(s_append.as_ref(), refname, o3, 9_000_000_000).expect("append");
+        });
+        deleter.join().expect("deleter");
+        appender.join().expect("appender");
+        let entries = read_entries(store.as_ref(), refname);
+        assert!(entries.iter().any(|e| e.new_oid == o3));
     }
 }
 
