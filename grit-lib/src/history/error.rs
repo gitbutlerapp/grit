@@ -37,6 +37,11 @@ pub enum HistoryError {
     #[error(transparent)]
     HunkSelect(#[from] crate::porcelain::hunk_select::HunkSelectError),
 
+    /// Generating a change id for a replacement commit failed (for example the
+    /// [`ChangeIdGenerator`](crate::change_id::ChangeIdGenerator) had no entropy).
+    #[error(transparent)]
+    ChangeId(#[from] crate::change_id::ChangeIdError),
+
     /// Applying staged changes onto the target would make that commit empty.
     #[error("fixup makes commit {commit} empty")]
     FixupMakesTargetEmpty {

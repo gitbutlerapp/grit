@@ -4,9 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::change_id::{
-    change_id, set_change_id, ChangeId, ChangeIdError, ChangeIdGenerator, ChangeIdPolicy,
-};
+use crate::change_id::{change_id, set_change_id, ChangeId, ChangeIdGenerator, ChangeIdPolicy};
 use crate::commit::signing::extra_headers_without_commit_signatures;
 use crate::commit_encoding::identity_raw_for_serialized_commit;
 use crate::error::Error;
@@ -122,12 +120,6 @@ impl ChangeIdWriteContext {
             generator: repo.change_id_generator(),
             hash_algo: repo.odb().hash_algo(),
         })
-    }
-}
-
-fn change_id_err(err: ChangeIdError) -> HistoryError {
-    HistoryError::Planning {
-        message: err.to_string(),
     }
 }
 
@@ -1668,11 +1660,11 @@ fn write_new_commit(
         raw_message: None,
         extra_headers: extra_headers.to_vec(),
     };
-    if let Some(id) = change_ids
-        .policy
-        .id_for_new_commit(&data, change_ids.hash_algo, change_ids.generator.as_ref())
-        .map_err(change_id_err)?
-    {
+    if let Some(id) = change_ids.policy.id_for_new_commit(
+        &data,
+        change_ids.hash_algo,
+        change_ids.generator.as_ref(),
+    )? {
         set_change_id(&mut data, &id);
     }
     write_commit_data(repo, opts, &data)

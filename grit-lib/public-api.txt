@@ -1026,6 +1026,8 @@ pub grit_lib::change_id::ChangeIdError::WrongLength
 impl core::cmp::Eq for grit_lib::change_id::ChangeIdError
 impl core::cmp::PartialEq for grit_lib::change_id::ChangeIdError
 pub fn grit_lib::change_id::ChangeIdError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::change_id::ChangeIdError> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::change_id::ChangeIdError) -> Self
 impl core::error::Error for grit_lib::change_id::ChangeIdError
 impl core::fmt::Debug for grit_lib::change_id::ChangeIdError
 pub fn grit_lib::change_id::ChangeIdError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -11824,6 +11826,8 @@ pub grit_lib::objects::ChangeIdError::WrongLength
 impl core::cmp::Eq for grit_lib::change_id::ChangeIdError
 impl core::cmp::PartialEq for grit_lib::change_id::ChangeIdError
 pub fn grit_lib::change_id::ChangeIdError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::change_id::ChangeIdError> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::change_id::ChangeIdError) -> Self
 impl core::error::Error for grit_lib::change_id::ChangeIdError
 impl core::fmt::Debug for grit_lib::change_id::ChangeIdError
 pub fn grit_lib::change_id::ChangeIdError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -26335,6 +26339,7 @@ pub grit_lib::revwalk::history::HistoryError::BecameEmpty::commit: grit_lib::obj
 pub grit_lib::revwalk::history::HistoryError::BranchCheckedOutElsewhere
 pub grit_lib::revwalk::history::HistoryError::BranchCheckedOutElsewhere::name: alloc::string::String
 pub grit_lib::revwalk::history::HistoryError::BranchCheckedOutElsewhere::worktree: alloc::string::String
+pub grit_lib::revwalk::history::HistoryError::ChangeId(grit_lib::change_id::ChangeIdError)
 pub grit_lib::revwalk::history::HistoryError::Conflict
 pub grit_lib::revwalk::history::HistoryError::Conflict::commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::HistoryError::Conflict::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
@@ -26415,6 +26420,8 @@ pub grit_lib::revwalk::history::HistoryError::WorktreeApply
 pub grit_lib::revwalk::history::HistoryError::WorktreeApply::message: alloc::string::String
 impl grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::is_cancelled(&self) -> bool
+impl core::convert::From<grit_lib::change_id::ChangeIdError> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::change_id::ChangeIdError) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::ident::AuthorArgError> for grit_lib::revwalk::history::HistoryError

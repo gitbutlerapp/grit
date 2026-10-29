@@ -128,6 +128,7 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
     use super::*;
+    use crate::change_id::ChangeIdError;
     use crate::error::Error;
     use crate::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
     use crate::repo::{init_repository, Repository};
@@ -234,5 +235,15 @@ mod tests {
         };
         let err = squash(&repo, &["no-such-branch..main"], &opts).unwrap_err();
         assert!(matches!(err, HistoryError::Library(_)), "{err:?}");
+    }
+
+    #[test]
+    fn change_id_errors_convert_to_their_own_variant() {
+        let err = HistoryError::from(ChangeIdError::HashCollision);
+        assert!(matches!(
+            err,
+            HistoryError::ChangeId(ChangeIdError::HashCollision)
+        ));
+        assert_eq!(err.to_string(), ChangeIdError::HashCollision.to_string());
     }
 }
