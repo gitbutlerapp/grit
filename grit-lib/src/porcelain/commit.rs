@@ -3185,6 +3185,22 @@ mod tests {
         String::from_utf8(out.stdout).unwrap()
     }
 
+    fn sharedindex_file_paths(git_dir: &Path) -> Vec<PathBuf> {
+        fs::read_dir(git_dir)
+            .unwrap()
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name();
+                let s = name.to_string_lossy();
+                if s.starts_with("sharedindex.") {
+                    Some(e.path())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// `git init` + one commit of `f1.txt`, then `f1.txt` modified in the worktree (issue #1789).
     fn git_repo_with_modified_file(root: &Path) -> Repository {
         system_git(root, &["init", "-q", "-b", "main"]);
@@ -3435,6 +3451,158 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().starts_with("sharedindex."))
             .collect();
         assert!(!shared.is_empty(), "index must stay split");
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn commit_worktree_reuses_shared_index_on_small_change() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        system_git(root, &["init", "-q", "-b", "main"]);
+        for i in 0..30 {
+            fs::write(root.join(format!("f{i:02}.txt")), format!("{i}\n")).unwrap();
+        }
+        system_git(root, &["add", "."]);
+        system_git(root, &["commit", "-qm", "init"]);
+        system_git(root, &["config", "core.splitIndex", "true"]);
+        system_git(root, &["update-index", "--split-index"]);
+
+        let before = sharedindex_file_paths(&root.join(".git"));
+        assert_eq!(before.len(), 1, "git must create one shared index");
+
+        fs::write(root.join("f00.txt"), b"changed\n").unwrap();
+        let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
+        commit_worktree(
+            &repo,
+            &commit_req("one file"),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+
+        let after = sharedindex_file_paths(repo.git_dir());
+        assert_eq!(
+            before.len(),
+            after.len(),
+            "small commit must not write a new sharedindex"
+        );
+        assert!(
+            system_git(root, &["ls-files", "--debug"]).contains("f00.txt"),
+            "split link must remain readable by git"
+        );
+        assert_eq!(system_git(root, &["status", "--porcelain"]), "");
+        system_git(root, &["fsck", "--strict", "--no-progress"]);
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn commit_worktree_rebuilds_shared_index_when_max_percent_exceeded() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        system_git(root, &["init", "-q", "-b", "main"]);
+        for i in 0..10 {
+            fs::write(root.join(format!("f{i}.txt")), format!("{i}\n")).unwrap();
+        }
+        system_git(root, &["add", "."]);
+        system_git(root, &["commit", "-qm", "init"]);
+        system_git(root, &["config", "core.splitIndex", "true"]);
+        system_git(root, &["config", "splitIndex.maxPercentChange", "20"]);
+        system_git(root, &["update-index", "--split-index"]);
+
+        let first = sharedindex_file_paths(&root.join(".git"));
+        assert_eq!(first.len(), 1);
+        let first_oid = first[0]
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .strip_prefix("sharedindex.")
+            .unwrap()
+            .to_string();
+
+        for i in 0..4 {
+            fs::write(root.join(format!("n{i}.txt")), format!("n{i}\n")).unwrap();
+        }
+        let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
+        commit_worktree(
+            &repo,
+            &commit_req("many new files"),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+
+        let shared = sharedindex_file_paths(repo.git_dir());
+        let second_oid = shared
+            .iter()
+            .map(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .strip_prefix("sharedindex.")
+                    .unwrap()
+                    .to_string()
+            })
+            .find(|oid| oid != &first_oid)
+            .expect("maxPercentChange should force a new shared index base");
+        assert_ne!(first_oid, second_oid);
+        system_git(root, &["fsck", "--strict", "--no-progress"]);
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn commit_worktree_failed_pre_commit_leaves_split_index_unchanged() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        system_git(root, &["init", "-q", "-b", "main"]);
+        for i in 0..12 {
+            fs::write(root.join(format!("f{i}.txt")), format!("{i}\n")).unwrap();
+        }
+        system_git(root, &["add", "."]);
+        system_git(root, &["commit", "-qm", "init"]);
+        system_git(root, &["config", "core.splitIndex", "true"]);
+        system_git(root, &["update-index", "--split-index"]);
+        fs::write(
+            root.join(".git/config"),
+            format!(
+                "{}\n[hook \"hc\"]\n\tcommand = exit 1\n\tevent = pre-commit\n",
+                fs::read_to_string(root.join(".git/config")).unwrap()
+            ),
+        )
+        .unwrap();
+
+        fs::write(root.join("f0.txt"), b"blocked\n").unwrap();
+        let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
+        let index_path = repo.git_dir().join("index");
+        let index_before = fs::read(&index_path).unwrap();
+        let shared_before = sharedindex_file_paths(repo.git_dir());
+        let tip_before = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
+
+        let mut req = commit_req("blocked");
+        req.hooks = HookPolicy::Run;
+        assert!(commit_worktree(
+            &repo,
+            &req,
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .is_err());
+
+        assert_eq!(fs::read(&index_path).unwrap(), index_before);
+        assert_eq!(sharedindex_file_paths(repo.git_dir()), shared_before);
+        assert_eq!(
+            resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap(),
+            tip_before
+        );
+        system_git(root, &["fsck", "--strict", "--no-progress"]);
     }
 
     #[cfg_attr(
