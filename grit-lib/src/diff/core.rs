@@ -5262,7 +5262,7 @@ fn diff_index_to_worktree_inner(
             par_opts,
         )
     } else {
-        Vec::new()
+        RefreshChecks::default()
     };
     poll_diff_cancel_watch(cancel_watch)?;
     visit_blob_lookup_batches(blob_stat_batches, |entry_index, lookup| {
@@ -5311,7 +5311,7 @@ fn diff_index_to_worktree_inner(
                     )
                 {
                     let content_matches = RefreshContent::matches(
-                        refresh_checks[entry_index],
+                        refresh_checks.get(entry_index),
                         &index.entries[entry_index].oid,
                     );
                     let refresh = refresh_index_blob_stat_from_scan(
@@ -5345,10 +5345,7 @@ fn diff_index_to_worktree_inner(
                 if !materialize_dirty_blobs
                     && !stat.is_dir
                     && stat.git_mode != crate::index::MODE_SYMLINK
-                    && RefreshContent::differs(
-                        refresh_checks.get(entry_index).copied().flatten(),
-                        &ie.oid,
-                    )
+                    && RefreshContent::differs(refresh_checks.get(entry_index), &ie.oid)
                 {
                     result.push(worktree_content_change_entry(
                         ie,
@@ -6415,8 +6412,10 @@ pub fn refresh_index_stat_content_verified_with_rules(
         let BlobDiskLookup::Present(stat) = lookup else {
             return Ok(());
         };
-        let content_matches =
-            RefreshContent::matches(refresh_checks[entry_index], &index.entries[entry_index].oid);
+        let content_matches = RefreshContent::matches(
+            refresh_checks.get(entry_index),
+            &index.entries[entry_index].oid,
+        );
         let refresh = refresh_index_blob_stat_from_scan(
             &mut index.entries[entry_index],
             &stat,
@@ -6540,9 +6539,9 @@ struct WorktreeHashContext<'a> {
 /// file then shares the index's timestamp second. Hashing them here, in parallel when
 /// `par_opts` and the total size allow it, keeps that first scan from reading files one by one.
 ///
-/// Returns one slot per index entry: `Some` for scanned entries that `include` (given the entry
-/// index) admits and [`refresh_needs_content_check`] selects, `None` elsewhere. Read and filter
-/// failures are [`RefreshContent::Failed`], so those entries stay unverified.
+/// Returns a check for each scanned entry that `include` (given the entry index) admits and
+/// [`refresh_needs_content_check`] selects. Read and filter failures are
+/// [`RefreshContent::Failed`], so those entries stay unverified.
 #[allow(clippy::too_many_arguments)]
 fn refresh_content_checks(
     odb: &Odb,
@@ -6553,7 +6552,7 @@ fn refresh_content_checks(
     include: &dyn Fn(usize, &IndexEntry, &crate::worktree_scan::BlobDiskStat) -> bool,
     ctx: &WorktreeHashContext<'_>,
     par_opts: crate::parallel::ParallelOptions,
-) -> Vec<Option<RefreshContent>> {
+) -> RefreshChecks {
     use crate::worktree_scan::BlobDiskLookup;
 
     /// Attributes are resolved on the calling thread: the shared rules are not `Sync`.
@@ -6582,10 +6581,10 @@ fn refresh_content_checks(
             file_attrs: (ctx.file_attrs_for)(&crate::repo_relpath::storage_string(&ie.path)),
         });
     }
-    let mut checks = vec![None; index.entries.len()];
     if jobs.is_empty() {
-        return checks;
+        return RefreshChecks::default();
     }
+    let mut checks = vec![None; index.entries.len()];
     let (work_tree, precompose_unicode, ignorecase) =
         (ctx.work_tree, ctx.precompose_unicode, ctx.ignorecase);
     let (conv, filter_process) = (ctx.conv, ctx.filter_process);
@@ -6643,7 +6642,21 @@ fn refresh_content_checks(
     for (job, content) in jobs.iter().zip(matches) {
         checks[job.entry_index] = Some(content);
     }
-    checks
+    RefreshChecks(checks)
+}
+
+/// Results of [`refresh_content_checks`], by index entry position.
+///
+/// Empty when no entry needed a check (a clean, non-racy work tree), so the common case
+/// allocates nothing.
+#[derive(Default)]
+struct RefreshChecks(Vec<Option<RefreshContent>>);
+
+impl RefreshChecks {
+    /// The check that ran for the entry at `entry_index`, if any.
+    fn get(&self, entry_index: usize) -> Option<RefreshContent> {
+        self.0.get(entry_index).copied().flatten()
+    }
 }
 
 /// What the stat refresh learned by hashing one entry's worktree file.
@@ -15187,5 +15200,33 @@ mod line_coverage_tests {
             )?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod refresh_checks_tests {
+    use super::{RefreshChecks, RefreshContent};
+    use crate::objects::ObjectId;
+
+    #[test]
+    fn empty_checks_answer_none_for_every_entry() {
+        let checks = RefreshChecks::default();
+        assert!(checks.0.is_empty());
+        assert!(checks.get(0).is_none());
+        assert!(checks.get(9_999).is_none());
+    }
+
+    #[test]
+    fn filled_checks_answer_by_entry_position() {
+        let oid = ObjectId::from_bytes(&[7u8; 20]).unwrap();
+        let other = ObjectId::from_bytes(&[8u8; 20]).unwrap();
+        let checks = RefreshChecks(vec![None, Some(RefreshContent::Hashed(oid)), None]);
+        assert!(checks.get(0).is_none());
+        assert!(RefreshContent::matches(checks.get(1), &oid));
+        assert!(RefreshContent::differs(checks.get(1), &other));
+        assert!(
+            checks.get(3).is_none(),
+            "positions past the end have no check"
+        );
     }
 }
