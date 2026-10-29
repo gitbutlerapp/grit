@@ -7,10 +7,12 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::diff::{Diff, RenameDetection, UncommittedDiff};
 use grit_lib::error::Error;
 use grit_lib::objects::{parse_tree, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -97,6 +99,22 @@ fn open_repo(root: &Path) -> Repository {
     .expect("open")
 }
 
+fn assert_index_modes_canonical(root: &Path) {
+    let ls = git(root, &["ls-files", "-s"]);
+    assert!(
+        !ls.contains("100664") && !ls.contains("100775"),
+        "index must not store legacy modes: {ls}"
+    );
+    let diff_index = Command::new("git")
+        .current_dir(root)
+        .args(["diff-index", "HEAD"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("diff-index");
+    assert!(diff_index.success(), "git diff-index HEAD must succeed");
+}
+
 #[test]
 fn legacy_tree_modes_status_and_commit_clean_after_git_checkout() {
     let root = tempfile::tempdir().expect("tempdir");
@@ -142,6 +160,28 @@ fn legacy_tree_modes_status_and_commit_clean_after_git_checkout() {
 }
 
 #[test]
+fn legacy_tree_modes_worktree_diff_empty_after_git_checkout() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_legacy_mode_repo(root.path());
+    let repo = open_repo(root.path());
+
+    let head = repo.head_commit().expect("head commit");
+    let head_tree = repo.odb().commit_tree(&head).expect("commit tree");
+    let mut index = repo.index_handle().load().expect("index");
+    // Force tree↔worktree diff (not index↔worktree fast path) so legacy tree modes are tested.
+    index.cache_tree_root = None;
+    index.cache_tree = None;
+    let mut uncommitted = UncommittedDiff::new(&repo, index);
+    let entries = uncommitted
+        .worktree_entries(Some(&head_tree), RenameDetection::Off)
+        .expect("worktree diff vs HEAD");
+    assert!(
+        entries.is_empty(),
+        "grit diff (worktree vs HEAD) must be empty: {entries:?}"
+    );
+}
+
+#[test]
 fn grit_checkout_writes_canonical_index_modes() {
     let root = tempfile::tempdir().expect("tempdir");
     let tree = init_legacy_mode_repo(root.path());
@@ -165,14 +205,7 @@ fn grit_checkout_writes_canonical_index_modes() {
         "non-canonical 100664 must not appear in index: {ls}"
     );
 
-    let diff_index = Command::new("git")
-        .current_dir(root.path())
-        .args(["diff-index", "HEAD"])
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .status()
-        .expect("diff-index");
-    assert!(diff_index.success(), "git diff-index HEAD must succeed");
+    assert_index_modes_canonical(root.path());
 
     let model = status(
         &repo,
@@ -192,4 +225,34 @@ fn grit_checkout_writes_canonical_index_modes() {
             .any(|e| e.name == b"a.txt" && e.mode == 0o100664),
         "tree object must still record legacy 100664"
     );
+}
+
+#[test]
+fn hard_reset_to_head_keeps_canonical_index_modes() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_legacy_mode_repo(root.path());
+    let repo = open_repo(root.path());
+
+    let head = repo.head_commit().expect("head commit");
+    reset_to_commit(
+        &repo,
+        &ResetOptions::new(
+            head,
+            ResetMode::Hard,
+            IDENT.parse().expect("identity"),
+            "reset: test",
+        ),
+        &mut NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("hard reset HEAD");
+
+    assert_index_modes_canonical(root.path());
+
+    let head_tree = repo.odb().commit_tree(&head).expect("commit tree");
+    let mut uncommitted = Diff::new(&repo).uncommitted().expect("uncommitted diff");
+    let entries = uncommitted
+        .worktree_entries(Some(&head_tree), RenameDetection::Off)
+        .expect("worktree diff");
+    assert!(entries.is_empty(), "diff after hard reset must be empty");
 }
