@@ -13,7 +13,7 @@ use time::OffsetDateTime;
 
 use crate::binary::{grit_source_commit, tool_version};
 use crate::fixture::{remove_dir_robust, scratch_dir};
-use crate::hot_path_fixture::run_git;
+use crate::hot_path_fixture::{pack_unpacked_objects, run_git};
 use crate::hyperfine::{run_hyperfine, HyperfineRun};
 use crate::machine::{collect_machine_info, format_timestamp};
 use crate::parallel_env::{parallel_env_prefix, ThreadMode};
@@ -33,14 +33,52 @@ const FILE_BYTES: usize = 2048;
 const READY_MARKER: &str = "grit-bench-partial-source-ready";
 
 /// A non-bare source with `file_count` files committed over `packs` commits, each
-/// followed by an incremental repack, so the object store holds `packs` packs (a
-/// repository that took many pushes and was never fully repacked).
+/// followed by packing only loose objects into a new packfile, so the object
+/// store holds `packs` packs (a repository that took many pushes and was never
+/// fully repacked).
 ///
 /// # Errors
 ///
 /// Returns an error when a `git` step fails.
 pub fn ensure_many_pack_source(git: &Path, file_count: usize, packs: usize) -> Result<PathBuf> {
     ensure_many_pack_source_in(&parallel_cache_root(), git, file_count, packs)
+}
+
+fn loose_object_count(repo: &Path) -> usize {
+    let objects = repo.join(".git/objects");
+    fs::read_dir(&objects)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter(|e| {
+                    let name = e.file_name();
+                    let name = name.to_string_lossy();
+                    name.len() == 2 && name != "pack" && name != "info"
+                })
+                .map(|shard| {
+                    fs::read_dir(shard.path())
+                        .map(|leaves| {
+                            leaves
+                                .filter_map(Result::ok)
+                                .filter(|leaf| leaf.file_type().is_ok_and(|t| t.is_file()))
+                                .count()
+                        })
+                        .unwrap_or(0)
+                })
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+fn pack_file_count(repo: &Path) -> usize {
+    fs::read_dir(repo.join(".git/objects/pack"))
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+                .count()
+        })
+        .unwrap_or(0)
 }
 
 fn ensure_many_pack_source_in(
@@ -51,7 +89,10 @@ fn ensure_many_pack_source_in(
 ) -> Result<PathBuf> {
     let packs = packs.max(1);
     let dir = root.join(format!("partial-source-{file_count}-{packs}p"));
-    if dir.join(".git").join(READY_MARKER).is_file() {
+    if dir.join(".git").join(READY_MARKER).is_file()
+        && pack_file_count(&dir) == packs
+        && loose_object_count(&dir) == 0
+    {
         return Ok(dir);
     }
     if dir.exists() {
@@ -76,7 +117,7 @@ fn ensure_many_pack_source_in(
         }
         run_git(git, &dir, &["add", "-A"])?;
         run_git(git, &dir, &["commit", "-q", "-m", &format!("batch {p}")])?;
-        run_git(git, &dir, &["repack", "-d", "-q"])?;
+        pack_unpacked_objects(git, &dir)?;
     }
     fs::write(dir.join(".git").join(READY_MARKER), "")?;
     Ok(dir)
@@ -287,6 +328,12 @@ mod tests {
             .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
             .count();
         assert_eq!(packs, 4);
+        assert_eq!(
+            loose_object_count(&dir),
+            0,
+            "objects must live in packs only"
+        );
+        run_git(&git, &dir, &["fsck", "--strict"]).expect("fsck");
         let files: usize = (0..4)
             .map(|p| fs::read_dir(dir.join(format!("p{p:03}"))).map_or(0, |d| d.count()))
             .sum();
@@ -296,5 +343,18 @@ mod tests {
             ensure_many_pack_source_in(tmp.path(), &git, 20, 4).expect("cached"),
             dir
         );
+        // Ready marker with a stale pack layout must rebuild.
+        let pack_dir = dir.join(".git/objects/pack");
+        let stale_pack = fs::read_dir(&pack_dir)
+            .expect("pack dir")
+            .filter_map(Result::ok)
+            .find(|e| e.path().extension().is_some_and(|x| x == "pack"))
+            .expect("a pack file");
+        fs::remove_file(stale_pack.path()).expect("remove pack");
+        assert_eq!(pack_file_count(&dir), 3);
+        let rebuilt = ensure_many_pack_source_in(tmp.path(), &git, 20, 4).expect("rebuild");
+        assert_eq!(rebuilt, dir);
+        assert_eq!(pack_file_count(&dir), 4);
+        assert_eq!(loose_object_count(&dir), 0);
     }
 }
