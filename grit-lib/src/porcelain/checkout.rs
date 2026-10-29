@@ -220,18 +220,37 @@ fn restore_checkout_rollback_chunk(
     progress: &mut dyn ProgressSink,
 ) -> Vec<String> {
     let mut write_jobs: Vec<CheckoutWriteJob<'_>> = Vec::with_capacity(changes.len());
+    let mut smudge_context: Option<Arc<FilterSmudgeMeta>> = None;
+    let filter_state = rules.filter_process();
+    let mut reset_filters: HashSet<String> = HashSet::new();
     for change in changes {
         let Some(path) = change.new_path.as_deref() else {
             continue;
         };
         let mode = change.new_mode.bits();
         let file_attrs = Arc::new(rules.file_attrs(path, false));
+        if let Some(cmd) = file_attrs.filter_process.as_deref() {
+            if reset_filters.insert(cmd.to_string()) {
+                filter_state.reset_process_filter_for_retry(cmd);
+            }
+        }
+        let job_smudge =
+            if file_attrs.filter_process.is_some() || file_attrs.filter_smudge.is_some() {
+                if smudge_context.is_none() {
+                    smudge_context = Some(Arc::new(
+                        crate::filter_process::checkout_smudge_context(repo),
+                    ));
+                }
+                smudge_context.clone()
+            } else {
+                None
+            };
         write_jobs.push(CheckoutWriteJob::new(
             path.to_owned(),
             mode,
             change,
             file_attrs,
-            None,
+            job_smudge,
         ));
     }
     let path_refs: Vec<&str> = write_jobs.iter().map(|j| j.path.as_str()).collect();
@@ -257,7 +276,7 @@ fn restore_checkout_rollback_chunk(
     }
     let mut delayed = DelayedProcessCheckout::default();
     let mut progress = CancelProgress::new(progress, &NeverCancel);
-    match execute_write_jobs_unrecorded(
+    let execute_result = execute_write_jobs_unrecorded(
         repo,
         rules,
         config,
@@ -267,16 +286,152 @@ fn restore_checkout_rollback_chunk(
         &mut delayed,
         &write_jobs,
         &parallel_indices,
-        true,
+        false,
         None,
         true,
         &mut progress,
         &NeverCancel,
-    ) {
-        Ok(_) => Vec::new(),
+    );
+    match execute_result {
+        Ok(outcomes) => {
+            let mut pending_delayed = Vec::new();
+            for outcome in outcomes {
+                match outcome {
+                    WriteJobOutcome::Index(_) => {}
+                    WriteJobOutcome::Delayed(target) => pending_delayed.push(*target),
+                }
+            }
+            if pending_delayed.is_empty() {
+                return Vec::new();
+            }
+            reconcile_delayed_rollback_entries(
+                &mut delayed,
+                &pending_delayed,
+                rules,
+                &smudge_context,
+            );
+            if delayed.entries.is_empty() {
+                return restore_checkout_rollback_delayed_fallback(
+                    repo,
+                    rules,
+                    work_tree,
+                    &pending_delayed,
+                    &smudge_context,
+                    &mut dir_cache,
+                );
+            }
+            let mut dummy_entries = Vec::new();
+            match finish_delayed_checkouts(
+                repo,
+                rules,
+                work_tree,
+                &mut delayed,
+                &pending_delayed,
+                &mut dir_cache,
+                &mut dummy_entries,
+            ) {
+                Ok(()) => Vec::new(),
+                Err(_) => restore_checkout_rollback_delayed_fallback(
+                    repo,
+                    rules,
+                    work_tree,
+                    &pending_delayed,
+                    &smudge_context,
+                    &mut dir_cache,
+                ),
+            }
+        }
         Err(_) => {
             restore_checkout_rollback_chunk_serial(repo, work_tree, changes, rules, &mut dir_cache)
         }
+    }
+}
+
+fn restore_checkout_rollback_delayed_fallback(
+    repo: &Repository,
+    rules: &WorktreeRules,
+    work_tree: &Path,
+    pending: &[DelayedCheckoutTarget],
+    smudge_context: &Option<Arc<FilterSmudgeMeta>>,
+    dir_cache: &mut LeadingDirCache,
+) -> Vec<String> {
+    let filter_state = rules.filter_process();
+    let mut reset_filters: HashSet<String> = HashSet::new();
+    for target in pending {
+        let attrs = rules.file_attrs(&target.path, false);
+        if let Some(cmd) = attrs.filter_process.as_deref() {
+            if reset_filters.insert(cmd.to_string()) {
+                filter_state.reset_process_filter_for_retry(cmd);
+            }
+        }
+    }
+    let mut failed = Vec::new();
+    for target in pending {
+        let meta = smudge_context
+            .as_ref()
+            .map(|ctx| FilterSmudgeMeta {
+                ref_name: ctx.ref_name.clone(),
+                treeish_hex: ctx.treeish_hex.clone(),
+                blob_hex: Some(target.oid.to_hex()),
+            })
+            .unwrap_or_else(|| FilterSmudgeMeta {
+                blob_hex: Some(target.oid.to_hex()),
+                ..FilterSmudgeMeta::default()
+            });
+        let bytes = match smudge_retry_after_delay(repo, rules, &target.path, &meta) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                failed.push(target.path.clone());
+                continue;
+            }
+        };
+        if write_checkout_entry(
+            work_tree,
+            &target.path,
+            WorktreeFileContent::Bytes(&bytes),
+            target.mode,
+            &target.change,
+            dir_cache,
+            target.oid,
+        )
+        .is_err()
+        {
+            failed.push(target.path.clone());
+        }
+    }
+    failed
+}
+
+fn reconcile_delayed_rollback_entries(
+    delayed: &mut DelayedProcessCheckout,
+    pending: &[DelayedCheckoutTarget],
+    rules: &WorktreeRules,
+    smudge_context: &Option<Arc<FilterSmudgeMeta>>,
+) {
+    for target in pending {
+        if delayed
+            .entries
+            .iter()
+            .any(|entry| entry.path == target.path)
+        {
+            continue;
+        }
+        let attrs = rules.file_attrs(&target.path, false);
+        let Some(cmd) = attrs.filter_process.clone() else {
+            continue;
+        };
+        let mut meta = smudge_context
+            .as_ref()
+            .map(|ctx| FilterSmudgeMeta {
+                ref_name: ctx.ref_name.clone(),
+                treeish_hex: ctx.treeish_hex.clone(),
+                blob_hex: Some(target.oid.to_hex()),
+            })
+            .unwrap_or_default();
+        if meta.blob_hex.is_none() {
+            meta.blob_hex = Some(target.oid.to_hex());
+        }
+        delayed.push_delayed(cmd, target.path.clone(), meta);
     }
 }
 
@@ -5752,5 +5907,203 @@ mod tests {
         }
         let config = repo.config().expect("config");
         checkout_worktree_rules(&repo, &index, &changes, config).expect("rules with attrs");
+    }
+}
+
+#[cfg(test)]
+mod checkout_rollback_delay_filter_tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::sync::Arc;
+
+    use crate::config::environment::{Environment, RepositoryOptions};
+    use crate::diff::{zero_oid, DiffEntry, DiffStatus};
+    use crate::objects::FileMode;
+    use crate::progress::NullProgress;
+    use crate::repo::Repository;
+    use crate::worktree_rules::WorktreeRules;
+
+    use super::{
+        restore_checkout_rollback_paths, CheckoutRollbackRestore, DelayedCheckoutTarget,
+        LeadingDirCache,
+    };
+
+    fn have_python3() -> bool {
+        Command::new("python3")
+            .arg("-c")
+            .arg("pass")
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    fn basic_filter_script() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/filter_process_test_server.py")
+    }
+
+    fn git(root: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn filter_options(wt: &Path, state_file: &Path) -> RepositoryOptions {
+        let vars = std::env::vars_os().chain([(
+            "GRIT_FILTER_STATE_FILE".into(),
+            state_file.as_os_str().to_owned(),
+        )]);
+        RepositoryOptions::with_environment(Environment::from_vars(vars, wt.to_path_buf()))
+            .with_work_tree(wt)
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "spawns filter subprocess")]
+    fn rollback_restore_smudges_process_filtered_path() {
+        if !have_python3() {
+            return;
+        }
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let state_file = tempfile::Builder::new()
+            .prefix("grit-filter-state-")
+            .tempfile()
+            .expect("state")
+            .into_temp_path();
+        fs::write(&state_file, "").expect("truncate state");
+        std::env::set_var("GRIT_FILTER_STATE_FILE", &state_file);
+
+        git(root, &["init", "-q", "-b", "main"]);
+        git(root, &["config", "user.email", "t@example.com"]);
+        git(root, &["config", "user.name", "Test"]);
+        let script = basic_filter_script();
+        git(
+            root,
+            &[
+                "config",
+                "filter.test.process",
+                &format!("python3 -u {}", script.display()),
+            ],
+        );
+        fs::write(root.join(".gitattributes"), "a.txt filter=test\n").expect("attrs");
+        fs::write(root.join("a.txt"), "old\n").expect("write");
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+
+        let repo =
+            Repository::discover(Some(root), &filter_options(root, &state_file)).expect("open");
+        let index = repo.load_index().expect("index");
+        let key = crate::repo_relpath::storage_bytes("a.txt");
+        let entry = index.get(&key, 0).expect("a.txt indexed");
+        let expected = fs::read_to_string(root.join("a.txt")).expect("read before");
+
+        fs::write(root.join("a.txt"), "new\n").expect("simulate partial checkout");
+
+        let failed = restore_checkout_rollback_paths(
+            &repo,
+            repo.work_tree().expect("wt"),
+            &[CheckoutRollbackRestore {
+                path: "a.txt".into(),
+                oid: entry.oid,
+                mode: entry.mode,
+            }],
+            &mut NullProgress,
+        );
+        assert!(failed.is_empty(), "unrestored: {failed:?}");
+        assert_eq!(
+            fs::read_to_string(root.join("a.txt")).expect("read after"),
+            expected
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "spawns filter subprocess")]
+    fn rollback_restore_delayed_fallback_writes_smudged_bytes() {
+        if !have_python3() {
+            return;
+        }
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let state_file = tempfile::Builder::new()
+            .prefix("grit-filter-state-")
+            .tempfile()
+            .expect("state")
+            .into_temp_path();
+        fs::write(&state_file, "").expect("truncate state");
+        std::env::set_var("GRIT_FILTER_STATE_FILE", &state_file);
+
+        git(root, &["init", "-q", "-b", "main"]);
+        git(root, &["config", "user.email", "t@example.com"]);
+        git(root, &["config", "user.name", "Test"]);
+        let script = basic_filter_script();
+        git(
+            root,
+            &[
+                "config",
+                "filter.test.process",
+                &format!("python3 -u {}", script.display()),
+            ],
+        );
+        fs::write(root.join(".gitattributes"), "a.txt filter=test\n").expect("attrs");
+        fs::write(root.join("a.txt"), "old\n").expect("write");
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+
+        let repo =
+            Repository::discover(Some(root), &filter_options(root, &state_file)).expect("open");
+        let index = repo.load_index().expect("index");
+        let rules = WorktreeRules::from_parts_index_attributes_only(
+            &repo,
+            &index,
+            repo.config().expect("config"),
+        )
+        .expect("rules");
+        let key = crate::repo_relpath::storage_bytes("a.txt");
+        let entry = index.get(&key, 0).expect("a.txt indexed");
+        let expected = fs::read_to_string(root.join("a.txt")).expect("read before");
+        let change = DiffEntry {
+            status: DiffStatus::Added,
+            old_path: None,
+            new_path: Some("a.txt".into()),
+            old_mode: FileMode::ABSENT,
+            new_mode: FileMode::new(entry.mode),
+            old_oid: zero_oid(),
+            new_oid: entry.oid,
+            score: None,
+        };
+        fs::write(root.join("a.txt"), "new\n").expect("simulate partial checkout");
+
+        let smudge_context = Some(Arc::new(crate::filter_process::checkout_smudge_context(
+            &repo,
+        )));
+        let pending = [DelayedCheckoutTarget {
+            path: "a.txt".into(),
+            mode: entry.mode,
+            oid: entry.oid,
+            change,
+        }];
+        let failed = super::restore_checkout_rollback_delayed_fallback(
+            &repo,
+            &rules,
+            repo.work_tree().expect("wt"),
+            &pending,
+            &smudge_context,
+            &mut LeadingDirCache::new(),
+        );
+        assert!(failed.is_empty(), "unrestored: {failed:?}");
+        assert_eq!(
+            fs::read_to_string(root.join("a.txt")).expect("read after"),
+            expected,
+            "delayed rollback fallback must smudge pre-checkout bytes back"
+        );
     }
 }

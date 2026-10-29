@@ -80,6 +80,14 @@ while True:
     if cmd_line is None:
         sys.exit(0)
     cmd = cmd_line.split("=", 1)[1]
+    if cmd == "check":
+        pkt_write(b"status=success\n")
+        pkt_flush()
+        continue
+    if cmd == "list_available_blobs":
+        pkt_write(b"status=success\n")
+        pkt_flush()
+        continue
     path_line = pkt_read_line()
     assert path_line and path_line.startswith("pathname="), path_line
     while pkt_read_line() is not None:

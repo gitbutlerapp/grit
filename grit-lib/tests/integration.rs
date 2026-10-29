@@ -205,6 +205,9 @@ mod checkout_bulk_crlf_git_compat;
 #[path = "checkout_cancel_rollback.rs"]
 mod checkout_cancel_rollback;
 #[cfg(feature = "full-tests")]
+#[path = "checkout_cancel_rollback_delay_filter.rs"]
+mod checkout_cancel_rollback_delay_filter;
+#[cfg(feature = "full-tests")]
 #[path = "checkout_cancel_rollback_wide_perf.rs"]
 mod checkout_cancel_rollback_wide_perf;
 #[cfg(feature = "full-tests")]

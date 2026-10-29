@@ -183,6 +183,17 @@ impl FilterProcessState {
         self.remove_process_filter(cmd);
     }
 
+    /// Clear a disabled flag and terminate any stale subprocess so the next smudge starts clean.
+    ///
+    /// Used when checkout rollback must smudge again after a cancelled checkout may have left
+    /// filters disabled or mid-protocol.
+    pub(crate) fn reset_process_filter_for_retry(&self, cmd: &str) {
+        if let Ok(mut disabled) = self.disabled.lock() {
+            disabled.remove(cmd);
+        }
+        self.remove_process_filter(cmd);
+    }
+
     pub(crate) fn process_filter_is_disabled(&self, cmd: &str) -> bool {
         self.disabled
             .lock()
