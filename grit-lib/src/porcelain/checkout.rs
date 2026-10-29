@@ -1041,6 +1041,16 @@ fn index_hard_reset_cache_matches_tree(index: &Index, target_tree: &ObjectId) ->
         && usize::try_from(root.entry_count).ok() == Some(stage0_count)
 }
 
+/// Diff entries to move `index` onto `target_tree` using the cache-tree-aware hard-reset align walk.
+pub(crate) fn checkout_diff_align_index_to_tree(
+    odb: &crate::odb::Odb,
+    index: &Index,
+    target_tree: &ObjectId,
+) -> Result<Vec<DiffEntry>> {
+    let plan = crate::diff::plan_hard_reset_index_align(odb, index, target_tree)?;
+    Ok(hard_reset_align_plan_diff_entries(index, &plan))
+}
+
 /// Turn a same-tree hard-reset index align plan into checkout diff entries (HEAD reset with staged
 /// index changes, or merge abort index realignment).
 fn hard_reset_align_plan_diff_entries(

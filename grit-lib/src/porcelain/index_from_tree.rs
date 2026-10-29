@@ -548,12 +548,24 @@ fn seed_rows_under<'a>(
 /// stage-0 seed entry. Both indexes must be in canonical `(path, stage)` order; entries that are
 /// not found keep their zeroed stat data.
 fn seed_stage0_stat_data(index: &mut Index, seed: &Index) {
+    reseed_stage0_stat_data_excluding_paths(index, seed, &std::collections::HashSet::new());
+}
+
+/// Like [`seed_stage0_stat_data`], but skips paths in `exclude` (checkout-updated rows).
+pub(crate) fn reseed_stage0_stat_data_excluding_paths(
+    index: &mut Index,
+    seed: &Index,
+    exclude: &std::collections::HashSet<Vec<u8>>,
+) {
     let mut seeds = seed
         .entries
         .iter()
         .filter(|e| e.stage() == 0 && seed_row_stat_reusable(e))
         .peekable();
     for entry in index.entries.iter_mut().filter(|e| e.stage() == 0) {
+        if exclude.contains(&entry.path) {
+            continue;
+        }
         while seeds.next_if(|s| s.path < entry.path).is_some() {}
         let Some(src) = seeds.next_if(|s| s.path == entry.path) else {
             continue;

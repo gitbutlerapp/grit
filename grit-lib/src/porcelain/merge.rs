@@ -1675,6 +1675,112 @@ pub fn abort_branch_merge(repo: &Repository) -> Result<()> {
     restore_pre_merge_state(repo)
 }
 
+fn merge_abort_unmerged_paths(index: &Index) -> HashSet<Vec<u8>> {
+    index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage() != 0)
+        .map(|entry| entry.path.clone())
+        .collect()
+}
+
+/// Stage-0 rows for merge abort checkout diffing: omit paths that still have unmerged stages.
+fn merge_abort_index_for_diff(index: &Index) -> Index {
+    let unmerged = merge_abort_unmerged_paths(index);
+    let mut diff_index = Index {
+        version: index.version,
+        hash_algo: index.hash_algo,
+        source_mtime: index.source_mtime,
+        ..Index::new()
+    };
+    for entry in index.entries() {
+        if entry.stage() != 0 || unmerged.contains(&entry.path) {
+            continue;
+        }
+        diff_index.push_entry_unsorted(entry.clone());
+    }
+    diff_index.sort();
+    diff_index
+}
+
+fn merge_abort_changed_paths(changes: &[crate::diff::DiffEntry]) -> HashSet<Vec<u8>> {
+    changes
+        .iter()
+        .filter_map(|change| {
+            change
+                .new_path
+                .as_deref()
+                .or(change.old_path.as_deref())
+                .map(|path| crate::repo_relpath::storage_bytes(path).into_owned())
+        })
+        .collect()
+}
+
+fn merge_abort_finalize_index_stats(
+    repo: &Repository,
+    old_index: &Index,
+    changes: &[crate::diff::DiffEntry],
+) -> Result<()> {
+    let Some(work_tree) = repo.work_tree() else {
+        return Ok(());
+    };
+    let changed = merge_abort_changed_paths(changes);
+    let mut index = repo.index_handle().load()?;
+    crate::porcelain::index_from_tree::reseed_stage0_stat_data_excluding_paths(
+        &mut index, old_index, &changed,
+    );
+    let unset_paths: Vec<String> = index
+        .entries()
+        .iter()
+        .filter(|entry| {
+            entry.stage() == 0 && entry.stat_cache_unset() && !changed.contains(&entry.path)
+        })
+        .filter_map(|entry| std::str::from_utf8(&entry.path).ok().map(str::to_owned))
+        .collect();
+    if !unset_paths.is_empty() {
+        let unset: BTreeSet<&str> = unset_paths.iter().map(String::as_str).collect();
+        crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths(
+            repo, work_tree, &mut index, &unset,
+        )?;
+    }
+    repo.index_handle().write(&mut index)?;
+    Ok(())
+}
+
+fn merge_abort_append_unmerged_tree_checkouts(
+    odb: &crate::odb::Odb,
+    head_tree: &ObjectId,
+    unmerged: &HashSet<Vec<u8>>,
+    changes: &mut Vec<crate::diff::DiffEntry>,
+) -> Result<()> {
+    use crate::diff::{zero_oid, DiffEntry, DiffStatus};
+    use crate::objects::FileMode;
+    let mut seen: HashSet<String> = changes
+        .iter()
+        .filter_map(|change| change.new_path.clone())
+        .collect();
+    for path in unmerged {
+        let Some(entry) = odb.tree_entry_at_path(head_tree, path)? else {
+            continue;
+        };
+        let path_str = crate::repo_relpath::storage_string(path);
+        if !seen.insert(path_str.clone()) {
+            continue;
+        }
+        changes.push(DiffEntry {
+            status: DiffStatus::Modified,
+            old_path: Some(path_str.clone()),
+            new_path: Some(path_str),
+            old_mode: FileMode::new(entry.mode),
+            new_mode: FileMode::new(entry.mode),
+            old_oid: zero_oid(),
+            new_oid: entry.oid,
+            score: None,
+        });
+    }
+    Ok(())
+}
+
 fn restore_pre_merge_state(repo: &Repository) -> Result<()> {
     let orig = read_orig_head_for_repository(repo)?
         .ok_or_else(|| Error::Message("merge in progress but ORIG_HEAD is missing".into()))?;
@@ -1699,17 +1805,55 @@ fn restore_pre_merge_state(repo: &Repository) -> Result<()> {
         .collect();
     conflict_only.sort();
     conflict_only.dedup();
-    drop(old_index);
 
-    checkout::checkout_hard_to_tree_from_head_tree(
+    let unmerged = merge_abort_unmerged_paths(&old_index);
+    let diff_source = merge_abort_index_for_diff(&old_index);
+    let mut changes =
+        checkout::checkout_diff_align_index_to_tree(repo.odb(), &diff_source, &head_tree)?;
+    merge_abort_append_unmerged_tree_checkouts(repo.odb(), &head_tree, &unmerged, &mut changes)?;
+    let mut index = crate::porcelain::index_from_tree::index_from_tree_with_seeded_stats(
+        repo, &head_tree, &old_index,
+    )?;
+    crate::porcelain::index_from_tree::prepare_index_for_tree_transition(
+        repo, &head_tree, &mut index,
+    )?;
+    let mut lock = repo.lock_index()?;
+    checkout::checkout_tree_changes_with_index_opts(
         repo,
-        &head_tree,
-        &head_tree,
+        &changes,
+        &mut index,
         &mut crate::progress::NullProgress,
         &crate::progress::NeverCancel,
+        checkout::CheckoutApplyOptions {
+            parallel_prepare_blobs: false,
+            checkout_parallel_threshold: None,
+            checkout_result_tree: Some(head_tree),
+            ..checkout::CheckoutApplyOptions::default()
+        },
+        None,
+        checkout::CheckoutIndexWrite::Commit(&mut lock),
     )?;
+    merge_abort_finalize_index_stats(repo, &old_index, &changes)?;
     if let Some(work_tree) = repo.work_tree() {
-        for path in conflict_only {
+        let mut remove_paths = conflict_only;
+        for entry in old_index.entries() {
+            if entry.stage() != 0 {
+                continue;
+            }
+            if repo
+                .odb()
+                .tree_entry_at_path(&head_tree, &entry.path)
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                continue;
+            }
+            remove_paths.push(entry.path.clone());
+        }
+        remove_paths.sort();
+        remove_paths.dedup();
+        for path in remove_paths {
             let abs = crate::index::worktree_path_from_index_rel(work_tree, &path);
             if abs.symlink_metadata().is_ok_and(|meta| !meta.is_dir()) {
                 fs::remove_file(&abs)?;

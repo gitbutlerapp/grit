@@ -935,6 +935,9 @@ mod matrix_push;
 #[path = "matrix_sha256.rs"]
 mod matrix_sha256;
 #[cfg(feature = "full-tests")]
+#[path = "merge_abort_wide_perf_git_compat.rs"]
+mod merge_abort_wide_perf_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "merge_base_git_compat.rs"]
 mod merge_base_git_compat;
 #[cfg(feature = "full-tests")]
