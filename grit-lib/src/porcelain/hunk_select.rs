@@ -10,8 +10,8 @@ use thiserror::Error;
 
 use crate::apply::parse_patch;
 use crate::apply::{
-    apply_hunks_to_blob, apply_patch_to_index_and_write, ApplyOptions, FilePatch, Hunk, HunkLine,
-    IndexApplyOptions, IndexApplyOutcome,
+    apply_hunks_to_blob, apply_patch_to_index, apply_patch_to_index_and_write, ApplyOptions,
+    FilePatch, Hunk, HunkLine, IndexApplyOptions, IndexApplyOutcome,
 };
 use crate::diff::hunk_id::{hunk_ids, hunk_ids_with_duplicate_peers, DiffSide, HunkId};
 use crate::diff::structured::{
@@ -19,7 +19,7 @@ use crate::diff::structured::{
     StructuredSegment,
 };
 use crate::diff::{
-    collect_files_for_target, hunk_diff_bundle, imara_unified_hunk_slices,
+    collect_files_for_target, imara_unified_hunk_slices, include_file_in_diff,
     read_worktree_side_bytes_for_diff, unified_hunk_body_for_diff_options,
     unstaged_file_diffs_with_peer_hunks, unstaged_raw_changes_with_peer_hunks,
     unstaged_raw_changes_with_peer_hunks_in, DiffOptions, DiffStatus, DiffTarget, FileChange,
@@ -324,19 +324,39 @@ fn resolve_selection_in(
     if selection.ids.is_empty() && selection.ranges.is_empty() {
         return Ok(ResolvedSelection::default());
     }
-    let opts = diff_options;
+    // Ids and patches only use line text, so intra-line emphasis would be computed for nothing.
+    let opts = diff_options.with_word_level_inline(false);
     let requested: HashSet<HunkId> = selection.ids.iter().cloned().collect();
 
     match side {
         DiffSide::Unstaged => {
+            // An index loaded here is dropped before the per-file diffs below.
+            let (changes, peer_hunks) = match index {
+                Some(index) => {
+                    unstaged_raw_changes_with_peer_hunks_in(repo, index, pathspecs, opts.clone())?
+                }
+                None => unstaged_raw_changes_with_peer_hunks(repo, pathspecs, opts.clone())?,
+            };
             let mut resolved = if requested.is_empty() {
                 ResolvedSelection::default()
             } else {
-                resolve_unstaged(repo, index, pathspecs, opts.clone(), &requested)?
+                resolve_unstaged(
+                    repo,
+                    &changes,
+                    &peer_hunks,
+                    pathspecs,
+                    opts.clone(),
+                    &requested,
+                )?
             };
             if !selection.ranges.is_empty() {
-                let line_part =
-                    resolve_line_ranges_unstaged(repo, pathspecs, opts, selection, &requested)?;
+                let line_part = resolve_line_ranges_unstaged(
+                    &changes,
+                    &peer_hunks,
+                    &opts,
+                    selection,
+                    &requested,
+                )?;
                 merge_resolved(&mut resolved, line_part);
             }
             Ok(resolved)
@@ -371,22 +391,17 @@ fn resolve_staged(
 
 fn resolve_unstaged(
     repo: &Repository,
-    index: Option<&mut Index>,
+    changes: &[FileChange],
+    peer_hunks: &HashMap<String, Vec<StructuredHunk>>,
     pathspecs: &[String],
     opts: DiffOptions,
     requested: &HashSet<HunkId>,
 ) -> std::result::Result<ResolvedSelection, HunkSelectError> {
-    let (changes, peer_hunks) = match index {
-        Some(index) => {
-            unstaged_raw_changes_with_peer_hunks_in(repo, index, pathspecs, opts.clone())?
-        }
-        None => unstaged_raw_changes_with_peer_hunks(repo, pathspecs, opts.clone())?,
-    };
     let mut patches = Vec::new();
     let mut staged_hunks = BTreeMap::new();
     let mut found = HashSet::new();
 
-    for change in &changes {
+    for change in changes {
         if change.binary {
             continue;
         }
@@ -430,9 +445,9 @@ fn resolve_unstaged(
         let files: Vec<FileDiff> = changes
             .iter()
             .filter(|c| !c.binary)
-            .map(|c| build_file_diff_for_stale(c, &opts))
+            .map(|c| build_file_diff(c, &opts))
             .collect();
-        let current_ids = current_ids_for_stale(DiffSide::Unstaged, pathspecs, &files, &peer_hunks);
+        let current_ids = current_ids_for_stale(DiffSide::Unstaged, pathspecs, &files, peer_hunks);
         return Err(HunkSelectError::StaleId {
             id,
             path: stale_path_hint(pathspecs, &files),
@@ -568,7 +583,7 @@ fn file_patch_from_unified_slices(
     Ok(patch)
 }
 
-fn build_file_diff_for_stale(change: &FileChange, opts: &DiffOptions) -> FileDiff {
+fn build_file_diff(change: &FileChange, opts: &DiffOptions) -> FileDiff {
     let structured = structured_file_diff(
         change.old_mode,
         change.new_mode,
@@ -804,34 +819,11 @@ fn count_new_side_lines(bytes: &[u8]) -> usize {
     count
 }
 
-fn new_side_line_count(
-    repo: &Repository,
-    file: &FileDiff,
-) -> std::result::Result<usize, HunkSelectError> {
-    if matches!(file.status, DiffStatus::Deleted) {
-        return Ok(0);
+fn new_side_line_count(change: &FileChange) -> usize {
+    if matches!(change.status, DiffStatus::Deleted) {
+        return 0;
     }
-    let wt = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
-    let mode_str = file.new_mode.as_deref().unwrap_or("100644");
-    let mode = u32::from_str_radix(mode_str, 8).map_err(|_| HunkSelectError::InvalidMode {
-        path: file.path.clone(),
-        mode: mode_str.to_owned(),
-    })?;
-    let config = repo.config().map_err(HunkSelectError::from)?;
-    let index = repo.index_handle().load().map_err(HunkSelectError::from)?;
-    let rules = WorktreeRules::from_repository(repo, &index).map_err(HunkSelectError::from)?;
-    let index_entry = index.get(file.path.as_bytes(), 0);
-    let bytes = read_worktree_side_bytes_for_diff(
-        repo.odb(),
-        wt,
-        &file.path,
-        mode,
-        config.as_ref(),
-        index_entry,
-        Some(&rules),
-    )
-    .map_err(HunkSelectError::from)?;
-    Ok(count_new_side_lines(&bytes))
+    count_new_side_lines(&change.new_bytes.data)
 }
 
 fn range_label(start: usize, end: usize) -> String {
@@ -988,13 +980,12 @@ fn recount_structured_hunk(hunk: &mut StructuredHunk) {
 }
 
 fn resolve_line_ranges_unstaged(
-    repo: &Repository,
-    pathspecs: &[String],
-    opts: DiffOptions,
+    changes: &[FileChange],
+    peer_hunks: &HashMap<String, Vec<StructuredHunk>>,
+    opts: &DiffOptions,
     selection: &HunkSelection,
     id_selected: &HashSet<HunkId>,
 ) -> std::result::Result<ResolvedSelection, HunkSelectError> {
-    let bundle = hunk_diff_bundle(repo, pathspecs, opts)?;
     let mut by_path: BTreeMap<String, Vec<(usize, usize)>> = BTreeMap::new();
     let mut labels: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for range in &selection.ranges {
@@ -1013,21 +1004,19 @@ fn resolve_line_ranges_unstaged(
 
     for (path, raw_intervals) in by_path {
         let intervals = merge_intervals(&raw_intervals);
-        let file = bundle
-            .unstaged
+        let change = changes
             .iter()
-            .find(|f| f.path == path)
+            .find(|c| c.path == path)
             .ok_or_else(|| HunkSelectError::RangeSelectsNothing { path: path.clone() })?;
-        if file.binary {
+        if change.binary {
             return Err(HunkSelectError::Binary { path: path.clone() });
         }
-        let max_line = new_side_line_count(repo, file)?;
-        validate_line_ranges(&path, &intervals, max_line)?;
-        let peer = bundle
-            .peer_hunks
-            .get(&path)
-            .map(|h| h.as_slice())
-            .unwrap_or(&[]);
+        let file = build_file_diff(change, opts);
+        if !include_file_in_diff(&file, opts) {
+            return Err(HunkSelectError::RangeSelectsNothing { path });
+        }
+        validate_line_ranges(&path, &intervals, new_side_line_count(change))?;
+        let peer = peer_hunks.get(&path).map(|h| h.as_slice()).unwrap_or(&[]);
         let ids = hunk_ids_with_duplicate_peers(DiffSide::Unstaged, &path, &file.hunks, peer);
         let mut partial = Vec::new();
         let mut selected_any = false;
@@ -1049,7 +1038,7 @@ fn resolve_line_ranges_unstaged(
             return Err(HunkSelectError::RangeSelectsNothing { path: path.clone() });
         }
         if selected_any {
-            patches.push(file_patch_from_hunks(file, &partial)?);
+            patches.push(file_patch_from_hunks(&file, &partial)?);
         }
         if let Some(labs) = labels.remove(&path) {
             staged_lines.insert(path, labs);
@@ -1499,15 +1488,28 @@ pub fn stage_hunks(
     diff_options: DiffOptions,
     dry_run: bool,
 ) -> std::result::Result<StageHunksOutcome, HunkSelectError> {
-    let resolved = resolve_selection_with_staged(repo, side, selection, pathspecs, diff_options)?;
-    let apply = apply_patch_to_index_and_write(
+    // Lock first so the selection is resolved against the index the patches are applied to. The
+    // index is reloaded rather than kept across the diff, which would add it to the diff's peak.
+    let handle = repo.index_handle();
+    let mut lock = if dry_run {
+        None
+    } else {
+        Some(handle.begin_update()?)
+    };
+    let resolved = resolve_selection_in(repo, None, side, selection, pathspecs, diff_options)?;
+    let mut index = handle.load()?;
+    let apply = apply_patch_to_index(
         repo,
+        &mut index,
         &resolved.patches,
         &IndexApplyOptions {
             dry_run,
             ..IndexApplyOptions::default()
         },
     )?;
+    if let Some(lock) = lock.as_mut() {
+        handle.commit_update(lock, &mut index, false)?;
+    }
     Ok(StageHunksOutcome::from_apply(
         dry_run,
         resolved.selected_hunks,
@@ -1564,6 +1566,7 @@ pub fn list_unstaged_hunk_ids(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diff::hunk_diff_bundle;
     use crate::diff::hunk_id::hunk_ids;
     use crate::index::write_tree::write_tree_from_index;
     use crate::porcelain::add::{stage, StageOptions};
@@ -2130,6 +2133,8 @@ mod tests {
         for p in &patch {
             patch_text.push_str(&format_patch_for_git(p));
         }
+        let index_path = root.join(".git/index");
+        let index_before = std::fs::read(&index_path).unwrap();
         stage_hunks(
             &repo,
             DiffSide::Unstaged,
@@ -2141,7 +2146,7 @@ mod tests {
         .unwrap();
         let grit_tree =
             write_tree_from_index(repo.odb(), &repo.index_handle().load().unwrap(), "").unwrap();
-        git(root, &["read-tree", "HEAD"]);
+        std::fs::write(&index_path, index_before).unwrap();
         let patch_path = root.join("partial.diff");
         std::fs::write(&patch_path, patch_text).unwrap();
         git(root, &["apply", "--cached", patch_path.to_str().unwrap()]);
@@ -2531,6 +2536,258 @@ mod tests {
                 end: 1,
             }],
         );
+    }
+
+    fn numbered_lines(n: usize) -> String {
+        (1..=n).map(|i| format!("line{i}\n")).collect()
+    }
+
+    fn edit_every_tenth_line(base: &str) -> String {
+        base.lines()
+            .enumerate()
+            .map(|(i, l)| {
+                if i % 10 == 0 {
+                    format!("{}\n", l.to_uppercase())
+                } else {
+                    format!("{l}\n")
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn stage_lines_dry_run_writes_nothing_and_stages_only_the_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::init(root, &InitOptions::default()).unwrap();
+        let base = numbered_lines(40);
+        std::fs::write(root.join("f.txt"), &base).unwrap();
+        std::fs::write(root.join("other.txt"), b"other\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+        std::fs::write(root.join("f.txt"), edit_every_tenth_line(&base)).unwrap();
+        std::fs::write(root.join("other.txt"), b"changed\n").unwrap();
+        let selection = HunkSelection {
+            ids: Vec::new(),
+            ranges: vec![LineRange {
+                path: "f.txt".into(),
+                start: 1,
+                end: 15,
+            }],
+        };
+        let index_path = root.join(".git/index");
+        let before = std::fs::read(&index_path).unwrap();
+        let outcome = stage_hunks(
+            &repo,
+            DiffSide::Unstaged,
+            &selection,
+            &["f.txt".into()],
+            hunk_diff_opts(),
+            true,
+        )
+        .unwrap();
+        assert!(outcome.dry_run);
+        assert_eq!(outcome.modified, ["f.txt"]);
+        assert_eq!(std::fs::read(&index_path).unwrap(), before);
+        assert!(!root.join(".git/index.lock").exists());
+
+        let outcome = stage_hunks(
+            &repo,
+            DiffSide::Unstaged,
+            &selection,
+            &["f.txt".into()],
+            hunk_diff_opts(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(outcome.staged_lines["f.txt"], ["1-15"]);
+        assert!(!root.join(".git/index.lock").exists());
+        let index = repo.index_handle().load().unwrap();
+        let staged = repo
+            .odb()
+            .read(&index.get(b"f.txt", 0).unwrap().oid)
+            .unwrap()
+            .data;
+        let expected: String = base
+            .lines()
+            .enumerate()
+            .map(|(i, l)| {
+                if i < 15 && i % 10 == 0 {
+                    format!("{}\n", l.to_uppercase())
+                } else {
+                    format!("{l}\n")
+                }
+            })
+            .collect();
+        assert_eq!(String::from_utf8(staged).unwrap(), expected);
+        let other = repo
+            .odb()
+            .read(&index.get(b"other.txt", 0).unwrap().oid)
+            .unwrap()
+            .data;
+        assert_eq!(other, b"other\n", "unselected paths stay unstaged");
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn lines_with_literal_pathspec_among_other_dirty_files_match_git() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        let base = numbered_lines(300);
+        std::fs::write(root.join("big.txt"), &base).unwrap();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        for i in 0..20 {
+            std::fs::write(root.join(format!("sub/f{i}.txt")), format!("{i}\n")).unwrap();
+        }
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+        std::fs::write(root.join("big.txt"), edit_every_tenth_line(&base)).unwrap();
+        std::fs::write(root.join("sub/f3.txt"), b"dirty\n").unwrap();
+        stage_lines_and_compare_git(
+            &repo,
+            root,
+            "big.txt",
+            vec![
+                LineRange {
+                    path: "big.txt".into(),
+                    start: 1,
+                    end: 105,
+                },
+                LineRange {
+                    path: "big.txt".into(),
+                    start: 251,
+                    end: 251,
+                },
+            ],
+        );
+        let out = Command::new("git")
+            .current_dir(root)
+            .args(["diff", "--name-only"])
+            .output()
+            .expect("git diff");
+        let unstaged = String::from_utf8_lossy(&out.stdout);
+        assert!(unstaged.lines().any(|l| l == "sub/f3.txt"), "{unstaged}");
+        assert!(unstaged.lines().any(|l| l == "big.txt"), "{unstaged}");
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn lines_on_top_of_staged_change_match_git() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        let base = numbered_lines(100);
+        std::fs::write(root.join("f.txt"), &base).unwrap();
+        git(root, &["add", "f.txt"]);
+        git(root, &["commit", "-qm", "init"]);
+        let edited = edit_every_tenth_line(&base);
+        std::fs::write(root.join("f.txt"), &edited).unwrap();
+        stage_hunks(
+            &repo,
+            DiffSide::Unstaged,
+            &HunkSelection {
+                ids: Vec::new(),
+                ranges: vec![LineRange {
+                    path: "f.txt".into(),
+                    start: 1,
+                    end: 30,
+                }],
+            },
+            &["f.txt".into()],
+            hunk_diff_opts(),
+            false,
+        )
+        .unwrap();
+        git(root, &["commit", "-qm", "partial"]);
+        stage_hunks(
+            &repo,
+            DiffSide::Unstaged,
+            &HunkSelection {
+                ids: Vec::new(),
+                ranges: vec![LineRange {
+                    path: "f.txt".into(),
+                    start: 31,
+                    end: 60,
+                }],
+            },
+            &["f.txt".into()],
+            hunk_diff_opts(),
+            false,
+        )
+        .unwrap();
+        stage_lines_and_compare_git(
+            &repo,
+            root,
+            "f.txt",
+            vec![LineRange {
+                path: "f.txt".into(),
+                start: 61,
+                end: 80,
+            }],
+        );
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn lines_without_pathspec_match_git() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        let (base, edited) = three_hunk_body();
+        std::fs::write(root.join("f.txt"), base).unwrap();
+        std::fs::write(root.join("g.txt"), b"g\n").unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+        std::fs::write(root.join("f.txt"), &edited).unwrap();
+        std::fs::write(root.join("g.txt"), b"G\n").unwrap();
+        let selection = HunkSelection {
+            ids: Vec::new(),
+            ranges: vec![LineRange {
+                path: "f.txt".into(),
+                start: 10,
+                end: 30,
+            }],
+        };
+        let patch = resolve_selection(&repo, DiffSide::Unstaged, &selection, &[], hunk_diff_opts())
+            .unwrap();
+        let patch_text: String = patch.iter().map(format_patch_for_git).collect();
+        stage_hunks(
+            &repo,
+            DiffSide::Unstaged,
+            &selection,
+            &[],
+            hunk_diff_opts(),
+            false,
+        )
+        .unwrap();
+        let grit_tree =
+            write_tree_from_index(repo.odb(), &repo.index_handle().load().unwrap(), "").unwrap();
+        git(root, &["read-tree", "HEAD"]);
+        let patch_path = root.join("partial.diff");
+        std::fs::write(&patch_path, patch_text).unwrap();
+        git(root, &["apply", "--cached", patch_path.to_str().unwrap()]);
+        let git_tree = Command::new("git")
+            .current_dir(root)
+            .args(["write-tree"])
+            .output()
+            .expect("write-tree");
+        assert_eq!(
+            grit_tree.to_hex(),
+            String::from_utf8_lossy(&git_tree.stdout).trim()
+        );
+        git(root, &["fsck"]);
     }
 
     #[cfg_attr(

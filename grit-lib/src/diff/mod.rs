@@ -84,7 +84,7 @@ pub use stat::{DiffStat, FileStat, StatBar};
 pub use targets::hunk_diff_bundle;
 pub use targets::HunkDiffBundle;
 pub(crate) use targets::{
-    collect_files_for_target, unstaged_file_diffs_with_peer_hunks,
+    collect_files_for_target, include_file_in_diff, unstaged_file_diffs_with_peer_hunks,
     unstaged_raw_changes_with_peer_hunks, unstaged_raw_changes_with_peer_hunks_in,
 };
 pub use targets::{

@@ -400,7 +400,7 @@ fn resolve_diff_request_in(
     }
 }
 
-fn include_file_in_diff(file: &FileDiff, opts: &DiffOptions) -> bool {
+pub(crate) fn include_file_in_diff(file: &FileDiff, opts: &DiffOptions) -> bool {
     if !opts.whitespace.is_active() || file.binary {
         return true;
     }
@@ -1180,7 +1180,14 @@ pub struct HunkDiffBundle {
     pub peer_hunks: std::collections::HashMap<String, Vec<StructuredHunk>>,
 }
 
-/// Load unstaged diffs, staged peer hunks, and staged-side file rows in one pass.
+/// Load unstaged diffs and the staged peer hunks on the same paths.
+///
+/// Literal file pathspecs only scan those paths (and skip the staged side when it matches
+/// `HEAD`); any other pathspec scans the whole index and filters.
+///
+/// # Errors
+///
+/// Propagates index, object database, and working tree read errors.
 pub fn hunk_diff_bundle(
     repo: &Repository,
     pathspecs: &[String],
@@ -1188,25 +1195,8 @@ pub fn hunk_diff_bundle(
 ) -> Result<HunkDiffBundle> {
     let config = repo.config()?;
     let thread_policy = repo.thread_policy();
-    let rename_threshold = opts.renames.threshold_percent().unwrap_or(101);
-    // Pathspec semantics belong in `filter_file_changes`; do not pass raw pathspec strings
-    // to `restrict_to_paths` (glob/magic patterns are not repository paths).
-    let staged_fc = filter_file_changes(
-        staged_changes(repo, rename_threshold, None)?,
-        repo,
-        pathspecs,
-    )?;
-    let staged_files = if staged_fc.is_empty() {
-        Vec::new()
-    } else {
-        file_diffs_from_worktree_changes(staged_fc, &config, &thread_policy, opts.clone())?
-    };
-    let peer_hunks: std::collections::HashMap<String, Vec<StructuredHunk>> = staged_files
-        .iter()
-        .map(|f| (f.path.clone(), f.hunks.clone()))
-        .collect();
-    let unstaged_fc =
-        filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs)?;
+    let (unstaged_fc, peer_hunks) =
+        unstaged_raw_changes_with_peer_hunks(repo, pathspecs, opts.clone())?;
     let unstaged = file_diffs_from_worktree_changes(unstaged_fc, &config, &thread_policy, opts)?;
     Ok(HunkDiffBundle {
         unstaged,
