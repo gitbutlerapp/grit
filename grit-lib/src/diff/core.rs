@@ -3835,25 +3835,25 @@ fn diff_index_to_tree_flatten(
         }
         if ie.stage() == 0 && ie.is_sparse_directory_placeholder() {
             let dir = path.strip_suffix('/').unwrap_or(path.as_str());
-            if let Some(head_root) = tree_oid {
-                if let Some(head_sub) = subtree_oid_at_path(odb, head_root, dir)? {
-                    if head_sub == ie.oid {
+            let index_flat = flatten_tree(odb, &ie.oid, dir)?;
+            let head_flat = match tree_oid {
+                None => Vec::new(),
+                Some(head_root) => match subtree_oid_at_path(odb, head_root, dir)? {
+                    None => Vec::new(),
+                    Some(head_sub) if head_sub == ie.oid => {
                         continue;
                     }
-                    let head_flat = flatten_tree(odb, &head_sub, dir)?;
-                    let index_flat = flatten_tree(odb, &ie.oid, dir)?;
-                    diff_flattened_subtrees(
-                        &head_flat,
-                        &index_flat,
-                        ignore_submodules,
-                        &mut result,
-                        &mut stage0_paths,
-                        &mut tree_map,
-                    );
-                    continue;
-                }
-            }
-            let _ = tree_map.remove(path.as_str());
+                    Some(head_sub) => flatten_tree(odb, &head_sub, dir)?,
+                },
+            };
+            diff_flattened_subtrees(
+                &head_flat,
+                &index_flat,
+                ignore_submodules,
+                &mut result,
+                &mut stage0_paths,
+                &mut tree_map,
+            );
             continue;
         }
         if ie.stage() != 0 {
@@ -4391,6 +4391,28 @@ fn emit_index_tree_added(walk: &mut DiffIndexTreeWalk<'_, '_>, dir_prefix: &[u8]
         }
         IndexLevelKind::Tree { name } => {
             let full_path = join_index_path(dir_prefix, name);
+            let mut path_slash = full_path.clone();
+            path_slash.push(b'/');
+            if let Some(entry) =
+                walk.index.entries.get(*walk.idx_cursor).filter(|entry| {
+                    entry.path == path_slash && entry.is_sparse_directory_placeholder()
+                })
+            {
+                let dir = String::from_utf8_lossy(if dir_prefix.is_empty() {
+                    name
+                } else {
+                    &full_path
+                });
+                emit_flattened_subtree_as_added(
+                    walk.odb,
+                    &entry.oid,
+                    dir.as_ref(),
+                    walk.ignore_submodules,
+                    walk.result,
+                )?;
+                *walk.idx_cursor += 1;
+                return Ok(());
+            }
             let start = *walk.idx_cursor;
             skip_index_subtree(walk.index, walk.idx_cursor, &full_path);
             for ie in &walk.index.entries[start..*walk.idx_cursor] {
@@ -11922,6 +11944,32 @@ fn subtree_oid_at_path(odb: &Odb, root: &ObjectId, path: &str) -> Result<Option<
         oid = entry.oid;
     }
     Ok(Some(oid))
+}
+
+/// Report every blob in an index subtree as staged additions (HEAD has no tree at this path).
+fn emit_flattened_subtree_as_added(
+    odb: &Odb,
+    subtree: &ObjectId,
+    prefix: &str,
+    ignore_submodules: bool,
+    result: &mut Vec<DiffEntry>,
+) -> Result<()> {
+    for entry in flatten_tree(odb, subtree, prefix)? {
+        if ignore_submodules && entry.mode == 0o160000 {
+            continue;
+        }
+        result.push(DiffEntry {
+            status: DiffStatus::Added,
+            old_path: None,
+            new_path: Some(entry.path),
+            old_mode: FileMode::ABSENT,
+            new_mode: FileMode::new(entry.mode),
+            old_oid: zero_oid(),
+            new_oid: entry.oid,
+            score: None,
+        });
+    }
+    Ok(())
 }
 
 /// Compare two flattened subtrees and append staged diff entries.

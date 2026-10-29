@@ -150,6 +150,43 @@ fn readonly_porcelain_keeps_git_sparse_index_shape() {
 }
 
 #[test]
+fn staged_out_of_cone_addition_when_head_has_no_such_tree() {
+    if !git_at_least(2, 37) {
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let wt = tmp.path();
+    git(wt, &["init", "-q", "-b", "main", "."]);
+    git(wt, &["config", "user.email", "t@example.com"]);
+    git(wt, &["config", "user.name", "Test"]);
+    fs::create_dir_all(wt.join("in")).expect("mkdir in");
+    fs::write(wt.join("in/f"), "in\n").expect("write in");
+    git(wt, &["add", "-A"]);
+    git(wt, &["commit", "-qm", "base"]);
+    git(wt, &["sparse-checkout", "init", "--cone", "--sparse-index"]);
+    git(wt, &["sparse-checkout", "set", "in"]);
+    fs::create_dir_all(wt.join("out/deep")).expect("mkdir out");
+    fs::write(wt.join("out/deep/f"), "new\n").expect("write out");
+    git(wt, &["add", "--sparse", "out/deep/f"]);
+    git(wt, &["sparse-checkout", "reapply", "--sparse-index"]);
+
+    assert_eq!(
+        git(wt, &["diff", "--cached", "--name-status"]).trim(),
+        "A\tout/deep/f"
+    );
+
+    let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
+    let staged = Diff::new(&grit_repo)
+        .uncommitted()
+        .expect("load index")
+        .staged_entries(RenameDetection::Off)
+        .expect("staged diff");
+    assert_eq!(staged.len(), 1, "expected one staged add: {staged:?}");
+    assert_eq!(staged[0].path(), "out/deep/f");
+    assert_eq!(staged[0].status, DiffStatus::Added);
+}
+
+#[test]
 fn staged_out_of_cone_modification_with_mismatched_sparse_placeholder() {
     if !git_at_least(2, 37) {
         return;
