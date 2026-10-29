@@ -27,6 +27,7 @@
 
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
+use crate::fs_publish::publish_no_clobber;
 use crate::objects::ObjectId;
 use crate::refs::store::RefStoreError;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -36,6 +37,7 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+use tempfile::TempPath;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -2020,26 +2022,33 @@ fn publish_new_reftable_table_file(
         )));
     }
     let tmp_path = reftable_dir.join(format!(".writ-{suffix:08x}.tmp"));
-    let mut file = fs::OpenOptions::new()
+    let mut file = match fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&tmp_path)
-        .map_err(Error::Io)?;
-    file.write_all(data).map_err(Error::Io)?;
-    file.sync_all().map_err(Error::Io)?;
-    drop(file);
-    if path.exists() {
+    {
+        Ok(file) => file,
+        Err(err) => return Err(Error::Io(err)),
+    };
+    if let Err(err) = file.write_all(data).and_then(|_| file.sync_all()) {
+        drop(file);
         let _ = fs::remove_file(&tmp_path);
-        return Err(Error::Io(std::io::Error::new(
+        return Err(Error::Io(err));
+    }
+    drop(file);
+
+    #[cfg(test)]
+    reftable_write_test_hooks::run_before_persist_hook(&path);
+
+    let staged = TempPath::try_from_path(tmp_path).map_err(Error::Io)?;
+    match publish_no_clobber(staged, &path) {
+        Ok(true) => Ok(filename),
+        Ok(false) => Err(Error::Io(std::io::Error::new(
             std::io::ErrorKind::AlreadyExists,
             "reftable table file already exists",
-        )));
+        ))),
+        Err(err) => Err(Error::Io(err)),
     }
-    fs::rename(&tmp_path, &path).map_err(|err| {
-        let _ = fs::remove_file(&tmp_path);
-        Error::Io(err)
-    })?;
-    Ok(filename)
 }
 
 fn invalidate_stack_table_cache(reftable_dir: &Path) {
@@ -3563,22 +3572,33 @@ mod reftable_tx_fail_inject {
 
 #[cfg(test)]
 mod reftable_write_test_hooks {
+    use std::cell::RefCell;
     use std::collections::VecDeque;
-    use std::sync::{Mutex, OnceLock};
+    use std::path::Path;
 
-    fn suffixes() -> &'static Mutex<VecDeque<u32>> {
-        static SUFFIXES: OnceLock<Mutex<VecDeque<u32>>> = OnceLock::new();
-        SUFFIXES.get_or_init(|| Mutex::new(VecDeque::new()))
+    thread_local! {
+        static SUFFIXES: RefCell<VecDeque<u32>> = const { RefCell::new(VecDeque::new()) };
+        static BEFORE_PERSIST: RefCell<Option<Box<dyn Fn(&Path)>>> = const { RefCell::new(None) };
     }
 
     pub(crate) fn push_table_suffixes(values: impl IntoIterator<Item = u32>) {
-        if let Ok(mut guard) = suffixes().lock() {
-            guard.extend(values);
-        }
+        SUFFIXES.with(|s| s.borrow_mut().extend(values));
     }
 
     pub(crate) fn take_table_suffix() -> Option<u32> {
-        suffixes().lock().ok()?.pop_front()
+        SUFFIXES.with(|s| s.borrow_mut().pop_front())
+    }
+
+    pub(crate) fn set_before_persist_hook(hook: Option<Box<dyn Fn(&Path)>>) {
+        BEFORE_PERSIST.with(|h| *h.borrow_mut() = hook);
+    }
+
+    pub(crate) fn run_before_persist_hook(path: &Path) {
+        BEFORE_PERSIST.with(|h| {
+            if let Some(hook) = h.borrow().as_ref() {
+                hook(path);
+            }
+        });
     }
 }
 
@@ -4870,6 +4890,67 @@ mod tests {
             })
             .to_string(),
             "reftable: symref target is not valid UTF-8"
+        );
+    }
+
+    #[test]
+    fn write_table_file_retries_when_destination_races_before_persist() {
+        use crate::repo::init_repository;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .expect("init");
+        let git_dir = dir.path().join(".git");
+        let stack = ReftableStack::open(&git_dir).expect("open");
+        let reftable_dir = git_dir.join("reftable");
+        let data = ReftableWriter::new(WriteOptions::default(), 1, 1)
+            .finish()
+            .expect("empty table");
+        let colliding = 0x1234_5678u32;
+        let fallback = 0x8765_4321u32;
+        let raced_name = reftable_table_filename(1, 1, colliding);
+        struct ClearPersistHook;
+        impl Drop for ClearPersistHook {
+            fn drop(&mut self) {
+                reftable_write_test_hooks::set_before_persist_hook(None);
+            }
+        }
+        let _clear_hook = ClearPersistHook;
+        reftable_write_test_hooks::set_before_persist_hook(Some(Box::new({
+            let raced_name = raced_name.clone();
+            move |path| {
+                if path.file_name().and_then(|n| n.to_str()) == Some(raced_name.as_str()) {
+                    fs::write(path, b"raced-in").expect("race destination into place");
+                }
+            }
+        })));
+        reftable_write_test_hooks::push_table_suffixes([colliding, fallback]);
+        let published = stack
+            .write_table_file(&data, 1, 1)
+            .expect("publish with new suffix after race");
+        assert_eq!(published, reftable_table_filename(1, 1, fallback));
+        assert_eq!(
+            fs::read(reftable_dir.join(&raced_name)).expect("read raced file"),
+            b"raced-in"
+        );
+        let leftovers: Vec<_> = fs::read_dir(&reftable_dir)
+            .expect("read reftable dir")
+            .flatten()
+            .map(|e| e.file_name())
+            .filter(|name| {
+                name.to_str()
+                    .is_some_and(|s| s.starts_with(".writ-") && s.ends_with(".tmp"))
+            })
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "stale suffix reservation temps: {leftovers:?}"
         );
     }
 
