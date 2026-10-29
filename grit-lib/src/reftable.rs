@@ -2013,9 +2013,59 @@ fn is_transient_stack_table_error(err: &Error) -> bool {
 }
 
 fn random_table_suffix() -> Result<u32> {
+    #[cfg(test)]
+    if let Some(suffix) = reftable_write_test_hooks::take_table_suffix() {
+        return Ok(suffix);
+    }
     let mut buf = [0u8; 4];
     getrandom::getrandom(&mut buf).map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
     Ok(u32::from_le_bytes(buf))
+}
+
+fn reftable_table_filename(min_update_index: u64, max_update_index: u64, suffix: u32) -> String {
+    format!(
+        "{:08x}-{:08x}-{:08x}.ref",
+        min_update_index, max_update_index, suffix
+    )
+}
+
+/// Publish `data` as a new table file that must not already exist on disk.
+fn publish_new_reftable_table_file(
+    reftable_dir: &Path,
+    data: &[u8],
+    min_update_index: u64,
+    max_update_index: u64,
+    suffix: u32,
+) -> Result<String> {
+    let filename = reftable_table_filename(min_update_index, max_update_index, suffix);
+    let path = reftable_dir.join(&filename);
+    if path.exists() {
+        return Err(Error::Io(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "reftable table file already exists",
+        )));
+    }
+    let tmp_path = reftable_dir.join(format!(".writ-{suffix:08x}.tmp"));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp_path)
+        .map_err(Error::Io)?;
+    file.write_all(data).map_err(Error::Io)?;
+    file.sync_all().map_err(Error::Io)?;
+    drop(file);
+    if path.exists() {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(Error::Io(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "reftable table file already exists",
+        )));
+    }
+    fs::rename(&tmp_path, &path).map_err(|err| {
+        let _ = fs::remove_file(&tmp_path);
+        Error::Io(err)
+    })?;
+    Ok(filename)
 }
 
 fn invalidate_stack_table_cache(reftable_dir: &Path) {
@@ -3170,36 +3220,21 @@ impl ReftableStack {
         const MAX_ATTEMPTS: u32 = 32;
         for _ in 0..MAX_ATTEMPTS {
             let suffix = random_table_suffix()?;
-            let filename = format!(
-                "{:08x}-{:08x}-{:08x}.ref",
-                min_update_index, max_update_index, suffix
-            );
-            let path = self.reftable_dir.join(&filename);
-            let tmp_name = format!(".writ-{:08x}.tmp", suffix);
-            let tmp_path = self.reftable_dir.join(&tmp_name);
-            let mut file = match fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&tmp_path)
-            {
-                Ok(file) => file,
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(err) => return Err(Error::Io(err)),
-            };
-            file.write_all(data).map_err(Error::Io)?;
-            file.sync_all().map_err(Error::Io)?;
-            match crate::atomic_replace::replace_file(&tmp_path, &path) {
-                Ok(()) => return Ok(filename),
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let _ = fs::remove_file(&tmp_path);
-                    continue;
-                }
-                Err(err) => return Err(Error::Io(err)),
+            match publish_new_reftable_table_file(
+                &self.reftable_dir,
+                data,
+                min_update_index,
+                max_update_index,
+                suffix,
+            ) {
+                Ok(filename) => return Ok(filename),
+                Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(err) => return Err(err),
             }
         }
         Err(Error::Io(std::io::Error::new(
             std::io::ErrorKind::AlreadyExists,
-            "could not allocate a unique reftable file name",
+            "could not allocate a unique reftable table file name",
         )))
     }
 
@@ -3530,6 +3565,27 @@ mod reftable_tx_fail_inject {
     // hygiene: test-only write_transaction failure injection (thread_local)
     thread_local! {
         pub static INJECT: RefCell<bool> = const { RefCell::new(false) };
+    }
+}
+
+#[cfg(test)]
+mod reftable_write_test_hooks {
+    use std::collections::VecDeque;
+    use std::sync::{Mutex, OnceLock};
+
+    fn suffixes() -> &'static Mutex<VecDeque<u32>> {
+        static SUFFIXES: OnceLock<Mutex<VecDeque<u32>>> = OnceLock::new();
+        SUFFIXES.get_or_init(|| Mutex::new(VecDeque::new()))
+    }
+
+    pub(crate) fn push_table_suffixes(values: impl IntoIterator<Item = u32>) {
+        if let Ok(mut guard) = suffixes().lock() {
+            guard.extend(values);
+        }
+    }
+
+    pub(crate) fn take_table_suffix() -> Option<u32> {
+        suffixes().lock().ok()?.pop_front()
     }
 }
 
@@ -4821,6 +4877,40 @@ mod tests {
             })
             .to_string(),
             "reftable: symref target is not valid UTF-8"
+        );
+    }
+
+    #[test]
+    fn write_table_file_does_not_clobber_existing_destination() {
+        use crate::repo::init_repository;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .expect("init");
+        let git_dir = dir.path().join(".git");
+        let stack = ReftableStack::open(&git_dir).expect("open");
+        let reftable_dir = git_dir.join("reftable");
+        let data = ReftableWriter::new(WriteOptions::default(), 1, 1)
+            .finish()
+            .expect("empty table");
+        let colliding = 0x1234_5678u32;
+        let fallback = 0x8765_4321u32;
+        let blocked = reftable_table_filename(1, 1, colliding);
+        fs::write(reftable_dir.join(&blocked), b"keep").expect("seed existing table");
+        reftable_write_test_hooks::push_table_suffixes([colliding, fallback]);
+        let published = stack
+            .write_table_file(&data, 1, 1)
+            .expect("publish with new suffix");
+        assert_eq!(published, reftable_table_filename(1, 1, fallback));
+        assert_eq!(
+            fs::read(reftable_dir.join(&blocked)).expect("read blocked file"),
+            b"keep"
         );
     }
 
