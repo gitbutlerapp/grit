@@ -8636,6 +8636,16 @@ pub fn detect_renames_with_policy(
     {
         let par_opts = diff_rename_parallel_options(config, thread_policy);
 
+        let mut prefetch_entries: Vec<DiffEntry> =
+            Vec::with_capacity(remaining_deleted.len() + remaining_added.len());
+        for &di in &remaining_deleted {
+            prefetch_entries.push(deleted[di].clone());
+        }
+        for &ai in &remaining_added {
+            prefetch_entries.push(added[ai].clone());
+        }
+        super::tree_content::prefetch_tree_diff_blobs(odb, &prefetch_entries)?;
+
         let deleted_sizes: Vec<Option<usize>> = remaining_deleted
             .iter()
             .map(|&di| blob_payload_size(odb, &deleted[di].old_oid))

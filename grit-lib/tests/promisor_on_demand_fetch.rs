@@ -13,7 +13,9 @@ use std::thread;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigFile;
 use grit_lib::config::ConfigScope;
-use grit_lib::diff::{build_file_diffs, DiffDetail, DiffOptions};
+use grit_lib::diff::{
+    build_file_diffs, diff_commits_with_renames_and_policy, DiffDetail, DiffOptions,
+};
 use grit_lib::error::Error;
 use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
@@ -130,6 +132,46 @@ fn pack_file_count(objects: &Path) -> usize {
         .count()
 }
 
+fn setup_mass_add_delete_blobless_upstream(file_count: usize) -> (TempDir, PathBuf) {
+    let layout = TempDir::new().expect("layout");
+    let upstream = layout.path().join("upstream");
+    git_in(layout.path(), &["init", "-q", "-b", "main", "upstream"]);
+    git_in(&upstream, &["config", "user.email", "t@t"]);
+    for i in 1..=file_count {
+        fs::write(
+            upstream.join(format!("old-{i}.txt")),
+            format!("old file {i}\n{}", "payload\n".repeat(20)),
+        )
+        .expect("write");
+    }
+    git_in(&upstream, &["add", "."]);
+    git_in(&upstream, &["commit", "-m", "base", "-q"]);
+    for i in 1..=file_count {
+        fs::remove_file(upstream.join(format!("old-{i}.txt"))).expect("rm");
+        fs::write(
+            upstream.join(format!("new-{i}.txt")),
+            format!("new file {i}\n{}", "payload\n".repeat(20)),
+        )
+        .expect("write new");
+    }
+    git_in(&upstream, &["add", "-A"]);
+    git_in(&upstream, &["commit", "-m", "renamed", "-q"]);
+
+    let bare = layout.path().join("remote.git");
+    git_in(
+        layout.path(),
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            upstream.to_str().unwrap(),
+            "remote.git",
+        ],
+    );
+    git_in(&bare, &["config", "uploadpack.allowFilter", "true"]);
+    (layout, bare)
+}
+
 fn setup_many_file_blobless_upstream(file_count: usize) -> (TempDir, PathBuf) {
     let layout = TempDir::new().expect("layout");
     let upstream = layout.path().join("upstream");
@@ -242,6 +284,105 @@ fn no_fetcher_returns_typed_promised_missing() {
         matches!(err, Error::PromisedObjectMissing(_)),
         "expected PromisedObjectMissing, got {err:?}"
     );
+}
+
+#[test]
+fn rename_detection_prefetch_batched_past_rename_limit() {
+    let file_count = 600;
+    let (_layout, bare) = setup_mass_add_delete_blobless_upstream(file_count);
+    let url = format!("file://{}", bare.canonicalize().unwrap().display());
+    let dest = TempDir::new().expect("dest");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let fetcher = Arc::new(CountingFetcher {
+        calls: Arc::clone(&calls),
+        inner: DefaultPromisorFetcher::new(Arc::new(DefaultHttpClientFactory::new())),
+    });
+    let repo = grit_blobless_clone(&url, dest.path(), Some(fetcher));
+
+    let objects = repo.git_dir().join("objects");
+    let packs_before = pack_file_count(&objects);
+    let config = repo.config().expect("config");
+    let thread_policy = ThreadPolicy::default();
+    let entries = diff_commits_with_renames_and_policy(
+        repo.odb(),
+        &revision(&repo, "HEAD~1"),
+        &revision(&repo, "HEAD"),
+        50,
+        config.as_ref(),
+        &thread_policy,
+    )
+    .expect("commit diff with renames");
+    assert_eq!(entries.len(), file_count);
+
+    build_file_diffs(
+        repo.odb(),
+        entries,
+        DiffDetail::Stat,
+        DiffOptions::default(),
+        config.as_ref(),
+        &thread_policy,
+    )
+    .expect("stat");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "rename detection and stat must share one promisor fetch for {file_count} add/delete pairs"
+    );
+    assert_eq!(pack_file_count(&objects), packs_before + 1);
+}
+
+#[test]
+fn tree_diff_prefetch_batched_past_rename_limit() {
+    let file_count = 1200;
+    let (_layout, bare) = setup_many_file_blobless_upstream(file_count);
+    let url = format!("file://{}", bare.canonicalize().unwrap().display());
+    let dest = TempDir::new().expect("dest");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let fetcher = Arc::new(CountingFetcher {
+        calls: Arc::clone(&calls),
+        inner: DefaultPromisorFetcher::new(Arc::new(DefaultHttpClientFactory::new())),
+    });
+    let repo = grit_blobless_clone(&url, dest.path(), Some(fetcher));
+
+    let objects = repo.git_dir().join("objects");
+    let packs_before = pack_file_count(&objects);
+    let config = repo.config().expect("config");
+    let thread_policy = ThreadPolicy::default();
+    let entries = diff_commits_with_renames_and_policy(
+        repo.odb(),
+        &revision(&repo, "HEAD~1"),
+        &revision(&repo, "HEAD"),
+        50,
+        config.as_ref(),
+        &thread_policy,
+    )
+    .expect("commit diff with renames");
+    assert_eq!(entries.len(), file_count);
+
+    build_file_diffs(
+        repo.odb(),
+        entries,
+        DiffDetail::Stat,
+        DiffOptions::default(),
+        config.as_ref(),
+        &thread_policy,
+    )
+    .expect("stat");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "stat diff must batch {file_count} missing blobs into one promisor fetch"
+    );
+    assert_eq!(
+        pack_file_count(&objects),
+        packs_before + 1,
+        "one promisor pack for the batch"
+    );
+
+    let sample = revision(&repo, "HEAD:file-1.txt");
+    git_cmd(&["cat-file", "blob", &sample.to_hex()])
+        .in_dir(&bare)
+        .exec();
 }
 
 #[test]
