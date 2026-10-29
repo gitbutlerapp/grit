@@ -25,29 +25,47 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use std::sync::mpsc::{self, RecvTimeoutError};
+
 use crate::error::{Error, Result};
-use crate::progress::{poll_watch, CANCEL_POLL_STRIDE};
+use crate::progress::{poll_watch, StatScanCancel, CANCEL_POLL_STRIDE};
 
 type DirAbsFn = dyn Fn(&[u8]) -> PathBuf + Send + Sync;
 
-fn poll_blob_scan_directory(cancel_watch: Option<&Arc<AtomicBool>>) -> Result<()> {
-    if let Some(w) = cancel_watch {
-        poll_watch(w)?;
-    }
-    Ok(())
+#[derive(Clone, Copy)]
+enum StatBoundaryPoll<'a> {
+    Owner(&'a StatScanCancel),
+    Worker(Option<&'a Arc<AtomicBool>>),
 }
 
-fn poll_blob_scan_stride(
-    cancel_watch: Option<&Arc<AtomicBool>>,
-    counter: &mut usize,
-) -> Result<()> {
-    *counter = counter.wrapping_add(1);
-    if counter.is_multiple_of(CANCEL_POLL_STRIDE) {
-        if let Some(w) = cancel_watch {
-            poll_watch(w)?;
+impl StatBoundaryPoll<'_> {
+    fn poll_directory(&self) -> Result<()> {
+        match self {
+            Self::Owner(cancel) => cancel.poll(),
+            Self::Worker(watch) => {
+                if let Some(w) = watch {
+                    poll_watch(w)?;
+                }
+                Ok(())
+            }
         }
     }
-    Ok(())
+
+    fn poll_stride(&self, counter: &mut usize) -> Result<()> {
+        *counter = counter.wrapping_add(1);
+        if !counter.is_multiple_of(CANCEL_POLL_STRIDE) {
+            return Ok(());
+        }
+        match self {
+            Self::Owner(cancel) => cancel.poll(),
+            Self::Worker(watch) => {
+                if let Some(w) = watch {
+                    poll_watch(w)?;
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 /// Whether tracked files are stat-ed through one `read_dir` of their parent (see module docs).
@@ -783,7 +801,7 @@ fn collect_blob_lookups_in_directory(
     out: &mut Vec<(usize, BlobDiskLookup)>,
     sparse: BlobScanSparseMode,
     scanned: &mut usize,
-    cancel_watch: Option<&Arc<AtomicBool>>,
+    boundary: StatBoundaryPoll<'_>,
     cancel_stride: &mut usize,
 ) -> Result<()> {
     let mut sink = BlobLookupCollectSink {
@@ -799,7 +817,7 @@ fn collect_blob_lookups_in_directory(
         file_abs,
         literal_paths,
         under_symlink,
-        cancel_watch,
+        boundary,
         cancel_stride,
         &mut |entry_index, rel_path, lookup| {
             #[cfg(not(windows))]
@@ -844,7 +862,7 @@ fn for_each_blob_in_one_directory<F>(
     file_abs: &dyn Fn(&[u8]) -> PathBuf,
     literal_paths: bool,
     under_symlink: bool,
-    cancel_watch: Option<&Arc<AtomicBool>>,
+    boundary: StatBoundaryPoll<'_>,
     cancel_stride: &mut usize,
     visit: &mut F,
 ) -> Result<()>
@@ -853,7 +871,7 @@ where
 {
     if under_symlink {
         for &entry_index in entry_indices {
-            poll_blob_scan_stride(cancel_watch, cancel_stride)?;
+            boundary.poll_stride(cancel_stride)?;
             let rel_path = entry_rel_path(index, entry_index)?;
             visit(entry_index, rel_path, BlobDiskLookup::Missing)?;
         }
@@ -872,7 +890,7 @@ where
                 entry_indices,
                 &handle,
                 &abs_dir,
-                cancel_watch,
+                boundary,
                 cancel_stride,
                 visit,
             );
@@ -885,7 +903,7 @@ where
         // `file_abs`, which may probe and list the directory to find another spelling.
         let abs_dir = dir_abs(dir);
         for &entry_index in entry_indices {
-            poll_blob_scan_stride(cancel_watch, cancel_stride)?;
+            boundary.poll_stride(cancel_stride)?;
             let rel_path = entry_rel_path(index, entry_index)?;
             let file_name = entry_file_name(index, entry_index)?;
             let direct = crate::index::worktree_path_from_index_rel(&abs_dir, file_name);
@@ -911,7 +929,7 @@ where
     let abs_dir = dir_abs(dir);
     #[cfg(windows)]
     if entry_indices.len() == 1 {
-        poll_blob_scan_stride(cancel_watch, cancel_stride)?;
+        boundary.poll_stride(cancel_stride)?;
         let entry_index = entry_indices[0];
         let rel_path = entry_rel_path(index, entry_index)?;
         let file_name = entry_file_name(index, entry_index)?;
@@ -922,7 +940,7 @@ where
 
     let (dir_readable, on_disk) = read_directory_map(&abs_dir, entry_indices.len())?;
     for &entry_index in entry_indices {
-        poll_blob_scan_stride(cancel_watch, cancel_stride)?;
+        boundary.poll_stride(cancel_stride)?;
         let rel_path = entry_rel_path(index, entry_index)?;
         let file_name = entry_file_name(index, entry_index)?;
         let lookup = if !dir_readable {
@@ -1036,7 +1054,7 @@ fn for_each_blob_at_directory<F>(
     entry_indices: &[usize],
     directory: &fs::File,
     abs_dir: &Path,
-    cancel_watch: Option<&Arc<AtomicBool>>,
+    boundary: StatBoundaryPoll<'_>,
     cancel_stride: &mut usize,
     visit: &mut F,
 ) -> Result<()>
@@ -1047,7 +1065,7 @@ where
     let count_probes = probe_counts(abs_dir);
     let mut name = Vec::new();
     for &entry_index in entry_indices {
-        poll_blob_scan_stride(cancel_watch, cancel_stride)?;
+        boundary.poll_stride(cancel_stride)?;
         let rel = entry_rel_path(index, entry_index)?;
         let file_name = entry_file_name(index, entry_index)?;
         if file_name.contains(&0) {
@@ -1099,7 +1117,7 @@ fn collect_blob_lookups_serial(
     file_abs: &dyn Fn(&[u8]) -> PathBuf,
     literal_paths: bool,
     sparse: BlobScanSparseMode,
-    cancel_watch: Option<&Arc<AtomicBool>>,
+    cancel: &StatScanCancel,
 ) -> Result<(Vec<(usize, BlobDiskLookup)>, usize)> {
     let mut out = match sparse {
         BlobScanSparseMode::Dense => Vec::with_capacity(plan.len()),
@@ -1107,8 +1125,9 @@ fn collect_blob_lookups_serial(
     };
     let mut scanned = 0usize;
     let mut cancel_stride = 0usize;
+    let boundary = StatBoundaryPoll::Owner(cancel);
     for (dir_idx, dir) in plan.dirs.iter().enumerate() {
-        poll_blob_scan_directory(cancel_watch)?;
+        boundary.poll_directory()?;
         let Some(range) = plan.dir_ranges.get(dir_idx) else {
             continue;
         };
@@ -1125,7 +1144,7 @@ fn collect_blob_lookups_serial(
             &mut out,
             sparse,
             &mut scanned,
-            cancel_watch,
+            boundary,
             &mut cancel_stride,
         )?;
     }
@@ -1300,7 +1319,7 @@ fn collect_blob_lookups_for_index_slice<S, P>(
     sparse: BlobScanSparseMode,
     local: &mut Vec<(usize, BlobDiskLookup)>,
     scanned: &mut usize,
-    cancel_watch: Option<&Arc<AtomicBool>>,
+    worker_watch: Option<&Arc<AtomicBool>>,
     cancel_stride: &mut usize,
 ) -> Result<()>
 where
@@ -1310,10 +1329,11 @@ where
     if slice.is_empty() {
         return Ok(());
     }
+    let boundary = StatBoundaryPoll::Worker(worker_watch);
     let mut has_symlink_ancestor = symlink_probe();
     let mut dir_idx = first_dir_index_at_or_after(plan, slice.start);
     while dir_idx < plan.dirs.len() {
-        poll_blob_scan_directory(cancel_watch)?;
+        boundary.poll_directory()?;
         let Some(dir_range) = plan.dir_ranges.get(dir_idx) else {
             dir_idx += 1;
             continue;
@@ -1339,7 +1359,7 @@ where
                 local,
                 sparse,
                 scanned,
-                cancel_watch,
+                boundary,
                 cancel_stride,
             )?;
         }
@@ -1358,7 +1378,7 @@ fn preload_blob_lookups_parallel<S, P>(
     file_abs: Arc<DirAbsFn>,
     literal_paths: bool,
     sparse: BlobScanSparseMode,
-    cancel_watch: Option<Arc<AtomicBool>>,
+    cancel: StatScanCancel,
 ) -> Result<Vec<Vec<(usize, BlobDiskLookup)>>>
 where
     S: Fn() -> P + Sync,
@@ -1369,30 +1389,18 @@ where
         return Ok(Vec::new());
     }
     let slices = partition_blob_lookup_slices(plan, threads);
-    let mut batches = Vec::with_capacity(slices.len());
+    let worker_count = slices.len();
+    let mut batches = Vec::with_capacity(worker_count);
+    let (done_tx, done_rx) = mpsc::channel();
     std::thread::scope(|scope| {
-        let poller_done = Arc::new(AtomicBool::new(false));
-        if cancel_watch.is_some() {
-            let poller_done = Arc::clone(&poller_done);
-            let watch = cancel_watch.clone();
-            scope.spawn(move || {
-                while !poller_done.load(Ordering::Relaxed) {
-                    if let Some(w) = watch.as_ref() {
-                        if poll_watch(w).is_err() {
-                            break;
-                        }
-                    }
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-            });
-        }
-        let mut handles = Vec::new();
+        let worker_watch = cancel.watch.clone();
         for slice in slices {
             let dir_abs = Arc::clone(&dir_abs);
             let file_abs = Arc::clone(&file_abs);
-            let cancel_watch = cancel_watch.clone();
-            handles.push(
-                scope.spawn(move || -> Result<(Vec<(usize, BlobDiskLookup)>, usize)> {
+            let worker_watch = worker_watch.clone();
+            let done_tx = done_tx.clone();
+            scope.spawn(move || {
+                let result = (|| {
                     let mut local = Vec::new();
                     let mut scanned = 0usize;
                     let mut cancel_stride = 0usize;
@@ -1407,33 +1415,34 @@ where
                         sparse,
                         &mut local,
                         &mut scanned,
-                        cancel_watch.as_ref(),
+                        worker_watch.as_ref(),
                         &mut cancel_stride,
                     )?;
                     Ok((local, scanned))
-                }),
-            );
+                })();
+                let _ = done_tx.send(result);
+            });
         }
+        drop(done_tx);
+
         let mut scanned_total = 0usize;
-        for handle in handles {
-            match handle.join() {
+        while batches.len() < worker_count {
+            match done_rx.recv_timeout(Duration::from_millis(5)) {
                 Ok(Ok((local, scanned))) => {
                     scanned_total += scanned;
                     batches.push(local);
                 }
-                Ok(Err(e)) => {
-                    poller_done.store(true, Ordering::Relaxed);
-                    return Err(e);
-                }
-                Err(_) => {
-                    poller_done.store(true, Ordering::Relaxed);
-                    return Err(Error::Message(
-                        "parallel blob stat worker thread panicked".to_owned(),
-                    ));
+                Ok(Err(e)) => return Err(e),
+                Err(RecvTimeoutError::Timeout) => cancel.poll()?,
+                Err(RecvTimeoutError::Disconnected) => {
+                    if batches.len() < worker_count {
+                        return Err(Error::Message(
+                            "parallel blob stat worker exited before reporting".to_owned(),
+                        ));
+                    }
                 }
             }
         }
-        poller_done.store(true, Ordering::Relaxed);
         if scanned_total != blob_count {
             return Err(Error::Message(format!(
                 "parallel blob stat preload expected {blob_count} scanned entries, got {scanned_total}"
@@ -1460,6 +1469,7 @@ where
     F: FnMut(usize, BlobDiskLookup) -> Result<()>,
     H: FnMut(&[u8]) -> bool,
 {
+    let empty_cancel = empty_stat_cancel();
     let (batch, scanned) = collect_blob_lookups_serial(
         index,
         plan,
@@ -1468,7 +1478,7 @@ where
         &file_abs,
         false,
         BlobScanSparseMode::Dense,
-        None,
+        &empty_cancel,
     )?;
     if scanned != plan.len() {
         return Err(Error::Message(format!(
@@ -1477,6 +1487,13 @@ where
         )));
     }
     visit_blob_lookup_batches(vec![batch], visit)
+}
+
+fn empty_stat_cancel() -> StatScanCancel {
+    StatScanCancel {
+        watch: None,
+        owner_poll: None,
+    }
 }
 
 /// Collect disk lookups for every entry in `plan`, optionally using parallel preload.
@@ -1517,6 +1534,7 @@ where
         symlink_probe,
         sparse,
         None,
+        None,
     )
 }
 
@@ -1544,12 +1562,17 @@ pub(crate) fn collect_blob_lookup_batches_with_literal_paths<S, P>(
     symlink_probe: S,
     sparse: BlobScanSparseMode,
     cancel_watch: Option<Arc<AtomicBool>>,
+    cancel_poll: Option<Arc<crate::progress::StackCancelPoll>>,
 ) -> Result<Vec<Vec<(usize, BlobDiskLookup)>>>
 where
     S: Fn() -> P + Sync,
     P: FnMut(&[u8]) -> bool,
 {
     let blob_count = plan.len();
+    let cancel = StatScanCancel {
+        watch: cancel_watch,
+        owner_poll: cancel_poll,
+    };
     // Keep small scans on the existing metadata path: setting up descriptor-relative
     // probes pays off on the larger indexes that also justify stat preload.
     let literal_paths = literal_paths && blob_count >= PARALLEL_STAT_MIN_ENTRIES;
@@ -1566,7 +1589,7 @@ where
             Arc::clone(&file_abs_arc),
             literal_paths,
             sparse,
-            cancel_watch,
+            cancel,
         )?
     } else {
         let (batch, scanned) = collect_blob_lookups_serial(
@@ -1577,7 +1600,7 @@ where
             file_abs_arc.as_ref(),
             literal_paths,
             sparse,
-            cancel_watch.as_ref(),
+            &cancel,
         )?;
         if scanned != blob_count {
             return Err(Error::Message(format!(
@@ -1824,12 +1847,13 @@ mod tests {
         let handle = open_stat_directory(root).unwrap();
         let indices: Vec<_> = (0..index.entries.len()).collect();
         let mut cancel_stride = 0usize;
+        let boundary = StatBoundaryPoll::Worker(None);
         let result = for_each_blob_at_directory(
             &index,
             &indices,
             &handle,
             root,
-            None,
+            boundary,
             &mut cancel_stride,
             &mut |i, rel, lookup| {
                 let expected =
@@ -1868,12 +1892,13 @@ mod tests {
         index.add_or_replace(entry_from_stat(&path, b"file\0suffix", oid, 0o100644).unwrap());
         let handle = open_stat_directory(tmp.path()).unwrap();
         let mut cancel_stride = 0usize;
+        let boundary = StatBoundaryPoll::Worker(None);
         let error = for_each_blob_at_directory(
             &index,
             &[0],
             &handle,
             tmp.path(),
-            None,
+            boundary,
             &mut cancel_stride,
             &mut |_, _, _| panic!("invalid name must not be truncated and visited"),
         )

@@ -4882,7 +4882,8 @@ pub struct DiffIndexToWorktreeOptions {
     /// When set, long loops abort with [`crate::error::Error::Cancelled`] once the flag is raised
     /// (see [`crate::progress::cancel_watch_arc`] and [`crate::progress::poll_cancel_watch`]).
     pub cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    /// Optional hook invoked at cancel boundaries (for example [`crate::progress::StackCancelPoll`]).
+    /// Owner-thread progress poll hook (see [`crate::progress::StackCancelPoll`]).
+    #[doc(hidden)]
     pub cancel_poll: Option<std::sync::Arc<crate::progress::StackCancelPoll>>,
 }
 
@@ -4924,13 +4925,11 @@ fn poll_diff_cancel_watch(
 #[inline]
 fn poll_diff_cancel(options: &DiffIndexToWorktreeOptions) -> crate::error::Result<()> {
     if let Some(poll) = options.cancel_poll.as_ref() {
-        // SAFETY: `StackCancelPoll` is only registered for the synchronous diff call on the
-        // owning thread; parallel stat workers read `cancel_watch` instead.
-        unsafe {
-            poll.poll()?;
-        }
+        poll.poll_owner()?;
+    } else {
+        poll_diff_cancel_watch(options.cancel_watch.as_ref())?;
     }
-    poll_diff_cancel_watch(options.cancel_watch.as_ref())
+    Ok(())
 }
 
 struct StagingHashJob {
@@ -5764,6 +5763,7 @@ fn diff_index_to_worktree_inner(
         },
         sparse,
         options.cancel_watch.clone(),
+        options.cancel_poll.clone(),
     )?;
     // Size-changed entries ask whether their clean conversion is the identity in both the stat
     // refresh and the visit below; resolve each one's attributes once.

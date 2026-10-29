@@ -287,24 +287,18 @@ pub fn poll_watch(watch: &std::sync::atomic::AtomicBool) -> crate::error::Result
 }
 
 /// Poll hook for long [`crate::diff::diff_index_to_worktree_with_options`] scans on the stack
-/// frame that owns `progress` and `cancel`.
+/// frame that owns `progress`.
 ///
-/// Marked `Send` so parallel stat preload can share the same [`Arc`] with worker threads; callers
-/// must only invoke [`Self::poll`] from the thread that owns the stack locals (or accept that
-/// parallel workers rely on [`cancel_watch_arc`] alone).
-pub struct StackCancelPoll {
+/// [`Self::poll_owner`] must run only on the thread that owns the captured `WatchProgress`.
+pub(crate) struct StackCancelPoll {
     progress: usize,
     watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
-// Pointer refers to a stack-local `WatchProgress` for the duration of one diff call.
-unsafe impl Send for StackCancelPoll {}
-unsafe impl Sync for StackCancelPoll {}
-
 impl StackCancelPoll {
-    /// Capture `progress` and `watch` for [`Self::poll`].
+    /// Capture `progress` and `watch` for [`Self::poll_owner`].
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         progress: &mut WatchProgress<'_>,
         watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
@@ -315,18 +309,33 @@ impl StackCancelPoll {
     }
 
     /// Mirror [`ProgressSink::should_cancel`] into `watch`, then [`poll_watch`].
-    ///
-    /// # Safety
-    ///
-    /// Must run on the thread that owns the captured `progress` local, and only while it is live
-    /// (during a single diff call).
-    pub unsafe fn poll(&self) -> crate::error::Result<()> {
-        let progress = &mut *(self.progress as *mut WatchProgress<'_>);
+    pub(crate) fn poll_owner(&self) -> crate::error::Result<()> {
+        // SAFETY: only invoked on the owning thread while the captured `WatchProgress` is live.
+        let progress = unsafe { &mut *(self.progress as *mut WatchProgress<'_>) };
         if progress.should_cancel() {
             self.watch.store(true, std::sync::atomic::Ordering::Relaxed);
             return Err(crate::error::Error::Cancelled);
         }
         poll_watch(&self.watch)
+    }
+}
+
+/// Cancellation inputs for worktree stat scans: worker-visible `watch` plus an owner-thread poll hook.
+pub(crate) struct StatScanCancel {
+    pub watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub owner_poll: Option<std::sync::Arc<StackCancelPoll>>,
+}
+
+impl StatScanCancel {
+    /// Poll owner progress (when present), otherwise the shared watch flag.
+    pub(crate) fn poll(&self) -> crate::error::Result<()> {
+        if let Some(poll) = self.owner_poll.as_ref() {
+            poll.poll_owner()
+        } else if let Some(w) = self.watch.as_ref() {
+            poll_watch(w)
+        } else {
+            Ok(())
+        }
     }
 }
 

@@ -104,35 +104,45 @@ fn status_returns_cancelled_during_tracked_stat_scan_with_flag_cancel() {
 
 #[test]
 fn status_returns_cancelled_during_tracked_stat_scan_with_progress_sink() {
-    struct CancelSink(Arc<AtomicBool>);
+    struct CancelSink {
+        requested: Arc<AtomicBool>,
+    }
 
     impl ProgressSink for CancelSink {
         fn should_cancel(&self) -> bool {
-            self.0.load(Ordering::Relaxed)
+            self.requested.load(Ordering::Relaxed)
         }
     }
 
     let (_tmp, repo) = repo_with_many_tracked_files();
     let opts = status_opts();
 
-    let watch = Arc::new(AtomicBool::new(false));
-    let mut sink = CancelSink(Arc::clone(&watch));
-    let mut progress =
-        grit_lib::progress::WatchProgress::new(&mut sink, std::sync::Arc::clone(&watch));
-    let watch_for_thread = Arc::clone(&watch);
+    let baseline = Instant::now();
+    status(&repo, &opts, &mut NullProgress, &NeverCancel).expect("baseline status");
+    let baseline_elapsed = baseline.elapsed();
+    assert!(
+        baseline_elapsed > Duration::from_millis(150),
+        "fixture should spend measurable time in stat scan (got {baseline_elapsed:?})"
+    );
+
+    let requested = Arc::new(AtomicBool::new(false));
+    let mut sink = CancelSink {
+        requested: Arc::clone(&requested),
+    };
+    let trigger = Arc::clone(&requested);
     let sleeper = thread::spawn(move || {
         thread::sleep(Duration::from_millis(50));
-        watch_for_thread.store(true, Ordering::Relaxed);
+        trigger.store(true, Ordering::Relaxed);
     });
 
     let started = Instant::now();
-    let err =
-        status(&repo, &opts, &mut progress, &NeverCancel).expect_err("sink cancel mid stat scan");
+    let err = status(&repo, &opts, &mut sink, &NeverCancel).expect_err("sink cancel mid stat scan");
     sleeper.join().expect("join");
     assert!(matches!(err, Error::Cancelled));
+    let elapsed = started.elapsed();
     assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "sink cancel should not wait for the entire stat scan"
+        elapsed < baseline_elapsed / 2,
+        "sink cancel at 50 ms should finish well before a full scan ({elapsed:?} vs baseline {baseline_elapsed:?})"
     );
 }
 
