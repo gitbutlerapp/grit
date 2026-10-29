@@ -102,6 +102,7 @@ fn ensure_many_pack_source_in(
     run_git(git, &dir, &["init", "-q", "-b", "main"])?;
     // Git 2.45+ may run incremental repack during pack-objects when several small
     // packfiles exist; that merges packs and breaks the many-pack fixture layout.
+    run_git(git, &dir, &["config", "gc.auto", "0"])?;
     run_git(git, &dir, &["config", "maintenance.auto", "false"])?;
     run_git(git, &dir, &["config", "uploadpack.allowFilter", "true"])?;
     run_git(
