@@ -790,6 +790,12 @@ enum PackedObjectEntry {
     Stored { kind: ObjectKind, oid: ObjectId },
 }
 
+fn packed_entry_kind(entry: &PackedObjectEntry) -> ObjectKind {
+    match entry {
+        PackedObjectEntry::DryRun { kind, .. } | PackedObjectEntry::Stored { kind, .. } => *kind,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn record_resolved_object(
     by_offset: &mut HashMap<usize, PackedObjectEntry>,
@@ -1022,7 +1028,11 @@ fn strict_verify_packed_references_map<S: UnpackSink + ?Sized>(
     shallow_boundaries: &HashSet<ObjectId>,
 ) -> Result<()> {
     for (oid, entry) in pack {
-        let (kind, data) = entry_payload_for_strict(entry, sink, oid)?;
+        let kind = packed_entry_kind(entry);
+        if kind == ObjectKind::Blob {
+            continue;
+        }
+        let (_, data) = entry_payload_for_strict(entry, sink, oid)?;
         match kind {
             ObjectKind::Tree => {
                 for e in parse_tree(&data)? {
@@ -3070,5 +3080,144 @@ mod tests {
             0,
             "must not read streamed blobs back for strict fsck"
         );
+    }
+
+    #[test]
+    fn strict_verify_does_not_reload_streamed_blobs() {
+        use std::cell::Cell;
+
+        use crate::index::MODE_REGULAR;
+        use crate::objects::{serialize_commit, serialize_tree, CommitData, TreeEntry};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let odb = Odb::new(tmp.path());
+        let big: Vec<u8> = vec![b'x'; 2 * 1024 * 1024 + 1];
+        let big_oid = odb.write(ObjectKind::Blob, &big).expect("write blob");
+
+        let tree_data = serialize_tree(&[TreeEntry {
+            mode: MODE_REGULAR,
+            name: b"big.bin".to_vec(),
+            oid: big_oid,
+        }]);
+        let tree_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Tree, &tree_data)
+            .expect("hash");
+        let commit = CommitData {
+            tree: tree_oid,
+            parents: vec![],
+            author: "A <a@b.com>".into(),
+            committer: "A <a@b.com>".into(),
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: "m".into(),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        };
+        let commit_data = serialize_commit(&commit);
+        let commit_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Commit, &commit_data)
+            .expect("hash");
+
+        struct CountingSink<'a> {
+            inner: &'a Odb,
+            reads: Cell<usize>,
+        }
+
+        impl UnpackSink for CountingSink<'_> {
+            fn hash_algo(&self) -> HashAlgo {
+                Odb::hash_algo(self.inner)
+            }
+
+            fn write(&self, kind: ObjectKind, data: &[u8], dry_run: bool) -> Result<ObjectId> {
+                if dry_run {
+                    return self.inner.hash(kind, data);
+                }
+                self.inner.write(kind, data)
+            }
+
+            fn read_stored(&self, oid: &ObjectId) -> Result<Option<Object>> {
+                self.reads.set(self.reads.get() + 1);
+                self.inner.read_stored(oid)
+            }
+
+            fn contains(&self, oid: &ObjectId) -> Result<bool> {
+                Odb::contains(self.inner, oid)
+            }
+        }
+
+        let mut by_oid = HashMap::new();
+        by_oid.insert(
+            big_oid,
+            PackedObjectEntry::Stored {
+                kind: ObjectKind::Blob,
+                oid: big_oid,
+            },
+        );
+        by_oid.insert(
+            tree_oid,
+            PackedObjectEntry::DryRun {
+                kind: ObjectKind::Tree,
+                data: tree_data,
+            },
+        );
+        by_oid.insert(
+            commit_oid,
+            PackedObjectEntry::DryRun {
+                kind: ObjectKind::Commit,
+                data: commit_data,
+            },
+        );
+
+        let sink = CountingSink {
+            inner: &odb,
+            reads: Cell::new(0),
+        };
+        strict_verify_packed_references_map(
+            &sink,
+            &by_oid,
+            &HashSet::new(),
+            false,
+            &HashSet::new(),
+        )
+        .expect("strict connectivity");
+        assert_eq!(
+            sink.reads.get(),
+            0,
+            "strict verify must not read streamed blob payloads"
+        );
+
+        let missing = ObjectId::from_hex(&"ab".repeat(20)).unwrap();
+        let bad_tree = serialize_tree(&[TreeEntry {
+            mode: MODE_REGULAR,
+            name: b"missing".to_vec(),
+            oid: missing,
+        }]);
+        let bad_tree_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Tree, &bad_tree)
+            .expect("hash");
+        let mut bad = HashMap::new();
+        bad.insert(
+            bad_tree_oid,
+            PackedObjectEntry::DryRun {
+                kind: ObjectKind::Tree,
+                data: bad_tree,
+            },
+        );
+        let sink2 = CountingSink {
+            inner: &odb,
+            reads: Cell::new(0),
+        };
+        assert!(matches!(
+            strict_verify_packed_references_map(
+                &sink2,
+                &bad,
+                &HashSet::new(),
+                false,
+                &HashSet::new(),
+            ),
+            Err(Error::CorruptObject(_))
+        ));
+        assert_eq!(sink2.reads.get(), 0);
     }
 }
