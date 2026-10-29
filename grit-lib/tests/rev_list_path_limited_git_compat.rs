@@ -362,6 +362,121 @@ fn git_path_count(wt: &std::path::Path, path: &str) -> usize {
         .expect("git count")
 }
 
+fn git_path_rev_list(wt: &std::path::Path, path: &str) -> Vec<String> {
+    git(wt, &["rev-list", "HEAD", "--", path])
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+fn grit_path_rev_list(wt: &std::path::Path, path: &str) -> Vec<String> {
+    grit_path_commits(wt, &["HEAD"], path, None)
+        .iter()
+        .map(ObjectId::to_hex)
+        .collect()
+}
+
+fn import_partial_prefix_wildcard_fixture(wt: &std::path::Path) {
+    git(wt, &["init", "-q"]);
+    std::fs::create_dir_all(wt.join("builtin")).expect("mkdir");
+    std::fs::create_dir_all(wt.join("other")).expect("mkdir");
+    std::fs::write(wt.join("builtin/log.c"), "1\n").expect("write");
+    std::fs::write(wt.join("other/log.c"), "1\n").expect("write");
+    git(wt, &["add", "."]);
+    git(wt, &["commit", "-qm", "both"]);
+    std::fs::write(wt.join("builtin/log.c"), "2\n").expect("touch builtin");
+    git(wt, &["add", "builtin/log.c"]);
+    git(wt, &["commit", "-qm", "builtin only"]);
+}
+
+#[test]
+fn path_limited_icase_partial_prefix_non_ascii_dir_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q"]);
+    std::fs::create_dir_all(wt.join("é")).expect("mkdir");
+    std::fs::write(wt.join("é/log.c"), "1\n").expect("write");
+    git(wt, &["add", "."]);
+    git(wt, &["commit", "-qm", "one"]);
+
+    let spec = ":(icase)b*/log.c";
+    assert_eq!(git_path_count(wt, spec), 0);
+    assert_eq!(grit_path_count(wt, spec), 0);
+    assert!(git_path_rev_list(wt, spec).is_empty());
+    assert!(grit_path_rev_list(wt, spec).is_empty());
+}
+
+#[test]
+fn path_limited_partial_prefix_wildcard_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    import_partial_prefix_wildcard_fixture(wt);
+
+    for spec in [
+        "b*/log.c",
+        ":(glob)b*/log.c",
+        "bu?ltin/log.c",
+        ":(icase)B*/LOG.C",
+    ] {
+        let git_list = git_path_rev_list(wt, spec);
+        let grit_list = grit_path_rev_list(wt, spec);
+        assert_eq!(grit_list, git_list, "spec {spec:?}");
+        assert_eq!(git_list.len(), 2, "spec {spec:?}");
+    }
+    let unrelated = grit_path_count(wt, "other/log.c");
+    assert_eq!(unrelated, git_path_count(wt, "other/log.c"));
+    assert_eq!(unrelated, 1);
+}
+
+fn import_issue_2299_wildcard_fixture(wt: &std::path::Path) {
+    git(wt, &["init", "-q"]);
+    std::fs::create_dir_all(wt.join("a/b")).expect("mkdir");
+    std::fs::write(wt.join("a/b/f.c"), "1\n").expect("write");
+    std::fs::write(wt.join("a/g.c"), "1\n").expect("write");
+    std::fs::write(wt.join("top.c"), "1\n").expect("write");
+    git(wt, &["add", "."]);
+    git(wt, &["commit", "-qm", "one"]);
+    for path in ["a/b/f.c", "a/g.c", "top.c"] {
+        std::fs::write(wt.join(path), "2\n").expect("touch");
+    }
+    git(wt, &["commit", "-qam", "two"]);
+}
+
+#[test]
+fn path_limited_wildcard_pathspec_matrix_matches_git_issue_2299() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    import_issue_2299_wildcard_fixture(wt);
+
+    for spec in [
+        "a/g.c",
+        "*/g.c",
+        "**/g.c",
+        "*g.c",
+        "a/*/f.c",
+        ":(glob)**/f.c",
+        ":(glob)a/**/f.c",
+        ":(glob)*/g.c",
+        ":(icase)A/g.c",
+        ":(icase,glob)A/*.C",
+        ":(top,glob)**/f.c",
+        ":(literal)*g.c",
+        "a/*.c",
+    ] {
+        let git_list = git_path_rev_list(wt, spec);
+        let grit_list = grit_path_rev_list(wt, spec);
+        assert_eq!(grit_list, git_list, "spec {spec:?}");
+    }
+
+    let narrow = grit_path_count(wt, "a/*.c");
+    let git_narrow = git_path_count(wt, "a/*.c");
+    assert_eq!(narrow, git_narrow);
+    assert_eq!(narrow, 2);
+    let deep = grit_path_count(wt, "a/b/f.c");
+    assert_eq!(deep, git_path_count(wt, "a/b/f.c"));
+    assert_eq!(deep, 2);
+}
+
 #[test]
 fn path_limited_single_directory_name_count_matches_git() {
     let hist = HistoryRepo::init();

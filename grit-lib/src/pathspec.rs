@@ -841,8 +841,12 @@ pub(crate) fn pathspec_entry_is_relevant(path: &str, is_tree: bool, specs: &[Str
         || (is_tree && pathspec_wants_descent_for_rev_tree(path, specs))
 }
 
-/// Whether tree-walking should recurse into directory `full_name` for pathspec `spec` without
-/// `-r` (Git `read_tree` / `show_recursive` “interesting” descent).
+/// Whether a path-limited tree walk should recurse into directory `full_name` for pathspec `spec`.
+///
+/// Used by revision history path limiting ([`crate::rev_list`]) and diff tree pruning
+/// ([`crate::diff::core::DiffTreesWalkHint`]). Matches Git `tree-walk.c` `do_match` recursive
+/// directory interest: a directory is entered when a positive spec's leading literal segment
+/// matches it, or when the pattern begins with a glob metacharacter (`simple_length` zero).
 ///
 /// Exclude-only patterns never trigger descent alone.
 #[must_use]
@@ -870,8 +874,129 @@ pub fn pathspec_wants_descent_into_tree(spec: &str, full_name: &str) -> bool {
     if pattern.starts_with(&dir_prefix) {
         return true;
     }
-    let probe = format!("{full_name}/.__grit_ls_tree_probe__");
-    matches_ls_tree_pathspec(spec, &probe, 0o100644, &[])
+    if ps_str_eq(pattern, full_name, magic.icase) {
+        return true;
+    }
+    pathspec_recursive_descent_wanted(pattern, magic, full_name)
+}
+
+fn pathspec_literal_descent_wanted(pattern: &str, dir: &str) -> bool {
+    if pattern.is_empty() {
+        return false;
+    }
+    if let Some(prefix) = pattern.strip_suffix('/') {
+        return dir == prefix || path_is_under_dir(dir, prefix, false);
+    }
+    if dir == pattern {
+        return false;
+    }
+    dir.len() < pattern.len()
+        && path_starts_with(pattern, dir, false)
+        && pattern.as_bytes()[dir.len()] == b'/'
+}
+
+fn pathspec_recursive_descent_wanted(pattern: &str, magic: PathspecMagic, dir: &str) -> bool {
+    if magic.literal {
+        return pathspec_literal_descent_wanted(pattern, dir);
+    }
+    if simple_length(pattern) == 0 {
+        return true;
+    }
+
+    let icase = magic.icase;
+    let glob = magic.glob;
+    let components: Vec<&str> = dir.split('/').filter(|c| !c.is_empty()).collect();
+    pathspec_descent_match_components(pattern, icase, glob, &components)
+}
+
+fn pathspec_first_component(pat: &str) -> (&str, &str) {
+    match pat.find('/') {
+        Some(i) => (&pat[..i], &pat[i + 1..]),
+        None => (pat, ""),
+    }
+}
+
+fn pathspec_dir_name_matches_component(
+    pat_comp: &str,
+    dir_name: &str,
+    icase: bool,
+    glob: bool,
+) -> bool {
+    if pat_comp.is_empty() {
+        return true;
+    }
+    let nwl = simple_length(pat_comp);
+    if nwl == 0 {
+        return true;
+    }
+    if nwl >= pat_comp.len() {
+        return ps_str_eq(pat_comp, dir_name, icase);
+    }
+    let lit = &pat_comp[..nwl];
+    let lit_bytes = lit.as_bytes();
+    let dir_bytes = dir_name.as_bytes();
+    if icase {
+        if dir_bytes.len() < lit_bytes.len()
+            || !dir_bytes[..lit_bytes.len()].eq_ignore_ascii_case(lit_bytes)
+        {
+            return false;
+        }
+    } else if dir_bytes.len() < lit_bytes.len() || &dir_bytes[..lit_bytes.len()] != lit_bytes {
+        return false;
+    }
+    let flags = if icase { WM_CASEFOLD } else { 0 };
+    let wm_flags = if glob { flags | WM_PATHNAME } else { flags };
+    wildmatch(pat_comp.as_bytes(), dir_name.as_bytes(), wm_flags)
+}
+
+fn pathspec_descent_match_components(
+    pat: &str,
+    icase: bool,
+    glob: bool,
+    dir_components: &[&str],
+) -> bool {
+    if dir_components.is_empty() {
+        return simple_length(pat) == 0 || !pat.is_empty();
+    }
+    if simple_length(pat) == 0 {
+        return true;
+    }
+    let (pat_comp, pat_rest) = pathspec_first_component(pat);
+    if !pathspec_dir_name_matches_component(pat_comp, dir_components[0], icase, glob) {
+        return false;
+    }
+    pathspec_descent_match_components(pat_rest, icase, glob, &dir_components[1..])
+}
+
+#[cfg(test)]
+mod pathspec_descent_tests {
+    use super::*;
+
+    #[test]
+    fn descent_wildcard_non_final_component() {
+        assert!(pathspec_wants_descent_into_tree("*/g.c", "a"));
+        assert!(pathspec_wants_descent_into_tree("a/*/f.c", "a"));
+        assert!(pathspec_wants_descent_into_tree("a/*/f.c", "a/b"));
+        assert!(pathspec_wants_descent_into_tree(":(glob)**/f.c", "a"));
+        assert!(pathspec_wants_descent_into_tree(":(glob)*/g.c", "a"));
+        assert!(pathspec_wants_descent_into_tree(":(icase)A/g.c", "a"));
+        assert!(!pathspec_wants_descent_into_tree(":(literal)*g.c", "a"));
+        assert!(!pathspec_wants_descent_into_tree("a/*.c", "b"));
+        assert!(pathspec_wants_descent_into_tree("b*/log.c", "builtin"));
+        assert!(!pathspec_wants_descent_into_tree("b*/log.c", "other"));
+        assert!(pathspec_wants_descent_into_tree("bu?ltin/log.c", "builtin"));
+        assert!(pathspec_wants_descent_into_tree(
+            ":(icase)B*/LOG.C",
+            "builtin"
+        ));
+        assert!(!pathspec_wants_descent_into_tree(":(icase)b*/log.c", "é"));
+    }
+
+    #[test]
+    fn glob_doublestar_path_matches_nested_file() {
+        let specs = vec![":(glob)**/f.c".to_owned()];
+        assert!(matches_pathspec_list("a/b/f.c", &specs));
+    }
 }
 
 /// Like [`matches_pathspec_set_for_object`], but uses [`matches_ls_tree_pathspec`] for each
