@@ -27661,6 +27661,7 @@ pub grit_lib::revwalk::queries::RevWalkListOptions::cherry_mark: bool
 pub grit_lib::revwalk::queries::RevWalkListOptions::commit_filter: core::option::Option<alloc::rcs::arc::Arc<grit_lib::revwalk::filter::CommitFilter>>
 pub grit_lib::revwalk::queries::RevWalkListOptions::first_parent: bool
 pub grit_lib::revwalk::queries::RevWalkListOptions::follow: bool
+pub grit_lib::revwalk::queries::RevWalkListOptions::full_history: bool
 pub grit_lib::revwalk::queries::RevWalkListOptions::graph: bool
 pub grit_lib::revwalk::queries::RevWalkListOptions::left_right: bool
 pub grit_lib::revwalk::queries::RevWalkListOptions::limit: core::option::Option<usize>

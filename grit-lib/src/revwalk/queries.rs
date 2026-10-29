@@ -88,6 +88,8 @@ pub struct RevWalkListOptions {
     pub paths: Vec<String>,
     /// Follow renames for a single literal file path (Git `log --follow`).
     pub follow: bool,
+    /// Include merge commits on the followed path (`log --follow --full-history`).
+    pub full_history: bool,
     /// Author/committer/grep filter (same semantics as `git rev-list` / `git log`).
     pub commit_filter: Option<Arc<CommitFilter>>,
     /// Pickaxe filter (`-S` / `-G`).
@@ -287,6 +289,7 @@ pub(crate) fn rev_list_options_from_walk(
         left_right: walk.left_right || walk.cherry_mark,
         cherry_mark: walk.cherry_mark,
         follow: walk.follow,
+        full_history: walk.full_history,
         ..RevListOptions::default()
     })
 }

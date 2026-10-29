@@ -224,6 +224,7 @@ impl RevSelectArgs {
             refs: ref_selections(self),
             first_parent: self.first_parent,
             follow: self.follow,
+            full_history: false,
             paths: walk_paths.to_vec(),
             commit_filter,
             pickaxe,
