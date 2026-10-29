@@ -19557,8 +19557,8 @@ pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_ref(&self, &mut dyn
 pub fn grit_lib::refs::store::FilesRefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::FilesRefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::FilesRefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
-pub fn grit_lib::refs::store::FilesRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::FilesRefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
+pub fn grit_lib::refs::store::FilesRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::FilesRefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::store::FilesRefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
@@ -19603,8 +19603,8 @@ pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_ref(&self, &mut dy
 pub fn grit_lib::refs::store::MemoryRefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::MemoryRefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::MemoryRefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
-pub fn grit_lib::refs::store::MemoryRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::MemoryRefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
+pub fn grit_lib::refs::store::MemoryRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::MemoryRefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::store::MemoryRefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
@@ -19813,8 +19813,8 @@ pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_ref(&self, &mut 
 pub fn grit_lib::refs::store::ReftableRefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::ReftableRefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::ReftableRefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
-pub fn grit_lib::refs::store::ReftableRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::ReftableRefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
+pub fn grit_lib::refs::store::ReftableRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::ReftableRefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::store::ReftableRefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
@@ -19839,8 +19839,8 @@ pub fn grit_lib::refs::store::RefStore::for_each_reflog_ref(&self, &mut dyn core
 pub fn grit_lib::refs::store::RefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::RefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::RefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
-pub fn grit_lib::refs::store::RefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::RefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
+pub fn grit_lib::refs::store::RefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::RefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::RefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::store::RefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
@@ -19855,8 +19855,8 @@ pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_ref(&self, &mut dyn
 pub fn grit_lib::refs::store::FilesRefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::FilesRefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::FilesRefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
-pub fn grit_lib::refs::store::FilesRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::FilesRefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
+pub fn grit_lib::refs::store::FilesRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::FilesRefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::store::FilesRefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
@@ -19871,8 +19871,8 @@ pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_ref(&self, &mut dy
 pub fn grit_lib::refs::store::MemoryRefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::MemoryRefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::MemoryRefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
-pub fn grit_lib::refs::store::MemoryRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::MemoryRefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
+pub fn grit_lib::refs::store::MemoryRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::MemoryRefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::store::MemoryRefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
@@ -19887,8 +19887,8 @@ pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_ref(&self, &mut 
 pub fn grit_lib::refs::store::ReftableRefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::ReftableRefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::ReftableRefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
-pub fn grit_lib::refs::store::ReftableRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::ReftableRefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
+pub fn grit_lib::refs::store::ReftableRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::store::ReftableRefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::store::ReftableRefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
