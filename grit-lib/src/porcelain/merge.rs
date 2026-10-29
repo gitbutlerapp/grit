@@ -937,6 +937,15 @@ pub enum IntegrateBranchOutcome {
 
 /// Integrate `other_oid` into the branch `into_ref` (currently at `into_oid`).
 ///
+/// `into_ref` is the branch being merged into: either a full ref name (for example
+/// `refs/heads/main`) or a short local branch name (for example `main` or
+/// `feature/nested`, stored as `refs/heads/{into_ref}`). Short names that do not resolve
+/// return [`Error::BranchNotFound`].
+///
+/// `label` names the other side in merge messages and reflogs: the default merge commit
+/// subject is `Merge {label}` (see [`MergeOptions::message`]), and branch reflog lines
+/// use `merge {label}` or `merge {label}: fast-forward` on fast-forward.
+///
 /// On success without conflicts, updates the branch ref, index, and worktree. On
 /// conflicts, records `MERGE_HEAD` / `ORIG_HEAD` / `MERGE_MSG`, writes conflict
 /// markers and a partially merged index, and leaves the branch ref unchanged.
@@ -955,9 +964,10 @@ pub enum IntegrateBranchOutcome {
 /// Propagates merge, checkout, ref, and I/O failures. Returns [`Error::WouldOverwrite`]
 /// when local or untracked paths would be overwritten by the merge tree, and
 /// [`Error::DirtyWorktree`] when the worktree is not clean but no specific paths were
-/// collected. Returns [`Error::Message`] when the histories are unrelated or `into_ref`
-/// no longer points at `into_oid` (checked before the worktree is touched, and again
-/// when the ref moves).
+/// collected. Returns [`Error::Message`] when the histories are unrelated. Returns
+/// [`Error::RefStore`] with [`crate::refs::store::RefStoreError::ExpectedMismatch`] when
+/// the canonical branch ref no longer points at `into_oid` (checked before the worktree
+/// is touched, and again when the ref moves).
 /// Returns [`Error::Cancelled`] when cancelled; the branch, `HEAD`, the index and the merge
 /// state are unchanged, and a cancel during the checkout rolls the work tree back.
 pub fn integrate_branch(
@@ -982,6 +992,9 @@ pub fn integrate_branch(
 }
 
 /// Integrate `other_oid` into the branch at `into_ref` with explicit merge options.
+///
+/// `into_ref` accepts a full ref name or a short local branch name; see [`integrate_branch`].
+/// `label` is used for merge messages and reflogs as documented on [`integrate_branch`].
 ///
 /// Before a clean merge records its commit, runs `pre-merge-commit`, then
 /// `prepare-commit-msg .git/MERGE_MSG merge` and `commit-msg .git/MERGE_MSG` with `MERGE_HEAD`
@@ -1036,6 +1049,21 @@ pub fn integrate_branch_with(
     Ok(outcome)
 }
 
+/// Map `into_ref` to the ref updated by integrate: full `refs/…` names are kept;
+/// otherwise treat as a short local branch under `refs/heads/`.
+fn canonical_integrate_into_ref(repo: &Repository, into_ref: &str) -> Result<String> {
+    if into_ref.starts_with("refs/") {
+        return Ok(into_ref.to_owned());
+    }
+    let canonical = format!("refs/heads/{into_ref}");
+    if repo.refs().resolve(&canonical).is_err() {
+        return Err(Error::BranchNotFound {
+            branch: into_ref.to_owned(),
+        });
+    }
+    Ok(canonical)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn integrate_branch_without_hooks(
     repo: &Repository,
@@ -1047,11 +1075,12 @@ fn integrate_branch_without_hooks(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<IntegrateBranchOutcome> {
+    let into_ref = canonical_integrate_into_ref(repo, into_ref)?;
     if into_oid == other_oid || is_ancestor(repo, other_oid, into_oid)? {
         write_orig_head(repo, into_oid)?;
         return Ok(IntegrateBranchOutcome::UpToDate);
     }
-    ensure_branch_tip(repo, into_ref, Some(into_oid))?;
+    ensure_branch_tip(repo, &into_ref, Some(into_oid))?;
     poll_cancel(progress, cancel)?;
     // Like Git, every merge attempt past this point records where it started, including a
     // refused fast-forward-only merge and one that stops on conflicts.
@@ -1080,7 +1109,7 @@ fn integrate_branch_without_hooks(
         merge_checkout_tree_transition(repo, Some(&into_tree), &other_tree, progress, cancel)?;
         move_branch(
             repo,
-            into_ref,
+            &into_ref,
             into_oid,
             other_oid,
             &format!("merge {label}: fast-forward"),
@@ -1208,7 +1237,7 @@ fn integrate_branch_without_hooks(
             let oid = stamp_change_id_on_new_commit(repo, &policy, &mut commit)
                 .and_then(|()| write_commit_object(repo, &commit, None))
                 .and_then(|oid| {
-                    move_branch(repo, into_ref, into_oid, oid, &format!("merge {label}"))
+                    move_branch(repo, &into_ref, into_oid, oid, &format!("merge {label}"))
                         .map(|()| oid)
                 })
                 .inspect_err(|_| {
@@ -1223,6 +1252,8 @@ fn integrate_branch_without_hooks(
 }
 
 /// Like [`integrate_branch`], with explicit fast-forward policy for [`pull`](crate::porcelain::pull).
+///
+/// `into_ref` and `label` follow [`integrate_branch`].
 ///
 /// # Errors
 ///
@@ -2261,6 +2292,202 @@ mod integrate_tests {
             .expect("tip");
         assert_eq!(tip, oid);
         grit_test_support::git(tmp.path(), &["fsck", "--strict"]);
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn integrate_branch_accepts_short_into_ref() {
+        use crate::error::Error;
+        use crate::refs::store::RefStoreError;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        grit_test_support::git(tmp.path(), &["init", "-q", "-b", "main"]);
+        grit_test_support::git(tmp.path(), &["config", "user.name", "Test"]);
+        grit_test_support::git(tmp.path(), &["config", "user.email", "t@example.com"]);
+        let repo =
+            Repository::discover(Some(tmp.path()), &RepositoryOptions::empty()).expect("repo");
+        std::fs::write(tmp.path().join("a.txt"), "base\n").expect("write");
+        grit_test_support::git(tmp.path(), &["add", "a.txt"]);
+        grit_test_support::git(tmp.path(), &["commit", "-m", "base"]);
+        grit_test_support::git(tmp.path(), &["switch", "-c", "other"]);
+        std::fs::write(tmp.path().join("o.txt"), "other\n").expect("write");
+        grit_test_support::git(tmp.path(), &["add", "o.txt"]);
+        grit_test_support::git(tmp.path(), &["commit", "-m", "other"]);
+        let other: ObjectId = grit_test_support::git(tmp.path(), &["rev-parse", "other"])
+            .trim()
+            .parse()
+            .expect("other");
+        grit_test_support::git(tmp.path(), &["checkout", "main"]);
+        std::fs::write(tmp.path().join("m.txt"), "main\n").expect("write");
+        grit_test_support::git(tmp.path(), &["add", "m.txt"]);
+        grit_test_support::git(tmp.path(), &["commit", "-m", "main"]);
+        let main: ObjectId = grit_test_support::git(tmp.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .expect("main");
+
+        let outcome = integrate_branch(
+            &repo,
+            "main",
+            main,
+            other,
+            "other",
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("short into_ref");
+        let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {
+            panic!("expected merge");
+        };
+        let commit = repo.odb().read_commit(&oid).expect("merge commit");
+        assert_eq!(commit.message, "Merge other\n");
+        let tip_short: ObjectId =
+            grit_test_support::git(tmp.path(), &["rev-parse", "refs/heads/main"])
+                .trim()
+                .parse()
+                .expect("main tip");
+        assert_eq!(tip_short, oid);
+
+        let tmp_full = tempfile::tempdir().expect("tempdir");
+        grit_test_support::git(tmp_full.path(), &["init", "-q", "-b", "main"]);
+        grit_test_support::git(tmp_full.path(), &["config", "user.name", "Test"]);
+        grit_test_support::git(tmp_full.path(), &["config", "user.email", "t@example.com"]);
+        let repo_full =
+            Repository::discover(Some(tmp_full.path()), &RepositoryOptions::empty()).expect("repo");
+        std::fs::write(tmp_full.path().join("a.txt"), "base\n").expect("write");
+        grit_test_support::git(tmp_full.path(), &["add", "a.txt"]);
+        grit_test_support::git(tmp_full.path(), &["commit", "-m", "base"]);
+        grit_test_support::git(tmp_full.path(), &["switch", "-c", "other"]);
+        std::fs::write(tmp_full.path().join("o.txt"), "other\n").expect("write");
+        grit_test_support::git(tmp_full.path(), &["add", "o.txt"]);
+        grit_test_support::git(tmp_full.path(), &["commit", "-m", "other"]);
+        let other_full: ObjectId = grit_test_support::git(tmp_full.path(), &["rev-parse", "other"])
+            .trim()
+            .parse()
+            .expect("other");
+        grit_test_support::git(tmp_full.path(), &["checkout", "main"]);
+        std::fs::write(tmp_full.path().join("m.txt"), "main\n").expect("write");
+        grit_test_support::git(tmp_full.path(), &["add", "m.txt"]);
+        grit_test_support::git(tmp_full.path(), &["commit", "-m", "main"]);
+        let main_full: ObjectId = grit_test_support::git(tmp_full.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .expect("main");
+        let outcome_full = integrate_branch(
+            &repo_full,
+            "refs/heads/main",
+            main_full,
+            other_full,
+            "other",
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("full into_ref");
+        assert!(matches!(
+            outcome_full,
+            IntegrateBranchOutcome::Merged { .. }
+        ));
+        let IntegrateBranchOutcome::Merged { oid: oid_full, .. } = outcome_full else {
+            unreachable!();
+        };
+        let commit_full = repo_full
+            .odb()
+            .read_commit(&oid_full)
+            .expect("merge commit");
+        assert_eq!(commit_full.message, "Merge other\n");
+
+        grit_test_support::git(tmp.path(), &["switch", "-c", "feature/foo"]);
+        std::fs::write(tmp.path().join("nested.txt"), "feature\n").expect("write");
+        grit_test_support::git(tmp.path(), &["add", "nested.txt"]);
+        grit_test_support::git(tmp.path(), &["commit", "-m", "feature"]);
+        let feature_tip: ObjectId = grit_test_support::git(tmp.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .expect("feature");
+        grit_test_support::git(tmp.path(), &["checkout", "main"]);
+        std::fs::write(tmp.path().join("main2.txt"), "main2\n").expect("write");
+        grit_test_support::git(tmp.path(), &["add", "main2.txt"]);
+        grit_test_support::git(tmp.path(), &["commit", "-m", "main2"]);
+        let main2: ObjectId = grit_test_support::git(tmp.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .expect("main2");
+        let merged = integrate_branch(
+            &repo,
+            "feature/foo",
+            feature_tip,
+            main2,
+            "main",
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("nested short name");
+        let IntegrateBranchOutcome::Merged {
+            oid: feature_merge, ..
+        } = merged
+        else {
+            panic!("expected merge into feature/foo");
+        };
+        let stored: ObjectId =
+            grit_test_support::git(tmp.path(), &["rev-parse", "refs/heads/feature/foo"])
+                .trim()
+                .parse()
+                .expect("feature/foo tip");
+        assert_eq!(stored, feature_merge);
+        assert!(repo.refs().resolve("refs/feature/foo").is_err());
+
+        let tmp_missing = tempfile::tempdir().expect("tempdir");
+        grit_test_support::git(tmp_missing.path(), &["init", "-q", "-b", "main"]);
+        let repo_missing =
+            Repository::discover(Some(tmp_missing.path()), &RepositoryOptions::empty())
+                .expect("repo");
+        std::fs::write(tmp_missing.path().join("f.txt"), "x\n").expect("write");
+        grit_test_support::git(tmp_missing.path(), &["add", "f.txt"]);
+        grit_test_support::git(tmp_missing.path(), &["commit", "-m", "c"]);
+        let head: ObjectId = grit_test_support::git(tmp_missing.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .expect("head");
+        let err = integrate_branch(
+            &repo_missing,
+            "no-such-branch",
+            head,
+            head,
+            "other",
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect_err("missing branch");
+        assert!(matches!(err, Error::BranchNotFound { branch } if branch == "no-such-branch"));
+        assert!(!tmp_missing.path().join(".git/ORIG_HEAD").exists());
+        let tip: ObjectId = grit_test_support::git(tmp_missing.path(), &["rev-parse", "main"])
+            .trim()
+            .parse()
+            .expect("main tip");
+        assert_eq!(tip, head);
+
+        let stale = main;
+        let err = integrate_branch(
+            &repo,
+            "refs/heads/main",
+            stale,
+            other,
+            "other",
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect_err("stale tip");
+        assert!(
+            matches!(
+                err,
+                Error::RefStore(RefStoreError::ExpectedMismatch { ref name, .. })
+                    if name == "refs/heads/main"
+            ),
+            "unexpected {err:?}"
+        );
     }
 
     #[cfg_attr(
