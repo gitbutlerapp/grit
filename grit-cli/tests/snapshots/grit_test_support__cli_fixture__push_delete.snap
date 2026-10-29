@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "  pushed old-topic → origin refs/heads/old-topic\n",
+    "stdout": "  deleted old-topic from origin\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"remote\":\"origin\",\"kind\":\"delete\",\"branch\":\"old-topic\",\"results\":[{\"ref\":\"refs/heads/old-topic\",\"status\":\"ok\",\"old_oid\":\"0c8b189f8669762be348e3c55343da7faec7313b\",\"forced\":false}],\"rejected\":false,\"dry_run\":false}\n",
+    "stdout": "{\"remote\":\"origin\",\"kind\":\"delete\",\"branch\":\"old-topic\",\"results\":[{\"ref\":\"refs/heads/old-topic\",\"status\":\"ok\",\"old_oid\":\"0c8b189f8669762be348e3c55343da7faec7313b\",\"forced\":false,\"deleted\":true}],\"rejected\":false,\"dry_run\":false}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Push to `origin`\n- **`refs/heads/old-topic`** · pushed `old-topic` → `origin refs/heads/old-topic`\n",
+    "stdout": "## Push to `origin`\n- **`refs/heads/old-topic`** · deleted `old-topic` from `origin`\n",
     "stderr": ""
   }
 }

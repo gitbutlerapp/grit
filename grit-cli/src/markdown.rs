@@ -2059,7 +2059,22 @@ pub fn print_push_results(
         let target = format!("{remote} {}", result.ref_name);
         match result.status {
             crate::commands::push::PushRefOutcomeStatus::Ok => {
-                if dry_run {
+                if result.deleted == Some(true) {
+                    let short = crate::commands::push::ref_short_display(&result.ref_name);
+                    if dry_run {
+                        outln!(
+                            w,
+                            "- **`{}`** · would delete `{short}` from `{remote}`",
+                            result.ref_name
+                        );
+                    } else {
+                        outln!(
+                            w,
+                            "- **`{}`** · deleted `{short}` from `{remote}`",
+                            result.ref_name
+                        );
+                    }
+                } else if dry_run {
                     outln!(
                         w,
                         "- **`{}`** · would push `{branch}` → `{target}`",

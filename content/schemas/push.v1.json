@@ -24,6 +24,13 @@
     "PushRefResult": {
       "description": "One ref's push result.",
       "properties": {
+        "deleted": {
+          "description": "True when this ref was deleted on the remote (omit when false).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "forced": {
           "type": "boolean"
         },

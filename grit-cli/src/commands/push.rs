@@ -111,6 +111,20 @@ pub struct PushRefResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub src: Option<String>,
+    /// True when this ref was deleted on the remote (omit when false).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub deleted: Option<bool>,
+}
+
+/// Short display name for a pushed remote ref (`refs/heads/foo` → `foo`).
+pub(crate) fn ref_short_display(full_ref: &str) -> &str {
+    for prefix in ["refs/heads/", "refs/tags/", "refs/remotes/"] {
+        if let Some(rest) = full_ref.strip_prefix(prefix) {
+            return rest;
+        }
+    }
+    full_ref
 }
 
 impl HumanRender for PushOutcome {
@@ -125,7 +139,14 @@ impl HumanRender for PushOutcome {
             let target = format!("{} {}", self.remote, result.ref_name);
             match result.status {
                 PushRefOutcomeStatus::Ok => {
-                    if self.dry_run {
+                    if result.deleted == Some(true) {
+                        let short = ref_short_display(&result.ref_name);
+                        if self.dry_run {
+                            outln!(w, "  would delete {short} from {}", self.remote);
+                        } else {
+                            outln!(w, "  deleted {short} from {}", self.remote);
+                        }
+                    } else if self.dry_run {
                         outln!(w, "  would push {label} → {target}");
                     } else {
                         outln!(w, "  pushed {label} → {target}");
@@ -315,6 +336,7 @@ pub fn run(
                 new_oid: result.new_oid.map(|o| o.to_hex()),
                 forced: result.forced,
                 src: result.local_ref.clone(),
+                deleted: result.deletion.then_some(true),
             }
         })
         .collect();
@@ -386,6 +408,7 @@ mod tests {
                 new_oid: None,
                 forced: false,
                 src: None,
+                deleted: None,
             };
             let value = serde_json::to_value(&result).expect("json");
             assert_eq!(value["status"].as_str(), Some(expected));

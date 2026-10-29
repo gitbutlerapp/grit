@@ -91,7 +91,7 @@ $ grit push --tags
   pushed --tags → origin refs/tags/v0.1
 
 $ grit push --delete v0.1
-  pushed --delete → origin refs/tags/v0.1
+  deleted v0.1 from origin
 
 $ grit tag -d v0.1
 Deleted tag v0.1
