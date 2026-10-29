@@ -79,12 +79,7 @@ fn restore_dir_write(path: &Path) {
 }
 
 fn commit_request(message: &str) -> CommitRequest {
-    CommitRequest {
-        message: message.into(),
-        author: Some("T <t@e.com> 1 +0000".parse().expect("signature")),
-        committer: Some("T <t@e.com> 1 +0000".parse().expect("signature")),
-        ..Default::default()
-    }
+    grit_test_support::commit_request(message, "T <t@e.com> 1 +0000")
 }
 
 fn init_repo(root: &Path) -> Repository {

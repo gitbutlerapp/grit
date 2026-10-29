@@ -137,12 +137,7 @@ fn init_repo() -> (tempfile::TempDir, Repository) {
 }
 
 fn commit_req(message: &str) -> CommitRequest {
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(IDENT.parse().expect("signature")),
-        committer: Some(IDENT.parse().expect("signature")),
-        ..Default::default()
-    }
+    grit_test_support::commit_request(message, IDENT)
 }
 
 fn write_files(root: &Path, dir: &str, contents: &str) {

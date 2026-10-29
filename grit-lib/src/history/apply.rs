@@ -1903,7 +1903,14 @@ fn clear_worktree_path_before_restore(
                 fs::remove_file(abs)?;
             }
         }
-        WorktreePathKind::Regular | WorktreePathKind::Symlink => {
+        WorktreePathKind::Symlink => {
+            if abs.is_dir() {
+                fs::remove_dir_all(abs)?;
+            } else if abs.is_symlink() || abs.is_file() {
+                fs::remove_file(abs)?;
+            }
+        }
+        WorktreePathKind::Regular => {
             if abs.is_dir() {
                 fs::remove_dir_all(abs)?;
             }
@@ -2719,6 +2726,27 @@ mod inject_and_apply_tests {
             fs::read_to_string(link_target).expect("read target"),
             "target content\n",
             "must not follow symlink and overwrite the external target"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_worktree_path_replaces_regular_file_with_saved_symlink() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tracked = dir.path().join("tracked");
+        fs::write(&tracked, "regular file\n").expect("write");
+        let saved = WorktreePathSnapshot {
+            kind: WorktreePathKind::Symlink,
+            bytes: Some(b"link-target.txt".to_vec()),
+            from_old_tree: false,
+            mode: 0,
+        };
+        restore_worktree_path(&tracked, &saved).expect("restore symlink");
+        assert!(tracked.is_symlink());
+        assert!(!tracked.is_file());
+        assert_eq!(
+            fs::read_link(&tracked).expect("read link"),
+            std::path::Path::new("link-target.txt")
         );
     }
 

@@ -271,12 +271,7 @@ fn stage_and_commit(
         &mut NullProgress,
         &NeverCancel,
     )?;
-    let request = CommitRequest {
-        message: content.into(),
-        author: Some(IDENT_TS.parse().expect("signature")),
-        committer: Some(IDENT_TS.parse().expect("signature")),
-        ..Default::default()
-    };
+    let request = grit_test_support::commit_request(content, IDENT_TS);
     commit_with_scope(
         repo,
         &request,

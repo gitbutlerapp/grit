@@ -42,16 +42,7 @@ fn status_skips_stale_opportunistic_write_after_concurrent_commit() {
     let hook_dir = dir.to_path_buf();
     let hook = Arc::new(move || {
         let repo = open_grit_repo(&hook_dir);
-        let req = CommitRequest {
-            message: "race".into(),
-            author: Some("A <a@b.c> 1 +0000".parse().expect("author")),
-            committer: Some("A <a@b.c> 1 +0000".parse().expect("committer")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
-        };
+        let req = grit_test_support::commit_request("race", "A <a@b.c> 1 +0000");
         create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit in hook");
     });
 

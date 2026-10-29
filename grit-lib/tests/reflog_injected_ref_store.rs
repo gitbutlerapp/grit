@@ -63,12 +63,7 @@ fn commit_n(repo: &Repository, work_tree: &Path, n: usize) -> Vec<ObjectId> {
             .expect("stage");
             commit_with_scope(
                 repo,
-                &CommitRequest {
-                    message: format!("c{i}"),
-                    author: Some(IDENT_TS.parse().expect("signature")),
-                    committer: Some(IDENT_TS.parse().expect("signature")),
-                    ..Default::default()
-                },
+                &grit_test_support::commit_request(format!("c{i}"), IDENT_TS),
                 CommitScope::Staged,
                 &mut NullProgress,
                 &grit_lib::progress::NeverCancel,
