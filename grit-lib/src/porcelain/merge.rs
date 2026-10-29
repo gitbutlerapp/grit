@@ -71,6 +71,7 @@ use crate::porcelain::worktree_guard::prepare_tree_checkout;
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
 use crate::refs;
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
+use crate::refs::update_detached_head_for_commit_on_store;
 use crate::repo::Repository;
 use crate::rev_parse_error::RevParseError;
 use crate::state::{
@@ -1011,6 +1012,82 @@ fn canonical_integrate_into_ref(repo: &Repository, into_ref: &str) -> Result<Str
     Ok(canonical)
 }
 
+/// Where a merge updates the repository tip after a fast-forward or merge commit.
+enum IntegrateTarget {
+    Branch(String),
+    DetachedHead,
+}
+
+/// Integrate `other_oid` into detached `HEAD` (currently at `into_oid`).
+///
+/// Same outcomes, options, hooks, and conflict handling as [`integrate_branch`], but only
+/// `HEAD` moves on success; no branch ref is updated.
+///
+/// # Errors
+///
+/// Same as [`integrate_branch_with`], except branch-not-found and symbolic-HEAD cases do
+/// not apply when `into_oid` matches detached `HEAD`.
+pub fn integrate_detached_head(
+    repo: &Repository,
+    into_oid: ObjectId,
+    other_oid: ObjectId,
+    label: &str,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+) -> Result<IntegrateBranchOutcome> {
+    integrate_detached_head_with(
+        repo,
+        into_oid,
+        other_oid,
+        label,
+        &MergeOptions::default(),
+        progress,
+        cancel,
+    )
+}
+
+/// Integrate `other_oid` into detached `HEAD` at `into_oid` with explicit merge options.
+///
+/// See [`integrate_detached_head`] and [`integrate_branch_with`].
+#[allow(clippy::too_many_arguments)]
+pub fn integrate_detached_head_with(
+    repo: &Repository,
+    into_oid: ObjectId,
+    other_oid: ObjectId,
+    label: &str,
+    options: &MergeOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+) -> Result<IntegrateBranchOutcome> {
+    let outcome = integrate_at_tip_without_hooks(
+        repo,
+        IntegrateTarget::DetachedHead,
+        into_oid,
+        other_oid,
+        label,
+        options,
+        progress,
+        cancel,
+    )?;
+    if options.hooks.enabled() {
+        match outcome {
+            IntegrateBranchOutcome::FastForward { .. } | IntegrateBranchOutcome::Merged { .. } => {
+                run_post_merge(repo, false);
+            }
+            IntegrateBranchOutcome::Squashed => {
+                run_post_merge(repo, true);
+            }
+            IntegrateBranchOutcome::UpToDate
+            | IntegrateBranchOutcome::Conflicts { .. }
+            | IntegrateBranchOutcome::Stopped => {}
+        }
+    }
+    if matches!(outcome, IntegrateBranchOutcome::Merged { .. }) {
+        clear_merge_state(repo.git_dir())?;
+    }
+    Ok(outcome)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn integrate_branch_without_hooks(
     repo: &Repository,
@@ -1023,11 +1100,37 @@ fn integrate_branch_without_hooks(
     cancel: &dyn Cancel,
 ) -> Result<IntegrateBranchOutcome> {
     let into_ref = canonical_integrate_into_ref(repo, into_ref)?;
+    integrate_at_tip_without_hooks(
+        repo,
+        IntegrateTarget::Branch(into_ref),
+        into_oid,
+        other_oid,
+        label,
+        options,
+        progress,
+        cancel,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn integrate_at_tip_without_hooks(
+    repo: &Repository,
+    target: IntegrateTarget,
+    into_oid: ObjectId,
+    other_oid: ObjectId,
+    label: &str,
+    options: &MergeOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+) -> Result<IntegrateBranchOutcome> {
     if into_oid == other_oid || is_ancestor(repo, other_oid, into_oid)? {
         write_orig_head(repo, into_oid)?;
         return Ok(IntegrateBranchOutcome::UpToDate);
     }
-    ensure_branch_tip(repo, &into_ref, Some(into_oid))?;
+    match &target {
+        IntegrateTarget::Branch(into_ref) => ensure_branch_tip(repo, into_ref, Some(into_oid))?,
+        IntegrateTarget::DetachedHead => ensure_detached_head_tip(repo, into_oid)?,
+    };
     poll_cancel(progress, cancel)?;
     // Like Git, every merge attempt past this point records where it started, including a
     // refused fast-forward-only merge and one that stops on conflicts.
@@ -1054,9 +1157,9 @@ fn integrate_branch_without_hooks(
         }
 
         merge_checkout_tree_transition(repo, Some(&into_tree), &other_tree, progress, cancel)?;
-        move_branch(
+        advance_integrate_tip(
             repo,
-            &into_ref,
+            &target,
             into_oid,
             other_oid,
             &format!("merge {label}: fast-forward"),
@@ -1184,7 +1287,7 @@ fn integrate_branch_without_hooks(
             let oid = stamp_change_id_on_new_commit(repo, &policy, &mut commit)
                 .and_then(|()| write_commit_object(repo, &commit, None))
                 .and_then(|oid| {
-                    move_branch(repo, &into_ref, into_oid, oid, &format!("merge {label}"))
+                    advance_integrate_tip(repo, &target, into_oid, oid, &format!("merge {label}"))
                         .map(|()| oid)
                 })
                 .inspect_err(|_| {
@@ -1834,6 +1937,47 @@ fn move_branch(
     reason: &str,
 ) -> Result<()> {
     update_checked_out_branch(repo, refname, Some(old), new, reason)
+}
+
+fn advance_integrate_tip(
+    repo: &Repository,
+    target: &IntegrateTarget,
+    old: ObjectId,
+    new: ObjectId,
+    reason: &str,
+) -> Result<()> {
+    match target {
+        IntegrateTarget::Branch(refname) => move_branch(repo, refname, old, new, reason),
+        IntegrateTarget::DetachedHead => move_detached_head(repo, old, new, reason),
+    }
+}
+
+fn move_detached_head(repo: &Repository, old: ObjectId, new: ObjectId, reason: &str) -> Result<()> {
+    let config = repo.config()?;
+    let identity =
+        resolve_loose_committer_identity_with(repo.environment(), &config, repo.identity_now());
+    update_detached_head_for_commit_on_store(
+        repo.refs(),
+        Some(old),
+        new,
+        &identity,
+        reason,
+        config.as_ref(),
+    )
+}
+
+/// Refuse to merge when detached `HEAD` no longer points at `expected`.
+fn ensure_detached_head_tip(repo: &Repository, expected: ObjectId) -> Result<()> {
+    let current = match repo.refs().read_raw("HEAD")? {
+        Some(RawRef::Direct(oid)) => Some(oid),
+        Some(RawRef::Symbolic(_)) => {
+            return Err(Error::Message(
+                "HEAD points at a branch; use integrate_branch".into(),
+            ));
+        }
+        None => None,
+    };
+    refs::verify_branch_commit_cas(Some(expected), current, "HEAD")
 }
 
 /// Refuse to touch the work tree when `branch_ref` no longer points at `expected` (`None`:
