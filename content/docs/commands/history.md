@@ -61,7 +61,7 @@ Provide exactly one of `-m` / `--message` or `--message-file` when you want an e
 
 Assign **staged** hunks into the commits that last touched overlapping lines (between `--base` and `HEAD`), then replay descendants in **one** rewrite. Grit uses blame line mapping to find candidate commits and checks that each hunk commutes with commits after its target. Assigned hunks are folded into target commits via the same three-way merge as [`fixup`](#fixup); unassigned hunks stay staged.
 
-`--base` is exclusive: commits at and before the base are not considered. When omitted, grit hides other local branch tips, applies an upstream fork-point when configured, and caps the stack at ten commits.
+`--base` is exclusive: commits at and before the base are not considered. When omitted, grit hides other local branch tips (except a second branch name at the checked-out tip, such as a backup or review branch parked at `HEAD`), applies an upstream fork-point when configured, and caps the stack at ten commits. When a hunk’s introducing commit is excluded because of another local tip, `--json` and human output report `hidden_by_ref` with the ref name and suggest `--base`.
 
 ### `rebase`
 
@@ -275,7 +275,8 @@ For `absorb`, the object also includes:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `assignments` | array | `{path,hunk_range,commit,subject}` for hunks assigned to historical commits. |
-| `unassigned` | array | `{path,hunk_range,reason}` for hunks left staged (`reason` is a stable code). |
+| `unassigned` | array | `{path,hunk_range,reason,detail?}` for hunks left staged (`reason` is a stable code; `detail` explains `hidden_by_ref`). |
+| `excluded_refs` | array | `{ref,commit}` for local branch tips hidden from the stack (always present; empty when none apply). |
 
 For `undo`, the object also includes:
 

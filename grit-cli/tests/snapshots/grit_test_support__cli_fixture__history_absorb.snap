@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"operation\":\"absorb\",\"assignments\":[],\"unassigned\":[{\"path\":\"absorb.txt\",\"hunk_range\":{\"old_start\":1,\"old_lines\":0,\"new_start\":1,\"new_lines\":1},\"reason\":\"file_added\"},{\"path\":\"staged.txt\",\"hunk_range\":{\"old_start\":1,\"old_lines\":0,\"new_start\":1,\"new_lines\":1},\"reason\":\"file_added\"}],\"rewritten\":[],\"refs\":[],\"head\":null,\"dry_run\":true}\n",
+    "stdout": "{\"operation\":\"absorb\",\"assignments\":[],\"unassigned\":[{\"path\":\"absorb.txt\",\"hunk_range\":{\"old_start\":1,\"old_lines\":0,\"new_start\":1,\"new_lines\":1},\"reason\":\"file_added\"},{\"path\":\"staged.txt\",\"hunk_range\":{\"old_start\":1,\"old_lines\":0,\"new_start\":1,\"new_lines\":1},\"reason\":\"file_added\"}],\"excluded_refs\":[{\"ref\":\"refs/heads/feature\",\"commit\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\"}],\"rewritten\":[],\"refs\":[],\"head\":null,\"dry_run\":true}\n",
     "stderr": ""
   },
   "markdown": {

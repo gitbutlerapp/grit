@@ -1529,7 +1529,9 @@ pub fn print_history_absorb_outcome(
                 "| `{}` | `{}` | {} |",
                 escape_table_cell(&row.path),
                 absorb_hunk_header(&row.hunk_range),
-                escape_table_cell(&row.reason)
+                escape_table_cell(&crate::commands::history::format_absorb_unassigned_reason(
+                    row
+                ))
             );
         }
         outln!(w);

@@ -26438,6 +26438,7 @@ pub grit_lib::revwalk::history::UnassignedReason::CommutesWithEntireStack
 pub grit_lib::revwalk::history::UnassignedReason::DoesNotCommute
 pub grit_lib::revwalk::history::UnassignedReason::FileAdded
 pub grit_lib::revwalk::history::UnassignedReason::FileDeleted
+pub grit_lib::revwalk::history::UnassignedReason::HiddenByRef
 pub grit_lib::revwalk::history::UnassignedReason::MultipleCandidates
 pub grit_lib::revwalk::history::UnassignedReason::NoCandidate
 pub grit_lib::revwalk::history::UnassignedReason::PureAdditionFarFromContext
@@ -26477,8 +26478,27 @@ impl core::marker::Unpin for grit_lib::revwalk::history::AbsorbOptions
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::AbsorbOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::AbsorbOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::AbsorbOptions
+pub struct grit_lib::revwalk::history::AbsorbExcludedRef
+pub grit_lib::revwalk::history::AbsorbExcludedRef::ref_name: alloc::string::String
+pub grit_lib::revwalk::history::AbsorbExcludedRef::tip: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::revwalk::history::AbsorbExcludedRef
+pub fn grit_lib::revwalk::history::AbsorbExcludedRef::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::revwalk::history::AbsorbExcludedRef
+impl core::cmp::PartialEq for grit_lib::revwalk::history::AbsorbExcludedRef
+pub fn grit_lib::revwalk::history::AbsorbExcludedRef::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::revwalk::history::AbsorbExcludedRef
+pub fn grit_lib::revwalk::history::AbsorbExcludedRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::revwalk::history::AbsorbExcludedRef
+impl core::marker::Freeze for grit_lib::revwalk::history::AbsorbExcludedRef
+impl core::marker::Send for grit_lib::revwalk::history::AbsorbExcludedRef
+impl core::marker::Sync for grit_lib::revwalk::history::AbsorbExcludedRef
+impl core::marker::Unpin for grit_lib::revwalk::history::AbsorbExcludedRef
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::AbsorbExcludedRef
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::AbsorbExcludedRef
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::AbsorbExcludedRef
 pub struct grit_lib::revwalk::history::AbsorbPlan
 pub grit_lib::revwalk::history::AbsorbPlan::assignments: alloc::vec::Vec<grit_lib::revwalk::history::HunkAssignment>
+pub grit_lib::revwalk::history::AbsorbPlan::excluded_refs: alloc::vec::Vec<grit_lib::revwalk::history::AbsorbExcludedRef>
 pub grit_lib::revwalk::history::AbsorbPlan::plan: grit_lib::revwalk::history::RewritePlan
 pub grit_lib::revwalk::history::AbsorbPlan::unassigned: alloc::vec::Vec<grit_lib::revwalk::history::UnassignedHunk>
 impl core::clone::Clone for grit_lib::revwalk::history::AbsorbPlan
@@ -26984,6 +27004,7 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::StartRebaseOption
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::StartRebaseOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::StartRebaseOptions
 pub struct grit_lib::revwalk::history::UnassignedHunk
+pub grit_lib::revwalk::history::UnassignedHunk::detail: core::option::Option<alloc::string::String>
 pub grit_lib::revwalk::history::UnassignedHunk::hunk_range: grit_lib::revwalk::history::HunkRange
 pub grit_lib::revwalk::history::UnassignedHunk::path: alloc::string::String
 pub grit_lib::revwalk::history::UnassignedHunk::reason: grit_lib::revwalk::history::UnassignedReason

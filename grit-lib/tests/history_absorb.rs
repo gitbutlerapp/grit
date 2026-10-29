@@ -539,3 +539,200 @@ fn absorb_nothing_staged_errors() {
     .unwrap_err();
     assert!(matches!(err, HistoryError::NothingStaged));
 }
+
+fn init_issue_2256_fixture(wt: &std::path::Path) -> grit_lib::objects::ObjectId {
+    for i in 1..=3 {
+        let body: String = (1..=5).map(|n| format!("f{i}-{n}\n")).collect();
+        fs::write(wt.join(format!("f{i}.txt")), body).expect("write");
+    }
+    git(wt, &["add", "."]);
+    git(wt, &["commit", "-m", "base"]);
+    git(wt, &["checkout", "-b", "feature"]);
+    for i in 1..=3 {
+        let path = wt.join(format!("f{i}.txt"));
+        let mut text = fs::read_to_string(&path).expect("read");
+        text.push_str(&format!("line {i}\n"));
+        fs::write(&path, text).expect("write");
+        git(wt, &["add", "."]);
+        git(wt, &["commit", "-m", &format!("feature: touch f{i}")]);
+    }
+    let touch_f1 = git_rev_parse(wt, "HEAD~2").expect("touch f1");
+    fs::write(
+        wt.join("f1.txt"),
+        fs::read_to_string(wt.join("f1.txt"))
+            .expect("read")
+            .replace("line 1\n", "line 1 fixed\n"),
+    )
+    .expect("write");
+    git(wt, &["add", "f1.txt"]);
+    touch_f1
+}
+
+#[test]
+fn absorb_assigns_with_second_branch_name_at_head() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let target = init_issue_2256_fixture(wt);
+    git(wt, &["branch", "backup"]);
+    let backup_tip = git_rev_parse(wt, "HEAD").expect("tip");
+    let grit = open_grit(wt);
+    let plan = absorb(
+        &grit,
+        &AbsorbOptions {
+            base: None,
+            rewrite: rewrite_opts(),
+        },
+    )
+    .expect("plan");
+    assert_eq!(plan.assignments.len(), 1, "{plan:?}");
+    assert_eq!(plan.assignments[0].commit, target);
+    assert!(plan.unassigned.is_empty());
+    assert!(
+        !plan
+            .excluded_refs
+            .iter()
+            .any(|r| r.ref_name == "refs/heads/backup"),
+        "{:?}",
+        plan.excluded_refs
+    );
+    apply_absorb_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    git_fsck_strict(wt);
+    assert_eq!(
+        git_rev_parse(wt, "refs/heads/backup").expect("backup"),
+        backup_tip
+    );
+}
+
+#[test]
+fn absorb_hidden_by_ref_when_review_branch_covers_introducing_commit() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let target = init_issue_2256_fixture(wt);
+    git(wt, &["branch", "review", "HEAD~2"]);
+    let grit = open_grit(wt);
+    let plan = absorb(
+        &grit,
+        &AbsorbOptions {
+            base: None,
+            rewrite: rewrite_opts(),
+        },
+    )
+    .expect("plan");
+    assert!(plan.assignments.is_empty(), "{plan:?}");
+    assert_eq!(plan.unassigned.len(), 1);
+    assert_eq!(plan.unassigned[0].reason, UnassignedReason::HiddenByRef);
+    assert!(
+        plan.unassigned[0]
+            .detail
+            .as_deref()
+            .is_some_and(|d| d.contains("refs/heads/review")),
+        "{:?}",
+        plan.unassigned[0].detail
+    );
+    assert!(
+        plan.excluded_refs
+            .iter()
+            .any(|r| r.ref_name == "refs/heads/review"),
+        "{:?}",
+        plan.excluded_refs
+    );
+}
+
+#[test]
+fn absorb_stack_cap_is_not_hidden_by_ref_when_main_at_base() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "tracked.txt", "base line\n", "base");
+    git(wt, &["checkout", "-b", "feature"]);
+    for i in 1..=11 {
+        let mut text = fs::read_to_string(wt.join("tracked.txt")).expect("read");
+        text.push_str(&format!("c{i}\n"));
+        fs::write(wt.join("tracked.txt"), text).expect("write");
+        git(wt, &["add", "tracked.txt"]);
+        git(wt, &["commit", "-m", &format!("c{i}")]);
+    }
+    git(wt, &["checkout", "main"]);
+    git(wt, &["checkout", "feature"]);
+    let mut text = fs::read_to_string(wt.join("tracked.txt")).expect("read");
+    text = text.replacen("base line\n", "base line fixed\n", 1);
+    fs::write(wt.join("tracked.txt"), text).expect("write");
+    git(wt, &["add", "tracked.txt"]);
+    let grit = open_grit(wt);
+    let plan = absorb(
+        &grit,
+        &AbsorbOptions {
+            base: None,
+            rewrite: rewrite_opts(),
+        },
+    )
+    .expect("plan");
+    assert_eq!(plan.unassigned.len(), 1);
+    assert_eq!(plan.unassigned[0].reason, UnassignedReason::NoCandidate);
+    assert!(plan.unassigned[0].detail.is_none());
+    git(wt, &["branch", "-D", "main"]);
+    let plan_without_main = absorb(
+        &grit,
+        &AbsorbOptions {
+            base: None,
+            rewrite: rewrite_opts(),
+        },
+    )
+    .expect("plan");
+    assert_eq!(
+        plan_without_main.unassigned[0].reason,
+        UnassignedReason::NoCandidate
+    );
+}
+
+#[test]
+fn absorb_diverged_branch_at_main_does_not_block_feature_stack() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    for i in 1..=3 {
+        let body: String = (1..=5).map(|n| format!("f{i}-{n}\n")).collect();
+        fs::write(wt.join(format!("f{i}.txt")), body).expect("write");
+    }
+    git(wt, &["add", "."]);
+    git(wt, &["commit", "-m", "base"]);
+    let base = git_rev_parse(wt, "HEAD").expect("base");
+    git(wt, &["checkout", "-b", "feature"]);
+    for i in 1..=3 {
+        let path = wt.join(format!("f{i}.txt"));
+        let mut text = fs::read_to_string(&path).expect("read");
+        text.push_str(&format!("line {i}\n"));
+        fs::write(&path, text).expect("write");
+        git(wt, &["add", "."]);
+        git(wt, &["commit", "-m", &format!("feature: touch f{i}")]);
+    }
+    let target = git_rev_parse(wt, "HEAD~2").expect("touch f1");
+    git(wt, &["checkout", "main"]);
+    commit_file(wt, "main-only.txt", "m\n", "main-only");
+    git(wt, &["checkout", "feature"]);
+    fs::write(
+        wt.join("f1.txt"),
+        fs::read_to_string(wt.join("f1.txt"))
+            .expect("read")
+            .replace("line 1\n", "line 1 fixed\n"),
+    )
+    .expect("write");
+    git(wt, &["add", "f1.txt"]);
+    let grit = open_grit(wt);
+    let plan = absorb(
+        &grit,
+        &AbsorbOptions {
+            base: None,
+            rewrite: rewrite_opts(),
+        },
+    )
+    .expect("plan");
+    assert_eq!(plan.assignments.len(), 1, "{plan:?}");
+    assert_eq!(plan.assignments[0].commit, target);
+    assert!(
+        plan.excluded_refs
+            .iter()
+            .any(|r| r.ref_name == "refs/heads/main"),
+        "{:?}",
+        plan.excluded_refs
+    );
+    let _base = base;
+}

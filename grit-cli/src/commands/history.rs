@@ -1110,6 +1110,7 @@ impl From<&UnassignedHunk> for UnassignedHunkOut {
             path: row.path.clone(),
             hunk_range: (&row.hunk_range).into(),
             reason: row.reason.as_str().into(),
+            detail: row.detail.clone(),
         }
     }
 }
@@ -1123,6 +1124,19 @@ pub struct UnassignedHunkOut {
     pub hunk_range: HunkRangeOut,
     /// Stable reason code.
     pub reason: String,
+    /// Human-readable detail when the reason alone is not enough (for example `hidden_by_ref`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// Local branch tip excluded from the absorb stack.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AbsorbExcludedRefOut {
+    /// Full ref name.
+    #[serde(rename = "ref")]
+    pub ref_name: String,
+    /// Tip commit OID (full hex).
+    pub commit: String,
 }
 
 /// Result of `grit history absorb`.
@@ -1134,6 +1148,8 @@ pub struct HistoryAbsorbOutcome {
     pub assignments: Vec<AbsorbAssignmentOut>,
     /// Hunks left staged.
     pub unassigned: Vec<UnassignedHunkOut>,
+    /// Local branch tips hidden from the absorb stack (empty when none apply).
+    pub excluded_refs: Vec<AbsorbExcludedRefOut>,
     /// Original and replacement commit OIDs for every rewritten commit.
     pub rewritten: Vec<RewrittenPair>,
     /// Planned or applied ref tip updates.
@@ -1173,7 +1189,13 @@ impl HumanRender for HistoryAbsorbOutcome {
         }
         for row in &self.unassigned {
             let header = format_absorb_hunk_header(&row.hunk_range);
-            outln!(w, "  {} {} — {}", row.path, header, row.reason);
+            outln!(
+                w,
+                "  {} {} — {}",
+                row.path,
+                header,
+                format_absorb_unassigned_reason(row)
+            );
         }
         render_rewrite_rows(w, &self.rewritten, &self.refs)
     }
@@ -1656,11 +1678,27 @@ pub fn run_absorb(base: Option<&str>, shared: &HistoryRewriteArgs) -> Result<His
         operation: summary.operation,
         assignments: absorb_plan.assignments.iter().map(Into::into).collect(),
         unassigned: absorb_plan.unassigned.iter().map(Into::into).collect(),
+        excluded_refs: absorb_plan
+            .excluded_refs
+            .iter()
+            .map(|r| AbsorbExcludedRefOut {
+                ref_name: r.ref_name.clone(),
+                commit: r.tip.to_hex(),
+            })
+            .collect(),
         rewritten: summary.rewritten,
         refs: summary.refs,
         head: summary.head,
         dry_run: summary.dry_run,
     })
+}
+
+pub(crate) fn format_absorb_unassigned_reason(row: &UnassignedHunkOut) -> String {
+    if let Some(detail) = &row.detail {
+        format!("{}: {detail}", row.reason)
+    } else {
+        row.reason.clone()
+    }
 }
 
 fn format_absorb_hunk_header(range: &HunkRangeOut) -> String {

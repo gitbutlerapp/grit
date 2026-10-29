@@ -34,6 +34,24 @@
       ],
       "type": "object"
     },
+    "AbsorbExcludedRefOut": {
+      "description": "Local branch tip excluded from the absorb stack.",
+      "properties": {
+        "commit": {
+          "description": "Tip commit OID (full hex).",
+          "type": "string"
+        },
+        "ref": {
+          "description": "Full ref name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "commit",
+        "ref"
+      ],
+      "type": "object"
+    },
     "HeadPair": {
       "description": "`HEAD` commit before and after rewrite.",
       "properties": {
@@ -153,6 +171,13 @@
     "UnassignedHunkOut": {
       "description": "JSON/markdown unassigned hunk row.",
       "properties": {
+        "detail": {
+          "description": "Human-readable detail when the reason alone is not enough (for example `hidden_by_ref`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "hunk_range": {
           "allOf": [
             {
@@ -190,6 +215,13 @@
     "dry_run": {
       "description": "Whether refs were left unchanged (`true` for `--dry-run`).",
       "type": "boolean"
+    },
+    "excluded_refs": {
+      "description": "Local branch tips hidden from the absorb stack (empty when none apply).",
+      "items": {
+        "$ref": "#/definitions/AbsorbExcludedRefOut"
+      },
+      "type": "array"
     },
     "head": {
       "anyOf": [
@@ -231,6 +263,7 @@
   "required": [
     "assignments",
     "dry_run",
+    "excluded_refs",
     "head",
     "operation",
     "refs",
