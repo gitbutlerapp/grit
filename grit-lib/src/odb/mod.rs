@@ -29,6 +29,8 @@ pub mod store;
 mod stream;
 mod tree;
 
+pub(crate) use stream::deflate_stream_to_writer;
+
 #[doc(inline)]
 pub use builder::OdbBuilder;
 

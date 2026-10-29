@@ -1487,6 +1487,7 @@ mod reset_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "reset_hard_at_head_preserves_mtime.rs"]
 mod reset_hard_at_head_preserves_mtime;
+#[cfg(feature = "full-tests")]
 #[path = "reset_hard_at_head_restores_worktree.rs"]
 mod reset_hard_at_head_restores_worktree;
 #[cfg(feature = "full-tests")]
@@ -1939,6 +1940,9 @@ mod uncommitted_diff_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "untracked_cache_git_compat.rs"]
 mod untracked_cache_git_compat;
+#[cfg(feature = "full-tests")]
+#[path = "upload_pack_blob_memory_support.rs"]
+mod upload_pack_blob_memory_support;
 #[cfg(feature = "full-tests")]
 #[path = "upload_pack_filter.rs"]
 mod upload_pack_filter;

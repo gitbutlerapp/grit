@@ -94,12 +94,13 @@ impl StreamingReuse {
             .is_some_and(|pos| self.reuse_bits.get(pos as usize))
     }
 
-    /// Emit a whole packed object when marked reusable.
-    pub(crate) fn try_emit_whole(
+    /// Stream a whole packed object to `w` when marked reusable.
+    pub(crate) fn try_write_whole(
         &mut self,
+        w: &mut dyn Write,
         oid: &ObjectId,
         opts: &PackBuildOptions,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> Result<Option<u64>> {
         if !opts.reuse_objects || !self.marks_reuse(oid) {
             return Ok(None);
         }
@@ -110,14 +111,13 @@ impl StreamingReuse {
             .parent()
             .and_then(|p| p.parent())
             .ok_or_else(|| Error::CorruptObject("pack path layout".to_owned()))?;
-        let mut out = Vec::new();
-        match write_whole_reused(&mut out, objects_dir, oid, opts) {
+        match write_whole_reused(w, objects_dir, oid, opts) {
             Ok(n) => {
                 self.note_verbatim(n);
+                Ok(Some(n))
             }
-            Err(_) => return Ok(None),
-        };
-        Ok(Some(out))
+            Err(_) => Ok(None),
+        }
     }
 }
 
@@ -431,9 +431,12 @@ fn write_whole_reused(
     opts: &PackBuildOptions,
 ) -> Result<u64> {
     if opts.reuse_objects {
-        if let Some(raw) = crate::pack::packed_full_object_slice(objects_dir, oid)? {
-            w.write_all(&raw).map_err(Error::Io)?;
-            return Ok(raw.len() as u64);
+        if let Some((bytes, start, end)) = crate::pack::packed_full_object_range(objects_dir, oid)?
+        {
+            for chunk in bytes[start..end].chunks(64 * 1024) {
+                w.write_all(chunk).map_err(Error::Io)?;
+            }
+            return Ok((end - start) as u64);
         }
     }
     Err(Error::CorruptObject(

@@ -411,6 +411,16 @@ name = "merge_content_rss"
 path = "tests/merge_content_rss.rs"
 required-features = ["full-tests"]
 
+[[test]]
+name = "upload_pack_packed_blob_memory"
+path = "tests/upload_pack_packed_blob_memory.rs"
+required-features = ["full-tests"]
+
+[[test]]
+name = "upload_pack_loose_blob_memory"
+path = "tests/upload_pack_loose_blob_memory.rs"
+required-features = ["full-tests"]
+
 [[bench]]
 name = "pack_frontier"
 harness = false

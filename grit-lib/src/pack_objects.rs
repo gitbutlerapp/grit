@@ -15,6 +15,7 @@ use flate2::Compression;
 use crate::bitmap_walk::ReachableSet;
 use crate::delta_encode::{encode_prefix_extension_delta, DeltaIndex};
 use crate::error::{Error, Result};
+use crate::hash::HashingWriter;
 use crate::objects::{
     empty_object_id_hash_set, oid_hash_map, oid_hash_set, oid_hash_set_from, parse_commit,
     parse_tag, HashAlgo, ObjectId, ObjectInfo, ObjectKind, OidHashMap, OidHashSet, TreeRefIter,
@@ -720,6 +721,8 @@ fn write_upload_pack_stream_in_context(
     )
 }
 
+type PackIndexRows = Vec<(ObjectId, u64, u32)>;
+
 fn write_pack_header(w: &mut dyn Write, count: u32) -> Result<()> {
     w.write_all(b"PACK").map_err(Error::Io)?;
     w.write_all(&2u32.to_be_bytes()).map_err(Error::Io)?;
@@ -735,27 +738,32 @@ pub(crate) fn write_delta_pack_stream(
     w: &mut dyn Write,
     reuse: Option<&mut crate::pack_reuse::StreamingReuse>,
 ) -> Result<PackStats> {
-    let (pack_bytes_len, reuse_stats) = if let Some(reuse) = reuse {
-        let pack = serialize_delta_plan_stream(odb, plan, opts, Some(reuse))?;
-        let len = pack.bytes.len() as u64;
-        w.write_all(&pack.bytes).map_err(Error::Io)?;
-        (len, reuse.take_stats())
+    let algo = odb.hash_algo();
+    let mut out = HashingWriter::new(algo, w);
+    let reuse_stats = if let Some(reuse) = reuse {
+        let (_, body_bytes) = write_delta_plan_stream_body(&mut out, odb, plan, opts, Some(reuse))?;
+        out.finish().map_err(Error::Io)?;
+        let pack_bytes = 12u64 + body_bytes + algo.len() as u64;
+        let stats = reuse.take_stats();
+        (pack_bytes, stats)
     } else {
-        let pack = serialize_delta_plan_stream(odb, plan, opts, None)?;
-        let len = pack.bytes.len() as u64;
-        w.write_all(&pack.bytes).map_err(Error::Io)?;
-        (len, crate::pack_reuse::ReuseWriteStats::default())
+        let (_, body_bytes) = write_delta_plan_stream_body(&mut out, odb, plan, opts, None)?;
+        out.finish().map_err(Error::Io)?;
+        (
+            12u64 + body_bytes + algo.len() as u64,
+            crate::pack_reuse::ReuseWriteStats::default(),
+        )
     };
     let delta_count = plan.entries.iter().filter(|e| e.base.is_some()).count() as u32;
     Ok(PackStats {
         object_count: u32::try_from(plan.entries.len())
             .map_err(|_| Error::CorruptObject("pack object count exceeds u32".to_owned()))?,
-        pack_bytes: pack_bytes_len,
+        pack_bytes: reuse_stats.0,
         delta_count,
-        verbatim_reuse_bytes: reuse_stats.verbatim_reuse_bytes,
-        verbatim_reuse_objects: reuse_stats.verbatim_reuse_objects,
-        pack_ofs_fixup_objects: reuse_stats.pack_ofs_fixup_objects,
-        pack_ref_from_ofs_objects: reuse_stats.pack_ref_from_ofs_objects,
+        verbatim_reuse_bytes: reuse_stats.1.verbatim_reuse_bytes,
+        verbatim_reuse_objects: reuse_stats.1.verbatim_reuse_objects,
+        pack_ofs_fixup_objects: reuse_stats.1.pack_ofs_fixup_objects,
+        pack_ref_from_ofs_objects: reuse_stats.1.pack_ref_from_ofs_objects,
     })
 }
 
@@ -765,30 +773,67 @@ fn write_delta_plan_stream_body(
     plan: &DeltaPlan,
     opts: &PackBuildOptions,
     reuse: Option<&mut crate::pack_reuse::StreamingReuse>,
-) -> Result<Vec<(ObjectId, u64, u32)>> {
+) -> Result<(PackIndexRows, u64)> {
     let count = u32::try_from(plan.entries.len())
         .map_err(|_| Error::CorruptObject("pack object count exceeds u32".to_owned()))?;
     write_pack_header(w, count)?;
     let mut index_rows = Vec::with_capacity(plan.entries.len());
-    write_planned_entries(w, odb, plan, opts, 12, reuse, &mut index_rows)?;
-    Ok(index_rows)
+    let body_bytes = write_planned_entries(w, odb, plan, opts, 12, reuse, &mut index_rows)?;
+    Ok((index_rows, body_bytes))
 }
 
-/// Serialize a delta plan to an in-memory PACK v2 stream with a matching `.idx` row set.
-pub(crate) fn serialize_delta_plan_stream(
-    odb: &Odb,
-    plan: &DeltaPlan,
-    opts: &PackBuildOptions,
-    reuse: Option<&mut crate::pack_reuse::StreamingReuse>,
-) -> Result<SerializedDeltaPack> {
-    let mut buf = Vec::new();
-    let index_rows = write_delta_plan_stream_body(&mut buf, odb, plan, opts, reuse)?;
-    append_pack_trailer(&mut buf, odb.hash_algo());
-    Ok(SerializedDeltaPack {
-        bytes: buf,
-        index_rows,
-        staging_path: None,
-    })
+const PACK_STREAM_COPY_CHUNK: usize = 64 * 1024;
+
+pub(crate) struct CrcWriter<'a, W: Write + ?Sized> {
+    inner: &'a mut W,
+    crc: crc32fast::Hasher,
+}
+
+impl<'a, W: Write + ?Sized> CrcWriter<'a, W> {
+    pub(crate) fn new(inner: &'a mut W, prefix: &[u8]) -> Self {
+        let mut crc = crc32fast::Hasher::new();
+        crc.update(prefix);
+        Self { inner, crc }
+    }
+
+    pub(crate) fn finalize(self) -> u32 {
+        self.crc.finalize()
+    }
+}
+
+impl<W: Write + ?Sized> Write for CrcWriter<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.crc.update(buf);
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+struct ByteCounter<'a, W: Write + ?Sized> {
+    inner: &'a mut W,
+    n: u64,
+}
+
+impl<W: Write + ?Sized> Write for ByteCounter<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.n += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+fn write_all_chunked(w: &mut dyn Write, data: &[u8]) -> Result<()> {
+    for chunk in data.chunks(PACK_STREAM_COPY_CHUNK) {
+        w.write_all(chunk).map_err(Error::Io)?;
+    }
+    Ok(())
 }
 
 fn write_planned_entries(
@@ -799,7 +844,7 @@ fn write_planned_entries(
     pack_body_start: u64,
     mut reuse: Option<&mut crate::pack_reuse::StreamingReuse>,
     index_rows: &mut Vec<(ObjectId, u64, u32)>,
-) -> Result<()> {
+) -> Result<u64> {
     let algo = odb.hash_algo();
     let compression = odb.pack_compression()?;
     let mut oid_to_offset: OidHashMap<u64> = oid_hash_map();
@@ -809,17 +854,34 @@ fn write_planned_entries(
         let start = pack_body_start + body_written;
         let mut chunk = Vec::new();
         if entry.base.is_none() {
-            if let Some(reuse) = reuse.as_mut() {
-                if let Some(bytes) = reuse.try_emit_whole(&entry.oid, opts)? {
-                    chunk = bytes;
+            let mut crc_w = CrcWriter {
+                inner: w,
+                crc: crc32fast::Hasher::new(),
+            };
+            let wrote = {
+                let mut counter = ByteCounter {
+                    inner: &mut crc_w,
+                    n: 0,
+                };
+                if let Some(reuse) = reuse.as_mut() {
+                    if let Some(n) = reuse.try_write_whole(&mut counter, &entry.oid, opts)? {
+                        n
+                    } else {
+                        write_whole_pack_object_to_odb(
+                            &mut counter,
+                            odb,
+                            entry.oid,
+                            entry.kind,
+                            opts,
+                        )?
+                    }
+                } else {
+                    write_whole_pack_object_to_odb(&mut counter, odb, entry.oid, entry.kind, opts)?
                 }
-            }
-            if chunk.is_empty() {
-                write_whole_pack_object_from_odb(&mut chunk, odb, entry.oid, entry.kind, opts)?;
-            }
-            w.write_all(&chunk).map_err(Error::Io)?;
-            index_rows.push((entry.oid, start, crc32fast::hash(&chunk)));
-            body_written += chunk.len() as u64;
+            };
+            let crc = crc_w.finalize();
+            index_rows.push((entry.oid, start, crc));
+            body_written += wrote;
             oid_to_offset.insert(entry.oid, start);
             continue;
         }
@@ -895,7 +957,7 @@ fn write_planned_entries(
         body_written += chunk.len() as u64;
         oid_to_offset.insert(entry.oid, start);
     }
-    Ok(())
+    Ok(body_written)
 }
 
 /// Serialize a precomputed object list into a pack (used by [`build_pack`] and filtered bundles).
@@ -1289,27 +1351,55 @@ fn write_whole_pack_object_from_odb(
     kind: ObjectKind,
     opts: &PackBuildOptions,
 ) -> Result<()> {
+    write_whole_pack_object_to_odb(buf, odb, oid, kind, opts).map(|_| ())
+}
+
+/// Write one whole object from the ODB to `w`, reusing on-disk pack bytes or streaming
+/// blobs at or above [`Odb::big_file_threshold`].
+pub(crate) fn write_whole_pack_object_to_odb(
+    w: &mut dyn Write,
+    odb: &Odb,
+    oid: ObjectId,
+    kind: ObjectKind,
+    opts: &PackBuildOptions,
+) -> Result<u64> {
     if opts.reuse_objects && odb.hash_algo() == HashAlgo::Sha1 {
-        if let Some(raw) = crate::pack::packed_full_object_slice(odb.objects_dir(), &oid)? {
-            buf.extend_from_slice(&raw);
-            return Ok(());
+        if let Some((bytes, start, end)) =
+            crate::pack::packed_full_object_range(odb.objects_dir(), &oid)?
+        {
+            write_all_chunked(w, &bytes[start..end])?;
+            return Ok((end - start) as u64);
         }
     }
     let size = odb.read_info(&oid)?.size;
     let stream_from = odb.big_file_threshold()?;
     if kind == ObjectKind::Blob && size >= stream_from {
-        return odb
-            .with_stream(&oid, |mut stream| {
-                let payload_len = usize::try_from(stream.size).map_err(|_| {
-                    Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
-                })?;
-                encode_pack_object_header(buf, pack_type_code(kind), payload_len);
-                write_zlib_from_reader(buf, &mut stream.reader, odb.pack_compression()?)
-            })?
-            .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()));
+        let mut counter = ByteCounter { inner: w, n: 0 };
+        odb.with_stream(&oid, |mut stream| {
+            let payload_len = usize::try_from(stream.size).map_err(|_| {
+                Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
+            })?;
+            encode_pack_object_header_to(&mut counter, pack_type_code(kind), payload_len)?;
+            crate::odb::deflate_stream_to_writer(
+                &mut stream.reader,
+                stream.size,
+                &mut counter,
+                odb.pack_compression()?,
+            )?;
+            Ok(())
+        })?
+        .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))?;
+        return Ok(counter.n);
     }
     let obj = odb.read(&oid)?;
-    write_whole_pack_object(buf, odb, oid, kind, &obj.data, opts)
+    write_whole_pack_object_to(w, odb, oid, kind, &obj.data, opts)
+}
+
+fn encode_pack_object_header_to(w: &mut dyn Write, type_code: u8, size: usize) -> Result<()> {
+    let mut header = Vec::new();
+    encode_pack_object_header(&mut header, type_code, size);
+    w.write_all(&header).map_err(Error::Io)?;
+    Ok(())
 }
 
 /// Write one whole (non-delta) pack object, reusing on-disk bytes when allowed.
@@ -1321,15 +1411,29 @@ fn write_whole_pack_object(
     data: &[u8],
     opts: &PackBuildOptions,
 ) -> Result<()> {
+    write_whole_pack_object_to(buf, odb, oid, kind, data, opts).map(|_| ())
+}
+
+fn write_whole_pack_object_to(
+    w: &mut dyn Write,
+    odb: &Odb,
+    oid: ObjectId,
+    kind: ObjectKind,
+    data: &[u8],
+    opts: &PackBuildOptions,
+) -> Result<u64> {
+    let mut counter = ByteCounter { inner: w, n: 0 };
     if opts.reuse_objects && odb.hash_algo() == HashAlgo::Sha1 {
-        if let Some(raw) = crate::pack::packed_full_object_slice(odb.objects_dir(), &oid)? {
-            buf.extend_from_slice(&raw);
-            return Ok(());
+        if let Some((bytes, start, end)) =
+            crate::pack::packed_full_object_range(odb.objects_dir(), &oid)?
+        {
+            write_all_chunked(&mut counter, &bytes[start..end])?;
+            return Ok(counter.n);
         }
     }
-    encode_pack_object_header(buf, pack_type_code(kind), data.len());
-    let compression = odb.pack_compression()?;
-    write_zlib(buf, data, compression)
+    encode_pack_object_header_to(&mut counter, pack_type_code(kind), data.len())?;
+    write_zlib_to(&mut counter, data, odb.pack_compression()?)?;
+    Ok(counter.n)
 }
 
 /// Append the trailing pack checksum: the hash of everything written so far, at
@@ -1830,23 +1934,13 @@ fn load_islands_for_pack(
 
 /// zlib-deflate `data` and append it to `buf`.
 fn write_zlib(buf: &mut Vec<u8>, data: &[u8], compression: Compression) -> Result<()> {
-    let mut enc = ZlibEncoder::new(Vec::new(), compression);
-    enc.write_all(data).map_err(Error::Io)?;
-    let compressed = enc.finish().map_err(Error::Io)?;
-    buf.extend_from_slice(&compressed);
-    Ok(())
+    write_zlib_to(buf, data, compression)
 }
 
-/// zlib-deflate bytes read from `reader` and append them to `buf`.
-fn write_zlib_from_reader(
-    buf: &mut Vec<u8>,
-    reader: &mut dyn std::io::Read,
-    compression: Compression,
-) -> Result<()> {
-    let mut enc = ZlibEncoder::new(Vec::new(), compression);
-    std::io::copy(reader, &mut enc).map_err(Error::Io)?;
-    let compressed = enc.finish().map_err(Error::Io)?;
-    buf.extend_from_slice(&compressed);
+fn write_zlib_to(w: &mut dyn Write, data: &[u8], compression: Compression) -> Result<()> {
+    let mut enc = ZlibEncoder::new(w, compression);
+    enc.write_all(data).map_err(Error::Io)?;
+    enc.finish().map_err(Error::Io)?;
     Ok(())
 }
 

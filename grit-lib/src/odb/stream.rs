@@ -23,6 +23,21 @@ const CHUNK: usize = 128 * 1024;
 /// Offset of the single object in a pack: right after the 12-byte `PACK` header.
 const OBJECT_OFFSET: u64 = 12;
 
+/// Deflate exactly `size` payload bytes from `reader` into `w` without holding the payload.
+pub(crate) fn deflate_stream_to_writer(
+    reader: &mut dyn Read,
+    size: u64,
+    w: &mut dyn Write,
+    compression: Compression,
+) -> Result<()> {
+    let mut enc = ZlibEncoder::new(w, compression);
+    for_each_chunk(reader, size, |chunk| {
+        enc.write_all(chunk).map_err(Error::Io)
+    })?;
+    enc.finish().map_err(Error::Io)?;
+    Ok(())
+}
+
 /// Read exactly `size` bytes from `reader` in [`CHUNK`]-sized steps, handing each to `sink`.
 fn for_each_chunk(
     reader: &mut dyn Read,
