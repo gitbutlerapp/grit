@@ -11,7 +11,6 @@ use crate::hooks::{
     run_post_checkout, run_post_rewrite, HookName, PostOperationHooks, RewriteKind,
 };
 use crate::lockfile::{LockFile, LockWait};
-use crate::merge_base::is_ancestor;
 use crate::objects::ObjectId;
 use crate::operation::conflicts_from_tree_merge;
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
@@ -421,6 +420,26 @@ fn up_to_date_outcome(head: ObjectId) -> RebaseOutcome {
     }
 }
 
+/// When `grit-plan` predates `stopped_head`, record the detached replay parent before
+/// `grit commit` moves `HEAD` to the resolution commit.
+pub(crate) fn persist_rebase_stopped_head_if_missing(
+    repo: &Repository,
+) -> Result<(), RebaseSessionError> {
+    if !crate::state::grit_rebase_conflict_stop_active(repo.git_dir()) {
+        return Ok(());
+    }
+    let path = repo.git_dir().join("rebase-merge/grit-plan");
+    let raw = fs::read_to_string(&path).map_err(|_| RebaseSessionError::NoRebaseInProgress)?;
+    let mut parsed: PersistedRebaseState =
+        serde_json::from_str(&raw).map_err(|_| RebaseSessionError::NoRebaseInProgress)?;
+    if parsed.stopped_head.is_some() {
+        return Ok(());
+    }
+    let head = resolve_head_oid(repo)?;
+    parsed.stopped_head = Some(oid_hex(&head));
+    write_persisted_state(repo.git_dir(), &parsed)
+}
+
 fn stopped_head_for_continue(
     state: &LoadedState,
     repo: &Repository,
@@ -432,7 +451,33 @@ fn stopped_head_for_continue(
     if head == state.onto || state.mapping.values().any(|mapped| *mapped == head) {
         return Ok(head);
     }
+    let head_commit = load_commit(repo, head)?;
+    if let Some(&parent) = head_commit.parents.first() {
+        return Ok(parent);
+    }
     Err(RebaseSessionError::NoRebaseInProgress)
+}
+
+fn is_first_parent_descendant_of(
+    repo: &Repository,
+    ancestor: ObjectId,
+    tip: ObjectId,
+) -> Result<bool, RebaseSessionError> {
+    if tip == ancestor {
+        return Ok(false);
+    }
+    let mut current = Some(tip);
+    while let Some(oid) = current {
+        let parents = commit_parents(repo, oid).map_err(RebaseSessionError::from)?;
+        let Some(first) = parents.first().copied() else {
+            break;
+        };
+        if first == ancestor {
+            return Ok(true);
+        }
+        current = Some(first);
+    }
+    Ok(false)
 }
 
 fn advance_after_user_resolution_commit(
@@ -528,7 +573,7 @@ pub fn continue_rebase(
         if head_oid == stopped_head {
             return Err(RebaseSessionError::NothingToCommit);
         }
-        if is_ancestor(repo, stopped_head, head_oid).map_err(map_lib)? && head_oid != stopped_head {
+        if is_first_parent_descendant_of(repo, stopped_head, head_oid)? {
             ensure_worktree_clean_for_rebase_exec(repo).map_err(map_lib)?;
             return advance_after_user_resolution_commit(
                 repo, &state, opts, current, head_oid, progress, cancel,

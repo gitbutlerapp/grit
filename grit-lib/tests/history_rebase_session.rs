@@ -397,6 +397,214 @@ fn continue_nothing_to_commit_when_index_matches_stop_head() {
     assert!(grit.git_dir().join("rebase-merge/grit-plan").is_file());
 }
 
+fn strip_stopped_head_from_grit_plan(git_dir: &std::path::Path) {
+    let path = git_dir.join("rebase-merge/grit-plan");
+    let raw = std::fs::read_to_string(&path).expect("grit-plan");
+    let mut value: serde_json::Value = serde_json::from_str(&raw).expect("json");
+    value
+        .as_object_mut()
+        .expect("object")
+        .remove("stopped_head");
+    std::fs::write(&path, serde_json::to_vec_pretty(&value).expect("encode")).expect("write");
+}
+
+#[test]
+fn continue_after_commit_with_legacy_grit_plan_missing_stopped_head() {
+    use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "f", "1\n2\n3\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "o"]);
+    commit_file(wt, "f", "1\nO\n3\n", "o1");
+    std::fs::write(wt.join("g"), "y\n").expect("g");
+    git(wt, &["add", "g"]);
+    git(wt, &["commit", "-qm", "o2"]);
+    let tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "f", "1\nM\n3\n", "m");
+    let onto = git_oid(wt, "HEAD");
+    let grit = open_grit(wt);
+    git(wt, &["switch", "o"]);
+    let _ = start_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("stop");
+    strip_stopped_head_from_grit_plan(grit.git_dir());
+    std::fs::write(wt.join("f"), "1\nR\n3\n").expect("resolve");
+    commit_with_scope(
+        &grit,
+        &CommitRequest {
+            message: "resolved o1\n".into(),
+            committer: Some(IDENT.parse().expect("IDENT")),
+            ..Default::default()
+        },
+        CommitScope::AutoStage,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("commit");
+    let done = continue_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("continue");
+    assert!(matches!(done, RebaseOutcome::Done { .. }));
+    assert!(!grit.git_dir().join("rebase-merge").exists());
+}
+
+#[test]
+fn continue_rejects_resolution_merge_with_stop_as_second_parent_only() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "f.txt", "base\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "topic"]);
+    commit_file(wt, "f.txt", "topic change\n", "topic commit");
+    let topic_tip = git_oid(wt, "topic");
+    let tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "f.txt", "main change\n", "main commit");
+    let onto = git_oid(wt, "HEAD");
+    let grit = open_grit(wt);
+    git(wt, &["switch", "topic"]);
+    let _ = start_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("stop");
+    std::fs::write(wt.join("f.txt"), "resolved\n").expect("resolve");
+    git(wt, &["add", "f.txt"]);
+    let stopped_head = git_oid(wt, "HEAD");
+    let tree = git(wt, &["write-tree"]).trim().to_string();
+    let bogus = git(
+        wt,
+        &[
+            "commit-tree",
+            &tree,
+            "-p",
+            &topic_tip.to_hex(),
+            "-p",
+            &stopped_head.to_hex(),
+            "-m",
+            "bogus merge resolution",
+        ],
+    )
+    .trim()
+    .to_string();
+    git(wt, &["reset", "--hard", &bogus]);
+    let err = continue_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("bogus merge continue");
+    assert!(matches!(
+        err,
+        RebaseSessionError::ResolutionHeadChanged { .. }
+    ));
+    assert!(grit.git_dir().join("rebase-merge/grit-plan").is_file());
+}
+
+#[test]
+fn continue_resolution_head_changed_leaves_rebase_state() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "f.txt", "base\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "topic"]);
+    commit_file(wt, "f.txt", "topic change\n", "topic commit");
+    let topic_tip = git_oid(wt, "topic");
+    let tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "f.txt", "main change\n", "main commit");
+    let onto = git_oid(wt, "HEAD");
+    let grit = open_grit(wt);
+    git(wt, &["switch", "topic"]);
+    let _ = start_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("stop");
+    std::fs::write(wt.join("f.txt"), "resolved\n").expect("resolve");
+    git(wt, &["add", "f.txt"]);
+    let stopped_head = git_oid(wt, "HEAD");
+    let tree = git(wt, &["write-tree"]).trim().to_string();
+    let bogus = git(
+        wt,
+        &[
+            "commit-tree",
+            &tree,
+            "-p",
+            &topic_tip.to_hex(),
+            "-p",
+            &stopped_head.to_hex(),
+            "-m",
+            "bogus",
+        ],
+    )
+    .trim()
+    .to_string();
+    git(wt, &["reset", "--hard", &bogus]);
+    let _ = continue_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("continue");
+    assert!(grit.git_dir().join("rebase-merge/grit-plan").is_file());
+}
+
+#[test]
+fn commit_during_rebase_conflict_uses_merge_msg_without_dash_m() {
+    use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "f.txt", "base\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "topic"]);
+    commit_file(wt, "f.txt", "topic change\n", "o1 subject");
+    let tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "f.txt", "main change\n", "main commit");
+    let onto = git_oid(wt, "HEAD");
+    let grit = open_grit(wt);
+    git(wt, &["switch", "topic"]);
+    let _ = start_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("stop");
+    std::fs::write(wt.join("f.txt"), "resolved\n").expect("resolve");
+    commit_with_scope(
+        &grit,
+        &CommitRequest {
+            committer: Some(IDENT.parse().expect("IDENT")),
+            ..Default::default()
+        },
+        CommitScope::AutoStage,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("commit");
+    assert_eq!(git(wt, &["log", "-1", "--format=%s"]).trim(), "o1 subject");
+}
+
 #[test]
 fn skip_drops_conflicting_commit() {
     let repo = HistoryRepo::init();

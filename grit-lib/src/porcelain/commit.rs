@@ -21,7 +21,9 @@ use crate::diff::{
 };
 use crate::error::ApplyError;
 use crate::error::{Error, Result};
-use crate::history::{ensure_rewrite_apply_ready, HistoryError};
+use crate::history::{
+    ensure_rewrite_apply_ready, persist_rebase_stopped_head_if_missing, HistoryError,
+};
 use crate::hooks::{
     run_advisory_hook, run_commit_hook, run_post_rewrite, CommitHookEnv, HookError, HookName,
     PostOperationHooks, RewriteKind,
@@ -1515,6 +1517,11 @@ fn create_commit_with_index(
         && run_commit_hook_recorded(repo, HookName::PreCommit, &[], None, &commit_env)?
     {
         hooks_run.push(HookName::PreCommit);
+    }
+
+    if !req.amend && grit_rebase_conflict_stop_active(repo.git_dir()) {
+        persist_rebase_stopped_head_if_missing(repo)
+            .map_err(|e| Error::Message(format!("rebase resolution commit: {e}")))?;
     }
 
     let message_source = if req.message_from_merge {
