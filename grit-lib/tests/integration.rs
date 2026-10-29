@@ -247,6 +247,9 @@ mod checkout_populated_index_stat_git_compat;
 #[path = "checkout_populated_tree_large.rs"]
 mod checkout_populated_tree_large;
 #[cfg(feature = "full-tests")]
+#[path = "checkout_replaced_top_level_dir_git_compat.rs"]
+mod checkout_replaced_top_level_dir_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "checkout_switch_away_invalid_index.rs"]
 mod checkout_switch_away_invalid_index;
 #[cfg(feature = "full-tests")]
