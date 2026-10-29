@@ -3365,10 +3365,12 @@ fn sparse_filter_includes_path(
     repo: &Repository,
     path: &str,
     sparse_patterns: Option<&ParsedSparsePatterns>,
+    tree_state: &mut TreeWalkState,
 ) -> bool {
-    sparse_patterns
-        .map(|patterns| patterns.includes(path, repo.work_tree()))
-        .unwrap_or(true)
+    let Some(patterns) = sparse_patterns else {
+        return true;
+    };
+    tree_state.sparse_includes(repo, patterns, path)
 }
 
 fn sparse_oid_lines_from_filter(
@@ -8832,6 +8834,10 @@ struct TreeWalkState {
     tree_read_buf: Vec<u8>,
     cancel_watch: Option<Arc<AtomicBool>>,
     cancel_poll_counter: u32,
+    /// Cached [`ParsedSparsePatterns::includes`] results for this walk.
+    sparse_match_cache: HashMap<String, bool>,
+    /// Trees whose blob children were fully classified under a sparse filter.
+    sparse_complete_trees: HashSet<ObjectId>,
 }
 
 impl TreeWalkState {
@@ -8870,6 +8876,20 @@ impl TreeWalkState {
         let blob = Arc::new(std::mem::take(&mut self.tree_read_buf));
         self.tree_blobs.insert(tree_oid, Arc::clone(&blob));
         Ok(blob)
+    }
+
+    fn sparse_includes(
+        &mut self,
+        repo: &Repository,
+        patterns: &ParsedSparsePatterns,
+        path: &str,
+    ) -> bool {
+        if let Some(&included) = self.sparse_match_cache.get(path) {
+            return included;
+        }
+        let included = patterns.includes(path, repo.work_tree());
+        self.sparse_match_cache.insert(path.to_owned(), included);
+        included
     }
 
     /// Returns `true` if this tree at `depth` should be skipped (already entered at same or
@@ -9073,7 +9093,7 @@ fn collect_reachable_objects_segmented(
                 result.push((tag_oid, "tag".to_owned()));
             }
         }
-        let parent_trees_slice = if filter.is_some() {
+        let parent_trees_slice = if filter.is_some_and(ObjectFilter::is_depth_sensitive) {
             None
         } else {
             Some(graph.parent_commit_trees(commit_oid)?)
@@ -9085,12 +9105,9 @@ fn collect_reachable_objects_segmented(
             segments.push(result[start..].to_vec());
             continue;
         }
-        // The parent_union short-circuit dedups objects already reachable from a parent commit.
-        // With an active filter this changes which trees are *visited* per commit, which breaks
-        // Git's `tree:`/`combine:` skip-tree semantics (and the matching GIT_TRACE output): Git
-        // visits every reachable tree per commit and relies on each filter's own seen state to
-        // detect re-visits. Dedup of shown/omitted objects is already handled by `emitted` and the
-        // final omitted set, so skip the union optimization whenever a filter is present.
+        // Depth-sensitive filters (`tree:<n>` with n > 0, and combines containing them) must
+        // revisit trees at each commit so per-depth seen state matches Git. Other filters
+        // (including `sparse:oid`) still use unchanged-subtree skipping against parent trees.
         collect_tree_objects_filtered(
             repo,
             commit_tree,
@@ -9469,6 +9486,17 @@ fn collect_tree_objects_filtered(
             }
         }
     }
+    if sparse_patterns.is_some() && tree_state.sparse_complete_trees.contains(&tree_oid) {
+        if !packed_set.is_some_and(|p| p.contains(&tree_oid)) && emitted.insert(tree_oid) {
+            let out_path = if omit_object_paths {
+                String::new()
+            } else {
+                prefix.to_owned()
+            };
+            result.push((tree_oid, out_path));
+        }
+        return Ok(());
+    }
     let tree_blob = match tree_state.tree_blob(repo, tree_oid) {
         Ok(blob) => blob,
         Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
@@ -9546,6 +9574,7 @@ fn collect_tree_objects_filtered(
     }
 
     if bits.skip_tree {
+        tree_state.tree_blobs.remove(&tree_oid);
         return Ok(());
     }
 
@@ -9649,7 +9678,8 @@ fn collect_tree_objects_filtered(
                     Err(err) => return Err(err),
                 };
                 if child_info.kind == ObjectKind::Blob {
-                    let sparse_blob = sparse_filter_includes_path(repo, &path, sparse_patterns);
+                    let sparse_blob =
+                        sparse_filter_includes_path(repo, &path, sparse_patterns, tree_state);
                     let blob_bits = match filter {
                         None => ListFilterBits {
                             mark_seen: true,
@@ -9757,6 +9787,11 @@ fn collect_tree_objects_filtered(
             }
         }
     }
+
+    if sparse_patterns.is_some() {
+        tree_state.sparse_complete_trees.insert(tree_oid);
+    }
+    tree_state.tree_blobs.remove(&tree_oid);
 
     Ok(())
 }
@@ -9900,7 +9935,8 @@ fn collect_root_object(
         }
         ObjectKind::Blob => {
             let path_for_sparse = root.root_path.as_deref().unwrap_or("");
-            let sparse_blob = sparse_filter_includes_path(repo, path_for_sparse, sparse_patterns);
+            let sparse_blob =
+                sparse_filter_includes_path(repo, path_for_sparse, sparse_patterns, tree_state);
             let blob_bits = match filter {
                 None => ListFilterBits {
                     mark_seen: true,

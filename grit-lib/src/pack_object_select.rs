@@ -817,7 +817,7 @@ fn rev_list_filtered_objects(
     let haves: Vec<String> = haves.iter().map(ObjectId::to_hex).collect();
     let opts = crate::rev_list::RevListOptions {
         objects: true,
-        no_object_names: true,
+        no_object_names: false,
         quiet: true,
         filter: Some(filter.clone()),
         cancel_watch: Some(stop.watch_arc()),
@@ -836,7 +836,15 @@ fn rev_list_filtered_objects(
             ordered.push(*oid);
         }
     }
-    Ok((ordered, HashMap::new()))
+    let mut name_hashes = HashMap::new();
+    for (oid, path) in &result.objects {
+        if !path.is_empty() {
+            name_hashes
+                .entry(*oid)
+                .or_insert_with(|| pack_name_hash(path));
+        }
+    }
+    Ok((ordered, name_hashes))
 }
 
 /// Walk objects reachable from `roots`, with the path name hash of every blob
