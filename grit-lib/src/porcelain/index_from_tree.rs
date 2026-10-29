@@ -80,6 +80,8 @@ pub(crate) fn refresh_stage0_index_stats_for_paths(
         version: index.version,
         hash_algo: index.hash_algo,
         source_mtime: index.source_mtime,
+        source_checksum: index.source_checksum.clone(),
+        source_file_len: index.source_file_len,
         ..Index::new()
     };
     subset.entries = entries;

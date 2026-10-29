@@ -1805,6 +1805,8 @@ mod status_guidance_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "status_ignored_collapse_git_compat.rs"]
 mod status_ignored_collapse_git_compat;
+#[path = "status_index_refresh_race.rs"]
+mod status_index_refresh_race;
 #[cfg(feature = "full-tests")]
 #[path = "status_merge_conflicts_git_compat.rs"]
 mod status_merge_conflicts_git_compat;

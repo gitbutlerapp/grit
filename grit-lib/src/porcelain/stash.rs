@@ -2934,6 +2934,8 @@ fn apply_stash_commit(
             if !written.entries.is_empty() {
                 written.sort();
                 written.source_mtime = new_index.source_mtime;
+                written.source_checksum = new_index.source_checksum.clone();
+                written.source_file_len = new_index.source_file_len;
                 refresh_index_stats_content_verified(repo, work_tree, &mut written)?;
                 for refreshed in written.entries {
                     if let Some(ie) = new_index.get_mut(&refreshed.path, 0) {

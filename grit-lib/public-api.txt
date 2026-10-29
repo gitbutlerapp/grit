@@ -16612,8 +16612,8 @@ impl core::marker::Send for grit_lib::porcelain::status::StatusOptions
 impl core::marker::Sync for grit_lib::porcelain::status::StatusOptions
 impl core::marker::Unpin for grit_lib::porcelain::status::StatusOptions
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusOptions
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusOptions
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusOptions
 pub struct grit_lib::porcelain::status::UntrackedCollectMeta
 pub grit_lib::porcelain::status::UntrackedCollectMeta::clean_collapsed_unit: std::collections::hash::set::HashSet<alloc::string::String>
 pub grit_lib::porcelain::status::UntrackedCollectMeta::untracked_cache_refreshed: bool
