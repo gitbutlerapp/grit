@@ -1250,7 +1250,8 @@ fn receive_updates_eligible_for_initial_packed(updates: &[crate::refs::store::Re
 /// Apply a non-atomic receive-pack ref batch in one store transaction when possible.
 ///
 /// Plain creates use the initial packed-refs path; mixed batches use a regular transaction.
-/// When a batch fails, fall back to per-ref commits so one bad update does not block the rest.
+/// When a batch fails, fall back to a non-atomic batch (one reftable table write per phase)
+/// so sibling updates still commit while individual refs can be rejected.
 fn commit_receive_ref_updates_on_store(
     store: &dyn crate::refs::store::RefStore,
     pending: Vec<(usize, crate::refs::store::RefUpdate)>,
@@ -1270,15 +1271,18 @@ fn commit_receive_ref_updates_on_store(
     if batch_ok.is_ok() {
         return Vec::new();
     }
-    let mut failures = Vec::new();
-    for (idx, update) in pending {
-        if let Err(e) =
-            crate::refs::commit_ref_update_on_store_with_wait(store, update, || ref_lock_wait)
-        {
-            failures.push((idx, e.to_string()));
-        }
+    let indices: Vec<_> = pending.iter().map(|(idx, _)| *idx).collect();
+    match crate::refs::commit_ref_updates_non_atomic_on_store(store, updates) {
+        Ok(outcomes) => indices
+            .into_iter()
+            .zip(outcomes)
+            .filter_map(|(idx, outcome)| outcome.result.err().map(|e| (idx, e.to_string())))
+            .collect(),
+        Err(e) => indices
+            .into_iter()
+            .map(|idx| (idx, e.to_string()))
+            .collect(),
     }
-    failures
 }
 
 fn receive_command_store_update(cmd: &RefCommand) -> crate::refs::store::RefUpdate {
