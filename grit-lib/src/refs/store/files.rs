@@ -1,4 +1,10 @@
 //! Filesystem ref backend (loose refs + `packed-refs`) implementing [`super::RefStore`].
+//!
+//! On Windows, [`FilesRefStore`] rejects ref updates whose on-disk path would use a reserved
+//! device name (`CON`, `AUX`, `COM1`, …) or another component Win32 cannot represent without
+//! the `\\?\` prefix, because system Git cannot read such loose refs or reflogs. Deletes of
+//! refs that were already written remain allowed so grit can remove broken entries. Reftable
+//! and other backends are unchanged.
 
 use crate::git_path::CanonicalizeExt;
 use std::borrow::Cow;
@@ -54,6 +60,10 @@ pub struct FilesRefStoreConfig {
 }
 
 /// Loose + packed ref storage on disk.
+///
+/// On Windows, updates whose storage path includes a reserved device name or another
+/// non-round-tripping path component are rejected with [`RefStoreError::InvalidRefName`]
+/// so repositories stay readable by system Git.
 #[derive(Debug)]
 pub struct FilesRefStore {
     git_dir: PathBuf,
@@ -720,6 +730,41 @@ impl FilesRefStore {
             refname,
             self.namespace_prefix.as_deref(),
         )
+    }
+
+    /// Reject updates that would write a loose ref or reflog path Win32 cannot expose to
+    /// system Git (reserved device names and similar). Deletes are left alone.
+    #[cfg(windows)]
+    fn reject_win32_unstorable_ref_paths(&self, txn: &RefTransaction) -> StoreResult<()> {
+        use crate::git_path::win32_storage_path_components_round_trip;
+
+        let storage_ok =
+            |name: &str| win32_storage_path_components_round_trip(&self.route(name).storage_name);
+        for update in txn.updates() {
+            if update.new_value.is_none() && !update.flags.log_only {
+                continue;
+            }
+            if !storage_ok(&update.name) {
+                return Err(RefStoreError::InvalidRefName {
+                    name: update.name.clone(),
+                });
+            }
+        }
+        for rename in txn.reflog_renames() {
+            if !storage_ok(&rename.to) {
+                return Err(RefStoreError::InvalidRefName {
+                    name: rename.to.clone(),
+                });
+            }
+        }
+        for rename in txn.case_only_renames() {
+            if !storage_ok(&rename.to) {
+                return Err(RefStoreError::InvalidRefName {
+                    name: rename.to.clone(),
+                });
+            }
+        }
+        Ok(())
     }
 
     fn logical_name(&self, storage: &str) -> String {
@@ -3240,5 +3285,122 @@ mod tests {
             "not a ref\n"
         );
         assert!(!dir.path().join("refs/heads/first.lock").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn win32_initial_packed_transaction_accepts_reserved_ref_name() {
+        let dir = git_dir();
+        let store = store(dir.path());
+        commit_initial(&store, vec![create("refs/heads/aux", oid(1))]).expect("packed initial");
+
+        assert!(
+            !dir.path().join("refs/heads/aux").exists(),
+            "packed-only initial must not write a loose ref"
+        );
+        let packed = fs::read_to_string(dir.path().join("packed-refs")).expect("packed-refs");
+        assert!(
+            packed.contains("refs/heads/aux"),
+            "reserved name may live in packed-refs: {packed}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn win32_initial_loose_fallback_rejects_reserved_ref_name() {
+        let dir = git_dir();
+        let store = store(dir.path());
+        set(&store, "refs/heads/main", oid(1), Expected::Missing).expect("seed");
+
+        let err = commit_initial(
+            &store,
+            vec![
+                create("refs/heads/aux", oid(2)),
+                RefUpdate {
+                    expected: Expected::Any,
+                    ..create("refs/heads/main", oid(3))
+                },
+            ],
+        )
+        .expect_err("loose fallback");
+        assert!(
+            matches!(err, RefStoreError::InvalidRefName { .. }),
+            "{err:?}"
+        );
+        assert!(!dir.path().join("refs/heads/aux").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn win32_rejects_reserved_ref_path_components() {
+        let dir = git_dir();
+        let store = store(dir.path());
+        let oid = oid(9);
+
+        for name in [
+            "refs/heads/aux",
+            "refs/heads/foo/com1",
+            "refs/heads/COM1.txt",
+        ] {
+            let err = set(&store, name, oid, Expected::Missing).expect_err(name);
+            assert!(
+                matches!(err, RefStoreError::InvalidRefName { .. }),
+                "{name}: {err:?}"
+            );
+            let loose = dir.path().join(name);
+            assert!(!loose.exists(), "{name} must not be written");
+            assert!(
+                !dir.path().join(format!("{name}.lock")).exists(),
+                "lock must not be created for {name}"
+            );
+            assert!(
+                !dir.path().join("logs").join(name).exists(),
+                "reflog must not be written for {name}"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn win32_reftable_still_accepts_reserved_ref_names() {
+        use super::reftable::ReftableRefStore;
+
+        let store = ReftableRefStore::open_ephemeral().expect("reftable");
+        let txn = RefTransaction::new()
+            .update(RefUpdate {
+                name: "refs/heads/aux".to_owned(),
+                new_value: Some(RawRef::Direct(oid(1))),
+                expected: Expected::Missing,
+                reflog: None,
+                flags: RefUpdateFlags::default(),
+            })
+            .expect("txn");
+        store.prepare(txn).expect("prepare").commit().expect("aux");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn win32_can_delete_preseeded_reserved_loose_ref() {
+        let dir = git_dir();
+        let hex = oid(3).to_hex();
+        let aux = dir.path().join("refs/heads/aux");
+        fs::write(&aux, format!("{hex}\n")).expect("seed aux");
+        let store = store(dir.path());
+
+        let txn = RefTransaction::new()
+            .update(RefUpdate {
+                name: "refs/heads/aux".to_owned(),
+                new_value: None,
+                expected: Expected::Any,
+                reflog: None,
+                flags: RefUpdateFlags::default(),
+            })
+            .expect("txn");
+        store
+            .prepare(txn)
+            .expect("prepare")
+            .commit()
+            .expect("delete");
+        assert!(!aux.exists());
     }
 }
