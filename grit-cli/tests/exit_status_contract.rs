@@ -134,6 +134,53 @@ fn exit_status_for_every_error_kind_cli() {
     assert_eq!(v["kind"].as_str(), Some("revision_not_found"));
 }
 
+#[test]
+fn unknown_revision_errors_include_revision_not_found_kind() {
+    let root = init_repo();
+    fs::write(root.path().join("a.txt"), "a").expect("write");
+    let (code, _) = grit(root.path(), &["commit", "-m", "seed", "--json"]);
+    assert_eq!(code, 0);
+
+    let rev = "nosuchrev";
+    let cases: &[(&str, &[&str])] = &[
+        ("log", &["log", rev, "--json", "-n", "1"]),
+        ("revs", &["revs", rev, "--json"]),
+        ("show", &["show", rev, "--json"]),
+        ("diff", &["diff", "HEAD", rev, "--json"]),
+        ("reset", &["reset", rev, "--json"]),
+        ("rebase", &["rebase", rev, "--json"]),
+        ("pick", &["pick", rev, "--json"]),
+        ("revert", &["revert", rev, "--json"]),
+        ("resolve", &["resolve", rev, "--json"]),
+        ("merge-base", &["merge-base", "HEAD", rev, "--json"]),
+        ("tag", &["tag", "t", rev, "--json"]),
+        ("history", &["history", "drop", rev, "--json"]),
+    ];
+
+    for (name, args) in cases {
+        let (code, stdout) = grit(root.path(), args);
+        assert_eq!(code, 1, "{name}: {stdout}");
+        let v: Value = serde_json::from_str(stdout.trim()).expect(name);
+        assert_eq!(
+            v["kind"].as_str(),
+            Some("revision_not_found"),
+            "{name}: {v}"
+        );
+        assert!(v["error"].as_str().is_some_and(|e| !e.is_empty()), "{name}");
+    }
+
+    let cat_spec = format!("{rev}:file");
+    let (code, stdout) = grit(root.path(), &["cat", &cat_spec, "--json"]);
+    assert_eq!(code, 1, "cat: {stdout}");
+    let v: Value = serde_json::from_str(stdout.trim()).expect("cat");
+    assert_eq!(v["kind"].as_str(), Some("revision_not_found"));
+
+    let (code, stdout) = grit(root.path(), &["branch", "newbranch", rev, "--json"]);
+    assert_eq!(code, 1, "branch_invalid_start_point");
+    let v: Value = serde_json::from_str(stdout.trim()).expect("branch start");
+    assert_eq!(v["kind"].as_str(), Some("branch_invalid_start_point"));
+}
+
 /// Port with nothing listening (bound, then released).
 fn closed_port() -> u16 {
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");

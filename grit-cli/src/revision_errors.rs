@@ -1,8 +1,11 @@
 //! Shared revision resolution error text for commands.
 
+use anyhow::Error as AnyhowError;
 use grit_lib::error::Error as LibError;
 use grit_lib::object_inspect::ResolveError;
 use grit_lib::revwalk::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
+
+use crate::json_error;
 
 /// Format an ambiguous change-id error with candidate rows (oid, short id, subject).
 #[must_use]
@@ -41,20 +44,22 @@ pub fn map_lib_revision_error(err: &LibError) -> Option<String> {
 
 /// Map an error from expanding commit arguments (`grit pick` / `grit revert`) to a user-facing error.
 #[must_use]
-pub fn map_commit_spec_error(err: LibError) -> anyhow::Error {
+pub fn map_commit_spec_error(err: LibError) -> AnyhowError {
     if let Some(msg) = map_lib_revision_error(&err) {
-        return anyhow::anyhow!(msg);
+        return json_error::structured_revision_not_found(msg);
     }
     match err {
-        LibError::InvalidRef(msg) => anyhow::anyhow!(msg),
-        LibError::ObjectNotFound(msg) => anyhow::anyhow!("could not resolve commit: {msg}"),
-        other => anyhow::Error::new(other),
+        LibError::InvalidRef(msg) => AnyhowError::msg(msg),
+        LibError::ObjectNotFound(msg) => {
+            AnyhowError::msg(format!("could not resolve commit: {msg}"))
+        }
+        other => AnyhowError::new(other),
     }
 }
 
 /// Map [`ResolveError`] from [`Repository::resolve`](grit_lib::repo::Repository::resolve).
 #[must_use]
-pub fn map_resolve_error(spec: &str, err: ResolveError) -> anyhow::Error {
+pub fn map_resolve_error(spec: &str, err: ResolveError) -> AnyhowError {
     match err {
         ResolveError::AmbiguousShortObject { candidates, .. } => {
             let mut msg = format!("ambiguous short object id '{spec}'");
@@ -73,7 +78,9 @@ pub fn map_resolve_error(spec: &str, err: ResolveError) -> anyhow::Error {
         ResolveError::ReflogDateUnparseable { date } => {
             anyhow::anyhow!("invalid reflog date '{date}'")
         }
-        ResolveError::UnknownRevision { .. } => anyhow::anyhow!("unknown revision '{spec}'"),
+        ResolveError::UnknownRevision { .. } => {
+            json_error::structured_revision_not_found(format!("unknown revision '{spec}'"))
+        }
         ResolveError::RevisionRange { .. } => {
             anyhow::anyhow!("revision range or set '{spec}' is not a single object")
         }

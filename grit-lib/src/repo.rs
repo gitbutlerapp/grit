@@ -44,7 +44,7 @@ use crate::config::{
 use crate::diagnostics::{self, DiagnosticsHandle};
 use crate::environment::{Environment, RepositoryOptions};
 use crate::error::{Error, NotARepositoryReason, Result};
-use crate::git_dir::io_error::map_index_write_error;
+use crate::git_dir::io_error::{map_git_dir_io, map_index_write_error, GitDirPathOperation};
 use crate::git_path::path_for_error_message;
 use crate::hooks::run_hook;
 use crate::index::Index;
@@ -56,6 +56,7 @@ use crate::rev_parse::is_inside_work_tree;
 use crate::sparse_checkout::effective_cone_mode_for_sparse_file;
 use crate::split_index::{write_index_file_split, WriteSplitIndexRequest};
 use crate::state::resolve_head;
+use crate::worktree::io_error::{map_worktree_io, WorktreePathOperation};
 use crate::worktree_cwd::cwd_relative_under_work_tree;
 
 /// Compute Git `GIT_PREFIX` for `env.cwd` relative to the work tree (POSIX, no trailing `/`).
@@ -4675,8 +4676,16 @@ pub(crate) fn init_repository_separate_git_dir(
     environment: &Environment,
 ) -> Result<Repository> {
     let skip_hooks_info = template_dir.is_some_and(|p| p.as_os_str().is_empty());
-    fs::create_dir_all(work_tree)?;
-    fs::create_dir_all(git_dir)?;
+    fs::create_dir_all(work_tree).map_err(|source| {
+        map_worktree_io(
+            path_for_error_message(work_tree),
+            WorktreePathOperation::Create,
+            source,
+        )
+    })?;
+    fs::create_dir_all(git_dir).map_err(|source| {
+        map_git_dir_io(git_dir, git_dir, GitDirPathOperation::CreateDir, source)
+    })?;
     let existing = git_dir.join("config").is_file() && git_dir.join("HEAD").is_file();
     if existing {
         ensure_git_directory_layout(git_dir, false, ref_storage, skip_hooks_info)?;
@@ -4777,9 +4786,25 @@ pub(crate) fn init_repository_with_object_format(
     };
 
     if !bare {
-        fs::create_dir_all(path)?;
+        fs::create_dir_all(path).map_err(|source| {
+            map_worktree_io(
+                path_for_error_message(path),
+                WorktreePathOperation::Create,
+                source,
+            )
+        })?;
     }
-    fs::create_dir_all(&git_dir)?;
+    fs::create_dir_all(&git_dir).map_err(|source| {
+        if bare {
+            map_worktree_io(
+                path_for_error_message(path),
+                WorktreePathOperation::Create,
+                source,
+            )
+        } else {
+            map_git_dir_io(&git_dir, &git_dir, GitDirPathOperation::CreateDir, source)
+        }
+    })?;
     let existing = git_dir.join("config").is_file() && git_dir.join("HEAD").is_file();
     if existing {
         ensure_git_directory_layout(&git_dir, bare, ref_storage, skip_hooks_info)?;
