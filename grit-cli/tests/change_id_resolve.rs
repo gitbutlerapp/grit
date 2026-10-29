@@ -185,3 +185,24 @@ fn pick_lists_ambiguous_change_id_candidates() {
     assert!(out.stderr.contains("subject-a"));
     assert!(out.stderr.contains("subject-b"));
 }
+
+#[test]
+fn pick_and_revert_json_ambiguous_change_id_has_no_revision_not_found_kind() {
+    let dir = seed_ambiguous_shared_change_id();
+    let shared = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+    for cmd in ["pick", "revert"] {
+        let out = grit(dir.path(), &[cmd, shared, "--json"]);
+        assert!(!out.ok(), "{cmd}: {}", out.dump(cmd));
+        let v: serde_json::Value = serde_json::from_str(&out.stdout).expect("json stdout");
+        assert!(
+            v["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("ambiguous change id")),
+            "{cmd}: {v}"
+        );
+        assert!(
+            v.get("kind").is_none(),
+            "{cmd} must not use revision_not_found kind: {v}"
+        );
+    }
+}

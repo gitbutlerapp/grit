@@ -13,6 +13,7 @@ use grit_lib::porcelain::pull::PullError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::RemoteError;
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::rev_parse_error::RevParseError;
 use grit_lib::state::{wt_status_get_state, HeadState, InProgressOperation, NextStep, Operation};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -322,11 +323,41 @@ pub fn operation_in_progress(
 
 /// Build a structured CLI error for a revision that names nothing.
 pub fn revision_not_found(spec: &str) -> Error {
-    let human = format!("no branch, tag or commit named '{spec}'");
+    structured_revision_not_found(format!("no branch, tag or commit named '{spec}'"))
+}
+
+/// Structured `--json` failure for a missing revision, preserving caller-chosen wording.
+pub fn structured_revision_not_found(human: impl Into<String>) -> Error {
+    let human = human.into();
     Error::new(StructuredCliError {
         payload: StructuredJsonError::new(human.clone(), ErrorKind::RevisionNotFound),
         human,
     })
+}
+
+/// Detect rev-parse misses that should surface as `revision_not_found` (not every [`LibError`]).
+fn revision_not_found_payload_from_chain(err: &Error) -> Option<StructuredJsonError> {
+    for cause in err.chain() {
+        let Some(lib) = cause.downcast_ref::<LibError>() else {
+            continue;
+        };
+        match lib {
+            LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
+                return Some(StructuredJsonError::new(
+                    format!("revision '{name}' not found"),
+                    ErrorKind::RevisionNotFound,
+                ));
+            }
+            LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
+                return Some(StructuredJsonError::new(
+                    format!("revision '{spec}' not found"),
+                    ErrorKind::RevisionNotFound,
+                ));
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Map a library error to `anyhow`, using structured JSON for typed failures.
@@ -451,6 +482,10 @@ pub fn ensure_structured(err: Error) -> Error {
     if let Some(structured) = would_overwrite_from_chain(&err) {
         return structured;
     }
+    if let Some(payload) = revision_not_found_payload_from_chain(&err) {
+        let human = payload.error.clone();
+        return Error::new(StructuredCliError { payload, human });
+    }
     crate::unborn_errors::enrich_unborn_head(err)
 }
 
@@ -499,6 +534,7 @@ pub fn structured_json_payload(err: &Error) -> Option<StructuredJsonError> {
                 .downcast_ref::<StructuredCliError>()
                 .map(|structured| structured.payload.clone())
         })
+        .or_else(|| revision_not_found_payload_from_chain(err))
 }
 
 /// Build a structured error for incompatible `--json` / `--markdown` flag combinations.

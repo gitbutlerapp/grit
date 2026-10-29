@@ -249,7 +249,7 @@ Markdown lists branches in a table with upstream and worktree columns when prese
 | Code | Meaning |
 | ---: | --- |
 | `0` | Success, including `--dry-run` previews. |
-| `1` | Branch not found, not fully merged, checked out elsewhere, or other operational failure. |
+| `1` | Branch not found, not fully merged, checked out elsewhere, invalid start point (`branch_invalid_start_point`), or other operational failure. |
 | `2` | Usage error (missing arguments, incompatible flags). |
 
 On failure with `--json`, stdout includes `error` and a stable `kind`. See [Exit codes](../exit-codes/).

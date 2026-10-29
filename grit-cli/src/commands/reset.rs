@@ -268,9 +268,9 @@ pub fn run(
 fn map_reset_committish_error(err: Error, spec: &str) -> anyhow::Error {
     match err {
         Error::InvalidRef(msg) => anyhow::anyhow!(msg),
-        Error::ObjectNotFound(msg) => {
-            anyhow::anyhow!("invalid revision '{spec}': {msg}")
-        }
+        Error::ObjectNotFound(msg) => crate::json_error::structured_revision_not_found(format!(
+            "invalid revision '{spec}': {msg}"
+        )),
         other => anyhow::Error::new(other),
     }
 }

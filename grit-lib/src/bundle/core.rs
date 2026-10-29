@@ -191,6 +191,10 @@ impl From<std::io::Error> for BundleError {
     }
 }
 
+fn io_open_path(path: &Path, source: std::io::Error) -> BundleError {
+    BundleError::Io(format!("could not open '{}': {source}", path.display()))
+}
+
 impl BundleError {
     /// Whether the bundle operation was cancelled.
     #[must_use]
@@ -559,7 +563,7 @@ fn read_header_lines(reader: &mut dyn BufRead) -> std::result::Result<BundleHead
 const HEADER_READ_BUF: usize = 64 * 1024;
 
 fn read_header_from_file(path: &Path) -> std::result::Result<(BundleHeader, u64), BundleError> {
-    let file = File::open(path).map_err(BundleError::from)?;
+    let file = File::open(path).map_err(|e| io_open_path(path, e))?;
     let mut reader = std::io::BufReader::with_capacity(HEADER_READ_BUF, file);
     let header = read_header_lines(&mut reader)?;
     let mut pack_offset = reader.stream_position().map_err(BundleError::from)?;
@@ -1251,6 +1255,17 @@ mod tests {
         let bundle = Bundle::open(file.path()).expect("open");
         assert_eq!(bundle.header().refs.len(), refs);
         assert_eq!(bundle.pack_byte_offset(), (HEADER_READ_BUF - 2) as u64);
+    }
+
+    #[test]
+    fn open_missing_file_names_path() {
+        let path = std::path::Path::new("/no/such/bundle/path.bundle");
+        let err = Bundle::open(path).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("could not open") && msg.contains("path.bundle"),
+            "{msg}"
+        );
     }
 
     #[test]

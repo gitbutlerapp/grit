@@ -2353,6 +2353,7 @@ fn bad_filter_and_missing_revision_errors_are_clean() -> TestResult {
     assert_eq!(out.status, Some(1), "{}", out.dump());
     let v: Value = serde_json::from_str(&out.stdout)?;
     assert_eq!(v["error"], "revision 'nonexistent' not found");
+    assert_eq!(v["kind"].as_str(), Some("revision_not_found"));
 
     let out = gs(&repo, ["switch", "nonexistent", "--json"]);
     assert_eq!(out.status, Some(1), "{}", out.dump());

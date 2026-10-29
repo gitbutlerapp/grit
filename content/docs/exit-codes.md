@@ -56,7 +56,7 @@ $ grit push --json
 | `branch_no_upstream` | No upstream configured. `grit pull` hints at `grit pull origin <branch>` and `grit push -u origin <branch>`. |
 | `branch_error` | Other branch operation failure. |
 | `hook_failed` | A hook such as `pre-commit` exited non-zero (`hook.name`, `hook.status`, and the hook's captured `hook.stdout` / `hook.stderr`). |
-| `revision_not_found` | A branch, tag, commit id or revision expression names nothing (for example `grit merge nonexistent`). |
+| `revision_not_found` | A branch, tag, commit id or revision expression names nothing. Any command that resolves a revision may emit this `kind` when the spec names nothing (not only `grit merge`). |
 | `remote_unreadable` | The remote could not be reached or read (exit 128); see the exit status table above. When the server answers `404`, the hint asks you to check the URL. |
 | `no_remote` | `grit push` with no remote named, no push remote for the branch, and no `origin`. Hint: `grit remote add origin <url>`. |
 | `remote_not_found` | A remote name that is not configured (`grit push origin main`, `grit pull`, `grit fetch nosuch`). Hint: `grit remote add <name> <url>`. |

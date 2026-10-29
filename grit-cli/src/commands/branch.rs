@@ -13,6 +13,7 @@ use grit_lib::refs::branch_tracking::{
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::revwalk::rev_parse_error::RevParseError;
 use grit_lib::state::{
     operation_blocking_switch, resolve_head, resolve_head_for_repository, wt_status_get_state,
     HeadState, InProgressOperation,
@@ -705,6 +706,22 @@ fn track_mode(opts: &BranchRunOptions) -> TrackMode {
     }
 }
 
+fn map_create_start_revision_error(rev: &str, err: Error) -> AnyhowError {
+    use grit_lib::porcelain::branch::BranchError;
+    match err {
+        Error::RevParse(
+            RevParseError::InvalidObjectName { .. } | RevParseError::AmbiguousArgument { .. },
+        )
+        | Error::ObjectNotFound(_) => {
+            map_branch_error(Error::Branch(BranchError::InvalidStartPoint {
+                label: rev.to_owned(),
+                reason: "revision not found".into(),
+            }))
+        }
+        other => map_branch_error(other),
+    }
+}
+
 fn create(
     repo: &Repository,
     name: &str,
@@ -712,7 +729,8 @@ fn create(
     opts: &BranchRunOptions,
 ) -> Result<BranchOutcome> {
     let start_point = if let Some(rev) = start {
-        let oid = resolve_revision(repo, rev).map_err(map_branch_error)?;
+        let oid =
+            resolve_revision(repo, rev).map_err(|err| map_create_start_revision_error(rev, err))?;
         Some(StartPoint {
             oid,
             label: rev.to_owned(),
