@@ -1768,10 +1768,9 @@ fn restore_pre_merge_state(repo: &Repository) -> Result<()> {
     let mut changes =
         checkout::checkout_diff_align_index_to_tree(repo.odb(), &diff_source, &head_tree)?;
     merge_abort_append_unmerged_tree_checkouts(repo.odb(), &head_tree, &unmerged, &mut changes)?;
-    let mut index = crate::porcelain::index_from_tree::index_from_tree(repo, &head_tree)?;
-    if let Some(sparse) = crate::sparse_checkout::SparseCheckout::load(repo)? {
-        sparse.carry_skip_worktree(&mut index, &old_index);
-    }
+    let mut index = crate::porcelain::index_from_tree::index_from_tree_with_seeded_stats(
+        repo, &head_tree, &old_index,
+    )?;
     crate::porcelain::index_from_tree::prepare_index_for_tree_transition(
         repo, &head_tree, &mut index,
     )?;

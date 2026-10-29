@@ -1,6 +1,10 @@
 //! Issue #2311: warm `grit merge --abort` on a wide merge should stay near system `git`.
 //!
-//! `GRIT_MERGE_ABORT_PERF=1 cargo test -p grit-lib --test merge_abort_wide_perf_git_compat --release`
+//! Build release grit first (`cargo build --release -p grit-cli`) or set `GRIT_BIN`.
+//!
+//! ```console
+//! GRIT_MERGE_ABORT_PERF=1 cargo test -p grit-lib --test integration merge_abort_wide_near_git --release --features full-tests
+//! ```
 
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -167,8 +171,24 @@ fn merge_abort_wide_near_git() {
     );
     let grit_abort = warm_abort_median(root, &grit, &["merge", "bb"], &["merge", "--abort"]);
 
+    git(root, &["checkout", "-q", "ba"]);
+    let _ = Command::new(&grit)
+        .args(["merge", "bb"])
+        .current_dir(root)
+        .output();
+    let status_start = Instant::now();
+    run_cmd(
+        root,
+        std::path::Path::new("git"),
+        &["status", "--porcelain"],
+    );
+    let status_after_abort = status_start.elapsed();
+
     let ratio = grit_abort.as_secs_f64() / git_abort.as_secs_f64();
-    eprintln!("wide merge --abort: git={git_abort:?} grit={grit_abort:?} ratio={ratio:.2}");
+    eprintln!(
+        "wide merge --abort: git={git_abort:?} grit={grit_abort:?} ratio={ratio:.2} \
+         git status after abort={status_after_abort:?}"
+    );
     assert!(
         ratio <= MAX_GIT_RATIO,
         "grit merge --abort should stay within {MAX_GIT_RATIO}× git (got {ratio:.2}×)"
