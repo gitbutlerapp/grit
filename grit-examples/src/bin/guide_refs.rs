@@ -85,9 +85,8 @@ fn main() -> Result<(), grit_lib::error::Error> {
         .cloned()
         .ok_or_else(|| grit_lib::error::Error::Message("HEAD has no commit".into()))?;
 
-    let demo = RefName::try_from(DEMO_BRANCH).map_err(|e| {
-        grit_lib::error::Error::Message(format!("invalid demo ref name: {e}"))
-    })?;
+    let demo = RefName::try_from(DEMO_BRANCH)
+        .map_err(|e| grit_lib::error::Error::Message(format!("invalid demo ref name: {e}")))?;
     let old = repo.references().resolve(&demo).ok();
     repo.references().update(&demo, &target)?;
 

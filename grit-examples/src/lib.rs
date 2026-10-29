@@ -27,7 +27,8 @@ pub fn resolve_name(repo: &Repository, name: &str) -> Result<ObjectId> {
 
 /// Return the current HEAD object id.
 pub fn head_oid(repo: &Repository) -> Result<ObjectId> {
-    let head = RefName::try_from("HEAD").map_err(|e| anyhow::anyhow!("invalid HEAD ref name: {e}"))?;
+    let head =
+        RefName::try_from("HEAD").map_err(|e| anyhow::anyhow!("invalid HEAD ref name: {e}"))?;
     repo.references()
         .resolve(&head)
         .context("could not resolve HEAD")

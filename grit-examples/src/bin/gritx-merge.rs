@@ -47,8 +47,8 @@ fn run() -> Result<()> {
             .map_err(|e| anyhow::anyhow!("invalid HEAD target: {e}"))?;
         repo.references().update(&name, &target)?;
     } else {
-        let head = RefName::try_from("HEAD")
-            .map_err(|e| anyhow::anyhow!("invalid HEAD ref name: {e}"))?;
+        let head =
+            RefName::try_from("HEAD").map_err(|e| anyhow::anyhow!("invalid HEAD ref name: {e}"))?;
         repo.references().update(&head, &target)?;
     }
     println!("Fast-forwarded to {target}");
