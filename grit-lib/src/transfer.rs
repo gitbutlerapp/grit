@@ -1051,8 +1051,8 @@ fn copy_objects_for_local_fetch(
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<(HashSet<ObjectId>, TransferStats)> {
     use crate::local_object_copy::{
-        link_loose_objects, link_loose_objects_for_oids, link_packs_within, link_remote_pack_files,
-        linked_object_set, refresh_local_odb_after_link,
+        count_store_objects_for_link, link_loose_objects, link_loose_objects_for_oids,
+        link_packs_within, link_remote_pack_files, linked_object_set, refresh_local_odb_after_link,
     };
 
     let remote_objects = remote_odb.objects_dir();
@@ -1068,7 +1068,8 @@ fn copy_objects_for_local_fetch(
         && !wants.is_empty()
     {
         crate::progress::poll_cancel(progress, cancel)?;
-        let mut copy = LocalCopyProgress::new(wants.len() as u64);
+        let copy_total = count_store_objects_for_link(remote_objects)? as u64;
+        let mut copy = LocalCopyProgress::new(copy_total);
         let linked_packs = link_remote_pack_files(
             remote_objects,
             local_objects,
@@ -1076,12 +1077,12 @@ fn copy_objects_for_local_fetch(
             cancel,
             0,
         )?;
-        if linked_packs > 0 {
+        if linked_packs.objects > 0 {
             refresh_local_odb_after_link(local_odb);
-            copy.add(progress, linked_packs as u64);
+            copy.add(progress, linked_packs.objects as u64);
         }
         let pack_alone_satisfies_wants =
-            linked_packs > 0 && wants.iter().all(|oid| local_odb.exists(oid));
+            linked_packs.objects > 0 && wants.iter().all(|oid| local_odb.exists(oid));
         let linked_loose = link_loose_objects(
             remote_objects,
             local_objects,
@@ -1092,7 +1093,9 @@ fn copy_objects_for_local_fetch(
             refresh_local_odb_after_link(local_odb);
             copy.add(progress, linked_loose as u64);
         }
-        if (linked_packs > 0 || linked_loose > 0) && wants.iter().all(|oid| local_odb.exists(oid)) {
+        if (linked_packs.files > 0 || linked_loose > 0)
+            && wants.iter().all(|oid| local_odb.exists(oid))
+        {
             copy.finish(progress);
             let stats_loose = if pack_alone_satisfies_wants {
                 HashSet::new()
@@ -4031,6 +4034,54 @@ mod tests {
         }
     }
 
+    fn copying_phase_total(rec: &PhaseRecorder) -> Option<u64> {
+        rec.started
+            .iter()
+            .find(|(phase, _)| *phase == ProgressPhase::CopyingObjects)
+            .and_then(|(_, total)| *total)
+    }
+
+    fn assert_copy_progress_within_total(rec: &PhaseRecorder, copied_objects: u64) {
+        let Some(total) = copying_phase_total(rec) else {
+            panic!("missing CopyingObjects start: {:?}", rec.started);
+        };
+        assert!(
+            total >= copied_objects,
+            "progress total {total} smaller than copied objects {copied_objects}"
+        );
+        for &count in &rec.copying_counts {
+            assert!(
+                count <= total,
+                "copy progress {count} exceeds phase total {total}"
+            );
+        }
+        for snapshot in &rec.received {
+            assert!(
+                snapshot.received <= snapshot.total,
+                "received {} exceeds snapshot total {}",
+                snapshot.received,
+                snapshot.total
+            );
+            assert!(
+                snapshot.total <= total,
+                "snapshot total {} exceeds phase total {}",
+                snapshot.total,
+                total
+            );
+            assert!(
+                snapshot.received <= total,
+                "received {} exceeds phase total {}",
+                snapshot.received,
+                total
+            );
+        }
+        assert_eq!(
+            rec.copying_counts.last().copied().unwrap_or(0),
+            copied_objects,
+            "final copy count should match transferred objects"
+        );
+    }
+
     #[cfg_attr(
         not(feature = "full-tests"),
         ignore = "starts system git or is heavy; run with --features full-tests"
@@ -4127,7 +4178,10 @@ mod tests {
             tags: TagMode::None,
             ..Default::default()
         };
-        let mut rec = PhaseRecorder::default();
+        let mut rec = PhaseRecorder {
+            want_received: true,
+            ..Default::default()
+        };
         let outcome = fetch_local_with_progress(
             &local.path().join(".git"),
             remote.path(),
@@ -4136,6 +4190,13 @@ mod tests {
             &crate::progress::NeverCancel,
         )
         .expect("fetch_local");
+        assert!(
+            !rec.received.is_empty(),
+            "expected received_objects callbacks"
+        );
+        for snapshot in &rec.received {
+            assert!(snapshot.received <= snapshot.total);
+        }
 
         let enum_pos = rec
             .started
@@ -4176,6 +4237,72 @@ mod tests {
             rec.copying_counts.last().copied().unwrap_or(0) >= outcome.transfer.objects as u64,
             "final copy count should reach transferred objects"
         );
+    }
+
+    #[test]
+    fn link_source_objects_progress_counts_objects_not_sidecar_files() {
+        for want_received in [false, true] {
+            let remote = tempfile::tempdir().expect("remote");
+            assert!(git_ok(
+                remote.path(),
+                &["init", "-q", "-b", "main", "--bare"]
+            ));
+            let src = tempfile::tempdir().expect("src");
+            assert!(git_ok(src.path(), &["init", "-q", "-b", "main"]));
+            for i in 0..20 {
+                std::fs::write(src.path().join("f.txt"), format!("payload {i}\n")).unwrap();
+                assert!(git_ok(src.path(), &["add", "f.txt"]));
+                assert!(git_ok(src.path(), &["commit", "-qm", &format!("c{i}")],));
+            }
+            assert!(git_ok(
+                src.path(),
+                &["push", "-q", remote.path().to_str().unwrap(), "main:main"],
+            ));
+            assert!(git_ok(remote.path(), &["repack", "-a", "-d", "-f"],));
+
+            let local = tempfile::tempdir().expect("local");
+            init_repository(local.path(), false, "main", None, RefStorageFormat::Files)
+                .expect("init");
+
+            let opts = FetchOptions {
+                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+                initial_remote_fetch: true,
+                link_source_objects: true,
+                tags: TagMode::None,
+                ..Default::default()
+            };
+            let mut rec = PhaseRecorder {
+                want_received,
+                ..Default::default()
+            };
+            let outcome = fetch_local_with_progress(
+                &local.path().join(".git"),
+                remote.path(),
+                &opts,
+                &mut rec,
+                &crate::progress::NeverCancel,
+            )
+            .expect("fetch_local");
+
+            if want_received {
+                assert!(
+                    !rec.received.is_empty(),
+                    "expected received_objects when enabled"
+                );
+            } else {
+                assert!(
+                    rec.received.is_empty(),
+                    "expected no received_objects when disabled"
+                );
+            }
+            assert_copy_progress_within_total(&rec, outcome.transfer.objects as u64);
+            assert_ne!(
+                copying_phase_total(&rec),
+                Some(1),
+                "total must be object count, not ref count: {:?}",
+                rec.started
+            );
+        }
     }
 
     #[cfg_attr(

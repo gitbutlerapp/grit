@@ -58,10 +58,11 @@ pub trait Progress: ProgressSink {
         false
     }
 
-    /// Objects received so far in the pack being streamed in, reported during
-    /// the [`ReceivingObjects`](crate::progress::ProgressPhase::ReceivingObjects)
-    /// phase when [`Progress::wants_received_objects`] is true. Counts may lag
-    /// the bytes reported through [`ProgressSink::inc`] slightly.
+    /// Objects copied or received so far, reported during
+    /// [`ReceivingObjects`](crate::progress::ProgressPhase::ReceivingObjects) or
+    /// [`CopyingObjects`](crate::progress::ProgressPhase::CopyingObjects) when
+    /// [`Progress::wants_received_objects`] is true. Counts may lag the bytes
+    /// reported through [`ProgressSink::inc`] slightly on network fetch.
     fn received_objects(&mut self, _counts: crate::progress::ReceivedObjects) {}
 
     /// Progress of a resumable bundle download (clone with `bundle-uri`) or

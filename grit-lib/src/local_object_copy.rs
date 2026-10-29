@@ -30,6 +30,45 @@ fn pack_entry_name_ok(name: &str) -> bool {
         || name.ends_with(".mtimes")
 }
 
+/// Outcome of [`link_remote_pack_files`].
+pub(crate) struct LinkRemotePacksOutcome {
+    /// Pack sidecar files (`.pack`, `.idx`, …) installed by this call.
+    pub files: usize,
+    /// Git objects in newly installed pack indexes (not sidecar file count).
+    pub objects: usize,
+}
+
+/// Count objects stored under `source_objects` (packed index entries plus loose files).
+///
+/// Used to size local whole-store link progress before copying.
+pub(crate) fn count_store_objects_for_link(source_objects: &Path) -> Result<usize> {
+    let mut objects = 0usize;
+    let pack_dir = source_objects.join("pack");
+    if pack_dir.is_dir() {
+        for entry in fs::read_dir(&pack_dir).map_err(Error::Io)? {
+            let entry = entry.map_err(Error::Io)?;
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "idx") {
+                let index = pack::read_pack_index_no_verify(&path)?;
+                objects += index.len();
+            }
+        }
+    }
+    for entry in fs::read_dir(source_objects).map_err(Error::Io)? {
+        let entry = entry.map_err(Error::Io)?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str.len() != 2 || !name_str.chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        let Ok(shard) = fs::read_dir(entry.path()) else {
+            continue;
+        };
+        objects += shard.flatten().count();
+    }
+    Ok(objects)
+}
+
 /// Link or copy pack-related files from `remote_objects/pack/` into `local_objects/pack/`.
 ///
 /// Skips files that already exist in the destination. Every `.idx` is linked after
@@ -42,10 +81,13 @@ pub(crate) fn link_remote_pack_files(
     progress: &mut dyn crate::progress::ProgressSink,
     cancel: &dyn crate::progress::Cancel,
     total_hint: usize,
-) -> Result<usize> {
+) -> Result<LinkRemotePacksOutcome> {
     let remote_pack = remote_objects.join("pack");
     if !remote_pack.is_dir() {
-        return Ok(0);
+        return Ok(LinkRemotePacksOutcome {
+            files: 0,
+            objects: 0,
+        });
     }
     let local_pack = local_objects.join("pack");
     fs::create_dir_all(&local_pack).map_err(Error::Io)?;
@@ -57,7 +99,8 @@ pub(crate) fn link_remote_pack_files(
         }
     }
     names.sort_by_key(|name| name.to_string_lossy().ends_with(".idx"));
-    let mut linked = 0usize;
+    let mut linked_files = 0usize;
+    let mut linked_objects = 0usize;
     for name in names {
         crate::progress::poll_cancel(progress, cancel)?;
         let dst = local_pack.join(&name);
@@ -65,12 +108,20 @@ pub(crate) fn link_remote_pack_files(
             continue;
         }
         hard_link_or_copy(&remote_pack.join(&name), &dst)?;
-        linked += 1;
+        linked_files += 1;
         if total_hint > 0 {
             progress.inc(1);
         }
+        let name_str = name.to_string_lossy();
+        if name_str.ends_with(".idx") {
+            let index = pack::read_pack_index_no_verify(&dst)?;
+            linked_objects += index.len();
+        }
     }
-    Ok(linked)
+    Ok(LinkRemotePacksOutcome {
+        files: linked_files,
+        objects: linked_objects,
+    })
 }
 
 pub(crate) fn link_loose_objects(
@@ -376,8 +427,14 @@ mod tests {
         )
         .expect("link");
         assert!(
-            linked >= 2,
-            "expected at least .pack and .idx, got {linked}"
+            linked.files >= 2,
+            "expected at least .pack and .idx, got {}",
+            linked.files
+        );
+        assert!(
+            linked.objects >= 3,
+            "expected packed objects, got {}",
+            linked.objects
         );
 
         let local_odb = Odb::new(&dst_objects);
