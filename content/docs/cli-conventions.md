@@ -33,6 +33,8 @@ On **every** command, `-n` always means **limit** — never “dry-run” or any
 
 On **mutation** commands, preview mode is long-only **`--dry-run`** (no `-n` shortcut). Mutations that support partial selection (`add`, `restore`, `commit` with hunks, …) use `--dry-run` the same way.
 
+If you pass unknown `-n` on **`add`**, **`rm`**, **`mv`**, **`clean`**, or **`push`**, grit prints a usage hint pointing at **`--dry-run`** instead of clap’s misleading “pass `-n` as a value” tip.
+
 **`grit clean`** is a mutation with different defaults: without `-f` / `--force`, it only prints what would be removed. Passing **`--force`** performs the deletion. That is the documented special case instead of an exception entry.
 
 ## Message input (`-m`, `-F`)
