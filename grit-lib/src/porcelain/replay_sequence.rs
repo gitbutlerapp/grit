@@ -333,6 +333,60 @@ pub fn continue_replay_sequence(
         return Err(Error::ReplayContinueUnmerged);
     }
     let (refname, head_oid) = branch_head(repo)?;
+    let git_dir = repo.git_dir();
+    let step_head_present =
+        read_cherry_pick_head(git_dir)?.is_some() || read_revert_head(git_dir)?.is_some();
+    if !step_head_present && !active.opts.no_commit {
+        let head_tree = commit_tree(repo, &head_oid)?;
+        let index_tree = write_tree_update_index(
+            repo.odb(),
+            &mut index,
+            "",
+            crate::write_tree::WriteTreeFlags::silent(),
+        )?;
+        if index_tree != head_tree {
+            return Err(Error::ReplayContinueDirtyIndex);
+        }
+        let mut todo = active.todo;
+        let mut created_records = read_created_records(repo)?;
+        if !todo.is_empty() {
+            todo.remove(0);
+            write_sequencer_todo(git_dir, &todo)?;
+        }
+        if todo.is_empty() {
+            clear_replay_state(git_dir)?;
+            return Ok(SequenceOutcome::Completed {
+                created: created_records,
+                dropped: Vec::new(),
+            });
+        }
+        let sequence_start = read_sequencer_head(git_dir).unwrap_or(active.abort_safety);
+        persist_sequence_checkpoint(
+            repo,
+            sequence_start,
+            head_oid,
+            &todo,
+            &active.opts,
+            active.direction,
+            &committer,
+            &created_records,
+        )?;
+        return run_sequence(
+            repo,
+            &refname,
+            head_oid,
+            head_oid,
+            sequence_start,
+            active.direction,
+            &committer,
+            &active.opts,
+            &mut todo,
+            created_records.iter().map(|r| r.new_oid).collect(),
+            Vec::new(),
+            &mut created_records,
+            None,
+        );
+    }
     let source = active.current_source()?.ok_or(Error::NoReplayInProgress)?;
     let message = resolve_continue_replay_message(repo.git_dir())?;
     let new_tree = write_tree_update_index(
@@ -432,6 +486,12 @@ pub fn skip_replay_step(
     let committer = identity.header_line();
     let active = load_active_replay(repo)?;
     let (refname, head_oid) = branch_head(repo)?;
+    let git_dir = repo.git_dir();
+    let step_head_present =
+        read_cherry_pick_head(git_dir)?.is_some() || read_revert_head(git_dir)?.is_some();
+    if !step_head_present && head_oid != active.abort_safety {
+        return Err(Error::ReplaySkipAlreadyCommitted);
+    }
     reset_index_worktree_to_head(repo, &head_oid)?;
     clear_step_heads(repo.git_dir(), active.direction)?;
     let mut todo = active.todo;
@@ -473,24 +533,79 @@ pub fn skip_replay_step(
     }
 }
 
+/// Whether [`abort_replay_sequence`] rewound the branch or only cleared replay metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplayAbortOutcome {
+    /// Branch, index, and worktree were reset to the saved pre-replay head.
+    Rewound,
+    /// `HEAD` moved during the step; replay state was cleared without moving the branch.
+    ClearedInPlace,
+}
+
+/// Remove replay step state after a successful `grit commit` during pick/revert (Git `sequencer_post_commit_cleanup`).
+///
+/// # Errors
+///
+/// Propagates I/O, object read, and sequencer record failures.
+pub(crate) fn finish_replay_commit_state(repo: &Repository, new_oid: ObjectId) -> Result<()> {
+    let git_dir = repo.git_dir();
+    let cherry = read_cherry_pick_head(git_dir)?;
+    let revert = read_revert_head(git_dir)?;
+    let Some(source_oid) = cherry.or(revert) else {
+        return Ok(());
+    };
+
+    for name in ["CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG", "AUTO_MERGE"] {
+        let path = git_dir.join(name);
+        if path.exists() {
+            fs::remove_file(&path).map_err(Error::Io)?;
+        }
+    }
+
+    let todo_path = git_dir.join("sequencer").join("todo");
+    let todo_len = if todo_path.is_file() {
+        parse_sequencer_todo(repo, &todo_path)
+            .map(|entries| entries.len())
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    if git_dir.join("sequencer").is_dir() || todo_len > 1 {
+        let mut records = read_created_records(repo)?;
+        if !records.iter().any(|r| r.new_oid == new_oid) {
+            records.push(replay_created_record(repo, source_oid, new_oid)?);
+            write_created_records(git_dir, &records)?;
+        }
+    }
+
+    if todo_len <= 1 {
+        clear_replay_state(git_dir)?;
+    }
+    Ok(())
+}
+
 /// Cancel an in-progress replay, restoring branch, index, and worktree to the saved head.
+///
+/// When `HEAD` no longer matches `sequencer/abort-safety` (for example after `grit commit`
+/// finished the step), replay metadata is cleared without moving the branch.
 ///
 /// # Errors
 ///
 /// - [`Error::NoReplayInProgress`] when nothing is in progress.
-/// - [`Error::ReplayAbortHeadMoved`] when `HEAD` is no longer at `sequencer/abort-safety`.
-pub fn abort_replay_sequence(repo: &Repository) -> Result<()> {
+pub fn abort_replay_sequence(repo: &Repository) -> Result<ReplayAbortOutcome> {
     let active = load_active_replay(repo)?;
     let (refname, head_oid) = branch_head(repo)?;
     if head_oid != active.abort_safety {
-        return Err(Error::ReplayAbortHeadMoved);
+        clear_replay_state(repo.git_dir())?;
+        return Ok(ReplayAbortOutcome::ClearedInPlace);
     }
     let restore_oid = read_sequencer_head(repo.git_dir())
         .or(read_orig_head_for_repository(repo).ok().flatten())
         .unwrap_or(active.abort_safety);
     hard_reset_branch(repo, &refname, restore_oid)?;
     clear_replay_state(repo.git_dir())?;
-    Ok(())
+    Ok(ReplayAbortOutcome::Rewound)
 }
 
 // --- internal ---

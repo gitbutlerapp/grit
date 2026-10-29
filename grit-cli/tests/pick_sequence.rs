@@ -106,6 +106,73 @@ fn pick_conflict_then_continue() {
 }
 
 #[test]
+fn pick_conflict_commit_clears_operation() {
+    let dir = unique_tmp("pick-seq", "commit-finish");
+    init_repo(&dir);
+    commit_file(&dir, "f.txt", "base\n", "base");
+    git(&dir, &["switch", "-c", "topic"]);
+    fs::write(dir.join("f.txt"), "topic\n").unwrap();
+    git(&dir, &["commit", "-qam", "topic change"]);
+    let pick = git(&dir, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&dir, &["switch", "main"]);
+    fs::write(dir.join("f.txt"), "main\n").unwrap();
+    git(&dir, &["commit", "-qam", "main change"]);
+
+    let conflict = grit(&dir, &["pick", &pick]);
+    assert!(!conflict.ok());
+    fs::write(dir.join("f.txt"), "resolved\n").unwrap();
+    let commit = grit(&dir, &["commit", "-m", "resolved via commit"]);
+    assert!(commit.ok(), "commit after pick conflict: {}", commit.stderr);
+
+    let status = grit(&dir, &["status", "--json"]);
+    assert!(status.ok());
+    let st: Value = serde_json::from_str(status.stdout.trim()).unwrap();
+    assert!(
+        st.get("operation").is_none() || st["operation"].is_null(),
+        "status must not report pick in progress: {}",
+        status.stdout
+    );
+    assert!(!dir.join(".git/CHERRY_PICK_HEAD").exists());
+    let cont = grit(&dir, &["pick", "--continue"]);
+    assert!(!cont.ok());
+    assert!(cont.stderr.contains("no cherry-pick in progress"));
+}
+
+#[test]
+fn pick_conflict_commit_keeps_picked_author() {
+    let dir = unique_tmp("pick-seq", "commit-author");
+    init_repo(&dir);
+    commit_file(&dir, "f.txt", "base\n", "base");
+    git(&dir, &["switch", "-c", "side"]);
+    fs::write(dir.join("f.txt"), "side\n").unwrap();
+    git(
+        &dir,
+        &["commit", "-qam", "side", "--author=Other <o@example.com>"],
+    );
+    let pick = git(&dir, &["rev-parse", "HEAD"]).trim().to_owned();
+    let source_author = git(&dir, &["log", "-1", "--format=%an|%ae|%at", &pick])
+        .trim()
+        .to_owned();
+    git(&dir, &["switch", "main"]);
+    fs::write(dir.join("f.txt"), "main\n").unwrap();
+    git(&dir, &["commit", "-qam", "main"]);
+    git(&dir, &["config", "user.name", "Scott Chacon"]);
+    git(&dir, &["config", "user.email", "scott@gitbutler.net"]);
+
+    let conflict = grit(&dir, &["pick", &pick]);
+    assert!(!conflict.ok(), "expected pick conflict");
+    fs::write(dir.join("f.txt"), "resolved\n").unwrap();
+    let commit = json_stdout(&["commit", "-m", "resolved via commit", "--json"], &dir);
+    assert_eq!(commit["author"]["name"], "Other");
+    assert_eq!(commit["author"]["email"], "o@example.com");
+    assert_eq!(
+        git(&dir, &["log", "-1", "--format=%an|%ae|%at"]).trim(),
+        source_author,
+        "HEAD author must match picked commit, not configured committer identity"
+    );
+}
+
+#[test]
 fn pick_skip() {
     let dir = unique_tmp("pick-seq", "skip");
     init_repo(&dir);

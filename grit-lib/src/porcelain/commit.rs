@@ -28,7 +28,7 @@ use crate::hooks::{
 };
 use crate::ident::{
     fsck_commit_idents, parse_signature_times, prepare_commit_author_from_parent,
-    prepare_commit_identity_line, Signature,
+    prepare_commit_identity_line, replace_identity_date_suffix, Signature,
 };
 use crate::index::{Index, IndexLock};
 use crate::objects::odb::Odb;
@@ -42,6 +42,7 @@ use crate::porcelain::hunk_select::{
 };
 use crate::porcelain::index_from_tree::index_from_tree_with_seeded_worktree_stats;
 use crate::porcelain::pathspec_match::KnownPathspecChecker;
+use crate::porcelain::replay_sequence::finish_replay_commit_state;
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
 use crate::refs::{
     update_branch_for_commit_on_store, update_detached_head_for_commit_on_store,
@@ -52,8 +53,8 @@ use crate::signing::{
     extra_headers_without_commit_signatures, should_sign_commit, sign_serialized_commit, GpgConfig,
 };
 use crate::state::{
-    finish_merge_state, read_merge_heads, read_merge_msg, resolve_head_for_repository, HeadState,
-    InProgressOperation,
+    finish_merge_state, read_cherry_pick_head, read_merge_heads, read_merge_msg, read_revert_head,
+    resolve_head_for_repository, HeadState, InProgressOperation,
 };
 use crate::stripspace::{process, Mode};
 use crate::worktree_rules::WorktreeRules;
@@ -398,7 +399,22 @@ pub fn pending_commit_message(repo: &Repository) -> Result<Option<String>> {
     if !read_merge_heads(git_dir)?.is_empty() {
         return read_merge_msg(git_dir);
     }
+    if read_cherry_pick_head(git_dir)?.is_some() || read_revert_head(git_dir)?.is_some() {
+        let Some(raw) = read_merge_msg(git_dir)? else {
+            return Ok(None);
+        };
+        let processed = process(raw.as_bytes(), &Mode::StripComments("#".to_owned()));
+        let message = String::from_utf8(processed).map_err(|_| Error::EmptyCommitMessage)?;
+        if message.trim().is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(message));
+    }
     Ok(None)
+}
+
+fn replay_blocks_partial_commit(git_dir: &std::path::Path) -> Result<bool> {
+    Ok(read_cherry_pick_head(git_dir)?.is_some() || read_revert_head(git_dir)?.is_some())
 }
 
 /// Record a commit using `scope` to decide how the index is prepared.
@@ -477,6 +493,9 @@ fn commit_patch_scope(
 ) -> std::result::Result<CommitOutcome, CommitPatchError> {
     if !read_merge_heads(repo.git_dir())?.is_empty() {
         return Err(Error::PartialCommitDuringMerge.into());
+    }
+    if replay_blocks_partial_commit(repo.git_dir())? {
+        return Err(Error::PartialCommitDuringReplay.into());
     }
     let index_lock = (!req.dry_run)
         .then(|| repo.begin_index_update())
@@ -613,6 +632,9 @@ fn commit_paths_scope(
     }
     if !read_merge_heads(repo.git_dir())?.is_empty() {
         return Err(Error::PartialCommitDuringMerge);
+    }
+    if replay_blocks_partial_commit(repo.git_dir())? {
+        return Err(Error::PartialCommitDuringReplay);
     }
     validate_commit_pathspecs(repo, paths)?;
 
@@ -1233,8 +1255,31 @@ fn resolve_author_for_commit(
     }
     if let Some(author) = req.author.as_ref() {
         author.validate()?;
-        let author =
-            prepare_commit_identity_line(&author.header_line(), req.author_date.as_deref(), now)?;
+        let user_line = author.header_line();
+        if req.author_date.is_none() {
+            if let Some(picked) = read_cherry_pick_head(repo.git_dir())? {
+                let obj = repo.odb().read(&picked)?;
+                if obj.kind == ObjectKind::Commit {
+                    let picked_commit = parse_commit(&obj.data)?;
+                    if let Ok((picked_line, _)) = prepare_commit_author_from_parent(
+                        &picked_commit.author,
+                        &picked_commit.author_raw,
+                        None,
+                        now,
+                    ) {
+                        if let Some(date_suffix) = picked_line.split('>').nth(1).map(str::trim) {
+                            if !date_suffix.is_empty() {
+                                return Ok((
+                                    replace_identity_date_suffix(&user_line, date_suffix),
+                                    Vec::new(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let author = prepare_commit_identity_line(&user_line, req.author_date.as_deref(), now)?;
         return Ok((author, Vec::new()));
     }
     if let Some(a) = reuse_author {
@@ -1244,6 +1289,24 @@ fn resolve_author_for_commit(
             req.author_date.as_deref(),
             now,
         )?);
+    }
+    if !req_amend && !req.reset_author && req.author.is_none() {
+        if let Some(picked) = read_cherry_pick_head(repo.git_dir())? {
+            let obj = repo.odb().read(&picked)?;
+            if obj.kind != ObjectKind::Commit {
+                return Err(Error::CorruptObject(format!(
+                    "expected commit for CHERRY_PICK_HEAD, got {}",
+                    obj.kind.as_str()
+                )));
+            }
+            let picked_commit = parse_commit(&obj.data)?;
+            return Ok(prepare_commit_author_from_parent(
+                &picked_commit.author,
+                &picked_commit.author_raw,
+                req.author_date.as_deref(),
+                now,
+            )?);
+        }
     }
     if req_amend {
         let author = amend_author.unwrap_or_default();
@@ -1357,6 +1420,9 @@ fn create_commit_with_index(
         reuse_author_raw = source.author_raw;
     }
     if req.amend {
+        if replay_blocks_partial_commit(repo.git_dir())? {
+            return Err(Error::PartialCommitDuringReplay);
+        }
         let Some(tip) = parent.take() else {
             return Err(Error::AmendUnborn);
         };
@@ -1581,11 +1647,15 @@ fn create_commit_with_index(
     poll_cancel(progress, cancel)?;
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
 
+    let concluding_replay = read_cherry_pick_head(repo.git_dir())?.is_some()
+        || read_revert_head(repo.git_dir())?.is_some();
     let previous_tip = replaced_tip.or(parent);
     let reflog_old = previous_tip.unwrap_or_else(zero_oid);
     let subject = commit_subject(&commit_data.message);
     let reflog_msg = if req.amend {
         format!("commit (amend): {subject}")
+    } else if concluding_replay && read_cherry_pick_head(repo.git_dir())?.is_some() {
+        format!("commit (cherry-pick): {subject}")
     } else if parent.is_some() {
         format!("commit: {subject}")
     } else {
@@ -1663,6 +1733,9 @@ fn create_commit_with_index(
 
     if concluding_merge {
         let _ = finish_merge_state(repo)?;
+    }
+    if concluding_replay {
+        finish_replay_commit_state(repo, oid)?;
     }
     clear_squash_commit_state(repo.git_dir())?;
 

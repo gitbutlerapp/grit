@@ -416,7 +416,8 @@ fn build_commit_request(
     } else if amend || reuse_message_from.is_some() {
         None
     } else {
-        Some(context::signature(repo, IdentRole::Author, now)?)
+        // Leave unset so grit-lib picks author from CHERRY_PICK_HEAD, config, or identity.
+        None
     };
 
     let parsed_author_date = author_date.as_deref().map(parse_trailer_date).transpose()?;
@@ -656,6 +657,9 @@ fn map_commit_error(err: Error) -> anyhow::Error {
         Error::AmendUnborn => anyhow::anyhow!("cannot amend: no commits on this branch yet"),
         Error::PartialCommitDuringMerge => {
             anyhow::anyhow!("cannot do a partial commit during a merge")
+        }
+        Error::PartialCommitDuringReplay => {
+            anyhow::anyhow!("cannot do a partial commit during a cherry-pick or revert")
         }
         Error::PathspecNoMatch { spec } => anyhow::anyhow!(
             "pathspec '{spec}' did not match any file(s) known to git"

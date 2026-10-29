@@ -29,7 +29,7 @@ Positional arguments are applied **oldest first**. Each argument is either:
 - the worktree is **dirty**, `HEAD` is **detached**, or the branch has **no commits**
 - a commit is a **merge** without `--mainline` (not yet exposed on the CLI)
 
-Resolve conflicts, stage with [`grit add`](../add/), then run `grit pick --continue`. Use `grit pick --skip` to drop the current step, or `grit pick --abort` to restore the branch to its pre-pick tip.
+Resolve conflicts, then either run [`grit commit`](../commit/) (auto-stages the worktree and finishes the step, keeping the picked author) or stage with [`grit add`](../add/) and run `grit pick --continue`. Use `grit pick --skip` to drop the current step, or `grit pick --abort` to cancel. If the branch tip moved because you already committed the resolution, `--abort` clears replay state without moving the branch (Git warns and exits 0 in the same situation).
 
 ## Options
 

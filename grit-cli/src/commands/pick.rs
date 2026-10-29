@@ -20,8 +20,8 @@ use grit_lib::operation::{
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     abort_replay_sequence, commits_to_replay, continue_replay_sequence, predict_replay_sequence,
-    skip_replay_step, start_replay_sequence, ReplayCreated, ReplayOptions, ReplaySequenceRequest,
-    SequenceOutcome, SequencePrediction,
+    skip_replay_step, start_replay_sequence, ReplayAbortOutcome, ReplayCreated, ReplayOptions,
+    ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
 };
 use grit_lib::state::InProgressOperation;
 use schemars::JsonSchema;
@@ -201,7 +201,14 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
     }
 
     if opts.abort {
-        abort_replay_sequence(&repo).map_err(map_replay_error)?;
+        match abort_replay_sequence(&repo).map_err(map_replay_error)? {
+            ReplayAbortOutcome::Rewound => {}
+            ReplayAbortOutcome::ClearedInPlace => {
+                eprintln!(
+                    "warning: branch tip moved during the pick; replay state cleared without moving the branch"
+                );
+            }
+        }
         return Ok(PickOutcome::new(PickResult::Aborted));
     }
 
@@ -394,9 +401,12 @@ fn map_replay_error(err: Error) -> anyhow::Error {
         Error::ReplayContinueUnmerged => anyhow::anyhow!(
             "cannot continue: resolve conflicts and stage the result (`grit add`), then run `grit pick --continue`"
         ),
-        Error::ReplayAbortHeadMoved => {
-            anyhow::anyhow!("cannot abort: branch tip moved since the pick started")
-        }
+        Error::ReplaySkipAlreadyCommitted => anyhow::anyhow!(
+            "nothing to skip: current step already committed; run `grit pick --continue` instead"
+        ),
+        Error::ReplayContinueDirtyIndex => anyhow::anyhow!(
+            "cannot continue: index differs from HEAD after the step was committed"
+        ),
         Error::Message(msg) => anyhow::anyhow!(msg),
         other => anyhow::Error::new(other),
     }

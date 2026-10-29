@@ -1348,6 +1348,18 @@ pub enum Error {
     #[error("cannot do a partial commit during a merge")]
     PartialCommitDuringMerge,
 
+    /// Partial commit, amend, or patch commit while a cherry-pick or revert is in progress.
+    #[error("cannot do a partial commit during a cherry-pick or revert")]
+    PartialCommitDuringReplay,
+
+    /// [`continue_replay_sequence`](crate::porcelain::replay_sequence::continue_replay_sequence) with a dirty index after the step was already committed.
+    #[error("cannot continue replay: index differs from HEAD after the step was committed")]
+    ReplayContinueDirtyIndex,
+
+    /// [`skip_replay_step`](crate::porcelain::replay_sequence::skip_replay_step) when the current step was already committed on a moved branch tip.
+    #[error("nothing to skip: current step already committed; run continue instead")]
+    ReplaySkipAlreadyCommitted,
+
     /// Explicit [`crate::porcelain::add::stage`] pathspecs name paths excluded by ignore rules.
     #[error("the following paths are ignored:\n{}", paths.join("\n"))]
     PathspecIgnored {
@@ -1596,7 +1608,7 @@ pub enum Error {
         command: String,
     },
 
-    /// [`abort_replay_sequence`](crate::porcelain::replay_sequence::abort_replay_sequence) refuses when `HEAD` moved since the replay started.
+    /// Legacy: abort no longer fails when `HEAD` moved; [`ReplayAbortOutcome::ClearedInPlace`] is returned instead.
     #[error("cannot abort replay: HEAD moved since replay started")]
     ReplayAbortHeadMoved,
 
@@ -2042,6 +2054,9 @@ impl Error {
             Self::RestorePathUnmerged { .. } => "restore_path_unmerged",
             Self::PathspecBeyondSymlink { .. } => "pathspec_beyond_symlink",
             Self::PartialCommitDuringMerge => "partial_commit_during_merge",
+            Self::PartialCommitDuringReplay => "partial_commit_during_replay",
+            Self::ReplayContinueDirtyIndex => "replay_continue_dirty_index",
+            Self::ReplaySkipAlreadyCommitted => "replay_skip_already_committed",
             Self::PathspecIgnored { .. } => "pathspec_ignored",
             Self::RemoveBlocked { .. } => "remove_blocked",
             Self::NotRemovingRecursively(..) => "not_removing_recursively",
