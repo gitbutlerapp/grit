@@ -21,8 +21,13 @@ use grit_lib::refs::reftable::{
     reftable_write_ref_with_write_options, reftable_write_symref, reftable_write_transaction,
     RefValue, ReftableError, ReftableStack, ReftableTransactionUpdate,
 };
+use grit_lib::refs::store::{
+    open_ref_store, Expected, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
+};
 use grit_lib::refs::{read_head, resolve_ref};
+use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::RefStorageFormat;
 
 use support::{
     build_commit_dag, git, git_empty_commit_oid, git_for_each_ref_peeled, git_fsck_strict,
@@ -645,6 +650,129 @@ fn resolve_head_after_git_commit_tree_on_reftable() {
         }
         other => panic!("expected branch head, got {other:?}"),
     }
+}
+
+fn cas_oid(n: u32) -> ObjectId {
+    let mut b = [0u8; 20];
+    b[..4].copy_from_slice(&(n + 1).to_be_bytes());
+    ObjectId::from_bytes(&b).expect("oid")
+}
+
+fn reftable_table_file_count(git_dir: &Path) -> usize {
+    fs::read_dir(git_dir.join("reftable"))
+        .expect("reftable dir")
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_str().is_some_and(|n| n.ends_with(".ref")))
+        .count()
+}
+
+#[test]
+fn ref_store_cas_updates_trigger_geometric_auto_compaction() {
+    if !require_reftable_git() {
+        return;
+    }
+    let root = tempfile::tempdir().expect("tempdir");
+    let repo = Repository::init(
+        root.path(),
+        &InitOptions::new()
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Reftable),
+    )
+    .expect("init");
+    let git_dir = repo.git_dir().to_path_buf();
+    let store = open_ref_store(&git_dir).expect("open ref store");
+
+    const UPDATES: u32 = 100;
+    for i in 0..UPDATES {
+        let txn = RefTransaction::new()
+            .update(RefUpdate {
+                name: "refs/heads/hot".into(),
+                new_value: Some(RawRef::Direct(cas_oid(i))),
+                expected: if i == 0 {
+                    Expected::Missing
+                } else {
+                    Expected::Oid(cas_oid(i - 1))
+                },
+                reflog: None,
+                flags: RefUpdateFlags::default(),
+            })
+            .expect("txn");
+        store
+            .prepare(txn)
+            .expect("prepare")
+            .commit()
+            .expect("commit");
+    }
+
+    let tables = reftable_table_file_count(&git_dir);
+    assert!(
+        tables <= 8,
+        "expected logarithmic reftable stack after {UPDATES} CAS updates, got {tables} tables"
+    );
+    assert_eq!(
+        store
+            .read_raw("refs/heads/hot")
+            .expect("read hot")
+            .and_then(|r| match r {
+                RawRef::Direct(oid) => Some(oid),
+                _ => None,
+            }),
+        Some(cas_oid(UPDATES - 1))
+    );
+    assert!(git_fsck_strict(root.path()));
+    git_refs_verify(root.path());
+}
+
+#[test]
+fn geometric_factor_two_compacts_more_than_large_factor() {
+    if !require_reftable_git() {
+        return;
+    }
+    let run_updates = |factor: u8| -> usize {
+        let root = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            root.path(),
+            &InitOptions::new()
+                .with_initial_branch("main")
+                .with_ref_storage(RefStorageFormat::Reftable),
+        )
+        .expect("init");
+        let git_dir = repo.git_dir();
+        fs::write(
+            git_dir.join("config"),
+            format!("[reftable]\ngeometricFactor = {factor}\n"),
+        )
+        .expect("config");
+        let store = open_ref_store(git_dir).expect("open ref store");
+        for i in 0..60u32 {
+            let txn = RefTransaction::new()
+                .update(RefUpdate {
+                    name: "refs/heads/hot".into(),
+                    new_value: Some(RawRef::Direct(cas_oid(i))),
+                    expected: if i == 0 {
+                        Expected::Missing
+                    } else {
+                        Expected::Oid(cas_oid(i - 1))
+                    },
+                    reflog: None,
+                    flags: RefUpdateFlags::default(),
+                })
+                .expect("txn");
+            store
+                .prepare(txn)
+                .expect("prepare")
+                .commit()
+                .expect("commit");
+        }
+        reftable_table_file_count(git_dir)
+    };
+
+    let tables_factor_two = run_updates(2);
+    let tables_factor_255 = run_updates(255);
+    assert!(
+        tables_factor_two < tables_factor_255,
+        "factor 2 should compact more aggressively (2 -> {tables_factor_two} tables, 255 -> {tables_factor_255})"
+    );
 }
 
 #[test]

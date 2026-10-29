@@ -8,7 +8,8 @@ use grit_lib::error::Result;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::gc::{update_refs, RefTransactionItem};
 use grit_lib::refs::reftable::{
-    read_write_options, reftable_write_ref_with_write_options, RefValue, ReftableStack,
+    read_write_options, reftable_delete_ref_with_write_options,
+    reftable_write_ref_with_write_options, RefValue, ReftableStack,
 };
 use grit_lib::refs::{verify_ref_transaction_batch, write_ref, RefBatchItem, RefnameUnavailable};
 use grit_lib::repo::{InitOptions, Repository};
@@ -27,14 +28,26 @@ fn reftable_git_dir() -> (tempfile::TempDir, std::path::PathBuf) {
     (dir, git_dir)
 }
 
+fn write_options_autocompact_off(
+    git_dir: &std::path::Path,
+) -> grit_lib::refs::reftable::WriteOptions {
+    let mut opts = read_write_options(git_dir);
+    opts.autocompaction_enabled = false;
+    opts
+}
+
 fn write_with_autocompact_off(
     git_dir: &std::path::Path,
     refname: &str,
     oid: &ObjectId,
 ) -> Result<()> {
-    let mut opts = read_write_options(git_dir);
-    opts.autocompaction_enabled = false;
+    let opts = write_options_autocompact_off(git_dir);
     reftable_write_ref_with_write_options(git_dir, refname, oid, None, None, &opts)
+}
+
+fn delete_with_autocompact_off(git_dir: &std::path::Path, refname: &str) -> Result<()> {
+    let opts = write_options_autocompact_off(git_dir);
+    reftable_delete_ref_with_write_options(git_dir, refname, &opts)
 }
 
 #[test]
@@ -67,15 +80,7 @@ fn reftable_cas_rejects_stale_oid_after_deletion_in_newer_table() {
     let before = oid(0x11);
     let after = oid(0x22);
     write_with_autocompact_off(&git_dir, "refs/heads/cas-target", &before).expect("create");
-    update_refs(
-        &git_dir,
-        &[RefTransactionItem {
-            name: "refs/heads/cas-target".into(),
-            new_oid: None,
-            expected_old: None,
-        }],
-    )
-    .expect("delete");
+    delete_with_autocompact_off(&git_dir, "refs/heads/cas-target").expect("delete");
 
     let stack = ReftableStack::open(&git_dir).expect("open");
     assert!(

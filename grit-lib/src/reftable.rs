@@ -1943,16 +1943,17 @@ fn prefix_upper_exclusive(prefix: &str) -> Option<String> {
 }
 
 /// Compaction segment `[start, end)` in table index space (git `suggest_compaction_segment`).
-fn suggest_compaction_segment(sizes: &[u64]) -> (usize, usize) {
+fn suggest_compaction_segment(sizes: &[u64], geometric_factor: u8) -> (usize, usize) {
     let n = sizes.len();
     if n <= 1 {
         return (0, 0);
     }
+    let factor = u64::from(geometric_factor.max(2));
     let mut seg_end = 0usize;
     let mut bytes = 0u64;
     let mut i = n - 1;
     while i > 0 {
-        if sizes[i - 1] < sizes[i].saturating_mul(2) {
+        if sizes[i - 1] < sizes[i].saturating_mul(factor) {
             seg_end = i + 1;
             bytes = sizes[i];
             break;
@@ -1967,7 +1968,7 @@ fn suggest_compaction_segment(sizes: &[u64]) -> (usize, usize) {
     while i > 0 {
         let curr = bytes;
         bytes = bytes.saturating_add(sizes[i - 1]);
-        if sizes[i - 1] < curr.saturating_mul(2) {
+        if sizes[i - 1] < curr.saturating_mul(factor) {
             seg_start = i - 1;
         }
         i -= 1;
@@ -2351,12 +2352,11 @@ impl ReftableStack {
             return Ok(());
         }
         self.reload_table_names();
-        // Git keeps short stacks at two tables; geometric compaction starts once a third table exists.
-        if self.table_names.len() <= 2 {
+        if self.table_names.len() < 2 {
             return Ok(());
         }
         let sizes = self.table_payload_sizes()?;
-        let (start, end) = suggest_compaction_segment(&sizes);
+        let (start, end) = suggest_compaction_segment(&sizes, opts.auto_compaction_factor);
         if end <= start + 1 {
             return Ok(());
         }
@@ -3395,13 +3395,23 @@ fn test_inject_reftable_transaction_fail() -> Result<()> {
 
 /// Delete a ref from a reftable repo.
 pub fn reftable_delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
+    let (store_git_dir, _) = reftable_storage_location(git_dir, refname);
+    let opts = read_write_options(&store_git_dir);
+    reftable_delete_ref_with_write_options(git_dir, refname, &opts)
+}
+
+/// Delete a ref using explicit reftable write options (for tests and callers that disable auto-compaction).
+pub fn reftable_delete_ref_with_write_options(
+    git_dir: &Path,
+    refname: &str,
+    opts: &WriteOptions,
+) -> Result<()> {
     let (store_git_dir, storage_refname) = reftable_storage_location(git_dir, refname);
     let mut stack = ReftableStack::open(&store_git_dir)?;
     if stack.lookup_ref(&storage_refname)?.is_none() {
         return Err(RefStoreError::not_found(refname).into());
     }
-    let opts = read_write_options(&store_git_dir);
-    stack.write_ref(&storage_refname, RefValue::Deletion, None, &opts)
+    stack.write_ref(&storage_refname, RefValue::Deletion, None, opts)
 }
 
 /// Read the symbolic target of a ref in a reftable repo.
@@ -4145,9 +4155,9 @@ mod tests {
 
     #[test]
     fn suggest_compaction_segment_matches_geometric_break() {
-        assert_eq!(suggest_compaction_segment(&[10]), (0, 0));
-        assert_eq!(suggest_compaction_segment(&[64, 32, 16]), (0, 0));
-        let (start, end) = suggest_compaction_segment(&[64, 32, 16, 8, 4, 3, 1]);
+        assert_eq!(suggest_compaction_segment(&[10], 2), (0, 0));
+        assert_eq!(suggest_compaction_segment(&[64, 32, 16], 2), (0, 0));
+        let (start, end) = suggest_compaction_segment(&[64, 32, 16, 8, 4, 3, 1], 2);
         assert!(
             end > start + 1,
             "expected compaction segment, got {start}..{end}"

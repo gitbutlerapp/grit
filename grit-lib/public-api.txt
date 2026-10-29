@@ -19322,6 +19322,7 @@ pub fn grit_lib::refs::reftable::read_write_options_with_environment(&std::path:
 pub fn grit_lib::refs::reftable::reftable_append_reflog(&std::path::Path, &str, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &str, &str, bool) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reftable::reftable_create_reflog(&std::path::Path, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reftable::reftable_delete_ref(&std::path::Path, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::reftable::reftable_delete_ref_with_write_options(&std::path::Path, &str, &grit_lib::refs::reftable::WriteOptions) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reftable::reftable_delete_reflog(&std::path::Path, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reftable::reftable_list_reflog_refs(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::refs::reftable::reftable_list_refs(&std::path::Path, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
