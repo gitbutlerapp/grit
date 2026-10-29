@@ -516,12 +516,18 @@ fn advance_after_user_resolution_commit(
             .map_err(RebaseSessionError::from)?,
         reused: false,
     });
+    let resume_order: Vec<ObjectId> = replay_order_for_resume(state, current)
+        .into_iter()
+        .filter(|commit| *commit != current)
+        .collect();
+    let mut edits = state.edits.clone();
+    edits.retain(|commit, _| resume_order.contains(commit));
     let rewrite = replan_rewrite_options(state);
     let outcome = plan_rewrite_with_order_resumable_seeded(
         repo,
-        &state.edits,
+        &edits,
         &rewrite,
-        Some(&state.replay_order),
+        Some(&resume_order),
         state.flatten_leaf_merges.then_some(state.onto),
         state.rebase.favor,
         Some((mapping, rewritten)),
@@ -612,6 +618,7 @@ pub fn continue_rebase(
         mapped
     };
 
+    let resume_order = replay_order_for_resume(&state, current);
     let mut edits = state.edits.clone();
     edits.insert(
         current,
@@ -622,6 +629,7 @@ pub fn continue_rebase(
             parents: Some(parents),
         },
     );
+    edits.retain(|commit, _| resume_order.contains(commit));
 
     let seed = (state.mapping.clone(), state.rewritten.clone());
     let rewrite = replan_rewrite_options(&state);
@@ -629,7 +637,7 @@ pub fn continue_rebase(
         repo,
         &edits,
         &rewrite,
-        Some(&state.replay_order),
+        Some(&resume_order),
         state.flatten_leaf_merges.then_some(state.onto),
         state.rebase.favor,
         Some(seed),
@@ -689,12 +697,20 @@ pub fn skip_rebase(
         reused: false,
     });
 
+    let resume_order: Vec<ObjectId> = state
+        .remaining
+        .iter()
+        .copied()
+        .filter(|c| *c != current)
+        .collect();
+    let mut edits = state.edits.clone();
+    edits.retain(|commit, _| resume_order.contains(commit));
     let rewrite = replan_rewrite_options(&state);
     let outcome = plan_rewrite_with_order_resumable_seeded(
         repo,
-        &state.edits,
+        &edits,
         &rewrite,
-        Some(&state.replay_order),
+        Some(&resume_order),
         state.flatten_leaf_merges.then_some(state.onto),
         state.rebase.favor,
         Some((mapping, rewritten)),
@@ -995,6 +1011,24 @@ fn mapping_from_persist(
         .collect()
 }
 
+/// Commits still to replay when resuming after a stop (not the full initial replay order).
+fn replay_order_for_resume(state: &LoadedState, current: ObjectId) -> Vec<ObjectId> {
+    let mut order = if state.remaining.is_empty() {
+        state.replay_order.clone()
+    } else {
+        state.remaining.clone()
+    };
+    if let Some(pos) = order.iter().position(|c| *c == current) {
+        if pos != 0 {
+            order.remove(pos);
+            order.insert(0, current);
+        }
+    } else {
+        order.insert(0, current);
+    }
+    order
+}
+
 #[allow(clippy::too_many_arguments)]
 fn state_from_partial(
     partial: &super::plan::PartialRewritePlan,
@@ -1012,12 +1046,23 @@ fn state_from_partial(
         .copied()
         .filter(|c| partial.mapping.contains_key(c))
         .collect();
-    let remaining: Vec<ObjectId> = partial
+    let conflict = partial.conflict.commit;
+    let mut remaining: Vec<ObjectId> = partial
         .commits_to_replay
         .iter()
         .copied()
         .filter(|c| !partial.mapping.contains_key(c))
         .collect();
+    // Continue applies the user's resolution to `remaining[0]`; keep the stopped commit first
+    // even when side-branch replays precede it in topological replay order.
+    if let Some(pos) = remaining.iter().position(|c| *c == conflict) {
+        if pos != 0 {
+            remaining.remove(pos);
+            remaining.insert(0, conflict);
+        }
+    } else {
+        remaining.insert(0, conflict);
+    }
     PersistedRebaseState {
         mapping: mapping_to_persist(&partial.mapping),
         rewritten: partial
