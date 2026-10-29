@@ -16,6 +16,9 @@ pub struct RefTransaction {
     reflog_renames: Vec<RefReflogRename>,
     case_only_renames: Vec<RefCaseOnlyRename>,
     initial: bool,
+    /// When set, [`super::RefStore::prepare`] may skip updates that fail per-ref checks and
+    /// commit the rest in one batch (Git `REF_TRANSACTION_ALLOW_FAILURE`).
+    allow_failures: bool,
 }
 
 impl RefTransaction {
@@ -130,6 +133,24 @@ impl RefTransaction {
     #[must_use]
     pub fn is_initial(&self) -> bool {
         self.initial
+    }
+
+    /// Allow per-ref rejections during prepare while committing the rest in one batch.
+    ///
+    /// Rejections are returned from [`super::PreparedRefTransaction::rejected_updates`].
+    /// Compare-and-swap, directory/file, and object-target failures on one ref do not roll back
+    /// sibling updates in the same transaction. Duplicate names, invalid ref names, and other
+    /// whole-transaction errors still fail prepare entirely.
+    #[must_use]
+    pub fn allowing_failures(mut self) -> Self {
+        self.allow_failures = true;
+        self
+    }
+
+    /// Whether [`Self::allowing_failures`] was set.
+    #[must_use]
+    pub fn allows_failures(&self) -> bool {
+        self.allow_failures
     }
 
     /// Split into ref updates, reflog renames, and case-only ref renames.

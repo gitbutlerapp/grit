@@ -114,6 +114,43 @@ fn push_tracking_remote_refs_one_reftable_transaction() {
     });
 }
 
+#[test]
+fn non_atomic_multi_ref_create_one_reftable_transaction() {
+    use grit_lib::refs::commit_ref_updates_non_atomic;
+    use grit_lib::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
+
+    each_backend(|backend, repo| {
+        if backend != Backend::Reftable {
+            return;
+        }
+        let git_dir = repo.git_dir();
+        let (_, tip) = two_commit_oids(&repo);
+        let updates: Vec<RefUpdate> = (0..40)
+            .map(|i| RefUpdate {
+                name: format!("refs/heads/batch-{i}"),
+                new_value: Some(RawRef::Direct(tip)),
+                expected: Expected::Any,
+                reflog: None,
+                flags: RefUpdateFlags::default(),
+            })
+            .collect();
+        let (_, count_before) = reftable_tables_snapshot(&git_dir);
+        commit_ref_updates_non_atomic(&git_dir, updates).expect("non-atomic batch");
+        for i in 0..40 {
+            assert_eq!(
+                resolve_ref(&git_dir, &format!("refs/heads/batch-{i}")).ok(),
+                Some(tip)
+            );
+        }
+        let (_, count_after) = reftable_tables_snapshot(&git_dir);
+        assert_eq!(
+            count_after,
+            count_before + 1,
+            "non-atomic receive-pack batch must add one reftable table"
+        );
+    });
+}
+
 #[cfg(unix)]
 #[test]
 fn receive_pack_atomic_push_both_backends() {

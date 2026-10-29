@@ -13,8 +13,9 @@ use crate::odb::Odb;
 use crate::reflog::ReflogEntry;
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
+type ObjectPartitionResult = (Vec<RefUpdate>, Vec<(String, RefStoreError)>);
 
-use super::backend::verify_direct_targets;
+use super::backend::{is_per_ref_rejectable, verify_direct_targets};
 use super::reference_transaction::prepare_with_reference_transaction_hooks;
 use super::{
     FilesRefStore, PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore,
@@ -30,6 +31,84 @@ use super::{
 /// [`RefStoreError::ObjectLookup`] for the first offending update.
 pub(crate) fn verify_update_targets(odb: &Odb, updates: &[RefUpdate]) -> StoreResult<()> {
     odb.with_pack_read_context(|| verify_direct_targets(updates, |oid| odb.stored_object_kind(oid)))
+}
+
+fn partition_object_target_failures(
+    odb: &Odb,
+    updates: &[RefUpdate],
+) -> StoreResult<ObjectPartitionResult> {
+    let mut accepted = Vec::with_capacity(updates.len());
+    let mut rejected = Vec::new();
+    for update in updates {
+        match verify_update_targets(odb, std::slice::from_ref(update)) {
+            Ok(()) => accepted.push(update.clone()),
+            Err(err) if is_per_ref_rejectable(&err) => rejected.push((update.name.clone(), err)),
+            Err(err) => return Err(err),
+        }
+    }
+    Ok((accepted, rejected))
+}
+
+fn txn_with_accepted_updates(
+    txn: &RefTransaction,
+    accepted: Vec<RefUpdate>,
+) -> StoreResult<RefTransaction> {
+    let mut filtered = RefTransaction::from_updates(accepted)?;
+    if txn.is_initial() {
+        filtered = filtered.initial();
+    }
+    if txn.allows_failures() {
+        filtered = filtered.allowing_failures();
+    }
+    for rename in txn.reflog_renames() {
+        filtered = filtered.with_reflog_rename(rename.clone());
+    }
+    for rename in txn.case_only_renames() {
+        filtered = filtered.with_case_only_rename(rename.clone());
+    }
+    Ok(filtered)
+}
+
+struct ObjectCheckedPrepared<'a> {
+    rejections: Vec<(String, RefStoreError)>,
+    inner: Option<Box<dyn PreparedRefTransaction + Send + 'a>>,
+}
+
+impl PreparedRefTransaction for ObjectCheckedPrepared<'_> {
+    fn rejected_updates(&self) -> &[(String, RefStoreError)] {
+        &self.rejections
+    }
+
+    fn commit(mut self: Box<Self>) -> StoreResult<()> {
+        if let Some(inner) = self.inner.take() {
+            inner.commit()?;
+        }
+        Ok(())
+    }
+
+    fn abort(mut self: Box<Self>) -> StoreResult<()> {
+        if let Some(inner) = self.inner.take() {
+            inner.abort()?;
+        }
+        Ok(())
+    }
+}
+
+fn wrap_checked_prepared<'a>(
+    object_rejections: Vec<(String, RefStoreError)>,
+    inner: Box<dyn PreparedRefTransaction + Send + 'a>,
+) -> Box<dyn PreparedRefTransaction + Send + 'a> {
+    let mut rejections = object_rejections;
+    rejections.extend(
+        inner
+            .rejected_updates()
+            .iter()
+            .map(|(name, err)| (name.clone(), err.clone())),
+    );
+    Box::new(ObjectCheckedPrepared {
+        rejections,
+        inner: Some(inner),
+    })
 }
 
 /// The ref store for `git_dir` (as [`super::open_ref_store`] selects it), checked against the
@@ -123,14 +202,37 @@ impl RefStore for ObjectCheckedRefStore {
         txn: RefTransaction,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
         txn.validate()?;
-        self.verify_update_targets(txn.updates())?;
-        prepare_with_reference_transaction_hooks(
+        let (txn, object_rejections) = if txn.allows_failures() {
+            let (accepted, object_rejections) =
+                partition_object_target_failures(&self.odb, txn.updates())?;
+            let txn = txn_with_accepted_updates(&txn, accepted)?;
+            (txn, object_rejections)
+        } else {
+            self.verify_update_targets(txn.updates())?;
+            (txn, Vec::new())
+        };
+        if txn.allows_failures()
+            && txn.updates().is_empty()
+            && txn.reflog_renames().is_empty()
+            && txn.case_only_renames().is_empty()
+        {
+            return Ok(Box::new(ObjectCheckedPrepared {
+                rejections: object_rejections,
+                inner: None,
+            }));
+        }
+        let prepared = prepare_with_reference_transaction_hooks(
             self,
             self.inner.as_ref(),
             self.hooks.as_ref(),
             self.null_oid(),
             txn,
-        )
+        )?;
+        if object_rejections.is_empty() {
+            Ok(prepared)
+        } else {
+            Ok(wrap_checked_prepared(object_rejections, prepared))
+        }
     }
 
     fn verify_update_targets(&self, updates: &[RefUpdate]) -> StoreResult<()> {

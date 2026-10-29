@@ -33,6 +33,8 @@ use super::transaction::RefTransaction;
 use super::validation::validate_storable_refname as validate_name;
 use super::{RawRef, RefUpdate};
 
+type PartitionUpdatesResult = (Vec<RefUpdate>, Vec<(String, RefStoreError)>);
+
 pub use super::apply::RefBatchState;
 pub use super::transaction::expected_matches;
 pub use super::validation::verify_create_conflicts;
@@ -196,6 +198,43 @@ pub(crate) fn check_transaction_updates(
 ) -> Result<(), RefStoreError> {
     verify_create_conflicts(&state.refs, updates)?;
     simulate_batch_apply(state, updates, &[], &[])
+}
+
+/// Whether a ref-store error may reject a single update while siblings still commit.
+#[must_use]
+pub fn is_per_ref_rejectable(err: &RefStoreError) -> bool {
+    matches!(
+        err,
+        RefStoreError::ExpectedMismatch { .. }
+            | RefStoreError::NameUnavailable { .. }
+            | RefStoreError::MissingObject { .. }
+            | RefStoreError::NotACommit { .. }
+    )
+}
+
+/// Split `updates` into those that pass batch checks in order and per-ref rejections.
+///
+/// Simulates accepted updates on `state` so later creates see earlier ones in the same batch.
+/// Non-rejectable errors fail the whole call.
+pub fn partition_updates_allowing_failures(
+    state: &RefBatchState,
+    updates: Vec<RefUpdate>,
+) -> Result<PartitionUpdatesResult, RefStoreError> {
+    let mut working = state.clone();
+    let mut accepted = Vec::with_capacity(updates.len());
+    let mut rejected = Vec::new();
+    for update in updates {
+        let name = update.name.clone();
+        match check_transaction_updates(&working, std::slice::from_ref(&update)) {
+            Ok(()) => {
+                apply_update(&mut working, &update)?;
+                accepted.push(update);
+            }
+            Err(err) if is_per_ref_rejectable(&err) => rejected.push((name, err)),
+            Err(err) => return Err(err),
+        }
+    }
+    Ok((accepted, rejected))
 }
 
 /// Apply `txn` to `state`: ref values, symbolic-ref dereferencing, appended reflog lines,

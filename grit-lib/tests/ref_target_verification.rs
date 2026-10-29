@@ -13,8 +13,8 @@ use grit_lib::objects::{NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::reflog::read_reflog;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefName, RefStore, RefStoreError, RefTransaction, RefUpdate,
-    RefUpdateFlags, ReflogUpdate,
+    Expected, MemoryRefStore, PreparedRefTransaction, RawRef, RefCaseOnlyRename, RefName, RefStore,
+    RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
 use grit_lib::refs::{
     commit_ref_update_on_store, update_branch_for_commit, update_branch_for_commit_on_store,
@@ -122,6 +122,17 @@ fn commit_updates(store: &dyn RefStore, updates: Vec<RefUpdate>) -> Result<(), R
         .into_iter()
         .try_fold(RefTransaction::new(), RefTransaction::update)?;
     store.prepare(txn)?.commit()
+}
+
+fn prepare_allowing_failures(
+    store: &dyn RefStore,
+    updates: Vec<RefUpdate>,
+) -> Result<Box<dyn PreparedRefTransaction + Send + '_>, RefStoreError> {
+    let txn = updates
+        .into_iter()
+        .try_fold(RefTransaction::new(), RefTransaction::update)?
+        .allowing_failures();
+    store.prepare(txn)
 }
 
 fn missing(refname: &str, oid: ObjectId) -> RefStoreError {
@@ -648,4 +659,84 @@ fn branch_commit_writer_refuses_missing_and_non_commit_tips() {
             "{format:?}"
         );
     });
+}
+
+#[test]
+fn allowing_failures_prepare_missing_object_commits_sibling() {
+    each_format(|format, fx| {
+        let prepared = prepare_allowing_failures(
+            fx.repo.refs(),
+            vec![
+                put("refs/heads/good", fx.commit),
+                put("refs/heads/bad", bogus()),
+            ],
+        )
+        .expect("prepare with allowing_failures");
+        assert_eq!(
+            prepared.rejected_updates(),
+            &[(
+                String::from("refs/heads/bad"),
+                missing("refs/heads/bad", bogus())
+            )],
+            "{format:?}"
+        );
+        prepared.commit().expect("commit");
+        assert_eq!(
+            fx.raw("refs/heads/good"),
+            Some(RawRef::Direct(fx.commit)),
+            "{format:?}"
+        );
+        assert_eq!(fx.raw("refs/heads/bad"), None, "{format:?}");
+    });
+}
+
+#[test]
+fn allowing_failures_prepare_not_a_commit_commits_sibling() {
+    each_format(|format, fx| {
+        let prepared = prepare_allowing_failures(
+            fx.repo.refs(),
+            vec![
+                put("refs/heads/good", fx.commit),
+                put("refs/heads/tree-branch", fx.tree),
+            ],
+        )
+        .expect("prepare with allowing_failures");
+        assert_eq!(
+            prepared.rejected_updates(),
+            &[(
+                String::from("refs/heads/tree-branch"),
+                not_a_commit("refs/heads/tree-branch", fx.tree, ObjectKind::Tree)
+            )],
+            "{format:?}"
+        );
+        prepared.commit().expect("commit");
+        assert_eq!(
+            fx.raw("refs/heads/good"),
+            Some(RawRef::Direct(fx.commit)),
+            "{format:?}"
+        );
+        assert_eq!(fx.raw("refs/heads/tree-branch"), None, "{format:?}");
+    });
+}
+
+#[test]
+fn allowing_failures_prepare_rename_only_commits_case_only_rename() {
+    let fx = Fixture::new(RefStorageFormat::Files);
+    commit_updates(fx.repo.refs(), vec![put("refs/heads/topic", fx.commit)]).expect("seed topic");
+    assert_eq!(fx.raw("refs/heads/topic"), Some(RawRef::Direct(fx.commit)));
+    let txn = RefTransaction::new()
+        .with_case_only_rename(RefCaseOnlyRename {
+            from: String::from("refs/heads/topic"),
+            to: String::from("refs/heads/Topic"),
+        })
+        .allowing_failures();
+    let prepared = fx
+        .repo
+        .refs()
+        .prepare(txn)
+        .expect("prepare rename-only allowing_failures");
+    assert!(prepared.rejected_updates().is_empty());
+    prepared.commit().expect("commit");
+    assert_eq!(fx.raw("refs/heads/topic"), None);
+    assert_eq!(fx.raw("refs/heads/Topic"), Some(RawRef::Direct(fx.commit)));
 }

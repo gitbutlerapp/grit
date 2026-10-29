@@ -72,6 +72,13 @@ pub trait PreparedRefTransaction: Send {
     /// Returns [`RefStoreError`] when the batch can no longer be applied.
     fn commit(self: Box<Self>) -> StoreResult<()>;
 
+    /// Updates [`RefTransaction::allowing_failures`] skipped during [`Self::commit`]'s prepare.
+    ///
+    /// Empty when the transaction was not prepared with [`RefTransaction::allowing_failures`].
+    fn rejected_updates(&self) -> &[(String, RefStoreError)] {
+        &[]
+    }
+
     /// Release locks without changing stored refs.
     ///
     /// # Errors

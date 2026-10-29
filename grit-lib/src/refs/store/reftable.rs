@@ -20,7 +20,7 @@ use crate::reftable::{
 use crate::repo::init_repository;
 
 use super::apply::{apply_reflog_rename, RefBatchState};
-use super::backend::check_transaction_updates;
+use super::backend::{check_transaction_updates, partition_updates_allowing_failures};
 use super::error::RefStoreError;
 use super::semantics::{
     apply_update_to_map, deref_reflog_target, format_reflog_identity, reflog_new_oid_before,
@@ -587,6 +587,7 @@ impl RefStore for ReftableRefStore {
                 name: txn.lock_name(),
             });
         }
+        let allow_failures = txn.allows_failures();
         let (updates, reflog_renames, _case_only_renames) = txn.into_parts();
 
         let updates = self.split_cross_stack_symref_updates(updates)?;
@@ -597,6 +598,7 @@ impl RefStore for ReftableRefStore {
         }
 
         let mut stacks = Vec::new();
+        let mut rejections = Vec::new();
         for (store_git_dir, group) in grouped {
             let mut stack = ReftableStack::open(&store_git_dir)
                 .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
@@ -610,7 +612,15 @@ impl RefStore for ReftableRefStore {
                 refs,
                 reflogs: BTreeMap::new(),
             };
-            check_transaction_updates(&snapshot, &group)?;
+            let group = if allow_failures {
+                let (accepted, group_rejections) =
+                    partition_updates_allowing_failures(&snapshot, group)?;
+                rejections.extend(group_rejections);
+                accepted
+            } else {
+                check_transaction_updates(&snapshot, &group)?;
+                group
+            };
             let refs = snapshot.refs;
             let rt_updates = build_reftable_updates_for_stack(&self.git_dir, &refs, &group)?;
             let opts = self.write_options_for(&store_git_dir);
@@ -631,6 +641,7 @@ impl RefStore for ReftableRefStore {
         Ok(Box::new(ReftablePrepared {
             store: self,
             committed: false,
+            rejections,
         }))
     }
 
@@ -750,9 +761,14 @@ fn commit_reflog_rename_on_stack(
 struct ReftablePrepared<'a> {
     store: &'a ReftableRefStore,
     committed: bool,
+    rejections: Vec<(String, RefStoreError)>,
 }
 
 impl PreparedRefTransaction for ReftablePrepared<'_> {
+    fn rejected_updates(&self) -> &[(String, RefStoreError)] {
+        &self.rejections
+    }
+
     fn commit(mut self: Box<Self>) -> StoreResult<()> {
         let mut guard_state = self
             .store

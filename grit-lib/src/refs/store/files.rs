@@ -35,6 +35,7 @@ use super::apply::{
     apply_case_only_ref_rename, apply_reflog_rename, apply_update, ref_change_target,
     ref_lock_names_for_updates, simulate_batch_apply, RefBatchState,
 };
+use super::backend::{is_per_ref_rejectable, partition_updates_allowing_failures};
 use super::error::RefStoreError;
 use super::routing::{resolve_common_dir, route_ref_storage_in_common, RefStorageRoute};
 use super::transaction::expected_matches;
@@ -1727,6 +1728,7 @@ impl RefStore for FilesRefStore {
                         after_commit: RefBatchState::default(),
                         initial_packed_records,
                     }),
+                    rejections: Vec::new(),
                 }));
             }
         }
@@ -1734,14 +1736,23 @@ impl RefStore for FilesRefStore {
         #[cfg(windows)]
         self.reject_win32_unstorable_ref_paths(&txn)?;
 
+        let allow_failures = txn.allows_failures();
         let (updates, reflog_renames, case_only_renames) = txn.into_parts();
+        let mut rejections = Vec::new();
 
         let mut preliminary = self
             .load_batch_state_for_prepare(&updates, &reflog_renames, &case_only_renames)
             .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
         self.insert_create_conflict_neighbors(&mut preliminary.refs, &updates)
             .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-        verify_create_conflicts(&preliminary.refs, &updates)?;
+        let updates = if allow_failures {
+            let (accepted, part) = partition_updates_allowing_failures(&preliminary, updates)?;
+            rejections.extend(part);
+            accepted
+        } else {
+            verify_create_conflicts(&preliminary.refs, &updates)?;
+            updates
+        };
         for rename in &reflog_renames {
             self.ensure_reflog_path_writable(&rename.to)?;
         }
@@ -1770,11 +1781,14 @@ impl RefStore for FilesRefStore {
         let extras: BTreeSet<&str> = updates.iter().map(|u| u.name.as_str()).collect();
         let packed = self.packed_refs_view().ok().flatten();
         let mut ancestors = HashMap::new();
+        let mut available_updates = Vec::with_capacity(updates.len());
         for update in &updates {
             if update.new_value.is_none() || update.flags.log_only {
+                available_updates.push(update.clone());
                 continue;
             }
             if preliminary.refs.contains_key(&update.name) {
+                available_updates.push(update.clone());
                 continue;
             }
             if let Err(reason) = self.verify_create_available_in(
@@ -1784,12 +1798,19 @@ impl RefStore for FilesRefStore {
                 packed.as_ref(),
                 &mut ancestors,
             ) {
+                let err: RefStoreError = reason.into();
+                if allow_failures && is_per_ref_rejectable(&err) {
+                    rejections.push((update.name.clone(), err));
+                    continue;
+                }
                 for acquired in ref_locks.values() {
                     let _ = fs::remove_file(acquired);
                 }
-                return Err(reason.into());
+                return Err(err);
             }
+            available_updates.push(update.clone());
         }
+        let updates = available_updates;
 
         let before_commit = preliminary;
         let mut after_commit = before_commit.clone();
@@ -1847,6 +1868,7 @@ impl RefStore for FilesRefStore {
         Ok(Box::new(FilesPrepared {
             store: self,
             committed: false,
+            rejections: rejections.clone(),
             batch: Some(PreparedFilesBatch {
                 updates,
                 case_only_renames,
@@ -1975,9 +1997,14 @@ struct FilesPrepared<'a> {
     store: &'a FilesRefStore,
     committed: bool,
     batch: Option<PreparedFilesBatch>,
+    rejections: Vec<(String, RefStoreError)>,
 }
 
 impl PreparedRefTransaction for FilesPrepared<'_> {
+    fn rejected_updates(&self) -> &[(String, RefStoreError)] {
+        &self.rejections
+    }
+
     fn commit(mut self: Box<Self>) -> StoreResult<()> {
         let Some(mut batch) = self.batch.take() else {
             return Ok(());

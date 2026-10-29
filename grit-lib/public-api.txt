@@ -20010,6 +20010,16 @@ impl core::marker::Unpin for grit_lib::refs::RefBatchItem
 impl core::marker::UnsafeUnpin for grit_lib::refs::RefBatchItem
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::RefBatchItem
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::RefBatchItem
+pub struct grit_lib::refs::RefUpdateCommitOutcome
+pub grit_lib::refs::RefUpdateCommitOutcome::name: alloc::string::String
+pub grit_lib::refs::RefUpdateCommitOutcome::result: core::result::Result<(), grit_lib::refs::store::RefStoreError>
+impl core::clone::Clone for grit_lib::refs::RefUpdateCommitOutcome
+pub fn grit_lib::refs::RefUpdateCommitOutcome::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::refs::RefUpdateCommitOutcome
+pub fn grit_lib::refs::RefUpdateCommitOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::cmp::PartialEq for grit_lib::refs::RefUpdateCommitOutcome
+pub fn grit_lib::refs::RefUpdateCommitOutcome::eq(&self, &Self) -> bool
+impl core::cmp::Eq for grit_lib::refs::RefUpdateCommitOutcome
 pub struct grit_lib::refs::References<'repo>
 impl<'repo> grit_lib::refs::handle::References<'repo>
 pub fn grit_lib::refs::handle::References<'repo>::list(&self, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
@@ -20040,6 +20050,9 @@ pub fn grit_lib::refs::collect_alternate_ref_oids(&std::path::Path) -> grit_lib:
 pub fn grit_lib::refs::commit_ref_batch_on_store(&dyn grit_lib::refs::store::RefStore, &[grit_lib::refs::store::RefUpdate], &[grit_lib::refs::store::RefReflogRename], &[grit_lib::refs::store::RefCaseOnlyRename]) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::commit_ref_store_batch(&std::path::Path, &[grit_lib::refs::store::RefUpdate]) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::commit_ref_update_on_store(&dyn grit_lib::refs::store::RefStore, grit_lib::refs::store::RefUpdate) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::commit_ref_updates_allowing_failures_on_store(&dyn grit_lib::refs::store::RefStore, alloc::vec::Vec<grit_lib::refs::store::RefUpdate>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::RefUpdateCommitOutcome>>
+pub fn grit_lib::refs::commit_ref_updates_non_atomic(&std::path::Path, alloc::vec::Vec<grit_lib::refs::store::RefUpdate>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::RefUpdateCommitOutcome>>
+pub fn grit_lib::refs::commit_ref_updates_non_atomic_on_store(&dyn grit_lib::refs::store::RefStore, alloc::vec::Vec<grit_lib::refs::store::RefUpdate>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::RefUpdateCommitOutcome>>
 pub fn grit_lib::refs::commit_ref_updates_on_store(&dyn grit_lib::refs::store::RefStore, &[grit_lib::refs::store::RefUpdate], &[grit_lib::refs::store::RefReflogRename]) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::common_dir(&std::path::Path) -> core::option::Option<std::path::PathBuf>
 pub fn grit_lib::refs::delete_ref(&std::path::Path, &str) -> grit_lib::error::Result<()>

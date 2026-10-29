@@ -157,6 +157,13 @@ impl Drop for HookWrappedPrepared<'_> {
 }
 
 impl PreparedRefTransaction for HookWrappedPrepared<'_> {
+    fn rejected_updates(&self) -> &[(String, RefStoreError)] {
+        match self.inner.as_ref() {
+            Some(inner) => inner.rejected_updates(),
+            None => &[],
+        }
+    }
+
     fn commit(mut self: Box<Self>) -> StoreResult<()> {
         self.hook_armed = false;
         let inner = self
