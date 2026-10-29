@@ -234,21 +234,18 @@ pub fn run(
         ..BlameOptions::default()
     };
 
-    options.line_range = line_range
-        .as_deref()
-        .map(|spec| resolve_blame_line_range_with_options(&repo, &file, spec, &options))
-        .transpose()
-        .with_context(|| "could not parse line range")?;
-
-    let normalized = if let Some(wt) = repo.work_tree() {
-        grit_lib::worktree::pathspec::normalize_worktree_file_path(
-            &file,
-            wt,
-            repo.pathspec_argv_prefix(&file),
-        )
+    let blame_path = if repo.work_tree().is_some() {
+        repo.resolve_worktree_pathspec(&file, repo.pathspec_argv_prefix(&file))
+            .with_context(|| format!("could not resolve path '{file}'"))?
     } else {
         file.clone()
     };
+
+    options.line_range = line_range
+        .as_deref()
+        .map(|spec| resolve_blame_line_range_with_options(&repo, &blame_path, spec, &options))
+        .transpose()
+        .with_context(|| "could not parse line range")?;
 
     let ignore = IgnoreRevs::load(
         &repo,
@@ -271,11 +268,11 @@ pub fn run(
     options.ignore = ignore;
     options.whitespace = whitespace;
     options.copy_detection = copy_detection;
-    let mut result = blame_file(&repo, &file, &options)?;
+    let mut result = blame_file(&repo, &blame_path, &options)?;
     label_uncommitted(&mut result, uncommitted_label);
 
     Ok(outcome_from_result(
-        normalized,
+        blame_path,
         start.to_hex(),
         result,
         group,

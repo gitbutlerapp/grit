@@ -121,16 +121,16 @@ cargo run -p grit-examples --bin guide_embedding
 [`blame_file`](rustdoc:grit_lib::blame::blame_file),
 [`compute_blame`](rustdoc:grit_lib::blame::compute_blame), and
 [`resolve_blame_line_range`](rustdoc:grit_lib::blame::resolve_blame_line_range)
-accept the reversible path strings returned by library status. Pass status paths
-unchanged. For a raw byte path, build the input with
-`repo_relpath::storage_string`. Ordinary UTF-8
-paths remain readable; non-UTF-8 paths and names beginning with the reserved
-`grit+pathhex:` prefix are escaped. Encoded inputs identify repository-relative
-paths without applying the caller's working-directory prefix. For `blame_file`
-and `resolve_blame_line_range`, ordinary UTF-8 operands are normalized against
-the working directory before storage escaping, so
-`./grit+pathhex:6162` (or `../grit+pathhex:6162` from a subdirectory)
-addresses that literal filename rather than the file `ab`.
+take **repository-relative** paths: the same string names the same file no matter
+where the host process is running. Pass status paths unchanged. For a raw byte
+path, build the input with `repo_relpath::storage_string`. Non-UTF-8 paths and
+names beginning with the reserved `grit+pathhex:` prefix are escaped. Absolute
+paths under the work tree and `./` / `../` segments normalize against the
+work-tree root. To turn command-line operands into that form (cwd-relative, like
+`git blame`), resolve each path with
+[`Repository::resolve_worktree_pathspec`](rustdoc:grit_lib::repo::Repository::resolve_worktree_pathspec)
+using [`Repository::pathspec_argv_prefix`](rustdoc:grit_lib::repo::Repository::pathspec_argv_prefix)
+before calling blame APIs.
 
 Every blame `original_path`, including hunks and rename/copy origins, uses that
 same storage representation. Recover its exact bytes with

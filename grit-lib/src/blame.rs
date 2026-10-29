@@ -4786,12 +4786,15 @@ fn blame_lines_share_hunk(prev: &BlameAttributedLine, next: &BlameAttributedLine
 
 /// Blame `path` at `options.start` (or `HEAD`) and return per-line attributions.
 ///
-/// `path` accepts the reversible strings returned by status or
-/// `repo_relpath::storage_string`. Encoded paths are repository-relative;
-/// ordinary UTF-8 paths retain work-tree cwd resolution. Decoding happens once,
-/// keeping literal reserved-prefix names distinct. Returned `original_path` values
-/// use the same storage encoding. Ordinary operands such as `./grit+pathhex:6162`
-/// are normalized before storage escaping, so they name the literal file.
+/// `path` is repository-relative: the same string names the same file regardless
+/// of the host process working directory. It accepts the reversible strings
+/// returned by status or [`crate::repo_relpath::storage_string`]. Decoding
+/// happens once, keeping literal reserved-prefix names distinct. Returned
+/// `original_path` values use the same storage encoding. Absolute paths under
+/// the work tree and `./` / `../` segments are normalized against the work-tree
+/// root. For argv-style cwd resolution (as in the `grit blame` CLI), use
+/// [`Repository::resolve_worktree_pathspec`](crate::repo::Repository::resolve_worktree_pathspec)
+/// before calling this function.
 ///
 /// Adding or removing the final LF changes attribution of the last line by default.
 /// Whitespace normalization (for example [`crate::diff::WhitespaceMode::ignore_all_space`])
@@ -5053,7 +5056,7 @@ fn normalize_blame_path(repo: &Repository, path: &str) -> String {
         crate::pathspec::normalize_worktree_file_path_with_git_dir(
             path,
             work_tree,
-            repo.pathspec_argv_prefix(path),
+            None,
             Some(repo.git_dir()),
         )
     } else {
