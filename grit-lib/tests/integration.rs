@@ -271,6 +271,9 @@ mod clone_eol_crlf_git_compat;
 #[path = "clone_index_cache_tree_git_compat.rs"]
 mod clone_index_cache_tree_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "clone_into_custom_primary.rs"]
+mod clone_into_custom_primary;
+#[cfg(feature = "full-tests")]
 #[path = "clone_large_blob_rss.rs"]
 mod clone_large_blob_rss;
 #[cfg(feature = "full-tests")]

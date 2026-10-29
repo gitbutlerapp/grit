@@ -478,7 +478,7 @@ impl CloneIntoOptions {
         Self {
             url: url.into(),
             remote_name: DEFAULT_REMOTE.to_owned(),
-            environment: Environment::capture_process(),
+            environment: Environment::empty(),
             initial_branch: "main".to_owned(),
             thread_policy: crate::parallel::ThreadPolicy::default(),
             depth: None,
@@ -491,6 +491,13 @@ impl CloneIntoOptions {
             checkout: true,
             bundle_cache: None,
         }
+    }
+
+    /// Replace the process environment used for config and reflog identity.
+    #[must_use]
+    pub fn with_environment(mut self, environment: Environment) -> Self {
+        self.environment = environment;
+        self
     }
 
     fn clone_options_for_repo(&self, repo: &Repository) -> CloneOptions {
@@ -551,12 +558,17 @@ pub struct CloneIntoOutcome {
 ///
 /// Use this when the repository is already open with a custom object or ref store. Path-based
 /// [`clone`] always initializes a files-backed layout; `clone_into` only runs fetch and checkout.
+/// The supplied `repo` handle is kept through fetch and checkout (injected stores are not
+/// replaced with a files-backed reopen). Set [`CloneIntoOptions::environment`] explicitly when
+/// config or reflog identity must reflect the host process.
 ///
 /// # Errors
 ///
-/// Same as [`clone`] except [`CloneError::DestNotEmpty`] cannot occur.
+/// Same as [`clone`] except [`CloneError::DestNotEmpty`] cannot occur. Local clone sources
+/// whose object format differs from the repository's injected store return
+/// [`Error::ObjectFormatMismatch`](crate::error::Error::ObjectFormatMismatch).
 pub fn clone_into(
-    repo: &Repository,
+    repo: Repository,
     opts: CloneIntoOptions,
     progress: &mut dyn Progress,
     cancel: &dyn Cancel,
@@ -570,8 +582,9 @@ pub fn clone_into(
             opts.remote_name.clone(),
         )));
     }
-    let clone_opts = opts.clone_options_for_repo(repo);
-    let outcome = populate_repo_from_remote(repo, &clone_opts, progress, cancel, http_factory)?;
+    ensure_clone_remote_object_format(&repo, &opts.url, &opts.environment)?;
+    let clone_opts = opts.clone_options_for_repo(&repo);
+    let outcome = populate_repo_from_remote(repo, clone_opts, progress, cancel, http_factory)?;
     Ok(CloneIntoOutcome {
         head: outcome.head,
         checkout_oid: outcome.checkout_oid,
@@ -650,12 +663,12 @@ pub fn clone(
         opts.promisor_fetcher.clone(),
     )
     .map_err(CloneError::Library)?;
-    populate_repo_from_remote(&repo, &opts, progress, cancel, http_factory)
+    populate_repo_from_remote(repo, opts, progress, cancel, http_factory)
 }
 
 fn populate_repo_from_remote(
-    repo: &Repository,
-    opts: &CloneOptions,
+    repo: Repository,
+    opts: CloneOptions,
     progress: &mut dyn Progress,
     cancel: &dyn Cancel,
     http_factory: Option<&dyn HttpClientFactory>,
@@ -664,26 +677,49 @@ fn populate_repo_from_remote(
     clone_after_claim(repo, opts, progress, cancel, http_factory, bare)
 }
 
+/// For injected object stores, refuse a local clone source whose object format differs.
+fn ensure_clone_remote_object_format(
+    repo: &Repository,
+    url: &str,
+    environment: &Environment,
+) -> std::result::Result<(), CloneError> {
+    if repo.odb().uses_files_primary() {
+        return Ok(());
+    }
+    let Some(remote_algo) = local_clone_source_hash_algo(url, &environment.discovery_cwd()) else {
+        return Ok(());
+    };
+    let local = repo.odb().hash_algo();
+    if local != remote_algo {
+        return Err(CloneError::Library(Error::ObjectFormatMismatch {
+            repository: local,
+            store: remote_algo,
+        }));
+    }
+    Ok(())
+}
+
 fn clone_after_claim(
-    initial: &Repository,
-    opts: &CloneOptions,
+    mut repo: Repository,
+    opts: CloneOptions,
     progress: &mut dyn Progress,
     cancel: &dyn Cancel,
     http_factory: Option<&dyn HttpClientFactory>,
     bare: bool,
 ) -> std::result::Result<CloneOutcome, CloneError> {
-    let git_dir = initial.git_dir().to_path_buf();
+    let git_dir = repo.git_dir().to_path_buf();
+    let preserve_injected_store = !repo.odb().uses_files_primary();
 
     let origin_url = stored_clone_remote_url(&opts.url);
     set_local_config(
-        initial,
+        &repo,
         &[(
             &format!("remote.{}.url", opts.remote_name),
             origin_url.clone(),
         )],
     )?;
 
-    let config = ConfigSet::load(&opts.environment, Some(initial.git_dir()), true)
+    let config = ConfigSet::load(&opts.environment, Some(repo.git_dir()), true)
         .map_err(CloneError::Library)?;
     let mut remote = Remote::from_config(&config, &opts.remote_name)?;
     if bare {
@@ -692,11 +728,11 @@ fn clone_after_claim(
         remote.fetch_refspecs.clear();
     }
     let requested = match opts.branch.as_deref() {
-        Some(name) => resolve_requested_clone_ref(name, &remote, initial, http_factory)?,
+        Some(name) => resolve_requested_clone_ref(name, &remote, &repo, http_factory)?,
         None => CloneRequestedRef::Default,
     };
     let fetch_refspec =
-        clone_initial_fetch_refspec(opts, &requested, &remote, initial, http_factory)?;
+        clone_initial_fetch_refspec(&opts, &requested, &remote, &repo, http_factory)?;
     if !bare {
         let mut remote_config_entries = vec![(
             format!("remote.{}.fetch", opts.remote_name),
@@ -709,7 +745,7 @@ fn clone_after_claim(
             ));
         }
         set_local_config(
-            initial,
+            &repo,
             &remote_config_entries
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.clone()))
@@ -718,15 +754,15 @@ fn clone_after_claim(
     }
 
     let clone_message = format!("clone: from {}", opts.url);
-    let identity = fetch_operation_identity(&opts.environment, initial.git_dir())
-        .map_err(CloneError::Library)?;
+    let identity =
+        fetch_operation_identity(&opts.environment, repo.git_dir()).map_err(CloneError::Library)?;
     let clone_reflog = CloneReflog {
         identity: identity.clone(),
         message: clone_message.clone(),
     };
     let mut fetch_opts = FetchOptions {
         refspecs: vec![fetch_refspec],
-        tags: resolve_clone_tag_mode(opts),
+        tags: resolve_clone_tag_mode(&opts),
         initial_remote_fetch: true,
         remote_name: if bare {
             None
@@ -747,28 +783,30 @@ fn clone_after_claim(
     }
     let bundle = match opts.bundle_cache.as_deref() {
         Some(cache) if opts.depth.is_none() && opts.filter.is_none() => {
-            remote.seed_from_bundle_uri(initial, cache, progress, cancel, http_factory)
+            remote.seed_from_bundle_uri(&repo, cache, progress, cancel, http_factory)
         }
         _ => crate::bundle_uri::BundleSeed::NotOffered,
     };
     if cancel.is_cancelled() {
         return Err(CloneError::Library(Error::Cancelled));
     }
-    let mut fetch_outcome = remote.fetch(initial, fetch_opts, progress, cancel, http_factory)?;
+    let mut fetch_outcome = remote.fetch(&repo, fetch_opts, progress, cancel, http_factory)?;
     if let crate::bundle_uri::BundleSeed::Seeded(seeded) = &bundle {
-        crate::bundle_uri::remove_bundle_refs(initial).map_err(CloneError::Library)?;
+        crate::bundle_uri::remove_bundle_refs(&repo).map_err(CloneError::Library)?;
         fetch_outcome.transfer += seeded.transfer;
     }
-    // Wire clone may upgrade an empty SHA-1 destination to the remote object format; reopen so
-    // checkout uses a fresh ODB hash algorithm (the pre-fetch handle caches SHA-1).
-    let repo = open_clone_repository(
-        &git_dir,
-        &opts.dest,
-        bare,
-        &opts.environment,
-        opts.promisor_fetcher.clone(),
-    )
-    .map_err(CloneError::Library)?;
+    if !preserve_injected_store {
+        // Wire clone may upgrade an empty SHA-1 destination to the remote object format; reopen
+        // so checkout uses a fresh ODB hash algorithm (the pre-fetch handle caches SHA-1).
+        repo = open_clone_repository(
+            &git_dir,
+            &opts.dest,
+            bare,
+            &opts.environment,
+            opts.promisor_fetcher.clone(),
+        )
+        .map_err(CloneError::Library)?;
+    }
 
     if let Some(spec) = opts.filter {
         PartialCloneConfig::write(repo.git_dir(), &opts.remote_name, &spec)
@@ -777,7 +815,7 @@ fn clone_after_claim(
 
     let (head, oid) = setup_clone_head(
         &repo,
-        opts,
+        &opts,
         &requested,
         &fetch_outcome,
         &identity,
@@ -869,8 +907,17 @@ fn perform_clone_checkout(
     ))
 }
 
+fn resolve_clone_ref(repo: &Repository, refname: &str) -> ObjectId {
+    refs::resolve_ref_in(repo, refname).unwrap_or(ObjectId::zero())
+}
+
+fn write_clone_head_symref(repo: &Repository, target: &str) -> std::result::Result<(), CloneError> {
+    refs::write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", target)
+        .map_err(CloneError::Library)
+}
+
 fn local_branch_names_with_commits(repo: &Repository) -> Vec<String> {
-    refs::list_refs(repo.git_dir(), "refs/heads/")
+    refs::list_refs_in(repo, "refs/heads/")
         .unwrap_or_default()
         .into_iter()
         .filter_map(|(name, oid)| {
@@ -884,7 +931,7 @@ fn local_branch_names_with_commits(repo: &Repository) -> Vec<String> {
 
 fn remote_branch_names_with_commits(repo: &Repository, remote_name: &str) -> Vec<String> {
     let prefix = format!("refs/remotes/{remote_name}/");
-    refs::list_refs(repo.git_dir(), &prefix)
+    refs::list_refs_in(repo, &prefix)
         .unwrap_or_default()
         .into_iter()
         .filter_map(|(name, oid)| {
@@ -1066,10 +1113,10 @@ fn setup_clone_head(
         CloneRequestedRef::Branch(branch) => {
             let branch_ref = format!("refs/heads/{branch}");
             let oid = if opts.bare {
-                refs::resolve_ref(repo.git_dir(), &branch_ref).unwrap_or(ObjectId::zero())
+                resolve_clone_ref(repo, &branch_ref)
             } else {
                 let tracking = format!("refs/remotes/{}/{}", opts.remote_name, branch);
-                let oid = refs::resolve_ref(repo.git_dir(), &tracking).unwrap_or(ObjectId::zero());
+                let oid = resolve_clone_ref(repo, &tracking);
                 if !oid.is_zero() {
                     refs::update_direct_ref_on_store(
                         repo.refs(),
@@ -1091,8 +1138,7 @@ fn setup_clone_head(
                 }
                 oid
             };
-            refs::write_symbolic_ref(repo.git_dir(), "HEAD", &branch_ref)
-                .map_err(CloneError::Library)?;
+            write_clone_head_symref(repo, &branch_ref)?;
             if !oid.is_zero() {
                 refs::append_reflog_with_signature(
                     repo.git_dir(),
@@ -1130,10 +1176,10 @@ fn setup_clone_head(
             );
             let branch_ref = format!("refs/heads/{default}");
             let oid = if opts.bare {
-                refs::resolve_ref(repo.git_dir(), &branch_ref).unwrap_or(ObjectId::zero())
+                resolve_clone_ref(repo, &branch_ref)
             } else {
                 let tracking = format!("refs/remotes/{}/{default}", opts.remote_name);
-                let oid = refs::resolve_ref(repo.git_dir(), &tracking).unwrap_or(ObjectId::zero());
+                let oid = resolve_clone_ref(repo, &tracking);
                 if !oid.is_zero() {
                     refs::update_direct_ref_on_store(
                         repo.refs(),
@@ -1155,8 +1201,7 @@ fn setup_clone_head(
                 }
                 oid
             };
-            refs::write_symbolic_ref(repo.git_dir(), "HEAD", &branch_ref)
-                .map_err(CloneError::Library)?;
+            write_clone_head_symref(repo, &branch_ref)?;
             if !oid.is_zero() {
                 refs::append_reflog_with_signature(
                     repo.git_dir(),
@@ -1294,7 +1339,7 @@ fn choose_clone_default_branch(
         } else {
             format!("refs/remotes/{remote_name}/{name}")
         };
-        if refs::resolve_ref(repo.git_dir(), &resolved).is_ok() {
+        if refs::resolve_ref_in(repo, &resolved).is_ok() {
             return name.clone();
         }
     }
@@ -1306,11 +1351,11 @@ fn choose_clone_default_branch(
 
 fn pick_default_branch_bare(repo: &Repository) -> Option<String> {
     for candidate in ["main", "master"] {
-        if refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{candidate}")).is_ok() {
+        if refs::resolve_ref_in(repo, &format!("refs/heads/{candidate}")).is_ok() {
             return Some(candidate.to_owned());
         }
     }
-    refs::list_refs(repo.git_dir(), "refs/heads/")
+    refs::list_refs_in(repo, "refs/heads/")
         .ok()?
         .into_iter()
         .find_map(|(name, _)| name.strip_prefix("refs/heads/").map(str::to_owned))
@@ -1360,16 +1405,11 @@ fn default_branch_from_local_remote(url: &str, repo: &Repository) -> Option<Stri
 
 fn pick_default_branch(repo: &Repository, remote_name: &str) -> Option<String> {
     for candidate in ["main", "master"] {
-        if refs::resolve_ref(
-            repo.git_dir(),
-            &format!("refs/remotes/{remote_name}/{candidate}"),
-        )
-        .is_ok()
-        {
+        if refs::resolve_ref_in(repo, &format!("refs/remotes/{remote_name}/{candidate}")).is_ok() {
             return Some(candidate.to_owned());
         }
     }
-    refs::list_refs(repo.git_dir(), &format!("refs/remotes/{remote_name}/"))
+    refs::list_refs_in(repo, &format!("refs/remotes/{remote_name}/"))
         .ok()?
         .into_iter()
         .find_map(|(name, _)| {

@@ -20356,6 +20356,53 @@ impl core::marker::Unpin for grit_lib::remote::clone::CloneTags
 impl core::marker::UnsafeUnpin for grit_lib::remote::clone::CloneTags
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::CloneTags
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneTags
+pub struct grit_lib::remote::clone::CloneIntoOptions
+pub grit_lib::remote::clone::CloneIntoOptions::bare: bool
+pub grit_lib::remote::clone::CloneIntoOptions::branch: core::option::Option<alloc::string::String>
+pub grit_lib::remote::clone::CloneIntoOptions::bundle_cache: core::option::Option<std::path::PathBuf>
+pub grit_lib::remote::clone::CloneIntoOptions::checkout: bool
+pub grit_lib::remote::clone::CloneIntoOptions::depth: core::option::Option<u32>
+pub grit_lib::remote::clone::CloneIntoOptions::environment: grit_lib::config::environment::Environment
+pub grit_lib::remote::clone::CloneIntoOptions::filter: core::option::Option<grit_lib::remote::partial_clone::ObjectFilterSpec>
+pub grit_lib::remote::clone::CloneIntoOptions::initial_branch: alloc::string::String
+pub grit_lib::remote::clone::CloneIntoOptions::promisor_fetcher: core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>
+pub grit_lib::remote::clone::CloneIntoOptions::remote_name: alloc::string::String
+pub grit_lib::remote::clone::CloneIntoOptions::single_branch: core::option::Option<bool>
+pub grit_lib::remote::clone::CloneIntoOptions::tags: core::option::Option<grit_lib::remote::clone::CloneTags>
+pub grit_lib::remote::clone::CloneIntoOptions::thread_policy: grit_lib::parallel::ThreadPolicy
+pub grit_lib::remote::clone::CloneIntoOptions::url: alloc::string::String
+impl grit_lib::remote::clone::CloneIntoOptions
+pub fn grit_lib::remote::clone::CloneIntoOptions::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_environment(self, grit_lib::config::environment::Environment) -> Self
+impl core::marker::Freeze for grit_lib::remote::clone::CloneIntoOptions
+impl core::marker::Send for grit_lib::remote::clone::CloneIntoOptions
+impl core::marker::Sync for grit_lib::remote::clone::CloneIntoOptions
+impl core::marker::Unpin for grit_lib::remote::clone::CloneIntoOptions
+impl core::marker::UnsafeUnpin for grit_lib::remote::clone::CloneIntoOptions
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::CloneIntoOptions
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneIntoOptions
+pub struct grit_lib::remote::clone::CloneIntoOutcome
+pub grit_lib::remote::clone::CloneIntoOutcome::branches: u64
+pub grit_lib::remote::clone::CloneIntoOutcome::bundle: grit_lib::remote::bundle_uri::BundleSeed
+pub grit_lib::remote::clone::CloneIntoOutcome::checkout: grit_lib::remote::clone::CloneCheckout
+pub grit_lib::remote::clone::CloneIntoOutcome::checkout_oid: grit_lib::objects::ObjectId
+pub grit_lib::remote::clone::CloneIntoOutcome::files: u64
+pub grit_lib::remote::clone::CloneIntoOutcome::filter_sent: bool
+pub grit_lib::remote::clone::CloneIntoOutcome::head: grit_lib::remote::clone::CloneHead
+pub grit_lib::remote::clone::CloneIntoOutcome::path_collisions: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::remote::clone::CloneIntoOutcome::submodule_paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::remote::clone::CloneIntoOutcome::tags: u64
+pub grit_lib::remote::clone::CloneIntoOutcome::transfer: grit_lib::remote::transfer::TransferStats
+pub grit_lib::remote::clone::CloneIntoOutcome::worktree_bytes: u64
+impl core::fmt::Debug for grit_lib::remote::clone::CloneIntoOutcome
+pub fn grit_lib::remote::clone::CloneIntoOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::remote::clone::CloneIntoOutcome
+impl core::marker::Send for grit_lib::remote::clone::CloneIntoOutcome
+impl core::marker::Sync for grit_lib::remote::clone::CloneIntoOutcome
+impl core::marker::Unpin for grit_lib::remote::clone::CloneIntoOutcome
+impl core::marker::UnsafeUnpin for grit_lib::remote::clone::CloneIntoOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::CloneIntoOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneIntoOutcome
 pub struct grit_lib::remote::clone::CloneOptions
 pub grit_lib::remote::clone::CloneOptions::bare: bool
 pub grit_lib::remote::clone::CloneOptions::branch: core::option::Option<alloc::string::String>
@@ -20410,8 +20457,8 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::Clone
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneOutcome
 pub fn grit_lib::remote::clone::cleanup_failed_clone(&std::path::Path, bool)
 pub fn grit_lib::remote::clone::clone(grit_lib::remote::clone::CloneOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::clone::CloneOutcome, grit_lib::remote::clone::CloneError>
-pub fn grit_lib::remote::clone::clone_into(&grit_lib::repo::Repository, grit_lib::remote::clone::CloneIntoOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::clone::CloneIntoOutcome, grit_lib::remote::clone::CloneError>
 pub fn grit_lib::remote::clone::clone_effective_single_branch(&grit_lib::remote::clone::CloneOptions) -> bool
+pub fn grit_lib::remote::clone::clone_into(grit_lib::repo::Repository, grit_lib::remote::clone::CloneIntoOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::clone::CloneIntoOutcome, grit_lib::remote::clone::CloneError>
 pub fn grit_lib::remote::clone::derive_clone_dir(&str, bool) -> core::result::Result<alloc::string::String, grit_lib::remote::transport_path::NoDirectoryName>
 pub fn grit_lib::remote::clone::dest_preexisted_empty(&std::path::Path) -> bool
 pub mod grit_lib::remote::credentials
