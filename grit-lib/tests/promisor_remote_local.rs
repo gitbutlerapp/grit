@@ -13,7 +13,7 @@ use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::NeverCancel;
 use grit_lib::refs::ref_storage::RefStorageFormat;
-use grit_lib::remote::clone::{clone, CloneOptions};
+use grit_lib::remote::clone::{clone, CloneError, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transport::http::HttpClient;
@@ -276,4 +276,88 @@ fn blobless_checkout_takes_each_blob_from_the_remote_that_has_it() {
     assert_eq!(outcome.files, 2);
     assert_eq!(std::fs::read(dest.join("small")).unwrap(), b"small\n");
     assert_eq!(std::fs::read(dest.join("big")).unwrap().len(), 20 * 1024);
+}
+
+#[test]
+fn a_checkout_whose_blobs_cannot_be_fetched_keeps_the_clone() {
+    // Neither remote can serve the large blob: the server left it out and the LOP does
+    // not have it yet. Like Git, the fetched repository stays so the checkout can be
+    // retried once the blob is available.
+    let tmp = tempfile::tempdir().unwrap();
+    let server = tmp.path().join("server.git");
+    let big = bare_with_big_blob(&server);
+    let lop = tmp.path().join("lop.git");
+    let lop_repo = Repository::init(
+        &lop,
+        &InitOptions::new()
+            .with_bare(true)
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .unwrap();
+    let hex = big.to_hex();
+    std::fs::remove_file(server.join("objects").join(&hex[..2]).join(&hex[2..])).unwrap();
+    let lop_url = format!("file://{}", lop.display());
+    append_config(
+        &server,
+        "[uploadpack]\n\tallowFilter = true\n\tallowAnySHA1InWant = true\n",
+    );
+    append_config(
+        &lop,
+        "[uploadpack]\n\tallowFilter = true\n\tallowAnySHA1InWant = true\n",
+    );
+
+    let dest = tmp.path().join("client");
+    let mut opts = CloneOptions::new(format!("file://{}", server.display()), dest.clone());
+    opts.environment = env_with_global_config(&tmp.path().join("home"), "");
+    opts.filter = Some(ObjectFilterSpec::BlobNone);
+    opts.config = vec![
+        ("remote.lop.url".into(), lop_url),
+        ("remote.lop.promisor".into(), "true".into()),
+    ];
+    let fetcher: Arc<dyn PromisorFetcher> = Arc::new(DefaultPromisorFetcher::new(Arc::new(NoHttp)));
+    opts.promisor_fetcher = Some(Arc::clone(&fetcher));
+    let err = match clone(opts, &mut NoProgress, &NeverCancel, None) {
+        Ok(_) => panic!("checkout of an unavailable blob succeeded"),
+        Err(err) => err,
+    };
+    assert!(matches!(err, CloneError::CheckoutFailed { .. }), "{err:?}");
+    assert!(!err.should_cleanup_failed_clone());
+    assert!(!err.is_cancelled());
+    assert_eq!(err.kept_repository(), Some(dest.as_path()));
+    assert_eq!(err.missing_promised_object(), Some(big));
+    let remotes: Vec<&str> = err
+        .failed_promisor_remotes()
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect();
+    assert_eq!(remotes, ["lop", "origin"]);
+    let CloneError::CheckoutFailed { commit, .. } = err else {
+        unreachable!()
+    };
+    clear_pack_cache();
+
+    // The kept repository has its refs and HEAD; once the LOP has the blob a checkout
+    // of HEAD completes the clone.
+    let repo = Repository::open(
+        &dest.join(".git"),
+        &RepositoryOptions::empty()
+            .with_work_tree(&dest)
+            .with_promisor_fetcher(Some(fetcher)),
+    )
+    .unwrap();
+    assert_eq!(
+        grit_lib::state::resolve_head(repo.git_dir()).unwrap().oid(),
+        Some(&commit)
+    );
+    assert!(!dest.join("big").exists());
+    lop_repo
+        .odb()
+        .write_loose_materialize(ObjectKind::Blob, &vec![b'x'; 20 * 1024])
+        .unwrap();
+    let tree = grit_lib::objects::parse_commit(&repo.odb().read(&commit).unwrap().data)
+        .unwrap()
+        .tree;
+    grit_lib::porcelain::checkout::checkout_between_trees(&repo, None, &tree).unwrap();
+    assert_eq!(std::fs::read(dest.join("big")).unwrap().len(), 20 * 1024);
+    assert_eq!(std::fs::read(dest.join("small")).unwrap(), b"small\n");
 }

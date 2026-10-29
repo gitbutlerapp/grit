@@ -20943,15 +20943,22 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::clone::CloneCheckout
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::CloneCheckout
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneCheckout
 pub enum grit_lib::remote::clone::CloneError
+pub grit_lib::remote::clone::CloneError::CheckoutFailed
+pub grit_lib::remote::clone::CloneError::CheckoutFailed::commit: grit_lib::objects::ObjectId
+pub grit_lib::remote::clone::CloneError::CheckoutFailed::path: std::path::PathBuf
+pub grit_lib::remote::clone::CloneError::CheckoutFailed::source: alloc::boxed::Box<grit_lib::error::Error>
 pub grit_lib::remote::clone::CloneError::DestNotEmpty(alloc::string::String)
 pub grit_lib::remote::clone::CloneError::InvalidCloneDepth
 pub grit_lib::remote::clone::CloneError::Library(grit_lib::error::Error)
 pub grit_lib::remote::clone::CloneError::Remote(grit_lib::remote::RemoteError)
 pub grit_lib::remote::clone::CloneError::RemoteRefNotFound(alloc::string::String)
 impl grit_lib::remote::clone::CloneError
+pub fn grit_lib::remote::clone::CloneError::failed_promisor_remotes(&self) -> &[(alloc::string::String, grit_lib::error::Error)]
 pub fn grit_lib::remote::clone::CloneError::is_cancelled(&self) -> bool
 pub fn grit_lib::remote::clone::CloneError::is_remote_ref_not_found(&self) -> bool
 pub fn grit_lib::remote::clone::CloneError::is_remote_unreadable(&self) -> bool
+pub fn grit_lib::remote::clone::CloneError::kept_repository(&self) -> core::option::Option<&std::path::Path>
+pub fn grit_lib::remote::clone::CloneError::missing_promised_object(&self) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::remote::clone::CloneError::should_cleanup_failed_clone(&self) -> bool
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::clone::CloneError
 pub fn grit_lib::remote::clone::CloneError::from(grit_lib::error::Error) -> Self

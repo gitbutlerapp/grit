@@ -25,6 +25,39 @@
     }
   ],
   "definitions": {
+    "CloneCheckoutJson": {
+      "description": "A clone that was kept after its checkout failed, when `kind == \"clone_checkout_failed\"`.",
+      "properties": {
+        "commit": {
+          "description": "The commit `HEAD` points at, whose files the checkout was writing.",
+          "type": "string"
+        },
+        "failed_remotes": {
+          "description": "Each promisor remote that failed while fetching the missing objects, in the order they were asked; empty when no remote was asked.",
+          "items": {
+            "$ref": "#/definitions/PromisorRemoteFailureJson"
+          },
+          "type": "array"
+        },
+        "missing_object": {
+          "description": "The first promised object that could not be fetched, when the checkout failed for lack of one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "The clone's directory; the repository in it was kept.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "commit",
+        "failed_remotes",
+        "path"
+      ],
+      "type": "object"
+    },
     "ErrorKind": {
       "description": "Machine-readable failure category in structured JSON errors (`kind` field).",
       "oneOf": [
@@ -253,6 +286,13 @@
           "type": "string"
         },
         {
+          "description": "`grit clone` fetched every object and set up the refs, but checking out the work tree failed (for example a partial clone could not fetch its blobs). The repository is kept (`clone_checkout`).",
+          "enum": [
+            "clone_checkout_failed"
+          ],
+          "type": "string"
+        },
+        {
           "description": "Git directory I/O failed on a named path under `.git/` (`paths`, often one entry).",
           "enum": [
             "git_dir_path_io"
@@ -355,9 +395,38 @@
       ],
       "type": "object"
     },
+    "PromisorRemoteFailureJson": {
+      "description": "One promisor remote that failed to supply missing objects.",
+      "properties": {
+        "error": {
+          "description": "Why the remote failed (its first error).",
+          "type": "string"
+        },
+        "remote": {
+          "description": "The remote's name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "error",
+        "remote"
+      ],
+      "type": "object"
+    },
     "StructuredJsonError": {
       "description": "JSON object emitted on stdout for structured command failures.",
       "properties": {
+        "clone_checkout": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CloneCheckoutJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The kept repository and what failed, when `kind == \"clone_checkout_failed\"`."
+        },
         "commit": {
           "description": "Commit that could not be replayed cleanly, when `kind == \"conflict\"`.",
           "type": [

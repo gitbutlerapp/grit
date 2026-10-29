@@ -420,12 +420,34 @@ When the server advertised promisor remotes, a bullet lists them, and one more n
 | Code | Meaning |
 | ---: | --- |
 | `0` | Clone succeeded (including empty remote with no checkout). |
-| `1` | Destination not empty, checkout failure, or other error. Missing or refused credentials are `kind` `auth_required` / `auth_rejected` with a `hint` in `--json` and on the human `hint:` line. HTTPS credentials come from your credential helper (`grit auth <url> --username <user> --token <token>` saves one for any host), then an askpass program (`GIT_ASKPASS`, `core.askPass`, `SSH_ASKPASS`); see [Credentials](../agents/#credentials-https). |
+| `1` | Destination not empty, checkout failure (the repository is kept: `kind` `clone_checkout_failed`, see [When the checkout fails](#when-the-checkout-fails)), or other error. Missing or refused credentials are `kind` `auth_required` / `auth_rejected` with a `hint` in `--json` and on the human `hint:` line. HTTPS credentials come from your credential helper (`grit auth <url> --username <user> --token <token>` saves one for any host), then an askpass program (`GIT_ASKPASS`, `core.askPass`, `SSH_ASKPASS`); see [Credentials](../agents/#credentials-https). |
 | `2` | Invalid flags ([`usage`](../exit-codes/)). |
 | `128` | Could not reach or read the source: missing path, DNS or connection failure, HTTP error status ([`remote_unreadable`](../exit-codes/)); a `404` adds a hint to check the URL. |
 | `130` | Interrupted with Ctrl-C, `SIGTERM`, or `SIGHUP` ([`interrupted`](../exit-codes/)). The error is `operation cancelled` (`{"error":"operation cancelled"}` with `--json`). |
 
 See [Exit codes](../exit-codes/).
+
+### When the checkout fails
+
+A failure while downloading or setting up the repository removes the destination again. Once every object and ref is in place and `HEAD` is set, a failure while writing the work tree keeps the repository, as `git clone` does, so the checkout can be finished without downloading everything again. The usual cause is a partial clone whose missing blobs cannot be fetched: a large-object promisor that is unreachable or does not have them yet, or lazy fetch turned off. The error says the clone was kept, the `hint` says how to finish, and `--json` reports `kind` `clone_checkout_failed` with a `clone_checkout` object (exit `1`):
+
+```console
+$ GRIT_NO_LAZY_FETCH=1 grit clone --blobs none file:///srv/project.git project
+Cloning into 'project' ...
+error: the clone into 'project' succeeded, but its checkout failed: promised object not available locally: ce013625030ba8dba906f756967f9e9ca394464a
+hint: the repository was kept; run `grit reset --hard` in 'project' to finish the checkout once its promisor remotes can supply the missing objects
+$ grit -C project reset --hard
+Reset master to 284c599 (hard)
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `clone_checkout.path` | string | The clone's directory, where the repository was kept. |
+| `clone_checkout.commit` | string | The commit `HEAD` points at, whose files the checkout was writing. |
+| `clone_checkout.missing_object` | string or omitted | The first promised object that could not be fetched, when the checkout failed for lack of one. |
+| `clone_checkout.failed_remotes` | array | Each promisor remote that failed to supply the missing objects, in the order they were asked: `remote` (name) and `error` (its first error). Empty when no remote was asked, for example with lazy fetch off. |
+
+A clone interrupted during the checkout is still removed (see below).
 
 ### Interrupting a clone
 

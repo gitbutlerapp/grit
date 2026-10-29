@@ -275,9 +275,13 @@ fn grit_lib_clone_hostile_path_rejected(
             "{case_label}: clone should not succeed with hostile default branch (checked out {} files)",
             outcome.files
         ),
-        Err(CloneError::Library(err)) => err,
+        // The fetch succeeded, so like Git the repository is kept and only the checkout failed.
+        Err(CloneError::CheckoutFailed { source, path, .. }) => {
+            assert!(path.join(".git").is_dir(), "{case_label}: repository kept");
+            *source
+        }
         Err(other) => {
-            panic!("{case_label}: expected InvalidPathComponent via Library error, got {other:?}")
+            panic!("{case_label}: expected InvalidPathComponent via CheckoutFailed, got {other:?}")
         }
     }
 }

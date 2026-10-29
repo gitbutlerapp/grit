@@ -50,17 +50,35 @@ pub enum CloneError {
     /// Remote resolution or transport failure.
     #[error(transparent)]
     Remote(#[from] crate::remote::RemoteError),
+    /// Every object and ref arrived and `HEAD` is set, but checking out the work tree
+    /// failed, for example because a partial clone could not fetch the blobs it needs.
+    ///
+    /// As with Git, the repository is kept so the checkout can be retried (for example
+    /// with a hard reset to `HEAD`); [`Self::should_cleanup_failed_clone`] is `false`. A
+    /// checkout cancelled part way is [`CloneError::Library`] with [`Error::Cancelled`]
+    /// instead, and is cleaned up like any other cancelled clone.
+    #[error("cloned into '{}', but checking out {commit} failed: {source}", .path.display())]
+    CheckoutFailed {
+        /// Destination of the clone, where the repository was kept.
+        path: PathBuf,
+        /// The commit the checkout was writing.
+        commit: ObjectId,
+        /// Why the checkout failed.
+        #[source]
+        source: Box<Error>,
+    },
 }
 
 impl CloneError {
     /// Whether [`cleanup_failed_clone`] may run after this failure.
     ///
     /// Returns `false` when the destination must be left unchanged: [`CloneError::DestNotEmpty`]
-    /// and pre-initialization failures such as [`RemoteError::InvalidRemoteName`].
+    /// and pre-initialization failures such as [`RemoteError::InvalidRemoteName`], and
+    /// [`CloneError::CheckoutFailed`], whose repository is kept.
     #[must_use]
     pub fn should_cleanup_failed_clone(&self) -> bool {
         match self {
-            Self::DestNotEmpty(_) | Self::InvalidCloneDepth => false,
+            Self::DestNotEmpty(_) | Self::InvalidCloneDepth | Self::CheckoutFailed { .. } => false,
             Self::Remote(RemoteError::InvalidRemoteName(_)) => false,
             Self::RemoteRefNotFound(_) => true,
             Self::Library(_) | Self::Remote(_) => true,
@@ -80,7 +98,10 @@ impl CloneError {
         match self {
             Self::Library(e) => e.is_remote_unreadable(),
             Self::Remote(e) => e.is_remote_unreadable(),
-            Self::DestNotEmpty(_) | Self::RemoteRefNotFound(_) | Self::InvalidCloneDepth => false,
+            Self::DestNotEmpty(_)
+            | Self::RemoteRefNotFound(_)
+            | Self::InvalidCloneDepth
+            | Self::CheckoutFailed { .. } => false,
         }
     }
 
@@ -92,8 +113,72 @@ impl CloneError {
         match self {
             Self::Library(e) => e.is_cancelled(),
             Self::Remote(e) => e.is_cancelled(),
-            Self::DestNotEmpty(_) | Self::RemoteRefNotFound(_) | Self::InvalidCloneDepth => false,
+            Self::DestNotEmpty(_)
+            | Self::RemoteRefNotFound(_)
+            | Self::InvalidCloneDepth
+            | Self::CheckoutFailed { .. } => false,
         }
+    }
+
+    /// The repository a failed clone left in place ([`CloneError::CheckoutFailed`]).
+    ///
+    /// # Returns
+    ///
+    /// The clone destination when the fetch and ref setup succeeded and only the
+    /// checkout failed; `None` for every other failure.
+    #[must_use]
+    pub fn kept_repository(&self) -> Option<&Path> {
+        match self {
+            Self::CheckoutFailed { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+
+    /// The promised object a [`CloneError::CheckoutFailed`] checkout could not get.
+    ///
+    /// # Returns
+    ///
+    /// The first object still missing when the checkout failed on
+    /// [`Error::PromisorFetchFailed`] or [`Error::PromisedObjectMissing`] (for example
+    /// with lazy fetch turned off); `None` otherwise.
+    #[must_use]
+    pub fn missing_promised_object(&self) -> Option<ObjectId> {
+        let Self::CheckoutFailed { source, .. } = self else {
+            return None;
+        };
+        match promisor_cause(source)? {
+            Error::PromisorFetchFailed { missing, .. } => Some(*missing),
+            Error::PromisedObjectMissing(oid) => Some(*oid),
+            _ => None,
+        }
+    }
+
+    /// The promisor remotes that failed while a [`CloneError::CheckoutFailed`] checkout
+    /// fetched its missing objects.
+    ///
+    /// # Returns
+    ///
+    /// Each failing remote's name with its first error, in the order they were tried;
+    /// empty when the checkout did not fail on [`Error::PromisorFetchFailed`].
+    #[must_use]
+    pub fn failed_promisor_remotes(&self) -> &[(String, Error)] {
+        let Self::CheckoutFailed { source, .. } = self else {
+            return &[];
+        };
+        match promisor_cause(source) {
+            Some(Error::PromisorFetchFailed { failures, .. }) => failures,
+            _ => &[],
+        }
+    }
+}
+
+/// The promisor fetch failure behind a checkout error, looking through a checkout whose
+/// rollback was also incomplete.
+fn promisor_cause(err: &Error) -> Option<&Error> {
+    match err {
+        Error::PromisorFetchFailed { .. } | Error::PromisedObjectMissing(_) => Some(err),
+        Error::CheckoutRollbackIncomplete { source, .. } => promisor_cause(source),
+        _ => None,
     }
 }
 
@@ -894,9 +979,22 @@ fn clone_after_claim(
     let mut submodule_paths = Vec::new();
     if opts.checkout && !bare {
         if let CloneCheckout::CheckedOut(checkout_oid) = checkout {
+            // Objects and refs are in place: from here on a failure keeps the repository,
+            // as Git does, so the checkout can be retried.
             (files, worktree_bytes, path_collisions, submodule_paths) =
-                perform_clone_checkout(&repo, checkout_oid, progress, cancel)
-                    .map_err(CloneError::Library)?;
+                perform_clone_checkout(&repo, checkout_oid, progress, cancel).map_err(
+                    |source| {
+                        if source.is_cancelled() {
+                            CloneError::Library(source)
+                        } else {
+                            CloneError::CheckoutFailed {
+                                path: opts.dest.clone(),
+                                commit: checkout_oid,
+                                source: Box::new(source),
+                            }
+                        }
+                    },
+                )?;
         }
     } else if matches!(checkout, CloneCheckout::CheckedOut(_)) {
         checkout = CloneCheckout::Skipped;

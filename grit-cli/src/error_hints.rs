@@ -84,6 +84,7 @@ fn guide_cause(cause: &(dyn StdError + 'static)) -> Option<Error> {
         return match err {
             CloneError::Library(lib) => guide_lib(lib),
             CloneError::Remote(remote) => guide_remote(remote),
+            CloneError::CheckoutFailed { .. } => Some(clone_checkout_failed(err)),
             _ => None,
         };
     }
@@ -228,6 +229,48 @@ fn guide_lib(err: &LibError) -> Option<Error> {
         LibError::Branch(branch_err) => guide_branch(branch_err),
         _ => None,
     }
+}
+
+/// A clone kept after its checkout failed: say so, and how to finish the checkout.
+fn clone_checkout_failed(err: &CloneError) -> Error {
+    let CloneError::CheckoutFailed {
+        path,
+        commit,
+        source,
+    } = err
+    else {
+        return guided(ErrorKind::CloneCheckoutFailed, err.to_string(), None, None);
+    };
+    let dir = path.display();
+    let human = format!("the clone into '{dir}' succeeded, but its checkout failed: {source}");
+    let hint = format!(
+        "the repository was kept; run `grit reset --hard` in '{dir}' to finish the checkout{}",
+        if err.missing_promised_object().is_some() {
+            " once its promisor remotes can supply the missing objects"
+        } else {
+            ""
+        }
+    );
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            hint: Some(hint),
+            clone_checkout: Some(crate::json_error::CloneCheckoutJson {
+                path: path.display().to_string(),
+                commit: commit.to_hex(),
+                missing_object: err.missing_promised_object().map(|oid| oid.to_hex()),
+                failed_remotes: err
+                    .failed_promisor_remotes()
+                    .iter()
+                    .map(|(remote, e)| crate::json_error::PromisorRemoteFailureJson {
+                        remote: remote.clone(),
+                        error: e.to_string(),
+                    })
+                    .collect(),
+            }),
+            ..StructuredJsonError::new(human.clone(), ErrorKind::CloneCheckoutFailed)
+        },
+        human,
+    })
 }
 
 fn guide_branch(err: &BranchError) -> Option<Error> {

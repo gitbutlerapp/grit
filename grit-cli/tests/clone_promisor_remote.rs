@@ -296,3 +296,53 @@ fn clone_says_when_the_server_ignored_the_filter() {
     );
     assert!(!human.contains("blobless"), "{human}");
 }
+
+#[test]
+fn clone_whose_checkout_fails_keeps_the_repository() {
+    // With lazy fetch off the blobless checkout cannot get its blobs. Like Git, the
+    // fetched repository stays, and a hard reset finishes the checkout later.
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    grit_ok(&work, &["init", "-b", "main"]);
+    std::fs::write(work.join("a.txt"), "a\n").unwrap();
+    grit_ok(&work, &["add", "."]);
+    grit_ok(&work, &["commit", "-m", "seed"]);
+    grit_ok(&work, &["config", "uploadpack.allowFilter", "true"]);
+    let url = format!("file://{}", work.display());
+
+    let out = grit_cmd(&["--json", "clone", "--blobs", "none", &url, "c-json"])
+        .in_dir(tmp.path())
+        .env("GRIT_NO_LAZY_FETCH", "1")
+        .with_status(1);
+    let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert_eq!(v["kind"], "clone_checkout_failed", "{v}");
+    assert_eq!(v["clone_checkout"]["path"], "c-json", "{v}");
+    let head = std::fs::read_to_string(work.join(".git/refs/heads/main")).unwrap();
+    assert_eq!(v["clone_checkout"]["commit"], head.trim(), "{v}");
+    assert!(v["clone_checkout"]["missing_object"].is_string(), "{v}");
+    assert_eq!(v["clone_checkout"]["failed_remotes"], serde_json::json!([]));
+    assert!(
+        v["hint"].as_str().unwrap().contains("grit reset --hard"),
+        "{v}"
+    );
+    let kept = tmp.path().join("c-json");
+    assert!(kept.join(".git/HEAD").is_file());
+    assert!(!kept.join("a.txt").exists());
+
+    let human = grit_cmd(&["clone", "--blobs", "none", &url, "c-human"])
+        .in_dir(tmp.path())
+        .env("GRIT_NO_LAZY_FETCH", "1")
+        .with_status(1);
+    assert!(
+        human
+            .stderr
+            .contains("the clone into 'c-human' succeeded, but its checkout failed"),
+        "{}",
+        human.stderr
+    );
+    assert!(human.stderr.contains("hint: the repository was kept"));
+
+    grit_ok(&kept, &["reset", "--hard"]);
+    assert_eq!(std::fs::read_to_string(kept.join("a.txt")).unwrap(), "a\n");
+}

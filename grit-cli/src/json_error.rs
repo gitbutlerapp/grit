@@ -50,6 +50,32 @@ pub struct LockHolderJson {
     pub running: bool,
 }
 
+/// A clone that was kept after its checkout failed, when `kind == "clone_checkout_failed"`.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct CloneCheckoutJson {
+    /// The clone's directory; the repository in it was kept.
+    pub path: String,
+    /// The commit `HEAD` points at, whose files the checkout was writing.
+    pub commit: String,
+    /// The first promised object that could not be fetched, when the checkout failed for
+    /// lack of one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub missing_object: Option<String>,
+    /// Each promisor remote that failed while fetching the missing objects, in the order
+    /// they were asked; empty when no remote was asked.
+    pub failed_remotes: Vec<PromisorRemoteFailureJson>,
+}
+
+/// One promisor remote that failed to supply missing objects.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct PromisorRemoteFailureJson {
+    /// The remote's name.
+    pub remote: String,
+    /// Why the remote failed (its first error).
+    pub error: String,
+}
+
 /// JSON object emitted on stdout for structured command failures.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct StructuredJsonError {
@@ -95,6 +121,10 @@ pub struct StructuredJsonError {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub lock: Option<LockHeldJson>,
+    /// The kept repository and what failed, when `kind == "clone_checkout_failed"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub clone_checkout: Option<CloneCheckoutJson>,
 }
 
 impl StructuredJsonError {
@@ -113,6 +143,7 @@ impl StructuredJsonError {
             paths: None,
             hint: None,
             lock: None,
+            clone_checkout: None,
         }
     }
 }
