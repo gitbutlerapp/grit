@@ -17674,6 +17674,7 @@ pub mod grit_lib::progress
 #[non_exhaustive] pub enum grit_lib::progress::ProgressPhase
 pub grit_lib::progress::ProgressPhase::CheckingOutFiles
 pub grit_lib::progress::ProgressPhase::CopyingObjects
+pub grit_lib::progress::ProgressPhase::EnumeratingObjects
 pub grit_lib::progress::ProgressPhase::IndexingObjects
 pub grit_lib::progress::ProgressPhase::ReceivingObjects
 pub grit_lib::progress::ProgressPhase::ResolvingDeltas
