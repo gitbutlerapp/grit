@@ -62,6 +62,8 @@ fn reftable_verify_batch_rejects_existing_ancestor_with_unrelated_sibling() {
 
 #[test]
 fn reftable_cas_rejects_stale_oid_after_deletion_in_newer_table() {
+    let prev_autocompact = std::env::var("GIT_TEST_REFTABLE_AUTOCOMPACTION").ok();
+    std::env::set_var("GIT_TEST_REFTABLE_AUTOCOMPACTION", "false");
     let (_dir, git_dir) = reftable_git_dir();
     let oid = |n: u8| support::stored_commit(&git_dir, n);
     let before = oid(0x11);
@@ -105,6 +107,11 @@ fn reftable_cas_rejects_stale_oid_after_deletion_in_newer_table() {
         .lookup_ref_oid("refs/heads/cas-target")
         .unwrap()
         .is_none());
+    if let Some(v) = prev_autocompact {
+        std::env::set_var("GIT_TEST_REFTABLE_AUTOCOMPACTION", v);
+    } else {
+        std::env::remove_var("GIT_TEST_REFTABLE_AUTOCOMPACTION");
+    }
 }
 
 #[test]

@@ -754,6 +754,10 @@ impl PreparedRefTransaction for ReftablePrepared<'_> {
                         &stack_batch.opts,
                     )
                     .map_err(map_reftable_err)?;
+                stack_batch
+                    .stack
+                    .maybe_auto_compact(&stack_batch.opts)
+                    .map_err(map_reftable_err)?;
             }
             for rename in &batch.reflog_renames {
                 let (store_git_dir, _) =
@@ -794,6 +798,7 @@ impl Drop for ReftablePrepared<'_> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::RefUpdateFlags;
     use super::*;
 
     #[test]
@@ -832,6 +837,48 @@ mod tests {
         let corrupt = map_reftable_err(ReftableError::BadMagic.into());
         assert!(matches!(corrupt, RefStoreError::Corrupt(msg) if msg.contains("bad magic")));
     }
+    fn cas_update_oid(n: u32) -> ObjectId {
+        let mut b = [0u8; 20];
+        b[..4].copy_from_slice(&(n + 1).to_be_bytes());
+        ObjectId::from_bytes(&b).expect("oid")
+    }
+
+    #[test]
+    fn prepared_commit_runs_geometric_auto_compaction() {
+        let store = ReftableRefStore::open_ephemeral().expect("store");
+        const UPDATES: u32 = 100;
+        for i in 0..UPDATES {
+            let txn = RefTransaction::new()
+                .update(RefUpdate {
+                    name: "refs/heads/hot".into(),
+                    new_value: Some(RawRef::Direct(cas_update_oid(i))),
+                    expected: if i == 0 {
+                        Expected::Missing
+                    } else {
+                        Expected::Oid(cas_update_oid(i - 1))
+                    },
+                    reflog: None,
+                    flags: RefUpdateFlags::default(),
+                })
+                .expect("txn");
+            store
+                .prepare(txn)
+                .expect("prepare")
+                .commit()
+                .expect("commit");
+        }
+        let stack = ReftableStack::open(&store.git_dir).expect("stack");
+        assert!(
+            stack.table_names().len() <= 8,
+            "expected bounded reftable stack, got {} tables",
+            stack.table_names().len()
+        );
+        assert_eq!(
+            store.read_raw("refs/heads/hot").expect("read"),
+            Some(RawRef::Direct(cas_update_oid(UPDATES - 1)))
+        );
+    }
+
     #[test]
     fn head_values_use_stack_transactions_and_ignore_loose_files() {
         let store = ReftableRefStore::open_ephemeral().expect("store");
