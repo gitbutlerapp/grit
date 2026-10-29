@@ -118,11 +118,11 @@ fn hard_reset_at_head_peak_rss_scales_like_git_on_wide_tree() {
     let small_git_root = tempfile::tempdir().expect("small git");
     wide_repo(small_git_root.path(), 2_000);
     let wide_git_root = tempfile::tempdir().expect("wide git");
-    wide_repo(wide_git_root.path(), 10_000);
+    wide_repo(wide_git_root.path(), 30_000);
     let small_grit_root = tempfile::tempdir().expect("small grit");
     wide_repo(small_grit_root.path(), 2_000);
     let wide_grit_root = tempfile::tempdir().expect("wide grit");
-    wide_repo(wide_grit_root.path(), 10_000);
+    wide_repo(wide_grit_root.path(), 30_000);
 
     let grit = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/release/grit");
     assert!(

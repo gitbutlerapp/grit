@@ -4264,6 +4264,312 @@ fn emit_index_tree_added(walk: &mut DiffIndexTreeWalk<'_, '_>, dir_prefix: &[u8]
     Ok(())
 }
 
+/// Paths and rows to reconcile an index with a target tree during hard reset.
+#[derive(Default)]
+pub(crate) struct HardResetIndexPlan {
+    pub remove_paths: Vec<Vec<u8>>,
+    pub updates: Vec<(Vec<u8>, u32, ObjectId)>,
+    pub insert_entries: Vec<IndexEntry>,
+}
+
+/// Plan index changes to match `target_tree` using a cache-tree-aware lockstep walk (raw paths).
+///
+/// Never builds a flattened tree map; when the cache-tree extension is absent, walks the full tree
+/// against the index instead of calling [`diff_index_to_tree_flatten`].
+pub(crate) fn plan_hard_reset_index_align(
+    odb: &Odb,
+    index: &Index,
+    target_tree: &ObjectId,
+) -> Result<HardResetIndexPlan> {
+    let mut plan = HardResetIndexPlan::default();
+    let mut idx_cursor = 0usize;
+    let cache_root = index.cache_tree.as_ref();
+    let use_cache = cache_root.is_some()
+        && index
+            .entries
+            .iter()
+            .all(|entry| entry.stage() == 0 && !entry.intent_to_add());
+    let cache_node = if use_cache { cache_root } else { None };
+    let retry = {
+        let mut walk = HardResetAlignWalk {
+            odb,
+            index,
+            idx_cursor: &mut idx_cursor,
+            ignore_submodules: false,
+            plan: &mut plan,
+            retry_without_cache: false,
+        };
+        hard_reset_align_index_tree_at(&mut walk, target_tree, cache_node, b"")?;
+        walk.retry_without_cache
+    };
+    if retry {
+        idx_cursor = 0;
+        plan = HardResetIndexPlan::default();
+        let mut walk = HardResetAlignWalk {
+            odb,
+            index,
+            idx_cursor: &mut idx_cursor,
+            ignore_submodules: false,
+            plan: &mut plan,
+            retry_without_cache: false,
+        };
+        hard_reset_align_index_tree_at(&mut walk, target_tree, None, b"")?;
+    }
+    while idx_cursor < index.entries.len() {
+        let ie = &index.entries[idx_cursor];
+        idx_cursor += 1;
+        if ie.stage() != 0 || ie.intent_to_add() {
+            continue;
+        }
+        plan.remove_paths.push(ie.path.clone());
+    }
+    Ok(plan)
+}
+
+/// Apply a [`HardResetIndexPlan`] and invalidate cache-tree nodes for touched paths.
+pub(crate) fn apply_hard_reset_index_plan(index: &mut Index, plan: HardResetIndexPlan) {
+    for path in &plan.remove_paths {
+        index.remove_path_all_stages(path);
+        index.invalidate_cache_tree_for_path(path);
+    }
+    for (path, mode, oid) in plan.updates {
+        if let Some(pos) = index.find_entry_pos(&path, 0) {
+            index.entries[pos].mode = mode;
+            index.entries[pos].oid = oid;
+            index.entries[pos].size = 0;
+            index.invalidate_cache_tree_for_path(&path);
+        }
+    }
+    for entry in plan.insert_entries {
+        let path = entry.path.clone();
+        index.add_or_replace(entry);
+        index.invalidate_cache_tree_for_path(&path);
+    }
+    index.sort();
+}
+
+struct HardResetAlignWalk<'a, 'b> {
+    odb: &'a Odb,
+    index: &'a Index,
+    idx_cursor: &'b mut usize,
+    ignore_submodules: bool,
+    plan: &'b mut HardResetIndexPlan,
+    retry_without_cache: bool,
+}
+
+fn hard_reset_align_index_tree_at(
+    walk: &mut HardResetAlignWalk<'_, '_>,
+    tree_oid: &ObjectId,
+    cache_node: Option<&CacheTreeNode>,
+    dir_prefix: &[u8],
+) -> Result<()> {
+    let tree_entries = read_tree(walk.odb, tree_oid)?;
+    if tree_entries_have_duplicate_names(&tree_entries) {
+        walk.retry_without_cache = true;
+        return Ok(());
+    }
+    let cache_children = CacheChildren::new(cache_node);
+    let mut ti = 0usize;
+
+    loop {
+        let te = tree_entries.get(ti);
+        let ie_kind = peek_index_level_entry(
+            walk.index,
+            walk.idx_cursor,
+            dir_prefix,
+            walk.ignore_submodules,
+        );
+
+        match (te, ie_kind) {
+            (Some(t_entry), Some(ie)) => {
+                let t_name = &t_entry.name;
+                let (i_name, i_is_tree) = match &ie {
+                    IndexLevelKind::Blob { name, .. } => (*name, false),
+                    IndexLevelKind::Tree { name } => (*name, true),
+                };
+                let t_is_tree = is_tree_mode(t_entry.mode);
+                let cmp = crate::objects::tree_entry_cmp(t_name, t_is_tree, i_name, i_is_tree);
+                match cmp {
+                    std::cmp::Ordering::Less => {
+                        hard_reset_plan_tree_only(walk, t_entry, dir_prefix)?;
+                        ti += 1;
+                    }
+                    std::cmp::Ordering::Greater => {
+                        hard_reset_plan_index_only(walk, dir_prefix)?;
+                    }
+                    std::cmp::Ordering::Equal => {
+                        if t_is_tree && i_is_tree {
+                            let full_path = join_index_path(dir_prefix, t_name);
+                            if hard_reset_skip_sparse_placeholder(walk, &full_path, t_entry)? {
+                                ti += 1;
+                                continue;
+                            }
+                            let child_cache = cache_children.get(t_name);
+                            if child_cache
+                                .is_some_and(|c| c.is_valid() && c.oid == Some(t_entry.oid))
+                            {
+                                skip_index_subtree(walk.index, walk.idx_cursor, &full_path);
+                                ti += 1;
+                                continue;
+                            }
+                            hard_reset_align_index_tree_at(
+                                walk,
+                                &t_entry.oid,
+                                child_cache,
+                                &full_path,
+                            )?;
+                        } else if t_is_tree != i_is_tree {
+                            hard_reset_plan_tree_only(walk, t_entry, dir_prefix)?;
+                            hard_reset_plan_index_only(walk, dir_prefix)?;
+                        } else {
+                            let IndexLevelKind::Blob { entry: ie, .. } = ie else {
+                                ti += 1;
+                                continue;
+                            };
+                            *walk.idx_cursor += 1;
+                            if t_entry.oid != ie.oid || t_entry.mode != ie.mode {
+                                walk.plan.updates.push((
+                                    ie.path.clone(),
+                                    t_entry.mode,
+                                    t_entry.oid,
+                                ));
+                            }
+                        }
+                        ti += 1;
+                    }
+                }
+            }
+            (Some(t_entry), None) => {
+                hard_reset_plan_tree_only(walk, t_entry, dir_prefix)?;
+                ti += 1;
+            }
+            (None, Some(_)) => {
+                hard_reset_plan_index_only(walk, dir_prefix)?;
+            }
+            (None, None) => break,
+        }
+    }
+    Ok(())
+}
+
+fn hard_reset_skip_sparse_placeholder(
+    walk: &mut HardResetAlignWalk<'_, '_>,
+    full_path: &[u8],
+    t_entry: &TreeEntry,
+) -> Result<bool> {
+    let Some(ie) = walk.index.entries.get(*walk.idx_cursor) else {
+        return Ok(false);
+    };
+    if !ie.is_sparse_directory_placeholder() {
+        return Ok(false);
+    }
+    let mut dir = full_path.to_vec();
+    if !dir.ends_with(b"/") {
+        dir.push(b'/');
+    }
+    if ie.path != dir || ie.oid != t_entry.oid {
+        return Ok(false);
+    }
+    *walk.idx_cursor += 1;
+    Ok(true)
+}
+
+fn hard_reset_plan_index_only(
+    walk: &mut HardResetAlignWalk<'_, '_>,
+    dir_prefix: &[u8],
+) -> Result<()> {
+    let ie_kind = peek_index_level_entry(
+        walk.index,
+        walk.idx_cursor,
+        dir_prefix,
+        walk.ignore_submodules,
+    )
+    .ok_or_else(|| Error::IndexError("missing index entry during hard reset align".into()))?;
+    match ie_kind {
+        IndexLevelKind::Blob { entry: ie, .. } => {
+            walk.plan.remove_paths.push(ie.path.clone());
+            *walk.idx_cursor += 1;
+        }
+        IndexLevelKind::Tree { name } => {
+            let full_path = join_index_path(dir_prefix, name);
+            let start = *walk.idx_cursor;
+            skip_index_subtree(walk.index, walk.idx_cursor, &full_path);
+            for ie in &walk.index.entries[start..*walk.idx_cursor] {
+                if ie.stage() != 0 || ie.intent_to_add() {
+                    continue;
+                }
+                walk.plan.remove_paths.push(ie.path.clone());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn hard_reset_plan_tree_only(
+    walk: &mut HardResetAlignWalk<'_, '_>,
+    entry: &TreeEntry,
+    dir_prefix: &[u8],
+) -> Result<()> {
+    if walk.ignore_submodules && entry.mode == 0o160000 {
+        return Ok(());
+    }
+    let path = join_index_path(dir_prefix, &entry.name);
+    if is_tree_mode(entry.mode) {
+        hard_reset_append_entries_from_tree(
+            walk.odb,
+            &entry.oid,
+            &path,
+            &mut walk.plan.insert_entries,
+        )?;
+    } else {
+        walk.plan
+            .insert_entries
+            .push(hard_reset_index_tree_row(path, entry.mode, entry.oid));
+    }
+    Ok(())
+}
+
+fn hard_reset_index_tree_row(path: Vec<u8>, mode: u32, oid: ObjectId) -> IndexEntry {
+    IndexEntry {
+        ctime_sec: 0,
+        ctime_nsec: 0,
+        mtime_sec: 0,
+        mtime_nsec: 0,
+        dev: 0,
+        ino: 0,
+        mode,
+        uid: 0,
+        gid: 0,
+        size: 0,
+        oid,
+        flags: path.len().min(0xFFF) as u16,
+        flags_extended: None,
+        path,
+        base_index_pos: 0,
+    }
+}
+
+fn hard_reset_append_entries_from_tree(
+    odb: &Odb,
+    tree_oid: &ObjectId,
+    prefix: &[u8],
+    out: &mut Vec<IndexEntry>,
+) -> Result<()> {
+    for te in read_tree(odb, tree_oid)? {
+        let mut path = prefix.to_vec();
+        if !path.is_empty() {
+            path.push(b'/');
+        }
+        path.extend_from_slice(&te.name);
+        if is_tree_mode(te.mode) {
+            hard_reset_append_entries_from_tree(odb, &te.oid, &path, out)?;
+        } else {
+            out.push(hard_reset_index_tree_row(path, te.mode, te.oid));
+        }
+    }
+    Ok(())
+}
+
 // ── Index-to-worktree diff (unstaged changes) ───────────────────────
 
 /// Compare the index against the working tree.

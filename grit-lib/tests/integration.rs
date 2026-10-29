@@ -1219,6 +1219,8 @@ mod promisor_on_demand_fetch;
 mod promisor_packs;
 #[path = "pruned_modules.rs"]
 mod pruned_modules;
+#[path = "published_crates_declare_rust_version.rs"]
+mod published_crates_declare_rust_version;
 #[cfg(feature = "full-tests")]
 #[path = "pull_git_compat.rs"]
 mod pull_git_compat;
