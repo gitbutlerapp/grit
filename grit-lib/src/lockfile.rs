@@ -214,7 +214,7 @@ impl LockFile {
         jitter: Arc<dyn LockJitter>,
     ) -> Result<Self, LockError> {
         let to_lock_error = |source: io::Error| {
-            if source.kind() == io::ErrorKind::AlreadyExists {
+            if crate::atomic_replace::is_lock_acquire_contention(&source, target) {
                 LockError::Held {
                     path: target.to_path_buf(),
                 }
@@ -338,9 +338,11 @@ impl LockFile {
             source,
         })?;
         drop(file);
-        fs::rename(&self.lock_path, other_path).map_err(|source| LockError::Io {
-            path: self.lock_path.clone(),
-            source,
+        crate::atomic_replace::replace_file(&self.lock_path, other_path).map_err(|source| {
+            LockError::Io {
+                path: self.lock_path.clone(),
+                source,
+            }
         })?;
         self.remove_holder_pid_sidecar();
         self.committed = true;

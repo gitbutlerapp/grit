@@ -1628,7 +1628,7 @@ impl Index {
         }
         drop(lock_file);
 
-        if let Err(e) = fs::rename(&tmp_path, path) {
+        if let Err(e) = crate::atomic_replace::replace_file(&tmp_path, path) {
             let _ = fs::remove_file(&tmp_path);
             if wrote_pid_file {
                 let _ = fs::remove_file(&pid_path);
@@ -3858,7 +3858,9 @@ impl IndexLock {
 
     /// Rename the staged lock file over the on-disk index.
     pub(crate) fn commit_replace_index(&mut self) -> Result<()> {
-        fs::rename(&self.lock_path, &self.index_path).map_err(Error::Io)?;
+        crate::atomic_replace::detach_open_handle(&mut self.file).map_err(Error::Io)?;
+        crate::atomic_replace::replace_file(&self.lock_path, &self.index_path)
+            .map_err(Error::Io)?;
         self.committed = true;
         if self.wrote_pid {
             let _ = fs::remove_file(&self.pid_path);

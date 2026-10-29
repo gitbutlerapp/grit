@@ -213,7 +213,12 @@ fn guide_lib(err: &LibError) -> Option<Error> {
         LibError::GitDirPathIo { path, .. } => Some(guided(
             ErrorKind::GitDirPathIo,
             err.to_string(),
-            Some(git_dir_path_io_hint(path)),
+            err.is_git_dir_file_in_use()
+                .then(|| {
+                    "another thread or process is updating the same git metadata; retry shortly"
+                        .to_owned()
+                })
+                .or_else(|| Some(git_dir_path_io_hint(path))),
             Some(vec![path.clone()]),
         )),
         LibError::UnbornHead => Some(
@@ -466,6 +471,16 @@ mod tests {
         }));
         assert_eq!(denied.paths, Some(vec!["a.txt".to_owned()]));
         assert!(denied.hint.is_none());
+    }
+
+    #[test]
+    fn git_dir_path_io_suggests_retry_when_in_use() {
+        let in_use = payload(Error::new(LibError::GitDirPathIo {
+            path: ".git/index".into(),
+            operation: grit_lib::error::GitDirPathOperation::WriteIndex,
+            source: std::io::Error::from_raw_os_error(libc::EBUSY as i32),
+        }));
+        assert!(in_use.hint.expect("hint").contains("retry shortly"));
     }
 
     #[test]
