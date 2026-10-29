@@ -8649,14 +8649,13 @@ pub fn detect_renames_with_policy(
                 }
                 odb.read(&deleted[remaining_deleted[i]].old_oid)
                     .ok()
-                    .map(|obj| normalize_bytes_for_rename(obj.data))
+                    .map(|obj| obj.data)
             };
             let load_added_blob = |i: usize| -> Option<Vec<u8>> {
                 if !load_added[i] {
                     return None;
                 }
                 read_added_entry_bytes(odb, &added[remaining_added[i]], work_root)
-                    .map(normalize_bytes_for_rename)
             };
             let (deleted_contents, added_contents) = if loads_needed <= 32 {
                 (
@@ -8695,7 +8694,7 @@ pub fn detect_renames_with_policy(
             > {
                 Ok(deleted_contents[row]
                     .as_ref()
-                    .map(|d| RenameLineTable::from_normalized_blob(d)))
+                    .map(|d| RenameLineTable::from_blob(d)))
             };
             let build_added_table = |col: usize| -> std::result::Result<
                 Option<RenameLineTable>,
@@ -8703,7 +8702,7 @@ pub fn detect_renames_with_policy(
             > {
                 Ok(added_contents[col]
                     .as_ref()
-                    .map(|d| RenameLineTable::from_normalized_blob(d)))
+                    .map(|d| RenameLineTable::from_blob(d)))
             };
             let deleted_tables: Vec<Option<RenameLineTable>> = if loads_needed <= 32 {
                 (0..remaining_deleted.len())
@@ -9065,7 +9064,7 @@ pub fn detect_copies_with_policy(
                 |si| -> std::result::Result<Option<RenameLineTable>, std::convert::Infallible> {
                     Ok(source_contents[si]
                         .as_ref()
-                        .map(|d| RenameLineTable::from_similarity_blob(d)))
+                        .map(|d| RenameLineTable::from_blob(d)))
                 },
             )
             .expect("copy source line tables");
@@ -9077,7 +9076,7 @@ pub fn detect_copies_with_policy(
                 |ai| -> std::result::Result<Option<RenameLineTable>, std::convert::Infallible> {
                     Ok(added_contents[ai]
                         .as_ref()
-                        .map(|d| RenameLineTable::from_similarity_blob(d)))
+                        .map(|d| RenameLineTable::from_blob(d)))
                 },
             )
             .expect("copy added line tables");
@@ -9545,15 +9544,6 @@ fn same_basename(del: &DiffEntry, add: &DiffEntry) -> bool {
 
 const RENAME_SCORE_MAX: u32 = 100;
 
-/// Normalize blob bytes for rename similarity (skip allocation when already LF-only).
-fn normalize_bytes_for_rename(data: Vec<u8>) -> Vec<u8> {
-    if data.contains(&b'\r') {
-        crate::crlf::crlf_to_lf(&data)
-    } else {
-        data
-    }
-}
-
 /// Uncompressed blob size without inflating object bodies (for rename pre-filtering).
 fn blob_payload_size(odb: &Odb, oid: &ObjectId) -> Option<usize> {
     if oid.is_zero() {
@@ -9585,18 +9575,19 @@ fn rename_pair_size_reachable(src_size: usize, dst_size: usize, minimum_score: u
 
 /// Compute a similarity percentage (0–100) between two byte slices.
 ///
-/// Matches Git rename detection: line-hash intersection over CRLF-normalized bodies,
-/// `score = copied_bytes * 100 / max(src_size, dst_size)`.
+/// Matches Git rename detection: span-hash intersection (`hash_chars` in diffcore-delta),
+/// `score = copied_bytes * 100 / max(src_size, dst_size)` on raw blob sizes.
 fn compute_similarity(old: &[u8], new: &[u8]) -> u32 {
     RenameLineTable::similarity_score(
-        &RenameLineTable::from_similarity_blob(old),
-        &RenameLineTable::from_similarity_blob(new),
+        &RenameLineTable::from_blob(old),
+        &RenameLineTable::from_blob(new),
     )
 }
 
 /// Compute rename/copy similarity percentage (0–100) between two byte slices.
 ///
-/// This uses the same scoring logic as internal rename detection.
+/// Uses Git `diffcore-delta` span hashing (`hash_chars`): 64-byte or newline-bounded
+/// chunks, CR skipped before LF in text blobs, `score = copied * 100 / max(len)`.
 #[must_use]
 pub fn rename_similarity_score(old: &[u8], new: &[u8]) -> u32 {
     compute_similarity(old, new)
