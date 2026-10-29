@@ -3585,3 +3585,32 @@ The target is 6.4% faster with 436 KiB less peak RSS; with a commit-graph it is 
 A separate gap turned up while measuring: `revs --count --since=2.weeks HEAD` without `-n`, on this fixture where every commit is older than the cutoff, takes 235 ms against Git's 1.7 ms. grit walks all 50,000 commits, while Git stops after a few. This change does not affect that path.
 
 What remains is mostly outside the walk. Applying the binary's 38,826 relative relocations at startup copies every `.data.rel.ro` page (about 100 page faults). In a separate comparison of two builds of the same code, a non-PIE build ran the target in 2.35 ms instead of 2.63 ms, with 1.3 MiB less RSS, at the cost of ASLR for the executable. Commit reads cost about 27,000 instructions each, of which about 10,000 are inflate (as in Git); most of the rest is pack-cache bookkeeping keyed by pack path. Translating the `.` in `--author=.` produces a long byte-class alternation, and parsing it accounts for most of the 300,000 instructions spent building the filter.
+
+## Branch listing and clap's global flags (2026-10-29)
+
+`grit branch` on the many-refs fixture lists one local branch, so nearly all of its time is fixed cost. On the `dist` binary, callgrind counts 2.16 million instructions against Git's 0.96 million, and `grit --version` alone takes 1.30 million. The largest single item after the dynamic loader was argument parsing. Before every parse, clap copies each global flag of the root command (`--json`, `--markdown`, `--filter`, `--threads`) into every subcommand, so 55 subcommands received 220 argument copies that were built and dropped again, although only the invoked subcommand can use them.
+
+grit now parses with a command tree in which only the subcommand named in `argv` receives those flags, in the same order clap would add them, and the root stops marking them global. Without a known subcommand name, as with `grit`, `grit --help` or a misspelled command, the stock tree is used, so suggestions still list every command. A unit test parses every subcommand and alias with the flags before and after it, nested subcommands, conflicting flags, missing values, unknown flags and `--help`, and requires the same parsed values and the same rendered errors as the stock tree.
+
+For the target (`grit branch`, `dist` profile, isolated config), callgrind records 2.16 → 1.76 million instructions (−18.6%), heaptrack 2,346 → 1,622 allocations and 339 → 177 KB peak heap, and `perf stat` 400 → 362 page faults. `grit branch --json` drops from 2.35 to 1.95 million instructions.
+
+Factory VM: Intel Xeon, 4 vCPUs, Rust 1.99.0, `dist` profile, system Git 2.43.0. Baseline `71dda1c22` and the change ran in the same sitting with `GIT_CONFIG_NOSYSTEM=1` and a near-empty global config. After five warmups, the three tools ran interleaved with rotating order for 400 rounds. Mutating rows were reset with Git, untimed, before each sample. Wall time is the median from spawn to exit. Peak RSS is the median of 21 `/usr/bin/time` runs, in KiB. Raw samples are in `grit-utils/baselines/clap-globals-5562.json`, and two `grit-bench daily` runs with the tools in both orders are in `daily-clap-globals-5562-before.json` and `daily-clap-globals-5562-after.json`.
+
+| Scenario | Git ms | Grit before ms | Grit after ms | Git RSS | Grit RSS before | Grit RSS after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `branch/list@many-refs` | 1.13 | 1.72 | 1.71 | 4,912 | 11,068 | 11,008 |
+| `branch/list-json@many-refs` | 1.30 | 1.87 | 1.86 | 5,680 | 11,892 | 11,848 |
+| `branch/list-markdown@many-refs` | 1.31 | 1.88 | 1.88 | 5,612 | 11,668 | 11,672 |
+| `branch/list@many-refs-loose` | 1.13 | 1.72 | 1.71 | 4,912 | 11,124 | 10,984 |
+| `branch/merged@many-refs` | 1.25 | 1.91 | 1.89 | 5,532 | 12,008 | 11,920 |
+| `branch/create@many-refs` | 1.39 | 2.21 | 2.19 | 5,684 | 11,932 | 11,844 |
+| `branch/delete@many-refs` | 4.06 | 4.44 | 4.22 | 5,700 | 11,780 | 11,684 |
+| `tag/list@many-refs` | 2.72 | 3.79 | 3.79 | 5,820 | 11,576 | 11,576 |
+| `config/get@small` | 0.98 | 1.60 | 1.57 | 4,284 | 9,884 | 9,752 |
+| `status/clean@small` | 1.45 | 2.28 | 2.24 | 5,168 | 12,716 | 12,844 |
+| `log/author-n50@deep-history` | 1.47 | 2.55 | 2.54 | 6,760 | 14,592 | 14,620 |
+| `grit --version` | 0.87 | 1.12 | 1.16 | 3,944 | 5,900 | 5,956 |
+
+Wall time improves by about 1% on most rows (`branch -D` by 5%). The instruction savings are larger than the time savings because the work removed was cheap allocation and copying, while page faults dominate the remaining time. `grit --version` runs no subcommand, so the change leaves it untouched: it runs 1,300,127 instructions before and 1,298,556 after, and its 3 extra page faults come from code placement in the new build. RSS rows move by up to ±150 KiB for the same reason.
+
+The rest of the gap is in how the binary is loaded and laid out, not in branch listing. ld.so spends 690,000 instructions and about 100 copy-on-write page faults applying 39,608 relative relocations, and resolving symbols. `grit branch` then faults in code from about 90 separate 64 KiB windows spread across 25 MB of `.text`, which accounts for most of the 6 MB of resident code (Git: 1.5 MB). As a prototype, the same build was relinked with LLD's `--symbol-ordering-file` listing the 871 functions that callgrind saw in nine common commands. That cut `grit branch` peak RSS from 10.7 to 7.5 MB, its page faults from 358 to 304 and its task clock from 1.76 to 1.44 ms; `status` and `log -n 5` each lost about 2.6 MB of RSS. Symbol names include crate hashes that change with every version and toolchain, so an ordering file has to be regenerated as part of each build. That step is not part of this change.
