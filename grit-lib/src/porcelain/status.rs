@@ -111,6 +111,11 @@ pub struct StatusOptions {
     pub now_unix_seconds: Option<i64>,
     /// When `true`, count entries on `refs/stash` (reads the stash reflog).
     pub count_stash: bool,
+    /// When `false`, stat refresh and untracked-cache updates stay in memory only: `.git/index`
+    /// is not rewritten and interrupted rewrite recovery is not attempted. Embedders that need
+    /// read-only status (for example when `GIT_OPTIONAL_LOCKS=0`) set this to `false`; the
+    /// default is `true`.
+    pub write_index: bool,
 }
 
 /// Map `status.showUntrackedFiles` to [`UntrackedMode`].
@@ -161,6 +166,7 @@ impl Default for StatusOptions {
             fsmonitor_query_boundary: None,
             now_unix_seconds: None,
             count_stash: false,
+            write_index: true,
         }
     }
 }
@@ -2248,6 +2254,12 @@ use crate::progress::ProgressSink;
 /// untracked cache, and trace2 emission — are intentionally *not* part of this;
 /// they wrap the call in the binary. A library consumer that just wants the
 /// status of a repository calls this directly.
+///
+/// When [`StatusOptions::write_index`] is `true` and the repository
+/// [`Environment`](crate::environment::Environment) allows optional locks, this function may
+/// rewrite `.git/index` after refreshing cached stat data (and may finish an interrupted rewrite
+/// apply). Set `write_index` to `false` or capture `GIT_OPTIONAL_LOCKS=0` in the environment for
+/// read-only status that leaves the index file untouched.
 pub fn status(
     repo: &Repository,
     opts: &StatusOptions,
@@ -2255,14 +2267,21 @@ pub fn status(
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<StatusModel> {
     crate::trace::trace_span!("grit.status.scan");
-    let interrupted_rewrite = match crate::history::recover_interrupted_rewrite_apply(repo) {
-        Ok(recovery) => recovery.map(InterruptedRewrite::from),
-        Err(crate::history::HistoryError::Library(err))
-            if matches!(*err, crate::error::Error::LockHeld { .. }) =>
-        {
-            Some(InterruptedRewrite::Pending)
+    let persist_index_to_disk = opts.write_index && repo.environment().git_optional_locks;
+    let interrupted_rewrite = if persist_index_to_disk {
+        match crate::history::recover_interrupted_rewrite_apply(repo) {
+            Ok(recovery) => recovery.map(InterruptedRewrite::from),
+            Err(crate::history::HistoryError::Library(err))
+                if matches!(*err, crate::error::Error::LockHeld { .. }) =>
+            {
+                Some(InterruptedRewrite::Pending)
+            }
+            Err(err) => return Err(crate::error::Error::History(err)),
         }
-        Err(err) => return Err(crate::error::Error::History(err)),
+    } else if crate::history::rewrite_apply_journal_active(repo.git_dir()) {
+        Some(InterruptedRewrite::Pending)
+    } else {
+        None
     };
     let watch = crate::progress::cancel_watch_arc(cancel);
     let mut progress = crate::progress::WatchProgress::new(progress, std::sync::Arc::clone(&watch));
@@ -2425,7 +2444,7 @@ pub fn status(
             (untracked, ignored)
         };
 
-    if persist_index {
+    if persist_index && persist_index_to_disk {
         // The refresh pass already re-hashed every racily clean entry and invalidated the
         // ones whose content changed, so the write must not hash them a second time.
         index.skip_racy_smudge_on_write = true;

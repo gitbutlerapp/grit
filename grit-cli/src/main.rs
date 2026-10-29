@@ -4360,7 +4360,15 @@ mod tests {
 
     /// Options every command accepts; they're documented once on the docs
     /// overview page rather than on each command's page.
-    const GLOBAL_OPTIONS: &[&str] = &["help", "version", "json", "markdown", "filter", "threads"];
+    const GLOBAL_OPTIONS: &[&str] = &[
+        "help",
+        "version",
+        "json",
+        "markdown",
+        "filter",
+        "threads",
+        "no-optional-locks",
+    ];
 
     /// Required `##` sections on every command page, in order. `Markdown output`
     /// may appear after `JSON output` when the command supports `--markdown`.

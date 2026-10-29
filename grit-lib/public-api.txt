@@ -1981,6 +1981,7 @@ pub grit_lib::config::environment::Environment::git_install_root: core::option::
 pub grit_lib::config::environment::Environment::git_namespace: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::git_no_replace_objects: bool
 pub grit_lib::config::environment::Environment::git_object_directory: core::option::Option<alloc::string::String>
+pub grit_lib::config::environment::Environment::git_optional_locks: bool
 pub grit_lib::config::environment::Environment::git_prefix: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::git_replace_ref_base: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::git_test_assume_different_owner: core::option::Option<alloc::string::String>
@@ -15986,6 +15987,7 @@ pub grit_lib::porcelain::status::StatusOptions::ignored: grit_lib::porcelain::st
 pub grit_lib::porcelain::status::StatusOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::status::StatusOptions::renames: core::option::Option<grit_lib::porcelain::status::RenameDetection>
 pub grit_lib::porcelain::status::StatusOptions::untracked: grit_lib::porcelain::status::UntrackedMode
+pub grit_lib::porcelain::status::StatusOptions::write_index: bool
 impl core::clone::Clone for grit_lib::porcelain::status::StatusOptions
 pub fn grit_lib::porcelain::status::StatusOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::porcelain::status::StatusOptions
@@ -17110,6 +17112,7 @@ pub grit_lib::prelude::Environment::git_install_root: core::option::Option<std::
 pub grit_lib::prelude::Environment::git_namespace: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::git_no_replace_objects: bool
 pub grit_lib::prelude::Environment::git_object_directory: core::option::Option<alloc::string::String>
+pub grit_lib::prelude::Environment::git_optional_locks: bool
 pub grit_lib::prelude::Environment::git_prefix: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::git_replace_ref_base: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::git_test_assume_different_owner: core::option::Option<alloc::string::String>

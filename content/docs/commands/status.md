@@ -29,6 +29,8 @@ Each change has a label: `new`, `modified`, `deleted`, `renamed`, `copied`, `typ
 
 A tracked file that grit cannot open to compare its content (another program holds it open without sharing, or it has no read permission) is listed as `modified`, like Git does, and the rest of the status is reported as usual. Commands that need the file's bytes, such as `grit add` of that path or a patch from `grit diff`, still fail with [`worktree_path_io`](../exit-codes/), and `grit switch` refuses a branch that would change it.
 
+**Index refresh:** after stat data in the work tree no longer matches `.git/index`, grit re-verifies content and normally writes the refreshed stat cache back to the index (like `git status`). Use [`--no-optional-locks`](../global-options/) or `GIT_OPTIONAL_LOCKS=0` when a background status must not touch the index file; grit still refreshes stat data in memory so the report matches a full run. Library callers set [`StatusOptions::write_index`](rustdoc:grit_lib::porcelain::status::StatusOptions::write_index) to `false` for the same read-only behavior without changing the process environment.
+
 During a paused merge or grit rebase, human output also lists **Conflicts** grouped by kind (`both modified`, `both added`, …). In `--json`, each conflict is `{ "path", "kind" }` and `operation.next_steps` lists the ordered `grit` commands while an operation is paused (for example `grit diff` then `grit add .` with conflicts, or `grit merge --continue` / `grit rebase --continue` once conflicts are resolved). Use `operation.alternatives` for cancel paths such as `grit merge --abort` or `grit rebase --abort` (not part of the ordered sequence). Grit rebase sessions are detected via `.git/rebase-merge/grit-plan`.
 
 A rebase that `git` started (`.git/rebase-merge/` or `.git/rebase-apply/` without grit's plan) is recognised too. The header names the branch being rebased (`Rebasing topic onto 1a2b3c4`), JSON `branch` reports that branch, and `operation` is `rebase-interactive` (Git's default merge backend) or `rebase` (`git rebase --apply`). Its `next_steps` end with `git rebase --continue`, because only git can resume its own todo list. `grit rebase --abort` is listed in `alternatives` and cancels it.
@@ -53,7 +55,7 @@ Every grit command that reports conflicts (`status`, `merge`, `pick`, `revert`, 
 
 ### Interrupted rebases and history edits
 
-A `grit rebase` or `grit history` edit that is killed after moving branches but before the files are updated leaves a recovery journal in `.git/grit/rewrite-apply/`. `grit status` finishes that work before it reports anything, and says what it did in one line above the usual screen:
+A `grit rebase` or `grit history` edit that is killed after moving branches but before the files are updated leaves a recovery journal in `.git/grit/rewrite-apply/`. With optional locks enabled (the default), `grit status` finishes that work before it reports anything, and says what it did in one line above the usual screen. With `--no-optional-locks` / `GIT_OPTIONAL_LOCKS=0`, recovery is deferred and the outcome stays **Pending** until a status run that may write the index:
 
 - **Finished the checkout.** The branches had already moved, so status puts back the files the interrupted checkout was writing and checks out the rewritten commit again. The rebase stands. Unrelated local edits are kept.
 - **Rolled back.** When that checkout cannot finish (or for an interrupted `history fixup` or `absorb`), branches, index and files go back to where they were before the command. Status still succeeds.

@@ -385,6 +385,11 @@ path = "tests/status_index_stat_refresh_git_compat.rs"
 required-features = ["full-tests"]
 
 [[test]]
+name = "status_optional_locks_git_compat"
+path = "tests/status_optional_locks_git_compat.rs"
+required-features = ["full-tests"]
+
+[[test]]
 name = "switch_delete_cross_device_symlink_1968"
 path = "tests/switch_delete_cross_device_symlink_1968.rs"
 required-features = ["full-tests"]

@@ -2331,6 +2331,9 @@ impl Repository {
     /// Like [`Repository::try_write_index`], but writes to an explicit index file path
     /// (for example the path selected by `GIT_INDEX_FILE`).
     pub(crate) fn try_write_index_at(&self, path: &Path, index: &mut Index) -> Result<bool> {
+        if !self.environment().git_optional_locks {
+            return Ok(false);
+        }
         match self.write_index_at(path, index) {
             Ok(()) => Ok(true),
             Err(e) if Self::opportunistic_index_write_skippable(&e) => Ok(false),

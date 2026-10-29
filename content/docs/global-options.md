@@ -11,6 +11,7 @@ These options work on any command (and on `grit` itself when you pass no subcomm
 | `--markdown` | Print agent-friendly Markdown instead of human-readable text. Most commands render structured headings, lists, and tables (or fenced diffs) rather than dumping JSON. Mutually exclusive with `--json`. |
 | `--filter <EXPR>` | Apply a jq expression to the JSON output. Requires `--json`. |
 | `--threads <N>` | Worker threads for parallel library work inside this process. `0` selects all logical CPUs (Git-style auto); `1` forces serial paths. Does not change human, `--json`, or `--markdown` output shape. |
+| `--no-optional-locks` | Skip opportunistic index updates that take optional locks (same as `GIT_OPTIONAL_LOCKS=0`). Stat refresh still runs in memory; `.git/index` is left untouched. |
 | `-h`, `--help` | Print help for `grit` or for a command. |
 | `-v`, `--version` | Print the version of `grit`. `-V` works too. |
 
@@ -58,6 +59,7 @@ The `grit` CLI snapshots the process environment into [`Environment`](../library
 | `GIT_NOTES_REF`, `GIT_NOTES_DISPLAY_REF` | Notes ref selection |
 | `GIT_ATTR_SOURCE`, `GIT_INDEX_VERSION`, `GIT_PRINT_SHA1_ELLIPSIS` | Attributes, index format, diff OID display |
 | `GIT_NAMESPACE`, `GIT_REPLACE_REF_BASE`, `GIT_NO_REPLACE_OBJECTS` | Ref namespaces and replace refs |
+| `GIT_OPTIONAL_LOCKS` | When set to `0`, `false`, `no`, or `off`, grit skips optional index writes during read-mostly commands such as `status` (same as `--no-optional-locks`). Unset means optional locks are allowed. |
 | `GIT_TRACE`, `GIT_TRACE_SETUP`, `GIT_TRACE2_PERF` | Trace output |
 | `GRIT_TRACE` | Grit operation spans to stderr (`1` / `true` / `yes`), or appended to a file when set to an absolute path; see [Debugging and tracing](../debugging/) |
 | `PATH` | Helper lookup (e.g. signing programs) |

@@ -35,6 +35,9 @@ pub struct GlobalRepoArgs {
     /// Use this directory as the work tree root (same as `GIT_WORK_TREE`).
     #[arg(long = "work-tree", value_name = "PATH")]
     pub work_tree: Option<PathBuf>,
+    /// Skip opportunistic index updates that take optional locks (same as `GIT_OPTIONAL_LOCKS=0`).
+    #[arg(long = "no-optional-locks", global = true)]
+    pub no_optional_locks: bool,
 }
 
 fn parse_config_override(spec: &str) -> Result<ConfigOverride, String> {
@@ -76,6 +79,9 @@ impl GlobalRepoArgs {
         }
         if changed_dir {
             std::env::set_var("PWD", cwd);
+        }
+        if self.no_optional_locks {
+            std::env::set_var("GIT_OPTIONAL_LOCKS", "0");
         }
         if self.git_dir.is_none() && self.work_tree.is_none() && self.config.is_empty() {
             return Ok(());
