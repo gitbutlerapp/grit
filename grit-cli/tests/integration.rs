@@ -43,6 +43,9 @@ mod auth_server_cli;
 #[path = "blame_copy_cli.rs"]
 mod blame_copy_cli;
 #[cfg(feature = "full-tests")]
+#[path = "blame_encoding_lossy_json.rs"]
+mod blame_encoding_lossy_json;
+#[cfg(feature = "full-tests")]
 #[path = "blame_ignore_revs_cli.rs"]
 mod blame_ignore_revs_cli;
 #[cfg(feature = "full-tests")]

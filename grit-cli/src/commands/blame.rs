@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::ops::Not;
 
 use anyhow::{bail, Context, Result};
 use std::fmt;
@@ -54,6 +55,8 @@ pub struct BlameLineJson {
     pub original_path: String,
     pub final_line: usize,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Not::not")]
+    pub encoding_lossy: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ignored: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,6 +79,8 @@ pub struct BlameHunkJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub not_committed: Option<bool>,
     pub lines: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_encoding_lossy: Option<Vec<bool>>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -335,6 +340,7 @@ fn outcome_from_result(
             final_line: line.final_line,
             content: content.clone(),
             original_path: line.original_path.clone(),
+            encoding_lossy: line.encoding_lossy,
             ignored: line.ignored.then_some(true),
             unblamable: line.unblamable.then_some(true),
             not_committed: line.not_committed.then_some(true),
@@ -359,6 +365,7 @@ fn outcome_from_result(
                 .final_start
                 .saturating_add(hunk.count.saturating_sub(1));
             let mut hunk_lines = Vec::with_capacity(hunk.count);
+            let mut hunk_encoding_lossy = Vec::with_capacity(hunk.count);
             for _ in 0..hunk.count {
                 let line = &result.lines[line_cursor];
                 debug_assert!(
@@ -370,7 +377,12 @@ fn outcome_from_result(
                 );
                 line_cursor += 1;
                 hunk_lines.push(normalize_blame_line_content(line.content.clone()));
+                hunk_encoding_lossy.push(line.encoding_lossy);
             }
+            let line_encoding_lossy = hunk_encoding_lossy
+                .iter()
+                .any(|&v| v)
+                .then_some(hunk_encoding_lossy);
             hunks_json.push(BlameHunkJson {
                 commit: hunk.commit.to_hex(),
                 original_path: hunk.original_path,
@@ -381,6 +393,7 @@ fn outcome_from_result(
                 unblamable: hunk.unblamable.then_some(true),
                 not_committed: hunk.commit.is_zero().then_some(true),
                 lines: hunk_lines,
+                line_encoding_lossy,
             });
         }
         debug_assert_eq!(line_cursor, result.lines.len());

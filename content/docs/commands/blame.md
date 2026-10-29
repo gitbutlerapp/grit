@@ -160,7 +160,8 @@ Pass `--json` for stable, scripting-friendly output:
 | `lines[].original_line` | number | 1-based line number in the originating commit. |
 | `lines[].original_path` | string | Reversibly stored path in the originating commit, preserving filename bytes through renames and copies. |
 | `lines[].final_line` | number | 1-based line number in the blamed file (the working tree or `--contents` when those are blamed). |
-| `lines[].content` | string | Line text. |
+| `lines[].content` | string | Line text (lossy UTF-8 when `encoding_lossy` is true). |
+| `lines[].encoding_lossy` | boolean | Present and `true` when the line bytes were not valid UTF-8 and `content` used lossy decoding. Raw bytes are not included in JSON; use [`grit_lib::blame::BlameAttributedLine::content_bytes`](rustdoc:grit_lib::blame::BlameAttributedLine::content_bytes) from the library when you need them. |
 | `lines[].ignored` | boolean | Present and `true` when the line was attributed through an ignored revision. |
 | `lines[].unblamable` | boolean | Present and `true` when the line was added in an ignored revision and cannot be blamed further back. |
 | `lines[].not_committed` | boolean | Present and `true` when the line exists only in the working tree or `--contents` buffer. `commit` is then all zeros and `original_line` equals `final_line`. |
@@ -185,6 +186,7 @@ Same top-level `file`, `rev`, and `commits` map. Replaces `lines[]` with `hunks[
 | `hunks[].unblamable` | boolean | Present and `true` when blame could not continue past an ignored revision. |
 | `hunks[].not_committed` | boolean | Present and `true` when the hunk's lines are not committed (`commit` is all zeros). |
 | `hunks[].lines` | array of strings | Line text for each row in the hunk (same order as final lines). |
+| `hunks[].line_encoding_lossy` | array of boolean | Present when any line in the hunk was decoded lossily; parallel to `lines`, one flag per row. Omitted when every line is valid UTF-8. |
 
 Every `original_path` names the file in its reported `commit`, even when a line range crosses rename-and-edit commits or subtree imports. After decoding the filename bytes, read that commit's file at `original_line` (or `original_start` for a hunk). The path can differ from both the requested path and intermediate names in history.
 
