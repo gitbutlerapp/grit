@@ -82,7 +82,9 @@ pub fn apply_patch_to_index(
     patches: &[FilePatch],
     opts: &IndexApplyOptions,
 ) -> std::result::Result<IndexApplyOutcome, ApplyError> {
-    let mut trial = index.clone();
+    // Later patches are planned against a copy that already has the earlier patches applied;
+    // the last (often only) patch needs no copy, since nothing is planned after it.
+    let mut trial: Option<Index> = None;
     let mut outcome = IndexApplyOutcome {
         dry_run: opts.dry_run,
         ..IndexApplyOutcome::default()
@@ -90,7 +92,7 @@ pub fn apply_patch_to_index(
     let mut fn_table: BTreeMap<String, FnState> = BTreeMap::new();
     let mut planned = Vec::new();
 
-    for patch in patches {
+    for (i, patch) in patches.iter().enumerate() {
         if patch.involves_gitlink() {
             let path = patch.effective_path().unwrap_or("<unknown>").to_string();
             return Err(ApplyError::Failed {
@@ -98,11 +100,15 @@ pub fn apply_patch_to_index(
                 message: "submodule/gitlink patches are not supported".to_string(),
             });
         }
-        let changes = plan_one_file_patch(repo, &trial, patch, opts, &mut fn_table, &mut outcome)?;
-        for change in &changes {
-            apply_planned_to_index(&mut trial, change);
-            planned.push(change.clone());
+        let view = trial.as_ref().unwrap_or(index);
+        let changes = plan_one_file_patch(repo, view, patch, opts, &mut fn_table, &mut outcome)?;
+        if i + 1 < patches.len() {
+            let trial = trial.get_or_insert_with(|| index.clone());
+            for change in &changes {
+                apply_planned_to_index(trial, change);
+            }
         }
+        planned.extend(changes);
     }
 
     if !opts.dry_run {
@@ -113,7 +119,9 @@ pub fn apply_patch_to_index(
                     .map_err(|e| library_err_path("", e))?;
             }
         }
-        *index = trial;
+        for change in &planned {
+            apply_planned_to_index(index, change);
+        }
     }
     Ok(outcome.finalize())
 }
@@ -483,5 +491,88 @@ mod tests {
         let blob = repo.odb().read(&entry.oid).unwrap();
         assert_eq!(blob.data, b"b\n");
         assert!(entry.stat_cache_unset());
+    }
+
+    fn one_line_patch(path: &str, old: &str, new: &str) -> FilePatch {
+        let text = format!(
+            "diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-{old}\n+{new}\n"
+        );
+        parse_patch(&text, 1, "p", false, None)
+            .unwrap()
+            .pop()
+            .unwrap()
+    }
+
+    fn repo_with_index(files: &[(&str, &[u8])]) -> (tempfile::TempDir, Repository, Index) {
+        let dir = tempfile::tempdir().unwrap();
+        let repo =
+            Repository::init(dir.path(), &crate::repo::InitOptions::default()).expect("init");
+        let mut index = Index::new();
+        for (path, data) in files {
+            let oid = repo.odb().write(ObjectKind::Blob, data).unwrap();
+            upsert_index_entry(&mut index, path, oid, MODE_REGULAR);
+        }
+        (dir, repo, index)
+    }
+
+    fn blob_at(repo: &Repository, index: &Index, path: &str) -> Vec<u8> {
+        let entry = index.get(path.as_bytes(), 0).expect("entry");
+        repo.odb().read(&entry.oid).unwrap().data
+    }
+
+    #[test]
+    fn index_apply_several_patches_in_one_call() {
+        let (_dir, repo, mut index) =
+            repo_with_index(&[("a.txt", b"a\n"), ("b.txt", b"b\n"), ("c.txt", b"c\n")]);
+        let patches = [
+            one_line_patch("a.txt", "a", "A"),
+            one_line_patch("c.txt", "c", "C"),
+        ];
+        let outcome =
+            apply_patch_to_index(&repo, &mut index, &patches, &IndexApplyOptions::default())
+                .unwrap();
+        assert_eq!(outcome.modified, ["a.txt", "c.txt"]);
+        assert_eq!(blob_at(&repo, &index, "a.txt"), b"A\n");
+        assert_eq!(blob_at(&repo, &index, "b.txt"), b"b\n");
+        assert_eq!(blob_at(&repo, &index, "c.txt"), b"C\n");
+    }
+
+    #[test]
+    fn index_apply_failure_in_later_patch_leaves_index_untouched() {
+        let (_dir, repo, mut index) = repo_with_index(&[("a.txt", b"a\n"), ("b.txt", b"b\n")]);
+        let before = index.clone();
+        let patches = [
+            one_line_patch("a.txt", "a", "A"),
+            one_line_patch("b.txt", "not-b", "B"),
+        ];
+        let err = apply_patch_to_index(&repo, &mut index, &patches, &IndexApplyOptions::default())
+            .expect_err("second patch does not apply");
+        assert!(matches!(err, ApplyError::PatchFailed { .. }), "{err:?}");
+        assert_eq!(index.entries, before.entries);
+        let a_oid = repo
+            .odb()
+            .hash_algo()
+            .hash_object(ObjectKind::Blob, b"A\n")
+            .unwrap();
+        assert!(!repo.odb().exists(&a_oid), "no blob written on failure");
+    }
+
+    #[test]
+    fn index_apply_dry_run_reports_without_changing_index() {
+        let (_dir, repo, mut index) = repo_with_index(&[("a.txt", b"a\n")]);
+        let before = index.clone();
+        let outcome = apply_patch_to_index(
+            &repo,
+            &mut index,
+            &[one_line_patch("a.txt", "a", "A")],
+            &IndexApplyOptions {
+                dry_run: true,
+                ..IndexApplyOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(outcome.dry_run);
+        assert_eq!(outcome.modified, ["a.txt"]);
+        assert_eq!(index.entries, before.entries);
     }
 }

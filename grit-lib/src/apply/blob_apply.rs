@@ -1,5 +1,7 @@
 //! Apply parsed [`FilePatch`] hunks to in-memory blob bytes (no I/O).
 
+use std::borrow::Cow;
+
 use super::{BinaryPatchPayload, FilePatch, Hunk, HunkLine};
 use crate::error::{ApplyError, Error};
 
@@ -84,6 +86,9 @@ fn materialize_binary(
     })
 }
 
+/// One line of the image being patched: borrowed from the preimage or a hunk where possible.
+type Line<'a> = Cow<'a, [u8]>;
+
 fn apply_hunks_to_blob(
     base: &[u8],
     hunks: &[Hunk],
@@ -103,9 +108,9 @@ fn apply_hunks_to_blob(
     Ok(join_blob_lines(&lines))
 }
 
-fn apply_one_hunk(
-    lines: &mut Vec<Vec<u8>>,
-    hunk: &Hunk,
+fn apply_one_hunk<'a>(
+    lines: &mut Vec<Line<'a>>,
+    hunk: &'a Hunk,
     path: &str,
 ) -> std::result::Result<(), ApplyError> {
     let (old_side, new_side) = hunk_old_new(hunk);
@@ -130,7 +135,7 @@ fn apply_one_hunk(
     Ok(())
 }
 
-fn hunk_old_new(hunk: &Hunk) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+fn hunk_old_new(hunk: &Hunk) -> (Vec<Line<'_>>, Vec<Line<'_>>) {
     let mut old_side = Vec::new();
     let mut new_side = Vec::new();
     let body = &hunk.lines;
@@ -153,15 +158,18 @@ fn hunk_old_new(hunk: &Hunk) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     (old_side, new_side)
 }
 
-fn hunk_line_bytes(text: &str, with_newline: bool) -> Vec<u8> {
-    let mut v = text.as_bytes().to_vec();
-    if with_newline && v.last() != Some(&b'\n') {
-        v.push(b'\n');
+fn hunk_line_bytes(text: &str, with_newline: bool) -> Line<'_> {
+    let bytes = text.as_bytes();
+    if !with_newline || bytes.last() == Some(&b'\n') {
+        return Cow::Borrowed(bytes);
     }
-    v
+    let mut owned = Vec::with_capacity(bytes.len() + 1);
+    owned.extend_from_slice(bytes);
+    owned.push(b'\n');
+    Cow::Owned(owned)
 }
 
-fn find_hunk_match(lines: &[Vec<u8>], old_side: &[Vec<u8>], hint: usize) -> Option<usize> {
+fn find_hunk_match(lines: &[Line<'_>], old_side: &[Line<'_>], hint: usize) -> Option<usize> {
     if old_side.is_empty() {
         return Some(hint.min(lines.len()));
     }
@@ -180,26 +188,18 @@ fn find_hunk_match(lines: &[Vec<u8>], old_side: &[Vec<u8>], hint: usize) -> Opti
     None
 }
 
-fn split_blob_lines(data: &[u8]) -> Vec<Vec<u8>> {
-    if data.is_empty() {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    let mut start = 0usize;
-    for (i, &b) in data.iter().enumerate() {
-        if b == b'\n' {
-            out.push(data[start..=i].to_vec());
-            start = i + 1;
-        }
-    }
-    if start < data.len() {
-        out.push(data[start..].to_vec());
-    }
-    out
+fn split_blob_lines(data: &[u8]) -> Vec<Line<'_>> {
+    data.split_inclusive(|&b| b == b'\n')
+        .map(Cow::Borrowed)
+        .collect()
 }
 
-fn join_blob_lines(lines: &[Vec<u8>]) -> Vec<u8> {
-    lines.iter().flat_map(|l| l.iter().copied()).collect()
+fn join_blob_lines(lines: &[Line<'_>]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(lines.iter().map(|l| l.len()).sum());
+    for line in lines {
+        out.extend_from_slice(line);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -238,5 +238,81 @@ diff --git a/f.txt b/f.txt
         let got =
             apply_patch_to_blob(b"old", &patches[0], &BlobApplyOptions::default()).expect("apply");
         assert_eq!(got, b"new\n");
+    }
+
+    #[test]
+    fn blob_apply_hunks_that_grow_and_shrink_the_image() {
+        let base = b"a\nb\nc\nd\ne\nf\ng\nh\n";
+        let patch_text = "\
+diff --git a/f.txt b/f.txt
+--- a/f.txt
++++ b/f.txt
+@@ -1,2 +1,3 @@
+ a
++a2
+ b
+@@ -6,3 +7,2 @@
+ f
+-g
+ h
+";
+        let patches = parse_patch(patch_text, 1, "p", false, None).expect("parse");
+        let got =
+            apply_patch_to_blob(base, &patches[0], &BlobApplyOptions::default()).expect("apply");
+        assert_eq!(got, b"a\na2\nb\nc\nd\ne\nf\nh\n");
+    }
+
+    #[test]
+    fn blob_apply_adds_missing_final_newline() {
+        let patch_text = "\
+diff --git a/f.txt b/f.txt
+--- a/f.txt
++++ b/f.txt
+@@ -1,2 +1,2 @@
+ keep
+-tail
+\\ No newline at end of file
++tail
+";
+        let patches = parse_patch(patch_text, 1, "p", false, None).expect("parse");
+        let got = apply_patch_to_blob(b"keep\ntail", &patches[0], &BlobApplyOptions::default())
+            .expect("apply");
+        assert_eq!(got, b"keep\ntail\n");
+    }
+
+    #[test]
+    fn blob_apply_finds_hunk_away_from_its_header_line() {
+        let patch_text = "\
+diff --git a/f.txt b/f.txt
+--- a/f.txt
++++ b/f.txt
+@@ -1 +1 @@
+-x
++y
+";
+        let patches = parse_patch(patch_text, 1, "p", false, None).expect("parse");
+        let got = apply_patch_to_blob(b"p\nq\nx\n", &patches[0], &BlobApplyOptions::default())
+            .expect("apply");
+        assert_eq!(got, b"p\nq\ny\n");
+        let err = apply_patch_to_blob(b"p\nq\n", &patches[0], &BlobApplyOptions::default())
+            .expect_err("no match");
+        assert!(matches!(err, ApplyError::PatchFailed { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn split_and_join_round_trip_without_copying_lines() {
+        for data in [
+            &b""[..],
+            b"\n",
+            b"one",
+            b"one\ntwo",
+            b"one\ntwo\n",
+            b"\n\nx\n",
+        ] {
+            let lines = split_blob_lines(data);
+            assert!(lines.iter().all(|l| matches!(l, Cow::Borrowed(_))));
+            assert_eq!(join_blob_lines(&lines), data);
+        }
+        assert_eq!(split_blob_lines(b"a\nb").len(), 2);
     }
 }
