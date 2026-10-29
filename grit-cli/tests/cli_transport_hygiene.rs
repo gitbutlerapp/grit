@@ -4,7 +4,8 @@
 fn cli_has_no_transport_logic() {
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let forbidden = [
-        "grit_lib::remote::transport",
+        // Match the transport module, not `transport_path` (URL display helpers).
+        "grit_lib::remote::transport::",
         "fetch_remote",
         "http_fetch",
         "fetch_local",

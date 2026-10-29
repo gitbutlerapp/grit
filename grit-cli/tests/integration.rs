@@ -142,6 +142,8 @@ mod clone_shallow;
 #[cfg(feature = "full-tests")]
 #[path = "clone_unborn_default_branch.rs"]
 mod clone_unborn_default_branch;
+#[path = "clone_url_redaction.rs"]
+mod clone_url_redaction;
 #[path = "commit_allow_empty.rs"]
 mod commit_allow_empty;
 #[path = "commit_amend_committer_only.rs"]
@@ -600,7 +602,7 @@ mod rm_mv_clean_cli;
 #[cfg(feature = "full-tests")]
 #[path = "serve_bundles_cli.rs"]
 mod serve_bundles_cli;
-#[cfg(unix)]
+#[cfg(feature = "full-tests")]
 #[path = "serve_hook_sigpipe.rs"]
 mod serve_hook_sigpipe;
 #[cfg(feature = "full-tests")]

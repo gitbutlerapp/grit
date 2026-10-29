@@ -12,6 +12,7 @@ use grit_lib::remote::clone::{
     CloneOutcome as LibCloneOutcome, CloneTags,
 };
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
+use grit_lib::remote::transport_path::redact_url_for_display;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -667,6 +668,7 @@ pub fn run(mut opts: CloneRunOptions) -> Result<CloneOutcome> {
         None => derive_clone_dir(url, opts.bare).map_err(|e| anyhow::anyhow!("{e}"))?,
     };
     let path = PathBuf::from(&dir);
+    let display_url = redact_url_for_display(url);
     let dest_preexisted_empty = dest_preexisted_empty(&path);
     let started = Instant::now();
     // Cleanup must wait until the library has stopped writing, so Ctrl+C only
@@ -680,7 +682,7 @@ pub fn run(mut opts: CloneRunOptions) -> Result<CloneOutcome> {
         eprintln!(
             "{} {} {} {}",
             paint(color, BOLD, "Cloning"),
-            paint(color, DIM, url),
+            paint(color, DIM, &display_url),
             paint(color, DIM, "→"),
             paint(color, BOLD, &dir)
         );
@@ -692,6 +694,7 @@ pub fn run(mut opts: CloneRunOptions) -> Result<CloneOutcome> {
         filter,
         &path,
         &dir,
+        &display_url,
         started,
         &mut term_progress,
         &interrupt,
@@ -716,6 +719,7 @@ fn clone_into(
     blobs: Option<BlobsArg>,
     path: &Path,
     dir: &str,
+    display_url: &str,
     started: Instant,
     term_progress: &mut TerminalProgress,
     cancel: &dyn Cancel,
@@ -762,13 +766,16 @@ fn clone_into(
     let outcome = clone_repo(clone_opts, &mut *term_progress, cancel, Some(&factory))?;
     let bundle = match &outcome.bundle {
         BundleSeed::Seeded(seeded) => Some(CloneBundleJson {
-            uri: seeded.uri.clone(),
+            uri: redact_url_for_display(&seeded.uri),
             bytes: seeded.bytes,
             resumed_from: seeded.resumed_from,
         }),
         BundleSeed::Failed { uri, reason } => {
             if run.mode == OutputMode::Human {
-                let from = uri.as_deref().map(|u| format!(" {u}")).unwrap_or_default();
+                let from = uri
+                    .as_deref()
+                    .map(|u| format!(" {}", redact_url_for_display(u)))
+                    .unwrap_or_default();
                 eprintln!(
                     "warning: could not use the server's bundle{from} ({reason}); fetched everything instead"
                 );
@@ -829,7 +836,7 @@ fn clone_into(
         space_for_clone(dir, &run.url, &remote_name)
     };
     Ok(CloneOutcome {
-        url: run.url.clone(),
+        url: display_url.to_owned(),
         path: dir.to_owned(),
         remote: remote_name,
         single_branch,
