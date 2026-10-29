@@ -638,8 +638,6 @@ fn checkout_hard_to_tree_journaled(
         trees_differ,
         &written_by_tree_diff,
         sparse.as_ref(),
-        pre_reset_index_mtime,
-        stat_policy,
     );
     let worktree_stats = scan_index_blob_stats_for_hard_reset(
         repo,
@@ -666,14 +664,6 @@ fn checkout_hard_to_tree_journaled(
                 return HardResetEntryAction::Written(None);
             }
             let existing = &index.entries[pos];
-            if hard_reset_at_head_trusts_index_stat(
-                trees_differ,
-                existing,
-                pre_reset_index_mtime,
-                stat_policy,
-            ) {
-                return HardResetEntryAction::Keep;
-            }
             match worktree_stats[pos] {
                 Some(stat)
                     if hard_reset_entry_stat_clean(
@@ -684,7 +674,18 @@ fn checkout_hard_to_tree_journaled(
                         pre_reset_index_mtime,
                     ) =>
                 {
-                    HardResetEntryAction::Keep
+                    if trees_differ {
+                        HardResetEntryAction::Keep
+                    } else if crate::diff::entry_is_racy_with_policy(
+                        existing,
+                        pre_reset_index_mtime,
+                        stat_policy,
+                    ) {
+                        // At HEAD, racily clean stat can hide a worktree edit in the same second.
+                        HardResetEntryAction::Verify
+                    } else {
+                        HardResetEntryAction::Keep
+                    }
                 }
                 _ => HardResetEntryAction::Verify,
             }
@@ -1008,31 +1009,12 @@ fn index_hard_reset_cache_matches_tree(index: &Index, target_tree: &ObjectId) ->
         && usize::try_from(root.entry_count).ok() == Some(stage0_count)
 }
 
-/// At-HEAD reset may treat a settled index stat as proof the worktree matches without lstat.
-fn hard_reset_at_head_trusts_index_stat(
-    trees_differ: bool,
-    entry: &IndexEntry,
-    index_mtime: Option<(u32, u32)>,
-    stat_policy: crate::index::StatMatchPolicy,
-) -> bool {
-    if trees_differ {
-        return false;
-    }
-    crate::diff::index_entry_skips_worktree_content_hash_after_stat_match(
-        entry,
-        index_mtime,
-        stat_policy,
-    )
-}
-
 /// Index positions that need a worktree stat before hard reset can choose keep vs verify.
 fn hard_reset_stat_probe_positions(
     index: &Index,
     trees_differ: bool,
     written_by_tree_diff: &BTreeSet<Vec<u8>>,
     sparse: Option<&SparseCheckout>,
-    index_mtime: Option<(u32, u32)>,
-    stat_policy: crate::index::StatMatchPolicy,
 ) -> Vec<usize> {
     let mut positions = Vec::new();
     for (pos, entry) in index.entries.iter().enumerate() {
@@ -1048,9 +1030,6 @@ fn hard_reset_stat_probe_positions(
             continue;
         }
         if trees_differ && written_by_tree_diff.contains(&entry.path) {
-            continue;
-        }
-        if hard_reset_at_head_trusts_index_stat(trees_differ, entry, index_mtime, stat_policy) {
             continue;
         }
         positions.push(pos);
@@ -1324,8 +1303,8 @@ fn hard_reset_entry_stat_clean(
 }
 
 /// Resolve [`HardResetEntryAction::Verify`] entries by comparing worktree content with the
-/// index blob, in parallel (racy files are typically a whole batch just written by a
-/// previous checkout, and each check opens and reads the file).
+/// index blob, in parallel. Unlike ordinary checkout skip logic, this never trusts a stat match
+/// without reading bytes: hard reset at HEAD uses verify for every stat-clean row.
 fn verify_hard_reset_candidates(
     repo: &Repository,
     work_tree: &Path,
@@ -1349,23 +1328,44 @@ fn verify_hard_reset_candidates(
         .resolve(ParallelOp::IndexRefresh, config.as_ref());
     options.min_total_bytes = None;
     let filter_process = rules.filter_process();
+    let conv = rules.conversion();
     let odb = repo.odb();
-    let git_dir = repo.git_dir();
-    let up_to_date = try_par_map(&candidates, options, 0, |&i| {
-        let path = &index.entries[plan_positions[i]].path;
-        let existing = &index.entries[plan_positions[i]];
-        crate::diff::path_checkout_skip_blob_write_when_up_to_date_with_config(
+    let mode_policy = crate::index::WorktreeModePolicy::from_config(config.as_ref());
+    let jobs: Vec<usize> = (0..candidates.len()).collect();
+    let attrs: Vec<_> = candidates
+        .iter()
+        .map(|&action_i| {
+            let path = &index.entries[plan_positions[action_i]].path;
+            rules.file_attrs(&crate::repo_relpath::storage_string(path), false)
+        })
+        .collect();
+    let up_to_date = try_par_map(&jobs, options, 0, |&j| {
+        let action_i = candidates[j];
+        let pos = plan_positions[action_i];
+        let existing = &index.entries[pos];
+        let rel = crate::repo_relpath::storage_string(&existing.path);
+        let abs = crate::index::worktree_path_from_index_rel(work_tree, &existing.path);
+        let meta = match fs::symlink_metadata(&abs) {
+            Ok(m) => m,
+            Err(_) => return Ok(false),
+        };
+        if !meta.is_file()
+            || !mode_policy
+                .worktree_mode_matches(crate::diff::mode_from_metadata(&meta), existing.mode)
+        {
+            return Ok(false);
+        }
+        crate::diff::hash_worktree_file(
             odb,
-            git_dir,
-            work_tree,
-            index,
-            existing,
-            &existing.oid,
-            existing.mode,
-            &crate::repo_relpath::storage_string(path),
+            &abs,
+            &meta,
+            conv,
+            &attrs[j],
+            &rel,
+            Some(existing),
             Some(filter_process),
-            Some(config.as_ref()),
         )
+        .map(|oid| oid == existing.oid)
     })
     .map_err(|ParallelHashError::Task(e)| e)?;
     for (i, keep) in candidates.into_iter().zip(up_to_date) {
