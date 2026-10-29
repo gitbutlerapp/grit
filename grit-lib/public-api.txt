@@ -5167,9 +5167,10 @@ pub grit_lib::diff::ListedFileDiff::stat: core::option::Option<grit_lib::diff::L
 pub grit_lib::diff::ListedFileDiff::status: grit_lib::diff::DiffStatus
 pub grit_lib::diff::ListedFileDiff::structured: core::option::Option<grit_lib::diff::structured::StructuredFileDiff>
 impl grit_lib::diff::ListedFileDiff
-pub fn grit_lib::diff::ListedFileDiff::from_metadata(grit_lib::diff::DiffEntry) -> Self
-impl grit_lib::diff::ListedFileDiff
+pub fn grit_lib::diff::ListedFileDiff::changes_all_ignored(&self, grit_lib::diff::WhitespaceMode) -> bool
 pub fn grit_lib::diff::ListedFileDiff::line_stat(&self) -> grit_lib::diff::LineStat
+impl grit_lib::diff::ListedFileDiff
+pub fn grit_lib::diff::ListedFileDiff::from_metadata(grit_lib::diff::DiffEntry) -> Self
 impl core::clone::Clone for grit_lib::diff::ListedFileDiff
 pub fn grit_lib::diff::ListedFileDiff::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::diff::ListedFileDiff
@@ -25745,6 +25746,7 @@ pub fn grit_lib::repo_handles::RepositoryStash<'repo>::branch(&self, &str, usize
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::clear(&self) -> grit_lib::error::Result<usize>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::create(&self, &grit_lib::stash::StashPushOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::diff(&self, usize, &grit_lib::stash::StashDiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::diff_stat(&self, usize, &grit_lib::stash::StashDiffOptions, grit_lib::diff::DiffOptions) -> grit_lib::error::Result<grit_lib::diff::DiffStat>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::drop(&self, usize) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::list(&self) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::StashEntry>>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::pop(&self, usize, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>

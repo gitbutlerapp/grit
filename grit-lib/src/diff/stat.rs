@@ -10,7 +10,7 @@ use std::ops::{Add, AddAssign};
 
 use super::detail::{DiffTotals, FileDiff, LineStat};
 use super::structured::{StructuredFileDiff, StructuredHunk, StructuredLineKind};
-use super::DiffStatus;
+use super::{DiffStatus, WhitespaceMode};
 use crate::combined_diff_patch::CombinedStructuredTextDiff;
 
 impl LineStat {
@@ -170,6 +170,26 @@ impl FileDiff {
             .as_ref()
             .map(CombinedStructuredTextDiff::line_stat)
             .unwrap_or_default()
+    }
+
+    /// Whether `whitespace` hid every change in this file.
+    ///
+    /// Git leaves such files out of `--stat` and `--numstat` under `-w`, `-b`,
+    /// `--ignore-space-at-eol` and `--ignore-blank-lines`. Only a text
+    /// modification with unchanged modes and no remaining changed lines
+    /// qualifies: additions, deletions, renames, mode changes and binary files
+    /// always stay listed.
+    ///
+    /// # Parameters
+    ///
+    /// - `whitespace`: the rules the file was diffed with.
+    #[must_use]
+    pub fn changes_all_ignored(&self, whitespace: WhitespaceMode) -> bool {
+        whitespace.is_active()
+            && self.status == DiffStatus::Modified
+            && !self.binary
+            && self.old_mode == self.new_mode
+            && self.line_stat().changes() == 0
     }
 }
 
@@ -446,6 +466,30 @@ mod tests {
         );
         assert_eq!(listed(None, Some(structured)).line_stat(), lines(1, 0));
         assert_eq!(listed(None, None).line_stat(), LineStat::default());
+    }
+
+    #[test]
+    fn changes_all_ignored_only_for_text_modifications_with_no_lines_left() {
+        let ws = WhitespaceMode::ignore_space_change();
+        let empty = listed(Some(LineStat::default()), None);
+        assert!(empty.changes_all_ignored(ws));
+        assert!(!empty.changes_all_ignored(WhitespaceMode::default()));
+        assert!(!listed(Some(lines(1, 1)), None).changes_all_ignored(ws));
+
+        let mut mode_change = empty.clone();
+        mode_change.old_mode = Some("100644".to_owned());
+        mode_change.new_mode = Some("100755".to_owned());
+        assert!(!mode_change.changes_all_ignored(ws));
+
+        let mut binary = empty.clone();
+        binary.binary = true;
+        assert!(!binary.changes_all_ignored(ws));
+
+        for status in [DiffStatus::Added, DiffStatus::Deleted, DiffStatus::Renamed] {
+            let mut other = empty.clone();
+            other.status = status;
+            assert!(!other.changes_all_ignored(ws), "{status:?}");
+        }
     }
 
     #[test]

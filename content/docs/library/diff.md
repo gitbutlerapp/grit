@@ -61,6 +61,8 @@ let totals = stat.totals();
 println!("{} files, +{} -{}", totals.files_changed, totals.insertions, totals.deletions);
 ```
 
+Under any whitespace rule (`-w`, `-b`, `--ignore-space-at-eol`, `--ignore-blank-lines`), Git leaves out of `--stat` any modified text file whose changes were all ignored. [`FileDiff::changes_all_ignored`](rustdoc:grit_lib::diff::ListedFileDiff::changes_all_ignored) tells you which rows those are. Additions, deletions, renames, mode changes and binary files stay listed. For a stash, [`RepositoryStash::diff_stat`](rustdoc:grit_lib::repo_handles::RepositoryStash::diff_stat) returns the finished `DiffStat` of `stash@{n}` against its base (`git stash show --stat`). It counts lines without building hunks and applies that whitespace rule.
+
 ## Porcelain models
 
 - **Status** — combines index vs HEAD and index vs worktree scans into structured sections (the CLI maps them to default / `--json` / `--markdown` output).

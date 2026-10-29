@@ -18,8 +18,9 @@ use std::io;
 use std::path::Path;
 
 use crate::diff::{
-    diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, zero_oid, DiffEntry,
-    DiffIndexToWorktreeOptions, DiffStatus,
+    build_file_diffs, diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees,
+    sort_entries_by_path, zero_oid, DiffDetail, DiffEntry, DiffIndexToWorktreeOptions, DiffOptions,
+    DiffStat, DiffStatus, FileStat,
 };
 use crate::error::{ApplyError, Error, Result};
 use crate::index::{
@@ -1853,7 +1854,33 @@ pub(crate) fn stash_diff(
     if options.include_untracked {
         append_stash_untracked_show_entries(repo, &head_tree, &stash_commit, &mut diffs)?;
     }
+    sort_entries_by_path(&mut diffs);
     Ok(diffs)
+}
+
+pub(crate) fn stash_diff_stat(
+    repo: &Repository,
+    n: usize,
+    options: &StashDiffOptions,
+    diff_options: DiffOptions,
+) -> Result<DiffStat> {
+    let entries = stash_diff(repo, n, options)?;
+    let config = repo.config()?;
+    let whitespace = diff_options.whitespace;
+    let output = build_file_diffs(
+        repo.odb(),
+        entries,
+        DiffDetail::Stat,
+        diff_options,
+        &config,
+        &repo.thread_policy(),
+    )?;
+    Ok(output
+        .files
+        .iter()
+        .filter(|file| !file.changes_all_ignored(whitespace))
+        .map(FileStat::from)
+        .collect())
 }
 
 fn append_stash_untracked_show_entries(
