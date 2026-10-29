@@ -278,6 +278,7 @@ pub(crate) fn link_packs_within(
     dest_has: &dyn Fn(&ObjectId) -> bool,
     progress: &mut dyn crate::progress::ProgressSink,
     cancel: &dyn crate::progress::Cancel,
+    mut on_index_scan: Option<&mut dyn FnMut(u64)>,
 ) -> Result<usize> {
     let source_pack = source_objects.join("pack");
     if send.is_empty() || !source_pack.is_dir() {
@@ -302,19 +303,44 @@ pub(crate) fn link_packs_within(
         }
         let index = pack::read_pack_index_no_verify(&entry.path())?;
         let mut already_present_budget = (index.len() * LINK_ALREADY_PRESENT_PERCENT / 100).max(1);
-        let within = !index.is_empty()
-            && (0..index.len()).all(|i| {
-                ObjectId::from_bytes(index.oid_at(i)).is_ok_and(|oid| {
-                    if send.contains(&oid) {
-                        return true;
+        let mut within = !index.is_empty();
+        if within {
+            let mut scan_last = 0u64;
+            let stride = crate::progress::OBJECT_PROGRESS_STRIDE;
+            for i in 0..index.len() {
+                if i.is_multiple_of(64) {
+                    crate::progress::poll_cancel(progress, cancel)?;
+                }
+                let Ok(oid) = ObjectId::from_bytes(index.oid_at(i)) else {
+                    within = false;
+                    break;
+                };
+                let scanned = (i + 1) as u64;
+                if let Some(on_scan) = on_index_scan.as_deref_mut() {
+                    while scanned.saturating_sub(scan_last) >= stride {
+                        scan_last += stride;
+                        on_scan(stride);
                     }
-                    if already_present_budget == 0 || !dest_has(&oid) {
-                        return false;
+                }
+                if send.contains(&oid) {
+                    continue;
+                }
+                if already_present_budget == 0 || !dest_has(&oid) {
+                    within = false;
+                    break;
+                }
+                already_present_budget -= 1;
+            }
+            if within {
+                if let Some(on_scan) = on_index_scan.as_deref_mut() {
+                    let scanned = index.len() as u64;
+                    let rem = scanned.saturating_sub(scan_last);
+                    if rem > 0 {
+                        on_scan(rem);
                     }
-                    already_present_budget -= 1;
-                    true
-                })
-            });
+                }
+            }
+        }
         if !within {
             continue;
         }

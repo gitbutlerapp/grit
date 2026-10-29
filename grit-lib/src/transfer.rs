@@ -738,7 +738,7 @@ fn transfer_stats_for_local_operation(
     } else {
         installed_count
     };
-    let kinds = if objects == installed_count {
+    let kinds = if objects == installed_count && installed_count <= LOCAL_LINK_KINDS_OID_PROBE_MAX {
         Some(object_kind_counts_for_oids(local_odb, installed)?)
     } else {
         None
@@ -989,8 +989,22 @@ fn ingest_pack_options_for_fetch(
 struct LocalCopyProgress {
     total: u64,
     done: u64,
+    /// Objects examined while deciding which packs qualify (before any are linked).
+    pipeline: u64,
     last_reported: u64,
     phase_active: bool,
+}
+
+/// Forwards loose-object link [`ProgressSink::inc`] into [`LocalCopyProgress::add`].
+struct CopyingLooseLink<'a> {
+    copy: &'a mut LocalCopyProgress,
+    progress: &'a mut dyn Progress,
+}
+
+impl ProgressSink for CopyingLooseLink<'_> {
+    fn inc(&mut self, n: u64) {
+        self.copy.add(self.progress, n);
+    }
 }
 
 impl LocalCopyProgress {
@@ -998,6 +1012,7 @@ impl LocalCopyProgress {
         Self {
             total,
             done: 0,
+            pipeline: 0,
             last_reported: 0,
             phase_active: false,
         }
@@ -1010,21 +1025,47 @@ impl LocalCopyProgress {
         }
     }
 
+    fn report_scan(&mut self, progress: &mut dyn Progress, n: u64) {
+        if n == 0 {
+            return;
+        }
+        self.pipeline = self.pipeline.saturating_add(n).min(self.total);
+        let through = self.pipeline.max(self.done);
+        self.report_through(progress, through);
+        if progress.wants_received_objects() {
+            progress.received_objects(ReceivedObjects {
+                received: through,
+                total: self.total,
+                deltas: 0,
+            });
+        }
+    }
+
+    fn report_through(&mut self, progress: &mut dyn Progress, through: u64) {
+        let through = through.min(self.total);
+        if through <= self.last_reported {
+            return;
+        }
+        self.ensure_started(progress);
+        crate::progress::report_object_progress_stride(
+            progress,
+            through,
+            &mut self.last_reported,
+            Some(self.total),
+        );
+    }
+
     fn add(&mut self, progress: &mut dyn Progress, n: u64) {
         if n == 0 {
             return;
         }
         self.ensure_started(progress);
-        self.done += n;
-        crate::progress::report_object_progress_stride(
-            progress,
-            self.done,
-            &mut self.last_reported,
-            Some(self.total),
-        );
+        self.done = self.done.saturating_add(n).min(self.total);
+        let through = self.done.max(self.pipeline);
+        self.report_through(progress, through);
         if progress.wants_received_objects() {
             progress.received_objects(ReceivedObjects {
-                received: self.done,
+                received: through,
                 total: self.total,
                 deltas: 0,
             });
@@ -1035,9 +1076,10 @@ impl LocalCopyProgress {
         if !self.phase_active {
             return;
         }
-        if self.last_reported < self.done {
-            progress.set(self.done);
-            self.last_reported = self.done;
+        let final_count = self.done.max(self.pipeline).min(self.total);
+        if self.last_reported < final_count {
+            progress.set(final_count);
+            self.last_reported = final_count;
         }
         progress.finish();
         self.phase_active = false;
@@ -1063,6 +1105,7 @@ fn copy_objects_for_local_fetch(
     fetch_opts: &FetchOptions,
     progress: &mut dyn Progress,
     cancel: &dyn crate::progress::Cancel,
+    prep_enumerating: bool,
 ) -> Result<(HashSet<ObjectId>, TransferStats)> {
     use crate::local_object_copy::{
         count_store_objects_for_link, link_loose_objects, link_loose_objects_for_oids,
@@ -1146,7 +1189,9 @@ fn copy_objects_for_local_fetch(
 
     let stop = crate::progress::CancelSignal::new(cancel);
     let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
-    progress.start(ProgressPhase::EnumeratingObjects, None);
+    if !prep_enumerating {
+        progress.start(ProgressPhase::EnumeratingObjects, None);
+    }
     let mut enum_last = 0u64;
     let send_set = collect_reachable_excluding_peer(
         remote_odb,
@@ -1167,6 +1212,7 @@ fn copy_objects_for_local_fetch(
 
     if local_odb.uses_files_primary() && !pack_build.thin && try_pack_link {
         let local_has = |oid: &ObjectId| local_odb.exists_materialized_local_without_rescan(oid);
+        let mut on_pack_scan = |n: u64| copy.report_scan(progress, n);
         let linked = link_packs_within(
             remote_objects,
             local_objects,
@@ -1174,6 +1220,7 @@ fn copy_objects_for_local_fetch(
             &local_has,
             &mut crate::progress::NullProgress,
             cancel,
+            Some(&mut on_pack_scan),
         )?;
         if linked > 0 {
             refresh_local_odb_after_link(local_odb);
@@ -1200,11 +1247,15 @@ fn copy_objects_for_local_fetch(
     // times the object size; linking matches system `git clone` on the same filesystem.
     let loose_candidates: HashSet<ObjectId> = still_missing.iter().copied().collect();
     if local_odb.uses_files_primary() {
+        let mut loose_link = CopyingLooseLink {
+            copy: &mut copy,
+            progress,
+        };
         let linked_loose = link_loose_objects_for_oids(
             remote_objects,
             local_objects,
             &still_missing,
-            &mut crate::progress::NullProgress,
+            &mut loose_link,
             cancel,
         )?;
         if linked_loose > 0 {
@@ -1325,6 +1376,7 @@ fn copy_objects_for_local_push(
             &dest_has,
             &mut progress,
             cancel,
+            None,
         )? > 0
     {
         refresh_local_odb_after_link(dest_odb);
@@ -1870,6 +1922,12 @@ pub(crate) fn fetch_local_into(
     let local_shallow = crate::shallow::load_shallow_boundaries(local_git_dir);
     let remote_shallow = crate::shallow::load_shallow_boundaries(remote_git_dir);
 
+    let mut prep_enumerating = false;
+    if !opts.dry_run {
+        progress.start(ProgressPhase::EnumeratingObjects, None);
+        prep_enumerating = true;
+    }
+
     // Explicitly requested tags participate in depth calculation; automatically
     // followed tags must only use the history selected by those fetch roots.
     if opts.tags == TagMode::All {
@@ -2002,6 +2060,10 @@ pub(crate) fn fetch_local_into(
     };
     let mut pack_oids: HashSet<ObjectId> = HashSet::new();
     let mut transfer = TransferStats::default();
+    if wants.is_empty() && prep_enumerating {
+        progress.finish();
+        prep_enumerating = false;
+    }
     if !wants.is_empty() && !opts.dry_run {
         // Resolve exclusion tips only once the final shallow/deepen wants need a copy.
         let mut haves: Vec<ObjectId> = Vec::new();
@@ -2031,6 +2093,7 @@ pub(crate) fn fetch_local_into(
             opts,
             progress,
             cancel,
+            prep_enumerating,
         )?;
         pack_oids = oids;
         transfer = fetch_transfer;
@@ -4197,6 +4260,68 @@ mod tests {
             );
         }
         (odb, parent.expect("tip"))
+    }
+
+    #[test]
+    fn fetch_local_hardlinked_pack_reports_scan_progress() {
+        let remote = tempfile::tempdir().expect("remote");
+        assert!(git_ok(
+            remote.path(),
+            &["init", "-q", "-b", "main", "--bare"]
+        ));
+        let src = tempfile::tempdir().expect("src");
+        assert!(git_ok(src.path(), &["init", "-q", "-b", "main"]));
+        for i in 0..280 {
+            std::fs::write(src.path().join("f.txt"), format!("payload {i}\n")).unwrap();
+            assert!(git_ok(src.path(), &["add", "f.txt"]));
+            assert!(git_ok(src.path(), &["commit", "-qm", &format!("c{i}")],));
+        }
+        assert!(git_ok(
+            src.path(),
+            &["push", "-q", remote.path().to_str().unwrap(), "main:main"],
+        ));
+        assert!(git_ok(remote.path(), &["repack", "-a", "-d", "-f"],));
+
+        let local = tempfile::tempdir().expect("local");
+        init_repository(local.path(), false, "main", None, RefStorageFormat::Files).expect("init");
+
+        let opts = FetchOptions {
+            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+            initial_remote_fetch: true,
+            tags: TagMode::None,
+            ..Default::default()
+        };
+        let mut rec = PhaseRecorder {
+            want_received: true,
+            ..Default::default()
+        };
+        let outcome = fetch_local_with_progress(
+            &local.path().join(".git"),
+            remote.path(),
+            &opts,
+            &mut rec,
+            &crate::progress::NeverCancel,
+        )
+        .expect("fetch_local");
+        assert!(
+            outcome.transfer.objects > 500,
+            "expected a large hardlinked pack transfer"
+        );
+        assert_eq!(
+            rec.started
+                .iter()
+                .filter(|(p, _)| *p == ProgressPhase::CopyingObjects)
+                .count(),
+            1,
+            "expected a single CopyingObjects phase, got {:?}",
+            rec.started
+        );
+        assert!(
+            rec.copying_counts.len() >= 3,
+            "expected scan progress while checking pack indexes, got {:?}",
+            rec.copying_counts
+        );
+        assert_monotonic(&rec.copying_counts);
     }
 
     #[test]
