@@ -4918,6 +4918,19 @@ fn poll_diff_cancel_watch(
     Ok(())
 }
 
+#[inline]
+fn poll_diff_cancel(
+    options: &DiffIndexToWorktreeOptions,
+    owner_poll: Option<&std::sync::Arc<crate::progress::StackCancelPoll>>,
+) -> crate::error::Result<()> {
+    if let Some(poll) = owner_poll {
+        poll.poll_owner()?;
+    } else {
+        poll_diff_cancel_watch(options.cancel_watch.as_ref())?;
+    }
+    Ok(())
+}
+
 struct StagingHashJob {
     entry_index: usize,
     rel_path: String,
@@ -5272,7 +5285,25 @@ pub fn diff_index_to_worktree_with_options(
         .repository_git_dir
         .clone()
         .unwrap_or(default_git_dir);
-    diff_index_to_worktree_inner(odb, index, work_tree, &git_dir, options, false)
+    diff_index_to_worktree_inner(odb, index, work_tree, &git_dir, options, false, None)
+        .map(|(entries, changed, _)| (entries, changed))
+}
+
+/// Like [`diff_index_to_worktree_with_options`], with an owner-thread progress poll hook for
+/// long stat scans (used by [`crate::porcelain::status::status`]).
+pub(crate) fn diff_index_to_worktree_with_owner_poll(
+    odb: &Odb,
+    index: &mut Index,
+    work_tree: &Path,
+    options: DiffIndexToWorktreeOptions,
+    owner_poll: Option<std::sync::Arc<crate::progress::StackCancelPoll>>,
+) -> Result<(Vec<DiffEntry>, bool)> {
+    let default_git_dir = work_tree.join(".git");
+    let git_dir = options
+        .repository_git_dir
+        .clone()
+        .unwrap_or(default_git_dir);
+    diff_index_to_worktree_inner(odb, index, work_tree, &git_dir, options, false, owner_poll)
         .map(|(entries, changed, _)| (entries, changed))
 }
 
@@ -5292,7 +5323,15 @@ pub fn diff_index_to_worktree_for_staging(
     bool,
     std::collections::BTreeMap<String, crate::index::IndexStatFields>,
 )> {
-    diff_index_to_worktree_inner(odb, index, work_tree, repository_git_dir, options, true)
+    diff_index_to_worktree_inner(
+        odb,
+        index,
+        work_tree,
+        repository_git_dir,
+        options,
+        true,
+        None,
+    )
 }
 
 /// First pass of [`diff_index_to_worktree_inner`]: gitlinks and intent-to-add paths only.
@@ -5494,6 +5533,7 @@ fn diff_index_to_worktree_inner(
     repository_git_dir: &Path,
     options: DiffIndexToWorktreeOptions,
     materialize_dirty_blobs: bool,
+    owner_poll: Option<std::sync::Arc<crate::progress::StackCancelPoll>>,
 ) -> Result<(
     Vec<DiffEntry>,
     bool,
@@ -5504,8 +5544,7 @@ fn diff_index_to_worktree_inner(
     use std::collections::BTreeMap;
 
     let mut staging_stat_cache = BTreeMap::new();
-    let cancel_watch = options.cancel_watch.as_ref();
-    poll_diff_cancel_watch(cancel_watch)?;
+    poll_diff_cancel(&options, owner_poll.as_ref())?;
     let index_mtime = index_mtime_for_diff(index, options.index_mtime);
 
     let ignore_submodule_untracked = options.ignore_submodule_untracked;
@@ -5601,7 +5640,7 @@ fn diff_index_to_worktree_inner(
     let error_on_broken_gitlinks = options.error_on_broken_gitlinks;
     if options.restrict_to_paths.is_none() {
         for ie in &index.entries {
-            poll_diff_cancel_watch(cancel_watch)?;
+            poll_diff_cancel(&options, owner_poll.as_ref())?;
             if ie.stage() != 0 {
                 let path = String::from_utf8_lossy(&ie.path).to_string();
                 let rank = match ie.stage() {
@@ -5647,7 +5686,7 @@ fn diff_index_to_worktree_inner(
         }
     } else {
         for ie in &index.entries {
-            poll_diff_cancel_watch(cancel_watch)?;
+            poll_diff_cancel(&options, owner_poll.as_ref())?;
             if ie.stage() != 0 {
                 continue;
             }
@@ -5749,6 +5788,8 @@ fn diff_index_to_worktree_inner(
             }
         },
         sparse,
+        options.cancel_watch.clone(),
+        owner_poll.clone(),
     )?;
     // Size-changed entries ask whether their clean conversion is the identity in both the stat
     // refresh and the visit below; resolve each one's attributes once.
@@ -5793,13 +5834,14 @@ fn diff_index_to_worktree_inner(
                 filter_process: filter_fp,
             },
             par_opts,
-        )
+            options.cancel_watch.as_ref(),
+        )?
     } else {
         RefreshChecks::default()
     };
-    poll_diff_cancel_watch(cancel_watch)?;
+    poll_diff_cancel(&options, owner_poll.as_ref())?;
     visit_blob_lookup_batches(blob_stat_batches, |entry_index, lookup| {
-        poll_diff_cancel_watch(cancel_watch)?;
+        poll_diff_cancel(&options, owner_poll.as_ref())?;
         if icase_collisions
             .as_ref()
             .is_some_and(|map| map.is_auto_stage_loser(&index.entries[entry_index].path))
@@ -6957,7 +6999,8 @@ pub fn refresh_index_stat_content_verified_with_rules(
             filter_process: filter_fp,
         },
         par_opts,
-    );
+        None,
+    )?;
     visit_blob_lookup_batches(refresh_batches, |entry_index, lookup| {
         let BlobDiskLookup::Present(stat) = lookup else {
             return Ok(());
@@ -7102,7 +7145,9 @@ fn refresh_content_checks(
     include: &dyn Fn(usize, &IndexEntry, &crate::worktree_scan::BlobDiskStat) -> bool,
     ctx: &WorktreeHashContext<'_>,
     par_opts: crate::parallel::ParallelOptions,
-) -> RefreshChecks {
+    cancel_watch: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<RefreshChecks> {
+    use crate::progress::{poll_watch, CANCEL_POLL_STRIDE};
     use crate::worktree_scan::BlobDiskLookup;
 
     /// Attributes are resolved on the calling thread: the shared rules are not `Sync`.
@@ -7114,7 +7159,14 @@ fn refresh_content_checks(
 
     let mut jobs = Vec::new();
     let mut total_bytes = 0usize;
+    let mut cancel_stride = 0usize;
     for (entry_index, lookup) in batches.iter().flatten() {
+        cancel_stride = cancel_stride.wrapping_add(1);
+        if cancel_stride.is_multiple_of(CANCEL_POLL_STRIDE) {
+            if let Some(w) = cancel_watch {
+                poll_watch(w)?;
+            }
+        }
         let BlobDiskLookup::Present(stat) = lookup else {
             continue;
         };
@@ -7132,67 +7184,56 @@ fn refresh_content_checks(
         });
     }
     if jobs.is_empty() {
-        return RefreshChecks::default();
+        return Ok(RefreshChecks::default());
     }
     let mut checks = vec![None; index.entries.len()];
     let (work_tree, precompose_unicode, ignorecase) =
         (ctx.work_tree, ctx.precompose_unicode, ctx.ignorecase);
     let (conv, filter_process) = (ctx.conv, ctx.filter_process);
     let entries = index.entries.as_slice();
+    let watch_for_hash = cancel_watch.cloned();
+    let hash_one = |job: &ContentCheck| -> Result<RefreshContent> {
+        if job.entry_index.is_multiple_of(CANCEL_POLL_STRIDE) {
+            if let Some(w) = watch_for_hash.as_ref() {
+                poll_watch(w)?;
+            }
+        }
+        let ie = &entries[job.entry_index];
+        let file_path =
+            index_entry_worktree_abs_bytes(work_tree, &ie.path, precompose_unicode, ignorecase);
+        Ok(RefreshContent::from(hash_worktree_file_with_mode(
+            odb,
+            &file_path,
+            job.worktree_mode,
+            conv,
+            &job.file_attrs,
+            &crate::repo_relpath::storage_string(&ie.path),
+            Some(ie),
+            filter_process,
+        )))
+    };
     let matches = if par_opts.threads.get() > 1 && jobs.len() > 1 {
-        crate::parallel::try_par_map_force::<_, _, std::convert::Infallible, _>(
-            &jobs,
-            par_opts,
-            |job| {
-                let ie = &entries[job.entry_index];
-                let file_path = index_entry_worktree_abs_bytes(
-                    work_tree,
-                    &ie.path,
-                    precompose_unicode,
-                    ignorecase,
-                );
-                Ok(RefreshContent::from(hash_worktree_file_with_mode(
-                    odb,
-                    &file_path,
-                    job.worktree_mode,
-                    conv,
-                    &job.file_attrs,
-                    &crate::repo_relpath::storage_string(&ie.path),
-                    Some(ie),
-                    filter_process,
-                )))
-            },
-        )
-        .unwrap_or_else(|e| match e {
-            crate::parallel::ParallelHashError::Task(infallible) => match infallible {},
-        })
+        crate::parallel::try_par_map_force(&jobs, par_opts, hash_one).map_err(|e| match e {
+            crate::parallel::ParallelHashError::Task(err) => err,
+        })?
     } else {
-        jobs.iter()
-            .map(|job| {
-                let ie = &entries[job.entry_index];
-                let file_path = index_entry_worktree_abs_bytes(
-                    work_tree,
-                    &ie.path,
-                    precompose_unicode,
-                    ignorecase,
-                );
-                RefreshContent::from(hash_worktree_file_with_mode(
-                    odb,
-                    &file_path,
-                    job.worktree_mode,
-                    conv,
-                    &job.file_attrs,
-                    &crate::repo_relpath::storage_string(&ie.path),
-                    Some(ie),
-                    filter_process,
-                ))
-            })
-            .collect()
+        let mut out = Vec::with_capacity(jobs.len());
+        let mut serial_stride = 0usize;
+        for job in &jobs {
+            serial_stride = serial_stride.wrapping_add(1);
+            if serial_stride.is_multiple_of(CANCEL_POLL_STRIDE) {
+                if let Some(w) = cancel_watch {
+                    poll_watch(w)?;
+                }
+            }
+            out.push(hash_one(job)?);
+        }
+        out
     };
     for (job, content) in jobs.iter().zip(matches) {
         checks[job.entry_index] = Some(content);
     }
-    RefreshChecks(checks)
+    Ok(RefreshChecks(checks))
 }
 
 /// Results of [`refresh_content_checks`], by index entry position.
@@ -8020,6 +8061,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                     repository_git_dir,
                     options,
                     false,
+                    None,
                 )?;
                 return Ok(entries);
             }

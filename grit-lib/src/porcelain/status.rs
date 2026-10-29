@@ -2326,8 +2326,12 @@ pub fn status(
             && i64::from(e.mtime_sec) < now_unix_seconds
     });
     crate::progress::poll_cancel_watch(&mut progress, cancel, &watch)?;
+    let cancel_poll = std::sync::Arc::new(crate::progress::StackCancelPoll::new(
+        &mut progress,
+        std::sync::Arc::clone(&watch),
+    ));
     let (unstaged_raw, index_stat_refresh_changed) =
-        crate::diff::diff_index_to_worktree_with_options(
+        crate::diff::diff_index_to_worktree_with_owner_poll(
             repo.odb(),
             &mut index,
             work_tree,
@@ -2346,6 +2350,7 @@ pub fn status(
                 cancel_watch: Some(std::sync::Arc::clone(&watch)),
                 ..Default::default()
             },
+            Some(cancel_poll),
         )?;
     let mut persist_index = index_stat_refresh_changed || rewrite_clears_racy_entries;
     let mut unstaged: Vec<DiffEntry> = unstaged_raw

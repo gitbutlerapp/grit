@@ -205,6 +205,9 @@ impl Cancel for NeverCancel {
 /// How often long object walks and pack builds report [`ProgressSink::set`].
 pub(crate) const OBJECT_PROGRESS_STRIDE: u64 = 256;
 
+/// How often worktree blob stat scans and similar loops poll [`poll_watch`].
+pub(crate) const CANCEL_POLL_STRIDE: usize = 256;
+
 /// Report monotonic object progress at [`OBJECT_PROGRESS_STRIDE`] boundaries.
 ///
 /// `done` is the absolute number of objects processed so far; `last_reported` is
@@ -280,6 +283,59 @@ pub fn poll_watch(watch: &std::sync::atomic::AtomicBool) -> crate::error::Result
         Err(crate::error::Error::Cancelled)
     } else {
         Ok(())
+    }
+}
+
+/// Poll hook for long [`crate::diff::diff_index_to_worktree_with_options`] scans on the stack
+/// frame that owns `progress`.
+///
+/// [`Self::poll_owner`] must run only on the thread that owns the captured `WatchProgress`.
+pub(crate) struct StackCancelPoll {
+    progress: usize,
+    watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl StackCancelPoll {
+    /// Capture `progress` and `watch` for [`Self::poll_owner`].
+    #[must_use]
+    pub(crate) fn new(
+        progress: &mut WatchProgress<'_>,
+        watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        Self {
+            progress: std::ptr::from_mut(progress).addr(),
+            watch,
+        }
+    }
+
+    /// Mirror [`ProgressSink::should_cancel`] into `watch`, then [`poll_watch`].
+    pub(crate) fn poll_owner(&self) -> crate::error::Result<()> {
+        // SAFETY: only invoked on the owning thread while the captured `WatchProgress` is live.
+        let progress = unsafe { &mut *(self.progress as *mut WatchProgress<'_>) };
+        if progress.should_cancel() {
+            self.watch.store(true, std::sync::atomic::Ordering::Relaxed);
+            return Err(crate::error::Error::Cancelled);
+        }
+        poll_watch(&self.watch)
+    }
+}
+
+/// Cancellation inputs for worktree stat scans: worker-visible `watch` plus an owner-thread poll hook.
+pub(crate) struct StatScanCancel {
+    pub watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub owner_poll: Option<std::sync::Arc<StackCancelPoll>>,
+}
+
+impl StatScanCancel {
+    /// Poll owner progress (when present), otherwise the shared watch flag.
+    pub(crate) fn poll(&self) -> crate::error::Result<()> {
+        if let Some(poll) = self.owner_poll.as_ref() {
+            poll.poll_owner()
+        } else if let Some(w) = self.watch.as_ref() {
+            poll_watch(w)
+        } else {
+            Ok(())
+        }
     }
 }
 
