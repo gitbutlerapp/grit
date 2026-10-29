@@ -47,3 +47,7 @@ The program resolves `ours` and `theirs` refs, stores the merge with `write_merg
 <!-- include: grit-examples/src/bin/guide_merge.rs -->
 
 The integration test builds non-conflicting `ours` / `theirs` branches, asserts the merged tree matches Git’s oracle, and runs `git fsck --strict` on the resulting merge commit.
+
+## Integrating a branch (`integrate_branch`)
+
+[`integrate_branch`](rustdoc:grit_lib::porcelain::merge::integrate_branch) merges one commit into a local branch and updates the index and work tree (or records merge-in-progress state on conflicts). Pass `into_ref` as either a full ref (for example `refs/heads/main`) or a short branch name (for example `main` or `feature/topic`); short names map to `refs/heads/{name}` and missing branches return [`Error::BranchNotFound`](rustdoc:grit_lib::error::Error::BranchNotFound). The `label` argument names the other side in the default merge message (`Merge {label}` unless [`MergeOptions::message`](rustdoc:grit_lib::porcelain::merge::MergeOptions::message) overrides it) and in branch reflog lines (`merge {label}`, or `merge {label}: fast-forward` on fast-forward).
