@@ -3488,7 +3488,8 @@ fn resolve_specs_with_options(
     Ok(out)
 }
 
-/// Resolve revision tokens for [`open_commit_stream`] / [`RevWalk::commits_iter`].
+/// Resolve revision tokens for [`open_commit_stream`] /
+/// [`RevWalk::commits_iter`](crate::revwalk::handle::RevWalk::commits_iter).
 pub fn resolve_specs_for_commit_stream(
     repo: &Repository,
     specs: &[String],
