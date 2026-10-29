@@ -4347,6 +4347,156 @@ pub(crate) fn apply_hard_reset_index_plan(index: &mut Index, plan: HardResetInde
     index.sort();
 }
 
+/// Rebuild the cache-tree extension after hard-reset index alignment, reusing valid seed
+/// subtrees from the lockstep tree/index walk.
+pub(crate) fn rebuild_hard_reset_cache_tree(
+    odb: &Odb,
+    index: &mut Index,
+    target_tree: &ObjectId,
+) -> Result<()> {
+    let stage0_count = index
+        .entries
+        .iter()
+        .filter(|entry| entry.stage() == 0 && !entry.intent_to_add())
+        .count();
+    let seed_root = index.cache_tree.as_ref();
+    let mut idx_cursor = 0usize;
+    let root = rebuild_hard_reset_cache_tree_at(
+        odb,
+        index,
+        &mut idx_cursor,
+        target_tree,
+        seed_root,
+        b"",
+        Vec::new(),
+    )?;
+    if usize::try_from(root.entry_count).ok() == Some(stage0_count) {
+        index.set_cache_tree(root);
+        Ok(())
+    } else {
+        Err(Error::IndexError(
+            "hard reset cache-tree entry count does not match index".into(),
+        ))
+    }
+}
+
+fn rebuild_hard_reset_cache_tree_at(
+    odb: &Odb,
+    index: &Index,
+    idx_cursor: &mut usize,
+    tree_oid: &ObjectId,
+    seed_node: Option<&CacheTreeNode>,
+    dir_prefix: &[u8],
+    name: Vec<u8>,
+) -> Result<CacheTreeNode> {
+    if !dir_prefix.is_empty() {
+        let mut path = dir_prefix.to_vec();
+        path.push(b'/');
+        if let Some(entry) = index.entries.get(*idx_cursor).filter(|entry| {
+            entry.path == path && entry.is_sparse_directory_placeholder() && entry.oid == *tree_oid
+        }) {
+            let _ = entry;
+            *idx_cursor += 1;
+            return Ok(CacheTreeNode::valid(name, 1, *tree_oid, Vec::new()));
+        }
+    }
+    let tree_entries = read_tree(odb, tree_oid)?;
+    let cache_children = CacheChildren::new(seed_node);
+    let mut entry_count: i32 = 0;
+    let mut children: Vec<CacheTreeNode> = Vec::new();
+    let mut ti = 0usize;
+
+    loop {
+        let te = tree_entries.get(ti);
+        let ie_kind = peek_index_level_entry(index, idx_cursor, dir_prefix, false);
+        match (te, ie_kind) {
+            (Some(t_entry), Some(ie)) => {
+                let t_name = &t_entry.name;
+                let (i_name, i_is_tree) = match &ie {
+                    IndexLevelKind::Blob { name, .. } => (*name, false),
+                    IndexLevelKind::Tree { name } => (*name, true),
+                };
+                let t_is_tree = is_tree_mode(t_entry.mode);
+                let cmp = crate::objects::tree_entry_cmp(t_name, t_is_tree, i_name, i_is_tree);
+                if cmp != std::cmp::Ordering::Equal {
+                    return Err(Error::IndexError(
+                        "hard reset cache-tree rebuild: index out of sync with target tree".into(),
+                    ));
+                }
+                if t_is_tree && i_is_tree {
+                    let full_path = join_index_path(dir_prefix, t_name);
+                    if hard_reset_skip_sparse_cache_rebuild(index, idx_cursor, &full_path, t_entry)?
+                    {
+                        entry_count = entry_count.saturating_add(1);
+                        ti += 1;
+                        continue;
+                    }
+                    let child = if let Some(child_cache) = cache_children
+                        .get(t_name)
+                        .filter(|node| node.is_valid() && node.oid == Some(t_entry.oid))
+                    {
+                        skip_index_subtree(index, idx_cursor, &full_path);
+                        let mut reused = (*child_cache).clone();
+                        reused.name = t_name.clone();
+                        reused
+                    } else {
+                        rebuild_hard_reset_cache_tree_at(
+                            odb,
+                            index,
+                            idx_cursor,
+                            &t_entry.oid,
+                            cache_children.get(t_name),
+                            &full_path,
+                            t_name.clone(),
+                        )?
+                    };
+                    entry_count = entry_count.saturating_add(child.entry_count.max(0));
+                    children.push(child);
+                } else if t_is_tree != i_is_tree {
+                    return Err(Error::IndexError(
+                        "hard reset cache-tree rebuild: tree/index type mismatch".into(),
+                    ));
+                } else {
+                    *idx_cursor += 1;
+                    entry_count = entry_count.saturating_add(1);
+                }
+                ti += 1;
+            }
+            (None, None) => break,
+            _ => {
+                return Err(Error::IndexError(
+                    "hard reset cache-tree rebuild: index out of sync with target tree".into(),
+                ));
+            }
+        }
+    }
+    children.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(CacheTreeNode::valid(name, entry_count, *tree_oid, children))
+}
+
+fn hard_reset_skip_sparse_cache_rebuild(
+    index: &Index,
+    idx_cursor: &mut usize,
+    full_path: &[u8],
+    t_entry: &TreeEntry,
+) -> Result<bool> {
+    let Some(entry) = index.entries.get(*idx_cursor) else {
+        return Ok(false);
+    };
+    if !entry.is_sparse_directory_placeholder() {
+        return Ok(false);
+    }
+    let mut dir = full_path.to_vec();
+    if !dir.ends_with(b"/") {
+        dir.push(b'/');
+    }
+    if entry.path != dir || entry.oid != t_entry.oid {
+        return Ok(false);
+    }
+    *idx_cursor += 1;
+    Ok(true)
+}
+
 struct HardResetAlignWalk<'a, 'b> {
     odb: &'a Odb,
     index: &'a Index,

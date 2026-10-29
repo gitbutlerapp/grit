@@ -1124,6 +1124,10 @@ fn hard_reset_normalize_index_row(entry: &mut IndexEntry) {
 }
 
 fn hard_reset_finish_cache_tree(repo: &Repository, index: &mut Index, target_tree: &ObjectId) {
+    if index_hard_reset_cache_matches_tree(index, target_tree) {
+        index.cache_tree_root = Some(*target_tree);
+        return;
+    }
     if index.has_sparse_directory_placeholders() {
         if let Ok(target) = crate::porcelain::index_from_tree::index_from_tree_reusing_cache_tree(
             repo,
@@ -1136,13 +1140,19 @@ fn hard_reset_finish_cache_tree(repo: &Repository, index: &mut Index, target_tre
         }
         return;
     }
-    let Some(cache_tree) = index.cache_tree.clone() else {
-        return;
-    };
-    if usize::try_from(cache_tree.entry_count).ok() == Some(index.entries.len()) {
-        index.set_cache_tree(cache_tree);
-    } else {
-        index.clear_cache_tree();
+    let stage0_count = index
+        .entries
+        .iter()
+        .filter(|entry| entry.stage() == 0 && !entry.intent_to_add())
+        .count();
+    if crate::diff::rebuild_hard_reset_cache_tree(repo.odb(), index, target_tree).is_err() {
+        if let Ok(cache_tree) =
+            crate::write_tree::build_cache_tree_from_tree(repo.odb(), target_tree)
+        {
+            if usize::try_from(cache_tree.entry_count).ok() == Some(stage0_count) {
+                index.set_cache_tree(cache_tree);
+            }
+        }
     }
 }
 
