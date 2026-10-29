@@ -783,7 +783,7 @@ fn write_delta_plan_stream_body(
     Ok((index_rows, body_bytes))
 }
 
-const PACK_STREAM_COPY_CHUNK: usize = 64 * 1024;
+pub(crate) const PACK_STREAM_COPY_CHUNK: usize = 64 * 1024;
 
 pub(crate) struct CrcWriter<'a, W: Write + ?Sized> {
     inner: &'a mut W,
@@ -831,7 +831,7 @@ impl<W: Write + ?Sized> Write for ByteCounter<'_, W> {
     }
 }
 
-fn write_all_chunked(w: &mut dyn Write, data: &[u8]) -> Result<()> {
+pub(crate) fn write_all_chunked(w: &mut dyn Write, data: &[u8]) -> Result<()> {
     for chunk in data.chunks(PACK_STREAM_COPY_CHUNK) {
         w.write_all(chunk).map_err(Error::Io)?;
     }

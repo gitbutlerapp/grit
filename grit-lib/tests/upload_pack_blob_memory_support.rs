@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+use std::io::{Read, Write};
+use std::path::Path;
 use std::process::Command;
 
 use grit_lib::objects::pack_objects::{
@@ -7,8 +9,23 @@ use grit_lib::objects::pack_objects::{
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 
+/// Incompressible payload size for memory regression tests (well below CI disk limits).
 pub const BLOB_BYTES: usize = 48 * 1024 * 1024;
 pub const MIB: u64 = 1024 * 1024;
+
+/// Write `len` bytes of pseudo-random data (zlib does not shrink it materially in a pack).
+pub fn write_incompressible_blob(path: &Path, len: usize) {
+    let mut f = std::fs::File::create(path).expect("create blob");
+    let mut urandom = std::fs::File::open("/dev/urandom").expect("urandom");
+    let mut buf = [0u8; 1024 * 1024];
+    let mut written = 0usize;
+    while written < len {
+        let n = (len - written).min(buf.len());
+        urandom.read_exact(&mut buf[..n]).expect("read urandom");
+        f.write_all(&buf[..n]).expect("write blob");
+        written += n;
+    }
+}
 
 pub fn anon_rss_kib() -> u64 {
     let status = std::fs::read_to_string("/proc/self/status").expect("proc status");

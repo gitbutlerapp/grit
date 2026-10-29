@@ -252,10 +252,12 @@ fn write_pack_in_batches(
                 let bytes = body
                     .as_slice()
                     .ok_or_else(|| Error::CorruptObject("missing prepared pack body".to_owned()))?;
-                out.write_all(bytes).map_err(Error::Io)?;
+                crate::pack_objects::write_all_chunked(&mut out, bytes)?;
                 let mut crc = crc32fast::Hasher::new();
                 crc.update(&header);
-                crc.update(bytes);
+                for chunk in bytes.chunks(crate::pack_objects::PACK_STREAM_COPY_CHUNK) {
+                    crc.update(chunk);
+                }
                 (bytes.len() as u64, crc.finalize())
             }
         };

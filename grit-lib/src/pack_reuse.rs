@@ -13,8 +13,8 @@ use crate::ewah_bitmap::Bitmap;
 use crate::midx::{read_midx_btmp_ranges, read_midx_pack_idx_names, read_midx_preferred_idx_name};
 use crate::objects::ObjectId;
 use crate::pack::{
-    pack_entry_raw_end, parse_pack_object_header, read_local_pack_indexes_cached,
-    read_pack_bytes_cached, read_packed_delta_dependency, PackedDeltaDependency, PackedType,
+    parse_pack_object_header, read_local_pack_indexes_cached, read_pack_bytes_cached,
+    read_packed_delta_dependency, PackedDeltaDependency, PackedType,
 };
 use crate::pack_index::PackIndex;
 use crate::pack_map::PackData;
@@ -349,7 +349,7 @@ fn compute_reuse_bits(
             let Some(entry_off) = pack.idx.find_offset(&oid)? else {
                 continue;
             };
-            if !entry_crc_ok(&pack.idx, pack_bytes, entry_off)? {
+            if !entry_crc_ok(&pack.idx, &pack.pack_bytes, entry_off)? {
                 continue;
             }
             let mut p = entry_off as usize;
@@ -397,15 +397,12 @@ fn compute_reuse_bits(
     Ok(reuse)
 }
 
-fn entry_crc_ok(idx: &PackIndex, pack_bytes: &[u8], entry_off: u64) -> Result<bool> {
-    let Some(end) = pack_entry_raw_end(idx, pack_bytes, entry_off)? else {
-        return Ok(false);
-    };
-    let slice = &pack_bytes[entry_off as usize..end];
-    match idx.crc32_for_pack_offset(entry_off)? {
-        Some(crc) => Ok(crc32fast::hash(slice) == crc),
-        None => Ok(true),
-    }
+fn entry_crc_ok(
+    idx: &PackIndex,
+    pack_bytes: &crate::pack::PackData,
+    entry_off: u64,
+) -> Result<bool> {
+    crate::pack::packed_entry_matches_index_crc(idx, pack_bytes, entry_off)
 }
 
 fn delta_base_oid(

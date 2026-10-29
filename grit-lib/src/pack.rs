@@ -5274,7 +5274,7 @@ pub(crate) fn locate_packed_whole_object(
 /// A large entry is hashed with a bounded window of the pack mapping resident (see
 /// [`VERIFY_RESIDENT_PACK_BYTES`]), so checking a big blob before streaming it does not pull
 /// its whole compressed size into the resident set.
-fn packed_entry_matches_index_crc(
+pub(crate) fn packed_entry_matches_index_crc(
     idx: &PackIndex,
     pack: &PackData,
     entry_offset: u64,
@@ -5349,29 +5349,11 @@ pub(crate) fn packed_full_object_range(
         if end <= start {
             continue;
         }
-        let slice = &pack_bytes[start..end];
         // Git `check_pack_crc`: verbatim reuse copies bytes unparsed, so guard with the pack
-        // index's CRC32. A corrupt copy is skipped, letting a redundant pack or the normal
-        // (validating) read path serve the object instead (t5303).
-        let recorded_crc = idx.crc32_for_pack_offset(entry_offset)?;
-        match recorded_crc {
-            Some(crc) if crc32fast::hash(slice) != crc => continue,
-            // v1 indexes carry no CRC; verify by inflating and re-hashing the content.
-            None if read_object_from_pack(idx, oid)
-                .map(|obj| {
-                    HashAlgo::from_len(idx.hash_bytes())
-                        .map(|algo| {
-                            hash_object(algo, obj.kind, &obj.data)
-                                .map(|h| h != *oid)
-                                .unwrap_or(true)
-                        })
-                        .unwrap_or(true)
-                })
-                .unwrap_or(true) =>
-            {
-                continue;
-            }
-            _ => {}
+        // index's CRC32 when v2 records one. v1 indexes rely on the zlib trailer; inflating
+        // here only to verify the oid would retain the whole payload in anon RSS (issue #2287).
+        if !packed_entry_matches_index_crc(idx, &pack_bytes, entry_offset)? {
+            continue;
         }
         return Ok(Some((pack_bytes, start, end)));
     }

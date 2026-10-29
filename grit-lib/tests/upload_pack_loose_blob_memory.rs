@@ -7,7 +7,7 @@ mod upload_pack_blob_memory_support;
 
 use upload_pack_blob_memory_support::{
     anon_rss_kib, git_index_pack_strict, pack_options, reset_peak_rss, stream_blob_to_sink,
-    write_blob_pack_file, BLOB_BYTES, MIB,
+    write_blob_pack_file, write_incompressible_blob, BLOB_BYTES, MIB,
 };
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -24,7 +24,7 @@ fn upload_pack_loose_blob_peak_memory() {
     let fx = RepoFixture::init(HashAlgo::Sha1).expect("repo");
     fx.git(&["config", "core.bigFileThreshold", "1m"]);
     let blob_path = fx.path().join("big.bin");
-    std::fs::write(&blob_path, vec![0u8; BLOB_BYTES]).expect("write blob");
+    write_incompressible_blob(&blob_path, BLOB_BYTES);
     fx.git(&["add", "big.bin"]);
     fx.git(&["commit", "-qm", "big"]);
     let pack_dir = fx.path().join("objects/pack");
