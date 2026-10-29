@@ -973,6 +973,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             let entries = staged_entries(&uncommitted, &repo, &diff_options, &pathspecs)?;
             match detail {
                 DiffDetail::Stat | DiffDetail::NameOnly | DiffDetail::NameStatus => {
+                    drop(uncommitted);
                     outcome_from_entries(&repo, entries, detail, diff_options, format)?
                 }
                 _ => {
@@ -988,6 +989,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     } else {
                         Vec::new()
                     };
+                    drop(uncommitted);
                     outcome_from_changes(
                         staged,
                         peer,
@@ -1005,12 +1007,13 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             let mut uncommitted = uncommitted_diff(&repo)?;
             let entries = unstaged_entries(&mut uncommitted, &repo, &diff_options, &pathspecs)?;
             match detail {
-                DiffDetail::Stat => outcome_stat_from_changes(
-                    uncommitted.load_worktree_changes(entries)?,
-                    diff_options,
-                    format,
-                ),
+                DiffDetail::Stat => {
+                    let changes = uncommitted.load_worktree_changes(entries)?;
+                    drop(uncommitted);
+                    outcome_stat_from_changes(changes, diff_options, format)
+                }
                 DiffDetail::NameOnly | DiffDetail::NameStatus => {
+                    drop(uncommitted);
                     outcome_from_entries(&repo, entries, detail, diff_options, format)?
                 }
                 _ => {
@@ -1026,6 +1029,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     } else {
                         Vec::new()
                     };
+                    drop(uncommitted);
                     outcome_from_changes(
                         unstaged,
                         peer,
@@ -1050,6 +1054,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 &pathspecs,
             )?;
             let changes = uncommitted.load_worktree_changes(entries)?;
+            drop(uncommitted);
             match detail {
                 DiffDetail::NameOnly | DiffDetail::NameStatus => {
                     outcome_from_change_names(changes, format)
