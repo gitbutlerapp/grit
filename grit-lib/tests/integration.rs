@@ -849,6 +849,7 @@ mod ingest_pack_into_store;
 #[cfg(feature = "full-tests")]
 #[path = "init_branch_format_git_compat.rs"]
 mod init_branch_format_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "init_environment_identity.rs"]
 mod init_environment_identity;
 #[path = "init_filesystem_config.rs"]
@@ -934,6 +935,9 @@ mod merge_conflicts_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "merge_continue_git_compat.rs"]
 mod merge_continue_git_compat;
+#[cfg(feature = "full-tests")]
+#[path = "merge_detached_head_git_compat.rs"]
+mod merge_detached_head_git_compat;
 #[path = "merge_diff_line_coverage.rs"]
 mod merge_diff_line_coverage;
 #[cfg(feature = "full-tests")]

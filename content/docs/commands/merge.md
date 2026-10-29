@@ -63,7 +63,9 @@ Literal braces are allowed in ref names: `grit merge 'foo{bar'` merges that bran
 
 On a criss-cross history the two branches have several merge bases (`grit merge-base --all` lists them). grit then merges those bases into one virtual base first and merges the two branches against it, like Git, so `grit merge` and `grit merge --check` give the same answer whichever base comes first. When the two sides resolved the same old conflict in different ways, the merge stops with a conflict instead of silently keeping one resolution. In that case the base version (stage 1 in the index, the `|||||||` section with `--conflict diff3`) holds the bases' own conflict, with markers labelled `Temporary merge branch 1` and `Temporary merge branch 2`. `-X ours|theirs` applies only to the final merge, not to the merge of the bases.
 
-Local edits are allowed when they only touch paths the merge does not change, or when a changed path already matches the post-merge tree in the index (same scoped rule as [`grit switch`](../switch/)). Grit refuses when your changes would be overwritten by files the merge updates, when an untracked file would be replaced by a path the merge would check out, on a branch with no commits, or with a detached HEAD; the branch and file are left unchanged.
+Local edits are allowed when they only touch paths the merge does not change, or when a changed path already matches the post-merge tree in the index (same scoped rule as [`grit switch`](../switch/)). Grit refuses when your changes would be overwritten by files the merge updates, when an untracked file would be replaced by a path the merge would check out, or on a branch with no commits; the branch (or detached `HEAD`) and file are left unchanged.
+
+With a **detached `HEAD`**, grit merges into `HEAD` like Git: a fast-forward or merge commit moves only `HEAD` (branch tips such as `main` stay put). `--check` and `--dry-run` work the same way and leave `HEAD`, the index, and merge state untouched.
 
 ### Merge modes
 

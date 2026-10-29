@@ -647,10 +647,14 @@ fn write_merge_fast_forward_markdown(
     would: bool,
 ) -> anyhow::Result<()> {
     let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
-    let head = outcome
-        .updated_branch
-        .as_deref()
-        .unwrap_or(outcome.branch.as_str());
+    let head = if outcome.detached_head {
+        "HEAD"
+    } else {
+        outcome
+            .updated_branch
+            .as_deref()
+            .unwrap_or(outcome.branch.as_str())
+    };
     let source = outcome
         .updated_branch
         .as_ref()
@@ -694,11 +698,15 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
         }
         MergeResult::Merged => {
             let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
-            outln!(
-                w,
-                "- Merged **`{}`** into the current branch · `{short}`",
-                outcome.branch
-            );
+            if outcome.detached_head {
+                outln!(w, "- Merged **`{}`** into HEAD · `{short}`", outcome.branch);
+            } else {
+                outln!(
+                    w,
+                    "- Merged **`{}`** into the current branch · `{short}`",
+                    outcome.branch
+                );
+            }
             if let Some(id) = outcome.change_id.as_deref() {
                 outln!(w, "- change id `{short}`", short = short_change_id(id));
             }
