@@ -34,7 +34,7 @@ use crate::ident::{
 };
 use crate::index::{Index, IndexLock};
 use crate::objects::odb::Odb;
-use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, serialize_commit, CommitData, FileMode, ObjectId, ObjectKind};
 use crate::pathspec::{matches_pathspec_list_with_context, pathspec_is_exclude, ResolvedPathspecs};
 use crate::porcelain::add::{
     stage_on_index, validate_commit_staging_pathspecs, StageMode, StageOptions,
@@ -1068,10 +1068,10 @@ fn commit_files_index_vs_parent_tree(
     index: &Index,
     parent_tree: Option<&ObjectId>,
 ) -> Result<Vec<CommitFile>> {
-    let mut parent: BTreeMap<String, ObjectId> = BTreeMap::new();
+    let mut parent: BTreeMap<String, (FileMode, ObjectId)> = BTreeMap::new();
     if let Some(tree) = parent_tree {
-        for (path, _mode, oid) in flatten_tree_entries(odb, tree)? {
-            parent.insert(path, oid);
+        for (path, mode, oid) in flatten_tree_entries(odb, tree)? {
+            parent.insert(path, (mode, oid));
         }
     }
     let mut files = Vec::new();
@@ -1086,11 +1086,13 @@ fn commit_files_index_vs_parent_tree(
                 status: DiffStatus::Added,
                 old_path: None,
             }),
-            Some(old_oid) if old_oid != entry.oid => files.push(CommitFile {
-                path,
-                status: DiffStatus::Modified,
-                old_path: None,
-            }),
+            Some((old_mode, old_oid)) if old_oid != entry.oid || entry.mode != old_mode.bits() => {
+                files.push(CommitFile {
+                    path,
+                    status: DiffStatus::for_content_change(old_mode.bits(), entry.mode),
+                    old_path: None,
+                });
+            }
             _ => {}
         }
     }
@@ -1959,6 +1961,7 @@ mod tests {
     use crate::repo::set_test_inject_index_write_fail;
     use crate::write_tree::{cache_tree_fully_valid, verify_cache_tree};
     use std::fs;
+    use std::io::Write;
     use std::path::Path;
     use std::process::Command;
     use std::str::FromStr;
@@ -2073,6 +2076,76 @@ mod tests {
         let mut req = commit_req(message);
         req.dry_run = true;
         req
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dry_run_includes_mode_only_and_mixed_worktree_changes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("c"), b"c\n").unwrap();
+        fs::write(root.join("s"), b"s\n").unwrap();
+        commit_worktree(
+            &repo,
+            &commit_req("base"),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+        let before = repo_snapshot(&repo);
+        let before_tip = resolve_ref(repo.git_dir(), "refs/heads/main").unwrap();
+
+        let mut perms = fs::metadata(root.join("c")).unwrap().permissions();
+        perms.set_mode(0o100755);
+        fs::set_permissions(root.join("c"), perms).unwrap();
+
+        let preview = commit_worktree(
+            &repo,
+            &dry_run_req("mode"),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+        assert_eq!(preview.changes, 1);
+        assert_eq!(preview.files.len(), 1);
+        assert_eq!(preview.files[0].path, "c");
+        assert_eq!(preview.files[0].status, DiffStatus::Modified);
+        assert_eq!(repo_snapshot(&repo), before);
+        assert_eq!(
+            resolve_ref(repo.git_dir(), "refs/heads/main").unwrap(),
+            before_tip
+        );
+
+        fs::OpenOptions::new()
+            .append(true)
+            .open(root.join("s"))
+            .unwrap()
+            .write_all(b"n\n")
+            .unwrap();
+
+        let preview = commit_worktree(
+            &repo,
+            &dry_run_req("mixed"),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+        assert_eq!(preview.changes, 2);
+        let paths: Vec<_> = preview.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"c"));
+        assert!(paths.contains(&"s"));
+
+        let committed = commit_worktree(
+            &repo,
+            &commit_req("mixed"),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+        assert_eq!(committed.files, preview.files);
     }
 
     #[cfg(unix)]

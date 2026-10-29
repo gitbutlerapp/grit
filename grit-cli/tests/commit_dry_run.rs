@@ -2,6 +2,7 @@
 
 use std::error::Error;
 use std::fs;
+use std::io::Write;
 use std::process::Command;
 
 use serde_json::Value;
@@ -120,6 +121,62 @@ fn commit_dry_run_amend_without_message_uses_head_subject() -> TestResult {
         v.get("subject").and_then(Value::as_str),
         Some("keep subject")
     );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn commit_dry_run_json_includes_mode_only_changes() -> TestResult {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir()?;
+    assert!(run_grit(dir.path(), &["init"]).status.success());
+    fs::write(dir.path().join("c"), b"c\n")?;
+    fs::write(dir.path().join("s"), b"s\n")?;
+    assert!(run_grit(dir.path(), &["commit", "-m", "base"])
+        .status
+        .success());
+
+    let mut perms = fs::metadata(dir.path().join("c"))?.permissions();
+    perms.set_mode(0o100755);
+    fs::set_permissions(dir.path().join("c"), perms)?;
+
+    let out = run_grit(
+        dir.path(),
+        &["commit", "--dry-run", "-m", "preview", "--json"],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: Value = serde_json::from_slice(&out.stdout)?;
+    assert_eq!(v.get("changes").and_then(Value::as_u64), Some(1));
+    let files = v.get("files").and_then(Value::as_array).expect("files");
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].get("path").and_then(Value::as_str), Some("c"));
+    assert_eq!(files[0].get("status").and_then(Value::as_str), Some("M"));
+
+    fs::OpenOptions::new()
+        .append(true)
+        .open(dir.path().join("s"))?
+        .write_all(b"n\n")?;
+
+    let out = run_grit(
+        dir.path(),
+        &["commit", "--dry-run", "-m", "mixed", "--json"],
+    );
+    assert!(out.status.success());
+    let v: Value = serde_json::from_slice(&out.stdout)?;
+    assert_eq!(v.get("changes").and_then(Value::as_u64), Some(2));
+    let files = v.get("files").and_then(Value::as_array).expect("files");
+    assert_eq!(files.len(), 2);
+    let paths: Vec<_> = files
+        .iter()
+        .filter_map(|f| f.get("path").and_then(Value::as_str))
+        .collect();
+    assert!(paths.contains(&"c"));
+    assert!(paths.contains(&"s"));
     Ok(())
 }
 
