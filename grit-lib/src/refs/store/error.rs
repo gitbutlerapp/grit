@@ -13,6 +13,14 @@ use super::{Expected, RawRef};
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum RefStoreError {
+    /// Reflog contents changed between a snapshot and a locked [`super::RefStore::rewrite_reflog`]
+    /// re-read. Callers that compare against an earlier snapshot should retry.
+    #[error("reflog '{name}' changed during rewrite")]
+    ReflogRewriteStale {
+        /// Ref whose log no longer matched the expected prefix.
+        name: String,
+    },
+
     /// Another writer holds a lock this transaction needs.
     ///
     /// For per-ref backends (files) that is the lock of `name` itself; for a backend with one

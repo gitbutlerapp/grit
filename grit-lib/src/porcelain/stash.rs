@@ -2975,17 +2975,25 @@ const STASH_REF: &str = "refs/stash";
 /// Propagates ref and reflog update failures.
 pub(crate) fn drop_stash_commit(repo: &Repository, stash_oid: &ObjectId) -> Result<bool> {
     let store = repo.refs();
-    let mut entries = read_reflog_on_store(store, STASH_REF)?;
-    if entries.last().is_none_or(|tip| tip.new_oid != *stash_oid) {
+    if read_reflog_on_store(store, STASH_REF)?
+        .last()
+        .is_none_or(|tip| tip.new_oid != *stash_oid)
+    {
         return Ok(false);
     }
-    entries.pop();
-    match entries.last().map(|entry| entry.new_oid) {
-        None => delete_ref_on_store(store, STASH_REF)?,
-        Some(prev) => {
-            store.replace_reflog(STASH_REF, entries)?;
-            update_direct_ref_on_store(store, repo.git_dir(), STASH_REF, &prev)?;
+    store.rewrite_reflog(STASH_REF, &mut |mut entries| {
+        if entries.last().is_none_or(|tip| tip.new_oid != *stash_oid) {
+            return Ok(entries);
         }
+        entries.pop();
+        Ok(entries)
+    })?;
+    let prev = read_reflog_on_store(store, STASH_REF)?
+        .last()
+        .map(|entry| entry.new_oid);
+    match prev {
+        None => delete_ref_on_store(store, STASH_REF)?,
+        Some(prev) => update_direct_ref_on_store(store, repo.git_dir(), STASH_REF, &prev)?,
     }
     Ok(true)
 }

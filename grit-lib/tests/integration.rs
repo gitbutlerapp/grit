@@ -1310,6 +1310,8 @@ mod reflog_injected_ref_store;
 #[cfg(feature = "full-tests")]
 #[path = "reflog_query_git_compat.rs"]
 mod reflog_query_git_compat;
+#[path = "reflog_rewrite_race.rs"]
+mod reflog_rewrite_race;
 #[cfg(feature = "full-tests")]
 #[path = "reflog_roundtrip.rs"]
 mod reflog_roundtrip;

@@ -294,6 +294,17 @@ impl RefStore for LinkedWorktreeRefStore {
         self.shared.replace_reflog(name, entries)
     }
 
+    fn rewrite_reflog(
+        &self,
+        name: &str,
+        transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
+    ) -> Result<()> {
+        if name == "HEAD" {
+            return self.head.rewrite_reflog(name, transform);
+        }
+        self.shared.rewrite_reflog(name, transform)
+    }
+
     fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
         let mut names = Vec::new();
         self.shared.for_each_reflog_ref(&mut |name| {

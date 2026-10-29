@@ -1228,23 +1228,9 @@ impl FilesRefStore {
         Ok(())
     }
 
-    fn persist_reflog(&self, name: &str, entries: &[ReflogEntry]) -> Result<()> {
+    /// Replace a reflog file atomically (temp file in the same directory, then rename).
+    fn persist_reflog_atomic(&self, name: &str, entries: &[ReflogEntry]) -> Result<()> {
         let path = self.reflog_path(name);
-        if entries.is_empty() {
-            if let Some(parent) = path.parent() {
-                self.io_ref_store(
-                    parent,
-                    GitDirPathOperation::CreateDir,
-                    fs::create_dir_all(parent),
-                )?;
-            }
-            self.io_ref_store(
-                &path,
-                GitDirPathOperation::AppendReflog,
-                fs::write(&path, ""),
-            )?;
-            return Ok(());
-        }
         if let Some(parent) = path.parent() {
             self.io_ref_store(
                 parent,
@@ -1252,13 +1238,35 @@ impl FilesRefStore {
                 fs::create_dir_all(parent),
             )?;
         }
-        let body: String = entries.iter().map(reflog_line).collect();
-        self.io_ref_store(
-            &path,
-            GitDirPathOperation::AppendReflog,
-            fs::write(&path, body),
-        )?;
-        Ok(())
+        let body: String = if entries.is_empty() {
+            String::new()
+        } else {
+            entries.iter().map(reflog_line).collect()
+        };
+        let tmp = path.with_extension("new");
+        let mut created_tmp = false;
+        let write_result = (|| -> Result<()> {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)
+                .map_err(Error::Io)?;
+            created_tmp = true;
+            use std::io::Write as _;
+            file.write_all(body.as_bytes()).map_err(Error::Io)?;
+            drop(file);
+            self.io_ref_store(
+                &path,
+                GitDirPathOperation::AppendReflog,
+                fs::rename(&tmp, &path),
+            )?;
+            created_tmp = false;
+            Ok(())
+        })();
+        if write_result.is_err() && created_tmp {
+            let _ = fs::remove_file(&tmp);
+        }
+        write_result
     }
 
     /// Add `entries` to the end of `name`'s reflog, leaving the lines it has as they are
@@ -1512,23 +1520,6 @@ impl FilesRefStore {
             self.forget_packed_cache();
         }
 
-        // Only names with a reflog on either side can have a reflog change to write.
-        let names: BTreeSet<&String> = before.reflogs.keys().chain(after.reflogs.keys()).collect();
-        for name in names {
-            let (old, new) = (before.reflogs.get(name), after.reflogs.get(name));
-            if old == new {
-                continue;
-            }
-            // A log the batch only added to gets the new lines appended, so what it held
-            // stays byte for byte, as read or not.
-            if let (Some(old), Some(new)) = (old, new) {
-                if new.starts_with(old) && self.append_reflog_entries(name, &new[old.len()..])? {
-                    continue;
-                }
-            }
-            self.persist_reflog(name, new.map(Vec::as_slice).unwrap_or_default())?;
-        }
-
         let pruned = if packed_lock_held {
             self.prune_deleted_packed_records(before, after, updates)?
         } else {
@@ -1541,6 +1532,35 @@ impl FilesRefStore {
             removed: &pruned.removed,
             emptied_dirs,
         };
+
+        let names: BTreeSet<&String> = before.reflogs.keys().chain(after.reflogs.keys()).collect();
+        for name in names {
+            let (old, new) = (before.reflogs.get(name), after.reflogs.get(name));
+            if old == new {
+                continue;
+            }
+            let under_carried = carried
+                .as_ref()
+                .is_some_and(|(carried_name, _)| carried_name == name);
+            let mut extra_lock = None;
+            if !under_carried {
+                let (_, _, lock_path) = self.ref_lock_paths(name);
+                self.lock_ref(name, &lock_path, ctx.ref_lock_wait)?;
+                extra_lock = Some(lock_path);
+            }
+            let write_result = (|| -> Result<()> {
+                if let (Some(old), Some(new)) = (old, new) {
+                    if new.starts_with(old) && self.append_reflog_entries(name, &new[old.len()..])? {
+                        return Ok(());
+                    }
+                }
+                self.persist_reflog_atomic(name, new.map(Vec::as_slice).unwrap_or_default())
+            })();
+            if let Some(lock_path) = extra_lock {
+                let _ = fs::remove_file(&lock_path);
+            }
+            write_result?;
+        }
 
         let mut persisted_refs = HashSet::new();
         let persisted =
@@ -1908,7 +1928,24 @@ impl RefStore for FilesRefStore {
     }
 
     fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()> {
-        self.persist_reflog(name, &entries)
+        self.rewrite_reflog(name, &mut |_| Ok(entries.clone()))
+    }
+
+    fn rewrite_reflog(
+        &self,
+        name: &str,
+        transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
+    ) -> Result<()> {
+        let wait = LockWait::files_ref_lock_for_git_dir(&self.common_dir);
+        let (_, _, lock_path) = self.ref_lock_paths(name);
+        self.lock_ref(name, &lock_path, wait)?;
+        let result = (|| -> Result<()> {
+            let entries = self.read_reflog_entries(name)?;
+            let rewritten = transform(entries)?;
+            self.persist_reflog_atomic(name, &rewritten)
+        })();
+        let _ = fs::remove_file(&lock_path);
+        result
     }
 
     fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {

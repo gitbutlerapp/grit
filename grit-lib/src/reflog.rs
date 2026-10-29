@@ -25,7 +25,7 @@ use crate::ident::Signature;
 use crate::index::MODE_TREE;
 use crate::merge_base;
 use crate::objects::{parse_commit, parse_tree, CommitRef, ObjectId, ObjectKind, OidHashMap};
-use crate::refs::store::RefStore as _;
+use crate::refs::store::{RefStore as _, RefStoreError};
 use crate::refs::{self, reflog_file_path};
 use crate::repo::Repository;
 use crate::wildmatch::{wildmatch, WM_PATHNAME};
@@ -518,7 +518,7 @@ pub(crate) fn delete_reflog_entries_on_store(
     let Some((kept, _)) = reflog_without_indices(store, refname, indices)? else {
         return Ok(());
     };
-    store.replace_reflog(refname, kept)
+    store.rewrite_reflog(refname, &mut |_| Ok(kept.clone()))
 }
 
 /// Like [`delete_reflog_entries_on_store`], but reconnects surviving `old_oid` values after
@@ -539,7 +539,7 @@ pub(crate) fn delete_reflog_entries_rechain_on_store(
     for i in 1..kept.len() {
         kept[i].old_oid = kept[i - 1].new_oid;
     }
-    store.replace_reflog(refname, kept)
+    store.rewrite_reflog(refname, &mut |_| Ok(kept.clone()))
 }
 
 /// Read every reflog entry for `refname` from `store`, oldest first; empty when it has none.
@@ -590,15 +590,10 @@ pub fn expire_reflog(git_dir: &Path, refname: &str, expire_time: Option<i64>) ->
         }
     }
 
-    if crate::refs::store::open_ref_store(git_dir)?.format()
-        != crate::refs::store::RefStorageFormat::Files
-    {
-        crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?
-            .replace_reflog(refname, kept_entries)?;
-        return Ok(pruned);
+    let store = crate::refs::store::open_ref_store(git_dir)?;
+    if pruned > 0 {
+        store.rewrite_reflog(refname, &mut |_| Ok(kept_entries.clone()))?;
     }
-    let path = reflog_path(git_dir, refname);
-    fs::write(&path, kept.join(""))?;
     Ok(pruned)
 }
 
@@ -1540,11 +1535,12 @@ pub(crate) fn expire_reflog_git_with_cache(
             .map(|tip| vec![tip])
     };
     let mut reachable = tips.map(|tips| ReachableCommits::new(repo, cache, tips, expire_total));
-    let mut kept_entries = Vec::new();
+    let snapshot = entries;
+    let mut drop_flags = Vec::with_capacity(snapshot.len());
     let mut pruned = 0usize;
-    let mut actions = Vec::with_capacity(entries.len());
+    let mut actions = Vec::with_capacity(snapshot.len());
 
-    for entry in &entries {
+    for entry in &snapshot {
         let drop = should_drop_reflog_entry(
             repo,
             entry,
@@ -1553,6 +1549,7 @@ pub(crate) fn expire_reflog_git_with_cache(
             reachable.as_mut(),
             stale_fix.as_ref(),
         );
+        drop_flags.push(drop);
         let action = if drop {
             pruned += 1;
             if params.dry_run {
@@ -1561,7 +1558,6 @@ pub(crate) fn expire_reflog_git_with_cache(
                 ReflogExpireActionKind::Prune
             }
         } else {
-            kept_entries.push(entry.clone());
             ReflogExpireActionKind::Keep
         };
         actions.push(ReflogExpireAction {
@@ -1572,13 +1568,58 @@ pub(crate) fn expire_reflog_git_with_cache(
     }
 
     if !params.dry_run && pruned > 0 {
-        store.replace_reflog(refname, kept_entries)?;
+        rewrite_reflog_from_snapshot(store, refname, &snapshot, &drop_flags)?;
         // Git applies `core.sharedRepository` to the rewritten log file.
         if let Some(files) = store.as_files() {
             adjust_reflog_shared_perm(repo.git_dir(), &files.reflog_path(refname));
         }
     }
     Ok(ReflogExpireResult { pruned, actions })
+}
+
+const REFLOG_REWRITE_RETRIES: u32 = 128;
+
+fn rewrite_reflog_from_snapshot(
+    store: &dyn crate::refs::store::RefStore,
+    refname: &str,
+    snapshot: &[ReflogEntry],
+    drop_flags: &[bool],
+) -> Result<()> {
+    debug_assert_eq!(snapshot.len(), drop_flags.len());
+    for attempt in 0..REFLOG_REWRITE_RETRIES {
+        let snap = snapshot.to_vec();
+        let drops = drop_flags.to_vec();
+        let name = refname.to_owned();
+        match store.rewrite_reflog(refname, &mut move |current| {
+            if current.len() < snap.len() || current[..snap.len()] != snap[..] {
+                return Err(Error::RefStore(RefStoreError::ReflogRewriteStale {
+                    name: name.clone(),
+                }));
+            }
+            let mut kept = Vec::new();
+            for (i, entry) in current.into_iter().enumerate() {
+                if i < drops.len() {
+                    if !drops[i] {
+                        kept.push(entry);
+                    }
+                } else {
+                    kept.push(entry);
+                }
+            }
+            Ok(kept)
+        }) {
+            Ok(()) => return Ok(()),
+            Err(Error::RefStore(RefStoreError::ReflogRewriteStale { .. }))
+                if attempt + 1 < REFLOG_REWRITE_RETRIES =>
+            {
+                continue;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Err(Error::RefStore(RefStoreError::Corrupt(format!(
+        "reflog '{refname}' kept changing during rewrite"
+    ))))
 }
 
 /// Per-ref `gc.<pattern>.reflogExpire*` rules plus global `gc.reflogExpire` / `gc.reflogExpireUnreachable`.

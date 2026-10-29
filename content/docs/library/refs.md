@@ -144,7 +144,7 @@ Malformed selectors return `Error::ReflogInvalidSelector`, invalid or overflowin
 return `Error::ReflogInvalidIndex` (with the integer error as its source), and invalid
 reference names return `Error::ReflogUnknownRef`. The handle checks for missing logs
 and out-of-range indices when you query or delete entries. It works on
-`Repository::refs` (`for_each_reflog_ref`, `for_each_reflog_entry`, `replace_reflog`),
+`Repository::refs` (`for_each_reflog_ref`, `for_each_reflog_entry`, `replace_reflog`, `rewrite_reflog`),
 so it behaves the same on the files, reftable and injected backends; on the files
 backend, newest-first queries read the log backwards and stop at the limit.
 
@@ -152,7 +152,7 @@ backend, newest-first queries read the log backwards and stop at the limit.
 
 `list_refs_for_repository` and `References::list` iterate with a prefix on the repository's ref backend. Use [`RefTransaction`](rustdoc:grit_lib::refs::store::RefTransaction) when updating many refs atomically.
 
-Reflog helpers live in [`reflog`](rustdoc:grit_lib::refs::reflog) and on [`RefStore`](rustdoc:grit_lib::refs::store::RefStore) (`for_each_reflog_entry`, `replace_reflog`, …). [`append_reflog`](rustdoc:grit_lib::refs::append_reflog) records an update; [`read_reflog`](rustdoc:grit_lib::refs::reflog::read_reflog) reads entries back.
+Reflog helpers live in [`reflog`](rustdoc:grit_lib::refs::reflog) and on [`RefStore`](rustdoc:grit_lib::refs::store::RefStore) (`for_each_reflog_entry`, `replace_reflog`, [`rewrite_reflog`](rustdoc:grit_lib::refs::store::RefStore::rewrite_reflog), …). Use `rewrite_reflog` for expire, delete, and other read-modify-write paths so concurrent ref updates stay serialized under the ref lock. [`append_reflog`](rustdoc:grit_lib::refs::append_reflog) records an update; [`read_reflog`](rustdoc:grit_lib::refs::reflog::read_reflog) reads entries back.
 
 ## Branches and tags
 
