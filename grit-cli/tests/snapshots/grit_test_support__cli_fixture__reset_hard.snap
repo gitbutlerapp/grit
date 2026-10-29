@@ -5,7 +5,7 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "Reset refs/heads/main to 062ca6e (hard)\nWarning: 1 commit(s) would become unreachable\n",
+    "stdout": "Reset refs/heads/main to 062ca6e (hard)\nWarning: 1 commit is no longer on refs/heads/main (was 83352a6). Recover it with `grit reset 83352a6` (recorded in ORIG_HEAD and, when reflogs are on, the reflog).\n",
     "stderr": ""
   },
   "json": {
@@ -15,7 +15,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Reset\n\n- **ref:** `refs/heads/main`\n- **mode:** `hard`\n- **target:** `062ca6e74f5603f4d09063c0f46cd07d8c96e019`\n- **previous:** `83352a61f6715ec3f0a297c6d6150725154fb833`\n- **dry_run:** `false`\n- **orphaned_total:** `1` (truncated: `false`)\n",
+    "stdout": "## Reset\n\n- **ref:** `refs/heads/main`\n- **mode:** `hard`\n- **target:** `062ca6e74f5603f4d09063c0f46cd07d8c96e019`\n- **previous:** `83352a61f6715ec3f0a297c6d6150725154fb833`\n- **dry_run:** `false`\n- **orphaned_total:** `1` (truncated: `false`)\n- **recovery:** `grit reset 83352a61f6715ec3f0a297c6d6150725154fb833` restores it (also recorded in ORIG_HEAD; reflog when enabled)\n",
     "stderr": ""
   }
 }
