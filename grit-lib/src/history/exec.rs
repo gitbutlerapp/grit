@@ -9,7 +9,10 @@ use crate::command_runner::{
 };
 use crate::error::Error;
 use crate::merge_file::{ConflictStyle, MergeFavor};
-use crate::merge_trees::{merge_trees_three_way, DirectoryRenameMode, WhitespaceMergeOptions};
+use crate::merge_trees::{
+    materialized_merge_result_tree, merge_trees_three_way, DirectoryRenameMode,
+    WhitespaceMergeOptions,
+};
 use crate::objects::ObjectId;
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::merge::apply_conflict_merge_worktree;
@@ -672,10 +675,12 @@ fn stop_on_replay_conflict(
             replay_conflict_labels(plan.commits[row].old, &data).presentation(ConflictStyle::Merge),
             DirectoryRenameMode::from_repo(repo)?,
         )?;
+        let materialized = materialized_merge_result_tree(repo.odb(), &merge)?;
         apply_conflict_merge_worktree(
             repo,
             &parent_tree,
             &merge,
+            &materialized,
             &mut crate::progress::NullProgress,
             &crate::progress::NeverCancel,
         )?;

@@ -11,6 +11,7 @@ use crate::hooks::{
     run_post_checkout, run_post_rewrite, HookName, PostOperationHooks, RewriteKind,
 };
 use crate::lockfile::{LockFile, LockWait};
+use crate::merge_trees::materialized_merge_result_tree;
 use crate::objects::ObjectId;
 use crate::operation::conflicts_from_tree_merge;
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
@@ -1208,10 +1209,13 @@ fn install_stopped_rebase(
     let mut progress = UncancellableProgress::new(progress);
     reset_index_worktree_to_head(repo, conflict.replayed_parent, &mut progress, &NeverCancel)?;
     let ours_tree = commit_tree(repo, conflict.replayed_parent)?;
+    let materialized =
+        materialized_merge_result_tree(repo.odb(), &conflict.merge).map_err(map_lib)?;
     apply_conflict_merge_worktree(
         repo,
         &ours_tree,
         &conflict.merge,
+        &materialized,
         &mut progress,
         &NeverCancel,
     )

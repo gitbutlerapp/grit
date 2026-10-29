@@ -416,6 +416,11 @@ path = "tests/merge_content_rss.rs"
 required-features = ["full-tests"]
 
 [[test]]
+name = "merge_conflict_rss"
+path = "tests/merge_conflict_rss.rs"
+required-features = ["full-tests"]
+
+[[test]]
 name = "upload_pack_packed_blob_memory"
 path = "tests/upload_pack_packed_blob_memory.rs"
 required-features = ["full-tests"]
