@@ -2268,30 +2268,32 @@ mod merge_call_tests {
         );
     }
 
-    #[test]
-    fn rebase_add_only_over_many_upstream_renames_scans_once() {
-        use crate::objects::{serialize_commit, CommitData};
-        use crate::revwalk::history::{plan_rebase, RebaseOntoOptions, RebaseRequest};
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
-            dir.path(),
-            &crate::repo::InitOptions::new()
-                .with_initial_branch("main".to_owned())
-                .with_ref_storage(crate::RefStorageFormat::Files),
+    fn rename_friendly_blob(i: usize, tag: &str) -> Vec<u8> {
+        format!(
+            "rename-friendly file {i}\nshared boilerplate alpha beta gamma delta epsilon\n{tag}\n"
         )
-        .expect("init");
-        let sig = ident(1);
-        let mut fork_tree = blob_tree(&repo, "base.txt", b"base\n").expect("tree");
-        for i in 0..200 {
+        .into_bytes()
+    }
+
+    fn wide_rename_fork_onto(
+        repo: &Repository,
+        sig: &str,
+        file_count: usize,
+    ) -> (ObjectId, ObjectId, ObjectId) {
+        use crate::objects::{serialize_commit, CommitData};
+
+        let mut fork_tree =
+            blob_tree(repo, "shared.toml", b"[package]\nname = \"root\"\n").expect("tree");
+        for i in 0..file_count {
             let path = format!("dir/f{i}.txt");
-            fork_tree = tree_with_file(&repo, fork_tree, &path, b"x\n").expect("fork wide");
+            fork_tree = tree_with_file(&repo, fork_tree, &path, &rename_friendly_blob(i, "fork"))
+                .expect("fork wide");
         }
         let fork_raw = serialize_commit(&CommitData {
             tree: fork_tree,
             parents: vec![],
-            author: sig.clone(),
-            committer: sig.clone(),
+            author: sig.to_owned(),
+            committer: sig.to_owned(),
             author_raw: Vec::new(),
             committer_raw: Vec::new(),
             encoding: None,
@@ -2304,18 +2306,25 @@ mod merge_call_tests {
             .write(ObjectKind::Commit, &fork_raw)
             .expect("fork");
 
-        let mut onto_tree = fork_tree;
-        for i in 0..200 {
+        let mut onto_tree = tree_with_file(
+            repo,
+            fork_tree,
+            "shared.toml",
+            b"[package]\nname = \"root\"\nversion = \"1\"\n",
+        )
+        .expect("onto shared edit");
+        for i in 0..file_count {
             let old = format!("dir/f{i}.txt");
             let new = format!("moved/f{i}.txt");
-            onto_tree = tree_with_file(&repo, onto_tree, &new, b"y\n").expect("moved add");
+            onto_tree = tree_with_file(&repo, onto_tree, &new, &rename_friendly_blob(i, "onto"))
+                .expect("moved add");
             onto_tree = tree_without_path(&repo, onto_tree, &old).expect("moved rm");
         }
         let onto_raw = serialize_commit(&CommitData {
             tree: onto_tree,
             parents: vec![fork],
-            author: sig.clone(),
-            committer: sig.clone(),
+            author: sig.to_owned(),
+            committer: sig.to_owned(),
             author_raw: Vec::new(),
             committer_raw: Vec::new(),
             encoding: None,
@@ -2327,13 +2336,208 @@ mod merge_call_tests {
             .odb()
             .write(ObjectKind::Commit, &onto_raw)
             .expect("onto");
+        (fork, onto, fork_tree)
+    }
+
+    fn plan_overlap_rebase(
+        repo: &Repository,
+        fork: ObjectId,
+        onto: ObjectId,
+        tip: ObjectId,
+    ) -> ObjectId {
+        use crate::objects::parse_commit;
+        use crate::revwalk::history::{plan_rebase, RebaseOntoOptions, RebasePlan, RebaseRequest};
+
+        let opts = RebaseOntoOptions::new(RewriteOptions {
+            scope: RefScope::Head,
+            empty: EmptyPolicy::Drop,
+            committer: ident(2).parse().expect("signature"),
+            preserve_committer: false,
+            sign: false,
+        });
+        let request = RebaseRequest {
+            upstream: fork,
+            onto: Some(onto),
+            branch_tip: tip,
+        };
+        test_reset_merge_tree_call_count();
+        test_reset_upstream_delta_scan_count();
+        let plan = match plan_rebase(repo, &request, &opts).expect("plan") {
+            RebasePlan::Plan(plan) => plan,
+            other => panic!("expected plan, got {other:?}"),
+        };
+        assert_eq!(
+            test_upstream_delta_scan_count(),
+            1,
+            "fork→onto rename map should be built once per replay session"
+        );
+        assert_eq!(
+            test_merge_tree_call_count(),
+            0,
+            "overlap replay should use cached upstream renames, not full tree merge per commit"
+        );
+        let new_tip = plan
+            .commits
+            .last()
+            .and_then(|row| row.new)
+            .expect("rewritten tip");
+        parse_commit(&repo.odb().read(&new_tip).expect("read").data)
+            .expect("parse")
+            .tree
+    }
+
+    #[test]
+    fn rebase_overlap_upstream_modified_shared_and_add_under_moved() {
+        use crate::objects::{serialize_commit, CommitData};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let sig = ident(1);
+        let (fork, onto, fork_tree) = wide_rename_fork_onto(&repo, &sig, 80);
 
         let mut stack_parent = fork;
         let mut stack_tree = fork_tree;
-        for i in 0..30 {
-            let path = format!("feat/n{i}.txt");
+        for i in 0..12 {
+            let path = format!("moved/extra-shared-{i}.txt");
+            stack_tree =
+                tree_with_file(&repo, stack_tree, &path, format!("layer {i}\n").as_bytes())
+                    .expect("stack add under moved tree");
+            let raw = serialize_commit(&CommitData {
+                tree: stack_tree,
+                parents: vec![stack_parent],
+                author: sig.clone(),
+                committer: sig.clone(),
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: None,
+                message: format!("moved extra {i}\n"),
+                raw_message: None,
+                extra_headers: Vec::new(),
+            });
+            stack_parent = repo
+                .odb()
+                .write(ObjectKind::Commit, &raw)
+                .expect("stack commit");
+        }
+        let tip = stack_parent;
+        write_ref(repo.git_dir(), "refs/heads/main", &tip).expect("ref");
+        plan_overlap_rebase(&repo, fork, onto, tip);
+    }
+
+    #[test]
+    fn rebase_overlap_add_under_moved_dir_uses_cached_renames() {
+        use crate::objects::{serialize_commit, CommitData};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let sig = ident(1);
+        let (fork, onto, fork_tree) = wide_rename_fork_onto(&repo, &sig, 80);
+
+        let mut stack_parent = fork;
+        let mut stack_tree = fork_tree;
+        for i in 0..12 {
+            let path = format!("moved/stack-{i}.txt");
             stack_tree = tree_with_file(&repo, stack_tree, &path, format!("{i}\n").as_bytes())
-                .expect("stack tree");
+                .expect("stack add under moved");
+            let raw = serialize_commit(&CommitData {
+                tree: stack_tree,
+                parents: vec![stack_parent],
+                author: sig.clone(),
+                committer: sig.clone(),
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: None,
+                message: format!("moved add {i}\n"),
+                raw_message: None,
+                extra_headers: Vec::new(),
+            });
+            stack_parent = repo
+                .odb()
+                .write(ObjectKind::Commit, &raw)
+                .expect("stack commit");
+        }
+        let tip = stack_parent;
+        write_ref(repo.git_dir(), "refs/heads/main", &tip).expect("ref");
+        plan_overlap_rebase(&repo, fork, onto, tip);
+    }
+
+    #[test]
+    fn rebase_overlap_add_under_renamed_dir_uses_cached_renames() {
+        use crate::objects::{serialize_commit, CommitData};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let sig = ident(1);
+        let (fork, onto, fork_tree) = wide_rename_fork_onto(&repo, &sig, 80);
+
+        let mut stack_parent = fork;
+        let mut stack_tree = fork_tree;
+        for i in 0..12 {
+            let path = format!("dir/feat-{i}.txt");
+            stack_tree = tree_with_file(&repo, stack_tree, &path, format!("new {i}\n").as_bytes())
+                .expect("stack add under dir");
+            let raw = serialize_commit(&CommitData {
+                tree: stack_tree,
+                parents: vec![stack_parent],
+                author: sig.clone(),
+                committer: sig.clone(),
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: None,
+                message: format!("under dir {i}\n"),
+                raw_message: None,
+                extra_headers: Vec::new(),
+            });
+            stack_parent = repo
+                .odb()
+                .write(ObjectKind::Commit, &raw)
+                .expect("stack commit");
+        }
+        let tip = stack_parent;
+        write_ref(repo.git_dir(), "refs/heads/main", &tip).expect("ref");
+        plan_overlap_rebase(&repo, fork, onto, tip);
+    }
+
+    #[test]
+    #[ignore = "release-profile timing for reviewer fixture (#2271)"]
+    fn rebase_overlap_reviewer_fixture_timing() {
+        use crate::objects::{serialize_commit, CommitData};
+        use std::time::Instant;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let sig = ident(1);
+        let (fork, onto, fork_tree) = wide_rename_fork_onto(&repo, &sig, 500);
+        let mut stack_parent = fork;
+        let mut stack_tree = fork_tree;
+        for i in 0..20 {
+            let path = format!("moved/stack-{i}.txt");
+            stack_tree = tree_with_file(&repo, stack_tree, &path, format!("edit {i}\n").as_bytes())
+                .expect("stack");
             let raw = serialize_commit(&CommitData {
                 tree: stack_tree,
                 parents: vec![stack_parent],
@@ -2353,31 +2557,18 @@ mod merge_call_tests {
         }
         let tip = stack_parent;
         write_ref(repo.git_dir(), "refs/heads/main", &tip).expect("ref");
-
-        let opts = RebaseOntoOptions::new(RewriteOptions {
-            scope: RefScope::Head,
-            empty: EmptyPolicy::Drop,
-            committer: ident(2).parse().expect("signature"),
-            preserve_committer: false,
-            sign: false,
-        });
-        let request = RebaseRequest {
-            upstream: fork,
-            onto: Some(onto),
-            branch_tip: tip,
-        };
         test_reset_merge_tree_call_count();
         test_reset_upstream_delta_scan_count();
-        plan_rebase(&repo, &request, &opts).expect("plan");
-        assert_eq!(
-            test_upstream_delta_scan_count(),
-            1,
-            "fork→onto rename map should be built once per replay session"
+        let start = Instant::now();
+        plan_overlap_rebase(&repo, fork, onto, tip);
+        eprintln!(
+            "reviewer fixture plan: {:.3}s",
+            start.elapsed().as_secs_f64()
         );
-        assert_eq!(
+        eprintln!(
+            "merge calls {} upstream scans {}",
             test_merge_tree_call_count(),
-            0,
-            "disjoint add-only stack should not call full tree merge per commit"
+            test_upstream_delta_scan_count()
         );
     }
 

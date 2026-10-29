@@ -20,14 +20,9 @@ use crate::write_tree::write_tree_partial_from_index;
 
 use super::error::HistoryError;
 
-thread_local! { // hygiene: merge-tree call counter for tests and unstable-bench-helpers
+thread_local! { // hygiene: replay merge metrics for tests and unstable-bench-helpers
     #[cfg(any(test, feature = "unstable-bench-helpers"))]
-    static MERGE_TREE_CALLS: Cell<usize> = const { Cell::new(0) };
-}
-
-thread_local! {
-    #[cfg(any(test, feature = "unstable-bench-helpers"))]
-    static UPSTREAM_DELTA_SCANS: Cell<usize> = const { Cell::new(0) };
+    static REPLAY_MERGE_METRICS: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
 }
 
 /// Test hook: number of three-way tree merges performed by planning.
@@ -35,14 +30,14 @@ thread_local! {
 #[doc(hidden)]
 #[must_use]
 pub fn test_merge_tree_call_count() -> usize {
-    MERGE_TREE_CALLS.with(|c| c.get())
+    REPLAY_MERGE_METRICS.with(|c| c.get().0)
 }
 
 /// Reset [`test_merge_tree_call_count`].
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
 #[doc(hidden)]
 pub fn test_reset_merge_tree_call_count() {
-    MERGE_TREE_CALLS.with(|c| c.set(0));
+    REPLAY_MERGE_METRICS.with(|c| c.set((0, 0)));
 }
 
 /// Test hook: full fork→onto diff/rename scans during replay planning.
@@ -50,24 +45,30 @@ pub fn test_reset_merge_tree_call_count() {
 #[doc(hidden)]
 #[must_use]
 pub fn test_upstream_delta_scan_count() -> usize {
-    UPSTREAM_DELTA_SCANS.with(|c| c.get())
+    REPLAY_MERGE_METRICS.with(|c| c.get().1)
 }
 
 /// Reset [`test_upstream_delta_scan_count`].
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
 #[doc(hidden)]
 pub fn test_reset_upstream_delta_scan_count() {
-    UPSTREAM_DELTA_SCANS.with(|c| c.set(0));
+    REPLAY_MERGE_METRICS.with(|c| c.set((0, 0)));
 }
 
 pub(crate) fn record_merge_call() {
     #[cfg(any(test, feature = "unstable-bench-helpers"))]
-    MERGE_TREE_CALLS.with(|c| c.set(c.get() + 1));
+    REPLAY_MERGE_METRICS.with(|c| {
+        let (merges, scans) = c.get();
+        c.set((merges + 1, scans));
+    });
 }
 
 fn record_upstream_delta_scan() {
     #[cfg(any(test, feature = "unstable-bench-helpers"))]
-    UPSTREAM_DELTA_SCANS.with(|c| c.set(c.get() + 1));
+    REPLAY_MERGE_METRICS.with(|c| {
+        let (merges, scans) = c.get();
+        c.set((merges, scans + 1));
+    });
 }
 
 struct UpstreamDeltaCache {
@@ -75,12 +76,14 @@ struct UpstreamDeltaCache {
     onto_tree: ObjectId,
     touched: HashSet<Vec<u8>>,
     file_old_to_new: HashMap<Vec<u8>, Vec<u8>>,
+    fork_onto_rename_triples: Vec<RenameTriple>,
     dir_rename_roots: HashSet<Vec<u8>>,
 }
 
 enum OverlapTransplant {
     Applied(ObjectId),
-    Skip,
+    Conflict(TreeMergeOutput),
+    NotApplicable,
 }
 
 /// Reuse upstream fork↔onto analysis across many replay transplants in one plan.
@@ -131,6 +134,7 @@ impl ReplayMergeSession {
             diff_trees(odb, Some(&fork_tree), Some(&onto_tree), "").map_err(HistoryError::from)?;
         let touched = paths_from_diff_entries(&entries);
         let rename_pairs = rename_pairs_from_diff(odb, entries)?;
+        let fork_onto_rename_triples = rename_pairs.clone();
         let mut file_old_to_new = HashMap::new();
         for (old, new, _) in &rename_pairs {
             if old != new {
@@ -144,12 +148,12 @@ impl ReplayMergeSession {
                 .collect::<Vec<_>>(),
         );
         let mut dir_rename_roots = HashSet::new();
-        for (old, new, _) in rename_pairs {
-            if is_tree_path(&mut self.merge_cache, odb, &fork_tree, &old)?
-                && is_tree_path(&mut self.merge_cache, odb, &fork_tree, &new)?
+        for (old, new, _) in &rename_pairs {
+            if is_tree_path(&mut self.merge_cache, odb, &fork_tree, old)?
+                && is_tree_path(&mut self.merge_cache, odb, &fork_tree, new)?
             {
-                dir_rename_roots.insert(old);
-                dir_rename_roots.insert(new);
+                dir_rename_roots.insert(old.clone());
+                dir_rename_roots.insert(new.clone());
             }
         }
         for dir in dir_renames.keys().chain(dir_renames.values()) {
@@ -160,6 +164,7 @@ impl ReplayMergeSession {
             onto_tree,
             touched,
             file_old_to_new,
+            fork_onto_rename_triples,
             dir_rename_roots,
         });
         Ok(())
@@ -226,15 +231,19 @@ impl ReplayMergeSession {
 
         if merge_favor == MergeFavor::default() {
             if self.upstream_cache_still_valid(repo, old_parent_tree, new_parent_tree)? {
-                if let OverlapTransplant::Applied(result) = self.try_overlap_transplant(
+                match self.try_overlap_transplant(
                     repo,
                     labels,
                     subject_tree,
                     old_parent_tree,
                     new_parent_tree,
                 )? {
-                    self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
-                    return Ok(result);
+                    OverlapTransplant::Applied(result) => {
+                        self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
+                        return Ok(result);
+                    }
+                    OverlapTransplant::Conflict(merge) => return on_conflict(commit, merge),
+                    OverlapTransplant::NotApplicable => {}
                 }
             } else {
                 self.upstream = None;
@@ -347,10 +356,11 @@ impl ReplayMergeSession {
         new_parent_tree: ObjectId,
     ) -> Result<OverlapTransplant, HistoryError> {
         let Some(upstream) = &self.upstream else {
-            return Ok(OverlapTransplant::Skip);
+            return Ok(OverlapTransplant::NotApplicable);
         };
         let file_old_to_new = upstream.file_old_to_new.clone();
-        let touched = upstream.touched.clone();
+        let fork_onto_rename_triples = upstream.fork_onto_rename_triples.clone();
+        let upstream_touched = upstream.touched.clone();
         let dir_rename_roots = upstream.dir_rename_roots.clone();
         let odb = repo.odb();
         let commit_diff = diff_trees(odb, Some(&old_parent_tree), Some(&subject_tree), "")
@@ -359,16 +369,16 @@ impl ReplayMergeSession {
             return Ok(OverlapTransplant::Applied(new_parent_tree));
         }
         if !commit_diff.iter().all(commit_change_is_simple) {
-            return Ok(OverlapTransplant::Skip);
+            return Ok(OverlapTransplant::NotApplicable);
         }
         let has_overlap = commit_diff.iter().any(|entry| {
             diff_entry_paths(entry).into_iter().any(|path| {
-                touches_upstream(&path, &touched)
+                touches_upstream(&path, &upstream_touched)
                     || touches_dir_rename_root(&path, &dir_rename_roots)
             })
         });
         if !has_overlap {
-            return Ok(OverlapTransplant::Skip);
+            return Ok(OverlapTransplant::NotApplicable);
         }
 
         let directory_renames = self.directory_renames(repo)?;
@@ -380,6 +390,8 @@ impl ReplayMergeSession {
             subject_tree,
             commit_diff,
             &file_old_to_new,
+            &fork_onto_rename_triples,
+            &upstream_touched,
             MergeFavor::default(),
             WhitespaceMergeOptions::default(),
             None,
@@ -389,7 +401,7 @@ impl ReplayMergeSession {
         .map_err(HistoryError::from)?;
 
         if crate::operation::tree_merge_has_conflicts(&merge) {
-            return Ok(OverlapTransplant::Skip);
+            return Ok(OverlapTransplant::Conflict(merge));
         }
         Ok(OverlapTransplant::Applied(merge.result_tree))
     }

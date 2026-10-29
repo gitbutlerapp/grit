@@ -880,6 +880,7 @@ fn merge_bases_into_one(
             presentation,
             DirectoryRenameMode::Off,
             call_depth,
+            None,
         )?;
         tree = materialized_merge_result_tree(repo.odb(), &merged)?;
         folded.push(next);
