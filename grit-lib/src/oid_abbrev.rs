@@ -296,6 +296,44 @@ PY"#;
         assert_eq!(repo.odb().exists_probe_count(), 0);
         Ok(())
     }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn pack_listing_outside_read_context_reuses_the_mapped_index() -> Result<()> {
+        let root = TempDir::new().expect("tempdir");
+        let dir = root.path();
+        git(dir, &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.join("f.txt"), "one\n").expect("write");
+        git(dir, &["add", "f.txt"]);
+        git(
+            dir,
+            &[
+                "-c",
+                "user.name=A",
+                "-c",
+                "user.email=a@e.t",
+                "commit",
+                "-q",
+                "-m",
+                "one",
+            ],
+        );
+        git(dir, &["gc", "--quiet"]);
+
+        let repo = Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("open");
+        let odb = repo.odb();
+        // A log walk reads under the pack-read context; abbreviating its commits afterwards
+        // must see the same index, not map the file a second time.
+        let walked = odb.with_pack_read_context(|| odb.local_pack_indexes())?;
+        let abbreviated = odb.local_pack_indexes()?;
+        assert_eq!(walked.len(), 1);
+        assert_eq!(abbreviated.len(), 1);
+        assert!(std::sync::Arc::ptr_eq(&walked[0], &abbreviated[0]));
+        Ok(())
+    }
 }
 
 fn may_have_loose_objects(repo: &Repository, cache: &mut Option<bool>) -> Result<bool> {

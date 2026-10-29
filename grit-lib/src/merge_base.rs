@@ -939,6 +939,21 @@ impl ReachableWalkState {
         limit: usize,
         cutoffs: ReachableWalkCommitterCutoffs,
     ) -> Result<(Self, Vec<ObjectId>, WalkedCommits)> {
+        // Under the pack-read context the walk reads every commit through one single-pack
+        // reader instead of installing the context and opening a reader per object.
+        repo.odb().with_pack_read_context(|| {
+            Self::page_retaining_commits_in_context(repo, resume, tips, hide, limit, cutoffs)
+        })
+    }
+
+    fn page_retaining_commits_in_context(
+        repo: &Repository,
+        resume: Option<ReachableWalkSnapshot>,
+        tips: &[ObjectId],
+        hide: &[ObjectId],
+        limit: usize,
+        cutoffs: ReachableWalkCommitterCutoffs,
+    ) -> Result<(Self, Vec<ObjectId>, WalkedCommits)> {
         // Sized for the page up front so the id table never exists twice while it grows.
         const MAX_PRESIZE: usize = 1 << 16;
         let mut cache = CommitGraphCache::new(repo);
@@ -2559,6 +2574,8 @@ struct CommitGraphCache<'r> {
     graph: Option<crate::commit_graph_file::CommitGraphChain>,
     /// Monotonic pack cursor for single-pack repos (deep-history benchmarks).
     single_pack: Option<crate::pack::SingleLocalPackReader>,
+    /// Set when [`Self::single_pack`] could not be opened under a matching pack-read context.
+    single_pack_unavailable: bool,
     /// When set, the commit objects [`Self::commit_time_for_heap`] reads from the object
     /// database, so a caller that renders the walked commits does not read them a second time.
     retained: Option<WalkedCommits>,
@@ -2611,6 +2628,7 @@ impl<'r> CommitGraphCache<'r> {
             graft_parents,
             graph,
             single_pack: None,
+            single_pack_unavailable: false,
             retained: None,
             retain_reads: false,
             read_buf: Vec::new(),
@@ -2620,12 +2638,18 @@ impl<'r> CommitGraphCache<'r> {
 
     /// Read `oid` into `buf` and return its kind. Delta bases stay cached, as for
     /// [`crate::odb::Odb::read`].
+    ///
+    /// The single local pack answers first; an object it does not hold (one in an alternate,
+    /// say) is read through the object database, so a walk never mistakes it for missing.
     fn read_object_into(&mut self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<ObjectKind> {
         self.ensure_single_pack_reader();
-        match self.single_pack.as_mut() {
-            Some(reader) => reader.read_object_into_with_delta_policy(oid, true, buf),
-            None => self.repo.odb().read_into_caching_delta_bases(oid, buf),
+        if let Some(reader) = self.single_pack.as_mut() {
+            match reader.read_object_into_with_delta_policy(oid, true, buf) {
+                Err(Error::ObjectNotFound(_)) => {}
+                read => return read,
+            }
         }
+        self.repo.odb().read_into_caching_delta_bases(oid, buf)
     }
 
     /// Parent rewrites can invalidate commit-graph linkage and create ancestry cycles.
@@ -2660,13 +2684,25 @@ impl<'r> CommitGraphCache<'r> {
         f(&mut guard)
     }
 
+    /// Open the reader over the single local pack, once per pack-read context.
+    ///
+    /// Loose objects may exist beside the pack: [`Self::read_object_into`] reads whatever the
+    /// pack lacks through the object database.
     fn ensure_single_pack_reader(&mut self) {
-        if self.single_pack.is_some() || !self.repo.odb().uses_files_primary() {
+        if self.single_pack.is_some()
+            || self.single_pack_unavailable
+            || !self.repo.odb().uses_files_primary()
+        {
             return;
         }
         let objects_dir = self.repo.odb().objects_dir();
-        if let Ok(Some(reader)) = crate::pack::SingleLocalPackReader::open(objects_dir) {
-            self.single_pack = Some(reader);
+        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+            return;
+        }
+        match crate::pack::SingleLocalPackReader::open_allow_loose(objects_dir) {
+            Ok(Some(reader)) => self.single_pack = Some(reader),
+            // Several packs, or none: the listing will not change during this walk.
+            _ => self.single_pack_unavailable = true,
         }
     }
 

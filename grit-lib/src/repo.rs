@@ -549,15 +549,12 @@ impl Repository {
     fn config_load_options(&self, include_system: bool) -> LoadConfigOptions {
         LoadConfigOptions {
             include_system,
-            include_ctx: crate::config::IncludeContext {
-                git_dir: Some(self.git_dir.clone()),
-                cwd: self.environment.cwd.clone(),
-                pwd: self.environment.pwd.clone(),
-                ..Default::default()
-            },
             diagnostics: Some(self.diagnostics()),
-            repo_caches: Some(Arc::clone(&self.caches)),
-            ..Default::default()
+            ..LoadConfigOptions::for_repository(
+                &self.environment,
+                Some(&self.git_dir),
+                Some(Arc::clone(&self.caches)),
+            )
         }
     }
 

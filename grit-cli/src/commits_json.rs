@@ -58,10 +58,8 @@ impl CommitJsonLoader {
                 oid: *oid,
                 subject: subject_line(&data.message),
                 author,
-                author_ident: data.author,
                 timestamp,
                 change_id: resolved.id.as_str().to_owned(),
-                change_id_stored: resolved.stored,
             });
         }
         Ok(summaries)
@@ -99,10 +97,8 @@ impl CommitJsonLoader {
                 oid: row.oid,
                 subject: subject_line(&row.message),
                 author: context::author_display_name(&row.author.name, &row.author.email),
-                author_ident: row.author.header_line(),
                 timestamp: row.author.time.unix_timestamp(),
                 change_id: row.change_id.as_str().to_owned(),
-                change_id_stored: row.change_id_stored,
             });
             json.push(CommitJson::from_loaded(row, now));
         }

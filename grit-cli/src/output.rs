@@ -23,7 +23,6 @@ use std::io::{ErrorKind, IsTerminal, Write};
 use time::OffsetDateTime;
 
 use crate::cli_messages::human_error_message;
-use crate::context::CommitSummary;
 use crate::json_error::structured_json_payload;
 use crate::json_filter::apply_json_filter;
 use crate::stdio;
@@ -326,24 +325,6 @@ pub struct CommitJson {
     pub change_id: String,
     /// `true` when `change_id` came from a `change-id` commit header.
     pub change_id_stored: bool,
-}
-
-impl CommitJson {
-    /// Build from a [`CommitSummary`] when ref decorations were not loaded.
-    pub fn from_summary(commit: &CommitSummary, now: i64) -> Self {
-        Self {
-            oid: commit.oid.to_hex(),
-            parents: Vec::new(),
-            author: Person::from_identity_line(&commit.author_ident),
-            committer: Person::from_identity_line(&commit.author_ident),
-            subject: commit.subject.clone(),
-            message: commit.subject.clone(),
-            refs: Vec::new(),
-            relative_date: Some(crate::context::relative_date_from(commit.timestamp, now)),
-            change_id: commit.change_id.clone(),
-            change_id_stored: commit.change_id_stored,
-        }
-    }
 }
 
 /// A single worktree/index change in JSON output.

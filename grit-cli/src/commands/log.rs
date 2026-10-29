@@ -182,7 +182,7 @@ impl HumanRender for LogOutcome {
             let empty = if self.display.oneline {
                 self.oneline_lines.is_empty()
             } else {
-                self.commits.is_empty()
+                self.commit_rows.is_empty()
             };
             if empty {
                 outln!(w, "No commits yet.");
@@ -203,22 +203,25 @@ impl HumanRender for LogOutcome {
                 outln!(w, "{line}");
             }
         } else {
-            for (row, (commit, diff)) in ui::commit_rows(&self.commit_rows, now)
-                .iter()
-                .zip(self.commits.iter().zip(&self.commit_diffs))
-            {
-                let row = if self.display.decorate {
-                    decorate_commit_row(row, &commit.commit.refs, head_branch)
-                } else {
-                    row.clone()
-                };
-                outln!(w, "{row}");
+            // `commits` and `commit_diffs` are empty when the rows need neither refs nor diffs.
+            for (i, row) in ui::commit_rows(&self.commit_rows, now).iter().enumerate() {
+                let commit = self.commits.get(i);
+                let diff = self.commit_diffs.get(i).and_then(Option::as_ref);
+                let stat = commit.and_then(|c| c.stat.as_ref());
+                match commit {
+                    Some(commit) if self.display.decorate => outln!(
+                        w,
+                        "{}",
+                        decorate_commit_row(row, &commit.commit.refs, head_branch)
+                    ),
+                    _ => outln!(w, "{row}"),
+                }
                 if let Some(outcome) = diff {
                     render_log_commit_diff(w, outcome)?;
-                } else if let Some(stat) = &commit.stat {
+                } else if let Some(stat) = stat {
                     render_stat(w, stat, color, None)?;
                 }
-                if diff.is_some() || commit.stat.is_some() {
+                if diff.is_some() || stat.is_some() {
                     outln!(w);
                 }
             }
@@ -903,26 +906,14 @@ fn build_commit_outcome(
         });
     }
 
+    // Without refs, diffs or JSON output, human and Markdown rows render from the summaries
+    // alone, so no JSON commit rows are built.
     let (commits, commit_rows, commit_diffs) = if need_commit_details {
         load_commits_with_format_for_oids(repo, oids, format, path_args, parsed, !json_output)?
     } else {
         let summaries = CommitJsonLoader::load_summaries_only(repo, oids, &mut parsed)?;
         drop(parsed);
-        let json_rows = summaries
-            .iter()
-            .map(|s| CommitJson::from_summary(s, now))
-            .collect::<Vec<_>>();
-        let commits: Vec<LogCommit> = json_rows
-            .into_iter()
-            .map(|commit| LogCommit {
-                commit,
-                files: None,
-                totals: None,
-                stat: None,
-            })
-            .collect();
-        let diffs = (0..commits.len()).map(|_| None).collect();
-        (commits, summaries, diffs)
+        (Vec::new(), summaries, Vec::new())
     };
 
     let head_branch_ref = head_branch.as_deref();
@@ -947,7 +938,7 @@ fn build_commit_outcome(
         build_graph_text_lines(
             repo,
             oids,
-            Some(&commits),
+            (!commits.is_empty()).then_some(commits.as_slice()),
             &commit_rows,
             display,
             head_branch_ref,
@@ -1126,10 +1117,10 @@ fn append_graph_block_lines(
                 render_oneline_from_summary(repo, summary)?
             }
         } else {
-            let commit =
-                commit.ok_or_else(|| anyhow::anyhow!("internal error: missing log commit row"))?;
             let row = ui::commit_rows(std::slice::from_ref(summary), now)[0].clone();
             if display.decorate {
+                let commit = commit
+                    .ok_or_else(|| anyhow::anyhow!("internal error: missing log commit row"))?;
                 decorate_commit_row(&row, &commit.commit.refs, head_branch)
             } else {
                 row

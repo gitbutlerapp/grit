@@ -144,6 +144,76 @@ mod tests {
         assert_at_most_config_loads("rev_list", 2);
     }
 
+    /// An environment that reads no system or user config, so only the repository's files load.
+    fn isolated_env(cwd: &Path) -> Environment {
+        let mut env = Environment::empty();
+        env.cwd = cwd.to_path_buf();
+        env.git_config_nosystem = Some("true".into());
+        env.git_config_global = Some("/dev/null".into());
+        env
+    }
+
+    #[test]
+    fn repository_open_parses_config_cascade_once() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        init_repo(root);
+        let options = RepositoryOptions::with_environment(isolated_env(root))
+            .with_work_tree(root.to_path_buf());
+
+        let repo = cascade_load_counters::measure(|| {
+            let repo = Repository::discover(Some(root), &options).expect("discover");
+            // The object format and object database settings read the cascade the open loaded.
+            let _ = repo.odb().hash_algo();
+            repo.odb().big_file_threshold().expect("big file threshold");
+            repo
+        });
+        assert_eq!(
+            cascade_load_counters::uncached_loads(),
+            1,
+            "discover parsed the config cascade more than once"
+        );
+
+        let shared = repo.odb().load_config_cascade().expect("odb config");
+        let session = repo.config().expect("repository config");
+        assert!(
+            std::sync::Arc::ptr_eq(&shared, &session),
+            "the object database must reuse the repository's config snapshot"
+        );
+    }
+
+    #[test]
+    fn odb_config_honors_gitdir_conditional_includes() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let git_dir = repo.git_dir().to_path_buf();
+        fs::write(
+            git_dir.join("odb.conf"),
+            "[core]\n\tbigFileThreshold = 4k\n",
+        )
+        .unwrap();
+        let mut config = fs::read_to_string(git_dir.join("config")).unwrap();
+        let work_tree = git_dir.parent().expect("work tree");
+        config.push_str(&format!(
+            "[includeIf \"gitdir:{}/\"]\n\tpath = odb.conf\n",
+            work_tree.display()
+        ));
+        fs::write(git_dir.join("config"), config).unwrap();
+
+        let reopened = Repository::open(
+            &git_dir,
+            &RepositoryOptions::with_environment(isolated_env(root))
+                .with_work_tree(root.to_path_buf()),
+        )
+        .expect("open");
+        assert_eq!(
+            reopened.config().unwrap().get("core.bigFileThreshold"),
+            Some("4k".to_owned())
+        );
+        assert_eq!(reopened.odb().big_file_threshold().unwrap(), 4096);
+    }
+
     #[test]
     fn repository_config_revalidates_global_cascade_stamps() {
         let tmp = TempDir::new().unwrap();

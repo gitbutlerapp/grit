@@ -9,6 +9,76 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds. The daily census behind the [Performance overview](performance-overview.md) measures the shipped **`dist`** build since 2026-10-28; see [Benchmarking](benchmarking.md#grit-bench-daily-factory-census) for what that switch did to every baseline.
 
+## Log pages: one config parse, one pack reader (2026-10-29)
+
+`grit log --limit 100` on git.git spends about as long per commit as Git (grit's
+inflate is faster than system zlib), so the gap is fixed cost. Four pieces of
+that cost were repeated work:
+
+- Opening a repository parsed the config cascade twice. `Odb::hash_algo` runs
+  while the ref store is set up and loaded the cascade under its own cache key,
+  so the repository's config session missed it and parsed every file again.
+  Both now share one entry, and the cache hands out its `Arc<ConfigSet>`
+  instead of deep-copying every entry for each reader. Every command that
+  opens a repository saves about 0.1 ms.
+- The log page walk never ran under the object database's pack-read context,
+  so its single-pack reader stayed closed and each commit read installed the
+  context and opened a reader again (250 reader opens for 100 commits). The
+  walk now reads through one reader. Objects that reader does not hold
+  (loose ones, or ones in an alternate) are read through the object database,
+  so they never look like missing parents.
+- Abbreviating commit ids after the walk listed the pack indexes outside that
+  context, so `grit log --oneline` mapped git.git's 10 MB `.idx` a second time
+  (4.5 MB more resident, 0.2 ms).
+- Plain human and Markdown rows built a JSON row per commit (hex id, two parsed
+  identities with RFC 3339 dates, a relative date) that only `--json` and
+  `--decorate` read.
+
+Measured on a 4-vCPU Intel Xeon VM, system Git 2.43.0, `dist` builds of main
+(`1e65b2ed2`) and of the change, in one sitting of four `grit-bench daily`
+runs ordered main, change, change, main (15 timed runs after 5 warmups each).
+Times average the two medians per binary. Peak RSS is the lower of each
+binary's two single samples. Output of `grit log` is byte-identical in human,
+Markdown and `--json` modes, with and without `--graph`, `--decorate`,
+`--stat`, `-p`, paths and filters.
+
+| Scenario | Git ms | Main ms | Change ms | Main KiB | Change KiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `log/oneline-100@git-git` | 2.92 | 3.59 | 3.52 | 19,584 | 20,192 |
+| `log/oneline-100@synth-100k` | 2.22 | 2.98 | 2.72 | 15,860 | 16,404 |
+| `log/all@git-git` | 45.10 | 53.04 | 44.64 | 34,548 | 33,388 |
+| `log/json-100@git-git` | 2.98 | 3.98 | 3.94 | 20,808 | 21,276 |
+| `log/author@git-git` | 2.33 | 3.68 | 3.65 | 18,632 | 19,400 |
+| `log/path@git-git` | 343.28 | 359.87 | 353.10 | 273,700 | 274,136 |
+| `shortlog/ahead@git-git` | 16.16 | 2.15 | 2.08 | 11,808 | 12,000 |
+| `show/head@git-git` | 1.91 | 2.63 | 2.56 | 13,552 | 14,048 |
+
+`log/stat-n50`, `log/author-n50@deep-history-cg`, `log/json-filter`,
+`log/limit-path` and `log/json-n10-loose-tags` came out 1–3% slower in this
+sitting. Separate interleaved checks of the same commands (40–200 runs per
+binary, alternating) had the change level or 1–4% ahead on every one of them.
+Interleaved runs of `log --limit 100` alone measure 3.50 ms on main and 3.23 ms
+with the change.
+
+Peak RSS reads about 0.5 MB higher with the change on most rows, including
+`status`, which none of these changes touch. The heap is 100 KB smaller and
+`.text` is 7 KB smaller. What moved is which 64 KB fault-around windows of
+the 24 MB text segment the run touches: rebuilding under fat LTO reshuffles
+function placement (see
+[`show` HEAD is startup-bound](#show-head-is-startup-bound-2026-10-28)). The
+only RSS this change adds by design is two more `.idx` windows (128 KB) that
+the single-pack reader's ordered lookups touch. Raw samples:
+[`daily-log-startup-5443-before-1.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-log-startup-5443-before-1.json),
+[`daily-log-startup-5443-after-1.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-log-startup-5443-after-1.json),
+[`daily-log-startup-5443-after-2.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-log-startup-5443-after-2.json)
+and
+[`daily-log-startup-5443-before-2.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-log-startup-5443-before-2.json).
+
+What remains of the gap on `log/oneline-100@git-git` is process-wide: about
+110 PIE relocation faults, code pages spread over the text segment (6.9 MB
+resident against Git's 1.8 MB), and clap copying every global flag into each
+of the 55 subcommands before parsing (270 KB of the 375 KB heap peak).
+
 ## Clean status: tracked files leave the untracked walk early (2026-10-29)
 
 Most entries in a work-tree directory are tracked files, and the untracked walk has nothing to report for them. It still copied each name, built the file's path, looked it up in a hash set of every index path, and sorted the whole listing. That set took one insert per entry and was built serially before the walk could start. The walk also opened every directory's `.gitignore` as it entered the directory. On `status/clean@synth-10k` the walk used about 6 ms of CPU across four threads, where Git's single-threaded walk uses about 2.3 ms.
