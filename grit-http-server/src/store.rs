@@ -17,7 +17,10 @@
 //! them. A password an admin generates for someone is *temporary*: the user
 //! must choose their own the first time they sign in.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+#[cfg(any(windows, test))]
+use std::borrow::Cow;
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
@@ -352,6 +355,67 @@ fn user_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
     })
 }
 
+/// Longest path, in UTF-16 units, that Win32 accepts without a `\\?\` prefix.
+#[cfg(any(windows, test))]
+const WIN32_MAX_PATH_UNITS: usize = 259;
+
+/// Whether `path` looks like an absolute Win32 path (including on non-Windows test hosts).
+#[cfg(any(windows, test))]
+fn looks_like_windows_absolute(path: &str) -> bool {
+    if path.starts_with(r"\\") {
+        return true;
+    }
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
+}
+
+/// Windows spelling passed to SQLite when `path` exceeds [`WIN32_MAX_PATH_UNITS`].
+///
+/// Relative paths and paths that already use `\\?\` or `\\?\UNC\` are unchanged.
+/// Other paths are absoluteized first; only over-long absolute paths gain the
+/// extended-length prefix (with `/` turned into `\`, because normalization is
+/// disabled). Non-Windows builds return `path` unchanged.
+#[cfg(any(windows, test))]
+fn win32_sqlite_open_path_str(path: &str) -> Cow<'_, str> {
+    if path.starts_with(r"\\?\") {
+        return Cow::Borrowed(path);
+    }
+    if !Path::new(path).is_absolute() && !looks_like_windows_absolute(path) {
+        return Cow::Borrowed(path);
+    }
+    let normalized = path.replace('/', "\\");
+    if normalized.encode_utf16().count() <= WIN32_MAX_PATH_UNITS {
+        return Cow::Owned(normalized);
+    }
+    if let Some(rest) = normalized.strip_prefix(r"\\") {
+        return Cow::Owned(format!(r"\\?\UNC\{rest}"));
+    }
+    Cow::Owned(format!(r"\\?\{normalized}"))
+}
+
+#[cfg(windows)]
+fn sqlite_connection_open_path(path: &Path) -> PathBuf {
+    if path.to_str().is_some() {
+        if path.starts_with(r"\\?\") {
+            return path.to_path_buf();
+        }
+        if path.is_absolute() {
+            let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+            let abs_str = abs.to_string_lossy();
+            return PathBuf::from(win32_sqlite_open_path_str(&abs_str).into_owned());
+        }
+    }
+    path.to_path_buf()
+}
+
+#[cfg(not(windows))]
+fn sqlite_connection_open_path(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
 /// The SQLite-backed user, token and grant store.
 pub struct AuthStore {
     conn: Connection,
@@ -360,11 +424,17 @@ pub struct AuthStore {
 impl AuthStore {
     /// Open the database at `path`, creating it and its tables when missing.
     ///
+    /// On Windows, when `path` resolves to more than 259 UTF-16 units, the file
+    /// is opened through the `\\?\` extended-length prefix so SQLite can create
+    /// the database beside a long `--root` path. The path reported to callers
+    /// (for example `grit serve --json`) is unchanged.
+    ///
     /// # Errors
     ///
     /// [`StoreError::Sqlite`] when the file cannot be opened or initialised.
     pub fn open(path: &Path) -> Result<Self> {
-        Self::init(Connection::open(path)?)
+        let open_path = sqlite_connection_open_path(path);
+        Self::init(Connection::open(open_path)?)
     }
 
     /// Open a private in-memory database (for tests).
@@ -889,6 +959,82 @@ mod tests {
         assert_eq!(a.secret().len(), Token::PREFIX.len() + 40);
         assert_ne!(a, b);
         assert_eq!(format!("{a:?}"), "Token(..)");
+    }
+
+    #[test]
+    fn win32_sqlite_open_path_str_leaves_short_and_relative_paths() {
+        assert_eq!(win32_sqlite_open_path_str("serve.db").as_ref(), "serve.db");
+        assert_eq!(
+            win32_sqlite_open_path_str(r"C:\srv\grit-serve.db").as_ref(),
+            r"C:\srv\grit-serve.db"
+        );
+        assert_eq!(
+            win32_sqlite_open_path_str(r"\\?\C:\srv\grit-serve.db").as_ref(),
+            r"\\?\C:\srv\grit-serve.db"
+        );
+    }
+
+    #[test]
+    fn win32_sqlite_open_path_str_adds_verbatim_prefix_when_too_long() {
+        let tail = "d".repeat(WIN32_MAX_PATH_UNITS - r"C:\".len() + 1);
+        let drive = format!(r"C:\{tail}\grit-serve.db");
+        assert_eq!(
+            win32_sqlite_open_path_str(&drive).as_ref(),
+            format!(r"\\?\{drive}")
+        );
+        let unc_tail = "d".repeat(WIN32_MAX_PATH_UNITS - r"\\srv\share\".len() + 1);
+        let unc = format!(r"\\srv\share\{unc_tail}\grit-serve.db");
+        assert_eq!(
+            win32_sqlite_open_path_str(&unc).as_ref(),
+            format!(r"\\?\UNC\srv\share\{unc_tail}\grit-serve.db")
+        );
+    }
+
+    #[test]
+    fn win32_sqlite_open_path_str_normalizes_slashes_for_verbatim_paths() {
+        let tail = "d".repeat(WIN32_MAX_PATH_UNITS - r"C:\".len() + 1);
+        let drive = format!("C:/{tail}/grit-serve.db");
+        assert_eq!(
+            win32_sqlite_open_path_str(&drive).as_ref(),
+            format!(r"\\?\C:\{tail}\grit-serve.db")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sqlite_opens_database_under_overlong_directory() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let mut deep = root.path().to_path_buf();
+        loop {
+            let db_candidate = deep.join("grit-serve.db");
+            let abs = std::path::absolute(&db_candidate).expect("absolute");
+            if abs.to_string_lossy().encode_utf16().count() > WIN32_MAX_PATH_UNITS {
+                break;
+            }
+            deep.push("d".repeat(30));
+        }
+        let deep_abs = std::path::absolute(&deep).expect("absolute");
+        let deep_open =
+            PathBuf::from(win32_sqlite_open_path_str(&deep_abs.to_string_lossy()).into_owned());
+        std::fs::create_dir_all(&deep_open).expect("create long directory");
+        // Plain absolute path (no `\\?\`), matching grit serve's default database location.
+        let db = deep_abs.join("grit-serve.db");
+        let email = "admin@example.com";
+        {
+            let mut store = ok(AuthStore::open(&db));
+            ok(store.setup(email, &password("hunter2hunter2"), false));
+        }
+        let db_on_disk =
+            PathBuf::from(win32_sqlite_open_path_str(&db.to_string_lossy()).into_owned());
+        let db_display = db_on_disk.to_string_lossy();
+        assert!(
+            !Path::new(&format!("{db_display}-journal")).exists()
+                && !Path::new(&format!("{db_display}-wal")).exists(),
+            "default rollback journal should not leave -journal/-wal siblings"
+        );
+        let verbatim_db = PathBuf::from(format!(r"\\?\{}", db.to_string_lossy()));
+        let store = ok(AuthStore::open(&verbatim_db));
+        assert_eq!(ok(store.user(email)).map(|u| u.email.as_str()), Some(email));
     }
 
     #[test]
