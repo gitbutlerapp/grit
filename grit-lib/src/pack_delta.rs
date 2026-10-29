@@ -55,13 +55,16 @@ enum PreparedBody {
     /// zlib-compressed delta copied verbatim from a local pack (header written in the
     /// serial stage).
     ReusedZlib(PackSlice),
+    /// Whole object streamed from the ODB at emit time (large loose blobs).
+    StreamWhole { oid: ObjectId, kind: ObjectKind },
 }
 
 impl PreparedBody {
-    fn as_slice(&self) -> &[u8] {
+    fn as_slice(&self) -> Option<&[u8]> {
         match self {
-            Self::Raw(slice) | Self::ReusedZlib(slice) => slice.as_slice(),
-            Self::Zlib(bytes) => bytes,
+            Self::Raw(slice) | Self::ReusedZlib(slice) => Some(slice.as_slice()),
+            Self::Zlib(bytes) => Some(bytes),
+            Self::StreamWhole { .. } => None,
         }
     }
 }
@@ -206,6 +209,7 @@ fn write_pack_in_batches(
                 let kind = prep.whole_kind.unwrap_or(entry.kind);
                 encode_pack_object_header(&mut header, pack_type_code(kind), prep.payload_len);
             }
+            (None, PreparedBody::StreamWhole { .. }) => {}
             (Some(base_oid), _) => {
                 let in_pack_offset = oid_to_offset.get(&base_oid).copied();
                 if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
@@ -231,21 +235,39 @@ fn write_pack_in_batches(
                 }
             }
         }
-        let body = prep.body.as_slice();
         out.write_all(&header).map_err(Error::Io)?;
-        out.write_all(body).map_err(Error::Io)?;
+        let (body_len, entry_crc) = match &prep.body {
+            PreparedBody::StreamWhole { oid, kind, .. } => {
+                let mut crc_out = crate::pack_objects::CrcWriter::new(&mut out, &header);
+                let n = crate::pack_objects::write_whole_pack_object_to_odb(
+                    &mut crc_out,
+                    odb,
+                    *oid,
+                    *kind,
+                    opts,
+                )?;
+                (n, crc_out.finalize())
+            }
+            body => {
+                let bytes = body
+                    .as_slice()
+                    .ok_or_else(|| Error::CorruptObject("missing prepared pack body".to_owned()))?;
+                out.write_all(bytes).map_err(Error::Io)?;
+                let mut crc = crc32fast::Hasher::new();
+                crc.update(&header);
+                crc.update(bytes);
+                (bytes.len() as u64, crc.finalize())
+            }
+        };
         if let Some(rows) = index_rows.as_deref_mut() {
-            let mut crc = crc32fast::Hasher::new();
-            crc.update(&header);
-            crc.update(body);
-            rows.push((entry.oid, offset, crc.finalize()));
+            rows.push((entry.oid, offset, entry_crc));
         }
         if prep.reused {
             verbatim_reuse_objects += 1;
-            verbatim_reuse_bytes += body.len() as u64;
+            verbatim_reuse_bytes += body_len;
         }
         oid_to_offset.insert(entry.oid, offset);
-        offset += (header.len() + body.len()) as u64;
+        offset += header.len() as u64 + body_len;
         Ok(())
     };
     let prepare = |batch: &[PlannedEntry]| prepare_batch(odb, batch, opts, compression);
@@ -344,6 +366,21 @@ fn prepare_whole(
                 reused: true,
             });
         }
+    }
+    let info = odb.read_info(&entry.oid)?;
+    if entry.kind == ObjectKind::Blob && info.size >= odb.big_file_threshold()? {
+        let payload_len = usize::try_from(info.size).map_err(|_| {
+            Error::CorruptObject(format!("object size overflow for {}", entry.oid.to_hex()))
+        })?;
+        return Ok(PreparedEntry {
+            body: PreparedBody::StreamWhole {
+                oid: entry.oid,
+                kind: entry.kind,
+            },
+            payload_len,
+            whole_kind: Some(entry.kind),
+            reused: false,
+        });
     }
     let payload = odb.read(&entry.oid)?.data;
     let zlib = zlib_compress(&payload, compression)?;
