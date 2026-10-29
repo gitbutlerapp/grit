@@ -254,7 +254,7 @@ pub fn merge(input: &MergeInput<'_>) -> Result<MergeOutput> {
                             }
                         } else if matches!(input.style, ConflictStyle::Merge) {
                             let (prefix_len, suffix_len) =
-                                common_prefix_suffix_merge_lines(ours, theirs);
+                                common_prefix_suffix_merge_lines(ours, theirs, &ws_mode);
                             let pre = &ours[..prefix_len];
                             let suf_start = ours.len().saturating_sub(suffix_len);
                             let o_mid = &ours[prefix_len..suf_start];
@@ -458,23 +458,48 @@ fn strip_line_terminator(line: &[u8]) -> &[u8] {
     line
 }
 
-/// Compare two lines ignoring trailing newline / CR conventions (matches git `xdl_recmatch` for EOL).
-fn merge_line_equal(a: &[u8], b: &[u8]) -> bool {
-    strip_line_terminator(a) == strip_line_terminator(b)
+/// Line body used for merge comparison: drop the record-separating `\n`, but keep a `\r` that
+/// precedes `\n` unless [`WhitespaceMode::ignore_cr_at_eol`] (git record hash / `xdl_recmatch`).
+fn line_content_for_merge_compare(line: &[u8], mode: &WhitespaceMode) -> Vec<u8> {
+    let (body, from_crlf_record) = if line.ends_with(b"\r\n") {
+        (&line[..line.len() - 1], true)
+    } else if line.ends_with(b"\n") {
+        (&line[..line.len() - 1], false)
+    } else {
+        // Incomplete final line: keep a lone trailing `\r` (git does not treat it like `\r\n`).
+        (line, false)
+    };
+    let mut bytes = body.to_vec();
+    if mode.ignore_cr_at_eol && from_crlf_record && bytes.last() == Some(&b'\r') {
+        bytes.pop();
+    }
+    normalize_line_for_compare(&bytes, mode)
 }
 
-/// Compare two line sequences line-by-line, ignoring trailing-newline conventions on each line.
+/// Compare two lines for merge equality (git `xdl_recmatch` / `xdl_merge_cmp_lines`).
+fn merge_line_equal(a: &[u8], b: &[u8], mode: &WhitespaceMode) -> bool {
+    line_content_for_merge_compare(a, mode) == line_content_for_merge_compare(b, mode)
+}
+
+/// Compare two line sequences line-by-line for merge equality.
 /// Mirrors git `xdl_merge_cmp_lines`, used to auto-resolve a both-sides-changed region when the
 /// two postimages are textually identical.
-fn merge_lines_equal(a: &[Vec<u8>], b: &[Vec<u8>]) -> bool {
-    a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| merge_line_equal(x, y))
+fn merge_lines_equal(a: &[Vec<u8>], b: &[Vec<u8>], mode: &WhitespaceMode) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b.iter())
+            .all(|(x, y)| merge_line_equal(x, y, mode))
 }
 
-fn common_prefix_suffix_merge_lines(ours: &[Vec<u8>], theirs: &[Vec<u8>]) -> (usize, usize) {
+fn common_prefix_suffix_merge_lines(
+    ours: &[Vec<u8>],
+    theirs: &[Vec<u8>],
+    mode: &WhitespaceMode,
+) -> (usize, usize) {
     let mut prefix = 0usize;
     while prefix < ours.len()
         && prefix < theirs.len()
-        && merge_line_equal(&ours[prefix], &theirs[prefix])
+        && merge_line_equal(&ours[prefix], &theirs[prefix], mode)
     {
         prefix += 1;
     }
@@ -485,6 +510,7 @@ fn common_prefix_suffix_merge_lines(ours: &[Vec<u8>], theirs: &[Vec<u8>]) -> (us
         && merge_line_equal(
             &ours[ours.len() - 1 - suffix],
             &theirs[theirs.len() - 1 - suffix],
+            mode,
         )
     {
         suffix += 1;
@@ -740,6 +766,7 @@ fn compute_hunks(
             &theirs_inserts,
             ours,
             theirs,
+            ws_mode,
             &mut hunks,
         );
 
@@ -764,7 +791,7 @@ fn compute_hunks(
                 end += 1;
             }
             let terminator_only_diff = base.len() == ours.len()
-                && (pos..end).all(|i| merge_line_equal(&base[i], &ours[i]))
+                && (pos..end).all(|i| merge_line_equal(&base[i], &ours[i], ws_mode))
                 && (pos..end).any(|i| base[i] != ours[i]);
             let unchanged_lines = if ws_mode.ignore_all_space
                 || ws_mode.ignore_space_change
@@ -830,7 +857,7 @@ fn compute_hunks(
                 // postimages): the change is taken once instead of conflicting. Only a genuine
                 // textual difference becomes a conflict (see t3424 `--empty=keep`, where a commit
                 // whose change is already present in upstream merges cleanly and becomes empty).
-                if merge_lines_equal(&o, &t) {
+                if merge_lines_equal(&o, &t, ws_mode) {
                     hunks.push(Hunk::OnlyOurs {
                         base: base[pos..end].to_vec(),
                         ours: o,
@@ -896,6 +923,7 @@ fn emit_inserts_at(
     theirs_inserts: &[Vec<(usize, usize)>],
     ours: &[Vec<u8>],
     theirs: &[Vec<u8>],
+    ws_mode: &WhitespaceMode,
     hunks: &mut Vec<Hunk>,
 ) {
     let o_ins = &ours_inserts[pos];
@@ -949,7 +977,7 @@ fn emit_inserts_at(
         if !ours_tail.is_empty() || !theirs_tail.is_empty() {
             // Identical insertions on both sides auto-resolve to a single copy (git
             // `xdl_merge`); only a genuine textual difference conflicts.
-            if merge_lines_equal(&ours_tail, &theirs_tail) {
+            if merge_lines_equal(&ours_tail, &theirs_tail, ws_mode) {
                 hunks.push(Hunk::OnlyOurs {
                     base: Vec::new(),
                     ours: ours_tail,
@@ -1145,10 +1173,12 @@ fn merge_adjacent_replace_and_trailing_insert_conflicts(hunks: Vec<Hunk>) -> Vec
                     theirs: t,
                 }),
             ) if !base.is_empty() && bt.is_empty() && !t.is_empty() && !ours.is_empty() => {
+                let mut conflict_theirs = base.clone();
+                conflict_theirs.extend(t.iter().cloned());
                 Some(Hunk::Conflict {
                     base: base.clone(),
                     ours: ours.clone(),
-                    theirs: t.clone(),
+                    theirs: conflict_theirs,
                 })
             }
             // A pure insertion by one side immediately *before* a base line the other side
@@ -1393,24 +1423,19 @@ struct WhitespaceMode {
 fn normalize_lines_for_compare(lines: &[Vec<u8>], mode: &WhitespaceMode) -> Vec<Vec<u8>> {
     lines
         .iter()
-        .map(|line| normalize_line_for_compare(line, mode))
+        .map(|line| line_content_for_merge_compare(line, mode))
         .collect()
 }
 
 fn lines_for_merge_diff_compare(lines: &[Vec<u8>], mode: &WhitespaceMode) -> Vec<Vec<u8>> {
     lines
         .iter()
-        .map(|line| normalize_line_for_compare(strip_line_terminator(line), mode))
+        .map(|line| line_content_for_merge_compare(line, mode))
         .collect()
 }
 
 fn normalize_line_for_compare(line: &[u8], mode: &WhitespaceMode) -> Vec<u8> {
     let mut bytes = line.to_vec();
-
-    if mode.ignore_cr_at_eol && bytes.ends_with(b"\r\n") {
-        let len = bytes.len();
-        bytes.remove(len - 2);
-    }
 
     if mode.ignore_all_space {
         return bytes

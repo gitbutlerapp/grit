@@ -528,3 +528,90 @@ fn write_merge_tree_fast_forwardable_merge_yields_tip_tree() {
         repo.objects().commit_tree(&main).expect("tree")
     );
 }
+
+/// Issue #2259 reproduction: CRLF on main plus an edit on theirs must conflict like git merge-tree.
+fn issue_2259_eol_merge_repo() -> (tempfile::TempDir, ObjectId, ObjectId) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.email", "d@e.com"]);
+    git(root, &["config", "user.name", "D"]);
+    git(root, &["config", "core.autocrlf", "false"]);
+
+    std::fs::write(root.join("t.txt"), b"a\nb\nc\nd\n").expect("base file");
+    git(root, &["add", "t.txt"]);
+    git(root, &["commit", "-m", "base"]);
+
+    git(root, &["switch", "-c", "theirs"]);
+    std::fs::write(root.join("t.txt"), b"a\nB\nc\nd\n").expect("theirs file");
+    git(root, &["commit", "-am", "theirs"]);
+    let theirs = rev(root, "HEAD");
+
+    git(root, &["switch", "main"]);
+    std::fs::write(root.join("t.txt"), b"a\r\nb\r\nc\r\nd\r\n").expect("ours file");
+    git(root, &["commit", "-am", "ours"]);
+    let main = rev(root, "HEAD");
+
+    (tmp, main, theirs)
+}
+
+#[test]
+fn issue_2259_predict_and_write_merge_tree_match_git() {
+    if !git_version_at_least(2, 38) {
+        eprintln!("SKIP: git merge-tree --write-tree requires git >= 2.38");
+        return;
+    }
+    let (tmp, main, theirs) = issue_2259_eol_merge_repo();
+    let root = tmp.path();
+    let repo = grit_repo(root);
+
+    let options = MergePredictionOptions {
+        ours_label: main.to_hex(),
+        theirs_label: theirs.to_hex(),
+        ..MergePredictionOptions::default()
+    };
+    let prediction = predict_merge(&repo, main, theirs, &options).expect("predict_merge");
+    assert!(
+        matches!(prediction, MergePrediction::Conflicts { .. }),
+        "merge --check must report conflicts, not clean"
+    );
+
+    let written = write_merge_tree(&repo, main, theirs, &options).expect("write_merge_tree");
+    assert!(!written.is_clean());
+    assert_eq!(written.conflicts.len(), 1);
+    assert_eq!(written.conflicts[0].path, "t.txt");
+
+    let oracle = git_merge_tree_oracle(root, None, &main, &theirs, MergeFavor::None);
+    assert_eq!(
+        written.tree, oracle.result_tree,
+        "merged tree must match git merge-tree --write-tree"
+    );
+    let merged_blob = git(
+        root,
+        &["cat-file", "-p", &format!("{}:t.txt", written.tree)],
+    );
+    let git_merged_blob = git(
+        root,
+        &["cat-file", "-p", &format!("{}:t.txt", oracle.result_tree)],
+    );
+    assert_eq!(
+        merged_blob, git_merged_blob,
+        "conflicted t.txt blob must match git"
+    );
+    assert!(merged_blob.contains("<<<<<<< "), "{merged_blob}");
+
+    let rows: Vec<GitUnmergedRow> = written
+        .stages
+        .iter()
+        .map(|s| GitUnmergedRow {
+            mode: s.mode,
+            oid: s.oid,
+            stage: u32::from(s.stage),
+            path: String::from_utf8(s.path.clone()).expect("utf-8 path"),
+        })
+        .collect();
+    assert_eq!(
+        rows, oracle.unmerged,
+        "unmerged index stages must match git merge-tree"
+    );
+}
