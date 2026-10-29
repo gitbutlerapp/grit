@@ -1151,7 +1151,7 @@ fn checkout_prepared_tree_transition(
         progress,
         cancel,
         CheckoutApplyOptions {
-            parallel_prepare_blobs: true,
+            parallel_prepare_blobs: false,
             checkout_parallel_threshold: None,
             trust_wholesale_dir_removal: prepared.trust_wholesale_dir_removal,
             preverified_wholesale_dirs: prepared.preverified_wholesale_dirs,

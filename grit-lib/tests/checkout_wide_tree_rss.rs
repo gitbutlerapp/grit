@@ -1,20 +1,18 @@
-//! Wide-tree checkout (many modified paths) must not retain O(changed files) planning buffers.
+//! Wide-tree checkout must stay within ~2× system git peak RSS (issue #2280).
+//!
+//! Peak RSS is measured on the process that execs `git` or `grit` via `fork`/`wait4`,
+//! matching the review harness (not in-process library calls).
 
 #![cfg(target_os = "linux")]
 
 use std::io::Write;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
-use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
-use grit_lib::progress::{NeverCancel, NullProgress};
-use grit_lib::repo::Repository;
-
 const DIRS: u32 = 30;
-const FILES_PER_DIR: u32 = 150;
-/// Half the tree rewritten on each branch (~22.5k paths at full scale; scaled here for CI).
+const FILES_PER_DIR: u32 = 1500;
 const DIRS_OTHER: u32 = 15;
 
 fn git(root: &Path, args: &[&str], input: &[u8]) -> String {
@@ -47,20 +45,33 @@ fn git(root: &Path, args: &[&str], input: &[u8]) -> String {
     String::from_utf8(out.stdout).expect("UTF-8 output")
 }
 
-fn peak_rss_kib() -> i64 {
-    std::fs::read_to_string("/proc/self/status")
-        .expect("process status")
-        .lines()
-        .find_map(|line| line.strip_prefix("VmHWM:"))
-        .expect("VmHWM")
-        .split_whitespace()
-        .next()
-        .expect("RSS value")
-        .parse()
-        .expect("RSS KiB")
+fn grit_bin() -> PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_grit")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/release/grit"))
 }
 
-fn build_wide_repo(root: &Path) -> (ObjectId, ObjectId) {
+fn peak_rss_for_exec(mut cmd: Command) -> i64 {
+    let pid = unsafe { libc::fork() };
+    assert!(pid >= 0, "fork failed");
+    if pid == 0 {
+        let err = cmd.exec();
+        eprintln!("exec failed: {err}");
+        unsafe { libc::_exit(127) };
+    }
+    let mut status = 0;
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+    let waited = unsafe { libc::wait4(pid, &mut status, 0, usage.as_mut_ptr()) };
+    assert_eq!(waited, pid, "wait4 failed");
+    assert!(
+        libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+        "child exited with status {status}"
+    );
+    // SAFETY: wait4 initialized usage on success.
+    i64::from(unsafe { usage.assume_init() }.ru_maxrss)
+}
+
+fn build_wide_repo(root: &Path) {
     git(root, &["init", "-q", "-b", "main"], b"");
     git(root, &["config", "user.name", "Test"], b"");
     git(root, &["config", "user.email", "t@example.com"], b"");
@@ -90,8 +101,6 @@ fn build_wide_repo(root: &Path) -> (ObjectId, ObjectId) {
         }
     }
     git(root, &["commit", "-qam", "other"], b"");
-    let other_tree = ObjectId::from_hex(git(root, &["rev-parse", "other^{tree}"], b"").trim())
-        .expect("other tree");
 
     git(root, &["checkout", "-q", "main"], b"");
     for d in DIRS_OTHER..DIRS {
@@ -106,39 +115,60 @@ fn build_wide_repo(root: &Path) -> (ObjectId, ObjectId) {
         }
     }
     git(root, &["commit", "-qam", "main2"], b"");
-    let main_tree = ObjectId::from_hex(git(root, &["rev-parse", "main^{tree}"], b"").trim())
-        .expect("main tree");
-    (main_tree, other_tree)
+}
+
+fn exec_env(_root: &Path) -> [(&'static str, String); 2] {
+    [
+        ("GIT_CONFIG_GLOBAL", "/dev/null".to_owned()),
+        ("GIT_CONFIG_SYSTEM", "/dev/null".to_owned()),
+    ]
 }
 
 #[test]
-fn checkout_between_wide_trees_bounds_peak_rss() {
+fn checkout_between_wide_trees_peak_rss_within_twice_git() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path();
-    let (main_tree, other_tree) = build_wide_repo(root);
+    build_wide_repo(root);
     git(root, &["checkout", "-q", "main"], b"");
-    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
 
-    let changed_files = (DIRS_OTHER * FILES_PER_DIR) as i64;
-    // Regression guard: pre-fix grit retained about 4 KiB of planning state per changed path.
-    let max_growth_kib = changed_files * 10;
-
-    let before = peak_rss_kib();
-    checkout_between_trees_with_progress(
-        &repo,
-        Some(&main_tree),
-        &other_tree,
-        &mut NullProgress,
-        &NeverCancel,
-    )
-    .expect("checkout other");
-    let growth = peak_rss_kib() - before;
-    eprintln!("wide-tree checkout peak RSS growth: {growth} KiB ({changed_files} paths)");
+    let grit = grit_bin();
     assert!(
-        growth < max_growth_kib,
-        "checkout retained too much for {changed_files} paths: peak RSS grew {growth} KiB (limit {max_growth_kib} KiB)"
+        grit.is_file(),
+        "release grit binary missing at {}",
+        grit.display()
     );
 
-    assert_eq!(git(root, &["write-tree"], b"").trim(), other_tree.to_hex());
+    let git_peak = peak_rss_for_exec({
+        let mut cmd = Command::new("git");
+        cmd.args(["reset", "--hard", "other"]).current_dir(root);
+        for (k, v) in exec_env(root) {
+            cmd.env(k, v);
+        }
+        cmd
+    });
+    git(root, &["checkout", "-q", "main"], b"");
+
+    let grit_peak = peak_rss_for_exec({
+        let mut cmd = Command::new(&grit);
+        cmd.args(["reset", "--hard", "other"]).current_dir(root);
+        for (k, v) in exec_env(root) {
+            cmd.env(k, v);
+        }
+        cmd
+    });
+
+    let max_allowed = git_peak * 2 + 4096;
+    eprintln!(
+        "wide-tree peak RSS KiB: git reset={git_peak} grit reset={grit_peak} max={max_allowed}"
+    );
+    assert!(
+        grit_peak <= max_allowed,
+        "grit peaked at {grit_peak} KiB vs git {git_peak} KiB (limit {max_allowed} KiB)"
+    );
+
+    assert_eq!(
+        git(root, &["write-tree"], b"").trim(),
+        git(root, &["rev-parse", "other^{tree}"], b"").trim()
+    );
     git(root, &["fsck", "--strict", "--no-progress"], b"");
 }

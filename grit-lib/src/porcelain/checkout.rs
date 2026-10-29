@@ -628,12 +628,65 @@ fn checkout_hard_to_tree_journaled(
     }
     let config = repo.config()?;
     let sparse = SparseCheckout::load(repo)?;
-    let plan_positions = hard_reset_stage0_entry_positions(&index);
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(config.as_ref()));
     let trust_filemode = config
         .get_bool("core.filemode")
         .and_then(|r| r.ok())
         .unwrap_or(true);
+    // Hard reset reapplies the sparse definition. Tracked files that caused skip-worktree
+    // to be cleared are removed again; paths still marked skip-worktree (including the
+    // expectFilesOutsideOfPatterns opt-out) and untracked files are left alone. Only retain
+    // paths still tracked in the target: checkout already handles deletions and ancestor
+    // replacements, and resolving their old child paths afterwards could follow a new symlink.
+    let sparse_removals: Vec<_> = index
+        .entries
+        .iter()
+        .filter(|entry| {
+            entry.stage() == 0
+                && !entry.skip_worktree()
+                && !entry.is_sparse_directory_placeholder()
+                && sparse
+                    .as_ref()
+                    .is_some_and(|s| !s.includes_index_path(&entry.path))
+        })
+        .map(|entry| (entry.path.clone(), entry.mode))
+        .collect();
+    if trees_differ && !changes.is_empty() {
+        for rel in hard_reset_unrecorded_tree_diff_paths(
+            repo,
+            work_tree,
+            &index,
+            &config,
+            &changes,
+            sparse.as_ref(),
+            HardResetStatCheck {
+                policy: stat_policy,
+                trust_filemode,
+                index_mtime: pre_reset_index_mtime,
+            },
+        )? {
+            journal.spool_remove(&rel)?;
+        }
+        let tree_diff_apply = CheckoutApplyOptions {
+            parallel_prepare_blobs: false,
+            checkout_parallel_threshold: Some(i64::MAX),
+            ..CheckoutApplyOptions::default()
+        };
+        apply_tree_changes_in_chunks(
+            repo,
+            &changes,
+            progress,
+            cancel,
+            &mut index,
+            tree_diff_apply,
+            None,
+            CheckoutIndexWrite::Defer(lock),
+            journal,
+        )?;
+        drop(changes);
+    }
+
+    let plan_positions = hard_reset_stage0_entry_positions(&index);
     let stat_positions = hard_reset_stat_probe_positions(
         &index,
         trees_differ,
@@ -693,8 +746,8 @@ fn checkout_hard_to_tree_journaled(
         })
         .collect();
     drop(worktree_stats);
-    // Fetch repair blobs together with tree-diff writes before attribute resolution can
-    // trigger isolated lazy reads. Planning uses only tree/index metadata and disk stats.
+    // Fetch repair blobs before verify/write passes. Tree-diff paths were already fetched
+    // during checkout when `trees_differ`.
     let needs_content = |action: &HardResetEntryAction| {
         matches!(
             action,
@@ -703,81 +756,27 @@ fn checkout_hard_to_tree_journaled(
                 | HardResetEntryAction::Written(_)
         )
     };
+    let prefetch_action = |action: &HardResetEntryAction| {
+        !(trees_differ && matches!(action, HardResetEntryAction::Written(_)))
+            && needs_content(action)
+    };
     let blobs = plan_positions
         .iter()
         .zip(&actions)
-        .filter(|(_, action)| needs_content(action))
+        .filter(|(_, action)| prefetch_action(action))
         .map(|(&pos, _)| index.entries[pos].oid);
     let attributes = index.entries.iter().filter(|entry| {
         entry.stage() == 0
             && (entry.path == b".gitattributes" || entry.path.ends_with(b"/.gitattributes"))
             && entry.mode != MODE_GITLINK
             && plan_positions.iter().zip(&actions).any(|(&pos, action)| {
-                needs_content(action)
+                prefetch_action(action)
                     && index.entries[pos]
                         .path
                         .starts_with(&entry.path[..entry.path.len() - b".gitattributes".len()])
             })
     });
     prefetch_promisor_blobs(repo, blobs.chain(attributes.map(|entry| entry.oid)))?;
-    // Hard reset reapplies the sparse definition. Tracked files that caused skip-worktree
-    // to be cleared are removed again; paths still marked skip-worktree (including the
-    // expectFilesOutsideOfPatterns opt-out) and untracked files are left alone. Only retain
-    // paths still tracked in the target: checkout already handles deletions and ancestor
-    // replacements, and resolving their old child paths afterwards could follow a new symlink.
-    let sparse_removals: Vec<_> = index
-        .entries
-        .iter()
-        .filter(|entry| {
-            entry.stage() == 0
-                && !entry.skip_worktree()
-                && !entry.is_sparse_directory_placeholder()
-                && sparse
-                    .as_ref()
-                    .is_some_and(|s| !s.includes_index_path(&entry.path))
-        })
-        .map(|entry| (entry.path.clone(), entry.mode))
-        .collect();
-    let hard_reset_apply = if changes.is_empty() {
-        None
-    } else {
-        Some(CheckoutApplyOptions {
-            parallel_prepare_blobs: true,
-            ..CheckoutApplyOptions::default()
-        })
-    };
-    if hard_reset_apply.is_some() {
-        for rel in hard_reset_unrecorded_tree_diff_paths(
-            repo,
-            work_tree,
-            &index,
-            &config,
-            &changes,
-            sparse.as_ref(),
-            HardResetStatCheck {
-                policy: stat_policy,
-                trust_filemode,
-                index_mtime: pre_reset_index_mtime,
-            },
-        )? {
-            journal.spool_remove(&rel)?;
-        }
-    }
-
-    if let Some(apply) = hard_reset_apply {
-        apply_tree_changes(
-            repo,
-            &changes,
-            progress,
-            cancel,
-            &mut index,
-            apply,
-            None,
-            CheckoutIndexWrite::Defer(lock),
-            journal,
-        )?;
-        drop(changes);
-    }
 
     let mut sparse_parent_symlinks = crate::diff::SymlinkDirCache::default();
     for (path, mode) in sparse_removals {
@@ -2180,7 +2179,6 @@ fn execute_checkout_write_changes_chunk(
     precompose: bool,
     ignorecase: bool,
     smudge_context: &Option<Arc<FilterSmudgeMeta>>,
-    uniform_attrs: Option<Arc<crlf::FileAttrs>>,
     dir_cache: &mut LeadingDirCache,
     delayed: &mut DelayedProcessCheckout,
     skip_parallel_write_ramp: bool,
@@ -2198,10 +2196,7 @@ fn execute_checkout_write_changes_chunk(
             continue;
         };
         let mode = change.new_mode.bits();
-        let file_attrs = uniform_attrs
-            .as_ref()
-            .map(Arc::clone)
-            .unwrap_or_else(|| Arc::new(rules.file_attrs(path, false)));
+        let file_attrs = Arc::new(rules.file_attrs(path, false));
         write_jobs.push(CheckoutWriteJob::new(
             path.to_owned(),
             mode,
@@ -2274,17 +2269,6 @@ fn checkout_bulk_added_tree_changes(
     index_write: CheckoutIndexWrite<'_>,
     journal: &mut CheckoutJournal,
 ) -> Result<()> {
-    let uniform_attrs = (!tree_changes_touch_gitattributes(changes)).then(|| {
-        Arc::new(
-            rules.file_attrs(
-                changes
-                    .first()
-                    .and_then(|c| c.new_path.as_deref())
-                    .unwrap_or(""),
-                false,
-            ),
-        )
-    });
     let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
     let mut delayed = DelayedProcessCheckout::default();
     let mut pending_delayed = Vec::new();
@@ -2304,7 +2288,6 @@ fn checkout_bulk_added_tree_changes(
             precompose,
             ignorecase,
             &smudge_context,
-            uniform_attrs.clone(),
             &mut dir_cache,
             &mut delayed,
             skip_ramp,
@@ -2403,17 +2386,6 @@ fn checkout_bulk_mod_delete_tree_changes(
         .iter()
         .filter(|c| matches!(c.status, DiffStatus::Modified | DiffStatus::Added))
         .collect();
-    let uniform_attrs = (!tree_changes_touch_gitattributes(changes)).then(|| {
-        Arc::new(
-            rules.file_attrs(
-                write_changes
-                    .first()
-                    .and_then(|c| c.new_path.as_deref())
-                    .unwrap_or(""),
-                false,
-            ),
-        )
-    });
     let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
     let smudge_context = None;
 
@@ -2498,7 +2470,6 @@ fn checkout_bulk_mod_delete_tree_changes(
             precompose,
             ignorecase,
             &smudge_context,
-            uniform_attrs.clone(),
             &mut dir_cache,
             &mut delayed,
             skip_ramp,
@@ -2680,55 +2651,35 @@ fn checkout_tree_changes_with_progress(
         &mut loaded_index
     };
     let mut journal = CheckoutJournal::new(work_tree)?;
-    let result = if changes.len() > POPULATED_TREE_CHECKOUT_CHUNK {
-        let chunk_count = changes.len().div_ceil(POPULATED_TREE_CHECKOUT_CHUNK);
-        let mut chunk_apply = apply;
-        match index_write {
-            CheckoutIndexWrite::Commit(lock) => {
-                for (i, chunk) in changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK).enumerate() {
-                    if i > 0 {
-                        chunk_apply.skip_parallel_write_ramp = true;
-                    }
-                    let write = if i + 1 == chunk_count {
-                        CheckoutIndexWrite::Commit(lock)
-                    } else {
-                        CheckoutIndexWrite::Defer(lock)
-                    };
-                    apply_tree_changes(
-                        repo,
-                        chunk,
-                        progress,
-                        cancel,
-                        index_mut,
-                        chunk_apply.clone(),
-                        attribute_changes,
-                        write,
-                        &mut journal,
-                    )?;
-                }
-            }
-            CheckoutIndexWrite::Defer(lock) => {
-                for (i, chunk) in changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK).enumerate() {
-                    if i > 0 {
-                        chunk_apply.skip_parallel_write_ramp = true;
-                    }
-                    apply_tree_changes(
-                        repo,
-                        chunk,
-                        progress,
-                        cancel,
-                        index_mut,
-                        chunk_apply.clone(),
-                        attribute_changes,
-                        CheckoutIndexWrite::Defer(lock),
-                        &mut journal,
-                    )?;
-                }
-            }
-        }
-        Ok(())
-    } else {
-        apply_tree_changes(
+    let result = apply_tree_changes_in_chunks(
+        repo,
+        changes,
+        progress,
+        cancel,
+        index_mut,
+        apply,
+        attribute_changes,
+        index_write,
+        &mut journal,
+    );
+    journal.finish(repo, result)
+}
+
+/// Apply large tree diffs in bounded chunks so checkout planning stays within peak RSS limits.
+#[allow(clippy::too_many_arguments)]
+fn apply_tree_changes_in_chunks(
+    repo: &Repository,
+    changes: &[DiffEntry],
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+    index_mut: &mut Index,
+    mut apply: CheckoutApplyOptions,
+    attribute_changes: Option<&[DiffEntry]>,
+    index_write: CheckoutIndexWrite<'_>,
+    journal: &mut CheckoutJournal,
+) -> Result<()> {
+    if changes.len() <= POPULATED_TREE_CHECKOUT_CHUNK {
+        return apply_tree_changes(
             repo,
             changes,
             progress,
@@ -2737,10 +2688,54 @@ fn checkout_tree_changes_with_progress(
             apply,
             attribute_changes,
             index_write,
-            &mut journal,
-        )
-    };
-    journal.finish(repo, result)
+            journal,
+        );
+    }
+    let chunk_count = changes.len().div_ceil(POPULATED_TREE_CHECKOUT_CHUNK);
+    match index_write {
+        CheckoutIndexWrite::Commit(lock) => {
+            for (i, chunk) in changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK).enumerate() {
+                if i > 0 {
+                    apply.skip_parallel_write_ramp = true;
+                }
+                let write = if i + 1 == chunk_count {
+                    CheckoutIndexWrite::Commit(lock)
+                } else {
+                    CheckoutIndexWrite::Defer(lock)
+                };
+                apply_tree_changes(
+                    repo,
+                    chunk,
+                    progress,
+                    cancel,
+                    index_mut,
+                    apply.clone(),
+                    attribute_changes,
+                    write,
+                    journal,
+                )?;
+            }
+        }
+        CheckoutIndexWrite::Defer(lock) => {
+            for (i, chunk) in changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK).enumerate() {
+                if i > 0 {
+                    apply.skip_parallel_write_ramp = true;
+                }
+                apply_tree_changes(
+                    repo,
+                    chunk,
+                    progress,
+                    cancel,
+                    index_mut,
+                    apply.clone(),
+                    attribute_changes,
+                    CheckoutIndexWrite::Defer(lock),
+                    journal,
+                )?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Body of [`checkout_tree_changes_with_progress`], recording work-tree changes in `journal`.

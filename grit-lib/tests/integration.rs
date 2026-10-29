@@ -199,6 +199,9 @@ mod checkout_autocrlf_git_compat;
 #[path = "checkout_between_trees_git_clean_after.rs"]
 mod checkout_between_trees_git_clean_after;
 #[cfg(feature = "full-tests")]
+#[path = "checkout_bulk_crlf_git_compat.rs"]
+mod checkout_bulk_crlf_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "checkout_cancel_rollback.rs"]
 mod checkout_cancel_rollback;
 #[cfg(feature = "full-tests")]
