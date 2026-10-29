@@ -123,18 +123,15 @@ pub struct StructuredFileDiff {
 
 /// Pre-split line bodies for O(1) lookup while building hunks.
 #[derive(Debug, Clone)]
-struct TextLines {
-    lines: Vec<String>,
+struct TextLines<'a> {
+    lines: Vec<&'a str>,
 }
 
-impl TextLines {
-    fn from_text(text: &str) -> Self {
+impl<'a> TextLines<'a> {
+    fn from_text(text: &'a str) -> Self {
         let (parts, _) = lines_with_trailing_newline(text);
         Self {
-            lines: parts
-                .iter()
-                .map(|s| strip_diff_newline_only(s).to_owned())
-                .collect(),
+            lines: parts.into_iter().map(strip_diff_newline_only).collect(),
         }
     }
 }
@@ -176,8 +173,6 @@ pub fn structured_text_diff(
 fn apply_word_level_inline(hunks: &mut [StructuredHunk], old_text: &str, new_text: &str) {
     let old = TextLines::from_text(old_text);
     let new = TextLines::from_text(new_text);
-    let old_snapshot = old.lines.clone();
-    let new_snapshot = new.lines.clone();
 
     for hunk in &mut *hunks {
         let mut i = 0usize;
@@ -212,7 +207,7 @@ fn apply_word_level_inline(hunks: &mut [StructuredHunk], old_text: &str, new_tex
         }
     }
 
-    pin_canonical_line_text(hunks, &old_snapshot, &new_snapshot);
+    pin_canonical_line_text(hunks, &old.lines, &new.lines);
 }
 
 fn emphasize_replace_line_pair(del: &mut StructuredLine, add: &mut StructuredLine) {
@@ -262,45 +257,43 @@ fn word_segments_from_diff(
 }
 
 /// One O(n) pass: `similar` may drop `\r` in inline segments; restore from precomputed lines.
-fn pin_canonical_line_text(
-    hunks: &mut [StructuredHunk],
-    old_lines: &[String],
-    new_lines: &[String],
-) {
+fn pin_canonical_line_text(hunks: &mut [StructuredHunk], old_lines: &[&str], new_lines: &[&str]) {
     for hunk in hunks {
         for line in &mut hunk.lines {
             let canonical = match line.kind {
-                StructuredLineKind::Del => line
+                StructuredLineKind::Del | StructuredLineKind::Context => line
                     .old
-                    .and_then(|n| old_lines.get(n.saturating_sub(1)).cloned()),
+                    .and_then(|n| old_lines.get(n.saturating_sub(1)).copied()),
                 StructuredLineKind::Add => line
                     .new
-                    .and_then(|n| new_lines.get(n.saturating_sub(1)).cloned()),
-                StructuredLineKind::Context => line
-                    .old
-                    .and_then(|n| old_lines.get(n.saturating_sub(1)).cloned()),
+                    .and_then(|n| new_lines.get(n.saturating_sub(1)).copied()),
             };
             let Some(canonical) = canonical else {
                 continue;
             };
-            if line.kind == StructuredLineKind::Del {
+            // Deleted lines always end up as exactly one segment.
+            let collapse = line.kind == StructuredLineKind::Del && line.segments.len() != 1;
+            if collapse || !segments_render_as(&line.segments, canonical) {
                 let emphasis = line.segments.iter().any(|s| s.emphasis);
                 line.segments = vec![StructuredSegment {
-                    text: canonical,
-                    emphasis,
-                }];
-                continue;
-            }
-            let rendered: String = line.segments.iter().map(|s| s.text.as_str()).collect();
-            if rendered != canonical {
-                let emphasis = line.segments.iter().any(|s| s.emphasis);
-                line.segments = vec![StructuredSegment {
-                    text: canonical,
+                    text: canonical.to_owned(),
                     emphasis,
                 }];
             }
         }
     }
+}
+
+/// Whether the concatenated segment texts equal `text`, without allocating.
+fn segments_render_as(segments: &[StructuredSegment], text: &str) -> bool {
+    let mut rest = text;
+    for segment in segments {
+        match rest.strip_prefix(segment.text.as_str()) {
+            Some(tail) => rest = tail,
+            None => return false,
+        }
+    }
+    rest.is_empty()
 }
 
 /// Build a structured file diff including mode metadata from a tree diff entry.
@@ -344,13 +337,13 @@ fn strip_diff_newline_only(s: &str) -> &str {
 }
 
 /// Old-side line bodies for structured hunk metadata (CRLF-safe split).
-pub(crate) fn old_line_bodies_for_context(text: &str) -> Vec<String> {
+pub(crate) fn old_line_bodies_for_context(text: &str) -> Vec<&str> {
     TextLines::from_text(text).lines
 }
 
 /// Nearest enclosing definition line above a 1-based old hunk start (Git `-W` style).
 pub(crate) fn enclosing_function_context(
-    lines: &[String],
+    lines: &[&str],
     old_start_1based: usize,
 ) -> Option<String> {
     if old_start_1based == 0 {
@@ -359,7 +352,7 @@ pub(crate) fn enclosing_function_context(
     function_context(lines, old_start_1based.saturating_sub(1))
 }
 
-fn function_context(lines: &[String], start_0based: usize) -> Option<String> {
+fn function_context(lines: &[&str], start_0based: usize) -> Option<String> {
     lines[..start_0based.min(lines.len())]
         .iter()
         .rev()
@@ -508,6 +501,70 @@ mod tests {
             .find(|l| l.kind == StructuredLineKind::Context && l.segments[0].text == "last")
             .expect("context last");
         assert!(ctx.no_newline_at_eof);
+    }
+
+    #[test]
+    fn segments_render_as_compares_concatenation() {
+        let seg = |text: &str| StructuredSegment {
+            text: text.into(),
+            emphasis: false,
+        };
+        assert!(segments_render_as(&[], ""));
+        assert!(!segments_render_as(&[], "a"));
+        assert!(segments_render_as(&[seg("ab"), seg("c")], "abc"));
+        assert!(!segments_render_as(&[seg("ab"), seg("c")], "abcd"));
+        assert!(!segments_render_as(&[seg("ab"), seg("x")], "abc"));
+        assert!(!segments_render_as(&[seg("abcd")], "abc"));
+    }
+
+    fn line_text(line: &StructuredLine) -> String {
+        line.segments.iter().map(|s| s.text.as_str()).collect()
+    }
+
+    #[test]
+    fn word_level_inline_keeps_canonical_line_text() {
+        let old = "keep\nfoo bar baz\n\nend\n";
+        let new = "keep\nfoo qux baz\nfilled\nend\n";
+        let plain = structured_text_diff(
+            old,
+            new,
+            DiffOptions::default().with_word_level_inline(false),
+        );
+        let inline = structured_text_diff(
+            old,
+            new,
+            DiffOptions::default().with_word_level_inline(true),
+        );
+        assert_eq!(plain.hunks.len(), inline.hunks.len());
+        for (p, i) in plain.hunks.iter().zip(&inline.hunks) {
+            assert_eq!(p.lines.len(), i.lines.len());
+            for (pl, il) in p.lines.iter().zip(&i.lines) {
+                assert_eq!((pl.kind, pl.old, pl.new), (il.kind, il.old, il.new));
+                assert_eq!(line_text(pl), line_text(il));
+                if il.kind == StructuredLineKind::Del {
+                    assert_eq!(
+                        il.segments.len(),
+                        1,
+                        "deleted lines collapse to one segment"
+                    );
+                }
+            }
+        }
+        let dels: Vec<_> = inline.hunks[0]
+            .lines
+            .iter()
+            .filter(|l| l.kind == StructuredLineKind::Del)
+            .collect();
+        assert_eq!(line_text(dels[0]), "foo bar baz");
+        assert!(dels[0].segments[0].emphasis);
+        assert_eq!(line_text(dels[1]), "");
+        let add = inline.hunks[0]
+            .lines
+            .iter()
+            .find(|l| l.kind == StructuredLineKind::Add)
+            .expect("added line");
+        assert_eq!(line_text(add), "foo qux baz");
+        assert!(add.segments.len() > 1, "added line keeps word segments");
     }
 
     fn git_diff_u0(old: &str, new: &str) -> String {
