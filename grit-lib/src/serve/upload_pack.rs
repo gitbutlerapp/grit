@@ -168,8 +168,12 @@ fn serve_v0(
     }
 
     let detailed = request.caps.contains("multi_ack_detailed");
+    let wants = &request.wants;
     let mut common: Vec<ObjectId> = Vec::new();
     let mut seen: HashSet<ObjectId> = HashSet::new();
+    let mut round_got_common = false;
+    let mut round_got_other = false;
+    let mut round_last_common: Option<ObjectId> = None;
     loop {
         match read_packet(input)? {
             None => {
@@ -189,10 +193,19 @@ fn serve_v0(
                     )));
                 };
                 let oid = parse_oid(repo, hex.trim())?;
-                if !seen.insert(oid) || !repo.odb().contains(&oid)? {
+                if !seen.insert(oid) {
+                    continue;
+                }
+                if !repo.odb().contains(&oid)? {
+                    if detailed && ready_to_send_pack(repo, wants, &common)? {
+                        write_line(output, &format!("ACK {} ready", oid.to_hex()))?;
+                        round_got_other = true;
+                    }
                     continue;
                 }
                 common.push(oid);
+                round_got_common = true;
+                round_last_common = Some(oid);
                 if detailed {
                     write_line(output, &format!("ACK {} common", oid.to_hex()))?;
                 } else if common.len() == 1 {
@@ -200,7 +213,20 @@ fn serve_v0(
                 }
             }
             Some(Packet::Flush) => {
-                if detailed || common.is_empty() {
+                if detailed {
+                    if round_got_common
+                        && !round_got_other
+                        && ready_to_send_pack(repo, wants, &common)?
+                    {
+                        if let Some(last) = round_last_common {
+                            write_line(output, &format!("ACK {} ready", last.to_hex()))?;
+                        }
+                    }
+                    write_line(output, "NAK")?;
+                    round_got_common = false;
+                    round_got_other = false;
+                    round_last_common = None;
+                } else if common.is_empty() {
                     write_line(output, "NAK")?;
                 }
                 output.flush()?;

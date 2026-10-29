@@ -490,6 +490,319 @@ fn upload_pack_stateless_v0_want_advertised_tip_skips_reachability_walk() {
     .expect("current tip want uses advertisement fast path");
 }
 
+fn grit_bin_for_subprocess() -> Option<std::path::PathBuf> {
+    if let Ok(p) = std::env::var("CARGO_BIN_EXE_grit") {
+        return Some(p.into());
+    }
+    let candidate =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/debug/grit");
+    candidate.is_file().then_some(candidate)
+}
+
+fn v0_multi_ack_caps() -> &'static str {
+    "multi_ack_detailed side-band-64k thin-pack no-progress include-tag ofs-delta"
+}
+
+fn seed_linear_commits(repo: &Repository, n: usize) -> Vec<ObjectId> {
+    let empty_tree =
+        ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("empty tree");
+    let _ = repo
+        .odb()
+        .write_loose_materialize(ObjectKind::Tree, &[] as &[u8]);
+    let mut parent: Option<ObjectId> = None;
+    let mut chain = Vec::new();
+    for i in 1..=n {
+        let mut body = format!("tree {}\n", empty_tree.to_hex());
+        if let Some(p) = parent {
+            body.push_str(&format!("parent {}\n", p.to_hex()));
+        }
+        body.push_str("author T <t@e.com> 100 +0000\ncommitter T <t@e.com> 100 +0000\n\n");
+        body.push_str(&format!("c{i}\n"));
+        let oid = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Commit, body.as_bytes())
+            .expect("commit");
+        chain.push(oid);
+        parent = Some(oid);
+    }
+    if let Some(tip) = chain.last().copied() {
+        std::fs::write(repo.git_dir().join("refs/heads/main"), format!("{tip}\n")).expect("ref");
+    }
+    chain
+}
+
+/// Fork: root -> a1 -> tip (main), root -> side.
+fn seed_fork(repo: &Repository) -> (ObjectId, ObjectId, ObjectId) {
+    let empty_tree =
+        ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("empty tree");
+    let root_body = format!(
+        "tree {}\nauthor T <t@e.com> 100 +0000\ncommitter T <t@e.com> 100 +0000\n\nroot\n",
+        empty_tree.to_hex()
+    );
+    let root = repo
+        .odb()
+        .write_loose_materialize(ObjectKind::Commit, root_body.as_bytes())
+        .expect("root");
+    let a1_body = format!(
+        "tree {}\nparent {}\nauthor T <t@e.com> 101 +0000\ncommitter T <t@e.com> 101 +0000\n\na1\n",
+        empty_tree.to_hex(),
+        root.to_hex()
+    );
+    let a1 = repo
+        .odb()
+        .write_loose_materialize(ObjectKind::Commit, a1_body.as_bytes())
+        .expect("a1");
+    let tip_body = format!(
+        "tree {}\nparent {}\nauthor T <t@e.com> 102 +0000\ncommitter T <t@e.com> 102 +0000\n\ntip\n",
+        empty_tree.to_hex(),
+        a1.to_hex()
+    );
+    let tip = repo
+        .odb()
+        .write_loose_materialize(ObjectKind::Commit, tip_body.as_bytes())
+        .expect("tip");
+    let b1_body = format!(
+        "tree {}\nparent {}\nauthor T <t@e.com> 103 +0000\ncommitter T <t@e.com> 103 +0000\n\nb1\n",
+        empty_tree.to_hex(),
+        root.to_hex()
+    );
+    let side = repo
+        .odb()
+        .write_loose_materialize(ObjectKind::Commit, b1_body.as_bytes())
+        .expect("b1");
+    std::fs::write(repo.git_dir().join("refs/heads/main"), format!("{tip}\n")).expect("ref");
+    (tip, a1, side)
+}
+
+fn count_substr(haystack: &[u8], needle: &str) -> usize {
+    haystack
+        .windows(needle.len())
+        .filter(|w| *w == needle.as_bytes())
+        .count()
+}
+
+#[test]
+fn upload_pack_v0_multi_ack_detailed_emits_ready_on_flush_when_haves_cover() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let chain = seed_linear_commits(&repo, 5);
+    let tip = chain[4];
+    let ancestor = chain[2];
+
+    let caps = v0_multi_ack_caps();
+    let mut body = pkt_line(&format!("want {} {caps}\n", tip.to_hex()));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line(&format!("have {}", ancestor.to_hex())));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line("done\n"));
+
+    let mut out = Vec::new();
+    upload_pack(
+        &repo,
+        &mut Cursor::new(body),
+        &mut out,
+        &mut test_serve_opts(ProtocolVersion::V0, false, false),
+    )
+    .expect("negotiation");
+    let text = String::from_utf8_lossy(&out);
+    assert!(
+        text.contains(&format!("ACK {} common", ancestor.to_hex())),
+        "expected common ACK: {text}"
+    );
+    assert!(
+        text.contains(&format!("ACK {} ready", ancestor.to_hex())),
+        "expected ready when haves cover wants: {text}"
+    );
+    assert_eq!(
+        count_substr(&out, " ready\n"),
+        1,
+        "single ready before done: {text}"
+    );
+    assert!(text.contains("NAK"), "expected NAK end of round: {text}");
+    assert!(out.windows(4).any(|w| w == b"PACK"), "pack after done");
+}
+
+#[test]
+fn upload_pack_v0_multi_ack_detailed_no_ready_when_haves_do_not_cover() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let (tip, _a1, side) = seed_fork(&repo);
+
+    let caps = v0_multi_ack_caps();
+    let mut body = pkt_line(&format!("want {} {caps}\n", tip.to_hex()));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line(&format!("have {}", side.to_hex())));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line("done\n"));
+
+    let mut out = Vec::new();
+    upload_pack(
+        &repo,
+        &mut Cursor::new(body),
+        &mut out,
+        &mut test_serve_opts(ProtocolVersion::V0, false, false),
+    )
+    .expect("negotiation");
+    let text = String::from_utf8_lossy(&out);
+    assert!(text.contains(&format!("ACK {} common", side.to_hex())));
+    assert!(
+        !text.contains(" ready\n"),
+        "must not emit ready when haves do not cover wants: {text}"
+    );
+}
+
+#[test]
+fn upload_pack_v0_multi_ack_detailed_ready_on_absent_have_not_on_flush() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let chain = seed_linear_commits(&repo, 4);
+    let tip = chain[3];
+    let ancestor = chain[1];
+    let absent =
+        ObjectId::from_hex("1234567890123456789012345678901234567890").expect("absent oid");
+
+    let caps = v0_multi_ack_caps();
+    let mut body = pkt_line(&format!("want {} {caps}\n", tip.to_hex()));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line(&format!("have {}", ancestor.to_hex())));
+    body.extend_from_slice(&pkt_line(&format!("have {}", absent.to_hex())));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line("done\n"));
+
+    let mut out = Vec::new();
+    upload_pack(
+        &repo,
+        &mut Cursor::new(body),
+        &mut out,
+        &mut test_serve_opts(ProtocolVersion::V0, false, false),
+    )
+    .expect("negotiation");
+    let text = String::from_utf8_lossy(&out);
+    assert!(
+        text.contains(&format!("ACK {} ready", absent.to_hex())),
+        "absent have should get ready on that oid: {text}"
+    );
+    assert_eq!(
+        count_substr(&out, " ready\n"),
+        1,
+        "must not emit a second ready on flush: {text}"
+    );
+}
+
+#[test]
+fn upload_pack_stateless_v0_multi_ack_detailed_ready_without_done() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let chain = seed_linear_commits(&repo, 4);
+    let tip = chain[3];
+    let ancestor = chain[1];
+
+    let caps = v0_multi_ack_caps();
+    let mut body = pkt_line(&format!("want {} {caps}\n", tip.to_hex()));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line(&format!("have {}", ancestor.to_hex())));
+    body.extend_from_slice(b"0000");
+
+    let mut out = Vec::new();
+    upload_pack(
+        &repo,
+        &mut Cursor::new(body),
+        &mut out,
+        &mut test_serve_opts(ProtocolVersion::V0, false, true),
+    )
+    .expect("stateless negotiation");
+    let text = String::from_utf8_lossy(&out);
+    assert!(text.contains(&format!("ACK {} ready", ancestor.to_hex())));
+    assert!(text.contains("NAK"));
+    assert!(!out.windows(4).any(|w| w == b"PACK"));
+}
+
+#[test]
+fn upload_pack_v0_git_client_sees_ready_with_few_haves() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = grit_test_support::git_packed_history(tmp.path(), 80);
+    let behind = ObjectId::from_hex(grit_test_support::git(&src, &["rev-parse", "main~25"]).trim())
+        .expect("behind");
+
+    let client = tmp.path().join("client.git");
+    grit_test_support::git(
+        tmp.path(),
+        &["init", "-q", "--bare", client.to_str().unwrap()],
+    );
+    grit_test_support::git(
+        &client,
+        &[
+            "fetch",
+            "-q",
+            src.to_str().unwrap(),
+            &format!("{}:refs/heads/old", behind.to_hex()),
+        ],
+    );
+
+    let grit_upload = grit_bin_for_subprocess()
+        .expect("build grit-cli for subprocess test")
+        .canonicalize()
+        .expect("grit binary path");
+    let trace = grit_test_support::git_cmd(&[
+        "-c",
+        "protocol.version=0",
+        "fetch",
+        "--upload-pack",
+        &format!("{} upload-pack", grit_upload.display()),
+        src.to_str().unwrap(),
+        "main:refs/remotes/o/main",
+    ])
+    .in_dir(&client)
+    .env("GIT_TRACE_PACKET", "1")
+    .suc()
+    .stderr;
+
+    assert!(
+        trace.contains("ready"),
+        "git client should receive ACK ready: {trace}"
+    );
+    let have_count = trace.matches("fetch> have").count();
+    assert!(
+        have_count <= 64,
+        "expected ~first window of haves, not full history walk (got {have_count}): tail {}",
+        &trace[trace.len().saturating_sub(2000)..]
+    );
+
+    grit_test_support::git(&client, &["fsck", "--full"]);
+}
+
 /// Annotated tag on a blob reachable from `main`, with the tag ref removed (smart HTTP race).
 #[test]
 fn upload_pack_stateless_v0_want_moved_annotated_blob_tag() {
