@@ -12,6 +12,7 @@ use super::validation::{
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RefTransaction {
     updates: Vec<RefUpdate>,
+    names: HashSet<String>,
     reflog_renames: Vec<RefReflogRename>,
     case_only_renames: Vec<RefCaseOnlyRename>,
     initial: bool,
@@ -30,9 +31,17 @@ impl RefTransaction {
     ///
     /// Returns [`RefStoreError::DuplicateUpdate`] for the first name queued twice.
     pub(crate) fn from_updates(updates: Vec<RefUpdate>) -> Result<Self, RefStoreError> {
-        Self::validate_no_duplicates(&updates)?;
+        let mut names = HashSet::with_capacity(updates.len());
+        for update in &updates {
+            if !names.insert(update.name.clone()) {
+                return Err(RefStoreError::DuplicateUpdate {
+                    name: update.name.clone(),
+                });
+            }
+        }
         Ok(Self {
             updates,
+            names,
             ..Self::default()
         })
     }
@@ -53,11 +62,7 @@ impl RefTransaction {
     ///
     /// Returns [`RefStoreError::DuplicateUpdate`] when `update.name` was already queued.
     pub fn push_update(&mut self, update: RefUpdate) -> Result<(), RefStoreError> {
-        if self
-            .updates
-            .iter()
-            .any(|existing| existing.name == update.name)
-        {
+        if !self.names.insert(update.name.clone()) {
             return Err(RefStoreError::DuplicateUpdate {
                 name: update.name.clone(),
             });
@@ -146,7 +151,8 @@ impl RefTransaction {
 
     /// Backend-independent checks every [`super::RefStore::prepare`] runs before taking locks.
     ///
-    /// Duplicate names cannot reach here because [`Self::push_update`] rejects them.
+    /// Duplicate names cannot reach here because [`Self::push_update`] and
+    /// [`Self::from_updates`] reject them.
     pub(crate) fn validate(&self) -> Result<(), RefStoreError> {
         for update in &self.updates {
             validate_storable_refname(&update.name)?;
@@ -175,18 +181,6 @@ impl RefTransaction {
         for (from, to) in renames {
             validate_storable_refname(from)?;
             validate_storable_refname(to)?;
-        }
-        Ok(())
-    }
-
-    fn validate_no_duplicates(updates: &[RefUpdate]) -> Result<(), RefStoreError> {
-        let mut seen = HashSet::with_capacity(updates.len());
-        for update in updates {
-            if !seen.insert(&update.name) {
-                return Err(RefStoreError::DuplicateUpdate {
-                    name: update.name.clone(),
-                });
-            }
         }
         Ok(())
     }
@@ -494,5 +488,65 @@ mod tests {
         assert!(!expected_matches(Some(&direct), &Expected::Oid(oid(2))));
         assert!(!expected_matches(None, &Expected::Exists));
         assert!(expected_matches(None, &Expected::Missing));
+    }
+
+    #[test]
+    fn from_updates_then_push_update_rejects_duplicate_name() {
+        let update = |name: &str| RefUpdate {
+            name: name.to_owned(),
+            new_value: Some(RawRef::Direct(oid(1))),
+            expected: Expected::Any,
+            reflog: None,
+            flags: Default::default(),
+        };
+        let mut txn =
+            RefTransaction::from_updates(vec![update("refs/heads/a"), update("refs/heads/b")])
+                .expect("distinct names");
+        let err = txn
+            .push_update(update("refs/heads/a"))
+            .expect_err("duplicate after from_updates");
+        assert!(matches!(
+            err,
+            RefStoreError::DuplicateUpdate { name } if name == "refs/heads/a"
+        ));
+        assert_eq!(txn.updates().len(), 2);
+    }
+
+    fn push_unique_updates(n: u32) -> std::time::Duration {
+        let mut txn = RefTransaction::new();
+        let start = std::time::Instant::now();
+        for i in 0..n {
+            txn.push_update(RefUpdate {
+                name: format!("refs/heads/b{i:07}"),
+                new_value: Some(RawRef::Direct(oid((i % 256) as u8))),
+                expected: Expected::Missing,
+                reflog: None,
+                flags: Default::default(),
+            })
+            .expect("unique name");
+        }
+        start.elapsed()
+    }
+
+    #[test]
+    fn push_update_batch_build_scales_linearly() {
+        let small = push_unique_updates(2_000);
+        let large = push_unique_updates(8_000);
+        let ratio = large.as_secs_f64() / small.as_secs_f64().max(1e-9);
+        assert!(
+            ratio < 12.0,
+            "expected roughly linear scaling (~4x for 4x refs), got {ratio:.1}x \
+             (small={small:?}, large={large:?})"
+        );
+    }
+
+    #[test]
+    #[ignore = "release-only sanity check for large batches (#2281); cargo test -p grit-lib --release push_update_100k -- --ignored --exact"]
+    fn push_update_100k_build_under_one_second() {
+        let elapsed = push_unique_updates(100_000);
+        assert!(
+            elapsed.as_secs() < 3,
+            "100k push_update build took {elapsed:?} (expected well under 1s in release)"
+        );
     }
 }
