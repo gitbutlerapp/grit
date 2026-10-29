@@ -1996,13 +1996,13 @@ struct CachedStackTables {
 static STACK_TABLE_CACHE: OnceLock<Mutex<HashMap<StackCacheKey, Arc<CachedStackTables>>>> =
     OnceLock::new();
 
+// hygiene: `'static` return borrows the process-wide STACK_TABLE_CACHE, not a new global
 fn stack_table_cache() -> &'static Mutex<HashMap<StackCacheKey, Arc<CachedStackTables>>> {
     STACK_TABLE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// How long readers retry when a listed table disappears or is still being written.
 const STACK_TABLE_RELOAD_DEADLINE: Duration = Duration::from_secs(3);
-const STACK_TABLE_RELOAD_SLEEP: Duration = Duration::from_millis(1);
 
 fn is_transient_stack_table_error(err: &Error) -> bool {
     match err {
@@ -2082,7 +2082,7 @@ fn build_cached_stack_tables_with_reload(
                 let unchanged = fresh == table_names;
                 table_names = fresh;
                 if unchanged {
-                    std::thread::sleep(STACK_TABLE_RELOAD_SLEEP);
+                    return Err(e);
                 }
             }
             Err(e) => return Err(e),
@@ -2298,10 +2298,7 @@ impl ReftableStack {
         read_write_options(&git_dir)
     }
 
-    fn stack_readers<'a>(
-        &self,
-        cached: &'a CachedStackTables,
-    ) -> Result<Vec<&'a ReftableReader>> {
+    fn stack_readers<'a>(&self, cached: &'a CachedStackTables) -> Result<Vec<&'a ReftableReader>> {
         cached
             .table_names
             .iter()
@@ -2504,7 +2501,10 @@ impl ReftableStack {
                         return Err(e);
                     }
                     invalidate_stack_table_cache(&self.reftable_dir);
-                    std::thread::sleep(STACK_TABLE_RELOAD_SLEEP);
+                    let fresh = self.table_names_for_read()?;
+                    if fresh == table_names {
+                        return Err(e);
+                    }
                 }
                 Err(e) => return Err(e),
             }
@@ -2664,7 +2664,10 @@ impl ReftableStack {
                         return Err(e);
                     }
                     invalidate_stack_table_cache(&self.reftable_dir);
-                    std::thread::sleep(STACK_TABLE_RELOAD_SLEEP);
+                    let fresh = self.table_names_for_read()?;
+                    if fresh == table_names {
+                        return Err(e);
+                    }
                 }
                 Err(e) => return Err(e),
             }
@@ -3172,18 +3175,27 @@ impl ReftableStack {
                 min_update_index, max_update_index, suffix
             );
             let path = self.reftable_dir.join(&filename);
-            if path.exists() {
-                continue;
-            }
-            let tmp_name = format!(".writ-{suffix:08x}.tmp");
+            let tmp_name = format!(".writ-{:08x}.tmp", suffix);
             let tmp_path = self.reftable_dir.join(&tmp_name);
+            let mut file = match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp_path)
             {
-                let mut file = fs::File::create(&tmp_path).map_err(Error::Io)?;
-                file.write_all(data).map_err(Error::Io)?;
-                file.sync_all().map_err(Error::Io)?;
+                Ok(file) => file,
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(err) => return Err(Error::Io(err)),
+            };
+            file.write_all(data).map_err(Error::Io)?;
+            file.sync_all().map_err(Error::Io)?;
+            match crate::atomic_replace::replace_file(&tmp_path, &path) {
+                Ok(()) => return Ok(filename),
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let _ = fs::remove_file(&tmp_path);
+                    continue;
+                }
+                Err(err) => return Err(Error::Io(err)),
             }
-            crate::atomic_replace::replace_file(&tmp_path, &path).map_err(Error::Io)?;
-            return Ok(filename);
         }
         Err(Error::Io(std::io::Error::new(
             std::io::ErrorKind::AlreadyExists,
@@ -3515,6 +3527,7 @@ pub fn reftable_write_transaction(
 mod reftable_tx_fail_inject {
     use std::cell::RefCell;
 
+    // hygiene: test-only write_transaction failure injection (thread_local)
     thread_local! {
         pub static INJECT: RefCell<bool> = const { RefCell::new(false) };
     }

@@ -634,6 +634,8 @@ fn concurrent_readers_survive_autocompact_writes() {
     let root = git_init_reftable_repo("main");
     let git_dir = root.path().join(".git");
     let opts = read_write_options(&git_dir);
+    let oid_a = git_empty_commit_oid(root.path());
+    let oid_b = git_empty_commit_oid(root.path());
     let stop = Arc::new(AtomicBool::new(false));
 
     let git_dir_writer = git_dir.clone();
@@ -642,7 +644,7 @@ fn concurrent_readers_survive_autocompact_writes() {
     let writer = thread::spawn(move || {
         let mut stack = ReftableStack::open(&git_dir_writer).expect("writer open");
         for i in 0..120u8 {
-            let oid = ObjectId::from_bytes(&[i; 20]).expect("oid");
+            let oid = if i.is_multiple_of(2) { oid_a } else { oid_b };
             stack
                 .write_ref(
                     &format!("refs/heads/stress/{i}"),
