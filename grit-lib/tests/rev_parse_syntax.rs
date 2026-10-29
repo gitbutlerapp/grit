@@ -4,6 +4,7 @@ use crate::support;
 
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
@@ -419,6 +420,120 @@ fn colon_message_search_matches_git() {
     let repo = open_grit(wt);
     oracle_one(&repo, wt, ":/history harness c", ResolveMode::Verify)
         .unwrap_or_else(|e| panic!("{e}"));
+}
+
+fn git_allow_empty_commit_with_dates(
+    wt: &Path,
+    msg: &str,
+    author_date: &str,
+    committer_date: &str,
+) {
+    let out = Command::new("git")
+        .current_dir(wt)
+        .args(["commit", "--allow-empty", "-q", "-m", msg])
+        .env("GIT_AUTHOR_DATE", author_date)
+        .env("GIT_COMMITTER_DATE", committer_date)
+        .env("GIT_CONFIG_GLOBAL", support::null_device_for_tests())
+        .env("GIT_CONFIG_SYSTEM", support::null_device_for_tests())
+        .output()
+        .expect("git commit");
+    assert!(
+        out.status.success(),
+        "git commit: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn setup_colon_message_youngest_across_refs() -> HistoryRepo {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git_allow_empty_commit_with_dates(wt, "base", "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z");
+    git(wt, &["branch", "aaa"]);
+    git(wt, &["branch", "zzz"]);
+    git(wt, &["switch", "-q", "aaa"]);
+    git_allow_empty_commit_with_dates(
+        wt,
+        "feature old",
+        "2024-02-01T00:00:00Z",
+        "2024-02-01T00:00:00Z",
+    );
+    git(wt, &["switch", "-q", "zzz"]);
+    git_allow_empty_commit_with_dates(
+        wt,
+        "feature new",
+        "2024-03-01T00:00:00Z",
+        "2024-03-01T00:00:00Z",
+    );
+    git(wt, &["switch", "-q", "main"]);
+    hist
+}
+
+fn setup_colon_message_youngest_non_tip_match() -> HistoryRepo {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git_allow_empty_commit_with_dates(wt, "base", "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z");
+    let base = git_rev_parse_verify(wt, "HEAD").expect("base");
+    git(wt, &["branch", "aaa"]);
+    git(wt, &["branch", "zzz"]);
+    git(wt, &["switch", "-q", "aaa"]);
+    git_allow_empty_commit_with_dates(
+        wt,
+        "feature oldest",
+        "2024-02-01T00:00:00Z",
+        "2024-02-01T00:00:00Z",
+    );
+    git(wt, &["switch", "-q", "zzz"]);
+    let mid_tree = git(wt, &["mktree"]).trim().to_string();
+    let mid_out = Command::new("git")
+        .current_dir(wt)
+        .args([
+            "commit-tree",
+            &mid_tree,
+            "-p",
+            &base.to_hex(),
+            "-m",
+            "feature middle",
+        ])
+        .env("GIT_AUTHOR_DATE", "2024-02-15T00:00:00Z")
+        .env("GIT_COMMITTER_DATE", "2024-02-15T00:00:00Z")
+        .env("GIT_CONFIG_GLOBAL", support::null_device_for_tests())
+        .env("GIT_CONFIG_SYSTEM", support::null_device_for_tests())
+        .output()
+        .expect("commit-tree middle");
+    assert!(mid_out.status.success());
+    let mid = String::from_utf8_lossy(&mid_out.stdout).trim().to_string();
+    git(wt, &["update-ref", "refs/heads/zzz", &mid]);
+    let wrap_tree = git(wt, &["mktree"]).trim().to_string();
+    let wrap_out = Command::new("git")
+        .current_dir(wt)
+        .args(["commit-tree", &wrap_tree, "-p", &mid, "-m", "wrapper tip"])
+        .env("GIT_AUTHOR_DATE", "2024-03-01T00:00:00Z")
+        .env("GIT_COMMITTER_DATE", "2024-03-01T00:00:00Z")
+        .env("GIT_CONFIG_GLOBAL", support::null_device_for_tests())
+        .env("GIT_CONFIG_SYSTEM", support::null_device_for_tests())
+        .output()
+        .expect("commit-tree tip");
+    assert!(wrap_out.status.success());
+    let tip = String::from_utf8_lossy(&wrap_out.stdout).trim().to_string();
+    git(wt, &["update-ref", "refs/heads/zzz", &tip]);
+    git(wt, &["switch", "-q", "main"]);
+    hist
+}
+
+#[test]
+fn colon_message_search_youngest_by_committer_date_matches_git() {
+    let hist = setup_colon_message_youngest_across_refs();
+    let wt = hist.worktree();
+    let repo = open_grit(wt);
+    oracle_one(&repo, wt, ":/feature", ResolveMode::Verify).unwrap_or_else(|e| panic!("{e}"));
+}
+
+#[test]
+fn colon_message_search_youngest_non_tip_parent_matches_git() {
+    let hist = setup_colon_message_youngest_non_tip_match();
+    let wt = hist.worktree();
+    let repo = open_grit(wt);
+    oracle_one(&repo, wt, ":/feature", ResolveMode::Verify).unwrap_or_else(|e| panic!("{e}"));
 }
 
 fn setup_index_conflict_stages() -> HistoryRepo {

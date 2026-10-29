@@ -15,14 +15,16 @@ use std::path::{Component, Path, PathBuf};
 
 use regex::Regex;
 
-use std::collections::{HashMap, HashSet};
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, HashSet};
+
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::config::ConfigSet;
 use crate::error::{Error, NotARepositoryReason, Result};
-use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, parse_tag, parse_tree, CommitRef, ObjectId, ObjectKind};
 use crate::reflog::ReflogEntry;
 use crate::refs;
 use crate::refs::store::RawRef;
@@ -3883,51 +3885,179 @@ fn parse_oneline_pattern(pattern: &str) -> Option<(bool, &str)> {
     None
 }
 
-fn resolve_commit_message_search_from(
+#[derive(Eq, PartialEq)]
+struct CommitMessageHeapEntry {
+    committer_time: i64,
+    oid: ObjectId,
+}
+
+impl Ord for CommitMessageHeapEntry {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.committer_time
+            .cmp(&other.committer_time)
+            .then_with(|| self.oid.cmp(&other.oid))
+    }
+}
+
+impl PartialOrd for CommitMessageHeapEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Parents, committer time, and lazily loaded message for one oneline search step.
+struct MessageSearchCommitMeta {
+    parents: smallvec::SmallVec<[ObjectId; 2]>,
+    committer_time: i64,
+    message: Option<String>,
+}
+
+struct MessageSearchWalker<'repo> {
+    repo: &'repo Repository,
+    graph: Option<Arc<crate::commit_graph_file::CommitGraphChain>>,
+    cache: HashMap<ObjectId, MessageSearchCommitMeta>,
+    visited: HashSet<ObjectId>,
+    heap: BinaryHeap<CommitMessageHeapEntry>,
+}
+
+impl<'repo> MessageSearchWalker<'repo> {
+    fn new(repo: &'repo Repository) -> Self {
+        Self {
+            repo,
+            graph: repo.odb().commit_graph_chain(),
+            cache: HashMap::new(),
+            visited: HashSet::new(),
+            heap: BinaryHeap::new(),
+        }
+    }
+
+    fn enqueue_peeled_tip(&mut self, tip: ObjectId) {
+        let commit_oid = match peel_tags_to_commit(self.repo, tip) {
+            Ok(Ok(oid)) => oid,
+            Ok(Err(_)) | Err(_) => return,
+        };
+        self.try_enqueue(commit_oid);
+    }
+
+    fn try_enqueue(&mut self, oid: ObjectId) {
+        if !self.visited.insert(oid) {
+            return;
+        }
+        let Some(committer_time) = self.ensure_linkage(oid) else {
+            self.visited.remove(&oid);
+            return;
+        };
+        self.heap.push(CommitMessageHeapEntry {
+            committer_time,
+            oid,
+        });
+    }
+
+    /// Parents and committer time from the commit-graph when possible; one ODB read otherwise.
+    fn ensure_linkage(&mut self, oid: ObjectId) -> Option<i64> {
+        if let Some(meta) = self.cache.get(&oid) {
+            return Some(meta.committer_time);
+        }
+        if let Some(ref graph) = self.graph {
+            if let Some((parents, committer_time)) = graph.graph_commit(&oid) {
+                self.cache.insert(
+                    oid,
+                    MessageSearchCommitMeta {
+                        parents: parents.into(),
+                        committer_time,
+                        message: None,
+                    },
+                );
+                return Some(committer_time);
+            }
+        }
+        let obj = self.repo.read_replaced(&oid).ok()?;
+        if obj.kind != ObjectKind::Commit {
+            return None;
+        }
+        let commit = CommitRef::parse(&obj.data).ok()?;
+        let committer_time = commit.committer_timestamp();
+        self.cache.insert(
+            oid,
+            MessageSearchCommitMeta {
+                parents: commit.parents().into(),
+                committer_time,
+                message: Some(commit.message().into_owned()),
+            },
+        );
+        Some(committer_time)
+    }
+
+    fn ensure_message(&mut self, oid: ObjectId) -> Option<String> {
+        if let Some(message) = self.cache.get(&oid)?.message.clone() {
+            return Some(message);
+        }
+        let obj = self.repo.read_replaced(&oid).ok()?;
+        if obj.kind != ObjectKind::Commit {
+            return None;
+        }
+        let commit = CommitRef::parse(&obj.data).ok()?;
+        let message = commit.message().into_owned();
+        self.cache.get_mut(&oid)?.message = Some(message.clone());
+        Some(message)
+    }
+
+    fn run(
+        mut self,
+        seeds: &[ObjectId],
+        pattern: &str,
+        negate: bool,
+        effective_pattern: &str,
+        regex: Option<&Regex>,
+    ) -> Result<ObjectId> {
+        for &seed in seeds {
+            self.enqueue_peeled_tip(seed);
+        }
+
+        while let Some(entry) = self.heap.pop() {
+            let Some(message) = self.ensure_message(entry.oid) else {
+                continue;
+            };
+            let base_match = if let Some(re) = regex {
+                re.is_match(&message)
+            } else {
+                message.contains(effective_pattern)
+            };
+            if negate ^ base_match {
+                return Ok(entry.oid);
+            }
+            let parents = self
+                .cache
+                .get(&entry.oid)
+                .map(|meta| meta.parents.clone())
+                .unwrap_or_default();
+            for parent in parents {
+                self.try_enqueue(parent);
+            }
+        }
+
+        Err(Error::ObjectNotFound(format!(":/{pattern}")))
+    }
+}
+
+fn resolve_commit_message_search_seeds(
     repo: &Repository,
-    start: ObjectId,
+    seeds: &[ObjectId],
     pattern: &str,
 ) -> Result<ObjectId> {
     let Some((negate, effective_pattern)) = parse_oneline_pattern(pattern) else {
         return Err(Error::ObjectNotFound(format!(":/{pattern}")));
     };
     let regex = Regex::new(effective_pattern).ok();
-    let mut visited = std::collections::HashSet::new();
-    let mut queue = std::collections::VecDeque::new();
-    queue.push_back(start);
-    visited.insert(start);
+    MessageSearchWalker::new(repo).run(seeds, pattern, negate, effective_pattern, regex.as_ref())
+}
 
-    while let Some(oid) = queue.pop_front() {
-        let obj = match repo.read_replaced(&oid) {
-            Ok(o) => o,
-            Err(_) => continue,
-        };
-        if obj.kind != ObjectKind::Commit {
-            continue;
-        }
-        let commit = match parse_commit(&obj.data) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        let base_match = if let Some(re) = &regex {
-            re.is_match(&commit.message)
-        } else {
-            commit.message.contains(effective_pattern)
-        };
-        let is_match = negate ^ base_match;
-        if is_match {
-            return Ok(oid);
-        }
-
-        for parent in &commit.parents {
-            if visited.insert(*parent) {
-                queue.push_back(*parent);
-            }
-        }
-    }
-
-    Err(Error::ObjectNotFound(format!(":/{pattern}")))
+fn resolve_commit_message_search_from(
+    repo: &Repository,
+    start: ObjectId,
+    pattern: &str,
+) -> Result<ObjectId> {
+    resolve_commit_message_search_seeds(repo, &[start], pattern)
 }
 
 fn find_abbrev_matches(repo: &Repository, prefix: &str) -> Result<Vec<ObjectId>> {
@@ -3972,76 +4102,29 @@ fn os_to_string(text: &OsStr) -> String {
     text.to_string_lossy().into_owned()
 }
 
-/// Search commit messages from HEAD backwards for a commit whose message
-/// contains `pattern`.  Returns the first matching commit OID.
+/// Search reachable commits for a message match: `:/<text>` picks the youngest
+/// commit (by committer date) whose message matches across all ref tips and HEAD.
 fn resolve_commit_message_search(
     repo: &crate::repo::Repository,
     pattern: &str,
 ) -> Result<ObjectId> {
-    // Handle negated pattern: /! means negate; /!! means literal /!
-    let (negate, effective_pattern) = if let Some(rest) = pattern.strip_prefix('!') {
-        if rest.starts_with('!') {
-            (false, rest) // !! = literal leading !
-        } else {
-            (true, rest) // ! = negate
+    let mut seeds = Vec::new();
+    let mut seen = HashSet::new();
+    if let Ok(head) = crate::state::resolve_head_for_repository(repo) {
+        if let Some(oid) = head.oid() {
+            if seen.insert(*oid) {
+                seeds.push(*oid);
+            }
         }
-    } else {
-        (false, pattern)
-    };
-    let regex = Regex::new(effective_pattern).ok();
-    let head = crate::state::resolve_head_for_repository(repo)
-        .map_err(|_| Error::ObjectNotFound(format!(":/{pattern}")))?;
-    let start_oid = match head.oid() {
-        Some(oid) => *oid,
-        None => return Err(Error::ObjectNotFound(format!(":/{pattern}"))),
-    };
-
-    let mut visited = std::collections::HashSet::new();
-    let mut queue = std::collections::VecDeque::new();
-    queue.push_back(start_oid);
-    visited.insert(start_oid);
+    }
     if let Ok(refs) = crate::refs::list_refs_in(repo, "refs/") {
         for (_name, oid) in refs {
-            if visited.insert(oid) {
-                queue.push_back(oid);
+            if seen.insert(oid) {
+                seeds.push(oid);
             }
         }
     }
-
-    while let Some(oid) = queue.pop_front() {
-        let obj = match repo.read_replaced(&oid) {
-            Ok(o) => o,
-            Err(_) => continue,
-        };
-        // Skip non-commit objects
-        if obj.kind != ObjectKind::Commit {
-            continue;
-        }
-        let commit = match parse_commit(&obj.data) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        // Check if message matches pattern (regex, with literal fallback)
-        let base_match = if let Some(re) = &regex {
-            re.is_match(&commit.message)
-        } else {
-            commit.message.contains(effective_pattern)
-        };
-        let is_match = if negate { !base_match } else { base_match };
-        if is_match {
-            return Ok(oid);
-        }
-
-        // Enqueue parents
-        for parent in &commit.parents {
-            if visited.insert(*parent) {
-                queue.push_back(*parent);
-            }
-        }
-    }
-
-    Err(Error::ObjectNotFound(format!(":/{pattern}")))
+    resolve_commit_message_search_seeds(repo, &seeds, pattern)
 }
 
 /// All object IDs (loose and packed) whose hex form starts with `prefix`.
@@ -5249,6 +5332,45 @@ mod line_coverage_tests {
             )?,
             1
         );
+        Ok(())
+    }
+
+    #[test]
+    fn colon_message_search_oneline_bang_patterns() -> crate::error::Result<()> {
+        let dir = tempdir().map_err(crate::error::Error::Io)?;
+        Repository::init(
+            dir.path(),
+            &InitOptions {
+                bare: true,
+                ref_storage: RefStorageFormat::Files,
+                ..InitOptions::default()
+            },
+        )?;
+        let repo = crate::repo::Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let tree = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Tree, b"100644 blob deadbeef\tf\n")?;
+        let with_feature = repo.odb().write_loose_materialize(
+            ObjectKind::Commit,
+            format!(
+                "tree {tree}\nauthor T <t@e.com> 200 +0000\ncommitter T <t@e.com> 200 +0000\n\nfeature msg\n"
+            )
+            .as_bytes(),
+        )?;
+        let plain = repo.odb().write_loose_materialize(
+            ObjectKind::Commit,
+            format!(
+                "tree {tree}\nparent {with_feature}\nauthor T <t@e.com> 300 +0000\ncommitter T <t@e.com> 300 +0000\n\nother\n"
+            )
+            .as_bytes(),
+        )?;
+        fs::write(repo.git_dir().join("refs/heads/main"), format!("{plain}\n"))
+            .map_err(crate::error::Error::Io)?;
+        assert_eq!(
+            resolve_commit_message_search_from(&repo, plain, "!-feature")?,
+            plain
+        );
+        assert!(resolve_commit_message_search_from(&repo, plain, "!foo").is_err());
         Ok(())
     }
 
