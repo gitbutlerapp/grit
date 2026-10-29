@@ -3517,22 +3517,27 @@ pub(crate) fn worktree_bytes_from_index_blob(
         return Ok(Some(blob.to_vec()));
     }
     let oid_hex = oid.to_string();
-    let smudge_meta_owned;
-    let smudge_meta = if let Some(meta) = smudge_meta {
-        meta
-    } else {
-        smudge_meta_owned = crate::filter_process::smudge_meta_for_checkout(repo, &oid_hex);
-        &smudge_meta_owned
-    };
     let conv = rules.conversion();
     let file_attrs = rules.file_attrs(rel_path, false);
+    // Only a smudge filter reads the metadata, and working it out reads `HEAD` and
+    // opens the ref store: once per file is a large share of a big checkout.
+    let has_filter = file_attrs.filter_process.is_some() || file_attrs.filter_smudge.is_some();
+    let smudge_meta_owned;
+    let smudge_meta = match smudge_meta {
+        Some(meta) => Some(meta),
+        None if has_filter => {
+            smudge_meta_owned = crate::filter_process::smudge_meta_for_checkout(repo, &oid_hex);
+            Some(&smudge_meta_owned)
+        }
+        None => None,
+    };
     crlf::convert_to_worktree(
         blob,
         rel_path,
         conv,
         &file_attrs,
         Some(&oid_hex),
-        Some(smudge_meta),
+        smudge_meta,
         delayed_checkout,
         Some(rules.filter_process()),
     )

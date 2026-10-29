@@ -120,8 +120,9 @@ fn work_dir() -> PathBuf {
     scratch_dir().join("partial-clone")
 }
 
-/// Hyperfine grit vs git on a `blob:none` local clone of a many-pack source and on the
-/// checkout of a blobless clone, which lazily fetches every blob of `HEAD`.
+/// Hyperfine grit vs git on a `blob:none` local clone of a many-pack source (without and
+/// with its checkout) and on the checkout of a blobless clone, both of which lazily
+/// fetch every blob of `HEAD`.
 ///
 /// # Errors
 ///
@@ -203,6 +204,30 @@ pub fn run_partial_clone_suite(
         ratio: median_ratio(git_clone.median_ms, grit_clone.median_ms),
         git: git_clone,
         grit: grit_clone,
+        grit_failure: None,
+    });
+
+    let git_clone_checkout = run(
+        shell_command(git, &["clone", "-q", "--filter=blob:none", &url, &dest_s]),
+        &remove,
+        "git",
+    )?;
+    let grit_clone_checkout = run(
+        shell_command(grit, &["clone", "--blobs", "none", &url, &dest_s]),
+        &remove,
+        "grit",
+    )?;
+    scenarios.push(ScenarioResult {
+        id: format!("partial-clone-blobless-checkout-{file_count}-{packs}packs"),
+        group: "partial-clone".into(),
+        fixture: format!("synthetic-{file_count}-{packs}-packs"),
+        description: format!(
+            "blob:none file:// clone with checkout of a {packs}-pack source, lazily fetching all {file_count} blobs in one request"
+        ),
+        driver: Driver::Cli.into(),
+        ratio: median_ratio(git_clone_checkout.median_ms, grit_clone_checkout.median_ms),
+        git: git_clone_checkout,
+        grit: grit_clone_checkout,
         grit_failure: None,
     });
 

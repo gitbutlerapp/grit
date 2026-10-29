@@ -652,6 +652,12 @@ fn send_pack_uninteresting_commits(
                     }
                     return Ok(());
                 }
+                // A want is often a blob (a lazy fetch names thousands): the header
+                // says so without inflating it.
+                match self.odb.read_info(&oid) {
+                    Ok(info) if matches!(info.kind, ObjectKind::Commit | ObjectKind::Tag) => {}
+                    _ => return Ok(()),
+                }
                 let Ok(obj) = self.odb.read(&oid) else {
                     return Ok(());
                 };
@@ -1060,6 +1066,14 @@ fn collect_reachable_excluding_with_name_hashes(
                 None => break,
             }
         };
+        // Queued blobs are wanted directly (a lazy fetch names thousands); the
+        // header says there is nothing to walk without inflating them.
+        match odb.read_info(&oid) {
+            Ok(info) if info.kind == ObjectKind::Blob => continue,
+            Ok(_) => {}
+            Err(_) if skip_missing => continue,
+            Err(e) => return Err(e),
+        }
         let obj = match odb.read(&oid) {
             Ok(o) => o,
             Err(_) if skip_missing => continue,
@@ -1284,6 +1298,17 @@ impl<'a> EnumerationWalk<'a> {
             return Ok(());
         }
         self.list(oid);
+        // Only a commit is read now; anything else (a blob want, say) is read, if at
+        // all, when the queue reaches it.
+        match self.odb.read_info(&oid) {
+            Ok(info) if info.kind != ObjectKind::Commit => {
+                self.queue.push_back((oid, String::new(), 0));
+                return Ok(());
+            }
+            Ok(_) => {}
+            Err(_) if self.skip_missing => return Ok(()),
+            Err(e) => return Err(e),
+        }
         match self.read(&oid)? {
             Some(obj) if obj.kind == ObjectKind::Commit => self.queue_commit(oid, obj),
             Some(_) => {

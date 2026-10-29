@@ -1963,6 +1963,9 @@ impl Odb {
     /// The oids from `oids` that are not stored locally per [`Self::exists_stored`]
     /// (alternates are not consulted), in input order.
     ///
+    /// `objects/pack/` is rescanned once for the whole batch, not once per missing
+    /// object: a partial clone asks this about thousands of absent blobs at a time.
+    ///
     /// # Errors
     ///
     /// Propagates the first failure of a custom primary store.
@@ -1970,7 +1973,17 @@ impl Odb {
         &self,
         oids: impl IntoIterator<Item = ObjectId>,
     ) -> Result<Vec<ObjectId>> {
-        filter_oids(oids, |oid| self.try_exists_stored(oid).map(|has| !has))
+        if self.custom_primary.is_some() {
+            return filter_oids(oids, |oid| self.try_exists_stored(oid).map(|has| !has));
+        }
+        self.reprepare_local_packs();
+        self.with_pack_store_for(&self.objects_dir, || {
+            filter_oids(oids, |oid| {
+                Ok(!(oid.is_canonical_empty_tree()
+                    || self.overlay_read(oid).is_some()
+                    || store::local_object_stored_without_rescan(&self.objects_dir, oid)))
+            })
+        })
     }
 
     /// Lenient [`Self::contains`]: a source that fails is skipped, so a later source can
@@ -4879,6 +4892,37 @@ mod tests {
             odb.missing_stored_oids([present, absent, alt_oid]).unwrap(),
             vec![absent, alt_oid],
             "stored ignores alternates"
+        );
+    }
+
+    #[test]
+    fn missing_stored_oids_sees_packs_written_since_the_last_probe() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let other = TempDir::new().unwrap();
+        let source = Odb::new(other.path());
+        let blobs: Vec<ObjectId> = (0..3)
+            .map(|i| {
+                source
+                    .write(ObjectKind::Blob, format!("b{i}").as_bytes())
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(odb.missing_stored_oids(blobs.clone()).unwrap(), blobs);
+        // Another writer adds a pack with two of them.
+        let pack = crate::pack_objects::build_pack_from_send_list(
+            &source,
+            &blobs[..2],
+            &std::collections::HashSet::new(),
+            &crate::pack_objects::PackBuildOptions::default(),
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        crate::index_pack::install_pack_bytes(pack, &Odb::new(dir.path()), &Default::default())
+            .unwrap();
+        assert_eq!(
+            odb.missing_stored_oids(blobs.clone()).unwrap(),
+            vec![blobs[2]]
         );
     }
 
