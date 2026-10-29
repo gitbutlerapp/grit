@@ -8,8 +8,9 @@ use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    abort_rebase, continue_rebase, skip_rebase, start_rebase, EmptyPolicy, RebaseOntoOptions,
-    RebaseOutcome, RebaseRequest, RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
+    abort_rebase, continue_rebase, read_history_last, skip_rebase, start_rebase, undo_last_rewrite,
+    EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RebaseSessionError, RefScope,
+    RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::state::resolve_head;
 use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation};
@@ -3268,6 +3269,271 @@ fn rebase_merge_replay_one_conflict_keeps_merge_parents_issue_2245() {
     assert!(
         !git_merge_base_is_ancestor(wt, "feat", "side"),
         "side ref must not absorb feat commits"
+    );
+    assert_git_fsck_strict(wt);
+}
+
+fn rebase_apply_with_record() -> grit_lib::revwalk::history::ApplyOptions {
+    grit_lib::revwalk::history::ApplyOptions {
+        identity: test_ident(),
+        reflog_message: "rebase".into(),
+        record_operation: Some("rebase".into()),
+        hooks: grit_lib::PostOperationHooks::Run,
+    }
+}
+
+fn undo_opts() -> grit_lib::revwalk::history::ApplyOptions {
+    grit_lib::revwalk::history::ApplyOptions {
+        identity: test_ident(),
+        reflog_message: "history undo".into(),
+        record_operation: None,
+        hooks: grit_lib::PostOperationHooks::Run,
+    }
+}
+
+fn finish_conflict_rebase_with_record(
+    wt: &std::path::Path,
+    start: &StartRebaseOptions,
+) -> (ObjectId, ObjectId) {
+    let orig_tip = git_oid(wt, "HEAD");
+    match start_rebase(
+        &open_grit(wt),
+        start,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("start")
+    {
+        RebaseOutcome::Stopped(_) => {}
+        other => panic!("expected conflict stop, got {other:?}"),
+    }
+    std::fs::write(wt.join("f.txt"), "resolved\n").expect("resolve");
+    git(wt, &["add", "f.txt"]);
+    let grit = open_grit(wt);
+    match continue_rebase(
+        &grit,
+        start,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("continue")
+    {
+        RebaseOutcome::Done { .. } => {}
+        other => panic!("expected done, got {other:?}"),
+    }
+    (orig_tip, git_oid(wt, "HEAD"))
+}
+
+/// Issue #2274: history-last after `--continue` must describe the reattached branch, not the
+/// detached conflict stop, so `history undo` can invert the rebase.
+#[test]
+fn continue_after_conflict_records_history_last_for_undo_issue_2274() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "f.txt", "base\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "topic"]);
+    commit_file(wt, "f.txt", "topic change\n", "topic commit");
+    let tip = git_oid(wt, "HEAD");
+    let orig_tip = tip;
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "f.txt", "main change\n", "main commit");
+    let onto = git_oid(wt, "HEAD");
+    git(wt, &["switch", "topic"]);
+
+    let start = StartRebaseOptions {
+        request: RebaseRequest {
+            upstream,
+            onto: Some(onto),
+            branch_tip: tip,
+        },
+        rebase: rebase_opts(),
+        apply: rebase_apply_with_record(),
+        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+    };
+    let (before, after) = finish_conflict_rebase_with_record(wt, &start);
+    assert_eq!(before, orig_tip);
+    assert_ne!(before, after);
+
+    let grit = open_grit(wt);
+    let record = read_history_last(&grit).expect("read").expect("record");
+    assert_eq!(record.operation, "rebase");
+    assert_eq!(record.head_ref.as_deref(), Some("refs/heads/topic"));
+    assert_eq!(record.head_old_commit, Some(orig_tip));
+    assert_eq!(record.head_new_commit, Some(after));
+    assert_ne!(record.head_old_commit, record.head_new_commit);
+
+    undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    assert_eq!(git_oid(wt, "topic"), orig_tip);
+    assert_eq!(
+        git(wt, &["symbolic-ref", "HEAD"]).trim(),
+        "refs/heads/topic"
+    );
+    undo_last_rewrite(&grit, &undo_opts(), false).expect("redo");
+    assert_eq!(git_oid(wt, "topic"), after);
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn skip_after_conflict_records_history_last_for_undo_issue_2274() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "f.txt", "base\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "topic"]);
+    commit_file(wt, "f.txt", "topic change\n", "topic commit");
+    commit_file(wt, "f2.txt", "second\n", "topic second");
+    let tip = git_oid(wt, "HEAD");
+    let orig_tip = git_oid(wt, "topic");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "f.txt", "main change\n", "main commit");
+    let onto = git_oid(wt, "HEAD");
+    git(wt, &["switch", "topic"]);
+
+    let start = StartRebaseOptions {
+        request: RebaseRequest {
+            upstream,
+            onto: Some(onto),
+            branch_tip: tip,
+        },
+        rebase: rebase_opts(),
+        apply: rebase_apply_with_record(),
+        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+    };
+    match start_rebase(
+        &open_grit(wt),
+        &start,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("start")
+    {
+        RebaseOutcome::Stopped(_) => {}
+        other => panic!("expected stop, got {other:?}"),
+    }
+    let stop_head = git_oid(wt, "HEAD");
+    let grit = open_grit(wt);
+    match skip_rebase(
+        &grit,
+        &start,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("skip")
+    {
+        RebaseOutcome::Done { applied, .. } => {
+            let final_tip = git_oid(wt, "topic");
+            assert_ne!(final_tip, stop_head);
+            assert_ne!(final_tip, orig_tip);
+            assert_eq!(applied.head, final_tip);
+        }
+        other => panic!("expected done, got {other:?}"),
+    }
+
+    let grit = open_grit(wt);
+    let record = read_history_last(&grit).expect("read").expect("record");
+    assert_eq!(record.head_ref.as_deref(), Some("refs/heads/topic"));
+    assert_eq!(record.head_old_commit, Some(orig_tip));
+    assert_eq!(record.head_new_commit, Some(git_oid(wt, "topic")));
+
+    undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    assert_eq!(git_oid(wt, "topic"), orig_tip);
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn stacked_continue_after_conflict_undo_restores_all_branch_tips_issue_2274() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(
+        wt,
+        &[("u", "r"), ("a", "u"), ("b", "a"), ("c", "b"), ("d", "b")],
+        &[("c", "refs/heads/main"), ("d", "refs/heads/stacked")],
+    );
+    git(
+        wt,
+        &[
+            "switch",
+            "--detach",
+            &format!("{}^{{commit}}", oids["u"].to_hex()),
+        ],
+    );
+    commit_file(wt, "shared.txt", "main-side\n", "onto shared");
+    let onto = git_oid(wt, "HEAD");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "shared.txt", "topic-side\n", "topic shared");
+    let branch_tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "stacked"]);
+
+    let grit = open_grit(wt);
+    let mut opts = rebase_opts();
+    opts.rewrite.scope = RefScope::Branches;
+    let start = StartRebaseOptions {
+        request: RebaseRequest {
+            upstream: oids["u"],
+            onto: Some(onto),
+            branch_tip,
+        },
+        rebase: opts,
+        apply: rebase_apply_with_record(),
+        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+    };
+    let main_before = resolve_ref(grit.git_dir(), "refs/heads/main").unwrap();
+    let stacked_before = resolve_ref(grit.git_dir(), "refs/heads/stacked").unwrap();
+
+    match start_rebase(
+        &grit,
+        &start,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("start")
+    {
+        RebaseOutcome::Stopped(_) => {
+            std::fs::write(wt.join("shared.txt"), "resolved shared\n").expect("resolve");
+            git(wt, &["add", "shared.txt"]);
+            let grit = open_grit(wt);
+            match continue_rebase(
+                &grit,
+                &start,
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .expect("continue")
+            {
+                RebaseOutcome::Done { .. } => {}
+                other => panic!("expected done, got {other:?}"),
+            }
+        }
+        other => panic!("expected conflict stop, got {other:?}"),
+    }
+
+    assert_ne!(
+        resolve_ref(grit.git_dir(), "refs/heads/main").unwrap(),
+        main_before
+    );
+    assert_ne!(
+        resolve_ref(grit.git_dir(), "refs/heads/stacked").unwrap(),
+        stacked_before
+    );
+
+    let grit = open_grit(wt);
+    let record = read_history_last(&grit).expect("read").expect("record");
+    assert_eq!(record.head_ref.as_deref(), Some("refs/heads/stacked"));
+    assert_eq!(record.head_old_commit, Some(stacked_before));
+
+    undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    assert_eq!(
+        resolve_ref(grit.git_dir(), "refs/heads/main").unwrap(),
+        main_before
+    );
+    assert_eq!(
+        resolve_ref(grit.git_dir(), "refs/heads/stacked").unwrap(),
+        stacked_before
+    );
+    assert_eq!(
+        git(wt, &["symbolic-ref", "HEAD"]).trim(),
+        "refs/heads/stacked"
     );
     assert_git_fsck_strict(wt);
 }

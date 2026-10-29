@@ -26,6 +26,7 @@ use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
 
 use super::apply::{apply_rewrite, log_head_move};
 use super::error::HistoryError;
+use super::last::{write_history_last, HistoryLastRecord};
 use super::plan::{commit_parents, plan_rewrite_with_order_resumable_seeded, ResumablePlanOutcome};
 use super::rebase::{
     commits_in_rebase_range, plan_rebase_resumable, PreRebase, RebaseOntoOptions, RebasePlan,
@@ -1117,6 +1118,20 @@ fn advance_after_plan(
             // The refs already moved: finish the rebase even if a cancel arrives now.
             reset_index_worktree_to_head(repo, branch_tip, &mut NullProgress, &NeverCancel)?;
             applied.head = branch_tip;
+            if let Some(operation) = apply.record_operation.as_deref() {
+                let head_old_tree = commit_tree(repo, prev.orig_head)?;
+                let head_new_tree = commit_tree(repo, branch_tip)?;
+                let record = HistoryLastRecord {
+                    operation: operation.into(),
+                    head_ref: Some(prev.head_ref.clone()),
+                    head_old_commit: Some(prev.orig_head),
+                    head_new_commit: Some(branch_tip),
+                    head_old_tree: Some(head_old_tree),
+                    head_new_tree: Some(head_new_tree),
+                    ref_updates: plan.ref_updates.clone(),
+                };
+                write_history_last(repo, &record, None)?;
+            }
             clear_rebase_state(repo.git_dir())?;
             if apply.hooks.enabled()
                 && run_post_rewrite(repo, RewriteKind::Rebase, &plan.rewritten_pairs())
