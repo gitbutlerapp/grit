@@ -600,7 +600,7 @@ fn simplify_verbatim_str(path: &str) -> Option<String> {
 
 /// Whether Win32 path parsing leaves `component` unchanged and names a regular file.
 #[cfg(any(windows, test))]
-fn win32_component_round_trips(component: &str) -> bool {
+pub(crate) fn win32_component_round_trips(component: &str) -> bool {
     const RESERVED: [&str; 6] = ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"];
     if component.is_empty()
         || component.ends_with(['.', ' '])
@@ -636,6 +636,12 @@ fn win32_component_round_trips(component: &str) -> bool {
             )
     });
     !numbered_device
+}
+
+/// Whether every `/`-separated component of a Git storage path is safe as a Win32 file name.
+#[cfg(any(windows, test))]
+pub(crate) fn win32_storage_path_components_round_trip(path: &str) -> bool {
+    path.split('/').all(win32_component_round_trips)
 }
 
 /// `path` in its plain Win32 spelling when it is a verbatim (`\\?\`) path that names the same
@@ -1342,5 +1348,20 @@ mod git_path_component_tests {
         let mut sb = String::new();
         let rel = relative_path("/repo/.git/info//sparse-checkout", "/repo", &mut sb);
         assert_eq!(rel, Some(".git/info//sparse-checkout"));
+    }
+
+    #[test]
+    fn win32_storage_path_components_round_trip_ref_names() {
+        let ok = win32_storage_path_components_round_trip;
+        assert!(!ok("refs/heads/aux"));
+        assert!(!ok("refs/heads/AUX"));
+        assert!(!ok("refs/heads/com1"));
+        assert!(!ok("refs/heads/COM1.txt"));
+        assert!(!ok("refs/heads/foo/aux/bar"));
+        assert!(!ok("refs/heads/foo./bar"));
+        assert!(!ok("refs/heads/conin$"));
+        assert!(ok("refs/heads/auxiliary"));
+        assert!(ok("refs/heads/commit"));
+        assert!(ok("HEAD"));
     }
 }
