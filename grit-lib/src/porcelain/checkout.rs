@@ -604,8 +604,12 @@ fn checkout_hard_to_tree_journaled(
         .collect();
     hard_reset_drop_unmerged_and_intent(&mut index);
     let mut deleted_abs_paths = Vec::new();
+    let mut staged_index_changes: Vec<DiffEntry> = Vec::new();
     if trees_differ || !index_hard_reset_cache_matches_tree(&index, target_tree) {
         let align_plan = crate::diff::plan_hard_reset_index_align(repo.odb(), &index, target_tree)?;
+        if !trees_differ {
+            staged_index_changes = hard_reset_align_plan_diff_entries(&index, &align_plan);
+        }
         let index_only_removals: Vec<(Vec<u8>, u32)> = align_plan
             .remove_paths
             .iter()
@@ -651,12 +655,18 @@ fn checkout_hard_to_tree_journaled(
         })
         .map(|entry| (entry.path.clone(), entry.mode))
         .collect();
+    let hard_reset_checkout_apply = CheckoutApplyOptions {
+        parallel_prepare_blobs: false,
+        checkout_parallel_threshold: None,
+        ..CheckoutApplyOptions::default()
+    };
     if trees_differ && !changes.is_empty() {
-        for rel in hard_reset_unrecorded_tree_diff_paths(
+        hard_reset_apply_tree_diff_checkout(
             repo,
             work_tree,
-            &index,
-            &config,
+            progress,
+            cancel,
+            &mut index,
             &changes,
             sparse.as_ref(),
             HardResetStatCheck {
@@ -664,26 +674,37 @@ fn checkout_hard_to_tree_journaled(
                 trust_filemode,
                 index_mtime: pre_reset_index_mtime,
             },
-        )? {
-            journal.spool_remove(&rel)?;
-        }
-        let tree_diff_apply = CheckoutApplyOptions {
-            parallel_prepare_blobs: false,
-            checkout_parallel_threshold: Some(i64::MAX),
-            ..CheckoutApplyOptions::default()
-        };
-        apply_tree_changes_in_chunks(
-            repo,
-            &changes,
-            progress,
-            cancel,
-            &mut index,
-            tree_diff_apply,
-            None,
-            CheckoutIndexWrite::Defer(lock),
+            hard_reset_checkout_apply.clone(),
+            lock,
             journal,
         )?;
         drop(changes);
+    } else if !staged_index_changes.is_empty() {
+        hard_reset_apply_tree_diff_checkout(
+            repo,
+            work_tree,
+            progress,
+            cancel,
+            &mut index,
+            &staged_index_changes,
+            sparse.as_ref(),
+            HardResetStatCheck {
+                policy: stat_policy,
+                trust_filemode,
+                index_mtime: pre_reset_index_mtime,
+            },
+            hard_reset_checkout_apply,
+            lock,
+            journal,
+        )?;
+    }
+    for change in &staged_index_changes {
+        if change.status == DiffStatus::Deleted {
+            continue;
+        }
+        if let Some(path) = &change.new_path {
+            written_by_tree_diff.insert(crate::repo_relpath::storage_bytes(path).into_owned());
+        }
     }
 
     let plan_positions = hard_reset_stage0_entry_positions(&index);
@@ -1011,6 +1032,106 @@ fn index_hard_reset_cache_matches_tree(index: &Index, target_tree: &ObjectId) ->
         && usize::try_from(root.entry_count).ok() == Some(stage0_count)
 }
 
+/// Turn a same-tree hard-reset index align plan into checkout diff entries (HEAD reset with staged
+/// index changes, or merge abort index realignment).
+fn hard_reset_align_plan_diff_entries(
+    index: &Index,
+    plan: &crate::diff::HardResetIndexPlan,
+) -> Vec<DiffEntry> {
+    let mut changes = Vec::new();
+    for path in &plan.remove_paths {
+        let Some(entry) = index.get(path, 0) else {
+            continue;
+        };
+        let path_str = crate::repo_relpath::storage_string(path);
+        changes.push(DiffEntry {
+            status: DiffStatus::Deleted,
+            old_path: Some(path_str.clone()),
+            new_path: None,
+            old_mode: FileMode::new(entry.mode),
+            new_mode: FileMode::ABSENT,
+            old_oid: entry.oid,
+            new_oid: zero_oid(),
+            score: None,
+        });
+    }
+    for (path, mode, oid) in &plan.updates {
+        let path_str = crate::repo_relpath::storage_string(path);
+        let (old_oid, old_mode) = index
+            .get(path, 0)
+            .map_or((zero_oid(), FileMode::ABSENT), |e| {
+                (e.oid, FileMode::new(e.mode))
+            });
+        let status = if old_mode == FileMode::ABSENT {
+            DiffStatus::Added
+        } else {
+            DiffStatus::Modified
+        };
+        changes.push(DiffEntry {
+            status,
+            old_path: Some(path_str.clone()),
+            new_path: Some(path_str),
+            old_mode,
+            new_mode: FileMode::new(*mode),
+            old_oid,
+            new_oid: *oid,
+            score: None,
+        });
+    }
+    for entry in &plan.insert_entries {
+        let path_str = crate::repo_relpath::storage_string(&entry.path);
+        changes.push(DiffEntry {
+            status: DiffStatus::Added,
+            old_path: None,
+            new_path: Some(path_str),
+            old_mode: FileMode::ABSENT,
+            new_mode: FileMode::new(entry.mode),
+            old_oid: zero_oid(),
+            new_oid: entry.oid,
+            score: None,
+        });
+    }
+    changes
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hard_reset_apply_tree_diff_checkout(
+    repo: &Repository,
+    work_tree: &Path,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+    index: &mut Index,
+    changes: &[DiffEntry],
+    sparse: Option<&SparseCheckout>,
+    stat_check: HardResetStatCheck,
+    apply: CheckoutApplyOptions,
+    lock: &mut IndexLock,
+    journal: &mut CheckoutJournal,
+) -> Result<()> {
+    for rel in hard_reset_unrecorded_tree_diff_paths(
+        repo,
+        work_tree,
+        index,
+        &repo.config()?,
+        changes,
+        sparse,
+        stat_check,
+    )? {
+        journal.spool_remove(&rel)?;
+    }
+    apply_tree_changes_in_chunks(
+        repo,
+        changes,
+        progress,
+        cancel,
+        index,
+        apply,
+        None,
+        CheckoutIndexWrite::Defer(lock),
+        journal,
+    )
+}
+
 /// Index positions that need a worktree stat before hard reset can choose keep vs verify.
 fn hard_reset_stat_probe_positions(
     index: &Index,
@@ -1060,6 +1181,11 @@ fn scan_index_blob_stats_for_hard_reset(
     if plan.is_empty() {
         return Ok(stats);
     }
+    let stat_workers = repo
+        .thread_policy()
+        .resolve(ParallelOp::IndexRefresh, config)
+        .threads
+        .get();
     let dir_root = work_tree.to_path_buf();
     let file_root = work_tree.to_path_buf();
     let batches = collect_blob_lookup_batches(
@@ -1067,7 +1193,7 @@ fn scan_index_blob_stats_for_hard_reset(
         &plan,
         WorktreeBlobScanOptions {
             preload_index: false,
-            stat_parallel_threads: Some(1),
+            stat_parallel_threads: Some(stat_workers),
         },
         &repo.thread_policy(),
         config,
