@@ -81,6 +81,34 @@ impl UploadSession {
             pack: self.pack,
         }
     }
+
+    fn absorb(&mut self, other: UploadSession) {
+        self.negotiation_rounds = self
+            .negotiation_rounds
+            .saturating_add(other.negotiation_rounds);
+        if let Some(p) = other.pack {
+            self.pack = Some(match self.pack {
+                None => p,
+                Some(existing) => PackStats {
+                    object_count: existing.object_count.saturating_add(p.object_count),
+                    pack_bytes: existing.pack_bytes.saturating_add(p.pack_bytes),
+                    delta_count: existing.delta_count.saturating_add(p.delta_count),
+                    verbatim_reuse_bytes: existing
+                        .verbatim_reuse_bytes
+                        .saturating_add(p.verbatim_reuse_bytes),
+                    verbatim_reuse_objects: existing
+                        .verbatim_reuse_objects
+                        .saturating_add(p.verbatim_reuse_objects),
+                    pack_ofs_fixup_objects: existing
+                        .pack_ofs_fixup_objects
+                        .saturating_add(p.pack_ofs_fixup_objects),
+                    pack_ref_from_ofs_objects: existing
+                        .pack_ref_from_ofs_objects
+                        .saturating_add(p.pack_ref_from_ofs_objects),
+                },
+            });
+        }
+    }
 }
 
 fn map_repo_cancel(err: ServeError) -> ServeError {
@@ -667,11 +695,12 @@ fn serve_v2(
         output.flush()?;
     }
 
+    let mut aggregate = UploadSession::default();
     loop {
         stop.poll().map_err(|_| ServeError::Cancelled)?;
         opts.server_options.clear();
         let Some(request) = read_v2_request(input, opts)? else {
-            return Ok(UploadSession::default());
+            return Ok(aggregate);
         };
         check_object_format(repo, request.object_format.as_deref())?;
         let session = match request.command.as_str() {
@@ -694,6 +723,7 @@ fn serve_v2(
         if opts.stateless_rpc {
             return Ok(session);
         }
+        aggregate.absorb(session);
     }
 }
 

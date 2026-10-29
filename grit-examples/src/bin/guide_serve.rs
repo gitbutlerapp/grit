@@ -31,9 +31,6 @@ fn protect_branches(cmd: &RefCommand, _odb: &Odb) -> Result<(), RefUpdateRefusal
     Ok(())
 }
 
-/// Refuse pushes that carry a specific push option (for example `git push -o ci.skip`).
-struct DenyPushOption(&'static str);
-
 struct ServerHook;
 
 impl ReceiveHook for ServerHook {
