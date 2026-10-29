@@ -943,6 +943,9 @@ pub fn write_tree_partial_from_index(
                     continue;
                 }
                 let sub_oid = merge_level(odb, index, &te.oid, &fp, paths_from_index)?;
+                if is_empty_tree_oid(odb, &sub_oid) {
+                    continue;
+                }
                 by_name.insert(
                     te.name.clone(),
                     TreeEntry {
@@ -1722,6 +1725,32 @@ mod tests {
             odb.write(ObjectKind::Blob, b"changed").unwrap(),
         ));
         assert!(!index_cache_tree_inputs_match(&left, &right));
+    }
+
+    #[test]
+    fn partial_write_tree_dropping_last_file_prunes_directory() {
+        use std::collections::HashSet;
+
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob = odb.write(ObjectKind::Blob, b"only").unwrap();
+        let mut base_index = Index::new();
+        base_index.add_or_replace(entry("upstream.txt", MODE_REGULAR, blob));
+        base_index.add_or_replace(entry("dir/only.txt", MODE_REGULAR, blob));
+        let base_tree = write_tree_from_index(&odb, &base_index, "").unwrap();
+
+        let mut paths = HashSet::new();
+        paths.insert(b"dir/only.txt".to_vec());
+        let empty_index = Index::new();
+        let merged =
+            write_tree_partial_from_index(&odb, &empty_index, &base_tree, &paths).expect("partial");
+
+        let top = parse_tree(&odb.read(&merged).unwrap().data).unwrap();
+        assert!(
+            top.iter().all(|e| e.name != b"dir"),
+            "empty directory must not appear in tree"
+        );
+        assert!(top.iter().any(|e| e.name == b"upstream.txt"));
     }
 
     #[test]

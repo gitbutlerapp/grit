@@ -2040,29 +2040,6 @@ mod merge_call_tests {
             .odb()
             .write(ObjectKind::Commit, &fork_raw)
             .expect("fork");
-        let mut parent = fork;
-        for i in 0..80 {
-            let tree = blob_tree(
-                &repo,
-                &format!("wide/n{i}.txt"),
-                format!("w{i}\n").as_bytes(),
-            )
-            .expect("tree");
-            let raw = serialize_commit(&CommitData {
-                tree,
-                parents: vec![parent],
-                author: sig.clone(),
-                committer: sig.clone(),
-                author_raw: Vec::new(),
-                committer_raw: Vec::new(),
-                encoding: None,
-                message: format!("wide {i}\n"),
-                raw_message: None,
-                extra_headers: Vec::new(),
-            });
-            parent = repo.odb().write(ObjectKind::Commit, &raw).expect("commit");
-        }
-        let onto = parent;
         fn tree_with_file(
             repo: &Repository,
             parent_tree: ObjectId,
@@ -2096,6 +2073,28 @@ mod merge_call_tests {
             });
             write_tree_from_index(repo.odb(), &index, "")
         }
+
+        let mut parent = fork;
+        let mut onto_tree = fork_tree;
+        for i in 0..80 {
+            let path = format!("wide/n{i}.txt");
+            onto_tree = tree_with_file(&repo, onto_tree, &path, format!("w{i}\n").as_bytes())
+                .expect("onto tree");
+            let raw = serialize_commit(&CommitData {
+                tree: onto_tree,
+                parents: vec![parent],
+                author: sig.clone(),
+                committer: sig.clone(),
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: None,
+                message: format!("wide {i}\n"),
+                raw_message: None,
+                extra_headers: Vec::new(),
+            });
+            parent = repo.odb().write(ObjectKind::Commit, &raw).expect("commit");
+        }
+        let onto = parent;
 
         let mut stack_parent = fork;
         let mut stack_tree = fork_tree;
@@ -2137,6 +2136,134 @@ mod merge_call_tests {
             test_merge_tree_call_count(),
             0,
             "add-only stack should not call three-way merge per commit"
+        );
+    }
+
+    #[test]
+    fn replay_delete_last_file_in_dir_matches_git_rebase_tree() {
+        use crate::objects::parse_commit;
+        use crate::revwalk::history::{plan_rebase, RebaseOntoOptions, RebasePlan, RebaseRequest};
+        use std::process::Command;
+
+        if Command::new("git").arg("--version").status().is_err() {
+            return;
+        }
+
+        let root = tempfile::tempdir().expect("tempdir");
+        let wt = root.path();
+        let git = |args: &[&str]| {
+            Command::new("git")
+                .current_dir(wt)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@grit.test")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@grit.test")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .expect("git");
+        };
+        git(&["init", "-b", "main"]);
+        std::fs::write(wt.join("upstream.txt"), "v1\n").expect("write");
+        git(&["add", "upstream.txt"]);
+        git(&["commit", "-m", "root"]);
+        let fork = Command::new("git")
+            .current_dir(wt)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .expect("rev-parse");
+        let fork_hex = String::from_utf8(fork.stdout)
+            .expect("utf8")
+            .trim()
+            .to_owned();
+        git(&["branch", "feat"]);
+        git(&["switch", "main"]);
+        std::fs::write(wt.join("upstream.txt"), "v2\n").expect("write");
+        git(&["add", "upstream.txt"]);
+        git(&["commit", "-m", "main bump"]);
+        let onto_hex = Command::new("git")
+            .current_dir(wt)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .expect("rev-parse");
+        let onto_hex = String::from_utf8(onto_hex.stdout)
+            .expect("utf8")
+            .trim()
+            .to_owned();
+        git(&["switch", "feat"]);
+        std::fs::create_dir_all(wt.join("dir")).expect("dir");
+        std::fs::write(wt.join("dir/only.txt"), "only\n").expect("write");
+        git(&["add", "dir/only.txt"]);
+        git(&["commit", "-m", "add dir"]);
+        std::fs::remove_file(wt.join("dir/only.txt")).expect("rm");
+        git(&["add", "-u"]);
+        git(&["commit", "-m", "drop dir"]);
+        let tip_hex = Command::new("git")
+            .current_dir(wt)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .expect("rev-parse");
+        let tip_hex = String::from_utf8(tip_hex.stdout)
+            .expect("utf8")
+            .trim()
+            .to_owned();
+
+        let fork = ObjectId::from_hex(&fork_hex).expect("fork");
+        let onto = ObjectId::from_hex(&onto_hex).expect("onto");
+        let tip = ObjectId::from_hex(&tip_hex).expect("tip");
+        let repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
+        let opts = RebaseOntoOptions::new(RewriteOptions {
+            scope: RefScope::Head,
+            empty: EmptyPolicy::Drop,
+            committer: ident(2).parse().expect("signature"),
+            preserve_committer: false,
+            sign: false,
+        });
+        let request = RebaseRequest {
+            upstream: fork,
+            onto: Some(onto),
+            branch_tip: tip,
+        };
+        let plan = match plan_rebase(&repo, &request, &opts).expect("plan") {
+            RebasePlan::Plan(plan) => plan,
+            other => panic!("expected plan, got {other:?}"),
+        };
+        let new_tip = plan
+            .commits
+            .last()
+            .and_then(|row| row.new)
+            .expect("rewritten tip");
+        let grit_tree = parse_commit(&repo.odb().read(&new_tip).expect("read").data)
+            .expect("parse")
+            .tree;
+
+        let git_wt = tempfile::tempdir().expect("git wt");
+        Command::new("git")
+            .current_dir(git_wt.path())
+            .args(["clone", wt.to_str().expect("utf8"), "r"])
+            .status()
+            .expect("clone");
+        let clone = git_wt.path().join("r");
+        Command::new("git")
+            .current_dir(&clone)
+            .args(["rebase", "--onto", &onto_hex, &fork_hex, "feat"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("git rebase");
+        let git_tree_hex = Command::new("git")
+            .current_dir(&clone)
+            .args(["rev-parse", "feat^{tree}"])
+            .output()
+            .expect("tree");
+        let git_tree =
+            ObjectId::from_hex(String::from_utf8(git_tree_hex.stdout).expect("utf8").trim())
+                .expect("parse tree");
+
+        assert_eq!(
+            grit_tree, git_tree,
+            "delete replay tree must match git (no empty dir tree)"
         );
     }
 }

@@ -1737,6 +1737,70 @@ fn rebase_leaves_backup_branch_at_checked_out_tip() {
     assert_git_fsck_strict(wt);
 }
 
+/// Replay planning must not leave an empty `dir/` tree entry when a commit deletes the last
+/// file in that directory (issue #2263 review).
+#[test]
+fn rebase_replay_delete_last_file_in_dir_matches_git_tree() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "upstream.txt", "v1\n", "root");
+    let fork = git_rev_parse(wt, "HEAD");
+    git(wt, &["branch", "feat"]);
+    git(wt, &["switch", "-q", "main"]);
+    commit_file(wt, "upstream.txt", "v2\n", "main bump");
+    let onto = git_rev_parse(wt, "HEAD");
+    git(wt, &["switch", "-q", "feat"]);
+    commit_file(wt, "dir/only.txt", "only\n", "add dir");
+    std::fs::remove_file(wt.join("dir/only.txt")).expect("rm");
+    git(wt, &["add", "-u"]);
+    std::process::Command::new("git")
+        .current_dir(wt)
+        .args(["commit", "-m", "drop dir"])
+        .env("GIT_AUTHOR_NAME", "Refs Harness Author")
+        .env("GIT_AUTHOR_EMAIL", "refs-harness@example.com")
+        .env("GIT_COMMITTER_NAME", "Refs Harness Author")
+        .env("GIT_COMMITTER_EMAIL", "refs-harness@example.com")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("commit");
+    let tip = git_rev_parse(wt, "HEAD");
+
+    let grit = open_grit(wt);
+    let plan = rebase_onto(
+        &grit,
+        fork,
+        onto,
+        &[tip],
+        &rebase_opts(RefScope::Head, EmptyPolicy::Drop, false),
+    )
+    .expect("grit plan");
+    apply_plan(&grit, &plan);
+    let grit_tree = git_rev_parse_verify(wt, "HEAD^{tree}");
+
+    let git_wt = tempfile::tempdir().expect("git wt");
+    std::process::Command::new("git")
+        .current_dir(git_wt.path())
+        .args(["clone", wt.to_str().expect("utf8"), "r"])
+        .status()
+        .expect("clone");
+    let git_wt = git_wt.path().join("r");
+    std::process::Command::new("git")
+        .current_dir(&git_wt)
+        .args(["rebase", "--onto", &onto.to_hex(), &fork.to_hex(), "feat"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git rebase");
+    let git_tree = git_rev_parse_verify(&git_wt, "feat^{tree}");
+
+    assert_eq!(
+        grit_tree, git_tree,
+        "replay delete must match git rebase tree (no empty dir placeholder)"
+    );
+    assert_git_fsck_strict(wt);
+}
+
 #[test]
 fn fast_forward_rebase_leaves_backup_branch_at_checked_out_tip() {
     let repo = HistoryRepo::init();

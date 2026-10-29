@@ -19,7 +19,7 @@ use crate::write_tree::write_tree_partial_from_index;
 
 use super::error::HistoryError;
 
-thread_local! {
+thread_local! { // hygiene: merge-tree call counter for tests and unstable-bench-helpers
     #[cfg(any(test, feature = "unstable-bench-helpers"))]
     static MERGE_TREE_CALLS: Cell<usize> = const { Cell::new(0) };
 }
