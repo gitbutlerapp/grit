@@ -2,7 +2,9 @@
 use crate::change_id::{set_change_id, ChangeIdPolicy};
 use crate::error::{Error, Result};
 use crate::fsck_standalone::{fsck_object, FsckObjectOptions};
-use crate::objects::write::canonical_tree_entries;
+use crate::objects::write::{
+    canonical_tree_entries, validate_tree_entry_stored_kinds, WriteTreeOptions,
+};
 use crate::objects::{
     serialize_commit, serialize_tree, CommitData, NewCommit, Object, ObjectId, ObjectInfo,
     ObjectKind, TreeEntry,
@@ -184,16 +186,21 @@ impl<'repo> Objects<'repo> {
 
     /// Write a tree object from `entries`, given in any order.
     ///
-    /// Entries are sorted into Git's tree order. Entry objects are not required to exist
-    /// (as with `git mktree --missing`), so trees can be built bottom-up or point at
-    /// objects a partial clone has not fetched.
+    /// Entries are sorted into Git's tree order. Each entry's object must exist in this
+    /// repository with the kind implied by its mode (tree, blob, or commit for gitlinks),
+    /// matching `git mktree` without `--missing`. Use
+    /// [`Self::write_tree_with`] with [`WriteTreeOptions::allow_missing`] when building
+    /// trees bottom-up or referencing objects a partial clone has not fetched.
     ///
     /// # Errors
     ///
     /// - [`crate::error::Error::InvalidTreeEntry`] when an entry has an empty, `.`, `..`,
     ///   `.git`-alias or slash/NUL-containing name, a mode other than `100644`, `100755`,
     ///   `120000`, `40000` or `160000`, the null object id, an object id of the wrong hash
-    ///   algorithm, a name over 4096 bytes, or a name used by another entry.
+    ///   algorithm, a name over 4096 bytes, a name used by another entry, or a symlink to a
+    ///   reserved metadata file name (`.gitmodules`, `.gitattributes`, and related spellings).
+    /// - [`crate::error::Error::ObjectNotFound`] when a required entry object is missing.
+    /// - [`crate::error::Error::UnexpectedObjectKind`] when a stored object has the wrong kind.
     /// - [`crate::error::Error::HashCollision`] and zlib or filesystem errors from the ODB.
     ///
     /// # Examples
@@ -216,13 +223,32 @@ impl<'repo> Objects<'repo> {
     /// # }
     /// ```
     pub fn write_tree(&self, entries: impl IntoIterator<Item = TreeEntry>) -> Result<ObjectId> {
-        let algo = self.repo.odb().hash_algo();
-        let data = serialize_tree(&canonical_tree_entries(entries, algo)?);
+        self.write_tree_with(entries, WriteTreeOptions::default())
+    }
+
+    /// Write a tree object from `entries` with `options`.
+    ///
+    /// Same validation and sorting as [`Self::write_tree`], except that missing blob and
+    /// tree oids are accepted when [`WriteTreeOptions::allow_missing`] is set.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::write_tree`].
+    pub fn write_tree_with(
+        &self,
+        entries: impl IntoIterator<Item = TreeEntry>,
+        options: WriteTreeOptions,
+    ) -> Result<ObjectId> {
+        let odb = self.repo.odb();
+        let algo = odb.hash_algo();
+        let canonical = canonical_tree_entries(entries, algo)?;
+        validate_tree_entry_stored_kinds(odb, &canonical, options.allow_missing)?;
+        let data = serialize_tree(&canonical);
         debug_assert!(
             fsck_object(ObjectKind::Tree, &data, FsckObjectOptions::new(algo)).is_ok(),
             "canonical_tree_entries let through a tree fsck rejects"
         );
-        self.repo.odb().write(ObjectKind::Tree, &data)
+        odb.write(ObjectKind::Tree, &data)
     }
 
     /// Write the commit described by `commit` and return its id.

@@ -36,7 +36,7 @@ pub use oid_hashtable::{
     oid_hash_map_from, oid_hash_map_with_capacity, oid_hash_set, oid_hash_set_from,
     oid_hash_set_with_capacity, OidBuildHasher, OidHashMap, OidHashSet, OidHasher,
 };
-pub use write::{NewCommit, TreeEntryError};
+pub use write::{NewCommit, TreeEntryError, WriteTreeOptions};
 
 pub use crate::change_id::{
     change_id, find_commits_by_change_id_prefix, is_change_id_spec_token,

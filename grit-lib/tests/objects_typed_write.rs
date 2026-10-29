@@ -196,6 +196,135 @@ fn write_tree_sorts_entries_and_passes_git_fsck() {
 }
 
 #[test]
+fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repo = init_bare(dir.path(), HashAlgo::Sha1);
+    let blob = blob(&repo, b"x\n");
+    let missing = ObjectId::from_hex("1234567890123456789012345678901234567890").expect("oid");
+
+    let blob_as_tree = repo.objects().write_tree([TreeEntry {
+        mode: 0o040000,
+        name: b"d".to_vec(),
+        oid: blob,
+    }]);
+    assert!(
+        matches!(
+            blob_as_tree,
+            Err(Error::UnexpectedObjectKind {
+                expected: ObjectKind::Tree,
+                actual: ObjectKind::Blob,
+                ..
+            })
+        ),
+        "{blob_as_tree:?}"
+    );
+
+    let missing_file = repo.objects().write_tree([TreeEntry {
+        mode: 0o100644,
+        name: b"m".to_vec(),
+        oid: missing,
+    }]);
+    assert!(
+        matches!(missing_file, Err(Error::ObjectNotFound(_))),
+        "{missing_file:?}"
+    );
+
+    let gitmodules_link = repo.objects().write_tree([TreeEntry {
+        mode: 0o120000,
+        name: b".gitmodules".to_vec(),
+        oid: blob,
+    }]);
+    assert!(
+        matches!(
+            gitmodules_link,
+            Err(Error::InvalidTreeEntry(TreeEntryError::ForbiddenDotSymlink {
+                ref name,
+                reserved_file: ".gitmodules",
+            })) if name == b".gitmodules"
+        ),
+        "{gitmodules_link:?}"
+    );
+
+    let would_be = repo
+        .objects()
+        .hash(
+            ObjectKind::Tree,
+            &serialize_tree(&[TreeEntry {
+                mode: 0o100644,
+                name: b"m".to_vec(),
+                oid: missing,
+            }]),
+        )
+        .expect("hash");
+    assert!(!repo.objects().contains(&would_be).unwrap());
+
+    let dangling_gitlink = repo
+        .objects()
+        .write_tree([TreeEntry {
+            mode: 0o160000,
+            name: b"sub".to_vec(),
+            oid: missing,
+        }])
+        .expect("missing gitlink is allowed");
+    git_fsck_strict(dir.path());
+    assert!(repo.objects().contains(&dangling_gitlink).unwrap());
+
+    let root = repo
+        .objects()
+        .write_commit(&NewCommit::new(
+            ObjectId::empty_tree(),
+            ada(1),
+            ada(1),
+            "sub",
+        ))
+        .expect("gitlink commit");
+    let gitlink = repo
+        .objects()
+        .write_tree([TreeEntry {
+            mode: 0o160000,
+            name: b"sub".to_vec(),
+            oid: root,
+        }])
+        .expect("present gitlink");
+    assert_ne!(gitlink, dangling_gitlink);
+    git_fsck_strict(dir.path());
+
+    let dangling_blob = repo
+        .objects()
+        .write_tree_with(
+            [file(b"future", missing)],
+            grit_lib::objects::WriteTreeOptions {
+                allow_missing: true,
+            },
+        )
+        .expect("allow_missing dangling blob");
+    assert!(repo.objects().contains(&dangling_blob).unwrap());
+    git_fsck_strict(dir.path());
+
+    let still_wrong = repo.objects().write_tree_with(
+        [TreeEntry {
+            mode: 0o040000,
+            name: b"d".to_vec(),
+            oid: blob,
+        }],
+        grit_lib::objects::WriteTreeOptions {
+            allow_missing: true,
+        },
+    );
+    assert!(
+        matches!(
+            still_wrong,
+            Err(Error::UnexpectedObjectKind {
+                expected: ObjectKind::Tree,
+                actual: ObjectKind::Blob,
+                ..
+            })
+        ),
+        "{still_wrong:?}"
+    );
+}
+
+#[test]
 fn write_tree_returns_typed_errors() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repo = init_bare(dir.path(), HashAlgo::Sha1);

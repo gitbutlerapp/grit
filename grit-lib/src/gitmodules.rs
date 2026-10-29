@@ -60,6 +60,33 @@ fn is_hfs_or_ntfs_dot_gitattributes(name: &str) -> bool {
     is_hfs_dot_gitattributes(name) || is_ntfs_dot_gitattributes(name)
 }
 
+/// When `mode` is `120000`, the well-known metadata file name the entry must not symlink to.
+///
+/// Covers HFS and NTFS spellings of `.gitmodules`, `.gitattributes`, `.gitignore`, and
+/// `.mailmap`, matching [`fsck_dot_special_tree_pass`].
+#[must_use]
+pub fn tree_entry_reserved_dot_symlink(mode: u32, name: &[u8]) -> Option<&'static str> {
+    if mode != 0o120000 {
+        return None;
+    }
+    let Ok(name_str) = std::str::from_utf8(name) else {
+        return None;
+    };
+    if is_hfs_or_ntfs_dot_gitmodules(name_str) {
+        return Some(".gitmodules");
+    }
+    if is_hfs_or_ntfs_dot_gitattributes(name_str) {
+        return Some(".gitattributes");
+    }
+    if is_hfs_dot_gitignore(name_str) || is_ntfs_dot_gitignore(name_str) {
+        return Some(".gitignore");
+    }
+    if is_hfs_dot_mailmap(name_str) || is_ntfs_dot_mailmap(name_str) {
+        return Some(".mailmap");
+    }
+    None
+}
+
 /// Symlink and registration for one tree (Git `fsck_tree` entry loop).
 pub fn fsck_dot_special_tree_pass(
     tree_oid: &ObjectId,

@@ -2319,6 +2319,7 @@ pub fn grit_lib::config::gitmodules::looks_like_command_line_option(&str) -> boo
 pub fn grit_lib::config::gitmodules::oids_from_copied_object_paths(&[std::path::PathBuf]) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
 pub fn grit_lib::config::gitmodules::tree_entry_is_gitattributes_blob(u32, &[u8]) -> bool
 pub fn grit_lib::config::gitmodules::tree_entry_is_gitmodules_blob(u32, &[u8]) -> bool
+pub fn grit_lib::config::gitmodules::tree_entry_reserved_dot_symlink(u32, &[u8]) -> core::option::Option<&'static str>
 pub fn grit_lib::config::gitmodules::validate_gitmodules_blob_line(&[u8]) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::gitmodules::verify_gitmodules_for_commit(&grit_lib::objects::odb::Odb, grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
 pub fn grit_lib::config::gitmodules::write_gitmodules_cli_option_warnings(&mut dyn core::io::write::Write, &str) -> core::io::error::Result<()>
@@ -9687,6 +9688,7 @@ pub fn grit_lib::objects::handle::Objects<'repo>::write(&self, grit_lib::objects
 pub fn grit_lib::objects::handle::Objects<'repo>::write_commit(&self, &grit_lib::objects::NewCommit) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::handle::Objects<'repo>::write_literally(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::handle::Objects<'repo>::write_tree(&self, impl core::iter::traits::collect::IntoIterator<Item = grit_lib::objects::TreeEntry>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::handle::Objects<'repo>::write_tree_with(&self, impl core::iter::traits::collect::IntoIterator<Item = grit_lib::objects::TreeEntry>, grit_lib::objects::WriteTreeOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 impl<'repo> core::clone::Clone for grit_lib::objects::handle::Objects<'repo>
 pub fn grit_lib::objects::handle::Objects<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::objects::handle::Objects<'repo>
@@ -12560,6 +12562,9 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::ObjectKind
 #[non_exhaustive] pub enum grit_lib::objects::TreeEntryError
 pub grit_lib::objects::TreeEntryError::DuplicateName
 pub grit_lib::objects::TreeEntryError::DuplicateName::name: alloc::vec::Vec<u8>
+pub grit_lib::objects::TreeEntryError::ForbiddenDotSymlink
+pub grit_lib::objects::TreeEntryError::ForbiddenDotSymlink::name: alloc::vec::Vec<u8>
+pub grit_lib::objects::TreeEntryError::ForbiddenDotSymlink::reserved_file: &'static str
 pub grit_lib::objects::TreeEntryError::HashAlgoMismatch
 pub grit_lib::objects::TreeEntryError::HashAlgoMismatch::actual: grit_lib::objects::HashAlgo
 pub grit_lib::objects::TreeEntryError::HashAlgoMismatch::expected: grit_lib::objects::HashAlgo
@@ -12963,6 +12968,7 @@ pub fn grit_lib::objects::handle::Objects<'repo>::write(&self, grit_lib::objects
 pub fn grit_lib::objects::handle::Objects<'repo>::write_commit(&self, &grit_lib::objects::NewCommit) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::handle::Objects<'repo>::write_literally(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::handle::Objects<'repo>::write_tree(&self, impl core::iter::traits::collect::IntoIterator<Item = grit_lib::objects::TreeEntry>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::handle::Objects<'repo>::write_tree_with(&self, impl core::iter::traits::collect::IntoIterator<Item = grit_lib::objects::TreeEntry>, grit_lib::objects::WriteTreeOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 impl<'repo> core::clone::Clone for grit_lib::objects::handle::Objects<'repo>
 pub fn grit_lib::objects::handle::Objects<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::objects::handle::Objects<'repo>
@@ -13135,6 +13141,26 @@ impl<'a> core::marker::Unpin for grit_lib::objects::TreeRefIter<'a>
 impl<'a> core::marker::UnsafeUnpin for grit_lib::objects::TreeRefIter<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::TreeRefIter<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::objects::TreeRefIter<'a>
+pub struct grit_lib::objects::WriteTreeOptions
+pub grit_lib::objects::WriteTreeOptions::allow_missing: bool
+impl core::clone::Clone for grit_lib::objects::WriteTreeOptions
+pub fn grit_lib::objects::WriteTreeOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::WriteTreeOptions
+impl core::cmp::PartialEq for grit_lib::objects::WriteTreeOptions
+pub fn grit_lib::objects::WriteTreeOptions::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::objects::WriteTreeOptions
+pub fn grit_lib::objects::WriteTreeOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::objects::WriteTreeOptions
+pub fn grit_lib::objects::WriteTreeOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::WriteTreeOptions
+impl core::marker::StructuralPartialEq for grit_lib::objects::WriteTreeOptions
+impl core::marker::Freeze for grit_lib::objects::WriteTreeOptions
+impl core::marker::Send for grit_lib::objects::WriteTreeOptions
+impl core::marker::Sync for grit_lib::objects::WriteTreeOptions
+impl core::marker::Unpin for grit_lib::objects::WriteTreeOptions
+impl core::marker::UnsafeUnpin for grit_lib::objects::WriteTreeOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::WriteTreeOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::WriteTreeOptions
 pub trait grit_lib::objects::ChangeIdGenerator: core::marker::Send + core::marker::Sync
 pub fn grit_lib::objects::ChangeIdGenerator::random_bytes(&self) -> core::result::Result<[u8; 16], grit_lib::change_id::ChangeIdError>
 impl grit_lib::change_id::ChangeIdGenerator for grit_lib::change_id::OsChangeIdGenerator

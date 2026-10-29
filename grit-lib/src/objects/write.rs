@@ -2,17 +2,21 @@
 //!
 //! [`Objects::write_tree`](super::Objects::write_tree) and
 //! [`Objects::write_commit`](super::Objects::write_commit) take these types and
-//! produce objects that pass `git fsck --strict`.
+//! produce objects that pass `git fsck --strict`, including checks on referenced oids.
 
 use std::collections::HashSet;
 
 use crate::change_id::ChangeId;
+use crate::error::Error;
 use crate::fsck_standalone::{tree_entry_mode_allowed, MAX_TREE_ENTRY_LEN};
+use crate::gitmodules::tree_entry_reserved_dot_symlink;
 use crate::ident::Signature;
-use crate::objects::{tree_entry_cmp, CommitData, HashAlgo, ObjectId, TreeEntry};
+use crate::objects::{tree_entry_cmp, CommitData, HashAlgo, ObjectId, ObjectKind, TreeEntry};
+use crate::odb::Odb;
 use crate::path_validate::{audit_tree_entry_name, PathComponentError, ProtectOptions};
 
 const MODE_TREE: u32 = 0o040000;
+const MODE_GITLINK: u32 = 0o160000;
 
 /// Why [`Objects::write_tree`](super::Objects::write_tree) refused an entry.
 ///
@@ -75,6 +79,25 @@ pub enum TreeEntryError {
         /// The repeated name.
         name: Vec<u8>,
     },
+    /// A symlink entry uses a name reserved for Git metadata files.
+    #[error(
+        "tree entry '{}' must not be a symlink to {reserved_file}",
+        String::from_utf8_lossy(.name)
+    )]
+    ForbiddenDotSymlink {
+        /// Entry name as given.
+        name: Vec<u8>,
+        /// Which metadata file name the entry matched.
+        reserved_file: &'static str,
+    },
+}
+
+/// Options for [`Objects::write_tree_with`](super::Objects::write_tree_with).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WriteTreeOptions {
+    /// When `true`, blob and tree entries may reference oids not stored locally (partial
+    /// clone and bottom-up tree assembly). Wrong kinds are still rejected.
+    pub allow_missing: bool,
 }
 
 /// Validate `entries` for `algo` and return them in canonical Git tree order.
@@ -103,6 +126,66 @@ pub(crate) fn canonical_tree_entries(
         });
     }
     Ok(entries)
+}
+
+/// Check each entry's oid is stored with the kind implied by its mode.
+///
+/// # Errors
+///
+/// - [`Error::ObjectNotFound`] when an entry requires a stored object that is missing.
+/// - [`Error::UnexpectedObjectKind`] when a stored object has the wrong kind.
+pub(crate) fn validate_tree_entry_stored_kinds(
+    odb: &Odb,
+    entries: &[TreeEntry],
+    allow_missing: bool,
+) -> Result<(), Error> {
+    for entry in entries {
+        validate_one_tree_entry_stored_kind(odb, entry, allow_missing)?;
+    }
+    Ok(())
+}
+
+fn expected_kind_for_tree_mode(mode: u32) -> ObjectKind {
+    match mode {
+        MODE_TREE => ObjectKind::Tree,
+        MODE_GITLINK => ObjectKind::Commit,
+        _ => ObjectKind::Blob,
+    }
+}
+
+fn validate_one_tree_entry_stored_kind(
+    odb: &Odb,
+    entry: &TreeEntry,
+    allow_missing: bool,
+) -> Result<(), Error> {
+    let expected = expected_kind_for_tree_mode(entry.mode);
+    let stored = odb.stored_object_kind(&entry.oid)?;
+    if entry.mode == MODE_GITLINK {
+        if let Some(actual) = stored {
+            if actual != ObjectKind::Commit {
+                return Err(Error::UnexpectedObjectKind {
+                    oid: entry.oid,
+                    expected: ObjectKind::Commit,
+                    actual,
+                });
+            }
+        }
+        return Ok(());
+    }
+    let Some(actual) = stored else {
+        if allow_missing {
+            return Ok(());
+        }
+        return Err(Error::ObjectNotFound(entry.oid.to_hex()));
+    };
+    if actual != expected {
+        return Err(Error::UnexpectedObjectKind {
+            oid: entry.oid,
+            expected,
+            actual,
+        });
+    }
+    Ok(())
 }
 
 fn validate_tree_entry(entry: &TreeEntry, algo: HashAlgo) -> Result<(), TreeEntryError> {
@@ -134,6 +217,12 @@ fn validate_tree_entry(entry: &TreeEntry, algo: HashAlgo) -> Result<(), TreeEntr
     if entry.oid.is_zero() {
         return Err(TreeEntryError::NullObjectId {
             name: entry.name.clone(),
+        });
+    }
+    if let Some(reserved_file) = tree_entry_reserved_dot_symlink(entry.mode, &entry.name) {
+        return Err(TreeEntryError::ForbiddenDotSymlink {
+            name: entry.name.clone(),
+            reserved_file,
         });
     }
     Ok(())
