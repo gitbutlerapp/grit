@@ -13,11 +13,12 @@
 //! and make no presentation decisions — no colour, pager, tty, or stdout.
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::config::ConfigSet;
 use crate::crlf::{self, ConversionConfig};
@@ -51,7 +52,7 @@ pub(crate) use checkout_journal::CheckoutJournal;
 use checkout_journal::SharedCheckoutDeleteRollback;
 pub(crate) use checkout_parallel::is_eligible_for_parallel_checkout;
 use checkout_parallel::{
-    cancellable_chunks, execute_write_jobs, paths_needing_serial_checkout, CheckoutPlanSlot,
+    cancellable_chunks, execute_write_jobs, paths_needing_serial_checkout_str, CheckoutPlanSlot,
     CheckoutWriteJob, WriteJobOutcome,
 };
 
@@ -664,7 +665,7 @@ fn checkout_hard_to_tree_journaled(
                 return HardResetEntryAction::Written(None);
             }
             let existing = &index.entries[pos];
-            match worktree_stats[pos] {
+            match worktree_stats.get(&pos).copied() {
                 Some(stat)
                     if hard_reset_entry_stat_clean(
                         existing,
@@ -691,6 +692,7 @@ fn checkout_hard_to_tree_journaled(
             }
         })
         .collect();
+    drop(worktree_stats);
     // Fetch repair blobs together with tree-diff writes before attribute resolution can
     // trigger isolated lazy reads. Planning uses only tree/index metadata and disk stats.
     let needs_content = |action: &HardResetEntryAction| {
@@ -774,6 +776,7 @@ fn checkout_hard_to_tree_journaled(
             CheckoutIndexWrite::Defer(lock),
             journal,
         )?;
+        drop(changes);
     }
 
     let mut sparse_parent_symlinks = crate::diff::SymlinkDirCache::default();
@@ -1044,13 +1047,13 @@ fn scan_index_blob_stats_for_hard_reset(
     index: &Index,
     config: &ConfigSet,
     positions: &[usize],
-) -> Result<Vec<Option<crate::worktree_scan::BlobDiskStat>>> {
+) -> Result<HashMap<usize, crate::worktree_scan::BlobDiskStat>> {
     use crate::worktree_scan::{
         collect_blob_lookup_batches, plan_blob_entries_by_dir_for_positions, BlobDiskLookup,
         BlobScanSparseMode, WorktreeBlobScanOptions,
     };
 
-    let mut stats = vec![None; index.entries.len()];
+    let mut stats = HashMap::new();
     if positions.is_empty() {
         return Ok(stats);
     }
@@ -1079,7 +1082,7 @@ fn scan_index_blob_stats_for_hard_reset(
             continue;
         };
         if let BlobDiskLookup::Present(stat) = lookup {
-            stats[orig] = Some(stat);
+            stats.insert(orig, stat);
         }
     }
     Ok(stats)
@@ -2165,6 +2168,96 @@ fn bulk_mod_delete_checkout_eligible(changes: &[DiffEntry], rules: &WorktreeRule
 }
 
 #[allow(clippy::too_many_arguments)]
+fn execute_checkout_write_changes_chunk(
+    repo: &Repository,
+    work_tree: &Path,
+    changes: &[&DiffEntry],
+    index_mut: &mut Index,
+    rules: &WorktreeRules,
+    config: &Arc<ConfigSet>,
+    conv: &ConversionConfig,
+    apply: &CheckoutApplyOptions,
+    precompose: bool,
+    ignorecase: bool,
+    smudge_context: &Option<Arc<FilterSmudgeMeta>>,
+    uniform_attrs: Option<Arc<crlf::FileAttrs>>,
+    dir_cache: &mut LeadingDirCache,
+    delayed: &mut DelayedProcessCheckout,
+    skip_parallel_write_ramp: bool,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+    journal: &mut CheckoutJournal,
+) -> Result<Vec<DelayedCheckoutTarget>> {
+    if changes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut write_jobs: Vec<CheckoutWriteJob<'_>> = Vec::with_capacity(changes.len());
+    for change in changes {
+        crate::progress::poll_cancel(progress, cancel)?;
+        let Some(path) = change.new_path.as_deref() else {
+            continue;
+        };
+        let mode = change.new_mode.bits();
+        let file_attrs = uniform_attrs
+            .as_ref()
+            .map(Arc::clone)
+            .unwrap_or_else(|| Arc::new(rules.file_attrs(path, false)));
+        write_jobs.push(CheckoutWriteJob::new(
+            path.to_owned(),
+            mode,
+            change,
+            file_attrs,
+            smudge_context.clone(),
+        ));
+    }
+    let path_refs: Vec<&str> = write_jobs.iter().map(|j| j.path.as_str()).collect();
+    let serial_indices = paths_needing_serial_checkout_str(&path_refs, ignorecase, precompose);
+    let parallel_indices: HashSet<usize> = write_jobs
+        .iter()
+        .enumerate()
+        .filter(|(i, job)| {
+            is_eligible_for_parallel_checkout(job.mode, &job.file_attrs)
+                && !serial_indices.contains(i)
+        })
+        .map(|(i, _)| i)
+        .collect();
+    if write_jobs.len() >= BULK_ADD_CHECKOUT_MIN {
+        precreate_checkout_parent_dirs(work_tree, &write_jobs, dir_cache);
+    } else {
+        for job in &write_jobs {
+            dir_cache.ensure_parents(work_tree, &job.path)?;
+        }
+    }
+    let write_outcomes = execute_write_jobs(
+        repo,
+        rules,
+        config,
+        conv,
+        work_tree,
+        dir_cache,
+        delayed,
+        &write_jobs,
+        &parallel_indices,
+        apply.parallel_prepare_blobs,
+        apply.checkout_parallel_threshold,
+        skip_parallel_write_ramp,
+        progress,
+        cancel,
+        journal,
+    )?;
+    let mut delayed_targets = Vec::new();
+    let mut entries = Vec::new();
+    for outcome in write_outcomes {
+        match outcome {
+            WriteJobOutcome::Index(entry) => entries.push(entry),
+            WriteJobOutcome::Delayed(target) => delayed_targets.push(*target),
+        }
+    }
+    index_mut.overwrite_stage0_entries(entries);
+    Ok(delayed_targets)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn checkout_bulk_added_tree_changes(
     repo: &Repository,
     work_tree: &Path,
@@ -2181,70 +2274,55 @@ fn checkout_bulk_added_tree_changes(
     index_write: CheckoutIndexWrite<'_>,
     journal: &mut CheckoutJournal,
 ) -> Result<()> {
-    let checkout_smudge_ctx = crate::filter_process::checkout_smudge_context(repo);
-    let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
-    let mut write_jobs: Vec<CheckoutWriteJob<'_>> = Vec::with_capacity(changes.len());
-    for change in changes {
-        crate::progress::poll_cancel(progress, cancel)?;
-        let Some(path) = change.new_path.as_deref() else {
-            continue;
-        };
-        let mode = change.new_mode.bits();
-        let file_attrs = rules.file_attrs(path, false);
-        write_jobs.push(CheckoutWriteJob::new(
-            path.to_owned(),
-            mode,
-            change,
-            file_attrs,
-            crate::filter_process::smudge_meta_for_checkout_blob(
-                &checkout_smudge_ctx,
-                &change.new_oid.to_hex(),
+    let uniform_attrs = (!tree_changes_touch_gitattributes(changes)).then(|| {
+        Arc::new(
+            rules.file_attrs(
+                changes
+                    .first()
+                    .and_then(|c| c.new_path.as_deref())
+                    .unwrap_or(""),
+                false,
             ),
-        ));
-    }
-    let write_paths: Vec<String> = write_jobs.iter().map(|j| j.path.clone()).collect();
-    let serial_paths = paths_needing_serial_checkout(&write_paths, ignorecase, precompose);
-    let parallel_indices: HashSet<usize> = write_jobs
-        .iter()
-        .enumerate()
-        .filter(|(_, job)| {
-            is_eligible_for_parallel_checkout(job.mode, &job.file_attrs)
-                && !serial_paths.contains(&job.path)
-        })
-        .map(|(i, _)| i)
-        .collect();
-    if write_jobs.len() >= BULK_ADD_CHECKOUT_MIN {
-        precreate_checkout_parent_dirs(work_tree, &write_jobs, &mut dir_cache);
-    } else {
-        for job in &write_jobs {
-            dir_cache.ensure_parents(work_tree, &job.path)?;
-        }
-    }
+        )
+    });
+    let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
     let mut delayed = DelayedProcessCheckout::default();
-    let write_outcomes = execute_write_jobs(
+    let mut pending_delayed = Vec::new();
+    let mut skip_ramp = apply.skip_parallel_write_ramp;
+    let smudge_context = None;
+    for chunk in changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK) {
+        let chunk_refs: Vec<&DiffEntry> = chunk.iter().collect();
+        pending_delayed.extend(execute_checkout_write_changes_chunk(
+            repo,
+            work_tree,
+            &chunk_refs,
+            index_mut,
+            rules,
+            config,
+            conv,
+            &apply,
+            precompose,
+            ignorecase,
+            &smudge_context,
+            uniform_attrs.clone(),
+            &mut dir_cache,
+            &mut delayed,
+            skip_ramp,
+            progress,
+            cancel,
+            journal,
+        )?);
+        skip_ramp = true;
+    }
+    let mut new_entries = Vec::new();
+    finish_delayed_checkouts(
         repo,
         rules,
-        config,
-        conv,
         work_tree,
-        &mut dir_cache,
         &mut delayed,
-        &write_jobs,
-        &parallel_indices,
-        apply.parallel_prepare_blobs,
-        apply.checkout_parallel_threshold,
-        apply.skip_parallel_write_ramp,
-        progress,
-        cancel,
-        journal,
-    )?;
-    let new_entries = finish_bulk_write_jobs(
-        repo,
-        rules,
-        work_tree,
+        &pending_delayed,
         &mut dir_cache,
-        &mut delayed,
-        write_outcomes,
+        &mut new_entries,
     )?;
     if apply.wholesale_safety_precomputed {
         let _ = remove_wholesale_directories_on_disk(
@@ -2294,9 +2372,6 @@ fn checkout_bulk_mod_delete_tree_changes(
         .iter()
         .filter(|c| c.status == DiffStatus::Deleted)
         .collect();
-    let write_changes = changes
-        .iter()
-        .filter(|c| matches!(c.status, DiffStatus::Modified | DiffStatus::Added));
     let delete_paths: Vec<String> = delete_changes
         .iter()
         .filter_map(|c| c.old_path.clone())
@@ -2324,27 +2399,23 @@ fn checkout_bulk_mod_delete_tree_changes(
         &owned_wholesale_candidates
     };
 
-    let checkout_smudge_ctx = crate::filter_process::checkout_smudge_context(repo);
-    let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
-    let mut write_jobs: Vec<CheckoutWriteJob<'_>> =
-        Vec::with_capacity(changes.len() - delete_changes.len());
-    for change in write_changes {
-        let Some(path) = change.new_path.as_deref() else {
-            continue;
-        };
-        let mode = change.new_mode.bits();
-        let file_attrs = rules.file_attrs(path, false);
-        write_jobs.push(CheckoutWriteJob::new(
-            path.to_owned(),
-            mode,
-            change,
-            file_attrs,
-            crate::filter_process::smudge_meta_for_checkout_blob(
-                &checkout_smudge_ctx,
-                &change.new_oid.to_hex(),
+    let write_changes: Vec<&DiffEntry> = changes
+        .iter()
+        .filter(|c| matches!(c.status, DiffStatus::Modified | DiffStatus::Added))
+        .collect();
+    let uniform_attrs = (!tree_changes_touch_gitattributes(changes)).then(|| {
+        Arc::new(
+            rules.file_attrs(
+                write_changes
+                    .first()
+                    .and_then(|c| c.new_path.as_deref())
+                    .unwrap_or(""),
+                false,
             ),
-        ));
-    }
+        )
+    });
+    let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
+    let smudge_context = None;
 
     let wholesale_dirs_removed = remove_wholesale_directories_on_disk(
         repo,
@@ -2411,49 +2482,41 @@ fn checkout_bulk_mod_delete_tree_changes(
     }
     remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
 
-    let write_paths: Vec<String> = write_jobs.iter().map(|j| j.path.clone()).collect();
-    let serial_paths = paths_needing_serial_checkout(&write_paths, ignorecase, precompose);
-    let parallel_indices: HashSet<usize> = write_jobs
-        .iter()
-        .enumerate()
-        .filter(|(_, job)| {
-            is_eligible_for_parallel_checkout(job.mode, &job.file_attrs)
-                && !serial_paths.contains(&job.path)
-        })
-        .map(|(i, _)| i)
-        .collect();
-    if write_jobs.len() >= BULK_ADD_CHECKOUT_MIN {
-        precreate_checkout_parent_dirs(work_tree, &write_jobs, &mut dir_cache);
-    } else {
-        for job in &write_jobs {
-            dir_cache.ensure_parents(work_tree, &job.path)?;
-        }
-    }
     let mut delayed = DelayedProcessCheckout::default();
-    let write_outcomes = execute_write_jobs(
+    let mut pending_delayed = Vec::new();
+    let mut skip_ramp = apply.skip_parallel_write_ramp;
+    for chunk in write_changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK) {
+        pending_delayed.extend(execute_checkout_write_changes_chunk(
+            repo,
+            work_tree,
+            chunk,
+            index_mut,
+            rules,
+            config,
+            conv,
+            &apply,
+            precompose,
+            ignorecase,
+            &smudge_context,
+            uniform_attrs.clone(),
+            &mut dir_cache,
+            &mut delayed,
+            skip_ramp,
+            progress,
+            cancel,
+            journal,
+        )?);
+        skip_ramp = true;
+    }
+    let mut new_entries = Vec::new();
+    finish_delayed_checkouts(
         repo,
         rules,
-        config,
-        conv,
         work_tree,
-        &mut dir_cache,
         &mut delayed,
-        &write_jobs,
-        &parallel_indices,
-        apply.parallel_prepare_blobs,
-        apply.checkout_parallel_threshold,
-        apply.skip_parallel_write_ramp,
-        progress,
-        cancel,
-        journal,
-    )?;
-    let new_entries = finish_bulk_write_jobs(
-        repo,
-        rules,
-        work_tree,
+        &pending_delayed,
         &mut dir_cache,
-        &mut delayed,
-        write_outcomes,
+        &mut new_entries,
     )?;
 
     crate::progress::poll_cancel(progress, cancel)?;
@@ -2617,17 +2680,66 @@ fn checkout_tree_changes_with_progress(
         &mut loaded_index
     };
     let mut journal = CheckoutJournal::new(work_tree)?;
-    let result = apply_tree_changes(
-        repo,
-        changes,
-        progress,
-        cancel,
-        index_mut,
-        apply,
-        attribute_changes,
-        index_write,
-        &mut journal,
-    );
+    let result = if changes.len() > POPULATED_TREE_CHECKOUT_CHUNK {
+        let chunk_count = changes.len().div_ceil(POPULATED_TREE_CHECKOUT_CHUNK);
+        let mut chunk_apply = apply;
+        match index_write {
+            CheckoutIndexWrite::Commit(lock) => {
+                for (i, chunk) in changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK).enumerate() {
+                    if i > 0 {
+                        chunk_apply.skip_parallel_write_ramp = true;
+                    }
+                    let write = if i + 1 == chunk_count {
+                        CheckoutIndexWrite::Commit(lock)
+                    } else {
+                        CheckoutIndexWrite::Defer(lock)
+                    };
+                    apply_tree_changes(
+                        repo,
+                        chunk,
+                        progress,
+                        cancel,
+                        index_mut,
+                        chunk_apply.clone(),
+                        attribute_changes,
+                        write,
+                        &mut journal,
+                    )?;
+                }
+            }
+            CheckoutIndexWrite::Defer(lock) => {
+                for (i, chunk) in changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK).enumerate() {
+                    if i > 0 {
+                        chunk_apply.skip_parallel_write_ramp = true;
+                    }
+                    apply_tree_changes(
+                        repo,
+                        chunk,
+                        progress,
+                        cancel,
+                        index_mut,
+                        chunk_apply.clone(),
+                        attribute_changes,
+                        CheckoutIndexWrite::Defer(lock),
+                        &mut journal,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    } else {
+        apply_tree_changes(
+            repo,
+            changes,
+            progress,
+            cancel,
+            index_mut,
+            apply,
+            attribute_changes,
+            index_write,
+            &mut journal,
+        )
+    };
     journal.finish(repo, result)
 }
 
@@ -2799,7 +2911,7 @@ fn apply_tree_changes(
     }
 
     let index: &Index = index_mut;
-    let checkout_smudge_ctx = crate::filter_process::checkout_smudge_context(repo);
+    let mut smudge_context: Option<Arc<FilterSmudgeMeta>> = None;
     let mut paths_to_remove: Vec<Vec<u8>> = Vec::with_capacity(changes.len() / 8);
     let mut deleted_abs_paths: Vec<PathBuf> = Vec::with_capacity(changes.len() / 8);
     let mut dir_cache = LeadingDirCache::with_protect(protect);
@@ -2998,30 +3110,37 @@ fn apply_tree_changes(
                     continue;
                 }
             }
-            let file_attrs = rules.file_attrs(path, false);
-            let smudge_meta = crate::filter_process::smudge_meta_for_checkout_blob(
-                &checkout_smudge_ctx,
-                &change.new_oid.to_hex(),
-            );
+            let file_attrs = Arc::new(rules.file_attrs(path, false));
+            let job_smudge =
+                if file_attrs.filter_process.is_some() || file_attrs.filter_smudge.is_some() {
+                    if smudge_context.is_none() {
+                        smudge_context = Some(Arc::new(
+                            crate::filter_process::checkout_smudge_context(repo),
+                        ));
+                    }
+                    smudge_context.clone()
+                } else {
+                    None
+                };
             write_jobs.push(CheckoutWriteJob::new(
                 path.clone(),
                 mode,
                 change,
                 file_attrs,
-                smudge_meta,
+                job_smudge,
             ));
             plan.push(CheckoutPlanSlot::Write);
         }
     }
 
-    let write_paths: Vec<String> = write_jobs.iter().map(|j| j.path.clone()).collect();
-    let serial_paths = paths_needing_serial_checkout(&write_paths, ignorecase, precompose);
+    let path_refs: Vec<&str> = write_jobs.iter().map(|j| j.path.as_str()).collect();
+    let serial_indices = paths_needing_serial_checkout_str(&path_refs, ignorecase, precompose);
     let parallel_indices: HashSet<usize> = write_jobs
         .iter()
         .enumerate()
-        .filter(|(_, job)| {
+        .filter(|(i, job)| {
             is_eligible_for_parallel_checkout(job.mode, &job.file_attrs)
-                && !serial_paths.contains(&job.path)
+                && !serial_indices.contains(i)
         })
         .map(|(i, _)| i)
         .collect();
@@ -3076,7 +3195,7 @@ fn apply_tree_changes(
                         new_entries.push(entry);
                     }
                     WriteJobOutcome::Delayed(target) => {
-                        pending_delayed.push(target);
+                        pending_delayed.push(*target);
                     }
                 }
             }
@@ -3285,38 +3404,6 @@ pub(crate) fn worktree_bytes_from_index_blob(
         Some(rules.filter_process()),
     )
     .map_err(Error::from)
-}
-
-fn finish_bulk_write_jobs(
-    repo: &Repository,
-    rules: &WorktreeRules,
-    work_tree: &Path,
-    dir_cache: &mut LeadingDirCache,
-    delayed: &mut DelayedProcessCheckout,
-    write_outcomes: Vec<WriteJobOutcome>,
-) -> Result<Vec<IndexEntry>> {
-    let mut new_entries = Vec::with_capacity(write_outcomes.len());
-    let mut pending_delayed = Vec::new();
-    for outcome in write_outcomes {
-        match outcome {
-            WriteJobOutcome::Index(entry) => {
-                new_entries.push(entry);
-            }
-            WriteJobOutcome::Delayed(target) => {
-                pending_delayed.push(target);
-            }
-        }
-    }
-    finish_delayed_checkouts(
-        repo,
-        rules,
-        work_tree,
-        delayed,
-        &pending_delayed,
-        dir_cache,
-        &mut new_entries,
-    )?;
-    Ok(new_entries)
 }
 
 #[allow(clippy::too_many_arguments)]

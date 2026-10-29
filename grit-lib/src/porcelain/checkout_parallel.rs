@@ -47,8 +47,9 @@ pub(crate) struct CheckoutWriteJob<'a> {
     pub mode: u32,
     pub oid: ObjectId,
     pub change: &'a crate::diff::DiffEntry,
-    pub file_attrs: FileAttrs,
-    pub smudge_meta: FilterSmudgeMeta,
+    pub file_attrs: Arc<FileAttrs>,
+    /// Shared ref/tree smudge metadata when a process filter is active; blob id comes from [`Self::oid`].
+    pub smudge_context: Option<Arc<FilterSmudgeMeta>>,
     /// Set just before the job first touches its work-tree path, so a failed checkout knows
     /// which paths to roll back.
     touched: AtomicBool,
@@ -60,8 +61,8 @@ impl<'a> CheckoutWriteJob<'a> {
         path: String,
         mode: u32,
         change: &'a crate::diff::DiffEntry,
-        file_attrs: FileAttrs,
-        smudge_meta: FilterSmudgeMeta,
+        file_attrs: Arc<FileAttrs>,
+        smudge_context: Option<Arc<FilterSmudgeMeta>>,
     ) -> Self {
         Self {
             path,
@@ -69,9 +70,17 @@ impl<'a> CheckoutWriteJob<'a> {
             oid: change.new_oid,
             change,
             file_attrs,
-            smudge_meta,
+            smudge_context,
             touched: AtomicBool::new(false),
         }
+    }
+
+    fn smudge_meta_for_convert(&self) -> Option<FilterSmudgeMeta> {
+        self.smudge_context.as_ref().map(|ctx| FilterSmudgeMeta {
+            ref_name: ctx.ref_name.clone(),
+            treeish_hex: ctx.treeish_hex.clone(),
+            blob_hex: Some(self.oid.to_hex()),
+        })
     }
 
     fn mark_touched(&self) {
@@ -87,10 +96,9 @@ pub(crate) enum CheckoutPlanSlot {
 }
 
 /// Result of materializing one write job (single ODB read + conversion).
-#[derive(Clone)]
 pub(crate) enum WriteJobOutcome {
     Index(IndexEntry),
-    Delayed(DelayedCheckoutTarget),
+    Delayed(Box<DelayedCheckoutTarget>),
 }
 
 fn effective_path_for_collision(path: &str, precompose: bool) -> Cow<'_, str> {
@@ -114,11 +122,26 @@ fn normalized_path_key(path: &str, precompose: bool, ignorecase: bool) -> String
 ///
 /// Runs in O(n × average path depth) via prefix lookup, not O(n²) pairwise comparison.
 #[must_use]
+#[allow(dead_code)]
 pub(crate) fn paths_needing_serial_checkout(
     paths: &[String],
     ignorecase: bool,
     precompose: bool,
 ) -> HashSet<String> {
+    let borrowed: Vec<&str> = paths.iter().map(String::as_str).collect();
+    paths_needing_serial_checkout_str(&borrowed, ignorecase, precompose)
+        .into_iter()
+        .map(|i| paths[i].clone())
+        .collect()
+}
+
+/// Indices into `paths` that must not run on the parallel checkout pool.
+#[must_use]
+pub(crate) fn paths_needing_serial_checkout_str(
+    paths: &[&str],
+    ignorecase: bool,
+    precompose: bool,
+) -> HashSet<usize> {
     if !ignorecase && !precompose {
         return HashSet::new();
     }
@@ -134,9 +157,7 @@ pub(crate) fn paths_needing_serial_checkout(
     }
     for indices in by_full.values() {
         if indices.len() > 1 {
-            for &i in indices {
-                serial.insert(paths[i].clone());
-            }
+            serial.extend(indices.iter().copied());
         }
     }
 
@@ -155,8 +176,8 @@ pub(crate) fn paths_needing_serial_checkout(
                 if let Some(others) = by_full.get(prefix.as_str()) {
                     for &j in others {
                         if i != j {
-                            serial.insert(paths[i].clone());
-                            serial.insert(paths[j].clone());
+                            serial.insert(i);
+                            serial.insert(j);
                         }
                     }
                 }
@@ -329,7 +350,7 @@ fn worktree_bytes_for_parallel_job(
         conv,
         &job.file_attrs,
         Some(&oid_hex),
-        Some(&job.smudge_meta),
+        job.smudge_meta_for_convert().as_ref(),
         None,
     )
     .map_err(Error::from)
@@ -465,16 +486,16 @@ fn materialize_write_job_serial(
         job.mode,
         &object.data,
         &job.oid,
-        Some(&job.smudge_meta),
+        job.smudge_meta_for_convert().as_ref(),
         Some(delayed),
     )?;
     let Some(worktree_bytes) = worktree_bytes else {
-        return Ok(WriteJobOutcome::Delayed(DelayedCheckoutTarget {
+        return Ok(WriteJobOutcome::Delayed(Box::new(DelayedCheckoutTarget {
             path: job.path.clone(),
             mode: job.mode,
             oid: job.oid,
             change: job.change.clone(),
-        }));
+        })));
     };
     let entry = write_checkout_entry(
         work_tree,
@@ -687,7 +708,7 @@ fn execute_write_jobs_unrecorded(
     progress: &mut dyn crate::progress::ProgressSink,
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<Vec<WriteJobOutcome>> {
-    let mut outcomes: Vec<Option<WriteJobOutcome>> = vec![None; jobs.len()];
+    let mut outcomes: Vec<Option<WriteJobOutcome>> = (0..jobs.len()).map(|_| None).collect();
     let pool = parallel_pool_for_checkout(
         repo,
         config,
