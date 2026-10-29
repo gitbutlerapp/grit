@@ -8836,7 +8836,7 @@ struct TreeWalkState {
     cancel_poll_counter: u32,
     /// Cached [`ParsedSparsePatterns::includes`] results for this walk.
     sparse_match_cache: HashMap<String, bool>,
-    /// Trees whose blob children were fully classified under a sparse filter at a given path.
+    /// Subtrees fully enumerated for sparse at `(tree_oid, prefix)` on this walk.
     sparse_complete_trees: HashSet<(ObjectId, String)>,
 }
 
@@ -9093,7 +9093,9 @@ fn collect_reachable_objects_segmented(
                 result.push((tag_oid, "tag".to_owned()));
             }
         }
-        let parent_trees_slice = if filter.is_some_and(ObjectFilter::is_depth_sensitive) {
+        let parent_trees_slice = if filter.is_some_and(|f| {
+            f.is_depth_sensitive() || matches!(f, ObjectFilter::SparseOid(_))
+        }) {
             None
         } else {
             Some(graph.parent_commit_trees(commit_oid)?)
@@ -9487,6 +9489,7 @@ fn collect_tree_objects_filtered(
         }
     }
     if sparse_patterns.is_some()
+        && parent_commit_trees.is_none()
         && tree_state
             .sparse_complete_trees
             .contains(&(tree_oid, prefix.to_owned()))
@@ -9792,7 +9795,7 @@ fn collect_tree_objects_filtered(
         }
     }
 
-    if sparse_patterns.is_some() {
+    if sparse_patterns.is_some() && parent_commit_trees.is_none() {
         tree_state
             .sparse_complete_trees
             .insert((tree_oid, prefix.to_owned()));

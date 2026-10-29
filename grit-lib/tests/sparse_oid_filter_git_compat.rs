@@ -2,11 +2,13 @@
 
 #![allow(clippy::unwrap_used)]
 
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::{ObjectFilter, RevListOptions};
 
@@ -126,6 +128,137 @@ fn blob_paths_from_rev_list_lines(bare: &Path, stdout: &[u8]) -> Vec<String> {
     }
     blobs.sort();
     blobs
+}
+
+fn object_ids_from_rev_list_lines(stdout: &[u8]) -> HashSet<ObjectId> {
+    let mut out = HashSet::new();
+    for line in String::from_utf8_lossy(stdout).lines() {
+        let oid = line.split_whitespace().next().unwrap_or("");
+        if oid.len() >= 40 {
+            if let Ok(id) = oid.parse::<ObjectId>() {
+                out.insert(id);
+            }
+        }
+    }
+    out
+}
+
+fn git_object_ids(bare: &Path, patterns: &str) -> HashSet<ObjectId> {
+    let oid = sparse_spec_oid(bare, patterns);
+    let filter = format!("sparse:oid={oid}");
+    let out = Command::new("git")
+        .args([
+            "rev-list",
+            "--objects",
+            &format!("--filter={filter}"),
+            "HEAD",
+        ])
+        .current_dir(bare)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    object_ids_from_rev_list_lines(&out.stdout)
+}
+
+fn grit_object_ids(bare: &Path, patterns: &str) -> HashSet<ObjectId> {
+    let oid = sparse_spec_oid(bare, patterns);
+    let filter = ObjectFilter::parse(&format!("sparse:oid={oid}")).unwrap();
+    let repo = Repository::open(bare, &RepositoryOptions::empty()).unwrap();
+    let head = git(&["rev-parse", "HEAD"], bare);
+    let opts = RevListOptions {
+        objects: true,
+        quiet: true,
+        filter: Some(filter),
+        ..Default::default()
+    };
+    let result = grit_lib::revwalk::rev_list::rev_list(&repo, &[head], &[], &opts).unwrap();
+    let mut out = HashSet::new();
+    out.extend(result.commits);
+    for (oid, _) in result.objects {
+        out.insert(oid);
+    }
+    out
+}
+
+/// Many commits sharing stable `src/cargo/core/` trees (Cargo-like shape).
+fn sparse_deep_history_fixture(dir: &Path, empty_commits: usize) -> String {
+    let work = dir.join("work");
+    std::fs::create_dir_all(work.join("src/cargo/core")).unwrap();
+    git(&["init", "-q"], &work);
+    std::fs::write(work.join("src/cargo/core/lib.rs"), "pub fn f() {}\n").unwrap();
+    std::fs::write(work.join("README.md"), "root\n").unwrap();
+    git(&["add", "-A"], &work);
+    git(
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "core",
+        ],
+        &work,
+    );
+    for i in 0..empty_commits {
+        git(
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qm",
+                &format!("empty-{i}"),
+                "--allow-empty",
+            ],
+            &work,
+        );
+    }
+    // Touch an unrelated path so later commits reuse the same `src/cargo/core` tree OID.
+    std::fs::write(work.join("notes.txt"), "notes\n").unwrap();
+    git(&["add", "notes.txt"], &work);
+    git(
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "notes",
+        ],
+        &work,
+    );
+    for i in 0..empty_commits / 2 {
+        git(
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qm",
+                &format!("tail-{i}"),
+                "--allow-empty",
+            ],
+            &work,
+        );
+    }
+    let bare = dir.join("bare.git");
+    git(
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            work.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+        dir,
+    );
+    bare.to_str().unwrap().to_string()
 }
 
 fn grit_blob_paths(bare: &Path, patterns: &str) -> Vec<String> {
@@ -261,6 +394,19 @@ fn sparse_oid_same_tree_oid_excluded_and_included_paths_matches_git() {
         grit_blob_paths(bare_path, patterns),
         git_blob_paths(bare_path, patterns),
         "shared subtree linked from excluded and included top-level dirs"
+    );
+}
+
+#[test]
+fn sparse_oid_deep_history_object_set_matches_git() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bare = sparse_deep_history_fixture(tmp.path(), 80);
+    let bare_path = Path::new(&bare);
+    let patterns = "/*\n!/*/\n/src/cargo/core/\n";
+    assert_eq!(
+        grit_object_ids(bare_path, patterns),
+        git_object_ids(bare_path, patterns),
+        "full object set for deep history with stable src/cargo/core tree"
     );
 }
 
