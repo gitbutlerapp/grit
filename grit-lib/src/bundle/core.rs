@@ -1099,10 +1099,8 @@ fn filtered_pack_objects(
     have_closure: &HashSet<ObjectId>,
 ) -> Result<Vec<ObjectId>> {
     let positive: Vec<String> = include.iter().map(ObjectId::to_hex).collect();
-    let negative: Vec<String> = exclude
-        .iter()
-        .map(|oid| format!("^{}", oid.to_hex()))
-        .collect();
+    // `rev_list` takes the excluded tips bare: they are already the negative side.
+    let negative: Vec<String> = exclude.iter().map(ObjectId::to_hex).collect();
     let options = RevListOptions {
         objects: true,
         no_object_names: true,

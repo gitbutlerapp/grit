@@ -3567,7 +3567,9 @@ fn resolve_specs_for_objects_with_options(
             let raw_object = match repo.odb().read(&raw_oid) {
                 Ok(obj) => obj,
                 Err(Error::ObjectNotFound(_)) if ignore_missing => continue,
-                Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
+                Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
+                    if missing_action != MissingAction::Error =>
+                {
                     roots.push(RootObject {
                         oid: raw_oid,
                         input: spec.clone(),
@@ -3639,7 +3641,11 @@ fn resolve_specs_for_objects_with_options(
                 };
                 let expected_kind = match repo.odb().read_info(&object_oid) {
                     Ok(info) => ExpectedObjectKind::from_object_kind(info.kind),
-                    Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => None,
+                    Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
+                        if missing_action != MissingAction::Error =>
+                    {
+                        None
+                    }
                     Err(Error::ObjectNotFound(_)) if ignore_missing => continue,
                     Err(err) => return Err(err),
                 };
@@ -3821,7 +3827,9 @@ fn walk_closure_ordered_with_missing(
         }
         let parents = match graph.parents_of(oid) {
             Ok(parents) => parents,
-            Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
+            Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
+                if missing_action != MissingAction::Error =>
+            {
                 if missing_action.reports_missing() && missing_seen.insert(oid) {
                     missing.push(oid);
                 }
@@ -9001,7 +9009,9 @@ fn commit_parent_trees(
     for &parent in parents {
         let commit = match load_commit(repo, parent) {
             Ok(commit) => commit,
-            Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
+            Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
+                if missing_action != MissingAction::Error =>
+            {
                 if missing_action.reports_missing() && missing_seen.insert(parent) {
                     missing.push(parent);
                 }
@@ -9366,7 +9376,9 @@ fn collect_reachable_objects_segmented(
         let start = result.len();
         let commit_tree = match graph.commit_tree(commit_oid) {
             Ok(tree) => tree,
-            Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
+            Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
+                if missing_action != MissingAction::Error =>
+            {
                 if missing_action.reports_missing() && missing_seen.insert(commit_oid) {
                     missing.push(commit_oid);
                 }
@@ -9793,7 +9805,9 @@ fn collect_tree_objects_filtered(
     }
     let tree_blob = match tree_state.tree_blob(repo, tree_oid) {
         Ok(blob) => blob,
-        Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
+        Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
+            if missing_action != MissingAction::Error =>
+        {
             if missing_action.reports_missing() && missing_seen.insert(tree_oid) {
                 missing.push(tree_oid);
             }
@@ -9891,7 +9905,9 @@ fn collect_tree_objects_filtered(
             if needs_child_read_info {
                 let child_info = match repo.odb().read_info(&entry.oid) {
                     Ok(info) => info,
-                    Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
+                    Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
+                        if missing_action != MissingAction::Error =>
+                    {
                         if missing_action.reports_missing() && missing_seen.insert(entry.oid) {
                             missing.push(entry.oid);
                         }
@@ -9963,7 +9979,9 @@ fn collect_tree_objects_filtered(
             if needs_child_read_info {
                 let child_info = match repo.odb().read_info(&entry.oid) {
                     Ok(info) => info,
-                    Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
+                    Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
+                        if missing_action != MissingAction::Error =>
+                    {
                         if missing_action.reports_missing() && missing_seen.insert(entry.oid) {
                             missing.push(entry.oid);
                         }
@@ -10036,7 +10054,9 @@ fn collect_tree_objects_filtered(
             } else {
                 let child_info = match repo.odb().read_info(&entry.oid) {
                     Ok(info) => info,
-                    Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
+                    Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
+                        if missing_action != MissingAction::Error =>
+                    {
                         if missing_action.reports_missing() && missing_seen.insert(entry.oid) {
                             missing.push(entry.oid);
                         }
@@ -10127,7 +10147,9 @@ fn collect_root_object(
 
     let object = match repo.odb().read(&root.oid) {
         Ok(object) => object,
-        Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
+        Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
+            if missing_action != MissingAction::Error =>
+        {
             if missing_action.reports_missing() && missing_seen.insert(root.oid) {
                 missing.push(root.oid);
             }
@@ -10366,7 +10388,9 @@ fn collect_reachable_objects_in_commit_order(
     for &commit_oid in commits {
         let commit = match load_commit(repo, commit_oid) {
             Ok(commit) => commit,
-            Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
+            Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
+                if missing_action != MissingAction::Error =>
+            {
                 if missing_action.reports_missing() && missing_seen.insert(commit_oid) {
                     missing.push(commit_oid);
                 }
