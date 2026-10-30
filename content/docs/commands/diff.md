@@ -17,7 +17,7 @@ grit diff --no-index <path> <path>
 
 ## Description
 
-With no argument, shows every uncommitted change: the working tree and index together, compared with the last commit (`HEAD`). Pass `--staged` to compare only the index to `HEAD` (staged changes). Pass `--unstaged` to compare only the working tree to the index (changes not yet staged). Pass `--against <ref>` to compare the working tree to another ref’s tree instead of `HEAD` (useful for “what changed since `main`?” while keeping a single commit argument as “show this commit’s patch”).
+With no argument, shows every uncommitted change: the working tree and index together, compared with the last commit (`HEAD`). Pass `--staged` to compare only the index to `HEAD` (staged changes). Pass `--unstaged` to compare only the working tree to the index (changes not yet staged). Pass `--against <ref>` to compare the working tree to another ref’s tree instead of `HEAD` (useful for “what changed since `main`?” while keeping a single commit argument as “show this commit’s patch”). Untracked paths are not diff entries—they appear only in [`grit status`](status.md).
 
 Symlinks are compared using the bytes of their link targets, including links to directories and missing paths. Clean filters and line-ending conversion do not apply to link targets. Serial and parallel scans produce the same changes, including on large worktrees; an unchanged symlink does not make a clean tree dirty. With `core.symlinks=false`, regular files checked out as symlink placeholders retain the link mode recorded in the index.
 

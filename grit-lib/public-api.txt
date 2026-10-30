@@ -5433,7 +5433,6 @@ pub const grit_lib::diff::RENAME_DETECTION_DISABLED: u32
 pub const grit_lib::diff::WORD_LEVEL_INLINE_MAX_CHANGED_FILES: usize
 pub fn grit_lib::diff::anchored_unified_diff(&str, &str, &str, &str, usize, &[alloc::string::String], similar::types::Algorithm, bool, bool, bool) -> alloc::string::String
 pub fn grit_lib::diff::annotate_unified_diff_no_newline_at_eof(&str, &str, &str) -> alloc::string::String
-pub fn grit_lib::diff::append_untracked_worktree_added_for_rename_detection(&grit_lib::repo::Repository, &grit_lib::index::Index, &grit_lib::worktree::worktree_rules::WorktreeRules, alloc::vec::Vec<grit_lib::diff::DiffEntry>) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::diff::DiffEntry>, std::collections::hash::set::HashSet<alloc::string::String>)>
 pub fn grit_lib::diff::apply_diff_filter(alloc::vec::Vec<grit_lib::diff::DiffEntry>, core::option::Option<grit_lib::diff::DiffFilter>) -> alloc::vec::Vec<grit_lib::diff::DiffEntry>
 pub fn grit_lib::diff::apply_rename_detection_to_diff_entries(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, core::option::Option<&std::path::Path>, u32, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::build_file_diffs(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, grit_lib::diff::DiffDetail, grit_lib::diff::DiffOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<grit_lib::diff::DiffFilesOutput>
@@ -5469,7 +5468,6 @@ pub fn grit_lib::diff::diff_trees_show_tree_entries(&grit_lib::objects::odb::Odb
 pub fn grit_lib::diff::diff_trees_with_renames(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str, u32) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diff_trees_with_renames_and_policy(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str, u32, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diffcore_count_changes(&[u8], &[u8]) -> (u64, u64)
-pub fn grit_lib::diff::drop_unused_synthetic_rename_candidates(alloc::vec::Vec<grit_lib::diff::DiffEntry>, &std::collections::hash::set::HashSet<alloc::string::String>) -> alloc::vec::Vec<grit_lib::diff::DiffEntry>
 pub fn grit_lib::diff::empty_blob_oid() -> grit_lib::objects::ObjectId
 pub fn grit_lib::diff::entry_is_racy(&grit_lib::index::IndexEntry, core::option::Option<(u32, u32)>) -> bool
 pub fn grit_lib::diff::entry_is_racy_with_policy(&grit_lib::index::IndexEntry, core::option::Option<(u32, u32)>, grit_lib::index::StatMatchPolicy) -> bool

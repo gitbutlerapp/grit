@@ -198,6 +198,28 @@ fn plain_filesystem_mv_pairs_via_untracked_worktree_candidate() {
     let root = tmp.path();
     init_repo_with_large_file(root);
     std::fs::rename(root.join("a.txt"), root.join("b.txt")).expect("mv");
+    std::fs::write(root.join("new.rs"), "unrelated untracked\n").expect("untracked");
+
+    for args in [
+        &["diff", "--name-status"][..],
+        &["diff", "HEAD", "--name-status", "-M"][..],
+    ] {
+        let git_out = Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .output()
+            .expect("git diff");
+        assert!(git_out.status.success(), "git {:?} failed", args);
+        let git_line = String::from_utf8_lossy(&git_out.stdout);
+        assert!(
+            git_line.contains("D\ta.txt") || git_line.contains("D\ta.txt\n"),
+            "git should show deletion only: {git_line}"
+        );
+        assert!(
+            !git_line.contains("b.txt") && !git_line.contains("new.rs"),
+            "git must not list untracked paths in diff: {git_line}"
+        );
+    }
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let mut index = repo.index_handle().load().expect("index");
@@ -219,17 +241,29 @@ fn plain_filesystem_mv_pairs_via_untracked_worktree_candidate() {
     )
     .expect("unstaged diff");
 
-    let renames: Vec<_> = entries
-        .iter()
-        .filter(|e| e.status == DiffStatus::Renamed)
-        .collect();
-    assert_eq!(
-        renames.len(),
-        1,
-        "plain mv should rename via untracked b.txt, got: {entries:?}"
+    assert!(
+        !entries.iter().any(|e| e.status == DiffStatus::Renamed),
+        "untracked destination must not pair as rename: {entries:?}"
     );
-    assert_eq!(renames[0].old_path.as_deref(), Some("a.txt"));
-    assert_eq!(renames[0].new_path.as_deref(), Some("b.txt"));
+    assert!(
+        !entries.iter().any(|e| e.status == DiffStatus::Added),
+        "untracked paths must not appear as added: {entries:?}"
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|e| e.status == DiffStatus::Deleted)
+            .count(),
+        1,
+        "expected single deletion of a.txt: {entries:?}"
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .find(|e| e.status == DiffStatus::Deleted)
+            .and_then(|e| e.old_path.as_deref()),
+        Some("a.txt")
+    );
 }
 
 #[test]

@@ -23,7 +23,6 @@
 
 use crate::git_path::CanonicalizeExt;
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -44,7 +43,6 @@ use crate::odb::{Odb, SessionTree};
 use crate::parallel::ThreadPolicy;
 use crate::repo::Repository;
 use crate::userdiff::FuncnameMatcher;
-use crate::worktree_rules::WorktreeRules;
 
 use super::rename_lines::RenameLineTable;
 use super::unified_emit::{
@@ -3588,144 +3586,11 @@ pub fn apply_rename_detection_to_diff_entries(
     }
 }
 
-/// Add [`DiffStatus::Added`] entries for untracked worktree files so rename detection can pair
-/// plain filesystem moves (index still lists the old path, new path only on disk).
-///
-/// The returned path set lists every synthetic added candidate. After rename detection, drop
-/// entries whose `new_path` is still in that set and still [`DiffStatus::Added`] — they were
-/// not consumed by a rename pair and must not appear in the diff (Git does not report unrelated
-/// untracked paths in `git diff`).
-///
-/// # Errors
-///
-/// Propagates I/O and ignore-rule load failures while scanning the work tree.
-pub fn append_untracked_worktree_added_for_rename_detection(
-    repo: &Repository,
-    index: &Index,
-    rules: &WorktreeRules,
-    mut entries: Vec<DiffEntry>,
-) -> Result<(Vec<DiffEntry>, HashSet<String>)> {
-    let mut synthetic_new_paths = HashSet::new();
-    if !entries.iter().any(|e| e.status == DiffStatus::Deleted) {
-        return Ok((entries, synthetic_new_paths));
-    }
-    let mut existing_new: HashSet<String> =
-        entries.iter().filter_map(|e| e.new_path.clone()).collect();
-    let untracked = list_untracked_worktree_files_for_rename(repo, index, rules)?;
-    for path in untracked {
-        if existing_new.contains(&path) {
-            continue;
-        }
-        existing_new.insert(path.clone());
-        synthetic_new_paths.insert(path.clone());
-        entries.push(DiffEntry {
-            status: DiffStatus::Added,
-            old_path: None,
-            new_path: Some(path),
-            old_mode: FileMode::ABSENT,
-            new_mode: FileMode::REGULAR,
-            old_oid: zero_oid(),
-            new_oid: zero_oid(),
-            score: None,
-        });
-    }
-    Ok((entries, synthetic_new_paths))
-}
-
-/// Drop synthetic untracked rename candidates that rename detection did not pair.
-#[must_use]
-pub fn drop_unused_synthetic_rename_candidates(
-    entries: Vec<DiffEntry>,
-    synthetic_new_paths: &HashSet<String>,
-) -> Vec<DiffEntry> {
-    if synthetic_new_paths.is_empty() {
-        return entries;
-    }
-    entries
-        .into_iter()
-        .filter(|e| {
-            !(e.status == DiffStatus::Added
-                && e.new_path
-                    .as_ref()
-                    .is_some_and(|p| synthetic_new_paths.contains(p)))
-        })
-        .collect()
-}
-
-fn list_untracked_worktree_files_for_rename(
-    repo: &Repository,
-    index: &Index,
-    rules: &WorktreeRules,
-) -> Result<Vec<String>> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
-    let mut out = Vec::new();
-    walk_untracked_worktree_files(repo, index, work_tree, "", rules, &mut out)?;
-    out.sort();
-    Ok(out)
-}
-
-fn walk_untracked_worktree_files(
-    repo: &Repository,
-    index: &Index,
-    dir: &Path,
-    rel_prefix: &str,
-    rules: &WorktreeRules,
-    out: &mut Vec<String>,
-) -> Result<()> {
-    let read = match fs::read_dir(dir) {
-        Ok(r) => r,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(Error::Io(e)),
-    };
-    for entry in read {
-        let entry = entry.map_err(Error::Io)?;
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if rel_prefix.is_empty() && name == ".git" {
-            continue;
-        }
-        let rel_path = if rel_prefix.is_empty() {
-            name.to_string()
-        } else {
-            format!("{rel_prefix}/{name}")
-        };
-        let file_type = entry.file_type().map_err(Error::Io)?;
-        if file_type.is_dir() {
-            let (ignored, _) = rules
-                .ignore_mut()
-                .check_path(repo, Some(index), &rel_path, true)?;
-            if ignored {
-                continue;
-            }
-            walk_untracked_worktree_files(
-                repo,
-                index,
-                &dir.join(name.as_ref()),
-                &rel_path,
-                rules,
-                out,
-            )?;
-        } else if file_type.is_file() || file_type.is_symlink() {
-            if index.get(rel_path.as_bytes(), 0).is_some() {
-                continue;
-            }
-            let (ignored, _) =
-                rules
-                    .ignore_mut()
-                    .check_path(repo, Some(index), &rel_path, false)?;
-            if !ignored {
-                out.push(rel_path);
-            }
-        }
-    }
-    Ok(())
-}
-
 /// Diff the index against the working tree and pair deleted/added paths as renames when similar.
 ///
-/// Runs [`diff_index_to_worktree_with_options`], appends untracked worktree paths as added
-/// candidates when needed, then [`apply_rename_detection_to_diff_entries`] with `work_root`
-/// set to `work_tree`.
+/// Runs [`diff_index_to_worktree_with_options`], then [`apply_rename_detection_to_diff_entries`]
+/// with `work_root` set to `work_tree`. Untracked worktree paths are not diff entries (see
+/// [`crate::porcelain::status`]); they are never fed into rename detection here.
 ///
 /// # Errors
 ///
@@ -3740,23 +3605,7 @@ pub fn diff_index_to_worktree_with_renames(
     let config = repo.config()?.as_ref().clone();
     let thread_policy = repo.thread_policy();
     let odb = repo.odb();
-    let rules_for_append = options.worktree_rules.clone();
-    let (mut entries, changed) =
-        diff_index_to_worktree_with_options(odb, index, work_tree, options)?;
-    let mut synthetic_new_paths = HashSet::new();
-    if rename_threshold < 100 {
-        if let Some(rules_arc) = rules_for_append {
-            let rules = rules_arc
-                .lock()
-                .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))?;
-            (entries, synthetic_new_paths) =
-                append_untracked_worktree_added_for_rename_detection(repo, index, &rules, entries)?;
-        } else {
-            let rules = WorktreeRules::from_repository(repo, index)?;
-            (entries, synthetic_new_paths) =
-                append_untracked_worktree_added_for_rename_detection(repo, index, &rules, entries)?;
-        }
-    }
+    let (entries, changed) = diff_index_to_worktree_with_options(odb, index, work_tree, options)?;
     let entries = apply_rename_detection_to_diff_entries(
         odb,
         entries,
@@ -3765,7 +3614,6 @@ pub fn diff_index_to_worktree_with_renames(
         &config,
         &thread_policy,
     )?;
-    let entries = drop_unused_synthetic_rename_candidates(entries, &synthetic_new_paths);
     Ok((entries, changed))
 }
 
