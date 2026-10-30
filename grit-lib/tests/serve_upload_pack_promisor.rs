@@ -287,6 +287,42 @@ fn client_that_accepts_nothing_gets_an_err_line_naming_the_lop() {
 }
 
 #[test]
+fn filtered_fetch_without_acceptance_leaves_out_what_its_filter_does() {
+    // Git over stateless HTTP accepts the LOP with `ls-refs` and sends the fetch
+    // without it; a filter no looser than the LOP's `partialCloneFilter` still
+    // gets the pack it asked for.
+    let fx = Offloaded::new();
+    let repo = fx.open(None);
+    for (filter, expected) in [
+        ("filter blob:limit=5120", vec![fx.tip, fx.tree, fx.small]),
+        ("filter blob:limit=1024", vec![fx.tip, fx.tree, fx.small]),
+        ("filter blob:none", vec![fx.tip, fx.tree]),
+    ] {
+        let (out, result) = serve(
+            &repo,
+            fetch_request(&[], &[want(fx.tip), filter.to_owned()]),
+            &mut v2(true),
+        );
+        result.unwrap();
+        let resp = parse_v2(&out);
+        assert_eq!(resp.err, None, "{filter}");
+        let objects = pack_objects(resp.pack.expect("pack"));
+        assert_eq!(objects, expected.into_iter().collect(), "{filter}");
+    }
+    assert!(!repo.odb().exists_stored(&fx.big));
+
+    // A looser filter could want a blob the LOP holds: still refused.
+    let (out, result) = serve(
+        &repo,
+        fetch_request(&[], &[want(fx.tip), "filter blob:limit=32768".to_owned()]),
+        &mut v2(true),
+    );
+    result.expect("stateless errors are reported in-band");
+    let err = parse_v2(&out).err.expect("ERR line");
+    assert!(err.contains(&fx.big.to_hex()), "{err}");
+}
+
+#[test]
 fn a_client_lazily_asking_for_the_blob_itself() {
     let fx = Offloaded::new();
     let repo = fx.open(None);

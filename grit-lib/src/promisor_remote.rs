@@ -31,6 +31,7 @@ use std::path::Path;
 use crate::config::{parse_bool, ConfigFile, ConfigScope, ConfigSet};
 use crate::error::{Error, Result};
 use crate::partial_clone::ObjectFilterSpec;
+use crate::rev_list::ObjectFilter;
 
 /// An optional per-remote field the `promisor-remote` capability can carry besides
 /// `name` and `url`.
@@ -475,6 +476,46 @@ fn promisor_remote_names(cfg: &ConfigSet) -> Vec<String> {
         names.push(pc);
     }
     names
+}
+
+/// Whether a fetch filtered with `request` leaves out every blob the promisor
+/// remotes in `cfg` may hold in this repository's place.
+///
+/// A promisor remote's `partialCloneFilter` says which blobs the repository may
+/// lack: `blob:none` any blob, `blob:limit=<n>` blobs of at least `n` bytes. The
+/// request leaves those out when its filter is `blob:none`, or `blob:limit=<m>`
+/// with `m` no larger than every remote's `n` (and no remote is `blob:none`), or a
+/// `combine:` filter with such a part. A promisor remote without a blob filter
+/// could stand in for any object, so the answer is then `false`, as it is for a
+/// repository without promisor remotes.
+pub(crate) fn request_filter_omits_promised_blobs(cfg: &ConfigSet, request: &ObjectFilter) -> bool {
+    let names = promisor_remote_names(cfg);
+    if names.is_empty() {
+        return false;
+    }
+    // The smallest blob a promisor remote may hold; `0` for `blob:none`.
+    let mut floor = u64::MAX;
+    for name in names {
+        let filter = cfg
+            .get(&format!("remote.{name}.partialclonefilter"))
+            .and_then(|spec| ObjectFilter::parse(&spec).ok());
+        match filter {
+            Some(ObjectFilter::BlobNone) => floor = 0,
+            Some(ObjectFilter::BlobLimit(n)) => floor = floor.min(n),
+            _ => return false,
+        }
+    }
+    omits_blobs_from(request, floor)
+}
+
+/// Whether `filter` leaves out every blob of at least `floor` bytes.
+fn omits_blobs_from(filter: &ObjectFilter, floor: u64) -> bool {
+    match filter {
+        ObjectFilter::BlobNone => true,
+        ObjectFilter::BlobLimit(limit) => *limit <= floor,
+        ObjectFilter::Combine(parts) => parts.iter().any(|part| omits_blobs_from(part, floor)),
+        _ => false,
+    }
 }
 
 /// Whether `name` is a promisor remote in `cfg`: `remote.<name>.promisor` is true,
@@ -1038,6 +1079,64 @@ mod tests {
             c.add_command_override(k, v).unwrap();
         }
         c
+    }
+
+    #[test]
+    fn request_filters_that_leave_out_promised_blobs() {
+        let parse = |spec: &str| ObjectFilter::parse(spec).unwrap();
+        let lop = cfg(&[
+            ("remote.lop.url", "https://lop.example.com/r"),
+            ("remote.lop.promisor", "true"),
+            ("remote.lop.partialCloneFilter", "blob:limit=1m"),
+        ]);
+        for (spec, omits) in [
+            ("blob:none", true),
+            ("blob:limit=1m", true),
+            ("blob:limit=4k", true),
+            ("blob:limit=2m", false),
+            ("tree:0", false),
+            ("combine:tree:3+blob:limit=512k", true),
+            ("combine:tree:3+blob:limit=2m", false),
+        ] {
+            assert_eq!(
+                request_filter_omits_promised_blobs(&lop, &parse(spec)),
+                omits,
+                "{spec}"
+            );
+        }
+        // The strictest remote decides; one that may hold any blob needs blob:none.
+        let two = cfg(&[
+            ("remote.lop.promisor", "true"),
+            ("remote.lop.partialCloneFilter", "blob:limit=1m"),
+            ("remote.small.partialCloneFilter", "blob:limit=64k"),
+        ]);
+        assert!(request_filter_omits_promised_blobs(
+            &two,
+            &parse("blob:limit=64k")
+        ));
+        assert!(!request_filter_omits_promised_blobs(
+            &two,
+            &parse("blob:limit=1m")
+        ));
+        let none = cfg(&[("remote.origin.partialCloneFilter", "blob:none")]);
+        assert!(request_filter_omits_promised_blobs(
+            &none,
+            &parse("blob:none")
+        ));
+        assert!(!request_filter_omits_promised_blobs(
+            &none,
+            &parse("blob:limit=1")
+        ));
+        // Without a blob filter a promisor remote could hold anything.
+        let unfiltered = cfg(&[("remote.lop.promisor", "true")]);
+        assert!(!request_filter_omits_promised_blobs(
+            &unfiltered,
+            &parse("blob:none")
+        ));
+        assert!(!request_filter_omits_promised_blobs(
+            &ConfigSet::default(),
+            &parse("blob:none")
+        ));
     }
 
     fn adv(value: &str) -> PromisorAdvertisement {

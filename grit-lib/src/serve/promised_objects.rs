@@ -7,6 +7,12 @@
 //! objects out of the pack (the client fetches them from the LOP); otherwise fail,
 //! unless lazy fetch was explicitly enabled, in which case the server fetches them
 //! first. A missing object nothing promises is always an error.
+//!
+//! grit also leaves promised blobs out when the client's own filter would have
+//! left them out (every promisor remote's `partialCloneFilter` is a blob filter the
+//! request's filter covers), since such a client gets the pack it asked for either
+//! way. Over stateless HTTP that matters: Git sends its acceptance of a promisor
+//! remote with `ls-refs` only, not with the `fetch` that follows.
 
 use std::cell::OnceCell;
 use std::collections::HashSet;
@@ -27,7 +33,7 @@ pub(crate) enum MissingObjects {
     /// [`super::MissingObjectReason::NotPromised`]).
     Error,
     /// Leave promised objects out of the pack; the client fetches them from a
-    /// promisor remote it accepted.
+    /// promisor remote it accepted, or its filter left them out anyway.
     OmitPromised,
     /// Fetch them from the repository's promisor remotes first, then send them.
     LazyFetch,
@@ -39,7 +45,8 @@ pub(crate) enum MissingObjects {
 ///
 /// - `repo_is_partial`: the served repository has promisor remotes
 ///   ([`crate::promisor::repo_treats_promisor_packs`]).
-/// - `accepted`: the client accepted at least one advertised promisor remote.
+/// - `accepted`: the client accepted at least one advertised promisor remote, or
+///   its filter leaves out every blob the promisor remotes hold.
 /// - `lazy_fetch`: the server may fetch missing objects from its promisor remotes.
 ///
 /// # Returns

@@ -321,15 +321,25 @@ fn upload_policy(repo: &Repository) -> UploadPackPolicy {
 
 /// How this request treats objects the repository lacks; `None` for a repository
 /// without promisor remotes (the ordinary pack path).
+///
+/// Promised blobs are left out for a client that accepted a promisor remote, and,
+/// among the objects the walk reaches, for one whose `filter` leaves them out anyway
+/// ([`crate::promisor_remote::request_filter_omits_promised_blobs`]). Over stateless
+/// HTTP the second is what lets Git clients fetch: Git sends its `promisor-remote`
+/// reply with `ls-refs` only, so the `fetch` request carries no acceptance. Pass
+/// `None` for the wants themselves, which are sent whatever the filter says.
 fn missing_objects_mode(
     repo: &Repository,
     config: &ConfigSet,
     policy: &UploadPackPolicy,
     opts: &ServeOptions,
+    filter: Option<&ObjectFilter>,
 ) -> Option<MissingObjects> {
+    let omitted_by_filter = filter
+        .is_some_and(|f| crate::promisor_remote::request_filter_omits_promised_blobs(config, f));
     missing_objects_policy(
         crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config),
-        !opts.accepted_promisor_remotes.is_empty(),
+        !opts.accepted_promisor_remotes.is_empty() || omitted_by_filter,
         opts.lazy_fetch.unwrap_or(policy.lazy_fetch),
     )
 }
@@ -361,8 +371,9 @@ fn serve_v0(
     let Some(mut request) = read_v0_request(repo, input, &config, &policy, stop)? else {
         return Ok(UploadSession::default());
     };
-    let missing = missing_objects_mode(repo, &config, &policy, opts);
-    if let Some(mode) = missing {
+    // Wanted objects are sent whatever the filter says, so only acceptance (or
+    // lazy fetch) covers a missing want.
+    if let Some(mode) = missing_objects_mode(repo, &config, &policy, opts, None) {
         if let Err(err) = resolve_missing_wants(repo, &mut request.wants, mode) {
             if matches!(err, ServeError::ObjectMissing { .. }) {
                 // The client reads ACK/NAK next; an `ERR` line there is reported
@@ -373,6 +384,7 @@ fn serve_v0(
             return Err(err);
         }
     }
+    let missing = missing_objects_mode(repo, &config, &policy, opts, request.filter.as_ref());
     if request.filter.is_some() {
         validate_wants_filtered(repo, &request.wants)?;
     } else {
@@ -1103,10 +1115,12 @@ fn fetch_v2(
         Some(spec) => Some(policy.parse_filter(&config, &spec)?),
     };
 
-    let missing = missing_objects_mode(repo, &config, &policy, opts);
-    if let Some(mode) = missing {
+    // Wanted objects are sent whatever the filter says, so only acceptance (or
+    // lazy fetch) covers a missing want.
+    if let Some(mode) = missing_objects_mode(repo, &config, &policy, opts, None) {
         resolve_missing_wants(repo, &mut wants, mode)?;
     }
+    let missing = missing_objects_mode(repo, &config, &policy, opts, filter.as_ref());
     if filter.is_some() {
         validate_wants_filtered(repo, &wants)?;
     } else {

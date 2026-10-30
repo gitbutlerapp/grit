@@ -46,6 +46,7 @@ A client that accepts some of these remotes says so with a `promisor-remote=<nam
 A repository with promisor remotes of its own may lack some objects: after [`grit gc offload`](../gc/#grit-gc-offload) its large blobs live only on a large-object promisor (LOP), and its other objects sit in a `.promisor` pack. Such a repository is *partial*, and upload-pack serves it by Git's rules:
 
 - When the client accepted at least one advertised promisor remote, a promised blob the repository does not have is left out of the pack. The client fetches it from the LOP. A blob is promised when an object in a promisor pack refers to it.
+- A client whose own filter leaves those blobs out gets the same pack without accepting anything. That holds when every promisor remote of the repository has a blob `partialCloneFilter` (`blob:none`, or `blob:limit=<n>`) and the fetch is filtered with `blob:none`, or with `blob:limit=<m>` where `m` is at most the smallest `n`: it would not have been sent those blobs anyway. Git's upload-pack has no such rule. Blobs the client wants by id are sent whatever its filter says, so a want of a promised blob still needs acceptance.
 - Otherwise the request fails. The server first fetches the missing blobs from its own promisor remotes only if lazy fetch is on. That takes `uploadpack.lazyFetch = true` (a grit setting) or `GIT_NO_LAZY_FETCH=0` in the environment of `grit upload-pack` or `grit serve`. Git's upload-pack has the same `GIT_NO_LAZY_FETCH=0` switch. The fetched blobs go into a new `.promisor` pack in the served repository, and the client's filter still applies to them: a `blob:limit` client is not sent the large blobs the server fetched.
 - A missing object that nothing promises is an error in every case.
 
@@ -53,7 +54,7 @@ The pack is planned before anything is sent, so a refusal reaches the client as 
 
 This applies only to repositories with a promisor remote (`remote.<name>.promisor = true` or `extensions.partialClone`). For those, the pack is chosen with the object walk instead of bitmaps or verbatim pack reuse; other repositories keep the fast path. Only blobs can be left out. A missing commit, tree or tag still fails the request; `grit gc offload` only ever removes blobs.
 
-Over smart HTTP, each request carries its own acceptance (see above). Git clients accept only on `ls-refs`, so their `fetch` arrives without it. A large-object setup served over HTTP to Git clients therefore needs lazy fetch on the server, or a stateful transport (SSH, `git://`).
+Over smart HTTP, each request carries its own acceptance (see above). Git clients accept only on `ls-refs`, so their `fetch` arrives without it. Their partial clone still works when its filter is no looser than the promisor remotes' `partialCloneFilter` (for example `git clone --filter=blob:limit=1m` against a LOP advertised with `blob:limit=1m`). For a looser filter, a large-object setup served over HTTP to Git clients needs lazy fetch on the server, or a stateful transport (SSH, `git://`).
 
 ## Options
 
