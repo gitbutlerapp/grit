@@ -43,6 +43,7 @@ ENTRY = "integration.rs"
 
 # Integration modules that must stay in the default suite despite using system git.
 DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
+    ("grit-lib", "fetch_reflog_git_compat"),
     ("grit-lib", "reset_hard_at_head_restores_worktree"),
     ("grit-lib", "status_index_refresh_race"),
 }

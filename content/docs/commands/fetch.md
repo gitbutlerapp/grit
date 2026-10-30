@@ -41,6 +41,8 @@ In a partial clone, a fetch takes part in the server's `promisor-remote` exchang
 
 Local fetches reuse the repository's ref store across tracking refs and tags. An up-to-date fetch skips object-copy preparation while still handling pruning, `FETCH_HEAD`, and the remote's default branch. See the [many-ref local fetch measurements](../../benchmarks/#local-fetch-with-many-refs).
 
+When `core.logAllRefUpdates` is enabled (grit's default for new repositories), each fetch that moves a remote-tracking branch writes a reflog entry on that ref (`fetch: fast-forward`, `fetch: forced-update`, or `fetch: storing head` for a newly stored tracking ref). [`grit pull`](../pull/) uses the same mechanism with a `pull:` prefix. The initial clone fetch does not create branch tracking reflogs (Git matches this); only `refs/remotes/<remote>/HEAD` gets `clone: from <url>`. Pruning a stale tracking ref removes its reflog file. Tags are not logged unless a reflog already exists or logging is set to `always`.
+
 `--all` fetches every configured remote in config order. Remotes with `remote.<name>.skipFetchAll=true` are skipped. Each remote uses its own `remote.<name>.prune` and `remote.<name>.tagOpt` unless `--prune`, `--no-prune`, `--tags`, or `--no-tags` override on the command line. Failures on one remote do not stop the rest; the command exits **1** if any remote failed or any ref update was rejected. `--all` cannot be combined with `<remote>` or `<refspec>` arguments.
 
 ## Options

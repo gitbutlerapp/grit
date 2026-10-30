@@ -55,8 +55,8 @@ pub use domain_reexports::*;
 pub use handle::References;
 pub use on_store::update_branch_for_commit_on_store;
 pub(crate) use on_store::{
-    append_reflog_on_store, delete_ref_on_store, update_detached_head_for_commit_on_store,
-    verify_new_tip, write_symbolic_ref_on_store,
+    append_reflog_on_store, delete_ref_on_store, reflog_wanted,
+    update_detached_head_for_commit_on_store, verify_new_tip, write_symbolic_ref_on_store,
 };
 
 /// In-process ref-transaction and loose-object prune helpers.

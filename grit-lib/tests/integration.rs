@@ -667,6 +667,8 @@ mod fetch_pull_branch_remote_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "fetch_ref_namespace_partial_1654.rs"]
 mod fetch_ref_namespace_partial_1654;
+#[path = "fetch_reflog_git_compat.rs"]
+mod fetch_reflog_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "fetch_refspec_git_compat.rs"]
 mod fetch_refspec_git_compat;

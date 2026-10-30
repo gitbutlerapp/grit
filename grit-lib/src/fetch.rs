@@ -2011,6 +2011,8 @@ pub fn fetch_remote_into(
 
     if !opts.dry_run && !store_batch.is_empty() {
         let t = std::time::Instant::now();
+        let fetch_reflog = prepare_fetch_apply_reflog(local, opts)?;
+        let fetch_reflog_ctx = fetch_reflog.as_ref().map(PreparedFetchReflog::context);
         crate::transfer::apply_fetch_ref_updates(
             local,
             store_batch,
@@ -2022,6 +2024,7 @@ pub fn fetch_remote_into(
                 remote_name: opts.remote_name.as_deref(),
             },
             opts.initial_remote_fetch,
+            fetch_reflog_ctx.as_ref(),
         )?;
         d_write += t.elapsed();
     }
@@ -2209,6 +2212,40 @@ fn fetch_remote_object_wants(
         filter_sent,
         promisor: None,
     })
+}
+
+/// Formatted identity and action for [`crate::transfer::apply_fetch_ref_updates`] reflog lines.
+pub(crate) struct PreparedFetchReflog {
+    identity: String,
+    action: &'static str,
+}
+
+impl PreparedFetchReflog {
+    pub(crate) fn context(&self) -> crate::transfer::FetchApplyReflog<'_> {
+        crate::transfer::FetchApplyReflog {
+            action: self.action,
+            identity: &self.identity,
+        }
+    }
+}
+
+/// Build fetch reflog metadata when this fetch should log tracking-ref updates.
+///
+/// Returns `None` on the initial clone fetch (branch logs are omitted; see
+/// [`finish_initial_remote_fetch_layout`] for `refs/remotes/{remote}/HEAD`).
+pub(crate) fn prepare_fetch_apply_reflog(
+    local: &Repository,
+    opts: &FetchOptions,
+) -> Result<Option<PreparedFetchReflog>> {
+    if opts.initial_remote_fetch {
+        return Ok(None);
+    }
+    let sig = fetch_operation_identity(&opts.environment, local.git_dir())?;
+    let identity = crate::refs::store::format_reflog_identity(&sig.reflog_name_email(), sig.time);
+    Ok(Some(PreparedFetchReflog {
+        identity,
+        action: opts.reflog_action,
+    }))
 }
 
 /// Committer identity for fetch/clone reflog entries.

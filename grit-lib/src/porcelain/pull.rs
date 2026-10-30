@@ -402,6 +402,7 @@ impl PullOptions {
                 opts.environment = environment;
                 opts.prune = prune;
                 opts.remote_name = Some(remote_name);
+                opts.reflog_action = "pull";
                 opts
             },
             upstream: None,

@@ -98,6 +98,21 @@ impl UpdateMode {
     pub fn is_reported(self) -> bool {
         self.modified_repo() || self.is_rejected()
     }
+
+    pub(crate) fn fetch_reflog_reason(self) -> Option<&'static str> {
+        match self {
+            Self::New => Some("storing head"),
+            Self::FastForward => Some("fast-forward"),
+            Self::Forced => Some("forced-update"),
+            _ => None,
+        }
+    }
+}
+
+/// Identity and action for fetch ref-update reflog lines (non-initial fetches).
+pub(crate) struct FetchApplyReflog<'a> {
+    pub action: &'static str,
+    pub identity: &'a str,
 }
 
 /// The resolved outcome of one reference during a fetch.
@@ -213,6 +228,8 @@ pub struct FetchOptions {
     pub configured_refspecs: Vec<String>,
     /// Clone-only reflog entries for `refs/remotes/{remote}/HEAD` (not remote branches).
     pub clone_reflog: Option<CloneReflog>,
+    /// Reflog action prefix for non-initial fetches (`fetch`, `pull`, …).
+    pub(crate) reflog_action: &'static str,
     /// Force ref updates that would otherwise be rejected (non-fast-forward branches,
     /// tag clobber under [`TagMode::All`] or explicit refspecs). Does not move tags
     /// that already exist locally under default tag following.
@@ -281,6 +298,7 @@ impl Default for FetchOptions {
             fetch_source: None,
             configured_refspecs: Vec::new(),
             clone_reflog: None,
+            reflog_action: "fetch",
             diagnostics: None,
             network_trace: false,
             index_pack_threads: None,
@@ -325,6 +343,7 @@ impl Clone for FetchOptions {
             fetch_source: self.fetch_source.clone(),
             configured_refspecs: self.configured_refspecs.clone(),
             clone_reflog: self.clone_reflog.clone(),
+            reflog_action: self.reflog_action,
             diagnostics: self.diagnostics.clone(),
             network_trace: self.network_trace,
             index_pack_threads: self.index_pack_threads,
@@ -2265,6 +2284,10 @@ pub(crate) fn fetch_local_into(
         }
     }
     if !opts.dry_run && !store_batch.is_empty() {
+        let fetch_reflog = crate::fetch::prepare_fetch_apply_reflog(local, opts)?;
+        let fetch_reflog_ctx = fetch_reflog
+            .as_ref()
+            .map(crate::fetch::PreparedFetchReflog::context);
         apply_fetch_ref_updates(
             local,
             store_batch,
@@ -2276,6 +2299,7 @@ pub(crate) fn fetch_local_into(
                 remote_name: opts.remote_name.as_deref(),
             },
             opts.initial_remote_fetch,
+            fetch_reflog_ctx.as_ref(),
         )?;
     }
 
@@ -3782,8 +3806,13 @@ fn mark_fetch_ref_update_rejected(
 /// Commit tracking-ref writes from a fetch into `local`'s ref store, applying every ref
 /// that can be updated.
 ///
-/// Each of `writes` stores a value under a name whatever the ref held before, without a
-/// reflog entry. They are committed as one batch transaction when the full batch validates;
+/// Each of `writes` stores a value under a name whatever the ref held before. Non-initial
+/// fetches attach a reflog line when [`crate::refs::on_store::reflog_wanted`] would
+/// (`core.logAllRefUpdates`, or the log already exists). Initial clone fetches omit
+/// branch reflogs (packed import) except the clone line on `refs/remotes/{remote}/HEAD`
+/// written by [`crate::fetch::finish_initial_remote_fetch_layout`].
+///
+/// Updates are committed as one batch transaction when the full batch validates;
 /// otherwise one at a time, recording lock or namespace failures on the matching
 /// [`RefUpdate`] rows instead of aborting the whole fetch.
 ///
@@ -3800,28 +3829,97 @@ pub(crate) fn apply_fetch_ref_updates(
     updates: &mut [RefUpdate],
     hint: FetchRefRejectHint<'_>,
     initial: bool,
+    fetch_reflog: Option<&FetchApplyReflog<'_>>,
 ) -> Result<()> {
-    use crate::refs::store::RawRef;
-    let store_update = |(name, value): &(String, RawRef)| crate::refs::store::RefUpdate {
-        name: name.clone(),
-        new_value: Some(value.clone()),
-        expected: crate::refs::store::Expected::Any,
-        reflog: None,
-        flags: Default::default(),
-    };
+    use crate::refs::store::{RawRef, ReflogUpdate};
+    use std::collections::HashMap;
+
     let store = local.refs();
+    let config = local.config()?;
+    let null_oid = store.reference_transaction_null_oid();
+    let mode_by_local: HashMap<String, (UpdateMode, Option<ObjectId>, Option<ObjectId>)> = updates
+        .iter()
+        .filter_map(|u| {
+            let local_ref = u.local_ref.as_ref()?;
+            Some((local_ref.clone(), (u.mode, u.old_oid, u.new_oid)))
+        })
+        .collect();
+
+    let store_update = |(name, value): &(String, RawRef)| -> Result<crate::refs::store::RefUpdate> {
+        let reflog = if initial {
+            None
+        } else if let Some(ctx) = fetch_reflog {
+            let Some((mode, old_oid, new_oid)) = mode_by_local.get(name).copied() else {
+                return Ok(crate::refs::store::RefUpdate {
+                    name: name.clone(),
+                    new_value: Some(value.clone()),
+                    expected: crate::refs::store::Expected::Any,
+                    reflog: None,
+                    flags: Default::default(),
+                });
+            };
+            let Some(reason) = mode.fetch_reflog_reason() else {
+                return Ok(crate::refs::store::RefUpdate {
+                    name: name.clone(),
+                    new_value: Some(value.clone()),
+                    expected: crate::refs::store::Expected::Any,
+                    reflog: None,
+                    flags: Default::default(),
+                });
+            };
+            if !crate::refs::reflog_wanted(store, &config, name)? {
+                return Ok(crate::refs::store::RefUpdate {
+                    name: name.clone(),
+                    new_value: Some(value.clone()),
+                    expected: crate::refs::store::Expected::Any,
+                    reflog: None,
+                    flags: Default::default(),
+                });
+            }
+            let old = old_oid.unwrap_or(null_oid);
+            let new = match value {
+                RawRef::Direct(oid) => *oid,
+                RawRef::Symbolic(_) => new_oid.unwrap_or(null_oid),
+            };
+            let message = format!("{}: {reason}", ctx.action);
+            Some(ReflogUpdate {
+                identity: ctx.identity.to_owned(),
+                message,
+                time: time::OffsetDateTime::UNIX_EPOCH,
+                old_oid: Some(old),
+                new_oid: Some(new),
+            })
+        } else {
+            None
+        };
+        Ok(crate::refs::store::RefUpdate {
+            name: name.clone(),
+            new_value: Some(value.clone()),
+            expected: crate::refs::store::Expected::Any,
+            reflog,
+            flags: Default::default(),
+        })
+    };
+
     let mut pending: Vec<&(String, RawRef)> = writes.iter().collect();
     if initial {
         let (direct, rest): (Vec<_>, Vec<_>) = pending
             .iter()
             .copied()
             .partition(|(_, value)| matches!(value, RawRef::Direct(_)));
-        let direct = direct.into_iter().map(store_update).collect();
+        let direct = direct
+            .into_iter()
+            .map(&store_update)
+            .collect::<Result<Vec<_>>>()?;
         if crate::refs::commit_initial_ref_updates_on_store(store, direct).is_ok() {
             pending = rest;
         }
     }
-    let batch = pending.iter().copied().map(store_update).collect();
+    let batch = pending
+        .iter()
+        .copied()
+        .map(&store_update)
+        .collect::<Result<Vec<_>>>()?;
     if pending.is_empty() || crate::refs::commit_owned_ref_updates_on_store(store, batch).is_ok() {
         return Ok(());
     }
@@ -3836,7 +3934,7 @@ pub(crate) fn apply_fetch_ref_updates(
     };
 
     for write in pending {
-        match crate::refs::commit_ref_update_on_store(store, store_update(write)) {
+        match crate::refs::commit_ref_update_on_store(store, store_update(write)?) {
             Ok(()) => {}
             Err(err) if fetch_ref_store_error_rejectable(&err) => {
                 mark_fetch_ref_update_rejected(updates, &write.0, &err, &stale_tracking, &hint);
@@ -3873,7 +3971,9 @@ pub(crate) fn prune_tracking_refs(
         ..Default::default()
     };
     let mut batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
+    let mut pruned_names: Vec<String> = Vec::new();
     for (name, oid) in pruned.into_iter() {
+        pruned_names.push(name.clone());
         if !dry_run {
             batch.push(crate::refs::store::RefUpdate {
                 name: name.clone(),
@@ -3892,7 +3992,14 @@ pub(crate) fn prune_tracking_refs(
             note: Some("pruned (gone on remote)".to_owned()),
         });
     }
-    crate::refs::commit_owned_ref_updates_on_store(local.refs(), batch)
+    let store = local.refs();
+    crate::refs::commit_owned_ref_updates_on_store(store, batch)?;
+    if !dry_run {
+        for name in pruned_names {
+            store.delete_reflog(&name)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

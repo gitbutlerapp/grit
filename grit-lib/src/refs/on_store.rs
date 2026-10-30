@@ -23,7 +23,11 @@ use super::{
 
 /// Whether an update to `refname` should carry a reflog entry: auto-created under
 /// `core.logAllRefUpdates`, or appended because the ref already has a reflog.
-fn reflog_wanted(store: &dyn RefStore, config: &ConfigSet, refname: &str) -> Result<bool> {
+pub(crate) fn reflog_wanted(
+    store: &dyn RefStore,
+    config: &ConfigSet,
+    refname: &str,
+) -> Result<bool> {
     if should_autocreate_reflog_for_mode(refname, config.effective_log_refs_config()) {
         return Ok(true);
     }

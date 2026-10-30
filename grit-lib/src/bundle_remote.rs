@@ -490,6 +490,10 @@ fn complete_bundle_fetch(
     }
 
     if !opts.dry_run && !store_batch.is_empty() {
+        let fetch_reflog = crate::fetch::prepare_fetch_apply_reflog(local, opts)?;
+        let fetch_reflog_ctx = fetch_reflog
+            .as_ref()
+            .map(crate::fetch::PreparedFetchReflog::context);
         crate::transfer::apply_fetch_ref_updates(
             local,
             store_batch,
@@ -501,6 +505,7 @@ fn complete_bundle_fetch(
                 remote_name: opts.remote_name.as_deref(),
             },
             opts.initial_remote_fetch,
+            fetch_reflog_ctx.as_ref(),
         )?;
     }
 
