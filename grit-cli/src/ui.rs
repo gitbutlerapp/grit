@@ -39,12 +39,20 @@ impl PathDisplayContext {
 
     /// Map a repository-relative path to a cwd-relative display string.
     pub fn format_repo_path<'a>(&self, repo_rel: &'a str) -> Cow<'a, str> {
+        let dir_trailing_slash = repo_rel.ends_with('/');
         let target = self
             .work_tree
             .join(repo_rel.replace('/', std::path::MAIN_SEPARATOR_STR));
         match relative_path_for_display(&self.cwd, &target) {
+            Some(rel) if rel == "." && dir_trailing_slash => Cow::Owned("./".to_owned()),
             Some(rel) if rel == "." => Cow::Borrowed(repo_rel),
-            Some(rel) => Cow::Owned(rel),
+            Some(rel) => {
+                if dir_trailing_slash && !rel.ends_with('/') {
+                    Cow::Owned(format!("{rel}/"))
+                } else {
+                    Cow::Owned(rel)
+                }
+            }
             None => Cow::Borrowed(repo_rel),
         }
     }
