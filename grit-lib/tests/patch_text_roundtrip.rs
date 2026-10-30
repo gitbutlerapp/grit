@@ -377,7 +377,123 @@ fn write_patch_resolved_reads_worktree_binary_sides() {
 
     git_in(dir.path(), &["add", "-A"]);
     let want = ObjectId::from_hex(&git_out(dir.path(), &["write-tree"])).expect("tree");
+    let new_txt =
+        ObjectId::from_hex(&git_out(dir.path(), &["hash-object", "-w", "t.txt"])).expect("hash");
+    assert!(
+        text.contains(&format!(
+            "index {}..{} 100644\n--- a/t.txt\n",
+            &old_txt.to_hex()[..7],
+            &new_txt.to_hex()[..7]
+        )),
+        "text index line must name postimage blob, not zeros:\n{text}"
+    );
+    assert!(
+        !text.contains("..0000000 100644\n--- a/t.txt"),
+        "must not emit placeholder new oid for text worktree side:\n{text}"
+    );
+
     assert_eq!(git_apply_index_in_clone(dir.path(), &patch), want);
+}
+
+fn git_hash_object_stdin(dir: &std::path::Path, bytes: &[u8]) -> ObjectId {
+    let mut child = Command::new("git")
+        .current_dir(dir)
+        .args(["hash-object", "-w", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn git hash-object");
+    use std::io::Write;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(bytes).expect("stdin");
+    }
+    let out = child.wait_with_output().expect("wait");
+    assert!(
+        out.status.success(),
+        "git hash-object: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    ObjectId::from_hex(String::from_utf8_lossy(&out.stdout).trim()).expect("oid")
+}
+
+#[test]
+fn write_patch_resolved_hashes_text_bytes_when_new_oid_zero() {
+    let dir = binary_fixture();
+    let old_txt = git_oid(dir.path(), "HEAD:t.txt");
+    let new_bytes = b"one\ntwo\n".to_vec();
+    let new_oid = git_hash_object_stdin(dir.path(), &new_bytes);
+
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).expect("open");
+    let files = vec![PatchResolvedSide {
+        entry: entry(
+            DiffStatus::Modified,
+            "t.txt",
+            ("100644", old_txt),
+            ("100644", ObjectId::zero()),
+        ),
+        old: PatchSide::Bytes(b"one\n".to_vec()),
+        new: PatchSide::Bytes(new_bytes),
+    }];
+    let patch = resolved_patch(&repo, &files);
+    let text = String::from_utf8(patch.clone()).expect("utf8");
+    assert!(
+        !text.contains("..0000000 100644"),
+        "index line must not use placeholder new oid:\n{text}"
+    );
+    assert!(
+        text.contains(&format!("..{} 100644", &new_oid.to_hex()[..7])),
+        "index line must abbreviate hashed postimage:\n{text}"
+    );
+
+    std::fs::write(dir.path().join("t.txt"), b"one\ntwo\n").unwrap();
+    git_in(dir.path(), &["add", "t.txt"]);
+    let want = ObjectId::from_hex(&git_out(dir.path(), &["write-tree"])).expect("tree");
+    assert_eq!(git_apply_index_in_clone(dir.path(), &patch), want);
+
+    let scratch = TempDir::new().expect("tempdir");
+    git_in(
+        scratch.path(),
+        &["clone", "-q", dir.path().to_str().expect("utf8"), "dst"],
+    );
+    let dst = scratch.path().join("dst");
+    std::fs::write(scratch.path().join("p.diff"), &patch).expect("write patch");
+    git_in(&dst, &["apply", "--3way", "--index", "../p.diff"]);
+    assert_eq!(
+        ObjectId::from_hex(&git_out(&dst, &["write-tree"])).expect("tree"),
+        want
+    );
+}
+
+#[test]
+fn write_patch_resolved_gitlink_index_line_keeps_commit_ids() {
+    let dir = TempDir::new().expect("tempdir");
+    git_in(dir.path(), &["init", "-q", "--initial-branch=main", "."]);
+    let old_commit = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("oid");
+    let new_commit = ObjectId::from_hex("2222222222222222222222222222222222222222").expect("oid");
+    let old_line = format!("Subproject commit {}\n", old_commit.to_hex());
+    let new_line = format!("Subproject commit {}\n", new_commit.to_hex());
+
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).expect("open");
+    let files = vec![PatchResolvedSide {
+        entry: entry(
+            DiffStatus::Modified,
+            "sub",
+            ("160000", old_commit),
+            ("160000", new_commit),
+        ),
+        old: PatchSide::Bytes(old_line.into_bytes()),
+        new: PatchSide::Bytes(new_line.into_bytes()),
+    }];
+    let patch = resolved_patch(&repo, &files);
+    let text = String::from_utf8(patch).expect("utf8");
+    assert!(
+        text.contains(&format!(
+            "index {}..{} 160000",
+            &old_commit.to_hex()[..7],
+            &new_commit.to_hex()[..7]
+        )),
+        "gitlink index line must keep commit oids:\n{text}"
+    );
 }
 
 #[test]

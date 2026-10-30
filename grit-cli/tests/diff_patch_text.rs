@@ -72,6 +72,29 @@ fn diff_patch_text_unstaged_git_apply_check() {
         patch_text.contains("@@") && patch_text.contains("index "),
         "expected full patch body, got:\n{patch_text}"
     );
+    assert!(
+        !patch_text.contains("..0000000 100644"),
+        "unstaged patch must hash worktree postimage on index line:\n{patch_text}"
+    );
+    let git_patch = Command::new("git")
+        .current_dir(dir.path())
+        .args(["diff", "file.txt"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git diff");
+    assert!(git_patch.status.success());
+    let git_text = String::from_utf8_lossy(&git_patch.stdout);
+    let index_line = |text: &str| {
+        text.lines()
+            .find(|l| l.starts_with("index "))
+            .expect("index line")
+    };
+    assert_eq!(
+        index_line(&patch_text),
+        index_line(&git_text),
+        "grit unstaged index line should match git diff"
+    );
 
     git_in(
         dir.path(),

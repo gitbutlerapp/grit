@@ -39,7 +39,7 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 | `--shortstat` | Only the summary line (`N files changed, …`). |
 | `--name-only` | Changed paths, one per line. |
 | `--name-status` | Status letter and path(s) per line (`M`, `A`, `R100<TAB>old<TAB>new`, …). |
-| `--patch-text` | Git-apply-compatible unified patch on stdout (`git diff --binary` shape): binary files appear as `GIT binary patch` sections with full ids on the `index` line, so `git apply --index` reproduces them. Human output only; not combinable with `--json` or `--markdown`. |
+| `--patch-text` | Git-apply-compatible unified patch on stdout (`git diff --binary` shape): `index` lines carry abbreviated preimage and postimage blob ids (including unstaged worktree content, hashed at render time), and binary files appear as `GIT binary patch` sections so `git apply --index` reproduces them. Human output only; not combinable with `--json` or `--markdown`. |
 | `-M`, `--find-renames[=<n>]` | Detect renames (default similarity 50). Long form requires `=` when a threshold is given. |
 | `--no-renames` | Do not detect renames. |
 | `--diff-algorithm <algo>` | Line diff algorithm (`myers`, `minimal`, `patience`, `histogram`). |

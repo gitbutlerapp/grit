@@ -1059,10 +1059,11 @@ pub struct PatchResolvedSide {
 /// Write `git diff --binary`-compatible patch text for files whose sides may live in memory,
 /// the object database, or the work tree (index and work-tree diffs).
 ///
-/// Binary files are written as `GIT binary patch` sections. Their `index` line always carries
-/// full ids of the content actually written, hashed from the bytes for [`PatchSide::Bytes`] and
-/// [`PatchSide::Worktree`] sides, because `git apply` refuses a binary patch without one and
-/// work-tree entries often carry no blob id for the work-tree side.
+/// Binary files are written as `GIT binary patch` sections. The `index` line carries abbreviated
+/// blob ids for the content actually written: [`PatchSide::Blob`] keeps the entry oid,
+/// [`PatchSide::Bytes`] and [`PatchSide::Worktree`] are hashed at render time (no ODB write),
+/// gitlinks keep their commit oids, and absent sides stay zero. Work-tree diffs often arrive
+/// with a zero new oid even for text files; filling ids here keeps `git apply --3way` usable.
 ///
 /// # Parameters
 ///
@@ -1097,19 +1098,17 @@ pub fn write_patch_resolved<W: Write>(
         diff_merges: DiffMerges::FirstParent,
     };
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
-    let oids = files
-        .iter()
-        .flat_map(|f| [f.entry.old_oid, f.entry.new_oid]);
-    abbrev_cache.warm_for_patch_batch(repo, oids, &thread_policy, &config)?;
     let mut worktree = None;
     for file in files {
         let old = resolve_patch_side(repo, file, EntrySide::Old, &mut worktree)?;
         let new = resolve_patch_side(repo, file, EntrySide::New, &mut worktree)?;
-        let entry = if merge_file::is_binary(&old) || merge_file::is_binary(&new) {
-            Cow::Owned(entry_with_content_ids(repo, file, &old, &new)?)
-        } else {
-            Cow::Borrowed(&file.entry)
-        };
+        let entry = entry_with_content_ids(repo, file, &old, &new)?;
+        abbrev_cache.warm_for_patch_batch(
+            repo,
+            [entry.old_oid, entry.new_oid],
+            &thread_policy,
+            &config,
+        )?;
         write_diff_entry_patch_with_resolved_bytes(
             out,
             repo,
@@ -1232,6 +1231,9 @@ fn entry_with_content_ids(
         if mode.is_absent() {
             return Ok(zero_oid());
         }
+        if mode.is_gitlink() {
+            return Ok(oid);
+        }
         match source {
             PatchSide::Blob => Ok(oid),
             PatchSide::Bytes(_) | PatchSide::Worktree => {
@@ -1335,6 +1337,82 @@ mod tests {
         assert!(text.contains("copy from src/a.txt"));
         assert!(text.contains("copy to dst/b.txt"));
         assert!(!text.contains("rename from"));
+        Ok(())
+    }
+
+    #[test]
+    fn write_patch_resolved_index_line_hashes_text_bytes_when_new_oid_zero() -> Result<()> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
+        let old_oid = repo.odb().write(ObjectKind::Blob, b"one\n")?;
+        let new_bytes = b"one\ntwo\n".to_vec();
+        let new_oid = repo
+            .odb()
+            .hash_algo()
+            .hash_object(ObjectKind::Blob, &new_bytes)?;
+        let files = [PatchResolvedSide {
+            entry: DiffEntry {
+                status: DiffStatus::Modified,
+                old_path: Some("t.txt".into()),
+                new_path: Some("t.txt".into()),
+                old_oid,
+                new_oid: zero_oid(),
+                old_mode: FileMode::REGULAR,
+                new_mode: FileMode::REGULAR,
+                score: None,
+            },
+            old: PatchSide::Bytes(b"one\n".to_vec()),
+            new: PatchSide::Bytes(new_bytes),
+        }];
+        let opts = PatchTextOptions::from_repo(&repo, DiffOptions::default())?;
+        let mut out = Cursor::new(Vec::new());
+        write_patch_resolved(&repo, &files, &opts, &mut out)?;
+        let text = String::from_utf8(out.into_inner()).expect("utf-8");
+        assert!(
+            !text.contains("..0000000 100644"),
+            "must not emit placeholder new oid:\n{text}"
+        );
+        assert!(
+            text.contains(&format!("..{} 100644", &new_oid.to_hex()[..7])),
+            "index line must abbreviate hashed postimage:\n{text}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn write_patch_resolved_gitlink_index_line_keeps_commit_ids() -> Result<()> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
+        let old_commit =
+            ObjectId::from_hex("1111111111111111111111111111111111111111").expect("oid");
+        let new_commit =
+            ObjectId::from_hex("2222222222222222222222222222222222222222").expect("oid");
+        let files = [PatchResolvedSide {
+            entry: DiffEntry {
+                status: DiffStatus::Modified,
+                old_path: Some("sub".into()),
+                new_path: Some("sub".into()),
+                old_oid: old_commit,
+                new_oid: new_commit,
+                old_mode: FileMode::GITLINK,
+                new_mode: FileMode::GITLINK,
+                score: None,
+            },
+            old: PatchSide::Bytes(format!("Subproject commit {}\n", old_commit.to_hex()).into()),
+            new: PatchSide::Bytes(format!("Subproject commit {}\n", new_commit.to_hex()).into()),
+        }];
+        let opts = PatchTextOptions::from_repo(&repo, DiffOptions::default())?;
+        let mut out = Cursor::new(Vec::new());
+        write_patch_resolved(&repo, &files, &opts, &mut out)?;
+        let text = String::from_utf8(out.into_inner()).expect("utf-8");
+        assert!(
+            text.contains(&format!(
+                "index {}..{} 160000",
+                &old_commit.to_hex()[..7],
+                &new_commit.to_hex()[..7]
+            )),
+            "gitlink index line must keep commit oids:\n{text}"
+        );
         Ok(())
     }
 }
