@@ -124,6 +124,8 @@ On Unix, explicit path operands must be valid UTF-8. An operand containing inval
 | `--ignored` | List ignored paths (traditional mode; same `!!` set as `git status --ignored --porcelain`). |
 | `-s`, `--short` | Compact one-line-per-path output for humans only (two-letter staged/unstaged codes; JSON unchanged). |
 
+From a subdirectory, short status uses cwd-relative paths; untracked directories keep a trailing slash (for example `?? ./` inside an untracked folder, or `?? ../other/` for a sibling directory).
+
 Rename detection is on by default (Git’s `status.renames` / `diff.renames`; disable with `status.renames=false`). Human output shows renames as `old → new`; `--json` adds `old_path` on rename and copy entries.
 
 ### How changes are detected

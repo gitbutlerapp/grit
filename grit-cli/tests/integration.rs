@@ -59,6 +59,7 @@ mod blame_range_memory;
 #[cfg(feature = "full-tests")]
 #[path = "blame_stored_path_cli.rs"]
 mod blame_stored_path_cli;
+#[cfg(feature = "full-tests")]
 #[path = "blame_subdir_cli.rs"]
 mod blame_subdir_cli;
 #[cfg(feature = "full-tests")]
@@ -603,6 +604,9 @@ mod status_midx_memory;
 #[cfg(feature = "full-tests")]
 #[path = "status_paths_renames.rs"]
 mod status_paths_renames;
+#[cfg(feature = "full-tests")]
+#[path = "status_untracked_cwd_paths.rs"]
+mod status_untracked_cwd_paths;
 #[cfg(feature = "full-tests")]
 #[path = "status_untracked_mode.rs"]
 mod status_untracked_mode;
