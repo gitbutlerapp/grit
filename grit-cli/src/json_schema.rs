@@ -64,6 +64,7 @@ const SCHEMA_V2_COMMANDS: &[&str] = &[
     "remote.set-url",
     "remote.show",
     "switch",
+    "stash.list",
     "tag",
     "worktree.prune",
 ];

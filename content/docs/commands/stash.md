@@ -123,7 +123,7 @@ stash untracked restore blocked: 'notes.txt' already exists on disk
 
 ## JSON output
 
-Schema: [v1](/schemas/stash/v1.json) · [stash.push v1](/schemas/stash.push/v1.json) · [stash.list v1](/schemas/stash.list/v1.json) · [stash.show v1](/schemas/stash.show/v1.json) · [stash.apply v1](/schemas/stash.apply/v1.json) · [stash.pop v1](/schemas/stash.pop/v1.json) · [stash.drop v1](/schemas/stash.drop/v1.json) · [stash.branch v1](/schemas/stash.branch/v1.json) · [stash.clear v1](/schemas/stash.clear/v1.json)
+Schema: [v1](/schemas/stash/v1.json) · [stash.push v1](/schemas/stash.push/v1.json) · [stash.list v2](/schemas/stash.list/v2.json), [v1](/schemas/stash.list/v1.json) · [stash.show v1](/schemas/stash.show/v1.json) · [stash.apply v1](/schemas/stash.apply/v1.json) · [stash.pop v1](/schemas/stash.pop/v1.json) · [stash.drop v1](/schemas/stash.drop/v1.json) · [stash.branch v1](/schemas/stash.branch/v1.json) · [stash.clear v1](/schemas/stash.clear/v1.json)
 
 Pass `--json` for stable, scripting-friendly output.
 
@@ -175,23 +175,26 @@ When there was nothing to save:
 
 ### `grit stash list`
 
-The JSON value is a top-level array (newest entry first):
-
 ```json
-[
-  {
-    "index": 0,
-    "oid": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
-    "message": "On main: second"
-  }
-]
+{
+  "action": "list",
+  "entries": [
+    {
+      "index": 0,
+      "oid": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
+      "message": "On main: second"
+    }
+  ]
+}
 ```
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `index` | number | Index matching `stash@{index}`. |
-| `oid` | string | Full stash commit id. |
-| `message` | string | Reflog message. |
+| `action` | string | Always `"list"`. |
+| `entries` | array | Stash entries, newest first. |
+| `entries[].index` | number | Index matching `stash@{index}`. |
+| `entries[].oid` | string | Full stash commit id. |
+| `entries[].message` | string | Reflog message. |
 
 ### `grit stash show`
 

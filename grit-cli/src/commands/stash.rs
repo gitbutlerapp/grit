@@ -156,10 +156,12 @@ impl MarkdownRender for StashPushOutcome {
     }
 }
 
-/// Result of `grit stash list` (`--json` is the bare array of entries).
+/// Result of `grit stash list` (`--json`: `{"action":"list","entries":[…]}`).
 #[derive(Serialize, JsonSchema)]
-#[serde(transparent)]
-pub struct StashListOutcome(pub Vec<StashListEntry>);
+pub struct StashListOutcome {
+    action: &'static str,
+    pub entries: Vec<StashListEntry>,
+}
 
 #[derive(Serialize, JsonSchema)]
 pub struct StashListEntry {
@@ -168,9 +170,18 @@ pub struct StashListEntry {
     pub message: String,
 }
 
+impl StashListOutcome {
+    fn new(entries: Vec<StashListEntry>) -> Self {
+        Self {
+            action: "list",
+            entries,
+        }
+    }
+}
+
 impl HumanRender for StashListOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        for entry in &self.0 {
+        for entry in &self.entries {
             let short = entry.oid.get(..7).unwrap_or(&entry.oid);
             outln!(w, "stash@{{{}}} {}: {}", entry.index, short, entry.message);
         }
@@ -180,11 +191,11 @@ impl HumanRender for StashListOutcome {
 
 impl MarkdownRender for StashListOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        if self.0.is_empty() {
+        if self.entries.is_empty() {
             outln!(w, "- _(no stash entries)_");
             return Ok(());
         }
-        for entry in &self.0 {
+        for entry in &self.entries {
             let short = entry.oid.get(..7).unwrap_or(&entry.oid);
             outln!(
                 w,
@@ -479,7 +490,7 @@ fn hunk_id_strings(by_path: BTreeMap<String, Vec<HunkId>>) -> BTreeMap<String, V
 pub fn run_list() -> Result<StashListOutcome> {
     let repo = context::discover()?;
     let entries = repo.stash().list().map_err(map_stash_error)?;
-    Ok(StashListOutcome(
+    Ok(StashListOutcome::new(
         entries
             .into_iter()
             .map(|e| StashListEntry {

@@ -1,0 +1,45 @@
+{
+  "$id": "https://grit-scm.com/schemas/stash.list/v2.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "StashListEntry": {
+      "properties": {
+        "index": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "message",
+        "oid"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit stash list` (`--json`: `{\"action\":\"list\",\"entries\":[…]}`).",
+  "properties": {
+    "action": {
+      "type": "string"
+    },
+    "entries": {
+      "items": {
+        "$ref": "#/definitions/StashListEntry"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "action",
+    "entries"
+  ],
+  "title": "StashListOutcome",
+  "type": "object"
+}

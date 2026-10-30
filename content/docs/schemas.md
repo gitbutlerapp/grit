@@ -99,7 +99,7 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `stash` | [v1](/schemas/stash/v1.json) |
 | `stash.apply` | [v1](/schemas/stash.apply/v1.json) |
 | `stash.drop` | [v1](/schemas/stash.drop/v1.json) |
-| `stash.list` | [v1](/schemas/stash.list/v1.json) |
+| `stash.list` | [v2](/schemas/stash.list/v2.json), [v1](/schemas/stash.list/v1.json) |
 | `stash.pop` | [v1](/schemas/stash.pop/v1.json) |
 | `stash.push` | [v1](/schemas/stash.push/v1.json) |
 | `stash.show` | [v1](/schemas/stash.show/v1.json) |

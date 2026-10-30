@@ -105,7 +105,9 @@ fn stash_list_json() {
 
     let (code, stdout, _) = grit(&dir, &["stash", "list", "--json"]);
     assert_eq!(code, 0);
-    let entries: Vec<serde_json::Value> = serde_json::from_str(stdout.trim()).expect("json array");
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json object");
+    assert_eq!(parsed["action"], "list");
+    let entries = parsed["entries"].as_array().expect("entries array");
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0]["index"], 0);
     assert!(entries[0]["oid"].as_str().unwrap().len() >= 40);
@@ -114,6 +116,21 @@ fn stash_list_json() {
         entries[0].get("stashed").is_none(),
         "list items must not include stashed"
     );
+}
+
+#[test]
+fn stash_list_json_empty() {
+    let dir = scratch("list-json-empty");
+    init_repo(&dir);
+    fs::write(dir.join("a"), "v\n").expect("write");
+    git(&dir, &["add", "a"]);
+    git(&dir, &["commit", "-qm", "init"]);
+
+    let (code, stdout, _) = grit(&dir, &["stash", "list", "--json"]);
+    assert_eq!(code, 0);
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json object");
+    assert_eq!(parsed["action"], "list");
+    assert_eq!(parsed["entries"], serde_json::json!([]));
 }
 
 #[test]
@@ -332,7 +349,9 @@ fn stash_interop_with_git() {
 
     let (code, stdout, _) = grit(&dir, &["stash", "list", "--json"]);
     assert_eq!(code, 0);
-    let entries: Vec<serde_json::Value> = serde_json::from_str(stdout.trim()).expect("json array");
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json object");
+    assert_eq!(parsed["action"], "list");
+    let entries = parsed["entries"].as_array().expect("entries array");
     assert_eq!(entries.len(), 1);
 
     let (code, _, _) = grit(&dir, &["stash", "pop"]);

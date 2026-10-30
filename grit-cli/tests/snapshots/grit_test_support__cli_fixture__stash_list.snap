@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "[{\"index\":0,\"oid\":\"631c92f84891027e83087461a183903d9b0ad0e9\",\"message\":\"On main: snapshot stash\"}]\n",
+    "stdout": "{\"action\":\"list\",\"entries\":[{\"index\":0,\"oid\":\"631c92f84891027e83087461a183903d9b0ad0e9\",\"message\":\"On main: snapshot stash\"}]}\n",
     "stderr": ""
   },
   "markdown": {
