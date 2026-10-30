@@ -130,11 +130,10 @@ fn kind_rank(kind: ObjectKind) -> u8 {
 
 /// Split `sorted` into chunks of about [`CHUNK_BYTES`] of payload (at least
 /// [`CHUNK_MIN_OBJECTS`] candidates, or [`CHUNK_MIN_UNNAMED_OBJECTS`] for blobs whose
-/// path is unknown), moving each cut forward to the next change
-/// of kind or path hash so one file's history is not split, as long as the chunk
-/// stays under twice its target. A zero path hash means the path is unknown (a
-/// fetch of bare object ids, or commits), not that the objects share a path, so a
-/// cut is never moved across a run of them.
+/// path is unknown), moving each cut forward through any trailing run with the
+/// same kind and path hash so one file's history is not split. A zero path hash
+/// means the path is unknown (a fetch of bare object ids, or commits), not that
+/// the objects share a path, so a cut is never moved across a run of them.
 fn chunk_bounds(sorted: &[DeltaCandidate]) -> Vec<(usize, usize)> {
     let n = sorted.len();
     let mut out = Vec::new();
@@ -152,14 +151,11 @@ fn chunk_bounds(sorted: &[DeltaCandidate]) -> Vec<(usize, usize)> {
             bytes += sorted[end].size;
             end += 1;
         }
-        let soft_bytes = bytes;
         while end < n
-            && bytes < 2 * soft_bytes
             && sorted[end].kind == sorted[end - 1].kind
             && sorted[end].name_hash != 0
             && sorted[end].name_hash == sorted[end - 1].name_hash
         {
-            bytes += sorted[end].size;
             end += 1;
         }
         out.push((start, end));
@@ -584,15 +580,24 @@ mod tests {
             .map(|i| cand(i, ObjectKind::Blob, 1, 1024))
             .collect();
         let bounds = chunk_bounds(&v);
-        assert_eq!(bounds.first(), Some(&(0, 8192)));
-        assert_eq!(bounds.last().map(|b| b.1), Some(v.len()));
-        assert!(bounds.windows(2).all(|w| w[0].1 == w[1].0));
+        assert_eq!(bounds, vec![(0, v.len())]);
 
         // Distinct named paths (hash 0 would mean an unknown path).
         let huge: Vec<DeltaCandidate> = (0..600)
             .map(|i| cand(i, ObjectKind::Blob, i + 1, 64 * 1024 * 1024))
             .collect();
         assert_eq!(chunk_bounds(&huge)[0], (0, CHUNK_MIN_OBJECTS));
+    }
+
+    #[test]
+    fn chunk_bounds_keeps_entire_same_path_run_after_soft_byte_limit() {
+        const TWO_MIB: u64 = 2 * 1024 * 1024;
+        let mut v: Vec<DeltaCandidate> = (0..2000)
+            .map(|i| cand(i, ObjectKind::Blob, 1, 2048))
+            .collect();
+        v.extend((0..7).map(|i| cand(10_000 + i, ObjectKind::Blob, 1, TWO_MIB)));
+        let bounds = chunk_bounds(&v);
+        assert_eq!(bounds, vec![(0, v.len())]);
     }
 
     #[test]
@@ -663,6 +668,57 @@ mod tests {
             id = base;
         }
         d
+    }
+
+    #[test]
+    fn search_deltas_one_undeltified_base_for_large_same_path_run() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        const TWO_MIB: usize = 2 * 1024 * 1024;
+        let mut candidates: Vec<DeltaCandidate> = (0..2000)
+            .map(|i| {
+                let data = vec![i as u8; 2048];
+                let oid = repo.odb().write(ObjectKind::Blob, &data).unwrap();
+                DeltaCandidate {
+                    id: i as u32,
+                    oid,
+                    kind: ObjectKind::Blob,
+                    size: 2048,
+                    name_hash: 1,
+                    whole_in_pack: None,
+                    in_pack: None,
+                    dependent_depth: 0,
+                    base_only: false,
+                }
+            })
+            .collect();
+        let mut payload = vec![0u8; TWO_MIB];
+        for v in 0..7 {
+            payload[0] = v as u8;
+            let oid = repo.odb().write(ObjectKind::Blob, &payload).unwrap();
+            candidates.push(DeltaCandidate {
+                id: 10_000 + v as u32,
+                oid,
+                kind: ObjectKind::Blob,
+                size: TWO_MIB as u64,
+                name_hash: 1,
+                whole_in_pack: None,
+                in_pack: None,
+                dependent_depth: 0,
+                base_only: false,
+            });
+        }
+        let found = search_deltas(
+            repo.odb(),
+            candidates,
+            params(50, 1),
+            &any_pair,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let large_ids: std::collections::HashSet<u32> = (0..7).map(|v| 10_000 + v as u32).collect();
+        let deltified: std::collections::HashSet<u32> = found.iter().map(|d| d.target).collect();
+        assert_eq!(large_ids.difference(&deltified).count(), 1);
     }
 
     #[test]

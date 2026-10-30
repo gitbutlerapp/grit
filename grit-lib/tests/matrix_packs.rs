@@ -840,6 +840,73 @@ fn delta_pack_is_far_smaller_and_near_pack_objects() {
     );
 }
 
+/// Count undeltified blob objects in a pack whose logical size is at least `min_size`.
+fn pack_whole_blob_count_at_least(bytes: &[u8], min_size: u64) -> usize {
+    let nr = pack_header_count(bytes) as usize;
+    let mut pos = 12usize;
+    let mut count = 0usize;
+    for _ in 0..nr {
+        let (type_code, size, consumed) = read_type_size(&bytes[pos..]);
+        pos += consumed;
+        match type_code {
+            6 => {
+                while bytes[pos] & 0x80 != 0 {
+                    pos += 1;
+                }
+                pos += 1;
+            }
+            7 => {
+                pos += 20;
+            }
+            3 if size >= min_size => count += 1,
+            _ => {}
+        }
+        pos += zlib_consume(&bytes[pos..]);
+    }
+    count
+}
+
+fn populate_issue_2345_large_edited_blob_repo(dir: &Path) {
+    git(dir, &["init", "-q", "-b", "main", "."]);
+    std::fs::create_dir_all(dir.join("d")).expect("mkdir d");
+    for i in 0..4 {
+        let body: String = (0..200)
+            .map(|line| format!("line {line} file {i} padding text here\n"))
+            .collect();
+        std::fs::write(dir.join(format!("d/f{i}.txt")), body).expect("write text");
+    }
+    std::fs::write(dir.join("blob.bin"), vec![0u8; 2 * 1024 * 1024]).expect("write blob");
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-q", "-m", "init"]);
+    for c in 0..91 {
+        for i in 0..4 {
+            let path = dir.join(format!("d/f{i}.txt"));
+            let text = std::fs::read_to_string(&path).expect("read");
+            let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+            let idx = c % lines.len();
+            lines[idx] = format!("edit commit {c} file {i}");
+            std::fs::write(&path, format!("{}\n", lines.join("\n"))).expect("write edit");
+        }
+        if c % 15 == 0 {
+            use std::io::{Read, Seek, SeekFrom, Write};
+            let mut blob = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(dir.join("blob.bin"))
+                .expect("open blob");
+            let mut patch = vec![0u8; 4096];
+            for (j, b) in patch.iter_mut().enumerate() {
+                *b = ((c as u8).wrapping_add(j as u8)) ^ 0xa5;
+            }
+            blob.write_all(&patch).expect("patch blob");
+            let _ = blob.seek(SeekFrom::Start(0));
+            let _ = blob.read(&mut patch);
+        }
+        git(dir, &["add", "."]);
+        git(dir, &["commit", "-q", "-m", &format!("commit {c}")]);
+    }
+}
+
 fn populate_issue_1011_sed_repo(dir: &Path) {
     git(dir, &["init", "-q", "-b", "main", "."]);
     let mut body = String::new();
@@ -899,6 +966,56 @@ fn populate_issue_1011_sixty_commit_repo(dir: &Path) {
         .expect("small");
         git(dir, &["add", "."]);
         git(dir, &["commit", "-q", "-m", &format!("c{i}")]);
+    }
+}
+
+/// Regression for issue #2345: repack must not store two full copies of a large edited blob.
+#[test]
+fn issue_2345_large_edited_blob_single_base_in_pack() {
+    if !git_try(std::path::Path::new("."), &["--version"]) {
+        eprintln!("SKIP: git missing");
+        return;
+    }
+    const TWO_MIB: u64 = 2 * 1024 * 1024;
+    for force in [false, true] {
+        let git_fixture = tempfile::tempdir().expect("git fixture tempdir");
+        populate_issue_2345_large_edited_blob_repo(git_fixture.path());
+        let git_size = git_repack_pack_bytes(git_fixture.path());
+
+        let grit_fixture = tempfile::tempdir().expect("grit fixture tempdir");
+        let dir = grit_fixture.path();
+        populate_issue_2345_large_edited_blob_repo(dir);
+        let repo = Repository::open(
+            &dir.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(dir),
+        )
+        .expect("open repo");
+        let mut repack_opts = RepackOptions::default();
+        repack_opts.force_recompress = force;
+        repo.repack(&repack_opts).expect("repack");
+        let pack_dir = dir.join(".git/objects/pack");
+        let pack_path = std::fs::read_dir(&pack_dir)
+            .expect("pack dir")
+            .filter_map(|e| e.ok())
+            .find(|e| e.path().extension().is_some_and(|ext| ext == "pack"))
+            .expect("pack file")
+            .path();
+        let pack = std::fs::read(&pack_path).expect("read pack");
+        let grit_pack_bytes = pack.len();
+        assert!(
+            git_index_and_fsck_ok(&pack, HashAlgo::Sha1),
+            "pack must index-pack and fsck (force_recompress={force})"
+        );
+        let whole_large = pack_whole_blob_count_at_least(&pack, TWO_MIB);
+        assert_eq!(
+            whole_large, 1,
+            "issue #2345: expected one undeltified 2 MiB blob, got {whole_large} (force={force})"
+        );
+        assert!(
+            grit_pack_bytes <= git_size * 12 / 10,
+            "issue #2345: grit repack {grit_pack_bytes} vs git {git_size} (ratio {:.2}, force={force})",
+            grit_pack_bytes as f64 / git_size as f64
+        );
     }
 }
 
