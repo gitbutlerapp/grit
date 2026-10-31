@@ -2443,6 +2443,35 @@ struct PaintWalk {
 /// commit dated slightly too old still repaints the ancestor it reaches. Git's `rev-list` walks
 /// the same number of commits past its "everything left is uninteresting" point.
 const PAINT_SLOP: usize = 5;
+
+#[cfg(test)]
+mod unpainted_bridge_test_hooks {
+    use std::cell::Cell;
+
+    thread_local! {
+        static UNPAINTED_BRIDGE_VISIT_CAP: Cell<Option<usize>> = const { Cell::new(None) };
+        static LEGACY_CD3F334B_SKEW_REPAIR: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub fn set_unpainted_bridge_visit_cap_for_test(cap: Option<usize>) {
+        UNPAINTED_BRIDGE_VISIT_CAP.with(|c| c.set(cap));
+    }
+
+    pub fn set_legacy_cd3f334b_skew_repair_for_test(enabled: bool) {
+        LEGACY_CD3F334B_SKEW_REPAIR.with(|c| c.set(enabled));
+    }
+
+    pub(crate) fn unpainted_bridge_visit_cap(default: usize) -> usize {
+        UNPAINTED_BRIDGE_VISIT_CAP
+            .with(|c| c.get())
+            .unwrap_or(default)
+    }
+
+    pub(crate) fn use_legacy_cd3f334b_skew_repair() -> bool {
+        LEGACY_CD3F334B_SKEW_REPAIR.with(|c| c.get())
+    }
+}
+
 /// How much older than a popped left-only commit a queued hide commit without a generation may
 /// be dated and still keep a [`HidePaintStop::TipsResolvedDateSlop`] paint going: the clock
 /// skew it tolerates exactly.
@@ -2455,6 +2484,17 @@ impl PaintWalk {
     ///
     /// Returns whether any commit was repainted so the main paint loop should continue.
     fn repaint_left_only_reachable_from_hide(
+        &mut self,
+        cache: &mut CommitGraphCache<'_>,
+    ) -> Result<bool> {
+        #[cfg(test)]
+        if unpainted_bridge_test_hooks::use_legacy_cd3f334b_skew_repair() {
+            return self.repaint_left_only_reachable_from_hide_cd3f334b(cache);
+        }
+        self.repaint_left_only_reachable_from_hide_bounded(cache)
+    }
+
+    fn repaint_left_only_reachable_from_hide_bounded(
         &mut self,
         cache: &mut CommitGraphCache<'_>,
     ) -> Result<bool> {
@@ -2494,6 +2534,71 @@ impl PaintWalk {
                 break;
             }
             changed = true;
+        }
+        Ok(changed)
+    }
+
+    /// Round-2 hide-side skew repair (commit cd3f334b), for regression tests only.
+    #[cfg(test)]
+    fn repaint_left_only_reachable_from_hide_cd3f334b(
+        &mut self,
+        cache: &mut CommitGraphCache<'_>,
+    ) -> Result<bool> {
+        if self.left_only_popped.is_empty() {
+            return Ok(false);
+        }
+        let hide_starts: Vec<ObjectId> = self
+            .queued
+            .keys()
+            .copied()
+            .filter(|oid| self.sides.get(oid).copied().unwrap_or(0) & PAINT_RIGHT != 0)
+            .collect();
+        let skew_probe: Vec<ObjectId> = self.left_only_popped.iter().copied().collect();
+        let allowance = UNRANKED_SKEW_ALLOWANCE.whole_seconds();
+        let clock_skewed = skew_probe.iter().any(|&left| {
+            let Ok(left_time) = cache.commit_time(left) else {
+                return false;
+            };
+            hide_starts.iter().any(|&start| {
+                cache
+                    .commit_time(start)
+                    .is_ok_and(|start_time| left_time.abs_diff(start_time) > allowance as u64)
+            })
+        });
+        if !clock_skewed || hide_starts.is_empty() {
+            return Ok(false);
+        }
+        let visit_cap = usize::MAX / 4;
+        let mut changed = false;
+        loop {
+            let mut progress = false;
+            for &start in &hide_starts {
+                let mut stack = vec![start];
+                let mut visited = OidHashSet::default();
+                visited.insert(start);
+                while let Some(oid) = stack.pop() {
+                    if visited.len() > visit_cap {
+                        break;
+                    }
+                    for parent in cache.parents_of(oid)? {
+                        if !visited.insert(parent) {
+                            continue;
+                        }
+                        if let Some(side) = self.sides.get(&parent).copied() {
+                            if side == PAINT_LEFT {
+                                progress = true;
+                                changed = true;
+                                self.mark(cache, parent, PAINT_RIGHT)?;
+                                self.left_only_popped.remove(&parent);
+                            }
+                        }
+                        stack.push(parent);
+                    }
+                }
+            }
+            if !progress {
+                break;
+            }
         }
         Ok(changed)
     }
@@ -2546,7 +2651,11 @@ impl PaintWalk {
         cache: &mut CommitGraphCache<'_>,
         hide_starts: &[ObjectId],
     ) -> Result<bool> {
-        let visit_cap = hide_starts.len() * 64 + PAINT_SLOP + 64;
+        let default_cap = hide_starts.len() * 64 + PAINT_SLOP + 64;
+        #[cfg(test)]
+        let visit_cap = unpainted_bridge_test_hooks::unpainted_bridge_visit_cap(default_cap);
+        #[cfg(not(test))]
+        let visit_cap = default_cap;
         let mut changed = false;
         for &start in hide_starts {
             let mut stack = vec![start];
@@ -3834,6 +3943,17 @@ pub(crate) fn branch_tips_merged_into(
 }
 
 #[cfg(test)]
+fn clear_walk_linkage(repo: &Repository) {
+    let mut link = repo
+        .caches()
+        .commit_linkage()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    link.parents.clear();
+    link.times.clear();
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::environment::RepositoryOptions;
@@ -4184,13 +4304,7 @@ mod tests {
     }
 
     fn clear_commit_linkage(repo: &Repository) {
-        let mut link = repo
-            .caches()
-            .commit_linkage()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        link.parents.clear();
-        link.times.clear();
+        clear_walk_linkage(repo);
     }
 
     /// Linear chain of `len` commits; `time(i)` dates commit `i` (0 is the root).
@@ -5168,13 +5282,15 @@ mod tests {
         behind: ObjectId,
     }
 
-    fn write_range_skew_paint_fixture(repo: &Repository) -> Result<RangeSkewPaintFixture> {
+    fn write_range_skew_paint_fixture(
+        repo: &Repository,
+        deep_unpainted: usize,
+    ) -> Result<RangeSkewPaintFixture> {
         const DAY: i64 = 86_400;
-        const DEEP_UNPAINTED: usize = 45;
         let odb = repo.odb();
         let base = write_commit_same_time(odb, &[], "base", 10 * DAY)?;
         let mut deep = base;
-        for i in 0..DEEP_UNPAINTED {
+        for i in 0..deep_unpainted {
             deep = write_commit_same_time(
                 odb,
                 &[deep],
@@ -5207,7 +5323,7 @@ mod tests {
     fn range_exclude_paint_converged_under_skew_hides_ancestor_commits() -> Result<()> {
         let dir = tempdir().map_err(Error::Io)?;
         let repo = open_test_bare(&dir)?;
-        let fixture = write_range_skew_paint_fixture(&repo)?;
+        let fixture = write_range_skew_paint_fixture(&repo, 46)?;
         let filter = ReachableCountFilter::default();
 
         let count = count_commits_reachable_excluding_ancestors_of(
@@ -5245,27 +5361,56 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn range_exclude_paint_converged_skew_repair_parent_reads_stay_local() -> Result<()> {
-        use super::intersect_walk_test_hooks::{
-            commit_parent_lookups, reset_commit_parent_lookups,
+    const SKEW_REPAIR_PARENT_READ_CEILING: usize = 63;
+
+    fn range_skew_repair_parent_reads(
+        repo: &Repository,
+        fixture: &RangeSkewPaintFixture,
+        unpainted_visit_cap: Option<usize>,
+    ) -> Result<usize> {
+        use super::unpainted_bridge_test_hooks::{
+            set_legacy_cd3f334b_skew_repair_for_test, set_unpainted_bridge_visit_cap_for_test,
         };
 
-        let dir = tempdir().map_err(Error::Io)?;
-        let repo = open_test_bare(&dir)?;
-        let fixture = write_range_skew_paint_fixture(&repo)?;
-        clear_commit_linkage(&repo);
-        reset_commit_parent_lookups();
+        let legacy = unpainted_visit_cap == Some(usize::MAX / 4);
+        set_legacy_cd3f334b_skew_repair_for_test(legacy);
+        set_unpainted_bridge_visit_cap_for_test(unpainted_visit_cap);
+        clear_commit_linkage(repo);
+        super::intersect_walk_test_hooks::reset_commit_parent_lookups();
         let _ = count_commits_reachable_excluding_ancestors_of(
-            &repo,
+            repo,
             &[fixture.positive_tip],
             &fixture.hide,
             ReachableCountFilter::default(),
         )?;
-        let lookups = commit_parent_lookups();
+        let lookups = super::intersect_walk_test_hooks::commit_parent_lookups();
+        set_unpainted_bridge_visit_cap_for_test(None);
+        set_legacy_cd3f334b_skew_repair_for_test(false);
+        Ok(lookups)
+    }
+
+    #[test]
+    fn range_exclude_paint_converged_skew_repair_parent_reads_stay_local() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let fixture = write_range_skew_paint_fixture(&repo, 44)?;
+        let bounded = range_skew_repair_parent_reads(&repo, &fixture, None)?;
         assert!(
-            lookups <= 64,
-            "skew repair must not walk unpainted history ({lookups} parent reads)"
+            bounded <= SKEW_REPAIR_PARENT_READ_CEILING,
+            "capped skew repair must stay local ({bounded} parent reads)"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn range_exclude_paint_converged_skew_repair_legacy_cd3f334b_exceeds_ceiling() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let fixture = write_range_skew_paint_fixture(&repo, 46)?;
+        let legacy = range_skew_repair_parent_reads(&repo, &fixture, Some(usize::MAX / 4))?;
+        assert!(
+            legacy > SKEW_REPAIR_PARENT_READ_CEILING,
+            "cd3f334b-style repair must exceed the ceiling ({legacy} parent reads)"
         );
         Ok(())
     }
