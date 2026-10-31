@@ -180,6 +180,61 @@ fn commit_dry_run_json_includes_mode_only_changes() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn commit_dry_run_embedded_gitlink_json_and_warning() -> TestResult {
+    use grit_test_support::git;
+
+    let dir = tempfile::tempdir()?;
+    assert!(run_grit(dir.path(), &["init"]).status.success());
+    fs::write(dir.path().join("a.txt"), b"a\n")?;
+    assert!(run_grit(dir.path(), &["commit", "-m", "init"])
+        .status
+        .success());
+
+    let vendor = dir.path().join("vendor");
+    fs::create_dir_all(&vendor)?;
+    git(&vendor, &["init", "-q", "-b", "main"]);
+    git(&vendor, &["config", "user.email", "t@example.com"]);
+    git(&vendor, &["config", "user.name", "Test"]);
+    fs::write(vendor.join("inside.txt"), b"inside\n")?;
+    git(&vendor, &["add", "inside.txt"]);
+    git(&vendor, &["commit", "-qm", "nested"]);
+
+    let out = run_grit(
+        dir.path(),
+        &["commit", "--dry-run", "-m", "nested", "--json"],
+    );
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: Value = serde_json::from_slice(&out.stdout)?;
+    assert_eq!(v.get("dry_run").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        v.get("embedded_gitlinks")
+            .and_then(Value::as_array)
+            .map(|a| a.len()),
+        Some(1)
+    );
+    assert_eq!(
+        v.get("embedded_gitlinks")
+            .and_then(Value::as_array)
+            .and_then(|a| a.first())
+            .and_then(Value::as_str),
+        Some("vendor")
+    );
+
+    let human = run_grit(dir.path(), &["commit", "--dry-run", "-m", "nested"]);
+    assert!(human.status.success());
+    let stderr = String::from_utf8_lossy(&human.stderr);
+    assert!(
+        stderr.contains("nested repository") && stderr.contains("vendor"),
+        "expected embedded-repo warning on stderr: {stderr}"
+    );
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn parallel_symlink_commit_preview_matches_commit_without_writes() -> TestResult {

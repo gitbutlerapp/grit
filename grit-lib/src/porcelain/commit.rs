@@ -32,7 +32,7 @@ use crate::ident::{
     fsck_commit_idents, parse_signature_times, prepare_commit_author_from_parent,
     prepare_commit_identity_line, replace_identity_date_suffix, Signature,
 };
-use crate::index::{Index, IndexLock};
+use crate::index::{Index, IndexLock, MODE_GITLINK};
 use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, serialize_commit, CommitData, FileMode, ObjectId, ObjectKind};
 use crate::pathspec::{matches_pathspec_list_with_context, pathspec_is_exclude, ResolvedPathspecs};
@@ -1162,7 +1162,7 @@ fn materialize_missing_index_blobs_for_overlay(repo: &Repository, index: &Index)
     for entry in index
         .entries
         .iter()
-        .filter(|e| e.stage() == 0 && !e.intent_to_add())
+        .filter(|e| e.stage() == 0 && !e.intent_to_add() && e.mode != MODE_GITLINK)
     {
         if odb.contains(&entry.oid)? {
             continue;
@@ -5172,5 +5172,67 @@ mod tests {
             resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap(),
             before_tip
         );
+    }
+
+    fn init_nested_git_repo(inner: &Path) {
+        Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(inner)
+            .output()
+            .expect("git init nested");
+        Command::new("git")
+            .args(["config", "user.email", "t@example.com"])
+            .current_dir(inner)
+            .output()
+            .expect("git config email");
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(inner)
+            .output()
+            .expect("git config name");
+        fs::write(inner.join("inside.txt"), b"inside\n").expect("write nested file");
+        Command::new("git")
+            .args(["add", "inside.txt"])
+            .current_dir(inner)
+            .output()
+            .expect("git add nested");
+        Command::new("git")
+            .args(["commit", "-qm", "nested"])
+            .current_dir(inner)
+            .output()
+            .expect("git commit nested");
+    }
+
+    #[test]
+    fn commit_worktree_dry_run_reports_embedded_gitlink() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let repo = init_repo(dir.path());
+        fs::write(dir.path().join("a"), b"a\n").unwrap();
+        commit_worktree(
+            &repo,
+            &commit_req("seed"),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("seed commit");
+
+        let vendor = dir.path().join("vendor");
+        fs::create_dir_all(&vendor).unwrap();
+        init_nested_git_repo(&vendor);
+
+        let mut req = commit_req("nested\n");
+        req.dry_run = true;
+        req.hooks = HookPolicy::SkipVerify;
+        let outcome = commit_worktree(
+            &repo,
+            &req,
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("dry-run commit with embedded repo");
+        assert_eq!(outcome.embedded_gitlinks, vec!["vendor".to_owned()]);
     }
 }

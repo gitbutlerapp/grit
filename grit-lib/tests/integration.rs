@@ -612,6 +612,7 @@ mod drop_promised_blobs;
 #[cfg(feature = "full-tests")]
 #[path = "drop_promised_blobs_git_compat.rs"]
 mod drop_promised_blobs_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "embedded_gitlink_warnings_issue_2360.rs"]
 mod embedded_gitlink_warnings_issue_2360;
 #[cfg(feature = "full-tests")]
