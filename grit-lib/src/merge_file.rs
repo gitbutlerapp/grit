@@ -117,6 +117,7 @@ pub fn merge(input: &MergeInput<'_>) -> Result<MergeOutput> {
     let ours_ops = similar::capture_diff_slices(algo, &base_compare_lines, &ours_compare_lines);
     let theirs_ops = similar::capture_diff_slices(algo, &base_compare_lines, &theirs_compare_lines);
 
+    let mut insert_consumed = vec![false; base_lines.len() + 1];
     let mut hunks = compute_hunks(
         &base_lines,
         &ours_lines,
@@ -124,6 +125,7 @@ pub fn merge(input: &MergeInput<'_>) -> Result<MergeOutput> {
         &ours_ops,
         &theirs_ops,
         &ws_mode,
+        &mut insert_consumed,
     );
     // Zealous diff3 (`adjust_zealous_hunks`) assumes the raw `compute_hunks` sequence.
     if !matches!(input.style, ConflictStyle::ZealousDiff3) {
@@ -748,6 +750,7 @@ fn compute_hunks(
     ours_ops: &[DiffOp],
     theirs_ops: &[DiffOp],
     ws_mode: &WhitespaceMode,
+    insert_consumed: &mut [bool],
 ) -> Vec<Hunk> {
     let ours_changed = changed_mask(ours_ops, base.len());
     let theirs_changed = changed_mask(theirs_ops, base.len());
@@ -759,23 +762,37 @@ fn compute_hunks(
     let mut pos = 0usize;
 
     while pos <= base.len() {
-        // Emit pure insertions before this base position.
-        emit_inserts_at(
-            pos,
-            &ours_inserts,
-            &theirs_inserts,
-            ours,
-            theirs,
-            ws_mode,
-            &mut hunks,
-        );
-
         if pos == base.len() {
+            emit_inserts_at(
+                pos,
+                &ours_inserts,
+                &theirs_inserts,
+                ours,
+                theirs,
+                ws_mode,
+                insert_consumed,
+                &mut hunks,
+            );
             break;
         }
 
         let o = ours_changed[pos];
         let t = theirs_changed[pos];
+
+        // Pure insertions anchored here are folded into the change region when this
+        // position starts one (`build_span_postimage` walks `pos..=end`).
+        if !o && !t {
+            emit_inserts_at(
+                pos,
+                &ours_inserts,
+                &theirs_inserts,
+                ours,
+                theirs,
+                ws_mode,
+                insert_consumed,
+                &mut hunks,
+            );
+        }
 
         if !o && !t {
             // Unchanged run. Stop before a position that has pending insertions
@@ -835,19 +852,53 @@ fn compute_hunks(
         let any_theirs = (pos..end).any(|p| theirs_changed[p]);
 
         match (any_ours, any_theirs) {
-            (true, false) => {
-                let c = collect_new_lines(ours_ops, ours, pos, end);
-                hunks.push(Hunk::OnlyOurs {
-                    base: base[pos..end].to_vec(),
-                    ours: c,
-                });
-            }
-            (false, true) => {
-                let c = collect_new_lines(theirs_ops, theirs, pos, end);
-                hunks.push(Hunk::OnlyTheirs {
-                    base: base[pos..end].to_vec(),
-                    theirs: c,
-                });
+            (true, false) | (false, true) => {
+                let touching_inserts = (pos..=end)
+                    .any(|p| !ours_inserts[p].is_empty() || !theirs_inserts[p].is_empty());
+                if touching_inserts {
+                    let span = SpanPostimageCtx {
+                        pos,
+                        end,
+                        base,
+                        ours,
+                        theirs,
+                        ours_changed: &ours_changed,
+                        theirs_changed: &theirs_changed,
+                        ours_inserts: &ours_inserts,
+                        theirs_inserts: &theirs_inserts,
+                        ours_ops,
+                        theirs_ops,
+                    };
+                    let o_img = build_span_postimage(&span, true);
+                    let t_img = build_span_postimage(&span, false);
+                    if !merge_lines_equal(&o_img, &t_img, ws_mode) {
+                        for p in pos..=end {
+                            if insert_consumed.len() > p {
+                                insert_consumed[p] = true;
+                            }
+                        }
+                        hunks.push(Hunk::Conflict {
+                            base: base[pos..end].to_vec(),
+                            ours: o_img,
+                            theirs: t_img,
+                        });
+                        pos = end;
+                        continue;
+                    }
+                }
+                if any_ours {
+                    let c = collect_new_lines(ours_ops, ours, pos, end);
+                    hunks.push(Hunk::OnlyOurs {
+                        base: base[pos..end].to_vec(),
+                        ours: c,
+                    });
+                } else {
+                    let c = collect_new_lines(theirs_ops, theirs, pos, end);
+                    hunks.push(Hunk::OnlyTheirs {
+                        base: base[pos..end].to_vec(),
+                        theirs: c,
+                    });
+                }
             }
             (true, true) => {
                 let o = collect_new_lines(ours_ops, ours, pos, end);
@@ -917,6 +968,7 @@ fn collect_inserts(ops: &[DiffOp], base_len: usize) -> Vec<Vec<(usize, usize)>> 
 }
 
 /// Emit hunks for pure insertions at base position `pos`.
+#[allow(clippy::too_many_arguments)]
 fn emit_inserts_at(
     pos: usize,
     ours_inserts: &[Vec<(usize, usize)>],
@@ -924,8 +976,12 @@ fn emit_inserts_at(
     ours: &[Vec<u8>],
     theirs: &[Vec<u8>],
     ws_mode: &WhitespaceMode,
+    insert_consumed: &[bool],
     hunks: &mut Vec<Hunk>,
 ) {
+    if insert_consumed.get(pos) == Some(&true) {
+        return;
+    }
     let o_ins = &ours_inserts[pos];
     let t_ins = &theirs_inserts[pos];
 
@@ -1160,10 +1216,38 @@ fn merge_adjacent_replace_and_trailing_insert_conflicts(hunks: Vec<Hunk>) -> Vec
             (Hunk::OnlyTheirs { base, theirs }, Some(Hunk::OnlyOurs { base: bo, ours: o }))
                 if !base.is_empty() && bo.is_empty() && !o.is_empty() && !theirs.is_empty() =>
             {
+                let mut conflict_ours = base.clone();
+                conflict_ours.extend(o.iter().cloned());
                 Some(Hunk::Conflict {
                     base: base.clone(),
-                    ours: o.clone(),
+                    ours: conflict_ours,
                     theirs: theirs.clone(),
+                })
+            }
+            (
+                Hunk::OnlyOurs { base, ours },
+                Some(Hunk::OnlyTheirs {
+                    base: bt,
+                    theirs: t,
+                }),
+            ) if !base.is_empty() && ours.is_empty() && bt.is_empty() && !t.is_empty() => {
+                let mut conflict_theirs = base.clone();
+                conflict_theirs.extend(t.iter().cloned());
+                Some(Hunk::Conflict {
+                    base: base.clone(),
+                    ours: Vec::new(),
+                    theirs: conflict_theirs,
+                })
+            }
+            (Hunk::OnlyTheirs { base, theirs }, Some(Hunk::OnlyOurs { base: bo, ours: o }))
+                if !base.is_empty() && theirs.is_empty() && bo.is_empty() && !o.is_empty() =>
+            {
+                let mut conflict_ours = base.clone();
+                conflict_ours.extend(o.iter().cloned());
+                Some(Hunk::Conflict {
+                    base: base.clone(),
+                    ours: conflict_ours,
+                    theirs: Vec::new(),
                 })
             }
             (
@@ -1348,6 +1432,52 @@ fn furthest_changed_op_end(ops: &[DiffOp], run_start: usize, current_end: usize)
     max
 }
 
+struct SpanPostimageCtx<'a> {
+    pos: usize,
+    end: usize,
+    base: &'a [Vec<u8>],
+    ours: &'a [Vec<u8>],
+    theirs: &'a [Vec<u8>],
+    ours_changed: &'a [bool],
+    theirs_changed: &'a [bool],
+    ours_inserts: &'a [Vec<(usize, usize)>],
+    theirs_inserts: &'a [Vec<(usize, usize)>],
+    ours_ops: &'a [DiffOp],
+    theirs_ops: &'a [DiffOp],
+}
+
+/// Build one side's post-image for base span `[pos..end)` plus pure insertions anchored
+/// at `pos..=end` (insertions before base line `i` are emitted when visiting anchor `i`).
+fn build_span_postimage(ctx: &SpanPostimageCtx<'_>, for_ours: bool) -> Vec<Vec<u8>> {
+    let (changed, ops, lines, inserts) = if for_ours {
+        (ctx.ours_changed, ctx.ours_ops, ctx.ours, ctx.ours_inserts)
+    } else {
+        (
+            ctx.theirs_changed,
+            ctx.theirs_ops,
+            ctx.theirs,
+            ctx.theirs_inserts,
+        )
+    };
+    let pos = ctx.pos;
+    let end = ctx.end;
+    let base = ctx.base;
+    let mut out = Vec::new();
+    for anchor in pos..=end {
+        for &(ns, ne) in &inserts[anchor] {
+            out.extend(lines[ns..ne].iter().cloned());
+        }
+        if anchor < end {
+            if changed[anchor] {
+                out.extend(changed_base_line_postimage(ops, lines, anchor));
+            } else {
+                out.push(base[anchor].clone());
+            }
+        }
+    }
+    out
+}
+
 /// Collect new (output) lines for base range `[base_start..base_end)`.
 ///
 /// For each op whose `old_range` overlaps the range:
@@ -1386,6 +1516,38 @@ fn collect_new_lines(
         }
     }
     lines
+}
+
+/// Output lines one side contributes for a single changed base line (empty when the line
+/// is removed by a multi-line delete/replace after the op's first base line).
+fn changed_base_line_postimage(
+    ops: &[DiffOp],
+    lines: &[Vec<u8>],
+    base_index: usize,
+) -> Vec<Vec<u8>> {
+    for op in ops {
+        if op.tag() == DiffTag::Equal {
+            let old = op.old_range();
+            if old.start <= base_index && base_index < old.end {
+                let offset = base_index - old.start;
+                let new_ = op.new_range();
+                if new_.start + offset < new_.end {
+                    return vec![lines[new_.start + offset].clone()];
+                }
+                return Vec::new();
+            }
+            continue;
+        }
+        let old = op.old_range();
+        if old.start <= base_index && base_index < old.end {
+            if base_index == old.start {
+                let new_ = op.new_range();
+                return lines[new_.start..new_.end].to_vec();
+            }
+            return Vec::new();
+        }
+    }
+    Vec::new()
 }
 
 /// Run Myers diff on two line slices.
@@ -1492,7 +1654,96 @@ pub fn is_binary(data: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use super::*;
+
+    fn git_merge_file_bytes(
+        base: &[u8],
+        ours: &[u8],
+        theirs: &[u8],
+        extra_args: &[&str],
+    ) -> Vec<u8> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("base"), base).expect("base");
+        std::fs::write(dir.path().join("ours"), ours).expect("ours");
+        std::fs::write(dir.path().join("theirs"), theirs).expect("theirs");
+        let out = Command::new("git")
+            .current_dir(dir.path())
+            .args(["merge-file", "-p"])
+            .args(extra_args)
+            .args([
+                "-L", "ours", "-L", "base", "-L", "theirs", "ours", "base", "theirs",
+            ])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git merge-file");
+        assert!(
+            out.status.success() || out.status.code() == Some(1),
+            "git merge-file failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        out.stdout
+    }
+
+    fn assert_merge_matches_git(
+        base: &[u8],
+        ours: &[u8],
+        theirs: &[u8],
+        extra_args: &[&str],
+        style: ConflictStyle,
+        favor: MergeFavor,
+        context: &str,
+    ) {
+        let git_out = git_merge_file_bytes(base, ours, theirs, extra_args);
+        let grit_out = merge(&MergeInput {
+            base,
+            ours,
+            theirs,
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor,
+            style,
+            marker_size: 7,
+            diff_algorithm: None,
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .expect("grit merge");
+        assert_eq!(
+            grit_out.content, git_out,
+            "{context}: merged bytes mismatch"
+        );
+    }
+
+    fn issue_2369_fixture() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        let base: String = (1..=10).map(|i| format!("{i}\n")).collect();
+        let base_lines: Vec<&str> = base.lines().collect();
+        // delete lines 3-5 (indices 2..5)
+        let ours = format!(
+            "{}\n",
+            [base_lines[0], base_lines[1]]
+                .into_iter()
+                .chain(base_lines[5..].iter().copied())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let theirs = format!(
+            "{}\n",
+            base_lines[..5]
+                .iter()
+                .chain([&"NEW1", &"NEW2"])
+                .chain(base_lines[5..].iter())
+                .copied()
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        (base.into_bytes(), ours.into_bytes(), theirs.into_bytes())
+    }
 
     fn do_merge(base: &str, ours: &str, theirs: &str) -> (String, usize) {
         let input = MergeInput {
@@ -1611,6 +1862,231 @@ mod tests {
         let theirs = "a\nb\nC\n"; // modify the last line, two lines away
         let (r, c) = do_merge(base, ours, theirs);
         assert_eq!(c, 0, "expected clean merge, got: {r:?}");
+    }
+
+    #[test]
+    fn issue_2369_delete_block_vs_insert_after_matches_git() {
+        let (base, ours, theirs) = issue_2369_fixture();
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2369",
+        );
+        let out = merge(&MergeInput {
+            base: &base,
+            ours: &ours,
+            theirs: &theirs,
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: None,
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .unwrap();
+        assert_eq!(out.conflicts, 1);
+    }
+
+    #[test]
+    fn issue_2369_symmetric_side_swap_matches_git() {
+        let (base, ours, theirs) = issue_2369_fixture();
+        assert_merge_matches_git(
+            &base,
+            &theirs,
+            &ours,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2369 swapped",
+        );
+    }
+
+    #[test]
+    fn issue_2369_leading_insert_after_line_two_matches_git() {
+        let base: String = (1..=10).map(|i| format!("{i}\n")).collect();
+        let lines: Vec<&str> = base.lines().collect();
+        let ours = format!(
+            "{}\n",
+            [lines[0], lines[1]]
+                .into_iter()
+                .chain(lines[5..].iter().copied())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let theirs = format!(
+            "{}\n",
+            lines[..2]
+                .iter()
+                .chain([&"NEW1", &"NEW2"])
+                .chain(lines[2..].iter())
+                .copied()
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let (b, o, t) = (base.into_bytes(), ours.into_bytes(), theirs.into_bytes());
+        assert_merge_matches_git(
+            &b,
+            &o,
+            &t,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "leading insert",
+        );
+    }
+
+    #[test]
+    fn issue_2369_insert_inside_deleted_span_matches_git() {
+        let base: String = (1..=10).map(|i| format!("{i}\n")).collect();
+        let lines: Vec<&str> = base.lines().collect();
+        let ours = format!(
+            "{}\n",
+            [lines[0], lines[1]]
+                .into_iter()
+                .chain(lines[7..].iter().copied())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let theirs = format!(
+            "{}\n",
+            lines
+                .iter()
+                .copied()
+                .enumerate()
+                .flat_map(|(i, l)| {
+                    if i == 4 {
+                        vec![l, "NEW1", "NEW2"]
+                    } else {
+                        vec![l]
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let (b, o, t) = (base.into_bytes(), ours.into_bytes(), theirs.into_bytes());
+        assert_merge_matches_git(
+            &b,
+            &o,
+            &t,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "interior insert",
+        );
+    }
+
+    #[test]
+    fn issue_2369_separated_insert_stays_clean() {
+        let base: String = (1..=10).map(|i| format!("{i}\n")).collect();
+        let lines: Vec<&str> = base.lines().collect();
+        let ours = format!(
+            "{}\n",
+            [lines[0], lines[1]]
+                .into_iter()
+                .chain(lines[4..].iter().copied())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let theirs = format!(
+            "{}\n",
+            lines[..5]
+                .iter()
+                .chain([&"NEW1", &"NEW2"])
+                .chain(lines[5..].iter())
+                .copied()
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let (b, o, t) = (base.into_bytes(), ours.into_bytes(), theirs.into_bytes());
+        assert_merge_matches_git(
+            &b,
+            &o,
+            &t,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "separated insert",
+        );
+    }
+
+    #[test]
+    fn issue_2369_diff3_and_zdiff3_match_git() {
+        let (base, ours, theirs) = issue_2369_fixture();
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs,
+            &["--diff3"],
+            ConflictStyle::Diff3,
+            MergeFavor::None,
+            "issue 2369 diff3",
+        );
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs,
+            &["--zdiff3"],
+            ConflictStyle::ZealousDiff3,
+            MergeFavor::None,
+            "issue 2369 zdiff3",
+        );
+    }
+
+    #[test]
+    fn issue_2369_favor_and_union_match_git() {
+        let (base, ours, theirs) = issue_2369_fixture();
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs,
+            &["--ours"],
+            ConflictStyle::Merge,
+            MergeFavor::Ours,
+            "issue 2369 favor ours",
+        );
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs,
+            &["--theirs"],
+            ConflictStyle::Merge,
+            MergeFavor::Theirs,
+            "issue 2369 favor theirs",
+        );
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs,
+            &["--union"],
+            ConflictStyle::Merge,
+            MergeFavor::Union,
+            "issue 2369 union",
+        );
+    }
+
+    #[test]
+    fn issue_2369_replace_vs_trailing_insert_ours_side_keeps_base() {
+        let base = b"1\n2\n3\n4\n5\n6\n";
+        let ours = b"1\n2\n3\n4\n5\nNEW1\nNEW2\n6\n";
+        let theirs = b"1\n2\nX\n6\n";
+        assert_merge_matches_git(
+            base,
+            ours,
+            theirs,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "replace vs trailing insert",
+        );
     }
 
     #[test]
@@ -2119,6 +2595,7 @@ mod tests {
             &base_compare_lines,
             &theirs_compare_lines,
         );
+        let mut insert_consumed = vec![false; base_lines.len() + 1];
         let hunks = compute_hunks(
             &base_lines,
             &ours_lines,
@@ -2126,6 +2603,7 @@ mod tests {
             &ours_ops,
             &theirs_ops,
             &ws_mode,
+            &mut insert_consumed,
         );
         assert_eq!(
             hunks.len(),

@@ -996,6 +996,8 @@ mod merge_eol_crlf_conflict_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "merge_file_git_compat.rs"]
 mod merge_file_git_compat;
+#[path = "merge_file_issue_2369_git_compat.rs"]
+mod merge_file_issue_2369_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "merge_identity_git_compat.rs"]
 mod merge_identity_git_compat;
