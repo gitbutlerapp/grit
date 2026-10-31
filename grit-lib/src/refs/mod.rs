@@ -1615,23 +1615,62 @@ impl PackedRefsFileView {
 
     /// Like [`Self::map_for_prefix_filtered`], but invokes `f` for each record instead of
     /// building a map.
+    ///
+    /// Returns [`ControlFlow::Break`] when `f` stops the scan. Unsorted files, and sorted
+    /// files whose records are out of order, fall back to a sorted materialized scan so
+    /// iteration matches [`RefStore::for_each_ref`] name order.
     pub(crate) fn for_each_prefix_filtered(
         &self,
         path: &Path,
         prefix: Option<&str>,
         keep: Option<PackedRecordFilter<'_>>,
-        f: PackedRecordForEach<'_>,
-    ) -> Result<()> {
+        mut f: PackedRecordForEach<'_>,
+    ) -> Result<ControlFlow<()>> {
+        if !self.sorted {
+            return self.for_each_prefix_filtered_sorted(path, prefix, keep, f);
+        }
         let prefix_trim = prefix.map(|p| p.trim_end_matches('/'));
-        let range_prefix = prefix_trim.filter(|p| self.sorted && !p.is_empty() && *p != "refs");
+        let range_prefix = prefix_trim.filter(|p| !p.is_empty() && *p != "refs");
         if let Some((begin, end)) = range_prefix.and_then(|prefix| self.prefix_region(prefix)) {
-            let in_order = self.for_each_region(path, begin, end, prefix_trim, keep, f)?;
+            let (in_order, flow) =
+                self.for_each_region(path, begin, end, prefix_trim, keep, &mut f)?;
+            if flow.is_break() {
+                return Ok(ControlFlow::Break(()));
+            }
             if in_order {
-                return Ok(());
+                return Ok(ControlFlow::Continue(()));
             }
         }
-        let _ = self.for_each_region(path, 0, self.data.len(), prefix_trim, keep, f)?;
-        Ok(())
+        let (in_order, flow) =
+            self.for_each_region(path, 0, self.data.len(), prefix_trim, keep, &mut f)?;
+        if flow.is_break() {
+            return Ok(ControlFlow::Break(()));
+        }
+        if in_order {
+            return Ok(ControlFlow::Continue(()));
+        }
+        self.for_each_prefix_filtered_sorted(path, prefix, keep, f)
+    }
+
+    fn for_each_prefix_filtered_sorted(
+        &self,
+        path: &Path,
+        prefix: Option<&str>,
+        keep: Option<PackedRecordFilter<'_>>,
+        f: PackedRecordForEach<'_>,
+    ) -> Result<ControlFlow<()>> {
+        let map = self.map_for_prefix_filtered(path, prefix, keep)?;
+        let mut names: Vec<_> = map.keys().cloned().collect();
+        names.sort_unstable();
+        for name in names {
+            let Some(oid) = map.get(&name) else {
+                continue;
+            };
+            if f(&name, *oid, None).is_break() {
+                return Ok(ControlFlow::Break(()));
+            }
+        }
+        Ok(ControlFlow::Continue(()))
     }
 
     /// Byte range a prefix scan of a sorted file covers, including the neighbouring records
@@ -1710,7 +1749,7 @@ impl PackedRefsFileView {
         prefix: Option<&str>,
         keep: Option<PackedRecordFilter<'_>>,
         f: PackedRecordForEach<'_>,
-    ) -> Result<bool> {
+    ) -> Result<(bool, ControlFlow<()>)> {
         let bytes = &self.data[begin..end];
         if memchr::memchr(b'\r', bytes).is_some() {
             return Err(packed_refs_unexpected_line(
@@ -1826,7 +1865,7 @@ fn for_each_packed_refs_region(
     keep: Option<PackedRecordFilter<'_>>,
     peel_trait: PackedPeelTrait,
     f: PackedRecordForEach<'_>,
-) -> Result<bool> {
+) -> Result<(bool, ControlFlow<()>)> {
     let ref_opts = RefNameOptions {
         allow_onelevel: false,
         refspec_pattern: false,
@@ -1835,21 +1874,22 @@ fn for_each_packed_refs_region(
     let mut in_order = true;
     let mut prev_name = "";
     let mut pending: Option<(&str, ObjectId, Option<ObjectId>)> = None;
-    let flush = |pending: &mut Option<(&str, ObjectId, Option<ObjectId>)>, f: PackedRecordForEach<'_>| {
-            let (Some(keep), Some((refname, oid, peeled))) = (keep, pending.take()) else {
-                return ControlFlow::Continue(());
-            };
-            let peel = if peel_trait.covers(refname) {
-                peeled.map_or(PackedPeel::NotTag, PackedPeel::Peeled)
-            } else {
-                PackedPeel::Unknown
-            };
-            if keep(refname, &oid, peel) {
-                f(refname, oid, peeled)
-            } else {
-                ControlFlow::Continue(())
-            }
+    let flush = |pending: &mut Option<(&str, ObjectId, Option<ObjectId>)>,
+                 f: PackedRecordForEach<'_>| {
+        let (Some(keep), Some((refname, oid, peeled))) = (keep, pending.take()) else {
+            return ControlFlow::Continue(());
         };
+        let peel = if peel_trait.covers(refname) {
+            peeled.map_or(PackedPeel::NotTag, PackedPeel::Peeled)
+        } else {
+            PackedPeel::Unknown
+        };
+        if keep(refname, &oid, peel) {
+            f(refname, oid, peeled)
+        } else {
+            ControlFlow::Continue(())
+        }
+    };
     let mut expect_peel = false;
     let mut lines = region.split('\n').peekable();
     while let Some(line) = lines.next() {
@@ -1861,7 +1901,7 @@ fn for_each_packed_refs_region(
         }
         if line.starts_with('#') {
             if flush(&mut pending, f).is_break() {
-                return Ok(in_order);
+                return Ok((in_order, ControlFlow::Break(())));
             }
             expect_peel = false;
             continue;
@@ -1875,7 +1915,7 @@ fn for_each_packed_refs_region(
             continue;
         }
         if flush(&mut pending, f).is_break() {
-            return Ok(in_order);
+            return Ok((in_order, ControlFlow::Break(())));
         }
         let (refname, oid) = parse_packed_ref_data_line_borrowed(path, line, &ref_opts)?;
         in_order &= prev_name <= refname;
@@ -1884,13 +1924,13 @@ fn for_each_packed_refs_region(
             if keep.is_some() {
                 pending = Some((refname, oid, None));
             } else if f(refname, oid, None).is_break() {
-                return Ok(in_order);
+                return Ok((in_order, ControlFlow::Break(())));
             }
         }
         expect_peel = true;
     }
-    let _ = flush(&mut pending, f);
-    Ok(in_order)
+    let flow = flush(&mut pending, f);
+    Ok((in_order, flow))
 }
 
 fn read_packed_refs_file_view(store: &Path) -> Result<Option<PackedRefsFileView>> {
