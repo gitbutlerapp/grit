@@ -18,7 +18,7 @@ pub const FIRST_BATCH: usize = 100;
 /// Later batch size for long listings.
 pub const BATCH: usize = 1000;
 
-/// Whether `walk` can use [`RevWalk::commits_stream`] for listing.
+/// Whether `walk` can use [`grit_lib::revwalk::handle::RevWalk::commits_stream`] for listing.
 #[must_use]
 pub fn plain_walk_streamable(walk: &RevWalkListOptions) -> bool {
     rev_walk_list_supports_stream(walk)
