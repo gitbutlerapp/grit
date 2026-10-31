@@ -286,6 +286,7 @@ fn distinct_byte_paths_match_git_with_and_without_bloom_filters() {
                 false,
                 0,
                 false,
+                false,
                 &HashMap::new(),
                 false,
                 None,

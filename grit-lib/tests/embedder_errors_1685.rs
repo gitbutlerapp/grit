@@ -91,6 +91,7 @@ fn compute_blame_missing_path_is_path_not_in_revision() {
         false,
         0,
         false,
+        false,
         &HashMap::new(),
         false,
         None,

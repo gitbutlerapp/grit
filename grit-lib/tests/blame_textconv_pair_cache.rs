@@ -185,6 +185,7 @@ fn blame_pair_map_cache_respects_textconv_path() {
         true,
         3,
         false,
+        false,
         &grafts,
         indent_heuristic,
         None,

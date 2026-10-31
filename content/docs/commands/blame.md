@@ -9,7 +9,7 @@ order: 2
 
 ```text
 grit blame [<rev>] [--rev <commit>] [--contents <file>] [-L RANGE] [--first-parent]
-  [--group] [-w] [-C]... [--ignore-rev <REV>]... [--ignore-revs-file <FILE>]... [--] <file>
+  [--group] [-w] [-M] [-C]... [--ignore-rev <REV>]... [--ignore-revs-file <FILE>]... [--] <file>
 ```
 
 ## Description
@@ -107,7 +107,8 @@ main's path errors provide no comparable successful-operation timing.
 | `--ignore-rev <REV>` | Treat this commit as transparent while walking history (repeatable). Unknown revisions are an error. |
 | `--ignore-revs-file <FILE>` | Read full-length commit oids to ignore, one per line (`#` comments, blank lines skipped). Repeatable; `""` clears entries loaded from config or earlier files. Missing files are an error. Relative paths are resolved from the repository root. Config `blame.ignoreRevsFile` (multi-valued) is applied before CLI files. |
 | `-w`, `--ignore-all-space` | Ignore whitespace when comparing lines between revisions (same rules as [`grit diff -w`](../diff/)). Whitespace-only edits do not move blame to a newer commit. |
-| `-C`, `--copy-detection` | Detect lines copied from other files (repeat up to three times for deeper search, matching `git blame -C` / `-C -C` / `-C -C -C`). A fourth `-C` is rejected with exit code 2. |
+| `-M`, `--move-detection` | Detect lines moved within the same file (`git blame -M`). Relocated blocks are blamed on the commit that originally wrote them when the move scores above Git's default threshold. |
+| `-C`, `--copy-detection` | Detect lines copied from other files (repeat up to three times for deeper search, matching `git blame -C` / `-C -C` / `-C -C -C`). A fourth `-C` is rejected with exit code 2. Using `-C` also enables move detection, matching Git (`-C` implies `-M`). |
 
 Human output prefixes ignored lines with `?` and lines that cannot be blamed past an ignored commit with `*` (same markers Git uses when `blame.markIgnoredLines` / `blame.markUnblamableLines` are enabled).
 

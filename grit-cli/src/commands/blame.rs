@@ -190,6 +190,7 @@ pub fn run(
     group: bool,
     ignore_all_space: bool,
     copy_detection: u8,
+    move_detection: bool,
     contents: Option<String>,
     now: time::OffsetDateTime,
 ) -> Result<BlameOutcome> {
@@ -263,6 +264,7 @@ pub fn run(
     options.ignore = ignore;
     options.whitespace = whitespace;
     options.copy_detection = copy_detection;
+    options.move_detection = move_detection || copy_detection.count() > 0;
     let result = blame_file(&repo, &blame_path, &options)?;
 
     Ok(outcome_from_result(
