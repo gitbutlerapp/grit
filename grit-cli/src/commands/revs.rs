@@ -13,6 +13,11 @@ use crate::context;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, OutputMode, RenderContext};
 use crate::pathspec_args::TrailingPathspecArgs;
 use crate::rev_select::RevSelectArgs;
+use crate::stream_commit_list::{
+    begin_commits_json_document, finish_commits_json_document, flush_or_broken_pipe,
+    load_batch_summaries, open_plain_stream, pull_batch, write_all_or_broken_pipe,
+    write_json_array_element, BATCH, FIRST_BATCH,
+};
 
 /// Left/right counts for a symmetric range (`--left-right --count`).
 #[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
@@ -232,6 +237,142 @@ fn commit_marks(oids: &[ObjectId], result: &RevListResult, mode: RevsMode) -> Ve
             }
         })
         .collect()
+}
+
+/// Whether plain [`run`] can stream commits instead of collecting the full walk first.
+pub fn listing_can_stream(
+    rev: &RevSelectArgs,
+    pathspecs: &TrailingPathspecArgs,
+    mode: RevsMode,
+) -> Result<bool> {
+    if mode.count || mode.left_right || mode.cherry_mark || pathspecs.has_any() {
+        return Ok(false);
+    }
+    let repo = context::discover()?;
+    let env = repo.environment();
+    let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
+    let opts = rev.to_rev_walk_options(&repo, env, &[], &walk_paths)?;
+    Ok(crate::stream_commit_list::plain_walk_streamable(&opts))
+}
+
+/// List commits incrementally on a plain date-order walk (see [`listing_can_stream`]).
+///
+/// # Errors
+///
+/// Propagates walk, load, and write errors other than a closed stdout pipe.
+pub fn stream_listing(
+    rev: RevSelectArgs,
+    pathspecs: TrailingPathspecArgs,
+    output_mode: OutputMode,
+    _ctx: &RenderContext,
+    w: &mut dyn Write,
+) -> Result<()> {
+    if rev.max_count() == Some(0) {
+        return write_empty_streaming_document(w, output_mode);
+    }
+    let repo = context::discover()?;
+    let env = repo.environment();
+    let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
+    let opts = rev.to_rev_walk_options(&repo, env, &[], &walk_paths)?;
+    let token_refs = rev.rev_tokens(&[]);
+    let fetch_cap = fetch_limit_plus_one(rev.max_count());
+    let mut stream = open_plain_stream(&repo, &token_refs, &opts, fetch_cap)?;
+    let loader = CommitJsonLoader::for_listed_commits();
+    let now = context::wall_clock_now(env).unix_timestamp();
+    let max = rev.max_count();
+    let mut truncated = false;
+    let mut emitted = 0usize;
+    let mut first_json = true;
+    let mut first_batch = true;
+    if output_mode == OutputMode::Json {
+        begin_commits_json_document(w)?;
+    } else if output_mode == OutputMode::Markdown {
+        outln!(w, "# Commits");
+        outln!(w);
+    }
+    loop {
+        let cap = if first_batch { FIRST_BATCH } else { BATCH };
+        let Some(mut batch) = pull_batch(&mut stream, cap)? else {
+            break;
+        };
+        first_batch = false;
+        if let Some(limit) = max {
+            if emitted + batch.oids.len() >= limit {
+                truncated = emitted + batch.oids.len() > limit
+                    || fetch_cap.is_some_and(|cap| cap > limit);
+                let keep = limit.saturating_sub(emitted);
+                batch.oids.truncate(keep);
+                let keep: std::collections::HashSet<_> = batch.oids.iter().copied().collect();
+                batch.walked.retain(|oid| keep.contains(oid));
+            }
+        }
+        if batch.oids.is_empty() {
+            break;
+        }
+        match output_mode {
+            OutputMode::Human => {
+                let summaries = load_batch_summaries(&repo, &mut batch)?;
+                let mut buf = Vec::new();
+                for row in summaries {
+                    outln!(buf, "{}  {}", row.oid, row.subject);
+                }
+                if write_all_or_broken_pipe(w, &buf)? {
+                    return Ok(());
+                }
+            }
+            OutputMode::Markdown => {
+                let summaries = load_batch_summaries(&repo, &mut batch)?;
+                let mut buf = Vec::new();
+                for row in summaries {
+                    outln!(buf, "- `{}` {}", row.oid, row.subject);
+                }
+                if write_all_or_broken_pipe(w, &buf)? {
+                    return Ok(());
+                }
+            }
+            OutputMode::Json => {
+                let commits = repo.odb().with_pack_read_context(|| {
+                    loader.load_reusing(&repo, &batch.oids, now, batch.walked)
+                })?;
+                for commit in commits {
+                    let row = RevsCommit::new(commit, RevsMarks::default());
+                    write_json_array_element(w, &mut first_json, &row)?;
+                }
+            }
+        }
+        emitted += batch.oids.len();
+        if flush_or_broken_pipe(w)? {
+            return Ok(());
+        }
+        if let Some(limit) = max {
+            if emitted >= limit {
+                if fetch_cap.is_some_and(|cap| cap > limit) {
+                    truncated = true;
+                }
+                break;
+            }
+        }
+    }
+    if output_mode == OutputMode::Json {
+        finish_commits_json_document(w, truncated, ",\"count\":null")?;
+    }
+    Ok(())
+}
+
+fn write_empty_streaming_document(w: &mut dyn Write, output_mode: OutputMode) -> Result<()> {
+    match output_mode {
+        OutputMode::Json => {
+            begin_commits_json_document(w)?;
+            finish_commits_json_document(w, false, ",\"count\":null")?;
+        }
+        OutputMode::Markdown => {
+            outln!(w, "# Commits");
+            outln!(w);
+            outln!(w, "_No commits._");
+        }
+        OutputMode::Human => {}
+    }
+    Ok(())
 }
 
 pub fn run(

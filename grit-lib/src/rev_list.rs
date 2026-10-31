@@ -5585,6 +5585,17 @@ pub struct CommitStreamParams {
     pub until: Option<i64>,
     /// Follow only the first parent at merges when walking history.
     pub first_parent: bool,
+    /// Keep raw commit object bytes for each yielded commit when the walk already read them.
+    pub retain_commit_bytes: bool,
+}
+
+/// One commit from [`CommitStream`]: its id and optional bytes read during the walk.
+#[derive(Debug, Clone)]
+pub struct CommitStreamItem {
+    /// Listed commit id.
+    pub oid: ObjectId,
+    /// Raw commit object bytes when [`CommitStreamParams::retain_commit_bytes`] was set.
+    pub commit_bytes: Option<Vec<u8>>,
 }
 
 /// Lazy commit-only walk in default date order (no object/cherry side tables).
@@ -5598,6 +5609,7 @@ pub struct CommitStream<'repo> {
     limit: Option<usize>,
     since: Option<i64>,
     until: Option<i64>,
+    retain_commit_bytes: bool,
     seen: usize,
     emitted: usize,
     errored: Option<Error>,
@@ -5633,7 +5645,7 @@ impl<'repo> CommitStream<'repo> {
 }
 
 impl Iterator for CommitStream<'_> {
-    type Item = Result<ObjectId>;
+    type Item = Result<CommitStreamItem>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(err) = self.errored.take() {
@@ -5659,15 +5671,26 @@ impl Iterator for CommitStream<'_> {
             }
             self.seen += 1;
             if self.seen <= self.skip {
+                self.graph.release_commit_bytes(oid);
                 self.enqueue_parents(oid);
                 continue;
             }
             if self.limit.is_some_and(|limit| self.emitted >= limit) {
+                self.graph.release_commit_bytes(oid);
                 return None;
             }
             self.emitted += 1;
+            let commit_bytes = if self.retain_commit_bytes {
+                self.graph
+                    .unreleased_bytes
+                    .as_mut()
+                    .and_then(|m| m.remove(&oid))
+            } else {
+                None
+            };
+            self.graph.release_commit_bytes(oid);
             self.enqueue_parents(oid);
-            return Some(Ok(oid));
+            return Some(Ok(CommitStreamItem { oid, commit_bytes }));
         }
     }
 }
@@ -5684,7 +5707,10 @@ pub fn open_commit_stream<'repo>(
     params: &CommitStreamParams,
 ) -> Result<CommitStream<'repo>> {
     let pack = repo.odb().pack_read_context_guard();
-    let graph = CommitGraph::with_commit_graph(repo, params.first_parent, true);
+    let mut graph = CommitGraph::with_commit_graph(repo, params.first_parent, true);
+    if params.retain_commit_bytes {
+        graph.keep_unreleased_commit_bytes();
+    }
     let excluded =
         RangeWalkHide::for_range_walk(repo, include, exclude, true, params.first_parent)?;
     let mut stream = CommitStream {
@@ -5697,6 +5723,7 @@ pub fn open_commit_stream<'repo>(
         limit: params.limit,
         since: params.since,
         until: params.until,
+        retain_commit_bytes: params.retain_commit_bytes,
         seen: 0,
         emitted: 0,
         errored: None,

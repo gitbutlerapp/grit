@@ -106,7 +106,7 @@ pub struct WalkedCommits {
 
 impl WalkedCommits {
     /// Empty set with room for the ids of `commits` commits.
-    pub(crate) fn with_capacity(commits: usize) -> Self {
+    pub fn with_capacity(commits: usize) -> Self {
         Self {
             bytes: Vec::new(),
             spans: crate::objects::oid_hash_map_with_capacity(commits),
@@ -114,14 +114,14 @@ impl WalkedCommits {
     }
 
     /// Keep a copy of the commit object payload `data` for `oid`.
-    pub(crate) fn insert(&mut self, oid: ObjectId, data: &[u8]) {
+    pub fn insert(&mut self, oid: ObjectId, data: &[u8]) {
         let start = self.bytes.len();
         self.bytes.extend_from_slice(data);
         self.spans.insert(oid, start..self.bytes.len());
     }
 
     /// Forget every commit not in `keep`.
-    pub(crate) fn retain(&mut self, keep: impl Fn(&ObjectId) -> bool) {
+    pub fn retain(&mut self, keep: impl Fn(&ObjectId) -> bool) {
         self.spans.retain(|oid, _| keep(oid));
     }
 

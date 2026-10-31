@@ -33,8 +33,9 @@ pub use handle::RevWalk;
 pub use handle::RevWalkCommitIter;
 pub use queries::{
     committer_cutoff_from_date, parse_rev_walk_tokens, resolve_log_walk_tips_and_hide,
-    rev_list_commits_for_author_group, LeftRightCounts, MergeFilter, RefSelection,
-    RevWalkCommitIterOptions, RevWalkListOptions, RevWalkParsedSpecs,
+    rev_list_commits_for_author_group, rev_walk_list_supports_stream, LeftRightCounts, MergeFilter,
+    RefSelection, RevWalkCommitIterOptions, RevWalkCommitStream, RevWalkCommitStreamItem,
+    RevWalkListOptions, RevWalkParsedSpecs,
 };
 
 pub mod rev_list {

@@ -49,6 +49,7 @@ mod ref_name_messages;
 mod rev_select;
 mod revision_errors;
 mod stdio;
+mod stream_commit_list;
 mod terminal_progress;
 mod ui;
 mod unborn_errors;
@@ -2976,6 +2977,22 @@ fn dispatch(
                 bail!("`--patch-text` cannot be used with --json or --markdown");
             }
             if !terminal {
+                if opts.filter.is_none()
+                    && commands::log::listing_can_stream(
+                        &rev, &pathspecs, display, &cursor, &format,
+                    )?
+                    && commands::log::listing_should_stream_incrementally(&rev, true)
+                {
+                    let stdout = std::io::stdout();
+                    let mut lock = stdout.lock();
+                    match commands::log::stream_listing(
+                        rev, pathspecs, format, display, opts.mode, ctx, &mut lock,
+                    ) {
+                        Ok(()) => return Ok(ExitStatus::Success),
+                        Err(e) if is_broken_pipe(&e) => return Ok(ExitStatus::Success),
+                        Err(e) => return Err(e),
+                    }
+                }
                 let page = commands::log::LogPage::Paged;
                 let outcome =
                     commands::log::run(rev, pathspecs, cursor, format, display, opts.mode, page)?;
@@ -3017,20 +3034,28 @@ fn dispatch(
             count,
             left_right,
             cherry_mark,
-        } => emit_success(
-            &commands::revs::run(
-                rev,
-                pathspecs,
-                commands::revs::RevsMode {
-                    count,
-                    left_right,
-                    cherry_mark,
-                },
-                opts.mode,
-            )?,
-            opts,
-            ctx,
-        ),
+        } => {
+            let mode = commands::revs::RevsMode {
+                count,
+                left_right,
+                cherry_mark,
+            };
+            if opts.filter.is_none() && commands::revs::listing_can_stream(&rev, &pathspecs, mode)?
+            {
+                let stdout = std::io::stdout();
+                let mut lock = stdout.lock();
+                match commands::revs::stream_listing(rev, pathspecs, opts.mode, ctx, &mut lock) {
+                    Ok(()) => return Ok(ExitStatus::Success),
+                    Err(e) if is_broken_pipe(&e) => return Ok(ExitStatus::Success),
+                    Err(e) => return Err(e),
+                }
+            }
+            emit_success(
+                &commands::revs::run(rev, pathspecs, mode, opts.mode)?,
+                opts,
+                ctx,
+            )
+        }
         Command::MergeBase {
             a,
             b,
