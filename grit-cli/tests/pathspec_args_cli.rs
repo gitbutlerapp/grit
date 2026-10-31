@@ -762,6 +762,53 @@ fn stdout_lines(out: &std::process::Output) -> Vec<String> {
         .collect()
 }
 
+/// Map `diff --name-only` lines to repository-relative paths. Git prints cwd-relative
+/// names from a subdirectory; grit prints repo-relative paths.
+fn diff_names_repo_relative(
+    repo: &std::path::Path,
+    cwd: &std::path::Path,
+    names: &[String],
+) -> std::collections::BTreeSet<String> {
+    use std::collections::BTreeSet;
+    use std::path::{Component, PathBuf};
+    names
+        .iter()
+        .map(|name| {
+            let joined = if name.starts_with("..") {
+                cwd.join(name)
+            } else if name.contains('/') {
+                repo.join(name)
+            } else {
+                cwd.join(name)
+            };
+            let mut out = PathBuf::new();
+            for component in joined.components() {
+                match component {
+                    Component::ParentDir => {
+                        out.pop();
+                    }
+                    Component::CurDir => {}
+                    other => out.push(other.as_os_str()),
+                }
+            }
+            out.strip_prefix(repo)
+                .expect("path under repo")
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect::<BTreeSet<_>>()
+}
+
+fn init_issue_2355_second_commit(dir: &std::path::Path) {
+    assert!(run_git(dir, &["add", "-A"]).status.success());
+    assert!(run_git(dir, &["commit", "-qm", "second"]).status.success());
+}
+
+fn status_filtered_shows_only_g_c(stdout: &str) -> bool {
+    let lines: Vec<&str> = stdout.lines().filter(|l| !l.is_empty()).collect();
+    lines.iter().all(|l| l.contains("g.c")) && !stdout.contains("h.c")
+}
+
 /// Regression for #2355: long-form `:(top)` pathspecs from a subdirectory match Git.
 #[test]
 fn top_pathspec_from_subdirectory_matches_git() {
@@ -769,17 +816,25 @@ fn top_pathspec_from_subdirectory_matches_git() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     init_issue_2355_fixture(dir.path());
     let sub = dir.path().join("a/b");
+    let repo = dir.path();
 
     let git_diff = run_git(&sub, &["diff", "--name-only", "--", ":(top)a/g.c"]);
     assert!(git_diff.status.success(), "git diff");
-    let git_diff_names = stdout_lines(&git_diff);
     let grit_diff = run_grit(grit, &sub, &["diff", "--name-only", "--", ":(top)a/g.c"]);
     assert!(
         grit_diff.status.success(),
         "grit diff: {}",
         String::from_utf8_lossy(&grit_diff.stderr)
     );
-    assert_eq!(stdout_lines(&grit_diff), git_diff_names);
+    assert_eq!(
+        diff_names_repo_relative(repo, &sub, &stdout_lines(&git_diff)),
+        diff_names_repo_relative(repo, &sub, &stdout_lines(&grit_diff)),
+        "same repo-relative diff selection"
+    );
+    assert_eq!(
+        diff_names_repo_relative(repo, &sub, &stdout_lines(&grit_diff)),
+        std::iter::once("a/g.c".to_string()).collect()
+    );
 
     let git_status = run_git(&sub, &["status", "--short", "--", ":(top)a/g.c"]);
     assert!(git_status.status.success(), "git status");
@@ -789,9 +844,15 @@ fn top_pathspec_from_subdirectory_matches_git() {
         "grit status: {}",
         String::from_utf8_lossy(&grit_status.stderr)
     );
-    assert_eq!(
-        String::from_utf8_lossy(&git_status.stdout),
-        String::from_utf8_lossy(&grit_status.stdout)
+    let git_status_out = String::from_utf8_lossy(&git_status.stdout);
+    let grit_status_out = String::from_utf8_lossy(&grit_status.stdout);
+    assert!(
+        status_filtered_shows_only_g_c(&git_status_out),
+        "git status filter: {git_status_out:?}"
+    );
+    assert!(
+        status_filtered_shows_only_g_c(&grit_status_out),
+        "grit status filter: {grit_status_out:?}"
     );
 
     assert!(run_git(&sub, &["add", "--", ":(top)a/g.c"])
@@ -809,25 +870,26 @@ fn top_pathspec_from_subdirectory_matches_git() {
     let dir3 = tempfile::TempDir::new().expect("tempdir3");
     init_issue_2355_fixture(dir3.path());
     let sub3 = dir3.path().join("a/b");
-    assert!(run_git(&sub3, &["add", "--", ":(top)a/g.c"])
-        .status
-        .success());
     assert!(run_git(&sub3, &["restore", "--", ":(top)a/g.c"])
         .status
         .success());
     let git_restored = fs::read_to_string(dir3.path().join("a/g.c")).expect("read g");
+    assert_eq!(git_restored, "1\n", "git restore unstaged working tree");
     let dir4 = tempfile::TempDir::new().expect("tempdir4");
     init_issue_2355_fixture(dir4.path());
     let sub4 = dir4.path().join("a/b");
-    assert!(run_grit(grit, &sub4, &["add", "--", ":(top)a/g.c"])
-        .status
-        .success());
     assert!(run_grit(grit, &sub4, &["restore", "--", ":(top)a/g.c"])
         .status
         .success());
     assert_eq!(
         fs::read_to_string(dir4.path().join("a/g.c")).expect("read g"),
         git_restored
+    );
+    assert!(
+        fs::read_to_string(dir4.path().join("a/b/h.c"))
+            .expect("read h")
+            .contains("m\n"),
+        "restore with top pathspec must not revert sibling file"
     );
 
     let dir5 = tempfile::TempDir::new().expect("tempdir5");
@@ -853,20 +915,48 @@ fn top_pathspec_from_subdirectory_matches_git() {
     );
     assert_eq!(ls_files_sorted(dir6.path()), git_rm_index);
 
-    let git_stash = run_git(&sub, &["stash", "push", "--", ":(top,glob)a/*.c"]);
-    assert!(git_stash.status.success(), "git stash");
     let dir7 = tempfile::TempDir::new().expect("tempdir7");
     init_issue_2355_fixture(dir7.path());
     let sub7 = dir7.path().join("a/b");
-    let grit_stash = run_grit(grit, &sub7, &["stash", "push", "--", ":(top,glob)a/*.c"]);
+    let h_before = fs::read_to_string(dir7.path().join("a/b/h.c")).expect("read h");
+    assert!(run_git(&sub7, &["stash", "push", "--", ":(top,glob)a/*.c"])
+        .status
+        .success());
+    let g_after_git_stash = fs::read_to_string(dir7.path().join("a/g.c")).expect("read g");
+    let h_after_git_stash = fs::read_to_string(dir7.path().join("a/b/h.c")).expect("read h");
+    assert_eq!(
+        g_after_git_stash, "1\n",
+        "git stash reverts selected root file"
+    );
+    assert_eq!(
+        h_after_git_stash, h_before,
+        "git stash leaves unselected file"
+    );
+
+    let dir8 = tempfile::TempDir::new().expect("tempdir8");
+    init_issue_2355_fixture(dir8.path());
+    let sub8 = dir8.path().join("a/b");
+    let grit_stash = run_grit(grit, &sub8, &["stash", "push", "--", ":(top,glob)a/*.c"]);
     assert!(
         grit_stash.status.success(),
         "grit stash: {}",
         String::from_utf8_lossy(&grit_stash.stderr)
     );
+    assert_eq!(
+        fs::read_to_string(dir8.path().join("a/g.c")).expect("read g"),
+        g_after_git_stash
+    );
+    assert_eq!(
+        fs::read_to_string(dir8.path().join("a/b/h.c")).expect("read h"),
+        h_after_git_stash
+    );
 
+    let dir9 = tempfile::TempDir::new().expect("tempdir9");
+    init_issue_2355_fixture(dir9.path());
+    init_issue_2355_second_commit(dir9.path());
+    let sub9 = dir9.path().join("a/b");
     let git_range = run_git(
-        &sub,
+        &sub9,
         &[
             "diff",
             "--name-only",
@@ -879,7 +969,7 @@ fn top_pathspec_from_subdirectory_matches_git() {
     assert!(git_range.status.success(), "git range diff");
     let grit_range = run_grit(
         grit,
-        &sub,
+        &sub9,
         &[
             "diff",
             "--name-only",
@@ -894,7 +984,44 @@ fn top_pathspec_from_subdirectory_matches_git() {
         "grit range diff: {}",
         String::from_utf8_lossy(&grit_range.stderr)
     );
-    assert_eq!(stdout_lines(&grit_range), stdout_lines(&git_range));
+    assert_eq!(
+        diff_names_repo_relative(dir9.path(), &sub9, &stdout_lines(&git_range)),
+        diff_names_repo_relative(dir9.path(), &sub9, &stdout_lines(&grit_range)),
+        "tree-to-tree diff selection"
+    );
+
+    let dir10 = tempfile::TempDir::new().expect("tempdir10");
+    init_issue_2355_fixture(dir10.path());
+    fs::write(dir10.path().join("a/b/extra.c"), b"1\n").expect("extra");
+    assert!(run_git(dir10.path(), &["add", "a/b/extra.c"])
+        .status
+        .success());
+    let sub10 = dir10.path().join("a/b");
+    let git_ex = run_git(
+        &sub10,
+        &["status", "--short", "--", ":(exclude,top)a/b", "."],
+    );
+    assert!(git_ex.status.success(), "git exclude top");
+    let grit_ex = run_grit(
+        grit,
+        &sub10,
+        &["status", "--short", "--", ":(exclude,top)a/b", "."],
+    );
+    assert!(
+        grit_ex.status.success(),
+        "grit exclude top: {}",
+        String::from_utf8_lossy(&grit_ex.stderr)
+    );
+    let git_ex_out = String::from_utf8_lossy(&git_ex.stdout);
+    let grit_ex_out = String::from_utf8_lossy(&grit_ex.stdout);
+    assert!(
+        !git_ex_out.contains("extra.c") && !git_ex_out.contains("h.c"),
+        "git exclude top: {git_ex_out:?}"
+    );
+    assert!(
+        !grit_ex_out.contains("extra.c") && !grit_ex_out.contains("h.c"),
+        "grit exclude top: {grit_ex_out:?}"
+    );
 }
 
 #[test]
