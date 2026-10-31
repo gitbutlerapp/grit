@@ -1050,8 +1050,18 @@ fn checkout_hard_to_tree_journaled(
     let mut deleted_abs_paths = Vec::new();
     let mut staged_index_changes: Vec<DiffEntry> = Vec::new();
     let mut index_only_removed_paths: HashSet<Vec<u8>> = HashSet::new();
+    let mut index_align_touched: BTreeSet<Vec<u8>> = BTreeSet::new();
     if trees_differ || !index_hard_reset_cache_matches_tree(&index, target_tree) {
         let align_plan = crate::diff::plan_hard_reset_index_align(repo.odb(), &index, target_tree)?;
+        for path in &align_plan.remove_paths {
+            index_align_touched.insert(path.clone());
+        }
+        for (path, _, _) in &align_plan.updates {
+            index_align_touched.insert(path.clone());
+        }
+        for entry in &align_plan.insert_entries {
+            index_align_touched.insert(entry.path.clone());
+        }
         if !trees_differ {
             staged_index_changes = hard_reset_align_plan_diff_entries(&index, &align_plan);
         }
@@ -1230,7 +1240,7 @@ fn checkout_hard_to_tree_journaled(
                 return HardResetEntryAction::Written(None);
             }
             if trees_differ && tree_stable_between_commits.contains(path) {
-                if unstaged_tree_stable_paths.contains(path) {
+                if unstaged_tree_stable_paths.contains(path) || index_align_touched.contains(path) {
                     return HardResetEntryAction::Write;
                 }
                 return HardResetEntryAction::Keep;
@@ -1249,8 +1259,10 @@ fn checkout_hard_to_tree_journaled(
                         pre_reset_index_mtime,
                     ) =>
                 {
-                    if trees_differ {
+                    if trees_differ && !index_align_touched.contains(path) {
                         HardResetEntryAction::Keep
+                    } else if trees_differ {
+                        HardResetEntryAction::Verify
                     } else if crate::diff::entry_is_racy_with_policy(
                         existing,
                         pre_reset_index_mtime,

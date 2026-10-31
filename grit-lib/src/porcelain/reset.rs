@@ -809,6 +809,53 @@ mod tests {
         ignore = "starts system git or is heavy; run with --features full-tests"
     )]
     #[test]
+    fn hard_reset_staged_path_unchanged_between_commits() {
+        let (_dir, repo) = init_repo();
+        let c1 = commit_file(&repo, "same.txt", "base\n", None);
+        let c2 = commit_file(&repo, "other.txt", "other\n", Some(c1));
+        let wt = repo.work_tree().expect("wt");
+        std::fs::write(wt.join("same.txt"), "staged\n").expect("wt");
+        let mut index = repo.load_index().expect("index");
+        let oid = repo
+            .odb()
+            .write(ObjectKind::Blob, b"staged\n")
+            .expect("blob");
+        let entry = crate::index::entry_from_stat(
+            &wt.join("same.txt"),
+            b"same.txt",
+            oid,
+            crate::index::MODE_REGULAR,
+        )
+        .expect("entry");
+        index.add_or_replace(entry);
+        repo.write_index(&mut index).expect("write index");
+
+        reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset");
+
+        assert_eq!(std::fs::read(wt.join("same.txt")).expect("disk"), b"base\n");
+        let st = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
+        assert!(st.staged.is_empty());
+        assert!(st.unstaged.is_empty());
+        let _ = c2;
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
     fn hard_reset_clears_unmerged_index_stages() {
         let (_dir, repo) = init_repo();
         let c1 = commit_file(&repo, "f", "clean\n", None);
