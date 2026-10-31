@@ -637,3 +637,134 @@ fn push_from_shallow_clone_over_grit_http_server() {
     assert!(!bare.join("shallow").exists());
     assert!(git_ok(&bare, &["fsck", "--strict"]));
 }
+
+fn want_pkt_line(oid: &str) -> String {
+    let line = format!("want {oid}\n");
+    format!("{:04x}{line}", line.len() + 4)
+}
+
+fn post_upload_pack_status(port: u16, path: &str, body: &[u8], gzip: bool) -> u16 {
+    use std::io::{Read, Write};
+
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(120)))
+        .expect("read timeout");
+    let encoding = if gzip {
+        "Content-Encoding: gzip\r\n"
+    } else {
+        ""
+    };
+    let head = format!(
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+         Content-Type: application/x-git-upload-pack-request\r\n\
+         {encoding}Content-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).expect("write head");
+    stream.write_all(body).expect("write body");
+    let mut response = Vec::new();
+    let _ = stream.read_to_end(&mut response);
+    let status_line = String::from_utf8_lossy(&response);
+    status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or_else(|| panic!("no HTTP status in response: {status_line:?}"))
+}
+
+#[test]
+fn large_fetch_want_body_is_accepted_over_smart_http() {
+    let server_bin = require_binary("grit-http-server");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("srv");
+    std::fs::create_dir_all(&root).unwrap();
+    let bare = root.join("project.git");
+    git(
+        tmp.path(),
+        &["init", "-q", "--bare", bare.to_str().expect("utf8 path")],
+    );
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&work, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(work.join("a.txt"), "x\n").unwrap();
+    git(&work, &["add", "a.txt"]);
+    git(&work, &["commit", "-q", "-m", "init"]);
+    git(
+        &work,
+        &["push", "-q", bare.to_str().expect("utf8 path"), "main"],
+    );
+    let oid = rev_parse(&bare, "refs/heads/main");
+
+    let port = require_port();
+    let child = spawn_server(&server_bin, &root, port, None);
+    let _guard = ServerGuard(child);
+    assert!(
+        wait_ready(port),
+        "grit-http-server did not become ready on port {port}"
+    );
+
+    let pkt = want_pkt_line(&oid);
+    let mut body = String::new();
+    while body.len() < 40 * 1024 * 1024 {
+        body.push_str(&pkt);
+    }
+    body.push_str("0000");
+
+    assert_eq!(
+        post_upload_pack_status(port, "/project.git/git-upload-pack", body.as_bytes(), false),
+        200,
+        "a ~40 MiB fetch want list must not hit HTTP 413"
+    );
+}
+
+#[test]
+fn gzip_fetch_want_body_past_32mib_decoded_is_accepted() {
+    use flate2::{write::GzEncoder, Compression};
+    use std::io::Write;
+
+    let server_bin = require_binary("grit-http-server");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("srv");
+    std::fs::create_dir_all(&root).unwrap();
+    let bare = root.join("project.git");
+    git(
+        tmp.path(),
+        &["init", "-q", "--bare", bare.to_str().expect("utf8 path")],
+    );
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&work, &["init", "-q", "-b", "main", "."]);
+    git(&work, &["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(
+        &work,
+        &["push", "-q", bare.to_str().expect("utf8 path"), "main"],
+    );
+    let oid = rev_parse(&bare, "refs/heads/main");
+
+    let port = require_port();
+    let child = spawn_server(&server_bin, &root, port, None);
+    let _guard = ServerGuard(child);
+    assert!(
+        wait_ready(port),
+        "grit-http-server did not become ready on port {port}"
+    );
+
+    let pkt = want_pkt_line(&oid);
+    let mut plain = String::new();
+    while plain.len() < 35 * 1024 * 1024 {
+        plain.push_str(&pkt);
+    }
+    plain.push_str("0000");
+    let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+    enc.write_all(plain.as_bytes()).expect("gzip write");
+    let gzip = enc.finish().expect("gzip finish");
+
+    assert_eq!(
+        post_upload_pack_status(port, "/project.git/git-upload-pack", &gzip, true),
+        200,
+        "gzip-compressed repetitive wants past 32 MiB decoded must succeed"
+    );
+}

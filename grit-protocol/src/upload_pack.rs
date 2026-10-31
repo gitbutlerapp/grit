@@ -3,6 +3,7 @@
 //! Serves fetch and clone over smart HTTP by calling [`grit_lib::remote::serve::upload_pack`]
 //! in-process.
 
+use std::io::Read;
 use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -74,15 +75,49 @@ pub fn stateless_rpc(
     protocol_version: Option<u8>,
     repository_options: &RepositoryOptions,
 ) -> Result<Vec<u8>> {
-    run_upload_pack(
+    stateless_rpc_from_reader(
         repo_path,
+        &mut &*request_body,
         protocol_version,
-        true,
-        false,
+        repository_options,
+    )
+}
+
+/// Run a stateless upload-pack RPC exchange, reading the request body from a
+/// stream.
+///
+/// Fetch and clone POST bodies can list one `want` line per ref, so the decoded
+/// request may be much larger than the HTTP body when it is gzip-compressed.
+/// The caller should apply its own decoded-size limit while reading; this
+/// function consumes the body incrementally and never buffers it whole.
+///
+/// # Parameters
+///
+/// - `repo_path`: the repository to fetch from.
+/// - `request_body`: the decoded request body (wants, haves, capabilities).
+/// - `protocol_version`: the wire version from the `Git-Protocol` header.
+/// - `repository_options`: environment used to load global/system config.
+///
+/// # Errors
+///
+/// Fails when the repository cannot be opened, the request cannot be read, or
+/// the exchange fails before any response is produced.
+pub fn stateless_rpc_from_reader(
+    repo_path: &Path,
+    request_body: &mut dyn Read,
+    protocol_version: Option<u8>,
+    repository_options: &RepositoryOptions,
+) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    stateless_rpc_to_reader(
+        repo_path,
         request_body,
+        protocol_version,
         repository_options,
         &Extensions::default(),
-    )
+        &mut output,
+    )?;
+    Ok(output)
 }
 
 /// [`stateless_rpc`] with [`Extensions`], so `command=bundle-uri` is answered.
@@ -97,15 +132,16 @@ pub fn stateless_rpc_with(
     repository_options: &RepositoryOptions,
     extensions: &Extensions,
 ) -> Result<Vec<u8>> {
-    run_upload_pack(
+    let mut output = Vec::new();
+    stateless_rpc_to_reader(
         repo_path,
+        &mut &*request_body,
         protocol_version,
-        true,
-        false,
-        request_body,
         repository_options,
         extensions,
-    )
+        &mut output,
+    )?;
+    Ok(output)
 }
 
 /// Run a stateless upload-pack RPC exchange (for `POST /git-upload-pack`),
@@ -131,6 +167,29 @@ pub fn stateless_rpc_with(
 pub fn stateless_rpc_to(
     repo_path: &Path,
     request_body: &[u8],
+    protocol_version: Option<u8>,
+    repository_options: &RepositoryOptions,
+    extensions: &Extensions,
+    output: &mut dyn std::io::Write,
+) -> Result<()> {
+    stateless_rpc_to_reader(
+        repo_path,
+        &mut &*request_body,
+        protocol_version,
+        repository_options,
+        extensions,
+        output,
+    )
+}
+
+/// [`stateless_rpc_to`] with a streaming request body.
+///
+/// # Errors
+///
+/// Same as [`stateless_rpc_to`].
+pub fn stateless_rpc_to_reader(
+    repo_path: &Path,
+    request_body: &mut dyn Read,
     protocol_version: Option<u8>,
     repository_options: &RepositoryOptions,
     extensions: &Extensions,
