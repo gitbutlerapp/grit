@@ -542,7 +542,7 @@ pub(crate) fn merge_trees_at_depth(
         (touched, ours_old_to_new_pairs, theirs_pairs)
     };
 
-    let (mut base, mut ours, mut theirs) = merge_trees_walk::build_sparse_maps(
+    let (base, mut ours, mut theirs) = merge_trees_walk::build_sparse_maps(
         cache,
         repo,
         base_tree,
@@ -555,22 +555,20 @@ pub(crate) fn merge_trees_at_depth(
     augment_renames_with_same_blob(&base, &theirs, &mut theirs_pairs);
 
     let mut df_escapes = DfEscapes::default();
-    if let (Some(ours_commit), Some(theirs_commit)) = (
-        presentation.df_directory_ours_commit,
-        presentation.df_directory_theirs_commit,
-    ) {
+    if presentation.df_directory_ours_commit.is_some()
+        && presentation.df_directory_theirs_commit.is_some()
+    {
         df_escapes = apply_df_file_directory_conflicts_trees(
             cache,
             repo,
             &base_tree,
             &ours_tree,
             &theirs_tree,
-            &mut base,
+            &base,
             &mut ours,
             &mut theirs,
             &mut touched,
-            ours_commit,
-            theirs_commit,
+            presentation,
         )?;
     }
 
@@ -649,6 +647,7 @@ pub(crate) fn merge_trees_at_depth(
     };
 
     drop(ours_old_to_new_pairs);
+    let df_skip = df_escapes.skip_paths();
     let mut output = merge_trees_walk::three_way_on_touched_paths(
         cache,
         repo,
@@ -662,25 +661,14 @@ pub(crate) fn merge_trees_at_depth(
         &ours_new_to_old,
         &theirs_old_to_new,
         rename_conflicts,
+        &df_skip,
         favor,
         ws,
         diff_algorithm,
         presentation,
         call_depth,
     )?;
-    for orig in &df_escapes.relocated_from {
-        output.index.remove_path_all_stages(orig);
-    }
-    for (path, entry) in df_escapes.stage2 {
-        output.index.remove_path_all_stages(&path);
-        stage_entry(&mut output.index, &path, &entry, 2);
-        output.touched_paths.insert(path);
-    }
-    for (path, entry) in df_escapes.stage3 {
-        output.index.remove_path_all_stages(&path);
-        stage_entry(&mut output.index, &path, &entry, 3);
-        output.touched_paths.insert(path);
-    }
+    df_escapes.apply_to_output(&mut output);
     output.index.sort();
     drop((base, ours, theirs, touched));
     let mut renamed_away = HashSet::new();
@@ -926,11 +914,44 @@ fn renamed_file_content(
     Ok(Some(entry))
 }
 
+struct DfParkedFile {
+    orig: Vec<u8>,
+    escaped: Vec<u8>,
+    base: Option<IndexEntry>,
+    side: IndexEntry,
+    side_stage: u8,
+}
+
 #[derive(Default)]
 struct DfEscapes {
-    stage2: BTreeMap<Vec<u8>, IndexEntry>,
-    stage3: BTreeMap<Vec<u8>, IndexEntry>,
-    relocated_from: Vec<Vec<u8>>,
+    parked: Vec<DfParkedFile>,
+}
+
+impl DfEscapes {
+    fn skip_paths(&self) -> HashSet<Vec<u8>> {
+        self.parked.iter().map(|p| p.orig.clone()).collect()
+    }
+
+    fn apply_to_output(&self, output: &mut TreeMergeOutput) {
+        for parked in &self.parked {
+            output.conflict_content.remove(&parked.orig);
+            output.index.remove_path_all_stages(&parked.orig);
+            output.index.remove_path_all_stages(&parked.escaped);
+            if let Some(be) = &parked.base {
+                stage_entry(&mut output.index, &parked.escaped, be, 1);
+            }
+            stage_entry(
+                &mut output.index,
+                &parked.escaped,
+                &parked.side,
+                parked.side_stage,
+            );
+            output
+                .conflict_content
+                .insert(parked.escaped.clone(), parked.side.oid);
+            output.touched_paths.insert(parked.escaped.clone());
+        }
+    }
 }
 
 fn side_has_descendant(side: &BTreeMap<Vec<u8>, IndexEntry>, prefix: &[u8]) -> bool {
@@ -945,12 +966,11 @@ fn apply_df_file_directory_conflicts_trees(
     base_tree: &ObjectId,
     ours_tree: &ObjectId,
     theirs_tree: &ObjectId,
-    base: &mut BTreeMap<Vec<u8>, IndexEntry>,
+    base: &BTreeMap<Vec<u8>, IndexEntry>,
     ours: &mut BTreeMap<Vec<u8>, IndexEntry>,
     theirs: &mut BTreeMap<Vec<u8>, IndexEntry>,
     touched: &mut HashSet<Vec<u8>>,
-    ours_commit: ObjectId,
-    theirs_commit: ObjectId,
+    presentation: TreeMergeConflictPresentation<'_>,
 ) -> crate::error::Result<DfEscapes> {
     use merge_tree_cache::MergeTreeSide;
 
@@ -987,11 +1007,12 @@ fn apply_df_file_directory_conflicts_trees(
         if directory_unchanged_from_base(cache, odb, base_tree, theirs_tree, path)? {
             continue;
         }
-        let escaped = escape_df_path_side(ours, path, ours_commit, &mut out.stage2);
-        out.relocated_from.push(path.clone());
-        touched.insert(path.clone());
-        if let Some(p) = escaped {
-            touched.insert(p);
+        let label = presentation.label_ours.as_bytes();
+        let side_entry = ours.remove(path);
+        if let Some(parked) = park_df_file_side(base, ours, theirs, path, label, 2, side_entry) {
+            touched.insert(path.clone());
+            touched.insert(parked.escaped.clone());
+            out.parked.push(parked);
         }
     }
     for path in &theirs_paths {
@@ -1020,15 +1041,88 @@ fn apply_df_file_directory_conflicts_trees(
         if directory_unchanged_from_base(cache, odb, base_tree, ours_tree, path)? {
             continue;
         }
-        let escaped = escape_df_path_side(theirs, path, theirs_commit, &mut out.stage3);
-        out.relocated_from.push(path.clone());
-        touched.insert(path.clone());
-        if let Some(p) = escaped {
-            touched.insert(p);
+        let label = df_theirs_escape_label(presentation, path);
+        let side_entry = theirs.remove(path);
+        if let Some(parked) =
+            park_df_file_side(base, ours, theirs, path, label.as_bytes(), 3, side_entry)
+        {
+            touched.insert(path.clone());
+            touched.insert(parked.escaped.clone());
+            out.parked.push(parked);
         }
     }
-    let _ = base;
     Ok(out)
+}
+
+fn df_theirs_escape_label<'a>(
+    presentation: TreeMergeConflictPresentation<'a>,
+    path: &[u8],
+) -> std::borrow::Cow<'a, str> {
+    match presentation.label_theirs {
+        TheirsConflictLabel::Fixed(label) => std::borrow::Cow::Borrowed(label),
+        TheirsConflictLabel::PathUtf8 => {
+            std::borrow::Cow::Owned(String::from_utf8_lossy(path).into_owned())
+        }
+    }
+}
+
+fn occupied_paths(
+    base: &BTreeMap<Vec<u8>, IndexEntry>,
+    ours: &BTreeMap<Vec<u8>, IndexEntry>,
+    theirs: &BTreeMap<Vec<u8>, IndexEntry>,
+) -> HashSet<Vec<u8>> {
+    base.keys()
+        .chain(ours.keys())
+        .chain(theirs.keys())
+        .cloned()
+        .collect()
+}
+
+fn uniquify_df_escape_path(path: &[u8], label: &[u8], occupied: &HashSet<Vec<u8>>) -> Vec<u8> {
+    let mut candidate = Vec::with_capacity(path.len() + 1 + label.len());
+    candidate.extend_from_slice(path);
+    candidate.push(b'~');
+    candidate.extend_from_slice(label);
+    if !occupied.contains(&candidate) {
+        return candidate;
+    }
+    let mut n = 2u32;
+    loop {
+        let mut alt = candidate.clone();
+        alt.push(b'~');
+        alt.extend_from_slice(n.to_string().as_bytes());
+        if !occupied.contains(&alt) {
+            return alt;
+        }
+        n += 1;
+    }
+}
+
+fn park_df_file_side(
+    base: &BTreeMap<Vec<u8>, IndexEntry>,
+    ours: &BTreeMap<Vec<u8>, IndexEntry>,
+    theirs: &BTreeMap<Vec<u8>, IndexEntry>,
+    path: &[u8],
+    label: &[u8],
+    side_stage: u8,
+    side_entry: Option<IndexEntry>,
+) -> Option<DfParkedFile> {
+    let mut side_entry = side_entry?;
+    if side_entry.mode == 0o040000 {
+        return None;
+    }
+    let occupied = occupied_paths(base, ours, theirs);
+    let escaped = uniquify_df_escape_path(path, label, &occupied);
+    side_entry.path = escaped.clone();
+    side_entry.flags = path_len_flags(&escaped);
+    let base_at_path = base.get(path).filter(|e| e.mode != 0o040000).cloned();
+    Some(DfParkedFile {
+        orig: path.to_vec(),
+        escaped,
+        base: base_at_path,
+        side: side_entry,
+        side_stage,
+    })
 }
 
 /// True when `side_tree` holds exactly the base's directory at `path`.
@@ -1052,24 +1146,6 @@ fn directory_unchanged_from_base(
         return Ok(false);
     };
     Ok(base.mode == 0o040000 && side.mode == 0o040000 && base.oid == side.oid)
-}
-
-fn escape_df_path_side(
-    side: &mut BTreeMap<Vec<u8>, IndexEntry>,
-    path: &[u8],
-    side_commit: ObjectId,
-    staged: &mut BTreeMap<Vec<u8>, IndexEntry>,
-) -> Option<Vec<u8>> {
-    let mut entry = side.remove(path)?;
-    let hex = side_commit.to_hex();
-    let mut escaped_path = path.to_vec();
-    escaped_path.extend_from_slice(b"~");
-    escaped_path.extend_from_slice(hex.as_bytes());
-    entry.path = escaped_path.clone();
-    entry.flags = path_len_flags(&escaped_path);
-    staged.insert(escaped_path.clone(), entry.clone());
-    side.insert(escaped_path.clone(), entry);
-    Some(escaped_path)
 }
 
 /// Git skips D/F relocation when one side only expanded a base file into `path/…`.

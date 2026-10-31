@@ -1781,10 +1781,43 @@ fn merge_abort_append_unmerged_tree_checkouts(
     Ok(())
 }
 
+fn merge_abort_remove_worktree_paths_blocking_tree_dirs(
+    repo: &Repository,
+    work_tree: &Path,
+    tree: &ObjectId,
+    prefix: &[u8],
+) -> Result<()> {
+    let obj = repo.odb().read(tree)?;
+    let entries = parse_tree(&obj.data)?;
+    for entry in entries {
+        let path_bytes = crate::repo_relpath::join_rel(prefix, &entry.name);
+        if crate::index::is_tree_mode(entry.mode) {
+            let abs = crate::index::worktree_path_from_index_rel(work_tree, &path_bytes);
+            if abs
+                .symlink_metadata()
+                .is_ok_and(|meta| !meta.is_dir() && !meta.file_type().is_symlink())
+            {
+                fs::remove_file(&abs)?;
+                checkout::remove_empty_parent_dirs(work_tree, &abs);
+            }
+            merge_abort_remove_worktree_paths_blocking_tree_dirs(
+                repo,
+                work_tree,
+                &entry.oid,
+                &path_bytes,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn restore_pre_merge_state(repo: &Repository) -> Result<()> {
     let orig = read_orig_head_for_repository(repo)?
         .ok_or_else(|| Error::Message("merge in progress but ORIG_HEAD is missing".into()))?;
     let head_tree = repo.odb().commit_tree(&orig)?;
+    if let Some(work_tree) = repo.work_tree() {
+        merge_abort_remove_worktree_paths_blocking_tree_dirs(repo, work_tree, &head_tree, b"")?;
+    }
 
     let old_index = repo.load_index()?;
     // Paths only introduced by the conflicted merge (absent from the pre-merge tree) must be

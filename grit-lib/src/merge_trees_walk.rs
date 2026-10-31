@@ -628,6 +628,7 @@ pub(crate) fn three_way_on_touched_paths(
     ours_new_to_old: &std::collections::HashMap<Vec<u8>, Vec<u8>>,
     theirs_old_to_new: &std::collections::HashMap<Vec<u8>, Vec<u8>>,
     rename_conflicts: Vec<RenameRenameConflict>,
+    df_skip_paths: &HashSet<Vec<u8>>,
     favor: MergeFavor,
     ws: WhitespaceMergeOptions,
     diff_algorithm: Option<&str>,
@@ -747,7 +748,7 @@ pub(crate) fn three_way_on_touched_paths(
     }
 
     for op in ours_paths {
-        if handled_ours.contains(op) {
+        if df_skip_paths.contains(op) || handled_ours.contains(op) {
             continue;
         }
         if ours_rename_sources.contains(op)
@@ -813,7 +814,7 @@ pub(crate) fn three_way_on_touched_paths(
     base_paths.sort();
     base_paths.dedup();
     for bp in base_paths {
-        if handled_base.contains(bp) {
+        if df_skip_paths.contains(bp) || handled_base.contains(bp) {
             continue;
         }
         let tp = theirs_old_to_new.get(bp).map_or(bp, Vec::as_slice);
@@ -844,7 +845,7 @@ pub(crate) fn three_way_on_touched_paths(
     theirs_paths.sort();
     theirs_paths.dedup();
     for tp in theirs_paths {
-        if handled_theirs.contains(tp) {
+        if df_skip_paths.contains(tp) || handled_theirs.contains(tp) {
             continue;
         }
         let t = sides.file(cache, odb, MergeTreeSide::Theirs, tp);

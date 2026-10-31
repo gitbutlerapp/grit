@@ -969,6 +969,8 @@ mod merge_continue_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "merge_detached_head_git_compat.rs"]
 mod merge_detached_head_git_compat;
+#[path = "merge_df_integrate_issue_2359.rs"]
+mod merge_df_integrate_issue_2359;
 #[path = "merge_diff_line_coverage.rs"]
 mod merge_diff_line_coverage;
 #[cfg(feature = "full-tests")]
