@@ -182,7 +182,7 @@ pub enum DiffAttr {
 }
 
 /// Per-file attributes relevant to conversion.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileAttrs {
     /// `text` field.
     pub text: TextAttr,

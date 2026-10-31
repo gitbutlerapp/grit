@@ -30776,10 +30776,14 @@ pub grit_lib::worktree::crlf::FileAttrs::whitespace: core::option::Option<alloc:
 pub grit_lib::worktree::crlf::FileAttrs::working_tree_encoding: core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::worktree::crlf::FileAttrs
 pub fn grit_lib::worktree::crlf::FileAttrs::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::worktree::crlf::FileAttrs
+impl core::cmp::PartialEq for grit_lib::worktree::crlf::FileAttrs
+pub fn grit_lib::worktree::crlf::FileAttrs::eq(&self, &Self) -> bool
 impl core::default::Default for grit_lib::worktree::crlf::FileAttrs
 pub fn grit_lib::worktree::crlf::FileAttrs::default() -> Self
 impl core::fmt::Debug for grit_lib::worktree::crlf::FileAttrs
 pub fn grit_lib::worktree::crlf::FileAttrs::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::worktree::crlf::FileAttrs
 impl core::marker::Freeze for grit_lib::worktree::crlf::FileAttrs
 impl core::marker::Send for grit_lib::worktree::crlf::FileAttrs
 impl core::marker::Sync for grit_lib::worktree::crlf::FileAttrs
