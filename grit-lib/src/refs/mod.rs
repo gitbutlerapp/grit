@@ -5570,27 +5570,6 @@ mod refname_available_tests {
     }
 
     #[test]
-    fn list_refs_packed_annotated_tag_uses_tag_object_not_peel() {
-        let dir = tempdir().unwrap();
-        let tag_oid: ObjectId = "1111111111111111111111111111111111111111"
-            .parse()
-            .unwrap();
-        let commit_oid: ObjectId = "2222222222222222222222222222222222222222"
-            .parse()
-            .unwrap();
-        let body = format!(
-            "# pack-refs with: peeled fully-peeled sorted \n\
-             {} refs/tags/v1\n\
-             ^{}\n",
-            tag_oid.to_hex(),
-            commit_oid.to_hex()
-        );
-        fs::write(dir.path().join("packed-refs"), body).unwrap();
-        let listed = list_refs(dir.path(), "refs/tags/").unwrap();
-        assert_eq!(listed, vec![("refs/tags/v1".to_owned(), tag_oid)]);
-    }
-
-    #[test]
     fn verify_blocks_parent_when_child_ref_exists() {
         let dir = tempdir().unwrap();
         let git_dir = dir.path();

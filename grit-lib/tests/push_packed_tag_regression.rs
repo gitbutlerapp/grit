@@ -5,10 +5,12 @@
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
-use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::refs::gc::collect_referenced_object_roots;
 use grit_lib::refs::list_refs;
-use grit_lib::remote::push_plan::{follow_tag_push_specs, resolve_push, PushPlanContext, PushRequest};
+use grit_lib::remote::push_plan::{
+    follow_tag_push_specs, resolve_push, PushPlanContext, PushRequest,
+};
+use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{push_local, PushOptions};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
