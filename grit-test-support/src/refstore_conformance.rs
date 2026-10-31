@@ -120,6 +120,10 @@ pub const CASES: &[(&str, Case)] = &[
     ("concurrent_prepare_lock_held", concurrent_prepare_lock_held),
     ("reflog_roundtrip", reflog_roundtrip),
     ("rewrite_reflog_roundtrip", rewrite_reflog_roundtrip),
+    (
+        "rewrite_reflog_serializes_concurrent_append",
+        rewrite_reflog_serializes_concurrent_append,
+    ),
     ("reentrant_callbacks", reentrant_callbacks),
 ];
 
@@ -175,6 +179,22 @@ fn commit_txn(store: &dyn RefStore, txn: RefTransaction) {
         .expect("prepare")
         .commit()
         .expect("commit");
+}
+
+fn commit_txn_retry_lock(store: &dyn RefStore, txn: RefTransaction) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match store.prepare(txn.clone()) {
+            Ok(prepared) => {
+                prepared.commit().expect("commit");
+                return;
+            }
+            Err(RefStoreError::LockHeld { .. }) if std::time::Instant::now() < deadline => {
+                thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Err(err) => panic!("prepare: {err:?}"),
+        }
+    }
 }
 
 fn seed_direct(store: &dyn RefStore, name: &str, value: ObjectId) {
@@ -1140,6 +1160,83 @@ pub fn rewrite_reflog_roundtrip(store: Arc<dyn RefStore>) {
         })
         .expect("read");
     assert_eq!(kept, vec![log(1), log(3)]);
+}
+
+const CONCURRENT_APPEND_MARKER: &str = "refstore-conformance-concurrent-append";
+
+/// [`RefStore::rewrite_reflog`] must hold the ref writer lock through `transform`, not only
+/// for the initial read. A read-sleep-`replace_reflog` path lets a concurrent `prepare` append
+/// a line that the final replace then drops.
+pub fn rewrite_reflog_serializes_concurrent_append(store: Arc<dyn RefStore>) {
+    seed_direct(store.as_ref(), "refs/heads/r", oid(1));
+    let droppable = ReflogEntry {
+        old_oid: oid(0),
+        new_oid: oid(1),
+        identity: "A <a@a.com> 1 +0000".to_owned(),
+        message: "drop-me".to_owned(),
+    };
+    let keep = ReflogEntry {
+        old_oid: oid(1),
+        new_oid: oid(2),
+        identity: "A <a@a.com> 2 +0000".to_owned(),
+        message: "keep-me".to_owned(),
+    };
+    store
+        .replace_reflog("refs/heads/r", vec![droppable, keep])
+        .expect("seed");
+
+    let (signal_tx, signal_rx) = std::sync::mpsc::channel();
+    let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+    let store2 = Arc::clone(&store);
+
+    let appender = thread::spawn(move || {
+        signal_rx.recv().expect("signal");
+        let txn = RefTransaction::new()
+            .update(RefUpdate {
+                name: "refs/heads/r".into(),
+                new_value: Some(RawRef::Direct(oid(3))),
+                expected: Expected::Oid(oid(1)),
+                reflog: Some(ReflogUpdate {
+                    identity: "A <a@a.com> 3 +0000".into(),
+                    message: CONCURRENT_APPEND_MARKER.into(),
+                    time: time::OffsetDateTime::from_unix_timestamp(1_700_000_003).expect("ts"),
+                    old_oid: Some(oid(1)),
+                    new_oid: Some(oid(3)),
+                }),
+                flags: RefUpdateFlags::default(),
+            })
+            .expect("txn");
+        commit_txn_retry_lock(store2.as_ref(), txn);
+        finished_tx.send(()).expect("send");
+    });
+
+    store
+        .rewrite_reflog("refs/heads/r", &mut |entries| {
+            signal_tx.send(()).expect("signal");
+            thread::sleep(std::time::Duration::from_millis(300));
+            Ok(entries
+                .into_iter()
+                .filter(|e| e.message != "drop-me")
+                .collect())
+        })
+        .expect("rewrite");
+
+    appender.join().expect("join");
+    finished_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("append finished");
+
+    let mut messages = Vec::new();
+    store
+        .for_each_reflog_entry("refs/heads/r", false, &mut |e| {
+            messages.push(e.message.clone());
+            ControlFlow::Continue(())
+        })
+        .expect("read");
+    assert!(
+        messages.iter().any(|m| m == CONCURRENT_APPEND_MARKER),
+        "concurrent append lost during rewrite_reflog; messages={messages:?}"
+    );
 }
 
 /// Iteration callbacks may read and write the store they are iterating. A backend that holds

@@ -5,8 +5,9 @@
 //! embeddable in-memory implementation used by tests and callers that keep refs
 //! outside a repository directory.
 //!
-//! To write your own backend, build `prepare` and `commit` on the [`backend`] helpers and
-//! check it with the `grit_test_support::refstore_conformance` suite.
+//! To write your own backend, build `prepare` and `commit` on the [`backend`] helpers,
+//! implement [`RefStore::rewrite_reflog`] with the same writer exclusion as `prepare`/`commit`,
+//! and check it with the `grit_test_support::refstore_conformance` suite.
 
 mod apply;
 pub mod backend;
@@ -104,7 +105,9 @@ pub trait PreparedRefTransaction: Send {
 /// through [`Self::prepare`]; see its documentation for the checks it must make. The
 /// [`backend`] module implements those checks and the commit semantics, and the
 /// `grit_test_support::refstore_conformance` suite verifies a store agrees with the built-in
-/// backends. Report failures of your own storage as [`RefStoreError::Backend`] (or
+/// backends. You must implement [`Self::rewrite_reflog`] with the same writer exclusion as
+/// `prepare`/`commit` for that ref; the suite includes a case that fails unsafe read-transform-write
+/// paths. Report failures of your own storage as [`RefStoreError::Backend`] (or
 /// [`crate::error::Error::RefStore`] wrapping it from the `Result` methods).
 pub trait RefStore: Send + Sync + Debug {
     /// Which on-disk or logical format this store uses.
@@ -256,11 +259,11 @@ pub trait RefStore: Send + Sync + Debug {
 
     /// Read a reflog under the backend writer lock, transform it, and write it back atomically.
     ///
-    /// The closure must not call back into this store. Implementations hold the per-ref lock
-    /// (files backend) or an equivalent writer lock for the whole read-transform-write.
-    ///
-    /// The default reads entries, runs `transform`, and calls [`Self::replace_reflog`], which is
-    /// not safe under concurrent ref updates; built-in backends override this method.
+    /// Custom backends must implement this method; there is no default. Hold the same writer
+    /// exclusion as [`Self::prepare`] / [`PreparedRefTransaction::commit`] for the whole
+    /// read-transform-write on `name`, pass the locked re-read of entries into `transform`, and
+    /// do not call back into this store from `transform` (that deadlocks backends that hold a
+    /// mutex across the call).
     ///
     /// # Errors
     ///
@@ -271,15 +274,7 @@ pub trait RefStore: Send + Sync + Debug {
         &self,
         name: &str,
         transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
-    ) -> Result<()> {
-        let mut entries = Vec::new();
-        self.for_each_reflog_entry(name, false, &mut |entry| {
-            entries.push(entry.clone());
-            ControlFlow::Continue(())
-        })?;
-        let rewritten = transform(entries)?;
-        self.replace_reflog(name, rewritten)
-    }
+    ) -> Result<()>;
 
     /// Invoke `f` for each ref name that has a reflog, in sorted order.
     ///
