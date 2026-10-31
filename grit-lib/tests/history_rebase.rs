@@ -1792,23 +1792,41 @@ fn rebase_sequential_topic_merges_no_duplicate_commits_issue_2365() {
         );
     }
 
-    let grit_t2_parent = parse_commit(
+    let feature_tip = git_rev_parse(wt_g, "feature");
+    let grit_merge_t2 = parse_commit(
         &grit
             .odb()
-            .read(&git_rev_parse(wt_g, "feature~1"))
-            .expect("read")
+            .read(&feature_tip)
+            .expect("read feature tip")
             .data,
     )
-    .expect("parse")
-    .parents[0];
-    let grit_merge_t1 = git_rev_parse(wt_g, "feature~2");
+    .expect("parse merge t2");
+    assert_eq!(grit_merge_t2.parents.len(), 2);
+    let grit_merge_t1_oid = grit_merge_t2.parents[0];
+    let grit_t2_oid = grit_merge_t2.parents[1];
+
+    let grit_t2 =
+        parse_commit(&grit.odb().read(&grit_t2_oid).expect("read t2").data).expect("parse t2");
     assert_eq!(
-        grit_t2_parent, grit_merge_t1,
-        "t2's first parent is the rebased merge t1"
+        grit_t2.parents[0], grit_merge_t1_oid,
+        "t2's first parent is the rebased merge t1 (merge t2's first parent)"
+    );
+
+    let grit_merge_t1 = parse_commit(
+        &grit
+            .odb()
+            .read(&grit_merge_t1_oid)
+            .expect("read merge t1")
+            .data,
+    )
+    .expect("parse merge t1");
+    assert_eq!(
+        grit_merge_t1.parents[0], onto,
+        "merge t1's first parent is the new main tip"
     );
     assert_ne!(
-        grit_t2_parent, onto,
-        "t2 must not sit directly on the old base"
+        grit_merge_t1.parents[0], fork,
+        "merge t1 must not keep the old fork as first parent"
     );
 
     assert_eq!(

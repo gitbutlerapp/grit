@@ -1654,28 +1654,23 @@ mod tests {
         let fork = write_commit(&repo, fork_tree, &[], "base", &id).expect("fork");
         let t1_tree = blob_tree(&repo, "t1.txt", b"t1\n").expect("t1 tree");
         let t1 = write_commit(&repo, t1_tree, &[fork], "t1", &id).expect("t1");
-        let merge_t1_tree = files_tree(
-            &repo,
-            &[("base", b"base\n"), ("t1.txt", b"t1\n")],
-        )
-        .expect("merge t1 tree");
+        let merge_t1_tree =
+            files_tree(&repo, &[("base", b"base\n"), ("t1.txt", b"t1\n")]).expect("merge t1 tree");
         let merge_t1 =
             write_commit(&repo, merge_t1_tree, &[fork, t1], "merge t1", &id).expect("merge t1");
         let t2_tree = blob_tree(&repo, "t2.txt", b"t2\n").expect("t2 tree");
         let t2 = write_commit(&repo, t2_tree, &[merge_t1], "t2", &id).expect("t2");
         let merge_t2_tree = files_tree(
             &repo,
-            &[("base", b"base\n"), ("t1.txt", b"t1\n"), ("t2.txt", b"t2\n")],
+            &[
+                ("base", b"base\n"),
+                ("t1.txt", b"t1\n"),
+                ("t2.txt", b"t2\n"),
+            ],
         )
         .expect("merge t2 tree");
-        let merge_t2 = write_commit(
-            &repo,
-            merge_t2_tree,
-            &[merge_t1, t2],
-            "merge t2",
-            &id,
-        )
-        .expect("merge t2");
+        let merge_t2 =
+            write_commit(&repo, merge_t2_tree, &[merge_t1, t2], "merge t2", &id).expect("merge t2");
 
         let range_set: HashSet<ObjectId> = [t1, merge_t1, t2, merge_t2].into_iter().collect();
         let mainline =

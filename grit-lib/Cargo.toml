@@ -453,6 +453,11 @@ name = "checkout_wide_tree_rss"
 path = "tests/checkout_wide_tree_rss.rs"
 required-features = ["full-tests"]
 
+[[test]]
+name = "history_rebase_bin"
+path = "tests/history_rebase_bin.rs"
+required-features = ["full-tests"]
+
 [[bench]]
 name = "pack_frontier"
 harness = false
