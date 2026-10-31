@@ -12,6 +12,8 @@ use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(any(test, feature = "full-tests"))]
+use std::sync::MutexGuard;
 use std::sync::{Arc, Mutex};
 
 use super::{
@@ -581,25 +583,51 @@ fn restore_spooled_directory(
 }
 
 #[cfg(any(test, feature = "full-tests"))]
-static CHECKOUT_SPOOL_PROBE: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+static CHECKOUT_SPOOL_PROBE: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(any(test, feature = "full-tests"))]
+static CHECKOUT_SPOOL_PROBE_ACTIVE: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(any(test, feature = "full-tests"))]
+static CHECKOUT_SPOOL_PROBE_SERIAL: Mutex<()> = Mutex::new(());
+
+/// Keeps checkout spool probing armed for one test; disarms on drop.
+#[cfg(any(test, feature = "full-tests"))]
+#[doc(hidden)]
+pub struct CheckoutSpoolProbeScope {
+    _serial: MutexGuard<'static, ()>,
+}
+
+#[cfg(any(test, feature = "full-tests"))]
+impl Drop for CheckoutSpoolProbeScope {
+    fn drop(&mut self) {
+        CHECKOUT_SPOOL_PROBE_ACTIVE.store(0, Ordering::Release);
+    }
+}
 
 /// Reset and return a guard that counts checkout delete spools until dropped.
 #[cfg(any(test, feature = "full-tests"))]
 #[doc(hidden)]
 pub fn reset_checkout_spool_probe() -> CheckoutSpoolProbeScope {
-    CHECKOUT_SPOOL_PROBE.store(0, std::sync::atomic::Ordering::Relaxed);
-    CheckoutSpoolProbeScope
+    let serial = CHECKOUT_SPOOL_PROBE_SERIAL
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    CHECKOUT_SPOOL_PROBE.store(0, Ordering::Relaxed);
+    CHECKOUT_SPOOL_PROBE_ACTIVE.store(1, Ordering::Release);
+    CheckoutSpoolProbeScope { _serial: serial }
 }
 
 #[cfg(any(test, feature = "full-tests"))]
 #[doc(hidden)]
-pub struct CheckoutSpoolProbeScope;
+pub fn checkout_spool_probe_count() -> usize {
+    CHECKOUT_SPOOL_PROBE.load(Ordering::Relaxed)
+}
 
 #[cfg(any(test, feature = "full-tests"))]
-#[doc(hidden)]
-pub fn checkout_spool_probe_count() -> usize {
-    CHECKOUT_SPOOL_PROBE.load(std::sync::atomic::Ordering::Relaxed)
+fn record_checkout_spool_probe() {
+    if CHECKOUT_SPOOL_PROBE_ACTIVE.load(Ordering::Acquire) != 0 {
+        CHECKOUT_SPOOL_PROBE.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 fn move_worktree_entry_to_spool(
@@ -613,14 +641,14 @@ fn move_worktree_entry_to_spool(
     match fs::rename(abs, stash) {
         Ok(()) => {
             #[cfg(any(test, feature = "full-tests"))]
-            CHECKOUT_SPOOL_PROBE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            record_checkout_spool_probe();
             Ok(())
         }
         Err(err) if err.kind() == std::io::ErrorKind::CrossesDevices => {
             cross_device_move_to_spool(abs, stash, kind)?;
             fs::remove_file(abs)?;
             #[cfg(any(test, feature = "full-tests"))]
-            CHECKOUT_SPOOL_PROBE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            record_checkout_spool_probe();
             Ok(())
         }
         Err(err) => Err(err),

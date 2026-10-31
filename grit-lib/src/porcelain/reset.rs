@@ -1996,16 +1996,39 @@ mod tests {
     fn hard_reset_all_modified_stat_clean_does_not_spool_worktree() {
         use crate::porcelain::checkout::{checkout_spool_probe_count, reset_checkout_spool_probe};
 
+        const FILES: usize = 50;
+
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
-        let (repo, older, newer) = wide_repo_two_commits_all_paths_differ(root);
-        let pinned = filetime::FileTime::from_unix_time(1_700_000_100, 0);
-        for d in 0..ALL_MODIFIED_DIRS {
-            for f in 0..ALL_MODIFIED_FILES_PER_DIR {
-                let path = root.join(format!("d{d}/f{f}.txt"));
-                filetime::set_file_mtime(&path, pinned).expect("pin mtime");
-            }
+        git(root, &["init", "-q", "-b", "main", "."]);
+        git(root, &["config", "gc.auto", "0"]);
+        for i in 0..FILES {
+            std::fs::write(root.join(format!("f{i:02}.txt")), format!("base {i}\n"))
+                .expect("write");
         }
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+        for i in 0..FILES {
+            std::fs::write(
+                root.join(format!("f{i:02}.txt")),
+                format!("base {i}\nedit\n"),
+            )
+            .expect("edit");
+        }
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "edited"]);
+        let older = ObjectId::from_hex(git(root, &["rev-parse", "HEAD~1"]).trim()).expect("older");
+        let newer = ObjectId::from_hex(git(root, &["rev-parse", "HEAD"]).trim()).expect("newer");
+        let repo = Repository::open(
+            &root.join(".git"),
+            &crate::environment::RepositoryOptions::empty().with_work_tree(root),
+        )
+        .expect("open");
+        let pinned = filetime::FileTime::from_unix_time(1_700_000_100, 0);
+        for i in 0..FILES {
+            filetime::set_file_mtime(root.join(format!("f{i:02}.txt")), pinned).expect("pin");
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
         git(root, &["update-index", "-q", "--refresh"]);
 
         let _spool = reset_checkout_spool_probe();
@@ -2026,7 +2049,7 @@ mod tests {
         assert_eq!(
             checkout_spool_probe_count(),
             0,
-            "stat-clean tree-diff hard reset must not spool every rewritten path"
+            "stat-clean non-racy tree-diff hard reset must not spool worktree files"
         );
         assert_git_sees_clean_repo(root);
     }
@@ -2068,6 +2091,144 @@ mod tests {
             "stat-dirty tree-diff path must spool before overwrite"
         );
         assert_git_sees_clean_repo(root);
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn cancelled_wide_hard_reset_restores_racy_same_size_worktree_bytes() {
+        use crate::error::Error;
+        use crate::porcelain::checkout::{checkout_spool_probe_count, reset_checkout_spool_probe};
+        use crate::progress::{Cancel, FlagCancel, ProgressPhase, ProgressSink};
+
+        const FILES: usize = 65;
+
+        struct CancelAfterCheckout {
+            cancel: FlagCancel,
+            limit: u64,
+            seen: u64,
+            in_checkout: bool,
+        }
+
+        impl ProgressSink for CancelAfterCheckout {
+            fn start(&mut self, phase: ProgressPhase, _total: Option<u64>) {
+                self.in_checkout = phase == ProgressPhase::CheckingOutFiles;
+            }
+
+            fn inc(&mut self, units: u64) {
+                if !self.in_checkout || self.cancel.is_cancelled() {
+                    return;
+                }
+                self.seen += units;
+                if self.seen >= self.limit {
+                    self.cancel.cancel();
+                }
+            }
+        }
+
+        impl Cancel for CancelAfterCheckout {
+            fn is_cancelled(&self) -> bool {
+                self.cancel.is_cancelled()
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        git(root, &["init", "-q", "-b", "main"]);
+        git(root, &["config", "core.checkStat", "minimal"]);
+        git(root, &["config", "core.trustctime", "false"]);
+        git(root, &["config", "gc.auto", "0"]);
+        std::fs::create_dir_all(root.join("keep")).expect("mkdir keep");
+        for i in 0..FILES {
+            std::fs::write(
+                root.join(format!("keep/f{i:02}.txt")),
+                format!("keep {i}\n"),
+            )
+            .expect("write");
+        }
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+        git(root, &["switch", "-qc", "other"]);
+        for i in 0..FILES {
+            std::fs::write(
+                root.join(format!("keep/f{i:02}.txt")),
+                format!("keep {i} changed\n"),
+            )
+            .expect("edit");
+        }
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "other"]);
+        git(root, &["switch", "-q", "main"]);
+
+        let mut oldest: Option<std::time::SystemTime> = None;
+        for i in 0..FILES {
+            let rel = format!("keep/f{i:02}.txt");
+            let path = root.join(&rel);
+            let mtime = std::fs::metadata(&path)
+                .expect("meta")
+                .modified()
+                .expect("mtime");
+            let before = std::fs::read_to_string(&path).expect("read");
+            let after = before.replacen("keep", "KEEP", 1);
+            assert_eq!(before.len(), after.len());
+            std::fs::write(&path, &after).expect("write edit");
+            std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .expect("open")
+                .set_modified(mtime)
+                .expect("restore mtime");
+            oldest = Some(oldest.map_or(mtime, |o: std::time::SystemTime| o.min(mtime)));
+        }
+        std::fs::File::options()
+            .write(true)
+            .open(root.join(".git/index"))
+            .expect("index")
+            .set_modified(oldest.expect("oldest"))
+            .expect("index mtime");
+
+        let status_before = git(root, &["status", "--porcelain"]);
+        assert!(
+            status_before.contains(" M keep/f00.txt"),
+            "git must see the hidden edit:\n{status_before}"
+        );
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &crate::environment::RepositoryOptions::empty().with_work_tree(root),
+        )
+        .expect("open");
+        let other = ObjectId::from_hex(git(root, &["rev-parse", "other"]).trim()).expect("other");
+        let cancel = FlagCancel::new();
+        let mut progress = CancelAfterCheckout {
+            cancel: cancel.clone(),
+            limit: 1,
+            seen: 0,
+            in_checkout: false,
+        };
+        let _spool = reset_checkout_spool_probe();
+        let err = reset_to_commit(
+            &repo,
+            &reset_opts(other, ResetMode::Hard),
+            &mut progress,
+            &cancel,
+        )
+        .expect_err("cancelled");
+        assert!(matches!(err, Error::Cancelled), "{err:?}");
+        assert!(
+            checkout_spool_probe_count() > 0,
+            "racy tree-diff paths must spool before overwrite"
+        );
+        assert!(
+            std::fs::read_to_string(root.join("keep/f00.txt"))
+                .expect("f00")
+                .starts_with("KEEP"),
+            "cancelled reset must restore pre-reset worktree bytes"
+        );
+        assert_eq!(git(root, &["status", "--porcelain"]), status_before);
+        git(root, &["fsck", "--no-progress"]);
     }
 
     #[cfg_attr(

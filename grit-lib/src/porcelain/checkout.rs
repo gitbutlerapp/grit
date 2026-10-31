@@ -1927,13 +1927,15 @@ fn hard_reset_unrecorded_tree_diff_paths(
         );
         if !stat_clean {
             unrecorded.push(path.to_owned());
-        } else if changes.len() <= RACY_TREE_DIFF_CONTENT_VERIFY_MAX
-            && crate::diff::entry_is_racy_with_policy(entry, check.index_mtime, check.policy)
-        {
+        } else if crate::diff::entry_is_racy_with_policy(entry, check.index_mtime, check.policy) {
             racy.push((pos, path, abs, meta));
         }
     }
     if racy.is_empty() {
+        return Ok(unrecorded);
+    }
+    if racy.len() > RACY_TREE_DIFF_CONTENT_VERIFY_MAX {
+        unrecorded.extend(racy.iter().map(|(_, path, _, _)| (*path).to_owned()));
         return Ok(unrecorded);
     }
     let rules = WorktreeRules::from_parts(repo, index, config.clone())?;
