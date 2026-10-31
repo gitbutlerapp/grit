@@ -363,6 +363,9 @@ fn download_attempt(
     }
     let response = match client.send(&request) {
         Ok(r) => r,
+        Err(e) if matches!(e, crate::error::Error::Auth { .. }) => {
+            return Err(ResumableError::Http(Box::new(e)));
+        }
         Err(e) => return Ok(AttemptOutcome::Dropped(e.to_string())),
     };
     let (mut offset, total) =
@@ -612,6 +615,9 @@ impl TusUpload {
                 Ok(r) if r.status == 409 => format!("offset {offset} was out of date"),
                 Ok(r) if (400..500).contains(&r.status) => return Err(gone(r.status)),
                 Ok(r) => format!("HTTP {}", r.status),
+                Err(e) if matches!(e, crate::error::Error::Auth { .. }) => {
+                    return Err(ResumableError::Http(Box::new(e)));
+                }
                 Err(e) => e.to_string(),
             };
             failures += 1;
@@ -958,6 +964,52 @@ mod tests {
         let outcome = download_resumable(&srv, "http://h/b", &dest, &mut NoProgress, &NeverCancel);
         assert_eq!(outcome.ok().map(|o| o.resumed_from), Some(kept));
         assert_eq!(std::fs::read(&dest).ok(), Some(srv.data.clone()));
+    }
+
+    #[test]
+    fn auth_failure_does_not_retry_the_download() {
+        use crate::error::{AuthFailure, Error};
+
+        struct AuthClient;
+        impl HttpClient for AuthClient {
+            fn get(&self, _: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
+                unreachable!()
+            }
+            fn post(
+                &self,
+                _: &str,
+                _: &str,
+                _: &str,
+                _: &[u8],
+                _: Option<&str>,
+            ) -> crate::error::Result<Vec<u8>> {
+                unreachable!()
+            }
+            fn send(&self, _: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
+                Err(Error::Auth {
+                    url: "http://h/b".to_owned(),
+                    reason: AuthFailure::Rejected,
+                })
+            }
+        }
+
+        let dir = tempdir();
+        let dest = dir.path().join("clone.bundle");
+        let outcome = download_resumable(
+            &AuthClient,
+            "http://h/b",
+            &dest,
+            &mut NoProgress,
+            &NeverCancel,
+        );
+        assert!(
+            matches!(outcome, Err(ResumableError::Http(_))),
+            "auth errors must fail immediately: {outcome:?}"
+        );
+        assert!(
+            !matches!(outcome, Err(ResumableError::Exhausted { .. })),
+            "auth must not be retried like a dropped connection"
+        );
     }
 
     #[test]

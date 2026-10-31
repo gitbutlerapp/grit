@@ -105,6 +105,14 @@ struct CachedAuthHeader {
     origin: String,
 }
 
+/// Authorization header chosen for a request's first attempt.
+struct InitialAuth {
+    header: Option<String>,
+    /// True when the header came from complete `user:password@` in the URL
+    /// (not from the origin cache or a credential helper).
+    from_complete_url_userinfo: bool,
+}
+
 /// `UreqHttpClient` struct.
 pub struct UreqHttpClient {
     agent: ureq::Agent,
@@ -241,6 +249,60 @@ impl UreqHttpClient {
             .as_ref()
             .filter(|entry| entry.origin == origin)
             .map(|entry| entry.header.clone())
+    }
+
+    /// Cached basic auth for `url`, or a complete `user:password@` from the request URL.
+    ///
+    /// URL credentials are stored in the in-memory origin cache only (never in a
+    /// credential helper) so later same-origin requests such as a `bundle-uri`
+    /// download can authenticate without embedding secrets in the bundle URL.
+    fn auth_header_for_url(&self, url: &str) -> InitialAuth {
+        if let Some(header) = self.cached_auth_header_for_url(url) {
+            return InitialAuth {
+                header: Some(header),
+                from_complete_url_userinfo: false,
+            };
+        }
+        let repo = repo_url_from_request_url(url);
+        let Some(cred) = Credential::from_url(repo, &self.credential_config) else {
+            return InitialAuth {
+                header: None,
+                from_complete_url_userinfo: false,
+            };
+        };
+        if !cred.is_complete() {
+            return InitialAuth {
+                header: None,
+                from_complete_url_userinfo: false,
+            };
+        }
+        let Some(header) = basic_auth_header(&cred) else {
+            return InitialAuth {
+                header: None,
+                from_complete_url_userinfo: false,
+            };
+        };
+        self.store_auth_header(header.clone(), repo);
+        InitialAuth {
+            header: Some(header),
+            from_complete_url_userinfo: true,
+        }
+    }
+
+    /// Handle an initial `401` before any credential helper runs.
+    ///
+    /// Wrong complete URL userinfo is rejected immediately; otherwise a missing
+    /// provider yields [`AuthFailure::NoCredentialProvider`].
+    fn fail_initial_401_before_helper(&self, url: &str, initial: &InitialAuth) -> Result<()> {
+        if initial.from_complete_url_userinfo {
+            self.clear_auth_header();
+            return Err(auth_error(url, AuthFailure::Rejected));
+        }
+        if self.credentials.is_none() {
+            self.clear_auth_header();
+            return Err(auth_error(url, AuthFailure::NoCredentialProvider));
+        }
+        Ok(())
     }
 
     fn store_auth_header(&self, header: String, url: &str) {
@@ -768,14 +830,14 @@ impl UreqHttpClient {
         body: &[u8],
         git_protocol: Option<&str>,
     ) -> Result<LowSpeedReader<Box<dyn Read + Send>>> {
-        let initial_auth = self.cached_auth_header_for_url(url);
+        let initial_auth = self.auth_header_for_url(url);
         let (head, reader) = self.do_post_open(
             url,
             content_type,
             accept,
             body,
             git_protocol,
-            initial_auth.as_deref(),
+            initial_auth.header.as_deref(),
         )?;
         if head.status != 401 {
             self.invalidate_auth_on_cross_origin_redirect(url, &head.final_url);
@@ -787,10 +849,11 @@ impl UreqHttpClient {
             return Ok(reader);
         }
         drain_response_body(reader);
-        let Some(provider) = self.credentials.as_ref() else {
-            self.clear_auth_header();
-            return Err(auth_error(url, AuthFailure::NoCredentialProvider));
-        };
+        self.fail_initial_401_before_helper(url, &initial_auth)?;
+        let provider = self
+            .credentials
+            .as_ref()
+            .ok_or_else(|| auth_error(url, AuthFailure::NoCredentialProvider))?;
         if !offers_basic(&head.www_authenticate) {
             return Err(auth_error(
                 url,
@@ -915,8 +978,8 @@ impl UreqHttpClient {
     /// [`HttpClient::send`] with the same `401` handling as the other requests.
     fn send_with_auth_retry(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
         let url = request.url;
-        let initial_auth = self.cached_auth_header_for_url(url);
-        let (head, response) = self.do_send(request, initial_auth.as_deref())?;
+        let initial_auth = self.auth_header_for_url(url);
+        let (head, response) = self.do_send(request, initial_auth.header.as_deref())?;
         if head.status != 401 {
             self.invalidate_auth_on_cross_origin_redirect(url, &head.final_url);
             self.save_response_cookies(&head.set_cookie);
@@ -924,10 +987,11 @@ impl UreqHttpClient {
         }
         let mut body = response.body;
         let _ = std::io::copy(&mut body, &mut io::sink());
-        let Some(provider) = self.credentials.as_ref() else {
-            self.clear_auth_header();
-            return Err(auth_error(url, AuthFailure::NoCredentialProvider));
-        };
+        self.fail_initial_401_before_helper(url, &initial_auth)?;
+        let provider = self
+            .credentials
+            .as_ref()
+            .ok_or_else(|| auth_error(url, AuthFailure::NoCredentialProvider))?;
         if !offers_basic(&head.www_authenticate) {
             return Err(auth_error(
                 url,
@@ -967,8 +1031,8 @@ impl UreqHttpClient {
     where
         F: Fn(&str, Option<&str>) -> Result<RawResponse>,
     {
-        let initial_auth = self.cached_auth_header_for_url(url);
-        let first = attempt(url, initial_auth.as_deref())?;
+        let initial_auth = self.auth_header_for_url(url);
+        let first = attempt(url, initial_auth.header.as_deref())?;
         if first.status != 401 {
             self.invalidate_auth_on_cross_origin_redirect(url, &first.final_url);
             self.save_response_cookies(&first.set_cookie);
@@ -983,10 +1047,11 @@ impl UreqHttpClient {
         // 401: need credentials. Without a provider, surface a typed auth error
         // (so embedders can detect it and e.g. fall back to a subprocess path)
         // rather than a generic message — and never block.
-        let Some(provider) = self.credentials.as_ref() else {
-            self.clear_auth_header();
-            return Err(auth_error(url, AuthFailure::NoCredentialProvider));
-        };
+        self.fail_initial_401_before_helper(url, &initial_auth)?;
+        let provider = self
+            .credentials
+            .as_ref()
+            .ok_or_else(|| auth_error(url, AuthFailure::NoCredentialProvider))?;
         if !offers_basic(&first.www_authenticate) {
             return Err(auth_error(
                 url,
@@ -1082,9 +1147,15 @@ impl HttpClient for UreqHttpClient {
         body: &mut dyn Read,
         git_protocol: Option<&str>,
     ) -> Result<Box<dyn Read + Send>> {
-        let auth = self.cached_auth_header_for_url(url);
+        let auth = self.auth_header_for_url(url);
         let result = self
-            .post_request(url, content_type, accept, git_protocol, auth.as_deref())
+            .post_request(
+                url,
+                content_type,
+                accept,
+                git_protocol,
+                auth.header.as_deref(),
+            )
             .send(ureq::SendBody::from_reader(body));
         let (head, reader) = match result {
             Ok(resp) => open_response_body(resp, &self.transport_timeouts)?,
@@ -1936,5 +2007,277 @@ mod tests {
         let msg = format!("{err}");
         assert!(msg.contains("org/repo@v1.git"));
         assert!(!msg.contains("user:pass"));
+    }
+
+    #[test]
+    fn complete_url_credentials_are_cached_for_same_origin() {
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        fn read_request(stream: &mut TcpStream) -> String {
+            stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let n = stream.read(&mut chunk).expect("read");
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            String::from_utf8_lossy(&buf).into_owned()
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let other = TcpListener::bind("127.0.0.1:0").expect("bind other");
+        let other_port = other.local_addr().expect("addr").port();
+        let auths: Arc<Mutex<Vec<Option<String>>>> = Arc::new(Mutex::new(Vec::new()));
+        let auths_repo = auths.clone();
+        let auths_other = auths.clone();
+
+        std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let req = read_request(&mut stream);
+                let auth = req.lines().find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("Authorization")
+                        .then(|| format!("{name}:{value}"))
+                });
+                auths_repo.lock().expect("lock").push(auth);
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                    .expect("write");
+            }
+        });
+        std::thread::spawn(move || {
+            let (mut stream, _) = other.accept().expect("accept other");
+            let req = read_request(&mut stream);
+            let auth = req.lines().find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("Authorization")
+                    .then(|| format!("{name}:{value}"))
+            });
+            auths_other.lock().expect("lock").push(auth);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .expect("write");
+        });
+
+        let client = UreqHttpClient::new();
+        let repo = format!("http://u%40x:p%40ss@127.0.0.1:{port}/repo.git/info/refs");
+        let bundle = format!("http://127.0.0.1:{port}/repo/bundles/x.bundle");
+        let foreign = format!("http://127.0.0.1:{other_port}/else.bundle");
+        client.get(&repo, None).expect("repo get");
+        client.get(&bundle, None).expect("bundle get");
+        client.get(&foreign, None).expect("foreign get");
+
+        let seen = auths.lock().expect("lock");
+        assert_eq!(seen.len(), 3, "expected three HTTP requests: {seen:?}");
+        assert!(
+            seen[1].as_ref().is_some_and(|h| h.contains("Basic")),
+            "same-origin bundle should reuse cached auth: {seen:?}"
+        );
+        assert!(
+            seen[2].is_none(),
+            "a different origin must not receive the repo token: {:?}",
+            seen[2]
+        );
+    }
+
+    #[test]
+    fn wrong_url_credentials_without_helper_are_rejected() {
+        use base64::Engine;
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+        use std::time::Duration;
+
+        fn read_request(stream: &mut TcpStream) -> String {
+            stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let n = stream.read(&mut chunk).expect("read");
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            String::from_utf8_lossy(&buf).into_owned()
+        }
+
+        let expected = format!(
+            "Basic {}",
+            base64::engine::general_purpose::STANDARD.encode("alice:good")
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let req = read_request(&mut stream);
+            let ok = req.lines().any(|line| {
+                line.split_once(':').is_some_and(|(name, value)| {
+                    name.eq_ignore_ascii_case("Authorization") && value.trim() == expected
+                })
+            });
+            if ok {
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                    .expect("write");
+            } else {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"git\"\r\nContent-Length: 0\r\n\r\n",
+                    )
+                    .expect("write");
+            }
+        });
+
+        let client = UreqHttpClient::new();
+        let url = format!("http://alice:bad@127.0.0.1:{port}/repo.git/info/refs");
+        let err = client.get(&url, None).expect_err("wrong URL creds");
+        assert!(
+            matches!(
+                err,
+                Error::Auth {
+                    reason: AuthFailure::Rejected,
+                    ..
+                }
+            ),
+            "expected Rejected without a credential helper, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn wrong_url_credentials_with_helper_are_rejected_without_consulting_it() {
+        use crate::credentials::CredentialProvider;
+        use crate::transport::http::{HttpClient, HttpMethod, HttpRequest};
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        fn read_request(stream: &mut TcpStream) -> String {
+            stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let n = stream.read(&mut chunk).expect("read");
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            String::from_utf8_lossy(&buf).into_owned()
+        }
+
+        fn assert_rejected(err: Error) {
+            assert!(
+                matches!(
+                    err,
+                    Error::Auth {
+                        reason: AuthFailure::Rejected,
+                        ..
+                    }
+                ),
+                "expected Rejected, got {err:?}"
+            );
+        }
+
+        #[derive(Clone)]
+        struct CountingProvider {
+            fills: Arc<AtomicUsize>,
+            approves: Arc<AtomicUsize>,
+            rejects: Arc<AtomicUsize>,
+        }
+
+        impl CountingProvider {
+            fn new() -> Self {
+                Self {
+                    fills: Arc::new(AtomicUsize::new(0)),
+                    approves: Arc::new(AtomicUsize::new(0)),
+                    rejects: Arc::new(AtomicUsize::new(0)),
+                }
+            }
+        }
+
+        impl CredentialProvider for CountingProvider {
+            fn fill(&self, input: &Credential) -> Result<Credential> {
+                self.fills.fetch_add(1, Ordering::SeqCst);
+                Ok(input.clone())
+            }
+
+            fn approve(&self, _cred: &Credential) -> Result<()> {
+                self.approves.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+
+            fn reject(&self, _cred: &Credential) -> Result<()> {
+                self.rejects.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        std::thread::spawn(move || {
+            for _ in 0..3 {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let _req = read_request(&mut stream);
+                stream
+                    .write_all(
+                        b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"git\"\r\nContent-Length: 0\r\n\r\n",
+                    )
+                    .expect("write");
+            }
+        });
+
+        let provider = CountingProvider::new();
+        let fills = provider.fills.clone();
+        let approves = provider.approves.clone();
+        let rejects = provider.rejects.clone();
+        let client = UreqHttpClient::with_credentials(Box::new(provider));
+
+        let base = format!("http://alice:bad@127.0.0.1:{port}/repo.git");
+        assert_rejected(
+            client
+                .get(&format!("{base}/info/refs"), None)
+                .expect_err("get"),
+        );
+
+        let send_url = format!("{base}/git-upload-pack");
+        let request = HttpRequest::new(HttpMethod::Get, &send_url);
+        assert_rejected(client.send(&request).expect_err("send"));
+
+        assert_rejected(
+            client
+                .post_into_reader(
+                    &send_url,
+                    "application/x-git-upload-pack-request",
+                    "application/x-git-upload-pack-result",
+                    b"0000",
+                    None,
+                )
+                .err()
+                .expect("post_into_reader"),
+        );
+
+        assert_eq!(fills.load(Ordering::SeqCst), 0, "fill must not run");
+        assert_eq!(approves.load(Ordering::SeqCst), 0, "approve must not run");
+        assert_eq!(rejects.load(Ordering::SeqCst), 0, "reject must not run");
     }
 }
