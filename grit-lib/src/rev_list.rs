@@ -6665,7 +6665,16 @@ fn try_bounded_path_limit_list(
             )?,
             _ => true,
         };
-        if action.visible && filter_ok && pickaxe_ok {
+        let mut list_commit = action.visible && filter_ok && pickaxe_ok;
+        if list_commit && (options.since_cutoff.is_some() || options.until_cutoff.is_some()) {
+            let ts = graph.committer_time(oid);
+            if options.until_cutoff.is_some_and(|u| ts > u)
+                || options.since_cutoff.is_some_and(|s| ts < s)
+            {
+                list_commit = false;
+            }
+        }
+        if list_commit {
             visible_seen += 1;
             if visible_seen > options.skip && ordered.len() < max_count {
                 ordered.push(oid);

@@ -1284,25 +1284,95 @@ fn bounded_path_since_with_large_limit_matches_git() {
     );
 }
 
+fn commit_tree_with_committer_timestamps(
+    worktree: &Path,
+    label: &str,
+    parents: &[ObjectId],
+    author: (&str, &str),
+    committer_ts: i64,
+    message: &str,
+    tree_oid: &str,
+) -> ObjectId {
+    let mut args: Vec<String> = vec![
+        "commit-tree".into(),
+        tree_oid.into(),
+        "-m".into(),
+        message.into(),
+    ];
+    for p in parents {
+        args.push("-p".into());
+        args.push(p.to_hex());
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let ts = format!("@{committer_ts} +0000");
+    let out = Command::new("git")
+        .current_dir(worktree)
+        .args(&arg_refs)
+        .env("GIT_AUTHOR_NAME", author.0)
+        .env("GIT_AUTHOR_EMAIL", author.1)
+        .env("GIT_COMMITTER_NAME", author.0)
+        .env("GIT_COMMITTER_EMAIL", author.1)
+        .env("GIT_AUTHOR_DATE", &ts)
+        .env("GIT_COMMITTER_DATE", &ts)
+        .env("GIT_CONFIG_GLOBAL", support::null_device_for_tests())
+        .env("GIT_CONFIG_SYSTEM", support::null_device_for_tests())
+        .output()
+        .expect("commit-tree");
+    assert!(
+        out.status.success(),
+        "commit-tree: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let commit = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    git(
+        worktree,
+        &["update-ref", &format!("refs/history/{label}"), &commit],
+    );
+    commit.parse().expect("oid")
+}
+
 #[test]
 fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();
-    let c0 =
-        commit_with_committer_timestamps(wt, "c0", &[], ("Alice", "a@x.com"), 1000, "old root");
-    let c1 = commit_with_committer_timestamps(
+    let c_anc = commit_with_committer_timestamps(wt, "anc", &[], ("Alice", "a@x.com"), 500, "anc");
+    let c0 = commit_with_committer_timestamps(
+        wt,
+        "c0",
+        &[c_anc],
+        ("Alice", "a@x.com"),
+        1000,
+        "keep for treesame",
+    );
+    std::fs::write(wt.join("frontier-path.txt"), "v0").expect("write");
+    git(wt, &["add", "frontier-path.txt"]);
+    let tree = git(wt, &["write-tree"]).trim().to_string();
+    let c1 = commit_tree_with_committer_timestamps(
         wt,
         "c1",
         &[c0],
         ("Alice", "a@x.com"),
         2000,
-        "past cutoff",
+        "past cutoff path touch",
+        &tree,
     );
-    remove_loose_object(wt, c0);
     let c2 = commit_with_committer_timestamps(wt, "c2", &[c1], ("Alice", "a@x.com"), 4000, "tip");
     git(wt, &["update-ref", "refs/heads/main", &c2.to_hex()]);
     commit_file(wt, "frontier-path.txt", "v1", "touch path");
     let repo = open_grit_repo(wt);
+    assert_rev_list_filter_matches_git(
+        wt,
+        &repo,
+        &[
+            "-n",
+            "5000",
+            "--author=Alice",
+            "--since=1970-01-01 00:41:40 +0000",
+            "main",
+            "--",
+            "frontier-path.txt",
+        ],
+    );
     assert_rev_list_filter_matches_git(
         wt,
         &repo,
@@ -1317,10 +1387,12 @@ fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
         ],
     );
 
+    remove_loose_object(wt, c_anc);
+
     let parsed = parse_rev_list_cli(&[
         "-n",
         "5000",
-        "--author=Refs Harness",
+        "--author=Alice",
         "--since=1970-01-01 00:41:40 +0000",
         "main",
         "--",
@@ -1334,14 +1406,18 @@ fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
             .collect::<Vec<_>>(),
     );
     let list_filter = CommitFilterBuilder::new()
-        .author("Refs Harness")
+        .author("Alice")
         .build()
         .expect("filter");
+    let paths = repo
+        .resolve_rev_walk_pathspecs(&parsed.paths)
+        .expect("paths");
     let opts = RevListOptions {
         max_count: Some(5000),
         since_cutoff: parsed.since_cutoff,
         commit_filter: Some(Arc::new(list_filter)),
-        paths: parsed.paths,
+        paths,
+        paths_resolved_from_argv: true,
         missing_action: MissingAction::Error,
         use_commit_graph: false,
         ..RevListOptions::default()
@@ -1352,7 +1428,7 @@ fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
         &[
             "-n",
             "5000",
-            "--author=Refs Harness",
+            "--author=Alice",
             "--since=1970-01-01 00:41:40 +0000",
             "main",
             "--",
@@ -1360,6 +1436,30 @@ fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
         ],
     );
     assert_eq!(result.commits, git_oids);
+    assert!(
+        !result.commits.contains(&c1),
+        "commit before --since must not be listed even when path-visible"
+    );
+
+    let list_filter = CommitFilterBuilder::new()
+        .author("Alice")
+        .build()
+        .expect("filter");
+    let opts = RevListOptions {
+        max_count: Some(5000),
+        commit_filter: Some(Arc::new(list_filter)),
+        paths: repo
+            .resolve_rev_walk_pathspecs(&["frontier-path.txt".to_owned()])
+            .expect("paths"),
+        paths_resolved_from_argv: true,
+        missing_action: MissingAction::Error,
+        use_commit_graph: false,
+        ..RevListOptions::default()
+    };
+    assert!(
+        rev_list(&repo, &["main".to_owned()], &[], &opts).is_err(),
+        "unbounded path filter walk must read the missing grandparent"
+    );
 }
 
 #[test]
