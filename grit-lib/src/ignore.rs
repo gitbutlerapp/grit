@@ -187,6 +187,37 @@ struct IgnoreRule {
     match_kind: IgnorePatternKind,
 }
 
+/// Patterns of one per-directory exclude file; every rule's `base_dir` is `base_dir`.
+#[derive(Debug, Clone)]
+struct DirRuleSet {
+    base_dir: String,
+    rules: Vec<IgnoreRule>,
+}
+
+/// What the per-directory exclude stack looks like inside one work-tree directory.
+#[derive(Debug, Clone)]
+struct DirState {
+    /// Ids into `IgnoreMatcher::rule_sets` of the exclude files that apply, root first.
+    stack: Vec<usize>,
+    /// Whether deeper directories may still add their own exclude file; `false` once an
+    /// ancestor turned out to be a file (or per-directory files are not read at all).
+    extendable: bool,
+    /// The pattern excluding this directory or one of its ancestors, which excludes everything
+    /// below it (`prep_exclude` stops descending at an excluded directory).
+    excluded: Option<IgnoreMatch>,
+}
+
+impl From<&IgnoreRule> for IgnoreMatch {
+    fn from(rule: &IgnoreRule) -> Self {
+        Self {
+            source: rule.source.clone(),
+            line_number: rule.line_number,
+            pattern_text: rule.pattern_text.clone(),
+            negative: rule.negative,
+        }
+    }
+}
+
 /// Engine used to evaluate ignore patterns against repository-relative paths.
 #[derive(Debug, Default, Clone)]
 pub struct IgnoreMatcher {
@@ -196,7 +227,9 @@ pub struct IgnoreMatcher {
     info_rules: Vec<IgnoreRule>,
     /// Patterns from `git ls-files -X` / `--exclude-from` (Git `EXC_FILE`, after global/info).
     exclude_from_rules: Vec<IgnoreRule>,
-    gitignore_cache: HashMap<String, Vec<IgnoreRule>>,
+    /// Per-directory exclude files read so far, keyed by directory, as ids into `rule_sets`.
+    gitignore_cache: HashMap<String, usize>,
+    rule_sets: Vec<DirRuleSet>,
     /// Per-directory exclude filename (`ls-files --exclude-per-directory`, default `.gitignore`).
     per_directory_name: Option<String>,
     /// Whether per-directory exclude files are read at all (Git `EXC_DIRS`).
@@ -206,10 +239,12 @@ pub struct IgnoreMatcher {
     read_per_directory: bool,
     /// Warnings emitted while loading in-tree `.gitignore` (e.g. symlink paths).
     pub warnings: Vec<String>,
-    /// Cached ancestor directory list for the last [`Self::ensure_per_dir_rules_loaded`] parent.
-    per_dir_dirs_cache: Option<(String, Vec<String>)>,
-    /// Per-directory ancestor exclude stacks reused across sibling checks under the same prefix.
-    dir_exclude_stack_cache: HashMap<String, Vec<String>>,
+    /// Exclude state of each queried parent directory, keyed by directory, as ids into
+    /// `dir_states`. Built once per directory from its parent's state.
+    dir_state_ids: HashMap<String, usize>,
+    dir_states: Vec<DirState>,
+    /// The directory of the previous query, which consecutive sibling paths share.
+    last_dir: Option<(String, usize)>,
     /// Fold ASCII case when comparing patterns and base directories (`core.ignorecase`).
     ignore_case: bool,
     /// Repository-relative directories entered during a depth-first walk (skip restat in EXC_DIRS).
@@ -258,7 +293,16 @@ impl IgnoreMatcher {
     #[must_use]
     pub fn with_ignore_case(mut self, ignore_case: bool) -> Self {
         self.ignore_case = ignore_case;
+        self.clear_dir_states();
         self
+    }
+
+    /// Forget per-directory exclude states, which depend on every pattern source and on case
+    /// folding; call after changing either.
+    fn clear_dir_states(&mut self) {
+        self.dir_state_ids.clear();
+        self.dir_states.clear();
+        self.last_dir = None;
     }
 
     /// Whether patterns match case-insensitively (see [`Self::with_ignore_case`]).
@@ -287,6 +331,7 @@ impl IgnoreMatcher {
             )?;
             self.exclude_from_rules.append(&mut more);
         }
+        self.clear_dir_states();
         Ok(())
     }
 
@@ -298,8 +343,8 @@ impl IgnoreMatcher {
         self.read_per_directory = true;
         // The cache is keyed by directory only; clear it so a new filename is honored.
         self.gitignore_cache.clear();
-        self.per_dir_dirs_cache = None;
-        self.dir_exclude_stack_cache.clear();
+        self.rule_sets.clear();
+        self.clear_dir_states();
     }
 
     /// Append patterns from `ls-files --exclude` / `-x` (Git command-line exclude list).
@@ -314,6 +359,7 @@ impl IgnoreMatcher {
                 self.cli_rules.push(rule);
             }
         }
+        self.clear_dir_states();
     }
 
     /// Take any warnings accumulated while loading ignore files (caller prints to stderr).
@@ -336,20 +382,14 @@ impl IgnoreMatcher {
         if is_tracked(index, repo_rel_path) {
             return Ok(false);
         }
-        let per_dir_dirs = self.ensure_per_dir_rules_loaded(repo, index, repo_rel_path)?;
-        let per_dir_groups = self.cached_rule_slices_for_dirs(&per_dir_dirs);
-        if !self.has_any_exclude_rules(&per_dir_groups) {
-            return Ok(false);
-        }
-        if self
-            .first_excluded_ancestor(repo_rel_path, &per_dir_groups)
-            .is_some()
-        {
+        let state = self.dir_state_id(repo, index, parent_dir(repo_rel_path))?;
+        let state = &self.dir_states[state];
+        if state.excluded.is_some() {
             return Ok(true);
         }
         Ok(self
-            .evaluate_against_groups(repo_rel_path, is_dir, &per_dir_groups)
-            .0)
+            .last_matching_rule(repo_rel_path, is_dir, &state.stack)
+            .is_some_and(|rule| !rule.negative))
     }
 
     /// Check whether a repository-relative path is ignored.
@@ -381,161 +421,73 @@ impl IgnoreMatcher {
         if is_tracked(index, repo_rel_path) {
             return Ok((false, None));
         }
-
-        // Git evaluates exclude pattern groups in priority order
-        // (`last_matching_pattern_from_lists`, dir.c):
-        //   1. EXC_CMDL  — command-line `-x`/`--exclude` patterns
-        //   2. EXC_DIRS  — per-directory `.gitignore` (deepest directory wins)
-        //   3. EXC_FILE  — `-X`/`--exclude-from`, then `core.excludesfile`, then `.git/info/exclude`
-        // The FIRST group that yields a match decides the result; within a group, the last
-        // matching pattern (last line) wins. This means a CLI `--exclude` overrides a per-directory
-        // `!negation`, and a per-directory `.gitignore` overrides `core.excludesfile`.
-        let per_dir_dirs = self.ensure_per_dir_rules_loaded(repo, index, repo_rel_path)?;
-        let per_dir_groups = self.cached_rule_slices_for_dirs(&per_dir_dirs);
-
-        // Git's `prep_exclude` (dir.c) descends into the path's ancestor directories before
-        // matching the leaf. If an ancestor directory itself matches a non-negative exclude
-        // pattern, the entire subtree is excluded and the walk stops: a later `!one/a.1`
-        // negation can never re-include a file once its parent directory `one` is excluded
-        // ("It is not possible to re-include a file if a parent directory of that file is
-        // excluded", gitignore(5)). When checking ancestor `a/b`, only the per-directory
-        // `.gitignore` files strictly above it are loaded yet, so we slice `per_dir_groups`
-        // to the ancestor's own depth.
-        if let Some(ancestor_match) = self.first_excluded_ancestor(repo_rel_path, &per_dir_groups) {
-            return Ok((true, Some(ancestor_match)));
+        let state = self.dir_state_id(repo, index, parent_dir(repo_rel_path))?;
+        let state = &self.dir_states[state];
+        // A path under an excluded directory stays excluded: a later `!dir/file` cannot
+        // re-include it (gitignore(5)).
+        if let Some(ancestor_match) = &state.excluded {
+            return Ok((true, Some(ancestor_match.clone())));
         }
-
-        let (ignored, matched) =
-            self.evaluate_against_groups(repo_rel_path, is_dir, &per_dir_groups);
-
-        // For `check-ignore -v` attribution, the verbose refinement walks the full flattened set.
-        let all_rules: Vec<&IgnoreRule> = self.flatten_groups(&per_dir_groups);
-        let matched = refine_match_for_check_ignore_verbose(
-            repo_rel_path,
-            is_dir,
-            ignored,
-            matched,
-            &all_rules,
-            self.ignore_case,
-        );
-
-        Ok((ignored, matched))
-    }
-
-    /// Build the ordered group list (EXC_CMDL, EXC_DIRS deepest-first, EXC_FILE) for a given
-    /// set of per-directory rule groups, then run Git's first-group-wins / last-pattern-wins
-    /// evaluation against `path`.
-    ///
-    /// `per_dir_groups` is the root-first slice of `.gitignore` rule lists that should be
-    /// considered for this query: callers pass the leaf's full slice for the path itself, or a
-    /// shorter prefix slice when probing an ancestor directory (matching `prep_exclude`'s
-    /// incremental loading order).
-    fn evaluate_against_groups(
-        &self,
-        path: &str,
-        is_dir: bool,
-        per_dir_groups: &[&[IgnoreRule]],
-    ) -> (bool, Option<IgnoreMatch>) {
-        let groups = self.build_groups(per_dir_groups);
-        for group in &groups {
-            let mut group_match: Option<&&IgnoreRule> = None;
-            for rule in group {
-                if rule_matches(rule, path, is_dir, self.ignore_case) {
-                    group_match = Some(rule);
+        let Some(rule) = self.last_matching_rule(repo_rel_path, is_dir, &state.stack) else {
+            return Ok((false, None));
+        };
+        if rule.negative {
+            return Ok((false, Some(rule.into())));
+        }
+        let attributed = self
+            .rules_in_priority_order(&state.stack)
+            .filter(|candidate| candidate.directory_only)
+            .filter(|candidate| rule_matches(candidate, repo_rel_path, is_dir, self.ignore_case))
+            .reduce(|best, candidate| {
+                let key = |r: &IgnoreRule| (base_dir_depth(&r.base_dir), r.line_number);
+                if key(candidate) < key(best) {
+                    candidate
+                } else {
+                    best
                 }
-            }
-            if let Some(rule) = group_match {
-                return (
-                    !rule.negative,
-                    Some(IgnoreMatch {
-                        source: rule.source.clone(),
-                        line_number: rule.line_number,
-                        pattern_text: rule.pattern_text.clone(),
-                        negative: rule.negative,
-                    }),
-                );
-            }
-        }
-        (false, None)
+            })
+            .unwrap_or(rule);
+        Ok((true, Some(attributed.into())))
     }
 
-    /// Flatten the ordered group list into a single rule slice (used for `check-ignore -v`
-    /// attribution, which walks every loaded pattern).
-    fn flatten_groups<'a>(&'a self, per_dir_groups: &[&'a [IgnoreRule]]) -> Vec<&'a IgnoreRule> {
-        self.build_groups(per_dir_groups)
-            .into_iter()
-            .flatten()
-            .collect()
+    /// The rule deciding `path`, given the per-directory exclude `stack` (root first) of its
+    /// parent directory.
+    ///
+    /// Pattern groups are consulted in Git's priority order: command-line excludes, then the
+    /// per-directory files from the deepest directory up, then `--exclude-from`,
+    /// `core.excludesfile` and `info/exclude` as one group. The first group with a match
+    /// decides, and within a group the last matching line wins.
+    fn last_matching_rule(&self, path: &str, is_dir: bool, stack: &[usize]) -> Option<&IgnoreRule> {
+        let fold = self.ignore_case;
+        last_match_in("", &self.cli_rules, path, is_dir, fold)
+            .or_else(|| {
+                stack.iter().rev().find_map(|&id| {
+                    let set = self.rule_sets.get(id)?;
+                    last_match_in(&set.base_dir, &set.rules, path, is_dir, fold)
+                })
+            })
+            .or_else(|| last_match_in("", &self.info_rules, path, is_dir, fold))
+            .or_else(|| last_match_in("", &self.global_rules, path, is_dir, fold))
+            .or_else(|| last_match_in("", &self.exclude_from_rules, path, is_dir, fold))
     }
 
-    /// Assemble the priority-ordered exclude groups: EXC_CMDL, then per-directory `.gitignore`
-    /// (deepest directory first), then EXC_FILE (`--exclude-from`, global, info).
-    fn build_groups<'a>(&'a self, per_dir_groups: &[&'a [IgnoreRule]]) -> Vec<Vec<&'a IgnoreRule>> {
-        let cmdl_rules: Vec<&IgnoreRule> = self.cli_rules.iter().collect();
-        let mut dir_groups: Vec<Vec<&IgnoreRule>> = Vec::new();
-        for rules in per_dir_groups.iter().rev() {
-            dir_groups.push(rules.iter().collect());
-        }
-        let file_rules: Vec<&IgnoreRule> = self
-            .exclude_from_rules
+    /// Every rule that can apply under `stack`, in the order Git's `check-ignore -v` scans
+    /// them: command-line excludes, per-directory files deepest first, then the file group.
+    fn rules_in_priority_order<'a>(
+        &'a self,
+        stack: &'a [usize],
+    ) -> impl Iterator<Item = &'a IgnoreRule> + 'a {
+        let per_dir = stack
             .iter()
+            .rev()
+            .filter_map(|&id| self.rule_sets.get(id))
+            .flat_map(|set| set.rules.iter());
+        self.cli_rules
+            .iter()
+            .chain(per_dir)
+            .chain(self.exclude_from_rules.iter())
             .chain(self.global_rules.iter())
             .chain(self.info_rules.iter())
-            .collect();
-
-        let mut groups: Vec<Vec<&IgnoreRule>> = Vec::new();
-        groups.push(cmdl_rules);
-        groups.extend(dir_groups);
-        groups.push(file_rules);
-        groups
-    }
-
-    /// Walk the ancestor directories of `repo_rel_path` from the top down. Returns the matching
-    /// pattern of the first ancestor directory that is positively excluded (Git's `prep_exclude`
-    /// abort), or `None` if no ancestor directory is excluded.
-    ///
-    /// `per_dir_groups` is the root-first list of per-directory rule lists for the leaf path;
-    /// element `i` corresponds to the ancestor directory at depth `i`. When probing the ancestor
-    /// directory at depth `d`, only groups `[0..d]` are loaded (the directory's own `.gitignore`
-    /// has not been read yet), matching Git's incremental load order.
-    fn first_excluded_ancestor(
-        &self,
-        repo_rel_path: &str,
-        per_dir_groups: &[&[IgnoreRule]],
-    ) -> Option<IgnoreMatch> {
-        let parent = parent_dir(repo_rel_path);
-        if parent.is_empty() {
-            return None;
-        }
-        let mut cur = String::new();
-        for (depth, segment) in parent.split('/').enumerate() {
-            if !cur.is_empty() {
-                cur.push('/');
-            }
-            cur.push_str(segment);
-            // Patterns loaded before descending into this directory: per-directory groups for
-            // strictly-shallower directories (root..=depth). `per_dir_groups[0]` is the root
-            // `.gitignore`, so the ancestor at depth `depth` (0-based) sees groups `[0..=depth]`.
-            let upper = (depth + 1).min(per_dir_groups.len());
-            let slice = &per_dir_groups[..upper];
-            let (ignored, matched) = self.evaluate_against_groups(&cur, true, slice);
-            if ignored {
-                return matched;
-            }
-        }
-        None
-    }
-
-    /// Per-directory `.gitignore` rules for the ancestors of `repo_rel_path`, grouped by
-    /// directory and ordered root-first (deepest directory last). The caller evaluates the
-    /// groups deepest-first to honor Git's `EXC_DIRS` precedence (a nested `.gitignore` wins
-    /// over an ancestor's, and over `EXC_FILE` sources).
-    fn has_any_exclude_rules(&self, per_dir_groups: &[&[IgnoreRule]]) -> bool {
-        !self.cli_rules.is_empty()
-            || !self.exclude_from_rules.is_empty()
-            || !self.global_rules.is_empty()
-            || !self.info_rules.is_empty()
-            || per_dir_groups.iter().any(|g| !g.is_empty())
     }
 
     /// Load per-directory exclude files for `dir_rel` when depth-first walking the work tree.
@@ -554,15 +506,7 @@ impl IgnoreMatcher {
             return Ok(());
         }
         self.known_worktree_directories.insert(dir_rel.to_owned());
-        let per_dir_name = self.per_directory_name.clone();
-        let rules = load_gitignore_for_dir(
-            repo,
-            index,
-            dir_rel,
-            per_dir_name.as_deref(),
-            &mut self.warnings,
-        )?;
-        self.gitignore_cache.insert(dir_rel.to_owned(), rules);
+        self.rule_set_id(repo, index, dir_rel)?;
         Ok(())
     }
 
@@ -581,75 +525,111 @@ impl IgnoreMatcher {
         }
     }
 
-    fn ensure_per_dir_rules_loaded(
+    /// Id of the parsed per-directory exclude file of `dir`, reading it on first use.
+    fn rule_set_id(
         &mut self,
         repo: &Repository,
         index: Option<&Index>,
-        repo_rel_path: &str,
-    ) -> Result<Vec<String>> {
-        if !self.read_per_directory {
-            return Ok(Vec::new());
+        dir: &str,
+    ) -> Result<usize> {
+        if let Some(&id) = self.gitignore_cache.get(dir) {
+            return Ok(id);
         }
-        let parent = parent_dir(repo_rel_path);
-        let dirs = match self.per_dir_dirs_cache.as_ref() {
-            Some((cached, cached_dirs)) if cached == parent => cached_dirs.clone(),
-            _ => {
-                if let Some(cached_dirs) = self.dir_exclude_stack_cache.get(parent) {
-                    self.per_dir_dirs_cache = Some((parent.to_string(), cached_dirs.clone()));
-                    cached_dirs.clone()
-                } else {
-                    let mut dirs = Vec::new();
-                    dirs.push(String::new());
-                    if !parent.is_empty() {
-                        let mut cur = String::new();
-                        for segment in parent.split('/') {
-                            if !cur.is_empty() {
-                                cur.push('/');
-                            }
-                            cur.push_str(segment);
-                            if self.known_worktree_directories.contains(&cur) {
-                                dirs.push(cur.clone());
-                            } else if worktree_path_is_existing_file(repo, &cur) {
-                                // Git does not treat a file path as a directory for EXC_DIRS
-                                // loading (`tracked.txt/.gitignore` must not be probed).
-                                break;
-                            } else {
-                                dirs.push(cur.clone());
-                            }
-                        }
-                    }
-                    self.per_dir_dirs_cache = Some((parent.to_string(), dirs.clone()));
-                    self.dir_exclude_stack_cache
-                        .insert(parent.to_string(), dirs.clone());
-                    dirs
-                }
-            }
-        };
-
-        let per_dir_name = self.per_directory_name.clone();
-        for dir in &dirs {
-            if !self.gitignore_cache.contains_key(dir) {
-                let rules = load_gitignore_for_dir(
-                    repo,
-                    index,
-                    dir,
-                    per_dir_name.as_deref(),
-                    &mut self.warnings,
-                )?;
-                self.gitignore_cache.insert(dir.clone(), rules);
-            }
-        }
-        Ok(dirs)
+        let per_dir_name = self.per_directory_name.as_deref();
+        let rules = load_gitignore_for_dir(repo, index, dir, per_dir_name, &mut self.warnings)?;
+        let id = self.rule_sets.len();
+        self.rule_sets.push(DirRuleSet {
+            base_dir: dir.to_owned(),
+            rules,
+        });
+        self.gitignore_cache.insert(dir.to_owned(), id);
+        Ok(id)
     }
 
-    fn cached_rule_slices_for_dirs(&self, dirs: &[String]) -> Vec<&[IgnoreRule]> {
-        dirs.iter()
-            .map(|dir| {
-                self.gitignore_cache
-                    .get(dir)
-                    .map_or(&[] as &[IgnoreRule], Vec::as_slice)
-            })
-            .collect()
+    /// Id of the exclude state of directory `dir` (`""` for the root), building it on first use.
+    ///
+    /// Sibling paths share their parent's state, so a batch of queries reads each exclude
+    /// file, stats each directory and probes each directory against the patterns once.
+    fn dir_state_id(
+        &mut self,
+        repo: &Repository,
+        index: Option<&Index>,
+        dir: &str,
+    ) -> Result<usize> {
+        if let Some((last, id)) = &self.last_dir {
+            if last == dir {
+                return Ok(*id);
+            }
+        }
+        let id = match self.dir_state_ids.get(dir) {
+            Some(&id) => id,
+            None => self.build_dir_state(repo, index, dir)?,
+        };
+        match &mut self.last_dir {
+            Some((last, last_id)) => {
+                last.clear();
+                last.push_str(dir);
+                *last_id = id;
+            }
+            None => self.last_dir = Some((dir.to_owned(), id)),
+        }
+        Ok(id)
+    }
+
+    /// Build the state of `dir` from its parent's, as Git's `prep_exclude` does when it
+    /// descends one level: probe `dir` itself against the patterns loaded so far, then push
+    /// `dir`'s own exclude file.
+    fn build_dir_state(
+        &mut self,
+        repo: &Repository,
+        index: Option<&Index>,
+        dir: &str,
+    ) -> Result<usize> {
+        let state = if dir.is_empty() {
+            let stack = if self.read_per_directory {
+                vec![self.rule_set_id(repo, index, "")?]
+            } else {
+                Vec::new()
+            };
+            DirState {
+                stack,
+                extendable: self.read_per_directory,
+                excluded: None,
+            }
+        } else {
+            let parent = parent_dir(dir);
+            let parent_id = match self.dir_state_ids.get(parent) {
+                Some(&id) => id,
+                None => self.build_dir_state(repo, index, parent)?,
+            };
+            let parent_state = &self.dir_states[parent_id];
+            let excluded = parent_state.excluded.clone().or_else(|| {
+                self.last_matching_rule(dir, true, &parent_state.stack)
+                    .filter(|rule| !rule.negative)
+                    .map(IgnoreMatch::from)
+            });
+            let mut stack = parent_state.stack.clone();
+            let mut extendable = parent_state.extendable;
+            // Git does not treat a file as a directory when loading per-directory excludes
+            // (`tracked.txt/.gitignore` must not be probed), nor anything below it.
+            if extendable
+                && (self.known_worktree_directories.contains(dir)
+                    || !worktree_path_is_existing_file(repo, dir))
+            {
+                stack.push(self.rule_set_id(repo, index, dir)?);
+            } else {
+                extendable = false;
+            }
+            DirState {
+                stack,
+                extendable,
+                excluded,
+            }
+        };
+        let id = self.dir_states.len();
+        self.dir_states.push(state);
+        self.dir_state_ids.insert(dir.to_owned(), id);
+        Ok(id)
     }
 }
 
@@ -806,27 +786,19 @@ fn load_rules_from_file(
 ///
 /// A backslash escapes the following byte; a run of spaces ending the line is removed only
 /// when it is not part of an escape sequence (see t0008 "trailing whitespace is ignored").
-fn trim_trailing_spaces_git(buf: &mut String) {
-    let mut bytes = std::mem::take(buf).into_bytes();
+fn trim_trailing_spaces_git(line: &str) -> &str {
+    let bytes = line.as_bytes();
     let mut last_space_start: Option<usize> = None;
     let mut i = 0usize;
-    while i < bytes.len() {
-        match bytes[i] {
+    while let Some(&byte) = bytes.get(i) {
+        match byte {
             b' ' => {
-                if last_space_start.is_none() {
-                    last_space_start = Some(i);
-                }
+                last_space_start.get_or_insert(i);
                 i += 1;
             }
             b'\\' => {
                 last_space_start = None;
-                i += 1;
-                if i < bytes.len() {
-                    i += 1;
-                } else {
-                    *buf = String::from_utf8_lossy(&bytes).into_owned();
-                    return;
-                }
+                i += 2;
             }
             _ => {
                 last_space_start = None;
@@ -834,10 +806,8 @@ fn trim_trailing_spaces_git(buf: &mut String) {
             }
         }
     }
-    if let Some(start) = last_space_start {
-        bytes.truncate(start);
-    }
-    *buf = String::from_utf8_lossy(&bytes).into_owned();
+    // Spaces are ASCII, so `start` is a char boundary.
+    last_space_start.map_or(line, |start| &line[..start])
 }
 
 fn parse_rule_line(
@@ -846,56 +816,36 @@ fn parse_rule_line(
     source: IgnoreSource,
     base_dir: &str,
 ) -> Option<IgnoreRule> {
-    let mut raw_line = line.strip_suffix('\r').unwrap_or(line).to_owned();
-    trim_trailing_spaces_git(&mut raw_line);
-    if raw_line.is_empty() || raw_line.starts_with('#') {
+    let pattern_text = trim_trailing_spaces_git(line.strip_suffix('\r').unwrap_or(line));
+    if pattern_text.is_empty() || pattern_text.starts_with('#') {
         return None;
     }
-
-    let pattern_text = raw_line.clone();
-    let mut raw = raw_line;
-
-    let mut negative = false;
-    if let Some(rest) = raw.strip_prefix('!') {
-        negative = true;
-        raw = rest.to_owned();
-    }
-    if raw.is_empty() {
+    let (negative, raw) = match pattern_text.strip_prefix('!') {
+        Some(rest) => (true, rest),
+        None => (false, pattern_text),
+    };
+    let (anchored, raw) = match raw.strip_prefix('/') {
+        Some(rest) => (true, rest),
+        None => (false, raw),
+    };
+    let (directory_only, body) = match raw.strip_suffix('/') {
+        Some(rest) => (true, rest),
+        None => (false, raw),
+    };
+    if raw.is_empty() || body.is_empty() {
         return None;
     }
-
-    let mut anchored = false;
-    if let Some(rest) = raw.strip_prefix('/') {
-        anchored = true;
-        raw = rest.to_owned();
-    }
-    if raw.is_empty() {
-        return None;
-    }
-
-    let mut directory_only = false;
-    if let Some(rest) = raw.strip_suffix('/') {
-        directory_only = true;
-        raw = rest.to_owned();
-    }
-    if raw.is_empty() {
-        return None;
-    }
-
-    let has_slash = raw.contains('/');
-    let body = raw;
-    let match_kind = classify_ignore_pattern(&body);
     Some(IgnoreRule {
         source,
         line_number,
-        pattern_text,
+        pattern_text: pattern_text.to_owned(),
         negative,
         directory_only,
         anchored,
-        has_slash,
-        body,
+        has_slash: body.contains('/'),
+        body: body.to_owned(),
         base_dir: base_dir.to_owned(),
-        match_kind,
+        match_kind: classify_ignore_pattern(body),
     })
 }
 
@@ -928,93 +878,83 @@ fn base_dir_depth(base: &str) -> usize {
     base.split('/').count()
 }
 
-/// Git's `check-ignore -v` attributes coverage to a parent `…/` directory rule when a redundant
-/// positive pattern exists in a nested `.gitignore` under an already-ignored directory.
-fn refine_match_for_check_ignore_verbose(
-    repo_rel_path: &str,
-    is_dir: bool,
-    ignored: bool,
-    matched: Option<IgnoreMatch>,
-    rules: &[&IgnoreRule],
-    ignore_case: bool,
-) -> Option<IgnoreMatch> {
-    let m = matched?;
-    if m.negative {
-        return Some(m);
-    }
-    if !ignored {
-        return Some(m);
-    }
-    let mut best: Option<&IgnoreRule> = None;
-    for rule in rules {
-        if !rule.directory_only {
-            continue;
-        }
-        if !rule_matches(rule, repo_rel_path, is_dir, ignore_case) {
-            continue;
-        }
-        match best {
-            None => best = Some(rule),
-            Some(b) if base_dir_depth(&rule.base_dir) < base_dir_depth(&b.base_dir) => {
-                best = Some(rule);
-            }
-            Some(b)
-                if base_dir_depth(&rule.base_dir) == base_dir_depth(&b.base_dir)
-                    && rule.line_number < b.line_number =>
-            {
-                best = Some(rule);
-            }
-            _ => {}
-        }
-    }
-    Some(
-        best.map(|r| IgnoreMatch {
-            source: r.source.clone(),
-            line_number: r.line_number,
-            pattern_text: r.pattern_text.clone(),
-            negative: r.negative,
-        })
-        .unwrap_or(m),
-    )
-}
-
 fn rule_matches(rule: &IgnoreRule, repo_rel_path: &str, is_dir: bool, ignore_case: bool) -> bool {
-    if ignore_case {
-        rule_matches_with::<true>(rule, repo_rel_path, is_dir)
-    } else {
-        rule_matches_with::<false>(rule, repo_rel_path, is_dir)
-    }
-}
-
-/// [`rule_matches`] specialized on case folding so the default case-sensitive path carries
-/// no per-comparison `core.ignorecase` checks.
-///
-/// Only the queried path itself is tested: slash-free patterns match its basename, patterns
-/// with a slash match the whole path relative to the rule's directory. A path under an
-/// excluded directory inherits that exclusion from [`IgnoreMatcher::first_excluded_ancestor`],
-/// which probes each ancestor with the same test, so `tags` followed by `!tags/` leaves
-/// `tags/a.txt` unignored while `tags` alone ignores it through its parent.
-fn rule_matches_with<const FOLD: bool>(
-    rule: &IgnoreRule,
-    repo_rel_path: &str,
-    is_dir: bool,
-) -> bool {
-    // Directory-only patterns (`foo/`) never match files, so `!pkg/` cannot re-include files
-    // under `pkg/` that `*` still ignores (issue #1650).
-    if rule.directory_only && !is_dir {
-        return false;
-    }
-    let Some(rel_to_base) = strip_base(&rule.base_dir, repo_rel_path, FOLD) else {
+    let Some(target) = MatchTarget::new(&rule.base_dir, repo_rel_path, ignore_case) else {
         return false;
     };
-    if rel_to_base.is_empty() {
-        return false;
+    if ignore_case {
+        target.matches::<true>(rule, is_dir)
+    } else {
+        target.matches::<false>(rule, is_dir)
     }
-    if rule.has_slash || rule.anchored {
-        return rule_body_matches(rule, rel_to_base, true, FOLD);
+}
+
+/// The last rule in `rules` (all relative to `base_dir`) that matches `path`.
+///
+/// Strips the base directory and finds the basename once for the whole list, and scans
+/// from the last line so the first hit is the winner.
+fn last_match_in<'a>(
+    base_dir: &str,
+    rules: &'a [IgnoreRule],
+    path: &str,
+    is_dir: bool,
+    ignore_case: bool,
+) -> Option<&'a IgnoreRule> {
+    if rules.is_empty() {
+        return None;
     }
-    let basename = rel_to_base.rsplit('/').next().unwrap_or(rel_to_base);
-    rule_body_matches(rule, basename, false, FOLD)
+    let target = MatchTarget::new(base_dir, path, ignore_case)?;
+    if ignore_case {
+        rules
+            .iter()
+            .rev()
+            .find(|rule| target.matches::<true>(rule, is_dir))
+    } else {
+        rules
+            .iter()
+            .rev()
+            .find(|rule| target.matches::<false>(rule, is_dir))
+    }
+}
+
+/// A queried path as seen from one exclude file's directory, borrowed from the query.
+struct MatchTarget<'p> {
+    /// The path relative to the exclude file's directory (never empty).
+    rel: &'p str,
+    /// The last component of `rel`.
+    basename: &'p str,
+}
+
+impl<'p> MatchTarget<'p> {
+    /// `None` when `path` is not strictly inside `base_dir`, so no rule there can match.
+    fn new(base_dir: &str, path: &'p str, ignore_case: bool) -> Option<Self> {
+        let rel = strip_base(base_dir, path, ignore_case)?;
+        if rel.is_empty() {
+            return None;
+        }
+        let basename = rel.rsplit_once('/').map_or(rel, |(_, name)| name);
+        Some(Self { rel, basename })
+    }
+
+    /// Whether `rule` matches, specialized on case folding so the default case-sensitive
+    /// path carries no per-comparison `core.ignorecase` checks.
+    ///
+    /// Only the queried path itself is tested: slash-free patterns match its basename,
+    /// patterns with a slash match the whole path relative to the rule's directory. A path
+    /// under an excluded directory inherits that exclusion from its parent directory's
+    /// state, which probes each ancestor with the same test, so `tags` followed by `!tags/`
+    /// leaves `tags/a.txt` unignored while `tags` alone ignores it through its parent.
+    fn matches<const FOLD: bool>(&self, rule: &IgnoreRule, is_dir: bool) -> bool {
+        // Directory-only patterns (`foo/`) never match files, so `!pkg/` cannot re-include
+        // files under `pkg/` that `*` still ignores (issue #1650).
+        if rule.directory_only && !is_dir {
+            return false;
+        }
+        if rule.has_slash || rule.anchored {
+            return rule_body_matches(rule, self.rel, true, FOLD);
+        }
+        rule_body_matches(rule, self.basename, false, FOLD)
+    }
 }
 
 fn is_tracked(index: Option<&Index>, repo_rel_path: &str) -> bool {
@@ -1038,15 +978,20 @@ fn worktree_path_is_existing_file(repo: &Repository, repo_rel_path: &str) -> boo
     path.metadata().map(|m| m.is_file()).unwrap_or(false)
 }
 
-fn path_query_is_dir(repo: &Repository, repo_rel_path: &str) -> bool {
+/// Whether a queried path names a directory: it ends in `/` or is one in the work tree.
+///
+/// `scratch` is reused across a batch so each query costs one `stat` and no allocation.
+fn path_query_is_dir(work_tree: Option<&Path>, repo_rel_path: &str, scratch: &mut PathBuf) -> bool {
     if repo_rel_path.ends_with('/') {
         return true;
     }
-    let Some(work_tree) = repo.work_tree() else {
+    let Some(work_tree) = work_tree else {
         return false;
     };
-    let path = work_tree.join(repo_rel_path);
-    path.metadata().map(|m| m.is_dir()).unwrap_or(false)
+    scratch.as_mut_os_string().clear();
+    scratch.push(work_tree);
+    scratch.push(repo_rel_path);
+    scratch.metadata().is_ok_and(|m| m.is_dir())
 }
 
 impl Repository {
@@ -1067,8 +1012,9 @@ impl Repository {
     pub fn ignore_check(&self, paths: &[String], index: &Index) -> Result<Vec<IgnoreCheck>> {
         let mut matcher = IgnoreMatcher::from_repository(self)?;
         let mut out = Vec::with_capacity(paths.len());
+        let mut scratch = PathBuf::new();
         for path in paths {
-            let is_dir = path_query_is_dir(self, path);
+            let is_dir = path_query_is_dir(self.work_tree(), path, &mut scratch);
             let (ignored, matched) = matcher.check_path(self, Some(index), path, is_dir)?;
             out.push(IgnoreCheck {
                 path: path.clone(),
@@ -1218,13 +1164,12 @@ struct SparsePattern {
 
 impl SparsePattern {
     fn from_line(line: &str) -> Option<Self> {
-        let mut raw_line = line.strip_suffix('\r').unwrap_or(line).to_owned();
-        trim_trailing_spaces_git(&mut raw_line);
+        let raw_line = trim_trailing_spaces_git(line.strip_suffix('\r').unwrap_or(line));
         if raw_line.is_empty() || raw_line.starts_with('#') {
             return None;
         }
 
-        let mut raw = raw_line;
+        let mut raw = raw_line.to_owned();
 
         let mut negative = false;
         if let Some(rest) = raw.strip_prefix('!') {
@@ -1449,6 +1394,8 @@ pub fn submodule_containing_path(repo_rel_path: &str, index: &Index) -> Option<S
 
 /// Convert a user-supplied path into a normalized repository-relative path.
 ///
+/// For many paths from the same directory, build one [`RepoPathNormalizer`] instead.
+///
 /// # Parameters
 ///
 /// - `repo` - repository handle.
@@ -1457,39 +1404,161 @@ pub fn submodule_containing_path(repo_rel_path: &str, index: &Index) -> Option<S
 ///
 /// # Errors
 ///
-/// Returns [`Error::PathError`] if the path resolves outside the work tree.
+/// Returns [`Error::PathError`] if the repository has no work tree or the path resolves
+/// outside it.
 pub fn normalize_repo_relative(repo: &Repository, cwd: &Path, path: &str) -> Result<String> {
-    let Some(work_tree) = &repo.work_tree() else {
-        return Err(Error::PathError(
-            "this operation must be run in a work tree".to_owned(),
-        ));
-    };
-    if path.starts_with(':') {
-        return Ok(path.to_owned());
+    RepoPathNormalizer::new(repo, cwd)?.normalize(path)
+}
+
+/// Converts user-supplied paths, relative to one working directory, into normalized
+/// repository-relative paths (as [`normalize_repo_relative`] does for a single path).
+///
+/// The working directory's position in the work tree is resolved once, so each relative path
+/// is normalized lexically on its `/`-separated components with a single allocation for the
+/// result. Absolute paths and paths that climb above the work tree root take the general
+/// route, which also recognizes alternate spellings of the work tree (such as macOS
+/// `/private/tmp` for `/tmp`).
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+/// use grit_lib::config::environment::RepositoryOptions;
+/// use grit_lib::repo::Repository;
+/// use grit_lib::worktree::ignore::RepoPathNormalizer;
+///
+/// # fn main() -> grit_lib::error::Result<()> {
+/// let repo = Repository::discover(None, &RepositoryOptions::empty())?;
+/// let cwd = repo.work_tree().unwrap_or(Path::new(".")).join("src");
+/// let normalizer = RepoPathNormalizer::new(&repo, &cwd)?;
+/// assert_eq!(normalizer.normalize("./lib/../main.rs")?, "src/main.rs");
+/// assert_eq!(normalizer.normalize("../docs/")?, "docs/");
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug)]
+pub struct RepoPathNormalizer<'a> {
+    work_tree: &'a Path,
+    cwd: &'a Path,
+    /// `cwd` relative to the work tree root with `/` separators, when it lies inside it.
+    cwd_rel: Option<String>,
+}
+
+impl<'a> RepoPathNormalizer<'a> {
+    /// Prepare to normalize paths given relative to `cwd`.
+    ///
+    /// # Parameters
+    ///
+    /// - `repo` - repository whose work tree paths are made relative to.
+    /// - `cwd` - directory relative input paths start from (usually the process's current
+    ///   directory); it may lie outside the work tree.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::PathError`] when `repo` has no work tree.
+    pub fn new(repo: &'a Repository, cwd: &'a Path) -> Result<Self> {
+        let Some(work_tree) = repo.work_tree() else {
+            return Err(Error::PathError(
+                "this operation must be run in a work tree".to_owned(),
+            ));
+        };
+        let cwd_rel = normalize_path(cwd)
+            .strip_prefix(work_tree)
+            .ok()
+            .map(crate::git_path::path_to_git_slash);
+        Ok(Self {
+            work_tree,
+            cwd,
+            cwd_rel,
+        })
     }
-    let query_as_dir = path.ends_with('/');
-    let input = Path::new(path);
-    let combined = if input.is_absolute() {
-        input.to_path_buf()
-    } else {
-        cwd.join(input)
-    };
-    let normalized = normalize_path(&combined);
-    // Repository opening already resolves the worktree root. Most queries share that
-    // spelling, so avoid canonicalizing the same root again for every path in a batch.
-    // Keep the filesystem-alias fallback for spellings such as macOS /tmp and /private/tmp.
-    let mut rel = match normalized.strip_prefix(work_tree) {
-        Ok(relative) => crate::git_path::path_to_git_slash(relative),
-        Err(_) => {
-            crate::git_path::strip_worktree_prefix(&normalized, work_tree).ok_or_else(|| {
-                Error::PathError(format!("path '{path}' is outside repository work tree"))
-            })?
+
+    /// Normalize one user-supplied path.
+    ///
+    /// `.` and `..` components are resolved lexically, a trailing `/` (a directory query) is
+    /// kept, the work tree root itself becomes `""`, and paths starting with `:` are returned
+    /// unchanged.
+    ///
+    /// # Parameters
+    ///
+    /// - `path` - path as the user typed it, relative to the normalizer's directory or
+    ///   absolute.
+    ///
+    /// # Returns
+    ///
+    /// The repository-relative path with `/` separators.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::PathError`] if the path resolves outside the work tree.
+    pub fn normalize(&self, path: &str) -> Result<String> {
+        if path.starts_with(':') {
+            return Ok(path.to_owned());
         }
-    };
-    if query_as_dir && !rel.is_empty() && !rel.ends_with('/') {
-        rel.push('/');
+        match self.normalize_lexically(path) {
+            Some(rel) => Ok(rel),
+            None => self.normalize_via_filesystem_paths(path),
+        }
     }
-    Ok(rel)
+
+    /// The fast route: a relative path that stays inside the work tree, resolved from the
+    /// precomputed working directory prefix. `None` sends the path down the general route.
+    fn normalize_lexically(&self, path: &str) -> Option<String> {
+        let cwd_rel = self.cwd_rel.as_deref()?;
+        if cfg!(windows) || Path::new(path).is_absolute() {
+            return None;
+        }
+        let mut rel = String::with_capacity(cwd_rel.len() + path.len() + 1);
+        rel.push_str(cwd_rel);
+        for component in path.split('/') {
+            match component {
+                "" | "." => {}
+                ".." => {
+                    if rel.is_empty() {
+                        return None;
+                    }
+                    rel.truncate(rel.rfind('/').unwrap_or(0));
+                }
+                name => {
+                    if !rel.is_empty() {
+                        rel.push('/');
+                    }
+                    rel.push_str(name);
+                }
+            }
+        }
+        if path.ends_with('/') && !rel.is_empty() {
+            rel.push('/');
+        }
+        Some(rel)
+    }
+
+    fn normalize_via_filesystem_paths(&self, path: &str) -> Result<String> {
+        let work_tree = self.work_tree;
+        let query_as_dir = path.ends_with('/');
+        let input = Path::new(path);
+        let combined = if input.is_absolute() {
+            input.to_path_buf()
+        } else {
+            self.cwd.join(input)
+        };
+        let normalized = normalize_path(&combined);
+        // Repository opening already resolves the worktree root. Most queries share that
+        // spelling, so avoid canonicalizing the same root again for every path in a batch.
+        // Keep the filesystem-alias fallback for spellings such as macOS /tmp and /private/tmp.
+        let mut rel = match normalized.strip_prefix(work_tree) {
+            Ok(relative) => crate::git_path::path_to_git_slash(relative),
+            Err(_) => {
+                crate::git_path::strip_worktree_prefix(&normalized, work_tree).ok_or_else(|| {
+                    Error::PathError(format!("path '{path}' is outside repository work tree"))
+                })?
+            }
+        };
+        if query_as_dir && !rel.is_empty() && !rel.ends_with('/') {
+            rel.push('/');
+        }
+        Ok(rel)
+    }
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
@@ -1525,6 +1594,70 @@ mod normalization_tests {
             normalize_repo_relative(&repo, dir.path(), "missing/file"),
             Err(Error::PathError(_))
         ));
+    }
+
+    #[test]
+    fn lexical_route_agrees_with_filesystem_route() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        crate::repo::init_repository(root, false, "main", None, crate::RefStorageFormat::Files)
+            .unwrap();
+        let options = crate::environment::RepositoryOptions::empty().with_work_tree(root);
+        let repo = Repository::open(&root.join(".git"), &options).unwrap();
+        let root = repo.work_tree().unwrap().to_path_buf();
+        let inputs = [
+            "",
+            ".",
+            "./",
+            "a",
+            "a/",
+            "a//b",
+            "./a/./b/",
+            "a/../b",
+            "a/b/../../c",
+            "..",
+            "../",
+            "../x",
+            "../../x/y/",
+            "x/../../y",
+            "café/new.txt",
+            "...",
+            ".hidden/..x",
+        ];
+        for cwd in [root.clone(), root.join("sub"), root.join("sub/deeper")] {
+            let normalizer = RepoPathNormalizer::new(&repo, &cwd).unwrap();
+            assert!(normalizer.cwd_rel.is_some());
+            for input in inputs {
+                let general = normalizer.normalize_via_filesystem_paths(input);
+                let lexical = normalizer.normalize_lexically(input);
+                match (&general, lexical) {
+                    (Ok(expected), Some(got)) => assert_eq!(&got, expected, "{cwd:?} {input}"),
+                    (_, None) => {}
+                    (Err(e), Some(got)) => panic!("{cwd:?} {input}: lexical {got}, general {e}"),
+                }
+                assert_eq!(
+                    normalizer.normalize(input).ok(),
+                    general.ok(),
+                    "{cwd:?} {input}"
+                );
+            }
+        }
+        let from_root = RepoPathNormalizer::new(&repo, &root).unwrap();
+        assert_eq!(from_root.normalize("a/../b/").unwrap(), "b/");
+        assert_eq!(from_root.normalize(":(glob)x").unwrap(), ":(glob)x");
+        assert!(from_root.normalize("../x").is_err());
+        let absolute = root.join("sub/f");
+        assert_eq!(
+            from_root.normalize(absolute.to_str().unwrap()).unwrap(),
+            "sub/f"
+        );
+
+        let outside = dir.path().parent().unwrap();
+        let normalizer = RepoPathNormalizer::new(&repo, outside).unwrap();
+        assert!(normalizer.cwd_rel.is_none());
+        let name = root.file_name().unwrap().to_str().unwrap();
+        assert_eq!(normalizer.normalize(&format!("{name}/x/")).unwrap(), "x/");
+        assert!(normalizer.normalize("elsewhere").is_err());
     }
 }
 
@@ -1636,6 +1769,31 @@ mod gitignore_glob_tests {
         let [leading_cr] = rules("\ra\n").try_into().unwrap();
         assert!(rule_matches(&leading_cr, "\ra", false, false));
         assert!(rules("a\nb").len() == 2);
+    }
+
+    #[test]
+    fn trailing_spaces_are_trimmed_unless_escaped() {
+        for (line, expected) in [
+            ("a  ", "a"),
+            ("a\\ ", "a\\ "),
+            ("a\\  ", "a\\ "),
+            ("a\\", "a\\"),
+            ("é b ", "é b"),
+            ("   ", ""),
+            ("a \\\\ ", "a \\\\"),
+        ] {
+            assert_eq!(trim_trailing_spaces_git(line), expected, "{line:?}");
+        }
+        for empty in ["!", "/", "!/", "//", "# x", " ", "\r"] {
+            let parsed = parse_rule_line(empty, 1, IgnoreSource::InfoExclude, "");
+            assert!(parsed.is_none(), "{empty:?}");
+        }
+        let r = rule("!/a/b/ ", "");
+        assert!(r.negative && r.anchored && r.directory_only && r.has_slash);
+        assert_eq!(
+            (r.pattern_text.as_str(), r.body.as_str()),
+            ("!/a/b/", "a/b")
+        );
     }
 
     #[test]
@@ -2013,5 +2171,154 @@ mod pattern_list_tests {
         assert_eq!(list.is_ignored("debug.log", false, false), None);
         assert_eq!(list.is_ignored("debug.log", false, true), Some(true));
         assert_eq!(list.is_ignored("build", true, true), Some(true));
+    }
+}
+
+#[cfg(test)]
+mod dir_state_cache_tests {
+    use super::*;
+    use crate::repo::init_repository;
+    use crate::RefStorageFormat;
+    use tempfile::TempDir;
+
+    fn repo_with(files: &[(&str, &str)]) -> (TempDir, Repository) {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        init_repository(root, false, "main", None, RefStorageFormat::Files).unwrap();
+        for (path, content) in files {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content).unwrap();
+        }
+        let options = crate::environment::RepositoryOptions::empty().with_work_tree(root);
+        let repo = Repository::open(&root.join(".git"), &options).unwrap();
+        (dir, repo)
+    }
+
+    #[test]
+    fn each_directory_state_and_exclude_file_is_built_once() {
+        let (_dir, repo) = repo_with(&[
+            (".gitignore", "*.o\n"),
+            ("a/x/.gitignore", "*.tmp\n"),
+            ("a/y/.gitignore", "*.bak\n"),
+        ]);
+        let mut matcher = IgnoreMatcher::from_repository(&repo).unwrap();
+        for round in 0..3 {
+            for (path, expected) in [
+                ("a/x/f.tmp", true),
+                ("a/y/f.tmp", false),
+                ("a/y/f.bak", true),
+                ("a/x/f.o", true),
+                ("a/x/f.rs", false),
+                ("top.o", true),
+            ] {
+                let (ignored, _) = matcher.check_path(&repo, None, path, false).unwrap();
+                assert_eq!(ignored, expected, "round {round}: {path}");
+                assert_eq!(
+                    matcher.is_path_ignored(&repo, None, path, false).unwrap(),
+                    expected
+                );
+            }
+        }
+        // Root, `a`, `a/x` and `a/y`, each stat'd, read and probed once across all rounds.
+        assert_eq!(matcher.dir_states.len(), 4);
+        assert_eq!(matcher.rule_sets.len(), 4);
+        let x = &matcher.dir_states[matcher.dir_state_ids["a/x"]];
+        assert_eq!(x.stack.len(), 3);
+        assert!(x.extendable && x.excluded.is_none());
+    }
+
+    #[test]
+    fn excluded_directory_is_recorded_on_its_descendants_states() {
+        let (_dir, repo) = repo_with(&[(".gitignore", "build/\n!build/keep.txt\n")]);
+        fs::create_dir_all(repo.work_tree().unwrap().join("build/deep")).unwrap();
+        let mut matcher = IgnoreMatcher::from_repository(&repo).unwrap();
+        for path in ["build/keep.txt", "build/deep/a.c"] {
+            let (ignored, matched) = matcher.check_path(&repo, None, path, false).unwrap();
+            assert!(ignored, "{path}");
+            assert_eq!(matched.unwrap().pattern_text, "build/");
+        }
+        assert!(matcher.dir_states[matcher.dir_state_ids["build"]]
+            .excluded
+            .is_some());
+        assert!(matcher.dir_states[matcher.dir_state_ids["build/deep"]]
+            .excluded
+            .is_some());
+        assert!(
+            !matcher
+                .check_path(&repo, None, "keep.txt", false)
+                .unwrap()
+                .0
+        );
+    }
+
+    #[test]
+    fn a_file_ancestor_ends_the_per_directory_stack() {
+        let (_dir, repo) = repo_with(&[(".gitignore", "*.o\n"), ("plain", "x\n")]);
+        let mut matcher = IgnoreMatcher::from_repository(&repo).unwrap();
+        assert!(
+            matcher
+                .check_path(&repo, None, "plain/sub/x.o", false)
+                .unwrap()
+                .0
+        );
+        let plain = &matcher.dir_states[matcher.dir_state_ids["plain"]];
+        assert_eq!(plain.stack.len(), 1);
+        assert!(!plain.extendable);
+        assert_eq!(
+            matcher.dir_states[matcher.dir_state_ids["plain/sub"]]
+                .stack
+                .len(),
+            1
+        );
+        assert!(!matcher.gitignore_cache.contains_key("plain"));
+    }
+
+    #[test]
+    fn adding_pattern_sources_refreshes_cached_directory_states() {
+        let (_dir, repo) = repo_with(&[("d/.gitignore", "*.tmp\n")]);
+        let mut matcher = IgnoreMatcher::from_repository(&repo).unwrap();
+        assert!(!matcher
+            .is_path_ignored(&repo, None, "d/x.log", false)
+            .unwrap());
+        assert!(!matcher
+            .is_path_ignored(&repo, None, "d/sub/x.c", false)
+            .unwrap());
+        matcher.add_cli_excludes(&["*.log".to_owned(), "sub".to_owned()]);
+        assert!(matcher
+            .is_path_ignored(&repo, None, "d/x.log", false)
+            .unwrap());
+        assert!(matcher
+            .is_path_ignored(&repo, None, "d/sub/x.c", false)
+            .unwrap());
+
+        let mut folded = matcher.with_ignore_case(true);
+        assert!(folded
+            .is_path_ignored(&repo, None, "d/X.TMP", false)
+            .unwrap());
+
+        folded.set_per_directory_name(".other");
+        assert!(!folded
+            .is_path_ignored(&repo, None, "d/x.tmp", false)
+            .unwrap());
+    }
+
+    #[test]
+    fn last_match_in_picks_the_last_matching_line_for_the_base_directory() {
+        let source = IgnoreSource::PerDirectory("sub/.gitignore".into());
+        let rules =
+            parse_gitignore_content("*.log\n!keep.log\nkeep*\n", source, "sub", &mut Vec::new())
+                .unwrap();
+        let hit = |path| last_match_in("sub", &rules, path, false, false).map(|r| r.line_number);
+        assert_eq!(hit("sub/a.log"), Some(1));
+        assert_eq!(hit("sub/deep/keep.log"), Some(3));
+        assert_eq!(hit("sub/keep.txt"), Some(3));
+        assert_eq!(hit("other/a.log"), None);
+        assert_eq!(hit("sub"), None);
+        assert_eq!(hit("subx/a.log"), None);
+        assert_eq!(
+            last_match_in("", &[], "a.log", false, false).map(|r| r.line_number),
+            None
+        );
     }
 }
