@@ -288,6 +288,10 @@ name = "integration"
 path = "tests/integration.rs"
 
 [[test]]
+name = "clone_reflog_injected_ref_store"
+path = "tests/clone_reflog_injected_ref_store.rs"
+
+[[test]]
 name = "add_bulk_memory"
 path = "tests/add_bulk_memory.rs"
 required-features = ["full-tests"]

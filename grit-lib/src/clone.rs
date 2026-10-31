@@ -1265,6 +1265,30 @@ fn resolve_clone_tag_mode(opts: &CloneOptions) -> TagMode {
     })
 }
 
+fn append_clone_reflog_on_store(
+    repo: &Repository,
+    refname: &str,
+    old_oid: &ObjectId,
+    new_oid: &ObjectId,
+    identity: &crate::ident::Signature,
+    message: &str,
+) -> Result<()> {
+    identity.validate().map_err(Error::InvalidSignature)?;
+    let formatted =
+        refs::store::format_reflog_identity(&identity.reflog_name_email(), identity.time);
+    let config = repo.config()?;
+    refs::append_reflog_on_store(
+        repo.refs(),
+        refname,
+        old_oid,
+        new_oid,
+        &formatted,
+        message,
+        false,
+        &config,
+    )
+}
+
 fn setup_clone_head(
     repo: &Repository,
     opts: &CloneOptions,
@@ -1279,16 +1303,8 @@ fn setup_clone_head(
             if !peel.is_zero() {
                 refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", peel)
                     .map_err(CloneError::Library)?;
-                refs::append_reflog_with_signature(
-                    repo.git_dir(),
-                    "HEAD",
-                    &zero,
-                    peel,
-                    identity,
-                    clone_message,
-                    false,
-                )
-                .map_err(CloneError::Library)?;
+                append_clone_reflog_on_store(repo, "HEAD", &zero, peel, identity, clone_message)
+                    .map_err(CloneError::Library)?;
             }
             Ok((
                 CloneHead::Detached {
@@ -1313,14 +1329,13 @@ fn setup_clone_head(
                         &oid,
                     )
                     .map_err(CloneError::Library)?;
-                    refs::append_reflog_with_signature(
-                        repo.git_dir(),
+                    append_clone_reflog_on_store(
+                        repo,
                         &branch_ref,
                         &zero,
                         &oid,
                         identity,
                         clone_message,
-                        false,
                     )
                     .map_err(CloneError::Library)?;
                 }
@@ -1328,16 +1343,8 @@ fn setup_clone_head(
             };
             write_clone_head_symref(repo, &branch_ref)?;
             if !oid.is_zero() {
-                refs::append_reflog_with_signature(
-                    repo.git_dir(),
-                    "HEAD",
-                    &zero,
-                    &oid,
-                    identity,
-                    clone_message,
-                    false,
-                )
-                .map_err(CloneError::Library)?;
+                append_clone_reflog_on_store(repo, "HEAD", &zero, &oid, identity, clone_message)
+                    .map_err(CloneError::Library)?;
             }
             if !opts.bare {
                 set_local_config(
@@ -1376,14 +1383,13 @@ fn setup_clone_head(
                         &oid,
                     )
                     .map_err(CloneError::Library)?;
-                    refs::append_reflog_with_signature(
-                        repo.git_dir(),
+                    append_clone_reflog_on_store(
+                        repo,
                         &branch_ref,
                         &zero,
                         &oid,
                         identity,
                         clone_message,
-                        false,
                     )
                     .map_err(CloneError::Library)?;
                 }
@@ -1391,16 +1397,8 @@ fn setup_clone_head(
             };
             write_clone_head_symref(repo, &branch_ref)?;
             if !oid.is_zero() {
-                refs::append_reflog_with_signature(
-                    repo.git_dir(),
-                    "HEAD",
-                    &zero,
-                    &oid,
-                    identity,
-                    clone_message,
-                    false,
-                )
-                .map_err(CloneError::Library)?;
+                append_clone_reflog_on_store(repo, "HEAD", &zero, &oid, identity, clone_message)
+                    .map_err(CloneError::Library)?;
             }
             if !opts.bare {
                 set_local_config(

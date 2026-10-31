@@ -2314,17 +2314,6 @@ pub(crate) fn finish_initial_remote_fetch_layout(
         return Ok(());
     };
     let null = ObjectId::null(local.odb().hash_algo());
-    if local.refs_on_disk() {
-        return crate::refs::append_reflog_with_signature(
-            git_dir,
-            &head_ref,
-            &null,
-            &tip,
-            &log.identity,
-            &log.message,
-            true,
-        );
-    }
     log.identity
         .validate()
         .map_err(crate::error::Error::InvalidSignature)?;
