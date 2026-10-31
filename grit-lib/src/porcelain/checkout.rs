@@ -51,6 +51,8 @@ mod checkout_parallel;
 pub(crate) use checkout_journal::create_symlink_at;
 pub(crate) use checkout_journal::CheckoutJournal;
 use checkout_journal::SharedCheckoutDeleteRollback;
+#[cfg(any(test, feature = "full-tests"))]
+pub use checkout_journal::{checkout_spool_probe_count, reset_checkout_spool_probe};
 pub(crate) use checkout_parallel::is_eligible_for_parallel_checkout;
 use checkout_parallel::{
     cancellable_chunks, execute_write_jobs, execute_write_jobs_unrecorded,
@@ -59,6 +61,8 @@ use checkout_parallel::{
 
 const PARALLEL_PER_FILE_DELETE_MIN: usize = 32;
 const POPULATED_TREE_CHECKOUT_CHUNK: usize = 2048;
+/// Above this tree-diff width, stat-clean rows rely on checkout journaling instead of racy hashing.
+const RACY_TREE_DIFF_CONTENT_VERIFY_MAX: usize = 64;
 
 fn remove_checkout_files_parallel_cancellable(
     work_tree: &Path,
@@ -999,6 +1003,30 @@ fn checkout_hard_to_tree_journaled(
         .map(|entry| entry.path.clone())
         .collect();
     hard_reset_drop_unmerged_and_intent(&mut index);
+    let config = repo.config()?;
+    let sparse = SparseCheckout::load(repo)?;
+    let stat_policy = crate::index::StatMatchPolicy::from_config(Some(config.as_ref()));
+    let trust_filemode = config
+        .get_bool("core.filemode")
+        .and_then(|r| r.ok())
+        .unwrap_or(true);
+    let stat_check = HardResetStatCheck {
+        policy: stat_policy,
+        trust_filemode,
+        index_mtime: pre_reset_index_mtime,
+    };
+    let mut tree_diff_unrecorded: Option<Vec<String>> = None;
+    if trees_differ && !changes.is_empty() {
+        tree_diff_unrecorded = Some(hard_reset_unrecorded_tree_diff_paths(
+            repo,
+            work_tree,
+            &index,
+            &config,
+            &changes,
+            sparse.as_ref(),
+            stat_check,
+        )?);
+    }
     let mut deleted_abs_paths = Vec::new();
     let mut staged_index_changes: Vec<DiffEntry> = Vec::new();
     let mut index_only_removed_paths: HashSet<Vec<u8>> = HashSet::new();
@@ -1041,12 +1069,6 @@ fn checkout_hard_to_tree_journaled(
             written_by_tree_diff.insert(crate::repo_relpath::storage_bytes(path).into_owned());
         }
     }
-    let config = repo.config()?;
-    let stat_policy = crate::index::StatMatchPolicy::from_config(Some(config.as_ref()));
-    let trust_filemode = config
-        .get_bool("core.filemode")
-        .and_then(|r| r.ok())
-        .unwrap_or(true);
     // Hard reset reapplies the sparse definition. Tracked files that caused skip-worktree
     // to be cleared are removed again; paths still marked skip-worktree (including the
     // expectFilesOutsideOfPatterns opt-out) and untracked files are left alone. Only retain
@@ -1068,6 +1090,7 @@ fn checkout_hard_to_tree_journaled(
     let hard_reset_checkout_apply = CheckoutApplyOptions {
         parallel_prepare_blobs: false,
         checkout_parallel_threshold: None,
+        checkout_result_tree: Some(*target_tree),
         ..CheckoutApplyOptions::default()
     };
     if trees_differ && !changes.is_empty() {
@@ -1078,12 +1101,8 @@ fn checkout_hard_to_tree_journaled(
             cancel,
             &mut index,
             &changes,
-            sparse.as_ref(),
-            HardResetStatCheck {
-                policy: stat_policy,
-                trust_filemode,
-                index_mtime: pre_reset_index_mtime,
-            },
+            tree_diff_unrecorded,
+            None,
             hard_reset_checkout_apply.clone(),
             lock,
             journal,
@@ -1097,12 +1116,8 @@ fn checkout_hard_to_tree_journaled(
             cancel,
             &mut index,
             &staged_index_changes,
-            sparse.as_ref(),
-            HardResetStatCheck {
-                policy: stat_policy,
-                trust_filemode,
-                index_mtime: pre_reset_index_mtime,
-            },
+            None,
+            Some((sparse.as_ref(), stat_check)),
             hard_reset_checkout_apply,
             lock,
             journal,
@@ -1115,6 +1130,45 @@ fn checkout_hard_to_tree_journaled(
         if let Some(path) = &change.new_path {
             written_by_tree_diff.insert(crate::repo_relpath::storage_bytes(path).into_owned());
         }
+    }
+
+    let skip_post_tree_diff_pass = trees_differ
+        && hard_reset_tree_diff_filled_all_entries(&index, &written_by_tree_diff, sparse.as_ref());
+    if skip_post_tree_diff_pass {
+        let mut sparse_parent_symlinks = crate::diff::SymlinkDirCache::default();
+        for (path, mode) in sparse_removals {
+            crate::progress::poll_cancel(progress, cancel)?;
+            if sparse_parent_symlinks.has_symlink_in_path_bytes(work_tree, &path, false, false) {
+                continue;
+            }
+            let rel = crate::repo_relpath::storage_string(&path);
+            let abs = if mode == MODE_GITLINK {
+                journal.remove_uninitialized_gitlink(&rel)
+            } else {
+                journal.spool_remove(&rel)?;
+                crate::index::worktree_path_from_index_rel(work_tree, &path)
+            };
+            remove_empty_parent_dirs_batch(work_tree, &[abs]);
+        }
+        index.source_mtime = pre_reset_index_mtime;
+        remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
+        progress.finish();
+        index.sort();
+        index.sparse_directories = index.has_sparse_directory_placeholders();
+        hard_reset_finish_cache_tree(repo, &mut index, target_tree);
+        if let Ok(config) = repo.config() {
+            let _ = crate::path_icase::smudge_ignorecase_collision_stat_mismatches(
+                repo.odb(),
+                work_tree,
+                &mut index,
+                config.as_ref(),
+                None,
+            );
+        }
+        let mtime_hint = Some(crate::index::stage0_mtime_max(&index.entries));
+        crate::progress::poll_cancel(progress, cancel)?;
+        write_checkout_index(repo, &mut index, lock, true, mtime_hint, journal)?;
+        return Ok(());
     }
 
     let plan_positions = hard_reset_stage0_entry_positions(&index);
@@ -1534,21 +1588,32 @@ fn hard_reset_apply_tree_diff_checkout(
     cancel: &dyn Cancel,
     index: &mut Index,
     changes: &[DiffEntry],
-    sparse: Option<&SparseCheckout>,
-    stat_check: HardResetStatCheck,
+    precomputed_unrecorded: Option<Vec<String>>,
+    compute_unrecorded: Option<(Option<&SparseCheckout>, HardResetStatCheck)>,
     apply: CheckoutApplyOptions,
     lock: &mut IndexLock,
     journal: &mut CheckoutJournal,
 ) -> Result<()> {
-    for rel in hard_reset_unrecorded_tree_diff_paths(
-        repo,
-        work_tree,
-        index,
-        &repo.config()?,
-        changes,
-        sparse,
-        stat_check,
-    )? {
+    let unrecorded = match precomputed_unrecorded {
+        Some(paths) => paths,
+        None => {
+            let Some((sparse, stat_check)) = compute_unrecorded else {
+                return Err(Error::Message(
+                    "hard reset tree-diff checkout needs unrecorded path plan".into(),
+                ));
+            };
+            hard_reset_unrecorded_tree_diff_paths(
+                repo,
+                work_tree,
+                index,
+                &repo.config()?,
+                changes,
+                sparse,
+                stat_check,
+            )?
+        }
+    };
+    for rel in unrecorded {
         journal.spool_remove(&rel)?;
     }
     apply_tree_changes_in_chunks(
@@ -1562,6 +1627,32 @@ fn hard_reset_apply_tree_diff_checkout(
         CheckoutIndexWrite::Defer(lock),
         journal,
     )
+}
+
+/// True when bulk tree-diff checkout updated every dense stage-0 row and recorded stat data.
+fn hard_reset_tree_diff_filled_all_entries(
+    index: &Index,
+    written_by_tree_diff: &BTreeSet<Vec<u8>>,
+    sparse: Option<&SparseCheckout>,
+) -> bool {
+    if written_by_tree_diff.is_empty() {
+        return false;
+    }
+    index.entries.iter().all(|entry| {
+        if entry.stage() != 0 || entry.intent_to_add() {
+            return true;
+        }
+        if entry.is_sparse_directory_placeholder() || entry.skip_worktree() {
+            return true;
+        }
+        if entry.mode == MODE_GITLINK {
+            return true;
+        }
+        if sparse.is_some_and(|sparse| !sparse.includes_index_path(&entry.path)) {
+            return true;
+        }
+        written_by_tree_diff.contains(&entry.path) && !entry.stat_cache_unset()
+    })
 }
 
 /// Index positions that need a worktree stat before hard reset can choose keep vs verify.
@@ -1836,7 +1927,9 @@ fn hard_reset_unrecorded_tree_diff_paths(
         );
         if !stat_clean {
             unrecorded.push(path.to_owned());
-        } else if crate::diff::entry_is_racy_with_policy(entry, check.index_mtime, check.policy) {
+        } else if changes.len() <= RACY_TREE_DIFF_CONTENT_VERIFY_MAX
+            && crate::diff::entry_is_racy_with_policy(entry, check.index_mtime, check.policy)
+        {
             racy.push((pos, path, abs, meta));
         }
     }

@@ -580,6 +580,28 @@ fn restore_spooled_directory(
     Ok(())
 }
 
+#[cfg(any(test, feature = "full-tests"))]
+static CHECKOUT_SPOOL_PROBE: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Reset and return a guard that counts checkout delete spools until dropped.
+#[cfg(any(test, feature = "full-tests"))]
+#[doc(hidden)]
+pub fn reset_checkout_spool_probe() -> CheckoutSpoolProbeScope {
+    CHECKOUT_SPOOL_PROBE.store(0, std::sync::atomic::Ordering::Relaxed);
+    CheckoutSpoolProbeScope
+}
+
+#[cfg(any(test, feature = "full-tests"))]
+#[doc(hidden)]
+pub struct CheckoutSpoolProbeScope;
+
+#[cfg(any(test, feature = "full-tests"))]
+#[doc(hidden)]
+pub fn checkout_spool_probe_count() -> usize {
+    CHECKOUT_SPOOL_PROBE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn move_worktree_entry_to_spool(
     abs: &Path,
     stash: &Path,
@@ -589,10 +611,16 @@ fn move_worktree_entry_to_spool(
         fs::create_dir_all(parent)?;
     }
     match fs::rename(abs, stash) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            #[cfg(any(test, feature = "full-tests"))]
+            CHECKOUT_SPOOL_PROBE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(())
+        }
         Err(err) if err.kind() == std::io::ErrorKind::CrossesDevices => {
             cross_device_move_to_spool(abs, stash, kind)?;
             fs::remove_file(abs)?;
+            #[cfg(any(test, feature = "full-tests"))]
+            CHECKOUT_SPOOL_PROBE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Ok(())
         }
         Err(err) => Err(err),

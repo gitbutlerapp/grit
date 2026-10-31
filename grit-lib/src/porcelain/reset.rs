@@ -1993,6 +1993,88 @@ mod tests {
         ignore = "starts system git or is heavy; run with --features full-tests"
     )]
     #[test]
+    fn hard_reset_all_modified_stat_clean_does_not_spool_worktree() {
+        use crate::porcelain::checkout::{checkout_spool_probe_count, reset_checkout_spool_probe};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let (repo, older, newer) = wide_repo_two_commits_all_paths_differ(root);
+        let pinned = filetime::FileTime::from_unix_time(1_700_000_100, 0);
+        for d in 0..ALL_MODIFIED_DIRS {
+            for f in 0..ALL_MODIFIED_FILES_PER_DIR {
+                let path = root.join(format!("d{d}/f{f}.txt"));
+                filetime::set_file_mtime(&path, pinned).expect("pin mtime");
+            }
+        }
+        git(root, &["update-index", "-q", "--refresh"]);
+
+        let _spool = reset_checkout_spool_probe();
+        reset_to_commit(
+            &repo,
+            &reset_opts(older, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("hard reset to older");
+        reset_to_commit(
+            &repo,
+            &reset_opts(newer, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("hard reset to newer");
+        assert_eq!(
+            checkout_spool_probe_count(),
+            0,
+            "stat-clean tree-diff hard reset must not spool every rewritten path"
+        );
+        assert_git_sees_clean_repo(root);
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn hard_reset_tree_diff_spools_stat_dirty_path_for_rollback() {
+        use crate::porcelain::checkout::{checkout_spool_probe_count, reset_checkout_spool_probe};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let (repo, older, _newer) = wide_repo_two_commits_all_paths_differ(root);
+        let pinned = filetime::FileTime::from_unix_time(1_700_000_100, 0);
+        for d in 0..ALL_MODIFIED_DIRS {
+            for f in 0..ALL_MODIFIED_FILES_PER_DIR {
+                let path = root.join(format!("d{d}/f{f}.txt"));
+                filetime::set_file_mtime(&path, pinned).expect("pin mtime");
+            }
+        }
+        git(root, &["update-index", "-q", "--refresh"]);
+        let dirty = root.join("d0/f0.txt");
+        let bumped = filetime::FileTime::from_unix_time(1_700_000_200, 0);
+        filetime::set_file_mtime(&dirty, bumped).expect("stat-dirty one file");
+
+        let _spool = reset_checkout_spool_probe();
+        reset_to_commit(
+            &repo,
+            &reset_opts(older, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("hard reset");
+        assert_eq!(
+            checkout_spool_probe_count(),
+            1,
+            "stat-dirty tree-diff path must spool before overwrite"
+        );
+        assert_git_sees_clean_repo(root);
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
     fn hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once() {
         use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
 

@@ -4369,6 +4369,28 @@ pub(crate) fn plan_hard_reset_index_align(
 
 /// Apply a [`HardResetIndexPlan`] and invalidate cache-tree nodes for touched paths.
 pub(crate) fn apply_hard_reset_index_plan(index: &mut Index, plan: HardResetIndexPlan) {
+    const BULK_INVALIDATE_MIN: usize = 64;
+    let touched = plan.remove_paths.len() + plan.updates.len() + plan.insert_entries.len();
+    let bulk_invalidate = touched >= BULK_INVALIDATE_MIN;
+    if bulk_invalidate {
+        for path in &plan.remove_paths {
+            index.remove_path_all_stages(path);
+        }
+        for (path, mode, oid) in plan.updates {
+            if let Some(pos) = index.find_entry_pos(&path, 0) {
+                index.entries[pos].mode = mode;
+                index.entries[pos].oid = oid;
+                index.entries[pos].size = 0;
+            }
+        }
+        for entry in plan.insert_entries {
+            index.add_or_replace(entry);
+        }
+        index.cache_tree = None;
+        index.cache_tree_root = None;
+        index.sort();
+        return;
+    }
     for path in &plan.remove_paths {
         index.remove_path_all_stages(path);
         index.invalidate_cache_tree_for_path(path);
