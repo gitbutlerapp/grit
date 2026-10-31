@@ -397,7 +397,10 @@ impl CheckoutJournal {
         let index = repo.load_index().ok();
         let mut restore_targets: Vec<CheckoutRollbackRestore> = Vec::new();
         let mut restore_paths = HashSet::new();
-        let mut dir_cache = LeadingDirCache::new();
+        let mut dir_cache = repo
+            .config()
+            .map(|config| LeadingDirCache::for_config(config.as_ref()))
+            .unwrap_or_else(|_| LeadingDirCache::new());
         for entry in replaced.iter().rev() {
             if spooled.contains(&entry.path) {
                 continue;

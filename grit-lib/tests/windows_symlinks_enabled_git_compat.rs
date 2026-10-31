@@ -7,10 +7,12 @@ use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
+use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::repo::Repository;
-use grit_test_support::git;
+use grit_test_support::{git, grit};
 
 const LINK_TARGET: &str = "target.txt";
 
@@ -61,6 +63,48 @@ fn assert_git_clean(root: &Path) {
     );
 }
 
+fn assert_git_fsck(root: &Path) {
+    git(root, &["fsck", "--strict", "--no-progress"]);
+}
+
+fn assert_grit_clean(root: &Path) {
+    let repo = open_repo(root);
+    let model = status(
+        &repo,
+        &StatusOptions {
+            untracked: UntrackedMode::No,
+            ..StatusOptions::default()
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("grit status");
+    assert!(
+        model.unstaged.is_empty() && model.untracked.is_empty(),
+        "grit status must be clean, unstaged={:?} untracked={:?}",
+        model.unstaged,
+        model.untracked
+    );
+    let short = grit(root, &["status", "-s"]);
+    assert!(
+        short.status.success(),
+        "grit status -s failed: {}",
+        String::from_utf8_lossy(&short.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&short.stdout).trim(),
+        "",
+        "grit status -s must be clean"
+    );
+}
+
+fn assert_worktree_clean(root: &Path) {
+    assert_link_is_symlink(root);
+    assert_git_clean(root);
+    assert_grit_clean(root);
+    assert_git_fsck(root);
+}
+
 #[test]
 fn restore_switch_clone_honor_core_symlinks_true() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -100,8 +144,7 @@ fn restore_switch_clone_honor_core_symlinks_true() {
         &grit_lib::progress::NeverCancel,
     )
     .expect("restore");
-    assert_link_is_symlink(&grit);
-    assert_git_clean(&grit);
+    assert_worktree_clean(&grit);
 
     git(&grit, &["checkout", "-q", "-b", "b2"]);
     git(&grit, &["rm", "-q", "link.txt"]);
@@ -119,8 +162,7 @@ fn restore_switch_clone_honor_core_symlinks_true() {
         &grit_lib::progress::NeverCancel,
     )
     .expect("switch main");
-    assert_link_is_symlink(&grit);
-    assert_git_clean(&grit);
+    assert_worktree_clean(&grit);
 
     let clone_dest = tmp.path().join("rc");
     let mut opts = CloneOptions::new(format!("file://{}", src.display()), clone_dest.clone());
@@ -132,8 +174,7 @@ fn restore_switch_clone_honor_core_symlinks_true() {
         &grit_lib::progress::NeverCancel,
     )
     .expect("grit clone");
-    assert_link_is_symlink(&clone_dest);
-    assert_git_clean(&clone_dest);
+    assert_worktree_clean(&clone_dest);
 }
 
 #[test]

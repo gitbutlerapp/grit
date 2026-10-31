@@ -1396,7 +1396,7 @@ fn checkout_hard_to_tree_journaled(
             }
             HardResetEntryAction::Written(None) | HardResetEntryAction::VerifiedUpToDate => {
                 let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
-                index.entries[pos] = checked_out_entry(&meta, path.as_slice(), oid, mode);
+                index.entries[pos] = checked_out_entry(&meta, path.as_slice(), oid, mode, None);
                 continue;
             }
             HardResetEntryAction::Gitlink
@@ -4379,15 +4379,9 @@ pub(crate) fn write_smudged_blob_to_worktree(
     oid: &ObjectId,
     mode: u32,
 ) -> Result<()> {
-    let written = write_blob_to_worktree(
-        repo,
-        rules,
-        work_tree,
-        rel_path,
-        oid,
-        mode,
-        &mut LeadingDirCache::new(),
-    )?;
+    let mut dir_cache = LeadingDirCache::for_config(rules.config());
+    let written =
+        write_blob_to_worktree(repo, rules, work_tree, rel_path, oid, mode, &mut dir_cache)?;
     if written.is_none() {
         return Err(Error::PathError(format!(
             "delayed filter checkout is not supported for '{rel_path}'"
@@ -4857,29 +4851,34 @@ fn write_checkout_entry(
             let old_mode = change.old_mode.bits();
             apply_in_place_git_mode_transition_at_path(&abs_path, old_mode, mode)?;
             let meta = written_file_symlink_metadata(&abs_path)?;
-            return Ok(checked_out_entry(&meta, &index_path, oid, mode));
+            return Ok(checked_out_entry(&meta, &index_path, oid, mode, None));
         }
     }
 
-    #[cfg(windows)]
     let symlink_target_len = (mode == MODE_SYMLINK).then_some(match &content {
         WorktreeFileContent::Bytes(data) => data.len(),
         WorktreeFileContent::Stream(_) => 0,
     });
     let has_symlinks = dir_cache.has_symlinks();
     let meta = write_worktree_content(work_tree, rel_path, content, mode, dir_cache, has_symlinks)?;
-    #[cfg(windows)]
-    {
-        return Ok(checked_out_entry(
-            &meta,
-            &index_path,
-            oid,
-            mode,
-            symlink_target_len,
-        ));
-    }
-    #[cfg(not(windows))]
-    Ok(checked_out_entry(&meta, &index_path, oid, mode))
+    Ok(checked_out_entry(
+        &meta,
+        &index_path,
+        oid,
+        mode,
+        symlink_target_len,
+    ))
+}
+
+/// Index row after writing a path to the worktree (checkout, restore, merge checkout).
+pub(crate) fn index_entry_from_worktree_write(
+    meta: &fs::Metadata,
+    index_path: &[u8],
+    oid: ObjectId,
+    mode: u32,
+    symlink_target_len: Option<usize>,
+) -> IndexEntry {
+    checked_out_entry(meta, index_path, oid, mode, symlink_target_len)
 }
 
 /// Index row for a file checkout just wrote from blob `oid`.
@@ -4892,7 +4891,7 @@ fn checked_out_entry(
     index_path: &[u8],
     oid: ObjectId,
     mode: u32,
-    #[cfg(windows)] symlink_target_len: Option<usize>,
+    #[cfg_attr(not(windows), allow(unused_variables))] symlink_target_len: Option<usize>,
 ) -> IndexEntry {
     let mut entry = entry_from_metadata(meta, index_path, oid, mode);
     if mode == MODE_SYMLINK {
@@ -5372,7 +5371,7 @@ mod tests {
         fs::write(&file, b"data").expect("write");
         let oid = ObjectId::zero();
         let meta = fs::symlink_metadata(&file).expect("stat");
-        let mut entry = checked_out_entry(&meta, b"f", oid, MODE_REGULAR);
+        let mut entry = checked_out_entry(&meta, b"f", oid, MODE_REGULAR, None);
         assert_eq!(entry.size, 4);
         assert!(entry.take_content_verified());
 
@@ -5381,7 +5380,7 @@ mod tests {
             let link = tmp.path().join("l");
             std::os::unix::fs::symlink("f", &link).expect("symlink");
             let meta = fs::symlink_metadata(&link).expect("lstat");
-            let mut entry = checked_out_entry(&meta, b"l", oid, MODE_SYMLINK);
+            let mut entry = checked_out_entry(&meta, b"l", oid, MODE_SYMLINK, None);
             assert!(!entry.take_content_verified());
         }
     }
