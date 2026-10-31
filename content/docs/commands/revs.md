@@ -64,7 +64,7 @@ Author, committer, message, and pickaxe filters use the same rules as [`grit log
 | `--first-parent` | Follow first parents only at merges. |
 | `--merges` | Only merge commits (conflicts with `--no-merges`). |
 | `--no-merges` | Exclude merge commits (conflicts with `--merges`). |
-| `--reverse` | Oldest commits first. |
+| `--reverse` | Print the selected window oldest-first. `-n` and `--skip` choose the window (newest `N` commits after skip); `--reverse` only flips that window. |
 | `--all` | Include every ref tip. |
 | `--branches[=<glob>]` | Branch tips, optionally filtered by glob. |
 | `--tags[=<glob>]` | Tag tips, optionally filtered by glob. |

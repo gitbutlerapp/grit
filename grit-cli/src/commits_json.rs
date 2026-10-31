@@ -153,13 +153,26 @@ impl CommitJsonLoader {
     }
 }
 
-/// When the walk used `limit + 1`, keep the first `limit` oids and report truncation.
-pub fn truncate_oid_list(oids: Vec<ObjectId>, limit: Option<usize>) -> (Vec<ObjectId>, bool) {
+/// When the walk used `limit + 1`, drop the probe row and report truncation.
+///
+/// Without `--reverse`, commits are newest-first and the extra probe is at the end — keep the
+/// first `limit` rows. With `--reverse`, the library has already reversed so the probe is the
+/// oldest row at index 0 — keep the last `limit` rows (the newest commits in the window).
+pub fn truncate_oid_list(
+    oids: Vec<ObjectId>,
+    limit: Option<usize>,
+    reverse: bool,
+) -> (Vec<ObjectId>, bool) {
     let Some(n) = limit else {
         return (oids, false);
     };
     if oids.len() > n {
-        (oids.into_iter().take(n).collect(), true)
+        if reverse {
+            let skip = oids.len() - n;
+            (oids.into_iter().skip(skip).collect(), true)
+        } else {
+            (oids.into_iter().take(n).collect(), true)
+        }
     } else {
         (oids, false)
     }
@@ -168,6 +181,37 @@ pub fn truncate_oid_list(oids: Vec<ObjectId>, limit: Option<usize>) -> (Vec<Obje
 /// Rev-walk limit that fetches one extra row to detect truncation cheaply.
 pub fn fetch_limit_plus_one(limit: Option<usize>) -> Option<usize> {
     limit.map(|n| n.saturating_add(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use grit_lib::objects::ObjectId;
+
+    fn oid(byte: u8) -> ObjectId {
+        let mut raw = [0u8; 20];
+        raw[19] = byte;
+        ObjectId::from_bytes(&raw).expect("test oid")
+    }
+
+    #[test]
+    fn truncate_keeps_head_when_not_reversed() {
+        let oids = vec![oid(5), oid(4), oid(3), oid(2)];
+        let (kept, truncated) = truncate_oid_list(oids, Some(3), false);
+        assert!(truncated);
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept[0].as_bytes()[19], 5);
+    }
+
+    #[test]
+    fn truncate_keeps_tail_when_reversed() {
+        let oids = vec![oid(1), oid(2), oid(3), oid(4)];
+        let (kept, truncated) = truncate_oid_list(oids, Some(3), true);
+        assert!(truncated);
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept[0].as_bytes()[19], 2);
+        assert_eq!(kept[2].as_bytes()[19], 4);
+    }
 }
 
 impl CommitJson {

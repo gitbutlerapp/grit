@@ -361,6 +361,8 @@ mod log_loose_tags_memory;
 #[cfg(feature = "full-tests")]
 #[path = "log_pickaxe_json.rs"]
 mod log_pickaxe_json;
+#[path = "log_reverse_limit.rs"]
+mod log_reverse_limit;
 #[path = "log_terminal_cli.rs"]
 mod log_terminal_cli;
 #[cfg(feature = "full-tests")]

@@ -309,8 +309,11 @@ pub fn run(
     fetch_opts.left_right = left_right;
     fetch_opts.cherry_mark = mode.cherry_mark;
     let mut list_result = walk.rev_list_result(&token_refs, &fetch_opts)?;
-    let (oids, truncated) =
-        truncate_oid_list(std::mem::take(&mut list_result.commits), rev.max_count());
+    let (oids, truncated) = truncate_oid_list(
+        std::mem::take(&mut list_result.commits),
+        rev.max_count(),
+        rev.reverse,
+    );
     let marks = commit_marks(&oids, &list_result, mode);
     let mut parsed = std::mem::take(&mut list_result.commit_data);
     let mut outcome = RevsOutcome {

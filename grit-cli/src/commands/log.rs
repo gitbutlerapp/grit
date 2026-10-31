@@ -534,7 +534,7 @@ pub fn run(
             .context("could not list commits")?;
         let parsed = std::mem::take(&mut list_result.commit_data);
         let graph_linkage = list_result.log_graph_linkage.clone();
-        let (oids, truncated) = truncate_oid_list(list_result.commits, page_limit);
+        let (oids, truncated) = truncate_oid_list(list_result.commits, page_limit, rev.reverse);
         if display.group_by == Some(LogGroupBy::Author) {
             let use_mailmap = rev_select::log_mailmap_enabled(&repo, rev.no_mailmap);
             let mailmap = mailmap_for_grouping(&repo, use_mailmap)?;
@@ -554,7 +554,7 @@ pub fn run(
                     .rev_walk()
                     .commits(&token_refs, &fetch_opts)
                     .context("could not list commits")?;
-                let (oids, truncated) = truncate_oid_list(oids, rev.max_count());
+                let (oids, truncated) = truncate_oid_list(oids, rev.max_count(), rev.reverse);
                 let grouped = group_commits_by_author(
                     &repo,
                     &oids,
@@ -568,7 +568,7 @@ pub fn run(
                 .rev_walk()
                 .commits(&token_refs, &fetch_opts)
                 .context("could not list commits")?;
-            let (oids, truncated) = truncate_oid_list(oids, rev.max_count());
+            let (oids, truncated) = truncate_oid_list(oids, rev.max_count(), rev.reverse);
             return build_author_group_outcome(&repo, &oids, truncated, display, use_mailmap);
         }
         return build_commit_outcome(

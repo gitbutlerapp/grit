@@ -64,7 +64,7 @@ With `--graph`, human output draws a commit graph in the left margin (Unicode bo
 | `--first-parent` | Follow only the first parent at merges (disables cursor paging). |
 | `--merges` | Only merge commits (conflicts with `--no-merges`; disables cursor paging). |
 | `--no-merges` | Exclude merge commits (conflicts with `--merges`; disables cursor paging). |
-| `--reverse` | Oldest commits first (disables cursor paging). |
+| `--reverse` | Print the selected window oldest-first. `-n`, `--skip`, and date filters choose the window (newest `N` commits after skip); `--reverse` only flips that window (disables cursor paging). |
 | `--all` | Include every ref tip. |
 | `--branches[=<glob>]` | Branch tips, optionally filtered by glob under `refs/heads/`. |
 | `--tags[=<glob>]` | Tag tips, optionally filtered by glob under `refs/tags/`. |
