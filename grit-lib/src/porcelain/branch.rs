@@ -98,9 +98,20 @@ pub struct CreateBranchOutcome {
     pub name: String,
     /// Tip commit the branch points at (or would point at when `dry_run`).
     pub oid: ObjectId,
+    /// Display name of the branch's upstream after the call (`origin/main`, or a local
+    /// branch name for a `.` remote), or `None` when it has none.
+    ///
+    /// This is the upstream tracking just configured, or else one already in config (a
+    /// forced reset keeps the existing `branch.<name>.*` keys). A live create reports it
+    /// only when the upstream ref resolves; a `dry_run` reports what the live call would
+    /// configure.
+    pub upstream: Option<String>,
 }
 
 /// Create or reset `refs/heads/<name>` without checking it out.
+///
+/// The returned [`CreateBranchOutcome::upstream`] says which upstream the branch tracks, so
+/// callers need not resolve tracking or re-read config themselves.
 ///
 /// # Errors
 ///
@@ -131,9 +142,14 @@ pub fn create_branch(repo: &Repository, opts: &CreateBranchOptions) -> Result<Cr
     let tracking = resolve_create_tracking(repo, name, &source_label, start_oid, opts.track)?;
 
     if opts.dry_run {
+        let upstream = match &tracking {
+            Some((remote, merge)) => Some(upstream_tracking_display(remote, merge)),
+            None => upstream_branch(repo, name).map(|base| base.name),
+        };
         return Ok(CreateBranchOutcome {
             name: name.clone(),
             oid: start_oid,
+            upstream,
         });
     }
 
@@ -150,6 +166,7 @@ pub fn create_branch(repo: &Repository, opts: &CreateBranchOptions) -> Result<Cr
     Ok(CreateBranchOutcome {
         name: name.clone(),
         oid: start_oid,
+        upstream: upstream_branch(repo, name).map(|base| base.name),
     })
 }
 
