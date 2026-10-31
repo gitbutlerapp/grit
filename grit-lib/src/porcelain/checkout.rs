@@ -915,8 +915,9 @@ pub fn checkout_between_trees_with_progress(
 /// rewritten. Missing promised blobs needed for writes and verification (including
 /// attribute dependencies) are fetched together before content reads. Sparse-excluded
 /// paths and gitlinks do not request blob content; lazy-fetch opt-outs still apply.
-/// Tracked paths absent from `target_tree` are removed and the index is
-/// rebuilt without unmerged stages.
+/// Tracked paths absent from `target_tree` are removed, worktree files that
+/// existed only for unmerged index entries absent from `target_tree` are
+/// removed as well, and the index is rebuilt without unmerged stages.
 ///
 /// `index.lock` is taken before the index is read and held until the rebuilt index
 /// replaces it, so no file is touched when the lock is unavailable.
@@ -991,9 +992,16 @@ fn checkout_hard_to_tree_journaled(
         .filter_map(|change| change.old_path.as_deref())
         .map(checkout_stored_index_path_bytes)
         .collect();
+    let unmerged_paths: BTreeSet<Vec<u8>> = index
+        .entries
+        .iter()
+        .filter(|entry| entry.stage() > 0)
+        .map(|entry| entry.path.clone())
+        .collect();
     hard_reset_drop_unmerged_and_intent(&mut index);
     let mut deleted_abs_paths = Vec::new();
     let mut staged_index_changes: Vec<DiffEntry> = Vec::new();
+    let mut index_only_removed_paths: HashSet<Vec<u8>> = HashSet::new();
     if trees_differ || !index_hard_reset_cache_matches_tree(&index, target_tree) {
         let align_plan = crate::diff::plan_hard_reset_index_align(repo.odb(), &index, target_tree)?;
         if !trees_differ {
@@ -1005,10 +1013,24 @@ fn checkout_hard_to_tree_journaled(
             .filter(|path| !tree_deleted.contains(*path))
             .filter_map(|path| index.get(path, 0).map(|entry| (path.clone(), entry.mode)))
             .collect();
+        index_only_removed_paths = index_only_removals
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect();
         crate::diff::apply_hard_reset_index_plan(&mut index, align_plan);
         deleted_abs_paths =
             hard_reset_journal_index_only_removals(work_tree, &index_only_removals, journal)?;
     }
+    let sparse = SparseCheckout::load(repo)?;
+    deleted_abs_paths.extend(hard_reset_journal_conflict_only_unmerged_paths(
+        work_tree,
+        &unmerged_paths,
+        &index,
+        &tree_deleted,
+        &index_only_removed_paths,
+        sparse.as_ref(),
+        journal,
+    )?);
 
     let mut written_by_tree_diff: BTreeSet<Vec<u8>> = BTreeSet::new();
     for change in &changes {
@@ -1020,7 +1042,6 @@ fn checkout_hard_to_tree_journaled(
         }
     }
     let config = repo.config()?;
-    let sparse = SparseCheckout::load(repo)?;
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(config.as_ref()));
     let trust_filemode = config
         .get_bool("core.filemode")
@@ -1669,6 +1690,42 @@ fn hard_reset_drop_unmerged_and_intent(index: &mut Index) {
         index.remove_path_all_stages(&path);
         index.invalidate_cache_tree_for_path(&path);
     }
+}
+
+/// Remove worktree files that existed only for unmerged index rows dropped by
+/// [`hard_reset_drop_unmerged_and_intent`] and are absent from the hard-reset target.
+fn hard_reset_journal_conflict_only_unmerged_paths(
+    work_tree: &Path,
+    unmerged_paths: &BTreeSet<Vec<u8>>,
+    index: &Index,
+    tree_deleted: &HashSet<Vec<u8>>,
+    index_only_removed: &HashSet<Vec<u8>>,
+    sparse: Option<&SparseCheckout>,
+    journal: &mut CheckoutJournal,
+) -> Result<Vec<PathBuf>> {
+    let mut removed = Vec::new();
+    for path in unmerged_paths {
+        if tree_deleted.contains(path) || index_only_removed.contains(path) {
+            continue;
+        }
+        if index.get(path, 0).is_some() {
+            continue;
+        }
+        if sparse.is_some_and(|sparse| !sparse.includes_index_path(path)) {
+            continue;
+        }
+        let abs = crate::index::worktree_path_from_index_rel(work_tree, path);
+        let Ok(meta) = fs::symlink_metadata(&abs) else {
+            continue;
+        };
+        if meta.is_dir() {
+            continue;
+        }
+        let rel = crate::repo_relpath::storage_string(path);
+        journal.spool_remove(&rel)?;
+        removed.push(abs);
+    }
+    Ok(removed)
 }
 
 fn hard_reset_normalize_index_row(entry: &mut IndexEntry) {

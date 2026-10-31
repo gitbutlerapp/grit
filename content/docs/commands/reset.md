@@ -24,7 +24,7 @@ Moves the current branch (or detached `HEAD`) to `<rev>`, which defaults to `HEA
 
 `--mixed` moves the tip and resets the index to match `<rev>`; the worktree is not touched.
 
-`--hard` moves the tip, resets the index, and updates tracked files in the worktree to match `<rev>`. Untracked files are left alone.
+`--hard` moves the tip, resets the index, and updates tracked files in the worktree to match `<rev>`. Untracked files are left alone. Paths that were unmerged when the reset started and are absent from `<rev>` are removed from the worktree (including files another side introduced during a conflict). Intent-to-add paths stay on disk as untracked files, as in Git.
 
 In a blobless clone, `--hard` batches missing blobs needed to materialize or repair tracked paths into one promisor fetch. This includes `reset --hard HEAD` after `clone --blobs none --no-checkout`, and unchanged paths missing from the worktree when resetting to another commit. Repeated blob ids are requested once; sparse-excluded paths and submodule gitlinks do not download blob content. The usual partial-clone lazy-fetch opt-outs still apply.
 

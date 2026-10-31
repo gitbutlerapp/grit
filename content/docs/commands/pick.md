@@ -39,8 +39,8 @@ Pick either completes a step, stops for conflicts or an empty commit, or changes
 | --- | --- |
 | `<commit>`… | Commits or ranges to replay (oldest first). |
 | `--continue` | Finish the paused pick after conflicts are resolved and staged. |
-| `--abort` | Cancel the in-progress pick and restore the saved branch tip. |
-| `--skip` | Skip the current todo step and continue with the rest. |
+| `--abort` | Cancel the in-progress pick and restore the saved branch tip and worktree (conflict-only files from the other side are removed). |
+| `--skip` | Skip the current todo step and continue with the rest; the worktree is reset to the saved tip, including removing conflict-only paths. |
 | `-x`, `--record-origin` | Append `(cherry picked from commit …)` to each new message. |
 | `--no-commit` | Apply the patch to the index and worktree without committing. |
 | `--empty` | When a step would not change the tree: `stop` (default), `keep` (empty commit), or `drop`. |

@@ -875,6 +875,109 @@ mod tests {
         assert!(st.unstaged.is_empty());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn hard_reset_removes_conflict_only_worktree_files() {
+        let (_dir, repo) = init_repo();
+        let c1 = commit_file(&repo, "a", "clean\n", None);
+        let wt = repo.work_tree().expect("wt");
+        let b1 = repo.odb().write(ObjectKind::Blob, b"base\n").expect("blob");
+        let b3 = repo
+            .odb()
+            .write(ObjectKind::Blob, b"theirs\n")
+            .expect("blob");
+        let dir_b1 = repo
+            .odb()
+            .write(ObjectKind::Blob, b"d-base\n")
+            .expect("blob");
+        let dir_b3 = repo
+            .odb()
+            .write(ObjectKind::Blob, b"d-theirs\n")
+            .expect("blob");
+        let mut index = Index::new();
+        for (path, stage, oid, size) in [
+            (b"b".as_slice(), 1u8, b1, 5u32),
+            (b"b", 3, b3, 7),
+            (b"dir/f", 1, dir_b1, 7),
+            (b"dir/f", 3, dir_b3, 9),
+        ] {
+            let mut entry = crate::index::IndexEntry {
+                ctime_sec: 0,
+                ctime_nsec: 0,
+                mtime_sec: 0,
+                mtime_nsec: 0,
+                dev: 0,
+                ino: 0,
+                mode: crate::index::MODE_REGULAR,
+                uid: 0,
+                gid: 0,
+                size,
+                oid,
+                flags: path.len().min(0xFFF) as u16,
+                flags_extended: None,
+                path: path.to_vec(),
+                base_index_pos: 0,
+            };
+            entry.set_stage(stage);
+            index.add_or_replace(entry);
+        }
+        let intent_oid = repo.odb().write(ObjectKind::Blob, b"").expect("blob");
+        let mut intent = crate::index::IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: crate::index::MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid: intent_oid,
+            flags: 8,
+            flags_extended: None,
+            path: b"intent.txt".to_vec(),
+            base_index_pos: 0,
+        };
+        intent.set_intent_to_add(true);
+        index.add_or_replace(intent);
+        index.sort();
+        std::fs::write(wt.join("b"), "theirs\n").expect("wt");
+        std::fs::create_dir_all(wt.join("dir")).expect("mkdir");
+        std::fs::write(wt.join("dir/f"), "d-theirs\n").expect("wt");
+        std::fs::write(wt.join("keep.txt"), "stay\n").expect("wt");
+        std::fs::write(wt.join("intent.txt"), "new\n").expect("wt");
+        repo.write_index(&mut index).expect("write index");
+
+        reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset");
+
+        assert!(!wt.join("b").exists());
+        assert!(!wt.join("dir/f").exists());
+        assert!(!wt.join("dir").exists());
+        assert!(wt.join("keep.txt").is_file());
+        assert!(wt.join("intent.txt").is_file());
+        let st = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
+        assert!(st.staged.is_empty());
+        assert!(st.unstaged.is_empty());
+        assert!(st.untracked.iter().any(|e| e == "keep.txt"));
+        assert!(st.untracked.iter().any(|e| e == "intent.txt"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn hard_reset_at_head_reverts_exec_bit_only_changes() {
