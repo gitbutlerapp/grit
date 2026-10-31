@@ -764,6 +764,42 @@ fn mv_case_only_directory_with_ignorecase() {
     }
 }
 
+/// Tracked and untracked symlinks that resolve to the same directory must not be treated
+/// as a case-only directory dentry rename (would overwrite `dir` without `--force`).
+#[test]
+fn mv_ignorecase_symlink_pair_not_case_only_directory() {
+    if is_case_insensitive(std::env::temp_dir().as_path()) {
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    git(repo_dir, &["config", "core.ignorecase", "true"]);
+    fs::create_dir(repo_dir.join("target")).unwrap();
+    std::os::unix::fs::symlink("target", repo_dir.join("Dir")).unwrap();
+    std::os::unix::fs::symlink("./target", repo_dir.join("dir")).unwrap();
+    git(repo_dir, &["add", "Dir"]);
+    git(repo_dir, &["commit", "-q", "-m", "one"]);
+
+    let repo = grit_repo(repo_dir);
+    let err = move_path(&repo, "Dir", "dir", false).expect_err("must not clobber untracked dir");
+    assert!(
+        matches!(
+            err,
+            grit_lib::error::Error::MoveDestinationExists { .. }
+                | grit_lib::error::Error::MoveIntoSubdirectory { .. }
+        ),
+        "unexpected error: {err:?}"
+    );
+    assert!(
+        std::fs::read_link(repo_dir.join("dir"))
+            .expect("dir symlink")
+            .to_string_lossy()
+            == "./target",
+        "untracked dir symlink must be unchanged"
+    );
+}
+
 /// Issue #2376: on a folding volume `Dir` and `dir` are the same dentry; grit must not
 /// plan `dir/Dir`.
 #[test]

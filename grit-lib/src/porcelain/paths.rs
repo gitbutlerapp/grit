@@ -1031,7 +1031,7 @@ fn resolve_move_destination(
     dst: &str,
     ignorecase: bool,
 ) -> Result<(String, bool)> {
-    let src_is_dir = work_tree.join(src).is_dir()
+    let src_is_dir = worktree_dentry_is_directory(work_tree, src)
         || index
             .get(src.as_bytes(), 0)
             .is_some_and(|e| e.mode == MODE_TREE)
@@ -1091,15 +1091,24 @@ fn index_has_paths_under(index: &Index, prefix: &str, ignorecase: bool) -> bool 
     !index_paths_under(index, prefix, false).is_empty()
 }
 
+fn worktree_dentry_is_directory(work_tree: &Path, rel: &str) -> bool {
+    fs::symlink_metadata(work_tree.join(rel))
+        .map(|meta| meta.is_dir())
+        .unwrap_or(false)
+}
+
 #[cfg(unix)]
 fn worktree_paths_same_identity(work_tree: &Path, a: &str, b: &str) -> bool {
     use std::os::unix::fs::MetadataExt;
 
     let a_abs = work_tree.join(a);
     let b_abs = work_tree.join(b);
-    let (Ok(ma), Ok(mb)) = (a_abs.metadata(), b_abs.metadata()) else {
+    let (Ok(ma), Ok(mb)) = (fs::symlink_metadata(&a_abs), fs::symlink_metadata(&b_abs)) else {
         return false;
     };
+    if !ma.is_dir() || !mb.is_dir() {
+        return false;
+    }
     ma.dev() == mb.dev() && ma.ino() == mb.ino()
 }
 
@@ -1517,6 +1526,17 @@ mod path_validation_tests {
             normalize_and_validate_repo_relative(&repo, wt, "./nested/file.txt").expect("ok"),
             "nested/file.txt"
         );
+    }
+}
+
+#[cfg(test)]
+mod is_subdirectory_tests {
+    use super::is_subdirectory;
+
+    #[test]
+    fn ignorecase_rejects_move_into_case_folded_subdirectory() {
+        assert!(is_subdirectory("dir/nested", "Dir", true));
+        assert!(!is_subdirectory("dir/nested", "Dir", false));
     }
 }
 
