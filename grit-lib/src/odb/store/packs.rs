@@ -516,7 +516,10 @@ impl PackPayloadStream {
         let out = &mut out[..cap];
         let input_end = self.whole.data_end.min(self.whole.entry_end);
         if self.pos >= input_end {
-            return Ok(0);
+            if self.stream_ended {
+                return Ok(0);
+            }
+            return Err(corrupt_pack_stream("zlib stream truncated"));
         }
         let input_take = (input_end - self.pos).min(LOOSE_INFLATE_INPUT_CHUNK);
         let input = &self.whole.pack[self.pos..self.pos + input_take];

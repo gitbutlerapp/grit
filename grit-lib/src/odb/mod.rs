@@ -3204,12 +3204,13 @@ impl Odb {
 
     /// Store `size` payload bytes of `kind` read from `reader` and return the object id.
     ///
-    /// Objects smaller than [`Self::big_file_threshold`] are read into memory and written like
-    /// [`Self::write_with_options`]. Bigger ones are hashed and deflated in fixed-size chunks
-    /// straight into a new single-object pack (at the [`ConfigSet::pack_objects_zlib_level`]
-    /// level), as Git does for big files, so memory use does not depend on `size`. If the
-    /// object already exists the new pack is discarded and the existing copy is freshened
-    /// unless `options.silent` is set.
+    /// Payloads below [`stream::STREAMED_WRITE_MIN_SIZE`] (1 MiB) are read into memory and
+    /// written like [`Self::write_with_options`]. From 1 MiB up to (but not including)
+    /// [`Self::big_file_threshold`] they are hashed and deflated in fixed-size chunks into a
+    /// loose object. At or above the threshold they go into a new single-object pack (at
+    /// [`ConfigSet::pack_objects_zlib_level`]), as Git does for big files, so memory use does
+    /// not depend on `size`. If the object already exists the new pack is discarded and the
+    /// existing copy is freshened unless `options.silent` is set.
     ///
     /// A custom primary receives the stream through [`WritableObjectStore::write_stream`];
     /// while the in-memory overlay is active the object is buffered into the overlay.

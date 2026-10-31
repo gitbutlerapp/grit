@@ -68,15 +68,11 @@ fn declared_loose_object_len(out: &[u8]) -> Option<usize> {
 fn loose_output_growth(len: usize, declared: Option<usize>, filled: usize) -> usize {
     match declared {
         Some(total) if total > len => {
-            let target = total
-                .min(len.saturating_mul(2).max(MAX_HEADER_SIZE_RESERVE))
-                .min(len + LOOSE_INFLATE_OUTPUT_CHUNK);
+            let target = total.min(len.saturating_mul(2).max(MAX_HEADER_SIZE_RESERVE));
             target - len
         }
-        _ if len == 0 => filled
-            .saturating_mul(4)
-            .clamp(256, LOOSE_INFLATE_OUTPUT_CHUNK),
-        _ => len.clamp(256, LOOSE_INFLATE_OUTPUT_CHUNK),
+        _ if len == 0 => filled.saturating_mul(4).max(256),
+        _ => len.max(256),
     }
 }
 

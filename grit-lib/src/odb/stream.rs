@@ -1,8 +1,9 @@
 //! Bounded-memory object hashing and writing from a byte stream.
 //!
-//! Objects at or above `core.bigFileThreshold` are never held in memory: the payload is read
-//! in fixed-size chunks that feed the object hasher and a zlib encoder writing a
-//! single-object pack, which is how Git stores big files too.
+//! Payloads of at least [`STREAMED_WRITE_MIN_SIZE`] (1 MiB) are read in fixed-size chunks
+//! instead of being buffered whole: below [`crate::Odb::big_file_threshold`] they become loose
+//! objects; at or above the threshold they are written as a single-object pack, matching Git's
+//! large-file storage split.
 
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Read, Write};
