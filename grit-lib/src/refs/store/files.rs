@@ -27,7 +27,8 @@ use crate::refs::{
     lock_path_for_ref, loose_ref_list_walk_root, packed_record_name, packed_record_oid,
     prune_empty_ref_dirs, read_packed_refs_file_view, read_packed_refs_map_for_prefix_filtered,
     read_ref_file, remove_empty_ref_directory, remove_packed_ref, remove_packed_ref_under_lock,
-    remove_packed_refs_under_lock, restore_packed_records_under_lock, PackedRecordFilter, Ref,
+    remove_packed_refs_under_lock, restore_packed_records_under_lock, PackedPeel,
+    PackedRecordFilter, Ref,
 };
 
 use super::apply::{
@@ -87,6 +88,9 @@ struct PackedCacheEntry {
     stamp: PackedRefsStamp,
     loaded: bool,
     file: Option<crate::refs::PackedRefsFileView>,
+    /// Full packed-refs map; only valid when [`Self::map_is_complete`].
+    map: Option<BTreeMap<String, ObjectId>>,
+    map_is_complete: bool,
 }
 
 /// Per-batch state shared by the steps of [`FilesRefStore::persist_state_diff`].
@@ -145,6 +149,8 @@ impl FilesRefStore {
                 stamp,
                 loaded: false,
                 file: None,
+                map: None,
+                map_is_complete: false,
             }),
         }
     }
@@ -190,9 +196,15 @@ impl FilesRefStore {
         let mut guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
         guard.loaded = false;
         guard.file = None;
+        guard.map = None;
+        guard.map_is_complete = false;
     }
 
-    fn invalidate_packed_cache_after_write(&self) {}
+    fn invalidate_packed_cache_after_write(&self) {
+        let mut guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
+        guard.map = None;
+        guard.map_is_complete = false;
+    }
 
     fn refresh_packed_cache_if_stale(&self) -> Result<()> {
         let path = super::paths::packed_refs_path(&self.common_dir);
@@ -202,9 +214,45 @@ impl FilesRefStore {
             return Ok(());
         }
         guard.file = read_packed_refs_file_view(&self.common_dir)?;
+        guard.map = None;
+        guard.map_is_complete = false;
         guard.stamp = stamp;
         guard.loaded = true;
         Ok(())
+    }
+
+    fn ensure_full_packed_map(&self) -> Result<()> {
+        self.refresh_packed_cache_if_stale()?;
+        let mut guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.map.is_some() && guard.map_is_complete {
+            return Ok(());
+        }
+        let map = if let Some(ref file) = guard.file {
+            let path = super::paths::packed_refs_path(&self.common_dir);
+            file.full_map(&path)?
+        } else {
+            BTreeMap::new()
+        };
+        guard.map = Some(map);
+        guard.map_is_complete = true;
+        Ok(())
+    }
+
+    /// Records of the common dir's `packed-refs` under `prefix` (storage names), read through
+    /// the cached file view so a listing and later lookups index the file once.
+    fn packed_map_for_prefix_filtered(
+        &self,
+        prefix: &str,
+        keep: Option<PackedRecordFilter<'_>>,
+    ) -> Result<HashMap<String, ObjectId>> {
+        self.refresh_packed_cache_if_stale()?;
+        let guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(ref file) = guard.file else {
+            return Ok(HashMap::new());
+        };
+        let path = super::paths::packed_refs_path(&self.common_dir);
+        let prefix = (!prefix.is_empty()).then_some(prefix);
+        file.map_for_prefix_filtered(&path, prefix, keep)
     }
 
     /// The common dir's `packed-refs` view this store reads through, refreshed when the file
@@ -550,6 +598,23 @@ impl FilesRefStore {
         Ok(None)
     }
 
+    fn ref_listing_entry(
+        &self,
+        name: String,
+        value: RawRef,
+        packed_peel: Option<ObjectId>,
+    ) -> RefEntry {
+        let peeled = match &value {
+            RawRef::Direct(_) => packed_peel,
+            RawRef::Symbolic(target) => self.resolve(target).ok(),
+        };
+        RefEntry {
+            name,
+            value,
+            peeled,
+        }
+    }
+
     fn packed_storage_visible(&self, storage: &str) -> bool {
         match self.namespace_prefix.as_deref() {
             None => true,
@@ -566,10 +631,13 @@ impl FilesRefStore {
         }
     }
 
-    /// Loose refs (and `HEAD`) whose logical names start with `logical_prefix`.
-    fn loose_refs_for_prefix(&self, logical_prefix: &str) -> Result<BTreeMap<String, RawRef>> {
+    /// Loose refs (and `HEAD`) whose logical names fall under `logical_prefix`.
+    fn collect_loose_refs_for_prefix(
+        &self,
+        logical_prefix: &str,
+        map: &mut BTreeMap<String, RawRef>,
+    ) -> Result<()> {
         let logical_prefix = logical_prefix.trim_end_matches('/');
-        let mut map: BTreeMap<String, RawRef> = BTreeMap::new();
         for base in self.store_bases() {
             let storage_prefix = self.namespace_prefix.as_deref().unwrap_or("refs/");
             if self.namespace_prefix.is_some() {
@@ -608,70 +676,51 @@ impl FilesRefStore {
                 }
             }
         }
-        Ok(map)
+        Ok(())
     }
 
-    /// Visit packed records under `logical_prefix` in storage-name order, without building a map.
-    fn for_each_packed_ref_filtered(
+    /// Stream packed records under `logical_prefix`, calling `visit` with logical name, object
+    /// id, and peeled tag target when `packed-refs` records one.
+    fn for_each_packed_record_filtered(
         &self,
         logical_prefix: &str,
         keep: Option<PackedRecordFilter<'_>>,
-        f: &mut dyn FnMut(&str, ObjectId) -> ControlFlow<()>,
+        mut visit: impl FnMut(String, ObjectId, Option<ObjectId>) -> ControlFlow<()>,
     ) -> Result<ControlFlow<()>> {
         let logical_prefix = logical_prefix.trim_end_matches('/');
         let packed_prefix = self.packed_refs_scan_prefix(logical_prefix);
-        let scan_prefix = (!logical_prefix.is_empty()).then_some(packed_prefix.as_str());
+        let scan_prefix = (!packed_prefix.is_empty()).then_some(packed_prefix.as_str());
         for (i, base) in self.store_bases().enumerate() {
-            if i == 0 {
+            let path = super::paths::packed_refs_path(if i == 0 { &self.common_dir } else { base });
+            let view = if i == 0 {
                 self.refresh_packed_cache_if_stale()?;
                 let guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
-                let Some(ref file) = guard.file else {
-                    continue;
-                };
-                let path = super::paths::packed_refs_path(&self.common_dir);
-                let file = file.clone();
-                drop(guard);
-                if file
-                    .for_each_prefix_filtered(&path, scan_prefix, keep, &mut |storage, oid, _| {
-                        if !self.packed_storage_visible(storage) {
-                            return ControlFlow::Continue(());
-                        }
-                        f(storage, oid)
-                    })?
-                    .is_break()
-                {
-                    return Ok(ControlFlow::Break(()));
-                }
+                guard.file.clone()
             } else {
-                let packed = read_packed_refs_map_for_prefix_filtered(base, &packed_prefix, keep)?;
-                let mut names: Vec<_> = packed.keys().cloned().collect();
-                names.sort_unstable();
-                for storage in names {
-                    let Some(oid) = packed.get(&storage) else {
-                        continue;
-                    };
-                    if !self.packed_storage_visible(&storage) {
-                        continue;
-                    }
-                    if f(&storage, *oid).is_break() {
-                        return Ok(ControlFlow::Break(()));
-                    }
+                read_packed_refs_file_view(base)?
+            };
+            let Some(view) = view else {
+                continue;
+            };
+            let flow = view.for_each_record(&path, scan_prefix, keep, |storage, oid, peel| {
+                if !self.packed_storage_visible(storage) {
+                    return ControlFlow::Continue(());
                 }
+                let logical = self.logical_name(storage);
+                if !logical_prefix.is_empty() && !logical.starts_with(logical_prefix) {
+                    return ControlFlow::Continue(());
+                }
+                let peeled = match peel {
+                    PackedPeel::Peeled(p) => Some(p),
+                    PackedPeel::NotTag | PackedPeel::Unknown => None,
+                };
+                visit(logical, oid, peeled)
+            })?;
+            if flow.is_break() {
+                return Ok(ControlFlow::Break(()));
             }
         }
         Ok(ControlFlow::Continue(()))
-    }
-
-    fn ref_entry_from_loose(name: String, value: RawRef, store: &FilesRefStore) -> RefEntry {
-        let peeled = match &value {
-            RawRef::Direct(_) => None,
-            RawRef::Symbolic(target) => store.resolve(target).ok(),
-        };
-        RefEntry {
-            name,
-            value,
-            peeled,
-        }
     }
 
     /// Raw refs whose logical names start with `logical_prefix`, loose values overriding packed
@@ -683,14 +732,40 @@ impl FilesRefStore {
     ) -> Result<BTreeMap<String, RawRef>> {
         let logical_prefix = logical_prefix.trim_end_matches('/');
         let mut map: BTreeMap<String, RawRef> = BTreeMap::new();
-        let _ = self.for_each_packed_ref_filtered(logical_prefix, keep, &mut |storage, oid| {
-            let logical = self.logical_name(storage);
-            map.insert(logical, RawRef::Direct(oid));
-            ControlFlow::Continue(())
-        })?;
-        for (logical, value) in self.loose_refs_for_prefix(logical_prefix)? {
-            map.insert(logical, value);
+        if logical_prefix.is_empty() {
+            self.ensure_full_packed_map()?;
+            let cache = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(packed) = cache.map.as_ref() {
+                for (storage, oid) in packed.iter() {
+                    if !self.packed_storage_visible(storage)
+                        || keep.is_some_and(|keep| !keep(storage, oid, PackedPeel::Unknown))
+                    {
+                        continue;
+                    }
+                    let logical = self.logical_name(storage);
+                    map.insert(logical, RawRef::Direct(*oid));
+                }
+            }
+            drop(cache);
+        } else {
+            for (i, base) in self.store_bases().enumerate() {
+                let packed_prefix = self.packed_refs_scan_prefix(logical_prefix);
+                let packed = if i == 0 {
+                    self.packed_map_for_prefix_filtered(&packed_prefix, keep)?
+                } else {
+                    read_packed_refs_map_for_prefix_filtered(base, &packed_prefix, keep)?
+                };
+                for (storage, oid) in packed {
+                    if !self.packed_storage_visible(&storage) {
+                        continue;
+                    }
+                    let logical = self.logical_name(&storage);
+                    map.insert(logical, RawRef::Direct(oid));
+                }
+            }
         }
+
+        self.collect_loose_refs_for_prefix(logical_prefix, &mut map)?;
         Ok(map)
     }
 
@@ -1763,83 +1838,56 @@ impl FilesRefStore {
         f: &mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
     ) -> Result<()> {
         let prefix = prefix.trim_end_matches('/');
-        let loose = self.loose_refs_for_prefix(prefix)?;
-        let mut merge = ForEachRefMerge {
-            store: self,
-            prefix,
-            loose: loose.into_iter().peekable(),
-            f,
+        let mut loose = BTreeMap::new();
+        self.collect_loose_refs_for_prefix(prefix, &mut loose)?;
+        let split_at = if prefix.is_empty() {
+            String::new()
+        } else {
+            prefix.to_owned()
         };
+        let mut loose_iter = loose.split_off(&split_at).into_iter().peekable();
+
+        let mut visit = |name: String, value: RawRef, packed_peel: Option<ObjectId>| {
+            if !prefix.is_empty() && !name.starts_with(prefix) {
+                return ControlFlow::Break(());
+            }
+            f(&self.ref_listing_entry(name, value, packed_peel))
+        };
+
         if self
-            .for_each_packed_ref_filtered(prefix, keep, &mut |storage, oid| {
-                merge.visit_packed(storage, oid)
+            .for_each_packed_record_filtered(prefix, keep, |logical, oid, packed_peel| {
+                while let Some((n, _)) = loose_iter.peek() {
+                    if n.as_str() >= logical.as_str() {
+                        break;
+                    }
+                    let Some((name, value)) = loose_iter.next() else {
+                        break;
+                    };
+                    if visit(name, value, None).is_break() {
+                        return ControlFlow::Break(());
+                    }
+                }
+                if loose_iter
+                    .peek()
+                    .is_some_and(|(n, _)| n.as_str() == logical.as_str())
+                {
+                    let Some((name, value)) = loose_iter.next() else {
+                        return ControlFlow::Continue(());
+                    };
+                    return visit(name, value, None);
+                }
+                visit(logical, RawRef::Direct(oid), packed_peel)
             })?
-            .is_continue()
+            .is_break()
         {
-            merge.finish()?;
+            return Ok(());
         }
-        Ok(())
-    }
-}
 
-struct ForEachRefMerge<'a> {
-    store: &'a FilesRefStore,
-    prefix: &'a str,
-    loose: std::iter::Peekable<std::collections::btree_map::IntoIter<String, RawRef>>,
-    f: &'a mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
-}
-
-impl ForEachRefMerge<'_> {
-    fn emit_loose_before(&mut self, target: &str) -> ControlFlow<()> {
-        while self
-            .loose
-            .peek()
-            .is_some_and(|(name, _)| name.as_str() < target)
-        {
-            let Some((name, value)) = self.loose.next() else {
-                break;
-            };
-            if !name.starts_with(self.prefix) {
-                return ControlFlow::Break(());
-            }
-            let entry = FilesRefStore::ref_entry_from_loose(name, value, self.store);
-            if (self.f)(&entry).is_break() {
-                return ControlFlow::Break(());
-            }
-        }
-        ControlFlow::Continue(())
-    }
-
-    fn visit_packed(&mut self, storage: &str, oid: ObjectId) -> ControlFlow<()> {
-        let logical = self.store.logical_name(storage);
-        if !logical.starts_with(self.prefix) {
-            return ControlFlow::Break(());
-        }
-        if self.emit_loose_before(&logical).is_break() {
-            return ControlFlow::Break(());
-        }
-        if self.loose.peek().is_some_and(|(name, _)| name == &logical) {
-            let Some((name, value)) = self.loose.next() else {
-                return ControlFlow::Break(());
-            };
-            let entry = FilesRefStore::ref_entry_from_loose(name, value, self.store);
-            return (self.f)(&entry);
-        }
-        let entry = RefEntry {
-            name: logical,
-            value: RawRef::Direct(oid),
-            peeled: None,
-        };
-        (self.f)(&entry)
-    }
-
-    fn finish(self) -> Result<()> {
-        for (name, value) in self.loose {
-            if !name.starts_with(self.prefix) {
+        for (name, value) in loose_iter {
+            if !prefix.is_empty() && !name.starts_with(prefix) {
                 break;
             }
-            let entry = FilesRefStore::ref_entry_from_loose(name, value, self.store);
-            if (self.f)(&entry).is_break() {
+            if visit(name, value, None).is_break() {
                 break;
             }
         }
@@ -2744,6 +2792,50 @@ mod tests {
         assert_eq!(
             listed_names(&store, "refs/"),
             ["refs/heads/aa", "refs/heads/bb", "refs/heads/cc"]
+        );
+    }
+
+    #[test]
+    fn for_each_ref_sorted_late_inversion_with_loose_override_lists_once_sorted() {
+        let dir = git_dir();
+        let packed_a = oid(1);
+        let packed_d = oid(2);
+        let packed_e = oid(3);
+        let packed_b = oid(4);
+        let packed_c = oid(5);
+        let loose_b = oid(9);
+        let packed = format!(
+            "# pack-refs with: peeled fully-peeled sorted \n\
+             {packed_a} refs/heads/a\n\
+             {packed_d} refs/heads/d\n\
+             {packed_e} refs/heads/e\n\
+             {packed_b} refs/heads/b\n\
+             {packed_c} refs/heads/c\n"
+        );
+        fs::write(dir.path().join("packed-refs"), packed).expect("packed-refs");
+        fs::write(dir.path().join("refs/heads/b"), format!("{loose_b}\n")).expect("loose b");
+        let store = store(dir.path());
+        assert_eq!(
+            listed_names(&store, "refs/"),
+            [
+                "refs/heads/a",
+                "refs/heads/b",
+                "refs/heads/c",
+                "refs/heads/d",
+                "refs/heads/e",
+            ]
+        );
+        let listed = listed_direct_oids(&store, "refs/");
+        assert_eq!(
+            listed.iter().filter(|(n, _)| n == "refs/heads/b").count(),
+            1
+        );
+        assert_eq!(
+            listed
+                .into_iter()
+                .find(|(n, _)| n == "refs/heads/b")
+                .map(|(_, oid)| oid),
+            Some(loose_b)
         );
     }
 
