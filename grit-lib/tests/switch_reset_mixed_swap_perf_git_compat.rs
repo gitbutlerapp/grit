@@ -145,6 +145,31 @@ fn warm_median(
 }
 
 /// Issue repro: grit switch to base, git reset index to base, then time grit reset to swap.
+fn warm_median_git_reset(root: &std::path::Path, reset_target: &str) -> Duration {
+    let prep = || {
+        git(root, &["checkout", "-q", "base"]);
+        git(root, &["reset", "-q", "--hard", "origin/base"]);
+    };
+    for _ in 0..WARM_RUNS {
+        prep();
+        let _ = timed(
+            root,
+            std::path::Path::new("git"),
+            &["reset", "--hard", reset_target],
+        );
+    }
+    let mut samples = Vec::with_capacity(WARM_RUNS);
+    for _ in 0..WARM_RUNS {
+        prep();
+        samples.push(timed(
+            root,
+            std::path::Path::new("git"),
+            &["reset", "--hard", reset_target],
+        ));
+    }
+    median(samples)
+}
+
 fn warm_median_grit_reset(
     root: &std::path::Path,
     grit: &std::path::Path,
@@ -201,12 +226,7 @@ fn switch_reset_mixed_swap_near_git() {
     let grit_switch = warm_median(&work, &grit, &["switch", "swap"], "base");
 
     git(&work, &["checkout", "-q", "base"]);
-    let git_reset = warm_median(
-        &work,
-        std::path::Path::new("git"),
-        &["reset", "--hard", "swap"],
-        "base",
-    );
+    let git_reset = warm_median_git_reset(&work, "swap");
     let grit_reset = warm_median_grit_reset(&work, &grit, "swap");
 
     let switch_ratio = grit_switch.as_secs_f64() / git_switch.as_secs_f64();
