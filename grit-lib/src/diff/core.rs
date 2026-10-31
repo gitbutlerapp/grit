@@ -2889,7 +2889,7 @@ pub fn tree_oid_of_commit(odb: &Odb, commit_oid: &ObjectId) -> Result<ObjectId> 
 ///
 /// Returns [`Error::InvalidRef`] when `oid` is not a commit or tree, and object read/parse
 /// errors when it is missing or malformed.
-pub fn tree_oid_for_diff_side(odb: &Odb, oid: &ObjectId) -> Result<ObjectId> {
+pub(crate) fn tree_oid_for_diff_side(odb: &Odb, oid: &ObjectId) -> Result<ObjectId> {
     use crate::objects::{CommitRef, ObjectKind};
     let object = odb.read(oid)?;
     match object.kind {

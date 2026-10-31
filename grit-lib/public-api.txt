@@ -3582,6 +3582,7 @@ pub fn grit_lib::diff::handle::Diff<'repo>::index_to_tree(&self, &grit_lib::inde
 pub fn grit_lib::diff::handle::Diff<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::diff::handle::Diff<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::diff::handle::Diff<'repo>::tree_to_tree(&self, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+pub fn grit_lib::diff::handle::Diff<'repo>::tree_to_tree_renames(&self, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::handle::Diff<'repo>::uncommitted(&self) -> grit_lib::error::Result<grit_lib::diff::UncommittedDiff<'repo>>
 pub fn grit_lib::diff::handle::Diff<'repo>::worktree_to_index(&self, &mut grit_lib::index::Index, bool, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 impl<'repo> grit_lib::diff::handle::Diff<'repo>
@@ -4726,6 +4727,7 @@ pub fn grit_lib::diff::handle::Diff<'repo>::index_to_tree(&self, &grit_lib::inde
 pub fn grit_lib::diff::handle::Diff<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::diff::handle::Diff<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::diff::handle::Diff<'repo>::tree_to_tree(&self, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+pub fn grit_lib::diff::handle::Diff<'repo>::tree_to_tree_renames(&self, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::handle::Diff<'repo>::uncommitted(&self) -> grit_lib::error::Result<grit_lib::diff::UncommittedDiff<'repo>>
 pub fn grit_lib::diff::handle::Diff<'repo>::worktree_to_index(&self, &mut grit_lib::index::Index, bool, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 impl<'repo> grit_lib::diff::handle::Diff<'repo>

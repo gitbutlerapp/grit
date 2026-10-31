@@ -434,7 +434,7 @@ impl<'repo> super::handle::Diff<'repo> {
                 Some(base) => commit_trees_has_changes(repo, base, new, &matcher, &opts),
                 None => {
                     let config = repo.config()?;
-                    let tip_tree = tree_oid_of_commit(repo.odb(), new)?;
+                    let tip_tree = super::core::tree_oid_for_diff_side(repo.odb(), new)?;
                     let mut entries = diff_trees_with_renames_and_policy(
                         repo.odb(),
                         None,

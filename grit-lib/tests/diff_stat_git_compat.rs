@@ -258,6 +258,24 @@ fn diffstat_honors_rename_detection_like_git() {
         .expect("tree ids");
     assert_eq!(via_tree_ids.len(), via_files.len());
 
+    let root_tree_only = repo
+        .diff()
+        .files(
+            &DiffTarget::Trees {
+                old: None,
+                new: tip_tree,
+            },
+            &[],
+            &DiffOptions::default(),
+        )
+        .expect("empty tree to tree oid");
+    assert!(
+        root_tree_only
+            .iter()
+            .any(|f| f.path == "dir/new_name.txt" && f.status == DiffStatus::Added),
+        "old=None with tree oid must diff against empty tree"
+    );
+
     let blob = repo
         .odb()
         .write(grit_lib::objects::ObjectKind::Blob, b"not a tree or commit")

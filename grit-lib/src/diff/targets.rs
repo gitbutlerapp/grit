@@ -485,7 +485,7 @@ pub(crate) fn collect_files_for_target(
                     rename_threshold,
                 )?
             } else {
-                commit_changes(
+                empty_tree_to_side_changes(
                     repo,
                     new,
                     &config,
@@ -874,8 +874,8 @@ fn tree_commit_diff_entries(
     rename_threshold: u32,
 ) -> Result<Vec<DiffEntry>> {
     let odb = repo.odb();
-    let base_tree = crate::diff::tree_oid_for_diff_side(odb, base)?;
-    let tip_tree = crate::diff::tree_oid_for_diff_side(odb, tip)?;
+    let base_tree = super::core::tree_oid_for_diff_side(odb, base)?;
+    let tip_tree = super::core::tree_oid_for_diff_side(odb, tip)?;
     let mut entries = diff_trees_with_renames_and_policy(
         odb,
         Some(&base_tree),
@@ -939,6 +939,40 @@ fn commit_changes(
     rename_threshold: u32,
 ) -> Result<Vec<TreeDiffStructured>> {
     let entries = commit_diff_entries(repo, oid, config, thread_policy, rename_threshold)?;
+    tree_diff_structured_parallel(repo.odb(), entries, config, thread_policy, diff_options)
+}
+
+fn empty_tree_to_side_diff_entries(
+    repo: &Repository,
+    side: &ObjectId,
+    config: &ConfigSet,
+    thread_policy: &ThreadPolicy,
+    rename_threshold: u32,
+) -> Result<Vec<DiffEntry>> {
+    let tip_tree = super::core::tree_oid_for_diff_side(repo.odb(), side)?;
+    let mut entries = diff_trees_with_renames_and_policy(
+        repo.odb(),
+        None,
+        Some(&tip_tree),
+        "",
+        rename_threshold,
+        config,
+        thread_policy,
+    )?;
+    sort_entries_by_path(&mut entries);
+    Ok(entries)
+}
+
+fn empty_tree_to_side_changes(
+    repo: &Repository,
+    side: &ObjectId,
+    config: &ConfigSet,
+    thread_policy: &ThreadPolicy,
+    diff_options: DiffOptions,
+    rename_threshold: u32,
+) -> Result<Vec<TreeDiffStructured>> {
+    let entries =
+        empty_tree_to_side_diff_entries(repo, side, config, thread_policy, rename_threshold)?;
     tree_diff_structured_parallel(repo.odb(), entries, config, thread_policy, diff_options)
 }
 
