@@ -2254,6 +2254,7 @@ pub fn grit_lib::config::gitmodules::gitdir::migrate_gitdir_configs(&std::path::
 pub fn grit_lib::config::gitmodules::gitdir::path_inside_indexed_submodule(&grit_lib::index::Index, &str) -> bool
 pub fn grit_lib::config::gitmodules::gitdir::path_inside_registered_submodule(&std::path::Path, &str) -> bool
 pub fn grit_lib::config::gitmodules::gitdir::path_inside_registered_submodule_name(&std::path::Path, &str) -> bool
+pub fn grit_lib::config::gitmodules::gitdir::registered_submodule_paths(&std::path::Path) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::config::gitmodules::gitdir::set_submodule_repo_worktree(&std::path::Path, &std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::gitmodules::gitdir::submodule_gitdir_filesystem_path(&std::path::Path, &std::path::Path, &grit_lib::config::ConfigFile, &str) -> grit_lib::error::Result<std::path::PathBuf>
 pub fn grit_lib::config::gitmodules::gitdir::submodule_gitdir_outer_conflict(&std::path::Path, &str) -> core::option::Option<std::path::PathBuf>
@@ -5804,9 +5805,9 @@ pub grit_lib::error::Error::DirtyWorktree
 pub grit_lib::error::Error::DirtyWorktree::operation: grit_lib::error::WorktreeOperation
 pub grit_lib::error::Error::DirtyWorktree::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::DubiousOwnership(alloc::string::String)
-pub grit_lib::error::Error::EmptyCommitMessage
 pub grit_lib::error::Error::EmbeddedRepoWithoutCommit
 pub grit_lib::error::Error::EmbeddedRepoWithoutCommit::path: alloc::string::String
+pub grit_lib::error::Error::EmptyCommitMessage
 pub grit_lib::error::Error::FetchDeepenRelativeUnsupported
 pub grit_lib::error::Error::FetchIntoCheckedOutBranch
 pub grit_lib::error::Error::FetchIntoCheckedOutBranch::branch: alloc::string::String
@@ -11898,6 +11899,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::pack_receive
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack_receive::TempPackReceive
 pub fn grit_lib::objects::pack_receive::append_pack_data(&[u8], &mut grit_lib::objects::pack_receive::PackReceiveTarget<'_>, &mut alloc::vec::Vec<u8>, &mut bool) -> grit_lib::error::Result<u64>
 pub fn grit_lib::objects::pack_receive::copy_reader_to_writer(&mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write) -> grit_lib::error::Result<u64>
+pub fn grit_lib::objects::pack_receive::copy_reader_to_writer_cancellable(&mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<u64>
 pub fn grit_lib::objects::pack_receive::read_sideband_pack_tail(&mut dyn alloc::io::read::Read, &mut grit_lib::objects::pack_receive::PackReceiveTarget<'_>, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, &mut alloc::vec::Vec<u8>, &mut bool, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::pack_receive::read_sideband_pack_to(&mut dyn alloc::io::read::Read, &mut grit_lib::objects::pack_receive::PackReceiveTarget<'_>, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
 pub mod grit_lib::objects::pack_reuse
@@ -13921,8 +13923,8 @@ pub struct grit_lib::pathspec::PathspecMatcher<'s>
 impl<'s> grit_lib::pathspec::PathspecMatcher<'s>
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::is_empty(&self) -> bool
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches(&self, &str) -> bool
-pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches_entry(&self, &str, u32) -> bool
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches_change(&self, &str, core::option::Option<&str>) -> bool
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches_entry(&self, &str, u32) -> bool
 impl<'s> core::clone::Clone for grit_lib::pathspec::PathspecMatcher<'s>
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::clone(&self) -> Self
 impl<'s> core::fmt::Debug for grit_lib::pathspec::PathspecMatcher<'s>
@@ -16212,6 +16214,14 @@ impl core::default::Default for grit_lib::porcelain::staging::StageWorktreeChang
 pub fn grit_lib::porcelain::staging::StageWorktreeChangesOutcome::default() -> Self
 impl core::fmt::Debug for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
 pub fn grit_lib::porcelain::staging::StageWorktreeChangesOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
+impl core::marker::Freeze for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
+impl core::marker::Send for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
+impl core::marker::Sync for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
+impl core::marker::Unpin for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
 pub fn grit_lib::porcelain::staging::stage_worktree_changes(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<grit_lib::porcelain::staging::StageWorktreeChangesOutcome>
 pub mod grit_lib::porcelain::stash
 pub enum grit_lib::porcelain::stash::StashMode
@@ -17146,9 +17156,9 @@ pub grit_lib::prelude::Error::DirtyWorktree
 pub grit_lib::prelude::Error::DirtyWorktree::operation: grit_lib::error::WorktreeOperation
 pub grit_lib::prelude::Error::DirtyWorktree::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::DubiousOwnership(alloc::string::String)
-pub grit_lib::prelude::Error::EmptyCommitMessage
 pub grit_lib::prelude::Error::EmbeddedRepoWithoutCommit
 pub grit_lib::prelude::Error::EmbeddedRepoWithoutCommit::path: alloc::string::String
+pub grit_lib::prelude::Error::EmptyCommitMessage
 pub grit_lib::prelude::Error::FetchDeepenRelativeUnsupported
 pub grit_lib::prelude::Error::FetchIntoCheckedOutBranch
 pub grit_lib::prelude::Error::FetchIntoCheckedOutBranch::branch: alloc::string::String
@@ -21158,6 +21168,7 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::clone::CloneIntoOptions
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::CloneIntoOptions
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneIntoOptions
 pub struct grit_lib::remote::clone::CloneIntoOutcome
+pub grit_lib::remote::clone::CloneIntoOutcome::bare_gitlink_paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::clone::CloneIntoOutcome::branches: u64
 pub grit_lib::remote::clone::CloneIntoOutcome::bundle: grit_lib::remote::bundle_uri::BundleSeed
 pub grit_lib::remote::clone::CloneIntoOutcome::checkout: grit_lib::remote::clone::CloneCheckout
@@ -21208,6 +21219,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::Clone
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneOptions
 pub struct grit_lib::remote::clone::CloneOutcome
 pub grit_lib::remote::clone::CloneOutcome::bare: bool
+pub grit_lib::remote::clone::CloneOutcome::bare_gitlink_paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::clone::CloneOutcome::branches: u64
 pub grit_lib::remote::clone::CloneOutcome::branches_with_commits: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::clone::CloneOutcome::bundle: grit_lib::remote::bundle_uri::BundleSeed
@@ -21221,7 +21233,6 @@ pub grit_lib::remote::clone::CloneOutcome::path: std::path::PathBuf
 pub grit_lib::remote::clone::CloneOutcome::path_collisions: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::clone::CloneOutcome::promisor: core::option::Option<grit_lib::objects::promisor_remote::PromisorHandshake>
 pub grit_lib::remote::clone::CloneOutcome::repo: grit_lib::repo::Repository
-pub grit_lib::remote::clone::CloneOutcome::bare_gitlink_paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::clone::CloneOutcome::submodule_paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::clone::CloneOutcome::tags: u64
 pub grit_lib::remote::clone::CloneOutcome::transfer: grit_lib::remote::transfer::TransferStats
@@ -31151,8 +31162,8 @@ pub struct grit_lib::worktree::pathspec::PathspecMatcher<'s>
 impl<'s> grit_lib::pathspec::PathspecMatcher<'s>
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::is_empty(&self) -> bool
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches(&self, &str) -> bool
-pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches_entry(&self, &str, u32) -> bool
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches_change(&self, &str, core::option::Option<&str>) -> bool
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches_entry(&self, &str, u32) -> bool
 impl<'s> core::clone::Clone for grit_lib::pathspec::PathspecMatcher<'s>
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::clone(&self) -> Self
 impl<'s> core::fmt::Debug for grit_lib::pathspec::PathspecMatcher<'s>
