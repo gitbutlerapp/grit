@@ -1632,24 +1632,32 @@ impl PackedRefsFileView {
         let prefix_trim = prefix.map(|p| p.trim_end_matches('/'));
         let range_prefix = prefix_trim.filter(|p| !p.is_empty() && *p != "refs");
         if let Some((begin, end)) = range_prefix.and_then(|prefix| self.prefix_region(prefix)) {
-            let (in_order, flow) =
-                self.for_each_region(path, begin, end, prefix_trim, keep, &mut f)?;
-            if flow.is_break() {
-                return Ok(ControlFlow::Break(()));
-            }
-            if in_order {
-                return Ok(ControlFlow::Continue(()));
+            if self.region_records_in_order(path, begin, end, prefix_trim, keep)? {
+                let (_, flow) =
+                    self.for_each_region(path, begin, end, prefix_trim, keep, &mut f)?;
+                return Ok(flow);
             }
         }
-        let (in_order, flow) =
-            self.for_each_region(path, 0, self.data.len(), prefix_trim, keep, &mut f)?;
-        if flow.is_break() {
-            return Ok(ControlFlow::Break(()));
-        }
-        if in_order {
-            return Ok(ControlFlow::Continue(()));
+        if self.region_records_in_order(path, 0, self.data.len(), prefix_trim, keep)? {
+            let (_, flow) =
+                self.for_each_region(path, 0, self.data.len(), prefix_trim, keep, &mut f)?;
+            return Ok(flow);
         }
         self.for_each_prefix_filtered_sorted(path, prefix, keep, f)
+    }
+
+    /// Whether records in `[begin, end)` are in nondecreasing name order (strict parse, no visitor).
+    fn region_records_in_order(
+        &self,
+        path: &Path,
+        begin: usize,
+        end: usize,
+        prefix: Option<&str>,
+        keep: Option<PackedRecordFilter<'_>>,
+    ) -> Result<bool> {
+        let (_, in_order) =
+            self.parse_region::<DiscardPackedRecords>(path, begin, end, prefix, keep)?;
+        Ok(in_order)
     }
 
     fn for_each_prefix_filtered_sorted(
@@ -1782,6 +1790,14 @@ pub(crate) type PackedRecordFilter<'a> = &'a dyn Fn(&str, &ObjectId, PackedPeel)
 /// Visitor for a streaming [`PackedRefsFileView`] scan.
 pub(crate) type PackedRecordForEach<'a> =
     &'a mut dyn FnMut(&str, ObjectId, Option<ObjectId>) -> ControlFlow<()>;
+
+/// Collector for [`PackedRefsFileView::parse_region`] order probes (no storage).
+#[derive(Default)]
+struct DiscardPackedRecords;
+
+impl Extend<(String, ObjectId)> for DiscardPackedRecords {
+    fn extend<T: IntoIterator<Item = (String, ObjectId)>>(&mut self, _: T) {}
+}
 
 /// Strictly parse the `packed-refs` lines of `region`, keeping refs that match `prefix`, and
 /// report whether the names of the records it parsed are in nondecreasing order.

@@ -2712,6 +2712,31 @@ mod tests {
     }
 
     #[test]
+    fn for_each_ref_sorted_header_out_of_order_lists_once_in_sorted_order() {
+        use std::cell::Cell;
+
+        let dir = git_dir();
+        let commit = oid(1);
+        let packed = format!(
+            "# pack-refs with: peeled fully-peeled sorted \n{commit} refs/heads/cc\n{commit} refs/heads/bb\n{commit} refs/heads/aa\n"
+        );
+        fs::write(dir.path().join("packed-refs"), packed).expect("packed-refs");
+        let store = store(dir.path());
+        let calls = Cell::new(0);
+        store
+            .for_each_ref("refs/", &mut |_| {
+                calls.set(calls.get() + 1);
+                ControlFlow::Continue(())
+            })
+            .expect("list");
+        assert_eq!(calls.get(), 3);
+        assert_eq!(
+            listed_names(&store, "refs/"),
+            ["refs/heads/aa", "refs/heads/bb", "refs/heads/cc"]
+        );
+    }
+
+    #[test]
     fn for_each_ref_sorts_unsorted_packed_refs() {
         let dir = git_dir();
         let commit = oid(1);
