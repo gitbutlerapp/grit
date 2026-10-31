@@ -788,6 +788,59 @@ fn continue_refuses_with_unmerged_paths() {
 }
 
 #[test]
+fn corrupt_grit_plan_oid_is_a_typed_error_and_changes_nothing() {
+    let (repo, upstream, onto, tip, orig_tip) = conflict_rebase_fixture();
+    let wt = repo.worktree();
+    let grit = open_grit(wt);
+    git(wt, &["switch", "topic"]);
+    let outcome = start_rebase(
+        &grit,
+        &start_opts(upstream, Some(onto), tip),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("stop");
+    assert!(matches!(outcome, RebaseOutcome::Stopped(_)));
+
+    let path = grit.git_dir().join("rebase-merge/grit-plan");
+    let raw = std::fs::read_to_string(&path).expect("grit-plan");
+    let mut value: serde_json::Value = serde_json::from_str(&raw).expect("json");
+    value["orig_head"] = serde_json::Value::String("not-an-oid".into());
+    let corrupt = serde_json::to_vec_pretty(&value).expect("encode");
+    std::fs::write(&path, &corrupt).expect("write");
+
+    let assert_invalid = |err: RebaseSessionError| {
+        assert!(
+            matches!(&err, RebaseSessionError::InvalidStateOid { value } if value == "not-an-oid"),
+            "{err:?}"
+        );
+        assert!(!err.is_cancelled());
+    };
+    assert_invalid(
+        continue_rebase(
+            &grit,
+            &start_opts(upstream, Some(onto), tip),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
+        )
+        .unwrap_err(),
+    );
+    assert_invalid(
+        skip_rebase(
+            &grit,
+            &start_opts(upstream, Some(onto), tip),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
+        )
+        .unwrap_err(),
+    );
+    assert_invalid(abort_rebase(&grit, &test_ident()).unwrap_err());
+
+    assert_eq!(std::fs::read(&path).expect("grit-plan"), corrupt);
+    assert_eq!(git_oid(wt, "topic"), orig_tip);
+}
+
+#[test]
 fn start_rebase_refuses_when_session_active() {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();

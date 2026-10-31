@@ -40,7 +40,6 @@ use super::rebase::{
     RebaseRequest,
 };
 use super::types::RefScope;
-use super::{commit_tree, load_commit};
 use super::types::{
     AppliedRewrite, ApplyOptions, CommitEdit, HistoryEdits, PlannedRefUpdate, RewriteOptions,
     RewritePlan, RewrittenCommit,
@@ -1626,7 +1625,10 @@ fn map_json(err: serde_json::Error) -> RebaseSessionError {
 
 #[cfg(test)]
 mod tests {
-    use super::{author_script, edits_from_persist, edits_to_persist, PersistedEdit};
+    use super::{
+        author_script, edits_from_persist, edits_to_persist, parse_oid, PersistedEdit,
+        RebaseSessionError,
+    };
     use crate::history::types::{CommitEdit, HistoryEdits};
     use crate::objects::ObjectId;
 
@@ -1666,6 +1668,27 @@ mod tests {
                 parent: oid(2),
             })
         );
+    }
+
+    #[test]
+    fn parse_oid_reports_the_bad_value() {
+        assert_eq!(parse_oid(&oid(7).to_hex()).ok(), Some(oid(7)));
+        let err = parse_oid("abc").err();
+        assert!(
+            matches!(&err, Some(RebaseSessionError::InvalidStateOid { value }) if value == "abc"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn persisted_edit_with_bad_oid_is_rejected() {
+        let rows = vec![PersistedEdit::Drop {
+            commit: "zz".into(),
+        }];
+        assert!(matches!(
+            edits_from_persist(&rows),
+            Err(RebaseSessionError::InvalidStateOid { value }) if value == "zz"
+        ));
     }
 
     #[test]
