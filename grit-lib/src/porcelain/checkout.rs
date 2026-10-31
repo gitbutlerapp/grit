@@ -1683,7 +1683,8 @@ fn hard_reset_stat_probe_positions(
     positions
 }
 
-/// Stat pass for hard reset: one worker and no index preload to keep peak RSS down on wide trees.
+/// Stat pass for hard reset: parallel workers (same policy as index refresh) without preloading
+/// the index into memory, so peak RSS stays near switch on wide trees.
 ///
 /// Paths are joined to the work tree verbatim, so on Linux files are stat-ed relative to a
 /// handle on their directory instead of walking the full absolute path once per file.
@@ -1713,7 +1714,8 @@ fn scan_index_blob_stats_for_hard_reset(
         &plan,
         WorktreeBlobScanOptions {
             preload_index: false,
-            stat_parallel_threads: Some(1),
+            stat_parallel_threads: None,
+            parallel_stat_without_preload: true,
         },
         &repo.thread_policy(),
         config,

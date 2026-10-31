@@ -385,6 +385,7 @@ fn switch_worktree_clean_for_paths(
             WorktreeBlobScanOptions {
                 preload_index,
                 stat_parallel_threads,
+                ..WorktreeBlobScanOptions::default()
             },
             &Default::default(),
             config.as_deref().unwrap_or(&ConfigSet::new()),

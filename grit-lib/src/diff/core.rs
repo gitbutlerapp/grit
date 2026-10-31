@@ -5882,6 +5882,7 @@ fn diff_index_to_worktree_inner(
     let blob_scan = WorktreeBlobScanOptions {
         preload_index,
         stat_parallel_threads: options.stat_parallel_threads,
+        ..WorktreeBlobScanOptions::default()
     };
     let blob_dirs = if let Some(limit) = options.restrict_to_paths.as_ref() {
         crate::worktree_scan::group_blob_entries_by_dir_for_paths(index, limit)
@@ -7072,6 +7073,7 @@ pub fn refresh_index_stat_content_verified_with_rules(
     let blob_scan = WorktreeBlobScanOptions {
         preload_index,
         stat_parallel_threads,
+        ..WorktreeBlobScanOptions::default()
     };
     let conv = rules_lock
         .as_ref()

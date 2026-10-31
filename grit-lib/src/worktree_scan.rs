@@ -169,11 +169,15 @@ const PARALLEL_STAT_MIN_SLICE_ENTRIES: usize = 8;
 /// Parallelism controls for directory-grouped blob scans (honors `core.preloadIndex`).
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct WorktreeBlobScanOptions {
-    /// When false, stat preload never uses more than one thread.
+    /// When false, parallel stat workers are off unless
+    /// [`Self::parallel_stat_without_preload`] is set (honors `core.preloadIndex` when true).
     pub preload_index: bool,
     /// When `Some(1)`, forces a serial scan. When `Some(n > 1)`, caps workers at `n`.
-    /// When `None`, uses [`crate::parallel::ThreadPolicy::index_stat_preload_threads`].
+    /// When `None`, uses the thread policy helpers below.
     pub stat_parallel_threads: Option<usize>,
+    /// Parallel directory stat scans without treating the scan as index preload (no
+    /// `core.preloadIndex` gate); used when callers must keep RSS down but still stat widely.
+    pub parallel_stat_without_preload: bool,
 }
 
 /// Returns how many threads a blob scan should use for `blob_count` entries.
@@ -184,7 +188,13 @@ pub(crate) fn stat_scan_thread_count(
     options: WorktreeBlobScanOptions,
     blob_count: usize,
 ) -> usize {
-    if !options.preload_index || blob_count < PARALLEL_STAT_MIN_ENTRIES {
+    if blob_count < PARALLEL_STAT_MIN_ENTRIES {
+        return 1;
+    }
+    if options.parallel_stat_without_preload {
+        return policy.index_stat_scan_threads(config, blob_count, options.stat_parallel_threads);
+    }
+    if !options.preload_index {
         return 1;
     }
     policy.index_stat_preload_threads(config, blob_count, options.stat_parallel_threads)
@@ -2121,6 +2131,7 @@ mod tests {
             WorktreeBlobScanOptions {
                 preload_index: true,
                 stat_parallel_threads: Some(4),
+                ..WorktreeBlobScanOptions::default()
             },
             &policy,
             &config,
@@ -2262,6 +2273,7 @@ mod tests {
             WorktreeBlobScanOptions {
                 preload_index: true,
                 stat_parallel_threads: Some(4),
+                ..WorktreeBlobScanOptions::default()
             },
             &policy,
             &config,
@@ -2324,6 +2336,7 @@ mod tests {
             WorktreeBlobScanOptions {
                 preload_index: true,
                 stat_parallel_threads: Some(4),
+                ..WorktreeBlobScanOptions::default()
             },
             &policy,
             &config,
@@ -2354,6 +2367,7 @@ mod tests {
             WorktreeBlobScanOptions {
                 preload_index: true,
                 stat_parallel_threads: Some(4),
+                ..WorktreeBlobScanOptions::default()
             },
             &policy,
             &config,
@@ -2395,10 +2409,29 @@ mod tests {
             WorktreeBlobScanOptions {
                 preload_index: false,
                 stat_parallel_threads: Some(4),
+                ..WorktreeBlobScanOptions::default()
             },
             PARALLEL_STAT_MIN_ENTRIES,
         );
         assert_eq!(threads, 1);
+    }
+
+    #[test]
+    fn parallel_stat_without_preload_uses_multiple_workers() {
+        let threads = stat_scan_thread_count(
+            &crate::parallel::ThreadPolicy::default(),
+            &crate::config::ConfigSet::new(),
+            WorktreeBlobScanOptions {
+                preload_index: false,
+                parallel_stat_without_preload: true,
+                ..WorktreeBlobScanOptions::default()
+            },
+            PARALLEL_STAT_MIN_ENTRIES + 500,
+        );
+        assert!(
+            threads > 1,
+            "hard-reset-style scan should pick parallel workers (got {threads})"
+        );
     }
 
     #[cfg(unix)]

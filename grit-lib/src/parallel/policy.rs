@@ -167,10 +167,25 @@ impl ThreadPolicy {
         blob_count: usize,
         stat_parallel_threads: Option<usize>,
     ) -> usize {
+        if !core_preload_index(config) || blob_count < PARALLEL_STAT_MIN_ENTRIES {
+            return 1;
+        }
+        self.index_stat_scan_threads(config, blob_count, stat_parallel_threads)
+    }
+
+    /// Parallel workers for directory-grouped worktree stat scans without requiring
+    /// `core.preloadIndex` (hard reset and other RSS-conscious callers).
+    #[must_use]
+    pub(crate) fn index_stat_scan_threads(
+        &self,
+        config: &ConfigSet,
+        blob_count: usize,
+        stat_parallel_threads: Option<usize>,
+    ) -> usize {
         const THREAD_COST: usize = 500;
         const MAX_PARALLEL: usize = 20;
 
-        if !core_preload_index(config) || blob_count < PARALLEL_STAT_MIN_ENTRIES {
+        if blob_count < PARALLEL_STAT_MIN_ENTRIES {
             return 1;
         }
 
