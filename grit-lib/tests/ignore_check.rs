@@ -267,3 +267,94 @@ fn ignore_source_is_typed() {
         Some(IgnoreSource::PerDirectory(p)) if p == "a/.gitignore"
     ));
 }
+
+#[test]
+fn batch_over_many_nested_gitignores_matches_git_in_any_order() {
+    use std::fs;
+
+    use grit_lib::config::environment::RepositoryOptions;
+    use grit_test_support::unique_tmp;
+
+    let home = unique_tmp("ignore", "nested-batch-home");
+    let root = unique_tmp("ignore", "nested-batch");
+    fs::create_dir_all(&home).expect("home");
+    assert!(t0008::hermetic_git(&home, &root, &["init"])
+        .status
+        .success());
+    fs::write(
+        root.join(".gitignore"),
+        "*.o\n/target/\nbuild/\n*.log\n!keep.log\n**/cache/**\n*.sw[op]\nvendor\n!vendor/\n",
+    )
+    .expect("root gitignore");
+    fs::write(root.join(".git/info/exclude"), "*.local\nsrc/*.env\n").expect("info exclude");
+    fs::write(root.join("blob"), "x\n").expect("file ancestor");
+    let mut paths = vec![
+        "blob/a.o".to_owned(),
+        "blob/sub/a.c".to_owned(),
+        "target/x".to_owned(),
+        "src/target/x".to_owned(),
+        "src/.env".to_owned(),
+        "src/a.env".to_owned(),
+        "vendor/lib.rs".to_owned(),
+        "keep.log".to_owned(),
+    ];
+    for d in 0..12 {
+        let dir = format!("src/d{d:02}");
+        fs::create_dir_all(root.join(&dir).join("gen")).expect("dir");
+        fs::write(
+            root.join(&dir).join(".gitignore"),
+            format!("*.bak\nscratch-*\n!scratch-keep\ngen/\n!keep.log\n*.{d}\nnested/*.c\n"),
+        )
+        .expect("nested gitignore");
+        for name in [
+            "f.txt",
+            "f.o",
+            "f.bak",
+            "scratch-1",
+            "scratch-keep",
+            "gen/out.c",
+            "gen/keep.log",
+            "cache/x/y.dat",
+            "build/z",
+            "new.log",
+            "keep.log",
+            "nested/a.c",
+            "nested/deeper/a.c",
+            "a.swp",
+            "a.local",
+            "Build/z",
+        ] {
+            paths.push(format!("{dir}/{name}"));
+        }
+        paths.push(format!("{dir}/x.{d}"));
+        paths.push(format!("{dir}/gen/"));
+    }
+    // Interleave directories so the matcher keeps switching between cached states, and ask
+    // every path twice.
+    let mut interleaved: Vec<String> = Vec::new();
+    for i in 0..paths.len() {
+        interleaved.push(paths[(i * 7) % paths.len()].clone());
+    }
+    interleaved.sort_by_key(|p| p.rsplit('/').next().map(str::to_owned));
+    interleaved.extend(paths.iter().cloned());
+
+    let repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(&root),
+    )
+    .expect("open");
+    let index = repo.index_handle().load().expect("index");
+    let path_refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+    let git_map = git_check_ignore_verbose_batch(&home, &root, &path_refs);
+    let results = grit_ignore_check(&repo, &index, &interleaved);
+    assert_eq!(results.len(), interleaved.len());
+    let mut ignored = 0;
+    for result in &results {
+        let git = git_map
+            .get(&result.path)
+            .unwrap_or_else(|| panic!("git missing {}", result.path));
+        assert_match_eq(&result.path, git, result.ignored, &result.matched);
+        ignored += usize::from(result.ignored);
+    }
+    assert!(ignored > results.len() / 2, "corpus should mostly ignore");
+}
