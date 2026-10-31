@@ -382,7 +382,7 @@ impl IgnoreMatcher {
         if is_tracked(index, repo_rel_path) {
             return Ok(false);
         }
-        let state = self.dir_state_id(repo, index, parent_dir(repo_rel_path))?;
+        let state = self.dir_state_id(repo, index, parent_dir(repo_rel_path), false)?;
         let state = &self.dir_states[state];
         if state.excluded.is_some() {
             return Ok(true);
@@ -418,10 +418,25 @@ impl IgnoreMatcher {
         repo_rel_path: &str,
         is_dir: bool,
     ) -> Result<(bool, Option<IgnoreMatch>)> {
+        self.check_path_with_ancestors(repo, index, repo_rel_path, is_dir, false)
+    }
+
+    /// [`Self::check_path`], where `ancestors_are_dirs` records that the caller already
+    /// knows no ancestor of `repo_rel_path` is a regular file (because `stat` of the path
+    /// succeeded or failed with "not found"), so new directories need no `stat` of their own.
+    fn check_path_with_ancestors(
+        &mut self,
+        repo: &Repository,
+        index: Option<&Index>,
+        repo_rel_path: &str,
+        is_dir: bool,
+        ancestors_are_dirs: bool,
+    ) -> Result<(bool, Option<IgnoreMatch>)> {
         if is_tracked(index, repo_rel_path) {
             return Ok((false, None));
         }
-        let state = self.dir_state_id(repo, index, parent_dir(repo_rel_path))?;
+        let parent = parent_dir(repo_rel_path);
+        let state = self.dir_state_id(repo, index, parent, ancestors_are_dirs)?;
         let state = &self.dir_states[state];
         // A path under an excluded directory stays excluded: a later `!dir/file` cannot
         // re-include it (gitignore(5)).
@@ -550,11 +565,13 @@ impl IgnoreMatcher {
     ///
     /// Sibling paths share their parent's state, so a batch of queries reads each exclude
     /// file, stats each directory and probes each directory against the patterns once.
+    /// `ancestors_are_dirs` skips that `stat` when no ancestor can be a regular file.
     fn dir_state_id(
         &mut self,
         repo: &Repository,
         index: Option<&Index>,
         dir: &str,
+        ancestors_are_dirs: bool,
     ) -> Result<usize> {
         if let Some((last, id)) = &self.last_dir {
             if last == dir {
@@ -563,7 +580,7 @@ impl IgnoreMatcher {
         }
         let id = match self.dir_state_ids.get(dir) {
             Some(&id) => id,
-            None => self.build_dir_state(repo, index, dir)?,
+            None => self.build_dir_state(repo, index, dir, ancestors_are_dirs)?,
         };
         match &mut self.last_dir {
             Some((last, last_id)) => {
@@ -584,6 +601,7 @@ impl IgnoreMatcher {
         repo: &Repository,
         index: Option<&Index>,
         dir: &str,
+        ancestors_are_dirs: bool,
     ) -> Result<usize> {
         let state = if dir.is_empty() {
             let stack = if self.read_per_directory {
@@ -600,7 +618,7 @@ impl IgnoreMatcher {
             let parent = parent_dir(dir);
             let parent_id = match self.dir_state_ids.get(parent) {
                 Some(&id) => id,
-                None => self.build_dir_state(repo, index, parent)?,
+                None => self.build_dir_state(repo, index, parent, ancestors_are_dirs)?,
             };
             let parent_state = &self.dir_states[parent_id];
             let excluded = parent_state.excluded.clone().or_else(|| {
@@ -614,6 +632,7 @@ impl IgnoreMatcher {
             // (`tracked.txt/.gitignore` must not be probed), nor anything below it.
             if extendable
                 && (self.known_worktree_directories.contains(dir)
+                    || ancestors_are_dirs
                     || !worktree_path_is_existing_file(repo, dir))
             {
                 stack.push(self.rule_set_id(repo, index, dir)?);
@@ -981,17 +1000,32 @@ fn worktree_path_is_existing_file(repo: &Repository, repo_rel_path: &str) -> boo
 /// Whether a queried path names a directory: it ends in `/` or is one in the work tree.
 ///
 /// `scratch` is reused across a batch so each query costs one `stat` and no allocation.
-fn path_query_is_dir(work_tree: Option<&Path>, repo_rel_path: &str, scratch: &mut PathBuf) -> bool {
+///
+/// Returns `(is_dir, ancestors_are_dirs)`. The second is `true` when the `stat` shows that no
+/// ancestor of the path is a regular file: it succeeded, or failed because a component is
+/// missing (a file ancestor fails with "not a directory" instead).
+fn probe_query_path(
+    work_tree: Option<&Path>,
+    repo_rel_path: &str,
+    scratch: &mut PathBuf,
+) -> (bool, bool) {
     if repo_rel_path.ends_with('/') {
-        return true;
+        return (true, false);
     }
     let Some(work_tree) = work_tree else {
-        return false;
+        return (false, false);
     };
     scratch.as_mut_os_string().clear();
     scratch.push(work_tree);
     scratch.push(repo_rel_path);
-    scratch.metadata().is_ok_and(|m| m.is_dir())
+    match scratch.metadata() {
+        Ok(meta) => (meta.is_dir(), true),
+        // Windows reports a file ancestor as "path not found", so only Unix can tell.
+        Err(err) => (
+            false,
+            cfg!(unix) && err.kind() == std::io::ErrorKind::NotFound,
+        ),
+    }
 }
 
 impl Repository {
@@ -1014,8 +1048,15 @@ impl Repository {
         let mut out = Vec::with_capacity(paths.len());
         let mut scratch = PathBuf::new();
         for path in paths {
-            let is_dir = path_query_is_dir(self.work_tree(), path, &mut scratch);
-            let (ignored, matched) = matcher.check_path(self, Some(index), path, is_dir)?;
+            let (is_dir, ancestors_are_dirs) =
+                probe_query_path(self.work_tree(), path, &mut scratch);
+            let (ignored, matched) = matcher.check_path_with_ancestors(
+                self,
+                Some(index),
+                path,
+                is_dir,
+                ancestors_are_dirs,
+            )?;
             out.push(IgnoreCheck {
                 path: path.clone(),
                 ignored,
@@ -2272,6 +2313,50 @@ mod dir_state_cache_tests {
             1
         );
         assert!(!matcher.gitignore_cache.contains_key("plain"));
+    }
+
+    #[test]
+    fn batch_check_skips_directory_stats_only_when_the_path_stat_allows_it() {
+        let (_dir, repo) = repo_with(&[
+            (".gitignore", "*.o\n"),
+            ("plain", "x\n"),
+            ("real/.gitignore", "*.tmp\n"),
+        ]);
+        let index = Index::new();
+        let paths = [
+            "plain/sub/x.o",
+            "plain/x.tmp",
+            "real/x.tmp",
+            "missing/deeper/x.tmp",
+            "real/",
+        ]
+        .map(str::to_owned);
+        let checks = repo.ignore_check(&paths, &index).unwrap();
+        let ignored: Vec<bool> = checks.iter().map(|c| c.ignored).collect();
+        assert_eq!(ignored, [true, false, true, false, false]);
+        let mut matcher = IgnoreMatcher::from_repository(&repo).unwrap();
+        let wt = repo.work_tree().unwrap();
+        let mut scratch = PathBuf::new();
+        assert_eq!(
+            probe_query_path(Some(wt), "real", &mut scratch),
+            (true, true)
+        );
+        assert_eq!(
+            probe_query_path(Some(wt), "missing/x", &mut scratch),
+            (false, cfg!(unix))
+        );
+        assert_eq!(
+            probe_query_path(Some(wt), "plain/x", &mut scratch),
+            (false, false)
+        );
+        assert_eq!(
+            probe_query_path(Some(wt), "real/", &mut scratch),
+            (true, false)
+        );
+        matcher
+            .check_path_with_ancestors(&repo, None, "plain/x.tmp", false, false)
+            .unwrap();
+        assert!(!matcher.dir_states[matcher.dir_state_ids["plain"]].extendable);
     }
 
     #[test]
