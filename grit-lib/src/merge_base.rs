@@ -2319,44 +2319,52 @@ impl SidePaint {
                 walk.mark(cache, tip, side)?;
             }
         }
-        let mut slop = PAINT_SLOP;
         loop {
-            if walk.open > 0 {
-                slop = PAINT_SLOP;
-            } else if !walk.unranked_hide_may_reach_left(&mut slop) {
-                break;
-            }
-            let Some(node) = walk.heap.pop() else {
-                break;
-            };
-            if walk.queued.remove(&node.oid) == Some(true) {
-                walk.open -= 1;
-            }
-            walk.popped.insert(node.oid);
-            let side = walk.sides.get(&node.oid).copied().unwrap_or(0);
-            if side == PAINT_LEFT
-                && walk
-                    .left_window
-                    .is_some_and(|window| !window.contains(node.committed_at))
-            {
-                return Ok(Self {
-                    sides: walk.sides,
-                    left_outside_window: true,
-                });
-            }
-            if walk.date_slop && side == PAINT_LEFT && node.rank == UNRANKED_COMMIT {
-                walk.left_floor = Some(
-                    walk.left_floor
-                        .map_or(node.committed_at, |floor| floor.min(node.committed_at)),
-                );
-            }
-            for (i, parent) in cache.parents_of(node.oid)?.into_iter().enumerate() {
-                let side = if i > 0 && walk.left_first_parent_only {
-                    side & PAINT_RIGHT
-                } else {
-                    side
+            let mut slop = PAINT_SLOP;
+            loop {
+                if walk.open > 0 {
+                    slop = PAINT_SLOP;
+                } else if !walk.unranked_hide_may_reach_left(&mut slop) {
+                    break;
+                }
+                let Some(node) = walk.heap.pop() else {
+                    break;
                 };
-                walk.mark(cache, parent, side)?;
+                if walk.queued.remove(&node.oid) == Some(true) {
+                    walk.open -= 1;
+                }
+                walk.popped.insert(node.oid);
+                let side = walk.sides.get(&node.oid).copied().unwrap_or(0);
+                if side == PAINT_LEFT {
+                    walk.left_only_popped.insert(node.oid);
+                }
+                if side == PAINT_LEFT
+                    && walk
+                        .left_window
+                        .is_some_and(|window| !window.contains(node.committed_at))
+                {
+                    return Ok(Self {
+                        sides: walk.sides,
+                        left_outside_window: true,
+                    });
+                }
+                if walk.date_slop && side == PAINT_LEFT && node.rank == UNRANKED_COMMIT {
+                    walk.left_floor = Some(
+                        walk.left_floor
+                            .map_or(node.committed_at, |floor| floor.min(node.committed_at)),
+                    );
+                }
+                for (i, parent) in cache.parents_of(node.oid)?.into_iter().enumerate() {
+                    let side = if i > 0 && walk.left_first_parent_only {
+                        side & PAINT_RIGHT
+                    } else {
+                        side
+                    };
+                    walk.mark(cache, parent, side)?;
+                }
+            }
+            if !walk.repaint_left_only_reachable_from_hide(cache)? {
+                break;
             }
         }
         Ok(Self {
@@ -2403,6 +2411,9 @@ struct PaintWalk {
     /// Queued commits, each flagged whether it keeps the walk going.
     queued: OidHashMap<bool>,
     popped: OidHashSet,
+    /// Commits popped while only the left (included) side reached them. A queued hide-side
+    /// commit dated before such a commit may still reach it after the open counter hits zero.
+    left_only_popped: OidHashSet,
     heap: BinaryHeap<PaintKey>,
     seq: u64,
     /// Queued commits that still keep the walk going (see [`Self::mark`]).
@@ -2435,6 +2446,45 @@ const PAINT_SLOP: usize = 5;
 const UNRANKED_SKEW_ALLOWANCE: time::Duration = time::Duration::DAY;
 
 impl PaintWalk {
+    /// After the paint frontier closes, propagate hide-side marks onto left-only commits that
+    /// a still-queued hide-side commit can still reach (Git's `mark_parents_uninteresting`
+    /// plus output-time uninteresting filtering).
+    ///
+    /// Returns whether any commit was repainted so the main paint loop should continue.
+    fn repaint_left_only_reachable_from_hide(
+        &mut self,
+        cache: &mut CommitGraphCache<'_>,
+    ) -> Result<bool> {
+        if self.left_only_popped.is_empty() {
+            return Ok(false);
+        }
+        let mut changed = false;
+        loop {
+            let mut progress = false;
+            let queued: Vec<ObjectId> = self.queued.keys().copied().collect();
+            for oid in queued {
+                if self.sides.get(&oid).copied().unwrap_or(0) & PAINT_RIGHT == 0 {
+                    continue;
+                }
+                for parent in cache.parents_of(oid)? {
+                    if !self.left_only_popped.contains(&parent) {
+                        continue;
+                    }
+                    progress = true;
+                    changed = true;
+                    self.mark(cache, parent, PAINT_RIGHT)?;
+                    if self.sides.get(&parent).copied().unwrap_or(0) & PAINT_RIGHT != 0 {
+                        self.left_only_popped.remove(&parent);
+                    }
+                }
+            }
+            if !progress {
+                break;
+            }
+        }
+        Ok(changed)
+    }
+
     /// Date-slop paint with nothing left-only queued: whether a queued commit without a
     /// generation may still reach a commit popped as left-only, so the walk goes on.
     ///
@@ -3686,6 +3736,7 @@ mod tests {
     use crate::environment::RepositoryOptions;
     use crate::odb::Odb;
     use crate::repo::{InitOptions, Repository};
+    use crate::revwalk::RevWalkListOptions;
     use std::fs;
     use tempfile::tempdir;
 
@@ -5001,6 +5052,80 @@ mod tests {
                 ("refs/heads/filler", filler),
             ],
         })
+    }
+
+    /// Range-walk paint fixture: `skewed` is dated after its child `behind`, and the hide side
+    /// reaches `skewed` only through `behind` while `positive_tip` also lists it through a
+    /// merge. A filler branch from the root lets the paint frontier close before `behind` is
+    /// popped, so `skewed` must still be marked hidden afterward.
+    struct RangeSkewPaintFixture {
+        positive_tip: ObjectId,
+        hide: Vec<ObjectId>,
+        skewed: ObjectId,
+        behind: ObjectId,
+    }
+
+    fn write_range_skew_paint_fixture(repo: &Repository) -> Result<RangeSkewPaintFixture> {
+        let odb = repo.odb();
+        let base = write_commit_same_time(odb, &[], "base", 100)?;
+        let skewed = write_commit_same_time(odb, &[base], "skewed ahead", 1_000)?;
+        let behind = write_commit_same_time(odb, &[skewed], "behind skewed", 150)?;
+        let held = write_commit_same_time(odb, &[behind], "held hide tip", 200)?;
+        let mut filler = base;
+        for i in 0..10 {
+            filler = write_commit_same_time(odb, &[filler], &format!("filler {i}"), 500 + i)?;
+        }
+        let side = write_commit_same_time(odb, &[base], "side work", 600)?;
+        let merge = write_commit_same_time(odb, &[side, skewed], "merge skewed in", 900)?;
+        let positive_tip = write_commit_same_time(odb, &[merge, filler], "positive tip", 950)?;
+        Ok(RangeSkewPaintFixture {
+            positive_tip,
+            hide: vec![held, filler, base],
+            skewed,
+            behind,
+        })
+    }
+
+    #[test]
+    fn range_exclude_paint_converged_under_skew_hides_ancestor_commits() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let fixture = write_range_skew_paint_fixture(&repo)?;
+        let filter = ReachableCountFilter::default();
+
+        let count = count_commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[fixture.positive_tip],
+            &fixture.hide,
+            filter,
+        )?;
+        let listed = commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[fixture.positive_tip],
+            &fixture.hide,
+            None,
+        )?;
+        let tip_hex = fixture.positive_tip.to_hex();
+        let mut tokens = vec![tip_hex.clone()];
+        for hide in &fixture.hide {
+            tokens.push(format!("^{}", hide.to_hex()));
+        }
+        let token_refs: Vec<&str> = tokens.iter().map(String::as_str).collect();
+        let revwalk = repo
+            .rev_walk()
+            .commits(&token_refs, &RevWalkListOptions::default())
+            .expect("revwalk commits");
+        let revwalk_count = repo
+            .rev_walk()
+            .count(&token_refs, &RevWalkListOptions::default())
+            .expect("revwalk count");
+
+        assert!(!listed.contains(&fixture.skewed));
+        assert!(!listed.contains(&fixture.behind));
+        assert_eq!(count, listed.len());
+        assert_eq!(revwalk.len(), count);
+        assert_eq!(revwalk_count, count);
+        Ok(())
     }
 
     #[test]

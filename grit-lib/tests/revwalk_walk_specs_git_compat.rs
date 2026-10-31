@@ -519,3 +519,62 @@ fn symmetric_range_walk_stops_at_merge_base_frontier() {
         .collect();
     assert_eq!(listed, limited);
 }
+
+/// History where a hide-side commit reaches an ancestor only through a child dated before it,
+/// while the positive tip also lists that ancestor through a merge (issue #2373).
+fn range_skew_paint_repo() -> (PathBuf, String, String, String) {
+    let wt = unique_tmp("revwalk-walk-specs", "range-skew-paint");
+    git(&wt, &["init", "-q", "-b", "main", "."]);
+    let mut s = ImportStream::default();
+    let base = s.commit("main", 100, &[]);
+    let skewed = s.commit("skewed", 1_000, &[base]);
+    let behind = s.commit("held", 150, &[skewed]);
+    let held = s.commit("held", 200, &[behind]);
+    let mut filler = base;
+    for i in 0..10 {
+        filler = s.commit("filler", 500 + i, &[filler]);
+    }
+    let side = s.commit("side", 600, &[base]);
+    let merge = s.commit("positive", 900, &[side, skewed]);
+    s.commit("positive", 950, &[merge, filler]);
+    s.import(&wt);
+    let hide = git(&wt, &["rev-parse", "held"]).trim().to_owned();
+    let positive = git(&wt, &["rev-parse", "positive"]).trim().to_owned();
+    let skewed = git(&wt, &["rev-parse", "skewed"]).trim().to_owned();
+    (wt, hide, positive, skewed)
+}
+
+#[test]
+fn double_dot_range_under_committer_date_skew_matches_git_without_commit_graph() {
+    let (wt, hide, positive, skewed) = range_skew_paint_repo();
+    let expected = git_rev_list(&wt, &format!("{positive} ^{hide}"));
+    let expected_count: usize = git(
+        &wt,
+        &["rev-list", "--count", &positive, &format!("^{hide}")],
+    )
+    .trim()
+    .parse()
+    .expect("git count");
+    let repo = open(&wt);
+    let hide_token = format!("^{hide}");
+    let tokens = [positive.as_str(), hide_token.as_str()];
+    let listed = repo
+        .rev_walk()
+        .commits(&tokens, &RevWalkListOptions::default())
+        .expect("commits");
+    assert_eq!(listed.len(), expected_count);
+    assert_eq!(
+        listed.iter().map(|oid| oid.to_hex()).collect::<Vec<_>>(),
+        expected
+    );
+    assert_eq!(
+        repo.rev_walk()
+            .count(&tokens, &RevWalkListOptions::default())
+            .expect("count"),
+        expected_count
+    );
+    assert!(
+        !expected.contains(&skewed),
+        "git must not list the skewed ancestor in the range"
+    );
+}
