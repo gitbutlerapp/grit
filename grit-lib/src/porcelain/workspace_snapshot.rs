@@ -18,7 +18,7 @@ use crate::porcelain::checkout::checkout_between_trees_with_progress;
 use crate::porcelain::stash::{collect_untracked_paths, flatten_tree_full};
 use crate::progress::{Cancel, ProgressSink};
 use crate::refs::prepare_with_lock_wait;
-use crate::refs::store::{Expected, RawRef, RefTransaction, RefUpdate, RefUpdateFlags};
+use crate::refs::store::{Expected, RawRef, RefName, RefTransaction, RefUpdate, RefUpdateFlags};
 use crate::repo::Repository;
 use crate::state::{
     merge_completion_sentinels, resolve_head_for_repository, HeadState, InProgressOperation,
@@ -34,8 +34,16 @@ pub struct WorkspaceCaptureOptions {
     pub include_untracked: bool,
 }
 
+/// Ref prefix for pins created by [`pin_workspace_snapshot`].
+///
+/// Each pin is `refs/grit/workspace-snapshots/<caller-id>` pointing at
+/// [`WorkspaceSnapshot::worktree_tree`]. Such refs are not under `refs/heads/`, so a tree oid is
+/// allowed and both Git and grit garbage collection retain the tree and reachable blobs.
+pub const WORKSPACE_SNAPSHOT_PIN_REF_PREFIX: &str = "refs/grit/workspace-snapshots/";
+
 /// A point-in-time workspace snapshot suitable for undo/redo in front ends.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize, serde::Deserialize))]
 pub struct WorkspaceSnapshot {
     /// Resolved `HEAD` at capture time.
     pub head: HeadState,
@@ -44,6 +52,7 @@ pub struct WorkspaceSnapshot {
     /// On-disk index bytes (including unmerged stages), as written by [`Index::write_to_path`].
     pub index_bytes: Vec<u8>,
     /// Index mtime when read from disk (preserved on restore for racy stat checks).
+    #[cfg_attr(feature = "serde-models", serde(with = "index_mtime_serde"))]
     pub index_mtime: Option<SystemTime>,
     /// Tree object describing worktree file contents at capture (conflict markers and untracked
     /// files when requested).
@@ -55,6 +64,107 @@ pub struct WorkspaceSnapshot {
 /// Options for [`restore_workspace_snapshot`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorkspaceRestoreOptions {}
+
+/// Full ref name that pins `snapshot.worktree_tree` for `caller_id`.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidRef`] when `caller_id` produces an invalid refname.
+pub fn workspace_snapshot_pin_ref_name(caller_id: &str) -> Result<String> {
+    let name = format!("{WORKSPACE_SNAPSHOT_PIN_REF_PREFIX}{caller_id}");
+    RefName::try_from(name.as_str()).map_err(|err| Error::InvalidRef(err.to_string()))?;
+    Ok(name)
+}
+
+/// Write a direct ref at [`workspace_snapshot_pin_ref_name`] so `snapshot.worktree_tree` and its
+/// blobs survive garbage collection until [`unpin_workspace_snapshot`].
+///
+/// [`capture_workspace_snapshot`] does not pin; call this when the snapshot will be stored for a
+/// later process (for example an undo log entry).
+///
+/// # Errors
+///
+/// Propagates invalid refname and ref-transaction failures.
+pub fn pin_workspace_snapshot(
+    repo: &Repository,
+    snapshot: &WorkspaceSnapshot,
+    caller_id: &str,
+) -> Result<()> {
+    let name = workspace_snapshot_pin_ref_name(caller_id)?;
+    let update = RefUpdate {
+        name,
+        new_value: Some(RawRef::Direct(snapshot.worktree_tree)),
+        expected: Expected::Any,
+        reflog: None,
+        flags: Default::default(),
+    };
+    let store = repo.refs();
+    let config = repo.config().ok();
+    let wait = LockWait::files_ref_lock(config.as_ref().map(|c| c.as_ref()));
+    let txn = RefTransaction::new().update(update).map_err(Error::from)?;
+    let prepared = prepare_with_lock_wait(store, txn, wait).map_err(Error::from)?;
+    prepared.commit().map_err(Error::from)
+}
+
+/// Delete the pin ref created for `caller_id`.
+///
+/// # Errors
+///
+/// Propagates invalid refname and ref-transaction failures.
+pub fn unpin_workspace_snapshot(repo: &Repository, caller_id: &str) -> Result<()> {
+    let name = workspace_snapshot_pin_ref_name(caller_id)?;
+    let update = RefUpdate {
+        name,
+        new_value: None,
+        expected: Expected::Any,
+        reflog: None,
+        flags: Default::default(),
+    };
+    let store = repo.refs();
+    let config = repo.config().ok();
+    let wait = LockWait::files_ref_lock(config.as_ref().map(|c| c.as_ref()));
+    let txn = RefTransaction::new().update(update).map_err(Error::from)?;
+    let prepared = prepare_with_lock_wait(store, txn, wait).map_err(Error::from)?;
+    prepared.commit().map_err(Error::from)
+}
+
+#[cfg(feature = "serde-models")]
+mod index_mtime_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    #[derive(Serialize, Deserialize)]
+    struct MtimeFields {
+        secs: u64,
+        nanos: u32,
+    }
+
+    pub fn serialize<S>(mtime: &Option<SystemTime>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match mtime {
+            None => serializer.serialize_none(),
+            Some(t) => {
+                let duration = t
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(serde::ser::Error::custom)?;
+                serializer.serialize_some(&MtimeFields {
+                    secs: duration.as_secs(),
+                    nanos: duration.subsec_nanos(),
+                })
+            }
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<SystemTime>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields: Option<MtimeFields> = Option::deserialize(deserializer)?;
+        Ok(fields.map(|f| UNIX_EPOCH + Duration::new(f.secs, f.nanos)))
+    }
+}
 
 /// Capture the current workspace without mutating the repository.
 ///
@@ -481,7 +591,7 @@ mod tests {
     use crate::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
     use crate::porcelain::switch::{resolve_switch_target, switch_repository, SwitchOptions};
     use crate::progress::{NeverCancel, NullProgress};
-    use grit_test_support::git;
+    use grit_test_support::{git, git_cmd};
 
     fn setup_merge_conflict() -> (tempfile::TempDir, Repository) {
         let tmp = tempfile::tempdir().unwrap();
@@ -754,5 +864,131 @@ mod tests {
         .unwrap();
         assert!(crate::state::detect_in_progress(repo.git_dir()).is_empty());
         assert!(!repo.git_dir().join("MERGE_HEAD").exists());
+    }
+
+    fn capture_conflict_snapshot_with_untracked(repo: &Repository) -> WorkspaceSnapshot {
+        let root = repo.work_tree().unwrap();
+        fs::write(root.join("dirty.txt"), "untracked-bytes\n").unwrap();
+        let side = git(root, &["rev-parse", "side"]).trim().to_owned();
+        let main = git(root, &["rev-parse", "main"]).trim().to_owned();
+        integrate_branch(
+            &repo,
+            "main",
+            ObjectId::from_hex(&main).unwrap(),
+            ObjectId::from_hex(&side).unwrap(),
+            "side",
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+        capture_workspace_snapshot(
+            repo,
+            &WorkspaceCaptureOptions {
+                refs: vec!["refs/heads/main".into()],
+                include_untracked: true,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn unpinned_worktree_tree_is_pruned_by_git_gc() {
+        let (_tmp, repo) = setup_merge_conflict();
+        let root = repo.work_tree().unwrap();
+        let snap = capture_conflict_snapshot_with_untracked(&repo);
+        let tree_hex = snap.worktree_tree.to_hex();
+        git(root, &["gc", "--prune=now", "-q"]);
+        let _ = git_cmd(&["cat-file", "-t", &tree_hex])
+            .in_dir(root)
+            .with_status(128);
+    }
+
+    #[test]
+    fn pinned_worktree_tree_survives_git_gc_and_grit_prune() {
+        use crate::refs::gc::{collect_referenced_object_roots, prune_loose_unreachable};
+
+        let (_tmp, repo) = setup_merge_conflict();
+        let root = repo.work_tree().unwrap();
+        let snap = capture_conflict_snapshot_with_untracked(&repo);
+        pin_workspace_snapshot(&repo, &snap, "undo-1").unwrap();
+        let tree_hex = snap.worktree_tree.to_hex();
+
+        git(root, &["gc", "--prune=now", "-q"]);
+        assert_eq!(git(root, &["cat-file", "-t", &tree_hex]).trim(), "tree");
+
+        let roots = collect_referenced_object_roots(repo.git_dir()).unwrap();
+        prune_loose_unreachable(repo.odb(), &roots, None).unwrap();
+        assert_eq!(git(root, &["cat-file", "-t", &tree_hex]).trim(), "tree");
+
+        restore_workspace_snapshot(
+            &repo,
+            &snap,
+            &WorkspaceRestoreOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("dirty.txt")).unwrap(),
+            "untracked-bytes\n"
+        );
+    }
+
+    #[test]
+    fn unpin_allows_worktree_tree_to_be_pruned() {
+        let (_tmp, repo) = setup_merge_conflict();
+        let root = repo.work_tree().unwrap();
+        let snap = capture_conflict_snapshot_with_untracked(&repo);
+        pin_workspace_snapshot(&repo, &snap, "undo-1").unwrap();
+        unpin_workspace_snapshot(&repo, "undo-1").unwrap();
+        let tree_hex = snap.worktree_tree.to_hex();
+        git(root, &["gc", "--prune=now", "-q"]);
+        let _ = git_cmd(&["cat-file", "-t", &tree_hex])
+            .in_dir(root)
+            .with_status(128);
+    }
+
+    #[cfg(feature = "serde-models")]
+    #[test]
+    fn workspace_snapshot_serde_round_trip() {
+        let (_tmp, repo) = setup_merge_conflict();
+        let snap = snapshot_with_direct_and_symbolic_refs(&repo);
+        let bytes = serde_json::to_vec(&snap).expect("serialize");
+        let decoded: WorkspaceSnapshot = serde_json::from_slice(&bytes).expect("deserialize");
+        assert_eq!(decoded, snap);
+    }
+
+    #[cfg(feature = "serde-models")]
+    fn snapshot_with_direct_and_symbolic_refs(repo: &Repository) -> WorkspaceSnapshot {
+        let mut snap = capture_conflict_snapshot_with_untracked(repo);
+        snap.refs.insert(
+            "HEAD".into(),
+            Some(RawRef::Symbolic("refs/heads/main".into())),
+        );
+        snap
+    }
+
+    #[cfg(feature = "serde-models")]
+    #[test]
+    fn workspace_snapshot_bincode_round_trip() {
+        use bincode::config;
+
+        let (_tmp, repo) = setup_merge_conflict();
+        let snap = snapshot_with_direct_and_symbolic_refs(&repo);
+        assert!(matches!(
+            snap.refs.get("refs/heads/main").and_then(|r| r.as_ref()),
+            Some(RawRef::Direct(_))
+        ));
+        assert!(matches!(
+            snap.refs.get("HEAD").and_then(|r| r.as_ref()),
+            Some(RawRef::Symbolic(_))
+        ));
+
+        let cfg = config::standard();
+        let bytes = bincode::serde::encode_to_vec(&snap, cfg).expect("bincode encode");
+        let (decoded, len): (WorkspaceSnapshot, usize) =
+            bincode::serde::decode_from_slice(&bytes, cfg).expect("bincode decode");
+        assert_eq!(len, bytes.len());
+        assert_eq!(decoded, snap);
     }
 }

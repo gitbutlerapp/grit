@@ -17080,9 +17080,13 @@ impl core::marker::Unpin for grit_lib::porcelain::workspace_snapshot::WorkspaceS
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot
+pub const grit_lib::porcelain::workspace_snapshot::WORKSPACE_SNAPSHOT_PIN_REF_PREFIX: &str
 pub fn grit_lib::porcelain::workspace_snapshot::capture_workspace_snapshot(&grit_lib::repo::Repository, &grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions) -> grit_lib::error::Result<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>
 pub fn grit_lib::porcelain::workspace_snapshot::clear_in_progress(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::state::InProgressOperation>>
+pub fn grit_lib::porcelain::workspace_snapshot::pin_workspace_snapshot(&grit_lib::repo::Repository, &grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::workspace_snapshot::restore_workspace_snapshot(&grit_lib::repo::Repository, &grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot, &grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
+pub fn grit_lib::porcelain::workspace_snapshot::unpin_workspace_snapshot(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::porcelain::workspace_snapshot::workspace_snapshot_pin_ref_name(&str) -> grit_lib::error::Result<alloc::string::String>
 pub mod grit_lib::porcelain::worktree_guard
 pub struct grit_lib::porcelain::worktree_guard::TreeSwitchPlan
 pub grit_lib::porcelain::worktree_guard::TreeSwitchPlan::tree_changes: alloc::vec::Vec<grit_lib::diff::DiffEntry>
@@ -26637,8 +26641,10 @@ impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::Re
 pub struct grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
 impl<'repo> grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
 pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::capture(&self, &grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions) -> grit_lib::error::Result<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>
+pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::pin(&self, &grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::restore(&self, &grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot, &grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
+pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::unpin(&self, &str) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
 pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>

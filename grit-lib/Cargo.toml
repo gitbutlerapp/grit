@@ -272,6 +272,7 @@ name = "fetch_local_many_refs"
 harness = false
 
 [dev-dependencies]
+bincode.workspace = true
 criterion.workspace = true
 grit-test-support = { path = "../grit-test-support" }
 serde = { workspace = true, features = ["derive"] }

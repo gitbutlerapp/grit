@@ -2,8 +2,8 @@
 
 use crate::error::Result;
 use crate::porcelain::workspace_snapshot::{
-    capture_workspace_snapshot, restore_workspace_snapshot, WorkspaceCaptureOptions,
-    WorkspaceRestoreOptions, WorkspaceSnapshot,
+    capture_workspace_snapshot, pin_workspace_snapshot, restore_workspace_snapshot,
+    unpin_workspace_snapshot, WorkspaceCaptureOptions, WorkspaceRestoreOptions, WorkspaceSnapshot,
 };
 use crate::progress::{Cancel, ProgressSink};
 use crate::repo::Repository;
@@ -47,5 +47,23 @@ impl<'repo> RepositoryWorkspaceSnapshot<'repo> {
         cancel: &dyn Cancel,
     ) -> Result<()> {
         restore_workspace_snapshot(self.repo, snapshot, options, progress, cancel)
+    }
+
+    /// Pin `snapshot.worktree_tree` so it survives garbage collection until [`Self::unpin`].
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors from [`pin_workspace_snapshot`].
+    pub fn pin(&self, snapshot: &WorkspaceSnapshot, caller_id: &str) -> Result<()> {
+        pin_workspace_snapshot(self.repo, snapshot, caller_id)
+    }
+
+    /// Remove a workspace snapshot pin for `caller_id`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors from [`unpin_workspace_snapshot`].
+    pub fn unpin(&self, caller_id: &str) -> Result<()> {
+        unpin_workspace_snapshot(self.repo, caller_id)
     }
 }
