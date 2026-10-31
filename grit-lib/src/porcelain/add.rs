@@ -3623,6 +3623,52 @@ mod tests {
     }
 
     #[test]
+    fn stage_unmerged_gitlink_refuses_unborn_nested_head() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let sub = root.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let sub_repo = open_nested_repo(&sub);
+        let base_oid = commit_in_repo(&sub_repo, "inside.txt", b"base\n", "base");
+        let ours_oid = commit_in_repo(&sub_repo, "inside.txt", b"ours\n", "ours");
+        let theirs_oid = commit_in_repo(&sub_repo, "inside.txt", b"theirs\n", "theirs");
+        fs::write(sub.join(".git/HEAD"), "ref: refs/heads/does-not-exist\n").unwrap();
+
+        let mut index = Index::new();
+        index
+            .entries
+            .push(conflict_index_entry("sub", 1, base_oid, MODE_GITLINK));
+        index
+            .entries
+            .push(conflict_index_entry("sub", 2, ours_oid, MODE_GITLINK));
+        index
+            .entries
+            .push(conflict_index_entry("sub", 3, theirs_oid, MODE_GITLINK));
+        write_index(&repo, &mut index);
+        let index_path = repo.git_dir().join("index");
+        let index_before = fs::read(&index_path).unwrap();
+
+        let err = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["sub".to_owned()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            Error::EmbeddedRepoWithoutCommit { path } if path == "sub"
+        ));
+        assert_eq!(fs::read(&index_path).unwrap(), index_before);
+        let index = repo.load_index().unwrap();
+        assert!(index.has_unmerged_entries());
+    }
+
+    #[test]
     fn stage_unmerged_gitlink_pathspec_stages_checked_out_head() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();

@@ -12262,17 +12262,26 @@ pub(crate) enum EmbeddedGitRepoStage {
     Gitlink(crate::objects::ObjectId),
 }
 
-/// Classify an unregistered embedded repository for index staging.
+/// Classify a worktree path for embedded-repository staging.
+///
+/// Unlike [`is_unregistered_embedded_git_repo`], registered gitlinks (including unmerged
+/// conflict stages) are still checked so an unborn nested HEAD cannot collapse conflicts.
 ///
 /// Returns [`EmbeddedGitRepoStage::NotEmbedded`] when the path is not a nested checkout.
 /// Returns [`EmbeddedGitRepoStage::Gitlink`] when HEAD resolves. Otherwise returns
 /// [`crate::error::Error::EmbeddedRepoWithoutCommit`].
 pub(crate) fn classify_embedded_git_repo_for_stage(
-    index: &Index,
+    _index: &Index,
     rel: &str,
     abs: &Path,
 ) -> crate::error::Result<EmbeddedGitRepoStage> {
-    if !is_unregistered_embedded_git_repo(index, rel, abs) {
+    if rel.is_empty() {
+        return Ok(EmbeddedGitRepoStage::NotEmbedded);
+    }
+    let Some(git_dir) = submodule_embedded_git_dir(abs) else {
+        return Ok(EmbeddedGitRepoStage::NotEmbedded);
+    };
+    if !crate::submodule_gitdir::is_valid_git_dir(&git_dir) {
         return Ok(EmbeddedGitRepoStage::NotEmbedded);
     }
     let path = rel.trim_end_matches('/').to_owned();
