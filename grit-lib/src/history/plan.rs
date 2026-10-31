@@ -271,7 +271,9 @@ fn plan_rewrite_with_order_impl(
     scoped_refs_override: Option<Vec<(String, ObjectId)>>,
 ) -> Result<ResumablePlanOutcome, HistoryError> {
     let committer_line = opts.committer_line()?;
-    if edits.is_empty() {
+    let replay_pending = replay_order.is_some_and(|order| !order.is_empty());
+    let has_seed = seed.is_some();
+    if edits.is_empty() && !replay_pending && !has_seed {
         return Ok(ResumablePlanOutcome::Complete(Box::new(RewritePlan {
             commits: Vec::new(),
             ref_updates: Vec::new(),
@@ -281,7 +283,43 @@ fn plan_rewrite_with_order_impl(
 
     let change_ids = ChangeIdWriteContext::from_repo(repo)?;
 
-    let oldest = oldest_edited_commit(repo, edits)?;
+    let oldest = if edits.is_empty() {
+        if let Some(order) = replay_order {
+            if let Some(&first) = order.first() {
+                first
+            } else if let Some(refs) = scoped_refs_override.as_ref().and_then(|r| r.first()) {
+                refs.1
+            } else if let Some((mapping, _)) = seed.as_ref() {
+                mapping
+                    .keys()
+                    .copied()
+                    .next()
+                    .ok_or_else(|| HistoryError::NotInHistory {
+                        commit: ObjectId::null(repo.odb().hash_algo()),
+                    })?
+            } else {
+                return Err(HistoryError::NotInHistory {
+                    commit: ObjectId::null(repo.odb().hash_algo()),
+                });
+            }
+        } else if let Some(refs) = scoped_refs_override.as_ref().and_then(|r| r.first()) {
+            refs.1
+        } else if let Some((mapping, _)) = seed.as_ref() {
+            mapping
+                .keys()
+                .copied()
+                .next()
+                .ok_or_else(|| HistoryError::NotInHistory {
+                    commit: ObjectId::null(repo.odb().hash_algo()),
+                })?
+        } else {
+            return Err(HistoryError::NotInHistory {
+                commit: ObjectId::null(repo.odb().hash_algo()),
+            });
+        }
+    } else {
+        oldest_edited_commit(repo, edits)?
+    };
     let scoped_refs = if let Some(refs) = scoped_refs_override {
         refs
     } else {
