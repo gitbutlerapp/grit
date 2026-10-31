@@ -17,6 +17,8 @@ Front ends that record an operation log need to undo more than a commit oid: con
 
 [`restore_workspace_snapshot`](rustdoc:grit_lib::porcelain::workspace_snapshot::restore_workspace_snapshot) updates refs and symbolic `HEAD` in one transaction, writes the index bytes, checks out the worktree tree, then restores sentinels.
 
+Before refs move, restore builds a tree from paths in the pre-restore index (all stages) and the snapshot worktree tree, hashing only files that exist on disk. Checkout diffs that tree against the snapshot worktree tree so undoing a branch switch or uncommitted deletions restores or removes paths even when they matched `HEAD` at capture. Untracked files that appear after capture and are not in the index or snapshot tree are left alone when `include_untracked` was false at capture.
+
 ## Clearing operation state
 
 [`state::clear_in_progress`](rustdoc:grit_lib::state::clear_in_progress) removes merge/rebase/cherry-pick sentinels without moving `HEAD` or the worktree (unlike [`abort_branch_merge`](rustdoc:grit_lib::porcelain::merge::abort_branch_merge)).

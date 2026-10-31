@@ -13,8 +13,9 @@ use crate::error::{Error, Result};
 use crate::index::{entry_from_stat, Index, MODE_GITLINK, MODE_TREE};
 use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
+use crate::path_validate::ProtectOptions;
 use crate::porcelain::checkout::checkout_between_trees_with_progress;
-use crate::porcelain::stash::collect_untracked_paths;
+use crate::porcelain::stash::{collect_untracked_paths, flatten_tree_full};
 use crate::progress::{Cancel, ProgressSink};
 use crate::refs::prepare_with_lock_wait;
 use crate::refs::store::{Expected, RawRef, RefTransaction, RefUpdate, RefUpdateFlags};
@@ -87,6 +88,10 @@ pub fn capture_workspace_snapshot(
 /// Restore a [`WorkspaceSnapshot`] in one coordinated step: refs and `HEAD`, index bytes,
 /// worktree tree checkout, then operation sentinels.
 ///
+/// Worktree checkout diffs the on-disk tree at restore time against the snapshot worktree
+/// tree (not the post-restore `HEAD` tree), so undoing a branch switch or local deletions
+/// recreates or removes paths even when they matched `HEAD` at capture.
+///
 /// # Errors
 ///
 /// Propagates ref transaction, checkout, and I/O failures.
@@ -97,9 +102,11 @@ pub fn restore_workspace_snapshot(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<()> {
+    let pre_restore_index = repo.load_index()?;
+    let disk_tree = build_pre_restore_disk_tree(repo, &pre_restore_index, &snapshot.worktree_tree)?;
     commit_ref_restore(repo, snapshot, options)?;
     restore_index_bytes(repo, &snapshot.index_bytes, snapshot.index_mtime)?;
-    restore_worktree_tree(repo, snapshot, progress, cancel)?;
+    restore_worktree_tree(repo, &disk_tree, snapshot, progress, cancel)?;
     restore_index_bytes(repo, &snapshot.index_bytes, snapshot.index_mtime)?;
     restore_operation_state(repo.git_dir(), &snapshot.operation_state)?;
     Ok(())
@@ -340,16 +347,58 @@ fn restore_operation_state(git_dir: &Path, files: &BTreeMap<String, Vec<u8>>) ->
     Ok(())
 }
 
+fn build_pre_restore_disk_tree(
+    repo: &Repository,
+    source: &Index,
+    snapshot_worktree_tree: &ObjectId,
+) -> Result<ObjectId> {
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let protect = ProtectOptions::default();
+    let mut paths: BTreeSet<Vec<u8>> = source.entries.iter().map(|e| e.path.clone()).collect();
+    for entry in flatten_tree_full(repo.odb(), snapshot_worktree_tree, "", protect)? {
+        paths.insert(entry.path.into_bytes());
+    }
+    let mut out = Index::new();
+    let rules = crate::worktree_rules::WorktreeRules::from_repository(repo, source)?;
+    let precompose = crate::precompose_config::effective_core_precomposeunicode_with_config(
+        Some(repo.git_dir()),
+        Some(&rules.config_arc()),
+    );
+    for path_bytes in paths {
+        if let Some(entry) = source.get(&path_bytes, 0) {
+            if entry.mode == MODE_GITLINK {
+                out.add_or_replace(entry.clone());
+                continue;
+            }
+        }
+        let rel = crate::repo_relpath::storage_string(&path_bytes);
+        let abs = crate::index::worktree_path_from_index_rel(work_tree, &path_bytes);
+        if abs.symlink_metadata().is_ok() {
+            stage_worktree_path_for_tree(
+                repo,
+                work_tree,
+                &rel,
+                &path_bytes,
+                &mut out,
+                precompose,
+                &rules,
+            )?;
+        }
+    }
+    out.sort();
+    write_tree_update_index(repo.odb(), &mut out, "", WriteTreeFlags::silent())
+}
+
 fn restore_worktree_tree(
     repo: &Repository,
+    disk_tree: &ObjectId,
     snapshot: &WorkspaceSnapshot,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<()> {
-    let head_tree = repo.odb().commit_tree(&repo.head_commit()?)?;
     checkout_between_trees_with_progress(
         repo,
-        Some(&head_tree),
+        Some(disk_tree),
         &snapshot.worktree_tree,
         progress,
         cancel,
@@ -430,6 +479,7 @@ mod tests {
 
     use super::*;
     use crate::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+    use crate::porcelain::switch::{resolve_switch_target, switch_repository, SwitchOptions};
     use crate::progress::{NeverCancel, NullProgress};
     use grit_test_support::git;
 
@@ -527,6 +577,146 @@ mod tests {
         assert!(cleared.contains(&InProgressOperation::Merge));
         assert!(!repo.git_dir().join("MERGE_HEAD").exists());
         assert_eq!(fs::read_to_string(root.join("a.txt")).unwrap(), before);
+    }
+
+    #[test]
+    fn restore_after_switch_removes_branch_only_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        git(root, &["init", "-q", "-b", "main"]);
+        fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+        git(root, &["switch", "-qc", "feat"]);
+        fs::create_dir(root.join("d")).unwrap();
+        fs::write(root.join("d/f.txt"), "f\n").unwrap();
+        fs::write(root.join("g.txt"), "g\n").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "feat"]);
+        git(root, &["switch", "-q", "main"]);
+
+        let repo =
+            Repository::discover(Some(root), &crate::environment::RepositoryOptions::empty())
+                .unwrap();
+        let snap = capture_workspace_snapshot(
+            &repo,
+            &WorkspaceCaptureOptions {
+                refs: vec!["refs/heads/main".into(), "refs/heads/feat".into()],
+                include_untracked: true,
+            },
+        )
+        .unwrap();
+
+        let mode = resolve_switch_target(&repo, "feat").unwrap();
+        switch_repository(
+            &repo,
+            &SwitchOptions {
+                mode,
+                dry_run: false,
+                hooks: Default::default(),
+            },
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+        assert!(root.join("d").is_dir());
+        assert!(root.join("g.txt").is_file());
+
+        restore_workspace_snapshot(
+            &repo,
+            &snap,
+            &WorkspaceRestoreOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+
+        assert_eq!(git(root, &["branch", "--show-current"]).trim(), "main");
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("d").exists());
+        assert!(!root.join("g.txt").exists());
+        assert!(git(root, &["status", "--short"]).trim().is_empty());
+        git(root, &["fsck"]);
+    }
+
+    #[test]
+    fn restore_recreates_tracked_file_deleted_after_capture() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        git(root, &["init", "-q", "-b", "main"]);
+        fs::write(root.join("keep.txt"), "keep\n").unwrap();
+        fs::write(root.join("run.sh"), "#!/bin/sh\n").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+
+        let repo =
+            Repository::discover(Some(root), &crate::environment::RepositoryOptions::empty())
+                .unwrap();
+        let snap = capture_workspace_snapshot(
+            &repo,
+            &WorkspaceCaptureOptions {
+                refs: vec!["refs/heads/main".into()],
+                include_untracked: false,
+            },
+        )
+        .unwrap();
+
+        fs::remove_file(root.join("run.sh")).unwrap();
+        assert!(!root.join("run.sh").exists());
+
+        restore_workspace_snapshot(
+            &repo,
+            &snap,
+            &WorkspaceRestoreOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(root.join("run.sh")).unwrap(),
+            "#!/bin/sh\n"
+        );
+        assert!(git(root, &["status", "--short"]).trim().is_empty());
+    }
+
+    #[test]
+    fn restore_removes_file_added_after_capture() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        git(root, &["init", "-q", "-b", "main"]);
+        fs::write(root.join("a.txt"), "a\n").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+
+        let repo =
+            Repository::discover(Some(root), &crate::environment::RepositoryOptions::empty())
+                .unwrap();
+        let snap = capture_workspace_snapshot(
+            &repo,
+            &WorkspaceCaptureOptions {
+                refs: vec!["refs/heads/main".into()],
+                include_untracked: true,
+            },
+        )
+        .unwrap();
+
+        fs::write(root.join("h.txt"), "new\n").unwrap();
+        git(root, &["add", "h.txt"]);
+        git(root, &["commit", "-qm", "add h"]);
+
+        restore_workspace_snapshot(
+            &repo,
+            &snap,
+            &WorkspaceRestoreOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+
+        assert!(!root.join("h.txt").exists());
+        assert!(git(root, &["status", "--short"]).trim().is_empty());
+        assert_eq!(git(root, &["rev-list", "--count", "HEAD"]).trim(), "1");
     }
 
     #[test]
