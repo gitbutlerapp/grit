@@ -33,6 +33,29 @@ fn isolated_git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).to_string()
 }
 
+fn write_fsmonitor_stable_token_hook(dir: &Path) -> PathBuf {
+    let hook = dir.join("fsmonitor-stable-hook.sh");
+    let script = r#"#!/bin/sh
+if [ "$1" = "2" ]; then
+  while read -r line; do
+    [ -z "$line" ] && break
+  done
+  printf 'tok\0'
+  exit 0
+fi
+exit 0
+"#;
+    fs::write(&hook, script).expect("write hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&hook).expect("meta").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&hook, perms).expect("chmod hook");
+    }
+    hook
+}
+
 fn write_fsmonitor_hook(dir: &Path) -> PathBuf {
     let hook = dir.join("fsmonitor-hook.sh");
     let script = r#"#!/bin/sh
@@ -459,6 +482,82 @@ exit 0
         fs::set_permissions(&hook, perms).expect("chmod hook");
     }
     hook
+}
+
+#[test]
+fn grit_status_marks_fsmonitor_valid_after_clean_scan() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_root = tmp.path();
+    git(repo_root, &["init", "-q", "-b", "main", "."]);
+    git(repo_root, &["config", "user.email", "t@example.com"]);
+    git(repo_root, &["config", "user.name", "Test"]);
+    let hook = write_fsmonitor_stable_token_hook(repo_root);
+    git(
+        repo_root,
+        &[
+            "config",
+            "core.fsmonitor",
+            hook.to_str().expect("hook utf8"),
+        ],
+    );
+    for d in 0..4 {
+        let dir = repo_root.join(format!("d{d}"));
+        fs::create_dir_all(&dir).expect("mkdir");
+        for f in 0..5 {
+            fs::write(dir.join(format!("f{f}.txt")), format!("{d} {f}\n")).expect("write");
+        }
+    }
+    git(repo_root, &["add", "."]);
+    git(repo_root, &["commit", "-qm", "files"]);
+
+    let grit_repo = Repository::open(
+        &repo_root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(repo_root),
+    )
+    .expect("open grit repo");
+    let opts = grit_lib::porcelain::status::StatusOptions::default();
+    let mut progress = grit_lib::progress::NullProgress;
+    for _ in 0..2 {
+        grit_lib::porcelain::status::status(&grit_repo, &opts, &mut progress, &NeverCancel)
+            .expect("status");
+    }
+
+    let index_path = repo_root.join(".git/index");
+    let index = Index::load(&index_path).expect("reload index");
+    assert_eq!(
+        index.fsmonitor_last_update.as_deref(),
+        Some("tok"),
+        "hook token must be stored"
+    );
+    let stage0: Vec<_> = index
+        .entries()
+        .iter()
+        .filter(|e| e.stage() == 0 && e.mode == MODE_REGULAR)
+        .collect();
+    assert!(
+        !stage0.is_empty(),
+        "expected tracked regular files in index"
+    );
+    assert!(
+        stage0.iter().all(|e| e.fsmonitor_valid()),
+        "clean scan must mark every stage-0 blob fsmonitor-valid"
+    );
+
+    let flags = ls_files_fsmonitor_flags(repo_root);
+    assert!(
+        flags.iter().all(|(c, _)| *c == 'h'),
+        "git ls-files -f must agree on valid bits: {flags:?}"
+    );
+
+    let third = grit_lib::porcelain::status::status(&grit_repo, &opts, &mut progress, &NeverCancel)
+        .expect("third status");
+    assert!(
+        third.unstaged.is_empty(),
+        "clean tree after valid bits primed: {:?}",
+        third.unstaged
+    );
+
+    fsck_clean(repo_root);
 }
 
 #[test]

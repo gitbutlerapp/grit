@@ -5764,6 +5764,7 @@ fn diff_index_to_worktree_inner(
     let mut result = Vec::new();
     let refresh_index_stat_in_pass = options.refresh_index_stat_in_pass;
     let mut index_stat_refresh_changed = false;
+    let mut fsmonitor_valid_updated = false;
     let mut honor_fsmonitor_valid = false;
     if options.refresh_fsmonitor {
         let default_runner = crate::command_runner::system_command_runner();
@@ -6070,11 +6071,10 @@ fn diff_index_to_worktree_inner(
                         let oid = index.entries[entry_index].oid;
                         index.mark_content_verified(&path, oid);
                     }
-                    if index.fsmonitor_last_update.is_some()
-                        && stat_matches_blob_stat(&index.entries[entry_index], &stat, stat_policy)
-                        && !refresh.index_changed
+                    if refresh.content_verified
+                        && crate::fsmonitor::mark_fsmonitor_valid_proven_clean(index, entry_index)
                     {
-                        index.entries[entry_index].set_fsmonitor_valid(true);
+                        fsmonitor_valid_updated = true;
                     }
                 }
                 let ie = &index.entries[entry_index];
@@ -6109,6 +6109,9 @@ fn diff_index_to_worktree_inner(
                             stat_policy,
                         )
                     {
+                        if crate::fsmonitor::mark_fsmonitor_valid_proven_clean(index, entry_index) {
+                            fsmonitor_valid_updated = true;
+                        }
                         return Ok(());
                     }
                     if stat_same && worktree_mode != ie.mode {
@@ -6154,6 +6157,9 @@ fn diff_index_to_worktree_inner(
                                     stat_policy,
                                 )))
                     {
+                        if crate::fsmonitor::mark_fsmonitor_valid_proven_clean(index, entry_index) {
+                            fsmonitor_valid_updated = true;
+                        }
                         return Ok(());
                     }
                     let file_path = index_entry_worktree_abs_bytes(
@@ -6276,6 +6282,11 @@ fn diff_index_to_worktree_inner(
                 }
             }
         }
+    }
+
+    if fsmonitor_valid_updated {
+        index.fsmonitor_validity_changed();
+        index_stat_refresh_changed = true;
     }
 
     Ok((result, index_stat_refresh_changed, staging_stat_cache))

@@ -61,6 +61,8 @@ pub struct StageTrackedSummary {
     pub untracked_invalidation_deferred: bool,
     /// Index stat cache was refreshed for at least one path without a blob/mode change.
     pub stat_refreshed: bool,
+    /// At least one stage-0 entry gained an fsmonitor-valid bit after a clean scan.
+    pub fsmonitor_valid_updated: bool,
 }
 
 impl StageTrackedSummary {
@@ -132,7 +134,10 @@ pub fn stage_tracked_modifications_with_thresholds(
     if summary.untracked_invalidation_deferred {
         replay_deferred_untracked_invalidations(&mut index, &summary);
     }
-    if summary.change_count() > 0 || summary.stat_refreshed {
+    if summary.change_count() > 0 || summary.stat_refreshed || summary.fsmonitor_valid_updated {
+        if summary.fsmonitor_valid_updated {
+            index.fsmonitor_validity_changed();
+        }
         index.ensure_canonical_order();
         repo.write_index_with_lock(&mut lock, &mut index, false)?;
     }
@@ -362,6 +367,7 @@ fn stage_tracked_modifications_in_index_body(
         .config()
         .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
     let mut honor_fsmonitor = false;
+    let mut fsmonitor_valid_updated = false;
     if let Ok(cfg) = repo.config() {
         let default_runner = crate::command_runner::system_command_runner();
         let boundary = crate::fsmonitor::FsmonitorQueryBoundary(
@@ -535,6 +541,7 @@ fn stage_tracked_modifications_in_index_body(
                     mode_policy,
                     rules,
                     icase_collisions: icase_collisions.as_ref(),
+                    fsmonitor_valid_updated: &mut fsmonitor_valid_updated,
                 };
                 let defer = parallel_restage.then_some(&mut deferred_restage);
                 match refresh_present_tracked_path(ctx, stat, defer, entry_index)? {
@@ -581,6 +588,7 @@ fn stage_tracked_modifications_in_index_body(
 
     summary.modified.sort();
     summary.removed.sort();
+    summary.fsmonitor_valid_updated |= fsmonitor_valid_updated;
     Ok(summary)
 }
 
@@ -594,6 +602,7 @@ struct PresentRefreshCtx<'a> {
     mode_policy: WorktreeModePolicy,
     rules: &'a mut WorktreeRules,
     icase_collisions: Option<&'a crate::path_icase::IcaseCheckoutCollisionMap>,
+    fsmonitor_valid_updated: &'a mut bool,
 }
 
 fn refresh_unmerged_tracked_path(
@@ -749,6 +758,7 @@ fn stage_tracked_path_individual(
                 mode_policy,
                 rules,
                 icase_collisions,
+                fsmonitor_valid_updated: &mut summary.fsmonitor_valid_updated,
             };
             match refresh_present_tracked_path(ctx, BlobDiskStat::from_metadata(&meta), None, 0)? {
                 PresentRefresh::Unchanged => {}
@@ -824,6 +834,7 @@ fn refresh_present_tracked_path(
         mode_policy,
         rules,
         icase_collisions,
+        fsmonitor_valid_updated,
     } = ctx;
     if icase_collisions.is_some_and(|map| map.is_auto_stage_loser(raw_path)) {
         return Ok(PresentRefresh::Unchanged);
@@ -857,6 +868,9 @@ fn refresh_present_tracked_path(
     let racy = entry_is_racy(idx_e, index_mtime);
     if !idx_intent_to_add && idx_e.size != 0 && stat_same && !racy {
         if wt_mode == idx_mode {
+            if crate::fsmonitor::mark_fsmonitor_valid_proven_clean_path(index, raw_path) {
+                *fsmonitor_valid_updated = true;
+            }
             return Ok(PresentRefresh::Unchanged);
         }
         // A type change (blob ↔ symlink, etc.) falls through to restage the content.
@@ -937,7 +951,13 @@ fn refresh_present_tracked_path(
                 }
                 if stat_fields_differ(&entry, idx_e) {
                     refresh_index_stat_only(index, raw_path, staged_oid, &entry)?;
+                    if crate::fsmonitor::mark_fsmonitor_valid_proven_clean_path(index, raw_path) {
+                        *fsmonitor_valid_updated = true;
+                    }
                     return Ok(PresentRefresh::StatRefreshed);
+                }
+                if crate::fsmonitor::mark_fsmonitor_valid_proven_clean_path(index, raw_path) {
+                    *fsmonitor_valid_updated = true;
                 }
                 return Ok(PresentRefresh::Unchanged);
             }
@@ -969,6 +989,9 @@ fn refresh_present_tracked_path(
             let meta = fs::symlink_metadata(abs_path).map_err(Error::Io)?;
             let oid = read_worktree_blob_oid_raw(repo, abs_path, &meta)?;
             if !idx_intent_to_add && idx_oid == oid && wt_mode == idx_mode {
+                if crate::fsmonitor::mark_fsmonitor_valid_proven_clean_path(index, raw_path) {
+                    *fsmonitor_valid_updated = true;
+                }
                 return Ok(PresentRefresh::Unchanged);
             }
             if icase_collisions.is_some_and(|map| {
