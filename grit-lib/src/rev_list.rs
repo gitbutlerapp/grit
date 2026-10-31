@@ -5572,34 +5572,6 @@ fn log_follow_rename_threshold(cfg: &ConfigSet) -> u32 {
     LOG_FOLLOW_RENAME_THRESHOLD_DEFAULT
 }
 
-fn follow_path_in_tree(
-    repo: &Repository,
-    tree: ObjectId,
-    argv_path: &str,
-    follow_path: &str,
-) -> Result<Option<String>> {
-    let has = |name: &str| {
-        let path_vec = [name.to_owned()];
-        tree_has_pathspec_match(repo, tree, "", &path_vec)
-    };
-    for name in [follow_path, argv_path] {
-        if has(name)? {
-            return Ok(Some(name.to_owned()));
-        }
-    }
-    if let Some((dir, base)) = follow_path.rsplit_once('/') {
-        // Prefer `commit.c` over `builtin-commit.c` when both exist (side branches often touch the latter).
-        if has(base)? {
-            return Ok(Some(base.to_owned()));
-        }
-        let hyphen = format!("{dir}-{base}");
-        if has(&hyphen)? {
-            return Ok(Some(hyphen));
-        }
-    }
-    Ok(None)
-}
-
 /// Path to use in `parent_tree` when walking `--follow` history from `commit_tree` at `follow_path`.
 ///
 /// Returns `None` when this parent does not carry the followed file (side branch).
@@ -5607,86 +5579,49 @@ fn follow_path_into_parent(
     repo: &Repository,
     parent_tree: ObjectId,
     commit_tree: ObjectId,
-    argv_path: &str,
+    _argv_path: &str,
     follow_path: &str,
     threshold: u32,
 ) -> Result<Option<String>> {
-    let Some(commit_path) = follow_path_in_tree(repo, commit_tree, argv_path, follow_path)? else {
-        return Ok(None);
-    };
-    let path_vec = [commit_path.clone()];
-    if tree_has_pathspec_match(repo, parent_tree, "", &path_vec)? {
-        let normalized =
-            follow_path_in_tree(repo, parent_tree, argv_path, &commit_path)?.unwrap_or(commit_path);
-        return Ok(Some(normalized));
+    let path_vec = [follow_path.to_owned()];
+    let in_child = tree_has_pathspec_match(repo, commit_tree, "", &path_vec)?;
+    let in_parent = tree_has_pathspec_match(repo, parent_tree, "", &path_vec)?;
+    if in_child && in_parent {
+        return Ok(Some(follow_path.to_owned()));
     }
-    if threshold >= 100 {
-        return Ok(None);
+    if !in_child && in_parent {
+        return Ok(Some(follow_path.to_owned()));
     }
-    let odb = repo.odb();
-    let entries = diff_trees(odb, Some(&parent_tree), Some(&commit_tree), "")?;
-    let entries = detect_renames(odb, None, entries, threshold);
-    Ok(entries
-        .into_iter()
-        .find(|e| {
-            e.status == DiffStatus::Renamed && e.new_path.as_deref() == Some(commit_path.as_str())
-        })
-        .and_then(|e| e.old_path)
-        .and_then(|old| {
-            follow_path_in_tree(repo, parent_tree, argv_path, &old)
-                .ok()
-                .flatten()
-                .or(Some(old))
-        }))
-}
-
-/// Stricter parent propagation at merges (Git pathspec-limited diff); linear history uses [`follow_path_into_parent`].
-/// Path name for `follow_path` (the argv path or a prior rename) within `commit_tree`.
-fn follow_path_at_commit(
-    repo: &Repository,
-    graph: &mut CommitGraph<'_>,
-    oid: ObjectId,
-    commit_tree: ObjectId,
-    argv_path: &str,
-    follow_path: &str,
-    threshold: u32,
-) -> Result<Option<String>> {
-    if let Some(resolved) = follow_path_in_tree(repo, commit_tree, argv_path, follow_path)? {
-        return Ok(Some(resolved));
-    }
-    if threshold >= 100 {
+    if !in_child {
         return Ok(None);
     }
-    let odb = repo.odb();
-    for parent in graph.parents_of(oid)? {
-        let parent_tree = graph.commit_tree(parent)?;
+    if threshold < 100 {
+        let odb = repo.odb();
         let entries = diff_trees(odb, Some(&parent_tree), Some(&commit_tree), "")?;
         let entries = detect_renames(odb, None, entries, threshold);
-        if let Some(old) = entries
-            .iter()
+        if let Some(old_path) = entries
+            .into_iter()
             .find(|e| e.status == DiffStatus::Renamed && e.new_path.as_deref() == Some(follow_path))
-            .and_then(|e| e.old_path.clone())
+            .and_then(|e| e.old_path)
         {
-            if tree_has_pathspec_match(repo, commit_tree, "", std::slice::from_ref(&old))? {
-                return Ok(Some(old));
-            }
+            return Ok(Some(old_path));
         }
     }
-    Ok(None)
+    Ok(Some(follow_path.to_owned()))
 }
 
 fn follow_path_into_parent_at_merge(
     repo: &Repository,
     parent_tree: ObjectId,
     commit_tree: ObjectId,
-    argv_path: &str,
+    _argv_path: &str,
     follow_path: &str,
     threshold: u32,
 ) -> Result<Option<String>> {
-    let Some(commit_path) = follow_path_in_tree(repo, commit_tree, argv_path, follow_path)? else {
+    let path_vec = [follow_path.to_owned()];
+    if !tree_has_pathspec_match(repo, commit_tree, "", &path_vec)? {
         return Ok(None);
-    };
-    let path_vec = [commit_path.clone()];
+    }
     let odb = repo.odb();
     let entries = diff_trees_for_pathspecs(odb, Some(&parent_tree), Some(&commit_tree), &path_vec)?;
     let entries = if threshold >= 100 {
@@ -5696,18 +5631,13 @@ fn follow_path_into_parent_at_merge(
     };
     if let Some(old) = entries
         .iter()
-        .find(|e| {
-            e.status == DiffStatus::Renamed && e.new_path.as_deref() == Some(commit_path.as_str())
-        })
+        .find(|e| e.status == DiffStatus::Renamed && e.new_path.as_deref() == Some(follow_path))
         .and_then(|e| e.old_path.clone())
     {
-        let normalized = follow_path_in_tree(repo, parent_tree, argv_path, &old)?.unwrap_or(old);
-        return Ok(Some(normalized));
+        return Ok(Some(old));
     }
     if tree_has_pathspec_match(repo, parent_tree, "", &path_vec)? {
-        let normalized =
-            follow_path_in_tree(repo, parent_tree, argv_path, &commit_path)?.unwrap_or(commit_path);
-        return Ok(Some(normalized));
+        return Ok(Some(follow_path.to_owned()));
     }
     Ok(None)
 }
@@ -5867,17 +5797,6 @@ fn dense_path_limited_action(
 
     if let Some(follow_path) = follow_path {
         let argv_path = paths.first().map(String::as_str).unwrap_or(follow_path);
-        let follow_path = follow_path_at_commit(
-            repo,
-            graph,
-            oid,
-            commit_tree,
-            argv_path,
-            follow_path,
-            follow_rename_threshold,
-        )?
-        .unwrap_or_else(|| follow_path.to_owned());
-        let follow_path = follow_path.as_str();
         let mut lineage: Vec<(ObjectId, bool, String)> = Vec::new();
         let merge = parents.len() > 1;
         for (nth, parent_oid) in parents.iter().enumerate() {
@@ -5923,7 +5842,40 @@ fn dense_path_limited_action(
             lineage.push((*parent_oid, differs, parent_follow_path));
         }
 
-        let parents_to_walk = lineage.iter().map(|(p, _, _)| *p).collect();
+        let parents_to_walk: Vec<ObjectId> = if merge {
+            let mut treesame_parent = None;
+            for parent_oid in &parents {
+                let Some((_, differs, _)) = lineage.iter().find(|(p, _, _)| p == parent_oid) else {
+                    continue;
+                };
+                if !*differs {
+                    treesame_parent = Some(*parent_oid);
+                    break;
+                }
+            }
+            if let Some(parent) = treesame_parent {
+                vec![parent]
+            } else {
+                let mut filtered: Vec<ObjectId> = lineage
+                    .iter()
+                    .filter(|(_, _, parent_follow_path)| parent_follow_path == follow_path)
+                    .map(|(p, _, _)| *p)
+                    .collect();
+                if filtered.is_empty() {
+                    if let Some((parent_oid, _, _)) = lineage
+                        .iter()
+                        .find(|(p, _, _)| parents.first().is_some_and(|first| p == first))
+                    {
+                        filtered.push(*parent_oid);
+                    } else {
+                        filtered.extend(lineage.iter().map(|(p, _, _)| *p));
+                    }
+                }
+                filtered
+            }
+        } else {
+            lineage.iter().map(|(p, _, _)| *p).collect()
+        };
 
         // Git `log --follow` walks through merges but does not list merge commits.
         let visible = if sparse {

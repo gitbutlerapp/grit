@@ -231,6 +231,75 @@ fn follow_uses_default_rename_threshold_when_diff_renames_is_numeric() {
 }
 
 #[test]
+fn follow_ordinary_delete_readd_matches_git_three_commits() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q"]);
+    commit_file(wt, "f.txt", "v1\n", "add");
+    git(wt, &["rm", "f.txt"]);
+    git(wt, &["commit", "-m", "del"]);
+    commit_file(wt, "f.txt", "v3\n", "readd");
+
+    let grit = grit_follow_commits(wt, "f.txt", None);
+    let git_oids = git_follow_commits(wt, "f.txt", None);
+    assert_eq!(grit, git_oids, "ordinary delete/re-add must match git");
+    assert_eq!(grit.len(), 3, "expected add, del, readd");
+}
+
+#[test]
+fn follow_delete_readd_and_basename_collision_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q"]);
+    std::fs::create_dir_all(wt.join("dir")).expect("mkdir");
+    commit_file(wt, "dir/foo.txt", "v1\n", "c1");
+    commit_file(wt, "dir/foo.txt", "v1\nv2\n", "c2");
+    commit_file(wt, "foo.txt", "root\n", "root-foo");
+    commit_file(wt, "dir/foo.txt", "v1\nv2\nv3\n", "c3");
+    git(wt, &["rm", "dir/foo.txt"]);
+    git(wt, &["commit", "-m", "del"]);
+    std::fs::create_dir_all(wt.join("dir")).expect("mkdir");
+    commit_file(wt, "dir/foo.txt", "v4\n", "readd");
+
+    let grit = grit_follow_commits(wt, "dir/foo.txt", None);
+    let git_oids = git_follow_commits(wt, "dir/foo.txt", None);
+    assert_eq!(
+        grit, git_oids,
+        "delete/re-add with root basename collision must match git"
+    );
+    assert_eq!(grit.len(), 5, "expected c1,c2,c3,del,readd");
+}
+
+#[test]
+fn follow_merge_skips_side_line_legacy_path_edits() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q"]);
+    std::fs::create_dir_all(wt.join("tracked")).expect("mkdir");
+    commit_file(wt, "tracked/file.txt", "main1\n", "m1");
+    commit_file(wt, "tracked-file.txt", "legacy\n", "legacy");
+    git(wt, &["branch", "side"]);
+    commit_file(wt, "tracked-file.txt", "legacy\nside\n", "side-edit");
+    git(wt, &["checkout", "main"]);
+    commit_file(wt, "tracked/file.txt", "main1\nmain2\n", "main-edit");
+    git(wt, &["merge", "side", "-m", "merge"]);
+    commit_file(
+        wt,
+        "tracked-file.txt",
+        "legacy\nside\nafter\n",
+        "post-merge-legacy-only",
+    );
+
+    let grit = grit_follow_commits(wt, "tracked/file.txt", None);
+    let git_oids = git_follow_commits(wt, "tracked/file.txt", None);
+    assert_eq!(
+        grit, git_oids,
+        "follow must not pick up parallel legacy-path side history"
+    );
+    assert_eq!(grit.len(), 2, "expected m1 and main-edit only");
+}
+
+#[test]
 fn follow_skips_low_similarity_rename() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();
