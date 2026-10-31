@@ -9,6 +9,49 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds. The daily census behind the [Performance overview](performance-overview.md) measures the shipped **`dist`** build since 2026-10-28; see [Benchmarking](benchmarking.md#grit-bench-daily-factory-census) for what that switch did to every baseline.
 
+## Sparse switch keeps changed excluded directories opaque (2026-10-31)
+
+`switch/sparse@sparse-unique-120k` changes 5,000 paths inside the 400 excluded
+directories of a sparse-index checkout. A switch expanded every excluded
+directory whose subtree differed (about 120,000 index rows), diffed and probed
+those rows, then folded them back into sparse-directory entries on write. After
+the switch it also reloaded the index fully expanded, which every sparse switch
+paid, only to look for case-folding collisions on repositories that ignore case.
+
+A sparse-directory row that still records `HEAD`'s subtree and has no files on
+disk holds nothing staged and nothing to protect, so the switch now points it at
+the target subtree without expanding it, as Git's two-way merge does for sparse
+directories. Rows holding other trees (staged content) are still expanded and
+checked. The head-to-target tree diff stops at the opaque rows, the cache-tree is
+rebuilt from the remaining valid nodes without reading excluded subtrees, and
+the index is reloaded after a switch only when `core.ignorecase` is set.
+
+Daily-matrix medians of ten runs (each run goes out and back), measured in one
+sitting on a four-vCPU Intel Xeon Linux VM with stock Git 2.43.0 and Rust 1.99.0
+release builds. Values are **milliseconds / peak MiB**:
+
+| Scenario | Git | Before | After |
+| --- | ---: | ---: | ---: |
+| `switch/sparse@sparse-unique-120k` | 73.3 / 17.7 | 367.0 / 56.6 | 24.0 / 23.0 |
+| `switch/sparse@sparse-120k` | 42.1 / 7.8 | 104.9 / 39.6 | 23.0 / 22.2 |
+| `switch/sparse@sparse-240k` | 62.0 / 8.1 | 190.4 / 58.1 | 22.8 / 22.2 |
+| `reset/sparse@sparse-unique-120k` | 51.2 / 22.0 | 36.6 / 22.0 | 36.9 / 22.8 |
+| `reset/sparse@sparse-120k` | 27.2 / 12.1 | 35.7 / 21.4 | 35.4 / 22.2 |
+| `reset/sparse@sparse-240k` | 36.6 / 16.9 | 38.2 / 21.4 | 35.9 / 22.2 |
+| `switch/branch@synth-100k` | 173.9 / 35.9 | 108.1 / 44.2 | 97.5 / 44.6 |
+| `switch/branch@synth-10k` | 21.6 / 10.2 | 19.7 / 22.8 | 16.7 / 23.4 |
+| `switch/delete-heavy@wide-48k` | 122.9 / 21.7 | 134.4 / 34.7 | 129.2 / 35.7 |
+| `switch/large-blob@big-asset` | 866.4 / 306.9 | 539.4 / 20.2 | 802.4 / 20.5 |
+
+The changed-tree switch is **15×** faster and now **3×** faster than Git; peak
+memory drops from 56.6 to 23.0 MiB. The other rows never keep a changed sparse
+directory and stay within noise: a second run in reverse order measured
+`switch/large-blob@big-asset` at 774.4 ms before and 776.3 ms after, and
+`switch/branch@synth-100k` at 105.8 and 85.7 ms. Full reports:
+[`daily-switch-sparse-unique-5841-before.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-switch-sparse-unique-5841-before.json)
+and
+[`daily-switch-sparse-unique-5841-after.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-switch-sparse-unique-5841-after.json).
+
 ## Deepening a shallow fetch negotiates (2026-10-29)
 
 A fetch with `--deepen`, `--depth` or into a shallow repository used to send the server no `have` lines, so the server packed every object of the deepened history. On `fetch/deepen@git-git` (a depth-1 `master` deepened by 50 commits, served by `git http-backend`), grit received 59k objects (43 MiB) that the client already held through its other branches, and spent most of its 5.5 s waiting for the server to build that pack and then indexing it. Git negotiates and receives 175 objects.
