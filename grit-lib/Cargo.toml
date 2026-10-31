@@ -328,6 +328,11 @@ path = "tests/filter_process_repo_scope.rs"
 required-features = ["full-tests"]
 
 [[test]]
+name = "git_index_file_write_git_compat"
+path = "tests/git_index_file_write_git_compat.rs"
+required-features = ["full-tests"]
+
+[[test]]
 name = "hygiene"
 path = "tests/hygiene.rs"
 

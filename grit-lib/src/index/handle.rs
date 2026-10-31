@@ -85,7 +85,7 @@ impl<'repo> IndexHandle<'repo> {
         self.repo.load_index_at(path)
     }
 
-    /// Write `index` to the repository's default index path.
+    /// Write `index` to the index path selected by `GIT_INDEX_FILE` / the default `.git/index`.
     ///
     /// # Errors
     ///
@@ -112,7 +112,7 @@ impl<'repo> IndexHandle<'repo> {
         self.repo.write_index_at_with_split(path, index, split)
     }
 
-    /// Acquire `.git/index.lock` before mutating the working tree for index+worktree commands.
+    /// Acquire a lock on the index path selected by `GIT_INDEX_FILE` / the default `.git/index`.
     #[inline]
     pub fn begin_update(&self) -> Result<crate::index::IndexLock> {
         self.repo.begin_index_update()
@@ -129,7 +129,8 @@ impl<'repo> IndexHandle<'repo> {
         self.repo.commit_index_update(lock, index, updated_workdir)
     }
 
-    /// Persist the index when the lock can be acquired (Git `repo_update_index_if_able`).
+    /// Persist the index when the lock can be acquired (Git `repo_update_index_if_able`),
+    /// using the path selected by `GIT_INDEX_FILE` when set.
     #[inline]
     pub fn try_write(&self, index: &mut Index) -> Result<bool> {
         self.repo.try_write_index(index)

@@ -1484,7 +1484,7 @@ fn create_commit_with_index(
     }
     let merge_heads = read_merge_heads(repo.git_dir())?;
     let concluding_merge = !merge_heads.is_empty();
-    let index_path = repo.git_dir().join("index");
+    let index_path = repo.index_path_for_env()?;
     let parent_tree = parent
         .as_ref()
         .map(|parent_oid| repo.odb().commit_tree(parent_oid))
