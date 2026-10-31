@@ -806,7 +806,7 @@ fn init_issue_2355_second_commit(dir: &std::path::Path) {
 
 fn status_filtered_shows_only_g_c(stdout: &str) -> bool {
     let lines: Vec<&str> = stdout.lines().filter(|l| !l.is_empty()).collect();
-    lines.iter().all(|l| l.contains("g.c")) && !stdout.contains("h.c")
+    !lines.is_empty() && lines.iter().all(|l| l.contains("g.c")) && !stdout.contains("h.c")
 }
 
 /// Regression for #2355: long-form `:(top)` pathspecs from a subdirectory match Git.
