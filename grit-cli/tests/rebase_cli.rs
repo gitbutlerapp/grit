@@ -1241,3 +1241,142 @@ fn rebase_exec_runs_when_already_up_to_date_with_upstream() -> TestResult {
     git_fsck_strict(dir)?;
     Ok(())
 }
+
+/// Issue #2357: multi-commit rebase must replay the tail after `--continue` / `--skip`.
+fn init_issue_2357_fixture(dir: &Path) -> Result<(String, String), Box<dyn Error>> {
+    gs(dir, ["init", "."])?;
+    fs::write(dir.join("f"), "one\n")?;
+    gs(dir, ["commit", "-m", "base"])?;
+    gs(dir, ["switch", "-c", "feat"])?;
+    fs::write(dir.join("f"), "feat\n")?;
+    gs(dir, ["commit", "-m", "feat1"])?;
+    fs::write(dir.join("g"), "x\n")?;
+    gs(dir, ["commit", "-m", "feat2"])?;
+    let orig_feat = git(dir, &["rev-parse", "feat"])?.trim().to_string();
+    gs(dir, ["switch", "main"])?;
+    fs::write(dir.join("f"), "main\n")?;
+    gs(dir, ["commit", "-m", "mainchg"])?;
+    let main_tip = git(dir, &["rev-parse", "main"])?.trim().to_string();
+    gs(dir, ["switch", "feat"])?;
+    Ok((orig_feat, main_tip))
+}
+
+fn assert_issue_2357_rebased(
+    dir: &Path,
+    orig_feat: &str,
+    main_tip: &str,
+    middle_subject: &str,
+) -> Result<(), Box<dyn Error>> {
+    let feat_tip = git(dir, &["rev-parse", "feat"])?.trim().to_string();
+    assert_ne!(feat_tip, orig_feat, "feat must move off the pre-rebase tip");
+    assert!(
+        git(dir, &["merge-base", "--is-ancestor", main_tip, "feat"]).is_ok(),
+        "main must be an ancestor of feat after rebase"
+    );
+    assert_eq!(
+        git(dir, &["log", "--format=%s", "-3", "feat"])?.trim(),
+        format!("feat2\n{middle_subject}\nmainchg")
+    );
+    assert_eq!(fs::read_to_string(dir.join("f"))?, "resolved\n");
+    assert!(!dir.join(".git/rebase-merge").exists());
+    git_fsck_strict(dir)?;
+    Ok(())
+}
+
+#[test]
+fn issue_2357_multi_commit_continue_after_add_replays_tail() -> TestResult {
+    let scratch = Scratch::new("issue-2357-continue-add")?;
+    let dir = scratch.path();
+    let (orig_feat, main_tip) = init_issue_2357_fixture(dir)?;
+    assert_eq!(gs(dir, ["rebase", "main"])?.status, Some(1));
+    fs::write(dir.join("f"), "resolved\n")?;
+    assert!(gs(dir, ["add", "f"])?.success());
+    let resume = gs(dir, ["rebase", "--continue"])?;
+    assert!(resume.success(), "{}\n{}", resume.stdout, resume.stderr);
+    assert!(
+        resume.stdout.contains("Rebased 2 commit(s)"),
+        "expected rebase summary, got: {}",
+        resume.stdout
+    );
+    assert_issue_2357_rebased(dir, &orig_feat, &main_tip, "feat1")?;
+    Ok(())
+}
+
+#[test]
+fn issue_2357_multi_commit_continue_after_commit_replays_tail() -> TestResult {
+    let scratch = Scratch::new("issue-2357-continue-commit")?;
+    let dir = scratch.path();
+    let (orig_feat, main_tip) = init_issue_2357_fixture(dir)?;
+    assert_eq!(gs(dir, ["rebase", "main"])?.status, Some(1));
+    fs::write(dir.join("f"), "resolved\n")?;
+    gs(dir, ["commit", "-m", "resolved f"])?;
+    let resume = gs(dir, ["rebase", "--continue"])?;
+    assert!(resume.success(), "{}\n{}", resume.stdout, resume.stderr);
+    assert!(resume.stdout.contains("Rebased 2 commit(s)"));
+    assert_issue_2357_rebased(dir, &orig_feat, &main_tip, "resolved f")?;
+    Ok(())
+}
+
+#[test]
+fn issue_2357_multi_commit_skip_replays_tail() -> TestResult {
+    let scratch = Scratch::new("issue-2357-skip")?;
+    let dir = scratch.path();
+    let (orig_feat, main_tip) = init_issue_2357_fixture(dir)?;
+    assert_eq!(gs(dir, ["rebase", "main"])?.status, Some(1));
+    let skip = gs(dir, ["rebase", "--skip"])?;
+    assert!(skip.success(), "{}\n{}", skip.stdout, skip.stderr);
+    assert!(skip.stdout.contains("Rebased 2 commit(s)"));
+    let feat_tip = git(dir, &["rev-parse", "feat"])?.trim().to_string();
+    assert_ne!(feat_tip, orig_feat);
+    assert!(
+        git(dir, &["merge-base", "--is-ancestor", &main_tip, "feat"]).is_ok(),
+        "main must be an ancestor of feat after skip"
+    );
+    assert_eq!(
+        git(dir, &["log", "--format=%s", "-2", "feat"])?.trim(),
+        "feat2\nmainchg"
+    );
+    assert!(!dir.join(".git/rebase-merge").exists());
+    git_fsck_strict(dir)?;
+    Ok(())
+}
+
+#[test]
+fn issue_2357_conflict_on_second_of_three_commits_replays_third() -> TestResult {
+    let scratch = Scratch::new("issue-2357-third-commit")?;
+    let dir = scratch.path();
+    gs(dir, ["init", "."])?;
+    fs::write(dir.join("f"), "base\n")?;
+    gs(dir, ["commit", "-m", "base"])?;
+    gs(dir, ["switch", "-c", "feat"])?;
+    fs::write(dir.join("note"), "one\n")?;
+    gs(dir, ["commit", "-m", "feat1"])?;
+    fs::write(dir.join("f"), "two\n")?;
+    gs(dir, ["commit", "-m", "feat2"])?;
+    fs::write(dir.join("note"), "three\n")?;
+    gs(dir, ["commit", "-m", "feat3"])?;
+    let orig_feat = git(dir, &["rev-parse", "feat"])?.trim().to_string();
+    gs(dir, ["switch", "main"])?;
+    fs::write(dir.join("f"), "main\n")?;
+    gs(dir, ["commit", "-m", "mainchg"])?;
+    let main_tip = git(dir, &["rev-parse", "main"])?.trim().to_string();
+    gs(dir, ["switch", "feat"])?;
+    assert_eq!(gs(dir, ["rebase", "main"])?.status, Some(1));
+    fs::write(dir.join("f"), "resolved two\n")?;
+    gs(dir, ["add", "f"])?;
+    let resume = gs(dir, ["rebase", "--continue"])?;
+    assert!(resume.success(), "{}\n{}", resume.stdout, resume.stderr);
+    assert!(resume.stdout.contains("Rebased 3 commit(s)"));
+    let feat_tip = git(dir, &["rev-parse", "feat"])?.trim().to_string();
+    assert_ne!(feat_tip, orig_feat);
+    assert!(git(dir, &["merge-base", "--is-ancestor", &main_tip, "feat"]).is_ok());
+    assert_eq!(
+        git(dir, &["log", "--format=%s", "-4", "feat"])?.trim(),
+        "feat3\nfeat2\nfeat1\nmainchg"
+    );
+    assert_eq!(fs::read_to_string(dir.join("f"))?, "resolved two\n");
+    assert_eq!(fs::read_to_string(dir.join("note"))?, "three\n");
+    assert!(!dir.join(".git/rebase-merge").exists());
+    git_fsck_strict(dir)?;
+    Ok(())
+}
