@@ -3485,6 +3485,11 @@ pub(crate) fn branch_tips_merged_into(
     bases: &[ObjectId],
     tips: &[ObjectId],
 ) -> Result<OidHashSet> {
+    // A tip that is itself a base is merged; when every tip is (listing the branch the
+    // base names), nothing needs ranking or walking.
+    if tips.iter().all(|tip| bases.contains(tip)) {
+        return Ok(tips.iter().copied().collect());
+    }
     let mut cache = CommitGraphCache::new(repo);
     cache.tips_merged_from_bases(bases, tips)
 }
@@ -3497,6 +3502,22 @@ mod tests {
     use crate::repo::{InitOptions, Repository};
     use std::fs;
     use tempfile::tempdir;
+
+    #[test]
+    fn tips_equal_to_bases_are_merged_without_reading_history() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = open_test_bare(&dir)?;
+        let root = write_commit_same_time(repo.odb(), &[], "root", 100)?;
+        let tip = write_commit_same_time(repo.odb(), &[root], "tip", 200)?;
+        let absent = ObjectId::from_hex("1111111111111111111111111111111111111111")?;
+        let merged = branch_tips_merged_into(&repo, &[tip, absent], &[absent])?;
+        assert_eq!(merged, [absent].into_iter().collect::<OidHashSet>());
+        let merged = branch_tips_merged_into(&repo, &[tip], &[tip, root])?;
+        assert_eq!(merged, [tip, root].into_iter().collect::<OidHashSet>());
+        let merged = branch_tips_merged_into(&repo, &[root], &[tip, root])?;
+        assert_eq!(merged, [root].into_iter().collect::<OidHashSet>());
+        Ok(())
+    }
 
     #[test]
     fn containment_memo_shares_successes_and_exhausted_histories() -> Result<()> {
