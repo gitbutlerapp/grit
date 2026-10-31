@@ -184,7 +184,12 @@ fn lying_sorted_packed_refs_v0_advertisement_matches_system_git(
     std::fs::write(
         repo.git_dir().join("packed-refs"),
         format!(
-            "# pack-refs with: peeled fully-peeled sorted\n{commit} refs/heads/b\n{commit} refs/heads/a\n{commit} refs/heads/z\n"
+            "# pack-refs with: peeled fully-peeled sorted\n\
+             {commit} refs/heads/a\n\
+             {commit} refs/heads/b\n\
+             {commit} refs/heads/d\n\
+             {commit} refs/heads/c\n\
+             {commit} refs/heads/z\n"
         ),
     )
     .map_err(ServeError::Io)?;
@@ -203,13 +208,17 @@ fn lying_sorted_packed_refs_v0_advertisement_matches_system_git(
     let grit_names = v0_advertised_ref_names(&grit_v0_advertisement(&repo));
     let git_names = v0_advertised_ref_names(&git_out.stdout);
     assert_eq!(grit_names, git_names);
-    assert_eq!(
-        grit_names
-            .iter()
-            .filter(|n| n.as_str() == "refs/heads/b")
-            .count(),
-        1,
-        "duplicate refs/heads/b in grit advertisement: {grit_names:?}"
-    );
+    for name in [
+        "refs/heads/a",
+        "refs/heads/b",
+        "refs/heads/c",
+        "refs/heads/d",
+    ] {
+        assert_eq!(
+            grit_names.iter().filter(|n| n.as_str() == name).count(),
+            1,
+            "duplicate {name} in grit advertisement: {grit_names:?}"
+        );
+    }
     Ok(())
 }
