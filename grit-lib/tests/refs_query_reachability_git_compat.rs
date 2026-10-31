@@ -680,6 +680,141 @@ fn merged_with_shared_tips_matches_git() {
     }
 }
 
+/// With too few refs for the `packed-refs` peel shortcut, the filter's tip resolution is
+/// also the listing's tag peel: a branch tip's header is read once, not once to peel and
+/// again to find its commit.
+#[test]
+fn merged_filter_peels_loose_tips_with_one_header_read() {
+    let root = tempfile::tempdir().unwrap();
+    let objects = std::sync::Arc::new(CountingObjects::new());
+    let repo = counted_repo(root.path(), objects.clone());
+    let mut trunk = Vec::new();
+    for i in 0..12 {
+        trunk.push(counted_commit(&repo, trunk.last().copied(), i));
+    }
+    let base = trunk[8];
+    let tips = [trunk[2], trunk[5], trunk[11]];
+    for (i, tip) in tips.iter().enumerate() {
+        std::fs::write(
+            repo.git_dir().join(format!("refs/heads/b{i}")),
+            format!("{tip}\n"),
+        )
+        .unwrap();
+    }
+    objects.info.lock().unwrap().clear();
+    let rows = query_refs(
+        &repo,
+        &RefQuery {
+            merged: vec![base],
+            ..RefQuery::default()
+        },
+        &RefQueryOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|r| r.full_name.as_str())
+            .collect::<Vec<_>>(),
+        ["refs/heads/b0", "refs/heads/b1"]
+    );
+    assert!(rows.iter().all(|r| r.peeled.is_none()));
+    let info = objects.info.lock().unwrap();
+    for tip in tips {
+        let n = info.get(&tip).copied().unwrap_or(0);
+        assert!(n <= 1, "tip {tip} header read {n} times");
+    }
+}
+
+/// Listings that went through a reachability filter carry the full tag peel Git computes
+/// (`<ref>^{}`, the `packed-refs` peel line) for annotated tags, loose and packed.
+#[test]
+fn filtered_listings_report_git_peels() {
+    if !git_interop_available(Backend::Files) {
+        return;
+    }
+    let root = tempfile::tempdir().expect("tempdir");
+    let worktree = root.path();
+    let repo = init_repo(worktree, Backend::Files);
+    let tip = seed_linear(worktree);
+    seed_tag_of_tag(worktree);
+    let tree = git(worktree, &["rev-parse", "HEAD^{tree}"])
+        .trim()
+        .to_owned();
+    git(worktree, &["tag", "-a", "tree-tag", "-m", "t", &tree]);
+    let mid = ObjectId::from_hex(git(worktree, &["rev-parse", "HEAD~1"]).trim()).expect("mid");
+    let all = vec![RefNamespace::Custom("refs/".to_owned())];
+    for pack in [false, true] {
+        if pack {
+            git(worktree, &["pack-refs", "--all"]);
+        }
+        let cases: Vec<(Vec<String>, RefQuery)> = vec![
+            (
+                vec![format!("--merged={tip}")],
+                RefQuery {
+                    merged: vec![tip],
+                    namespaces: all.clone(),
+                    ..RefQuery::default()
+                },
+            ),
+            (
+                vec![format!("--no-merged={mid}")],
+                RefQuery {
+                    no_merged: vec![mid],
+                    namespaces: all.clone(),
+                    ..RefQuery::default()
+                },
+            ),
+            (
+                vec![format!("--points-at={mid}")],
+                RefQuery {
+                    points_at: vec![mid],
+                    namespaces: all.clone(),
+                    ..RefQuery::default()
+                },
+            ),
+            (
+                vec![format!("--contains={mid}"), "--count=2".to_owned()],
+                RefQuery {
+                    contains: vec![mid],
+                    limit: Some(2),
+                    namespaces: all.clone(),
+                    ..RefQuery::default()
+                },
+            ),
+        ];
+        for (filter, query) in cases {
+            let mut args = vec![
+                "for-each-ref".to_owned(),
+                "--format=%(refname) %(objecttype)".to_owned(),
+            ];
+            args.extend(filter.iter().cloned());
+            args.push("refs/".to_owned());
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let expected: Vec<String> = git(worktree, &args)
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(|l| match l.split_once(' ') {
+                    Some((name, "tag")) => {
+                        let peeled = git(worktree, &["rev-parse", &format!("{name}^{{}}")]);
+                        format!("{name} {}", peeled.trim())
+                    }
+                    Some((name, _)) => name.to_owned(),
+                    None => l.to_owned(),
+                })
+                .collect();
+            let got: Vec<String> = query_refs(&repo, &query, &RefQueryOptions::default())
+                .expect("query_refs")
+                .into_iter()
+                .map(|r| match r.peeled {
+                    Some(p) => format!("{} {p}", r.full_name),
+                    None => r.full_name,
+                })
+                .collect();
+            assert_eq!(got, expected, "pack={pack} {filter:?}");
+        }
+    }
+}
+
 #[test]
 fn bounded_contains_memoizes_shared_negative_history() {
     let root = tempfile::tempdir().unwrap();
