@@ -1332,7 +1332,7 @@ pub fn print_rebase_outcome(
             if outcome.dry_run {
                 outln!(w, "- Dry run (refs unchanged)");
             }
-            if outcome.rewritten.is_empty() {
+            if outcome.rewritten.is_empty() && outcome.head.is_none() {
                 if !outcome.exec.is_empty() {
                     outln!(w, "- Exec commands ran; branch is unchanged");
                 } else {
@@ -1393,7 +1393,7 @@ pub fn print_history_rewrite_outcome(
 ) -> anyhow::Result<()> {
     outln!(w, "## {title}");
     outln!(w);
-    if outcome.operation == "rebase" && outcome.rewritten.is_empty() {
+    if outcome.operation == "rebase" && outcome.rewritten.is_empty() && outcome.head.is_none() {
         if !outcome.exec.is_empty() {
             outln!(w, "- Exec commands ran; branch is unchanged");
         } else {

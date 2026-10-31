@@ -637,7 +637,7 @@ fn render_rewrite_rows(
 
 impl HumanRender for HistoryRewriteOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        if self.operation == "rebase" && self.rewritten.is_empty() {
+        if self.operation == "rebase" && self.rewritten.is_empty() && self.head.is_none() {
             if !self.exec.is_empty() {
                 outln!(w, "Exec commands ran; branch is unchanged");
                 return Ok(());
