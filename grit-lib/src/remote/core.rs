@@ -1252,12 +1252,7 @@ fn parse_list_refs_v2_response(
             Some(pkt_line::Packet::ResponseEnd) => break,
             Some(pkt_line::Packet::Data(line)) => {
                 let line = line.trim_end_matches('\n');
-                if let Some(msg) = line.strip_prefix("ERR ") {
-                    return Err(RemoteError::Library(Error::Message(format!(
-                        "remote error: {}",
-                        msg.trim_end()
-                    ))));
-                }
+                pkt_line::reject_err_line(line)?;
                 if let Some(t) = crate::fetch::parse_v2_ls_refs_unborn_head_symref(line) {
                     head_symref = Some(t);
                     continue;

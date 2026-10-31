@@ -278,7 +278,8 @@ fn verify_ssh_child_after_advertisement(
 ///
 /// # Errors
 ///
-/// Returns an error on I/O failure or if the server sends an `ERR` packet.
+/// Returns an error on I/O failure, or [`Error::RemoteFatal`] if the server sends an
+/// `ERR` packet.
 pub fn read_advertisement(reader: &mut dyn Read) -> Result<Advertisement> {
     let mut adv = Advertisement {
         protocol_version: 0,
@@ -307,17 +308,12 @@ pub fn read_advertisement(reader: &mut dyn Read) -> Result<Advertisement> {
                         continue;
                     }
                 }
+                pkt_line::reject_err_line(line)?;
                 if v2 {
                     // v2 capability block: collect every line verbatim and leave
-                    // `advertised_refs` empty. `ERR` is still fatal.
-                    if let Some(msg) = line.strip_prefix("ERR ") {
-                        return Err(Error::Message(format!("remote error: {}", msg.trim_end())));
-                    }
+                    // `advertised_refs` empty.
                     adv.capabilities.push(line.to_string());
                     continue;
-                }
-                if let Some(msg) = line.strip_prefix("ERR ") {
-                    return Err(Error::Message(format!("remote error: {}", msg.trim_end())));
                 }
                 let Some((oid, refname, caps)) = parse_ref_advertisement_line(line) else {
                     continue;
@@ -1851,6 +1847,107 @@ mod tests {
             ),
             "expected NoHandshake, got {err}"
         );
+    }
+
+    #[cfg(unix)]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn system_git_upload_pack_refusing_a_want_is_remote_fatal() {
+        use std::os::unix::fs::PermissionsExt;
+
+        if Command::new("git").arg("--version").output().is_err() {
+            eprintln!("SKIP: no system git");
+            return;
+        }
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let source = tmp.path().join("source");
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(&source)
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "A")
+                .env("GIT_AUTHOR_EMAIL", "a@example.com")
+                .env("GIT_COMMITTER_NAME", "A")
+                .env("GIT_COMMITTER_EMAIL", "a@example.com")
+                .output()
+                .expect("run git");
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        std::fs::create_dir_all(&source).expect("mkdir");
+        git(&["init", "-q", "-b", "main"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "base"]);
+        let missing = "b".repeat(40);
+
+        let script = tmp.path().join("fake-ssh.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+while [ "$1" = "-p" ]; do shift 2; done
+shift
+cmd=$*
+case "$cmd" in
+  "git-upload-pack "*) cmd="git upload-pack ${cmd#git-upload-pack }" ;;
+esac
+eval "$cmd"
+"#,
+        )
+        .expect("write fake ssh");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let source_path = source.to_str().expect("utf8 path");
+
+        for protocol_version in [0u8, 2] {
+            let (transport, url) = if protocol_version == 2 {
+                (
+                    SshTransport::with_program(&script),
+                    format!("ssh://git@fakehost{source_path}"),
+                )
+            } else {
+                (
+                    SshTransport::with_shell_command(&script),
+                    format!("fakehost:{source_path}"),
+                )
+            };
+            let opts = ConnectOptions {
+                protocol_version,
+                ..Default::default()
+            };
+            let mut conn = transport
+                .connect(&url, Service::UploadPack, &opts)
+                .expect("connect to git upload-pack");
+            assert_eq!(conn.protocol_version(), protocol_version);
+
+            let local = tmp.path().join(format!("local-v{protocol_version}"));
+            let repo = crate::repo::Repository::init(&local, &crate::repo::InitOptions::new())
+                .expect("init local");
+            let mut fetch = crate::transfer::FetchOptions::new();
+            fetch.refspecs = vec![format!("{missing}:refs/heads/missing")];
+            let err = crate::fetch::fetch_remote(
+                repo.git_dir(),
+                conn.as_mut(),
+                &mut fetch,
+                &mut crate::fetch::NoProgress,
+                &crate::progress::NeverCancel,
+            )
+            .expect_err("git refuses a want for an object it does not have");
+            match err {
+                Error::RemoteFatal { message } => assert!(
+                    message.contains("not our ref") && message.contains(&missing),
+                    "v{protocol_version}: {message}"
+                ),
+                other => panic!("v{protocol_version}: expected RemoteFatal, got {other:?}"),
+            }
+        }
     }
 
     fn command_spec_has_sendenv(spec: &CommandSpec) -> bool {

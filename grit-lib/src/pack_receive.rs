@@ -17,6 +17,7 @@ use crate::error::{Error, Result};
 use crate::fetch::Progress;
 use crate::objects::HashAlgo;
 use crate::pack_stream_scan::PackStreamScanner;
+use crate::pkt_line;
 use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressUnit, ReceivedObjects};
 
 /// Where demuxed pack bytes are stored.
@@ -488,12 +489,7 @@ fn read_sideband_pack_tail_buffered(
                 }
             }
             2 => progress.message(&payload[1..]),
-            3 => {
-                return Err(Error::Message(format!(
-                    "remote error: {}",
-                    String::from_utf8_lossy(&payload[1..]).trim_end()
-                )))
-            }
+            3 => return Err(pkt_line::sideband_fatal(&payload[1..])),
             _ => {
                 let nbytes = append_pack_data_counted(
                     payload,
@@ -574,12 +570,7 @@ fn read_sideband_pack_tail_read_exact_loop(
                 note_received_pack_bytes(progress, &mut receiving, nbytes);
             }
             2 => progress.message(&payload_buf[1..]),
-            3 => {
-                return Err(Error::Message(format!(
-                    "remote error: {}",
-                    String::from_utf8_lossy(&payload_buf[1..]).trim_end()
-                )))
-            }
+            3 => return Err(pkt_line::sideband_fatal(&payload_buf[1..])),
             _ => {
                 let nbytes = append_pack_data(payload_buf, target, pending, seen_pack)?;
                 note_received_pack_bytes(progress, &mut receiving, nbytes);
@@ -1175,7 +1166,10 @@ mod tests {
                 &crate::progress::NeverCancel,
             )
             .expect_err("remote side-band error");
-        assert!(matches!(err, Error::Message(_)));
+        assert!(
+            matches!(&err, Error::RemoteFatal { message } if message == "network interrupted"),
+            "{err:?}"
+        );
         drop(recv);
         assert!(
             !path.exists(),

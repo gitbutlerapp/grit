@@ -1481,6 +1481,8 @@ mod reftable_worktree_head_deref;
 #[cfg(feature = "full-tests")]
 #[path = "remote_config_git_compat.rs"]
 mod remote_config_git_compat;
+#[path = "remote_fatal_error.rs"]
+mod remote_fatal_error;
 #[cfg(feature = "full-tests")]
 #[path = "remote_injected_ref_store.rs"]
 mod remote_injected_ref_store;

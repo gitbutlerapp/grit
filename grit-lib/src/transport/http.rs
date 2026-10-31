@@ -647,6 +647,7 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
             )))
         }
     };
+    pkt_line::reject_err_line(&first)?;
     if first.trim_end() == "version 2" {
         // Detect v2 so the caller can report it as unsupported in this pass.
         let mut caps = HashSet::new();
@@ -654,6 +655,7 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
             match pkt_line::read_packet(&mut cur)? {
                 None | Some(pkt_line::Packet::Flush) => break,
                 Some(pkt_line::Packet::Data(s)) => {
+                    pkt_line::reject_err_line(&s)?;
                     caps.insert(s.trim_end().to_owned());
                 }
                 Some(_) => break,
@@ -684,6 +686,7 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
             None | Some(pkt_line::Packet::Flush) => break,
             Some(pkt_line::Packet::Data(line)) => {
                 let line = line.trim_end_matches('\n');
+                pkt_line::reject_err_line(line)?;
                 if line.starts_with("version ") {
                     continue;
                 }
@@ -786,6 +789,11 @@ fn upload_pack_discovery_from_body_with_http(
 }
 
 /// Parse a smart-HTTP `info/refs` response body for `git-upload-pack`.
+///
+/// # Errors
+///
+/// [`Error::RemoteFatal`] when the server answers with an `ERR` packet instead of an
+/// advertisement; other malformed advertisements fail with parse errors.
 pub fn discover_upload_pack_from_body(body: &[u8]) -> Result<UploadPackDiscovery> {
     upload_pack_discovery_from_body(body)
 }

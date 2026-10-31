@@ -5974,6 +5974,8 @@ pub grit_lib::error::Error::ReflogInvalidSelector::spec: alloc::string::String
 pub grit_lib::error::Error::ReflogUnknownRef
 pub grit_lib::error::Error::ReflogUnknownRef::refname: alloc::string::String
 pub grit_lib::error::Error::Reftable(grit_lib::refs::reftable::ReftableError)
+pub grit_lib::error::Error::RemoteFatal
+pub grit_lib::error::Error::RemoteFatal::message: alloc::string::String
 pub grit_lib::error::Error::RemoteUnreadable
 pub grit_lib::error::Error::RemoteUnreadable::reason: grit_lib::error::RemoteUnreadableReason
 pub grit_lib::error::Error::RemoteUnreadable::url: core::option::Option<alloc::string::String>
@@ -17312,6 +17314,8 @@ pub grit_lib::prelude::Error::ReflogInvalidSelector::spec: alloc::string::String
 pub grit_lib::prelude::Error::ReflogUnknownRef
 pub grit_lib::prelude::Error::ReflogUnknownRef::refname: alloc::string::String
 pub grit_lib::prelude::Error::Reftable(grit_lib::refs::reftable::ReftableError)
+pub grit_lib::prelude::Error::RemoteFatal
+pub grit_lib::prelude::Error::RemoteFatal::message: alloc::string::String
 pub grit_lib::prelude::Error::RemoteUnreadable
 pub grit_lib::prelude::Error::RemoteUnreadable::reason: grit_lib::error::RemoteUnreadableReason
 pub grit_lib::prelude::Error::RemoteUnreadable::url: core::option::Option<alloc::string::String>

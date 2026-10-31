@@ -328,10 +328,7 @@ pub(crate) fn v2_primary_line_from_pkt(
             String::from_utf8_lossy(&bytes[1..]).trim_end().to_owned(),
         )),
         2 => Ok(None),
-        3 => Err(Error::Message(format!(
-            "remote error: {}",
-            String::from_utf8_lossy(&bytes[1..]).trim_end()
-        ))),
+        3 => Err(pkt_line::sideband_fatal(&bytes[1..])),
         _ => Ok(Some(payload.trim_end().to_owned())),
     }
 }

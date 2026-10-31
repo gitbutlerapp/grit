@@ -5,6 +5,8 @@
 
 use std::io::{self, Read, Write};
 
+use crate::error::{Error, Result};
+
 /// Special packet type: flush packet (`0000`).
 pub const FLUSH: &str = "0000";
 /// Special packet type: delimiter packet (`0001`).
@@ -206,4 +208,72 @@ pub fn parse_hex_len(prefix: &[u8]) -> io::Result<usize> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{e}")))?;
     usize::from_str_radix(s, 16)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("invalid length: {e}")))
+}
+
+/// Fail with [`Error::RemoteFatal`] when `line` is an `ERR <message>` data line.
+///
+/// A server may send `ERR` in place of any line it would otherwise send; call this on
+/// each data line before interpreting it.
+///
+/// # Errors
+///
+/// [`Error::RemoteFatal`] carrying the message, trailing whitespace trimmed.
+pub(crate) fn reject_err_line(line: &str) -> Result<()> {
+    match line.strip_prefix("ERR ") {
+        Some(message) => Err(Error::RemoteFatal {
+            message: message.trim_end().to_owned(),
+        }),
+        None => Ok(()),
+    }
+}
+
+/// [`Error::RemoteFatal`] for the payload of a side-band channel-3 packet (band byte removed).
+pub(crate) fn sideband_fatal(payload: &[u8]) -> Error {
+    Error::RemoteFatal {
+        message: String::from_utf8_lossy(payload).trim_end().to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fatal_message(err: Error) -> String {
+        match err {
+            Error::RemoteFatal { message } => message,
+            other => panic!("expected RemoteFatal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn err_line_is_a_remote_fatal_error() {
+        let err = reject_err_line("ERR upload-pack: not our ref deadbeef\n").unwrap_err();
+        assert_eq!(err.kind_name(), "remote_fatal");
+        assert_eq!(
+            err.to_string(),
+            "remote error: upload-pack: not our ref deadbeef"
+        );
+        assert_eq!(fatal_message(err), "upload-pack: not our ref deadbeef");
+    }
+
+    #[test]
+    fn other_lines_pass_through() {
+        for line in [
+            "NAK",
+            "ACK 0123",
+            "ERRATA",
+            "ERR",
+            " ERR x",
+            "err lower",
+            "",
+        ] {
+            assert!(reject_err_line(line).is_ok(), "{line:?}");
+        }
+    }
+
+    #[test]
+    fn sideband_fatal_trims_and_decodes_lossily() {
+        let err = sideband_fatal(b"pack-objects died \xff\n");
+        assert_eq!(fatal_message(err), "pack-objects died \u{fffd}");
+    }
 }

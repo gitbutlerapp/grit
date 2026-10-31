@@ -1491,6 +1491,17 @@ pub enum Error {
         reason: RemoteUnreadableReason,
     },
 
+    /// The remote was reached but aborted the conversation with its own error text: an
+    /// `ERR <message>` pkt-line (for example upload-pack declining a ref it does not
+    /// serve) or a packet on side-band channel 3.
+    ///
+    /// The text is the server's, not grit's: show it to the user, but do not parse it.
+    #[error("remote error: {message}")]
+    RemoteFatal {
+        /// The server's message, without the `ERR ` prefix or trailing whitespace.
+        message: String,
+    },
+
     /// The upload-pack serving a local path or `file://` URL in this process failed
     /// (for example it was asked for an object it does not have). Repository errors
     /// of the served side are returned as themselves instead.
@@ -2125,6 +2136,7 @@ impl Error {
             Self::MoveBadSource { .. } => "move_bad_source",
             Self::MoveMissingIndexEntry { .. } => "move_missing_index_entry",
             Self::RemoteUnreadable { .. } => "remote_unreadable",
+            Self::RemoteFatal { .. } => "remote_fatal",
             Self::LocalUploadPack(..) => "local_upload_pack",
             Self::LocalUploadPackPanicked => "local_upload_pack_panicked",
             Self::Resumable(..) => "resumable",

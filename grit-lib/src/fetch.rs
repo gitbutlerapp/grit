@@ -444,8 +444,8 @@ fn negotiate_pack(
                     if kind != AckKind::Bare {
                         let _ = negotiator.ack(ack_oid)?;
                     }
-                } else if let Some(msg) = ln.strip_prefix("ERR ") {
-                    return Err(Error::Message(format!("remote error: {}", msg.trim_end())));
+                } else {
+                    pkt_line::reject_err_line(ln)?;
                 }
             }
         }
@@ -729,9 +729,7 @@ pub(crate) fn parse_v2_ls_refs_response(reader: &mut dyn Read) -> Result<LsRefsA
             Some(pkt_line::Packet::ResponseEnd) => break,
             Some(pkt_line::Packet::Data(line)) => {
                 let line = line.trim_end_matches('\n');
-                if let Some(msg) = line.strip_prefix("ERR ") {
-                    return Err(Error::Message(format!("remote error: {}", msg.trim_end())));
-                }
+                pkt_line::reject_err_line(line)?;
                 if let Some(t) = parse_v2_ls_refs_unborn_head_symref(line) {
                     head_symref = Some(t);
                     continue;
@@ -1226,9 +1224,7 @@ pub(crate) fn read_v2_acknowledgments(
         }
     };
     let hdr = hdr.as_str();
-    if let Some(msg) = hdr.strip_prefix("ERR ") {
-        return Err(Error::Message(format!("remote error: {}", msg.trim_end())));
-    }
+    pkt_line::reject_err_line(hdr)?;
     if hdr != "acknowledgments" {
         // The server started a non-acknowledgments section; the pack reader,
         // called next, re-dispatches on this header. We cannot push it back, so
@@ -1335,9 +1331,7 @@ pub(crate) fn read_v2_fetch_pack_response(
             }
         };
         let hdr = hdr.as_str();
-        if let Some(msg) = hdr.strip_prefix("ERR ") {
-            return Err(Error::Message(format!("remote error: {}", msg.trim_end())));
-        }
+        pkt_line::reject_err_line(hdr)?;
         match hdr {
             h if h == crate::protocol_v2::FetchResponseSection::ShallowInfo.header() => {
                 // Capture the shallow/unshallow boundary updates. The section is
