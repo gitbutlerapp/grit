@@ -1576,7 +1576,19 @@ fn prune_stale_temporary_objects_with_cutoff(
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if name.starts_with("tmp_") || (name.starts_with('.') && name.contains("-install-")) {
+            if name.starts_with("tmp_") {
+                consider(&entry.path())?;
+                continue;
+            }
+            if !is_grit_pack_install_stage_name(&name) {
+                continue;
+            }
+            let meta = match fs::symlink_metadata(entry.path()) {
+                Ok(m) => m,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(Error::Io(e)),
+            };
+            if meta.is_dir() {
                 consider(&entry.path())?;
             }
         }
@@ -1593,6 +1605,11 @@ fn prune_stale_temporary_objects_with_cutoff(
         }
     }
     Ok(stats)
+}
+
+/// Grit index-pack staging directory: `.pack-<oid>-install-<pid>_<seq>`.
+fn is_grit_pack_install_stage_name(name: &str) -> bool {
+    name.starts_with(".pack-") && name.contains("-install-")
 }
 
 fn temporary_object_expired(meta: &fs::Metadata, keep_newer_than: Option<SystemTime>) -> bool {
@@ -3700,12 +3717,29 @@ mod tests {
     }
 
     #[test]
+    fn pack_install_stage_name_matches_only_grit_staging_dirs() {
+        assert!(is_grit_pack_install_stage_name(".pack-deadbeef-install-1_0"));
+        assert!(!is_grit_pack_install_stage_name(".notes-install-backup"));
+        assert!(!is_grit_pack_install_stage_name(".cache-install-state"));
+        assert!(is_grit_pack_install_stage_name(
+            ".pack-deadbeef-install-stale-file"
+        ));
+    }
+
+    #[test]
     fn gc_prunes_stale_tmp_pack_and_install_dirs() {
         let (_dir, repo) = repo_with_config("");
         let pack_dir = repo.git_dir().join("objects/pack");
         fs::write(pack_dir.join("tmp_pack_old"), b"old").unwrap();
         fs::write(pack_dir.join("tmp_pack_fresh"), b"new").unwrap();
         fs::create_dir(pack_dir.join(".pack-deadbeef-install-9_0")).unwrap();
+        fs::write(pack_dir.join(".notes-install-backup"), b"notes").unwrap();
+        fs::create_dir(pack_dir.join(".cache-install-state")).unwrap();
+        fs::write(
+            pack_dir.join(".pack-deadbeef-install-stale-file"),
+            b"not a stage dir",
+        )
+        .unwrap();
         let cutoff = SystemTime::now() - std::time::Duration::from_secs(21 * 86400);
         filetime::set_file_mtime(pack_dir.join("tmp_pack_old"), FileTime::from(cutoff)).unwrap();
         filetime::set_file_mtime(
@@ -3713,10 +3747,20 @@ mod tests {
             FileTime::from(cutoff),
         )
         .unwrap();
+        for path in [
+            pack_dir.join(".notes-install-backup"),
+            pack_dir.join(".cache-install-state"),
+            pack_dir.join(".pack-deadbeef-install-stale-file"),
+        ] {
+            filetime::set_file_mtime(&path, FileTime::from(cutoff)).unwrap();
+        }
         gc(&repo, &GcOptions::default()).expect("gc");
         assert!(!pack_dir.join("tmp_pack_old").exists());
         assert!(!pack_dir.join(".pack-deadbeef-install-9_0").exists());
         assert!(pack_dir.join("tmp_pack_fresh").exists());
+        assert!(pack_dir.join(".notes-install-backup").exists());
+        assert!(pack_dir.join(".cache-install-state").is_dir());
+        assert!(pack_dir.join(".pack-deadbeef-install-stale-file").is_file());
 
         fs::write(pack_dir.join("tmp_pack_old"), b"old").unwrap();
         filetime::set_file_mtime(pack_dir.join("tmp_pack_old"), FileTime::from(cutoff)).unwrap();

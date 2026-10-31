@@ -3056,6 +3056,13 @@ fn gc_prunes_stale_temporary_pack_files_like_git() {
     let pack_dir = objects.join("pack");
     fs::write(pack_dir.join("tmp_pack_old"), b"stale tmp pack").expect("old tmp");
     fs::write(pack_dir.join("tmp_pack_fresh"), b"fresh tmp pack").expect("fresh tmp");
+    fs::write(pack_dir.join(".notes-install-backup"), b"notes").expect("notes backup");
+    fs::create_dir(pack_dir.join(".cache-install-state")).expect("cache dir");
+    fs::write(
+        pack_dir.join(".pack-deadbeef-install-stale-file"),
+        b"regular file",
+    )
+    .expect("install-shaped file");
     fs::create_dir(pack_dir.join(".pack-deadbeef-install-1_0")).expect("install dir");
     fs::write(
         pack_dir.join(".pack-deadbeef-install-1_0/pack-deadbeef.pack"),
@@ -3068,6 +3075,13 @@ fn gc_prunes_stale_temporary_pack_files_like_git() {
     filetime::set_file_mtime(pack_dir.join("tmp_pack_old"), three_weeks_ago).expect("mtime old");
     filetime::set_file_mtime(pack_dir.join(".pack-deadbeef-install-1_0"), three_weeks_ago)
         .expect("mtime install");
+    for path in [
+        pack_dir.join(".notes-install-backup"),
+        pack_dir.join(".cache-install-state"),
+        pack_dir.join(".pack-deadbeef-install-stale-file"),
+    ] {
+        filetime::set_file_mtime(&path, three_weeks_ago).expect("mtime preserved junk");
+    }
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
     gc(&repo, &GcOptions::default()).expect("grit gc");
@@ -3075,6 +3089,9 @@ fn gc_prunes_stale_temporary_pack_files_like_git() {
     assert!(!pack_dir.join("tmp_pack_old").exists());
     assert!(!pack_dir.join(".pack-deadbeef-install-1_0").exists());
     assert!(pack_dir.join("tmp_pack_fresh").exists());
+    assert!(pack_dir.join(".notes-install-backup").exists());
+    assert!(pack_dir.join(".cache-install-state").is_dir());
+    assert!(pack_dir.join(".pack-deadbeef-install-stale-file").is_file());
 
     let never_dir = TempDir::new().expect("never");
     duplicate_repo_tree(dir.path(), never_dir.path());

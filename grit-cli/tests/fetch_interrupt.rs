@@ -57,16 +57,26 @@ fn pack_temp_leftovers(repo: &Path) -> bool {
     })
 }
 
+/// Network fetch writes `tmp_pack_*` or `incoming/pack-receive-*.tmp`; local fetch
+/// copies loose objects into fan-out directories first.
 fn receiving_pack(dest: &Path) -> bool {
     if pack_temp_leftovers(dest) {
         return true;
     }
     let incoming = dest.join(".git/objects/incoming");
-    fs::read_dir(&incoming).is_ok_and(|entries| {
+    if fs::read_dir(&incoming).is_ok_and(|entries| {
         entries.flatten().any(|e| {
             e.file_name()
                 .to_string_lossy()
                 .starts_with("pack-receive-")
+        })
+    }) {
+        return true;
+    }
+    let objects = dest.join(".git/objects");
+    fs::read_dir(&objects).is_ok_and(|entries| {
+        entries.flatten().any(|e| {
+            !matches!(e.file_name().to_str(), Some("info" | "pack" | "incoming"))
         })
     })
 }
@@ -93,24 +103,25 @@ fn interrupt_fetch(
     deliver: fn(&std::process::Child),
 ) -> i32 {
     let mut child = spawn_fetch(base, remote, dest);
-    let started = Instant::now();
     let deadline = Instant::now() + Duration::from_secs(120);
-    while started.elapsed() < Duration::from_millis(50) {
+    let mut saw_pack = false;
+    while Instant::now() < deadline {
         if let Some(status) = child.try_wait().expect("wait") {
             panic!(
-                "fetch finished in {:?} before interrupt window: {status:?}",
-                started.elapsed()
+                "fetch finished before a temporary pack appeared: {status:?}"
             );
         }
         if receiving_pack(dest) {
+            saw_pack = true;
             break;
         }
-        assert!(Instant::now() < deadline, "timed out waiting to interrupt fetch");
-        std::thread::sleep(Duration::from_micros(200));
+        std::thread::sleep(Duration::from_micros(500));
     }
-    if child.try_wait().expect("wait").is_none() {
-        deliver(&child);
-    }
+    assert!(
+        saw_pack,
+        "timed out waiting for fetch to start writing a temporary pack"
+    );
+    deliver(&child);
     child.wait().expect("wait").code().unwrap_or(-1)
 }
 
