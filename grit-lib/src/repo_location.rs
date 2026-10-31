@@ -27,7 +27,7 @@ use super::{
 /// # Examples
 ///
 /// ```
-/// use grit_lib::environment::{Environment, RepositoryOptions};
+/// use grit_lib::config::environment::{Environment, RepositoryOptions};
 /// use grit_lib::repo::{InitOptions, Repository, RepositoryLocation};
 ///
 /// # fn main() -> grit_lib::error::Result<()> {
