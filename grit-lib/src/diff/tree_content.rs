@@ -55,16 +55,29 @@ pub(crate) fn prefetch_tree_diff_blobs(odb: &Odb, entries: &[DiffEntry]) -> Resu
     odb.prefetch_promisor_read_batch(collect_tree_diff_blob_oids(entries))
 }
 
-/// Pool options for per-entry content work that should fan out whenever it can.
+/// Fewest changed entries for which per-entry blob loads and line diffs use worker threads.
 ///
-/// A single entry always runs on the calling thread, so the policy (which probes the
-/// CPU count and cgroup quota) is only consulted when there is more than one.
+/// Starting workers (stacks, allocator arenas, per-thread pack inflaters) costs more than
+/// loading and diffing a small commit's blobs on the calling thread: showing git.git commits
+/// that touch up to 17 files ran faster serially, while from about 18 files the pool won.
+/// Fewer, larger files gain nothing either, since each entry is diffed by one thread.
+const PER_ENTRY_POOL_MIN_ITEMS: usize = 16;
+
+/// Pool options for per-entry content work, fanning out once there are enough entries.
+///
+/// Below [`PER_ENTRY_POOL_MIN_ITEMS`] entries (or the policy's
+/// [`ThreadPolicy::min_items_override`], never below two) the work runs on the calling
+/// thread and the policy, which probes the CPU count and cgroup quota, is not consulted.
 fn per_entry_parallel_options(
     thread_policy: &ThreadPolicy,
     config: &ConfigSet,
     entry_count: usize,
 ) -> ParallelOptions {
-    if entry_count < 2 {
+    let min_items = thread_policy
+        .min_items_override
+        .unwrap_or(PER_ENTRY_POOL_MIN_ITEMS)
+        .max(2);
+    if entry_count < min_items {
         return ParallelOptions {
             threads: NonZeroUsize::MIN,
             min_items: 0,
@@ -140,6 +153,9 @@ pub fn tree_diff_contents_parallel(
 }
 
 /// Per-file line counts for stat modes (loads blobs, no hunk allocation).
+///
+/// Worker threads are used only for 16 or more entries (or the policy's
+/// [`ThreadPolicy::min_items_override`]); smaller diffs run on the calling thread.
 ///
 /// # Errors
 ///
@@ -265,6 +281,9 @@ pub fn tree_diff_structured_entry(
 /// When thread policy allows, workers compute up to about `2 × threads` entries ahead while
 /// the callback consumes results strictly in order.
 ///
+/// Worker threads are used only for 16 or more entries (or the policy's
+/// [`ThreadPolicy::min_items_override`]); smaller diffs run on the calling thread.
+///
 /// # Errors
 ///
 /// Propagates object database read failures and callback errors.
@@ -307,6 +326,9 @@ pub fn for_each_tree_diff_structured(
 }
 
 /// Load sides and compute structured line diffs for each entry in parallel.
+///
+/// Worker threads are used only for 16 or more entries (or the policy's
+/// [`ThreadPolicy::min_items_override`]); smaller diffs run on the calling thread.
 ///
 /// # Errors
 ///
@@ -610,20 +632,89 @@ mod tests {
     }
 
     #[test]
-    fn single_entry_runs_serially_without_consulting_the_policy() {
+    fn small_entry_counts_run_serially_without_consulting_the_policy() {
         let config = ConfigSet::new();
         let policy = ThreadPolicy::with_threads_override(Some(4));
-        for count in [0, 1] {
+        for count in [0, 1, 2, PER_ENTRY_POOL_MIN_ITEMS - 1] {
             let opts = per_entry_parallel_options(&policy, &config, count);
-            assert_eq!(opts.threads, NonZeroUsize::MIN);
+            assert_eq!(opts.threads, NonZeroUsize::MIN, "{count} entries");
         }
-        let opts = per_entry_parallel_options(&policy, &config, 2);
-        assert_eq!(opts.min_items, 0);
-        assert_eq!(opts.min_total_bytes, None);
+        for count in [PER_ENTRY_POOL_MIN_ITEMS, PER_ENTRY_POOL_MIN_ITEMS * 4] {
+            let opts = per_entry_parallel_options(&policy, &config, count);
+            assert_eq!(opts.min_items, 0);
+            assert_eq!(opts.min_total_bytes, None);
+            assert_eq!(
+                opts.threads,
+                policy.resolve(ParallelOp::DiffContent, &config).threads
+            );
+        }
+    }
+
+    #[test]
+    fn min_items_override_moves_the_pool_threshold() {
+        let config = ConfigSet::new();
+        let threads = ThreadPolicy::with_threads_override(Some(4))
+            .resolve(ParallelOp::DiffContent, &config)
+            .threads;
+        let forced = ThreadPolicy::with_threads_override(Some(4)).min_items_override(Some(0));
         assert_eq!(
-            opts.threads,
-            policy.resolve(ParallelOp::DiffContent, &config).threads
+            per_entry_parallel_options(&forced, &config, 1).threads,
+            NonZeroUsize::MIN
         );
+        assert_eq!(
+            per_entry_parallel_options(&forced, &config, 2).threads,
+            threads
+        );
+        let raised = ThreadPolicy::with_threads_override(Some(4)).min_items_override(Some(100));
+        assert_eq!(
+            per_entry_parallel_options(&raised, &config, 99).threads,
+            NonZeroUsize::MIN
+        );
+        assert_eq!(
+            per_entry_parallel_options(&raised, &config, 100).threads,
+            threads
+        );
+    }
+
+    #[test]
+    fn structured_diff_below_and_above_pool_threshold_matches_serial() {
+        let (_dir, repo) = init_repo();
+        let odb = repo.odb();
+        let tree_of = |version: &str, files: usize| {
+            let entries: Vec<TreeEntry> = (0..files)
+                .map(|i| TreeEntry {
+                    mode: 0o100644,
+                    name: format!("f{i:03}.txt").into_bytes(),
+                    oid: odb
+                        .write(
+                            ObjectKind::Blob,
+                            format!("file {i}\n{version}\nend\n").as_bytes(),
+                        )
+                        .expect("blob"),
+                })
+                .collect();
+            odb.write(ObjectKind::Tree, &serialize_tree(&entries))
+                .expect("tree")
+        };
+        let config = repo.config().expect("config");
+        for files in [PER_ENTRY_POOL_MIN_ITEMS - 1, PER_ENTRY_POOL_MIN_ITEMS + 1] {
+            let (old, new) = (tree_of("old", files), tree_of("new", files));
+            let entries = diff_trees(odb, Some(&old), Some(&new), "").expect("entries");
+            assert_eq!(entries.len(), files);
+            let run = |threads| {
+                tree_diff_structured_parallel(
+                    odb,
+                    entries.clone(),
+                    &config,
+                    &ThreadPolicy::with_threads_override(Some(threads)),
+                    DiffOptions::default(),
+                )
+                .expect("structured diff")
+            };
+            let serial = run(1);
+            assert_eq!(serial, run(4), "{files} files");
+            assert!(serial.iter().all(|f| f.structured.hunks.len() == 1));
+        }
     }
 
     #[test]
