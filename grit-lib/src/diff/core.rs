@@ -12254,6 +12254,34 @@ pub(crate) fn is_unregistered_embedded_git_repo(index: &Index, rel: &str, abs: &
     crate::submodule_gitdir::is_valid_git_dir(&git_dir)
 }
 
+/// Whether staging should record a gitlink, refuse, or treat the path as a normal directory.
+pub(crate) enum EmbeddedGitRepoStage {
+    /// Path is not an unregistered embedded repository.
+    NotEmbedded,
+    /// HEAD resolves to a commit that can be stored as mode `160000`.
+    Gitlink(crate::objects::ObjectId),
+}
+
+/// Classify an unregistered embedded repository for index staging.
+///
+/// Returns [`EmbeddedGitRepoStage::NotEmbedded`] when the path is not a nested checkout.
+/// Returns [`EmbeddedGitRepoStage::Gitlink`] when HEAD resolves. Otherwise returns
+/// [`crate::error::Error::EmbeddedRepoWithoutCommit`].
+pub(crate) fn classify_embedded_git_repo_for_stage(
+    index: &Index,
+    rel: &str,
+    abs: &Path,
+) -> crate::error::Result<EmbeddedGitRepoStage> {
+    if !is_unregistered_embedded_git_repo(index, rel, abs) {
+        return Ok(EmbeddedGitRepoStage::NotEmbedded);
+    }
+    let path = rel.trim_end_matches('/').to_owned();
+    match read_submodule_head_oid(abs) {
+        Some(oid) => Ok(EmbeddedGitRepoStage::Gitlink(oid)),
+        None => Err(crate::error::Error::EmbeddedRepoWithoutCommit { path }),
+    }
+}
+
 /// Walk upward from `sub_dir` to find the nearest containing Git work tree.
 fn find_superproject_git(sub_dir: &Path) -> Option<(PathBuf, PathBuf)> {
     let mut cur = sub_dir.parent()?;

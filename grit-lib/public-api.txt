@@ -5805,6 +5805,8 @@ pub grit_lib::error::Error::DirtyWorktree::operation: grit_lib::error::WorktreeO
 pub grit_lib::error::Error::DirtyWorktree::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::DubiousOwnership(alloc::string::String)
 pub grit_lib::error::Error::EmptyCommitMessage
+pub grit_lib::error::Error::EmbeddedRepoWithoutCommit
+pub grit_lib::error::Error::EmbeddedRepoWithoutCommit::path: alloc::string::String
 pub grit_lib::error::Error::FetchDeepenRelativeUnsupported
 pub grit_lib::error::Error::FetchIntoCheckedOutBranch
 pub grit_lib::error::Error::FetchIntoCheckedOutBranch::branch: alloc::string::String
@@ -17145,6 +17147,8 @@ pub grit_lib::prelude::Error::DirtyWorktree::operation: grit_lib::error::Worktre
 pub grit_lib::prelude::Error::DirtyWorktree::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::DubiousOwnership(alloc::string::String)
 pub grit_lib::prelude::Error::EmptyCommitMessage
+pub grit_lib::prelude::Error::EmbeddedRepoWithoutCommit
+pub grit_lib::prelude::Error::EmbeddedRepoWithoutCommit::path: alloc::string::String
 pub grit_lib::prelude::Error::FetchDeepenRelativeUnsupported
 pub grit_lib::prelude::Error::FetchIntoCheckedOutBranch
 pub grit_lib::prelude::Error::FetchIntoCheckedOutBranch::branch: alloc::string::String

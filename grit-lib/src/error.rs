@@ -1373,6 +1373,14 @@ pub enum Error {
     #[error("nothing to skip: current step already committed; run continue instead")]
     ReplaySkipAlreadyCommitted,
 
+    /// An embedded git repository (nested `.git` checkout) has no commit checked out on its
+    /// current branch, so it cannot be recorded as a gitlink or as regular files.
+    #[error("embedded git repository '{path}' has no commit checked out")]
+    EmbeddedRepoWithoutCommit {
+        /// Repository-relative path to the nested checkout directory.
+        path: String,
+    },
+
     /// Explicit [`crate::porcelain::add::stage`] pathspecs name paths excluded by ignore rules.
     #[error("the following paths are ignored:\n{}", paths.join("\n"))]
     PathspecIgnored {
@@ -2120,6 +2128,7 @@ impl Error {
             Self::PartialCommitDuringReplay => "partial_commit_during_replay",
             Self::ReplayContinueDirtyIndex => "replay_continue_dirty_index",
             Self::ReplaySkipAlreadyCommitted => "replay_skip_already_committed",
+            Self::EmbeddedRepoWithoutCommit { .. } => "embedded_repo_without_commit",
             Self::PathspecIgnored { .. } => "pathspec_ignored",
             Self::RemoveBlocked { .. } => "remove_blocked",
             Self::NotRemovingRecursively(..) => "not_removing_recursively",

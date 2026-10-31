@@ -691,6 +691,21 @@ fn map_commit_error(err: Error) -> anyhow::Error {
         Error::PathspecNoMatch { spec } => anyhow::anyhow!(
             "pathspec '{spec}' did not match any file(s) known to git"
         ),
+        Error::EmbeddedRepoWithoutCommit { path } => {
+            let human = format!(
+                "cannot commit: '{path}' is an embedded git repository with no commit checked out"
+            );
+            anyhow::Error::new(crate::json_error::StructuredCliError {
+                payload: crate::json_error::StructuredJsonError {
+                    paths: Some(vec![path]),
+                    ..crate::json_error::StructuredJsonError::new(
+                        human.clone(),
+                        crate::error_kind::ErrorKind::EmbeddedRepoWithoutCommit,
+                    )
+                },
+                human,
+            })
+        }
         hook @ Error::Hook(_) => anyhow::Error::new(hook),
         locked @ Error::LockHeld { .. } => crate::json_error::map_lib_error(locked),
         other => crate::json_error::map_lib_error(other),

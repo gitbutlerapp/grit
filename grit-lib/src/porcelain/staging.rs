@@ -7,8 +7,8 @@ use std::path::Path;
 
 use crate::crlf;
 use crate::diff::{
-    classify_worktree_entry_for_add, is_unregistered_embedded_git_repo, mode_from_metadata,
-    read_submodule_head_oid, DiffIndexToWorktreeOptions, DiffStatus, WorktreeAddRefresh,
+    classify_embedded_git_repo_for_stage, classify_worktree_entry_for_add, mode_from_metadata,
+    DiffIndexToWorktreeOptions, DiffStatus, EmbeddedGitRepoStage, WorktreeAddRefresh,
     WorktreeAddRefreshParams,
 };
 use crate::error::Result;
@@ -234,12 +234,9 @@ fn stage_new_worktree_path(
     let index_relpath = resolved.index_relpath.trim_end_matches('/').to_owned();
     let meta = std::fs::symlink_metadata(&abs).map_err(crate::error::Error::Io)?;
     if meta.is_dir() && !meta.file_type().is_symlink() {
-        if is_unregistered_embedded_git_repo(index, &index_relpath, &abs) {
-            let head_oid = read_submodule_head_oid(&abs).ok_or_else(|| {
-                crate::error::Error::Message(format!(
-                    "could not resolve submodule HEAD for '{index_relpath}'"
-                ))
-            })?;
+        if let EmbeddedGitRepoStage::Gitlink(head_oid) =
+            classify_embedded_git_repo_for_stage(index, &index_relpath, &abs)?
+        {
             let mut entry =
                 entry_from_metadata(&meta, index_relpath.as_bytes(), head_oid, MODE_GITLINK);
             entry.size = 0;

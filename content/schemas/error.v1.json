@@ -314,6 +314,13 @@
           "type": "string"
         },
         {
+          "description": "Nested git checkout has no commit on its current branch (`paths`).",
+          "enum": [
+            "embedded_repo_without_commit"
+          ],
+          "type": "string"
+        },
+        {
           "description": "`HEAD` is on a GitButler workspace, which GitButler rewrites; commit with `but commit`.",
           "enum": [
             "gitbutler_workspace"
