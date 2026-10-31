@@ -32,6 +32,7 @@ use crate::porcelain::worktree_guard::{
 use crate::refs;
 use crate::repo::Repository;
 use crate::rev_parse::expand_at_minus_to_branch_name;
+use crate::rev_parse_error::RevParseError;
 
 use crate::rev_parse::{peel_to_commit_for_merge_base, resolve_revision};
 use crate::state::{resolve_head_for_repository, HeadState};
@@ -227,23 +228,35 @@ impl PreparedSwitch {
 }
 
 /// Resolve `-c <branch> [<start-point>]`.
+///
+/// # Errors
+///
+/// Returns [`Error::Branch`] when the name is invalid, the branch already exists, or there are no
+/// commits to branch from. A `start_point` that does not resolve or does not name a commit fails
+/// like [`resolve_revision_spec`].
 pub fn resolve_create_branch(
     repo: &Repository,
     branch: &str,
     start_point: Option<&str>,
 ) -> Result<SwitchMode> {
-    validate_branch_short_name(branch)
-        .map_err(|e| Error::Message(format!("invalid branch name '{branch}': {e}")))?;
+    validate_branch_short_name(branch).map_err(|reason| {
+        Error::Branch(BranchError::InvalidName {
+            name: branch.to_owned(),
+            reason: reason.to_string(),
+        })
+    })?;
     let branch_ref = format!("refs/heads/{branch}");
     if repo.resolve_ref_oid(&branch_ref).is_ok() {
-        return Err(Error::Message(format!("branch '{branch}' already exists")));
+        return Err(Error::Branch(BranchError::AlreadyExists {
+            name: branch.to_owned(),
+        }));
     }
     let start_oid = match start_point {
         Some(spec) => resolve_revision_spec(repo, spec)?,
         None => resolve_head_for_repository(repo)?
             .oid()
             .copied()
-            .ok_or_else(|| Error::Message("no commits yet to create a branch from".into()))?,
+            .ok_or(Error::Branch(BranchError::NoCommits))?,
     };
     Ok(SwitchMode::Create {
         branch: branch.to_owned(),
@@ -254,6 +267,11 @@ pub fn resolve_create_branch(
 }
 
 /// Resolve a branch name, remote-tracking branch, or revision for `grit switch`.
+///
+/// # Errors
+///
+/// Returns [`Error::Branch`] for invalid local branch names, missing branches, and `@{-1}` with no
+/// previous branch; tag names that would attach `HEAD` to a tag return [`Error::Message`].
 pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode> {
     let spec = normalize_switch_spec(spec);
     if is_at_minus_branch_spec(spec) {
@@ -279,8 +297,12 @@ pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode
     ] {
         if let Ok(oid) = repo.resolve_ref_oid(&candidate) {
             let short = spec.strip_prefix("origin/").unwrap_or(spec).to_owned();
-            validate_branch_short_name(&short)
-                .map_err(|e| Error::Message(format!("invalid branch name '{short}': {e}")))?;
+            validate_branch_short_name(&short).map_err(|reason| {
+                Error::Branch(BranchError::InvalidName {
+                    name: short.clone(),
+                    reason: reason.to_string(),
+                })
+            })?;
             let local = format!("refs/heads/{short}");
             if let Ok(local_oid) = repo.resolve_ref_oid(&local) {
                 return Ok(SwitchMode::Existing {
@@ -370,13 +392,30 @@ fn resolve_unique_dwim_switch(repo: &Repository, spec: &str) -> Result<Option<Sw
 }
 
 /// Resolve a revision expression for `--detach` or `-c` start points.
+///
+/// # Errors
+///
+/// Returns [`Error::RevisionNotFound`] when `spec` does not resolve; [`Error::InvalidRef`] when the
+/// resolved object is not a commit; other object database errors propagate.
 pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> {
-    let oid = resolve_revision(repo, spec)
-        .map_err(|_| Error::Message(format!("invalid revision '{spec}'")))?;
-    peel_to_commit_for_merge_base(repo, oid).map_err(|e| match e {
-        Error::InvalidRef(msg) => Error::Message(msg),
+    if crate::rev_parse::is_top_level_range(spec) {
+        return Err(Error::RevisionNotFound(spec.to_owned()));
+    }
+    let oid = resolve_revision(repo, spec).map_err(|err| map_revision_spec_error(spec, err))?;
+    peel_to_commit_for_merge_base(repo, oid)
+}
+
+fn map_revision_spec_error(spec: &str, err: Error) -> Error {
+    match err {
+        Error::ObjectNotFound(_)
+        | Error::RevParse(
+            RevParseError::InvalidObjectName { .. }
+            | RevParseError::RevisionOutOfRange { .. }
+            | RevParseError::AmbiguousArgument { .. }
+            | RevParseError::NoSuchBranch { .. },
+        ) => Error::RevisionNotFound(spec.to_owned()),
         other => other,
-    })
+    }
 }
 
 /// Perform a branch switch or detached checkout.
@@ -1997,6 +2036,59 @@ mod tests {
         let err = resolve_switch_target(&repo, "rel1").expect_err("tag");
         assert!(matches!(err, Error::Message(_)));
         assert!(err.to_string().contains("--detach"));
+    }
+
+    #[test]
+    fn resolve_create_branch_returns_typed_branch_errors() {
+        let (_dir, repo) = init_repo();
+        let tip = commit_on_branch(&repo, "main", "f", "x\n", None);
+        switch_to(
+            &repo,
+            resolve_create_branch(&repo, "side", None).expect("create mode"),
+            false,
+        );
+
+        let dup = resolve_create_branch(&repo, "side", None).expect_err("duplicate");
+        assert!(matches!(
+            dup,
+            Error::Branch(BranchError::AlreadyExists { ref name }) if name == "side"
+        ));
+        assert!(dup.to_string().contains("already exists"));
+
+        let bad = resolve_create_branch(&repo, "bad name", None).expect_err("bad name");
+        assert!(matches!(
+            bad,
+            Error::Branch(BranchError::InvalidName { ref name, .. }) if name == "bad name"
+        ));
+
+        let (_empty_dir, empty) = init_repo();
+        let none = resolve_create_branch(&empty, "topic", None).expect_err("no commits");
+        assert!(matches!(none, Error::Branch(BranchError::NoCommits)));
+
+        let missing = resolve_create_branch(&repo, "from-missing", Some("nosuchrev"))
+            .expect_err("missing start");
+        assert!(matches!(
+            missing,
+            Error::RevisionNotFound(spec) if spec == "nosuchrev"
+        ));
+
+        let tree_oid = repo.odb().write(ObjectKind::Tree, b"").expect("empty tree");
+        let tree_spec = tree_oid.to_hex();
+        let not_commit =
+            resolve_create_branch(&repo, "from-tree", Some(&tree_spec)).expect_err("tree start");
+        assert!(matches!(not_commit, Error::InvalidRef(_)));
+        let _ = tip;
+    }
+
+    #[test]
+    fn resolve_revision_spec_unknown_revision_is_typed() {
+        let (_dir, repo) = init_repo();
+        let _tip = commit_on_branch(&repo, "main", "f", "x\n", None);
+        let err = resolve_revision_spec(&repo, "nosuchrev").expect_err("missing");
+        assert!(matches!(
+            err,
+            Error::RevisionNotFound(spec) if spec == "nosuchrev"
+        ));
     }
 
     /// Commit on top of `parent` with `HEAD` detached at the new commit and no ref holding it.

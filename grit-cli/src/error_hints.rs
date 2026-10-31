@@ -303,6 +303,24 @@ fn guide_branch(err: &BranchError) -> Option<Error> {
                 ))
             }
         }
+        BranchError::AlreadyExists { .. } => Some(guided(
+            ErrorKind::BranchAlreadyExists,
+            err.to_string(),
+            None,
+            None,
+        )),
+        BranchError::InvalidName { .. } => Some(guided(
+            ErrorKind::BranchInvalidName,
+            err.to_string(),
+            None,
+            None,
+        )),
+        BranchError::NoCommits => Some(guided(
+            ErrorKind::BranchNoCommits,
+            err.to_string(),
+            None,
+            None,
+        )),
         _ => None,
     }
 }
