@@ -20,8 +20,23 @@ use crate::ident::committer_unix_seconds_for_ordering;
 use crate::ignore::{parse_sparse_patterns_from_blob, ParsedSparsePatterns};
 use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
 use crate::merge_base::{
-    commits_reachable_excluding_ancestors_of_with_graph, ReachableWalkCommitterCutoffs,
+    commits_reachable_excluding_ancestors_of_with_graph, RangeWalkHide,
+    ReachableWalkCommitterCutoffs,
 };
+
+/// Excluded commits for a rev walk: either an explicit set (promisor, first-parent frontier)
+/// or a painted range hide predicate.
+#[derive(Clone, Default)]
+struct WalkExclude {
+    set: HashSet<ObjectId>,
+    paint: Option<RangeWalkHide>,
+}
+
+impl WalkExclude {
+    fn is_excluded(&self, oid: ObjectId) -> bool {
+        self.set.contains(&oid) || self.paint.as_ref().is_some_and(|hide| hide.is_hidden(oid))
+    }
+}
 use crate::objects::{
     oid_hash_map, oid_hash_set, parse_commit, parse_tag, parse_tree, CommitData, CommitRef,
     ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
@@ -1176,28 +1191,49 @@ pub fn rev_list(
     } else {
         &mut graph
     };
-    let excluded = if exclude.is_empty() {
-        HashSet::new()
+    let walk_exclude = if exclude.is_empty() {
+        WalkExclude::default()
     } else if let Some(frontier) = painted_hidden_frontier {
-        frontier
+        WalkExclude {
+            set: frontier,
+            paint: None,
+        }
     } else if options.exclude_promisor_objects {
-        walk_closure_ordered_excluding(exclude_graph, &exclude, &excluded_promisor)?.0
+        WalkExclude {
+            set: walk_closure_ordered_excluding(exclude_graph, &exclude, &excluded_promisor)?.0,
+            paint: None,
+        }
     } else if options.exclude_first_parent_only {
-        walk_closure_first_parent_only(exclude_graph, &exclude)?
+        WalkExclude {
+            set: walk_closure_first_parent_only(exclude_graph, &exclude)?,
+            paint: None,
+        }
     } else if options.missing_action != MissingAction::Error {
-        walk_closure_ordered_with_missing(
-            exclude_graph,
-            &exclude,
-            &HashSet::new(),
-            options.missing_action,
-            &mut traversal_missing,
-            &mut traversal_missing_seen,
-        )?
-        .0
+        WalkExclude {
+            set: walk_closure_ordered_with_missing(
+                exclude_graph,
+                &exclude,
+                &HashSet::new(),
+                options.missing_action,
+                &mut traversal_missing,
+                &mut traversal_missing_seen,
+            )?
+            .0,
+            paint: None,
+        }
     } else {
-        walk_closure(exclude_graph, &exclude)?
+        WalkExclude {
+            set: HashSet::new(),
+            paint: Some(RangeWalkHide::for_range_walk(
+                repo,
+                &include,
+                &exclude,
+                options.use_commit_graph,
+                options.first_parent && !options.exclude_first_parent_only,
+            )?),
+        }
     };
-    included.retain(|oid| !excluded.contains(oid));
+    included.retain(|oid| !walk_exclude.is_excluded(*oid));
 
     // Default dense path limiting is not just a post-walk filter: when a merge is TREESAME to a
     // parent for the pathspec, Git follows only that parent and never walks the other sides.
@@ -1265,7 +1301,7 @@ pub fn rev_list(
                 repo,
                 &mut graph,
                 &include,
-                &excluded,
+                &walk_exclude,
                 &paths,
                 options.sparse,
                 options.show_pulls,
@@ -1456,7 +1492,7 @@ pub fn rev_list(
                 options.parent_rewrite,
                 options.ancestry_path,
                 &effective_ancestry_path_bottoms,
-                &excluded,
+                &walk_exclude,
                 bloom_chain.as_ref(),
                 bloom_read_changed,
                 bloom_version,
@@ -1474,7 +1510,7 @@ pub fn rev_list(
             &ordered,
             &include,
             &paths,
-            &excluded,
+            &walk_exclude,
             &effective_ancestry_path_bottoms,
             options.ordering,
             options.show_pulls,
@@ -1657,7 +1693,7 @@ pub fn rev_list(
         let mut boundary_seen = HashSet::new();
         let use_path_parent_rewrite = options.parent_rewrite && !options.paths.is_empty();
         let omitted_but_selected = |parent: ObjectId| {
-            excluded.contains(&parent)
+            walk_exclude.is_excluded(parent)
                 || selected_before_limit.contains(&parent)
                 || omitted_by_date_filter.contains(&parent)
         };
@@ -1668,7 +1704,7 @@ pub fn rev_list(
                     oid,
                     &output_set,
                     &selected_before_limit,
-                    &excluded,
+                    &walk_exclude,
                     options.first_parent,
                     &omitted_by_date_filter,
                 )?
@@ -3100,7 +3136,7 @@ fn simplify_one_merge_for_paths(
     simplified: &HashMap<ObjectId, ObjectId>,
     first_parent_spine: &HashSet<ObjectId>,
     paths: &RevPathspecCheck<'_>,
-    excluded: &HashSet<ObjectId>,
+    excluded: &WalkExclude,
     ancestry_path_bottoms: &[ObjectId],
     show_pulls: bool,
     preserve_graph_merges: bool,
@@ -3184,7 +3220,7 @@ fn simplify_merges_commit_list(
     commits: &[ObjectId],
     positive_tips: &[ObjectId],
     paths: &RevPathspecCheck<'_>,
-    excluded: &HashSet<ObjectId>,
+    excluded: &WalkExclude,
     ancestry_path_bottoms: &[ObjectId],
     ordering: OrderingMode,
     show_pulls: bool,
@@ -3310,7 +3346,7 @@ fn path_merge_survives_simplify(
     repo: &Repository,
     oid: ObjectId,
     paths: &RevPathspecCheck<'_>,
-    excluded: &HashSet<ObjectId>,
+    excluded: &WalkExclude,
     ancestry_path_bottoms: &[ObjectId],
 ) -> Result<bool> {
     if paths.specs().is_empty() {
@@ -3341,7 +3377,7 @@ fn path_merge_survives_simplify(
             if nth == 0 {
                 first_parent_differs = true;
             }
-            if excluded.contains(parent_oid) {
+            if excluded.is_excluded(*parent_oid) {
                 differing_parent_is_excluded = true;
             }
         } else {
@@ -3548,7 +3584,7 @@ fn path_limited_rewrite_parents_for_boundary(
     oid: ObjectId,
     output_set: &HashSet<ObjectId>,
     selected_set: &HashSet<ObjectId>,
-    excluded: &HashSet<ObjectId>,
+    excluded: &WalkExclude,
     first_parent_only: bool,
     omitted_by_date_filter: &HashSet<ObjectId>,
 ) -> Result<Vec<ObjectId>> {
@@ -3571,7 +3607,7 @@ fn path_limited_rewrite_parents_for_boundary(
                 }
                 break;
             }
-            if excluded.contains(&cur) {
+            if excluded.is_excluded(cur) {
                 if seen.insert(cur) {
                     out.push(cur);
                 }
@@ -3792,7 +3828,7 @@ fn commit_touches_paths(
     parent_rewrite: bool,
     ancestry_path: bool,
     ancestry_path_bottoms: &[ObjectId],
-    excluded: &HashSet<ObjectId>,
+    excluded: &WalkExclude,
     bloom_chain: Option<&CommitGraphChain>,
     read_changed_paths: bool,
     changed_paths_version: i32,
@@ -3934,7 +3970,7 @@ fn commit_touches_paths(
             return Ok(first_parent_differs
                 || differing_parent_oids
                     .iter()
-                    .any(|parent| excluded.contains(parent)));
+                    .any(|parent| excluded.is_excluded(*parent)));
         }
         return Ok(differs_any || sparse);
     }
@@ -4285,7 +4321,7 @@ fn walk_dense_path_limited_closure(
     repo: &Repository,
     graph: &mut CommitGraph<'_>,
     tips: &[ObjectId],
-    excluded: &HashSet<ObjectId>,
+    excluded: &WalkExclude,
     paths: &RevPathspecCheck<'_>,
     sparse: bool,
     show_pulls: bool,
@@ -4298,7 +4334,7 @@ fn walk_dense_path_limited_closure(
     let mut cache = DenseWalkCache::default();
 
     while let Some(oid) = queue.pop_front() {
-        if excluded.contains(&oid) || !walked.insert(oid) {
+        if excluded.is_excluded(oid) || !walked.insert(oid) {
             continue;
         }
         walk_order.push(oid);
@@ -4311,7 +4347,7 @@ fn walk_dense_path_limited_closure(
         }
 
         for parent in action.parents_to_walk {
-            if !excluded.contains(&parent) && !walked.contains(&parent) {
+            if !excluded.is_excluded(parent) && !walked.contains(&parent) {
                 queue.push_back(parent);
             }
         }
@@ -5482,7 +5518,7 @@ fn date_heap_past_since_frontier(heap: &BinaryHeap<CommitDateKey>, since: i64) -
 fn streaming_date_walk<'r>(
     graph: &mut CommitGraph<'r>,
     include: &[ObjectId],
-    excluded: &HashSet<ObjectId>,
+    excluded: &RangeWalkHide,
     author_dates: bool,
     since_cutoff: Option<i64>,
     mut visit: impl FnMut(&mut CommitGraph<'r>, ObjectId) -> Result<WalkControl>,
@@ -5491,7 +5527,7 @@ fn streaming_date_walk<'r>(
     let mut queued = oid_hash_set();
     let mut next_seq = 0u64;
     for &tip in include {
-        if excluded.contains(&tip) || !queued.insert(tip) {
+        if excluded.is_hidden(tip) || !queued.insert(tip) {
             continue;
         }
         heap.push(CommitDateKey {
@@ -5513,7 +5549,7 @@ fn streaming_date_walk<'r>(
             }
         }
         for parent in graph.parents_of(oid)? {
-            if excluded.contains(&parent) || !queued.insert(parent) {
+            if excluded.is_hidden(parent) || !queued.insert(parent) {
                 continue;
             }
             heap.push(CommitDateKey {
@@ -5546,7 +5582,7 @@ pub struct CommitStreamParams {
 pub struct CommitStream<'repo> {
     graph: CommitGraph<'repo>,
     heap: BinaryHeap<CommitDateKey>,
-    excluded: HashSet<ObjectId>,
+    excluded: RangeWalkHide,
     queued: OidHashSet,
     next_seq: u64,
     skip: usize,
@@ -5561,7 +5597,7 @@ pub struct CommitStream<'repo> {
 
 impl<'repo> CommitStream<'repo> {
     fn push_tip(&mut self, tip: ObjectId) {
-        if self.excluded.contains(&tip) || !self.queued.insert(tip) {
+        if self.excluded.is_hidden(tip) || !self.queued.insert(tip) {
             return;
         }
         let date = self.graph.sort_key(tip, false);
@@ -5639,12 +5675,9 @@ pub fn open_commit_stream<'repo>(
     params: &CommitStreamParams,
 ) -> Result<CommitStream<'repo>> {
     let pack = repo.odb().pack_read_context_guard();
-    let mut graph = CommitGraph::with_commit_graph(repo, params.first_parent, true);
-    let excluded = if exclude.is_empty() {
-        HashSet::new()
-    } else {
-        walk_closure(&mut graph, exclude)?
-    };
+    let graph = CommitGraph::with_commit_graph(repo, params.first_parent, true);
+    let excluded =
+        RangeWalkHide::for_range_walk(repo, include, exclude, true, params.first_parent)?;
     let mut stream = CommitStream {
         graph,
         heap: BinaryHeap::new(),
@@ -5734,11 +5767,13 @@ fn try_bounded_commit_filter_limit_list(
                     options.first_parent,
                     options.use_commit_graph,
                 );
-                let excluded = if exclude.is_empty() {
-                    HashSet::new()
-                } else {
-                    walk_closure(&mut graph, exclude)?
-                };
+                let excluded = RangeWalkHide::for_range_walk(
+                    repo,
+                    include,
+                    exclude,
+                    options.use_commit_graph,
+                    options.first_parent,
+                )?;
                 // Reuse traversal bytes for filters and output, without keeping every
                 // nonmatching commit when a selective filter scans a long history.
                 graph.keep_unreleased_commit_bytes();
@@ -5884,11 +5919,13 @@ fn try_bounded_parent_filter_limit_list(
     repo.odb().with_pack_read_context(|| -> Result<()> {
         let mut graph =
             CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
-        let excluded = if exclude.is_empty() {
-            HashSet::new()
-        } else {
-            walk_closure(&mut graph, exclude)?
-        };
+        let excluded = RangeWalkHide::for_range_walk(
+            repo,
+            include,
+            exclude,
+            options.use_commit_graph,
+            options.first_parent,
+        )?;
         if options.retain_commit_data {
             graph.retain_parsed_commits(expected_parsed_commits(
                 options.skip.saturating_add(max_count.unwrap_or(64)),
@@ -6009,17 +6046,19 @@ fn try_bounded_topo_limit_list(
 
     let mut graph =
         CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
-    let excluded = if exclude.is_empty() {
-        HashSet::new()
-    } else {
-        walk_closure(&mut graph, exclude)?
-    };
+    let excluded = RangeWalkHide::for_range_walk(
+        repo,
+        include,
+        exclude,
+        options.use_commit_graph,
+        options.first_parent,
+    )?;
 
     let mut discover_heap = BinaryHeap::new();
     let mut queued: HashSet<ObjectId> = HashSet::new();
     let mut next_seq = 0u64;
     for &tip in include {
-        if excluded.contains(&tip) || !queued.insert(tip) {
+        if excluded.is_hidden(tip) || !queued.insert(tip) {
             continue;
         }
         discover_heap.push(CommitDateKey {
@@ -6053,7 +6092,7 @@ fn try_bounded_topo_limit_list(
             }
             let parents = graph.parents_of(oid)?;
             for parent in parents {
-                if excluded.contains(&parent) {
+                if excluded.is_hidden(parent) {
                     continue;
                 }
                 let count = unemitted_children.entry(parent).or_insert(0);
@@ -6070,14 +6109,14 @@ fn try_bounded_topo_limit_list(
             break;
         };
         let oid = item.oid;
-        if excluded.contains(&oid) || !selected.insert(oid) {
+        if excluded.is_hidden(oid) || !selected.insert(oid) {
             continue;
         }
         discovery_order.push(oid);
         unemitted_children.entry(oid).or_insert(0);
         let parents = graph.parents_of(oid)?;
         for parent in parents {
-            if excluded.contains(&parent) {
+            if excluded.is_hidden(parent) {
                 continue;
             }
             *unemitted_children.entry(parent).or_insert(0) += 1;
@@ -6265,7 +6304,7 @@ fn streaming_default_order_list(
             streaming_date_walk(
                 &mut graph,
                 include,
-                &HashSet::new(),
+                &RangeWalkHide::empty(),
                 false,
                 None,
                 |_, oid| {
@@ -6383,11 +6422,13 @@ fn try_bounded_path_limit_list(
     };
     let mut graph =
         CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
-    let excluded = if exclude.is_empty() {
-        HashSet::new()
-    } else {
-        walk_closure(&mut graph, exclude)?
-    };
+    let excluded = RangeWalkHide::for_range_walk(
+        repo,
+        include,
+        exclude,
+        options.use_commit_graph,
+        options.first_parent,
+    )?;
 
     let (bloom_chain, bloom_read_changed, bloom_version, bloom_cwd) =
         dense_bloom_context_for_paths(repo, repo_config, options);
@@ -6410,7 +6451,7 @@ fn try_bounded_path_limit_list(
     let mut queued = HashSet::new();
     let mut next_seq = 0u64;
     for &tip in include {
-        if excluded.contains(&tip) || !queued.insert(tip) {
+        if excluded.is_hidden(tip) || !queued.insert(tip) {
             continue;
         }
         heap.push(CommitDateKey {
@@ -6428,7 +6469,7 @@ fn try_bounded_path_limit_list(
     let mut ordered = Vec::with_capacity(max_count.min(64));
     while let Some(item) = heap.pop() {
         let oid = item.oid;
-        if excluded.contains(&oid) {
+        if excluded.is_hidden(oid) {
             continue;
         }
 
@@ -6489,7 +6530,7 @@ fn try_bounded_path_limit_list(
         }
 
         for parent in action.parents_to_walk {
-            if excluded.contains(&parent) || !queued.insert(parent) {
+            if excluded.is_hidden(parent) || !queued.insert(parent) {
                 continue;
             }
             heap.push(CommitDateKey {
@@ -9712,6 +9753,98 @@ mod tests {
             expand_object_filter_for_protocol("blob:limit=1m").expect("proto"),
             format!("blob:limit={}", 1024 * 1024)
         );
+    }
+
+    fn write_commit_on_tree(
+        repo: &Repository,
+        parent: Option<ObjectId>,
+        tree: ObjectId,
+        msg: &str,
+        time: i64,
+    ) -> Result<ObjectId> {
+        let mut body = format!("tree {tree}\n");
+        if let Some(p) = parent {
+            body.push_str(&format!("parent {p}\n"));
+        }
+        body.push_str(&format!(
+            "author T <t@e.com> {time} +0000\ncommitter T <t@e.com> {time} +0000\n\n{msg}\n"
+        ));
+        repo.odb()
+            .write_loose_materialize(ObjectKind::Commit, body.as_bytes())
+    }
+
+    /// Long history below the hide tip, short range above it, path only on HEAD.
+    fn seed_hide_chain_range_path_repo(
+        hidden_depth: usize,
+        range_depth: usize,
+    ) -> Result<(TempDir, Repository, ObjectId, ObjectId)> {
+        let dir = tempdir()?;
+        Repository::init(
+            dir.path(),
+            &InitOptions {
+                bare: true,
+                ..InitOptions::default()
+            },
+        )?;
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let blob = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Blob, b"x\n")?;
+        let mut tree_body = format!("100644 tracked.txt\0").into_bytes();
+        tree_body.extend_from_slice(blob.as_bytes());
+        let path_tree = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Tree, &tree_body)?;
+        let empty_tree = repo.odb().write_loose_materialize(ObjectKind::Tree, b"")?;
+        let mut parent = None;
+        let mut t = 100i64;
+        for i in 0..hidden_depth {
+            parent = Some(write_commit_on_tree(
+                &repo,
+                parent,
+                empty_tree,
+                &format!("hidden {i}"),
+                t,
+            )?);
+            t += 1;
+        }
+        let hide = parent.expect("hide tip");
+        for i in 0..range_depth {
+            parent = Some(write_commit_on_tree(
+                &repo,
+                parent,
+                empty_tree,
+                &format!("range {i}"),
+                t,
+            )?);
+            t += 1;
+        }
+        let tip = write_commit_on_tree(&repo, parent, path_tree, "touch path", t)?;
+        Ok((dir, repo, hide, tip))
+    }
+
+    #[test]
+    fn bounded_range_path_limit_parent_lookups_stay_in_range() -> Result<()> {
+        use crate::merge_base::intersect_walk_test_hooks::{
+            commit_parent_lookups, reset_commit_parent_lookups,
+        };
+
+        let (_dir, repo, hide, tip) = seed_hide_chain_range_path_repo(300, 8)?;
+        let opts = RevListOptions {
+            max_count: Some(1),
+            paths: vec!["tracked.txt".to_owned()],
+            use_commit_graph: true,
+            ..Default::default()
+        };
+        reset_commit_parent_lookups();
+        let result = rev_list(&repo, &[tip.to_hex()], &[hide.to_hex()], &opts)?;
+        let lookups = commit_parent_lookups();
+        assert_eq!(result.commits, vec![tip]);
+        assert!(
+            lookups <= 96,
+            "bounded range+path walk did {lookups} parent lookups; expected on the order of the range, not the hidden chain"
+        );
+        Ok(())
     }
 }
 

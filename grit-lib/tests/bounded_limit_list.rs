@@ -426,6 +426,81 @@ fn unlimited_range_does_not_read_history_below_excluded_tip() {
 }
 
 #[test]
+fn bounded_range_path_limit_skips_hidden_closure() {
+    let repo = support::HistoryRepo::init();
+    let wt = repo.worktree();
+    support::commit_file(wt, "deep/base.txt", "b\n", "root");
+    for i in 0..300 {
+        support::commit_file(
+            wt,
+            "deep/noise.txt",
+            &format!("{i}\n"),
+            &format!("noise {i}"),
+        );
+    }
+    let hide = support::git_rev_parse(wt, "HEAD").expect("hide tip after long chain");
+    for i in 0..8 {
+        support::commit_file(
+            wt,
+            "deep/noise.txt",
+            &format!("r{i}\n"),
+            &format!("range {i}"),
+        );
+    }
+    support::commit_file(wt, "fs/ext4/x.txt", "x\n", "touch ext4");
+
+    let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
+    let hide_hex = hide.to_hex();
+    let range = format!("{hide_hex}..HEAD");
+    let opts = RevListOptions {
+        max_count: Some(1),
+        paths: vec!["fs/ext4".to_owned()],
+        use_commit_graph: true,
+        ..Default::default()
+    };
+    let expected = support::git_rev_list(wt, &["-n", "1", &range, "--", "fs/ext4"]);
+    let result = rev_list(&grit_repo, &[String::from("HEAD")], &[hide_hex], &opts)
+        .expect("bounded range path rev-list");
+    assert_eq!(result.commits, expected);
+}
+
+#[test]
+fn bounded_range_path_limit_tolerates_missing_below_hide_frontier() {
+    let dir = tempdir().expect("tempdir");
+    let repo = open_bare(dir.path()).expect("repo");
+    let missing: grit_lib::objects::ObjectId = "0000000000000000000000000000000000000001"
+        .parse()
+        .expect("oid");
+    let below = write_commit(repo.odb(), &[missing], "below", 190, 190).expect("below");
+    let hide = write_commit(repo.odb(), &[below], "hide", 200, 200).expect("hide");
+    let mid = write_commit(repo.odb(), &[hide], "mid", 150, 150).expect("mid");
+    let tip = write_commit(repo.odb(), &[mid], "tip", 160, 160).expect("tip");
+    support::git(
+        dir.path(),
+        &["update-ref", "refs/heads/main", &tip.to_hex()],
+    );
+
+    let opts = RevListOptions {
+        max_count: Some(1),
+        paths: vec!["any/path".to_owned()],
+        ..Default::default()
+    };
+    let expected = support::git_rev_list(
+        dir.path(),
+        &[
+            "-n",
+            "1",
+            &format!("{}..{}", hide.to_hex(), tip.to_hex()),
+            "--",
+            "any/path",
+        ],
+    );
+    let result = rev_list(&repo, &[tip.to_hex()], &[hide.to_hex()], &opts)
+        .expect("bounded range path with missing parent behind hide");
+    assert_eq!(result.commits, expected);
+}
+
+#[test]
 fn range_with_newer_hide_tip_tolerates_missing_history_behind_it() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");
