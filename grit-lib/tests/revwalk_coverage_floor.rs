@@ -7,7 +7,7 @@ use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{
     expand_object_filter_for_protocol, merge_bases, rev_list, ObjectFilter, OrderingMode,
-    OutputMode, RevListOptions,
+    RevListOptions,
 };
 use grit_lib::revwalk::RevWalk;
 use std::collections::HashSet;
@@ -106,78 +106,67 @@ fn revwalk_floor_cartesian_sweep() -> grit_lib::error::Result<()> {
         OrderingMode::AuthorDateWalk,
         OrderingMode::AuthorDateTopo,
     ];
-    let formats = [
-        OutputMode::OidOnly,
-        OutputMode::Parents,
-        OutputMode::Format(String::from("oneline")),
-        OutputMode::Format(String::from("format:%H %P %T %t %p %s %D %d %gD %N %G?")),
-        OutputMode::Format(String::from("tformat:%<(12,trunc)%h %>(10,trunc)%s")),
-    ];
-
     for ordering in orderings {
-        for output_mode in &formats {
-            for use_graph in [false, true] {
-                let opts = RevListOptions {
-                    ordering,
-                    output_mode: output_mode.clone(),
-                    all_refs: use_graph,
-                    first_parent: ordering == OrderingMode::Topo,
-                    ancestry_path: true,
-                    ancestry_path_bottoms: vec![tip],
-                    simplify_by_decoration: true,
-                    simplify_by_decoration_oids: deco.clone(),
-                    full_history: true,
-                    simplify_merges: true,
-                    preserve_simplify_merges_graph_merges: true,
-                    show_pulls: true,
-                    sparse: true,
-                    parent_rewrite: true,
-                    paths: vec!["tracked.txt".into()],
-                    objects: true,
-                    no_object_names: false,
-                    boundary: true,
-                    left_right: true,
-                    left_right_explicit: true,
-                    left_only: false,
-                    right_only: false,
-                    cherry_mark: true,
-                    cherry_pick: false,
-                    min_parents: Some(1),
-                    max_parents: Some(3),
-                    symmetric_left: Some(tip),
-                    symmetric_right: Some(side),
-                    exclude_first_parent_only: true,
-                    filter: Some(ObjectFilter::Combine(vec![
-                        ObjectFilter::BlobLimit(8192),
-                        ObjectFilter::TreeDepth(8),
-                    ])),
-                    filter_raw_specs: vec!["blob:limit=8k".into(), "tree:8".into()],
-                    filter_provided_objects: true,
-                    filter_print_omitted: true,
-                    include_reflog_entries: true,
-                    include_indexed_objects: true,
-                    use_commit_graph: use_graph,
-                    use_commit_graph_bloom: use_graph,
-                    commit_graph_read_changed_paths: use_graph,
-                    use_bitmap_index: use_graph,
-                    bitmap_oid_only_objects: use_graph,
-                    in_commit_order: true,
-                    maximal_only: false,
-                    reverse: true,
-                    skip: 1,
-                    max_count: Some(128),
-                    count: false,
-                    path_graph_reorder: true,
-                    ignore_missing: true,
-                    ..RevListOptions::default()
-                };
-                let _out = rev_list(
-                    &repo,
-                    &[String::from("main"), String::from("side")],
-                    &[],
-                    &opts,
-                )?;
-            }
+        for use_graph in [false, true] {
+            let opts = RevListOptions {
+                ordering,
+                all_refs: use_graph,
+                first_parent: ordering == OrderingMode::Topo,
+                ancestry_path: true,
+                ancestry_path_bottoms: vec![tip],
+                simplify_by_decoration: true,
+                simplify_by_decoration_oids: deco.clone(),
+                full_history: true,
+                simplify_merges: true,
+                preserve_simplify_merges_graph_merges: true,
+                show_pulls: true,
+                sparse: true,
+                parent_rewrite: true,
+                paths: vec!["tracked.txt".into()],
+                objects: true,
+                no_object_names: false,
+                boundary: true,
+                left_right: true,
+                left_right_explicit: true,
+                left_only: false,
+                right_only: false,
+                cherry_mark: true,
+                cherry_pick: false,
+                min_parents: Some(1),
+                max_parents: Some(3),
+                symmetric_left: Some(tip),
+                symmetric_right: Some(side),
+                exclude_first_parent_only: true,
+                filter: Some(ObjectFilter::Combine(vec![
+                    ObjectFilter::BlobLimit(8192),
+                    ObjectFilter::TreeDepth(8),
+                ])),
+                filter_raw_specs: vec!["blob:limit=8k".into(), "tree:8".into()],
+                filter_provided_objects: true,
+                filter_print_omitted: true,
+                include_reflog_entries: true,
+                include_indexed_objects: true,
+                use_commit_graph: use_graph,
+                use_commit_graph_bloom: use_graph,
+                commit_graph_read_changed_paths: use_graph,
+                use_bitmap_index: use_graph,
+                bitmap_oid_only_objects: use_graph,
+                in_commit_order: true,
+                maximal_only: false,
+                reverse: true,
+                skip: 1,
+                max_count: Some(128),
+                count: false,
+                path_graph_reorder: true,
+                ignore_missing: true,
+                ..RevListOptions::default()
+            };
+            let _out = rev_list(
+                &repo,
+                &[String::from("main"), String::from("side")],
+                &[],
+                &opts,
+            )?;
         }
     }
 

@@ -56,7 +56,7 @@ Full “write-tree + commit + ref” path: stage files → `write_tree_from_inde
 
 ## `rev_list`
 
-Builds a commit, points `HEAD` at it, then calls `rev_list` with `RevListOptions` (here, `OutputMode::OidOnly`) and a positive spec `"HEAD"`. This is the same revision-walk machinery used for `git rev-list`-style operations.
+Builds a commit, points `HEAD` at it, then calls `rev_list` with default `RevListOptions` and a positive spec `"HEAD"`. This is the same revision-walk machinery used for `git rev-list`-style operations.
 
 **Interesting bits:** positive vs negative specs (empty here), `RevListResult::commits`.
 

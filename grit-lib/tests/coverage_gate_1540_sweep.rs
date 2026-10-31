@@ -24,7 +24,7 @@ use grit_lib::revwalk::merge_base::{
 };
 use grit_lib::revwalk::rev_list::{
     merge_bases, resolve_object_walk_roots, resolve_revision_commits, rev_list, ObjectFilter,
-    OrderingMode, OutputMode, RevListOptions,
+    OrderingMode, RevListOptions,
 };
 use grit_lib::revwalk::rev_parse::{
     resolve_revision, resolve_revision_as_commit, resolve_revision_for_range_end,
@@ -139,7 +139,7 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
         for use_graph in [false, true] {
             let opts = RevListOptions {
                 ordering,
-                output_mode: OutputMode::Format(String::from("format:%H %P %T %t %s %D %d %gD %N")),
+                parent_rewrite: true,
                 paths: vec!["src/".into(), "docs/".into()],
                 all_refs: use_graph,
                 use_commit_graph: use_graph,

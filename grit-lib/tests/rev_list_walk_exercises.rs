@@ -8,10 +8,10 @@ use grit_lib::refs::ref_exclusions::RefExclusions;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{
     commit_tips_from_named_refs, commit_visible_for_dense_pathspecs, merge_bases,
-    object_ids_for_cat_file_filtered, reachable_object_ids_for_cat_file, render_commit,
-    resolve_object_walk_roots, resolve_revision_commits, rev_list, select_bisect_commits,
+    object_ids_for_cat_file_filtered, reachable_object_ids_for_cat_file, resolve_object_walk_roots,
+    resolve_revision_commits, rev_list, select_bisect_commits,
     shallow_borders_reachable_from_wants, shallow_boundary_oids, tag_targets, MissingAction,
-    ObjectFilter, OrderingMode, OutputMode, RevListOptions,
+    ObjectFilter, OrderingMode, RevListOptions,
 };
 use std::collections::HashSet;
 use std::fs;
@@ -152,11 +152,6 @@ fn bisect_merge_bases_and_render() {
     assert!(!bases.is_empty());
     let bases_fp = merge_bases(&repo, tip, mid, true).expect("merge-base fp");
     assert!(!bases_fp.is_empty());
-    let line =
-        render_commit(&repo, tip, &OutputMode::Format(String::from("%H %s")), 40).expect("render");
-    assert!(line.contains('c'));
-    let oid_line = render_commit(&repo, tip, &OutputMode::OidOnly, 7).expect("oid");
-    assert_eq!(oid_line, tip.to_hex());
 }
 
 #[test]
@@ -196,7 +191,7 @@ fn rev_list_limit_boundary_cherry_and_all_refs() {
         objects: true,
         in_commit_order: true,
         missing_action: MissingAction::Allow,
-        output_mode: OutputMode::Parents,
+        parent_rewrite: true,
         reverse: true,
         boundary: true,
         cherry_mark: true,
@@ -206,8 +201,6 @@ fn rev_list_limit_boundary_cherry_and_all_refs() {
     let out = rev_list(&repo, &[tip.to_hex()], &[], &opts).expect("limited");
     assert!(out.commits.len() <= 2);
     assert!(!out.objects.is_empty());
-    let parents_line = render_commit(&repo, tip, &OutputMode::Parents, 40).expect("parents");
-    assert!(parents_line.contains(' '));
 }
 
 #[test]

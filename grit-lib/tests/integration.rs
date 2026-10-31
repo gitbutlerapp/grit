@@ -1598,9 +1598,6 @@ mod rev_list_commit_filter_git_compat;
 mod rev_list_commit_graph_walk;
 #[path = "rev_list_diff_coverage_sweep.rs"]
 mod rev_list_diff_coverage_sweep;
-#[cfg(feature = "full-tests")]
-#[path = "rev_list_format_git_compat.rs"]
-mod rev_list_format_git_compat;
 #[path = "rev_list_object_segments.rs"]
 mod rev_list_object_segments;
 #[cfg(feature = "full-tests")]
@@ -1609,6 +1606,9 @@ mod rev_list_object_walk_roots_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "rev_list_ordering.rs"]
 mod rev_list_ordering;
+#[cfg(feature = "full-tests")]
+#[path = "rev_list_parents_git_compat.rs"]
+mod rev_list_parents_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "rev_list_path_limited_git_compat.rs"]
 mod rev_list_path_limited_git_compat;

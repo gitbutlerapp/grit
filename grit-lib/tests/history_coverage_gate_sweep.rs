@@ -14,7 +14,7 @@ use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{
-    merge_bases, resolve_object_walk_roots, rev_list, OrderingMode, OutputMode, RevListOptions,
+    merge_bases, resolve_object_walk_roots, rev_list, OrderingMode, RevListOptions,
 };
 use grit_lib::revwalk::rev_parse::{
     resolve_revision, resolve_revision_as_commit, resolve_revision_for_range_end,
@@ -131,7 +131,6 @@ fn history_walk_diff_and_resolve_sweep() -> grit_lib::error::Result<()> {
     for ordering in orderings {
         let opts = RevListOptions {
             ordering,
-            output_mode: OutputMode::Format(String::from("oneline")),
             paths: vec!["tracked.txt".to_owned()],
             cherry_pick: false,
             left_right: true,

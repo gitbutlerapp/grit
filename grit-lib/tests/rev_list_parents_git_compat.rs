@@ -1,12 +1,12 @@
-//! `git rev-list --format=…` output parity for common format atoms.
+//! `git rev-list --parents` walk parity: parent rewriting lists the same commits as Git.
 
 use crate::support;
 
-use grit_lib::revwalk::rev_list::{rev_list, OutputMode, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 use support::{assert_grit_commits_match_git, commit_file, git, HistoryRepo};
 
 #[test]
-fn format_parents_and_decorations_match_git() {
+fn parent_rewrite_walk_matches_git() {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
     commit_file(wt, "a.txt", "a\n", "a");
@@ -18,34 +18,27 @@ fn format_parents_and_decorations_match_git() {
     git(wt, &["merge", "side", "-m", "merge", "--no-ff"]);
     git(wt, &["tag", "release"]);
 
-    for fmt in [
-        "format:%H %P %s",
-        "format:%h %p %D %d",
-        "format:%T %t %an %ae",
-        "format:%cn %ce %ad %cd",
-    ] {
-        let git_lines = git(wt, &["rev-list", &format!("--format={fmt}"), "main"]);
-        let grit_repo = support::open_grit_repo(wt);
-        let out = rev_list(
-            &grit_repo,
-            &[String::from("main")],
-            &[],
-            &RevListOptions {
-                output_mode: OutputMode::Format(fmt.to_owned()),
-                count: false,
-                ..RevListOptions::default()
-            },
-        )
-        .expect("rev-list");
-        assert_eq!(
-            out.commits.len(),
-            git_lines
-                .lines()
-                .filter(|l| !l.starts_with("commit "))
-                .count(),
-            "commit count for {fmt}"
-        );
-    }
+    let parents = RevListOptions {
+        parent_rewrite: true,
+        ..RevListOptions::default()
+    };
+    assert_grit_commits_match_git(
+        wt,
+        &["--parents", "main"],
+        &[String::from("main")],
+        &[],
+        &parents,
+    );
+    assert_grit_commits_match_git(
+        wt,
+        &["--parents", "main", "--", "b.txt"],
+        &[String::from("main")],
+        &[],
+        &RevListOptions {
+            paths: vec![String::from("b.txt")],
+            ..parents.clone()
+        },
+    );
     assert_grit_commits_match_git(
         wt,
         &["main"],

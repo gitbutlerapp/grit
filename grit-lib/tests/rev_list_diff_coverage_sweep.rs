@@ -13,8 +13,7 @@ use grit_lib::parallel::ThreadPolicy;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{
-    merge_bases, resolve_object_walk_roots, rev_list, ObjectFilter, OrderingMode, OutputMode,
-    RevListOptions,
+    merge_bases, resolve_object_walk_roots, rev_list, ObjectFilter, OrderingMode, RevListOptions,
 };
 use std::collections::HashSet;
 use std::fs;
@@ -77,7 +76,6 @@ fn symmetric_range_ancestry_and_object_roots() -> grit_lib::error::Result<()> {
 
     let opts = RevListOptions {
         ordering: OrderingMode::AuthorDateWalk,
-        output_mode: OutputMode::Format(String::from("oneline")),
         objects: true,
         in_commit_order: true,
         ..RevListOptions::default()

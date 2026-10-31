@@ -28,10 +28,9 @@ use grit_lib::repo::{
 };
 use grit_lib::revwalk::rev_list::{
     commit_tips_from_named_refs, commit_visible_for_dense_pathspecs, merge_bases,
-    object_ids_for_cat_file_filtered, reachable_object_ids_for_cat_file, render_commit,
-    render_commit_with_color, resolve_object_walk_roots, resolve_revision_commits, rev_list,
-    shallow_borders_reachable_from_wants, shallow_boundary_oids, tag_targets, MissingAction,
-    ObjectFilter, OrderingMode, OutputMode, RevListOptions,
+    object_ids_for_cat_file_filtered, reachable_object_ids_for_cat_file, resolve_object_walk_roots,
+    resolve_revision_commits, rev_list, shallow_borders_reachable_from_wants,
+    shallow_boundary_oids, tag_targets, MissingAction, ObjectFilter, OrderingMode, RevListOptions,
 };
 
 use support::{commit_file, git, open_grit_repo, HistoryRepo};
@@ -244,7 +243,7 @@ fn rev_list_deep_history_and_ref_matrix() -> grit_lib::error::Result<()> {
         for ancestry in [false, true] {
             let opts = RevListOptions {
                 ordering,
-                output_mode: OutputMode::Format(String::from("format:%H %P %s %D %d")),
+                parent_rewrite: true,
                 ancestry_path: ancestry,
                 ancestry_path_bottoms: vec![mid],
                 left_right: true,
@@ -270,10 +269,6 @@ fn rev_list_deep_history_and_ref_matrix() -> grit_lib::error::Result<()> {
             };
             let out = rev_list(&repo, &[String::from("main")], &[], &opts)?;
             assert!(!out.commits.is_empty());
-            if let Some(head) = out.commits.first() {
-                let _ = render_commit(&repo, *head, &opts.output_mode, 12)?;
-                let _ = render_commit_with_color(&repo, *head, &opts.output_mode, 12, true)?;
-            }
         }
     }
 

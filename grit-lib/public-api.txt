@@ -28725,25 +28725,6 @@ impl core::marker::Unpin for grit_lib::revwalk::rev_list::OrderingMode
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::rev_list::OrderingMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::rev_list::OrderingMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::rev_list::OrderingMode
-pub enum grit_lib::revwalk::rev_list::OutputMode
-pub grit_lib::revwalk::rev_list::OutputMode::Format(alloc::string::String)
-pub grit_lib::revwalk::rev_list::OutputMode::OidOnly
-pub grit_lib::revwalk::rev_list::OutputMode::Parents
-impl core::clone::Clone for grit_lib::revwalk::rev_list::OutputMode
-pub fn grit_lib::revwalk::rev_list::OutputMode::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::revwalk::rev_list::OutputMode
-impl core::cmp::PartialEq for grit_lib::revwalk::rev_list::OutputMode
-pub fn grit_lib::revwalk::rev_list::OutputMode::eq(&self, &Self) -> bool
-impl core::fmt::Debug for grit_lib::revwalk::rev_list::OutputMode
-pub fn grit_lib::revwalk::rev_list::OutputMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for grit_lib::revwalk::rev_list::OutputMode
-impl core::marker::Freeze for grit_lib::revwalk::rev_list::OutputMode
-impl core::marker::Send for grit_lib::revwalk::rev_list::OutputMode
-impl core::marker::Sync for grit_lib::revwalk::rev_list::OutputMode
-impl core::marker::Unpin for grit_lib::revwalk::rev_list::OutputMode
-impl core::marker::UnsafeUnpin for grit_lib::revwalk::rev_list::OutputMode
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::rev_list::OutputMode
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::rev_list::OutputMode
 pub struct grit_lib::revwalk::rev_list::BisectEntry
 pub grit_lib::revwalk::rev_list::BisectEntry::distance: usize
 pub grit_lib::revwalk::rev_list::BisectEntry::oid: grit_lib::objects::ObjectId
@@ -28903,7 +28884,6 @@ pub grit_lib::revwalk::rev_list::RevListOptions::no_kept_objects: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::no_object_names: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::objects: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::ordering: grit_lib::revwalk::rev_list::OrderingMode
-pub grit_lib::revwalk::rev_list::RevListOptions::output_mode: grit_lib::revwalk::rev_list::OutputMode
 pub grit_lib::revwalk::rev_list::RevListOptions::parent_rewrite: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::path_graph_reorder: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::paths: alloc::vec::Vec<alloc::string::String>
@@ -28930,7 +28910,6 @@ pub grit_lib::revwalk::rev_list::RevListOptions::use_commit_graph: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::use_commit_graph_bloom: bool
 impl grit_lib::revwalk::rev_list::RevListOptions
 pub fn grit_lib::revwalk::rev_list::RevListOptions::normalize_for_walk(&mut self, &grit_lib::repo::Repository, &grit_lib::config::ConfigSet)
-pub fn grit_lib::revwalk::rev_list::RevListOptions::wants_parent_rewrite(&self) -> bool
 impl core::clone::Clone for grit_lib::revwalk::rev_list::RevListOptions
 pub fn grit_lib::revwalk::rev_list::RevListOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::revwalk::rev_list::RevListOptions
@@ -28990,8 +28969,6 @@ pub fn grit_lib::revwalk::rev_list::object_ids_for_cat_file_filtered(&grit_lib::
 pub fn grit_lib::revwalk::rev_list::open_commit_stream<'repo>(&'repo grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &grit_lib::revwalk::rev_list::CommitStreamParams) -> grit_lib::error::Result<grit_lib::revwalk::rev_list::CommitStream<'repo>>
 pub fn grit_lib::revwalk::rev_list::reachable_object_ids_for_cat_file(&grit_lib::repo::Repository, core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::rev_list::read_lines(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
-pub fn grit_lib::revwalk::rev_list::render_commit(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::revwalk::rev_list::OutputMode, usize) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::revwalk::rev_list::render_commit_with_color(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::revwalk::rev_list::OutputMode, usize, bool) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::revwalk::rev_list::resolve_object_walk_roots(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::objects::ObjectId>, alloc::vec::Vec<grit_lib::revwalk::rev_list::ObjectWalkRoot>)>
 pub fn grit_lib::revwalk::rev_list::resolve_revision_commits(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::rev_list::resolve_revision_specs_to_commits(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>

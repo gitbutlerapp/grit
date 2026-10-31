@@ -9,7 +9,7 @@ use std::process::Command;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_list::{
-    split_revision_token, ObjectFilter, OrderingMode, OutputMode, RevListOptions, RevListResult,
+    split_revision_token, ObjectFilter, OrderingMode, RevListOptions, RevListResult,
 };
 use grit_lib::revwalk::rev_list_error::RevListError;
 use grit_lib::revwalk::RevWalkListOptions;
@@ -198,7 +198,7 @@ fn t6013_reverse_matches_git() {
     let path_opts = RevListOptions {
         reverse: true,
         full_history: true,
-        output_mode: OutputMode::Parents,
+        parent_rewrite: true,
         paths: vec!["foo".to_owned()],
         ..RevListOptions::default()
     };
@@ -249,7 +249,7 @@ fn t6013_reverse_matches_git() {
         reverse: true,
         full_history: true,
         boundary: true,
-        output_mode: OutputMode::Parents,
+        parent_rewrite: true,
         paths: vec!["foo".to_owned()],
         ..RevListOptions::default()
     };
@@ -318,7 +318,7 @@ fn t6013_max_count_boundary_path_limited_parents_match_git() {
         max_count: Some(1),
         boundary: true,
         full_history: true,
-        output_mode: OutputMode::Parents,
+        parent_rewrite: true,
         paths: vec!["foo".to_owned()],
         ..RevListOptions::default()
     };
@@ -590,7 +590,7 @@ fn t6001_grafts_and_replace_refs_match_git() {
         &[String::from("main")],
         &[],
         RevListOptions {
-            output_mode: OutputMode::Parents,
+            parent_rewrite: true,
             ..RevListOptions::default()
         },
         "t6001 graft --parents",
@@ -1528,7 +1528,6 @@ fn rev_list_option_smoke_exercises_library_paths() {
             ..RevListOptions::default()
         },
         RevListOptions {
-            output_mode: grit_lib::revwalk::rev_list::OutputMode::Parents,
             parent_rewrite: true,
             ..RevListOptions::default()
         },

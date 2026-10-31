@@ -18,7 +18,7 @@ use crate::config::ConfigSet;
 use crate::diff::pickaxe::PickaxeRenames;
 use crate::diff::zero_oid;
 use crate::error::{Error, Result};
-use crate::ident::{committer_unix_seconds_for_ordering, parse_signature_times};
+use crate::ident::committer_unix_seconds_for_ordering;
 use crate::ignore::{parse_sparse_patterns_from_blob, ParsedSparsePatterns};
 use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
 use crate::merge_base::{
@@ -40,17 +40,6 @@ use crate::repo::Repository;
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{resolve_revision_for_range_end, resolve_treeish_path, split_treeish_spec};
 use crate::revwalk::filter::CommitFilter;
-
-/// User-facing output mode for `rev-list`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OutputMode {
-    /// Print only object IDs.
-    OidOnly,
-    /// Print object ID followed by all parent IDs.
-    Parents,
-    /// Print a custom `%` placeholder format.
-    Format(String),
-}
 
 /// Behavior when reachable objects are missing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -486,8 +475,6 @@ pub struct RevListOptions {
     /// `log.excludeDecoration`, and the default hidden-ref behavior), matching Git's
     /// `load_ref_decorations(NULL, ...)` set used by `rev_compare_tree`.
     pub simplify_by_decoration_oids: HashSet<ObjectId>,
-    /// Commit output mode.
-    pub output_mode: OutputMode,
     /// Suppress commit output.
     pub quiet: bool,
     /// Print only final count.
@@ -532,7 +519,8 @@ pub struct RevListOptions {
     pub paths: Vec<String>,
     /// Show full history (don't simplify) for path-limited walks.
     pub full_history: bool,
-    /// Parent rewriting was requested (`--parents`, `--children`, or `%P`/`%p` output).
+    /// Parent rewriting was requested (Git `--parents` / `--children`): path-limited walks
+    /// keep the TREESAME merges that parent rewriting needs.
     pub parent_rewrite: bool,
     /// Sparse mode: don't prune non-matching commits.
     pub sparse: bool,
@@ -632,27 +620,6 @@ impl RevListOptions {
             self.use_commit_graph_bloom = true;
         }
     }
-
-    /// Whether path-limited walks should keep TREESAME merges for parent rewriting.
-    ///
-    /// Matches Git when `--parents` is set or the output format includes `%P` / `%p`.
-    #[must_use]
-    pub fn wants_parent_rewrite(&self) -> bool {
-        if self.parent_rewrite {
-            return true;
-        }
-        match &self.output_mode {
-            OutputMode::Parents => true,
-            OutputMode::Format(fmt) => {
-                let raw = fmt
-                    .strip_prefix("format:")
-                    .or_else(|| fmt.strip_prefix("tformat:"))
-                    .unwrap_or(fmt.as_str());
-                raw.contains("%P") || raw.contains("%p")
-            }
-            OutputMode::OidOnly => false,
-        }
-    }
 }
 
 impl Default for RevListOptions {
@@ -664,7 +631,6 @@ impl Default for RevListOptions {
             ancestry_path_bottoms: Vec::new(),
             simplify_by_decoration: false,
             simplify_by_decoration_oids: HashSet::new(),
-            output_mode: OutputMode::OidOnly,
             quiet: false,
             count: false,
             skip: 0,
@@ -1631,7 +1597,7 @@ pub fn rev_list(
                 options.simplify_merges,
                 options.preserve_simplify_merges_graph_merges,
                 options.show_pulls,
-                options.wants_parent_rewrite(),
+                options.parent_rewrite,
                 options.ancestry_path,
                 &effective_ancestry_path_bottoms,
                 &excluded,
@@ -1832,7 +1798,7 @@ pub fn rev_list(
         let output_set: HashSet<ObjectId> = ordered.iter().copied().collect();
         let mut boundary = Vec::new();
         let mut boundary_seen = HashSet::new();
-        let use_path_parent_rewrite = options.wants_parent_rewrite() && !options.paths.is_empty();
+        let use_path_parent_rewrite = options.parent_rewrite && !options.paths.is_empty();
         let omitted_but_selected = |parent: ObjectId| {
             excluded.contains(&parent)
                 || selected_before_limit.contains(&parent)
@@ -2126,1058 +2092,6 @@ pub fn split_revision_token(token: &str) -> (Vec<String>, Vec<String>) {
 /// are literal text, so those specs are left to normal revision resolution.
 fn is_unexpanded_symmetric_range(spec: &str) -> bool {
     crate::rev_parse::split_top_level_triple_dot_range(spec).is_some()
-}
-
-fn ansi_color_from_name(name: &str) -> String {
-    match name {
-        "red" => "\x1b[31m".to_owned(),
-        "green" => "\x1b[32m".to_owned(),
-        "yellow" => "\x1b[33m".to_owned(),
-        "blue" => "\x1b[34m".to_owned(),
-        "magenta" => "\x1b[35m".to_owned(),
-        "cyan" => "\x1b[36m".to_owned(),
-        "white" => "\x1b[37m".to_owned(),
-        "bold" => "\x1b[1m".to_owned(),
-        "dim" => "\x1b[2m".to_owned(),
-        "ul" | "underline" => "\x1b[4m".to_owned(),
-        "blink" => "\x1b[5m".to_owned(),
-        "reverse" => "\x1b[7m".to_owned(),
-        "reset" => "\x1b[m".to_owned(),
-        _ => String::new(),
-    }
-}
-
-fn color_name_to_code(name: &str) -> Option<u8> {
-    match name {
-        "black" => Some(0),
-        "red" => Some(1),
-        "green" => Some(2),
-        "yellow" => Some(3),
-        "blue" => Some(4),
-        "magenta" => Some(5),
-        "cyan" => Some(6),
-        "white" => Some(7),
-        "default" => Some(9),
-        _ => None,
-    }
-}
-
-fn ansi_color_from_spec(spec: &str) -> String {
-    if spec == "reset" {
-        return "\x1b[m".to_owned();
-    }
-    let mut attrs = Vec::new();
-    let mut fg = None;
-    let mut bg = None;
-    for part in spec.split_whitespace() {
-        match part {
-            "bold" => attrs.push("1".to_owned()),
-            "dim" => attrs.push("2".to_owned()),
-            "italic" => attrs.push("3".to_owned()),
-            "ul" | "underline" => attrs.push("4".to_owned()),
-            "blink" => attrs.push("5".to_owned()),
-            "reverse" => attrs.push("7".to_owned()),
-            "strike" => attrs.push("9".to_owned()),
-            "nobold" | "nodim" => attrs.push("22".to_owned()),
-            "noitalic" => attrs.push("23".to_owned()),
-            "noul" | "nounderline" => attrs.push("24".to_owned()),
-            "noblink" => attrs.push("25".to_owned()),
-            "noreverse" => attrs.push("27".to_owned()),
-            "nostrike" => attrs.push("29".to_owned()),
-            _ => {
-                if let Some(code) = color_name_to_code(part) {
-                    if fg.is_none() {
-                        fg = Some(format!("{}", 30 + code));
-                    } else {
-                        bg = Some(format!("{}", 40 + code));
-                    }
-                }
-            }
-        }
-    }
-    let mut codes = attrs;
-    if let Some(code) = fg {
-        codes.push(code);
-    }
-    if let Some(code) = bg {
-        codes.push(code);
-    }
-    if codes.is_empty() {
-        String::new()
-    } else {
-        format!("\x1b[{}m", codes.join(";"))
-    }
-}
-
-fn format_relative_date(diff: i64) -> String {
-    if diff < 0 {
-        "in the future".to_owned()
-    } else if diff < 60 {
-        format!("{} seconds ago", diff)
-    } else if diff < 3600 {
-        let m = diff / 60;
-        if m == 1 {
-            "1 minute ago".to_owned()
-        } else {
-            format!("{m} minutes ago")
-        }
-    } else if diff < 86400 {
-        let h = diff / 3600;
-        if h == 1 {
-            "1 hour ago".to_owned()
-        } else {
-            format!("{h} hours ago")
-        }
-    } else if diff < 86400 * 30 {
-        let d = diff / 86400;
-        if d == 1 {
-            "1 day ago".to_owned()
-        } else {
-            format!("{d} days ago")
-        }
-    } else if diff < 86400 * 365 {
-        let months = diff / (86400 * 30);
-        if months == 1 {
-            "1 month ago".to_owned()
-        } else {
-            format!("{months} months ago")
-        }
-    } else {
-        let years = diff / (86400 * 365);
-        if years == 1 {
-            "1 year ago".to_owned()
-        } else {
-            format!("{years} years ago")
-        }
-    }
-}
-
-/// Render one commit according to the selected output mode.
-///
-/// # Errors
-///
-/// Returns object decode errors when commit metadata is required.
-pub fn render_commit(
-    repo: &Repository,
-    oid: ObjectId,
-    mode: &OutputMode,
-    abbrev_len: usize,
-) -> Result<String> {
-    render_commit_with_color(repo, oid, mode, abbrev_len, false)
-}
-
-/// Render one commit, optionally with ANSI color for `%C` placeholders.
-pub fn render_commit_with_color(
-    repo: &Repository,
-    oid: ObjectId,
-    mode: &OutputMode,
-    abbrev_len: usize,
-    use_color: bool,
-) -> Result<String> {
-    match mode {
-        OutputMode::OidOnly => Ok(format!("{oid}")),
-        OutputMode::Parents => {
-            let mut out = format!("{oid}");
-            let commit = load_commit(repo, oid)?;
-            for parent in commit.parents {
-                out.push(' ');
-                out.push_str(&parent.to_hex());
-            }
-            Ok(out)
-        }
-        OutputMode::Format(fmt) => {
-            let commit = load_commit(repo, oid)?;
-            let wall_now = repo.wall_clock_epoch();
-            let subject = commit.message.lines().next().unwrap_or_default();
-            let hex = oid.to_hex();
-
-            // Handle named pretty formats
-            match fmt.as_str() {
-                "oneline" => {
-                    return Ok(format!("{} {}", hex, subject));
-                }
-                "short" => {
-                    fn fmt_ident(ident: &str) -> String {
-                        let name = if let Some(bracket) = ident.find('<') {
-                            ident[..bracket].trim()
-                        } else {
-                            ident.trim()
-                        };
-                        let email = if let Some(start) = ident.find('<') {
-                            if let Some(end) = ident.find('>') {
-                                &ident[start..=end]
-                            } else {
-                                ""
-                            }
-                        } else {
-                            ""
-                        };
-                        format!("{} {}", name, email)
-                    }
-                    let mut out = String::new();
-                    out.push_str(&format!("Author: {}\n", fmt_ident(&commit.author)));
-                    out.push('\n');
-                    out.push_str(&format!("    {}\n", subject));
-                    out.push('\n');
-                    return Ok(out);
-                }
-                "medium" => {
-                    fn extract_ident_display(ident: &str) -> String {
-                        let name = if let Some(bracket) = ident.find('<') {
-                            ident[..bracket].trim()
-                        } else {
-                            ident.trim()
-                        };
-                        let email = if let Some(start) = ident.find('<') {
-                            if let Some(end) = ident.find('>') {
-                                &ident[start..=end]
-                            } else {
-                                ""
-                            }
-                        } else {
-                            ""
-                        };
-                        format!("{} {}", name, email)
-                    }
-                    fn format_default_date(ident: &str) -> String {
-                        let parts: Vec<&str> = ident.rsplitn(3, ' ').collect();
-                        if parts.len() < 2 {
-                            return String::new();
-                        }
-                        let ts_str = parts[1];
-                        let offset_str = parts[0];
-                        let ts: i64 = match ts_str.parse() {
-                            Ok(v) => v,
-                            Err(_) => return format!("{ts_str} {offset_str}"),
-                        };
-                        let tz_bytes = offset_str.as_bytes();
-                        let tz_secs: i64 = if tz_bytes.len() >= 5 {
-                            let sign = if tz_bytes[0] == b'-' { -1i64 } else { 1i64 };
-                            let h: i64 = offset_str[1..3].parse().unwrap_or(0);
-                            let m: i64 = offset_str[3..5].parse().unwrap_or(0);
-                            sign * (h * 3600 + m * 60)
-                        } else {
-                            0
-                        };
-                        let adjusted = ts + tz_secs;
-                        let dt = time::OffsetDateTime::from_unix_timestamp(adjusted)
-                            .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-                        let weekday = match dt.weekday() {
-                            time::Weekday::Monday => "Mon",
-                            time::Weekday::Tuesday => "Tue",
-                            time::Weekday::Wednesday => "Wed",
-                            time::Weekday::Thursday => "Thu",
-                            time::Weekday::Friday => "Fri",
-                            time::Weekday::Saturday => "Sat",
-                            time::Weekday::Sunday => "Sun",
-                        };
-                        let month = match u8::from(dt.month()) {
-                            1 => "Jan",
-                            2 => "Feb",
-                            3 => "Mar",
-                            4 => "Apr",
-                            5 => "May",
-                            6 => "Jun",
-                            7 => "Jul",
-                            8 => "Aug",
-                            9 => "Sep",
-                            10 => "Oct",
-                            11 => "Nov",
-                            12 => "Dec",
-                            _ => "???",
-                        };
-                        format!(
-                            "{} {} {} {:02}:{:02}:{:02} {} {}",
-                            weekday,
-                            month,
-                            dt.day(),
-                            dt.hour(),
-                            dt.minute(),
-                            dt.second(),
-                            dt.year(),
-                            offset_str
-                        )
-                    }
-                    let mut out = String::new();
-                    out.push_str(&format!(
-                        "Author: {}\n",
-                        extract_ident_display(&commit.author)
-                    ));
-                    out.push_str(&format!(
-                        "Date:   {}\n",
-                        format_default_date(&commit.author)
-                    ));
-                    out.push('\n');
-                    for line in commit.message.lines() {
-                        out.push_str(&format!("    {}\n", line));
-                    }
-                    return Ok(out);
-                }
-                _ => {}
-            }
-
-            let raw_fmt = if let Some(t) = fmt.strip_prefix("format:") {
-                t
-            } else if let Some(t) = fmt.strip_prefix("tformat:") {
-                t
-            } else {
-                fmt.as_str()
-            };
-
-            // Verify the commit signature only when a `%G` placeholder is present
-            // in the format (matches git's lazy `%G?`/`%GS` evaluation).
-            let signature: Option<crate::signing::SignatureCheck> = if raw_fmt.contains("%G") {
-                repo.odb().read(&oid).ok().map(|obj| {
-                    let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
-                    match crate::signing::GpgConfig::from_config(&config) {
-                        Ok(cfg) => crate::signing::verify_commit(&cfg, &obj.data)
-                            .unwrap_or_else(|_| crate::signing::SignatureCheck::default_none()),
-                        Err(_) => crate::signing::SignatureCheck::default_none(),
-                    }
-                })
-            } else {
-                None
-            };
-            // Body: everything after the first line (skip blank separator line)
-            let body = {
-                let mut lines = commit.message.lines();
-                lines.next(); // skip subject
-                              // Skip optional blank line after subject
-                if let Some(blank) = lines.next() {
-                    if blank.is_empty() {
-                        lines.collect::<Vec<_>>().join("\n")
-                    } else {
-                        std::iter::once(blank)
-                            .chain(lines)
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    }
-                } else {
-                    String::new()
-                }
-            };
-            let tree_hex = commit.tree.to_hex();
-            let parent_hexes: Vec<String> = commit.parents.iter().map(|p| p.to_hex()).collect();
-            let parent_abbrevs: Vec<String> = commit
-                .parents
-                .iter()
-                .map(|p| {
-                    let hex = p.to_hex();
-                    let n = abbrev_len.clamp(4, 40).min(hex.len());
-                    hex[..n].to_string()
-                })
-                .collect();
-
-            // Extract name/email components from ident strings
-            fn extract_name(ident: &str) -> &str {
-                if let Some(bracket) = ident.find('<') {
-                    ident[..bracket].trim()
-                } else {
-                    ident.trim()
-                }
-            }
-            fn extract_email(ident: &str) -> &str {
-                if let Some(start) = ident.find('<') {
-                    if let Some(end) = ident.find('>') {
-                        return &ident[start + 1..end];
-                    }
-                }
-                ""
-            }
-            fn extract_timestamp(ident: &str) -> String {
-                match parse_signature_times(ident) {
-                    Some(p) => p.unix_seconds.to_string(),
-                    None => String::new(),
-                }
-            }
-            fn weekday_str(dt: &time::OffsetDateTime) -> &'static str {
-                match dt.weekday() {
-                    time::Weekday::Monday => "Mon",
-                    time::Weekday::Tuesday => "Tue",
-                    time::Weekday::Wednesday => "Wed",
-                    time::Weekday::Thursday => "Thu",
-                    time::Weekday::Friday => "Fri",
-                    time::Weekday::Saturday => "Sat",
-                    time::Weekday::Sunday => "Sun",
-                }
-            }
-            fn month_str(dt: &time::OffsetDateTime) -> &'static str {
-                match u8::from(dt.month()) {
-                    1 => "Jan",
-                    2 => "Feb",
-                    3 => "Mar",
-                    4 => "Apr",
-                    5 => "May",
-                    6 => "Jun",
-                    7 => "Jul",
-                    8 => "Aug",
-                    9 => "Sep",
-                    10 => "Oct",
-                    11 => "Nov",
-                    12 => "Dec",
-                    _ => "???",
-                }
-            }
-            fn extract_email_local(ident: &str) -> &str {
-                let email = extract_email(ident);
-                if let Some(at) = email.find('@') {
-                    &email[..at]
-                } else {
-                    email
-                }
-            }
-            fn extract_date_default(ident: &str) -> String {
-                let Some(p) = parse_signature_times(ident) else {
-                    return String::new();
-                };
-                let offset_str = ident.get(p.tz_hhmm_range.clone()).unwrap_or("+0000");
-                let adjusted = p.unix_seconds + p.tz_offset_secs;
-                let dt = time::OffsetDateTime::from_unix_timestamp(adjusted)
-                    .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-                format!(
-                    "{} {} {} {:02}:{:02}:{:02} {} {}",
-                    weekday_str(&dt),
-                    month_str(&dt),
-                    dt.day(),
-                    dt.hour(),
-                    dt.minute(),
-                    dt.second(),
-                    dt.year(),
-                    offset_str
-                )
-            }
-            fn extract_date_rfc2822(ident: &str) -> String {
-                let Some(p) = parse_signature_times(ident) else {
-                    return String::new();
-                };
-                let offset_str = ident.get(p.tz_hhmm_range.clone()).unwrap_or("+0000");
-                let adjusted = p.unix_seconds + p.tz_offset_secs;
-                let dt = time::OffsetDateTime::from_unix_timestamp(adjusted)
-                    .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-                format!(
-                    "{}, {} {} {} {:02}:{:02}:{:02} {}",
-                    weekday_str(&dt),
-                    dt.day(),
-                    month_str(&dt),
-                    dt.year(),
-                    dt.hour(),
-                    dt.minute(),
-                    dt.second(),
-                    offset_str
-                )
-            }
-            fn extract_date_short(ident: &str) -> String {
-                let Some(p) = parse_signature_times(ident) else {
-                    return String::new();
-                };
-                let adjusted = p.unix_seconds + p.tz_offset_secs;
-                let dt = time::OffsetDateTime::from_unix_timestamp(adjusted)
-                    .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-                format!("{:04}-{:02}-{:02}", dt.year(), dt.month() as u8, dt.day())
-            }
-            fn extract_date_iso(ident: &str) -> String {
-                let Some(p) = parse_signature_times(ident) else {
-                    return String::new();
-                };
-                let offset_str = ident.get(p.tz_hhmm_range.clone()).unwrap_or("+0000");
-                let adjusted = p.unix_seconds + p.tz_offset_secs;
-                let dt = time::OffsetDateTime::from_unix_timestamp(adjusted)
-                    .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-                format!(
-                    "{:04}-{:02}-{:02} {:02}:{:02}:{:02} {}",
-                    dt.year(),
-                    dt.month() as u8,
-                    dt.day(),
-                    dt.hour(),
-                    dt.minute(),
-                    dt.second(),
-                    offset_str
-                )
-            }
-
-            // Alignment/truncation state for %<(N), %>(N), %><(N) directives
-            #[derive(Clone, Copy)]
-            enum Align {
-                Left,
-                Right,
-                Center,
-            }
-            #[derive(Clone, Copy)]
-            enum ColTruncate {
-                None,
-                End,
-                Start,
-                Middle,
-            }
-            struct ColSpec {
-                width: usize,
-                align: Align,
-                trunc: ColTruncate,
-            }
-            fn apply_col(spec: &ColSpec, s: &str) -> String {
-                let char_len = s.chars().count();
-                if char_len > spec.width {
-                    match spec.trunc {
-                        ColTruncate::None => s.to_owned(),
-                        ColTruncate::End => {
-                            let mut out: String =
-                                s.chars().take(spec.width.saturating_sub(2)).collect();
-                            out.push_str("..");
-                            out
-                        }
-                        ColTruncate::Start => {
-                            let skip = char_len - spec.width + 2;
-                            let mut out = String::from("..");
-                            out.extend(s.chars().skip(skip));
-                            out
-                        }
-                        ColTruncate::Middle => {
-                            let keep = spec.width.saturating_sub(2);
-                            let left_half = keep / 2;
-                            let right_half = keep - left_half;
-                            let mut out: String = s.chars().take(left_half).collect();
-                            out.push_str("..");
-                            out.extend(s.chars().skip(char_len - right_half));
-                            out
-                        }
-                    }
-                } else {
-                    let pad = spec.width - char_len;
-                    match spec.align {
-                        Align::Left => {
-                            let mut out = s.to_owned();
-                            for _ in 0..pad {
-                                out.push(' ');
-                            }
-                            out
-                        }
-                        Align::Right => {
-                            let mut out = String::new();
-                            for _ in 0..pad {
-                                out.push(' ');
-                            }
-                            out.push_str(s);
-                            out
-                        }
-                        Align::Center => {
-                            let left = pad / 2;
-                            let right = pad - left;
-                            let mut out = String::new();
-                            for _ in 0..left {
-                                out.push(' ');
-                            }
-                            out.push_str(s);
-                            for _ in 0..right {
-                                out.push(' ');
-                            }
-                            out
-                        }
-                    }
-                }
-            }
-            fn parse_col_spec(
-                chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-                align: Align,
-            ) -> Option<ColSpec> {
-                // Consume '('
-                if chars.peek() != Some(&'(') {
-                    return None;
-                }
-                chars.next();
-                let mut num_str = String::new();
-                while let Some(&c) = chars.peek() {
-                    if c.is_ascii_digit() {
-                        num_str.push(c);
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                let width: usize = num_str.parse().ok()?;
-                let trunc = if chars.peek() == Some(&',') {
-                    chars.next(); // consume comma
-                    let mut mode = String::new();
-                    while let Some(&c) = chars.peek() {
-                        if c == ')' {
-                            break;
-                        }
-                        mode.push(c);
-                        chars.next();
-                    }
-                    match mode.as_str() {
-                        "trunc" => ColTruncate::End,
-                        "ltrunc" => ColTruncate::Start,
-                        "mtrunc" => ColTruncate::Middle,
-                        _ => ColTruncate::None,
-                    }
-                } else {
-                    ColTruncate::None
-                };
-                // Consume ')'
-                if chars.peek() == Some(&')') {
-                    chars.next();
-                }
-                Some(ColSpec {
-                    width,
-                    align,
-                    trunc,
-                })
-            }
-
-            let mut pending_col: Option<ColSpec> = None;
-            let mut rendered = String::new();
-            let mut chars = raw_fmt.chars().peekable();
-            while let Some(ch) = chars.next() {
-                if ch != '%' {
-                    rendered.push(ch);
-                    continue;
-                }
-                // Check for alignment directives: %<(...), %>(...), %><(...)
-                if chars.peek() == Some(&'<') {
-                    chars.next();
-                    if let Some(spec) = parse_col_spec(&mut chars, Align::Left) {
-                        pending_col = Some(spec);
-                    }
-                    continue;
-                }
-                if chars.peek() == Some(&'>') {
-                    chars.next();
-                    if chars.peek() == Some(&'<') {
-                        chars.next(); // %><(...)
-                        if let Some(spec) = parse_col_spec(&mut chars, Align::Center) {
-                            pending_col = Some(spec);
-                        }
-                    } else if chars.peek() == Some(&'>') {
-                        chars.next(); // %>>(...)
-                        if let Some(spec) = parse_col_spec(&mut chars, Align::Right) {
-                            pending_col = Some(spec);
-                        }
-                    } else if let Some(spec) = parse_col_spec(&mut chars, Align::Right) {
-                        pending_col = Some(spec);
-                    }
-                    continue;
-                }
-
-                // Helper macro-like: expand the placeholder, then apply pending_col
-                let mut expanded = String::new();
-                let target = if pending_col.is_some() {
-                    &mut expanded
-                } else {
-                    &mut rendered
-                };
-                match chars.peek() {
-                    Some('%') => {
-                        chars.next();
-                        target.push('%');
-                    }
-                    Some('H') => {
-                        chars.next();
-                        target.push_str(&oid.to_hex());
-                    }
-                    Some('h') => {
-                        chars.next();
-                        let hex = oid.to_hex();
-                        let n = abbrev_len.clamp(4, 40).min(hex.len());
-                        target.push_str(&hex[..n]);
-                    }
-                    Some('T') => {
-                        chars.next();
-                        target.push_str(&tree_hex);
-                    }
-                    Some('t') => {
-                        chars.next();
-                        let n = abbrev_len.clamp(4, 40).min(tree_hex.len());
-                        target.push_str(&tree_hex[..n]);
-                    }
-                    Some('P') => {
-                        chars.next();
-                        target.push_str(&parent_hexes.join(" "));
-                    }
-                    Some('p') => {
-                        chars.next();
-                        target.push_str(&parent_abbrevs.join(" "));
-                    }
-                    Some('n') => {
-                        chars.next();
-                        target.push('\n');
-                    }
-                    Some('s') => {
-                        chars.next();
-                        target.push_str(subject);
-                    }
-                    Some('b') => {
-                        chars.next();
-                        target.push_str(&body);
-                        if !body.is_empty() {
-                            target.push('\n');
-                        }
-                    }
-                    Some('B') => {
-                        chars.next();
-                        target.push_str(&commit.message);
-                    }
-                    Some('a') => {
-                        chars.next();
-                        match chars.next() {
-                            Some('n') => target.push_str(extract_name(&commit.author)),
-                            Some('N') => target.push_str(extract_name(&commit.author)),
-                            Some('e') => target.push_str(extract_email(&commit.author)),
-                            Some('E') => target.push_str(extract_email(&commit.author)),
-                            Some('l') => target.push_str(extract_email_local(&commit.author)),
-                            Some('d') => target.push_str(&extract_date_default(&commit.author)),
-                            Some('D') => target.push_str(&extract_date_rfc2822(&commit.author)),
-                            Some('t') => target.push_str(&extract_timestamp(&commit.author)),
-                            Some('s') => target.push_str(&extract_date_short(&commit.author)),
-                            Some('i') => target.push_str(&extract_date_iso(&commit.author)),
-                            Some('I') => {
-                                let Some(p) = parse_signature_times(&commit.author) else {
-                                    break;
-                                };
-                                let adjusted = p.unix_seconds + p.tz_offset_secs;
-                                let dt = time::OffsetDateTime::from_unix_timestamp(adjusted)
-                                    .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-                                let sign_ch = if p.tz_offset_secs >= 0 { '+' } else { '-' };
-                                let abs_off = p.tz_offset_secs.unsigned_abs();
-                                target.push_str(&format!(
-                                    "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{}{:02}:{:02}",
-                                    dt.year(),
-                                    dt.month() as u8,
-                                    dt.day(),
-                                    dt.hour(),
-                                    dt.minute(),
-                                    dt.second(),
-                                    sign_ch,
-                                    abs_off / 3600,
-                                    (abs_off % 3600) / 60
-                                ));
-                            }
-                            Some('r') => {
-                                let Some(p) = parse_signature_times(&commit.author) else {
-                                    break;
-                                };
-                                target.push_str(&format_relative_date(wall_now - p.unix_seconds));
-                            }
-                            Some(other) => {
-                                target.push('%');
-                                target.push('a');
-                                target.push(other);
-                            }
-                            None => {
-                                target.push('%');
-                                target.push('a');
-                            }
-                        }
-                    }
-                    Some('c') => {
-                        chars.next();
-                        match chars.next() {
-                            Some('n') => target.push_str(extract_name(&commit.committer)),
-                            Some('N') => target.push_str(extract_name(&commit.committer)),
-                            Some('e') => target.push_str(extract_email(&commit.committer)),
-                            Some('E') => target.push_str(extract_email(&commit.committer)),
-                            Some('l') => target.push_str(extract_email_local(&commit.committer)),
-                            Some('d') => target.push_str(&extract_date_default(&commit.committer)),
-                            Some('D') => target.push_str(&extract_date_rfc2822(&commit.committer)),
-                            Some('t') => target.push_str(&extract_timestamp(&commit.committer)),
-                            Some('s') => target.push_str(&extract_date_short(&commit.committer)),
-                            Some('i') => target.push_str(&extract_date_iso(&commit.committer)),
-                            Some('I') => {
-                                let Some(p) = parse_signature_times(&commit.committer) else {
-                                    break;
-                                };
-                                let adjusted = p.unix_seconds + p.tz_offset_secs;
-                                let dt = time::OffsetDateTime::from_unix_timestamp(adjusted)
-                                    .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-                                let sign_ch = if p.tz_offset_secs >= 0 { '+' } else { '-' };
-                                let abs_off = p.tz_offset_secs.unsigned_abs();
-                                target.push_str(&format!(
-                                    "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{}{:02}:{:02}",
-                                    dt.year(),
-                                    dt.month() as u8,
-                                    dt.day(),
-                                    dt.hour(),
-                                    dt.minute(),
-                                    dt.second(),
-                                    sign_ch,
-                                    abs_off / 3600,
-                                    (abs_off % 3600) / 60
-                                ));
-                            }
-                            Some('r') => {
-                                let Some(p) = parse_signature_times(&commit.committer) else {
-                                    break;
-                                };
-                                target.push_str(&format_relative_date(wall_now - p.unix_seconds));
-                            }
-                            Some(other) => {
-                                target.push('%');
-                                target.push('c');
-                                target.push(other);
-                            }
-                            None => {
-                                target.push('%');
-                                target.push('c');
-                            }
-                        }
-                    }
-                    Some('x') => {
-                        // Hex escape: %xNN
-                        chars.next();
-                        let mut hex_str = String::new();
-                        if let Some(&c1) = chars.peek() {
-                            if c1.is_ascii_hexdigit() {
-                                hex_str.push(c1);
-                                chars.next();
-                            }
-                        }
-                        if let Some(&c2) = chars.peek() {
-                            if c2.is_ascii_hexdigit() {
-                                hex_str.push(c2);
-                                chars.next();
-                            }
-                        }
-                        if let Ok(byte) = u8::from_str_radix(&hex_str, 16) {
-                            target.push(byte as char);
-                        }
-                    }
-                    Some('C') => {
-                        chars.next();
-                        if chars.peek() == Some(&'(') {
-                            chars.next();
-                            let mut spec = String::new();
-                            for c in chars.by_ref() {
-                                if c == ')' {
-                                    break;
-                                }
-                                spec.push(c);
-                            }
-                            let (force, color_spec) =
-                                if let Some(rest) = spec.strip_prefix("always,") {
-                                    (true, rest)
-                                } else if let Some(rest) = spec.strip_prefix("auto,") {
-                                    (false, rest)
-                                } else if spec == "auto" {
-                                    if use_color {
-                                        target.push_str("\x1b[m");
-                                    }
-                                    continue;
-                                } else {
-                                    (false, spec.as_str())
-                                };
-                            if use_color || force {
-                                target.push_str(&ansi_color_from_spec(color_spec));
-                            }
-                        } else {
-                            // Named colors: %Cred, %Cgreen, %Cblue, %Creset, %Cbold
-                            // Must match known names only, not consume trailing text
-                            let remaining: String = chars.clone().collect();
-                            let known = [
-                                "reset", "red", "green", "blue", "yellow", "magenta", "cyan",
-                                "white", "bold", "dim", "ul",
-                            ];
-                            let mut matched = false;
-                            for name in &known {
-                                if remaining.starts_with(name) {
-                                    for _ in 0..name.len() {
-                                        chars.next();
-                                    }
-                                    if use_color {
-                                        target.push_str(&ansi_color_from_name(name));
-                                    }
-                                    matched = true;
-                                    break;
-                                }
-                            }
-                            if !matched {
-                                // Unknown color name — consume alphanumerics
-                                while let Some(&c) = chars.peek() {
-                                    if c.is_alphanumeric() {
-                                        chars.next();
-                                    } else {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Some('w') => {
-                        // %w(...) — wrapping directive, consume and ignore for now
-                        chars.next();
-                        if chars.peek() == Some(&'(') {
-                            chars.next();
-                            for c in chars.by_ref() {
-                                if c == ')' {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    Some('+') => {
-                        // %+x — conditional newline: if next placeholder is non-empty, prepend newline
-                        chars.next();
-                        // Expand the following placeholder
-                        if chars.peek() == Some(&'%') {
-                            // The %+ applies to the NEXT expanded value
-                            // For simplicity, treat %+x as: if %x is non-empty, emit '\n' + value
-                            // This needs the *next* placeholder's value
-                        }
-                        // Simple: consume the next char as a format code; prepend \n if non-empty
-                        let mut sub = String::new();
-                        if let Some(&nc) = chars.peek() {
-                            match nc {
-                                'b' => {
-                                    chars.next();
-                                    sub.push_str(&body);
-                                    if !body.is_empty() {
-                                        sub.push('\n');
-                                    }
-                                }
-                                's' => {
-                                    chars.next();
-                                    sub.push_str(subject);
-                                }
-                                _ => {
-                                    chars.next();
-                                    sub.push('%');
-                                    sub.push('+');
-                                    sub.push(nc);
-                                }
-                            }
-                        }
-                        if !sub.is_empty() {
-                            target.push('\n');
-                            target.push_str(&sub);
-                        }
-                    }
-                    Some('-') => {
-                        // %-x — conditional: suppress newline before placeholder if empty
-                        chars.next();
-                        // Consume the next format code
-                        if let Some(&nc) = chars.peek() {
-                            match nc {
-                                'b' => {
-                                    chars.next();
-                                    if !body.is_empty() {
-                                        target.push_str(&body);
-                                        target.push('\n');
-                                    }
-                                }
-                                's' => {
-                                    chars.next();
-                                    target.push_str(subject);
-                                }
-                                _ => {
-                                    chars.next();
-                                    target.push('%');
-                                    target.push('-');
-                                    target.push(nc);
-                                }
-                            }
-                        }
-                    }
-                    Some('d') => {
-                        // Decorations — output empty for now
-                        chars.next();
-                    }
-                    Some('D') => {
-                        // Decorations without parens — output empty for now
-                        chars.next();
-                    }
-                    Some('e') => {
-                        // Encoding
-                        chars.next();
-                        if let Some(encoding) = &commit.encoding {
-                            target.push_str(encoding);
-                        }
-                    }
-                    Some('g') => {
-                        // Reflog placeholders: %gD, %gd, %gs, %gn, %ge, etc.
-                        chars.next();
-                        if let Some(&_nc) = chars.peek() {
-                            chars.next(); // consume the sub-specifier
-                                          // For non-reflog commits, these expand to empty
-                        }
-                    }
-                    Some('G') => {
-                        // Signature placeholders (%G?, %GS, %GK, %GF, %GP, %GT, %GG).
-                        // Unknown `%G<x>` (and a bare trailing `%G`) pass through
-                        // literally, mirroring git's pretty.c `return 0`.
-                        use crate::signing::{SignatureCheck, TrustLevel};
-                        let default_sig;
-                        let sig: &SignatureCheck = match &signature {
-                            Some(s) => s,
-                            None => {
-                                default_sig = SignatureCheck::default_none();
-                                &default_sig
-                            }
-                        };
-                        let mut lookahead = chars.clone();
-                        lookahead.next(); // consume 'G'
-                        let sub = lookahead.peek().copied();
-                        let handled = match sub {
-                            Some('?') => {
-                                let ch = if sig.result == 'G'
-                                    && matches!(
-                                        sig.trust_level,
-                                        TrustLevel::Undefined | TrustLevel::Never
-                                    ) {
-                                    'U'
-                                } else {
-                                    sig.result
-                                };
-                                target.push(ch);
-                                true
-                            }
-                            Some('S') => {
-                                target.push_str(sig.signer.as_deref().unwrap_or(""));
-                                true
-                            }
-                            Some('K') => {
-                                target.push_str(sig.key.as_deref().unwrap_or(""));
-                                true
-                            }
-                            Some('F') => {
-                                target.push_str(sig.fingerprint.as_deref().unwrap_or(""));
-                                true
-                            }
-                            Some('P') => {
-                                target
-                                    .push_str(sig.primary_key_fingerprint.as_deref().unwrap_or(""));
-                                true
-                            }
-                            Some('T') => {
-                                target.push_str(sig.trust_level.display_key());
-                                true
-                            }
-                            Some('G') => {
-                                target.push_str(&sig.output);
-                                true
-                            }
-                            _ => false,
-                        };
-                        if handled {
-                            chars.next(); // consume 'G'
-                            chars.next(); // consume sub-char
-                        } else {
-                            target.push('%');
-                        }
-                    }
-                    Some(&other) => {
-                        chars.next();
-                        target.push('%');
-                        target.push(other);
-                    }
-                    None => target.push('%'),
-                }
-                // Apply pending column formatting
-                if let Some(spec) = pending_col.take() {
-                    let formatted = apply_col(&spec, &expanded);
-                    rendered.push_str(&formatted);
-                }
-            }
-            Ok(rendered)
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -5497,7 +4411,6 @@ fn normalized_plain_literal_treesame_path(repo: &Repository, raw_spec: &str) -> 
 fn dense_path_limited_count_only_compatible(options: &RevListOptions) -> bool {
     options.count
         && !options.objects
-        && options.output_mode == OutputMode::OidOnly
         && matches!(options.ordering, OrderingMode::Default)
         && !options.left_right
         && !options.left_only
@@ -5516,7 +4429,7 @@ fn dense_path_limited_count_only_compatible(options: &RevListOptions) -> bool {
         && options.filter.is_none()
         && !options.filter_print_omitted
         && options.missing_action == MissingAction::Error
-        && !options.wants_parent_rewrite()
+        && !options.parent_rewrite
 }
 
 fn dense_path_limited_count_from_included(
@@ -6286,7 +5199,6 @@ fn rev_list_acceleration_compatible(options: &RevListOptions) -> bool {
         && !options.include_reflog_entries
         && !options.include_indexed_objects
         && !options.exclude_indexed_objects
-        && options.output_mode == OutputMode::OidOnly
         && !options.no_object_names
 }
 
@@ -10695,21 +9607,6 @@ mod tests {
     }
 
     #[test]
-    fn wants_parent_rewrite_from_output_mode() {
-        let parents = RevListOptions {
-            output_mode: OutputMode::Parents,
-            ..RevListOptions::default()
-        };
-        assert!(parents.wants_parent_rewrite());
-        let format_p = RevListOptions {
-            output_mode: OutputMode::Format("format:%h %P".to_owned()),
-            ..RevListOptions::default()
-        };
-        assert!(format_p.wants_parent_rewrite());
-        assert!(!RevListOptions::default().wants_parent_rewrite());
-    }
-
-    #[test]
     fn split_revision_token_range_and_caret() {
         let (pos, neg) = split_revision_token("main..feature");
         assert_eq!(pos, vec!["feature".to_owned()]);
@@ -10998,74 +9895,6 @@ mod tests {
     }
 
     #[test]
-    fn render_commit_output_modes() {
-        let (_dir, repo, _base, tip) = unit_test_repo_with_merge();
-        let oid_line = render_commit(&repo, tip, &OutputMode::OidOnly, 7).expect("oid");
-        assert_eq!(oid_line, tip.to_hex());
-        let parents = render_commit(&repo, tip, &OutputMode::Parents, 7).expect("parents");
-        assert!(parents.starts_with(&tip.to_hex()));
-        assert_eq!(parents.matches(' ').count(), 2);
-
-        for fmt in ["oneline", "short", "medium"] {
-            let out = render_commit(&repo, tip, &OutputMode::Format(fmt.to_owned()), 7).expect(fmt);
-            assert!(!out.is_empty());
-        }
-
-        let custom = render_commit_with_color(
-            &repo,
-            tip,
-            &OutputMode::Format("format:%<(10,trunc)h %s".to_owned()),
-            7,
-            false,
-        )
-        .expect("custom");
-        assert!(custom.contains("merge") || custom.contains(".."));
-
-        let placeholders = render_commit(
-            &repo,
-            tip,
-            &OutputMode::Format(
-                "format:%H%n%h%n%T%n%t%n%P%n%p%n%an %ae%n%at%n%cn%n%s%n%b".to_owned(),
-            ),
-            12,
-        )
-        .expect("placeholders");
-        assert!(placeholders.lines().count() >= 5);
-
-        let dates = render_commit(
-            &repo,
-            tip,
-            &OutputMode::Format("format:%ad %cd %as %cs %ai %ci %ar %cr %x0a".to_owned()),
-            12,
-        )
-        .expect("dates");
-        assert!(!dates.is_empty());
-
-        let colored = render_commit_with_color(
-            &repo,
-            tip,
-            &OutputMode::Format("format:%Cred%h%Creset %<(8)%s".to_owned()),
-            7,
-            true,
-        )
-        .expect("color");
-        assert!(colored.contains('\x1b') || colored.contains(&tip.to_hex()[..7]));
-
-        let mega = render_commit_with_color(
-            &repo,
-            tip,
-            &OutputMode::Format(
-                "tformat:%w(78,9)%+s%-b%G?%GS%GK%GF%GP%GT%GG%d%D%e%gD%>(10,trunc)h%><(15,mtrunc)s %aI %cI %x20"
-                    .to_owned(),
-            ),
-            10,
-            true,
-        )
-        .expect("mega format");
-        assert!(!mega.is_empty());
-    }
-
-    #[test]
     fn select_bisect_commits_ranks_linear_history() {
         let dir = tempdir().expect("tempdir");
         Repository::init(
@@ -11146,7 +9975,6 @@ mod tests {
             &[String::from("main")],
             &[],
             &RevListOptions {
-                output_mode: OutputMode::Parents,
                 parent_rewrite: true,
                 ..RevListOptions::default()
             },
@@ -11316,15 +10144,8 @@ mod line_coverage_tests {
             OrderingMode::AuthorDateWalk,
             OrderingMode::AuthorDateTopo,
         ];
-        let output_modes = [
-            OutputMode::OidOnly,
-            OutputMode::Parents,
-            OutputMode::Format(String::from("oneline")),
-            OutputMode::Format(String::from("format:%H %P %s %ad %cd %D %d %gD")),
-            OutputMode::Format(String::from("tformat:%<(10,trunc)%h %<(20,mtrunc)%s")),
-        ];
         for ordering in orderings {
-            for output_mode in &output_modes {
+            for parent_rewrite in [false, true] {
                 for (full, simplify, sparse, fp) in
                     [(false, false, false, false), (true, true, true, true)]
                 {
@@ -11332,7 +10153,7 @@ mod line_coverage_tests {
                     deco.insert(tip);
                     let opts = RevListOptions {
                         ordering,
-                        output_mode: output_mode.clone(),
+                        parent_rewrite,
                         paths: vec!["tracked.txt".to_owned()],
                         full_history: full,
                         simplify_merges: simplify,
@@ -11415,7 +10236,7 @@ mod line_coverage_tests {
     }
 
     #[test]
-    fn merge_bases_render_and_resolve_specs() -> Result<()> {
+    fn merge_bases_and_resolve_specs() -> Result<()> {
         let (_dir, repo, tip) = seed_repo(8, true);
         let all = rev_list(
             &repo,
@@ -11442,30 +10263,12 @@ mod line_coverage_tests {
             },
         )?;
         assert!(quiet.reachable_commit_count.is_some() || !all.is_empty());
-        for mode in [
-            OutputMode::Format(String::from("format:%H%n%P%n%T%n%t")),
-            OutputMode::Format(String::from("format:%h %s %D")),
-        ] {
-            let _ = render_commit_with_color(&repo, tip, &mode, 12, true)?;
-        }
         Ok(())
     }
 
     #[test]
-    fn deep_linear_render_and_rev_list_objects() -> Result<()> {
-        let (_dir, repo, tip) = seed_repo(120, true);
-        let format_specs = [
-            "format:%H %h %T %t %P %p %an %ae %at %cn %ce %ct %s %b %N %G? %GS %GK %GF %GP %GT %GG %d %D %gD",
-            "format:%ad %cd %as %cs %ai %ci %ar %cr %aI %cI %aD %cD",
-            "tformat:%w(78,9)%+s%-b%>(10,trunc)h%><(15,mtrunc)s",
-            "format:%<(10,trunc)h %<(10,trunc)s",
-            "format:%C(auto)%h %C(bold)%s",
-        ];
-        for spec in format_specs {
-            let mode = OutputMode::Format(spec.to_owned());
-            let _ = render_commit(&repo, tip, &mode, 12)?;
-            let _ = render_commit_with_color(&repo, tip, &mode, 12, true)?;
-        }
+    fn deep_linear_resolve_and_rev_list_objects() -> Result<()> {
+        let (_dir, repo, _tip) = seed_repo(120, true);
         for n in 0..32 {
             let spec = format!("HEAD~{n}");
             let _ = resolve_revision_commits(&repo, &[spec])?;
@@ -11639,7 +10442,6 @@ mod line_coverage_tests {
                     show_pulls: true,
                     exclude_first_parent_only: true,
                     parent_rewrite: true,
-                    output_mode: OutputMode::Parents,
                     paths: vec!["tracked.txt".to_owned()],
                     full_history: true,
                     sparse: true,
@@ -11692,26 +10494,16 @@ mod line_coverage_tests {
     }
 
     #[test]
-    fn deep_history_format_and_parent_rewrite() -> Result<()> {
-        let (_dir, repo, tip) = seed_repo(160, true);
-        let formats = [
-            "format:%H %P %T %t %p %s %D %d %gD %N %G? %GS %GK %GF %GP %GT %GG",
-            "format:%an %ae %at %cn %ce %ct %ad %cd %as %cs %ai %ci %ar %cr",
-            "tformat:%<(12,trunc)%h %<(30,mtrunc)%s %>(8,trunc)%an",
-        ];
-        for fmt in formats {
-            let mode = OutputMode::Format(fmt.to_owned());
-            let opts = RevListOptions {
-                output_mode: mode.clone(),
-                parent_rewrite: true,
-                objects: true,
-                ordering: OrderingMode::AuthorDateTopo,
-                ..RevListOptions::default()
-            };
-            let out = rev_list(&repo, &[String::from("main")], &[], &opts)?;
-            let _ = render_commit_with_color(&repo, tip, &mode, 12, true)?;
-            assert!(!out.commits.is_empty());
-        }
+    fn deep_history_parent_rewrite() -> Result<()> {
+        let (_dir, repo, _tip) = seed_repo(160, true);
+        let opts = RevListOptions {
+            parent_rewrite: true,
+            objects: true,
+            ordering: OrderingMode::AuthorDateTopo,
+            ..RevListOptions::default()
+        };
+        let out = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+        assert!(!out.commits.is_empty());
         Ok(())
     }
 

@@ -15,9 +15,7 @@ use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_list::{
-    merge_bases, rev_list, OrderingMode, OutputMode, RevListOptions,
-};
+use grit_lib::revwalk::rev_list::{merge_bases, rev_list, OrderingMode, RevListOptions};
 use grit_lib::revwalk::rev_parse::{
     resolve_revision, resolve_revision_as_commit, resolve_revision_for_verify,
 };
@@ -93,7 +91,6 @@ fn long_history_revwalk_revparse_and_blame() -> grit_lib::error::Result<()> {
     ] {
         let opts = RevListOptions {
             ordering,
-            output_mode: OutputMode::Format(String::from("oneline")),
             paths: vec!["a.txt".into(), "dir/".into()],
             first_parent: ordering == OrderingMode::Topo,
             simplify_merges: true,
