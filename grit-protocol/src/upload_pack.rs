@@ -8,7 +8,11 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 
-use crate::{run_upload_pack, run_upload_pack_to, Extensions, Result};
+use crate::{
+    run_upload_pack, run_upload_pack_to, run_upload_pack_with_session, Extensions, Result,
+    ServeSession,
+};
+use grit_lib::remote::serve::UploadOutcome;
 
 /// Run upload-pack ref advertisement (for `GET /info/refs?service=git-upload-pack`).
 ///
@@ -221,7 +225,33 @@ pub fn stateless_rpc_to_reader(
     extensions: &Extensions,
     output: &mut dyn std::io::Write,
 ) -> Result<()> {
-    run_upload_pack_to(
+    stateless_rpc_to_reader_with_session(
+        repo_path,
+        request_body,
+        protocol_version,
+        repository_options,
+        extensions,
+        output,
+        &ServeSession::none(),
+    )
+    .map(|_| ())
+}
+
+/// Like [`stateless_rpc_to_reader`], returning [`UploadOutcome`] when the exchange finishes.
+///
+/// # Errors
+///
+/// Same as [`stateless_rpc_to_reader`].
+pub fn stateless_rpc_to_reader_with_session(
+    repo_path: &Path,
+    request_body: &mut dyn Read,
+    protocol_version: Option<u8>,
+    repository_options: &RepositoryOptions,
+    extensions: &Extensions,
+    output: &mut dyn std::io::Write,
+    session: &ServeSession,
+) -> Result<UploadOutcome> {
+    run_upload_pack_with_session(
         repo_path,
         protocol_version,
         true,
@@ -230,5 +260,6 @@ pub fn stateless_rpc_to_reader(
         repository_options,
         extensions,
         output,
+        session,
     )
 }

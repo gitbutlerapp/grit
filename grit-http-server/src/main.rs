@@ -270,6 +270,7 @@ async fn rpc_dispatch(
         body,
         state.repository_options.clone(),
         grit_protocol::Extensions::default(),
+        grit_protocol::ServeSession::none(),
     )
     .await;
     state.with_cookie(response)

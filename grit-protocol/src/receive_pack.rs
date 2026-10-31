@@ -8,7 +8,10 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 
-use crate::{run_receive_pack, run_receive_pack_to, Extensions, Result};
+use crate::{
+    run_receive_pack, run_receive_pack_to, run_receive_pack_with_session, Extensions,
+    ReceiveRpcResult, Result, ServeSession,
+};
 
 /// Run receive-pack ref advertisement (for `GET /info/refs?service=git-receive-pack`).
 ///
@@ -122,12 +125,36 @@ pub fn stateless_rpc_from_reader(
     request_body: &mut dyn Read,
     repository_options: &RepositoryOptions,
 ) -> Result<Vec<u8>> {
-    run_receive_pack(
+    stateless_rpc_with_session(
+        repo_path,
+        request_body,
+        repository_options,
+        &ServeSession::none(),
+    )
+    .map(|r| r.body)
+}
+
+/// Like [`stateless_rpc_from_reader`], with a [`ServeSession`] and a typed [`ReceiveRpcResult::outcome`].
+///
+/// # Errors
+///
+/// Same as [`stateless_rpc_from_reader`].
+pub fn stateless_rpc_with_session(
+    repo_path: &Path,
+    request_body: &mut dyn Read,
+    repository_options: &RepositoryOptions,
+    session: &ServeSession,
+) -> Result<ReceiveRpcResult> {
+    let mut body = Vec::new();
+    let outcome = run_receive_pack_with_session(
         repo_path,
         true,
         false,
         request_body,
         repository_options,
         &Extensions::default(),
-    )
+        &mut body,
+        session,
+    )?;
+    Ok(ReceiveRpcResult { body, outcome })
 }

@@ -256,6 +256,44 @@ fn sign_in(addr: SocketAddr, email: &str, password: &str) -> Reply {
     )
 }
 
+#[cfg(unix)]
+#[test]
+fn push_pre_receive_hook_sees_token_user_as_remote_user() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let database = fixture(root);
+    let bare = root.join("repos/project.git");
+    let hook = bare.join("hooks/pre-receive");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\ncat >/dev/null\necho \"grit-remote-user=$REMOTE_USER\" >&2\n",
+    )
+    .expect("hook");
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let addr = start(&root.join("repos"), &database);
+    let clone_url = format!("http://u:{ADMIN_TOKEN}@{addr}/project.git");
+    git(root, &["clone", "-q", &clone_url, "w"]);
+    let w = root.join("w");
+    git(&w, &["commit", "-q", "--allow-empty", "-m", "x"]);
+    let out = git_output(&w, &["push", "origin", "HEAD:refs/heads/hook-user-test"]);
+    assert!(
+        out.status.success(),
+        "push failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("grit-remote-user=admin@example.com"),
+        "expected token user in hook output: {stderr}"
+    );
+    assert!(
+        !stderr.contains("grit-remote-user=u"),
+        "must not use HTTP username: {stderr}"
+    );
+}
+
 #[test]
 fn tokens_gate_clone_fetch_and_push() {
     let tmp = tempfile::tempdir().expect("tempdir");

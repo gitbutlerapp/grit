@@ -432,6 +432,31 @@ pub trait ReceiveHook {
         let _ = updates;
         None
     }
+
+    /// Run after refs were updated and the `post-receive` script, like a
+    /// `post-receive` hook for in-process policy and audit.
+    ///
+    /// Non-zero script exit codes do not undo ref updates; returning an error
+    /// here is for the embedder only and does not change what the client sees.
+    fn post_receive(
+        &self,
+        commands: &[&RefCommand],
+        odb: &Odb,
+        ctx: &ReceiveHookContext<'_>,
+    ) -> std::result::Result<(), RefUpdateRefusal> {
+        let _ = (commands, odb, ctx);
+        Ok(())
+    }
+
+    /// Run after the `post-update` script for the same applied updates.
+    fn post_update(
+        &self,
+        commands: &[&RefCommand],
+        odb: &Odb,
+    ) -> std::result::Result<(), RefUpdateRefusal> {
+        let _ = (commands, odb);
+        Ok(())
+    }
 }
 
 /// Push options and other session context for [`ReceiveHook`].
@@ -474,6 +499,10 @@ pub struct ReceiveOutcome {
     pub hooks: Vec<HookRunRecord>,
     /// Push options delivered to hooks via `GIT_PUSH_OPTION_*`.
     pub push_options: Vec<String>,
+    /// Decoded pack bytes read from the client (zero when no pack was sent).
+    pub bytes_received: u64,
+    /// Object count from the pack header (zero when no pack was sent).
+    pub objects_received: u32,
 }
 
 /// Serve one push session: advertise refs, read the ref updates and pack, store
@@ -600,6 +629,8 @@ pub fn receive_pack_with_hook_cancellable(
     let sideband = request.caps.contains("side-band-64k");
 
     let needs_pack = request.commands.iter().any(|c| c.new.is_some());
+    let mut bytes_received = 0u64;
+    let mut objects_received = 0u32;
     let mut quarantine = if needs_pack {
         Some(ReceiveQuarantine::create(repo.odb(), repo.git_dir())?)
     } else {
@@ -635,6 +666,8 @@ pub fn receive_pack_with_hook_cancellable(
             let odb = q.odb();
             spool_push_pack(input, &odb, max_input, &stop)
                 .and_then(|pack| {
+                    bytes_received = pack.bytes_received();
+                    objects_received = pack.object_count();
                     ingest_spooled_pack(
                         &odb,
                         pack,
@@ -735,6 +768,8 @@ pub fn receive_pack_with_hook_cancellable(
         updates,
         hooks: hook_records,
         push_options: request.push_options.clone(),
+        bytes_received,
+        objects_received,
     })
 }
 
@@ -1164,10 +1199,18 @@ fn apply_commands_with_hooks(
         let post_result = scripts.post_receive(&successful);
         relay_hook_sideband(&mut sideband_out, &post_result)?;
         hook_records.push(hook_record("post-receive", &post_result));
+        let _ = hook.post_receive(
+            &successful,
+            repo.odb(),
+            &ReceiveHookContext {
+                push_options: &request.push_options,
+            },
+        );
 
         let pu_result = scripts.post_update(&successful);
         relay_hook_sideband(&mut sideband_out, &pu_result)?;
         hook_records.push(hook_record("post-update", &pu_result));
+        let _ = hook.post_update(&successful, repo.odb());
     }
 
     drop(migrated_pack_keeps);
@@ -1421,6 +1464,23 @@ struct SpooledPack {
     file: tempfile::NamedTempFile,
     /// The 12-byte pack header (signature, version, object count).
     header: [u8; 12],
+    /// Pack bytes read from the client (including header and checksum).
+    bytes_received: u64,
+}
+
+impl SpooledPack {
+    fn bytes_received(&self) -> u64 {
+        self.bytes_received
+    }
+
+    fn object_count(&self) -> u32 {
+        u32::from_be_bytes([
+            self.header[8],
+            self.header[9],
+            self.header[10],
+            self.header[11],
+        ])
+    }
 }
 
 /// Stream exactly one packfile from the push stream into a temp file.
@@ -1487,7 +1547,11 @@ fn spool_push_pack(
     }
     out.flush()?;
     drop(out);
-    Ok(SpooledPack { file, header })
+    Ok(SpooledPack {
+        file,
+        header,
+        bytes_received: written,
+    })
 }
 
 /// `Read::read`, retrying when interrupted by a signal.
