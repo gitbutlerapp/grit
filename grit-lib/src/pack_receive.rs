@@ -276,14 +276,25 @@ fn pkt_line_payload_len(len_buf: &[u8; 4]) -> Result<usize> {
     Ok(len)
 }
 
-fn read_interrupted(reader: &mut dyn Read, buf: &mut [u8]) -> Result<usize> {
+fn read_interrupted(
+    reader: &mut dyn Read,
+    buf: &mut [u8],
+    cancel: &dyn crate::progress::Cancel,
+) -> Result<usize> {
     const ATTEMPTS: usize = 3;
     let mut attempt = 0usize;
     loop {
         match reader.read(buf) {
             Ok(n) => return Ok(n),
-            Err(e) if e.kind() == io::ErrorKind::Interrupted && attempt + 1 < ATTEMPTS => {
-                attempt += 1;
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                if cancel.is_cancelled() {
+                    return Err(Error::Cancelled);
+                }
+                if attempt + 1 < ATTEMPTS {
+                    attempt += 1;
+                    continue;
+                }
+                return Err(Error::Io(e));
             }
             Err(e) => return Err(Error::Io(e)),
         }
@@ -292,10 +303,20 @@ fn read_interrupted(reader: &mut dyn Read, buf: &mut [u8]) -> Result<usize> {
 
 /// Copy `reader` to `writer` with a large buffer (faster than [`io::copy`]'s 8 KiB default).
 pub fn copy_reader_to_writer(reader: &mut dyn Read, writer: &mut dyn Write) -> Result<u64> {
+    copy_reader_to_writer_cancellable(reader, writer, &crate::progress::NeverCancel)
+}
+
+/// Like [`copy_reader_to_writer`], but stops with [`Error::Cancelled`] when `cancel` is set
+/// after an interrupted read.
+pub fn copy_reader_to_writer_cancellable(
+    reader: &mut dyn Read,
+    writer: &mut dyn Write,
+    cancel: &dyn crate::progress::Cancel,
+) -> Result<u64> {
     let mut buf = vec![0u8; 1024 * 1024];
     let mut total = 0u64;
     loop {
-        let n = read_interrupted(reader, &mut buf)?;
+        let n = read_interrupted(reader, &mut buf, cancel)?;
         if n == 0 {
             break;
         }
@@ -338,12 +359,12 @@ impl SidebandStreamBuf {
         self.pos = 0;
     }
 
-    fn refill(&mut self, r: &mut dyn Read) -> Result<bool> {
+    fn refill(&mut self, r: &mut dyn Read, cancel: &dyn crate::progress::Cancel) -> Result<bool> {
         self.compact();
         if self.end >= self.storage.len() {
             return Ok(false);
         }
-        let n = read_interrupted(r, &mut self.storage[self.end..])?;
+        let n = read_interrupted(r, &mut self.storage[self.end..], cancel)?;
         self.end += n;
         Ok(n > 0)
     }
@@ -395,7 +416,7 @@ fn read_sideband_pack_tail_buffered(
     loop {
         poll_cancel(progress, cancel)?;
         while stream.available() < 4 {
-            if !stream.refill(r)? {
+            if !stream.refill(r, cancel)? {
                 if stream.available() == 0 {
                     flush_coalesced_progress(progress, &mut receiving, &mut progress_pending);
                     finish_receiving(progress, receiving);
@@ -438,7 +459,7 @@ fn read_sideband_pack_tail_buffered(
         }
         let payload_len = len - 4;
         while stream.available() < 4 + payload_len {
-            if !stream.refill(r)? {
+            if !stream.refill(r, cancel)? {
                 return Err(sideband_unexpected_eof());
             }
         }

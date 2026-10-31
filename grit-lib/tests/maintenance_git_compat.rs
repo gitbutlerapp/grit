@@ -1,6 +1,7 @@
 //! Repack/gc compatibility: grit maintenance vs system `git fsck`.
 
 use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -3023,4 +3024,128 @@ fn gc_honors_pack_write_bitmaps_synonym_and_scope_order() {
         !pack_has_bitmap(&reverse_dir.path().join(".git")),
         "later repack.writeBitmaps=false must override earlier pack.writeBitmaps=true"
     );
+}
+
+fn git_garbage_count(dir: &Path) -> usize {
+    let out = Command::new("git")
+        .current_dir(dir)
+        .args(["count-objects", "-v"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .envs(NO_AUTO_MAINTENANCE_ENV.iter().copied())
+        .output()
+        .expect("git count-objects");
+    assert!(out.status.success(), "git count-objects -v");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("garbage:")
+                .map(|rest| rest.trim().parse().expect("garbage count"))
+        })
+        .unwrap_or(0)
+}
+
+#[test]
+fn gc_prunes_stale_temporary_pack_files_like_git() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "seed"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+
+    let objects = dir.path().join(".git/objects");
+    let pack_dir = objects.join("pack");
+    fs::write(pack_dir.join("tmp_pack_old"), b"stale tmp pack").expect("old tmp");
+    fs::write(pack_dir.join("tmp_pack_fresh"), b"fresh tmp pack").expect("fresh tmp");
+    fs::write(pack_dir.join(".notes-install-backup"), b"notes").expect("notes backup");
+    fs::create_dir(pack_dir.join(".cache-install-state")).expect("cache dir");
+    fs::write(
+        pack_dir.join(".pack-deadbeef-install-stale-file"),
+        b"regular file",
+    )
+    .expect("install-shaped file");
+    fs::create_dir(pack_dir.join(".pack-deadbeef-install-1_0")).expect("install dir");
+    fs::write(
+        pack_dir.join(".pack-deadbeef-install-1_0/pack-deadbeef.pack"),
+        b"PACK",
+    )
+    .expect("install pack");
+
+    let three_weeks_ago =
+        FileTime::from_unix_time(OffsetDateTime::now_utc().unix_timestamp() - 21 * 86400, 0);
+    filetime::set_file_mtime(pack_dir.join("tmp_pack_old"), three_weeks_ago).expect("mtime old");
+    filetime::set_file_mtime(pack_dir.join(".pack-deadbeef-install-1_0"), three_weeks_ago)
+        .expect("mtime install");
+    for path in [
+        pack_dir.join(".notes-install-backup"),
+        pack_dir.join(".cache-install-state"),
+        pack_dir.join(".pack-deadbeef-install-stale-file"),
+    ] {
+        filetime::set_file_mtime(&path, three_weeks_ago).expect("mtime preserved junk");
+    }
+
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+    gc(&repo, &GcOptions::default()).expect("grit gc");
+    assert_eq!(git_garbage_count(dir.path()), 1, "fresh tmp_pack kept");
+    assert!(!pack_dir.join("tmp_pack_old").exists());
+    assert!(!pack_dir.join(".pack-deadbeef-install-1_0").exists());
+    assert!(pack_dir.join("tmp_pack_fresh").exists());
+    assert!(pack_dir.join(".notes-install-backup").exists());
+    assert!(pack_dir.join(".cache-install-state").is_dir());
+    assert!(pack_dir.join(".pack-deadbeef-install-stale-file").is_file());
+
+    let never_dir = TempDir::new().expect("never");
+    duplicate_repo_tree(dir.path(), never_dir.path());
+    git(never_dir.path(), &["config", "gc.pruneExpire", "never"]);
+    let never_repo =
+        Repository::discover(Some(never_dir.path()), &RepositoryOptions::empty()).expect("open");
+    fs::write(
+        never_dir.path().join(".git/objects/pack/tmp_pack_old"),
+        b"stale",
+    )
+    .expect("rewrite stale");
+    filetime::set_file_mtime(
+        never_dir.path().join(".git/objects/pack/tmp_pack_old"),
+        three_weeks_ago,
+    )
+    .expect("mtime");
+    gc(&never_repo, &GcOptions::default()).expect("gc never");
+    assert!(never_dir
+        .path()
+        .join(".git/objects/pack/tmp_pack_old")
+        .exists());
+
+    let dry_dir = TempDir::new().expect("dry");
+    duplicate_repo_tree(dir.path(), dry_dir.path());
+    let dry_repo =
+        Repository::discover(Some(dry_dir.path()), &RepositoryOptions::empty()).expect("open");
+    fs::write(
+        dry_dir.path().join(".git/objects/pack/tmp_pack_old"),
+        b"stale",
+    )
+    .expect("rewrite stale");
+    filetime::set_file_mtime(
+        dry_dir.path().join(".git/objects/pack/tmp_pack_old"),
+        three_weeks_ago,
+    )
+    .expect("mtime");
+    gc(
+        &dry_repo,
+        &GcOptions {
+            repack: RepackOptions {
+                dry_run: true,
+                ..RepackOptions::default()
+            },
+            ..GcOptions::default()
+        },
+    )
+    .expect("gc dry-run");
+    assert!(dry_dir
+        .path()
+        .join(".git/objects/pack/tmp_pack_old")
+        .exists());
+
+    let twin = TempDir::new().expect("twin");
+    duplicate_repo_tree(dir.path(), twin.path());
+    git(twin.path(), &["gc"]);
+    assert_eq!(git_garbage_count(twin.path()), 1);
 }

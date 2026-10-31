@@ -1459,6 +1459,9 @@ fn skipping_repack_would_retain_prunable_packed_objects(
 
 /// Delete unreachable loose objects using `gc.pruneExpire` or an explicit cutoff.
 ///
+/// Also removes stale temporary object paths (interrupted fetch/repack/index-pack leftovers)
+/// under the same expiry rules as Git's `git gc` / `git prune` temporary-file sweep.
+///
 /// # Errors
 ///
 /// Propagates config parse failures, unsupported ODB backends, and I/O errors.
@@ -1476,12 +1479,148 @@ pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<Pru
     };
     let roots = collect_maintenance_object_roots(repo)?;
     let shallow = load_shallow_boundaries(repo.git_dir());
-    prune_loose_unreachable_with(
+    let mut stats = prune_loose_unreachable_with(
         odb,
         &LazyReachable::new(odb, &roots, &shallow),
         keep_newer_than,
         opts.dry_run,
-    )
+    )?;
+    let objects_dir = odb
+        .files_objects_dir()
+        .ok_or(Error::UnsupportedObjectStore {
+            operation: "prune temporary objects",
+        })?;
+    let temp =
+        prune_stale_temporary_objects_with_cutoff(objects_dir, keep_newer_than, opts.dry_run)?;
+    stats.pruned += temp.pruned;
+    stats.kept += temp.kept;
+    Ok(stats)
+}
+
+/// Remove stale temporary object files and directories left by interrupted maintenance or
+/// fetch operations.
+///
+/// Uses the same cutoff semantics as unreachable loose-object pruning: when
+/// `keep_newer_than` is `None` (`gc.pruneExpire=now|all`), every temporary entry is
+/// eligible; otherwise only entries whose modification time is not newer than the cutoff
+/// are removed. When `keep_newer_than` is `None` and the caller wants to skip entirely,
+/// pass `GcLoosePrunePolicy::Disabled` at the call site instead of calling this function.
+///
+/// # Errors
+///
+/// Returns I/O errors from directory traversal or removal.
+pub fn prune_stale_temporary_objects(
+    repo: &Repository,
+    keep_newer_than: Option<SystemTime>,
+    dry_run: bool,
+) -> Result<PruneStats> {
+    repo.odb()
+        .require_files_primary("prune temporary objects")?;
+    let objects_dir = repo
+        .odb()
+        .files_objects_dir()
+        .ok_or(Error::UnsupportedObjectStore {
+            operation: "prune temporary objects",
+        })?;
+    prune_stale_temporary_objects_with_cutoff(objects_dir, keep_newer_than, dry_run)
+}
+
+fn prune_stale_temporary_objects_with_cutoff(
+    objects_dir: &Path,
+    keep_newer_than: Option<SystemTime>,
+    dry_run: bool,
+) -> Result<PruneStats> {
+    let mut stats = PruneStats::default();
+    let mut consider = |path: &Path| -> Result<()> {
+        let meta = match fs::symlink_metadata(path) {
+            Ok(m) => m,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(Error::Io(e)),
+        };
+        if temporary_object_expired(&meta, keep_newer_than) {
+            if dry_run {
+                stats.pruned += 1;
+            } else if meta.is_dir() {
+                fs::remove_dir_all(path).map_err(Error::Io)?;
+                stats.pruned += 1;
+            } else {
+                fs::remove_file(path).map_err(Error::Io)?;
+                stats.pruned += 1;
+            }
+        } else {
+            stats.kept += 1;
+        }
+        Ok(())
+    };
+
+    if let Ok(entries) = fs::read_dir(objects_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("tmp_") {
+                consider(&entry.path())?;
+            } else if name.len() == 2 && name.as_bytes().iter().all(|b| b.is_ascii_hexdigit()) {
+                if let Ok(loose) = fs::read_dir(entry.path()) {
+                    for loose_entry in loose.flatten() {
+                        let loose_name = loose_entry.file_name();
+                        if loose_name.to_string_lossy().starts_with("tmp_obj_") {
+                            consider(&loose_entry.path())?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let pack_dir = objects_dir.join("pack");
+    if let Ok(entries) = fs::read_dir(&pack_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("tmp_") {
+                consider(&entry.path())?;
+                continue;
+            }
+            if !is_grit_pack_install_stage_name(&name) {
+                continue;
+            }
+            let meta = match fs::symlink_metadata(entry.path()) {
+                Ok(m) => m,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(Error::Io(e)),
+            };
+            if meta.is_dir() {
+                consider(&entry.path())?;
+            }
+        }
+    }
+
+    let incoming = objects_dir.join("incoming");
+    if let Ok(entries) = fs::read_dir(&incoming) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("pack-receive-") && name.ends_with(".tmp") {
+                consider(&entry.path())?;
+            }
+        }
+    }
+    Ok(stats)
+}
+
+/// Grit index-pack staging directory: `.pack-<oid>-install-<pid>_<seq>`.
+fn is_grit_pack_install_stage_name(name: &str) -> bool {
+    name.starts_with(".pack-") && name.contains("-install-")
+}
+
+fn temporary_object_expired(meta: &fs::Metadata, keep_newer_than: Option<SystemTime>) -> bool {
+    match keep_newer_than {
+        None => true,
+        Some(cutoff) => meta
+            .modified()
+            .ok()
+            .is_none_or(|modified| modified <= cutoff),
+    }
 }
 
 fn duration_ms(d: std::time::Duration) -> u64 {
@@ -1873,10 +2012,6 @@ fn gc_locked(repo: &Repository, opts: &GcOptions, now: i64) -> Result<GcStats> {
         stats.phase_timings.drop_large_blobs_ms = duration_ms(start.elapsed());
     }
 
-    if dry_run {
-        return Ok(stats);
-    }
-
     // Repack prunes unreachable loose objects itself (sharing its reachability walk), so gc
     // only reports the outcome.
     stats.prune_ran = stats.repack.unreachable_prune_ran;
@@ -1884,6 +2019,22 @@ fn gc_locked(repo: &Repository, opts: &GcOptions, now: i64) -> Result<GcStats> {
         pruned: stats.repack.unreachable_loose_pruned,
         kept: stats.repack.unreachable_loose_kept,
     };
+
+    if let GcLoosePrunePolicy::Enabled { keep_newer_than } = &prune_policy {
+        let temp = prune_stale_temporary_objects_with_cutoff(
+            repo.odb()
+                .files_objects_dir()
+                .ok_or(Error::UnsupportedObjectStore { operation: "gc" })?,
+            *keep_newer_than,
+            dry_run,
+        )?;
+        stats.prune.pruned += temp.pruned;
+        stats.prune.kept += temp.kept;
+    }
+
+    if dry_run {
+        return Ok(stats);
+    }
 
     if opts.write_commit_graph && gc_should_write_commit_graph(&cfg)? {
         let start = Instant::now();
@@ -2603,6 +2754,8 @@ mod tests {
     use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::progress::{NeverCancel, NullProgress};
     use crate::repo::InitOptions;
+    use filetime::FileTime;
+    use std::time::SystemTime;
     use tempfile::TempDir;
 
     /// Pack `oids` (already stored) into one new pack of `repo`, with a `.keep` marker
@@ -3562,5 +3715,70 @@ mod tests {
             .status()
             .expect("fsck")
             .success());
+    }
+
+    #[test]
+    fn pack_install_stage_name_matches_only_grit_staging_dirs() {
+        assert!(is_grit_pack_install_stage_name(
+            ".pack-deadbeef-install-1_0"
+        ));
+        assert!(!is_grit_pack_install_stage_name(".notes-install-backup"));
+        assert!(!is_grit_pack_install_stage_name(".cache-install-state"));
+        assert!(is_grit_pack_install_stage_name(
+            ".pack-deadbeef-install-stale-file"
+        ));
+    }
+
+    #[test]
+    fn gc_prunes_stale_tmp_pack_and_install_dirs() {
+        let (_dir, repo) = repo_with_config("");
+        let pack_dir = repo.git_dir().join("objects/pack");
+        fs::write(pack_dir.join("tmp_pack_old"), b"old").unwrap();
+        fs::write(pack_dir.join("tmp_pack_fresh"), b"new").unwrap();
+        fs::create_dir(pack_dir.join(".pack-deadbeef-install-9_0")).unwrap();
+        fs::write(pack_dir.join(".notes-install-backup"), b"notes").unwrap();
+        fs::create_dir(pack_dir.join(".cache-install-state")).unwrap();
+        fs::write(
+            pack_dir.join(".pack-deadbeef-install-stale-file"),
+            b"not a stage dir",
+        )
+        .unwrap();
+        let cutoff = SystemTime::now() - std::time::Duration::from_secs(21 * 86400);
+        filetime::set_file_mtime(pack_dir.join("tmp_pack_old"), FileTime::from(cutoff)).unwrap();
+        filetime::set_file_mtime(
+            pack_dir.join(".pack-deadbeef-install-9_0"),
+            FileTime::from(cutoff),
+        )
+        .unwrap();
+        for path in [
+            pack_dir.join(".notes-install-backup"),
+            pack_dir.join(".cache-install-state"),
+            pack_dir.join(".pack-deadbeef-install-stale-file"),
+        ] {
+            filetime::set_file_mtime(&path, FileTime::from(cutoff)).unwrap();
+        }
+        gc(&repo, &GcOptions::default()).expect("gc");
+        assert!(!pack_dir.join("tmp_pack_old").exists());
+        assert!(!pack_dir.join(".pack-deadbeef-install-9_0").exists());
+        assert!(pack_dir.join("tmp_pack_fresh").exists());
+        assert!(pack_dir.join(".notes-install-backup").exists());
+        assert!(pack_dir.join(".cache-install-state").is_dir());
+        assert!(pack_dir.join(".pack-deadbeef-install-stale-file").is_file());
+
+        fs::write(pack_dir.join("tmp_pack_old"), b"old").unwrap();
+        filetime::set_file_mtime(pack_dir.join("tmp_pack_old"), FileTime::from(cutoff)).unwrap();
+        let stats = gc(
+            &repo,
+            &GcOptions {
+                repack: RepackOptions {
+                    dry_run: true,
+                    ..RepackOptions::default()
+                },
+                ..GcOptions::default()
+            },
+        )
+        .expect("dry-run gc");
+        assert!(stats.prune.pruned >= 1);
+        assert!(pack_dir.join("tmp_pack_old").exists());
     }
 }

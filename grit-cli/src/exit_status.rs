@@ -106,6 +106,12 @@ impl ExitStatus {
             cause
                 .downcast_ref::<grit_lib::remote::clone::CloneError>()
                 .is_some_and(grit_lib::remote::clone::CloneError::is_cancelled)
+                || cause
+                    .downcast_ref::<grit_lib::error::Error>()
+                    .is_some_and(grit_lib::error::Error::is_cancelled)
+                || cause
+                    .downcast_ref::<grit_lib::porcelain::pull::PullError>()
+                    .is_some_and(grit_lib::porcelain::pull::PullError::is_cancelled)
         }) {
             return Self::Interrupted;
         }
@@ -423,11 +429,21 @@ mod tests {
         ));
         assert_eq!(ExitStatus::for_error(&cancelled), ExitStatus::Interrupted);
         assert_eq!(ExitStatus::Interrupted.code(), 130);
-        assert_eq!(
-            ExitStatus::for_error(&anyhow::Error::new(grit_lib::error::Error::Cancelled)),
-            ExitStatus::Failure,
-            "only clone maps cancellation to 130"
-        );
+        for err in [
+            anyhow::Error::new(grit_lib::error::Error::Cancelled),
+            commands::fetch::map_remote_error(grit_lib::remote::RemoteError::Library(
+                grit_lib::error::Error::Cancelled,
+            )),
+            anyhow::Error::new(grit_lib::porcelain::pull::PullError::Remote(
+                grit_lib::remote::RemoteError::Library(grit_lib::error::Error::Cancelled),
+            )),
+        ] {
+            assert_eq!(
+                ExitStatus::for_error(&err),
+                ExitStatus::Interrupted,
+                "fetch/pull map cancellation to 130: {err:?}"
+            );
+        }
 
         let pickaxe_err = grit_lib::diff::PickaxeError::InvalidPattern {
             pattern: "x".into(),

@@ -115,6 +115,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     options.fetch = fetch_opts;
     let remote_name = invocation.remote;
     let factory = crate::context::http_client_factory();
+    let interrupt = crate::interrupt::InterruptCancel::install();
     // The work-tree update after the fetch reports no progress, so the overall
     // bar covers the transfer only.
     let mut progress = args.fetch.quiet.progress(mode).with_overall(false);
@@ -130,12 +131,12 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
             )
         );
     }
-    let lib = match pull(&repo, &options, &mut progress, &NeverCancel, Some(&factory)) {
+    let lib = match pull(&repo, &options, &mut progress, &interrupt, Some(&factory)) {
         Ok(outcome) => outcome,
         Err(PullError::Remote(remote_err)) => {
             let mapped = map_remote_error(remote_err);
             if auth::offer_reauth(&mapped, url.as_deref().unwrap_or_default())? {
-                pull(&repo, &options, &mut progress, &NeverCancel, Some(&factory))?
+                pull(&repo, &options, &mut progress, &interrupt, Some(&factory))?
             } else {
                 return Err(mapped);
             }
