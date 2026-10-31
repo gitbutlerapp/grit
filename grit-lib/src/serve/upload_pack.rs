@@ -133,7 +133,10 @@ fn map_repo_cancel(err: ServeError) -> ServeError {
 /// request is answered, which is how smart HTTP drives the exchange.
 ///
 /// Shallow fetches, partial-clone filters, and `want-ref` follow repository
-/// upload-pack policy and the capabilities advertised for the session. As in
+/// upload-pack policy and the capabilities advertised for the session. In
+/// protocol v0/v1 `--stateless-rpc`, a request with `deepen`, `deepen-since`, or
+/// `deepen-not` sends the flush-terminated `shallow` / `unshallow` section before
+/// any negotiation ACKs (matching Git `upload-pack --stateless-rpc`). As in
 /// Git, the v2 `object-info` command is advertised and answered only when
 /// `transfer.advertiseObjectInfo` is true. With `promisor.advertise` set, the
 /// v2 capabilities end with `promisor-remote` naming the repository's promisor
@@ -448,7 +451,15 @@ fn serve_v0(
     } else {
         None
     };
-    if !opts.stateless_rpc {
+    let stateless_shallow_before_ack =
+        opts.stateless_rpc && request.shallow.sends_v0_shallow_list();
+    if stateless_shallow_before_ack {
+        if let Some(ref sh) = shallow_resp {
+            write_v0_shallow_lines(output, sh)?;
+        }
+        write_flush(output)?;
+        output.flush()?;
+    } else if !opts.stateless_rpc {
         if let Some(ref sh) = shallow_resp {
             write_v0_shallow_lines(output, sh)?;
             write_flush(output)?;
@@ -468,7 +479,7 @@ fn serve_v0(
         stop.poll().map_err(|_| ServeError::Cancelled)?;
         match read_packet(input)? {
             None => {
-                if opts.stateless_rpc {
+                if opts.stateless_rpc && !stateless_shallow_before_ack {
                     if let Some(ref sh) = shallow_resp {
                         write_v0_shallow_lines(output, sh)?;
                         write_flush(output)?;
@@ -536,7 +547,7 @@ fn serve_v0(
         }
     }
 
-    if opts.stateless_rpc {
+    if opts.stateless_rpc && !stateless_shallow_before_ack {
         if let Some(ref sh) = shallow_resp {
             write_v0_shallow_lines(output, sh)?;
             write_flush(output)?;

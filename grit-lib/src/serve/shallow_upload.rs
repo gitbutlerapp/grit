@@ -29,6 +29,13 @@ impl ShallowRequest {
             || !self.deepen_not.is_empty()
             || !self.client_shallow.is_empty()
     }
+
+    /// Whether v0/v1 stateless RPC must emit the flush-terminated shallow section
+    /// before negotiation ACKs (Git `send_shallow_list` for deepen arguments).
+    #[must_use]
+    pub fn sends_v0_shallow_list(&self) -> bool {
+        self.depth.is_some() || self.deepen_since.is_some() || !self.deepen_not.is_empty()
+    }
 }
 
 /// Shallow/unshallow lines to send and graft state for pack enumeration.
