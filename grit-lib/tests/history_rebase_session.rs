@@ -397,6 +397,44 @@ fn continue_nothing_to_commit_when_index_matches_stop_head() {
     assert!(grit.git_dir().join("rebase-merge/grit-plan").is_file());
 }
 
+#[test]
+fn skip_reports_invalid_oid_in_grit_plan() {
+    let (repo, upstream, onto, tip, _) = conflict_rebase_fixture();
+    let wt = repo.worktree();
+    let grit = open_grit(wt);
+    let opts = start_opts(upstream, Some(onto), tip);
+    git(wt, &["switch", "topic"]);
+    start_rebase(
+        &grit,
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("stop");
+    let path = grit.git_dir().join("rebase-merge/grit-plan");
+    let raw = std::fs::read_to_string(&path).expect("grit-plan");
+    let mut value: serde_json::Value = serde_json::from_str(&raw).expect("json");
+    value.as_object_mut().expect("object").insert(
+        "orig_head".into(),
+        serde_json::Value::String("not-an-oid".into()),
+    );
+    std::fs::write(&path, serde_json::to_vec_pretty(&value).expect("encode")).expect("write");
+
+    let err = skip_rebase(
+        &grit,
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("corrupt plan skip");
+    assert!(
+        matches!(&err, RebaseSessionError::InvalidStateOid { value } if value == "not-an-oid"),
+        "{err:?}"
+    );
+    assert!(!err.is_cancelled());
+    assert!(path.is_file(), "a failed skip must leave the plan in place");
+}
+
 fn strip_stopped_head_from_grit_plan(git_dir: &std::path::Path) {
     let path = git_dir.join("rebase-merge/grit-plan");
     let raw = std::fs::read_to_string(&path).expect("grit-plan");

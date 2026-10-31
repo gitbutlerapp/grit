@@ -44,6 +44,7 @@ use super::types::{
     AppliedRewrite, ApplyOptions, CommitEdit, HistoryEdits, PlannedRefUpdate, RewriteOptions,
     RewritePlan, RewrittenCommit,
 };
+use super::{commit_tree, load_commit};
 use crate::operation::Conflict;
 
 /// Options for [`start_rebase`].
@@ -193,6 +194,14 @@ pub enum RebaseSessionError {
         name: String,
     },
 
+    /// Grit's saved rebase plan records a value that is not a valid object id, so the session
+    /// cannot be continued, skipped, or aborted.
+    #[error("rebase state records an invalid object id: {value:?}")]
+    InvalidStateOid {
+        /// The recorded text that failed to parse.
+        value: String,
+    },
+
     /// Underlying history rewrite failure.
     #[error(transparent)]
     History(#[from] HistoryError),
@@ -218,7 +227,8 @@ impl RebaseSessionError {
             | Self::NotOnBranch
             | Self::ExecHeadChanged { .. }
             | Self::StaleExecPlan { .. }
-            | Self::AbortRefMoved { .. } => false,
+            | Self::AbortRefMoved { .. }
+            | Self::InvalidStateOid { .. } => false,
         }
     }
 }
@@ -932,11 +942,8 @@ fn oid_hex(oid: &ObjectId) -> String {
 }
 
 fn parse_oid(hex: &str) -> Result<ObjectId, RebaseSessionError> {
-    ObjectId::from_hex(hex).map_err(|e| {
-        HistoryError::Planning {
-            message: e.to_string(),
-        }
-        .into()
+    ObjectId::from_hex(hex).map_err(|_| RebaseSessionError::InvalidStateOid {
+        value: hex.to_owned(),
     })
 }
 
@@ -1546,17 +1553,6 @@ fn resolve_head_oid(repo: &Repository) -> Result<ObjectId, RebaseSessionError> {
         .oid()
         .copied()
         .ok_or(RebaseSessionError::NotOnBranch)
-}
-
-fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId, RebaseSessionError> {
-    repo.odb().commit_tree(&commit).map_err(map_lib)
-}
-
-fn load_commit(
-    repo: &Repository,
-    oid: ObjectId,
-) -> Result<crate::objects::CommitData, RebaseSessionError> {
-    repo.odb().read_commit(&oid).map_err(map_lib)
 }
 
 fn reset_index_worktree_to_head(
