@@ -1742,6 +1742,11 @@ impl ConfigFile {
         }
     }
 
+    /// Write the file back to [`Self::path`] through `{path}.lock` and an atomic rename.
+    ///
+    /// The existing file's permission bits are kept. Like Git, which has no `core.fsync`
+    /// component for config files, the lock file is not fsynced before the rename: readers
+    /// always see either the old or the new file, but a crash may lose the update.
     ///
     /// # Errors
     ///
@@ -1749,12 +1754,6 @@ impl ConfigFile {
     /// `{path}.lock` already exists.
     pub fn write(&self) -> Result<()> {
         let lock_path = config_lock_path(&self.path);
-        if lock_path.exists() {
-            return Err(Error::Config(ConfigError::ConfigFileLocked {
-                path: lock_path.display().to_string(),
-            }));
-        }
-
         let content = self.raw_lines.join("\n");
         let bytes: Vec<u8> = if content.trim().is_empty() {
             Vec::new()
@@ -1780,17 +1779,11 @@ impl ConfigFile {
 
         #[cfg(unix)]
         if let Ok(meta) = fs::metadata(&self.path) {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = meta.permissions().mode();
-            let _ = fs::set_permissions(&lock_path, fs::Permissions::from_mode(mode));
+            let _ = lock_file.set_permissions(meta.permissions());
         }
 
         use std::io::Write as _;
         lock_file.write_all(&bytes).map_err(|e| {
-            let _ = fs::remove_file(&lock_path);
-            Error::Io(e)
-        })?;
-        lock_file.sync_all().map_err(|e| {
             let _ = fs::remove_file(&lock_path);
             Error::Io(e)
         })?;

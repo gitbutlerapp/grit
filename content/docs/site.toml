@@ -106,6 +106,8 @@ label = "Harness (make bench-lib / bench-scenarios)"
 baseline = [
   "grit-utils/baselines/daily-config-parse-5571-before.json",
   "grit-utils/baselines/daily-config-parse-5571-after.json",
+  "grit-utils/baselines/daily-config-set-before.json",
+  "grit-utils/baselines/daily-config-set-after.json",
   "grit-utils/baselines/daily-fetch-deepen-5548-before.json",
   "grit-utils/baselines/daily-fetch-deepen-5548-after.json",
   "grit-utils/baselines/daily-perf-5414-status-before.json",

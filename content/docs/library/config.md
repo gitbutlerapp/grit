@@ -13,6 +13,10 @@ Configuration in grit-lib follows Git’s cascade (system, global, local, worktr
 
 `ConfigHandle::set_local` writes one key to the repository-local config (or `commondir/config` for linked worktrees without a per-worktree config file), then reloads the in-memory snapshot on the open `Repository`.
 
+Without an open `Repository`, find the git directory with [`RepositoryLocation::discover`](rustdoc:grit_lib::repo::RepositoryLocation) and pass it to [`set_config_value`](rustdoc:grit_lib::config::set_config_value) with `ConfigLocation::Local`. Discovery applies the same format and ownership checks as `Repository::discover`, but it does not open the object database, the refs or the config cascade. Then only the target file is read and rewritten. `grit config` uses this path.
+
+Writes go through `config.lock` and an atomic rename and keep the file's permission bits. Like Git, they do not fsync the file, so a crash may lose the update, but readers never see a partial file.
+
 ## Example
 
 <!-- include: grit-examples/src/bin/guide_config.rs -->
