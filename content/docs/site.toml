@@ -108,6 +108,11 @@ baseline = [
   "grit-utils/baselines/daily-pick-index-stream-after.json",
   "grit-utils/baselines/daily-diff-worktree-memory-before.json",
   "grit-utils/baselines/daily-diff-worktree-memory-after.json",
+
+  "grit-utils/baselines/daily-status-hot-text-before.json",
+  "grit-utils/baselines/daily-status-hot-text-after.json",
+  "grit-utils/baselines/daily-hot-text-related-before.json",
+  "grit-utils/baselines/daily-hot-text-related-after.json",
   "grit-utils/baselines/daily-config-parse-5571-before.json",
   "grit-utils/baselines/daily-config-parse-5571-after.json",
   "grit-utils/baselines/daily-config-set-before.json",

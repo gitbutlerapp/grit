@@ -43,6 +43,10 @@ tracing = ["dep:tracing"]
 # Derive `serde::Serialize` on result models (`StatusModel`, `DiffEntry`, `LoadedCommit`,
 # commit/switch/reset/fetch/push/stash/rebase outcomes, `Signature`, `Error`, …).
 serde-models = []
+# Lay out grit-lib's hot code path (hot-text.ld) contiguously in every binary that links the
+# library, so short operations fault in fewer code pages. x86_64 Linux GNU (LLD) only; a
+# no-op elsewhere. See build.rs.
+hot-text-layout = []
 
 [dependencies]
 tracing = { version = "0.1", optional = true, default-features = false, features = ["std"] }
