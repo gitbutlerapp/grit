@@ -9,6 +9,9 @@
 //! Modules marked `full-tests` start the system `git` or build heavy fixtures;
 //! they build only with `--features full-tests` (`make test-full`).
 
+#[cfg(feature = "full-tests")]
+#[path = "receive_post_callback.rs"]
+mod receive_post_callback;
 #[path = "shallow_stateless_v0.rs"]
 mod shallow_stateless_v0;
 #[path = "spawn_guard.rs"]

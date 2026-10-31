@@ -432,6 +432,35 @@ pub trait ReceiveHook {
         let _ = updates;
         None
     }
+
+    /// Run after refs were updated and the `post-receive` script, like a
+    /// `post-receive` hook for in-process policy and audit.
+    ///
+    /// Ref updates and the client's status report are already fixed when this
+    /// runs. A refusal is recorded on [`ReceiveOutcome::post_receive_callback_error`]
+    /// and does not change them (same as a failing `post-receive` script).
+    fn post_receive(
+        &self,
+        commands: &[&RefCommand],
+        odb: &Odb,
+        ctx: &ReceiveHookContext<'_>,
+    ) -> std::result::Result<(), RefUpdateRefusal> {
+        let _ = (commands, odb, ctx);
+        Ok(())
+    }
+
+    /// Run after the `post-update` script for the same applied updates.
+    ///
+    /// Refusals are recorded on [`ReceiveOutcome::post_update_callback_error`]
+    /// without changing ref updates or the client report.
+    fn post_update(
+        &self,
+        commands: &[&RefCommand],
+        odb: &Odb,
+    ) -> std::result::Result<(), RefUpdateRefusal> {
+        let _ = (commands, odb);
+        Ok(())
+    }
 }
 
 /// Push options and other session context for [`ReceiveHook`].
@@ -474,6 +503,28 @@ pub struct ReceiveOutcome {
     pub hooks: Vec<HookRunRecord>,
     /// Push options delivered to hooks via `GIT_PUSH_OPTION_*`.
     pub push_options: Vec<String>,
+    /// Decoded pack bytes read from the client (zero when no pack was sent).
+    pub bytes_received: u64,
+    /// Object count from the pack header (zero when no pack was sent).
+    pub objects_received: u32,
+    /// [`ReceiveHook::post_receive`] refused after refs were updated.
+    pub post_receive_callback_error: Option<RefUpdateRefusal>,
+    /// [`ReceiveHook::post_update`] refused after refs were updated.
+    pub post_update_callback_error: Option<RefUpdateRefusal>,
+}
+
+struct AppliedPush {
+    updates: Vec<RefUpdateResult>,
+    post_receive_callback_error: Option<RefUpdateRefusal>,
+    post_update_callback_error: Option<RefUpdateRefusal>,
+}
+
+fn applied_push(updates: Vec<RefUpdateResult>) -> AppliedPush {
+    AppliedPush {
+        updates,
+        post_receive_callback_error: None,
+        post_update_callback_error: None,
+    }
 }
 
 /// Serve one push session: advertise refs, read the ref updates and pack, store
@@ -600,6 +651,8 @@ pub fn receive_pack_with_hook_cancellable(
     let sideband = request.caps.contains("side-band-64k");
 
     let needs_pack = request.commands.iter().any(|c| c.new.is_some());
+    let mut bytes_received = 0u64;
+    let mut objects_received = 0u32;
     let mut quarantine = if needs_pack {
         Some(ReceiveQuarantine::create(repo.odb(), repo.git_dir())?)
     } else {
@@ -635,6 +688,8 @@ pub fn receive_pack_with_hook_cancellable(
             let odb = q.odb();
             spool_push_pack(input, &odb, max_input, &stop)
                 .and_then(|pack| {
+                    bytes_received = pack.bytes_received();
+                    objects_received = pack.object_count();
                     ingest_spooled_pack(
                         &odb,
                         pack,
@@ -692,6 +747,8 @@ pub fn receive_pack_with_hook_cancellable(
     };
 
     let mut hook_records = Vec::new();
+    let mut post_receive_callback_error = None;
+    let mut post_update_callback_error = None;
     let updates = if unpack_error.is_some() {
         request
             .commands
@@ -700,7 +757,7 @@ pub fn receive_pack_with_hook_cancellable(
             .collect()
     } else {
         stop.poll().map_err(|_| ServeError::Cancelled)?;
-        apply_commands_with_hooks(
+        let applied = apply_commands_with_hooks(
             repo,
             &request,
             opts,
@@ -711,7 +768,10 @@ pub fn receive_pack_with_hook_cancellable(
             &shallow,
             sideband.then_some(&mut *output),
             &mut hook_records,
-        )?
+        )?;
+        post_receive_callback_error = applied.post_receive_callback_error;
+        post_update_callback_error = applied.post_update_callback_error;
+        applied.updates
     };
 
     if sideband {
@@ -735,6 +795,10 @@ pub fn receive_pack_with_hook_cancellable(
         updates,
         hooks: hook_records,
         push_options: request.push_options.clone(),
+        bytes_received,
+        objects_received,
+        post_receive_callback_error,
+        post_update_callback_error,
     })
 }
 
@@ -998,7 +1062,7 @@ fn apply_commands_with_hooks(
     shallow: &ShallowPlan,
     mut sideband_out: Option<&mut dyn Write>,
     hook_records: &mut Vec<HookRunRecord>,
-) -> Result<Vec<RefUpdateResult>> {
+) -> Result<AppliedPush> {
     let lookup_odb = quarantine.as_ref().map(|q| q.odb());
     let head_branch = ref_update_policy::head_branch(repo);
     let checked_out = ref_update_policy::checked_out_branch(repo);
@@ -1039,7 +1103,7 @@ fn apply_commands_with_hooks(
     let atomic = request.caps.contains("atomic");
     if atomic && results.iter().any(|r| r.error.is_some()) {
         refuse_remaining(&mut results, &RefUpdateRefusal::AtomicTransactionFailed);
-        return Ok(results);
+        return Ok(applied_push(results));
     }
 
     let accepted: Vec<RefCommand> = request
@@ -1059,7 +1123,7 @@ fn apply_commands_with_hooks(
             &hook_ctx,
         ) {
             refuse_remaining(&mut results, &refusal);
-            return Ok(results);
+            return Ok(applied_push(results));
         }
     }
 
@@ -1070,11 +1134,11 @@ fn apply_commands_with_hooks(
     hook_records.push(hook_record("pre-receive", &pre_result));
     if !pre_result.is_ok() {
         refuse_remaining(&mut results, &RefUpdateRefusal::PreReceiveHookDeclined);
-        return Ok(results);
+        return Ok(applied_push(results));
     }
 
     if results.iter().all(|r| r.error.is_some()) {
-        return Ok(results);
+        return Ok(applied_push(results));
     }
 
     let mut migrated_pack_keeps = Vec::new();
@@ -1101,7 +1165,7 @@ fn apply_commands_with_hooks(
 
     if atomic && results.iter().any(|r| r.error.is_some()) {
         refuse_remaining(&mut results, &RefUpdateRefusal::AtomicTransactionFailed);
-        return Ok(results);
+        return Ok(applied_push(results));
     }
 
     let new_roots: HashSet<ObjectId> = shallow
@@ -1120,7 +1184,7 @@ fn apply_commands_with_hooks(
         }
         if atomic {
             refuse_remaining(&mut results, &RefUpdateRefusal::AtomicTransactionFailed);
-            return Ok(results);
+            return Ok(applied_push(results));
         }
     }
 
@@ -1160,19 +1224,35 @@ fn apply_commands_with_hooks(
         .filter(|(_, r)| r.error.is_none())
         .map(|(c, _)| c)
         .collect();
+    let mut post_receive_callback_error = None;
+    let mut post_update_callback_error = None;
     if !successful.is_empty() {
         let post_result = scripts.post_receive(&successful);
         relay_hook_sideband(&mut sideband_out, &post_result)?;
         hook_records.push(hook_record("post-receive", &post_result));
+        post_receive_callback_error = hook
+            .post_receive(
+                &successful,
+                repo.odb(),
+                &ReceiveHookContext {
+                    push_options: &request.push_options,
+                },
+            )
+            .err();
 
         let pu_result = scripts.post_update(&successful);
         relay_hook_sideband(&mut sideband_out, &pu_result)?;
         hook_records.push(hook_record("post-update", &pu_result));
+        post_update_callback_error = hook.post_update(&successful, repo.odb()).err();
     }
 
     drop(migrated_pack_keeps);
 
-    Ok(results)
+    Ok(AppliedPush {
+        updates: results,
+        post_receive_callback_error,
+        post_update_callback_error,
+    })
 }
 
 /// Refuse every update that has not been refused yet.
@@ -1421,6 +1501,23 @@ struct SpooledPack {
     file: tempfile::NamedTempFile,
     /// The 12-byte pack header (signature, version, object count).
     header: [u8; 12],
+    /// Pack bytes read from the client (including header and checksum).
+    bytes_received: u64,
+}
+
+impl SpooledPack {
+    fn bytes_received(&self) -> u64 {
+        self.bytes_received
+    }
+
+    fn object_count(&self) -> u32 {
+        u32::from_be_bytes([
+            self.header[8],
+            self.header[9],
+            self.header[10],
+            self.header[11],
+        ])
+    }
 }
 
 /// Stream exactly one packfile from the push stream into a temp file.
@@ -1487,7 +1584,11 @@ fn spool_push_pack(
     }
     out.flush()?;
     drop(out);
-    Ok(SpooledPack { file, header })
+    Ok(SpooledPack {
+        file,
+        header,
+        bytes_received: written,
+    })
 }
 
 /// `Read::read`, retrying when interrupted by a signal.

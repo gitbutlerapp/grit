@@ -5,6 +5,7 @@
 //! keeps pushes off the target branch of a repository with snapshot checkouts.
 
 pub mod receive_pack;
+pub mod session;
 pub mod upload_pack;
 
 use std::io::{Read, Write};
@@ -16,11 +17,13 @@ use grit_lib::config::ConfigSet;
 pub use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::remote::serve::{
-    self, ProtocolVersion, ReceiveHook, ReceivePolicy, RefCommand, RefUpdateRefusal,
-    RefUpdateResult, ServeOptions,
+    self, ProtocolVersion, ReceiveHook, ReceiveHookContext, ReceiveOutcome, ReceivePolicy,
+    RefCommand, RefUpdateRefusal, RefUpdateResult, ServeOptions, UploadOutcome,
 };
 use grit_lib::remote::snapshot_checkout::TargetGuard;
 use grit_lib::repo::Repository;
+
+pub use session::{ReceiveRpcResult, ServeSession};
 
 /// Errors from smart-protocol handlers.
 #[derive(Debug, thiserror::Error)]
@@ -123,6 +126,74 @@ impl ReceiveHook for PushGuard {
     }
 }
 
+struct GuardedHook {
+    guard: PushGuard,
+    extra: Option<std::sync::Arc<dyn ReceiveHook + Send + Sync>>,
+}
+
+impl ReceiveHook for GuardedHook {
+    fn pre_receive_ctx(
+        &self,
+        commands: &[RefCommand],
+        odb: &Odb,
+        ctx: &ReceiveHookContext<'_>,
+    ) -> std::result::Result<(), RefUpdateRefusal> {
+        self.guard.pre_receive_ctx(commands, odb, ctx)?;
+        if let Some(h) = self.extra.as_deref() {
+            h.pre_receive_ctx(commands, odb, ctx)?;
+        }
+        Ok(())
+    }
+
+    fn update_ctx(
+        &self,
+        command: &RefCommand,
+        odb: &Odb,
+        ctx: &ReceiveHookContext<'_>,
+    ) -> std::result::Result<(), RefUpdateRefusal> {
+        self.guard.update_ctx(command, odb, ctx)?;
+        if let Some(h) = self.extra.as_deref() {
+            h.update_ctx(command, odb, ctx)?;
+        }
+        Ok(())
+    }
+
+    fn message(&self, updates: &[RefUpdateResult]) -> Option<String> {
+        match (
+            self.guard.message(updates),
+            self.extra.as_deref().and_then(|h| h.message(updates)),
+        ) {
+            (None, None) => None,
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (Some(a), Some(b)) => Some(format!("{a}{b}")),
+        }
+    }
+
+    fn post_receive(
+        &self,
+        commands: &[&RefCommand],
+        odb: &Odb,
+        ctx: &ReceiveHookContext<'_>,
+    ) -> std::result::Result<(), RefUpdateRefusal> {
+        if let Some(h) = self.extra.as_deref() {
+            h.post_receive(commands, odb, ctx)?;
+        }
+        Ok(())
+    }
+
+    fn post_update(
+        &self,
+        commands: &[&RefCommand],
+        odb: &Odb,
+    ) -> std::result::Result<(), RefUpdateRefusal> {
+        if let Some(h) = self.extra.as_deref() {
+            h.post_update(commands, odb)?;
+        }
+        Ok(())
+    }
+}
+
 /// What a pusher of the target branch `target` is told to do instead.
 fn target_push_advice(target: &str) -> String {
     format!(
@@ -208,6 +279,32 @@ pub(crate) fn run_upload_pack_to(
     extensions: &Extensions,
     output: &mut dyn std::io::Write,
 ) -> Result<()> {
+    run_upload_pack_with_session(
+        repo_path,
+        protocol_version,
+        stateless_rpc,
+        advertise_refs,
+        input,
+        repository_options,
+        extensions,
+        output,
+        &ServeSession::none(),
+    )
+    .map(|_| ())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_upload_pack_with_session(
+    repo_path: &Path,
+    protocol_version: Option<u8>,
+    stateless_rpc: bool,
+    advertise_refs: bool,
+    input: &mut dyn Read,
+    repository_options: &RepositoryOptions,
+    extensions: &Extensions,
+    output: &mut dyn std::io::Write,
+    session: &ServeSession,
+) -> Result<UploadOutcome> {
     let without_fetcher = repository_options
         .clone()
         .with_promisor_fetcher(None)
@@ -230,8 +327,8 @@ pub(crate) fn run_upload_pack_to(
     // The promisor fetcher in `repository_options` is used only when this request may
     // fetch missing promised objects; otherwise the served repository fetches nothing.
     opts.attach_promisor_fetcher(&repo, &config, repository_options.promisor_fetcher.clone());
-    let _summary = serve::upload_pack(&repo, input, output, &mut opts)?;
-    Ok(())
+    serve::upload_pack_cancellable(&repo, input, output, &mut opts, session.cancel())
+        .map_err(Error::from)
 }
 
 pub(crate) fn run_receive_pack(
@@ -264,6 +361,30 @@ pub(crate) fn run_receive_pack_to(
     extensions: &Extensions,
     output: &mut dyn Write,
 ) -> Result<()> {
+    run_receive_pack_with_session(
+        repo_path,
+        stateless_rpc,
+        advertise_refs,
+        input,
+        repository_options,
+        extensions,
+        output,
+        &ServeSession::none(),
+    )
+    .map(|_| ())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_receive_pack_with_session(
+    repo_path: &Path,
+    stateless_rpc: bool,
+    advertise_refs: bool,
+    input: &mut dyn Read,
+    repository_options: &RepositoryOptions,
+    extensions: &Extensions,
+    output: &mut dyn Write,
+    session: &ServeSession,
+) -> Result<ReceiveOutcome> {
     let options = repository_options
         .clone()
         .with_promisor_fetcher(None)
@@ -284,8 +405,20 @@ pub(crate) fn run_receive_pack_to(
     };
     let policy = ReceivePolicy::from_config(&config);
     let guard = PushGuard::for_repository(&repo);
-    serve::receive_pack_with_hook(&repo, input, output, &opts, &policy, &guard)?;
-    Ok(())
+    let hook = GuardedHook {
+        guard,
+        extra: session.receive_hook.clone(),
+    };
+    serve::receive_pack_with_hook_cancellable(
+        &repo,
+        input,
+        output,
+        &opts,
+        &policy,
+        &hook,
+        session.cancel(),
+    )
+    .map_err(Error::from)
 }
 
 #[cfg(test)]

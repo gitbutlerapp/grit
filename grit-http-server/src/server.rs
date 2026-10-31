@@ -524,6 +524,21 @@ pub struct Authorized {
     pub email: String,
 }
 
+/// Repository options for one authenticated push, with hook identity exported.
+#[must_use]
+pub(crate) fn repository_options_for_pusher(
+    base: &grit_protocol::RepositoryOptions,
+    email: &str,
+) -> grit_protocol::RepositoryOptions {
+    let mut options = base.clone();
+    options.environment = options
+        .environment
+        .clone()
+        .with_var("REMOTE_USER", email)
+        .with_var("GRIT_USER", email);
+    options
+}
+
 /// `scheme://host` the client used to reach the server, from `Host` (or the
 /// `X-Forwarded-*` headers a reverse proxy adds).
 fn request_base_url(headers: &HeaderMap) -> Option<String> {
@@ -685,13 +700,14 @@ async fn post_dispatch(
                     .await
             }
             UploadPath::Receive(id) => {
+                let options = repository_options_for_pusher(&state.smart_options, &found.email);
                 crate::uploads::receive(
                     found.repo.path,
                     id,
                     found.user_id,
                     &state.uploads,
                     body,
-                    state.options.clone(),
+                    options,
                     || state.pushed(),
                 )
                 .await
@@ -704,20 +720,26 @@ async fn post_dispatch(
     let Some((name, service)) = Service::strip_rpc_suffix(&path) else {
         return (StatusCode::NOT_FOUND, "not found\n").into_response();
     };
-    let repo = match state.authorize(&headers, name, needed_access(service)) {
-        Ok(found) => found.repo,
+    let found = match state.authorize(&headers, name, needed_access(service)) {
+        Ok(found) => found,
         Err(resp) => return *resp,
     };
     let protocol_version = smart_http::protocol_version_from_headers(&headers);
-    let extensions = state.extensions(&repo, service, &headers);
+    let extensions = state.extensions(&found.repo, service, &headers);
+    let options = if service == Service::ReceivePack {
+        repository_options_for_pusher(&state.smart_options, &found.email)
+    } else {
+        state.smart_options.clone()
+    };
     let response = smart_http::rpc(
-        repo.path,
+        found.repo.path,
         service,
         protocol_version,
         &headers,
         body,
-        state.smart_options.clone(),
+        options,
         extensions,
+        grit_protocol::ServeSession::none(),
     )
     .await;
     if service == Service::ReceivePack && response.status().is_success() {

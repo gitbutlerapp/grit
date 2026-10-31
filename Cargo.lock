@@ -1029,6 +1029,7 @@ name = "grit-protocol"
 version = "0.5.27"
 dependencies = [
  "grit-lib",
+ "tempfile",
  "thiserror",
 ]
 

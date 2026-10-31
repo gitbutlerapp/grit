@@ -159,6 +159,7 @@ pub async fn info_refs(
 /// - `extensions`: the bundle list `command=bundle-uri` answers with.
 ///
 /// Bad bodies become `400`/`413` and failures `500` responses.
+#[allow(clippy::too_many_arguments)]
 pub async fn rpc(
     repo_path: PathBuf,
     service: Service,
@@ -167,6 +168,7 @@ pub async fn rpc(
     body: Body,
     options: RepositoryOptions,
     extensions: grit_protocol::Extensions,
+    session: grit_protocol::ServeSession,
 ) -> Response<Body> {
     rpc_holding(
         repo_path,
@@ -176,9 +178,21 @@ pub async fn rpc(
         body,
         options,
         extensions,
+        session,
         (),
     )
     .await
+    .0
+}
+
+/// Follow-up metrics from a smart HTTP RPC (when the caller wants them).
+#[derive(Default)]
+pub struct RpcFollowUp {
+    /// Set for receive-pack once the body is buffered.
+    pub receive_outcome: Option<grit_lib::remote::serve::ReceiveOutcome>,
+    /// Set for upload-pack; completes when the streaming body finishes.
+    pub upload_outcome:
+        Option<tokio::sync::oneshot::Receiver<grit_lib::remote::serve::UploadOutcome>>,
 }
 
 /// [`rpc`], keeping `hold` alive until the response body has been sent in
@@ -194,50 +208,68 @@ pub async fn rpc_holding<H: Send + 'static>(
     body: Body,
     options: RepositoryOptions,
     extensions: grit_protocol::Extensions,
+    session: grit_protocol::ServeSession,
     hold: H,
-) -> Response<Body> {
+) -> (Response<Body>, RpcFollowUp) {
     let encoding = match body_encoding(headers) {
         Ok(e) => e,
-        Err(resp) => return *resp,
+        Err(resp) => return (*resp, RpcFollowUp::default()),
     };
-    let data = match service {
+    match service {
         Service::UploadPack => {
             let raw = streaming_body_reader(body);
-            return stream_upload_pack(
+            let (response, upload_outcome) = stream_upload_pack(
                 repo_path,
                 raw,
                 encoding,
                 protocol_version,
                 options,
                 extensions,
+                session,
                 hold,
             )
             .await;
+            (
+                response,
+                RpcFollowUp {
+                    receive_outcome: None,
+                    upload_outcome,
+                },
+            )
         }
         Service::ReceivePack => {
             let raw = streaming_body_reader(body);
             let result = tokio::task::spawn_blocking(move || {
-                grit_protocol::receive_pack::stateless_rpc_from_reader(
+                grit_protocol::receive_pack::stateless_rpc_with_session(
                     &repo_path,
                     &mut decoded_reader(raw, encoding),
                     &options,
+                    &session,
                 )
             })
             .await;
             match result {
-                Ok(Ok(data)) => data,
-                Ok(Err(e)) => return receive_pack_error_response(&e),
-                Err(e) => return internal_error(&format!("{} failed: {e}", service.name())),
+                Ok(Ok(result)) => (
+                    no_cache_headers(Response::builder())
+                        .header(
+                            header::CONTENT_TYPE,
+                            format!("application/x-{}-result", service.name()),
+                        )
+                        .body(Body::from(result.body))
+                        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+                    RpcFollowUp {
+                        receive_outcome: Some(result.outcome),
+                        upload_outcome: None,
+                    },
+                ),
+                Ok(Err(e)) => (receive_pack_error_response(&e), RpcFollowUp::default()),
+                Err(e) => (
+                    internal_error(&format!("{} failed: {e}", service.name())),
+                    RpcFollowUp::default(),
+                ),
             }
         }
-    };
-    no_cache_headers(Response::builder())
-        .header(
-            header::CONTENT_TYPE,
-            format!("application/x-{}-result", service.name()),
-        )
-        .body(Body::from(data))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+    }
 }
 
 /// Answer `GET` for a file that clients download with resumable `Range`
@@ -1011,6 +1043,7 @@ async fn streaming_channel_response(
 
 /// Run upload-pack on a blocking thread and stream its output as the
 /// response body.
+#[allow(clippy::too_many_arguments)]
 async fn stream_upload_pack<H: Send + 'static>(
     repo_path: PathBuf,
     raw: impl Read + Send + 'static,
@@ -1018,22 +1051,31 @@ async fn stream_upload_pack<H: Send + 'static>(
     protocol_version: Option<u8>,
     options: RepositoryOptions,
     extensions: grit_protocol::Extensions,
+    session: grit_protocol::ServeSession,
     hold: H,
-) -> Response<Body> {
+) -> (
+    Response<Body>,
+    Option<tokio::sync::oneshot::Receiver<grit_lib::remote::serve::UploadOutcome>>,
+) {
+    let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Chunk>(STREAM_CHANNEL_DEPTH);
     let task = tokio::task::spawn_blocking(move || {
         let mut request = decoded_fetch_reader(raw, encoding);
         let mut out = ChannelWriter::new(tx);
-        let result = grit_protocol::upload_pack::stateless_rpc_to_reader(
+        let result = grit_protocol::upload_pack::stateless_rpc_to_reader_with_session(
             &repo_path,
             &mut request,
             protocol_version,
             &options,
             &extensions,
             &mut out,
+            &session,
         );
         match result {
-            Ok(()) => out.send_pending().map_err(grit_protocol::Error::Io),
+            Ok(outcome) => {
+                let _ = outcome_tx.send(outcome);
+                out.send_pending().map_err(grit_protocol::Error::Io)
+            }
             Err(e) => {
                 if out.sent {
                     let _ = out.tx.blocking_send(Err(std::io::Error::other(format!(
@@ -1046,11 +1088,15 @@ async fn stream_upload_pack<H: Send + 'static>(
     });
     let first = match rx.recv().await {
         Some(Ok(first)) => first,
-        Some(Err(e)) => return internal_error(&format!("upload-pack failed: {e}")),
+        Some(Err(e)) => {
+            return (internal_error(&format!("upload-pack failed: {e}")), None);
+        }
         None => match task.await {
             Ok(Ok(())) => Bytes::new(),
-            Ok(Err(e)) => return upload_pack_error_response(&e),
-            Err(e) => return internal_error(&format!("upload-pack failed: {e}")),
+            Ok(Err(e)) => return (upload_pack_error_response(&e), None),
+            Err(e) => {
+                return (internal_error(&format!("upload-pack failed: {e}")), None);
+            }
         },
     };
     let rest = futures_util::stream::unfold((rx, hold), |(mut rx, hold)| async move {
@@ -1060,8 +1106,11 @@ async fn stream_upload_pack<H: Send + 'static>(
         futures_util::stream::once(std::future::ready(Ok::<Bytes, std::io::Error>(first))),
         rest,
     );
-    no_cache_headers(Response::builder())
-        .header(header::CONTENT_TYPE, "application/x-git-upload-pack-result")
-        .body(Body::from_stream(body))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+    (
+        no_cache_headers(Response::builder())
+            .header(header::CONTENT_TYPE, "application/x-git-upload-pack-result")
+            .body(Body::from_stream(body))
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+        Some(outcome_rx),
+    )
 }

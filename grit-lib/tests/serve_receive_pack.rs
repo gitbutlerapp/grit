@@ -533,6 +533,48 @@ fn hook_scripts_see_git_dir_dot() {
     assert_eq!(std::fs::read_to_string(&log).expect("hook log"), ".");
 }
 
+#[cfg(unix)]
+#[test]
+fn hook_scripts_see_remote_user_from_repository_environment() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let tip = source_repo(&tmp.path().join("src"), 1);
+    let pack = pack_for(&tmp.path().join("src"), &[tip.to_hex()]);
+    let bare = tmp.path().join("bare.git");
+    bare_repo(&bare);
+    let log = bare.join("remote-user-seen");
+    let hook = bare.join("hooks").join("pre-receive");
+    std::fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\ncat >/dev/null\nprintf '%s' \"$REMOTE_USER\" >'{}'\n",
+            log.display()
+        ),
+    )
+    .expect("hook");
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let mut env = Environment::empty();
+    env.cwd = bare.clone();
+    env = env.with_var("REMOTE_USER", "alice@example.com");
+    let repo = Repository::open(&bare, &RepositoryOptions::with_environment(env)).expect("open");
+
+    let body = push_body(&[(None, Some(tip), "refs/heads/main")], &pack);
+    let outcome = receive_pack(
+        &repo,
+        &mut std::io::Cursor::new(body),
+        &mut Vec::new(),
+        &serve_opts(),
+        &ReceivePolicy::default(),
+    )
+    .expect("receive_pack");
+    assert!(outcome.updates[0].error.is_none());
+    assert_eq!(
+        std::fs::read_to_string(&log).expect("hook log"),
+        "alice@example.com"
+    );
+}
+
 /// Regression for issue #1945: a multi-megabyte blob in a small pack must unpack
 /// to loose objects under the default `receive.unpackLimit` without requiring
 /// the full inflated payload in memory.

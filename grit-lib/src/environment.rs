@@ -408,6 +408,34 @@ impl Environment {
         self
     }
 
+    /// Set or override one subprocess variable without resnapshotting the process.
+    ///
+    /// The value is stored in the shared captured map (cloned on first use) and
+    /// exported through [`Self::subprocess_environment`] like any other untyped
+    /// variable. Typed fields on this environment still win over the same key.
+    ///
+    /// # Parameters
+    ///
+    /// - `key`: variable name (for example `REMOTE_USER`).
+    /// - `value`: UTF-8 value to export to hook and filter subprocesses.
+    ///
+    /// # Returns
+    ///
+    /// This environment with `key` set to `value`.
+    #[must_use]
+    pub fn with_var(mut self, key: impl Into<String>, value: impl Into<OsString>) -> Self {
+        let key = key.into();
+        let value = value.into();
+        let mut map = self
+            .captured_vars
+            .as_ref()
+            .map(|vars| (**vars).clone())
+            .unwrap_or_default();
+        map.insert(key, value);
+        self.captured_vars = Some(Arc::new(map));
+        self
+    }
+
     /// Append a command-line configuration override (`git -c key=value`).
     ///
     /// The override is added to [`Self::git_config_parameters`] in the quoted
@@ -1420,6 +1448,21 @@ mod tests {
     #[test]
     fn subprocess_environment_of_empty_snapshot_is_empty() {
         assert!(Environment::empty().subprocess_environment().is_empty());
+    }
+
+    #[test]
+    fn with_var_overlays_without_resnapshotting_process() {
+        let env = Environment::empty()
+            .with_var("REMOTE_USER", "alice@example.com")
+            .with_var("GRIT_USER", "alice@example.com");
+        let set = env.subprocess_environment();
+        let get = |key: &str| {
+            set.iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.to_string_lossy().into_owned())
+        };
+        assert_eq!(get("REMOTE_USER").as_deref(), Some("alice@example.com"));
+        assert_eq!(get("GRIT_USER").as_deref(), Some("alice@example.com"));
     }
 
     #[test]
