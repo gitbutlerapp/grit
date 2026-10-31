@@ -141,7 +141,8 @@ pub async fn info_refs(
     .await
 }
 
-/// Like [`info_refs`], keeping `hold` alive until the response body finishes.
+/// Like [`info_refs`], keeping `hold` until the advertisement worker finishes
+/// or times out (not until the client drains the response body).
 #[allow(clippy::too_many_arguments)]
 pub async fn info_refs_holding<H: Send + 'static>(
     repo_path: PathBuf,
@@ -615,6 +616,8 @@ const STREAM_READ_BUFFER: usize = 64 * 1024;
 #[cfg(test)]
 fn streaming_body_reader(body: Body, idle_timeout: Duration) -> impl Read + Send + 'static {
     use futures_util::TryStreamExt as _;
+
+    use crate::limits::IdleTimeoutStream;
 
     let stream = body.into_data_stream().map_err(std::io::Error::other);
     let stream = IdleTimeoutStream::new(stream, idle_timeout);

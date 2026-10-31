@@ -1311,10 +1311,57 @@ fn max_git_requests_returns_service_unavailable() {
     drop(stall);
 }
 
+/// Stateless v0 upload-pack body: `want` (with caps), flush, `done`.
+fn stateless_fetch_body(oid: &str) -> Vec<u8> {
+    use grit_lib::remote::pkt_line;
+    let mut body = Vec::new();
+    let caps = " multi_ack side-band-64k thin-pack ofs-delta";
+    pkt_line::write_line_to_vec(&mut body, &format!("want {oid}{caps}")).expect("want");
+    body.extend_from_slice(b"0000");
+    pkt_line::write_line_to_vec(&mut body, "done").expect("done");
+    body
+}
+
+/// High-entropy bytes so the resulting pack stays large after zlib.
+fn incompressible_bytes(len: usize) -> Vec<u8> {
+    let mut seed = 0x2545_f491_4f6c_dd1du64;
+    (0..len)
+        .map(|_| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed & 0xff) as u8
+        })
+        .collect()
+}
+
+/// Read only the HTTP status line and headers from `stream`, leaving any
+/// response body bytes in the kernel buffer (simulates a client that stops
+/// reading the pack).
+fn read_response_headers_only(stream: &mut TcpStream) -> Vec<u8> {
+    use std::io::Read;
+    let mut response = Vec::new();
+    let mut byte = [0u8; 1];
+    while stream.read(&mut byte).expect("read header byte") != 0 {
+        response.push(byte[0]);
+        if response.len() >= 4 && response.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    response
+}
+
 #[test]
 fn slow_fetch_response_reader_releases_git_slot() {
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::time::Duration;
+
+    use grit_http_server::smart_http::{STREAM_CHANNEL_DEPTH, STREAM_CHUNK};
+
+    // Must exceed upload-pack stream buffering so a non-reading client backpressures
+    // the worker (see `STREAM_CHANNEL_DEPTH` × `STREAM_CHUNK` in smart_http.rs).
+    const BLOB_BYTES: usize = 32 * 1024 * 1024;
+    assert!(BLOB_BYTES > STREAM_CHANNEL_DEPTH * STREAM_CHUNK);
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
@@ -1329,7 +1376,7 @@ fn slow_fetch_response_reader_releases_git_slot() {
             "wt",
         ],
     );
-    std::fs::write(wt.join("big.bin"), vec![0u8; 4 * 1024 * 1024]).expect("write");
+    std::fs::write(wt.join("big.bin"), incompressible_bytes(BLOB_BYTES)).expect("write");
     git(&wt, &["add", "big.bin"]);
     git(&wt, &["commit", "-q", "-m", "big"]);
     git(
@@ -1351,30 +1398,20 @@ fn slow_fetch_response_reader_releases_git_slot() {
     let addr = start_with_limits(&root.join("repos"), &database, limits);
     std::thread::sleep(Duration::from_millis(100));
 
-    let body = format!("0032want {oid}\n0000");
+    let body = stateless_fetch_body(&oid);
     let mut stall = TcpStream::connect(addr).expect("connect");
     stall
-        .set_read_timeout(Some(Duration::from_secs(30)))
+        .set_read_timeout(Some(Duration::from_secs(120)))
         .expect("read timeout");
-    let request = format!(
-        "POST /project.git/git-upload-pack HTTP/1.1\r\nHost: x\r\n{}\r\nContent-Type: application/x-git-upload-pack-request\r\nContent-Length: {}\r\n\r\n{body}",
+    let request_head = format!(
+        "POST /project.git/git-upload-pack HTTP/1.1\r\nHost: x\r\n{}\r\nContent-Type: application/x-git-upload-pack-request\r\nContent-Length: {}\r\n\r\n",
         bearer(ADMIN_TOKEN),
         body.len()
     );
-    stall.write_all(request.as_bytes()).expect("post");
+    stall.write_all(request_head.as_bytes()).expect("post head");
+    stall.write_all(&body).expect("post body");
     stall.flush().ok();
-    let mut response = Vec::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        let n = stall.read(&mut buf).expect("read headers");
-        if n == 0 {
-            break;
-        }
-        response.extend_from_slice(&buf[..n]);
-        if response.windows(4).any(|w| w == b"\r\n\r\n") {
-            break;
-        }
-    }
+    let response = read_response_headers_only(&mut stall);
     assert!(
         response.starts_with(b"HTTP/1.1 200") || response.starts_with(b"HTTP/1.0 200"),
         "fetch should start: {}",
