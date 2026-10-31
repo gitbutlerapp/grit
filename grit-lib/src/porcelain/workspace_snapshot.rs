@@ -149,11 +149,10 @@ mod index_mtime_serde {
                 let duration = t
                     .duration_since(UNIX_EPOCH)
                     .map_err(serde::ser::Error::custom)?;
-                MtimeFields {
+                serializer.serialize_some(&MtimeFields {
                     secs: duration.as_secs(),
                     nanos: duration.subsec_nanos(),
-                }
-                .serialize(serializer)
+                })
             }
         }
     }
@@ -953,9 +952,43 @@ mod tests {
     #[test]
     fn workspace_snapshot_serde_round_trip() {
         let (_tmp, repo) = setup_merge_conflict();
-        let snap = capture_conflict_snapshot_with_untracked(&repo);
+        let snap = snapshot_with_direct_and_symbolic_refs(&repo);
         let bytes = serde_json::to_vec(&snap).expect("serialize");
         let decoded: WorkspaceSnapshot = serde_json::from_slice(&bytes).expect("deserialize");
+        assert_eq!(decoded, snap);
+    }
+
+    #[cfg(feature = "serde-models")]
+    fn snapshot_with_direct_and_symbolic_refs(repo: &Repository) -> WorkspaceSnapshot {
+        let mut snap = capture_conflict_snapshot_with_untracked(repo);
+        snap.refs.insert(
+            "HEAD".into(),
+            Some(RawRef::Symbolic("refs/heads/main".into())),
+        );
+        snap
+    }
+
+    #[cfg(feature = "serde-models")]
+    #[test]
+    fn workspace_snapshot_bincode_round_trip() {
+        use bincode::config;
+
+        let (_tmp, repo) = setup_merge_conflict();
+        let snap = snapshot_with_direct_and_symbolic_refs(&repo);
+        assert!(matches!(
+            snap.refs.get("refs/heads/main").and_then(|r| r.as_ref()),
+            Some(RawRef::Direct(_))
+        ));
+        assert!(matches!(
+            snap.refs.get("HEAD").and_then(|r| r.as_ref()),
+            Some(RawRef::Symbolic(_))
+        ));
+
+        let cfg = config::standard();
+        let bytes = bincode::serde::encode_to_vec(&snap, cfg).expect("bincode encode");
+        let (decoded, len): (WorkspaceSnapshot, usize) =
+            bincode::serde::decode_from_slice(&bytes, cfg).expect("bincode decode");
+        assert_eq!(len, bytes.len());
         assert_eq!(decoded, snap);
     }
 }

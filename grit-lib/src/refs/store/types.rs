@@ -43,7 +43,6 @@ impl std::fmt::Display for RefName {
 /// Storage-level ref value without DWIM or resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde-models", serde(untagged))]
 pub enum RawRef {
     /// Points directly at an object.
     Direct(ObjectId),
