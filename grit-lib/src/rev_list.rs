@@ -6376,7 +6376,7 @@ fn streaming_since_cutoff_bounded_list(
                 streaming_date_walk(
                     &mut graph,
                     include,
-                    &HashSet::new(),
+                    &RangeWalkHide::empty(),
                     false,
                     since,
                     |graph, oid| {
