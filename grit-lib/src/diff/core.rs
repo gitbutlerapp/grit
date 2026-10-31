@@ -4943,6 +4943,8 @@ fn parallel_process_blob_worktree_jobs(
     config: &crate::config::ConfigSet,
     materialize_dirty_blobs: bool,
     hash_blobs_without_write: bool,
+    for_status: bool,
+    diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
     conv: &crate::crlf::ConversionConfig,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
     _icase_collisions: Option<&crate::path_icase::IcaseCheckoutCollisionMap>,
@@ -4993,6 +4995,16 @@ fn parallel_process_blob_worktree_jobs(
                 stream_from,
             ) {
                 Ok(content) => content,
+                Err(err)
+                    if status_skips_inaccessible_worktree_error(
+                        &err,
+                        for_status,
+                        materialize_dirty_blobs,
+                    ) =>
+                {
+                    warn_and_skip_status_inaccessible(diagnostics, rel_path.as_str(), &err);
+                    return Ok(None);
+                }
                 Err(err) if unreadable_worktree_blob_is_modified(&err, materialize_dirty_blobs) => {
                     return modified(zero_oid());
                 }
@@ -5099,6 +5111,77 @@ fn blob_disk_lookup_io_result(
     Err(Error::Io(err))
 }
 
+fn io_err_is_permission_denied(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::PermissionDenied
+}
+
+fn status_skips_inaccessible_worktree_error(
+    err: &Error,
+    for_status: bool,
+    materialize_dirty_blobs: bool,
+) -> bool {
+    if !for_status || materialize_dirty_blobs {
+        return false;
+    }
+    match err {
+        Error::Io(e) => io_err_is_permission_denied(e),
+        Error::WorktreePathIo {
+            operation: crate::worktree::WorktreePathOperation::Metadata,
+            source,
+            ..
+        } => io_err_is_permission_denied(source),
+        _ => false,
+    }
+}
+
+fn warn_and_skip_status_inaccessible(
+    diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
+    path: &str,
+    err: &Error,
+) -> bool {
+    let detail = match err {
+        Error::Io(e) => e.to_string(),
+        Error::WorktreePathIo { source, .. } => source.to_string(),
+        _ => return false,
+    };
+    if let Some(handle) = diagnostics {
+        crate::diagnostics::warn(
+            handle,
+            crate::diagnostics::Warning::WorktreeAccessFailed {
+                path: path.to_owned(),
+                detail,
+            },
+        );
+    }
+    true
+}
+
+fn symlink_metadata_worktree_diff(
+    file_path: &Path,
+    path_str: &str,
+    diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
+    for_status: bool,
+    materialize_dirty_blobs: bool,
+) -> Result<Option<fs::Metadata>> {
+    match fs::symlink_metadata(file_path) {
+        Ok(meta) => Ok(Some(meta)),
+        Err(e)
+            if e.kind() == std::io::ErrorKind::NotFound
+                || e.raw_os_error() == Some(20) /* ENOTDIR */ =>
+        {
+            Ok(None)
+        }
+        Err(e) => {
+            if for_status && !materialize_dirty_blobs && io_err_is_permission_denied(&e) {
+                warn_worktree_access_failed(diagnostics, path_str, &e);
+                Ok(None)
+            } else {
+                Err(Error::Io(e))
+            }
+        }
+    }
+}
+
 /// Whether status may report `ie` modified because the worktree size (already munged to the
 /// index's 32-bit form) differs from the cached one, without reading the file (Git
 /// `compare_stat_data`).
@@ -5169,6 +5252,7 @@ fn push_index_blob_worktree_diff(
     materialize_dirty_blobs: bool,
     hash_blobs_without_write: bool,
     for_status: bool,
+    diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
     icase_collisions: Option<&crate::path_icase::IcaseCheckoutCollisionMap>,
     result: &mut Vec<DiffEntry>,
@@ -5257,6 +5341,16 @@ fn push_index_blob_worktree_diff(
         stream_from,
     ) {
         Ok(content) => content,
+        Err(err)
+            if status_skips_inaccessible_worktree_error(
+                &err,
+                for_status,
+                materialize_dirty_blobs,
+            ) =>
+        {
+            warn_and_skip_status_inaccessible(diagnostics, path_str_ref, &err);
+            return Ok(());
+        }
         Err(err) if unreadable_worktree_blob_is_modified(&err, materialize_dirty_blobs) => {
             result.push(worktree_content_change_entry(
                 ie,
@@ -6027,7 +6121,16 @@ fn diff_index_to_worktree_inner(
                         precompose_unicode,
                         ignorecase,
                     );
-                    let meta = fs::symlink_metadata(&file_path).map_err(Error::Io)?;
+                    let Some(meta) = symlink_metadata_worktree_diff(
+                        &file_path,
+                        path_str_ref,
+                        options.diagnostics.as_ref(),
+                        options.for_status,
+                        materialize_dirty_blobs,
+                    )?
+                    else {
+                        return Ok(());
+                    };
                     push_index_blob_worktree_diff(
                         odb,
                         ie,
@@ -6042,6 +6145,7 @@ fn diff_index_to_worktree_inner(
                         materialize_dirty_blobs,
                         hash_blobs_without_write,
                         options.for_status,
+                        options.diagnostics.as_ref(),
                         filter_fp,
                         icase_collisions.as_ref(),
                         &mut result,
@@ -6065,6 +6169,8 @@ fn diff_index_to_worktree_inner(
             &config,
             materialize_dirty_blobs,
             hash_blobs_without_write,
+            options.for_status,
+            options.diagnostics.as_ref(),
             &conv,
             filter_fp,
             icase_collisions.as_ref(),

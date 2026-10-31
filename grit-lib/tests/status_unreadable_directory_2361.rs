@@ -92,7 +92,11 @@ mod unix {
 
         let git_status = git(root, &["status", "--porcelain"]);
         assert_eq!(git_status.trim(), " M a");
-        assert_eq!(git(root, &["status"]).lines().next().unwrap(), "");
+        let git_human = git(root, &["status"]);
+        assert!(
+            git_human.contains(" M a") || git_human.contains("modified:   a"),
+            "git status should show modified a: {git_human}"
+        );
 
         set_mode(&root.join("d"), 0o755);
     }

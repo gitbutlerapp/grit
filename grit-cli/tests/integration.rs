@@ -611,6 +611,9 @@ mod status_midx_memory;
 #[cfg(feature = "full-tests")]
 #[path = "status_paths_renames.rs"]
 mod status_paths_renames;
+#[cfg(unix)]
+#[path = "status_unreadable_directory_cli.rs"]
+mod status_unreadable_directory_cli;
 #[cfg(feature = "full-tests")]
 #[path = "status_untracked_cwd_paths.rs"]
 mod status_untracked_cwd_paths;

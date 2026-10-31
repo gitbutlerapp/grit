@@ -296,6 +296,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `stash_count` | number | Entries on the stash reflog (`0` when empty). |
 | `interrupted_rewrite` | string | Recovery of a rebase or history edit that was killed after moving refs: `finished_checkout` (the rewrite stands), `rolled_back` (it was undone) or `pending` (another process holds `.git/index.lock`). Omitted when nothing was pending. |
 | `gitbutler_workspace` | object | Only on a [GitButler workspace](#gitbutler-workspaces): `commit` (the workspace commit, which `head` names and `commits` and `ahead` leave out) and `heads`, the merged branch tips in the workspace's parent order, each with `commit`, `branches` (local branches pointing there, sorted; empty when none), `subject` and `ahead` (commits not on `target`, or `null` when counts were skipped). Omitted otherwise. |
+| `warnings` | array | Non-fatal worktree access problems while scanning. Each item is `{ "kind", "message" }` (for example `worktree_access_failed` when a directory could not be opened). Omitted when empty. |
 
 Example:
 

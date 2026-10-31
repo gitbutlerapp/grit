@@ -1708,6 +1708,16 @@ fn visit_untracked_directory(
 ) -> Result<()> {
     matcher.note_directory_known(rel);
 
+    if !rel.is_empty() {
+        match fs::read_dir(abs) {
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                warn_if_untracked_directory_unreadable(repo, rel, &e);
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     if has_tracked_under(index, gitlinks, tracked_paths, rel) {
         visit_untracked_node(
             repo,
