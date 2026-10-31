@@ -4369,44 +4369,41 @@ pub(crate) fn plan_hard_reset_index_align(
 
 /// Apply a [`HardResetIndexPlan`] and invalidate cache-tree nodes for touched paths.
 pub(crate) fn apply_hard_reset_index_plan(index: &mut Index, plan: HardResetIndexPlan) {
-    const BULK_INVALIDATE_MIN: usize = 64;
-    let touched = plan.remove_paths.len() + plan.updates.len() + plan.insert_entries.len();
-    let bulk_invalidate = touched >= BULK_INVALIDATE_MIN;
-    if bulk_invalidate {
-        for path in &plan.remove_paths {
-            index.remove_path_all_stages(path);
-        }
-        for (path, mode, oid) in plan.updates {
-            if let Some(pos) = index.find_entry_pos(&path, 0) {
-                index.entries[pos].mode = mode;
-                index.entries[pos].oid = oid;
-                index.entries[pos].size = 0;
-            }
-        }
-        for entry in plan.insert_entries {
-            index.add_or_replace(entry);
-        }
-        index.cache_tree = None;
-        index.cache_tree_root = None;
-        index.sort();
-        return;
-    }
-    for path in &plan.remove_paths {
-        index.remove_path_all_stages(path);
-        index.invalidate_cache_tree_for_path(path);
+    let change_count = plan
+        .remove_paths
+        .len()
+        .saturating_add(plan.updates.len())
+        .saturating_add(plan.insert_entries.len());
+    const BULK_HARD_RESET_INDEX_MIN: usize = 64;
+    let bulk = change_count >= BULK_HARD_RESET_INDEX_MIN;
+    if bulk {
+        index.drop_derived_index_extensions();
     }
     for (path, mode, oid) in plan.updates {
         if let Some(pos) = index.find_entry_pos(&path, 0) {
-            index.entries[pos].mode = mode;
-            index.entries[pos].oid = oid;
-            index.entries[pos].size = 0;
-            index.invalidate_cache_tree_for_path(&path);
+            let entry = &mut index.entries[pos];
+            let content_unchanged = entry.oid == oid && entry.mode == mode;
+            entry.mode = mode;
+            entry.oid = oid;
+            if !content_unchanged {
+                entry.size = 0;
+            }
+            if !bulk {
+                index.invalidate_cache_tree_for_path(&path);
+            }
         }
     }
-    for entry in plan.insert_entries {
-        let path = entry.path.clone();
-        index.add_or_replace(entry);
-        index.invalidate_cache_tree_for_path(&path);
+    index.defer_untracked_cache_invalidation = bulk;
+    index.remove_prefixes_paths_and_insert(
+        &std::collections::BTreeSet::new(),
+        plan.remove_paths.iter().map(|p| p.as_slice()),
+        plan.insert_entries,
+    );
+    index.defer_untracked_cache_invalidation = false;
+    if !bulk {
+        for path in &plan.remove_paths {
+            index.invalidate_cache_tree_for_path(path);
+        }
     }
     index.sort();
 }

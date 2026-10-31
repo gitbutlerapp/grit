@@ -717,15 +717,20 @@ pub(crate) fn untracked_scan_pathspecs_for_deletes(tree_changes: &[DiffEntry]) -
     specs.into_iter().collect()
 }
 
-/// Exact added paths (and ancestor directories) for untracked overwrite checks during fast wholesale scan.
+fn index_has_stage0_path(index: &Index, rel: &str) -> bool {
+    index.get(rel.as_bytes(), 0).is_some()
+}
+
+/// Untracked paths that [`DiffStatus::Added`] tree rows would overwrite, without a worktree walk.
 ///
-/// Top-level pathspec roots would walk entire trees under each root; this list stays proportional to
-/// the number of added paths in the tree diff.
-#[must_use]
-pub(crate) fn untracked_scan_paths_for_added_tree_changes(
+/// Used with the wholesale-delete scan when thousands of adds share existing directory prefixes
+/// (issue #2380): pathspec roots would re-walk entire populated trees.
+fn collect_untracked_for_added_tree_changes_lstat(
+    index: &Index,
+    work_tree: &Path,
     tree_changes: &[DiffEntry],
-) -> Vec<String> {
-    let mut specs = BTreeSet::new();
+) -> Result<Vec<String>> {
+    let mut untracked = Vec::new();
     for change in tree_changes {
         if change.status != DiffStatus::Added {
             continue;
@@ -737,14 +742,107 @@ pub(crate) fn untracked_scan_paths_for_added_tree_changes(
         if trimmed.is_empty() {
             continue;
         }
-        specs.insert(trimmed.to_owned());
-        let mut rest = trimmed;
-        while let Some((prefix, _)) = rest.rsplit_once('/') {
-            specs.insert(prefix.to_owned());
-            rest = prefix;
+        collect_untracked_collisions_for_added_path(index, work_tree, trimmed, &mut untracked)?;
+    }
+    untracked.sort();
+    untracked.dedup();
+    Ok(untracked)
+}
+
+fn collect_untracked_collisions_for_added_path(
+    index: &Index,
+    work_tree: &Path,
+    added: &str,
+    untracked: &mut Vec<String>,
+) -> Result<()> {
+    let abs = work_tree.join(added);
+    match fs::symlink_metadata(&abs) {
+        Ok(meta) => {
+            if meta.is_dir() {
+                collect_untracked_files_under_dir(index, work_tree, added, untracked)?;
+            } else {
+                if (meta.is_file() || meta.file_type().is_symlink())
+                    && !index_has_stage0_path(index, added)
+                {
+                    untracked.push(added.to_owned());
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => {
+            if let Some(parent) = added.rsplit_once('/') {
+                if !index_has_stage0_path(index, parent.0) {
+                    untracked.push(parent.0.to_owned());
+                }
+            }
+        }
+        Err(e) => return Err(Error::Io(e)),
+    }
+    let mut prefix_len = 0usize;
+    for component in added.split('/') {
+        if prefix_len == 0 {
+            prefix_len = component.len();
+        } else {
+            prefix_len += 1 + component.len();
+        }
+        if prefix_len >= added.len() {
+            break;
+        }
+        let ancestor = &added[..prefix_len];
+        let ancestor_abs = work_tree.join(ancestor);
+        let Ok(meta) = fs::symlink_metadata(&ancestor_abs) else {
+            continue;
+        };
+        if !meta.is_dir()
+            && (meta.is_file() || meta.file_type().is_symlink())
+            && !index_has_stage0_path(index, ancestor)
+        {
+            untracked.push(ancestor.to_owned());
         }
     }
-    specs.into_iter().collect()
+    Ok(())
+}
+
+fn collect_untracked_files_under_dir(
+    index: &Index,
+    work_tree: &Path,
+    dir_rel: &str,
+    untracked: &mut Vec<String>,
+) -> Result<()> {
+    let abs_root = work_tree.join(dir_rel);
+    let mut stack = vec![abs_root];
+    let mut rel_buf = dir_rel.to_owned();
+    while let Some(abs) = stack.pop() {
+        let read_dir = match fs::read_dir(&abs) {
+            Ok(rd) => rd,
+            Err(_) => continue,
+        };
+        for entry in read_dir.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let rel_start = rel_buf.len();
+            rel_buf.push('/');
+            rel_buf.push_str(&name);
+            let rel = rel_buf.as_str();
+            let file_type = match entry.file_type() {
+                Ok(t) => t,
+                Err(_) => {
+                    rel_buf.truncate(rel_start);
+                    continue;
+                }
+            };
+            if file_type.is_dir() {
+                stack.push(entry.path());
+                rel_buf.truncate(rel_start);
+                continue;
+            }
+            if (file_type.is_file() || file_type.is_symlink()) && !index_has_stage0_path(index, rel)
+            {
+                untracked.push(rel.to_owned());
+            }
+            rel_buf.truncate(rel_start);
+        }
+    }
+    Ok(())
 }
 
 const WHOLESALE_FAST_UNTRACKED_SCAN_MIN: usize = 32;
@@ -1287,22 +1385,17 @@ pub(crate) fn collect_untracked_and_wholesale_trust_for_tree_changes(
         untracked.extend(u);
         ignored.extend(i);
     }
-    let scan_specs: Vec<String> = if use_fast_wholesale_scan {
-        untracked_scan_paths_for_added_tree_changes(tree_changes)
-            .into_iter()
-            .filter(|spec| work_tree.join(spec).exists())
-            .collect()
-    } else {
-        all_specs.clone()
-    };
-    if !scan_specs.is_empty() {
+    if use_fast_wholesale_scan {
+        let u = collect_untracked_for_added_tree_changes_lstat(index, work_tree, tree_changes)?;
+        untracked.extend(u);
+    } else if !all_specs.is_empty() {
         let (u, mut ign) = collect_untracked_and_ignored_with_cache(
             repo,
             index,
             work_tree,
             IgnoredMode::No,
             true,
-            &scan_specs,
+            &all_specs,
             true,
         )?;
         untracked.extend(u);
@@ -1724,18 +1817,29 @@ mod tests {
     }
 
     #[test]
-    fn untracked_scan_paths_for_added_include_path_and_ancestors() {
-        let changes = vec![
-            added_entry("dir/sub/new.txt"),
-            modified_entry("tracked.txt"),
-            added_entry("top"),
-        ];
-        let specs = super::untracked_scan_paths_for_added_tree_changes(&changes);
-        assert!(specs.contains(&"dir/sub/new.txt".to_owned()));
-        assert!(specs.contains(&"dir/sub".to_owned()));
-        assert!(specs.contains(&"dir".to_owned()));
-        assert!(specs.contains(&"top".to_owned()));
-        assert!(!specs.contains(&"tracked.txt".to_owned()));
+    fn added_lstat_untracked_detects_file_and_dir_clash() {
+        let (dir, repo) = init_repo();
+        let work_tree = repo.work_tree().expect("work tree");
+        std::fs::create_dir_all(dir.path().join("slot")).expect("mkdir");
+        std::fs::write(dir.path().join("slot/precious.txt"), "u\n").expect("write");
+        let index = load_worktree_index(&repo).expect("index");
+        let hits = super::collect_untracked_for_added_tree_changes_lstat(
+            &index,
+            work_tree,
+            &[added_entry("slot")],
+        )
+        .expect("scan");
+        assert_eq!(hits, vec!["slot/precious.txt".to_owned()]);
+
+        std::fs::remove_dir_all(dir.path().join("slot")).expect("rm slot");
+        std::fs::write(dir.path().join("slot"), "file\n").expect("write slot file");
+        let hits = super::collect_untracked_for_added_tree_changes_lstat(
+            &index,
+            work_tree,
+            &[added_entry("slot/incoming.txt")],
+        )
+        .expect("scan");
+        assert_eq!(hits, vec!["slot".to_owned()]);
     }
 
     #[test]

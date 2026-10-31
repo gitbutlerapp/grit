@@ -999,6 +999,7 @@ mod merge_eol_crlf_conflict_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "merge_file_git_compat.rs"]
 mod merge_file_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "merge_file_issue_2369_git_compat.rs"]
 mod merge_file_issue_2369_git_compat;
 #[cfg(feature = "full-tests")]
@@ -1903,6 +1904,9 @@ mod switch_no_checkout_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "switch_reflog_git_compat.rs"]
 mod switch_reflog_git_compat;
+#[cfg(feature = "full-tests")]
+#[path = "switch_reset_mixed_swap_perf_git_compat.rs"]
+mod switch_reset_mixed_swap_perf_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "switch_tree_diff_git_compat.rs"]
 mod switch_tree_diff_git_compat;
