@@ -1574,6 +1574,79 @@ pub(crate) fn first_parent_hidden_frontier(
     Ok(frontier)
 }
 
+/// Hide predicate for a revision range (`tips` minus ancestors of `hide` tips).
+///
+/// Computes a two-sided paint once instead of closing every ancestor of `hide`, so bounded
+/// walks with pathspecs or commit filters stop at the merge-base frontier.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RangeWalkHide {
+    hide_tips: OidHashSet,
+    paint: SidePaint,
+}
+
+impl RangeWalkHide {
+    /// No excluded tips: nothing is hidden.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Whether any hide tips were configured.
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        !self.hide_tips.is_empty()
+    }
+
+    /// Paint `tips` against `hide` for subsequent [`Self::is_hidden`] checks.
+    ///
+    /// # Errors
+    ///
+    /// Propagates commit read and parse errors for commits not reached from `hide`.
+    pub fn for_range_walk(
+        repo: &Repository,
+        tips: &[ObjectId],
+        hide: &[ObjectId],
+        use_commit_graph: bool,
+        list_first_parent_only: bool,
+    ) -> Result<Self> {
+        if hide.is_empty() {
+            return Ok(Self::empty());
+        }
+        let mut cache = CommitGraphCache::with_commit_graph(repo, use_commit_graph);
+        if cache.graph.is_some() && cache.has_parent_rewrites()? {
+            cache = CommitGraphCache::with_commit_graph(repo, false);
+        }
+        let generations_bound = cache.graph.is_some();
+        let paint = if list_first_parent_only {
+            SidePaint::compute_hiding_first_parent(&mut cache, tips, hide)?
+        } else if generations_bound {
+            SidePaint::compute_hiding(&mut cache, tips, hide, HidePaintStop::TipsResolved, None)?
+        } else {
+            SidePaint::compute_hiding(&mut cache, tips, hide, HidePaintStop::Converged, None)?
+        };
+        Ok(Self {
+            hide_tips: hide.iter().copied().collect(),
+            paint,
+        })
+    }
+
+    /// Whether `oid` lies in hidden history and must not be listed or traversed.
+    #[must_use]
+    pub fn is_hidden(&self, oid: ObjectId) -> bool {
+        if !self.is_active() {
+            return false;
+        }
+        if self.hide_tips.contains(&oid) {
+            return true;
+        }
+        if let Some(reached) = self.paint.reached_by(oid, PAINT_RIGHT) {
+            return reached;
+        }
+        // Unpainted commits sit below the frontier where every path is reachable from hide.
+        true
+    }
+}
+
 /// Shortcuts for [`count_commits_reachable_excluding_ancestors_of`] that avoid painting, or
 /// `None` when the paint has to run.
 fn try_count_without_paint(

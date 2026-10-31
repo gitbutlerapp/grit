@@ -539,13 +539,13 @@ fn count_authors_stack_walk(
         return Ok(Vec::new());
     }
     let objects_dir = repo.odb().objects_dir();
-    let excluded: HashSet<ObjectId> = if exclude.is_empty() {
-        HashSet::new()
-    } else {
-        let mut graph =
-            crate::rev_list::CommitGraph::with_commit_graph(repo, false, use_commit_graph);
-        crate::rev_list::walk_closure(&mut graph, exclude)?
-    };
+    let excluded = crate::merge_base::RangeWalkHide::for_range_walk(
+        repo,
+        tips,
+        exclude,
+        use_commit_graph,
+        first_parent,
+    )?;
     let mut graph = use_commit_graph
         .then(|| crate::rev_list::CommitGraph::with_commit_graph(repo, first_parent, true));
     let mut pack_reader: Option<SingleLocalPackReader> = None;
@@ -553,7 +553,7 @@ fn count_authors_stack_walk(
     let mut stack: Vec<ObjectId> = tips.to_vec();
     let mut seen = HashSet::new();
     while let Some(oid) = stack.pop() {
-        if excluded.contains(&oid) || !seen.insert(oid) {
+        if excluded.is_hidden(oid) || !seen.insert(oid) {
             continue;
         }
         let commit_bytes = load_commit_bytes_and_count_author(
