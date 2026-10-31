@@ -1694,6 +1694,150 @@ fn rebase_merge_side_branch_keeps_side_parentage_like_git_rebase_merges() {
     assert_git_fsck_strict(wt_git);
 }
 
+fn init_issue_2365_sequential_topic_merges(wt: &std::path::Path) {
+    commit_file(wt, "base", "base\n", "base");
+    git(wt, &["switch", "-qc", "feature"]);
+    for topic in ["t1", "t2"] {
+        git(wt, &["switch", "-qc", topic, "feature"]);
+        commit_file(wt, &format!("{topic}.txt"), topic, topic);
+        git(wt, &["switch", "-q", "feature"]);
+        git(
+            wt,
+            &[
+                "merge",
+                "-q",
+                "--no-ff",
+                "-m",
+                &format!("merge {topic}"),
+                topic,
+            ],
+        );
+    }
+    git(wt, &["branch", "-D", "t1"]);
+    git(wt, &["branch", "-D", "t2"]);
+    git(wt, &["switch", "-q", "main"]);
+    commit_file(wt, "m.txt", "m\n", "main2");
+    git(wt, &["switch", "-q", "feature"]);
+}
+
+#[test]
+fn rebase_sequential_topic_merges_no_duplicate_commits_issue_2365() {
+    let grit_repo = HistoryRepo::init();
+    let git_repo = HistoryRepo::init();
+    let wt_g = grit_repo.worktree();
+    let wt_git = git_repo.worktree();
+    git(wt_g, &["config", "grit.changeIds", "false"]);
+    git(wt_git, &["config", "grit.changeIds", "false"]);
+    init_issue_2365_sequential_topic_merges(wt_g);
+    init_issue_2365_sequential_topic_merges(wt_git);
+
+    let fork = git_rev_parse(wt_g, "main~1");
+    let onto = git_rev_parse(wt_g, "main");
+    let tip = git_rev_parse(wt_g, "feature");
+    let fork_git = git_rev_parse(wt_git, "main~1");
+    let onto_git = git_rev_parse(wt_git, "main");
+
+    let grit = open_grit(wt_g);
+    let opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, false);
+    plan_apply(&grit, rebase_request(fork, Some(onto), tip), &opts);
+
+    let rebase = std::process::Command::new("git")
+        .current_dir(wt_git)
+        .args([
+            "rebase",
+            "--rebase-merges",
+            "--onto",
+            &onto_git.to_hex(),
+            &fork_git.to_hex(),
+            "feature",
+        ])
+        .env("GIT_AUTHOR_NAME", "Refs Harness Author")
+        .env("GIT_AUTHOR_EMAIL", "refs-harness@example.com")
+        .env("GIT_COMMITTER_NAME", "Refs Harness Author")
+        .env("GIT_COMMITTER_EMAIL", "refs-harness@example.com")
+        .env("GIT_COMMITTER_DATE", "1700001000 +0000")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git rebase");
+    assert!(rebase.success(), "git rebase --rebase-merges failed");
+
+    let ahead_count = |wt: &std::path::Path| {
+        git(wt, &["rev-list", "--count", "main..feature"])
+            .trim()
+            .parse::<u32>()
+            .expect("count")
+    };
+    assert_eq!(ahead_count(wt_g), 4);
+    assert_eq!(ahead_count(wt_git), 4);
+
+    let subject_lines = |wt: &std::path::Path| {
+        git(wt, &["log", "--format=%s", "main..feature"])
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let grit_subjects = subject_lines(wt_g);
+    let git_subjects = subject_lines(wt_git);
+    for label in ["t1", "merge t1"] {
+        assert_eq!(
+            grit_subjects.iter().filter(|s| s.as_str() == label).count(),
+            1,
+            "grit: {label} appears once in {grit_subjects:?}"
+        );
+        assert_eq!(
+            git_subjects.iter().filter(|s| s.as_str() == label).count(),
+            1,
+            "git: {label} appears once in {git_subjects:?}"
+        );
+    }
+
+    let feature_tip = git_rev_parse(wt_g, "feature");
+    let grit_merge_t2 = parse_commit(
+        &grit
+            .odb()
+            .read(&feature_tip)
+            .expect("read feature tip")
+            .data,
+    )
+    .expect("parse merge t2");
+    assert_eq!(grit_merge_t2.parents.len(), 2);
+    let grit_merge_t1_oid = grit_merge_t2.parents[0];
+    let grit_t2_oid = grit_merge_t2.parents[1];
+
+    let grit_t2 =
+        parse_commit(&grit.odb().read(&grit_t2_oid).expect("read t2").data).expect("parse t2");
+    assert_eq!(
+        grit_t2.parents[0], grit_merge_t1_oid,
+        "t2's first parent is the rebased merge t1 (merge t2's first parent)"
+    );
+
+    let grit_merge_t1 = parse_commit(
+        &grit
+            .odb()
+            .read(&grit_merge_t1_oid)
+            .expect("read merge t1")
+            .data,
+    )
+    .expect("parse merge t1");
+    assert_eq!(
+        grit_merge_t1.parents[0], onto,
+        "merge t1's first parent is the new main tip"
+    );
+    assert_ne!(
+        grit_merge_t1.parents[0], fork,
+        "merge t1 must not keep the old fork as first parent"
+    );
+
+    assert_eq!(
+        git(wt_g, &["rev-parse", "feature^{tree}"]).trim(),
+        git(wt_git, &["rev-parse", "feature^{tree}"]).trim(),
+        "feature trees match git rebase --rebase-merges"
+    );
+    assert_git_fsck_strict(wt_g);
+    assert_git_fsck_strict(wt_git);
+}
+
 fn init_merge_only_integration_branch(wt: &std::path::Path) {
     commit_file(wt, "base.txt", "base\n", "base");
     git(wt, &["switch", "-qc", "feat", "main"]);

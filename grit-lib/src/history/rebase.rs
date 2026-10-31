@@ -438,7 +438,7 @@ pub(crate) fn build_rebase_rewrite_inputs(
     if !opts.flatten_leaf_merges {
         let range_set: HashSet<ObjectId> = range.iter().copied().collect();
         let mainline = mainline_commits_in_range(repo, fork, tips, &range_set)?;
-        replay_order = reorder_side_branches_before_mainline(&mainline, &replay_order);
+        replay_order = priority_topo_replay_order(repo, &mainline, &replay_order)?;
     }
     Ok((edits, replay_order, range))
 }
@@ -520,23 +520,82 @@ fn merge_preserving_rebase_edits(
     Ok(edits)
 }
 
-/// Replay merged side branches before mainline commits, matching `git rebase --rebase-merges`
-/// (topological order alone can pick a parallel mainline root before its merged topic).
-fn reorder_side_branches_before_mainline(
+/// Stable priority topological replay order for merge-preserving rebases.
+///
+/// Every in-range parent is emitted before its child. Among commits whose in-range parents are
+/// already scheduled, side branches run before mainline commits (so boundary topics replay before
+/// a parallel mainline root), with ties broken by the incoming topological order.
+fn priority_topo_replay_order(
+    repo: &Repository,
     mainline: &HashSet<ObjectId>,
     replay_order: &[ObjectId],
-) -> Vec<ObjectId> {
-    let side: Vec<ObjectId> = replay_order
+) -> Result<Vec<ObjectId>, HistoryError> {
+    if replay_order.is_empty() {
+        return Ok(Vec::new());
+    }
+    let order_index: HashMap<ObjectId, usize> = replay_order
+        .iter()
+        .enumerate()
+        .map(|(index, &oid)| (oid, index))
+        .collect();
+    let in_replay: HashSet<ObjectId> = order_index.keys().copied().collect();
+
+    let mut pending_parents: HashMap<ObjectId, usize> = HashMap::new();
+    let mut children: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
+    for &commit in replay_order {
+        let parents = commit_parents(repo, commit)?;
+        let in_range = parents
+            .iter()
+            .filter(|parent| in_replay.contains(parent))
+            .count();
+        pending_parents.insert(commit, in_range);
+        for &parent in &parents {
+            if in_replay.contains(&parent) {
+                children.entry(parent).or_default().push(commit);
+            }
+        }
+    }
+
+    let prefer_side_branch = |left: &ObjectId, right: &ObjectId| {
+        let left_mainline = mainline.contains(left);
+        let right_mainline = mainline.contains(right);
+        match (left_mainline, right_mainline) {
+            (true, false) => std::cmp::Ordering::Greater,
+            (false, true) => std::cmp::Ordering::Less,
+            _ => order_index[left].cmp(&order_index[right]),
+        }
+    };
+
+    let mut ready: Vec<ObjectId> = replay_order
         .iter()
         .copied()
-        .filter(|commit| !mainline.contains(commit))
+        .filter(|commit| pending_parents.get(commit).copied().unwrap_or(0) == 0)
         .collect();
-    let mainline_part: Vec<ObjectId> = replay_order
-        .iter()
-        .copied()
-        .filter(|commit| mainline.contains(commit))
-        .collect();
-    side.into_iter().chain(mainline_part).collect()
+    let mut ordered = Vec::with_capacity(replay_order.len());
+    while ordered.len() < replay_order.len() {
+        let Some(next) = ready
+            .iter()
+            .min_by(|a, b| prefer_side_branch(a, b))
+            .copied()
+        else {
+            return Err(HistoryError::Planning {
+                message: "rebase replay order has a cycle among in-range parents".into(),
+            });
+        };
+        ready.retain(|commit| commit != &next);
+        ordered.push(next);
+        if let Some(kids) = children.get(&next) {
+            for &child in kids {
+                if let Some(pending) = pending_parents.get_mut(&child) {
+                    *pending -= 1;
+                    if *pending == 0 {
+                        ready.push(child);
+                    }
+                }
+            }
+        }
+    }
+    Ok(ordered)
 }
 
 /// First-parent commits from each rebase tip back to `fork` (exclusive).
@@ -1578,5 +1637,52 @@ mod tests {
 
         assert_eq!(plan.ref_updates.len(), 1);
         assert_eq!(plan.ref_updates[0].new, s3);
+    }
+
+    #[test]
+    fn priority_topo_replay_order_sequential_topic_merges_issue_2365() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let id = ident(1);
+        let fork_tree = blob_tree(&repo, "base", b"base\n").expect("fork tree");
+        let fork = write_commit(&repo, fork_tree, &[], "base", &id).expect("fork");
+        let t1_tree = blob_tree(&repo, "t1.txt", b"t1\n").expect("t1 tree");
+        let t1 = write_commit(&repo, t1_tree, &[fork], "t1", &id).expect("t1");
+        let merge_t1_tree =
+            files_tree(&repo, &[("base", b"base\n"), ("t1.txt", b"t1\n")]).expect("merge t1 tree");
+        let merge_t1 =
+            write_commit(&repo, merge_t1_tree, &[fork, t1], "merge t1", &id).expect("merge t1");
+        let t2_tree = blob_tree(&repo, "t2.txt", b"t2\n").expect("t2 tree");
+        let t2 = write_commit(&repo, t2_tree, &[merge_t1], "t2", &id).expect("t2");
+        let merge_t2_tree = files_tree(
+            &repo,
+            &[
+                ("base", b"base\n"),
+                ("t1.txt", b"t1\n"),
+                ("t2.txt", b"t2\n"),
+            ],
+        )
+        .expect("merge t2 tree");
+        let merge_t2 =
+            write_commit(&repo, merge_t2_tree, &[merge_t1, t2], "merge t2", &id).expect("merge t2");
+
+        let range_set: HashSet<ObjectId> = [t1, merge_t1, t2, merge_t2].into_iter().collect();
+        let mainline =
+            mainline_commits_in_range(&repo, fork, &[merge_t2], &range_set).expect("mainline");
+        assert!(mainline.contains(&merge_t1));
+        assert!(mainline.contains(&merge_t2));
+        assert!(!mainline.contains(&t1));
+        assert!(!mainline.contains(&t2));
+
+        let partitioned = vec![t1, t2, merge_t1, merge_t2];
+        let ordered =
+            priority_topo_replay_order(&repo, &mainline, &partitioned).expect("ordered replay");
+        assert_eq!(ordered, vec![t1, merge_t1, t2, merge_t2]);
     }
 }
