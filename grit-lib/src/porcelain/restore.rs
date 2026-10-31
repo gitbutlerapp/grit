@@ -29,7 +29,7 @@ use crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths;
 use crate::porcelain::stash::{flat_tree_lookup, flatten_tree_full, FlatTreeEntry};
 use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressSink};
 use crate::repo::Repository;
-use crate::state::{resolve_head_for_repository, HeadState};
+use crate::state::resolve_head_for_repository;
 use crate::worktree_rules::WorktreeRules;
 
 /// Unmerged index side to check out into the worktree (`git restore --ours|--theirs`).
@@ -163,7 +163,7 @@ pub(crate) fn restore_paths_with_lock(
     };
 
     let head_entries = if needs_head_tree_entries(restore_staged, opts.source) {
-        match resolve_head_tree(repo)? {
+        match repo.head_tree()? {
             Some(tree) => flatten_tree_full(repo.odb(), &tree, "", protect)?,
             None => Vec::new(),
         }
@@ -541,18 +541,6 @@ fn conflict_worktree_mode(ours_mode: u32, theirs_mode: u32) -> u32 {
 fn pathspecs_select_all_tracked(pathspecs: &[String]) -> bool {
     pathspecs.iter().any(|s| matches!(s.as_str(), "." | ":/."))
         && !pathspecs.iter().any(|s| pathspec_is_exclude(s))
-}
-
-fn resolve_head_tree(repo: &Repository) -> Result<Option<ObjectId>> {
-    match resolve_head_for_repository(repo)? {
-        HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => {
-            let obj = repo.odb().read(&oid)?;
-            let commit = parse_commit(&obj.data)?;
-            Ok(Some(commit.tree))
-        }
-        HeadState::Branch { .. } => Ok(None),
-        HeadState::Invalid => Err(Error::Message("HEAD is in an unknown state".into())),
-    }
 }
 
 fn needs_head_tree_entries(restore_staged: bool, source: RestoreSource) -> bool {

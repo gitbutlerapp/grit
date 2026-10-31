@@ -90,6 +90,29 @@ impl HeadState {
     pub fn is_detached(&self) -> bool {
         matches!(self, Self::Detached { .. })
     }
+
+    /// The root tree of the commit this state names.
+    ///
+    /// Use this when an unreadable `HEAD` should be treated like an unborn branch (for example
+    /// to diff the index against "nothing"); use [`Repository::head_tree`] when it must be an
+    /// error.
+    ///
+    /// # Parameters
+    ///
+    /// - `odb`: the object database holding the commit.
+    ///
+    /// # Returns
+    ///
+    /// `Some(tree)` when [`Self::oid`] names a commit, `None` on an unborn branch or an
+    /// [`HeadState::Invalid`] `HEAD`.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Odb::commit_tree`](crate::objects::odb::Odb::commit_tree): the commit is missing, is not
+    /// a commit, or has no valid `tree` header.
+    pub fn tree(&self, odb: &crate::objects::odb::Odb) -> Result<Option<ObjectId>> {
+        self.oid().map(|oid| odb.commit_tree(oid)).transpose()
+    }
 }
 
 /// An in-progress operation that the repository is in the middle of.
@@ -490,6 +513,23 @@ impl Repository {
             HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => Ok(oid),
             HeadState::Branch { oid: None, .. } => Err(Error::UnbornHead),
             HeadState::Invalid => Err(Error::InvalidHead),
+        }
+    }
+
+    /// The root tree of the commit `HEAD` points at, or `None` on an unborn branch.
+    ///
+    /// `HEAD` is read like [`Self::head_commit`]. Use [`HeadState::tree`] on an already
+    /// resolved `HEAD` when an invalid `HEAD` should also mean "no tree".
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidHead`] when `HEAD` is missing or names something that is not a ref.
+    /// - Ref store read failures while resolving `HEAD`.
+    /// - The errors of [`Odb::commit_tree`](crate::objects::odb::Odb::commit_tree) for the `HEAD` commit.
+    pub fn head_tree(&self) -> Result<Option<ObjectId>> {
+        match resolve_head_for_repository(self)? {
+            HeadState::Invalid => Err(Error::InvalidHead),
+            head => head.tree(self.odb()),
         }
     }
 }
@@ -1324,6 +1364,8 @@ mod head_state_tests {
     #![allow(clippy::unwrap_used)]
 
     use super::{resolve_head, resolve_head_for_repository, HeadState};
+    use crate::error::Error;
+    use crate::objects::{ObjectId, ObjectKind};
     use crate::repo::init_repository;
     use crate::RefStorageFormat;
     use tempfile::TempDir;
@@ -1357,6 +1399,71 @@ mod head_state_tests {
             resolve_head_for_repository(&repo).unwrap(),
             HeadState::Invalid
         );
+    }
+
+    fn commit_on_head(repo: &crate::repo::Repository) -> (ObjectId, ObjectId) {
+        let tree = repo.odb().write(ObjectKind::Tree, b"").unwrap();
+        let body = format!(
+            "tree {tree}\nauthor A <a@example.com> 0 +0000\ncommitter A <a@example.com> 0 +0000\n\nc\n"
+        );
+        let commit = repo
+            .odb()
+            .write(ObjectKind::Commit, body.as_bytes())
+            .unwrap();
+        std::fs::write(repo.git_dir().join("HEAD"), format!("{commit}\n")).unwrap();
+        (commit, tree)
+    }
+
+    #[test]
+    fn head_tree_is_none_on_an_unborn_branch_on_every_backend() {
+        for format in [RefStorageFormat::Files, RefStorageFormat::Reftable] {
+            let tmp = TempDir::new().unwrap();
+            let repo = init_repository(tmp.path(), false, "main", None, format).unwrap();
+            assert_eq!(repo.head_tree().unwrap(), None);
+            assert_eq!(unborn_main().tree(repo.odb()).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn head_tree_is_the_tree_of_the_head_commit() {
+        let tmp = TempDir::new().unwrap();
+        let repo =
+            init_repository(tmp.path(), false, "main", None, RefStorageFormat::Files).unwrap();
+        let (commit, tree) = commit_on_head(&repo);
+        assert_eq!(repo.head_tree().unwrap(), Some(tree));
+        assert_eq!(
+            HeadState::Detached { oid: commit }
+                .tree(repo.odb())
+                .unwrap(),
+            Some(tree)
+        );
+    }
+
+    #[test]
+    fn invalid_head_is_an_error_for_head_tree_and_none_for_head_state_tree() {
+        let tmp = TempDir::new().unwrap();
+        let repo =
+            init_repository(tmp.path(), false, "main", None, RefStorageFormat::Files).unwrap();
+        std::fs::write(repo.git_dir().join("HEAD"), "ref: refs/tags/missing\n").unwrap();
+        assert!(matches!(repo.head_tree(), Err(Error::InvalidHead)));
+        assert_eq!(HeadState::Invalid.tree(repo.odb()).unwrap(), None);
+    }
+
+    #[test]
+    fn head_on_a_non_commit_is_an_unexpected_object_kind() {
+        let tmp = TempDir::new().unwrap();
+        let repo =
+            init_repository(tmp.path(), false, "main", None, RefStorageFormat::Files).unwrap();
+        let blob = repo.odb().write(ObjectKind::Blob, b"data").unwrap();
+        std::fs::write(repo.git_dir().join("HEAD"), format!("{blob}\n")).unwrap();
+        assert!(matches!(
+            repo.head_tree(),
+            Err(Error::UnexpectedObjectKind {
+                expected: ObjectKind::Commit,
+                actual: ObjectKind::Blob,
+                ..
+            })
+        ));
     }
 }
 

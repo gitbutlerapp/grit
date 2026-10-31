@@ -3,7 +3,7 @@
 use crate::error::{Error, Result};
 use crate::git_path::pathspec_traverses_symlink_dir;
 use crate::index::MODE_TREE;
-use crate::objects::{parse_commit, parse_tree, ObjectId};
+use crate::objects::{parse_tree, ObjectId};
 use crate::pathspec::{
     has_glob_chars, pathspec_has_attr_magic, pathspec_is_exclude, sorted_paths_match_pathspec,
 };
@@ -164,14 +164,11 @@ fn known_paths(repo: &Repository) -> Result<Vec<String>> {
 ///
 /// Propagates failures resolving `HEAD` or reading its commit and trees.
 pub(crate) fn sorted_head_tree_paths(repo: &Repository) -> Result<Vec<String>> {
-    let head = resolve_head_for_repository(repo)?;
-    let Some(head_oid) = head.oid() else {
+    let Some(head_tree) = resolve_head_for_repository(repo)?.tree(repo.odb())? else {
         return Ok(Vec::new());
     };
-    let obj = repo.odb().read(head_oid)?;
-    let commit = parse_commit(&obj.data)?;
     let mut paths = Vec::new();
-    collect_tree_paths(repo, commit.tree, "", &mut paths)?;
+    collect_tree_paths(repo, head_tree, "", &mut paths)?;
     paths.sort_unstable();
     Ok(paths)
 }

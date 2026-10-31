@@ -679,15 +679,10 @@ fn commit_paths_scope(
         .then(|| repo.begin_index_update())
         .transpose()?;
     let head = resolve_head_for_repository(repo)?;
-    let parent_tree = match &head {
-        HeadState::Branch { oid: Some(p), .. } | HeadState::Detached { oid: p } => {
-            Some(repo.odb().commit_tree(p)?)
-        }
-        HeadState::Branch { oid: None, .. } => None,
-        HeadState::Invalid => {
-            return Err(Error::InvalidHead);
-        }
-    };
+    if head == HeadState::Invalid {
+        return Err(Error::InvalidHead);
+    }
+    let parent_tree = head.tree(repo.odb())?;
 
     let mut real_index = repo.load_index()?;
     if real_index.has_unmerged_entries() {

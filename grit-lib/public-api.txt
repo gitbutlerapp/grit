@@ -18282,6 +18282,7 @@ pub fn grit_lib::repo::Repository::enforce_safe_directory(&self) -> grit_lib::er
 pub fn grit_lib::repo::Repository::verify_safe_for_clone_source(&self) -> grit_lib::error::Result<()>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::head_commit(&self) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::repo::Repository::head_tree(&self) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::ignore_check(&self, &[alloc::string::String], &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::worktree::ignore::IgnoreCheck>>
 impl grit_lib::repo::Repository
@@ -25829,6 +25830,7 @@ pub fn grit_lib::repo::Repository::enforce_safe_directory(&self) -> grit_lib::er
 pub fn grit_lib::repo::Repository::verify_safe_for_clone_source(&self) -> grit_lib::error::Result<()>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::head_commit(&self) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::repo::Repository::head_tree(&self) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::ignore_check(&self, &[alloc::string::String], &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::worktree::ignore::IgnoreCheck>>
 impl grit_lib::repo::Repository
@@ -29924,6 +29926,7 @@ pub fn grit_lib::state::HeadState::branch_name(&self) -> core::option::Option<&s
 pub fn grit_lib::state::HeadState::is_detached(&self) -> bool
 pub fn grit_lib::state::HeadState::is_unborn(&self) -> bool
 pub fn grit_lib::state::HeadState::oid(&self) -> core::option::Option<&grit_lib::objects::ObjectId>
+pub fn grit_lib::state::HeadState::tree(&self, &grit_lib::objects::odb::Odb) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 impl core::clone::Clone for grit_lib::state::HeadState
 pub fn grit_lib::state::HeadState::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::state::HeadState

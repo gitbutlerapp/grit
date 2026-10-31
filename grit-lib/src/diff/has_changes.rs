@@ -18,7 +18,7 @@ use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, ObjectId};
 use crate::pathspec::PathspecMatcher;
 use crate::repo::Repository;
-use crate::state::resolve_head;
+use crate::state::resolve_head_for_repository;
 use crate::worktree::worktree_rules::WorktreeRules;
 
 /// Hook for tests that assert early exit while scanning worktree diffs.
@@ -205,14 +205,6 @@ pub(crate) fn tree_entry_has_changes(
     Ok(false)
 }
 
-fn head_tree(repo: &Repository) -> Result<Option<ObjectId>> {
-    let head = resolve_head(repo.git_dir())?;
-    Ok(match head.oid() {
-        Some(oid) => Some(tree_oid_of_commit(repo.odb(), oid)?),
-        None => None,
-    })
-}
-
 fn worktree_has_changes(
     repo: &Repository,
     index: &mut Index,
@@ -311,7 +303,7 @@ fn staged_has_changes(
     matcher: &PathspecMatcher<'_>,
     opts: &DiffOptions,
 ) -> Result<bool> {
-    let head_tree = head_tree(repo)?;
+    let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
     let index = repo.index_handle().load()?;
     let config = repo.config()?;
     let mut entries = diff_index_to_tree_with_renames(
@@ -395,7 +387,7 @@ impl<'repo> super::handle::Diff<'repo> {
         match target {
             DiffTarget::WorktreeVsHead => {
                 let mut index = repo.index_handle().load()?;
-                let head_tree = head_tree(repo)?;
+                let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
                 worktree_has_changes(repo, &mut index, head_tree.as_ref(), &matcher, &opts)
             }
             DiffTarget::IndexVsHead => staged_has_changes(repo, &matcher, &opts),

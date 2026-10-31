@@ -346,11 +346,7 @@ fn restore_worktree_tree(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<()> {
-    let head_oid = resolve_head_for_repository(repo)?
-        .oid()
-        .copied()
-        .ok_or(Error::UnbornHead)?;
-    let head_tree = repo.odb().commit_tree(&head_oid)?;
+    let head_tree = repo.odb().commit_tree(&repo.head_commit()?)?;
     checkout_between_trees_with_progress(
         repo,
         Some(&head_tree),
