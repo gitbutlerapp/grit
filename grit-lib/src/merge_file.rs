@@ -1,7 +1,7 @@
 //! Three-way file merge — the engine behind `grit merge-file`.
 //!
 //! Performs a line-level three-way merge of *base*, *ours*, and *theirs*
-//! using the Myers diff algorithm (via the `similar` crate).
+//! using Git's xdiff line alignment (Myers by default, with change compaction).
 //!
 //! # Algorithm
 //!
@@ -16,8 +16,9 @@
 //! Pure insertions (ops with empty old_range) are attached to the adjacent
 //! base position and emitted as OnlyOurs / OnlyTheirs hunks.
 
+use crate::diff::merge_file_compacted_line_ops;
 use crate::error::Result;
-use similar::{Algorithm, DiffOp, DiffTag};
+use similar::{DiffOp, DiffTag};
 
 /// How conflict regions should be resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -109,30 +110,11 @@ pub fn merge(input: &MergeInput<'_>) -> Result<MergeOutput> {
     let ours_compare_lines = lines_for_merge_diff_compare(&ours_lines, &ws_mode);
     let theirs_compare_lines = lines_for_merge_diff_compare(&theirs_lines, &ws_mode);
 
-    let algo = input
-        .diff_algorithm
-        .as_deref()
-        .map(|name| match name.to_lowercase().as_str() {
-            "histogram" | "patience" => similar::Algorithm::Patience,
-            _ => similar::Algorithm::Myers,
-        })
-        .unwrap_or(similar::Algorithm::Myers);
-    let ours_ops = compact_merge_diff_ops(
-        similar::capture_diff_slices(algo, &base_compare_lines, &ours_compare_lines),
-        &base_lines,
-        &ours_lines,
-        &base_compare_lines,
-        &ours_compare_lines,
-        &ws_mode,
-    );
-    let theirs_ops = compact_merge_diff_ops(
-        similar::capture_diff_slices(algo, &base_compare_lines, &theirs_compare_lines),
-        &base_lines,
-        &theirs_lines,
-        &base_compare_lines,
-        &theirs_compare_lines,
-        &ws_mode,
-    );
+    let diff_algorithm = input.diff_algorithm.as_deref();
+    let ours_ops =
+        merge_file_compacted_line_ops(&base_compare_lines, &ours_compare_lines, diff_algorithm);
+    let theirs_ops =
+        merge_file_compacted_line_ops(&base_compare_lines, &theirs_compare_lines, diff_algorithm);
 
     let mut insert_consumed = vec![false; base_lines.len() + 1];
     let mut hunks = compute_hunks(
@@ -155,7 +137,7 @@ pub fn merge(input: &MergeInput<'_>) -> Result<MergeOutput> {
         input.style,
         ConflictStyle::Diff3 | ConflictStyle::ZealousDiff3
     ) {
-        hunks = refine_conflicts_by_subdiff(hunks, algo, &ws_mode);
+        hunks = refine_conflicts_by_subdiff(hunks, diff_algorithm, &ws_mode);
         hunks = simplify_non_conflicts_between_conflicts(hunks, true);
     }
     // Git keeps adjacent conflict regions separate when identical lines appear
@@ -676,7 +658,7 @@ fn simplify_non_conflicts_between_conflicts(
 /// Split a conflict into sub-hunks by diffing the two sides (git `xdl_refine_conflicts`).
 fn refine_conflicts_by_subdiff(
     hunks: Vec<Hunk>,
-    algo: Algorithm,
+    diff_algorithm: Option<&str>,
     ws_mode: &WhitespaceMode,
 ) -> Vec<Hunk> {
     let mut out = Vec::with_capacity(hunks.len());
@@ -691,7 +673,7 @@ fn refine_conflicts_by_subdiff(
         }
         let o_cmp = normalize_lines_for_compare(&ours, ws_mode);
         let t_cmp = normalize_lines_for_compare(&theirs, ws_mode);
-        let sub_ops = similar::capture_diff_slices(algo, &o_cmp, &t_cmp);
+        let sub_ops = merge_file_compacted_line_ops(&o_cmp, &t_cmp, diff_algorithm);
         if sub_ops.len() == 1 && sub_ops[0].tag() == DiffTag::Equal {
             out.push(Hunk::Unchanged(ours));
             continue;
@@ -1573,9 +1555,9 @@ fn changed_base_line_postimage(
     Vec::new()
 }
 
-/// Run Myers diff on two line slices.
+/// Run Git Myers + compaction on two merge compare-key slices.
 fn _diff_ops(old: &[Vec<u8>], new: &[Vec<u8>]) -> Vec<DiffOp> {
-    similar::capture_diff_slices(Algorithm::Myers, old, new)
+    merge_file_compacted_line_ops(old, new, None)
 }
 
 /// Split a byte slice into lines, each including its trailing `\n` if present.
@@ -1959,6 +1941,94 @@ mod tests {
         let theirs = "a\nb\nC\n"; // modify the last line, two lines away
         let (r, c) = do_merge(base, ours, theirs);
         assert_eq!(c, 0, "expected clean merge, got: {r:?}");
+    }
+
+    fn issue_2391_fixture() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        let base_lines: Vec<String> = (0..80)
+            .map(|i| match i % 3 {
+                0 => "}".to_string(),
+                1 => String::new(),
+                _ => "\treturn ret;".to_string(),
+            })
+            .collect();
+        let base = base_lines
+            .iter()
+            .map(|l| format!("{l}\n"))
+            .collect::<String>()
+            .into_bytes();
+
+        let mut theirs_lines = base_lines.clone();
+        theirs_lines.drain(50..53);
+        let theirs = theirs_lines
+            .iter()
+            .map(|l| format!("{l}\n"))
+            .collect::<String>()
+            .into_bytes();
+
+        let mut ours_lines = base_lines;
+        for i in 0..11 {
+            ours_lines.insert(53 + i, format!("inserted {i}"));
+        }
+        let ours = ours_lines
+            .iter()
+            .map(|l| format!("{l}\n"))
+            .collect::<String>()
+            .into_bytes();
+
+        (base, ours, theirs)
+    }
+
+    #[test]
+    fn issue_2391_repeated_anchor_deletion_vs_insert_matches_git() {
+        let (base, ours, theirs) = issue_2391_fixture();
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2391 myers",
+        );
+        let out = merge(&MergeInput {
+            base: &base,
+            ours: &ours,
+            theirs: &theirs,
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: None,
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .unwrap();
+        assert_eq!(out.conflicts, 0, "expected clean merge");
+        let hist = merge(&MergeInput {
+            base: &base,
+            ours: &ours,
+            theirs: &theirs,
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: Some("histogram".into()),
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .unwrap();
+        assert_eq!(
+            hist.conflicts, 0,
+            "histogram path should also merge cleanly"
+        );
     }
 
     #[test]
@@ -2952,16 +3022,10 @@ mod tests {
         let base_compare_lines = normalize_lines_for_compare(&base_lines, &ws_mode);
         let ours_compare_lines = normalize_lines_for_compare(&ours_lines, &ws_mode);
         let theirs_compare_lines = normalize_lines_for_compare(&theirs_lines, &ws_mode);
-        let ours_ops = similar::capture_diff_slices(
-            Algorithm::Myers,
-            &base_compare_lines,
-            &ours_compare_lines,
-        );
-        let theirs_ops = similar::capture_diff_slices(
-            Algorithm::Myers,
-            &base_compare_lines,
-            &theirs_compare_lines,
-        );
+        let ours_ops =
+            merge_file_compacted_line_ops(&base_compare_lines, &ours_compare_lines, None);
+        let theirs_ops =
+            merge_file_compacted_line_ops(&base_compare_lines, &theirs_compare_lines, None);
         let mut insert_consumed = vec![false; base_lines.len() + 1];
         let hunks = compute_hunks(
             &base_lines,

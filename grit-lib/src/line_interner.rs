@@ -78,6 +78,48 @@ impl<'a> LineInterner<'a> {
     }
 }
 
+/// Intern arbitrary byte lines to dense `u32` ids (equal id iff equal bytes).
+#[derive(Default)]
+pub struct ByteLineInterner {
+    lines: Vec<Vec<u8>>,
+    table: HashTable<u32>,
+    hasher: DefaultHashBuilder,
+}
+
+impl ByteLineInterner {
+    #[must_use]
+    pub fn with_capacity(lines: usize) -> Self {
+        Self {
+            lines: Vec::new(),
+            table: HashTable::with_capacity(lines),
+            hasher: DefaultHashBuilder::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn intern(&mut self, line: &[u8]) -> u32 {
+        let hash = self.hasher.hash_one(line);
+        let entry = self.table.entry(
+            hash,
+            |&id| self.lines[id as usize] == line,
+            |&id| self.hasher.hash_one(&self.lines[id as usize]),
+        );
+        match entry {
+            Entry::Occupied(found) => *found.get(),
+            Entry::Vacant(slot) => {
+                let id = u32::try_from(self.lines.len()).unwrap_or(u32::MAX);
+                self.lines.push(line.to_vec());
+                slot.insert(id);
+                id
+            }
+        }
+    }
+
+    pub fn intern_all(&mut self, lines: &[Vec<u8>]) -> Vec<u32> {
+        lines.iter().map(|line| self.intern(line)).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::LineInterner;

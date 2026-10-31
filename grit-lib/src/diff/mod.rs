@@ -15,6 +15,7 @@
 mod changes;
 mod commit_files_many;
 mod core;
+pub(crate) use core::merge_file_compacted_line_ops;
 pub(crate) use core::myers_rediff_changed_masks_for_region;
 mod detail;
 mod files;

@@ -472,6 +472,166 @@ fn xdiff_changed_flags_trimmed_ids(
     ((full1, full2), ids1_full, ids2_full)
 }
 
+fn xdiff_changed_flags_trimmed_byte_ids(
+    old_compare: &[Vec<u8>],
+    new_compare: &[Vec<u8>],
+    need_min: bool,
+) -> XdiffTrimmedIds {
+    use crate::line_interner::ByteLineInterner;
+
+    let nrec1 = old_compare.len();
+    let nrec2 = new_compare.len();
+    if nrec1 == 0 && nrec2 == 0 {
+        return ((Vec::new(), Vec::new()), Vec::new(), Vec::new());
+    }
+    let mut interner = ByteLineInterner::with_capacity(nrec1 + nrec2);
+    let ids1_full = interner.intern_all(old_compare);
+    let ids2_full = interner.intern_all(new_compare);
+
+    let lim = nrec1.min(nrec2);
+    let mut head = 0usize;
+    while head < lim && ids1_full[head] == ids2_full[head] {
+        head += 1;
+    }
+    let mut tail = 0usize;
+    let rem = lim - head;
+    while tail < rem && ids1_full[nrec1 - 1 - tail] == ids2_full[nrec2 - 1 - tail] {
+        tail += 1;
+    }
+    let shared_records = head + tail;
+    let (full1, full2) = if shared_records == 0 {
+        git_xdiff::changed_flags(&ids1_full, &ids2_full, need_min)
+    } else {
+        let cut_ids1 = &ids1_full[head..nrec1 - tail];
+        let cut_ids2 = &ids2_full[head..nrec2 - tail];
+        let nclasses = ids1_full
+            .iter()
+            .chain(&ids2_full)
+            .max()
+            .map_or(0, |&max| max as usize + 1);
+        let mut shared_counts = vec![0u32; nclasses];
+        for &id in &ids1_full[..head] {
+            shared_counts[id as usize] += 1;
+        }
+        for &id in &ids1_full[nrec1 - tail..] {
+            shared_counts[id as usize] += 1;
+        }
+        let (mid1, mid2) = git_xdiff::changed_flags_with_shared(
+            cut_ids1,
+            cut_ids2,
+            &shared_counts,
+            shared_records,
+            need_min,
+        );
+        let mut full1 = vec![false; nrec1];
+        let mut full2 = vec![false; nrec2];
+        if !mid1.is_empty() {
+            full1[head..nrec1 - tail].copy_from_slice(&mid1);
+        }
+        if !mid2.is_empty() {
+            full2[head..nrec2 - tail].copy_from_slice(&mid2);
+        }
+        (full1, full2)
+    };
+    ((full1, full2), ids1_full, ids2_full)
+}
+
+fn merge_compare_str_owned(keys: &[Vec<u8>]) -> Vec<String> {
+    keys.iter()
+        .map(|key| {
+            std::str::from_utf8(key)
+                .map(ToString::to_string)
+                .unwrap_or_else(|_| String::from_utf8_lossy(key).into_owned())
+        })
+        .collect()
+}
+
+enum MergeFileCompactAlgorithm {
+    Myers { need_min: bool },
+    Histogram,
+    Patience,
+}
+
+fn parse_merge_file_compact_algorithm(name: Option<&str>) -> MergeFileCompactAlgorithm {
+    match name.map(str::to_lowercase).as_deref() {
+        None | Some("myers") => MergeFileCompactAlgorithm::Myers { need_min: false },
+        Some("minimal") => MergeFileCompactAlgorithm::Myers { need_min: true },
+        Some("histogram") => MergeFileCompactAlgorithm::Histogram,
+        Some("patience") => MergeFileCompactAlgorithm::Patience,
+        Some(_) => MergeFileCompactAlgorithm::Myers { need_min: false },
+    }
+}
+
+/// Compacted line alignment for three-way merge (base↔side diffs and conflict refinement).
+///
+/// Compare keys must already follow merge `xdl_recmatch` rules. Neither merge-file nor merge-ort
+/// enables the indent heuristic; change compaction still slides groups against the other side.
+pub(crate) fn merge_file_compacted_line_ops(
+    old_compare: &[Vec<u8>],
+    new_compare: &[Vec<u8>],
+    diff_algorithm: Option<&str>,
+) -> Vec<similar::DiffOp> {
+    const INDENT_HEURISTIC: bool = false;
+    let old_owned = merge_compare_str_owned(old_compare);
+    let new_owned = merge_compare_str_owned(new_compare);
+    let old_keys: Vec<&str> = old_owned.iter().map(String::as_str).collect();
+    let new_keys: Vec<&str> = new_owned.iter().map(String::as_str).collect();
+    let old_side = diff_indent_heuristic::CompactSide {
+        lines: &old_keys,
+        keys: &old_keys,
+        compare_ids: None,
+    };
+    let new_side = diff_indent_heuristic::CompactSide {
+        lines: &new_keys,
+        keys: &new_keys,
+        compare_ids: None,
+    };
+
+    match parse_merge_file_compact_algorithm(diff_algorithm) {
+        MergeFileCompactAlgorithm::Myers { need_min } => {
+            let ((changed1, changed2), old_key_ids, new_key_ids) =
+                xdiff_changed_flags_trimmed_byte_ids(old_compare, new_compare, need_min);
+            diff_indent_heuristic::apply_change_compact_to_masks(
+                changed1,
+                changed2,
+                diff_indent_heuristic::CompactSide {
+                    compare_ids: Some(&old_key_ids),
+                    ..old_side
+                },
+                diff_indent_heuristic::CompactSide {
+                    compare_ids: Some(&new_key_ids),
+                    ..new_side
+                },
+                INDENT_HEURISTIC,
+            )
+        }
+        MergeFileCompactAlgorithm::Histogram => {
+            let (changed1, changed2) = git_xdiff::histogram_changed_flags(&old_keys, &new_keys);
+            let raw = changed_flags_to_ops(&changed1, &changed2, old_keys.len(), new_keys.len());
+            diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
+                &raw,
+                old_side,
+                new_side,
+                INDENT_HEURISTIC,
+                super::WhitespaceMode::default(),
+                true,
+            )
+        }
+        MergeFileCompactAlgorithm::Patience => {
+            let (changed1, changed2) = git_xdiff::patience_changed_flags(&old_keys, &new_keys);
+            let raw = changed_flags_to_ops(&changed1, &changed2, old_keys.len(), new_keys.len());
+            diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
+                &raw,
+                old_side,
+                new_side,
+                INDENT_HEURISTIC,
+                super::WhitespaceMode::default(),
+                false,
+            )
+        }
+    }
+}
+
 pub(crate) fn git_xdiff_compacted_line_ops(
     old_compare: &[&str],
     new_compare: &[&str],
