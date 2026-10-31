@@ -13,7 +13,7 @@
 //! and make no presentation decisions — no colour, pager, tty, or stdout.
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -1128,7 +1128,10 @@ fn checkout_hard_to_tree_journaled(
                 return HardResetEntryAction::Written(None);
             }
             let existing = &index.entries[pos];
-            match worktree_stats.get(&pos).copied() {
+            match worktree_stats.get(pos) {
+                Some(stat) if hard_reset_entry_size_changed(existing, &stat) => {
+                    HardResetEntryAction::Write
+                }
                 Some(stat)
                     if hard_reset_entry_stat_clean(
                         existing,
@@ -1569,56 +1572,71 @@ fn hard_reset_stat_probe_positions(
 }
 
 /// Stat pass for hard reset: one worker and no index preload to keep peak RSS down on wide trees.
+///
+/// Paths are joined to the work tree verbatim, so on Linux files are stat-ed relative to a
+/// handle on their directory instead of walking the full absolute path once per file.
 fn scan_index_blob_stats_for_hard_reset(
     repo: &Repository,
     work_tree: &Path,
     index: &Index,
     config: &ConfigSet,
     positions: &[usize],
-) -> Result<HashMap<usize, crate::worktree_scan::BlobDiskStat>> {
+) -> Result<HardResetWorktreeStats> {
     use crate::worktree_scan::{
-        collect_blob_lookup_batches, plan_blob_entries_by_dir_for_positions, BlobDiskLookup,
-        BlobScanSparseMode, WorktreeBlobScanOptions,
+        collect_blob_lookup_batches_with_literal_paths, plan_blob_entries_by_dir_for_positions,
+        BlobDiskLookup, BlobScanSparseMode, WorktreeBlobScanOptions,
     };
 
-    let mut stats = HashMap::new();
     if positions.is_empty() {
-        return Ok(stats);
+        return Ok(HardResetWorktreeStats::default());
     }
     let plan = plan_blob_entries_by_dir_for_positions(index, positions, false);
     if plan.is_empty() {
-        return Ok(stats);
+        return Ok(HardResetWorktreeStats::default());
     }
-    let stat_workers = repo
-        .thread_policy()
-        .resolve(ParallelOp::IndexRefresh, config)
-        .threads
-        .get();
     let dir_root = work_tree.to_path_buf();
     let file_root = work_tree.to_path_buf();
-    let batches = collect_blob_lookup_batches(
+    let batches = collect_blob_lookup_batches_with_literal_paths(
         index,
         &plan,
         WorktreeBlobScanOptions {
             preload_index: false,
-            stat_parallel_threads: Some(stat_workers),
+            stat_parallel_threads: Some(1),
         },
         &repo.thread_policy(),
         config,
         move |dir: &[u8]| crate::index::worktree_path_from_index_rel(&dir_root, dir),
         move |rel: &[u8]| crate::index::worktree_path_from_index_rel(&file_root, rel),
+        true,
         crate::worktree_scan::no_symlink_probe,
         BlobScanSparseMode::Dense,
+        None,
+        None,
     )?;
-    for (plan_index, lookup) in batches.into_iter().flatten() {
-        let Some(&orig) = plan.indices.get(plan_index) else {
-            continue;
-        };
-        if let BlobDiskLookup::Present(stat) = lookup {
-            stats.insert(orig, stat);
-        }
+    let mut stats: Vec<_> = batches
+        .into_iter()
+        .flatten()
+        .filter_map(|(plan_index, lookup)| match lookup {
+            BlobDiskLookup::Present(stat) => plan.indices.get(plan_index).map(|&pos| (pos, stat)),
+            _ => None,
+        })
+        .collect();
+    stats.sort_unstable_by_key(|&(pos, _)| pos);
+    Ok(HardResetWorktreeStats(stats))
+}
+
+/// Work-tree stats from [`scan_index_blob_stats_for_hard_reset`], sorted by index position.
+#[derive(Default)]
+struct HardResetWorktreeStats(Vec<(usize, crate::worktree_scan::BlobDiskStat)>);
+
+impl HardResetWorktreeStats {
+    /// The stat for index position `pos`, or `None` when the path was missing on disk.
+    fn get(&self, pos: usize) -> Option<crate::worktree_scan::BlobDiskStat> {
+        self.0
+            .binary_search_by_key(&pos, |&(p, _)| p)
+            .ok()
+            .map(|i| self.0[i].1)
     }
-    Ok(stats)
 }
 
 fn hard_reset_journal_index_only_removals(
@@ -1846,6 +1864,23 @@ fn hard_reset_entry_stat_clean(
         && (!trust_filemode || stat.git_mode == existing.mode)
         && crate::diff::stat_matches_blob_stat(existing, stat, stat_policy)
         && !crate::diff::entry_is_racy_with_policy(existing, index_mtime, stat_policy)
+}
+
+/// Whether a regular file's on-disk size differs from the size the index recorded for it.
+///
+/// The recorded size is that of the work-tree bytes last seen matching the blob, so a
+/// different size means those bytes changed: the file is rewritten without hashing it first.
+/// A clean filter may still map the new bytes to the same blob, but hard reset leaves the
+/// checked-out form either way.
+fn hard_reset_entry_size_changed(
+    existing: &IndexEntry,
+    stat: &crate::worktree_scan::BlobDiskStat,
+) -> bool {
+    is_regular_git_mode(existing.mode)
+        && !existing.stat_cache_unset()
+        && !stat.is_dir
+        && is_regular_git_mode(stat.git_mode)
+        && stat.worktree_size() != existing.size
 }
 
 /// Resolve [`HardResetEntryAction::Verify`] entries by comparing worktree content with the
@@ -5003,6 +5038,53 @@ mod tests {
     use crate::repo::init_repository;
     use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
     use tempfile::TempDir;
+
+    #[test]
+    fn checked_out_entry_marks_only_regular_files_content_verified() {
+        let tmp = TempDir::new().expect("tempdir");
+        let file = tmp.path().join("f");
+        fs::write(&file, b"data").expect("write");
+        let oid = ObjectId::zero();
+        let meta = fs::symlink_metadata(&file).expect("stat");
+        let mut entry = checked_out_entry(&meta, b"f", oid, MODE_REGULAR);
+        assert_eq!(entry.size, 4);
+        assert!(entry.take_content_verified());
+
+        #[cfg(unix)]
+        {
+            let link = tmp.path().join("l");
+            std::os::unix::fs::symlink("f", &link).expect("symlink");
+            let meta = fs::symlink_metadata(&link).expect("lstat");
+            let mut entry = checked_out_entry(&meta, b"l", oid, MODE_SYMLINK);
+            assert!(!entry.take_content_verified());
+        }
+    }
+
+    #[test]
+    fn hard_reset_size_change_needs_a_recorded_size() {
+        let tmp = TempDir::new().expect("tempdir");
+        let file = tmp.path().join("f");
+        fs::write(&file, b"four").expect("write");
+        let meta = fs::symlink_metadata(&file).expect("stat");
+        let stat = crate::worktree_scan::BlobDiskStat::from_metadata(&meta);
+        let recorded = entry_from_metadata(&meta, b"f", ObjectId::zero(), MODE_REGULAR);
+        assert!(!hard_reset_entry_size_changed(&recorded, &stat));
+
+        let mut resized = recorded.clone();
+        resized.size = 5;
+        assert!(hard_reset_entry_size_changed(&resized, &stat));
+
+        let mut unset = recorded.clone();
+        unset.size = 0;
+        unset.mtime_sec = 0;
+        unset.mtime_nsec = 0;
+        assert!(unset.stat_cache_unset());
+        assert!(!hard_reset_entry_size_changed(&unset, &stat));
+
+        let mut link = resized;
+        link.mode = MODE_SYMLINK;
+        assert!(!hard_reset_entry_size_changed(&link, &stat));
+    }
 
     #[derive(Default)]
     struct CheckoutProgressRecorder {

@@ -1564,6 +1564,9 @@ mod reset_hard_cancel;
 #[path = "reset_hard_wide_perf_git_compat.rs"]
 mod reset_hard_wide_perf_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "reset_hard_worktree_stat_git_compat.rs"]
+mod reset_hard_worktree_stat_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "reset_invalid_signature.rs"]
 mod reset_invalid_signature;
 #[cfg(feature = "full-tests")]
