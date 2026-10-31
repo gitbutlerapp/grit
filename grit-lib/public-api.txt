@@ -572,11 +572,11 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::BlameLine
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::blame::BlameLine
 pub struct grit_lib::blame::BlameOptions
 pub grit_lib::blame::BlameOptions::copy_detection: grit_lib::blame::CopyDetection
-pub grit_lib::blame::BlameOptions::move_detection: bool
 pub grit_lib::blame::BlameOptions::final_source: grit_lib::blame::BlameFinalSource
 pub grit_lib::blame::BlameOptions::first_parent_only: bool
 pub grit_lib::blame::BlameOptions::ignore: grit_lib::blame::IgnoreRevs
 pub grit_lib::blame::BlameOptions::line_range: core::option::Option<core::ops::range::RangeInclusive<usize>>
+pub grit_lib::blame::BlameOptions::move_detection: bool
 pub grit_lib::blame::BlameOptions::now: core::option::Option<time::offset_date_time::OffsetDateTime>
 pub grit_lib::blame::BlameOptions::start: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::blame::BlameOptions::whitespace: grit_lib::diff::WhitespaceMode

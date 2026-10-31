@@ -1,4 +1,4 @@
-//! Resolve author identity and build a [`CommitRequest`](grit_lib::porcelain::commit::CommitRequest).
+//! Resolve author identity and build a [`CommitRequest`].
 //!
 //! Source for the library guide "Repository" page Identity section (included in the docs site).
 
