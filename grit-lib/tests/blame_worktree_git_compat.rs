@@ -478,12 +478,40 @@ fn uncommitted_commit_info_carries_the_given_time() {
     );
     let info = &result.commits[&ObjectId::zero()];
     assert_eq!(info.author_time, 1_800_000_000);
-    assert!(info.author.is_empty() && info.summary.is_empty());
+    assert_eq!(
+        info.author,
+        "Not Committed Yet <not.committed.yet> 1800000000 +0000"
+    );
+    assert_eq!(info.summary, "Not Committed Yet");
     let without_time = blame(&repo, "f.txt", &worktree_options());
     assert_eq!(without_time.commits[&ObjectId::zero()].author_time, 0);
     let hunks = result.hunks();
-    assert!(hunks[0].commit.is_zero());
+    assert!(hunks[0].commit.is_zero() && hunks[0].not_committed);
     assert_eq!((hunks[0].final_start, hunks[0].count), (1, 1));
+    assert!(hunks[0].lines(&result)[0].not_committed);
+    assert!(!hunks[1].not_committed);
+}
+
+#[test]
+fn contents_commit_info_uses_the_external_file_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    history(root);
+    let repo = open_repo(root);
+    let result = blame(
+        &repo,
+        "f.txt",
+        &BlameOptions {
+            final_source: BlameFinalSource::Contents(b"buffer only\n".to_vec()),
+            ..worktree_options()
+        },
+    );
+    let info = &result.commits[&ObjectId::zero()];
+    assert_eq!(
+        info.author,
+        "External file (--contents) <not.committed.yet> 0 +0000"
+    );
+    assert_eq!(info.summary, "External file (--contents)");
 }
 
 /// `author` of the null-commit group in `git blame --porcelain` output.

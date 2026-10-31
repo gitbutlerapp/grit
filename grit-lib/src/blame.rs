@@ -19,7 +19,7 @@
 //! # }
 //! ```
 
-use std::ops::RangeInclusive;
+use std::ops::{Range, RangeInclusive};
 use std::sync::OnceLock;
 
 use similar::{Algorithm as SimilarAlgorithm, DiffOp};
@@ -4674,6 +4674,9 @@ pub enum BlameFinalSource {
     Contents(Vec<u8>),
 }
 
+/// Email shown in the placeholder identity of uncommitted lines (Git's porcelain `author-mail`).
+pub const UNCOMMITTED_EMAIL: &str = "not.committed.yet";
+
 impl BlameFinalSource {
     /// Author name Git's porcelain blame gives lines that exist only in this source:
     /// `External file (--contents)` for [`Contents`](Self::Contents), `Not Committed Yet`
@@ -4683,6 +4686,19 @@ impl BlameFinalSource {
         match self {
             Self::Contents(_) => "External file (--contents)",
             Self::Revision | Self::Worktree => "Not Committed Yet",
+        }
+    }
+
+    /// Commit metadata [`blame_file`] reports for uncommitted lines: the
+    /// [`uncommitted_author_name`](Self::uncommitted_author_name) as author name and summary,
+    /// [`UNCOMMITTED_EMAIL`] as email, and `author_time` at UTC.
+    #[must_use]
+    pub fn uncommitted_commit_info(&self, author_time: i64) -> BlameCommitInfo {
+        let label = self.uncommitted_author_name();
+        BlameCommitInfo {
+            author: format!("{label} <{UNCOMMITTED_EMAIL}> {author_time} +0000"),
+            author_time,
+            summary: label.to_owned(),
         }
     }
 }
@@ -4746,7 +4762,8 @@ pub struct BlameHunk {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlameCommitInfo {
     /// Author identity line (`Name <email> <epoch> <tz>`); empty when the commit has no
-    /// `author` header.
+    /// `author` header. For uncommitted lines this is the placeholder identity Git reports
+    /// (see [`BlameFinalSource::uncommitted_author_name`]).
     pub author: String,
     /// Author timestamp (Unix seconds); `0` when the author line has none.
     pub author_time: i64,
@@ -4776,16 +4793,16 @@ impl BlameResult {
             let extend =
                 i < self.lines.len() && blame_lines_share_hunk(&self.lines[i - 1], &self.lines[i]);
             if !extend {
-                let slice = &self.lines[start..i];
+                let first = &self.lines[start];
                 out.push(BlameHunk {
-                    commit: slice[0].commit,
-                    original_path: slice[0].original_path.clone(),
-                    original_start: slice[0].original_line,
-                    final_start: slice[0].final_line,
-                    count: slice.len(),
-                    ignored: slice[0].ignored,
-                    unblamable: slice[0].unblamable,
-                    not_committed: slice[0].not_committed,
+                    commit: first.commit,
+                    original_path: first.original_path.clone(),
+                    original_start: first.original_line,
+                    final_start: first.final_line,
+                    count: i - start,
+                    ignored: first.ignored,
+                    unblamable: first.unblamable,
+                    not_committed: first.not_committed,
                     lines: start..i,
                 });
                 start = i;
@@ -4829,6 +4846,7 @@ fn blame_lines_share_hunk(prev: &BlameAttributedLine, next: &BlameAttributedLine
         && prev.original_path == next.original_path
         && prev.ignored == next.ignored
         && prev.unblamable == next.unblamable
+        && prev.not_committed == next.not_committed
         && next.original_line == prev.original_line + 1
         && next.final_line == prev.final_line + 1
 }
@@ -4934,11 +4952,9 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
             for line in &lines {
                 commits.entry(line.commit).or_insert_with(|| {
                     if line.not_committed {
-                        BlameCommitInfo {
-                            author: String::new(),
-                            author_time: options.now.map_or(0, |now| now.unix_timestamp()),
-                            summary: String::new(),
-                        }
+                        options.final_source.uncommitted_commit_info(
+                            options.now.map_or(0, |now| now.unix_timestamp()),
+                        )
                     } else {
                         load_blame_commit_info(odb, line.commit)
                     }
@@ -5877,6 +5893,26 @@ mod tests {
         let before = clean.clone();
         clean.name_uncommitted_author(&BlameFinalSource::Worktree);
         assert_eq!(clean, before);
+    }
+
+    #[test]
+    fn uncommitted_commit_info_depends_on_final_source() {
+        let contents = BlameFinalSource::Contents(b"x\n".to_vec());
+
+        let info = BlameFinalSource::Worktree.uncommitted_commit_info(1_800_000_000);
+        assert_eq!(
+            info.author,
+            "Not Committed Yet <not.committed.yet> 1800000000 +0000"
+        );
+        assert_eq!(info.author_time, 1_800_000_000);
+        assert_eq!(info.summary, "Not Committed Yet");
+
+        let info = contents.uncommitted_commit_info(0);
+        assert_eq!(
+            info.author,
+            "External file (--contents) <not.committed.yet> 0 +0000"
+        );
+        assert_eq!(info.summary, "External file (--contents)");
     }
 
     #[test]

@@ -387,6 +387,7 @@ pub grit_lib::blame::BlameFinalSource::Revision
 pub grit_lib::blame::BlameFinalSource::Worktree
 impl grit_lib::blame::BlameFinalSource
 pub const fn grit_lib::blame::BlameFinalSource::uncommitted_author_name(&self) -> &'static str
+pub fn grit_lib::blame::BlameFinalSource::uncommitted_commit_info(&self, i64) -> grit_lib::blame::BlameCommitInfo
 impl core::clone::Clone for grit_lib::blame::BlameFinalSource
 pub fn grit_lib::blame::BlameFinalSource::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::blame::BlameFinalSource
@@ -675,6 +676,7 @@ impl core::marker::Unpin for grit_lib::blame::IgnoreRevsSources
 impl core::marker::UnsafeUnpin for grit_lib::blame::IgnoreRevsSources
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::IgnoreRevsSources
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::blame::IgnoreRevsSources
+pub const grit_lib::blame::UNCOMMITTED_EMAIL: &str
 pub fn grit_lib::blame::blame_file(&grit_lib::repo::Repository, &str, &grit_lib::blame::BlameOptions) -> grit_lib::error::Result<grit_lib::blame::BlameResult>
 pub fn grit_lib::blame::build_exact_relocate_line_map(&[&str], &[&str], &[core::option::Option<usize>]) -> alloc::vec::Vec<core::option::Option<usize>>
 pub fn grit_lib::blame::build_fuzzy_line_map(&[&str], &[&str], &[core::option::Option<usize>]) -> alloc::vec::Vec<core::option::Option<usize>>

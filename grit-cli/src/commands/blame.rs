@@ -174,7 +174,7 @@ fn blame_line_marker(unblamable: bool, ignored: bool) -> char {
 }
 
 /// Strip trailing line terminators from blamed line text for display and JSON.
-fn normalize_blame_line_content(content: String) -> String {
+fn normalize_blame_line_content(content: &str) -> String {
     content.trim_end_matches(['\n', '\r']).to_owned()
 }
 
@@ -263,13 +263,12 @@ pub fn run(
     options.ignore = ignore;
     options.whitespace = whitespace;
     options.copy_detection = copy_detection;
-    let mut result = blame_file(&repo, &blame_path, &options)?;
-    result.name_uncommitted_author(&options.final_source);
+    let result = blame_file(&repo, &blame_path, &options)?;
 
     Ok(outcome_from_result(
         blame_path,
         start.to_hex(),
-        result,
+        &result,
         group,
         now.unix_timestamp(),
     ))
@@ -278,7 +277,7 @@ pub fn run(
 fn outcome_from_result(
     file: String,
     rev: String,
-    result: BlameResult,
+    result: &BlameResult,
     group: bool,
     now: i64,
 ) -> BlameOutcome {
@@ -306,7 +305,7 @@ fn outcome_from_result(
             })
             .unwrap_or_else(|| ("unknown".to_owned(), "?".to_owned()));
 
-        let content = normalize_blame_line_content(line.content.clone());
+        let content = normalize_blame_line_content(&line.content);
         let marker = blame_line_marker(line.unblamable, line.ignored);
         lines_json.push(BlameLineJson {
             commit: commit_hex.clone(),
@@ -350,7 +349,7 @@ fn outcome_from_result(
                     not_committed: hunk.not_committed.then_some(true),
                     lines: hunk_lines
                         .iter()
-                        .map(|line| normalize_blame_line_content(line.content.clone()))
+                        .map(|line| normalize_blame_line_content(&line.content))
                         .collect(),
                     line_encoding_lossy,
                     original_path: hunk.original_path,
@@ -378,8 +377,8 @@ mod tests {
 
     #[test]
     fn normalize_blame_line_content_strips_trailing_crlf() {
-        assert_eq!(normalize_blame_line_content("x\r\n".to_owned()), "x");
-        assert_eq!(normalize_blame_line_content("y\n".to_owned()), "y");
-        assert_eq!(normalize_blame_line_content("z".to_owned()), "z");
+        assert_eq!(normalize_blame_line_content("x\r\n"), "x");
+        assert_eq!(normalize_blame_line_content("y\n"), "y");
+        assert_eq!(normalize_blame_line_content("z"), "z");
     }
 }
