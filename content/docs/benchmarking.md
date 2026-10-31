@@ -296,8 +296,9 @@ Short commands' peak RSS is mostly the binary's own code: the kernel maps file-b
 in 64 KB fault-around windows, so a function run once makes its whole window resident, and
 the library functions an operation runs are otherwise scattered over the whole `.text`.
 `grit-lib`'s `hot-text-layout` feature lays the library's hot code path out contiguously in
-every binary that links it; `grit` enables it (see
-[Benchmarks](benchmarks.md#status-memory-is-code-layout-2026-10-31)).
+every binary that links it; `grit` enables it and lays out its own hot code the same way
+(see [Benchmarks](benchmarks.md#status-memory-is-code-layout-2026-10-31) and
+[Benchmarks](benchmarks.md#the-cli-joins-the-hot-text-layout-2026-10-31)).
 
 - [`grit-lib/hot-text.ld`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/hot-text.ld)
   lists the functions of grit-lib, the Rust runtime and grit-lib's own dependencies that the
@@ -306,15 +307,29 @@ every binary that links it; `grit` enables it (see
 - `grit-lib/build.rs` publishes the fragment as a native library. LLD reads it as an
   implicit linker script and places the listed functions in one `.text.grit_hot` output
   section ahead of `.text`.
-- GNU ld rejects `SECTIONS` in implicit scripts, so the feature only acts on
+- [`grit-cli/hot-text.ld`](https://github.com/gitbutlerapp/grit/blob/main/grit-cli/hot-text.ld)
+  lists everything else the same workloads run in the `grit` binary: the CLI's own code,
+  clap, and library generics the CLI instantiates. `grit-cli/build.rs` passes it to the
+  final link of `grit` only, which places those functions in `.text.grit_cli_hot`, also
+  ahead of `.text`. Every command runs argument parsing and CLI start-up first, so this
+  half matters as much as the library's for short commands.
+- GNU ld rejects `SECTIONS` in implicit scripts, so both fragments only act on
   `x86_64-unknown-linux-gnu`, where rustc links with LLD by default. Set
-  `GRIT_HOT_TEXT_LAYOUT=0` to turn it off, for example when linking with another linker.
+  `GRIT_HOT_TEXT_LAYOUT=0` to turn them off, for example when linking with another linker.
 - Patterns glob input-section names with crate hashes wildcarded, so version bumps keep
   them matching. A function that is renamed or no longer runs simply stays in `.text`.
-- The `hot_text_layout` test fails if the section is missing, smaller than 256 KiB (the
-  sign that most patterns stopped matching), or not ahead of `.text`.
+- The instantiating crate at the end of a generic's symbol is wildcarded as well. LLVM
+  merges identical instantiations from different crates into one copy, and which crate's
+  name the survivor keeps changes between builds: the stripped `dist` binary can name
+  `<String as Display>::fmt` after `serde_json` where the profiled unstripped one named it
+  after `grit`. About one pattern in eight names an instantiating crate; with it pinned,
+  `grit branch` on the shipped build still faulted in 12 windows of plain `.text`, against
+  5 with the wildcard.
+- The `hot_text_layout` test fails if either section is missing, smaller than its floor
+  (256 KiB for the library, 128 KiB for the CLI, the sign that most patterns stopped
+  matching), or not ahead of `.text`.
 
-Regenerate the list after large library changes, from an unstripped `dist` build:
+Regenerate both lists after large library or CLI changes, from an unstripped `dist` build:
 
 ```bash
 CARGO_PROFILE_DIST_STRIP=false CARGO_TARGET_DIR=target/hot-text \
@@ -325,9 +340,10 @@ python3 scripts/gen_hot_text_layout.py --grit target/hot-text/dist/grit
 The script needs `valgrind`. It builds a 10,000-file clone (packed objects and refs, tags,
 an upstream) and runs the library's common operations through the shipped binary, so
 inlining matches what is linked: status, diff, log, show, revision walks, blame, refs,
-config, add, commit, switch and stash. Each workload starts right after a reset, so its
-first step also takes the index-refresh path. Callgrind records every function each step
-runs; the script keeps the library's and orders them by how many workloads share them.
+branch listing and edits, config, add, commit, switch and stash. Each workload starts right
+after a reset, so its first step also takes the index-refresh path. Callgrind records every
+function each step runs; the script splits them into the library's and the rest, and orders
+each list by how many workloads share a function.
 
 To see where a run's resident pages are, stop the process at `exit_group` under `gdb` and
 read `/proc/<pid>/smaps` (per mapping) or `/proc/<pid>/pagemap` (per page, to map back to

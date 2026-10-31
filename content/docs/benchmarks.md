@@ -9,6 +9,58 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds. The daily census behind the [Performance overview](performance-overview.md) measures the shipped **`dist`** build since 2026-10-28; see [Benchmarking](benchmarking.md#grit-bench-daily-factory-census) for what that switch did to every baseline.
 
+## The CLI joins the hot text layout (2026-10-31)
+
+`branch/list@many-refs` lists the one local branch of a clone with 10,000 packed refs. The work is tiny: grit runs 1.70 million user-space instructions, Git 1.32 million. Yet grit took 1.86 ms against Git's 1.32 ms and 11.0 MB against 6.7 MB. Both gaps are page faults, 336 against Git's 170, and most of the time a short command spends in the kernel goes to mapping file pages on those faults.
+
+- 101 are copy-on-write faults on `.data.rel.ro`, which the loader relocates at start-up (PIE). Every command pays these, and they stay.
+- 77 are code faults, each mapping a 64 KB fault-around window, against Git's 24. Only 19 landed in the library's `.text.grit_hot` section. The other 58 were scattered over `.text`.
+
+Two things scattered them. First, the [library layout](#status-memory-is-code-layout-2026-10-31) leaves out the CLI's own code, and argument parsing (clap building the command tree), dispatch, environment setup and rendering run in every command, about 40 windows of their own. Second, the library's list had already gone stale (`head_file_present` and `FilesRefStore::collect_loose_refs_for_prefix`, run by every ref listing, no longer matched), and it never matched some functions in shipped builds. LLVM merges identical generic instantiations from different crates, and which crate's name the surviving copy keeps (`<String as Display>::fmt` instantiated in `grit`, `serde_json` or `ureq_proto`) differs between the profiled unstripped build and the stripped `dist` one.
+
+What changed:
+
+- `scripts/gen_hot_text_layout.py` now writes two fragments from one callgrind profile. [`grit-lib/hot-text.ld`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/hot-text.ld) keeps the library's functions. [`grit-cli/hot-text.ld`](https://github.com/gitbutlerapp/grit/blob/main/grit-cli/hot-text.ld) gets everything else the `grit` binary runs (CLI, clap, CLI-instantiated library generics), and `grit-cli/build.rs` links it into `grit` as `.text.grit_cli_hot`, about 2 MB, ahead of `.text`.
+- Patterns wildcard a generic's instantiating crate, so merged instantiations match whichever name survives.
+- The profile gained branch workloads (`--json`, `--merged`, create, rename, force-delete), and both lists were regenerated.
+
+For `grit branch` on the many-refs clone, code faults drop from 77 to 36 (21 library, 10 CLI, 5 left in `.text`, among them the C start-up code), and total faults from 336 to 299.
+
+Rows from `grit-bench daily` on `dist` builds against the system `git` in one sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0. "base" is `8ccac076d`. Times are medians of all samples from three alternating rounds of 30 runs (the related rows: two rounds of 20, five rounds of 40 for `status/clean@small`), and peak RSS is the median of the rounds' peaks. Values are **milliseconds / MB**. Reports: `daily-branch-cli-hot-text-before.json` → `daily-branch-cli-hot-text-after.json` (first round) and `daily-cli-hot-text-related-before.json` → `daily-cli-hot-text-related-after.json`.
+
+| Scenario | git ms / MB | base ms / MB | + CLI layout ms / MB | RSS vs git | time vs git |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `branch/list@many-refs` | 1.32 / 6.7 | 1.86 / 11.0 | 1.74 / **8.8** | 1.65× → 1.32× | 1.40 → 1.32 |
+| `branch/list-json@many-refs` | 1.50 / 7.4 | 2.08 / 11.5 | 1.91 / **9.3** | 1.55× → 1.25× | 1.38 → 1.27 |
+| `branch/list@many-refs-loose` | 1.30 / 6.7 | 1.89 / 10.9 | 1.77 / **8.9** | 1.62× → 1.33× | 1.46 → 1.36 |
+| `branch/merged@many-refs` | 1.44 / 7.4 | 2.07 / 11.6 | 1.90 / **9.7** | 1.58× → 1.31× | 1.44 → 1.32 |
+| `branch/create@many-refs` | 1.56 / 7.5 | 2.52 / 12.3 | 2.22 / **9.6** | 1.64× → 1.28× | 1.62 → 1.42 |
+| `branch/delete@many-refs` | 4.43 / 7.7 | 3.86 / 12.6 | 3.35 / **10.2** | 1.64× → 1.32× | 0.87 → 0.76 |
+| `branch/rename@many-refs` | 1.70 / 7.4 | 3.45 / 10.1 | 3.36 / **9.4** | 1.36× → 1.27× | 2.03 → 1.98 |
+| `branch/merged-ref@many-refs` | 0.76 / 6.2 | 1.73 / 8.0 | 1.70 / **7.8** | 1.30× → 1.26× | 2.28 → 2.24 |
+| `tag/list@many-refs` | 3.27 / 7.8 | 3.48 / 11.8 | 3.35 / **9.8** | 1.51× → 1.25× | 1.06 → 1.02 |
+| `status/clean@small` | 1.83 / 7.2 | 2.73 / 11.6 | 2.53 / **9.3** | 1.61× → 1.29× | 1.49 → 1.39 |
+| `status/dirty@small` | 1.85 / 7.2 | 2.76 / 11.9 | 2.48 / **9.4** | 1.65× → 1.30× | 1.49 → 1.34 |
+| `status/dirty@synth-10k` | 10.52 / 9.3 | 7.70 / 15.1 | 7.47 / **12.9** | 1.61× → 1.38× | 0.73 → 0.71 |
+| `show/head@synth-10k` | 1.96 / 8.3 | 2.87 / 13.4 | 2.61 / **11.0** | 1.62× → 1.33× | 1.46 → 1.33 |
+| `diff/worktree@synth-10k` | 6.77 / 9.6 | 6.69 / 14.8 | 6.47 / **12.3** | 1.54× → 1.28× | 0.99 → 0.96 |
+| `commit/small@synth-10k` | 26.91 / 13.4 | 16.23 / 19.0 | 15.90 / **15.4** | 1.42× → 1.15× | 0.60 → 0.59 |
+| `add/modified@synth-10k` | 16.81 / 12.0 | 10.52 / 18.7 | 9.89 / **16.7** | 1.56× → 1.39× | 0.63 → 0.59 |
+| `switch/branch@synth-10k` | 22.07 / 10.3 | 15.87 / 14.7 | 15.36 / **12.5** | 1.43× → 1.22× | 0.72 → 0.70 |
+| `reset/mixed@synth-10k` | 8.16 / 9.2 | 10.20 / 17.3 | 10.25 / **13.6** | 1.87× → 1.47× | 1.25 → 1.26 |
+| `config/get@small` | 1.21 / 6.2 | 1.66 / 10.0 | 1.58 / **7.6** | 1.61× → 1.23× | 1.37 → 1.30 |
+| `notes/list@synth-10k` | 1.25 / 6.2 | 2.03 / 10.4 | 1.76 / **9.1** | 1.68× → 1.47× | 1.62 → 1.41 |
+| `worktree/list@synth-10k` | 1.59 / 6.5 | 2.50 / 10.2 | 2.31 / **8.2** | 1.58× → 1.27× | 1.58 → 1.46 |
+| `merge/clean@synth-10k` | 98.76 / 13.6 | 52.67 / 18.4 | 51.32 / **16.8** | 1.35× → 1.23× | 0.53 → 0.52 |
+| `remote/show@many-refs` | 34.84 / 29.8 | 18.08 / 16.4 | 18.43 / **15.3** | 0.55× → 0.51× | 0.52 → 0.53 |
+
+`branch/merged-ref` and `branch/rename` time `grit-bench` drivers that call the library directly, so only the refreshed library list reaches them. Every one of the 30 related scenarios in the reports uses less memory. `status/clean@synth-10k` reads flat (6.58 → 6.56 ms, 14.9 → 14.6 MB): its peak is the first run after the prepare step, which takes the threaded index refresh, and a settled run directly under GNU `time` drops from 11.4 to 9.2 MB. Time changes for rows over 10 ms are within run-to-run noise.
+
+```bash
+./target/dist/grit-bench daily --only branch/list@many-refs,branch/list-json@many-refs,branch/list@many-refs-loose,branch/merged@many-refs,branch/merged-ref@many-refs,branch/create@many-refs,branch/delete@many-refs,branch/rename@many-refs,tag/list@many-refs \
+  --min-runs 30 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-branch-cli-hot-text-after.json
+```
+
 ## Sparse switch keeps changed excluded directories opaque (2026-10-31)
 
 `switch/sparse@sparse-unique-120k` changes 5,000 paths inside the 400 excluded
