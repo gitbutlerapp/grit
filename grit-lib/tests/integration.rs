@@ -1593,6 +1593,8 @@ mod restore_hunks_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "restore_staged_conflict_issue_2155.rs"]
 mod restore_staged_conflict_issue_2155;
+#[path = "rev_list_attr_pathspec.rs"]
+mod rev_list_attr_pathspec;
 #[cfg(feature = "full-tests")]
 #[path = "rev_list_bitmaps.rs"]
 mod rev_list_bitmaps;

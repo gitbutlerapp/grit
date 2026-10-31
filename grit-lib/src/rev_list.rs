@@ -31,7 +31,7 @@ use crate::objects::{
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
-use crate::pathspec::pathspec_entry_is_relevant;
+use crate::pathspec::{pathspec_has_attr_magic, PathspecMatcher};
 use crate::progress::poll_watch;
 use crate::ref_exclusions::{git_namespace_prefix, strip_git_namespace, RefExclusions};
 use crate::reflog::{list_reflog_refs, read_reflog};
@@ -1404,13 +1404,14 @@ pub fn rev_list(
             stats: options.bloom_stats.as_ref(),
             cwd: bloom_cwd.as_deref(),
         };
+        let paths = RevPathspecCheck::build(repo, &options.paths)?;
         let (selected, walked, walk_order) = repo.odb().with_pack_read_context(|| {
             walk_dense_path_limited_closure(
                 repo,
                 &mut graph,
                 &include,
                 &excluded,
-                &options.paths,
+                &paths,
                 options.sparse,
                 options.show_pulls,
                 Some(&bloom_ctx),
@@ -1574,7 +1575,7 @@ pub fn rev_list(
     // in sparse mode. Filtering again would discard sparse merges with a TREESAME parent.
     let dense_path_retain_done = dense_path_limited && !path_effective_full;
     if !options.paths.is_empty() && !dense_path_retain_done {
-        let paths = &options.paths;
+        let paths = RevPathspecCheck::build(repo, &options.paths)?;
         // The dense path-limited walk above already performed the first-parent Bloom precheck and
         // recorded its `GIT_TRACE2_PERF` statistics for every visited commit (matching Git's single
         // `limit_list` pass). Re-running the precheck here would double-count those counters, so
@@ -1591,7 +1592,7 @@ pub fn rev_list(
                 repo,
                 &mut graph,
                 *oid,
-                paths,
+                &paths,
                 path_effective_full,
                 options.sparse,
                 options.simplify_merges,
@@ -1612,11 +1613,12 @@ pub fn rev_list(
     }
 
     if !options.paths.is_empty() && options.simplify_merges && !ordered.is_empty() {
+        let paths = RevPathspecCheck::build(repo, &options.paths)?;
         ordered = simplify_merges_commit_list(
             repo,
             &ordered,
             &include,
-            &options.paths,
+            &paths,
             &excluded,
             &effective_ancestry_path_bottoms,
             options.ordering,
@@ -1981,18 +1983,19 @@ pub fn rev_list(
                     }
                 }
                 if !options.paths.is_empty() && !omit_object_paths {
-                    retain_objects_matching_pathspecs(&mut objs, &options.paths);
+                    let paths = RevPathspecCheck::build(repo, &options.paths)?;
+                    retain_objects_matching_pathspecs(&mut objs, &paths);
                     let mut seen_oids: HashSet<ObjectId> =
                         objs.iter().map(|(oid, _)| *oid).collect();
                     for (oid, path) in
-                        collect_pathspec_matching_tree_objects(repo, &ordered, &options.paths)?
+                        collect_pathspec_matching_tree_objects(repo, &ordered, &paths)?
                     {
                         if seen_oids.insert(oid) {
                             objs.push((oid, path));
                         }
                     }
                     for segment in &mut segments {
-                        retain_objects_matching_pathspecs(segment, &options.paths);
+                        retain_objects_matching_pathspecs(segment, &paths);
                     }
                     if !counts.is_empty() {
                         counts = segments.iter().map(Vec::len).collect();
@@ -3167,7 +3170,7 @@ fn first_parent_spines_for_positive_tips(
 fn commit_path_treesame_to_relevant_parents(
     repo: &Repository,
     oid: ObjectId,
-    paths: &[String],
+    paths: &RevPathspecCheck<'_>,
     parents: &[ObjectId],
     selected: &HashSet<ObjectId>,
 ) -> Result<bool> {
@@ -3223,10 +3226,10 @@ fn remove_duplicate_parents(parents: &mut Vec<ObjectId>) {
 fn remove_path_treesame_root_parents(
     repo: &Repository,
     oid: ObjectId,
-    paths: &[String],
+    paths: &RevPathspecCheck<'_>,
     parents: &mut Vec<ObjectId>,
 ) -> Result<()> {
-    if paths.is_empty() {
+    if paths.specs().is_empty() {
         return Ok(());
     }
     parents.retain(|parent| {
@@ -3246,7 +3249,7 @@ fn remove_path_treesame_root_parents(
 fn leave_one_path_treesame_parent(
     repo: &Repository,
     oid: ObjectId,
-    paths: &[String],
+    paths: &RevPathspecCheck<'_>,
     parents: &mut Vec<ObjectId>,
 ) -> Result<()> {
     if parents.len() <= 1 {
@@ -3286,7 +3289,7 @@ fn simplify_one_merge_for_paths(
     selected: &HashSet<ObjectId>,
     simplified: &HashMap<ObjectId, ObjectId>,
     first_parent_spine: &HashSet<ObjectId>,
-    paths: &[String],
+    paths: &RevPathspecCheck<'_>,
     excluded: &HashSet<ObjectId>,
     ancestry_path_bottoms: &[ObjectId],
     show_pulls: bool,
@@ -3370,7 +3373,7 @@ fn simplify_merges_commit_list(
     repo: &Repository,
     commits: &[ObjectId],
     positive_tips: &[ObjectId],
-    paths: &[String],
+    paths: &RevPathspecCheck<'_>,
     excluded: &HashSet<ObjectId>,
     ancestry_path_bottoms: &[ObjectId],
     ordering: OrderingMode,
@@ -3496,11 +3499,11 @@ fn simplify_merges_author_date_order(
 fn path_merge_survives_simplify(
     repo: &Repository,
     oid: ObjectId,
-    paths: &[String],
+    paths: &RevPathspecCheck<'_>,
     excluded: &HashSet<ObjectId>,
     ancestry_path_bottoms: &[ObjectId],
 ) -> Result<bool> {
-    if paths.is_empty() {
+    if paths.specs().is_empty() {
         return Ok(false);
     }
     let mut tree_buf = Vec::new();
@@ -3578,11 +3581,11 @@ fn graph_simplify_parent_list_lib(
 fn path_treesame_parents(
     repo: &Repository,
     oid: ObjectId,
-    paths: &[String],
+    paths: &RevPathspecCheck<'_>,
     parents: &[ObjectId],
 ) -> Result<HashSet<ObjectId>> {
     let mut treesame = HashSet::new();
-    if paths.is_empty() || parents.is_empty() {
+    if paths.specs().is_empty() || parents.is_empty() {
         return Ok(treesame);
     }
 
@@ -3970,7 +3973,7 @@ fn commit_touches_paths(
     repo: &Repository,
     graph: &mut CommitGraph<'_>,
     oid: ObjectId,
-    paths: &[String],
+    paths: &RevPathspecCheck<'_>,
     full_history: bool,
     sparse: bool,
     simplify_merges: bool,
@@ -4473,7 +4476,7 @@ fn walk_dense_path_limited_closure(
     graph: &mut CommitGraph<'_>,
     tips: &[ObjectId],
     excluded: &HashSet<ObjectId>,
-    paths: &[String],
+    paths: &RevPathspecCheck<'_>,
     sparse: bool,
     show_pulls: bool,
     bloom: Option<&DenseBloomCtx<'_>>,
@@ -4517,7 +4520,7 @@ fn dense_path_limited_action(
     repo: &Repository,
     graph: &mut CommitGraph<'_>,
     oid: ObjectId,
-    paths: &[String],
+    paths: &RevPathspecCheck<'_>,
     sparse: bool,
     show_pulls: bool,
     bloom: Option<&DenseBloomCtx<'_>>,
@@ -4600,23 +4603,24 @@ pub fn commit_visible_for_dense_pathspecs(
     if paths.is_empty() {
         return Ok(true);
     }
+    let paths = RevPathspecCheck::build(repo, paths)?;
     let commit = load_commit(repo, oid)?;
     let parents = commit.parents.clone();
 
     if parents.is_empty() {
-        return tree_has_pathspec_match(repo, commit.tree, "", paths);
+        return tree_has_pathspec_match(repo, commit.tree, "", &paths);
     }
 
     if parents.len() == 1 {
         let parent = load_commit(repo, parents[0])?;
-        return trees_differ_for_pathspecs(repo, commit.tree, parent.tree, "", paths);
+        return trees_differ_for_pathspecs(repo, commit.tree, parent.tree, "", &paths);
     }
 
     let mut treesame_parents = 0usize;
     let mut differs_any = false;
     for parent_oid in &parents {
         let parent = load_commit(repo, *parent_oid)?;
-        let differs = trees_differ_for_pathspecs(repo, commit.tree, parent.tree, "", paths)?;
+        let differs = trees_differ_for_pathspecs(repo, commit.tree, parent.tree, "", &paths)?;
         if differs {
             differs_any = true;
         } else {
@@ -4652,20 +4656,61 @@ fn compute_cherry_patch_id(
     }
 }
 
+/// Path-limited history matching, including `:(attr:...)` via [`Repository::pathspec_matcher`].
+struct RevPathspecCheck<'a> {
+    specs: &'a [String],
+    attr: Option<PathspecMatcher<'a>>,
+}
+
+impl<'a> RevPathspecCheck<'a> {
+    fn build(repo: &Repository, specs: &'a [String]) -> Result<Self> {
+        let attr = if specs.iter().any(|s| pathspec_has_attr_magic(s)) {
+            Some(repo.pathspec_matcher(specs)?)
+        } else {
+            None
+        };
+        Ok(Self { specs, attr })
+    }
+
+    fn specs(&self) -> &[String] {
+        self.specs
+    }
+
+    fn path_matches(&self, path: &str, mode: u32) -> bool {
+        if let Some(m) = &self.attr {
+            m.matches_entry(path, mode)
+        } else {
+            crate::pathspec::matches_pathspec_list(path, self.specs)
+        }
+    }
+
+    fn entry_is_relevant(&self, path: &str, is_tree: bool, mode: u32) -> bool {
+        if !is_tree && self.path_matches(path, mode) {
+            return true;
+        }
+        is_tree && crate::pathspec::pathspec_wants_descent_for_rev_tree(path, self.specs)
+    }
+}
+
 fn path_differs_for_specs(
     current: &HashMap<String, (ObjectId, u32)>,
     parent: &HashMap<String, (ObjectId, u32)>,
-    specs: &[String],
+    paths: &RevPathspecCheck<'_>,
 ) -> bool {
-    let mut paths = std::collections::BTreeSet::new();
-    paths.extend(current.keys().cloned());
-    paths.extend(parent.keys().cloned());
+    let mut union = std::collections::BTreeSet::new();
+    union.extend(current.keys().cloned());
+    union.extend(parent.keys().cloned());
 
-    for path in &paths {
-        if !crate::pathspec::matches_pathspec_list(path, specs) {
+    for path in union {
+        let mode = current
+            .get(&path)
+            .or_else(|| parent.get(&path))
+            .map(|(_, m)| *m)
+            .unwrap_or(0o100644);
+        if !paths.path_matches(&path, mode) {
             continue;
         }
-        if current.get(path) != parent.get(path) {
+        if current.get(&path) != parent.get(&path) {
             return true;
         }
     }
@@ -4691,16 +4736,16 @@ fn tree_has_pathspec_match(
     repo: &Repository,
     tree_oid: ObjectId,
     prefix: &str,
-    pathspecs: &[String],
+    paths: &RevPathspecCheck<'_>,
 ) -> Result<bool> {
-    tree_has_pathspec_match_cached(repo, tree_oid, prefix, pathspecs, None)
+    tree_has_pathspec_match_cached(repo, tree_oid, prefix, paths, None)
 }
 
 fn tree_has_pathspec_match_cached(
     repo: &Repository,
     tree_oid: ObjectId,
     prefix: &str,
-    pathspecs: &[String],
+    paths: &RevPathspecCheck<'_>,
     cache: Option<&mut DenseWalkCache>,
 ) -> Result<bool> {
     let mut fallback_buf = Vec::new();
@@ -4726,12 +4771,12 @@ fn tree_has_pathspec_match_cached(
             format!("{prefix}/{name}")
         };
         let is_tree = is_tree_mode(entry.mode);
-        if !is_tree && crate::pathspec::matches_pathspec_list(&path, pathspecs) {
+        if !is_tree && paths.path_matches(&path, entry.mode) {
             return Ok(true);
         }
         if is_tree
-            && crate::pathspec::pathspec_wants_descent_for_rev_tree(&path, pathspecs)
-            && tree_has_pathspec_match_cached(repo, entry.oid, &path, pathspecs, None)?
+            && crate::pathspec::pathspec_wants_descent_for_rev_tree(&path, paths.specs())
+            && tree_has_pathspec_match_cached(repo, entry.oid, &path, paths, None)?
         {
             return Ok(true);
         }
@@ -4747,16 +4792,9 @@ fn trees_differ_for_pathspecs(
     old_tree: ObjectId,
     new_tree: ObjectId,
     prefix: &str,
-    pathspecs: &[String],
+    paths: &RevPathspecCheck<'_>,
 ) -> Result<bool> {
-    trees_differ_for_pathspecs_optional(
-        repo,
-        Some(old_tree),
-        Some(new_tree),
-        prefix,
-        pathspecs,
-        None,
-    )
+    trees_differ_for_pathspecs_optional(repo, Some(old_tree), Some(new_tree), prefix, paths, None)
 }
 
 fn trees_differ_for_pathspecs_optional(
@@ -4764,11 +4802,11 @@ fn trees_differ_for_pathspecs_optional(
     old_tree: Option<ObjectId>,
     new_tree: Option<ObjectId>,
     prefix: &str,
-    pathspecs: &[String],
+    paths: &RevPathspecCheck<'_>,
     cache: Option<&mut DenseWalkCache>,
 ) -> Result<bool> {
-    if prefix.is_empty() && pathspecs.len() == 1 {
-        if let Some(literal) = normalized_plain_literal_treesame_path(repo, &pathspecs[0]) {
+    if prefix.is_empty() && paths.specs().len() == 1 {
+        if let Some(literal) = normalized_plain_literal_treesame_path(repo, &paths.specs()[0]) {
             let mut local = DenseWalkCache::default();
             let walk_cache = match cache {
                 Some(c) => c,
@@ -4789,7 +4827,7 @@ fn trees_differ_for_pathspecs_optional(
                 Some(oid) => read_parsed_tree(repo, oid)?,
                 None => Vec::new(),
             };
-            trees_differ_tree_entries(repo, &old_entries, &new_entries, prefix, pathspecs)
+            trees_differ_tree_entries(repo, &old_entries, &new_entries, prefix, paths)
         }
     }
 }
@@ -4799,7 +4837,7 @@ fn trees_differ_tree_entries(
     old: &[crate::objects::TreeEntry],
     new: &[crate::objects::TreeEntry],
     prefix: &str,
-    pathspecs: &[String],
+    paths: &RevPathspecCheck<'_>,
 ) -> Result<bool> {
     let mut oi = 0usize;
     let mut ni = 0usize;
@@ -4816,11 +4854,10 @@ fn trees_differ_tree_entries(
                     Ordering::Less => {
                         let name = String::from_utf8_lossy(&o.name);
                         let path = format_path_for_tree_diff(prefix, &name);
-                        if pathspec_entry_is_relevant(&path, is_tree_mode(o.mode), pathspecs) {
+                        if paths.entry_is_relevant(&path, is_tree_mode(o.mode), o.mode) {
                             if is_tree_mode(o.mode) {
-                                if tree_has_pathspec_match_cached(
-                                    repo, o.oid, &path, pathspecs, None,
-                                )? {
+                                if tree_has_pathspec_match_cached(repo, o.oid, &path, paths, None)?
+                                {
                                     return Ok(true);
                                 }
                             } else {
@@ -4832,11 +4869,10 @@ fn trees_differ_tree_entries(
                     Ordering::Greater => {
                         let name = String::from_utf8_lossy(&n.name);
                         let path = format_path_for_tree_diff(prefix, &name);
-                        if pathspec_entry_is_relevant(&path, is_tree_mode(n.mode), pathspecs) {
+                        if paths.entry_is_relevant(&path, is_tree_mode(n.mode), n.mode) {
                             if is_tree_mode(n.mode) {
-                                if tree_has_pathspec_match_cached(
-                                    repo, n.oid, &path, pathspecs, None,
-                                )? {
+                                if tree_has_pathspec_match_cached(repo, n.oid, &path, paths, None)?
+                                {
                                     return Ok(true);
                                 }
                             } else {
@@ -4850,8 +4886,8 @@ fn trees_differ_tree_entries(
                         let path = format_path_for_tree_diff(prefix, &name);
                         let o_is_tree = is_tree_mode(o.mode);
                         let n_is_tree = is_tree_mode(n.mode);
-                        let relevant =
-                            pathspec_entry_is_relevant(&path, o_is_tree || n_is_tree, pathspecs);
+                        let mode = if o_is_tree { o.mode } else { n.mode };
+                        let relevant = paths.entry_is_relevant(&path, o_is_tree || n_is_tree, mode);
                         if relevant {
                             if o.oid != n.oid
                                 || crate::index::canon_mode(o.mode)
@@ -4863,7 +4899,7 @@ fn trees_differ_tree_entries(
                                         Some(o.oid),
                                         Some(n.oid),
                                         &path,
-                                        pathspecs,
+                                        paths,
                                         None,
                                     )? {
                                         return Ok(true);
@@ -4874,14 +4910,15 @@ fn trees_differ_tree_entries(
                             } else if o_is_tree
                                 && n_is_tree
                                 && crate::pathspec::pathspec_wants_descent_for_rev_tree(
-                                    &path, pathspecs,
+                                    &path,
+                                    paths.specs(),
                                 )
                                 && trees_differ_for_pathspecs_optional(
                                     repo,
                                     Some(o.oid),
                                     Some(n.oid),
                                     &path,
-                                    pathspecs,
+                                    paths,
                                     None,
                                 )?
                             {
@@ -4896,9 +4933,9 @@ fn trees_differ_tree_entries(
             (Some(o), None) => {
                 let name = String::from_utf8_lossy(&o.name);
                 let path = format_path_for_tree_diff(prefix, &name);
-                if pathspec_entry_is_relevant(&path, is_tree_mode(o.mode), pathspecs) {
+                if paths.entry_is_relevant(&path, is_tree_mode(o.mode), o.mode) {
                     if is_tree_mode(o.mode) {
-                        if tree_has_pathspec_match_cached(repo, o.oid, &path, pathspecs, None)? {
+                        if tree_has_pathspec_match_cached(repo, o.oid, &path, paths, None)? {
                             return Ok(true);
                         }
                     } else {
@@ -4910,9 +4947,9 @@ fn trees_differ_tree_entries(
             (None, Some(n)) => {
                 let name = String::from_utf8_lossy(&n.name);
                 let path = format_path_for_tree_diff(prefix, &name);
-                if pathspec_entry_is_relevant(&path, is_tree_mode(n.mode), pathspecs) {
+                if paths.entry_is_relevant(&path, is_tree_mode(n.mode), n.mode) {
                     if is_tree_mode(n.mode) {
-                        if tree_has_pathspec_match_cached(repo, n.oid, &path, pathspecs, None)? {
+                        if tree_has_pathspec_match_cached(repo, n.oid, &path, paths, None)? {
                             return Ok(true);
                         }
                     } else {
@@ -5042,7 +5079,7 @@ fn trees_differ_for_pathspecs_with_bloom(
     commit_tree: ObjectId,
     parent_tree: ObjectId,
     prefix: &str,
-    pathspecs: &[String],
+    paths: &RevPathspecCheck<'_>,
     first_parent: bool,
     bloom: Option<&DenseBloomCtx<'_>>,
     commit_oid: ObjectId,
@@ -5055,7 +5092,7 @@ fn trees_differ_for_pathspecs_with_bloom(
                 bloom_ret = chain.bloom_precheck_for_paths(
                     repo.odb(),
                     commit_oid,
-                    pathspecs,
+                    paths.specs(),
                     ctx.cwd,
                     ctx.changed_paths_version,
                     ctx.read_changed_paths,
@@ -5076,7 +5113,7 @@ fn trees_differ_for_pathspecs_with_bloom(
         Some(commit_tree),
         Some(parent_tree),
         prefix,
-        pathspecs,
+        paths,
         cache,
     )?;
     if first_parent && bloom_ret == BloomPrecheck::Maybe && !differs {
@@ -6608,7 +6645,7 @@ fn try_bounded_path_limit_list(
     } else {
         options.since_cutoff
     };
-    let paths = &options.paths;
+    let path_check = RevPathspecCheck::build(repo, &options.paths)?;
     let mut heap = BinaryHeap::new();
     let mut queued = HashSet::new();
     let mut next_seq = 0u64;
@@ -6639,7 +6676,7 @@ fn try_bounded_path_limit_list(
             repo,
             &mut graph,
             oid,
-            paths,
+            &path_check,
             options.sparse,
             options.show_pulls,
             Some(&bloom_ctx),
@@ -6659,7 +6696,7 @@ fn try_bounded_path_limit_list(
                 &mut graph,
                 pickaxe,
                 oid,
-                paths,
+                &options.paths,
                 pickaxe_renames,
                 &mut pickaxe_blob_cache,
             )?,
@@ -8184,11 +8221,15 @@ fn excluded_object_root_ids(
     Ok(objects.into_iter().map(|(oid, _)| oid).collect())
 }
 
-fn retain_objects_matching_pathspecs(objects: &mut Vec<(ObjectId, String)>, pathspecs: &[String]) {
+fn retain_objects_matching_pathspecs(
+    objects: &mut Vec<(ObjectId, String)>,
+    paths: &RevPathspecCheck<'_>,
+) {
     objects.retain(|(_, path)| {
         path.is_empty()
-            || crate::pathspec::matches_pathspec_list(path, pathspecs)
-            || pathspecs
+            || paths.path_matches(path, 0o100644)
+            || paths
+                .specs()
                 .iter()
                 .any(|spec| crate::pathspec::pathspec_wants_descent_into_tree(spec, path))
     });
@@ -8197,7 +8238,7 @@ fn retain_objects_matching_pathspecs(objects: &mut Vec<(ObjectId, String)>, path
 fn collect_pathspec_matching_tree_objects(
     repo: &Repository,
     commits: &[ObjectId],
-    pathspecs: &[String],
+    paths: &RevPathspecCheck<'_>,
 ) -> Result<Vec<(ObjectId, String)>> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
@@ -8207,7 +8248,7 @@ fn collect_pathspec_matching_tree_objects(
             repo,
             commit.tree,
             "",
-            pathspecs,
+            paths,
             &mut seen,
             &mut out,
         )?;
@@ -8219,7 +8260,7 @@ fn collect_pathspec_matching_tree_objects_inner(
     repo: &Repository,
     tree_oid: ObjectId,
     prefix: &str,
-    pathspecs: &[String],
+    paths: &RevPathspecCheck<'_>,
     seen: &mut HashSet<ObjectId>,
     out: &mut Vec<(ObjectId, String)>,
 ) -> Result<()> {
@@ -8242,17 +8283,16 @@ fn collect_pathspec_matching_tree_objects_inner(
             format!("{prefix}/{name}")
         };
         let is_tree = entry.mode == 0o040000;
-        let matches = crate::pathspec::matches_pathspec_list(&path, pathspecs);
-        let wants_descent = pathspecs
+        let matches = paths.path_matches(&path, entry.mode);
+        let wants_descent = paths
+            .specs()
             .iter()
             .any(|spec| crate::pathspec::pathspec_wants_descent_into_tree(spec, &path));
         if (matches || (is_tree && wants_descent)) && seen.insert(entry.oid) {
             out.push((entry.oid, path.clone()));
         }
         if is_tree && wants_descent {
-            collect_pathspec_matching_tree_objects_inner(
-                repo, entry.oid, &path, pathspecs, seen, out,
-            )?;
+            collect_pathspec_matching_tree_objects_inner(repo, entry.oid, &path, paths, seen, out)?;
         }
     }
     Ok(())

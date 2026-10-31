@@ -13912,6 +13912,7 @@ pub struct grit_lib::pathspec::PathspecMatcher<'s>
 impl<'s> grit_lib::pathspec::PathspecMatcher<'s>
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::is_empty(&self) -> bool
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches(&self, &str) -> bool
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches_entry(&self, &str, u32) -> bool
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches_change(&self, &str, core::option::Option<&str>) -> bool
 impl<'s> core::clone::Clone for grit_lib::pathspec::PathspecMatcher<'s>
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::clone(&self) -> Self
@@ -31205,6 +31206,7 @@ pub struct grit_lib::worktree::pathspec::PathspecMatcher<'s>
 impl<'s> grit_lib::pathspec::PathspecMatcher<'s>
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::is_empty(&self) -> bool
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches(&self, &str) -> bool
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches_entry(&self, &str, u32) -> bool
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches_change(&self, &str, core::option::Option<&str>) -> bool
 impl<'s> core::clone::Clone for grit_lib::pathspec::PathspecMatcher<'s>
 pub fn grit_lib::pathspec::PathspecMatcher<'s>::clone(&self) -> Self

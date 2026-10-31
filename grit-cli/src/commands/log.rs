@@ -100,6 +100,8 @@ pub struct LogDisplayOptions {
     pub line_counts: bool,
     /// Author and date column widths to keep, so streamed batches line up.
     pub columns: Option<ui::CommitColumns>,
+    /// The repository has no commits (`HEAD` unset); an empty page is not "no history".
+    pub no_commits_in_repo: bool,
 }
 
 /// Result of `grit log`: one page of commits, plus the next page's start (if any).
@@ -227,8 +229,11 @@ impl HumanRender for LogOutcome {
             return self.render_continuation(w);
         }
         if self.display.group_by.is_some() {
-            if self.author_group_rows.is_empty() {
+            if self.author_group_rows.is_empty() && self.display.no_commits_in_repo {
                 outln!(w, "No commits yet.");
+                return Ok(());
+            }
+            if self.author_group_rows.is_empty() {
                 return Ok(());
             }
             return render_author_groups_human(w, &self.author_group_rows);
@@ -239,8 +244,11 @@ impl HumanRender for LogOutcome {
             } else {
                 self.commit_rows.is_empty()
             };
-            if empty {
+            if empty && self.display.no_commits_in_repo {
                 outln!(w, "No commits yet.");
+                return Ok(());
+            }
+            if empty {
                 return Ok(());
             }
         }
@@ -249,7 +257,9 @@ impl HumanRender for LogOutcome {
         let head_branch = self.head_branch.as_deref();
         if self.display.graph {
             if self.graph_lines.is_empty() {
-                outln!(w, "No commits yet.");
+                if self.display.no_commits_in_repo {
+                    outln!(w, "No commits yet.");
+                }
                 return Ok(());
             }
             self.render_graph_human(w)?;
@@ -339,8 +349,11 @@ pub struct LogCommit {
 impl MarkdownRender for LogOutcome {
     fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         if self.display.group_by.is_some() {
-            if self.author_group_rows.is_empty() {
+            if self.author_group_rows.is_empty() && self.display.no_commits_in_repo {
                 outln!(w, "No commits yet.");
+                return Ok(());
+            }
+            if self.author_group_rows.is_empty() {
                 return Ok(());
             }
             return render_author_groups_markdown(w, &self.author_group_rows);
@@ -351,8 +364,11 @@ impl MarkdownRender for LogOutcome {
             } else {
                 self.commit_rows.is_empty()
             };
-            if empty {
+            if empty && self.display.no_commits_in_repo {
                 outln!(w, "No commits yet.");
+                return Ok(());
+            }
+            if empty {
                 return Ok(());
             }
         }
@@ -436,6 +452,10 @@ pub fn run(
         }
     }
     let repo = context::discover()?;
+    let display = LogDisplayOptions {
+        no_commits_in_repo: grit_lib::state::resolve_head_for_repository(&repo).is_err(),
+        ..display
+    };
     let env = repo.environment();
     let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
     let path_args = walk_paths.as_slice();

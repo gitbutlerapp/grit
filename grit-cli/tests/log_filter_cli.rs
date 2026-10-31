@@ -313,3 +313,72 @@ fn log_since_date_only_and_relative_accepted() -> TestResult {
     }
     Ok(())
 }
+
+fn init_attr_log_fixture(dir: &Path) {
+    assert!(grit_run(dir, &["init"]).status.success(), "init");
+    assert!(
+        grit_run(dir, &["config", "commit.gpgsign", "false"])
+            .status
+            .success(),
+        "config"
+    );
+    for path in ["a/g.c", "a/b/f.c", "c/d/f.c", "A.c", "top.c"] {
+        let full = dir.join(path);
+        fs::create_dir_all(full.parent().unwrap()).expect("mkdir");
+        fs::write(&full, path).expect("write");
+        assert!(grit_run(dir, &["add", path]).status.success(), "add {path}");
+        assert!(
+            grit_run(dir, &["commit", "-qm", &format!("add {path}")])
+                .status
+                .success(),
+            "commit {path}"
+        );
+    }
+    fs::write(dir.join(".gitattributes"), "*.c myattr\n").expect("attrs");
+    assert!(
+        grit_run(dir, &["add", ".gitattributes"]).status.success(),
+        "add attrs"
+    );
+    assert!(
+        grit_run(dir, &["commit", "-qm", "attrs"]).status.success(),
+        "commit attrs"
+    );
+}
+
+#[test]
+fn log_attr_pathspec_lists_commits_and_empty_filter_is_silent() -> TestResult {
+    let dir = std::env::temp_dir().join(format!("grit-log-attr-ps-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir)?;
+    init_attr_log_fixture(&dir);
+
+    let git_count = git(&dir, &["log", "--oneline", "--", ":(attr:myattr)"])
+        .lines()
+        .filter(|l| !l.is_empty())
+        .count();
+    assert_eq!(git_count, 5);
+
+    let out = grit_run(&dir, &["log", "--oneline", "--", ":(attr:myattr)"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let grit_out = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !grit_out.contains("No commits yet."),
+        "must not treat filtered empty page as empty repo: {grit_out}"
+    );
+    assert_eq!(
+        grit_out.lines().filter(|l| !l.is_empty()).count(),
+        git_count
+    );
+
+    let miss = grit_run(&dir, &["log", "--oneline", "--", ":(attr:no-such-attr)"]);
+    assert!(miss.status.success());
+    let miss_out = String::from_utf8_lossy(&miss.stdout);
+    assert!(!miss_out.contains("No commits yet."));
+    assert!(miss_out.trim().is_empty());
+
+    Ok(())
+}

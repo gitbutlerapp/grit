@@ -1144,12 +1144,23 @@ impl<'s> PathspecMatcher<'s> {
     #[must_use]
     pub fn matches(&self, path: &str) -> bool {
         const REGULAR_FILE: u32 = 0o100644;
+        self.matches_entry(path, REGULAR_FILE)
+    }
+
+    /// Like [`Self::matches`], but uses Git tree/index entry `mode` for trailing-slash and
+    /// submodule pathspec semantics.
+    ///
+    /// Required for path-limited history walks and staging when specs include `:(attr:...)` magic.
+    #[must_use]
+    pub fn matches_entry(&self, path: &str, mode: u32) -> bool {
+        let ctx = context_from_mode_bits(mode);
+        let match_ctx = PathspecMatchContext {
+            is_directory: ctx.is_directory,
+            is_git_submodule: ctx.is_git_submodule,
+            precompose_paths: self.precompose,
+        };
         let Some(attrs) = &self.attrs else {
-            return matches_pathspec_list_with_context(
-                path,
-                &self.specs,
-                pathspec_match_context_with_precompose(self.precompose),
-            );
+            return matches_pathspec_list_with_context(path, &self.specs, match_ctx);
         };
         let path = if self.precompose {
             precompose_utf8_path(path)
@@ -1157,7 +1168,7 @@ impl<'s> PathspecMatcher<'s> {
             Cow::Borrowed(path)
         };
         let lookup = AttrLookup::new(&attrs.rules, &attrs.macros, self.attr_icase);
-        matches_pathspec_list_with_attrs(&path, REGULAR_FILE, lookup, &self.specs)
+        matches_pathspec_list_with_attrs(&path, mode, lookup, &self.specs)
     }
 
     /// Whether a changed file is selected, checking its current `path` and, for a rename or
