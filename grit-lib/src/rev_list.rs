@@ -46,7 +46,7 @@ use crate::pack_bitmap::BitmapIndex;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
 use crate::pathspec::{pathspec_has_attr_magic, PathspecMatcher};
 use crate::progress::poll_watch;
-use crate::reflog::{list_reflog_refs, read_reflog};
+use crate::reflog::{read_reflog_on_store, reflog_refs_on_store};
 use crate::refs;
 use crate::repo::Repository;
 use crate::rev_list_error::RevListError;
@@ -2487,9 +2487,9 @@ fn reflog_commit_tips(repo: &Repository) -> Result<Vec<ObjectId>> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     let mut peeled_raw = HashSet::new();
-    for refname in list_reflog_refs(repo.git_dir())? {
-        let entries = read_reflog(repo.git_dir(), &refname)?;
-        for e in entries {
+    let store = repo.refs();
+    for refname in reflog_refs_on_store(store)? {
+        for e in read_reflog_on_store(store, &refname)? {
             for oid in [e.old_oid, e.new_oid] {
                 if oid == z || !peeled_raw.insert(oid) {
                     continue;

@@ -4,17 +4,25 @@
 
 use std::fs;
 use std::process::Command;
+use std::sync::Arc;
 
+use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::ident::Signature;
 use grit_lib::index::Index;
+use grit_lib::maintenance::repository_fsck::reachability_roots;
 use grit_lib::maintenance::repository_fsck::{self as fsck, FsckIssue, FsckOptions};
+use grit_lib::objects::odb::{store::MemoryStore, OdbBuilder};
 use grit_lib::objects::pack::{
     read_pack_index, verify_pack_and_collect, write_v2_pack_index_with_trailer, PackedType,
 };
-use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::objects::{HashAlgo, NewCommit, ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::{NeverCancel, NullProgress};
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::refs::store::{
+    Expected, MemoryRefStore, RawRef, RefTransaction, RefUpdate, ReflogUpdate,
+};
+use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 use grit_test_support::objects::{
     write_pack_and_index, DeltaOps, IndexPackOptions, ObjectKind as PackKind, PackBuilder,
     PackBuilt,
@@ -23,6 +31,7 @@ use grit_test_support::{
     git_fsck, git_hash_object_literally, write_loose_object, HashAlgo as FixtureAlgo,
 };
 use tempfile::TempDir;
+use time::OffsetDateTime;
 
 fn git(dir: &std::path::Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -1356,6 +1365,148 @@ fn reflog_and_index_roots_are_not_dangling() {
     }
     let grit_set = grit_dangling_set(&report);
     assert_eq!(grit_set, git_set);
+}
+
+/// Regression for issue #2396: injected ref stores must contribute reflog reachability roots.
+#[test]
+fn injected_ref_store_reflog_roots_are_not_dangling() {
+    fn scenario(label: &str, repo: &Repository) -> ObjectId {
+        let sig = Signature::new(
+            "T",
+            "t@example.com",
+            OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time"),
+        )
+        .expect("sig");
+        let tree = repo.odb().write(ObjectKind::Tree, &[]).expect("tree");
+        let c1 = repo
+            .objects()
+            .write_commit(&NewCommit::new(
+                tree,
+                sig.clone(),
+                sig.clone(),
+                "c1".to_string(),
+            ))
+            .expect("c1");
+        let c2 = repo
+            .objects()
+            .write_commit(&NewCommit::new(
+                tree,
+                sig.clone(),
+                sig.clone(),
+                "c2".to_string(),
+            ))
+            .expect("c2");
+        let side = repo
+            .objects()
+            .write_commit(&NewCommit::new(
+                tree,
+                sig.clone(),
+                sig.clone(),
+                "side".to_string(),
+            ))
+            .expect("side");
+        let ts = OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time");
+        let identity = "T <t@example.com>";
+        let mut update = |new, exp, msg: &str| {
+            let txn = RefTransaction::new()
+                .update(RefUpdate {
+                    name: "refs/heads/main".into(),
+                    new_value: Some(RawRef::Direct(new)),
+                    expected: exp,
+                    flags: Default::default(),
+                    reflog: Some(ReflogUpdate {
+                        identity: identity.into(),
+                        message: msg.into(),
+                        time: ts,
+                        old_oid: None,
+                        new_oid: None,
+                    }),
+                })
+                .expect("txn");
+            repo.refs()
+                .prepare(txn)
+                .expect("prepare")
+                .commit()
+                .expect("commit");
+        };
+        update(c1, Expected::Missing, "branch: Created");
+        update(c2, Expected::Oid(c1), "reset: moving to c2");
+        let side_txn = RefTransaction::new()
+            .update(RefUpdate {
+                name: "refs/heads/feature".into(),
+                new_value: Some(RawRef::Direct(side)),
+                expected: Expected::Missing,
+                flags: Default::default(),
+                reflog: Some(ReflogUpdate {
+                    identity: identity.into(),
+                    message: "branch: Created".into(),
+                    time: ts,
+                    old_oid: None,
+                    new_oid: None,
+                }),
+            })
+            .expect("side txn");
+        repo.refs()
+            .prepare(side_txn)
+            .expect("prepare side")
+            .commit()
+            .expect("commit side");
+
+        let roots = reachability_roots(repo).expect("roots");
+        assert!(
+            roots.contains(&c1),
+            "{label}: reflog-only commit must be a root"
+        );
+        assert!(
+            roots.contains(&side),
+            "{label}: side branch tip must be a root"
+        );
+
+        let report = grit_fsck(
+            repo,
+            &FsckOptions::full_repository(false).with_check_dangling(true),
+        );
+        assert!(
+            !report.dangling.iter().any(|(_, oid)| *oid == c1),
+            "{label}: c1 must not be dangling: {:?}",
+            report.dangling
+        );
+        assert!(
+            !report.dangling.iter().any(|(_, oid)| *oid == side),
+            "{label}: side branch must not be dangling: {:?}",
+            report.dangling
+        );
+        c1
+    }
+
+    let files_dir = TempDir::new().expect("tempdir");
+    let files_repo = Repository::init(
+        files_dir.path(),
+        &InitOptions::new().with_initial_branch("main"),
+    )
+    .expect("init files");
+    let c1_files = scenario("files backend", &files_repo);
+
+    let mem_root = TempDir::new().expect("mem tempdir");
+    let gd = mem_root.path().join("mem.git");
+    fs::create_dir_all(&gd).expect("git dir");
+    let mem_repo = RepositoryBuilder::new(RepositoryOptions::empty())
+        .odb_builder(
+            OdbBuilder::files(gd.join("objects"))
+                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                .alternates(false),
+        )
+        .ref_store(Arc::new(MemoryRefStore::new()))
+        .initial_branch("main")
+        .open(&gd, None)
+        .expect("memory repo");
+    scenario("MemoryStore + MemoryRefStore", &mem_repo);
+
+    let git_text = git(files_dir.path(), &["fsck"]);
+    assert!(
+        !git_text.contains(&c1_files.to_hex()),
+        "system git must not report reflog-only commit as dangling: {git_text}"
+    );
 }
 
 #[test]
