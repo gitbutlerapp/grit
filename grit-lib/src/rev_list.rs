@@ -5864,6 +5864,7 @@ fn can_use_bounded_parent_filter_limit_list(options: &RevListOptions) -> bool {
     }
     let stripped = rev_list_options_without_parent_selectors(options);
     options.ordering == OrderingMode::Default
+        && stripped.since_cutoff.is_none()
         && bounded_limit_list_common_inner(&stripped, false)
         && plain_commit_walk(&stripped, false)
 }
@@ -6345,12 +6346,12 @@ fn streaming_since_cutoff_bounded_list(
                             !until.is_some_and(|u| ts > u) && !since.is_some_and(|s| ts < s);
                         if in_window {
                             matched_seen += 1;
-                            if options.count {
-                                match_count += 1;
-                            } else if matched_seen > options.skip
-                                && max_count.is_none_or(|m| ordered.len() < m)
-                            {
-                                ordered.push(oid);
+                            if matched_seen > options.skip {
+                                if options.count {
+                                    match_count += 1;
+                                } else if max_count.is_none_or(|m| ordered.len() < m) {
+                                    ordered.push(oid);
+                                }
                             }
                         }
                         Ok(if options.count {
@@ -9897,6 +9898,128 @@ mod since_cutoff_frontier_tests {
             commit_parent_lookups() < 64,
             "list path should also stop at the since frontier"
         );
+        Ok(())
+    }
+
+    fn git_rev_list_count(repo_dir: &std::path::Path, args: &[&str]) -> usize {
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("-C").arg(repo_dir).arg("rev-list").arg("--count");
+        cmd.args(args);
+        let out = cmd.output().expect("git rev-list --count");
+        assert!(
+            out.status.success(),
+            "git failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        std::str::from_utf8(&out.stdout)
+            .expect("utf8")
+            .trim()
+            .parse()
+            .expect("count")
+    }
+
+    fn write_dated_commit(
+        repo: &Repository,
+        parents: &[ObjectId],
+        msg: &str,
+        time: i64,
+    ) -> ObjectId {
+        let blob = repo.odb().write(ObjectKind::Blob, b"x\n").expect("blob");
+        let tree_body = format!("100644 f {}\0", blob.to_hex());
+        let tree = repo
+            .odb()
+            .write(ObjectKind::Tree, tree_body.as_bytes())
+            .expect("tree");
+        let ident = format!("T <t@e.com> {time} +0000");
+        let mut body = format!("tree {tree}\n");
+        for p in parents {
+            body.push_str(&format!("parent {p}\n"));
+        }
+        body.push_str(&format!("author {ident}\ncommitter {ident}\n\n{msg}\n"));
+        repo.odb()
+            .write(ObjectKind::Commit, body.as_bytes())
+            .expect("commit")
+    }
+
+    #[test]
+    fn since_with_parent_filters_and_skip_count_match_git() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        Repository::init(
+            dir.path(),
+            &InitOptions {
+                bare: true,
+                ref_storage: RefStorageFormat::Files,
+                ..InitOptions::default()
+            },
+        )
+        .expect("init");
+        let repo = Repository::open(dir.path(), &crate::environment::RepositoryOptions::empty())?;
+        let root = write_dated_commit(&repo, &[], "root", 1_000_000_000);
+        let b = write_dated_commit(&repo, &[root], "b", 1_000_000_000);
+        let c = write_dated_commit(&repo, &[b], "c", 1_000_000_000);
+        let side = write_dated_commit(&repo, &[b], "side", 1_000_000_000);
+        let merge = write_dated_commit(&repo, &[c, side], "merge", 1_000_000_000);
+        let tip = write_dated_commit(&repo, &[merge], "tip", 2_000_000_000);
+        fs::write(repo.git_dir().join("refs/heads/main"), format!("{tip}\n"))?;
+
+        let since = 1_500_000_000i64;
+        let since_arg = format!("--since={since}");
+        for (git_args, opts) in [
+            (
+                vec!["--first-parent", since_arg.as_str(), "main"],
+                RevListOptions {
+                    first_parent: true,
+                    since_cutoff: Some(since),
+                    count: true,
+                    use_commit_graph: false,
+                    ..RevListOptions::default()
+                },
+            ),
+            (
+                vec!["--merges", since_arg.as_str(), "main"],
+                RevListOptions {
+                    min_parents: Some(2),
+                    since_cutoff: Some(since),
+                    count: true,
+                    use_commit_graph: false,
+                    ..RevListOptions::default()
+                },
+            ),
+        ] {
+            let expected = git_rev_list_count(dir.path(), &git_args);
+            let actual = rev_list(&repo, &[String::from("main")], &[], &opts)?.commit_count();
+            assert_eq!(actual, expected, "git args {git_args:?}");
+        }
+
+        let mut parent = root;
+        let mut chain_tip = root;
+        for i in 0..12 {
+            let t = 1_600_000_000 + i * 3_600;
+            chain_tip = write_dated_commit(&repo, &[parent], &format!("c{i}"), t);
+            parent = chain_tip;
+        }
+        fs::write(
+            repo.git_dir().join("refs/heads/main"),
+            format!("{chain_tip}\n"),
+        )?;
+        let chain_since = 1_590_000_000i64;
+        let chain_since_arg = format!("--since={chain_since}");
+        let expected =
+            git_rev_list_count(dir.path(), &["--skip=5", chain_since_arg.as_str(), "main"]);
+        let actual = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &RevListOptions {
+                skip: 5,
+                since_cutoff: Some(chain_since),
+                count: true,
+                use_commit_graph: false,
+                ..RevListOptions::default()
+            },
+        )?
+        .commit_count();
+        assert_eq!(actual, expected, "count with --skip and --since");
         Ok(())
     }
 }
