@@ -4674,6 +4674,19 @@ pub enum BlameFinalSource {
     Contents(Vec<u8>),
 }
 
+impl BlameFinalSource {
+    /// Author name Git's porcelain blame gives lines that exist only in this source:
+    /// `External file (--contents)` for [`Contents`](Self::Contents), `Not Committed Yet`
+    /// otherwise.
+    #[must_use]
+    pub const fn uncommitted_author_name(&self) -> &'static str {
+        match self {
+            Self::Contents(_) => "External file (--contents)",
+            Self::Revision | Self::Worktree => "Not Committed Yet",
+        }
+    }
+}
+
 /// One blamed line returned by [`blame_file`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlameAttributedLine {
@@ -4722,6 +4735,11 @@ pub struct BlameHunk {
     pub ignored: bool,
     /// Set when every line in the hunk could not be blamed past an ignored revision.
     pub unblamable: bool,
+    /// Set when the hunk's lines exist only in the uncommitted final content
+    /// ([`BlameAttributedLine::not_committed`]); `commit` is then the null object id.
+    pub not_committed: bool,
+    /// Indices of this hunk's lines in [`BlameResult::lines`]; see [`BlameResult::hunk_lines`].
+    pub lines: std::ops::Range<usize>,
 }
 
 /// Metadata for a commit referenced by [`BlameResult::lines`].
@@ -4767,11 +4785,42 @@ impl BlameResult {
                     count: slice.len(),
                     ignored: slice[0].ignored,
                     unblamable: slice[0].unblamable,
+                    not_committed: slice[0].not_committed,
+                    lines: start..i,
                 });
                 start = i;
             }
         }
         out
+    }
+
+    /// The lines of `hunk`, a hunk returned by [`Self::hunks`] on this result.
+    ///
+    /// Returns an empty slice when `hunk.lines` is out of range (a hunk from another result).
+    #[must_use]
+    pub fn hunk_lines(&self, hunk: &BlameHunk) -> &[BlameAttributedLine] {
+        self.lines.get(hunk.lines.clone()).unwrap_or_default()
+    }
+
+    /// Give the null-commit entry in [`Self::commits`] an author identity for display, named
+    /// the way Git's porcelain blame names uncommitted lines.
+    ///
+    /// [`blame_file`] leaves that entry's `author` and `summary` empty. This fills the author
+    /// line as `<name> <not.committed.yet> <author_time> +0000` and the summary as `<name>`,
+    /// where the name is [`BlameFinalSource::uncommitted_author_name`] for `source` (the
+    /// [`BlameOptions::final_source`] the result was computed with). The email is
+    /// `not.committed.yet` for every source. An entry whose author is already set, or a
+    /// result with no uncommitted lines, is left unchanged.
+    pub fn name_uncommitted_author(&mut self, source: &BlameFinalSource) {
+        let Some(info) = self.commits.get_mut(&ObjectId::zero()) else {
+            return;
+        };
+        if !info.author.is_empty() {
+            return;
+        }
+        let name = source.uncommitted_author_name();
+        info.author = format!("{name} <not.committed.yet> {} +0000", info.author_time);
+        name.clone_into(&mut info.summary);
     }
 }
 
@@ -5698,6 +5747,136 @@ mod tests {
         assert_eq!(hunks[0].final_start, 1);
         assert_eq!(hunks[1].count, 1);
         assert_eq!(hunks[1].original_path, "b.txt");
+        assert_eq!(
+            (hunks[0].lines.clone(), hunks[1].lines.clone()),
+            (0..2, 2..3)
+        );
+        let contents: Vec<_> = hunks
+            .iter()
+            .map(|h| {
+                result
+                    .hunk_lines(h)
+                    .iter()
+                    .map(|l| l.content.as_str())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(contents, [vec!["one", "two"], vec!["three"]]);
+        assert!(hunks.iter().all(|h| !h.not_committed));
+    }
+
+    fn uncommitted_result(lines: usize) -> BlameResult {
+        let committed =
+            crate::objects::ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
+        let line = |n: usize, commit, not_committed| BlameAttributedLine {
+            commit,
+            original_line: n,
+            final_line: n,
+            original_path: "f.txt".to_owned(),
+            content: format!("line {n}"),
+            encoding_lossy: false,
+            content_bytes: None,
+            ignored: false,
+            unblamable: false,
+            not_committed,
+        };
+        let mut all = vec![line(1, committed, false)];
+        all.extend((2..2 + lines).map(|n| line(n, ObjectId::zero(), true)));
+        let mut commits = HashMap::new();
+        commits.insert(
+            committed,
+            BlameCommitInfo {
+                author: "A U Thor <a@example.com> 100 +0000".to_owned(),
+                author_time: 100,
+                summary: "first".to_owned(),
+            },
+        );
+        if lines > 0 {
+            commits.insert(
+                ObjectId::zero(),
+                BlameCommitInfo {
+                    author: String::new(),
+                    author_time: 1_800_000_000,
+                    summary: String::new(),
+                },
+            );
+        }
+        BlameResult {
+            lines: all,
+            commits,
+        }
+    }
+
+    #[test]
+    fn blame_result_hunks_mark_uncommitted_runs() {
+        let result = uncommitted_result(2);
+        let hunks = result.hunks();
+        assert_eq!(hunks.len(), 2);
+        assert!(!hunks[0].not_committed);
+        assert!(hunks[1].not_committed && hunks[1].commit.is_zero());
+        assert_eq!((hunks[1].lines.clone(), hunks[1].count), (1..3, 2));
+        assert_eq!(result.hunk_lines(&hunks[1]), &result.lines[1..]);
+    }
+
+    #[test]
+    fn blame_result_hunk_lines_of_foreign_hunk_is_empty() {
+        let result = uncommitted_result(0);
+        let mut hunk = uncommitted_result(3).hunks().pop().unwrap();
+        assert!(result.hunk_lines(&hunk).is_empty());
+        hunk.lines = 3..1;
+        assert!(result.hunk_lines(&hunk).is_empty());
+    }
+
+    #[test]
+    fn uncommitted_author_name_follows_final_source() {
+        assert_eq!(
+            BlameFinalSource::Worktree.uncommitted_author_name(),
+            "Not Committed Yet"
+        );
+        assert_eq!(
+            BlameFinalSource::Revision.uncommitted_author_name(),
+            "Not Committed Yet"
+        );
+        assert_eq!(
+            BlameFinalSource::Contents(b"x\n".to_vec()).uncommitted_author_name(),
+            "External file (--contents)"
+        );
+    }
+
+    #[test]
+    fn name_uncommitted_author_fills_only_the_null_commit() {
+        let mut result = uncommitted_result(1);
+        result.name_uncommitted_author(&BlameFinalSource::Worktree);
+        let info = &result.commits[&ObjectId::zero()];
+        assert_eq!(
+            info.author,
+            "Not Committed Yet <not.committed.yet> 1800000000 +0000"
+        );
+        assert_eq!(info.summary, "Not Committed Yet");
+        assert_eq!(info.author_time, 1_800_000_000);
+        let committed = result.lines[0].commit;
+        assert_eq!(
+            result.commits[&committed].author,
+            "A U Thor <a@example.com> 100 +0000"
+        );
+
+        let before = result.clone();
+        result.name_uncommitted_author(&BlameFinalSource::Contents(Vec::new()));
+        assert_eq!(result, before, "an already named entry is kept");
+
+        let mut contents = uncommitted_result(1);
+        contents.name_uncommitted_author(&BlameFinalSource::Contents(Vec::new()));
+        let info = &contents.commits[&ObjectId::zero()];
+        assert_eq!(
+            info.author,
+            "External file (--contents) <not.committed.yet> 1800000000 +0000"
+        );
+        assert_eq!(info.summary, "External file (--contents)");
+
+        let mut clean = uncommitted_result(0);
+        let before = clean.clone();
+        clean.name_uncommitted_author(&BlameFinalSource::Worktree);
+        assert_eq!(clean, before);
     }
 
     #[test]
