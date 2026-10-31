@@ -2108,10 +2108,10 @@ fn materialize_flat_entry_in_worktree(
         if file_path.exists() || file_path.symlink_metadata().is_ok() {
             let _ = fs::remove_file(&file_path);
         }
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, &file_path)?;
-        #[cfg(not(unix))]
-        fs::write(&file_path, target.as_bytes())?;
+        let has_symlinks =
+            crate::index::WorktreeModePolicy::from_config(rules.config()).has_symlinks;
+        crate::worktree::write_index_symlink_to_worktree(&file_path, &target, has_symlinks)
+            .map_err(Error::Io)?;
     } else {
         write_smudged_regular_file_replacing_symlink(
             repo,
@@ -2657,12 +2657,10 @@ fn apply_stash_commit(
             if file_path.exists() || file_path.symlink_metadata().is_ok() {
                 let _ = fs::remove_file(&file_path);
             }
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(&target, &file_path)?;
-            // Windows lacks unprivileged symlinks; keep the worktree
-            // populated by writing the target as a regular file.
-            #[cfg(not(unix))]
-            fs::write(&file_path, target.as_bytes())?;
+            let has_symlinks =
+                crate::index::WorktreeModePolicy::from_config(worktree_rules.config()).has_symlinks;
+            crate::worktree::write_index_symlink_to_worktree(&file_path, &target, has_symlinks)
+                .map_err(Error::Io)?;
         } else if head_moved {
             // Three-way merge: base (head_at_stash), ours (current HEAD), theirs (stash)
             let base_content = StashTreeEntry::lookup(&base_tree_entries, path)

@@ -720,20 +720,7 @@ fn cross_device_restore_from_spool(
 }
 
 pub(crate) fn create_symlink_at(target: &Path, link: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::symlink;
-        symlink(target, link)
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::{symlink_dir, symlink_file};
-        if target.is_dir() {
-            symlink_dir(target, link)
-        } else {
-            symlink_file(target, link)
-        }
-    }
+    crate::worktree::create_worktree_symlink(link, target)
 }
 
 #[cfg(test)]

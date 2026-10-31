@@ -48,7 +48,6 @@ use crate::worktree_rules::WorktreeRules;
 mod checkout_journal;
 #[path = "checkout_parallel.rs"]
 mod checkout_parallel;
-pub(crate) use checkout_journal::create_symlink_at;
 pub(crate) use checkout_journal::CheckoutJournal;
 use checkout_journal::SharedCheckoutDeleteRollback;
 #[cfg(test)]
@@ -268,7 +267,7 @@ fn restore_checkout_rollback_chunk(
         })
         .map(|(i, _)| i)
         .collect();
-    let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
+    let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
     if write_jobs.len() >= BULK_ADD_CHECKOUT_MIN {
         precreate_checkout_parent_dirs(work_tree, &write_jobs, &mut dir_cache);
     } else {
@@ -1330,8 +1329,7 @@ fn checkout_hard_to_tree_journaled(
     let mut delayed = DelayedProcessCheckout::default();
     let mut pending_delayed: Vec<DelayedCheckoutTarget> = Vec::new();
     let mut delayed_entries: Vec<IndexEntry> = Vec::new();
-    let protect = ProtectOptions::from_config(config.as_ref());
-    let mut dir_cache = LeadingDirCache::with_protect(protect);
+    let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
 
     if trees_differ {
         for (&pos, action) in plan_positions.iter().zip(&mut actions) {
@@ -3222,7 +3220,7 @@ fn checkout_bulk_added_tree_changes(
     index_write: CheckoutIndexWrite<'_>,
     journal: &mut CheckoutJournal,
 ) -> Result<()> {
-    let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
+    let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
     let mut delayed = DelayedProcessCheckout::default();
     let mut pending_delayed = Vec::new();
     let mut skip_ramp = apply.skip_parallel_write_ramp;
@@ -3346,7 +3344,7 @@ fn checkout_bulk_mod_delete_tree_changes(
         .iter()
         .filter(|c| matches!(c.status, DiffStatus::Modified | DiffStatus::Added))
         .collect();
-    let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
+    let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
     let smudge_context = None;
 
     let wholesale_dirs_removed = remove_wholesale_directories_on_disk(
@@ -3940,7 +3938,7 @@ fn apply_tree_changes(
     let mut smudge_context: Option<Arc<FilterSmudgeMeta>> = None;
     let mut paths_to_remove: Vec<Vec<u8>> = Vec::with_capacity(changes.len() / 8);
     let mut deleted_abs_paths: Vec<PathBuf> = Vec::with_capacity(changes.len() / 8);
-    let mut dir_cache = LeadingDirCache::with_protect(protect);
+    let mut dir_cache = LeadingDirCache::with_protect_config(protect, Some(config.as_ref()));
     let mut plan: Vec<CheckoutPlanSlot> = Vec::with_capacity(changes.len());
     let mut write_jobs: Vec<CheckoutWriteJob<'_>> = Vec::new();
     let mut rules: Option<Rc<WorktreeRules>> =
@@ -4797,6 +4795,7 @@ pub(crate) fn write_blob_to_worktree(
     mode: u32,
     dir_cache: &mut LeadingDirCache,
 ) -> Result<Option<fs::Metadata>> {
+    let has_symlinks = dir_cache.has_symlinks();
     let attrs = rules.file_attrs(rel_path, false);
     let Some(blob) = read_blob_unless_streamed(repo, rules.conversion(), &attrs, mode, oid, false)?
     else {
@@ -4810,6 +4809,7 @@ pub(crate) fn write_blob_to_worktree(
                     WorktreeFileContent::Stream(&mut *reader),
                     mode,
                     dir_cache,
+                    has_symlinks,
                 )
             })?
             .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))
@@ -4820,7 +4820,8 @@ pub(crate) fn write_blob_to_worktree(
     else {
         return Ok(None);
     };
-    write_to_worktree_cached(work_tree, rel_path, &bytes, mode, dir_cache).map(Some)
+    let has_symlinks = dir_cache.has_symlinks();
+    write_to_worktree_cached(work_tree, rel_path, &bytes, mode, dir_cache, has_symlinks).map(Some)
 }
 
 fn write_checkout_entry(
@@ -4860,7 +4861,24 @@ fn write_checkout_entry(
         }
     }
 
-    let meta = write_worktree_content(work_tree, rel_path, content, mode, dir_cache)?;
+    #[cfg(windows)]
+    let symlink_target_len = (mode == MODE_SYMLINK).then_some(match &content {
+        WorktreeFileContent::Bytes(data) => data.len(),
+        WorktreeFileContent::Stream(_) => 0,
+    });
+    let has_symlinks = dir_cache.has_symlinks();
+    let meta = write_worktree_content(work_tree, rel_path, content, mode, dir_cache, has_symlinks)?;
+    #[cfg(windows)]
+    {
+        return Ok(checked_out_entry(
+            &meta,
+            &index_path,
+            oid,
+            mode,
+            symlink_target_len,
+        ));
+    }
+    #[cfg(not(windows))]
     Ok(checked_out_entry(&meta, &index_path, oid, mode))
 }
 
@@ -4874,9 +4892,17 @@ fn checked_out_entry(
     index_path: &[u8],
     oid: ObjectId,
     mode: u32,
+    #[cfg(windows)] symlink_target_len: Option<usize>,
 ) -> IndexEntry {
     let mut entry = entry_from_metadata(meta, index_path, oid, mode);
-    if meta.is_file() {
+    if mode == MODE_SYMLINK {
+        #[cfg(windows)]
+        if let Some(len) = symlink_target_len.filter(|len| *len > 0) {
+            if entry.size == 0 {
+                entry.size = crate::index::munge_index_size(u64::try_from(len).unwrap_or(0));
+            }
+        }
+    } else if meta.is_file() {
         entry.mark_content_verified();
     }
     entry
@@ -4922,6 +4948,7 @@ fn apply_in_place_git_mode_transition_at_path(
 pub(crate) struct LeadingDirCache {
     ready: HashSet<PathBuf>,
     protect: ProtectOptions,
+    has_symlinks: bool,
 }
 
 fn precreate_checkout_parent_dirs(
@@ -4954,10 +4981,30 @@ impl LeadingDirCache {
     }
 
     pub(crate) fn with_protect(protect: ProtectOptions) -> Self {
+        Self::with_protect_config(protect, None)
+    }
+
+    /// Like [`Self::with_protect`], honouring `core.symlinks` from `config` when provided.
+    pub(crate) fn with_protect_config(protect: ProtectOptions, config: Option<&ConfigSet>) -> Self {
+        let has_symlinks = config
+            .map(crate::index::WorktreeModePolicy::from_config)
+            .unwrap_or_default()
+            .has_symlinks;
         Self {
             ready: HashSet::new(),
             protect,
+            has_symlinks,
         }
+    }
+
+    #[must_use]
+    pub(crate) fn has_symlinks(&self) -> bool {
+        self.has_symlinks
+    }
+
+    /// Cache for one checkout pass using `core.symlinks` and path protection from `config`.
+    pub(crate) fn for_config(config: &ConfigSet) -> Self {
+        Self::with_protect_config(ProtectOptions::from_config(config), Some(config))
     }
 
     /// Share parent-directory state from planning so workers do not re-stat prepared paths.
@@ -4965,6 +5012,7 @@ impl LeadingDirCache {
         Self {
             ready: source.ready.clone(),
             protect: source.protect,
+            has_symlinks: source.has_symlinks,
         }
     }
 
@@ -5124,6 +5172,7 @@ pub(crate) fn write_to_worktree_cached(
     data: &[u8],
     mode: u32,
     dir_cache: &mut LeadingDirCache,
+    has_symlinks: bool,
 ) -> Result<fs::Metadata> {
     write_worktree_content(
         work_tree,
@@ -5131,6 +5180,7 @@ pub(crate) fn write_to_worktree_cached(
         WorktreeFileContent::Bytes(data),
         mode,
         dir_cache,
+        has_symlinks,
     )
 }
 
@@ -5141,6 +5191,7 @@ fn write_worktree_content(
     content: WorktreeFileContent<'_>,
     mode: u32,
     dir_cache: &mut LeadingDirCache,
+    has_symlinks: bool,
 ) -> Result<fs::Metadata> {
     let rel_bytes = crate::repo_relpath::storage_bytes(rel_path);
     validate_worktree_path(&rel_bytes, mode, dir_cache.protect)?;
@@ -5212,32 +5263,11 @@ fn write_worktree_content(
         let target = std::str::from_utf8(data).map_err(|_| {
             Error::PathError(format!("symlink target for '{rel_path}' is not UTF-8"))
         })?;
-        #[cfg(unix)]
         io_with_path(
             rel_path,
             WorktreePathOperation::Create,
-            std::os::unix::fs::symlink(target, &abs_path),
+            crate::worktree::write_index_symlink_to_worktree(&abs_path, target, has_symlinks),
         )?;
-        // Windows lacks unprivileged symlink creation; materialise the link as a
-        // regular file containing the target path so the worktree stays populated.
-        #[cfg(not(unix))]
-        {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&abs_path)
-                .map_err(|e| {
-                    crate::worktree::map_worktree_io(rel_path, WorktreePathOperation::Replace, e)
-                })?;
-            io_with_path(
-                rel_path,
-                WorktreePathOperation::Replace,
-                file.write_all(target.as_bytes()),
-            )?;
-            return written_file_metadata(file, &abs_path);
-        }
-        #[cfg(unix)]
         return written_file_symlink_metadata(&abs_path);
     }
     write_fresh_worktree_blob(&abs_path, rel_path, data, mode)

@@ -2064,6 +2064,9 @@ mod userdiff_hunk_header_git_compat;
 #[path = "wildmatch_vectors.rs"]
 mod wildmatch_vectors;
 #[cfg(feature = "full-tests")]
+#[path = "windows_symlinks_enabled_git_compat.rs"]
+mod windows_symlinks_enabled_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "worktree_add_options_git_compat.rs"]
 mod worktree_add_options_git_compat;
 #[cfg(feature = "full-tests")]

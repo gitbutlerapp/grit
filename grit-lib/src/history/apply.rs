@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::config::ConfigSet;
 use crate::diff::{mode_from_metadata, DiffEntry, DiffStatus};
@@ -1866,16 +1867,10 @@ fn restore_worktree_path_from_old_tree(
             }
             let index = repo.load_index()?;
             let config = repo.config()?;
-            let rules = WorktreeRules::from_parts_index_attributes_only(repo, &index, config)?;
-            write_blob_to_worktree(
-                repo,
-                &rules,
-                work_tree,
-                path,
-                &oid,
-                mode,
-                &mut LeadingDirCache::new(),
-            )?;
+            let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
+            let rules =
+                WorktreeRules::from_parts_index_attributes_only(repo, &index, Arc::clone(&config))?;
+            write_blob_to_worktree(repo, &rules, work_tree, path, &oid, mode, &mut dir_cache)?;
             Ok(())
         }
     }
@@ -1920,66 +1915,11 @@ fn clear_worktree_path_before_restore(
 }
 
 fn symlink_target_from_snapshot_bytes(bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
-    #[cfg(unix)]
-    {
-        use std::ffi::OsStr;
-        use std::os::unix::ffi::OsStrExt;
-        Ok(std::path::PathBuf::from(OsStr::from_bytes(bytes)))
-    }
-    #[cfg(windows)]
-    {
-        let text = std::str::from_utf8(bytes).map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "symlink restore requires a UTF-8 target on Windows",
-            )
-        })?;
-        Ok(std::path::PathBuf::from(text))
-    }
-    #[cfg(all(not(unix), not(windows)))]
-    {
-        let _ = bytes;
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "symlink restore is not supported on this platform",
-        ))
-    }
+    crate::worktree::symlink_target_path_from_bytes(bytes)
 }
 
 fn write_symlink_from_snapshot(abs: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let target = symlink_target_from_snapshot_bytes(bytes)?;
-    if let Some(parent) = abs.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::{symlink_dir, symlink_file};
-        let lookup = if target.is_relative() {
-            abs.parent()
-                .map(|parent| parent.join(&target))
-                .unwrap_or_else(|| target.clone())
-        } else {
-            target.clone()
-        };
-        if lookup.is_dir() {
-            symlink_dir(&target, abs)
-        } else {
-            symlink_file(&target, abs)
-        }
-    }
-    #[cfg(unix)]
-    {
-        use crate::porcelain::checkout::create_symlink_at;
-        create_symlink_at(&target, abs)
-    }
-    #[cfg(all(not(unix), not(windows)))]
-    {
-        let _ = (abs, target);
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "symlink restore is not supported on this platform",
-        ))
-    }
+    crate::worktree::create_worktree_symlink_from_blob(abs, bytes)
 }
 
 pub(crate) fn restore_worktree_path(

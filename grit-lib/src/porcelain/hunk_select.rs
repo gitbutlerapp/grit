@@ -1261,7 +1261,9 @@ fn commit_worktree_reverse(
 ) -> std::result::Result<(), HunkSelectError> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let rules = WorktreeRules::from_repository(repo, &index).map_err(HunkSelectError::from)?;
-    let mut dir_cache = LeadingDirCache::new();
+    let config = repo.config().map_err(HunkSelectError::from)?;
+    let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
+    let has_symlinks = dir_cache.has_symlinks();
     for plan in planned {
         // The restored content only lives in the worktree, so it is hashed (for `ident` and
         // filter metadata) but not stored.
@@ -1285,6 +1287,7 @@ fn commit_worktree_reverse(
             &worktree_bytes,
             plan.mode,
             &mut dir_cache,
+            has_symlinks,
         )?;
         push_restored_path(&mut outcome.restored, &plan.path);
     }

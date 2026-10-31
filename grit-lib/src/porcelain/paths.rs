@@ -934,19 +934,8 @@ fn restore_worktree_backups(work_tree: &Path, backups: &[WorktreePathBackup]) ->
                         Error::PathError(format!("creating parent for '{rel}': {e}"))
                     })?;
                 }
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::symlink;
-                    symlink(target, &abs)
-                        .map_err(|e| Error::PathError(format!("restoring symlink '{rel}': {e}")))?;
-                }
-                #[cfg(not(unix))]
-                {
-                    let _ = target;
-                    return Err(Error::Message(format!(
-                        "cannot restore symlink '{rel}' on this platform"
-                    )));
-                }
+                crate::worktree::create_worktree_symlink(&abs, target.as_ref())
+                    .map_err(|e| Error::PathError(format!("restoring symlink '{rel}': {e}")))?;
             }
         }
     }

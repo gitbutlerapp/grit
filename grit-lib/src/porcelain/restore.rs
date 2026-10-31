@@ -714,8 +714,7 @@ fn apply_worktree_restore_inner(
         cancel,
     } = ctx;
     let config = repo.config()?;
-    let protect = crate::path_validate::ProtectOptions::from_config(&config);
-    let mut dir_cache = LeadingDirCache::with_protect(protect);
+    let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
 
     if !worktree_from_tree {
         let attr_index = index_out.gitattributes_snapshot();
