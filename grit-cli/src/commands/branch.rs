@@ -8,15 +8,15 @@ use grit_lib::porcelain::branch::{
     StartPoint, TrackMode,
 };
 use grit_lib::refs::branch_tracking::{
-    list_branches, upstream_branch, BranchDetail, BranchListQuery, BranchScope, BranchSummary,
+    list_branches, BranchDetail, BranchListQuery, BranchScope, BranchSummary,
 };
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 use grit_lib::state::{
-    operation_blocking_switch, resolve_head, resolve_head_for_repository, wt_status_get_state,
-    HeadState, InProgressOperation,
+    operation_blocking_switch, resolve_head_for_repository, wt_status_get_state, HeadState,
+    InProgressOperation,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -749,45 +749,13 @@ fn create(
     let created = create_branch(repo, &create_opts).map_err(map_branch_error)?;
     let oid = created.oid.to_hex();
     let short_oid = short_hex(&oid);
-    let upstream = if opts.dry_run {
-        predicted_upstream(repo, name, &create_opts)?
-    } else {
-        upstream_branch(repo, name).map(|base| base.name)
-    };
     Ok(BranchOutcome::Create {
         name: created.name,
         oid,
         short_oid,
-        upstream,
+        upstream: created.upstream,
         dry_run: opts.dry_run,
     })
-}
-
-fn predicted_upstream(
-    repo: &Repository,
-    name: &str,
-    opts: &CreateBranchOptions,
-) -> Result<Option<String>> {
-    use grit_lib::porcelain::branch::resolve_create_tracking;
-    let (start_oid, label) = match &opts.start {
-        Some(point) => (point.oid, point.label.clone()),
-        None => {
-            let head = resolve_head(repo.git_dir())?;
-            let oid = head.oid().copied().ok_or_else(|| {
-                map_branch_error(Error::Branch(
-                    grit_lib::porcelain::branch::BranchError::NoCommits,
-                ))
-            })?;
-            let label =
-                grit_lib::porcelain::checkout_reflog::branch_create_reflog_source_label(&head);
-            (oid, label)
-        }
-    };
-    let tracking = resolve_create_tracking(repo, name, &label, start_oid, opts.track)
-        .map_err(map_branch_error)?;
-    Ok(tracking.map(|(remote, merge)| {
-        grit_lib::porcelain::branch::upstream_tracking_display(&remote, &merge)
-    }))
 }
 
 fn remove(

@@ -454,6 +454,146 @@ fn dry_run_force_does_not_reset_existing_branch() {
     assert_eq!(oid(dir, "topic"), tip);
 }
 
+fn git_upstream(dir: &Path, branch: &str) -> Option<String> {
+    let spec = format!("{branch}@{{upstream}}");
+    let out = git_cmd(&["rev-parse", "--abbrev-ref", &spec])
+        .in_dir(dir)
+        .exec();
+    out.ok().then(|| out.stdout.trim().to_owned())
+}
+
+fn create_from(
+    name: &str,
+    start: StartPoint,
+    track: TrackMode,
+    dry_run: bool,
+) -> CreateBranchOptions {
+    CreateBranchOptions {
+        name: name.into(),
+        start: Some(start),
+        force: false,
+        track,
+        dry_run,
+    }
+}
+
+#[test]
+fn create_reports_remote_upstream_git_reads_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    git(dir, &["init", "-q", "-b", "main"]);
+    commit(dir, "c1");
+    git(dir, &["remote", "add", "origin", "/nonexistent"]);
+    git(dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    let repo = open(dir);
+    let start = StartPoint {
+        oid: oid(dir, "origin/main"),
+        label: "origin/main".into(),
+    };
+
+    let preview = create_branch(
+        &repo,
+        &create_from("topic", start.clone(), TrackMode::Auto, true),
+    )
+    .unwrap();
+    assert_eq!(preview.upstream.as_deref(), Some("origin/main"));
+    assert_eq!(git_upstream(dir, "topic"), None);
+
+    let live = create_branch(&repo, &create_from("topic", start, TrackMode::Auto, false)).unwrap();
+    assert_eq!(live.upstream, preview.upstream);
+    assert_eq!(git_upstream(dir, "topic"), live.upstream);
+    fsck(dir);
+}
+
+#[test]
+fn create_reports_local_upstream_for_track_always() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    git(dir, &["init", "-q", "-b", "main"]);
+    commit(dir, "c1");
+    git(dir, &["branch", "base"]);
+    let repo = open(dir);
+    let start = StartPoint {
+        oid: oid(dir, "base"),
+        label: "base".into(),
+    };
+
+    let preview = create_branch(
+        &repo,
+        &create_from("topic", start.clone(), TrackMode::Always, true),
+    )
+    .unwrap();
+    assert_eq!(preview.upstream.as_deref(), Some("base"));
+
+    let live = create_branch(
+        &repo,
+        &create_from("topic", start, TrackMode::Always, false),
+    )
+    .unwrap();
+    assert_eq!(live.upstream.as_deref(), Some("base"));
+    assert_eq!(git_upstream(dir, "topic").as_deref(), Some("base"));
+}
+
+#[test]
+fn create_without_tracking_reports_no_upstream() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    git(dir, &["init", "-q", "-b", "main"]);
+    commit(dir, "c1");
+    git(dir, &["remote", "add", "origin", "/nonexistent"]);
+    git(dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    let repo = open(dir);
+    let start = StartPoint {
+        oid: oid(dir, "origin/main"),
+        label: "origin/main".into(),
+    };
+
+    for dry_run in [true, false] {
+        let created = create_branch(
+            &repo,
+            &create_from("topic", start.clone(), TrackMode::Never, dry_run),
+        )
+        .unwrap();
+        assert_eq!(created.upstream, None, "dry_run={dry_run}");
+    }
+    let at_head = create_branch(&repo, &CreateBranchOptions::at_head("other")).unwrap();
+    assert_eq!(at_head.upstream, None);
+    assert_eq!(git_upstream(dir, "topic"), None);
+}
+
+#[test]
+fn forced_reset_reports_kept_upstream_in_dry_run_and_live() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    git(dir, &["init", "-q", "-b", "main"]);
+    commit(dir, "c1");
+    git(dir, &["remote", "add", "origin", "/nonexistent"]);
+    git(dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git(dir, &["branch", "--track", "topic", "origin/main"]);
+    commit(dir, "c2");
+    let repo = open(dir);
+    let mut opts = create_from(
+        "topic",
+        StartPoint {
+            oid: oid(dir, "main"),
+            label: "main".into(),
+        },
+        TrackMode::Auto,
+        true,
+    );
+    opts.force = true;
+
+    let preview = create_branch(&repo, &opts).unwrap();
+    assert_eq!(preview.upstream.as_deref(), Some("origin/main"));
+
+    opts.dry_run = false;
+    let live = create_branch(&repo, &opts).unwrap();
+    assert_eq!(live.upstream, preview.upstream);
+    assert_eq!(oid(dir, "topic"), oid(dir, "main"));
+    assert_eq!(git_upstream(dir, "topic"), live.upstream);
+    fsck(dir);
+}
+
 #[test]
 fn public_branch_mutation_api_smoke() {
     let tmp = tempfile::tempdir().unwrap();

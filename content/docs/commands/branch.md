@@ -152,7 +152,7 @@ Pass `--json` for stable, scripting-friendly output. The object's `action` field
 | `name` | string | For `create` or `delete`, the branch name. |
 | `oid` | string | For `create` or `delete`, full tip id. For `rename`, tip before rename when present. |
 | `short_oid` | string | Abbreviated tip id (seven hex digits when possible). |
-| `upstream` | string or null | For `create`, configured upstream display name when tracking applies; for `set_upstream`, the upstream display name (for example `origin/main`). |
+| `upstream` | string or null | For `create`, the branch's upstream display name afterwards: the one tracking configures, or the one already configured when `--force` resets an existing branch (`--dry-run` reports what the live create would). For `set_upstream`, the upstream display name (for example `origin/main`). |
 | `old` | string | For `rename`, previous short name. |
 | `new` | string | For `rename`, new short name. |
 | `replaced` | string or null | For `rename` with `--force`, previous tip of `new` when overwritten. |

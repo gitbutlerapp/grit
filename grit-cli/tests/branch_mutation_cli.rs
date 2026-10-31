@@ -260,6 +260,25 @@ fn local_track_dry_run_upstream_matches_live_create() {
 }
 
 #[test]
+fn forced_reset_dry_run_reports_kept_upstream_like_live() {
+    let root = init_repo();
+    git(&root, &["remote", "add", "origin", "/nonexistent"]);
+    git(&root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git(&root, &["branch", "--track", "topic", "origin/main"]);
+    git(&root, &["commit", "-q", "--allow-empty", "-m", "c3"]);
+
+    let preview = json_ok(&root, &["branch", "topic", "main", "--force", "--dry-run"]);
+    assert_eq!(preview["upstream"], "origin/main");
+
+    let live = json_ok(&root, &["branch", "topic", "main", "--force"]);
+    assert_eq!(live["upstream"], "origin/main");
+    assert_eq!(
+        git_stdout(&root, &["rev-parse", "--abbrev-ref", "topic@{upstream}"]).trim(),
+        "origin/main"
+    );
+}
+
+#[test]
 fn delete_with_upstream_flags_is_rejected() {
     let root = init_repo();
     git(&root, &["branch", "topic"]);

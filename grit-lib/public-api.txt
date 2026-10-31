@@ -14196,6 +14196,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch::Creat
 pub struct grit_lib::porcelain::branch::CreateBranchOutcome
 pub grit_lib::porcelain::branch::CreateBranchOutcome::name: alloc::string::String
 pub grit_lib::porcelain::branch::CreateBranchOutcome::oid: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::branch::CreateBranchOutcome::upstream: core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::porcelain::branch::CreateBranchOutcome
 pub fn grit_lib::porcelain::branch::CreateBranchOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::branch::CreateBranchOutcome
