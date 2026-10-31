@@ -8,7 +8,7 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 
-use crate::{run_receive_pack, Extensions, Result};
+use crate::{run_receive_pack, run_receive_pack_to, Extensions, Result};
 
 /// Run receive-pack ref advertisement (for `GET /info/refs?service=git-receive-pack`).
 ///
@@ -50,6 +50,29 @@ pub fn advertise_refs_with(
         &mut std::io::empty(),
         repository_options,
         extensions,
+    )
+}
+
+/// Like [`advertise_refs_with`], but writes pkt-lines to `output` as they are
+/// produced instead of buffering the full advertisement in memory.
+///
+/// # Errors
+///
+/// Same as [`advertise_refs_with`].
+pub fn advertise_refs_to(
+    repo_path: &Path,
+    repository_options: &RepositoryOptions,
+    extensions: &Extensions,
+    output: &mut dyn std::io::Write,
+) -> Result<()> {
+    run_receive_pack_to(
+        repo_path,
+        false,
+        true,
+        &mut std::io::empty(),
+        repository_options,
+        extensions,
+        output,
     )
 }
 

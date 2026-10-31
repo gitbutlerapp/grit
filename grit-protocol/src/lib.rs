@@ -7,7 +7,7 @@
 pub mod receive_pack;
 pub mod upload_pack;
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::git_path::path_for_error_message;
@@ -242,6 +242,28 @@ pub(crate) fn run_receive_pack(
     repository_options: &RepositoryOptions,
     extensions: &Extensions,
 ) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    run_receive_pack_to(
+        repo_path,
+        stateless_rpc,
+        advertise_refs,
+        input,
+        repository_options,
+        extensions,
+        &mut output,
+    )?;
+    Ok(output)
+}
+
+pub(crate) fn run_receive_pack_to(
+    repo_path: &Path,
+    stateless_rpc: bool,
+    advertise_refs: bool,
+    input: &mut dyn Read,
+    repository_options: &RepositoryOptions,
+    extensions: &Extensions,
+    output: &mut dyn Write,
+) -> Result<()> {
     let options = repository_options
         .clone()
         .with_promisor_fetcher(None)
@@ -262,9 +284,8 @@ pub(crate) fn run_receive_pack(
     };
     let policy = ReceivePolicy::from_config(&config);
     let guard = PushGuard::for_repository(&repo);
-    let mut output = Vec::new();
-    serve::receive_pack_with_hook(&repo, input, &mut output, &opts, &policy, &guard)?;
-    Ok(output)
+    serve::receive_pack_with_hook(&repo, input, output, &opts, &policy, &guard)?;
+    Ok(())
 }
 
 #[cfg(test)]

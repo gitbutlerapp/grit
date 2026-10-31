@@ -16,7 +16,7 @@
 //! [`STREAM_CHUNK`] × [`STREAM_CHANNEL_DEPTH`] of buffer on the server, and a
 //! client that reads slowly slows the pack down instead of piling it up.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use axum::{
@@ -115,34 +115,17 @@ pub async fn info_refs(
     options: RepositoryOptions,
     extensions: grit_protocol::Extensions,
 ) -> Response<Body> {
-    let advertisement = tokio::task::spawn_blocking(move || match service {
-        Service::UploadPack => grit_protocol::upload_pack::advertise_refs_with(
-            &repo_path,
-            protocol_version,
-            &options,
-            &extensions,
-        ),
-        Service::ReceivePack => {
-            grit_protocol::receive_pack::advertise_refs_with(&repo_path, &options, &extensions)
-        }
-    })
-    .await;
-    let advertisement = match advertisement {
-        Ok(Ok(data)) => data,
-        Ok(Err(e)) => return internal_error(&format!("info/refs failed: {e}")),
-        Err(e) => return internal_error(&format!("info/refs failed: {e}")),
-    };
-
-    let mut body = pkt_line(&format!("# service={}\n", service.name()));
-    body.extend_from_slice(b"0000");
-    body.extend_from_slice(&advertisement);
-    no_cache_headers(Response::builder())
-        .header(
-            header::CONTENT_TYPE,
-            format!("application/x-{}-advertisement", service.name()),
-        )
-        .body(Body::from(body))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+    let mut preamble = pkt_line(&format!("# service={}\n", service.name()));
+    preamble.extend_from_slice(b"0000");
+    stream_info_refs_advertisement(
+        repo_path,
+        service,
+        protocol_version,
+        options,
+        extensions,
+        Bytes::from(preamble),
+    )
+    .await
 }
 
 /// Answer `POST <repo>/git-upload-pack` or `POST <repo>/git-receive-pack`.
@@ -843,13 +826,82 @@ impl std::io::Write for ChannelWriter {
     }
 }
 
+async fn stream_info_refs_advertisement(
+    repo_path: PathBuf,
+    service: Service,
+    protocol_version: Option<u8>,
+    options: RepositoryOptions,
+    extensions: grit_protocol::Extensions,
+    preamble: Bytes,
+) -> Response<Body> {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Chunk>(STREAM_CHANNEL_DEPTH);
+    let task = tokio::task::spawn_blocking(move || {
+        let mut out = ChannelWriter::new(tx);
+        let result = (|| -> grit_protocol::Result<()> {
+            out.write_all(&preamble).map_err(grit_protocol::Error::Io)?;
+            match service {
+                Service::UploadPack => grit_protocol::upload_pack::advertise_refs_to(
+                    &repo_path,
+                    protocol_version,
+                    &options,
+                    &extensions,
+                    &mut out,
+                ),
+                Service::ReceivePack => grit_protocol::receive_pack::advertise_refs_to(
+                    &repo_path,
+                    &options,
+                    &extensions,
+                    &mut out,
+                ),
+            }
+        })();
+        match result {
+            Ok(()) => out.send_pending().map_err(grit_protocol::Error::Io),
+            Err(e) => {
+                if !out.sent {
+                    return Err(e);
+                }
+                let _ = out
+                    .tx
+                    .blocking_send(Err(std::io::Error::other(format!("info/refs failed: {e}"))));
+                Err(e)
+            }
+        }
+    });
+    let content_type = format!("application/x-{}-advertisement", service.name());
+    streaming_channel_response(task, rx, "info/refs failed", content_type).await
+}
+
+async fn streaming_channel_response(
+    task: tokio::task::JoinHandle<grit_protocol::Result<()>>,
+    mut rx: tokio::sync::mpsc::Receiver<Chunk>,
+    fail_label: &'static str,
+    content_type: String,
+) -> Response<Body> {
+    let first = match rx.recv().await {
+        Some(Ok(first)) => first,
+        Some(Err(e)) => return internal_error(&format!("{fail_label}: {e}")),
+        None => match task.await {
+            Ok(Ok(())) => Bytes::new(),
+            Ok(Err(e)) => return internal_error(&format!("{fail_label}: {e}")),
+            Err(e) => return internal_error(&format!("{fail_label}: {e}")),
+        },
+    };
+    let rest = futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|chunk| (chunk, rx))
+    });
+    let body = futures_util::StreamExt::chain(
+        futures_util::stream::once(std::future::ready(Ok::<Bytes, std::io::Error>(first))),
+        rest,
+    );
+    no_cache_headers(Response::builder())
+        .header(header::CONTENT_TYPE, content_type)
+        .body(Body::from_stream(body))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
 /// Run upload-pack on a blocking thread and stream its output as the
 /// response body.
-///
-/// The status is decided by the first chunk: a failure before any output is
-/// a `500` as before; once output has started the response is a `200`, and a
-/// later failure aborts the body (the client sees a truncated transfer and
-/// fails) instead of ending it as if the pack were complete.
 async fn stream_upload_pack<H: Send + 'static>(
     repo_path: PathBuf,
     request: Vec<u8>,
@@ -873,7 +925,6 @@ async fn stream_upload_pack<H: Send + 'static>(
             Ok(()) => out.send_pending().map_err(grit_protocol::Error::Io),
             Err(e) => {
                 if out.sent {
-                    // Part of the response is out: fail the body, not the status.
                     let _ = out.tx.blocking_send(Err(std::io::Error::other(format!(
                         "upload-pack failed: {e}"
                     ))));
@@ -885,7 +936,6 @@ async fn stream_upload_pack<H: Send + 'static>(
     let first = match rx.recv().await {
         Some(Ok(first)) => first,
         Some(Err(e)) => return internal_error(&format!("upload-pack failed: {e}")),
-        // Nothing was sent: the task is done, one way or the other.
         None => match task.await {
             Ok(Ok(())) => Bytes::new(),
             Ok(Err(e)) => return internal_error(&format!("upload-pack failed: {e}")),

@@ -30,6 +30,7 @@ use crate::error::{Error, Result};
 use crate::fs_publish::publish_no_clobber;
 use crate::objects::ObjectId;
 use crate::refs::store::RefStoreError;
+use memmap2::Mmap;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
@@ -1242,9 +1243,37 @@ impl WriterState {
 // Reader
 // ---------------------------------------------------------------------------
 
+/// Backing storage for a [`ReftableReader`]: owned bytes or a file mapping.
+enum TableBytes {
+    Owned(Arc<[u8]>),
+    Mapped(Arc<Mmap>),
+}
+
+impl TableBytes {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            TableBytes::Owned(data) => data.as_ref(),
+            TableBytes::Mapped(map) => map.as_ref(),
+        }
+    }
+
+    #[cfg(test)]
+    fn is_mapped(&self) -> bool {
+        matches!(self, TableBytes::Mapped(_))
+    }
+
+    #[cfg(test)]
+    fn mapped_arc(&self) -> Option<&Arc<Mmap>> {
+        match self {
+            TableBytes::Mapped(map) => Some(map),
+            TableBytes::Owned(_) => None,
+        }
+    }
+}
+
 /// Reads a single reftable file from a byte buffer.
 pub struct ReftableReader {
-    data: Arc<[u8]>,
+    data: TableBytes,
     version: u8,
     block_size: u32,
     min_update_index: u64,
@@ -1264,6 +1293,10 @@ struct Footer {
 }
 
 impl ReftableReader {
+    fn bytes(&self) -> &[u8] {
+        self.data.as_slice()
+    }
+
     /// Open a reftable from bytes.
     pub fn new(data: Vec<u8>) -> Result<Self> {
         Self::from_arc(Arc::from(data))
@@ -1271,28 +1304,44 @@ impl ReftableReader {
 
     /// Open a reftable from shared bytes (avoids cloning table payloads).
     pub fn from_arc(data: Arc<[u8]>) -> Result<Self> {
-        if data.len() < HEADER_SIZE + FOOTER_V1_SIZE {
+        Self::open(TableBytes::Owned(data))
+    }
+
+    /// Open a reftable from a shared file mapping (no anonymous copy of the table).
+    pub fn from_mapped(map: Arc<Mmap>) -> Result<Self> {
+        Self::open(TableBytes::Mapped(map))
+    }
+
+    /// Whether this reader views file-backed storage (stack cache tests).
+    #[cfg(test)]
+    pub(crate) fn table_backing_is_mapped(&self) -> bool {
+        self.data.is_mapped()
+    }
+
+    fn open(data: TableBytes) -> Result<Self> {
+        let bytes = data.as_slice();
+        if bytes.len() < HEADER_SIZE + FOOTER_V1_SIZE {
             // Could be an empty table (header + footer only = 24 + 68 = 92)
-            if data.len() < HEADER_SIZE {
-                return Err(ReftableError::TooSmall { len: data.len() }.into());
+            if bytes.len() < HEADER_SIZE {
+                return Err(ReftableError::TooSmall { len: bytes.len() }.into());
             }
         }
 
         // Parse header
-        if &data[0..4] != REFTABLE_MAGIC {
+        if &bytes[0..4] != REFTABLE_MAGIC {
             return Err(ReftableError::BadMagic.into());
         }
-        let version = data[4];
+        let version = bytes[4];
         if version != 1 && version != 2 {
             return Err(ReftableError::UnsupportedVersion { version }.into());
         }
         // Parse footer
         let footer_size = if version == 2 { 72 } else { FOOTER_V1_SIZE };
-        if data.len() < footer_size {
-            return Err(ReftableError::TooSmall { len: data.len() }.into());
+        if bytes.len() < footer_size {
+            return Err(ReftableError::TooSmall { len: bytes.len() }.into());
         }
-        let footer_start = data.len() - footer_size;
-        let footer = parse_footer(&data[footer_start..], version)?;
+        let footer_start = bytes.len() - footer_size;
+        let footer = parse_footer(&bytes[footer_start..], version)?;
 
         Ok(Self {
             data,
@@ -1353,7 +1402,7 @@ impl ReftableReader {
         } else {
             FOOTER_V1_SIZE
         };
-        let file_end = self.data.len() - footer_size;
+        let file_end = self.bytes().len() - footer_size;
 
         let ref_end = if self.ref_index_position > 0 {
             self.ref_index_position as usize
@@ -1372,10 +1421,10 @@ impl ReftableReader {
         };
 
         while pos < ref_end {
-            if pos >= self.data.len() {
+            if pos >= self.bytes().len() {
                 break;
             }
-            let block_type = self.data[pos];
+            let block_type = self.bytes()[pos];
             if block_type == 0 {
                 if self.block_size > 0 {
                     let bs = self.block_size as usize;
@@ -1388,7 +1437,7 @@ impl ReftableReader {
                 break;
             }
 
-            let block_len = read_u24(&self.data, pos + 1);
+            let block_len = read_u24(self.bytes(), pos + 1);
             let block_data_start = pos + 4;
             let is_first = pos == header_len;
             let records_end = if is_first { block_len } else { pos + block_len };
@@ -1398,14 +1447,14 @@ impl ReftableReader {
             }
 
             let restart_table_start =
-                restart_table_start_for_block(&self.data, records_end, block_data_start)?;
+                restart_table_start_for_block(self.bytes(), records_end, block_data_start)?;
 
             let mut rpos = block_data_start;
             let mut prev_name = Vec::<u8>::new();
 
             while rpos < restart_table_start {
                 let (rec, new_pos) = decode_ref_record(
-                    &self.data,
+                    self.bytes(),
                     rpos,
                     &prev_name,
                     self.min_update_index,
@@ -1460,10 +1509,10 @@ impl ReftableReader {
             return Ok(None);
         }
         for _ in 0..64 {
-            if pos >= self.data.len() {
+            if pos >= self.bytes().len() {
                 return Ok(None);
             }
-            match self.data[pos] {
+            match self.bytes()[pos] {
                 BLOCK_TYPE_REF => return Ok(Some(pos)),
                 BLOCK_TYPE_INDEX => {
                     let Some(offset) = self.index_block_seek_offset(pos, name)? else {
@@ -1489,7 +1538,7 @@ impl ReftableReader {
         let mut prev_key = Vec::<u8>::new();
         let mut last: Option<u64> = None;
         while rpos < records_end {
-            let (key, offset, new_pos) = decode_index_record(&self.data, rpos, &prev_key)?;
+            let (key, offset, new_pos) = decode_index_record(self.bytes(), rpos, &prev_key)?;
             prev_key = key;
             if prev_key.as_slice() >= name {
                 return Ok(Some(offset));
@@ -1501,10 +1550,10 @@ impl ReftableReader {
     }
 
     fn block_record_range(&self, block_pos: usize) -> Result<(usize, usize)> {
-        if block_pos + 4 > self.data.len() {
+        if block_pos + 4 > self.bytes().len() {
             return Err(truncated(ReftableField::BlockHeader));
         }
-        let block_len = read_u24(&self.data, block_pos + 1);
+        let block_len = read_u24(self.bytes(), block_pos + 1);
         let header_len = self.header_len();
         let is_first = block_pos == header_len;
         let records_end = if is_first {
@@ -1512,12 +1561,12 @@ impl ReftableReader {
         } else {
             block_pos + block_len
         };
-        if records_end > self.data.len() || records_end < 2 {
+        if records_end > self.bytes().len() || records_end < 2 {
             return Err(corrupt(ReftableError::InvalidBlockLength));
         }
         let records_data_start = block_pos + 4;
         let restart_table_start =
-            restart_table_start_for_block(&self.data, records_end, records_data_start)?;
+            restart_table_start_for_block(self.bytes(), records_end, records_data_start)?;
         Ok((records_data_start, restart_table_start))
     }
 
@@ -1528,7 +1577,7 @@ impl ReftableReader {
         } else {
             FOOTER_V1_SIZE
         };
-        let file_end = self.data.len() - footer_size;
+        let file_end = self.bytes().len() - footer_size;
 
         // Determine where the log section starts. Git records the log offset in
         // the footer, but when the log block is the *first* block in the file it
@@ -1539,8 +1588,8 @@ impl ReftableReader {
         // header) is a log block — mirroring `is_present` in git's table.c.
         let mut pos = if self.log_position > 0 {
             self.log_position as usize
-        } else if self.data.len() > self.header_len()
-            && self.data[self.header_len()] == BLOCK_TYPE_LOG
+        } else if self.bytes().len() > self.header_len()
+            && self.bytes()[self.header_len()] == BLOCK_TYPE_LOG
         {
             // Log block is the first block; it begins right after the header.
             self.header_len()
@@ -1550,10 +1599,10 @@ impl ReftableReader {
         let mut logs = Vec::new();
 
         while pos < file_end {
-            if pos >= self.data.len() {
+            if pos >= self.bytes().len() {
                 break;
             }
-            let block_type = self.data[pos];
+            let block_type = self.bytes()[pos];
             if block_type != BLOCK_TYPE_LOG {
                 break;
             }
@@ -1562,7 +1611,7 @@ impl ReftableReader {
             // includes the header bytes; the compressed payload still starts
             // right after the type+length header at `pos + 4`.
             let is_first = pos == self.header_len() && self.log_position == 0;
-            let block_len = read_u24(&self.data, pos + 1);
+            let block_len = read_u24(self.bytes(), pos + 1);
             let compressed_start = pos + 4;
 
             // The inflated size is block_len minus the 4-byte type+length header
@@ -1570,7 +1619,7 @@ impl ReftableReader {
             let header_prefix = if is_first { self.header_len() } else { 0 };
             let inflated_size = block_len.saturating_sub(4 + header_prefix);
 
-            let remaining = &self.data[compressed_start..file_end];
+            let remaining = &self.bytes()[compressed_start..file_end];
             let (inflated, consumed) = decompress_log_payload(remaining, inflated_size)?;
 
             // Parse log records from inflated data
@@ -1626,7 +1675,7 @@ impl ReftableReader {
     /// Effective ref payload size for compaction heuristics (file size minus header overhead).
     pub fn payload_size(&self) -> u64 {
         let overhead = if self.version == 2 { 28 } else { 24 };
-        self.data.len().saturating_sub(overhead) as u64
+        self.bytes().len().saturating_sub(overhead) as u64
     }
 }
 
@@ -1966,8 +2015,6 @@ struct StackCacheKey {
 struct CachedStackTables {
     table_names: Vec<String>,
     readers: Vec<ReftableReader>,
-    /// Keeps file-backed mappings alive for [`ReftableReader`] views.
-    _maps: Vec<memmap2::Mmap>,
 }
 
 // hygiene: process-wide reftable table cache keyed by tables.list identity (cleared on writes)
@@ -2087,19 +2134,16 @@ fn build_cached_stack_tables(
     table_names: &[String],
 ) -> Result<CachedStackTables> {
     let mut readers = Vec::with_capacity(table_names.len());
-    let mut maps = Vec::with_capacity(table_names.len());
     for name in table_names {
         let path = reftable_dir.join(name);
         let file = fs::File::open(&path).map_err(Error::Io)?;
         let len = file.metadata().map_err(Error::Io)?.len() as usize;
-        let map = crate::pack_map::map_read_only_file(&file, len).map_err(Error::Io)?;
-        readers.push(ReftableReader::from_arc(Arc::from(map.as_ref()))?);
-        maps.push(map);
+        let map = Arc::new(crate::pack_map::map_read_only_file(&file, len).map_err(Error::Io)?);
+        readers.push(ReftableReader::from_mapped(map)?);
     }
     Ok(CachedStackTables {
         table_names: table_names.to_owned(),
         readers,
-        _maps: maps,
     })
 }
 
@@ -4266,6 +4310,37 @@ mod tests {
         assert!(!reftable_should_write_log(&git_dir, "refs/heads/topic"));
         reftable_create_reflog(&git_dir, "refs/heads/topic").expect("create reflog");
         assert!(reftable_should_write_log(&git_dir, "refs/heads/topic"));
+    }
+
+    #[test]
+    fn stack_table_cache_readers_use_mapped_backing() {
+        use crate::objects::ObjectId;
+        use crate::repo::init_repository;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .expect("init");
+        let git_dir = dir.path().join(".git");
+        let oid = ObjectId::from_bytes(&[0x44; 20]).expect("oid");
+        reftable_write_ref(&git_dir, "refs/heads/mapped-test", &oid, None, None)
+            .expect("write ref");
+        let reftable_dir = git_dir.join("reftable");
+        let cached = super::load_cached_stack_tables(&reftable_dir).expect("cache");
+        assert!(
+            cached.readers.iter().all(|r| r.table_backing_is_mapped()),
+            "stack cache must mmap tables instead of copying them into Arc<[u8]>"
+        );
+        let again = super::load_cached_stack_tables(&reftable_dir).expect("cache again");
+        assert!(
+            Arc::ptr_eq(&cached, &again),
+            "second load must hit the process-wide stack cache"
+        );
     }
 
     #[test]

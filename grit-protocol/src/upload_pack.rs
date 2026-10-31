@@ -60,6 +60,31 @@ pub fn advertise_refs_with(
     )
 }
 
+/// Like [`advertise_refs_with`], but writes pkt-lines to `output` as they are
+/// produced instead of buffering the full advertisement in memory.
+///
+/// # Errors
+///
+/// Same as [`advertise_refs_with`].
+pub fn advertise_refs_to(
+    repo_path: &Path,
+    protocol_version: Option<u8>,
+    repository_options: &RepositoryOptions,
+    extensions: &Extensions,
+    output: &mut dyn std::io::Write,
+) -> Result<()> {
+    run_upload_pack_to(
+        repo_path,
+        protocol_version,
+        false,
+        true,
+        &[],
+        repository_options,
+        extensions,
+        output,
+    )
+}
+
 /// Run a stateless upload-pack RPC exchange (for `POST /git-upload-pack`).
 ///
 /// Takes the request body as input and returns the response body.

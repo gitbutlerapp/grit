@@ -9,8 +9,8 @@ use super::upload_pack_policy::{
 };
 use super::{
     check_object_format, for_each_advertised_ref, head_info, parse_oid, read_packet, write_flush,
-    write_line, AdvertisedRefView, DeepenNotError, MissingObjectReason, Packet,
-    Peel, ProtocolVersion, Result, ServeError, ServeOptions,
+    write_line, AdvertisedRefView, DeepenNotError, MissingObjectReason, Packet, Peel,
+    ProtocolVersion, Result, ServeError, ServeOptions,
 };
 use crate::config::ConfigSet;
 use crate::objects::pack_objects::PackStats;
@@ -1497,9 +1497,9 @@ fn pack_failure_io(err: std::io::Error, written: u64) -> ServeError {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use super::AdvertisedRef;
     use crate::config::environment::RepositoryOptions;
     use crate::repo::InitOptions;
+    use crate::serve::AdvertisedRef;
 
     /// Bare repository with `n` linear commits (oldest first) and an annotated
     /// tag `refs/tags/t<i>` on every commit index in `tagged`.
