@@ -812,6 +812,8 @@ mod hooks_path_relative;
 #[cfg(feature = "full-tests")]
 #[path = "hooks_spawn.rs"]
 mod hooks_spawn;
+#[path = "hot_text_linker_support.rs"]
+mod hot_text_linker_support;
 #[cfg(feature = "full-tests")]
 #[path = "ident_attribute_git_compat.rs"]
 mod ident_attribute_git_compat;

@@ -18,12 +18,18 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+include!("hot_text_linker_support.rs");
+
 fn main() {
     println!("cargo:rerun-if-changed=hot-text.ld");
+    println!("cargo:rerun-if-changed=hot_text_linker_support.rs");
     println!("cargo:rerun-if-env-changed=GRIT_HOT_TEXT_LAYOUT");
+    println!("cargo:rerun-if-env-changed=RUSTFLAGS");
+    println!("cargo:rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
     if env::var_os("CARGO_FEATURE_HOT_TEXT_LAYOUT").is_none()
         || env::var("GRIT_HOT_TEXT_LAYOUT").as_deref() == Ok("0")
         || env::var("TARGET").as_deref() != Ok("x86_64-unknown-linux-gnu")
+        || !linker_supports_hot_text_layout()
     {
         return;
     }

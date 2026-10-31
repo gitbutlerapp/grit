@@ -53,6 +53,7 @@ fn sections(elf: &[u8]) -> Option<Vec<Section>> {
         .collect()
 }
 
+#[cfg(not(grit_hot_text_layout_disabled))]
 #[test]
 fn grit_binary_has_hot_text_section_ahead_of_text() -> Result<(), Box<dyn Error>> {
     if option_env!("GRIT_HOT_TEXT_LAYOUT") == Some("0") {
