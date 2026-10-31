@@ -2275,7 +2275,7 @@ impl Repository {
     /// Returns [`Error::Io`] when the lock file already exists or cannot be created.
     pub(crate) fn begin_index_update(&self) -> Result<crate::index::IndexLock> {
         test_inject_index_write_fail()?;
-        let path = self.index_path();
+        let path = self.index_path_for_env()?;
         let cfg = self.config()?;
         crate::index::IndexLock::acquire(&path, Some(cfg.as_ref()))
     }
@@ -2301,7 +2301,7 @@ impl Repository {
         lock: &mut crate::index::IndexLock,
         index: &mut Index,
     ) -> Result<()> {
-        let path = self.index_path();
+        let path = lock.index_path.clone();
         let (skip_hash, cfg) = self.prepare_index_for_disk_write(&path, index)?;
         write_index_file_split(
             &path,
@@ -2362,7 +2362,7 @@ impl Repository {
     /// Propagates non-recoverable failures (for example cache-tree verification or split-index
     /// constraints).
     pub(crate) fn try_write_index(&self, index: &mut Index) -> Result<bool> {
-        self.try_write_index_at(&self.index_path(), index)
+        self.try_write_index_at(&self.index_path_for_env()?, index)
     }
 
     /// Like [`Repository::try_write_index`], but writes to an explicit index file path
@@ -2416,8 +2416,9 @@ impl Repository {
         updated_workdir: bool,
         updated_skipworktree: bool,
     ) -> Result<()> {
+        let path = self.index_path_for_env()?;
         self.write_index_at_with_post_index_change(
-            &self.index_path(),
+            &path,
             index,
             updated_workdir,
             updated_skipworktree,
