@@ -215,6 +215,8 @@ On overwrite refusal with `--json`, stdout is a single object with `kind` `would
 
 A branch that does not exist is `kind` `branch_not_found` with a `hint`.
 
+With `--create`, an existing name is `kind` `branch_already_exists`, an invalid name is `branch_invalid_name`, and an empty repository with no start point is `branch_no_commits`. A start point that does not resolve is `revision_not_found`; one that resolves to a non-commit object is a plain error string with no dedicated `kind`.
+
 While a merge, rebase, pick or revert is paused, the refusal is `{"error": "interactive rebase in progress", "kind": "operation_in_progress"}` (the `error` names the paused operation).
 
 ## Markdown output
