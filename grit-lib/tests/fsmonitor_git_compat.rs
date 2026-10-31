@@ -464,6 +464,39 @@ fn grit_status_v1_two_query_race_after_hook_modifies_during_first_query() {
     );
 }
 
+fn write_fsmonitor_report_once_hook(dir: &Path, report_path: &str) -> PathBuf {
+    let hook = dir.join("fsmonitor-report-once-hook.sh");
+    let state = dir.join("fsmonitor-report-once.stamp");
+    let _ = fs::remove_file(&state);
+    let script = format!(
+        r#"#!/bin/sh
+STATE={state}
+if [ "$1" = "2" ]; then
+  query_token=$2
+  if [ "$query_token" = "tok" ] && [ ! -f "$STATE" ]; then
+    touch "$STATE"
+    printf 'tok\0{report_path}\0'
+    exit 0
+  fi
+  printf 'tok\0'
+  exit 0
+fi
+exit 0
+"#,
+        state = state.display(),
+        report_path = report_path
+    );
+    fs::write(&hook, script).expect("write hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&hook).expect("meta").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&hook, perms).expect("chmod hook");
+    }
+    hook
+}
+
 fn write_fsmonitor_v2_report_all_hook(dir: &Path) -> PathBuf {
     let hook = dir.join("fsmonitor-report-hook.sh");
     let script = r#"#!/bin/sh
@@ -558,6 +591,93 @@ fn grit_status_marks_fsmonitor_valid_after_clean_scan() {
     );
 
     fsck_clean(repo_root);
+}
+
+#[test]
+#[cfg(unix)]
+fn grit_status_does_not_mark_fsmonitor_valid_on_mode_change() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_root = tmp.path();
+    git(repo_root, &["init", "-q", "-b", "main", "."]);
+    git(repo_root, &["config", "user.email", "t@example.com"]);
+    git(repo_root, &["config", "user.name", "Test"]);
+    let prime_hook = write_fsmonitor_stable_token_hook(repo_root);
+    git(
+        repo_root,
+        &[
+            "config",
+            "core.fsmonitor",
+            prime_hook.to_str().expect("hook utf8"),
+        ],
+    );
+    fs::write(repo_root.join("tracked.txt"), "base\n").expect("write");
+    fs::write(repo_root.join("sibling.txt"), "base\n").expect("write sibling");
+    git(repo_root, &["add", "."]);
+    git(repo_root, &["commit", "-qm", "initial"]);
+
+    let grit_repo = Repository::open(
+        &repo_root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(repo_root),
+    )
+    .expect("open grit repo");
+    let opts = grit_lib::porcelain::status::StatusOptions::default();
+    let mut progress = grit_lib::progress::NullProgress;
+    for _ in 0..2 {
+        grit_lib::porcelain::status::status(&grit_repo, &opts, &mut progress, &NeverCancel)
+            .expect("prime status");
+    }
+
+    let tracked = repo_root.join("tracked.txt");
+    let mut perms = fs::metadata(&tracked).expect("meta").permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&tracked, perms).expect("chmod");
+    let now = filetime::FileTime::now();
+    filetime::set_file_mtime(&tracked, now).expect("touch");
+
+    let report_hook = write_fsmonitor_report_once_hook(repo_root, "tracked.txt");
+    git(
+        repo_root,
+        &[
+            "config",
+            "core.fsmonitor",
+            report_hook.to_str().expect("hook utf8"),
+        ],
+    );
+
+    let first = grit_lib::porcelain::status::status(&grit_repo, &opts, &mut progress, &NeverCancel)
+        .expect("first status after mode change");
+    assert!(
+        first.unstaged.iter().any(|e| e.path() == "tracked.txt"),
+        "mode change must stay modified: {:?}",
+        first.unstaged
+    );
+    let index_path = repo_root.join(".git/index");
+    let index_after_first = Index::load(&index_path).expect("index after first");
+    assert!(
+        !index_after_first
+            .get(b"tracked.txt", 0)
+            .expect("tracked")
+            .fsmonitor_valid(),
+        "mode-changed path must not be fsmonitor-valid"
+    );
+    assert!(
+        index_after_first
+            .get(b"sibling.txt", 0)
+            .expect("sibling")
+            .fsmonitor_valid(),
+        "untouched sibling stays fsmonitor-valid after hook reported only tracked.txt"
+    );
+
+    let second =
+        grit_lib::porcelain::status::status(&grit_repo, &opts, &mut progress, &NeverCancel)
+            .expect("second status with stable hook token");
+    assert!(
+        second.unstaged.iter().any(|e| e.path() == "tracked.txt"),
+        "second status must still report mode change, not skip via valid bit: {:?}",
+        second.unstaged
+    );
 }
 
 #[test]

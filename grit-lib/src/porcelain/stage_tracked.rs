@@ -62,7 +62,7 @@ pub struct StageTrackedSummary {
     /// Index stat cache was refreshed for at least one path without a blob/mode change.
     pub stat_refreshed: bool,
     /// At least one stage-0 entry gained an fsmonitor-valid bit after a clean scan.
-    pub fsmonitor_valid_updated: bool,
+    pub(crate) fsmonitor_valid_updated: bool,
 }
 
 impl StageTrackedSummary {

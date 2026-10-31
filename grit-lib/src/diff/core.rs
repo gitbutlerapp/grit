@@ -6071,11 +6071,6 @@ fn diff_index_to_worktree_inner(
                         let oid = index.entries[entry_index].oid;
                         index.mark_content_verified(&path, oid);
                     }
-                    if refresh.content_verified
-                        && crate::fsmonitor::mark_fsmonitor_valid_proven_clean(index, entry_index)
-                    {
-                        fsmonitor_valid_updated = true;
-                    }
                 }
                 let ie = &index.entries[entry_index];
                 let worktree_mode =
