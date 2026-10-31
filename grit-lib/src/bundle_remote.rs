@@ -270,6 +270,7 @@ pub(crate) fn fetch_from_bundle_into(
 ) -> Result<FetchOutcome> {
     crate::progress::poll_cancel(progress, cancel)?;
     let bundle = Bundle::open(bundle_path).map_err(map_bundle_err)?;
+    preflight_bundle_fetch_refspecs(&bundle, opts)?;
     bundle
         .verify(repo)
         .map_err(map_bundle_err)?
@@ -532,6 +533,46 @@ fn complete_bundle_fetch(
         filter_sent: false,
         promisor: None,
     })
+}
+
+/// Resolve fetch refspecs against the bundle header before ingesting objects.
+fn preflight_bundle_fetch_refspecs(bundle: &Bundle, opts: &FetchOptions) -> Result<()> {
+    use crate::fetch_request::FetchRefspecError;
+    use crate::remote::Remote;
+
+    let header_refs = &bundle.header().refs;
+    let effective = if opts.refspecs.is_empty() {
+        &opts.configured_refspecs
+    } else {
+        &opts.refspecs
+    };
+
+    let implicit_head_fetch = effective.is_empty()
+        || (effective.len() == 1
+            && effective[0].trim_start_matches('+') == Remote::ANONYMOUS_FETCH_REFSPEC);
+
+    if implicit_head_fetch {
+        if crate::transfer::remote_head_oid_from_advertised(header_refs).is_none() {
+            return Err(Error::FetchRefspec(FetchRefspecError::SourceNotFound {
+                ref_name: "HEAD".to_owned(),
+                spec: "HEAD".to_owned(),
+            }));
+        }
+        return Ok(());
+    }
+
+    let remote_head_oid = crate::transfer::remote_head_oid_from_advertised(header_refs);
+    let filtered_remote_refs: Vec<(String, ObjectId)> = header_refs
+        .iter()
+        .filter(|(name, _)| {
+            name != "HEAD"
+                && !name.ends_with("^{}")
+                && crate::refs::is_valid_fetch_advertised_ref(name)
+        })
+        .cloned()
+        .collect();
+    crate::transfer::build_fetch_matched_set(opts, &filtered_remote_refs, remote_head_oid)?;
+    Ok(())
 }
 
 fn map_bundle_err(e: BundleError) -> Error {

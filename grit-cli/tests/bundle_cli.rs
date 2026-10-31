@@ -271,6 +271,64 @@ fn bundle_verify_rejects_unknown_v3_capability() {
 }
 
 #[test]
+fn fetch_range_bundle_without_refspec_errors_not_up_to_date() {
+    let upstream = unique_tmp("fetch-range-up");
+    git(&upstream, &["init", "-q", "-b", "main", "."]);
+    git(&upstream, &["commit", "--allow-empty", "-qm", "one"]);
+    git(&upstream, &["commit", "--allow-empty", "-qm", "two"]);
+    let full = upstream.join("full.bundle");
+    git(
+        &upstream,
+        &["bundle", "create", full.to_str().unwrap(), "--all"],
+    );
+    let incr = upstream.join("incr.bundle");
+    git(
+        &upstream,
+        &["bundle", "create", incr.to_str().unwrap(), "HEAD~1..main"],
+    );
+
+    let parent = unique_tmp("fetch-range-down");
+    let dest = parent.join("repo");
+    let clone_out = grit(&parent, &["clone", "-q", full.to_str().unwrap(), "repo"]);
+    assert!(
+        clone_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&clone_out.stderr)
+    );
+
+    let fetch_out = grit(&dest, &["fetch", incr.to_str().unwrap()]);
+    assert!(
+        !fetch_out.status.success(),
+        "expected failure, stdout={} stderr={}",
+        String::from_utf8_lossy(&fetch_out.stdout),
+        String::from_utf8_lossy(&fetch_out.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&fetch_out.stdout),
+        String::from_utf8_lossy(&fetch_out.stderr)
+    );
+    assert!(
+        !combined.to_ascii_lowercase().contains("already up to date"),
+        "must not claim up to date: {combined}"
+    );
+
+    let explicit = grit(
+        &dest,
+        &[
+            "fetch",
+            incr.to_str().unwrap(),
+            "main:refs/remotes/bundle/main",
+        ],
+    );
+    assert!(
+        explicit.status.success(),
+        "explicit refspec fetch: {}",
+        String::from_utf8_lossy(&explicit.stderr)
+    );
+}
+
+#[test]
 fn bundle_verify_missing_prerequisite_exit_code() {
     let upstream = unique_tmp("prereq-up");
     git(&upstream, &["init", "-q", "-b", "main", "."]);
