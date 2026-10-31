@@ -206,10 +206,11 @@ fn fetch_over_smart_http_lands_refs_and_objects() {
 
     // 2. Fetch via http_fetch over a recording client (no Git-Protocol header).
     let client = Arc::new(RecordingClient::new_default());
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o
     };
     let outcome = http_fetch(client.clone(), &local_git, &url, &mut opts, &mut NoProgress)
         .expect("http_fetch over grit-http-server");
@@ -640,10 +641,11 @@ fn fetch_over_smart_http_v2_lands_refs_and_objects() {
     drop(conn);
 
     // 2. Fetch over v2 via http_fetch with the recording client.
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o
     };
     let outcome = http_fetch(
         recording.clone(),
@@ -905,10 +907,11 @@ fn fetch_from_config_client_v2_many_refs_and_large_pack() {
         "sanity: bare new() must not imply v2 — regression targets from_config"
     );
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o
     };
     let outcome = http_fetch(
         recording.clone(),
@@ -1004,10 +1007,11 @@ fn http_fetch_surfaces_io_error_from_upload_pack_read_failure() {
 
     let inner = UreqHttpClient::from_config(&ConfigSet::new()).expect("from_config");
     let client = http_client_arc(IoFailUploadPackClient { inner });
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::None;
+        o
     };
     let err = http_fetch(client, &local_git, &url, &mut opts, &mut NoProgress).expect_err("I/O");
     assert!(
@@ -1529,10 +1533,11 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
     git(&back, &["init", "-q", "-b", "main", "."]);
     let back_git = back.join(".git");
 
-    let mut fetch_opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
+    let mut fetch_opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::None;
+        o
     };
     let client2 = http_client_arc(UreqHttpClient::new());
     let fetch_outcome = http_fetch(
@@ -1660,13 +1665,14 @@ fn http_fetch_rss_child_process() {
     std::fs::create_dir_all(&work).expect("work dir");
     git(&work, &["init", "-q", "-b", "main", "."]);
     let git_dir = work.join(".git");
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        initial_remote_fetch: true,
-        remote_name: Some("origin".to_owned()),
-        index_pack_threads: index_threads.or(Some(1)),
-        pack_spool_only: true,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.initial_remote_fetch = true;
+        o.remote_name = Some("origin".to_owned());
+        o.index_pack_threads = index_threads.or(Some(1));
+        o.pack_spool_only = true;
+        o
     };
     let client = http_client_arc(UreqHttpClient::new());
     http_fetch(client, &git_dir, &url, &mut opts, &mut NoProgress).expect("http_fetch");
@@ -1884,10 +1890,11 @@ fn fetch_over_git_http_backend_cgi() {
         &post_body[..post_body.len().min(24)]
     );
     let mut progress = NoProgress;
-    let mut fetch_opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-        tags: TagMode::Following,
-        ..Default::default()
+    let mut fetch_opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+        o.tags = TagMode::Following;
+        o
     };
     http_fetch(client.clone(), &local, &url, &mut fetch_opts, &mut progress)
         .expect("http_fetch over git http-backend CGI wrapper");

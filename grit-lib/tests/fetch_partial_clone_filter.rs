@@ -289,11 +289,12 @@ fn refetch_reapplies_stored_filter() {
     )
     .expect("cfg");
     let remote = Remote::from_config(&config, "origin").expect("remote");
-    let fetch_opts = FetchOptions {
-        refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        tags: TagMode::Following,
-        remote_name: Some("origin".to_owned()),
-        ..Default::default()
+    let fetch_opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+        o.tags = TagMode::Following;
+        o.remote_name = Some("origin".to_owned());
+        o
     };
     remote
         .fetch(&repo, fetch_opts, &mut NoProgress, &NeverCancel, None)

@@ -18,11 +18,12 @@ use grit_lib::HookName;
 
 fn commit_req(message: &str) -> CommitRequest {
     let id = "Msg Source <msg@example.com> 1700000000 +0000".to_owned();
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(id.parse().expect("signature")),
-        committer: Some(id.parse().expect("signature")),
-        ..Default::default()
+    {
+        let mut o = CommitRequest::default();
+        o.message = message.to_owned();
+        o.author = Some(id.parse().expect("signature"));
+        o.committer = Some(id.parse().expect("signature"));
+        o
     }
 }
 

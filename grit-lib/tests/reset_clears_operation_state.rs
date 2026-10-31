@@ -77,12 +77,13 @@ fn commit_file(root: &Path, path: &str, contents: &str, msg: &str) -> ObjectId {
 }
 
 fn commit_req(message: &str) -> CommitRequest {
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(IDENT.parse().expect("author")),
-        committer: Some(IDENT.parse().expect("committer")),
-        allow_empty: false,
-        ..Default::default()
+    {
+        let mut o = CommitRequest::default();
+        o.message = message.to_owned();
+        o.author = Some(IDENT.parse().expect("author"));
+        o.committer = Some(IDENT.parse().expect("committer"));
+        o.allow_empty = false;
+        o
     }
 }
 

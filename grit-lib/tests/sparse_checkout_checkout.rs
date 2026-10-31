@@ -491,10 +491,11 @@ fn grit_pull(dir: &Path, mode: PullMode) {
         &repo,
         &PullOptions {
             mode: Some(mode),
-            fetch: FetchOptions {
-                tags: TagMode::Following,
-                environment: env,
-                ..Default::default()
+            fetch: {
+                let mut o = FetchOptions::default();
+                o.tags = TagMode::Following;
+                o.environment = env;
+                o
             },
             ..PullOptions::default()
         },

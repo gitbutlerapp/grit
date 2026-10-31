@@ -107,12 +107,13 @@ fn populated_checkout_reports_collisions_and_auto_stage_skips_losers() {
     );
 
     let id = "Tester <t@example.com> 1700000000 +0000".to_owned();
-    let req = CommitRequest {
-        message: "unrelated change".to_owned(),
-        author: Some(id.parse().expect("sig")),
-        committer: Some(id.parse().expect("sig")),
-        allow_empty: false,
-        ..Default::default()
+    let req = {
+        let mut o = CommitRequest::default();
+        o.message = "unrelated change".to_owned();
+        o.author = Some(id.parse().expect("sig"));
+        o.committer = Some(id.parse().expect("sig"));
+        o.allow_empty = false;
+        o
     };
     commit_with_scope(
         &repo,
@@ -174,12 +175,13 @@ fn auto_stage_unrelated_and_commit(repo: &Repository, dest: &Path) {
     fs::write(dest.join("unrelated.txt"), "edit\n").expect("unrelated");
     stage_tracked_modifications(repo, dest).expect("stage tracked");
     let id = "Tester <t@example.com> 1700000000 +0000".to_owned();
-    let req = CommitRequest {
-        message: "unrelated change".to_owned(),
-        author: Some(id.parse().expect("sig")),
-        committer: Some(id.parse().expect("sig")),
-        allow_empty: false,
-        ..Default::default()
+    let req = {
+        let mut o = CommitRequest::default();
+        o.message = "unrelated change".to_owned();
+        o.author = Some(id.parse().expect("sig"));
+        o.committer = Some(id.parse().expect("sig"));
+        o.allow_empty = false;
+        o
     };
     commit_with_scope(
         repo,
@@ -271,12 +273,13 @@ fn collision_clone_worktree(fx: &TestRepo) {
 
 fn commit_request(message: &str) -> CommitRequest {
     let id = "Tester <t@example.com> 1700000000 +0000".to_owned();
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(id.parse().expect("sig")),
-        committer: Some(id.parse().expect("sig")),
-        allow_empty: false,
-        ..Default::default()
+    {
+        let mut o = CommitRequest::default();
+        o.message = message.to_owned();
+        o.author = Some(id.parse().expect("sig"));
+        o.committer = Some(id.parse().expect("sig"));
+        o.allow_empty = false;
+        o
     }
 }
 
@@ -516,10 +519,11 @@ fn build_flat_name_collision_tree(repo: &Repository, dest: &Path) -> grit_lib::o
 #[test]
 fn switch_reports_collisions_and_status_lists_mismatched_index_row() {
     let fx = init_collision_repo();
-    let empty = CommitRequest {
-        message: "empty".into(),
-        allow_empty: true,
-        ..commit_request("empty")
+    let empty = {
+        let mut o = commit_request("empty");
+        o.message = "empty".into();
+        o.allow_empty = true;
+        o
     };
     commit_with_scope(
         &fx.repo,

@@ -181,21 +181,18 @@ fn clone_fetch_keeps_pack_and_matches_git_layout() {
     .expect("init");
     let clone_git = clone.path().join(".git");
 
-    fetch_local(
-        &clone_git,
-        &upstream.path().join(".git"),
-        &FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-            tags: TagMode::All,
-            initial_remote_fetch: true,
-            remote_name: Some("origin".to_owned()),
-            clone_reflog: Some(CloneReflog {
-                identity: "T <t@e.com> 1 +0000".parse().expect("identity"),
-                message: "clone: from file://fixture".to_owned(),
-            }),
-            ..Default::default()
-        },
-    )
+    fetch_local(&clone_git, &upstream.path().join(".git"), &{
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o.initial_remote_fetch = true;
+        o.remote_name = Some("origin".to_owned());
+        o.clone_reflog = Some(CloneReflog {
+            identity: "T <t@e.com> 1 +0000".parse().expect("identity"),
+            message: "clone: from file://fixture".to_owned(),
+        });
+        o
+    })
     .expect("fetch");
 
     let default_branch = "main";

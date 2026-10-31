@@ -80,10 +80,11 @@ fn fetch_from_git_bundle_matches_git_fetch() {
     let outcome = remote
         .fetch(
             &repo,
-            FetchOptions {
-                refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-                tags: TagMode::None,
-                ..Default::default()
+            {
+                let mut o = FetchOptions::default();
+                o.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+                o.tags = TagMode::None;
+                o
             },
             &mut progress,
             &NeverCancel,
@@ -144,9 +145,10 @@ fn literal_bundle_fetch_writes_fetch_head() {
     remote
         .fetch(
             &repo,
-            FetchOptions {
-                tags: TagMode::None,
-                ..Default::default()
+            {
+                let mut o = FetchOptions::default();
+                o.tags = TagMode::None;
+                o
             },
             &mut NoProgress,
             &NeverCancel,

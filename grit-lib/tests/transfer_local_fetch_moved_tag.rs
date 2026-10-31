@@ -25,10 +25,11 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
     let local_git = local.join(".git");
     let remote_git = remote.join(".git");
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
+    let opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o
     };
     fetch_local(&local_git, &remote_git, &opts).expect("initial fetch");
 
@@ -95,10 +96,11 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
     let local_git = local.join(".git");
     let remote_git = remote.join(".git");
 
-    let base = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
+    let base = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o
     };
     fetch_local(&local_git, &remote_git, &base).expect("seed");
 
@@ -109,9 +111,10 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
     git(&remote, &["tag", "-f", "newtag"]);
     let tag_after = rev_parse(&remote, "refs/tags/newtag");
 
-    let all_tags = FetchOptions {
-        tags: TagMode::All,
-        ..base.clone()
+    let all_tags = {
+        let mut o = base.clone();
+        o.tags = TagMode::All;
+        o
     };
     let rejected = fetch_local(&local_git, &remote_git, &all_tags).expect("fetch --tags");
     assert!(rejected.has_rejections());
@@ -126,9 +129,10 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
         tag_before
     );
 
-    let forced = FetchOptions {
-        force: true,
-        ..all_tags
+    let forced = {
+        let mut o = all_tags;
+        o.force = true;
+        o
     };
     let applied = fetch_local(&local_git, &remote_git, &forced).expect("fetch --tags --force");
     assert!(!applied.has_rejections());

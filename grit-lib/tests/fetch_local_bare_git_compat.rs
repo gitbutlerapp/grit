@@ -29,10 +29,11 @@ fn fetch_local_from_bare_remote_like_guide_network() {
     git(&consumer, &["init", "-q", "-b", "main", "."]);
     let local_git = consumer.join(".git");
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
+    let opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o
     };
     fetch_local(&local_git, &bare, &opts).expect("fetch_local from bare remote");
     resolve_ref(&local_git, "refs/remotes/origin/main").expect("tracking ref");

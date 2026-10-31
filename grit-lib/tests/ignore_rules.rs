@@ -1077,11 +1077,12 @@ fn ignorecase_auto_stage_commit_skips_ignored_and_fscks() {
         let (home, root) = ignorecase_fixture(&format!("1912-commit-{ignore_case}"), ignore_case);
         commit_worktree(
             &open_at(&root),
-            &CommitRequest {
-                message: "x\n".to_owned(),
-                author: Some(ident.parse().expect("signature")),
-                committer: Some(ident.parse().expect("signature")),
-                ..CommitRequest::default()
+            &{
+                let mut o = CommitRequest::default();
+                o.message = "x\n".to_owned();
+                o.author = Some(ident.parse().expect("signature"));
+                o.committer = Some(ident.parse().expect("signature"));
+                o
             },
             &mut NullProgress,
             &grit_lib::progress::NeverCancel,

@@ -120,15 +120,16 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
         stage_for_commit(repo, &mut NullProgress, &NeverCancel).expect("stage");
         create_commit(
             repo,
-            &CommitRequest {
-                message: format!("m {idx}"),
-                author: Some(ident.parse().expect("signature")),
-                committer: Some(ident.parse().expect("signature")),
-                allow_empty: false,
-                sign_override: None,
-                amend: false,
-                assume_worktree_synced: false,
-                ..Default::default()
+            &{
+                let mut o = CommitRequest::default();
+                o.message = format!("m {idx}");
+                o.author = Some(ident.parse().expect("signature"));
+                o.committer = Some(ident.parse().expect("signature"));
+                o.allow_empty = false;
+                o.sign_override = None;
+                o.amend = false;
+                o.assume_worktree_synced = false;
+                o
             },
             &mut NullProgress,
             &NeverCancel,
@@ -1800,15 +1801,16 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
     let ident = "Test <t@example.com> 1 +0000".to_string();
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "base".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = "base".into();
+            o.author = Some(ident.parse().expect("signature"));
+            o.committer = Some(ident.parse().expect("signature"));
+            o.allow_empty = false;
+            o.sign_override = None;
+            o.amend = false;
+            o.assume_worktree_synced = false;
+            o
         },
         &mut NullProgress,
         &NeverCancel,
@@ -1822,15 +1824,16 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
     stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage child");
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "child".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = "child".into();
+            o.author = Some(ident.parse().expect("signature"));
+            o.committer = Some(ident.parse().expect("signature"));
+            o.allow_empty = false;
+            o.sign_override = None;
+            o.amend = false;
+            o.assume_worktree_synced = false;
+            o
         },
         &mut NullProgress,
         &NeverCancel,
@@ -2540,15 +2543,16 @@ fn grit_commit_all(repo: &Repository, path: &Path, message: &str) {
     let ident = "Test <t@example.com> 1 +0000".to_string();
     create_commit(
         repo,
-        &CommitRequest {
-            message: message.to_string(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = message.to_string();
+            o.author = Some(ident.parse().expect("signature"));
+            o.committer = Some(ident.parse().expect("signature"));
+            o.allow_empty = false;
+            o.sign_override = None;
+            o.amend = false;
+            o.assume_worktree_synced = false;
+            o
         },
         &mut NullProgress,
         &NeverCancel,

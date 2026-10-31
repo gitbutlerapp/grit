@@ -183,11 +183,12 @@ fn run_case(protocol_v2: bool, remote_progress: bool) -> (Vec<u8>, Vec<u8>) {
 
     let main_oid = rev_parse(&source, "refs/heads/main");
     let mut cap = RemoteCap(Vec::new());
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        remote_progress,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o.remote_progress = remote_progress;
+        o
     };
     fetch_remote(
         &local_git,

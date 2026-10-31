@@ -236,10 +236,11 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
     let url_with_embedded_creds =
         format!("http://{USER}:wrong-embedded-pass@127.0.0.1:{port}/repo.git");
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o
     };
 
     // --- 0. Sanity: the server really demands auth. An unauthenticated client
@@ -436,10 +437,11 @@ fn fetch_missing_repo_with_valid_credentials_does_not_reject_them() {
     let good_url = format!("http://127.0.0.1:{port}/repo.git");
     let typo_url = format!("http://127.0.0.1:{port}/repo-typo.git");
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o
     };
 
     let provider = SharedProvider(Arc::new(StaticCredentialProvider::new(USER, PASS)));
@@ -693,10 +695,11 @@ fn credential_store_host_entry_authenticates_fetch_and_push() {
     std::fs::create_dir_all(&local).unwrap();
     git(&local, &["init", "-q", "-b", "main", "."]);
     let local_git = local.join(".git");
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o
     };
     http_fetch(
         client(),
@@ -868,10 +871,11 @@ fn git_askpass_authenticates_fetch_with_the_prompts_system_git_uses() {
     std::fs::create_dir_all(&local).unwrap();
     git(&local, &["init", "-q", "-b", "main", "."]);
     let local_git = local.join(".git");
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o
     };
     http_fetch(
         shared_client(&factory, &config),
@@ -1011,9 +1015,10 @@ fn wrong_credentials_in_the_url_are_rejected_without_asking_askpass() {
     let local = tmp.path().join("clone");
     std::fs::create_dir_all(&local).unwrap();
     git(&local, &["init", "-q", "-b", "main", "."]);
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o
     };
     let err = http_fetch(
         shared_client(&factory, &config),

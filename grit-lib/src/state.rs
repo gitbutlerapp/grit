@@ -808,17 +808,55 @@ fn strip_ref_for_display(full: &str) -> String {
     full.to_string()
 }
 
-fn ref_name_exists(git_dir: &Path, refname: &str) -> bool {
-    git_dir.join(refname).exists()
-        || crate::refs::packed_refs_entry_exists(git_dir, refname).unwrap_or(false)
+/// Where [`wt_status_get_state`] reads the `HEAD` reflog and ref names from when labelling a
+/// detached `HEAD`: the git directory, or a ref store that has no on-disk layout.
+#[derive(Clone, Copy)]
+enum RefSource<'a> {
+    GitDir(&'a Path),
+    Store(&'a dyn crate::refs::store::RefStore),
 }
 
-fn dwim_detach_label(git_dir: &Path, target: &str, noid: ObjectId) -> String {
+impl RefSource<'_> {
+    fn exists(&self, refname: &str) -> bool {
+        match self {
+            Self::GitDir(git_dir) => {
+                git_dir.join(refname).exists()
+                    || crate::refs::packed_refs_entry_exists(git_dir, refname).unwrap_or(false)
+            }
+            Self::Store(store) => store.read_raw(refname).ok().flatten().is_some(),
+        }
+    }
+
+    fn resolve(&self, refname: &str) -> Option<ObjectId> {
+        match self {
+            Self::GitDir(git_dir) => crate::refs::resolve_ref(git_dir, refname).ok(),
+            Self::Store(store) => store.resolve(refname).ok(),
+        }
+    }
+
+    fn head_reflog(&self) -> Option<Vec<crate::reflog::ReflogEntry>> {
+        match self {
+            Self::GitDir(git_dir) => reflog::read_reflog(git_dir, "HEAD").ok(),
+            Self::Store(store) => {
+                let mut entries = Vec::new();
+                store
+                    .for_each_reflog_entry("HEAD", false, &mut |entry| {
+                        entries.push(entry.clone());
+                        std::ops::ControlFlow::Continue(())
+                    })
+                    .ok()?;
+                Some(entries)
+            }
+        }
+    }
+}
+
+fn dwim_detach_label(refs: RefSource<'_>, target: &str, noid: ObjectId) -> String {
     if target == "HEAD" {
         return abbrev_oid(&noid);
     }
     if target.starts_with("refs/") {
-        if let Ok(oid) = crate::refs::resolve_ref(git_dir, target) {
+        if let Some(oid) = refs.resolve(target) {
             if oid == noid {
                 return strip_ref_for_display(target);
             }
@@ -829,10 +867,10 @@ fn dwim_detach_label(git_dir: &Path, target: &str, noid: ObjectId) -> String {
         format!("refs/tags/{target}"),
         format!("refs/remotes/{target}"),
     ] {
-        if candidate.starts_with("refs/tags/") && ref_name_exists(git_dir, &candidate) {
+        if candidate.starts_with("refs/tags/") && refs.exists(&candidate) {
             return strip_ref_for_display(&candidate);
         }
-        if let Ok(oid) = crate::refs::resolve_ref(git_dir, &candidate) {
+        if let Some(oid) = refs.resolve(&candidate) {
             if oid == noid {
                 return strip_ref_for_display(&candidate);
             }
@@ -857,8 +895,8 @@ fn dwim_detach_label(git_dir: &Path, target: &str, noid: ObjectId) -> String {
     abbrev_oid(&noid)
 }
 
-fn wt_status_get_detached_from(git_dir: &Path, head_oid: ObjectId) -> Option<(String, bool)> {
-    let entries = reflog::read_reflog(git_dir, "HEAD").ok()?;
+fn wt_status_get_detached_from(refs: RefSource<'_>, head_oid: ObjectId) -> Option<(String, bool)> {
+    let entries = refs.head_reflog()?;
     for entry in entries.iter().rev() {
         let msg = entry.message.trim();
         let Some(rest) = msg.strip_prefix("checkout: moving from ") else {
@@ -869,7 +907,7 @@ fn wt_status_get_detached_from(git_dir: &Path, head_oid: ObjectId) -> Option<(St
         };
         let target = rest[idx + 4..].trim();
         let noid = entry.new_oid;
-        let label = dwim_detach_label(git_dir, target, noid);
+        let label = dwim_detach_label(refs, target, noid);
         let detached_at = head_oid == noid;
         return Some((label, detached_at));
     }
@@ -941,6 +979,38 @@ pub fn wt_status_get_state(
     head: &HeadState,
     get_detached_from: bool,
 ) -> Result<WtStatusState> {
+    wt_status_get_state_from(git_dir, RefSource::GitDir(git_dir), head, get_detached_from)
+}
+
+/// Like [`wt_status_get_state`], but reads the `HEAD` reflog and ref names behind a detached
+/// `HEAD` label through `repo`'s ref store when that store has no on-disk layout.
+///
+/// Operation sentinels (`MERGE_HEAD`, `rebase-merge/`, `sequencer/`, …) are files in the
+/// repository's git directory whatever ref store is injected, so they are read from there.
+/// Repositories whose refs live in the git directory behave exactly as [`wt_status_get_state`].
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when an operation sentinel cannot be read.
+pub fn wt_status_get_state_for_repository(
+    repo: &Repository,
+    head: &HeadState,
+    get_detached_from: bool,
+) -> Result<WtStatusState> {
+    let refs = if repo.refs_on_disk() {
+        RefSource::GitDir(repo.git_dir())
+    } else {
+        RefSource::Store(repo.refs())
+    };
+    wt_status_get_state_from(repo.git_dir(), refs, head, get_detached_from)
+}
+
+fn wt_status_get_state_from(
+    git_dir: &Path,
+    refs: RefSource<'_>,
+    head: &HeadState,
+    get_detached_from: bool,
+) -> Result<WtStatusState> {
     let mut state = WtStatusState::default();
 
     if git_dir.join("MERGE_HEAD").exists() {
@@ -976,7 +1046,7 @@ pub fn wt_status_get_state(
 
     if get_detached_from {
         if let HeadState::Detached { oid } = head {
-            if let Some((label, at)) = wt_status_get_detached_from(git_dir, *oid) {
+            if let Some((label, at)) = wt_status_get_detached_from(refs, *oid) {
                 state.detached_from = Some(label);
                 state.detached_at = at;
             }

@@ -30110,6 +30110,7 @@ pub fn grit_lib::state::split_commit_in_progress(&std::path::Path, &grit_lib::st
 pub fn grit_lib::state::status_operation(&grit_lib::state::WtStatusState, bool) -> core::option::Option<grit_lib::state::Operation>
 pub fn grit_lib::state::write_orig_head(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::state::wt_status_get_state(&std::path::Path, &grit_lib::state::HeadState, bool) -> grit_lib::error::Result<grit_lib::state::WtStatusState>
+pub fn grit_lib::state::wt_status_get_state_for_repository(&grit_lib::repo::Repository, &grit_lib::state::HeadState, bool) -> grit_lib::error::Result<grit_lib::state::WtStatusState>
 pub mod grit_lib::tree_sha256
 #[non_exhaustive] pub enum grit_lib::tree_sha256::MissingSubmoduleReason
 pub grit_lib::tree_sha256::MissingSubmoduleReason::MissingCommit

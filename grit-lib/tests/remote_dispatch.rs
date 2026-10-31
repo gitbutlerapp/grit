@@ -362,10 +362,11 @@ fn remote_push_local_file_url_matches_git() {
     )
     .unwrap();
 
-    let fetch_opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
+    let fetch_opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o
     };
     let url = format!("file://{}", bare.display());
     let remote = Remote::from_url(&url).unwrap();
@@ -521,10 +522,11 @@ fn remote_fetch_git_daemon_matches_git() {
     remote
         .fetch(
             &repo,
-            FetchOptions {
-                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-                tags: TagMode::Following,
-                ..Default::default()
+            {
+                let mut o = FetchOptions::default();
+                o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+                o.tags = TagMode::Following;
+                o
             },
             &mut grit_lib::remote::fetch::NoProgress,
             &grit_lib::progress::NeverCancel,

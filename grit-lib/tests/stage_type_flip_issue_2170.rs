@@ -76,12 +76,13 @@ fn dir_became_file_repo(root: &Path) {
 
 fn commit_request() -> CommitRequest {
     let ident = "Test <t@example.com> 1 +0000".to_string();
-    CommitRequest {
-        message: "flip".into(),
-        author: Some(ident.parse().expect("signature")),
-        committer: Some(ident.parse().expect("signature")),
-        hooks: HookPolicy::SkipVerify,
-        ..Default::default()
+    {
+        let mut o = CommitRequest::default();
+        o.message = "flip".into();
+        o.author = Some(ident.parse().expect("signature"));
+        o.committer = Some(ident.parse().expect("signature"));
+        o.hooks = HookPolicy::SkipVerify;
+        o
     }
 }
 

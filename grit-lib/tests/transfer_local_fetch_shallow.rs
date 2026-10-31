@@ -60,10 +60,11 @@ fn fetch_local_in_git_shallow_clone_does_not_create_broken_tags() {
     );
 
     let shallow_git = shallow.join(".git");
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
+    let opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o
     };
     fetch_local(&shallow_git, &bare, &opts).expect("fetch_local");
 
@@ -111,12 +112,12 @@ fn fetch_local_clone_from_shallow_source_propagates_shallow_file() {
     git(&dest, &["init", "-q", "-b", "main", "."]);
     let dest_git = dest.join(".git");
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        initial_remote_fetch: true,
-        remote_name: Some("origin".to_owned()),
-        ..Default::default()
+    let opts = {
+        let mut o = FetchOptions::new().initial_remote_fetch(true);
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o.remote_name = Some("origin".to_owned());
+        o
     };
     fetch_local(&dest_git, &shallow_src.join(".git"), &opts).expect("fetch_local from shallow");
 
@@ -164,17 +165,13 @@ fn fetch_local_initial_fetch_following_imports_reachable_tags() {
     let local_git = local.join(".git");
     let upstream_git = upstream.join(".git");
 
-    fetch_local(
-        &local_git,
-        &upstream_git,
-        &FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-            tags: TagMode::Following,
-            initial_remote_fetch: true,
-            remote_name: Some("origin".to_owned()),
-            ..Default::default()
-        },
-    )
+    fetch_local(&local_git, &upstream_git, &{
+        let mut o = FetchOptions::new().initial_remote_fetch(true);
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o.remote_name = Some("origin".to_owned());
+        o
+    })
     .expect("initial fetch");
 
     for tag in [
@@ -250,16 +247,13 @@ fn unshallow_follows_historical_tags_in_one_fetch() {
     let client = depth_one_client(tmp.path(), &source, "client");
     let comparison = depth_one_client(tmp.path(), &source, "comparison");
     git(&comparison, &["fetch", "--unshallow"]);
-    let outcome = fetch_local(
-        &client.join(".git"),
-        &source,
-        &FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-            tags: TagMode::Following,
-            fetch_depth: Some(FetchDepth::Unshallow),
-            ..Default::default()
-        },
-    )
+    let outcome = fetch_local(&client.join(".git"), &source, &{
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+        o.tags = TagMode::Following;
+        o.fetch_depth = Some(FetchDepth::Unshallow);
+        o
+    })
     .unwrap();
     assert_tag_history_matches_git(&client, &comparison);
     assert_eq!(git(&client, &["tag", "--list"]).trim(), "v1\nv2");
@@ -346,16 +340,13 @@ fn shallow_tag_following_uses_requested_history_and_tag_mode() {
         let mut git_args = vec!["fetch"];
         git_args.extend(args);
         git(&comparison, &git_args);
-        fetch_local(
-            &client.join(".git"),
-            &source,
-            &FetchOptions {
-                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-                fetch_depth,
-                tags,
-                ..Default::default()
-            },
-        )
+        fetch_local(&client.join(".git"), &source, &{
+            let mut o = FetchOptions::default();
+            o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+            o.fetch_depth = fetch_depth;
+            o.tags = tags;
+            o
+        })
         .unwrap();
         assert_tag_history_matches_git(&client, &comparison);
         if tags == TagMode::Following {
@@ -385,16 +376,13 @@ fn unshallow_follows_tags_only_as_far_as_shallow_source_can_supply() {
     let client = depth_one_client(tmp.path(), &source, "client");
     let comparison = depth_one_client(tmp.path(), &source, "comparison");
     git(&comparison, &["fetch", "--unshallow"]);
-    fetch_local(
-        &client.join(".git"),
-        &source,
-        &FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-            tags: TagMode::Following,
-            fetch_depth: Some(FetchDepth::Unshallow),
-            ..Default::default()
-        },
-    )
+    fetch_local(&client.join(".git"), &source, &{
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+        o.tags = TagMode::Following;
+        o.fetch_depth = Some(FetchDepth::Unshallow);
+        o
+    })
     .unwrap();
     assert_tag_history_matches_git(&client, &comparison);
     assert_eq!(git(&client, &["tag", "--list"]).trim(), "v2");
@@ -417,16 +405,13 @@ fn unshallow_preserves_negative_refspecs_and_existing_tags() {
         } else {
             refspecs.push("^refs/tags/v1".into());
         }
-        let outcome = fetch_local(
-            &client.join(".git"),
-            &source,
-            &FetchOptions {
-                refspecs,
-                tags: TagMode::Following,
-                fetch_depth: Some(FetchDepth::Unshallow),
-                ..Default::default()
-            },
-        )
+        let outcome = fetch_local(&client.join(".git"), &source, &{
+            let mut o = FetchOptions::default();
+            o.refspecs = refspecs;
+            o.tags = TagMode::Following;
+            o.fetch_depth = Some(FetchDepth::Unshallow);
+            o
+        })
         .unwrap();
         if existing {
             assert!(

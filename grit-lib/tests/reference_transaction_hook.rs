@@ -185,12 +185,13 @@ fn sha256_initial_commit_hook_uses_wide_null_old_id() {
     let ident = "T <t@e.x> 1700000000 +0000".to_string();
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "c1".into(),
-            author: Some(ident.parse().expect("sig")),
-            committer: Some(ident.parse().expect("sig")),
-            allow_empty: false,
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = "c1".into();
+            o.author = Some(ident.parse().expect("sig"));
+            o.committer = Some(ident.parse().expect("sig"));
+            o.allow_empty = false;
+            o
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,

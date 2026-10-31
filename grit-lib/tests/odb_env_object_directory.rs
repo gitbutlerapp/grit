@@ -109,11 +109,12 @@ fn loose_objects(objects_dir: &Path) -> Vec<PathBuf> {
 }
 
 fn commit_request(message: &str) -> CommitRequest {
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(IDENT.parse().expect("signature")),
-        committer: Some(IDENT.parse().expect("signature")),
-        ..Default::default()
+    {
+        let mut o = CommitRequest::default();
+        o.message = message.to_owned();
+        o.author = Some(IDENT.parse().expect("signature"));
+        o.committer = Some(IDENT.parse().expect("signature"));
+        o
     }
 }
 
@@ -392,9 +393,10 @@ fn fetch_into_quarantine(root: &Path, url: &str) {
     repo.remotes()
         .fetch(
             &remote,
-            FetchOptions {
-                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-                ..Default::default()
+            {
+                let mut o = FetchOptions::default();
+                o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+                o
             },
             &mut NoProgress,
             &NeverCancel,

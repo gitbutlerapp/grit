@@ -241,9 +241,10 @@ fn commit_after_pick_conflict_finishes_sequence_issue_2262() {
     .expect("pick");
     fs::write(root.path().join("f.txt"), "a\nRES\nc\n").unwrap();
 
-    let req = CommitRequest {
-        message: "resolved pick".to_owned(),
-        ..Default::default()
+    let req = {
+        let mut o = CommitRequest::default();
+        o.message = "resolved pick".to_owned();
+        o
     };
     let mut progress = NullProgress;
     commit_with_scope(

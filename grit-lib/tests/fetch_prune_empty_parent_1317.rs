@@ -41,10 +41,11 @@ fn fetch_prune_removes_empty_parent_then_fetch_succeeds() {
     git(&local, &["init", "-q", "-b", "main", "."]);
     let local_git = local.join(".git");
 
-    let wildcard = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
+    let wildcard = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::None;
+        o
     };
     fetch_local(&local_git, &remote, &wildcard).expect("initial fetch");
     resolve_ref(&local_git, "refs/remotes/origin/feature/x").expect("nested tracking ref");

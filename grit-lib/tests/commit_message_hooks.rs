@@ -144,12 +144,13 @@ impl Fixture {
 }
 
 fn request(message: &str) -> CommitRequest {
-    CommitRequest {
-        message: message.into(),
-        author: Some(IDENT.parse().expect("signature")),
-        committer: Some(IDENT.parse().expect("signature")),
-        allow_empty: true,
-        ..Default::default()
+    {
+        let mut o = CommitRequest::default();
+        o.message = message.into();
+        o.author = Some(IDENT.parse().expect("signature"));
+        o.committer = Some(IDENT.parse().expect("signature"));
+        o.allow_empty = true;
+        o
     }
 }
 
@@ -232,9 +233,10 @@ fn no_verify_still_runs_prepare_commit_msg() {
     fx.commit("f", "1\n", "c1");
     let repo = fx.repo();
 
-    let req = CommitRequest {
-        hooks: HookPolicy::SkipVerify,
-        ..request("skip verify")
+    let req = {
+        let mut o = request("skip verify");
+        o.hooks = HookPolicy::SkipVerify;
+        o
     };
     let outcome = commit(&repo, &req).expect("commit");
     assert_eq!(outcome.hooks_run, vec![HookName::PrepareCommitMsg]);
@@ -250,14 +252,16 @@ fn reused_and_amended_messages_name_their_source_commit() {
     let c1 = fx.commit("f", "1\n", "c1");
     let repo = fx.repo();
 
-    let reuse = CommitRequest {
-        reuse_message_from: Some(c1),
-        ..request("")
+    let reuse = {
+        let mut o = request("");
+        o.reuse_message_from = Some(c1);
+        o
     };
     let reused = commit(&repo, &reuse).expect("reuse");
-    let amend = CommitRequest {
-        amend: true,
-        ..request("")
+    let amend = {
+        let mut o = request("");
+        o.amend = true;
+        o
     };
     commit(&repo, &amend).expect("amend");
     let log = fx.take_log();
@@ -287,9 +291,10 @@ fn amend_with_message_reports_message_like_git() {
     fx.commit("f", "1\n", "c1");
     let repo = fx.repo();
 
-    let amend = CommitRequest {
-        amend: true,
-        ..request("reworded")
+    let amend = {
+        let mut o = request("reworded");
+        o.amend = true;
+        o
     };
     commit(&repo, &amend).expect("amend");
     let grit_log = fx.take_log();
@@ -447,9 +452,10 @@ fn failing_prepare_commit_msg_leaves_head_unchanged() {
     fx.write_hook("prepare-commit-msg", "exit 7");
     let repo = fx.repo();
 
-    let req = CommitRequest {
-        hooks: HookPolicy::SkipVerify,
-        ..request("refused")
+    let req = {
+        let mut o = request("refused");
+        o.hooks = HookPolicy::SkipVerify;
+        o
     };
     let err = commit(&repo, &req).expect_err("prepare-commit-msg refuses");
     assert_eq!(hook_failed(&err), Some("prepare-commit-msg"));

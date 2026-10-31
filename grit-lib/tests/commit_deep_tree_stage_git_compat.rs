@@ -96,15 +96,16 @@ fn create_commit_nothing_to_commit_without_second_stat_refresh() {
     let ident = "Test <t@example.com> 1 +0000".to_string();
     let err = create_commit(
         &repo,
-        &CommitRequest {
-            message: "noop".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: true,
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = "noop".into();
+            o.author = Some(ident.parse().expect("signature"));
+            o.committer = Some(ident.parse().expect("signature"));
+            o.allow_empty = false;
+            o.sign_override = None;
+            o.amend = false;
+            o.assume_worktree_synced = true;
+            o
         },
         &mut NullProgress,
         &NeverCancel,
@@ -166,15 +167,16 @@ fn grit_commit_on_deep_tree_leaves_clean_tree_for_git() {
     let ident = "Test <t@example.com> 1 +0000".to_string();
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "t".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: true,
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = "t".into();
+            o.author = Some(ident.parse().expect("signature"));
+            o.committer = Some(ident.parse().expect("signature"));
+            o.allow_empty = false;
+            o.sign_override = None;
+            o.amend = false;
+            o.assume_worktree_synced = true;
+            o
         },
         &mut NullProgress,
         &NeverCancel,
@@ -346,12 +348,13 @@ fn commit_staged_after_single_edit_avoids_full_tree_stat_refresh() {
 
     let tracked = git(root, &["ls-files"]).lines().count();
     let ident = "Test <t@example.com> 1 +0000".to_string();
-    let req = CommitRequest {
-        message: "t".into(),
-        author: Some(ident.parse().expect("signature")),
-        committer: Some(ident.parse().expect("signature")),
-        hooks: HookPolicy::SkipVerify,
-        ..Default::default()
+    let req = {
+        let mut o = CommitRequest::default();
+        o.message = "t".into();
+        o.author = Some(ident.parse().expect("signature"));
+        o.committer = Some(ident.parse().expect("signature"));
+        o.hooks = HookPolicy::SkipVerify;
+        o
     };
 
     let _probe = reset_worktree_metadata_probe(root);
@@ -400,7 +403,7 @@ fn commit_worktree_allow_empty_clean_tree_single_staging_pass() {
 
     let ident = "Test <t@example.com> 1 +0000".to_string();
     let mut req = CommitRequest::new("empty");
-    let sig = ident.parse().expect("signature");
+    let sig: grit_lib::ident::Signature = ident.parse().expect("signature");
     req.author = Some(sig.clone());
     req.committer = Some(sig);
     req.allow_empty = true;
@@ -423,12 +426,13 @@ fn commit_worktree_allow_empty_clean_tree_single_staging_pass() {
 
 fn plain_commit_request(message: &str) -> CommitRequest {
     let ident = "Test <t@example.com> 1 +0000".to_string();
-    CommitRequest {
-        message: message.into(),
-        author: Some(ident.parse().expect("signature")),
-        committer: Some(ident.parse().expect("signature")),
-        hooks: HookPolicy::SkipVerify,
-        ..Default::default()
+    {
+        let mut o = CommitRequest::default();
+        o.message = message.into();
+        o.author = Some(ident.parse().expect("signature"));
+        o.committer = Some(ident.parse().expect("signature"));
+        o.hooks = HookPolicy::SkipVerify;
+        o
     }
 }
 

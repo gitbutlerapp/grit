@@ -179,10 +179,11 @@ fn fetch_over_git_daemon_v2_lands_refs_and_objects() {
         conn.capabilities()
     );
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o
     };
     let outcome = fetch_remote(
         &local_git,
@@ -343,10 +344,11 @@ fn fetch_over_git_daemon_v2_incremental_with_haves() {
             }
         };
         assert_eq!(conn.protocol_version(), 2);
-        let mut opts = FetchOptions {
-            refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-            tags: TagMode::None,
-            ..Default::default()
+        let mut opts = {
+            let mut o = FetchOptions::default();
+            o.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+            o.tags = TagMode::None;
+            o
         };
         fetch_remote(
             &local_git,
@@ -381,10 +383,11 @@ fn fetch_over_git_daemon_v2_incremental_with_haves() {
         .connect(&url, Service::UploadPack, &opts_v2)
         .expect("reconnect v2");
     assert_eq!(conn.protocol_version(), 2);
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::None;
+        o
     };
     fetch_remote(
         &local_git,

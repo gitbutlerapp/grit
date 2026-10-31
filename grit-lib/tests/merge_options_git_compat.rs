@@ -55,11 +55,12 @@ fn commit_ident() -> String {
 
 fn empty_commit_req() -> CommitRequest {
     let id = commit_ident();
-    CommitRequest {
-        message: String::new(),
-        author: Some(id.parse().expect("signature")),
-        committer: Some(id.parse().expect("signature")),
-        ..Default::default()
+    {
+        let mut o = CommitRequest::default();
+        o.message = String::new();
+        o.author = Some(id.parse().expect("signature"));
+        o.committer = Some(id.parse().expect("signature"));
+        o
     }
 }
 

@@ -58,10 +58,11 @@ fn fetch_local_copies_refs_and_objects_then_fast_forwards() {
     let remote_v1 = rev_parse(&remote, "refs/tags/v1");
 
     // --- First fetch: everything is New. ---
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
+    let opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o
     };
     let outcome = fetch_local(&local_git, &remote_git, &opts).expect("fetch_local");
 
@@ -286,9 +287,10 @@ fn fetch_local_from_loose_remote_links_loose_objects() {
     git(&local, &["init", "-q", "-b", "main", "."]);
     let local_git = local.join(".git");
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        ..Default::default()
+    let opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o
     };
     fetch_local(&local_git, &remote_git, &opts).expect("fetch_local");
 
@@ -352,10 +354,11 @@ fn fetch_local_into_empty_repo_links_remote_pack() {
     git(&local, &["init", "-q", "-b", "main", "."]);
     let local_git = local.join(".git");
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
+    let opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o
     };
     fetch_local(&local_git, &remote_git, &opts).expect("fetch_local");
 
@@ -411,10 +414,11 @@ fn fetch_into_repo_holding_the_empty_tree_still_links_the_source_pack() {
         .exec();
     assert!(empty_tree.ok(), "{}", empty_tree.stderr);
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
+    let opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::None;
+        o
     };
     fetch_local(&local_git, &remote_git, &opts).expect("fetch_local");
 

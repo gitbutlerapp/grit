@@ -14,11 +14,12 @@ use grit_lib::repo::Repository;
 
 fn commit_req(message: &str) -> CommitRequest {
     let id = "AutoStage <auto@example.com> 1700000000 +0000";
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(id.parse().expect("signature")),
-        committer: Some(id.parse().expect("signature")),
-        ..Default::default()
+    {
+        let mut o = CommitRequest::default();
+        o.message = message.to_owned();
+        o.author = Some(id.parse().expect("signature"));
+        o.committer = Some(id.parse().expect("signature"));
+        o
     }
 }
 

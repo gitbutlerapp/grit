@@ -44,11 +44,12 @@ fn commit_n(repo: &Repository, work_tree: &Path, n: usize) {
         .expect("stage");
         commit_with_scope(
             repo,
-            &CommitRequest {
-                message: format!("c{i}"),
-                author: Some(IDENT_TS.parse().expect("signature")),
-                committer: Some(IDENT_TS.parse().expect("signature")),
-                ..Default::default()
+            &{
+                let mut o = CommitRequest::default();
+                o.message = format!("c{i}");
+                o.author = Some(IDENT_TS.parse().expect("signature"));
+                o.committer = Some(IDENT_TS.parse().expect("signature"));
+                o
             },
             CommitScope::Staged,
             &mut NullProgress,

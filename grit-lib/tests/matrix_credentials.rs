@@ -950,10 +950,11 @@ mod http_401 {
         }
         let url = format!("http://127.0.0.1:{port}/repo.git");
 
-        let mut opts = FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-            tags: TagMode::None,
-            ..Default::default()
+        let mut opts = {
+            let mut o = FetchOptions::default();
+            o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+            o.tags = TagMode::None;
+            o
         };
 
         // --- Wrong credentials: the helper supplies a bad password; the 401 ->

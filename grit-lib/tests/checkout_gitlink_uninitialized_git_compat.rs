@@ -147,9 +147,10 @@ fn stray_files_in_uninitialized_gitlink_match_git_status_and_commit() {
 
     let err = commit_worktree(
         &repo,
-        &CommitRequest {
-            message: "touch".into(),
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = "touch".into();
+            o
         },
         &mut NullProgress,
         &NeverCancel,

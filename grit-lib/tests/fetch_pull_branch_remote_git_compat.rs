@@ -111,10 +111,11 @@ fn fetch_without_remote_updates_branch_remote_tracking_ref_like_git() {
     remote
         .fetch(
             &repo,
-            FetchOptions {
-                refspecs: invocation.user_refspecs,
-                environment: Environment::empty(),
-                ..Default::default()
+            {
+                let mut o = FetchOptions::default();
+                o.refspecs = invocation.user_refspecs;
+                o.environment = Environment::empty();
+                o
             },
             &mut NoProgress,
             &NeverCancel,

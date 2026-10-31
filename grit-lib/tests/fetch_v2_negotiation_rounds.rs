@@ -189,10 +189,11 @@ fn fetch_main(git_dir: &Path, srv: &Server) -> Result<(), grit_lib::error::Error
     };
     let mut conn = transport.connect(&srv.url, Service::UploadPack, &connect)?;
     assert_eq!(conn.protocol_version(), 2, "expected protocol v2");
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+        o.tags = TagMode::None;
+        o
     };
     fetch_remote(
         git_dir,

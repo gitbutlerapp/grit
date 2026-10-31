@@ -113,11 +113,12 @@ fn commit_file(repo: &Repository, wt: &Path, name: &str, message: &str) -> Objec
     .expect("stage");
     commit_with_scope(
         repo,
-        &CommitRequest {
-            message: message.into(),
-            author: Some(TS.parse().expect("signature")),
-            committer: Some(TS.parse().expect("signature")),
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = message.into();
+            o.author = Some(TS.parse().expect("signature"));
+            o.committer = Some(TS.parse().expect("signature"));
+            o
         },
         CommitScope::Staged,
         &mut NullProgress,

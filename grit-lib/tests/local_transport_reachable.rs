@@ -107,10 +107,11 @@ fn fetch_heads(dest: &Path, url: &str) {
         .expect("url")
         .fetch(
             &repo,
-            FetchOptions {
-                refspecs: vec!["+refs/heads/*:refs/remotes/o/*".to_owned()],
-                tags: TagMode::None,
-                ..Default::default()
+            {
+                let mut o = FetchOptions::default();
+                o.refspecs = vec!["+refs/heads/*:refs/remotes/o/*".to_owned()];
+                o.tags = TagMode::None;
+                o
             },
             &mut NoProgress,
             &NeverCancel,

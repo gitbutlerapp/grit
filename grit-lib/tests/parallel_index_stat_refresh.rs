@@ -74,15 +74,16 @@ fn seed_repo(root: &Path, preload_index: bool) -> Repository {
         &NeverCancel,
     )
     .expect("stage");
-    let req = grit_lib::porcelain::commit::CommitRequest {
-        message: "seed".into(),
-        author: Some("T <t@e.com> 1 +0000".parse().expect("signature")),
-        committer: Some("T <t@e.com> 1 +0000".parse().expect("signature")),
-        allow_empty: false,
-        sign_override: None,
-        amend: false,
-        assume_worktree_synced: false,
-        ..Default::default()
+    let req = {
+        let mut o = grit_lib::porcelain::commit::CommitRequest::default();
+        o.message = "seed".into();
+        o.author = Some("T <t@e.com> 1 +0000".parse().expect("signature"));
+        o.committer = Some("T <t@e.com> 1 +0000".parse().expect("signature"));
+        o.allow_empty = false;
+        o.sign_override = None;
+        o.amend = false;
+        o.assume_worktree_synced = false;
+        o
     };
     grit_lib::porcelain::commit::create_commit(&repo, &req, &mut NullProgress, &NeverCancel)
         .expect("commit");

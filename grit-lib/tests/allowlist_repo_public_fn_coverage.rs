@@ -93,15 +93,16 @@ fn seed_main_commit(repo: &Repository, dir: &Path) -> ObjectId {
     let ident = "User <u@example.com> 1700000000 +0000".to_owned();
     create_commit(
         repo,
-        &CommitRequest {
-            message: "seed".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = "seed".into();
+            o.author = Some(ident.parse().expect("signature"));
+            o.committer = Some(ident.parse().expect("signature"));
+            o.allow_empty = false;
+            o.sign_override = None;
+            o.amend = false;
+            o.assume_worktree_synced = false;
+            o
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,

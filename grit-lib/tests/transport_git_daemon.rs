@@ -159,10 +159,11 @@ fn fetch_over_git_daemon_lands_refs_and_objects() {
         main_oid.to_hex()
     );
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o
     };
     let outcome = fetch_remote(
         &local_git,
@@ -301,10 +302,11 @@ fn fetch_following_lightweight_tag_at_branch_tip_downloads_branch() {
         }
     };
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o
     };
     fetch_remote(
         &local_git,
@@ -390,10 +392,11 @@ fn fetch_remote_following_imports_annotated_tag_on_existing_tip() {
         }
     };
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+        o.tags = TagMode::Following;
+        o
     };
     fetch_remote(
         &local_git,
@@ -491,10 +494,11 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
             return;
         }
     };
-    let mut fetch_opts = FetchOptions {
-        refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
+    let mut fetch_opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+        o.tags = TagMode::None;
+        o
     };
     fetch_remote(
         &local_git,
@@ -622,10 +626,11 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
             return;
         }
     };
-    let mut seed_opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
+    let mut seed_opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::None;
+        o
     };
     fetch_remote(
         &local_git,
@@ -650,13 +655,14 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
     let mut conn = transport
         .connect(&url, Service::UploadPack, &ConnectOptions::default())
         .expect("reconnect");
-    let mut dry_run_opts = FetchOptions {
-        refspecs: vec!["refs/heads/main:refs/heads/probe".to_owned()],
-        configured_refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        remote_name: Some("origin".to_owned()),
-        dry_run: true,
-        tags: TagMode::None,
-        ..Default::default()
+    let mut dry_run_opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["refs/heads/main:refs/heads/probe".to_owned()];
+        o.configured_refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.remote_name = Some("origin".to_owned());
+        o.dry_run = true;
+        o.tags = TagMode::None;
+        o
     };
     let outcome = fetch_remote(
         &local_git,

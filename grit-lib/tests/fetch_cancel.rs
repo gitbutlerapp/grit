@@ -24,10 +24,11 @@ fn fetch_local_returns_cancelled_when_signalled_before_start() {
     let flag = FlagCancel::new();
     flag.cancel();
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
+    let opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o
     };
     let err = fetch_local_with_progress(&local.join(".git"), &bare, &opts, &mut NoProgress, &flag)
         .expect_err("cancelled before fetch");

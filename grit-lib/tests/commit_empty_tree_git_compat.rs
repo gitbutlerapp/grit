@@ -20,15 +20,16 @@ fn ident() -> String {
 
 fn commit_req(message: &str, allow_empty: bool) -> CommitRequest {
     let id = ident();
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(id.parse().expect("signature")),
-        committer: Some(id.parse().expect("signature")),
-        allow_empty,
-        sign_override: None,
-        amend: false,
-        assume_worktree_synced: false,
-        ..Default::default()
+    {
+        let mut o = CommitRequest::default();
+        o.message = message.to_owned();
+        o.author = Some(id.parse().expect("signature"));
+        o.committer = Some(id.parse().expect("signature"));
+        o.allow_empty = allow_empty;
+        o.sign_override = None;
+        o.amend = false;
+        o.assume_worktree_synced = false;
+        o
     }
 }
 

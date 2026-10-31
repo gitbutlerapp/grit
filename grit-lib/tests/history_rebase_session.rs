@@ -325,10 +325,11 @@ fn continue_after_commit_during_rebase_conflict() {
     std::fs::write(wt.join("f"), "1\nR\n3\n").expect("resolve");
     commit_with_scope(
         &grit,
-        &CommitRequest {
-            message: "resolved o1\n".into(),
-            committer: Some(IDENT.parse().expect("IDENT")),
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = "resolved o1\n".into();
+            o.committer = Some(IDENT.parse().expect("IDENT"));
+            o
         },
         CommitScope::AutoStage,
         &mut grit_lib::progress::NullProgress,
@@ -438,10 +439,11 @@ fn continue_after_commit_with_legacy_grit_plan_missing_stopped_head() {
     std::fs::write(wt.join("f"), "1\nR\n3\n").expect("resolve");
     commit_with_scope(
         &grit,
-        &CommitRequest {
-            message: "resolved o1\n".into(),
-            committer: Some(IDENT.parse().expect("IDENT")),
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = "resolved o1\n".into();
+            o.committer = Some(IDENT.parse().expect("IDENT"));
+            o
         },
         CommitScope::AutoStage,
         &mut grit_lib::progress::NullProgress,
@@ -650,9 +652,10 @@ fn commit_during_rebase_conflict_uses_merge_msg_without_dash_m() {
     std::fs::write(wt.join("f.txt"), "resolved\n").expect("resolve");
     commit_with_scope(
         &grit,
-        &CommitRequest {
-            committer: Some(IDENT.parse().expect("IDENT")),
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.committer = Some(IDENT.parse().expect("IDENT"));
+            o
         },
         CommitScope::AutoStage,
         &mut grit_lib::progress::NullProgress,

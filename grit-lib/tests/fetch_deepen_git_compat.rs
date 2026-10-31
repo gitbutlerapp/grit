@@ -109,16 +109,13 @@ fn grit_fetch_local(
     fetch_depth: Option<FetchDepth>,
 ) -> grit_lib::error::Result<()> {
     let git_dir = work.join(".git");
-    fetch_local(
-        &git_dir,
-        bare,
-        &FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-            tags: TagMode::Following,
-            fetch_depth,
-            ..Default::default()
-        },
-    )
+    fetch_local(&git_dir, bare, &{
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o.fetch_depth = fetch_depth;
+        o
+    })
     .map(|_| ())
 }
 
@@ -198,15 +195,12 @@ fn unshallow_on_complete_repo_errors_typed() {
             wt.to_str().unwrap(),
         ],
     );
-    let err = fetch_local(
-        &wt.join(".git"),
-        &bare,
-        &FetchOptions {
-            refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-            fetch_depth: Some(FetchDepth::Unshallow),
-            ..Default::default()
-        },
-    )
+    let err = fetch_local(&wt.join(".git"), &bare, &{
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+        o.fetch_depth = Some(FetchDepth::Unshallow);
+        o
+    })
     .expect_err("unshallow on full repo");
     assert!(matches!(err, Error::FetchUnshallowNotShallow));
 }
@@ -285,11 +279,12 @@ fn grit_fetch_daemon_refspec(
     let mut conn = transport
         .connect(url, Service::UploadPack, &connect_opts)
         .expect("connect git daemon");
-    let mut opts = FetchOptions {
-        refspecs: vec![refspec.to_owned()],
-        tags: TagMode::Following,
-        fetch_depth,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec![refspec.to_owned()];
+        o.tags = TagMode::Following;
+        o.fetch_depth = fetch_depth;
+        o
     };
     fetch_remote(
         &git_dir,
@@ -544,11 +539,12 @@ mod http {
 
         git_fetch(&git_client, &["fetch", "--deepen", "3", "origin"]);
         let client = http_client_arc(UreqHttpClient::new());
-        let mut opts = FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-            tags: TagMode::Following,
-            fetch_depth: FetchDepth::deepen(3),
-            ..Default::default()
+        let mut opts = {
+            let mut o = FetchOptions::default();
+            o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+            o.tags = TagMode::Following;
+            o.fetch_depth = FetchDepth::deepen(3);
+            o
         };
         http_fetch(
             client,
@@ -618,11 +614,12 @@ mod http {
                 &git_client,
                 &["fetch", "--depth", &depth.to_string(), "origin"],
             );
-            let mut opts = FetchOptions {
-                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-                tags: TagMode::Following,
-                fetch_depth: FetchDepth::depth(depth),
-                ..Default::default()
+            let mut opts = {
+                let mut o = FetchOptions::default();
+                o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+                o.tags = TagMode::Following;
+                o.fetch_depth = FetchDepth::depth(depth);
+                o
             };
             http_fetch(
                 client.clone(),

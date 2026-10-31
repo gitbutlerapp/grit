@@ -43,11 +43,12 @@ fn fetch_applies_other_refs_when_stale_nested_ref_blocks_without_prune() {
     git(&clone, &["remote", "add", "origin", bare.to_str().unwrap()]);
     let clone_git = clone.join(".git");
 
-    let first_opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        remote_name: Some("origin".to_owned()),
-        tags: TagMode::None,
-        ..Default::default()
+    let first_opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.remote_name = Some("origin".to_owned());
+        o.tags = TagMode::None;
+        o
     };
     fetch_local(&clone_git, &bare, &first_opts).expect("initial fetch");
 
@@ -123,11 +124,12 @@ fn fetch_with_prune_resolves_namespace_conflict() {
     git(&clone, &["remote", "add", "origin", bare.to_str().unwrap()]);
     let clone_git = clone.join(".git");
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        remote_name: Some("origin".to_owned()),
-        tags: TagMode::None,
-        ..Default::default()
+    let opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.remote_name = Some("origin".to_owned());
+        o.tags = TagMode::None;
+        o
     };
     fetch_local(&clone_git, &bare, &opts).expect("initial fetch");
 
@@ -141,9 +143,10 @@ fn fetch_with_prune_resolves_namespace_conflict() {
     git(&work, &["commit", "-q", "-m", "gone"]);
     git(&work, &["push", "-q", "origin", "gone"]);
 
-    let pruned = FetchOptions {
-        prune: true,
-        ..opts
+    let pruned = {
+        let mut o = opts;
+        o.prune = true;
+        o
     };
     let outcome = fetch_local(&clone_git, &bare, &pruned).expect("fetch with prune");
     assert!(

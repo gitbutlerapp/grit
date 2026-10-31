@@ -68,10 +68,11 @@ fn fetch_local_cancelled_at_start_is_classified() {
     let flag = FlagCancel::new();
     flag.cancel();
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
+    let opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o
     };
     let err = fetch_local_with_progress(&local.join(".git"), &bare, &opts, &mut NoProgress, &flag)
         .expect_err("cancelled before fetch");
@@ -94,10 +95,10 @@ fn clone_cancelled_at_start_is_classified_and_needs_cleanup() {
 
     let opts = CloneOptions::new(upstream.to_string_lossy(), dest.clone());
     let err = clone(opts, &mut NoProgress, &flag, None).expect_err("cancelled before clone");
-    assert!(matches!(
-        err,
-        CloneError::Remote(RemoteError::Library(Error::Cancelled))
-    ));
+    assert!(
+        matches!(err, CloneError::Library(Error::Cancelled)),
+        "{err:?}"
+    );
     assert!(err.is_cancelled(), "{err:?}");
     assert!(err.should_cleanup_failed_clone(), "{err:?}");
     assert!(dest.join(".git").is_dir(), "partial clone leaves .git");

@@ -146,10 +146,11 @@ fn git_daemon_noop_fetch_and_push_send_flush_not_hangup() {
     .unwrap();
     let remote = Remote::from_url(&fixture.url).unwrap();
 
-    let fetch_opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
+    let fetch_opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o
     };
 
     let first = remote

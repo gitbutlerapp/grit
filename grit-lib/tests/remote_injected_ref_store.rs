@@ -182,14 +182,11 @@ fn local_fetch_and_prune_stay_in_the_injected_store() {
     store
         .set_ref("refs/remotes/origin/gone", RawRef::Direct(remotes.tip))
         .expect("seed stale ref");
-    fetch(
-        &repo,
-        "origin",
-        FetchOptions {
-            prune: true,
-            ..Default::default()
-        },
-    );
+    fetch(&repo, "origin", {
+        let mut o = FetchOptions::default();
+        o.prune = true;
+        o
+    });
     let names: Vec<String> = store_refs(&store, "refs/remotes/origin/")
         .into_iter()
         .map(|(name, _)| name)
@@ -210,27 +207,21 @@ fn wire_fetch_stays_in_the_injected_store() {
     let repo = open(&local).with_ref_store(store.clone());
 
     // A partial-clone filter sends a local fetch through `git upload-pack` and the wire path.
-    fetch(
-        &repo,
-        "origin",
-        FetchOptions {
-            filter: Some(ObjectFilterSpec::BlobNone),
-            ..Default::default()
-        },
-    );
+    fetch(&repo, "origin", {
+        let mut o = FetchOptions::default();
+        o.filter = Some(ObjectFilterSpec::BlobNone);
+        o
+    });
     assert_origin_tracking_in_store(&repo, &store, remotes.tip);
     assert_no_disk_tracking_refs(&local);
 
     git(&remotes.upstream, &["branch", "-D", "topic"]);
-    fetch(
-        &repo,
-        "origin",
-        FetchOptions {
-            filter: Some(ObjectFilterSpec::BlobNone),
-            prune: true,
-            ..Default::default()
-        },
-    );
+    fetch(&repo, "origin", {
+        let mut o = FetchOptions::default();
+        o.filter = Some(ObjectFilterSpec::BlobNone);
+        o.prune = true;
+        o
+    });
     assert!(store
         .read_raw("refs/remotes/origin/topic")
         .expect("read")
@@ -269,14 +260,11 @@ fn bundle_fetch_stays_in_the_injected_store() {
         .expect("seed stale ref");
     let repo = open(&local).with_ref_store(store.clone());
 
-    fetch(
-        &repo,
-        "origin",
-        FetchOptions {
-            prune: true,
-            ..Default::default()
-        },
-    );
+    fetch(&repo, "origin", {
+        let mut o = FetchOptions::default();
+        o.prune = true;
+        o
+    });
     assert_eq!(
         store_refs(&store, "refs/remotes/origin/"),
         vec![
@@ -428,14 +416,11 @@ fn files_backend_fetch_prune_and_push_round_trip_with_git() {
 
     fetch(&repo, "origin", FetchOptions::default());
     git(&remotes.upstream, &["branch", "-D", "topic"]);
-    fetch(
-        &repo,
-        "origin",
-        FetchOptions {
-            prune: true,
-            ..Default::default()
-        },
-    );
+    fetch(&repo, "origin", {
+        let mut o = FetchOptions::default();
+        o.prune = true;
+        o
+    });
     git(
         &local,
         &["update-ref", "refs/heads/main", &remotes.tip.to_hex()],

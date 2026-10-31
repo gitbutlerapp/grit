@@ -12,12 +12,13 @@ use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode, UpdateMode}
 use grit_test_support::git;
 
 fn options(tags: TagMode) -> FetchOptions {
-    FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-        tags,
-        remote_name: Some("origin".into()),
-        fetch_source: Some("fixture".into()),
-        ..Default::default()
+    {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+        o.tags = tags;
+        o.remote_name = Some("origin".into());
+        o.fetch_source = Some("fixture".into());
+        o
     }
 }
 
@@ -85,9 +86,10 @@ fn repeated_many_ref_fetches_preserve_refs_and_transfer_nothing() {
         &["update-ref", "--no-deref", "-d", "refs/remotes/origin/HEAD"],
     );
     std::fs::write(git_dir.join("FETCH_HEAD"), "stale\n").unwrap();
-    let explicit = FetchOptions {
-        refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".into()],
-        ..options(TagMode::Following)
+    let explicit = {
+        let mut o = options(TagMode::Following);
+        o.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".into()];
+        o
     };
     assert_noop(&remote, &client, &explicit, 1);
     let fetch_head = std::fs::read_to_string(git_dir.join("FETCH_HEAD")).unwrap();
@@ -148,10 +150,11 @@ fn repeated_many_ref_fetches_preserve_refs_and_transfer_nothing() {
     assert_noop(&remote, &client, &opts, 3001);
 
     git(&remote, &["update-ref", "-d", "refs/heads/team/2999"]);
-    let opts = FetchOptions {
-        prune: true,
-        tags: TagMode::Following,
-        ..opts
+    let opts = {
+        let mut o = opts;
+        o.prune = true;
+        o.tags = TagMode::Following;
+        o
     };
     let outcome = fetch_local(&client.join(".git"), &remote, &opts).unwrap();
     assert_eq!(
@@ -173,9 +176,10 @@ fn reftable_local_fetch_remains_fresh_after_prune() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let (remote, client) = fixture::fixture(tmp.path(), 30, 20, true);
-    let opts = FetchOptions {
-        prune: true,
-        ..options(TagMode::All)
+    let opts = {
+        let mut o = options(TagMode::All);
+        o.prune = true;
+        o
     };
     for _ in 0..2 {
         let outcome = fetch_local(&client.join(".git"), &remote, &opts).unwrap();

@@ -67,12 +67,13 @@ fn loose_path(root: &Path, oid: &ObjectId) -> PathBuf {
 
 fn commit_req(message: &str) -> CommitRequest {
     let id = "Big File <big@example.com> 1700000000 +0000";
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(id.parse().expect("signature")),
-        committer: Some(id.parse().expect("signature")),
-        hooks: HookPolicy::SkipVerify,
-        ..Default::default()
+    {
+        let mut o = CommitRequest::default();
+        o.message = message.to_owned();
+        o.author = Some(id.parse().expect("signature"));
+        o.committer = Some(id.parse().expect("signature"));
+        o.hooks = HookPolicy::SkipVerify;
+        o
     }
 }
 

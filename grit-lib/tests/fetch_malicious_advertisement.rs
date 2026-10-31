@@ -137,10 +137,11 @@ fn fetch_v0_malicious_advertisement_preserves_config() {
         .with_caps(&["multi_ack_detailed", "side-band-64k", "ofs-delta"])
         .with_version(0);
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::None;
+        o
     };
 
     let mut conn = conn;
@@ -175,10 +176,11 @@ fn fetch_v2_malicious_ls_refs_preserves_config() {
         ])
         .with_version(2);
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::None;
+        o
     };
 
     let mut conn = conn;

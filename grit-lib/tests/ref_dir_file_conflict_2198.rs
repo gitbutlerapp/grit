@@ -151,11 +151,12 @@ fn fetched_rel_children(tmp: &Path) -> (PathBuf, PathBuf, FetchOptions) {
     git(tmp, &["init", "-q", "-b", "main", clone.to_str().unwrap()]);
     git(&clone, &["remote", "add", "origin", bare.to_str().unwrap()]);
     let clone_git = clone.join(".git");
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        remote_name: Some("origin".to_owned()),
-        tags: TagMode::None,
-        ..Default::default()
+    let opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.remote_name = Some("origin".to_owned());
+        o.tags = TagMode::None;
+        o
     };
     // System git writes the tracking refs with reflogs, so `logs/…/rel/` is a directory too.
     git(&clone, &["fetch", "-q", "origin"]);
@@ -192,9 +193,10 @@ fn assert_fetch_rejects_rel_and_creates_other(clone: &Path, bare: &Path, opts: &
     );
     git(clone, &["fsck", "--no-progress"]);
 
-    let pruned = FetchOptions {
-        prune: true,
-        ..opts.clone()
+    let pruned = {
+        let mut o = opts.clone();
+        o.prune = true;
+        o
     };
     let outcome = fetch_local(&clone_git, bare, &pruned).expect("fetch with prune");
     assert!(!outcome.has_rejections(), "{:?}", outcome.updates);

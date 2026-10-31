@@ -60,15 +60,16 @@ fn many_commits(repo: &Repository, n: usize) {
         stage_for_commit(repo, &mut NullProgress, &grit_lib::progress::NeverCancel).expect("stage");
         create_commit(
             repo,
-            &CommitRequest {
-                message: format!("c{i}"),
-                author: Some(ident.parse().expect("signature")),
-                committer: Some(ident.parse().expect("signature")),
-                allow_empty: false,
-                sign_override: None,
-                amend: false,
-                assume_worktree_synced: false,
-                ..Default::default()
+            &{
+                let mut o = CommitRequest::default();
+                o.message = format!("c{i}");
+                o.author = Some(ident.parse().expect("signature"));
+                o.committer = Some(ident.parse().expect("signature"));
+                o.allow_empty = false;
+                o.sign_override = None;
+                o.amend = false;
+                o.assume_worktree_synced = false;
+                o
             },
             &mut NullProgress,
             &grit_lib::progress::NeverCancel,

@@ -241,11 +241,12 @@ fn fetch_honors_core_ssh_command_when_env_unset() {
     remote
         .fetch(
             &repo,
-            FetchOptions {
-                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-                tags: TagMode::Following,
-                environment: Environment::empty(),
-                ..Default::default()
+            {
+                let mut o = FetchOptions::default();
+                o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+                o.tags = TagMode::Following;
+                o.environment = Environment::empty();
+                o
             },
             &mut NoProgress,
             &NeverCancel,

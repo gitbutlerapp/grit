@@ -53,9 +53,10 @@ fn stage_all_and_commit_first(repo: &Repository, wt: &std::path::Path) {
     .expect("stage");
     commit_worktree(
         repo,
-        &CommitRequest {
-            message: "first".into(),
-            ..CommitRequest::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = "first".into();
+            o
         },
         &mut NullProgress,
         &NeverCancel,
@@ -93,9 +94,10 @@ fn init_default_hermetic_commit_reports_missing_identity() {
     .expect("stage");
     let err = commit_worktree(
         &repo,
-        &CommitRequest {
-            message: "first".into(),
-            ..CommitRequest::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = "first".into();
+            o
         },
         &mut NullProgress,
         &NeverCancel,

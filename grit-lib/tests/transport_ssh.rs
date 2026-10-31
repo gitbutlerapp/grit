@@ -109,10 +109,11 @@ fn run_fetch_and_assert(transport: &SshTransport, url: &str, source: &Path, loca
         main_oid.to_hex()
     );
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o
     };
     let outcome = fetch_remote(
         &local_git,
@@ -269,10 +270,11 @@ fn fetch_over_ssh_v2_lands_refs_and_objects() {
         conn.capabilities()
     );
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
+    let mut opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::All;
+        o
     };
     let outcome = fetch_remote(
         &local_git,

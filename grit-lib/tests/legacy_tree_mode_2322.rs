@@ -137,11 +137,12 @@ fn legacy_tree_modes_status_and_commit_clean_after_git_checkout() {
         model.unstaged
     );
 
-    let req = CommitRequest {
-        message: "nochange".to_owned(),
-        author: Some(IDENT.parse().expect("author")),
-        committer: Some(IDENT.parse().expect("committer")),
-        ..Default::default()
+    let req = {
+        let mut o = CommitRequest::default();
+        o.message = "nochange".to_owned();
+        o.author = Some(IDENT.parse().expect("author"));
+        o.committer = Some(IDENT.parse().expect("committer"));
+        o
     };
     let err = create_commit(
         &repo,

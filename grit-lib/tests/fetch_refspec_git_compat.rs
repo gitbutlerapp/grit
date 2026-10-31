@@ -148,19 +148,20 @@ fn grit_fetch_file(
     refspecs: &[&str],
     configured: &[&str],
 ) -> grit_lib::remote::transfer::FetchOutcome {
-    let opts = FetchOptions {
-        refspecs: refspecs.iter().map(|s| (*s).to_owned()).collect(),
-        configured_refspecs: configured.iter().map(|s| (*s).to_owned()).collect(),
-        tags: TagMode::None,
-        remote_name: Some("origin".into()),
-        fetch_source: Some({
+    let opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = refspecs.iter().map(|s| (*s).to_owned()).collect();
+        o.configured_refspecs = configured.iter().map(|s| (*s).to_owned()).collect();
+        o.tags = TagMode::None;
+        o.remote_name = Some("origin".into());
+        o.fetch_source = Some({
             let mut s = remote_git.to_string_lossy().into_owned();
             if s.ends_with(".git") {
                 s.truncate(s.len() - 4);
             }
             s
-        }),
-        ..Default::default()
+        });
+        o
     };
     fetch_local(&local.join(".git"), remote_git, &opts).expect("grit fetch_local")
 }
@@ -230,10 +231,11 @@ fn named_remote_explicit_refspec_writes_fetch_head_via_remote_fetch() {
     origin
         .fetch(
             &repo,
-            FetchOptions {
-                refspecs: vec!["main".into()],
-                tags: TagMode::None,
-                ..Default::default()
+            {
+                let mut o = FetchOptions::default();
+                o.refspecs = vec!["main".into()];
+                o.tags = TagMode::None;
+                o
             },
             &mut NoProgress,
             &NeverCancel,
@@ -366,17 +368,14 @@ fn missing_source_ref_typed_error_file() {
     remote.commit_empty("only");
 
     let grit_c = clone_consumer(tmp.path(), &remote, "grit-c");
-    let err = fetch_local(
-        &grit_c.join(".git"),
-        &remote.git_dir(),
-        &FetchOptions {
-            refspecs: vec!["no-such-branch".into()],
-            configured_refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-            tags: TagMode::None,
-            remote_name: Some("origin".into()),
-            ..Default::default()
-        },
-    )
+    let err = fetch_local(&grit_c.join(".git"), &remote.git_dir(), &{
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["no-such-branch".into()];
+        o.configured_refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+        o.tags = TagMode::None;
+        o.remote_name = Some("origin".into());
+        o
+    })
     .unwrap_err();
     assert!(
         matches!(err, Error::FetchRefspec(_)),
@@ -400,17 +399,14 @@ fn branch_to_tag_clobber_rejected_like_git() {
     let spec = "refs/heads/main:refs/tags/local-tag";
     let cfg = ["+refs/heads/*:refs/remotes/origin/*"];
 
-    let grit_outcome = fetch_local(
-        &grit_c.join(".git"),
-        &remote.git_dir(),
-        &FetchOptions {
-            refspecs: vec![spec.into()],
-            configured_refspecs: cfg.iter().map(|s| (*s).into()).collect(),
-            tags: TagMode::None,
-            remote_name: Some("origin".into()),
-            ..Default::default()
-        },
-    )
+    let grit_outcome = fetch_local(&grit_c.join(".git"), &remote.git_dir(), &{
+        let mut o = FetchOptions::default();
+        o.refspecs = vec![spec.into()];
+        o.configured_refspecs = cfg.iter().map(|s| (*s).into()).collect();
+        o.tags = TagMode::None;
+        o.remote_name = Some("origin".into());
+        o
+    })
     .expect("grit fetch");
     assert!(
         grit_outcome.updates.iter().any(|u| {
@@ -456,17 +452,14 @@ fn tag_to_branch_rejected_when_tag_would_clobber_branch() {
     run_git(remote.path(), &["tag", "v1", &main1]);
 
     let spec = "refs/tags/v1:refs/heads/from-tag";
-    let outcome = fetch_local(
-        &grit_c.join(".git"),
-        &remote.git_dir(),
-        &FetchOptions {
-            refspecs: vec![spec.into()],
-            configured_refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-            tags: TagMode::None,
-            remote_name: Some("origin".into()),
-            ..Default::default()
-        },
-    )
+    let outcome = fetch_local(&grit_c.join(".git"), &remote.git_dir(), &{
+        let mut o = FetchOptions::default();
+        o.refspecs = vec![spec.into()];
+        o.configured_refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+        o.tags = TagMode::None;
+        o.remote_name = Some("origin".into());
+        o
+    })
     .expect("fetch");
     assert!(
         outcome.updates.iter().any(|u| {
@@ -508,18 +501,15 @@ fn dry_run_classifies_fast_forward_without_writing() {
     let probe_before = tracking_tip(&grit_c.join(".git"), "refs/heads/probe");
     remote.commit_empty("r2");
 
-    let outcome = fetch_local(
-        &grit_c.join(".git"),
-        &remote.git_dir(),
-        &FetchOptions {
-            refspecs: vec!["refs/heads/main:refs/heads/probe".into()],
-            configured_refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-            tags: TagMode::None,
-            remote_name: Some("origin".into()),
-            dry_run: true,
-            ..Default::default()
-        },
-    )
+    let outcome = fetch_local(&grit_c.join(".git"), &remote.git_dir(), &{
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["refs/heads/main:refs/heads/probe".into()];
+        o.configured_refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+        o.tags = TagMode::None;
+        o.remote_name = Some("origin".into());
+        o.dry_run = true;
+        o
+    })
     .expect("dry-run fetch");
     let update = outcome
         .updates
@@ -549,17 +539,14 @@ fn non_fast_forward_local_branch_rejected_file() {
     run_git(&grit_c, &["checkout", "-q", "main"]);
     remote.commit_empty("r3");
 
-    let outcome = fetch_local(
-        &grit_c.join(".git"),
-        &remote.git_dir(),
-        &FetchOptions {
-            refspecs: vec![format!("refs/heads/main:refs/heads/forceme")],
-            configured_refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-            tags: TagMode::None,
-            remote_name: Some("origin".into()),
-            ..Default::default()
-        },
-    )
+    let outcome = fetch_local(&grit_c.join(".git"), &remote.git_dir(), &{
+        let mut o = FetchOptions::default();
+        o.refspecs = vec![format!("refs/heads/main:refs/heads/forceme")];
+        o.configured_refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+        o.tags = TagMode::None;
+        o.remote_name = Some("origin".into());
+        o
+    })
     .expect("fetch");
     let rejected = outcome
         .updates
@@ -583,17 +570,14 @@ fn checked_out_branch_update_refused_file() {
     let grit_c = clone_consumer(tmp.path(), &remote, "grit-c");
     remote.commit_empty("two");
 
-    let err = fetch_local(
-        &grit_c.join(".git"),
-        &remote.git_dir(),
-        &FetchOptions {
-            refspecs: vec!["refs/heads/main:refs/heads/main".into()],
-            configured_refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-            tags: TagMode::None,
-            remote_name: Some("origin".into()),
-            ..Default::default()
-        },
-    )
+    let err = fetch_local(&grit_c.join(".git"), &remote.git_dir(), &{
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["refs/heads/main:refs/heads/main".into()];
+        o.configured_refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+        o.tags = TagMode::None;
+        o.remote_name = Some("origin".into());
+        o
+    })
     .unwrap_err();
     assert!(
         matches!(err, Error::FetchIntoCheckedOutBranch { .. }),
@@ -751,13 +735,14 @@ mod http {
     fn grit_fetch_http(local: &Path, url: &str, refspecs: &[&str], configured: &[&str]) {
         let client =
             Arc::new(UreqHttpClient::from_config(&Default::default()).expect("ureq client"));
-        let mut opts = FetchOptions {
-            refspecs: refspecs.iter().map(|s| (*s).to_owned()).collect(),
-            configured_refspecs: configured.iter().map(|s| (*s).to_owned()).collect(),
-            tags: TagMode::None,
-            remote_name: Some("origin".into()),
-            fetch_source: Some(url.to_owned()),
-            ..Default::default()
+        let mut opts = {
+            let mut o = FetchOptions::default();
+            o.refspecs = refspecs.iter().map(|s| (*s).to_owned()).collect();
+            o.configured_refspecs = configured.iter().map(|s| (*s).to_owned()).collect();
+            o.tags = TagMode::None;
+            o.remote_name = Some("origin".into());
+            o.fetch_source = Some(url.to_owned());
+            o
         };
         http_fetch(
             http_client_arc(client),
@@ -869,13 +854,14 @@ mod http {
         run_git(&grit_c, &["remote", "set-url", "origin", &server.url]);
         let client =
             Arc::new(UreqHttpClient::from_config(&Default::default()).expect("ureq client"));
-        let mut opts = FetchOptions {
-            refspecs: vec!["no-such-branch".into()],
-            configured_refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-            tags: TagMode::None,
-            remote_name: Some("origin".into()),
-            fetch_source: Some(server.url.clone()),
-            ..Default::default()
+        let mut opts = {
+            let mut o = FetchOptions::default();
+            o.refspecs = vec!["no-such-branch".into()];
+            o.configured_refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+            o.tags = TagMode::None;
+            o.remote_name = Some("origin".into());
+            o.fetch_source = Some(server.url.clone());
+            o
         };
         let err = http_fetch(
             http_client_arc(client),

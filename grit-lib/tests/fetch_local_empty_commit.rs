@@ -51,10 +51,11 @@ fn fetch_local_empty_commit_bare_remote() {
         &["remote", "add", "origin", bare.to_str().unwrap()],
     );
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
+    let opts = {
+        let mut o = FetchOptions::default();
+        o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        o.tags = TagMode::Following;
+        o
     };
     fetch_local(&consumer.join(".git"), &bare, &opts).expect("fetch_local");
 

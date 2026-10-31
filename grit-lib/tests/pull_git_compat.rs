@@ -81,10 +81,11 @@ fn setup_tracked_pair(tag: &str) -> (PathBuf, PathBuf) {
 }
 
 fn fetch_opts(env: &Environment) -> FetchOptions {
-    FetchOptions {
-        tags: TagMode::Following,
-        environment: env.clone(),
-        ..Default::default()
+    {
+        let mut o = FetchOptions::default();
+        o.tags = TagMode::Following;
+        o.environment = env.clone();
+        o
     }
 }
 

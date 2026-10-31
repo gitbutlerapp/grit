@@ -878,6 +878,8 @@ mod init_environment_identity;
 mod init_filesystem_config;
 #[path = "init_template_precompose_probe.rs"]
 mod init_template_precompose_probe;
+#[path = "injected_store_cas_and_operation_state.rs"]
+mod injected_store_cas_and_operation_state;
 #[cfg(feature = "full-tests")]
 #[path = "interpret_trailers_git_compat.rs"]
 mod interpret_trailers_git_compat;

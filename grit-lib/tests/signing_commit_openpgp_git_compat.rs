@@ -131,15 +131,11 @@ fn create_commit_openpgp_uses_committer_default_without_signingkey() {
     let _gnupg = EnvVarGuard::set("GNUPGHOME", &gnupg_path);
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "openpgp default key".to_owned(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("openpgp default key");
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,

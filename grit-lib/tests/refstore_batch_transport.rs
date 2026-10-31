@@ -36,12 +36,12 @@ fn fetch_updates_refs_in_one_transaction_reftable() {
         let local_git = local.git_dir();
         let (_, count_before) = reftable_tables_snapshot(&local_git);
 
-        let opts = FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-            tags: TagMode::None,
-            initial_remote_fetch: false,
-            remote_name: Some("origin".to_owned()),
-            ..Default::default()
+        let opts = {
+            let mut o = FetchOptions::default();
+            o.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+            o.tags = TagMode::None;
+            o.remote_name = Some("origin".to_owned());
+            o
         };
         grit_lib::remote::transfer::fetch_local(&local_git, &remote_git, &opts).expect("fetch");
 

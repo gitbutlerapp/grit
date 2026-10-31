@@ -345,11 +345,12 @@ fn commit_one_file(repo: &Repository, dir: &Path) -> grit_lib::error::Result<Com
     let ident = "T <t@t> 1 +0000".to_string();
     create_commit(
         repo,
-        &CommitRequest {
-            message: "msg".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = "msg".into();
+            o.author = Some(ident.parse().expect("signature"));
+            o.committer = Some(ident.parse().expect("signature"));
+            o
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,
@@ -594,11 +595,12 @@ fn commit_staged(
     let ident = "T <t@t> 1 +0000".to_string();
     create_commit(
         repo,
-        &CommitRequest {
-            message: message.into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            ..Default::default()
+        &{
+            let mut o = CommitRequest::default();
+            o.message = message.into();
+            o.author = Some(ident.parse().expect("signature"));
+            o.committer = Some(ident.parse().expect("signature"));
+            o
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,

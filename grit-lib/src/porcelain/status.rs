@@ -2279,7 +2279,7 @@ pub fn status(
         .ok_or(crate::error::Error::RequiresWorkTree)?;
 
     let head = crate::state::resolve_head_for_repository(repo)?;
-    let state = crate::state::wt_status_get_state(repo.git_dir(), &head, true)?;
+    let state = crate::state::wt_status_get_state_for_repository(repo, &head, true)?;
     let repo_config = repo.config().ok();
 
     // Load without expanding sparse-directory placeholders; expand only directories
