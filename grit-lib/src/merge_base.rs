@@ -1631,6 +1631,11 @@ pub fn try_linear_chain_commits_with_cutoffs(
     limit: usize,
     cutoffs: ReachableWalkCommitterCutoffs,
 ) -> Result<Option<Vec<ObjectId>>> {
+    // Parent-chain order is not committer-date order; `--since` needs the heap walk's frontier
+    // (see [`ReachableWalkState::pop_next_emit`]) so clock-skewed histories stay correct.
+    if cutoffs.since.is_some() {
+        return Ok(None);
+    }
     let mut cache = CommitGraphCache::new(repo);
     let mut out = Vec::with_capacity(limit.min(64));
     let mut stack = vec![tip];
