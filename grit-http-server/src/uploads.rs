@@ -404,6 +404,7 @@ pub async fn receive(
     locks: &UploadLocks,
     body: Body,
     options: RepositoryOptions,
+    _git_slot: tokio::sync::OwnedSemaphorePermit,
     on_applied: impl FnOnce(),
 ) -> Response<Body> {
     let Some(meta) = load(&repo_path, id, user) else {

@@ -47,7 +47,7 @@ impl Shutdown {
 }
 
 /// Wait for the first shutdown signal (Unix: SIGTERM, SIGINT, SIGHUP; Windows: Ctrl+C).
-async fn first_signal() {
+pub(crate) async fn wait_first_signal() {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
@@ -91,16 +91,16 @@ pub async fn serve_until_shutdown(
         if let Some(trigger) = trigger {
             let _ = trigger.await;
         } else {
-            first_signal().await;
+            wait_first_signal().await;
         }
         eprintln!(
             "grit serve: closing listener; in-flight requests may finish (grace {})",
-            format_grace(grace)
+            format_grace_for_log(grace)
         );
         on_shutdown();
         let _ = drain_started_tx.send(());
         tokio::spawn(async {
-            first_signal().await;
+            wait_first_signal().await;
             eprintln!("grit serve: second shutdown signal; exiting now");
             std::process::exit(1);
         });
@@ -124,7 +124,7 @@ pub async fn serve_until_shutdown(
             } => {
                 eprintln!(
                     "grit serve: grace period ({}) elapsed; closing remaining connections",
-                    format_grace(grace)
+                    format_grace_for_log(grace)
                 );
                 Ok(())
             }
@@ -132,7 +132,7 @@ pub async fn serve_until_shutdown(
     }
 }
 
-fn format_grace(grace: Duration) -> String {
+pub(crate) fn format_grace_for_log(grace: Duration) -> String {
     if grace.is_zero() {
         return "unlimited".to_owned();
     }

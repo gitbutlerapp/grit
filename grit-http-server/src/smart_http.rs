@@ -18,7 +18,9 @@
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::time::Duration;
 
+use crate::limits::{io_error_is_idle_timeout, BodyIdleTimeout};
 use axum::{
     body::{Body, Bytes},
     http::{header, response::Builder, HeaderMap, Response, StatusCode},
@@ -127,6 +129,29 @@ pub async fn info_refs(
     options: RepositoryOptions,
     extensions: grit_protocol::Extensions,
 ) -> Response<Body> {
+    info_refs_holding(
+        repo_path,
+        service,
+        protocol_version,
+        options,
+        extensions,
+        Duration::from_secs(60),
+        (),
+    )
+    .await
+}
+
+/// Like [`info_refs`], keeping `hold` alive until the response body finishes.
+#[allow(clippy::too_many_arguments)]
+pub async fn info_refs_holding<H: Send + 'static>(
+    repo_path: PathBuf,
+    service: Service,
+    protocol_version: Option<u8>,
+    options: RepositoryOptions,
+    extensions: grit_protocol::Extensions,
+    idle_timeout: Duration,
+    hold: H,
+) -> Response<Body> {
     let mut preamble = pkt_line(&format!("# service={}\n", service.name()));
     preamble.extend_from_slice(b"0000");
     stream_info_refs_advertisement(
@@ -136,6 +161,8 @@ pub async fn info_refs(
         options,
         extensions,
         Bytes::from(preamble),
+        idle_timeout,
+        hold,
     )
     .await
 }
@@ -179,6 +206,7 @@ pub async fn rpc(
         options,
         extensions,
         session,
+        Duration::from_secs(60),
         (),
     )
     .await
@@ -209,6 +237,7 @@ pub async fn rpc_holding<H: Send + 'static>(
     options: RepositoryOptions,
     extensions: grit_protocol::Extensions,
     session: grit_protocol::ServeSession,
+    idle_timeout: Duration,
     hold: H,
 ) -> (Response<Body>, RpcFollowUp) {
     let encoding = match body_encoding(headers) {
@@ -234,6 +263,7 @@ pub async fn rpc_holding<H: Send + 'static>(
                 options,
                 extensions,
                 session,
+                idle_timeout,
                 hold,
             )
             .await;
@@ -582,10 +612,11 @@ const STREAM_READ_BUFFER: usize = 64 * 1024;
 /// Must be called from the async runtime; the returned reader must then be used from a
 /// blocking thread (`spawn_blocking`), where each read waits for the next body chunk.
 #[cfg(test)]
-fn streaming_body_reader(body: Body) -> impl Read + Send + 'static {
+fn streaming_body_reader(body: Body, idle_timeout: Duration) -> impl Read + Send + 'static {
     use futures_util::TryStreamExt as _;
 
     let stream = body.into_data_stream().map_err(std::io::Error::other);
+    let stream = IdleTimeoutStream::new(stream, idle_timeout);
     std::io::BufReader::with_capacity(
         STREAM_READ_BUFFER,
         tokio_util::io::SyncIoBridge::new(tokio_util::io::StreamReader::new(stream)),
@@ -690,6 +721,9 @@ fn upload_pack_error_response(err: &grit_protocol::Error) -> Response<Body> {
     if io_error_is_request_body_limit(io) {
         return payload_too_large();
     }
+    if io_error_is_idle_timeout(io) {
+        return request_idle_timeout();
+    }
     (StatusCode::BAD_REQUEST, "could not read request body").into_response()
 }
 
@@ -703,7 +737,14 @@ fn receive_pack_error_response(err: &grit_protocol::Error) -> Response<Body> {
     {
         return payload_too_large();
     }
+    if io_error_is_idle_timeout(io) {
+        return request_idle_timeout();
+    }
     (StatusCode::BAD_REQUEST, "could not read request body").into_response()
+}
+
+fn request_idle_timeout() -> Response<Body> {
+    (StatusCode::REQUEST_TIMEOUT, "request body idle timeout\n").into_response()
 }
 
 #[cfg(test)]
@@ -856,7 +897,7 @@ mod tests {
         let chunk: Vec<u8> = (0..=255u8).cycle().take(1024).collect();
         let chunks = vec![chunk; MAX / 1024 + 2];
         let read = tokio::task::spawn_blocking(move || {
-            let raw = streaming_body_reader(chunked_body(chunks));
+            let raw = streaming_body_reader(chunked_body(chunks), Duration::from_secs(60));
             let mut out = Vec::new();
             decoded_fetch_reader_with_limit(raw, BodyEncoding::Identity, MAX).read_to_end(&mut out)
         });
@@ -882,7 +923,7 @@ mod tests {
     }
 
     async fn read_streamed(body: Body, encoding: BodyEncoding) -> Vec<u8> {
-        let raw = streaming_body_reader(body);
+        let raw = streaming_body_reader(body, Duration::from_secs(60));
         let read = tokio::task::spawn_blocking(move || {
             let mut out = Vec::new();
             decoded_reader(raw, encoding)
@@ -1000,14 +1041,16 @@ struct ChannelWriter {
     pending: Vec<u8>,
     tx: tokio::sync::mpsc::Sender<Chunk>,
     sent: bool,
+    idle: Duration,
 }
 
 impl ChannelWriter {
-    fn new(tx: tokio::sync::mpsc::Sender<Chunk>) -> Self {
+    fn new(tx: tokio::sync::mpsc::Sender<Chunk>, idle: Duration) -> Self {
         Self {
             pending: Vec::with_capacity(STREAM_CHUNK),
             tx,
             sent: false,
+            idle,
         }
     }
 
@@ -1019,11 +1062,25 @@ impl ChannelWriter {
             &mut self.pending,
             Vec::with_capacity(STREAM_CHUNK),
         ));
-        self.tx
-            .blocking_send(Ok(chunk))
-            .map_err(|_| std::io::Error::from(std::io::ErrorKind::BrokenPipe))?;
-        self.sent = true;
-        Ok(())
+        let handle = tokio::runtime::Handle::try_current().map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "upload-pack response needs a Tokio runtime",
+            )
+        })?;
+        match handle
+            .block_on(async { tokio::time::timeout(self.idle, self.tx.send(Ok(chunk))).await })
+        {
+            Ok(Ok(())) => {
+                self.sent = true;
+                Ok(())
+            }
+            Ok(Err(_)) => Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)),
+            Err(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                BodyIdleTimeout,
+            )),
+        }
     }
 }
 
@@ -1043,17 +1100,20 @@ impl std::io::Write for ChannelWriter {
     }
 }
 
-async fn stream_info_refs_advertisement(
+#[allow(clippy::too_many_arguments)]
+async fn stream_info_refs_advertisement<H: Send + 'static>(
     repo_path: PathBuf,
     service: Service,
     protocol_version: Option<u8>,
     options: RepositoryOptions,
     extensions: grit_protocol::Extensions,
     preamble: Bytes,
+    idle_timeout: Duration,
+    hold: H,
 ) -> Response<Body> {
     let (tx, rx) = tokio::sync::mpsc::channel::<Chunk>(STREAM_CHANNEL_DEPTH);
     let task = tokio::task::spawn_blocking(move || {
-        let mut out = ChannelWriter::new(tx);
+        let mut out = ChannelWriter::new(tx, idle_timeout);
         let result = (|| -> grit_protocol::Result<()> {
             out.write_all(&preamble).map_err(grit_protocol::Error::Io)?;
             match service {
@@ -1086,12 +1146,13 @@ async fn stream_info_refs_advertisement(
         }
     });
     let content_type = format!("application/x-{}-advertisement", service.name());
-    streaming_channel_response(task, rx, "info/refs failed", content_type).await
+    streaming_channel_response(task, rx, hold, "info/refs failed", content_type).await
 }
 
-async fn streaming_channel_response(
+async fn streaming_channel_response<H: Send + 'static>(
     task: tokio::task::JoinHandle<grit_protocol::Result<()>>,
     mut rx: tokio::sync::mpsc::Receiver<Chunk>,
+    hold: H,
     fail_label: &'static str,
     content_type: String,
 ) -> Response<Body> {
@@ -1104,8 +1165,8 @@ async fn streaming_channel_response(
             Err(e) => return internal_error(&format!("{fail_label}: {e}")),
         },
     };
-    let rest = futures_util::stream::unfold(rx, |mut rx| async move {
-        rx.recv().await.map(|chunk| (chunk, rx))
+    let rest = futures_util::stream::unfold((rx, hold), |(mut rx, hold)| async move {
+        rx.recv().await.map(|chunk| (chunk, (rx, hold)))
     });
     let body = futures_util::StreamExt::chain(
         futures_util::stream::once(std::future::ready(Ok::<Bytes, std::io::Error>(first))),
@@ -1129,6 +1190,7 @@ async fn stream_upload_pack<H: Send + 'static>(
     options: RepositoryOptions,
     extensions: grit_protocol::Extensions,
     session: grit_protocol::ServeSession,
+    idle_timeout: Duration,
     hold: H,
 ) -> (
     Response<Body>,
@@ -1139,7 +1201,7 @@ async fn stream_upload_pack<H: Send + 'static>(
     let mut bridge = Some(bridge);
     let task = tokio::task::spawn_blocking(move || {
         let mut request = fetch_request_body(raw, encoding);
-        let mut out = ChannelWriter::new(tx);
+        let mut out = ChannelWriter::new(tx, idle_timeout);
         let result = grit_protocol::upload_pack::stateless_rpc_to_reader_with_session(
             &repo_path,
             &mut request,

@@ -2354,6 +2354,25 @@ enum Command {
         /// Do not build or offer clone bundles.
         #[arg(long)]
         no_bundles: bool,
+        /// Maximum time to wait for complete request headers on Git connections.
+        #[arg(
+            long,
+            value_name = "DURATION",
+            default_value = "30s",
+            value_parser = commands::serve_http::parse_interval
+        )]
+        header_timeout: std::time::Duration,
+        /// Drop Git requests whose body or upload-pack response stalls this long between chunks.
+        #[arg(
+            long,
+            value_name = "DURATION",
+            default_value = "60s",
+            value_parser = commands::serve_http::parse_interval
+        )]
+        idle_timeout: std::time::Duration,
+        /// Concurrent Git smart-HTTP requests before new ones get HTTP 503.
+        #[arg(long, value_name = "N", default_value = "128")]
+        max_git_requests: usize,
         /// After SIGTERM, SIGINT or SIGHUP, keep serving in-flight requests for this long before closing remaining connections (`0s` waits until they finish).
         #[arg(
             long,
@@ -4671,6 +4690,9 @@ fn dispatch(
             email,
             bundle_interval,
             no_bundles,
+            header_timeout,
+            idle_timeout,
+            max_git_requests,
             shutdown_timeout,
         } => {
             let db = db.as_deref();
@@ -4714,11 +4736,17 @@ fn dispatch(
                         interval: bundle_interval,
                         ..Default::default()
                     };
+                    let limits = grit_http_server::server::ServeLimits {
+                        header_timeout,
+                        idle_timeout,
+                        max_git_requests,
+                    };
                     commands::serve_http::run(
                         &root,
                         db,
                         &bind,
                         bundles,
+                        limits,
                         grit_http_server::server::Shutdown::grace(shutdown_timeout),
                     )?;
                     Ok(ExitStatus::Success)

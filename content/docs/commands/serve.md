@@ -8,7 +8,7 @@ order: 7
 ## Synopsis
 
 ```text
-grit serve [--root <path>] [--db <file>] [--bind <host:port>] [--bundle-interval <duration>] [--no-bundles] [--shutdown-timeout <duration>]
+grit serve [--root <path>] [--db <file>] [--bind <host:port>] [--bundle-interval <duration>] [--no-bundles] [--header-timeout <duration>] [--idle-timeout <duration>] [--max-git-requests <n>] [--shutdown-timeout <duration>]
 grit serve --setup [--email <email>] [--root <path>] [--db <file>]
 grit serve add-user <email> [--admin] [--root <path>] [--db <file>]
 grit serve token <email> [--root <path>] [--db <file>]
@@ -122,8 +122,9 @@ To keep a repository's big blobs out of it, host the LOP as a second repository 
 
 `grit serve` with no subcommand and no `--setup` runs the server until interrupted. It refuses to start until `--setup` has created a user. It listens on `127.0.0.1:8080`; use `--bind 0.0.0.0:8080` to accept connections from other machines. The server speaks plain HTTP, so put it behind a TLS-terminating proxy before sending passwords and tokens across a network you don't trust.
 
-On SIGTERM, SIGINT or SIGHUP (Ctrl+C on Windows), the server logs that it is closing the listener, stops accepting new connections, and lets in-flight clone and push requests finish. The clone-bundle background thread stops after its current build. By default it waits up to `--shutdown-timeout` (30 seconds) for those requests; `--shutdown-timeout 0s` waits with no cap until they finish. When the grace period ends, remaining connections are closed. A second signal in that window exits immediately without waiting.
+Git smart HTTP connections drop peers that stop sending: `--header-timeout` (default `30s`) closes incomplete request headers, and `--idle-timeout` (default `60s`) closes POST bodies or upload-pack responses that stall between chunks (a large push that keeps sending is unaffected). When `--max-git-requests` concurrent Git operations (default `128`) are already in flight, further `info/refs`, fetch, push and resumable-push apply requests get HTTP `503` immediately instead of queuing, so the web UI and sign-in still have threads to answer.
 
+On SIGTERM, SIGINT or SIGHUP (Ctrl+C on Windows), the server logs that it is closing the listener, stops accepting new connections, and lets in-flight clone and push requests finish. The clone-bundle background thread stops after its current build. By default it waits up to `--shutdown-timeout` (30 seconds) for those requests; `--shutdown-timeout 0s` waits with no cap until they finish. When the grace period ends, remaining connections are closed. A second signal in that window exits immediately without waiting.
 ## Options
 
 | Option | Description |
@@ -135,6 +136,9 @@ On SIGTERM, SIGINT or SIGHUP (Ctrl+C on Windows), the server logs that it is clo
 | `--email <email>` | Email address of the admin `--setup` creates. Asked for on a terminal when omitted. Requires `--setup`. |
 | `--bundle-interval <duration>` | How old a changed repository's clone bundle gets before a new one is built: a number with `s`, `m`, `h` or `d`. Defaults to `24h`. |
 | `--no-bundles` | Do not build or advertise clone bundles. |
+| `--header-timeout <duration>` | How long to wait for a complete HTTP request header on a new connection before closing it. Defaults to `30s`. |
+| `--idle-timeout <duration>` | How long to wait between bytes on a Git smart HTTP POST body or upload-pack response before closing the connection. Defaults to `60s`. |
+| `--max-git-requests <n>` | Maximum concurrent Git smart HTTP operations (`info/refs`, fetch, push, resumable push). Further requests get HTTP `503`. Defaults to `128`. |
 | `--shutdown-timeout <duration>` | After a shutdown signal, how long to keep serving in-flight requests before closing remaining connections. Defaults to `30s`; `0s` waits until they finish. A second signal exits immediately. |
 | `add-user <email>` | Add a user, named by their email address. Prompts for a password, or generates a temporary one. |
 | `add-user --admin` | Make the new user an admin. |

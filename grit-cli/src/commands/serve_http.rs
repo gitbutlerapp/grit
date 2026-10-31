@@ -9,7 +9,9 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use grit_http_server::server::{default_database_path, ServeConfig, Server, ServerError};
+use grit_http_server::server::{
+    default_database_path, ServeConfig, ServeLimits, Server, ServerError, Shutdown,
+};
 use grit_http_server::store::{generate_password, Access, AuthStore, HashedPassword, Token};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -50,7 +52,8 @@ pub fn run(
     db: Option<&Path>,
     bind: &str,
     bundles: grit_http_server::bundles::BundleSettings,
-    shutdown: grit_http_server::server::Shutdown,
+    limits: ServeLimits,
+    shutdown: Shutdown,
 ) -> Result<()> {
     let root =
         std::fs::canonicalize(root).with_context(|| format!("cannot serve {}", root.display()))?;
@@ -69,6 +72,7 @@ pub fn run(
             )),
         ),
         bundles,
+        limits,
     };
     let server = match Server::bind(config, bind) {
         Ok(server) => server,

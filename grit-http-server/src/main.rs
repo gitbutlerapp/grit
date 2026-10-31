@@ -19,6 +19,7 @@ use axum::{
     Router,
 };
 use clap::Parser;
+use grit_http_server::limits::{parse_duration, serve_with_shutdown, ServeLimits};
 use grit_http_server::smart_http::{self, Service};
 
 #[derive(Parser)]
@@ -52,11 +53,34 @@ struct Args {
     /// the client's `http.saveCookies` persistence path end-to-end.
     #[arg(long, value_name = "NAME=VALUE")]
     set_cookie: Option<String>,
+
+    /// Maximum time to wait for complete request headers.
+    #[arg(
+        long,
+        value_name = "DURATION",
+        default_value = "30s",
+        value_parser = parse_duration
+    )]
+    header_timeout: std::time::Duration,
+
+    /// Close connections that stop sending request body chunks for this long.
+    #[arg(
+        long,
+        value_name = "DURATION",
+        default_value = "60s",
+        value_parser = parse_duration
+    )]
+    idle_timeout: std::time::Duration,
+
+    /// Concurrent smart-HTTP Git requests before new ones get HTTP 503.
+    #[arg(long, value_name = "N", default_value = "128")]
+    max_git_requests: usize,
 }
 
 #[derive(Clone)]
 struct AppState {
     root: PathBuf,
+    idle_timeout: std::time::Duration,
     /// Repository open/config options captured from the server process at startup.
     repository_options: grit_protocol::RepositoryOptions,
     /// The expected `Authorization: Basic …` header value when basic auth is
@@ -185,6 +209,7 @@ async fn main() -> Result<()> {
     let repository_options = grit_protocol::repository_options_from_process();
     let state = Arc::new(AppState {
         root,
+        idle_timeout: args.idle_timeout,
         repository_options,
         expected_auth,
         log_headers: args.log_headers,
@@ -197,9 +222,15 @@ async fn main() -> Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&args.bind).await?;
     eprintln!("Listening on {}", args.bind);
-    grit_http_server::shutdown::serve_until_shutdown(
-        listener,
+    let limits = ServeLimits {
+        header_timeout: args.header_timeout,
+        idle_timeout: args.idle_timeout,
+        max_git_requests: args.max_git_requests,
+    };
+    serve_with_shutdown(
         app,
+        listener,
+        limits,
         grit_http_server::server::Shutdown::default(),
         || {},
     )
@@ -233,12 +264,14 @@ async fn info_refs_dispatch(
         Err(e) => return *e,
     };
     let protocol_version = smart_http::protocol_version_from_headers(&headers);
-    let response = smart_http::info_refs(
+    let response = smart_http::info_refs_holding(
         repo_path,
         service,
         protocol_version,
         state.repository_options.clone(),
         grit_protocol::Extensions::default(),
+        state.idle_timeout,
+        (),
     )
     .await;
     state.with_cookie(response)
@@ -276,7 +309,7 @@ async fn rpc_dispatch(
         Err(e) => return finish_with_discarded_body(body, *e).await,
     };
     let protocol_version = smart_http::protocol_version_from_headers(&headers);
-    let response = smart_http::rpc(
+    let (response, _follow_up) = smart_http::rpc_holding(
         repo_path,
         service,
         protocol_version,
@@ -285,6 +318,8 @@ async fn rpc_dispatch(
         state.repository_options.clone(),
         grit_protocol::Extensions::default(),
         grit_protocol::ServeSession::none(),
+        state.idle_timeout,
+        (),
     )
     .await;
     state.with_cookie(response)

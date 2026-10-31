@@ -51,8 +51,8 @@ use grit_protocol::RepositoryOptions;
 
 use crate::bundles::{BundleScheduler, BundleSettings};
 use crate::checkout_locks::CheckoutLocks;
+use crate::limits;
 use crate::login::{LoginError, PendingLogins, PollOutcome};
-use crate::shutdown::serve_until_shutdown;
 use crate::smart_http::{self, Service};
 use crate::store::{
     normalize_repository_name, Access, AuthStore, HashedPassword, StoreError, Token, User,
@@ -173,6 +173,8 @@ pub fn default_database_path(root: &Path) -> PathBuf {
     root.join(DATABASE_FILE_NAME)
 }
 
+pub use crate::limits::ServeLimits;
+
 /// What [`Server::bind`] needs.
 #[derive(Debug, Clone)]
 pub struct ServeConfig {
@@ -180,6 +182,8 @@ pub struct ServeConfig {
     pub root: PathBuf,
     /// The user database (see [`default_database_path`]).
     pub database: PathBuf,
+    /// Header, body idle and Git concurrency limits.
+    pub limits: ServeLimits,
     /// Environment used to load global and system config for each repository.
     ///
     /// A [`RepositoryOptions::promisor_fetcher`] here is given only to upload-pack
@@ -197,6 +201,8 @@ pub(crate) struct ServerState {
     pub(crate) repositories: Repositories,
     store: Mutex<AuthStore>,
     logins: Mutex<PendingLogins>,
+    pub(crate) limits: ServeLimits,
+    git_slots: Arc<tokio::sync::Semaphore>,
     /// [`ServeConfig::repository_options`] without the promisor fetcher.
     pub(crate) options: RepositoryOptions,
     /// [`ServeConfig::repository_options`] as given, for smart-protocol and
@@ -241,12 +247,16 @@ impl Server {
         let listener = std::net::TcpListener::bind(address)?;
         listener.set_nonblocking(true)?;
         let stand_in_password = HashedPassword::new(Token::generate()?.secret())?;
+        let limits = config.limits.clone();
+        let git_slots = limits.git_semaphore();
         Ok(Self {
             listener,
             state: Arc::new(ServerState {
                 repositories: Repositories::at(&config.root),
                 store: Mutex::new(store),
                 logins: Mutex::new(PendingLogins::default()),
+                limits,
+                git_slots,
                 options: config
                     .repository_options
                     .clone()
@@ -291,10 +301,10 @@ impl Server {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?;
+        let limits = self.state.limits.clone();
         runtime.block_on(async move {
             let listener = tokio::net::TcpListener::from_std(self.listener)?;
-            let app = router(self.state);
-            serve_until_shutdown(listener, app, shutdown, move || {
+            limits::serve_with_shutdown(router(self.state), listener, limits, shutdown, move || {
                 *state.scheduler.lock().unwrap_or_else(|e| e.into_inner()) = None;
             })
             .await
@@ -578,6 +588,18 @@ fn needed_access(service: Service) -> Access {
     }
 }
 
+fn try_git_slot(state: &Arc<ServerState>) -> Result<tokio::sync::OwnedSemaphorePermit, Rejection> {
+    state.git_slots.clone().try_acquire_owned().map_err(|_| {
+        Box::new(
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "too many concurrent git requests\n",
+            )
+                .into_response(),
+        )
+    })
+}
+
 async fn get_dispatch(
     State(state): State<Arc<ServerState>>,
     UrlPath(path): UrlPath<String>,
@@ -599,12 +621,19 @@ async fn get_dispatch(
     };
     let protocol_version = smart_http::protocol_version_from_headers(&headers);
     let extensions = state.extensions(&repo, service, &headers);
-    smart_http::info_refs(
+    let idle = state.limits.idle_timeout;
+    let slot = match try_git_slot(&state) {
+        Ok(slot) => slot,
+        Err(resp) => return *resp,
+    };
+    smart_http::info_refs_holding(
         repo.path,
         service,
         protocol_version,
         state.smart_options.clone(),
         extensions,
+        idle,
+        slot,
     )
     .await
 }
@@ -721,6 +750,10 @@ async fn post_dispatch(
             }
             UploadPath::Receive(id) => {
                 let options = repository_options_for_pusher(&state.smart_options, &found.email);
+                let slot = match try_git_slot(&state) {
+                    Ok(slot) => slot,
+                    Err(resp) => return finish_with_discarded_body(body, *resp).await,
+                };
                 crate::uploads::receive(
                     found.repo.path,
                     id,
@@ -728,6 +761,7 @@ async fn post_dispatch(
                     &state.uploads,
                     body,
                     options,
+                    slot,
                     || state.pushed(),
                 )
                 .await
@@ -755,7 +789,12 @@ async fn post_dispatch(
     } else {
         state.smart_options.clone()
     };
-    let response = smart_http::rpc(
+    let idle = state.limits.idle_timeout;
+    let slot = match try_git_slot(&state) {
+        Ok(slot) => slot,
+        Err(resp) => return finish_with_discarded_body(body, *resp).await,
+    };
+    let (response, _follow_up) = smart_http::rpc_holding(
         found.repo.path,
         service,
         protocol_version,
@@ -764,6 +803,8 @@ async fn post_dispatch(
         options,
         extensions,
         grit_protocol::ServeSession::none(),
+        idle,
+        slot,
     )
     .await;
     if service == Service::ReceivePack && response.status().is_success() {
