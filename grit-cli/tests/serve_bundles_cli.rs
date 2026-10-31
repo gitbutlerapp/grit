@@ -286,6 +286,38 @@ impl Read for Dropping {
 }
 
 #[test]
+fn clone_with_url_credentials_uses_the_server_bundle() {
+    let f = fixture();
+    let (_server, url) = serve(&f.home, &f.repos);
+    wait_for_bundle(&f.demo, None);
+    let url_home = tempfile::tempdir().expect("url clone home");
+    let host = url.trim_start_matches("http://");
+    let clone_url = format!("http://admin%40example.com:{}@{host}/demo.git", f.token);
+    let out = grit(
+        url_home.path(),
+        url_home.path(),
+        &["--json", "clone", &clone_url, "copy"],
+    )
+    .output()
+    .expect("spawn grit clone");
+    assert!(
+        out.status.success(),
+        "grit clone failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let value: Value = serde_json::from_slice(&out.stdout).expect("JSON output");
+    assert!(
+        value.get("bundle").is_some(),
+        "URL credentials should use the server bundle: {value}"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("could not use the server's bundle"),
+        "bundle auth from URL credentials must not fall back: {stderr}"
+    );
+}
+
+#[test]
 fn clones_start_from_the_server_bundle_and_resume_its_download() {
     let f = fixture();
     let (_server, url) = serve(&f.home, &f.repos);

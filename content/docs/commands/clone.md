@@ -64,6 +64,8 @@ The bundle download has its own display: an arrow and the bundle's URL, then a b
 
 When it finishes, the line becomes `✓ bundle 58.5 MiB in 8.5s · 5.23 MiB/s · resumed at 14.1 MiB`, and the summary gets a `bundle` row. Shallow (`--depth`) and partial (`--blobs`) clones never use a bundle, and `transfer.bundleURI=false` in config turns bundles off. When the bundle cannot be used, clone warns and fetches everything as usual.
 
+The advertised bundle URL usually has no credentials in it. If the clone URL carries `user:password@` (typical for CI tokens), grit reuses that authentication for the bundle download when it is on the same host as the repository. Authentication failures are not retried like a dropped connection.
+
 For private GitHub repositories over HTTPS, sign in first with [`grit auth`](../auth/). For other hosts, save a user name and token first with `grit auth <url> --username <user> --token <token>`.
 
 When the remote has no commits yet (an empty bare repository), grit still creates the destination directory, configures `origin`, and points `HEAD` at the remote's default branch without checking out files. Human output includes a short note on stderr (`note: the remote repository is empty.`); `--json` reports `"files": 0`, `"no_checkout_reason": "empty_remote"`, and the configured branch name.
