@@ -290,17 +290,34 @@ pub(crate) fn is_ancestor_unless_rewound(
     cache.is_ancestor(ancestor, descendant)
 }
 
-/// Whether `target` lies on `from`'s first-parent chain, walking only commits dated at or
-/// after `target`.
+/// Whether `target` lies on `from`'s first-parent chain, walking only commits at or above
+/// `target` (commit-graph generation when both are ranked, else committer date).
 fn first_parent_chain_reaches_newer(
     cache: &mut CommitGraphCache<'_>,
     from: ObjectId,
     target: ObjectId,
 ) -> Result<bool> {
+    let target_rank = commit_rank_for_walk(cache, target);
+    if target_rank != UNRANKED_COMMIT {
+        let from_rank = commit_rank_for_walk(cache, from);
+        if from_rank != UNRANKED_COMMIT {
+            let mut cur = from;
+            while commit_rank_for_walk(cache, cur) > target_rank {
+                let Some(parent) = cache.first_parent_of(cur)? else {
+                    return Ok(false);
+                };
+                if parent == target {
+                    return Ok(true);
+                }
+                cur = parent;
+            }
+            return Ok(false);
+        }
+    }
     let target_time = cache.commit_time(target)?;
     let mut cur = from;
     while cache.commit_time(cur)? >= target_time {
-        let Some(&parent) = cache.parents_of(cur)?.first() else {
+        let Some(parent) = cache.first_parent_of(cur)? else {
             return Ok(false);
         };
         if parent == target {
@@ -2907,6 +2924,54 @@ impl<'r> CommitGraphCache<'r> {
         time
     }
 
+    /// First parent of `oid`, when present.
+    fn first_parent_of(&mut self, oid: ObjectId) -> Result<Option<ObjectId>> {
+        Ok(self.parents_of(oid)?.first().copied())
+    }
+
+    /// Walk `descendant`'s first-parent chain toward `ancestor` without a heap or visited set.
+    ///
+    /// Returns `true` when `ancestor` is found. When the commit-graph ranks both commits,
+    /// stops once generations drop to `ancestor`'s rank and returns `false` so the full walk
+    /// can follow merge parents. Otherwise walks to the root.
+    fn first_parent_forward_scan_reaches_ancestor(
+        &mut self,
+        ancestor: ObjectId,
+        descendant: ObjectId,
+    ) -> Result<bool> {
+        let ancestor_gen = commit_graph_rank(self, ancestor);
+        let mut cur = descendant;
+        loop {
+            if cur == ancestor {
+                return Ok(true);
+            }
+            let Some(parent) = self.first_parent_of(cur)? else {
+                return Ok(false);
+            };
+            if let Some(limit) = ancestor_gen {
+                let parent_gen = commit_rank_for_walk(self, parent);
+                if parent_gen != UNRANKED_COMMIT && parent_gen <= limit {
+                    return Ok(false);
+                }
+            }
+            cur = parent;
+        }
+    }
+
+    /// Whether `oid` is in the commit-graph at or below `ancestor`'s generation, so it cannot
+    /// reach a strictly newer `ancestor` without leaving the graph.
+    fn graph_generation_cannot_reach_ancestor(
+        &self,
+        ancestor: ObjectId,
+        oid: ObjectId,
+    ) -> bool {
+        let Some(limit) = commit_graph_rank(self, ancestor) else {
+            return false;
+        };
+        let generation = commit_graph_rank(self, oid);
+        generation.is_some_and(|g| g <= limit)
+    }
+
     /// Whether `ancestor` is an ancestor of (or equal to) `descendant`.
     ///
     /// Walks parents from `descendant` newest-first (a date-ordered heap),
@@ -2926,7 +2991,13 @@ impl<'r> CommitGraphCache<'r> {
             return Ok(true);
         }
 
+        if self.first_parent_forward_scan_reaches_ancestor(ancestor, descendant)? {
+            return Ok(true);
+        }
+
         let a_time = self.commit_time(ancestor)?;
+        let both_ranked = commit_graph_rank(self, ancestor).is_some()
+            && commit_graph_rank(self, descendant).is_some();
 
         // Tolerate up to this many commits below the cutoff before concluding the
         // ancestor is unreachable; absorbs realistic clock skew without walking
@@ -2944,6 +3015,9 @@ impl<'r> CommitGraphCache<'r> {
             if oid == ancestor {
                 return Ok(true);
             }
+            if both_ranked && self.graph_generation_cannot_reach_ancestor(ancestor, oid) {
+                continue;
+            }
             if time < a_time {
                 slop -= 1;
                 if slop <= 0 {
@@ -2953,6 +3027,9 @@ impl<'r> CommitGraphCache<'r> {
                 slop = SLOP;
             }
             for parent in self.parents_of(oid)? {
+                if both_ranked && self.graph_generation_cannot_reach_ancestor(ancestor, parent) {
+                    continue;
+                }
                 if visited.insert(parent) {
                     let pt = self.commit_time(parent)?;
                     heap.push((pt, parent));
@@ -5122,6 +5199,41 @@ mod tests {
         assert!(slop_lookups >= 100, "the date-slop walk ({slop_lookups})");
         // The target, then `wip` and the three commits down the chain to it.
         assert!(lookups <= 5, "HEAD~3 is found on the chain ({lookups})");
+        Ok(())
+    }
+
+    #[test]
+    fn is_ancestor_long_first_parent_chain_uses_forward_scan() -> Result<()> {
+        use super::intersect_walk_test_hooks::{
+            commit_parent_lookups, reset_commit_parent_lookups,
+        };
+
+        const LEN: usize = 3_000;
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let chain = write_chain(&repo, LEN, |i| 100 + i as i64)?;
+        let tip = chain[LEN - 1];
+        let ancestor = chain[0];
+
+        clear_commit_linkage(&repo);
+        reset_commit_parent_lookups();
+        assert!(is_ancestor(&repo, ancestor, tip)?);
+        let lookups = commit_parent_lookups();
+        assert!(
+            lookups <= LEN + 20,
+            "first-parent forward scan must walk the chain, not the slop heap ({lookups})"
+        );
+
+        repo.odb().write_commit_graph()?;
+        let repo = open_test_bare(&dir)?;
+        clear_commit_linkage(&repo);
+        reset_commit_parent_lookups();
+        assert!(is_ancestor(&repo, ancestor, tip)?);
+        let ranked_lookups = commit_parent_lookups();
+        assert!(
+            ranked_lookups <= LEN + 20,
+            "generation-ranked forward scan must stay on the chain ({ranked_lookups})"
+        );
         Ok(())
     }
 

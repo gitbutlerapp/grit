@@ -444,6 +444,11 @@ name = "checkout_wide_tree_rss"
 path = "tests/checkout_wide_tree_rss.rs"
 required-features = ["full-tests"]
 
+[[test]]
+name = "is_ancestor_24k_perf_git_compat"
+path = "tests/is_ancestor_24k_perf_git_compat.rs"
+required-features = ["full-tests"]
+
 [[bench]]
 name = "pack_frontier"
 harness = false
