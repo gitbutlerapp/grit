@@ -7,7 +7,7 @@ use crate::progress::summary::{stdout_color, transfer_header, TransferSummary};
 use crate::progress::TerminalProgress;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::Cancel;
 use grit_lib::remote::fetch_request::{resolve_fetch_invocation, resolve_remote_argument};
 use grit_lib::remote::transfer::{
     resolve_fetch_prune, resolve_fetch_tags, FetchDepth, FetchOptions,
@@ -305,6 +305,7 @@ pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchRunOutcome> {
 }
 
 fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
         .context("could not load config")?;
@@ -359,6 +360,7 @@ fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
         args.force,
         &factory,
         &mut progress,
+        &interrupt,
     ) {
         Ok(result) => result,
         Err(err) => {
@@ -374,6 +376,7 @@ fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
                     args.force,
                     &factory,
                     &mut progress,
+                    &interrupt,
                 )?
             } else {
                 return Err(err);
@@ -419,6 +422,7 @@ fn shallow_json(
 }
 
 fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
         .context("could not load config")?;
@@ -438,7 +442,7 @@ fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
             args.prune_override(),
             args.tag_mode_override(),
             &mut progress,
-            &NeverCancel,
+            &interrupt,
             Some(&factory),
         )
         .context("could not fetch all remotes")?;
@@ -547,6 +551,7 @@ fn fetch_once(
     force: bool,
     factory: &DefaultHttpClientFactory,
     progress: &mut TerminalProgress,
+    cancel: &dyn Cancel,
 ) -> Result<grit_lib::remote::transfer::FetchOutcome> {
     let remote = resolve_remote_argument(config, &invocation.remote).map_err(map_remote_error)?;
     remote
@@ -565,7 +570,7 @@ fn fetch_once(
                 opts
             },
             progress,
-            &NeverCancel,
+            cancel,
             Some(factory),
         )
         .map_err(map_remote_fetch_error)
@@ -586,6 +591,7 @@ pub(crate) fn map_remote_error(err: RemoteError) -> anyhow::Error {
             crate::json_error::map_lib_error(grit_lib::error::Error::HashCollision { oid })
         }
         RemoteError::Library(hook @ grit_lib::error::Error::Hook(_)) => anyhow::Error::new(hook),
+        RemoteError::Library(lib) if lib.is_cancelled() => anyhow::Error::new(lib),
         RemoteError::Library(lib) if lib.is_remote_unreadable() => anyhow::Error::new(lib),
         RemoteError::Library(lib) => anyhow::Error::msg(RemoteError::Library(lib).to_string()),
         other => anyhow::Error::msg(other.to_string()),

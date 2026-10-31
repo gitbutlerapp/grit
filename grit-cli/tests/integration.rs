@@ -247,6 +247,9 @@ mod exit_status_contract;
 #[cfg(feature = "full-tests")]
 #[path = "fetch_all_cli.rs"]
 mod fetch_all_cli;
+#[cfg(unix)]
+#[path = "fetch_interrupt.rs"]
+mod fetch_interrupt;
 #[cfg(feature = "full-tests")]
 #[path = "fetch_pull_branch_remote.rs"]
 mod fetch_pull_branch_remote;

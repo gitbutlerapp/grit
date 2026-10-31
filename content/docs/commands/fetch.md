@@ -45,6 +45,8 @@ When `core.logAllRefUpdates` is enabled (grit's default for new repositories), e
 
 `--all` fetches every configured remote in config order. Remotes with `remote.<name>.skipFetchAll=true` are skipped. Each remote uses its own `remote.<name>.prune` and `remote.<name>.tagOpt` unless `--prune`, `--no-prune`, `--tags`, or `--no-tags` override on the command line. Failures on one remote do not stop the rest; the command exits **1** if any remote failed or any ref update was rejected. `--all` cannot be combined with `<remote>` or `<refspec>` arguments.
 
+When a fetch is interrupted (`SIGINT`, `SIGTERM`, or `SIGHUP`, including Ctrl+C from a terminal), grit cancels the in-progress transfer, removes any partial pack temp file it was writing, and exits **130** without leaving `tmp_pack_*` or pack install staging directories behind. Stale temp files from a hard kill (`SIGKILL`) are removed later by [`grit gc`](gc.md) once they are older than `gc.pruneExpire`, the same way `git gc` prunes `tmp_pack_*`.
+
 ## Options
 
 | Option | Description |
