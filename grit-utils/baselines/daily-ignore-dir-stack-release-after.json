@@ -1,0 +1,170 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-31T03:29:25.523330436Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.26",
+    "grit_commit": "4899941dbe1e60d6be3d67e396dcb8d0b21f647e"
+  },
+  "scenarios": [
+    {
+      "id": "ignore/check-1000@synth-10k",
+      "area": "ignore",
+      "description": "Check 1000 paths against ignore rules vs git check-ignore",
+      "git": {
+        "median_wall_ms": 2.249363,
+        "peak_rss_bytes": 6750208,
+        "runs": 40,
+        "samples_ms": [
+          2.244,
+          2.398,
+          7.475,
+          2.593,
+          2.241,
+          2.128,
+          2.426,
+          2.344,
+          2.172,
+          2.326,
+          2.07,
+          2.162,
+          2.49,
+          2.276,
+          2.318,
+          2.305,
+          2.022,
+          2.391,
+          2.498,
+          2.003,
+          2.07,
+          2.378,
+          2.438,
+          2.261,
+          1.901,
+          2.049,
+          2.238,
+          2.202,
+          2.084,
+          2.161,
+          2.471,
+          2.457,
+          2.283,
+          2.061,
+          2.136,
+          2.47,
+          2.242,
+          2.148,
+          2.255,
+          1.91
+        ],
+        "min_ms": 1.900846,
+        "max_ms": 7.475402,
+        "stddev_ms": 0.8437061849692288
+      },
+      "grit": {
+        "median_wall_ms": 5.5594245,
+        "peak_rss_bytes": 18452480,
+        "runs": 40,
+        "samples_ms": [
+          6.077,
+          5.591,
+          5.792,
+          5.75,
+          5.449,
+          5.336,
+          5.516,
+          5.398,
+          5.561,
+          5.403,
+          5.408,
+          5.583,
+          5.713,
+          5.558,
+          5.569,
+          5.315,
+          5.264,
+          5.497,
+          5.537,
+          5.262,
+          5.245,
+          5.564,
+          5.496,
+          5.02,
+          5.663,
+          5.523,
+          5.658,
+          5.791,
+          5.433,
+          5.64,
+          5.647,
+          5.654,
+          5.474,
+          5.596,
+          5.747,
+          5.578,
+          5.767,
+          5.622,
+          5.401,
+          5.317
+        ],
+        "min_ms": 5.020387,
+        "max_ms": 6.076606,
+        "stddev_ms": 0.1908211045294075
+      },
+      "ratio": 2.4715550580319854,
+      "detail": {
+        "commands": {
+          "git": "cd /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k && git check-ignore -q --stdin < /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k/bench-ignore-paths.txt",
+          "grit": "set -eu\ncd /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k && xargs grit ignore check --all < /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k/bench-ignore-paths.txt"
+        },
+        "phases": {
+          "git": [
+            {
+              "name": "index: do_read_index",
+              "ms": 0.052,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "cache_tree: read",
+              "ms": 0.02,
+              "count": 1,
+              "depth": 0
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.236,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.index.read",
+              "ms": 0.032,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.031,
+              "count": 2,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

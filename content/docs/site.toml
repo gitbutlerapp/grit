@@ -163,6 +163,8 @@ baseline = [
   "grit-utils/baselines/daily-ignore-normalization-dist-after.json",
   "grit-utils/baselines/daily-ignore-normalization-release-before.json",
   "grit-utils/baselines/daily-ignore-normalization-release-after.json",
+  "grit-utils/baselines/daily-ignore-dir-stack-release-before.json",
+  "grit-utils/baselines/daily-ignore-dir-stack-release-after.json",
   "grit-utils/baselines/fetch-local-unshallow-tags.json",
   "grit-utils/baselines/log-stat-before.json",
   "grit-utils/baselines/log-stat-after.json",
