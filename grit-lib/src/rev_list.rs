@@ -5456,6 +5456,15 @@ fn can_stream_default_order(exclude: &[ObjectId], options: &RevListOptions) -> b
         && options.until_cutoff.is_none()
 }
 
+/// Default-order walk with a `--since` frontier and no `-n`: same heap stop as
+/// [`streaming_date_walk`], with `--until` applied only when emitting.
+fn can_stream_since_cutoff_order(exclude: &[ObjectId], options: &RevListOptions) -> bool {
+    exclude.is_empty()
+        && options.ordering == OrderingMode::Default
+        && options.since_cutoff.is_some()
+        && plain_commit_walk(options, false)
+}
+
 /// Whether a [`streaming_date_walk`] visitor wants more commits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WalkControl {
@@ -5945,7 +5954,8 @@ fn bounded_limit_list_common(options: &RevListOptions) -> bool {
 }
 
 fn bounded_limit_list_common_inner(options: &RevListOptions, graph_topo: bool) -> bool {
-    (options.max_count.is_some() || options.skip > 0) && plain_commit_walk(options, graph_topo)
+    (options.max_count.is_some() || options.skip > 0 || options.since_cutoff.is_some())
+        && plain_commit_walk(options, graph_topo)
 }
 
 /// Whether the walk only needs commits in date order, with nothing that forces the full
@@ -5962,7 +5972,6 @@ fn plain_commit_walk(options: &RevListOptions, graph_topo: bool) -> bool {
         .as_ref()
         .is_none_or(|f| !f.is_active())
         && options.pickaxe.is_none()
-        && !options.all_refs
         && !options.first_parent
         && !options.objects
         && options.paths.is_empty()
@@ -6178,6 +6187,9 @@ fn try_bounded_limit_list(
     if can_stream_default_order(exclude, options) {
         return streaming_default_order_list(repo, include, options).map(Some);
     }
+    if can_stream_since_cutoff_order(exclude, options) {
+        return streaming_since_cutoff_bounded_list(repo, include, options).map(Some);
+    }
     let need = options
         .skip
         .saturating_add(options.max_count.unwrap_or(usize::MAX));
@@ -6230,7 +6242,14 @@ fn try_bounded_limit_list(
     if options.reverse {
         ordered.reverse();
     }
-    Ok(Some(rev_list_result_from_commits(ordered)))
+    let result = if options.count {
+        let mut result = rev_list_result_from_commits(Vec::new());
+        result.reachable_commit_count = Some(ordered.len());
+        result
+    } else {
+        rev_list_result_from_commits(ordered)
+    };
+    Ok(Some(result))
 }
 
 /// How many commits a date walk listing `listed` commits is likely to parse.
@@ -6288,6 +6307,82 @@ fn streaming_default_order_list(
         ordered.reverse();
     }
     let mut result = rev_list_result_from_commits(ordered);
+    result.commit_data = commit_data;
+    Ok(result)
+}
+
+/// List or count commits in default date order with a `--since` frontier stop.
+fn streaming_since_cutoff_bounded_list(
+    repo: &Repository,
+    include: &[ObjectId],
+    options: &RevListOptions,
+) -> Result<RevListResult> {
+    let max_count = options.max_count;
+    let mut ordered = Vec::with_capacity(max_count.unwrap_or(64).min(4096));
+    let (match_count, commit_data) =
+        repo.odb()
+            .with_pack_read_context(|| -> Result<(usize, OidHashMap<CommitData>)> {
+                let mut graph =
+                    CommitGraph::with_commit_graph(repo, false, options.use_commit_graph);
+                if options.retain_commit_data && !options.count {
+                    graph.retain_parsed_commits(expected_parsed_commits(
+                        options.skip.saturating_add(max_count.unwrap_or(4096)),
+                    ));
+                }
+                let since = options.since_cutoff;
+                let until = options.until_cutoff;
+                let mut matched_seen = 0usize;
+                let mut match_count = 0usize;
+                streaming_date_walk(
+                    &mut graph,
+                    include,
+                    &HashSet::new(),
+                    false,
+                    since,
+                    |graph, oid| {
+                        let ts = graph.committer_time(oid);
+                        let in_window =
+                            !until.is_some_and(|u| ts > u) && !since.is_some_and(|s| ts < s);
+                        if in_window {
+                            matched_seen += 1;
+                            if options.count {
+                                match_count += 1;
+                            } else if matched_seen > options.skip
+                                && max_count.is_none_or(|m| ordered.len() < m)
+                            {
+                                ordered.push(oid);
+                            }
+                        }
+                        Ok(if options.count {
+                            if max_count.is_some_and(|m| match_count >= m) {
+                                WalkControl::Stop
+                            } else {
+                                WalkControl::Continue
+                            }
+                        } else if max_count.is_some_and(|m| ordered.len() >= m) {
+                            WalkControl::Stop
+                        } else {
+                            WalkControl::Continue
+                        })
+                    },
+                )?;
+                let commit_data = if options.retain_commit_data && !options.count {
+                    graph.take_retained_commits(&ordered)
+                } else {
+                    oid_hash_map()
+                };
+                Ok((match_count, commit_data))
+            })?;
+    if options.reverse {
+        ordered.reverse();
+    }
+    let mut result = if options.count {
+        let mut result = rev_list_result_from_commits(Vec::new());
+        result.reachable_commit_count = Some(match_count);
+        result
+    } else {
+        rev_list_result_from_commits(ordered)
+    };
     result.commit_data = commit_data;
     Ok(result)
 }
@@ -9712,6 +9807,97 @@ mod tests {
             expand_object_filter_for_protocol("blob:limit=1m").expect("proto"),
             format!("blob:limit={}", 1024 * 1024)
         );
+    }
+}
+
+#[cfg(test)]
+mod since_cutoff_frontier_tests {
+    use super::*;
+    use crate::merge_base::intersect_walk_test_hooks::{
+        commit_parent_lookups, reset_commit_parent_lookups,
+    };
+    use crate::objects::ObjectKind;
+    use crate::repo::{InitOptions, Repository};
+    use crate::RefStorageFormat;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn write_dated_chain(repo: &Repository, depth: usize) -> ObjectId {
+        const HOUR: i64 = 3_600;
+        let blob = repo.odb().write(ObjectKind::Blob, b"x\n").expect("blob");
+        let tree_body = format!("100644 f {}\0", blob.to_hex());
+        let tree = repo
+            .odb()
+            .write(ObjectKind::Tree, tree_body.as_bytes())
+            .expect("tree");
+        let mut parent: Option<ObjectId> = None;
+        let mut tip = None::<ObjectId>;
+        for i in 0..depth {
+            let t = 1_700_000_000 + i as i64 * HOUR;
+            let ident = format!("T <t@e.com> {t} +0000");
+            let mut body = format!("tree {tree}\n");
+            if let Some(p) = parent {
+                body.push_str(&format!("parent {p}\n"));
+            }
+            body.push_str(&format!("author {ident}\ncommitter {ident}\n\nc{i}\n"));
+            let oid = repo
+                .odb()
+                .write(ObjectKind::Commit, body.as_bytes())
+                .expect("commit");
+            tip = Some(oid);
+            parent = Some(oid);
+        }
+        tip.expect("chain tip")
+    }
+
+    #[test]
+    fn since_without_limit_stops_at_frontier_not_full_chain() -> Result<()> {
+        const DEPTH: usize = 800;
+        let dir = tempdir().map_err(Error::Io)?;
+        Repository::init(
+            dir.path(),
+            &InitOptions {
+                bare: true,
+                ref_storage: RefStorageFormat::Files,
+                ..InitOptions::default()
+            },
+        )
+        .expect("init");
+        let repo = Repository::open(dir.path(), &crate::environment::RepositoryOptions::empty())?;
+        let tip = write_dated_chain(&repo, DEPTH);
+        fs::write(repo.git_dir().join("refs/heads/main"), format!("{tip}\n"))?;
+
+        let since = 1_700_000_000 + (DEPTH as i64 - 1) * 3_600;
+        let opts = RevListOptions {
+            since_cutoff: Some(since),
+            count: true,
+            use_commit_graph: false,
+            ..RevListOptions::default()
+        };
+
+        reset_commit_parent_lookups();
+        let result = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+        assert_eq!(result.commit_count(), 1);
+        let lookups = commit_parent_lookups();
+        assert!(
+            lookups < 64,
+            "expected frontier stop near tip, not full chain ({lookups} parent lookups for depth {DEPTH})"
+        );
+
+        reset_commit_parent_lookups();
+        let list_opts = RevListOptions {
+            since_cutoff: Some(since),
+            use_commit_graph: false,
+            ..RevListOptions::default()
+        };
+        let listed = rev_list(&repo, &[String::from("main")], &[], &list_opts)?;
+        assert_eq!(listed.commits.len(), 1);
+        assert_eq!(listed.commits[0], tip);
+        assert!(
+            commit_parent_lookups() < 64,
+            "list path should also stop at the since frontier"
+        );
+        Ok(())
     }
 }
 
