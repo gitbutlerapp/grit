@@ -64,7 +64,8 @@ pub struct RefEntry {
     pub name: String,
     /// Stored value (direct or symbolic).
     pub value: RawRef,
-    /// Peeled oid when `value` is symbolic and resolves successfully.
+    /// Peeled tip when `value` is symbolic and resolves, or when a direct ref's
+    /// `packed-refs` record includes a `^` peel line.
     pub peeled: Option<ObjectId>,
 }
 

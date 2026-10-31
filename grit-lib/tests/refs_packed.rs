@@ -472,9 +472,14 @@ fn t1408_packed_refs_garbage_line_rejected_like_git() {
     git_empty_commit_oid(wt);
     git(wt, &["branch", "good"]);
     git(wt, &["pack-refs", "--all"]);
-    let mut content = fs::read_to_string(git_dir.join("packed-refs")).unwrap();
-    content.push_str("this is not a valid packed-refs line\n");
-    write_packed_refs(&git_dir, &content);
+    let content = fs::read_to_string(git_dir.join("packed-refs")).unwrap();
+    let mut lines: Vec<&str> = content.split('\n').collect();
+    let insert_at = lines
+        .iter()
+        .position(|l| l.contains(" refs/heads/"))
+        .map_or(lines.len(), |i| i + 1);
+    lines.insert(insert_at, "this is not a valid packed-refs line");
+    write_packed_refs(&git_dir, &format!("{}\n", lines.join("\n")));
 
     assert!(
         matches!(
