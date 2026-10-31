@@ -1693,6 +1693,31 @@ cargo build --profile dist -p grit-cli -p grit-utils
 grit-bench daily --only ignore/check-1000@synth-10k --grit /path/to/frozen/grit --output ignore.json
 ```
 
+## Ignore exclude stacks per directory (2026-10-31)
+
+`grit ignore check` (and every other `IgnoreMatcher` caller) used to rebuild its view of the per-directory `.gitignore` stack for each path. It cloned the ancestor directory list, assembled a fresh vector of every pattern group, and re-probed every ancestor directory against the patterns to see whether it was excluded. When a path's parent was new, it also stat'd every ancestor to make sure none was a file. Parsed `.gitignore` files were already cached, so no file was read twice; the cost was all per-path bookkeeping and system calls.
+
+The matcher now keeps one state per directory, derived from its parent's state the first time a path inside it is queried. That state records the exclude files that apply and whether the directory or an ancestor is already excluded, so each directory is stat'd, read and probed once. Each pattern group is scanned from its last line, and the base directory and basename are stripped once per group, without allocating. The batch check reuses the `stat` it already makes for each queried path to learn that no ancestor is a regular file, so it makes one `stat` per path, as Git does. `RepoPathNormalizer` resolves the working directory's position once and normalizes each relative path lexically with a single allocation. Results are byte-identical in human, `--json` and `--markdown` output.
+
+Release builds, Linux VM with four logical CPUs, `git version 2.43.0`, measured in one sitting with frozen before and after binaries:
+
+| Workload | Git ms | Grit before ms | Grit after ms | Git peak KiB | Grit before peak KiB | Grit after peak KiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| daily `ignore/check-1000@synth-10k` | 2.25 | 6.99 | 5.56 | 6,592 | 18,064 | 18,020 |
+| nested `.gitignore` per directory, 1,000 paths | 49.2 | 7.5 | 5.3 | 6,772 | 15,756 | 15,108 |
+| nested `.gitignore` per directory, 10,000 paths | 920 | 40.6 | 18.8 | 6,800 | 20,564 | 18,492 |
+| `grit-bench ignore` (`ignore-check-1000`) | 1.9 | 4.4 | 3.5 | | | |
+
+The daily row runs through the harness's `xargs` wrapper, so it includes that overhead. The nested rows use synth-10k with a root `.gitignore` of ten patterns (negation, `**/cache/**`, a character class), a five-line `.gitignore` in each of its 100 directories, and `info/exclude`. The 1,000 queries cover tracked files, plain and directory-only matches, ignored ancestors, re-included names, and missing subdirectories; the 10,000-path row repeats that list ten times. Those rows are `hyperfine -N` means for `ignore check --all` and `git check-ignore -v -n`, and median wall time for the 10,000-path row, where the argument list is too long for `hyperfine`. On the daily fixture, `stat` calls drop from 2,077 to 1,077 (Git: 1,014) with the same 1,015 opens. On the 1,000-path nested fixture, `stat` calls drop from 1,376 to 1,166, `malloc` calls from 60,111 to 24,428, and instructions (callgrind) from 67.7M to 41.7M.
+
+Peak RSS barely moves because almost none of it is heap. A one-path query in a one-file repository peaks at about 13 MiB, of which less than 1 MiB is heap. The rest is pages of the 45 MB binary touched while loading and relocating it, which also accounts for most of the remaining wall-time gap to Git: `grit --version` alone takes about 1.5 ms. The committed [before](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-ignore-dir-stack-release-before.json) and [after](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-ignore-dir-stack-release-after.json) daily reports keep every sample. Both record the checkout's commit as `grit_commit`, not the frozen binary's.
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+grit-bench daily --only ignore/check-1000@synth-10k --grit /path/to/frozen/grit --min-runs 40 --format json
+grit-bench ignore --grit /path/to/frozen/grit --min-runs 30 --format json
+```
+
 ## Log statistics on packed history
 
 `grit log --limit 50 --stat` reuses its batched file counts for the JSON summary,
