@@ -85,11 +85,11 @@ fn diff_patch_text_unstaged_git_apply_check() {
         .expect("git diff");
     assert!(git_patch.status.success());
     let git_text = String::from_utf8_lossy(&git_patch.stdout);
-    let index_line = |text: &str| {
+    fn index_line(text: &str) -> &str {
         text.lines()
             .find(|l| l.starts_with("index "))
             .expect("index line")
-    };
+    }
     assert_eq!(
         index_line(&patch_text),
         index_line(&git_text),
