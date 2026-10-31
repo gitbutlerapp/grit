@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crate::diff::structured::{structured_file_diff, SideBytes, StructuredFileDiff};
-use crate::diff::targets::{commit_tree, diff_index_to_tree_for_paths};
+use crate::diff::targets::diff_index_to_tree_for_paths;
 use crate::diff::tree_content::{gitlink_line, load_new_side, load_old_side};
 use crate::diff::{
     apply_rename_detection_to_diff_entries, diff_index_to_tree_with_renames,
@@ -27,7 +27,7 @@ use crate::objects::odb::Odb;
 use crate::objects::{FileMode, ObjectId};
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::repo::Repository;
-use crate::state::resolve_head;
+use crate::state::resolve_head_for_repository;
 use crate::worktree::fsmonitor::fsmonitor_enabled;
 use crate::worktree::worktree_rules::WorktreeRules;
 
@@ -259,14 +259,6 @@ fn rename_threshold(renames: RenameDetection) -> u32 {
         .unwrap_or(RENAME_DETECTION_DISABLED)
 }
 
-/// `HEAD`'s tree, or `None` on an unborn branch.
-pub(crate) fn head_tree(repo: &Repository) -> Result<Option<ObjectId>> {
-    resolve_head(repo.git_dir())?
-        .oid()
-        .map(|oid| commit_tree(repo, oid))
-        .transpose()
-}
-
 /// Index against `HEAD`'s tree, sorted by path.
 ///
 /// A non-empty `restrict_to_paths` compares only those exact paths, without rename detection.
@@ -276,7 +268,7 @@ pub(crate) fn staged_entries_in(
     rename_threshold: u32,
     restrict_to_paths: Option<&BTreeSet<String>>,
 ) -> Result<Vec<DiffEntry>> {
-    let head_tree = head_tree(repo)?;
+    let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
     let mut entries = match restrict_to_paths.filter(|paths| !paths.is_empty()) {
         Some(paths) => diff_index_to_tree_for_paths(repo, index, head_tree.as_ref(), paths)?,
         None => {

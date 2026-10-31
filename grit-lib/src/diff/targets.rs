@@ -8,8 +8,8 @@ use thiserror::Error;
 
 use crate::config::ConfigSet;
 use crate::diff::changes::{
-    head_tree, load_changes, load_object_changes, staged_entries_in, unstaged_entries_in,
-    worktree_entries_in, FileChange, WorktreeSide,
+    load_changes, load_object_changes, staged_entries_in, unstaged_entries_in, worktree_entries_in,
+    FileChange, WorktreeSide,
 };
 use crate::diff::detail::LineStat;
 use crate::diff::diff_trees_with_renames_and_policy;
@@ -22,7 +22,7 @@ use crate::error::{Error, PathspecResolveError, Result};
 use crate::index::Index;
 use crate::index::MODE_TREE;
 use crate::objects::FileMode;
-use crate::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
+use crate::objects::ObjectId;
 use crate::parallel::{par_map, ParallelOp, ThreadPolicy};
 use crate::pathspec::{exact_literal_pathspec_set, PathspecMatchContext, PathspecMatcher};
 use crate::porcelain::pathspec_match::{
@@ -35,7 +35,7 @@ use crate::revwalk::rev_parse::{
     resolve_revision, resolve_revision_for_range_end, split_double_dot_range,
     split_triple_dot_range,
 };
-use crate::state::resolve_head;
+use crate::state::resolve_head_for_repository;
 use crate::worktree::pathspec::resolve_pathspec;
 use crate::worktree::worktree_rules::WorktreeRules;
 
@@ -351,10 +351,9 @@ fn resolve_diff_request_in(
         [] => {
             let pathspecs = resolve_worktree_diff_pathspecs(repo, cwd_prefix, &path_tokens)?;
             let target = match against {
-                Some(spec) => DiffTarget::WorktreeVsTree(commit_tree(
-                    repo,
-                    &resolve_diff_commit(repo, spec)?,
-                )?),
+                Some(spec) => DiffTarget::WorktreeVsTree(
+                    repo.odb().commit_tree(&resolve_diff_commit(repo, spec)?)?,
+                ),
                 None => DiffTarget::WorktreeVsHead,
             };
             Ok(DiffArguments { target, pathspecs })
@@ -433,11 +432,7 @@ pub(crate) fn collect_files_for_target(
 
     let files = match target {
         DiffTarget::WorktreeVsHead => {
-            let head = resolve_head(repo.git_dir())?;
-            let head_tree = match head.oid() {
-                Some(oid) => Some(commit_tree(repo, oid)?),
-                None => None,
-            };
+            let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
             let changes = filter_file_changes(
                 worktree_changes(repo, head_tree.as_ref(), rename_threshold)?,
                 repo,
@@ -911,10 +906,10 @@ fn commit_diff_entries(
     thread_policy: &ThreadPolicy,
     rename_threshold: u32,
 ) -> Result<Vec<DiffEntry>> {
-    let commit = read_commit(repo, oid)?;
+    let commit = repo.odb().read_commit(oid)?;
     let new_tree = commit.tree;
     let old_tree = match commit.parents.first() {
-        Some(parent) => Some(commit_tree(repo, parent)?),
+        Some(parent) => Some(repo.odb().commit_tree(parent)?),
         None => None,
     };
 
@@ -988,21 +983,6 @@ fn parse_commit_range(
     )))
 }
 
-fn read_commit(repo: &Repository, oid: &ObjectId) -> Result<CommitData> {
-    let object = repo.odb().read(oid)?;
-    if object.kind != ObjectKind::Commit {
-        return Err(Error::Message(format!(
-            "object {oid} is a {}, not a commit",
-            object.kind
-        )));
-    }
-    parse_commit(&object.data)
-}
-
-pub(super) fn commit_tree(repo: &Repository, commit: &ObjectId) -> Result<ObjectId> {
-    Ok(read_commit(repo, commit)?.tree)
-}
-
 /// Unstaged file diffs with staged peer hunks per path (for stable hunk ids).
 pub(crate) type UnstagedDiffWithPeers = (
     Vec<FileDiff>,
@@ -1036,7 +1016,7 @@ pub(crate) fn unstaged_raw_changes_with_peer_hunks_in(
     let rename_threshold = opts.renames.threshold_percent().unwrap_or(101);
     let literal_paths = exact_literal_pathspec_set(pathspecs, PathspecMatchContext::default());
     let head_tree = match literal_paths {
-        Some(_) => head_tree(repo)?,
+        Some(_) => resolve_head_for_repository(repo)?.tree(repo.odb())?,
         None => None,
     };
     let peer_hunks = staged_peer_hunks_for_pathspecs(

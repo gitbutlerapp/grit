@@ -19,7 +19,7 @@ use crate::error::{Error, OverwriteReason, Result, WorktreeOperation};
 use crate::index::StatMatchPolicy;
 use crate::index::{index_file_mtime, Index, IndexEntry};
 use crate::objects::FileMode;
-use crate::objects::{parse_commit, ObjectId};
+use crate::objects::ObjectId;
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::porcelain::checkout::tree_changes_touch_gitattributes;
 use crate::porcelain::status::{collect_untracked_and_ignored_with_cache, IgnoredMode};
@@ -44,8 +44,7 @@ pub struct WorktreeSnapshot {
 pub fn load_worktree_snapshot(repo: &Repository) -> Result<WorktreeSnapshot> {
     let _work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
 
-    let head = resolve_head_for_repository(repo)?;
-    let head_tree = head_tree_from_head_commit(repo, head.oid())?;
+    let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
     let index = load_worktree_index(repo)?;
     Ok(WorktreeSnapshot { index, head_tree })
 }
@@ -63,17 +62,6 @@ pub(crate) fn load_worktree_index(repo: &Repository) -> Result<Index> {
         index.expand_sparse_directory_placeholders(repo.odb(), protect)?;
     }
     Ok(index)
-}
-
-fn head_tree_from_head_commit(
-    repo: &Repository,
-    head_oid: Option<&ObjectId>,
-) -> Result<Option<ObjectId>> {
-    let Some(oid) = head_oid else {
-        return Ok(None);
-    };
-    let obj = repo.odb().read(oid)?;
-    Ok(Some(parse_commit(&obj.data)?.tree))
 }
 
 /// Staged and unstaged diffs for the current worktree (no rename detection), with stat refresh

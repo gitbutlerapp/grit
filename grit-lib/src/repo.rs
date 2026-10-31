@@ -55,7 +55,6 @@ use crate::repo_caches::RepoCaches;
 use crate::rev_parse::is_inside_work_tree;
 use crate::sparse_checkout::effective_cone_mode_for_sparse_file;
 use crate::split_index::{write_index_file_split, WriteSplitIndexRequest};
-use crate::state::resolve_head;
 use crate::worktree::io_error::{map_worktree_io, WorktreePathOperation};
 use crate::worktree_cwd::cwd_relative_under_work_tree;
 
@@ -2686,10 +2685,7 @@ impl Repository {
         // the index already matches.
         let tree_oid = match index.cache_tree_root {
             Some(tree) => Some(tree),
-            None => match resolve_head(&self.git_dir)?.oid() {
-                Some(oid) => Some(self.odb.commit_tree(oid)?),
-                None => None,
-            },
+            None => crate::state::resolve_head_for_repository(self)?.tree(&self.odb)?,
         };
         if let Some(t) = tree_oid {
             let protect = crate::path_validate::ProtectOptions::from_config(cfg.as_ref());

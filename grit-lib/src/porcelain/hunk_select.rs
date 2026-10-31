@@ -28,7 +28,7 @@ use crate::diff::{
 use crate::error::{ApplyError, Error};
 use crate::index::{Index, IndexLock, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR};
 use crate::objects::FileMode;
-use crate::objects::{parse_commit, ObjectId, ObjectKind};
+use crate::objects::ObjectKind;
 use crate::porcelain::checkout::{
     remove_empty_parent_dirs, smudge_bytes_for_worktree_path, write_smudged_blob_to_worktree,
     write_to_worktree_cached, LeadingDirCache,
@@ -36,7 +36,6 @@ use crate::porcelain::checkout::{
 use crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths;
 use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressSink};
 use crate::repo::Repository;
-use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree_rules::WorktreeRules;
 
 /// New-side line range for partial hunk staging (1-based, inclusive).
@@ -1126,7 +1125,7 @@ pub fn restore_hunks(
             &IndexApplyOptions {
                 dry_run,
                 reverse: true,
-                head_tree_oid: head_tree_oid(repo)?,
+                head_tree_oid: repo.head_tree()?,
             },
         )?;
         outcome
@@ -1294,18 +1293,6 @@ fn commit_worktree_reverse(
             .commit_update(&mut lock, &mut index, false)?;
     }
     Ok(())
-}
-
-fn head_tree_oid(repo: &Repository) -> std::result::Result<Option<ObjectId>, HunkSelectError> {
-    match resolve_head_for_repository(repo)? {
-        HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => {
-            let obj = repo.odb().read(&oid)?;
-            let commit = parse_commit(&obj.data)?;
-            Ok(Some(commit.tree))
-        }
-        HeadState::Branch { .. } => Ok(None),
-        HeadState::Invalid => Err(Error::InvalidHead.into()),
-    }
 }
 
 /// Returns whether any index entry changed.

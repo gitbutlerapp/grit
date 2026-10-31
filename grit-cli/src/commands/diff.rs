@@ -29,7 +29,7 @@ use grit_lib::diff::{
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::parallel::ParallelOp;
-use grit_lib::state::resolve_head;
+use grit_lib::state::resolve_head_for_repository;
 use grit_lib::worktree::pathspec::pathdiff;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -1131,10 +1131,8 @@ fn worktree_base_tree(
     if let DiffTarget::WorktreeVsTree(tree) = target {
         return Ok(Some(*tree));
     }
-    let head = resolve_head(repo.git_dir()).context("could not resolve HEAD")?;
-    head.oid()
-        .map(|oid| context::commit_tree(repo, oid))
-        .transpose()
+    let head = resolve_head_for_repository(repo).context("could not resolve HEAD")?;
+    Ok(head.tree(repo.odb())?)
 }
 
 /// Path-limited tree entries for a commit or commit-range target.

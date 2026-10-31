@@ -1075,7 +1075,8 @@ fn collapsed_conflicts_with_markers(
         }
         let tree = match head_tree {
             Some(tree) => tree,
-            None => *head_tree.insert(head_tree_oid(repo)?),
+            None => *head_tree
+                .insert(crate::state::resolve_head_for_repository(repo)?.tree(repo.odb())?),
         };
         let markers_already_committed = tree
             .and_then(|tree| crate::merge_diff::read_blob_at_path(repo.odb(), &tree, rel))
@@ -1087,14 +1088,6 @@ fn collapsed_conflicts_with_markers(
         }
     }
     Ok(rejects)
-}
-
-fn head_tree_oid(repo: &Repository) -> Result<Option<ObjectId>> {
-    match crate::state::resolve_head_for_repository(repo)? {
-        crate::state::HeadState::Branch { oid: Some(oid), .. }
-        | crate::state::HeadState::Detached { oid } => Ok(Some(repo.odb().commit_tree(&oid)?)),
-        _ => Ok(None),
-    }
 }
 
 struct TrackedStagePlan {

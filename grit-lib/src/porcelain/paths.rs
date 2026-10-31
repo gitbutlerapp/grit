@@ -10,13 +10,12 @@ use crate::diff::{
 };
 use crate::error::{Error, Result};
 use crate::index::{index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE};
-use crate::objects::{parse_commit, ObjectId};
+use crate::objects::ObjectId;
 use crate::path_icase::paths_equal;
 use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
 use crate::pathspec::pathspec_is_exclude;
 use crate::porcelain::checkout::remove_empty_parent_dirs;
 use crate::repo::Repository;
-use crate::state::{resolve_head_for_repository, HeadState};
 
 /// Options for [`remove_paths`].
 #[derive(Debug, Clone, Default)]
@@ -190,7 +189,7 @@ pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOut
     opts.resolve_recursive(repo)?;
 
     let mut index = repo.load_index()?;
-    let head_tree = resolve_head_tree(repo)?;
+    let head_tree = repo.head_tree()?;
     let tracked_paths = tracked_index_paths(&index);
 
     let to_remove = collect_removal_paths(repo, &tracked_paths, work_tree, &opts)?;
@@ -623,18 +622,6 @@ fn infer_remove_recursive(repo: &Repository, sources: &[String], specs: &[String
         }
     }
     Ok(false)
-}
-
-fn resolve_head_tree(repo: &Repository) -> Result<Option<ObjectId>> {
-    match resolve_head_for_repository(repo)? {
-        HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => {
-            let obj = repo.odb().read(&oid)?;
-            let commit = parse_commit(&obj.data)?;
-            Ok(Some(commit.tree))
-        }
-        HeadState::Branch { .. } => Ok(None),
-        HeadState::Invalid => Err(Error::Message("HEAD is in an unknown state".into())),
-    }
 }
 
 /// Stage-0 paths plus any path that appears in the index at any merge stage.
