@@ -90,9 +90,22 @@ struct AppState {
     log_headers: Option<PathBuf>,
     /// A `Set-Cookie` value to emit on every response (`--set-cookie`), if set.
     set_cookie: Option<String>,
+    git_slots: Arc<tokio::sync::Semaphore>,
 }
 
 impl AppState {
+    fn try_git_slot(&self) -> Result<tokio::sync::OwnedSemaphorePermit, Box<Response>> {
+        self.git_slots.clone().try_acquire_owned().map_err(|_| {
+            Box::new(
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "too many concurrent git requests\n",
+                )
+                    .into_response(),
+            )
+        })
+    }
+
     /// Append a request's headers to the `--log-headers` file (if configured),
     /// one `name: value` line per header, terminated by a blank line. Best-effort:
     /// any I/O error is ignored so logging never affects the served response.
@@ -207,6 +220,7 @@ async fn main() -> Result<()> {
     }
 
     let repository_options = grit_protocol::repository_options_from_process();
+    let git_slots = Arc::new(tokio::sync::Semaphore::new(args.max_git_requests));
     let state = Arc::new(AppState {
         root,
         idle_timeout: args.idle_timeout,
@@ -214,6 +228,7 @@ async fn main() -> Result<()> {
         expected_auth,
         log_headers: args.log_headers,
         set_cookie: args.set_cookie,
+        git_slots,
     });
 
     let app = Router::new()
@@ -264,6 +279,10 @@ async fn info_refs_dispatch(
         Err(e) => return *e,
     };
     let protocol_version = smart_http::protocol_version_from_headers(&headers);
+    let slot = match state.try_git_slot() {
+        Ok(slot) => slot,
+        Err(resp) => return *resp,
+    };
     let response = smart_http::info_refs_holding(
         repo_path,
         service,
@@ -271,7 +290,7 @@ async fn info_refs_dispatch(
         state.repository_options.clone(),
         grit_protocol::Extensions::default(),
         state.idle_timeout,
-        (),
+        slot,
     )
     .await;
     state.with_cookie(response)
@@ -309,6 +328,10 @@ async fn rpc_dispatch(
         Err(e) => return finish_with_discarded_body(body, *e).await,
     };
     let protocol_version = smart_http::protocol_version_from_headers(&headers);
+    let slot = match state.try_git_slot() {
+        Ok(slot) => slot,
+        Err(resp) => return finish_with_discarded_body(body, *resp).await,
+    };
     let (response, _follow_up) = smart_http::rpc_holding(
         repo_path,
         service,
@@ -319,7 +342,7 @@ async fn rpc_dispatch(
         grit_protocol::Extensions::default(),
         grit_protocol::ServeSession::none(),
         state.idle_timeout,
-        (),
+        slot,
     )
     .await;
     state.with_cookie(response)

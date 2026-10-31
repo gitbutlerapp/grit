@@ -223,10 +223,10 @@ pub struct RpcFollowUp {
         Option<tokio::sync::oneshot::Receiver<grit_lib::remote::serve::UploadOutcome>>,
 }
 
-/// [`rpc`], keeping `hold` alive until the response body has been sent in
-/// full (or the client went away): a fetch response streams after this
-/// returns, so whatever keeps the repository readable (a lock or lease) must
-/// live as long as the body.
+/// [`rpc`], keeping `hold` for the duration of the smart-HTTP exchange on the
+/// server (request body read and pack production). Response bodies may
+/// continue streaming after `hold` is dropped; Git concurrency slots must not
+/// wait on a slow reader.
 #[allow(clippy::too_many_arguments)]
 pub async fn rpc_holding<H: Send + 'static>(
     repo_path: PathBuf,
@@ -279,6 +279,7 @@ pub async fn rpc_holding<H: Send + 'static>(
             let (raw, bridge) = crate::request_body::open_body_bridge(body);
             let raw = std::io::BufReader::with_capacity(STREAM_READ_BUFFER, raw);
             let result = tokio::task::spawn_blocking(move || {
+                let _hold = hold;
                 let mut request = push_request_body(raw, encoding);
                 grit_protocol::receive_pack::stateless_rpc_with_session(
                     &repo_path,
@@ -1062,14 +1063,17 @@ impl ChannelWriter {
             &mut self.pending,
             Vec::with_capacity(STREAM_CHUNK),
         ));
+        self.send_chunk(Ok(chunk))
+    }
+
+    fn send_chunk(&mut self, chunk: Chunk) -> std::io::Result<()> {
         let handle = tokio::runtime::Handle::try_current().map_err(|_| {
             std::io::Error::new(
                 std::io::ErrorKind::NotConnected,
                 "upload-pack response needs a Tokio runtime",
             )
         })?;
-        match handle
-            .block_on(async { tokio::time::timeout(self.idle, self.tx.send(Ok(chunk))).await })
+        match handle.block_on(async { tokio::time::timeout(self.idle, self.tx.send(chunk)).await })
         {
             Ok(Ok(())) => {
                 self.sent = true;
@@ -1081,6 +1085,11 @@ impl ChannelWriter {
                 BodyIdleTimeout,
             )),
         }
+    }
+
+    /// After partial output, tell the response stream the exchange failed.
+    fn signal_failure(&mut self, message: &str) {
+        let _ = self.send_chunk(Err(std::io::Error::other(message)));
     }
 }
 
@@ -1113,6 +1122,7 @@ async fn stream_info_refs_advertisement<H: Send + 'static>(
 ) -> Response<Body> {
     let (tx, rx) = tokio::sync::mpsc::channel::<Chunk>(STREAM_CHANNEL_DEPTH);
     let task = tokio::task::spawn_blocking(move || {
+        let _hold = hold;
         let mut out = ChannelWriter::new(tx, idle_timeout);
         let result = (|| -> grit_protocol::Result<()> {
             out.write_all(&preamble).map_err(grit_protocol::Error::Io)?;
@@ -1138,21 +1148,18 @@ async fn stream_info_refs_advertisement<H: Send + 'static>(
                 if !out.sent {
                     return Err(e);
                 }
-                let _ = out
-                    .tx
-                    .blocking_send(Err(std::io::Error::other(format!("info/refs failed: {e}"))));
+                out.signal_failure(&format!("info/refs failed: {e}"));
                 Err(e)
             }
         }
     });
     let content_type = format!("application/x-{}-advertisement", service.name());
-    streaming_channel_response(task, rx, hold, "info/refs failed", content_type).await
+    streaming_channel_response(task, rx, "info/refs failed", content_type).await
 }
 
-async fn streaming_channel_response<H: Send + 'static>(
+async fn streaming_channel_response(
     task: tokio::task::JoinHandle<grit_protocol::Result<()>>,
     mut rx: tokio::sync::mpsc::Receiver<Chunk>,
-    hold: H,
     fail_label: &'static str,
     content_type: String,
 ) -> Response<Body> {
@@ -1165,8 +1172,8 @@ async fn streaming_channel_response<H: Send + 'static>(
             Err(e) => return internal_error(&format!("{fail_label}: {e}")),
         },
     };
-    let rest = futures_util::stream::unfold((rx, hold), |(mut rx, hold)| async move {
-        rx.recv().await.map(|chunk| (chunk, (rx, hold)))
+    let rest = futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|chunk| (chunk, rx))
     });
     let body = futures_util::StreamExt::chain(
         futures_util::stream::once(std::future::ready(Ok::<Bytes, std::io::Error>(first))),
@@ -1200,6 +1207,7 @@ async fn stream_upload_pack<H: Send + 'static>(
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Chunk>(STREAM_CHANNEL_DEPTH);
     let mut bridge = Some(bridge);
     let task = tokio::task::spawn_blocking(move || {
+        let _hold = hold;
         let mut request = fetch_request_body(raw, encoding);
         let mut out = ChannelWriter::new(tx, idle_timeout);
         let result = grit_protocol::upload_pack::stateless_rpc_to_reader_with_session(
@@ -1218,9 +1226,7 @@ async fn stream_upload_pack<H: Send + 'static>(
             }
             Err(e) => {
                 if out.sent {
-                    let _ = out.tx.blocking_send(Err(std::io::Error::other(format!(
-                        "upload-pack failed: {e}"
-                    ))));
+                    out.signal_failure(&format!("upload-pack failed: {e}"));
                 }
                 Err(e)
             }
@@ -1262,8 +1268,8 @@ async fn stream_upload_pack<H: Send + 'static>(
             }
         },
     };
-    let rest = futures_util::stream::unfold((rx, hold), |(mut rx, hold)| async move {
-        rx.recv().await.map(|chunk| (chunk, (rx, hold)))
+    let rest = futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|chunk| (chunk, rx))
     });
     let body = futures_util::StreamExt::chain(
         futures_util::stream::once(std::future::ready(Ok::<Bytes, std::io::Error>(first))),

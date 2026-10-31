@@ -1310,3 +1310,90 @@ fn max_git_requests_returns_service_unavailable() {
     );
     drop(stall);
 }
+
+#[test]
+fn slow_fetch_response_reader_releases_git_slot() {
+    use std::io::{Read, Write};
+    use std::time::Duration;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let database = fixture(root);
+    let wt = root.join("wt");
+    git(
+        root,
+        &[
+            "clone",
+            "-q",
+            root.join("repos/project.git").to_str().expect("utf-8"),
+            "wt",
+        ],
+    );
+    std::fs::write(wt.join("big.bin"), vec![0u8; 4 * 1024 * 1024]).expect("write");
+    git(&wt, &["add", "big.bin"]);
+    git(&wt, &["commit", "-q", "-m", "big"]);
+    git(
+        &wt,
+        &[
+            "push",
+            "-q",
+            root.join("repos/project.git").to_str().expect("utf-8"),
+            "main",
+        ],
+    );
+
+    let oid = rev_parse(&wt, "HEAD");
+    let limits = ServeLimits {
+        header_timeout: Duration::from_secs(30),
+        idle_timeout: Duration::from_secs(1),
+        max_git_requests: 1,
+    };
+    let addr = start_with_limits(&root.join("repos"), &database, limits);
+    std::thread::sleep(Duration::from_millis(100));
+
+    let body = format!("0032want {oid}\n0000");
+    let mut stall = TcpStream::connect(addr).expect("connect");
+    stall
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .expect("read timeout");
+    let request = format!(
+        "POST /project.git/git-upload-pack HTTP/1.1\r\nHost: x\r\n{}\r\nContent-Type: application/x-git-upload-pack-request\r\nContent-Length: {}\r\n\r\n{body}",
+        bearer(ADMIN_TOKEN),
+        body.len()
+    );
+    stall.write_all(request.as_bytes()).expect("post");
+    stall.flush().ok();
+    let mut response = Vec::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        let n = stall.read(&mut buf).expect("read headers");
+        if n == 0 {
+            break;
+        }
+        response.extend_from_slice(&buf[..n]);
+        if response.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+    }
+    assert!(
+        response.starts_with(b"HTTP/1.1 200") || response.starts_with(b"HTTP/1.0 200"),
+        "fetch should start: {}",
+        String::from_utf8_lossy(&response)
+    );
+
+    std::thread::sleep(Duration::from_secs(4));
+
+    let reply = http(
+        addr,
+        "GET",
+        "/project.git/info/refs?service=git-upload-pack",
+        &[bearer(ADMIN_TOKEN)],
+        "",
+    );
+    assert!(
+        reply.status.contains("200"),
+        "git slot should be free after response idle timeout, got {}",
+        reply.status
+    );
+    drop(stall);
+}
