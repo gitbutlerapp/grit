@@ -1275,7 +1275,7 @@ fn checkout_hard_to_tree_journaled(
             }
             HardResetEntryAction::Written(None) | HardResetEntryAction::VerifiedUpToDate => {
                 let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
-                index.entries[pos] = entry_from_metadata(&meta, path.as_slice(), oid, mode);
+                index.entries[pos] = checked_out_entry(&meta, path.as_slice(), oid, mode);
                 continue;
             }
             HardResetEntryAction::Gitlink
@@ -4525,12 +4525,30 @@ fn write_checkout_entry(
             let old_mode = change.old_mode.bits();
             apply_in_place_git_mode_transition_at_path(&abs_path, old_mode, mode)?;
             let meta = written_file_symlink_metadata(&abs_path)?;
-            return Ok(entry_from_metadata(&meta, &index_path, oid, mode));
+            return Ok(checked_out_entry(&meta, &index_path, oid, mode));
         }
     }
 
     let meta = write_worktree_content(work_tree, rel_path, content, mode, dir_cache)?;
-    Ok(entry_from_metadata(&meta, &index_path, oid, mode))
+    Ok(checked_out_entry(&meta, &index_path, oid, mode))
+}
+
+/// Index row for a file checkout just wrote from blob `oid`.
+///
+/// A regular file is marked content-verified: its bytes are known to be the blob's, so the
+/// racy-entry pass at index write need not read them back, even when the write landed in the
+/// same timestamp tick as the previous index.
+fn checked_out_entry(
+    meta: &fs::Metadata,
+    index_path: &[u8],
+    oid: ObjectId,
+    mode: u32,
+) -> IndexEntry {
+    let mut entry = entry_from_metadata(meta, index_path, oid, mode);
+    if meta.is_file() {
+        entry.mark_content_verified();
+    }
+    entry
 }
 
 /// Adjust only the executable bit for an in-place overwrite, preserving umask-driven permissions.
