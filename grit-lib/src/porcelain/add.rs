@@ -943,9 +943,18 @@ fn stage_inner_on_index(
         sort_outcome_paths_in_index_order(&mut outcome, index);
     }
 
-    if (outcome.total() > 0 || outcome.stat_refreshed) && !dry_run {
+    if (outcome.total() > 0
+        || outcome.stat_refreshed
+        || tracked_scan_summary
+            .as_ref()
+            .is_some_and(|s| s.fsmonitor_valid_updated))
+        && !dry_run
+    {
         if let Some(summary) = &tracked_scan_summary {
             replay_deferred_untracked_invalidations(index, summary);
+            if summary.fsmonitor_valid_updated {
+                index.fsmonitor_validity_changed();
+            }
         }
         index.ensure_canonical_order();
         if let Some(lock) = lock {

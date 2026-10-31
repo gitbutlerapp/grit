@@ -402,6 +402,10 @@ path = "tests/sparse_index_readonly_porcelain_git_compat.rs"
 required-features = ["full-tests"]
 
 [[test]]
+name = "fsmonitor_valid_status"
+path = "tests/fsmonitor_valid_status.rs"
+
+[[test]]
 name = "status_optional_locks_git_compat"
 path = "tests/status_optional_locks_git_compat.rs"
 required-features = ["full-tests"]

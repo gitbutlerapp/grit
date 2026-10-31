@@ -450,6 +450,44 @@ fn invalidate_all_valid(index: &mut Index) {
     index.invalidate_all_fsmonitor_valid();
 }
 
+/// Mark a stage-0 entry fsmonitor-valid after a worktree scan proved it unchanged.
+///
+/// Returns `true` when the valid bit flipped from false to true.
+pub(crate) fn mark_fsmonitor_valid_proven_clean(index: &mut Index, entry_index: usize) -> bool {
+    if index.fsmonitor_last_update.is_none() {
+        return false;
+    }
+    let Some(entry) = index.entries.get_mut(entry_index) else {
+        return false;
+    };
+    if entry.stage() != 0 || entry.mode == crate::index::MODE_GITLINK {
+        return false;
+    }
+    if entry.fsmonitor_valid() {
+        return false;
+    }
+    entry.set_fsmonitor_valid(true);
+    true
+}
+
+/// Like [`mark_fsmonitor_valid_proven_clean`], keyed by path.
+pub(crate) fn mark_fsmonitor_valid_proven_clean_path(index: &mut Index, path: &[u8]) -> bool {
+    if index.fsmonitor_last_update.is_none() {
+        return false;
+    }
+    let Some(entry) = index.get_mut(path, 0) else {
+        return false;
+    };
+    if entry.mode == crate::index::MODE_GITLINK {
+        return false;
+    }
+    if entry.fsmonitor_valid() {
+        return false;
+    }
+    entry.set_fsmonitor_valid(true);
+    true
+}
+
 /// When true, this index entry can skip worktree stat I/O during diff/status.
 #[must_use]
 pub fn entry_skips_worktree_stat(entry: &crate::index::IndexEntry, index: &Index) -> bool {
