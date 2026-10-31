@@ -8,9 +8,9 @@ use super::upload_pack_policy::{
     resolve_want_ref, validate_wants, validate_wants_filtered, UploadPackPolicy,
 };
 use super::{
-    advertised_refs, check_object_format, head_info, parse_oid, read_packet, write_flush,
-    write_line, AdvertisedRef, DeepenNotError, MissingObjectReason, Packet, Peel, ProtocolVersion,
-    Result, ServeError, ServeOptions,
+    check_object_format, for_each_advertised_ref, head_info, parse_oid, read_packet, write_flush,
+    write_line, AdvertisedRefView, DeepenNotError, MissingObjectReason, Packet,
+    Peel, ProtocolVersion, Result, ServeError, ServeOptions,
 };
 use crate::config::ConfigSet;
 use crate::objects::pack_objects::PackStats;
@@ -27,6 +27,7 @@ use crate::rev_list::ObjectFilter;
 use crate::transfer::PackBuildOptions;
 use std::collections::HashSet;
 use std::io::{Read, Write};
+use std::ops::ControlFlow;
 
 /// Capabilities offered in a v0/v1 advertisement, before the per-repository ones.
 const V0_CAPABILITIES: &[&str] = &[
@@ -344,6 +345,37 @@ fn missing_objects_mode(
     )
 }
 
+/// Tip object ids and annotated tags collected while serving upload-pack.
+struct UploadAdvertisement {
+    tip_objects: HashSet<ObjectId>,
+    tag_candidates: Vec<TagCandidate>,
+}
+
+impl UploadAdvertisement {
+    fn record(&mut self, r: AdvertisedRefView<'_>) {
+        self.tip_objects.insert(r.oid);
+        if let Some(peeled) = r.peeled {
+            self.tip_objects.insert(peeled);
+            if r.name.starts_with("refs/tags/") {
+                self.tag_candidates
+                    .push(TagCandidate { tag: r.oid, peeled });
+            }
+        }
+    }
+
+    fn collect(repo: &Repository, hidden: &[String]) -> Result<Self> {
+        let mut summary = Self {
+            tip_objects: HashSet::new(),
+            tag_candidates: Vec::new(),
+        };
+        for_each_advertised_ref(repo, hidden, &[], Peel::Yes, |r| {
+            summary.record(r);
+            Ok(ControlFlow::Continue(()))
+        })?;
+        Ok(summary)
+    }
+}
+
 fn serve_v0(
     repo: &Repository,
     input: &mut dyn Read,
@@ -354,18 +386,23 @@ fn serve_v0(
     stop.poll().map_err(|_| ServeError::Cancelled)?;
     let config = repo_config(repo);
     let policy = UploadPackPolicy::from_config(&config);
-    let refs = advertised_refs(repo, &opts.hidden_refs, &[], Peel::Yes)?;
     let head = head_info(repo);
-
-    if opts.advertise_refs || !opts.stateless_rpc {
+    let mut advertisement = if opts.advertise_refs || !opts.stateless_rpc {
         if opts.protocol == ProtocolVersion::V1 {
             write_line(output, "version 1")?;
         }
-        write_v0_advertisement(repo, output, &refs, &head, opts)?;
+        let summary = write_v0_advertisement(repo, output, &head, opts, &opts.hidden_refs)?;
         if opts.advertise_refs {
             return Ok(UploadSession::default());
         }
         output.flush()?;
+        summary
+    } else {
+        UploadAdvertisement::collect(repo, &opts.hidden_refs)?
+    };
+
+    if let Some(h) = head.oid {
+        advertisement.tip_objects.insert(h);
     }
 
     let Some(mut request) = read_v0_request(repo, input, &config, &policy, stop)? else {
@@ -390,7 +427,7 @@ fn serve_v0(
     } else {
         validate_wants(
             repo,
-            &refs,
+            &advertisement.tip_objects,
             head.oid,
             &request.wants,
             &policy,
@@ -510,7 +547,7 @@ fn serve_v0(
     stop.poll().map_err(|_| ServeError::Cancelled)?;
     let pack = write_response_pack_from_v0(
         repo,
-        &refs,
+        &advertisement.tag_candidates,
         &request,
         &common,
         shallow_resp.as_ref(),
@@ -525,15 +562,14 @@ fn serve_v0(
     })
 }
 
-/// Write the v0 ref advertisement: `HEAD` and every ref, capabilities on the
-/// first line, and a peeled `^{}` line after each annotated tag.
+/// Write the v0 ref advertisement and record tip ids for want validation.
 fn write_v0_advertisement(
     repo: &Repository,
     output: &mut dyn Write,
-    refs: &[AdvertisedRef],
     head: &super::HeadInfo,
     opts: &ServeOptions,
-) -> Result<()> {
+    hidden: &[String],
+) -> Result<UploadAdvertisement> {
     let policy = upload_policy(repo);
     let mut caps: Vec<String> = V0_CAPABILITIES.iter().map(|c| (*c).to_owned()).collect();
     for cap in policy.v0_capability_tokens() {
@@ -550,32 +586,40 @@ fn write_v0_advertisement(
     }
     let caps = caps.join(" ");
 
-    let mut lines: Vec<(ObjectId, String)> = Vec::new();
+    let mut summary = UploadAdvertisement {
+        tip_objects: HashSet::new(),
+        tag_candidates: Vec::new(),
+    };
+    let mut first_line = true;
     if let Some(oid) = head.oid {
-        lines.push((oid, "HEAD".to_owned()));
+        summary.tip_objects.insert(oid);
+        write_line(output, &format!("{} HEAD\0{caps}", oid.to_hex()))?;
+        first_line = false;
     }
-    for r in refs {
-        lines.push((r.oid, r.name.clone()));
-        if let Some(peeled) = r.peeled {
-            lines.push((peeled, format!("{}^{{}}", r.name)));
+    let mut wrote_ref = !first_line;
+    for_each_advertised_ref(repo, hidden, &[], Peel::Yes, |r| {
+        summary.record(r);
+        if first_line {
+            write_line(output, &format!("{} {}\0{caps}", r.oid.to_hex(), r.name))?;
+            first_line = false;
+        } else {
+            write_line(output, &format!("{} {}", r.oid.to_hex(), r.name))?;
         }
-    }
-
-    if lines.is_empty() {
+        wrote_ref = true;
+        if let Some(peeled) = r.peeled {
+            write_line(output, &format!("{} {}^{{}}", peeled.to_hex(), r.name))?;
+        }
+        Ok(ControlFlow::Continue(()))
+    })?;
+    if !wrote_ref {
         let zero = ObjectId::null(repo.odb().hash_algo());
         write_line(
             output,
             &format!("{} capabilities^{{}}\0{caps}", zero.to_hex()),
         )?;
     }
-    for (i, (oid, name)) in lines.iter().enumerate() {
-        if i == 0 {
-            write_line(output, &format!("{} {name}\0{caps}", oid.to_hex()))?;
-        } else {
-            write_line(output, &format!("{} {name}", oid.to_hex()))?;
-        }
-    }
-    write_flush(output)
+    write_flush(output)?;
+    Ok(summary)
 }
 
 struct V0Request {
@@ -736,7 +780,7 @@ fn write_v0_shallow_lines(output: &mut dyn Write, sh: &ShallowResponse) -> Resul
 #[allow(clippy::too_many_arguments)]
 fn write_response_pack_from_v0(
     repo: &Repository,
-    refs: &[AdvertisedRef],
+    include_tags: &[TagCandidate],
     request: &V0Request,
     common: &[ObjectId],
     shallow: Option<&ShallowResponse>,
@@ -769,7 +813,7 @@ fn write_response_pack_from_v0(
 
     let input = ResponsePackInput {
         repo,
-        refs,
+        include_tags,
         wants: &pack_wants,
         common: &pack_common,
         caps: &request.caps,
@@ -1020,13 +1064,14 @@ fn ls_refs(
             (None, _) => {}
         }
     }
-    for r in advertised_refs(repo, &opts.hidden_refs, &prefixes, peel)? {
+    for_each_advertised_ref(repo, &opts.hidden_refs, &prefixes, peel, |r| {
         let mut line = format!("{} {}", r.oid.to_hex(), r.name);
         if let Some(p) = r.peeled {
             line.push_str(&format!(" peeled:{}", p.to_hex()));
         }
         write_line(output, &line)?;
-    }
+        Ok(ControlFlow::Continue(()))
+    })?;
     write_flush(output)
 }
 
@@ -1099,12 +1144,15 @@ fn fetch_v2(
             )));
         }
     }
-    let refs = advertised_refs(repo, &opts.hidden_refs, &[], Peel::Yes)?;
+    let mut advertisement = UploadAdvertisement::collect(repo, &opts.hidden_refs)?;
     let head = head_info(repo);
+    if let Some(h) = head.oid {
+        advertisement.tip_objects.insert(h);
+    }
     let wanted_refs = want_ref_names
         .into_iter()
         .map(|name| {
-            let oid = resolve_want_ref(repo, &refs, &opts.hidden_refs, &name)?;
+            let oid = resolve_want_ref(repo, &opts.hidden_refs, &name)?;
             Ok((name, oid))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1124,7 +1172,14 @@ fn fetch_v2(
     if filter.is_some() {
         validate_wants_filtered(repo, &wants)?;
     } else {
-        validate_wants(repo, &refs, head.oid, &wants, &policy, opts.stateless_rpc)?;
+        validate_wants(
+            repo,
+            &advertisement.tip_objects,
+            head.oid,
+            &wants,
+            &policy,
+            opts.stateless_rpc,
+        )?;
     }
 
     let sideband_all = caps.contains("sideband-all");
@@ -1182,7 +1237,7 @@ fn fetch_v2(
     let have_shallow: HashSet<ObjectId> = client_shallow.iter().copied().collect();
     let input = ResponsePackInput {
         repo,
-        refs: &refs,
+        include_tags: &advertisement.tag_candidates,
         wants: &pack_wants,
         common: &common,
         caps: &caps,
@@ -1278,7 +1333,7 @@ fn write_v2_fetch_line(output: &mut dyn Write, line: &str, sideband_all: bool) -
 /// Inputs for [`prepare_response_pack`] and [`write_prepared_pack`].
 struct ResponsePackInput<'a> {
     repo: &'a Repository,
-    refs: &'a [AdvertisedRef],
+    include_tags: &'a [TagCandidate],
     wants: &'a [ObjectId],
     common: &'a [ObjectId],
     caps: &'a HashSet<String>,
@@ -1310,7 +1365,7 @@ struct PreparedPack {
 /// fetched, and read failures. Nothing has been written to the client then.
 fn prepare_response_pack(input: &ResponsePackInput<'_>) -> Result<PreparedPack> {
     let include_tags = if input.caps.contains("include-tag") {
-        tag_candidates(input.refs)
+        input.include_tags.to_vec()
     } else {
         Vec::new()
     };
@@ -1438,22 +1493,11 @@ fn pack_failure_io(err: std::io::Error, written: u64) -> ServeError {
     ServeError::PackInterrupted(Box::new(ServeError::Io(err)))
 }
 
-/// The annotated tags under `refs/tags/` that `include-tag` may add to the pack.
-///
-/// The pack writer adds a tag only when the object it peels to (a commit, tree or
-/// blob) is among the objects being sent, so tags on history the client already has
-/// or beyond a shallow boundary stay out, and no history is walked to decide it.
-fn tag_candidates(refs: &[AdvertisedRef]) -> Vec<TagCandidate> {
-    refs.iter()
-        .filter(|r| r.name.starts_with("refs/tags/"))
-        .filter_map(|r| r.peeled.map(|peeled| TagCandidate { tag: r.oid, peeled }))
-        .collect()
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use super::AdvertisedRef;
     use crate::config::environment::RepositoryOptions;
     use crate::repo::InitOptions;
 
@@ -1526,10 +1570,16 @@ mod tests {
         write_prepared_pack(&input, &prepared, output, sideband, stop)
     }
 
-    /// Answer `input` with `include-tag` and return the tags of `input.refs` the
+    fn tag_candidates_from(ads: &[AdvertisedRef]) -> Vec<TagCandidate> {
+        ads.iter()
+            .filter_map(|r| r.peeled.map(|peeled| TagCandidate { tag: r.oid, peeled }))
+            .collect()
+    }
+
+    /// Answer `input` with `include-tag` and return the tags of `input.include_tags` the
     /// pack holds, sorted.
     fn packed_tags(input: ResponsePackInput<'_>) -> Vec<ObjectId> {
-        let refs = input.refs;
+        let tag_ids: Vec<ObjectId> = input.include_tags.iter().map(|t| t.tag).collect();
         let mut pack = Vec::new();
         write_response_pack(input, &mut pack, false, &CancelSignal::never()).unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -1540,9 +1590,8 @@ mod tests {
             &crate::unpack_objects::UnpackOptions::default(),
         )
         .unwrap();
-        let mut tags: Vec<ObjectId> = refs
-            .iter()
-            .map(|r| r.oid)
+        let mut tags: Vec<ObjectId> = tag_ids
+            .into_iter()
             .filter(|oid| unpacked.contains(oid).unwrap())
             .collect();
         tags.sort();
@@ -1606,9 +1655,10 @@ mod tests {
         let tip = fx.commits[5];
         let resp = compute_shallow_response(&fx.repo, &[tip], &depth_request(3)).unwrap();
         let caps = HashSet::from(["include-tag".to_owned()]);
+        let include_tags = tag_candidates_from(&fx.tags);
         let tags = packed_tags(ResponsePackInput {
             repo: &fx.repo,
-            refs: &fx.tags,
+            include_tags: &include_tags,
             wants: &[tip],
             common: &[],
             caps: &caps,
@@ -1630,9 +1680,10 @@ mod tests {
     fn included_tags_skip_history_the_client_already_has() {
         let fx = fixture(6, &[1, 3, 5]);
         let caps = HashSet::from(["include-tag".to_owned()]);
+        let include_tags = tag_candidates_from(&fx.tags);
         let tags = packed_tags(ResponsePackInput {
             repo: &fx.repo,
-            refs: &fx.tags,
+            include_tags: &include_tags,
             wants: &[fx.commits[5]],
             common: &[fx.commits[3]],
             caps: &caps,
@@ -1663,10 +1714,11 @@ mod tests {
         let n = 3000;
         let (commits, tags) = write_history(&repo, n, &[5, n - 1]);
         let caps = HashSet::from(["include-tag".to_owned()]);
+        let include_tags = tag_candidates_from(&tags);
         let before = store.reads();
         let packed = packed_tags(ResponsePackInput {
             repo: &repo,
-            refs: &tags,
+            include_tags: &include_tags,
             wants: &[commits[n - 1]],
             common: &[commits[n - 3]],
             caps: &caps,
@@ -1710,7 +1762,7 @@ mod tests {
             .unwrap();
         let blob_tag = tag(blob, "blob", "blob");
         let old_tag = tag(fx.commits[0], "commit", "old");
-        let refs = vec![
+        let tag_ads = vec![
             AdvertisedRef {
                 name: "refs/tags/outer".to_owned(),
                 oid: outer,
@@ -1727,13 +1779,14 @@ mod tests {
                 peeled: Some(fx.commits[0]),
             },
         ];
+        let include_tags = tag_candidates_from(&tag_ads);
         let caps = HashSet::from(["include-tag".to_owned()]);
         let fetch = |wants: &[ObjectId]| {
             let mut pack = Vec::new();
             write_response_pack(
                 ResponsePackInput {
                     repo: &fx.repo,
-                    refs: &refs,
+                    include_tags: &include_tags,
                     wants,
                     common: &[fx.commits[1]],
                     caps: &caps,

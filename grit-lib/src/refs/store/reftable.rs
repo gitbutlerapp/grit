@@ -537,9 +537,10 @@ impl ReftableRefStore {
             {
                 return ControlFlow::Continue(());
             }
-            let peeled = match &value {
-                RawRef::Direct(_) => None,
-                RawRef::Symbolic(_) => self.resolve(&rec.name).ok(),
+            let peeled = match rec.value {
+                RefValue::Val2(_, peeled_target) => Some(peeled_target),
+                RefValue::Symref(_) => self.resolve(&rec.name).ok(),
+                _ => None,
             };
             let entry = RefEntry {
                 name: rec.name.clone(),

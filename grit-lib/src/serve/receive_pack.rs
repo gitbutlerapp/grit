@@ -6,8 +6,8 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use super::connectivity::{PushedObjects, Unconnected};
 
 use super::{
-    advertised_refs, check_object_format, parse_oid, read_packet, ref_update_policy, write_flush,
-    write_line, Packet, Peel, ProtocolVersion, Result, ServeError, ServeOptions,
+    check_object_format, for_each_advertised_ref, parse_oid, read_packet, ref_update_policy,
+    write_flush, write_line, Packet, Peel, ProtocolVersion, Result, ServeError, ServeOptions,
 };
 use crate::config::ConfigSet;
 use crate::fsck_msg_policy::{ObjectFsckPolicy, SkipListError};
@@ -777,20 +777,22 @@ fn write_advertisement(
     }
     let caps = caps.join(" ");
 
-    let refs = advertised_refs(repo, &opts.hidden_refs, &[], Peel::No)?;
-    if refs.is_empty() {
+    let mut first_line = true;
+    for_each_advertised_ref(repo, &opts.hidden_refs, &[], Peel::No, |r| {
+        if first_line {
+            write_line(output, &format!("{} {}\0{caps}", r.oid.to_hex(), r.name))?;
+            first_line = false;
+        } else {
+            write_line(output, &format!("{} {}", r.oid.to_hex(), r.name))?;
+        }
+        Ok(std::ops::ControlFlow::Continue(()))
+    })?;
+    if first_line {
         let zero = ObjectId::null(repo.odb().hash_algo());
         write_line(
             output,
             &format!("{} capabilities^{{}}\0{caps}", zero.to_hex()),
         )?;
-    }
-    for (i, r) in refs.iter().enumerate() {
-        if i == 0 {
-            write_line(output, &format!("{} {}\0{caps}", r.oid.to_hex(), r.name))?;
-        } else {
-            write_line(output, &format!("{} {}", r.oid.to_hex(), r.name))?;
-        }
     }
     write_flush(output)
 }
@@ -913,10 +915,11 @@ impl ShallowPlan {
         if info.is_empty() {
             return Ok(Self::none(request.commands.len()));
         }
-        let mut receiver_tips: HashSet<ObjectId> = advertised_refs(repo, &[], &[], Peel::Yes)?
-            .into_iter()
-            .map(|r| r.peeled.unwrap_or(r.oid))
-            .collect();
+        let mut receiver_tips: HashSet<ObjectId> = HashSet::new();
+        super::for_each_advertised_ref(repo, &[], &[], Peel::Yes, |r| {
+            receiver_tips.insert(r.peeled.unwrap_or(r.oid));
+            Ok(std::ops::ControlFlow::Continue(()))
+        })?;
         receiver_tips.extend(crate::refs::resolve_ref(repo.git_dir(), "HEAD").ok());
         let graph = repo.odb().commit_graph_chain();
         let roots = request
@@ -1585,11 +1588,7 @@ fn unconnected_tips(
 
 /// The values of every ref of `repo` and of `HEAD`, with tags also peeled.
 fn existing_ref_values(repo: &Repository) -> Result<HashSet<ObjectId>> {
-    let mut existing = HashSet::new();
-    for r in advertised_refs(repo, &[], &[], Peel::Yes)? {
-        existing.insert(r.oid);
-        existing.extend(r.peeled);
-    }
+    let mut existing = super::advertised_object_ids_from_repo(repo, &[], &[], super::Peel::Yes)?;
     existing.extend(crate::refs::resolve_ref(repo.git_dir(), "HEAD").ok());
     Ok(existing)
 }

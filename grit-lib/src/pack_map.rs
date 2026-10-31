@@ -451,6 +451,11 @@ fn map_read_only(file: &File, len: usize) -> std::io::Result<Mmap> {
     unsafe { MmapOptions::new().len(len).map(file) }
 }
 
+/// Map `len` bytes of an open read-only file (reftable tables, shared cache).
+pub(crate) fn map_read_only_file(file: &File, len: usize) -> std::io::Result<Mmap> {
+    map_read_only(file, len)
+}
+
 /// Read only the pack header and trailer from disk for comparison with cached bytes.
 ///
 /// # Errors

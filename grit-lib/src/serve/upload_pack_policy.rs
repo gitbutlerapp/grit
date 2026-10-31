@@ -2,7 +2,7 @@
 
 use std::collections::{HashSet, VecDeque};
 
-use super::{AdvertisedRef, Result, ServeError};
+use super::{Result, ServeError};
 use crate::config::ConfigSet;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::repo::Repository;
@@ -92,7 +92,6 @@ impl UploadPackPolicy {
 /// Resolve `want-ref` names to OIDs and record them for the `wanted-refs` section.
 pub(crate) fn resolve_want_ref(
     repo: &Repository,
-    refs: &[AdvertisedRef],
     hidden: &[String],
     name: &str,
 ) -> Result<ObjectId> {
@@ -108,10 +107,6 @@ pub(crate) fn resolve_want_ref(
         format!("refs/{name}")
     };
     if crate::hide_refs::ref_is_hidden(name, &full, hidden) {
-        return Err(ServeError::Protocol(format!("unknown ref {name}")));
-    }
-    let allowed: HashSet<&str> = refs.iter().map(|r| r.name.as_str()).collect();
-    if !allowed.contains(full.as_str()) && !allowed.contains(name) {
         return Err(ServeError::Protocol(format!("unknown ref {name}")));
     }
     crate::refs::resolve_ref(repo.git_dir(), &full)
@@ -137,7 +132,7 @@ pub(crate) fn validate_wants_filtered(repo: &Repository, wants: &[ObjectId]) -> 
 /// already advertised ref tips skip reachability work.
 pub(crate) fn validate_wants(
     repo: &Repository,
-    refs: &[AdvertisedRef],
+    advertised_tips: &HashSet<ObjectId>,
     head: Option<ObjectId>,
     wants: &[ObjectId],
     policy: &UploadPackPolicy,
@@ -156,7 +151,7 @@ pub(crate) fn validate_wants(
         return Ok(());
     }
 
-    let advertised = advertised_object_ids(refs, head);
+    let advertised = advertised_object_ids(advertised_tips, head);
     let extra: Vec<ObjectId> = wants
         .iter()
         .copied()
@@ -184,11 +179,8 @@ pub(crate) fn validate_wants(
     Err(ServeError::NotOurRef(extra[0]))
 }
 
-fn advertised_object_ids(refs: &[AdvertisedRef], head: Option<ObjectId>) -> HashSet<ObjectId> {
-    let mut allowed: HashSet<ObjectId> = refs
-        .iter()
-        .flat_map(|r| std::iter::once(r.oid).chain(r.peeled))
-        .collect();
+fn advertised_object_ids(tips: &HashSet<ObjectId>, head: Option<ObjectId>) -> HashSet<ObjectId> {
+    let mut allowed = tips.clone();
     if let Some(h) = head {
         allowed.insert(h);
     }

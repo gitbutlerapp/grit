@@ -1966,6 +1966,8 @@ struct StackCacheKey {
 struct CachedStackTables {
     table_names: Vec<String>,
     readers: Vec<ReftableReader>,
+    /// Keeps file-backed mappings alive for [`ReftableReader`] views.
+    _maps: Vec<memmap2::Mmap>,
 }
 
 // hygiene: process-wide reftable table cache keyed by tables.list identity (cleared on writes)
@@ -2085,14 +2087,19 @@ fn build_cached_stack_tables(
     table_names: &[String],
 ) -> Result<CachedStackTables> {
     let mut readers = Vec::with_capacity(table_names.len());
+    let mut maps = Vec::with_capacity(table_names.len());
     for name in table_names {
         let path = reftable_dir.join(name);
-        let data = fs::read(&path).map_err(Error::Io)?;
-        readers.push(ReftableReader::from_arc(Arc::from(data))?);
+        let file = fs::File::open(&path).map_err(Error::Io)?;
+        let len = file.metadata().map_err(Error::Io)?.len() as usize;
+        let map = crate::pack_map::map_read_only_file(&file, len).map_err(Error::Io)?;
+        readers.push(ReftableReader::from_arc(Arc::from(map.as_ref()))?);
+        maps.push(map);
     }
     Ok(CachedStackTables {
         table_names: table_names.to_owned(),
         readers,
+        _maps: maps,
     })
 }
 
@@ -2125,10 +2132,11 @@ fn build_cached_stack_tables_with_reload(
 
 fn load_cached_stack_tables(reftable_dir: &Path) -> Result<Arc<CachedStackTables>> {
     let key = tables_list_cache_key(reftable_dir)?;
-    if let Ok(guard) = stack_table_cache().lock() {
-        if let Some(hit) = guard.get(&key) {
-            return Ok(Arc::clone(hit));
-        }
+    let mut guard = stack_table_cache()
+        .lock()
+        .map_err(|_| Error::Io(std::io::Error::other("reftable stack cache lock poisoned")))?;
+    if let Some(hit) = guard.get(&key) {
+        return Ok(Arc::clone(hit));
     }
 
     let tables_list = reftable_dir.join("tables.list");
@@ -2145,9 +2153,7 @@ fn load_cached_stack_tables(reftable_dir: &Path) -> Result<Arc<CachedStackTables
         reftable_dir,
         table_names,
     )?);
-    if let Ok(mut guard) = stack_table_cache().lock() {
-        guard.insert(key, Arc::clone(&cached));
-    }
+    guard.insert(key, Arc::clone(&cached));
     Ok(cached)
 }
 

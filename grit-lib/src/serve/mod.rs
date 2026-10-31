@@ -37,10 +37,11 @@ pub use receive_pack::{
 pub use ref_update_policy::{checked_out_branch, head_branch, validate_ref_update, HeadBranches};
 pub use upload_pack::{upload_pack, upload_pack_cancellable, UploadOutcome};
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ops::ControlFlow;
 
 use crate::objects::ObjectId;
-use crate::refs::listing::PACKED_PEELS_MIN_REFS;
 use crate::refs::store::RawRef;
 use crate::refs::PackedRefPeels;
 use crate::repo::Repository;
@@ -334,6 +335,7 @@ pub const PUSH_BUNDLE_CAPABILITY: &str = "pushBundle";
 
 /// One ref as it appears in an advertisement.
 #[derive(Debug, Clone)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct AdvertisedRef {
     /// Full ref name, such as `refs/heads/main`.
     pub(crate) name: String,
@@ -352,7 +354,18 @@ pub(crate) enum Peel {
     Yes,
 }
 
-/// List the repository's refs in advertisement order, skipping hidden ones.
+/// One ref while streaming an advertisement (name borrows the ref store entry).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AdvertisedRefView<'a> {
+    /// Full ref name, such as `refs/heads/main`.
+    pub(crate) name: &'a str,
+    /// Object the ref points at.
+    pub(crate) oid: ObjectId,
+    /// For an annotated tag, the non-tag object it ultimately points at.
+    pub(crate) peeled: Option<ObjectId>,
+}
+
+/// Visit refs in advertisement order without retaining every name.
 ///
 /// Only refs whose names start with one of `prefixes` are listed (every ref
 /// under `refs/` when `prefixes` is empty), and the ref store is asked for
@@ -364,69 +377,128 @@ pub(crate) enum Peel {
 /// are left out. As in Git, a ref naming a missing object is still advertised;
 /// with [`Peel::Yes`] it, like any ref whose tag chain cannot be read, simply
 /// gets no peeled value.
+pub(crate) fn for_each_advertised_ref(
+    repo: &Repository,
+    hidden: &[String],
+    prefixes: &[&str],
+    peel: Peel,
+    mut f: impl FnMut(AdvertisedRefView<'_>) -> Result<ControlFlow<()>>,
+) -> Result<()> {
+    let store = repo.refs();
+    let git_dir = repo.git_dir();
+    let linked_worktree = crate::worktree_ref::is_linked_worktree_git_dir(git_dir);
+    let packed = (peel == Peel::Yes)
+        .then(|| PackedRefPeels::for_store(store, git_dir).ok())
+        .flatten();
+    let odb = repo.odb();
+    let mut peel_cache: HashMap<ObjectId, Option<ObjectId>> = HashMap::new();
+    let callback_err = RefCell::new(None::<Result<()>>);
+    let peel_ctx = peel == Peel::Yes;
+    let run = || {
+        for prefix in scan_prefixes(prefixes) {
+            store.for_each_ref(prefix, &mut |entry| {
+                if callback_err.borrow().is_some() {
+                    return ControlFlow::Break(());
+                }
+                let name = entry.name.as_str();
+                if !name.starts_with(prefix)
+                    || !crate::refs::is_valid_fetch_advertised_ref(name)
+                    || crate::hide_refs::ref_is_hidden(name, name, hidden)
+                    || (linked_worktree
+                        && !crate::worktree_ref::ref_visible_from_worktree(git_dir, name))
+                {
+                    return ControlFlow::Continue(());
+                }
+                let oid = match &entry.value {
+                    RawRef::Direct(oid) => Some(*oid),
+                    RawRef::Symbolic(_) => entry.peeled.or_else(|| store.resolve(name).ok()),
+                };
+                let Some(oid) = oid else {
+                    return ControlFlow::Continue(());
+                };
+                let entry_peeled = match &entry.value {
+                    RawRef::Direct(_) => entry.peeled,
+                    RawRef::Symbolic(_) => None,
+                };
+                let peeled: Option<ObjectId> = match peel {
+                    Peel::No => None,
+                    Peel::Yes => {
+                        if let Some(p) = entry_peeled {
+                            Some(p)
+                        } else if let Some(cached_peel) =
+                            packed.as_ref().and_then(|p| p.peeled(name, &oid))
+                        {
+                            cached_peel
+                        } else if let Some(cached) = peel_cache.get(&oid) {
+                            *cached
+                        } else {
+                            let p = odb.peel_tag_target(oid).ok().flatten();
+                            peel_cache.insert(oid, p);
+                            p
+                        }
+                    }
+                };
+                match f(AdvertisedRefView { name, oid, peeled }) {
+                    Ok(ControlFlow::Continue(())) => ControlFlow::Continue(()),
+                    Ok(ControlFlow::Break(())) => ControlFlow::Break(()),
+                    Err(e) => {
+                        *callback_err.borrow_mut() = Some(Err(e));
+                        ControlFlow::Break(())
+                    }
+                }
+            })?;
+            if callback_err.borrow().is_some() {
+                break;
+            }
+        }
+        if let Some(Err(e)) = callback_err.into_inner() {
+            return Err(e);
+        }
+        Ok(())
+    };
+    if peel_ctx {
+        odb.with_pack_read_context(run)
+    } else {
+        run()
+    }
+}
+
+/// Collect every advertised ref (tests and callers that need the full list).
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn advertised_refs(
     repo: &Repository,
     hidden: &[String],
     prefixes: &[&str],
     peel: Peel,
 ) -> Result<Vec<AdvertisedRef>> {
-    let store = repo.refs();
-    let git_dir = repo.git_dir();
-    let linked_worktree = crate::worktree_ref::is_linked_worktree_git_dir(git_dir);
-    let mut listed: Vec<(String, ObjectId)> = Vec::new();
-    for prefix in scan_prefixes(prefixes) {
-        store.for_each_ref(prefix, &mut |entry| {
-            let name = entry.name.as_str();
-            if !name.starts_with(prefix)
-                || !crate::refs::is_valid_fetch_advertised_ref(name)
-                || crate::hide_refs::ref_is_hidden(name, name, hidden)
-                || (linked_worktree
-                    && !crate::worktree_ref::ref_visible_from_worktree(git_dir, name))
-            {
-                return ControlFlow::Continue(());
-            }
-            let oid = match &entry.value {
-                RawRef::Direct(oid) => Some(*oid),
-                RawRef::Symbolic(_) => entry.peeled.or_else(|| store.resolve(name).ok()),
-            };
-            if let Some(oid) = oid {
-                listed.push((entry.name.clone(), oid));
-            }
-            ControlFlow::Continue(())
-        })?;
-    }
-    if !listed.is_sorted_by(|a, b| a.0 < b.0) {
-        listed.sort_by(|a, b| a.0.cmp(&b.0));
-        listed.dedup_by(|later, first| later.0 == first.0);
-    }
+    let mut out = Vec::new();
+    for_each_advertised_ref(repo, hidden, prefixes, peel, |r| {
+        out.push(AdvertisedRef {
+            name: r.name.to_owned(),
+            oid: r.oid,
+            peeled: r.peeled,
+        });
+        Ok(ControlFlow::Continue(()))
+    })?;
+    Ok(out)
+}
 
-    if peel == Peel::No {
-        return Ok(listed
-            .into_iter()
-            .map(|(name, oid)| AdvertisedRef {
-                name,
-                oid,
-                peeled: None,
-            })
-            .collect());
-    }
-    let odb = repo.odb();
-    // A malformed `packed-refs` only loses the shortcut; peeling falls back to the objects.
-    let packed = (listed.len() >= PACKED_PEELS_MIN_REFS)
-        .then(|| PackedRefPeels::for_store(store, git_dir).ok())
-        .flatten();
-    Ok(odb.with_pack_read_context(|| {
-        listed
-            .into_iter()
-            .map(|(name, oid)| {
-                let peeled = packed
-                    .as_ref()
-                    .and_then(|p| p.peeled(&name, &oid))
-                    .unwrap_or_else(|| odb.peel_tag_target(oid).ok().flatten());
-                AdvertisedRef { name, oid, peeled }
-            })
-            .collect()
-    }))
+/// Object ids that appear in an advertisement (direct tips and peeled targets).
+pub(crate) fn advertised_object_ids_from_repo(
+    repo: &Repository,
+    hidden: &[String],
+    prefixes: &[&str],
+    peel: Peel,
+) -> Result<std::collections::HashSet<ObjectId>> {
+    let mut ids = std::collections::HashSet::new();
+    for_each_advertised_ref(repo, hidden, prefixes, peel, |r| {
+        ids.insert(r.oid);
+        if let Some(p) = r.peeled {
+            ids.insert(p);
+        }
+        Ok(ControlFlow::Continue(()))
+    })?;
+    Ok(ids)
 }
 
 /// Ref-store prefixes to list so that every ref under `refs/` starting with one

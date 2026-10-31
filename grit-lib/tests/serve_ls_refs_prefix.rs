@@ -178,6 +178,18 @@ fn many_ref_repo(n: usize) -> (tempfile::TempDir, Repository, Arc<CountingStore>
 }
 
 #[test]
+fn ls_refs_peel_many_branches_at_one_commit_reads_objects_once() {
+    let (_dir, repo, store, _commit) = many_ref_repo(500);
+    let before = store.lookups();
+    let out = grit_ls_refs(&repo, &["peel"], &[]);
+    assert_eq!(pkt_lines(&out).len(), 501);
+    assert!(
+        store.lookups() - before <= 1,
+        "peeling 500 branch refs at one commit must not read the commit per ref"
+    );
+}
+
+#[test]
 fn ls_refs_prefix_reads_objects_only_for_the_refs_it_returns() {
     let (_dir, repo, store, commit) = many_ref_repo(500);
 
