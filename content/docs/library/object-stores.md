@@ -191,7 +191,7 @@ The repository-level entry points use it automatically. [`ingest_received_pack`]
 cargo run -p grit-examples --bin ingest_pack_into_store
 ```
 
-For a lower-level hook, [`fetch_remote_into`](rustdoc:grit_lib::remote::fetch::fetch_remote_into) drives wire negotiation on an open [`Connection`](rustdoc:grit_lib::remote::transport::Connection) and ingests into the repository's primary store. Set [`FetchOptions::pack_spool_only`](rustdoc:grit_lib::remote::transfer::FetchOptions::pack_spool_only) to receive the negotiated pack as a spool file and ingest it yourself with [`ingest_received_pack_path`](rustdoc:grit_lib::objects::index_pack::ingest_received_pack_path) or [`ingest_pack_into`](rustdoc:grit_lib::objects::unpack_objects::ingest_pack_into). Going the other way, [`build_pack`](rustdoc:grit_lib::objects::pack_objects::build_pack) on the custom repository's `Odb` produces a pack that `git index-pack --strict` accepts.
+For a lower-level hook, [`fetch_remote_into`](rustdoc:grit_lib::remote::fetch::fetch_remote_into) drives wire negotiation on an open [`Connection`](rustdoc:grit_lib::remote::transport::Connection) and ingests into the repository's primary store. With [`FetchOptions`](rustdoc:grit_lib::remote::transfer::FetchOptions) configured to spool the negotiated pack without index-pack, you receive a temp pack file and ingest it yourself with [`ingest_received_pack_path`](rustdoc:grit_lib::objects::index_pack::ingest_received_pack_path) or [`ingest_pack_into`](rustdoc:grit_lib::objects::unpack_objects::ingest_pack_into). Going the other way, [`build_pack`](rustdoc:grit_lib::objects::pack_objects::build_pack) on the custom repository's `Odb` produces a pack that `git index-pack --strict` accepts.
 
 ## Short ids and prefix lookup
 
