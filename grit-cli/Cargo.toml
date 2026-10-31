@@ -30,7 +30,7 @@ anyhow.workspace = true
 base64.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
-grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq", "tracing"] }
+grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq", "tracing", "hot-text-layout"] }
 grit-http-server = { version = "0.5", path = "../grit-http-server" }
 grit-protocol = { version = "0.5", path = "../grit-protocol" }
 tracing-core = { version = "0.1", default-features = false }
@@ -47,7 +47,7 @@ libc.workspace = true
 rpassword = "7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq", "http-ureq-native-tls", "tracing"] }
+grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq", "http-ureq-native-tls", "tracing", "hot-text-layout"] }
 
 # Process-creation flags and std-handle inheritance for detaching background `grit gc --auto`.
 [target.'cfg(windows)'.dependencies]

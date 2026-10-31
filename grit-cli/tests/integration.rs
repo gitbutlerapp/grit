@@ -308,6 +308,8 @@ mod history_squash;
 #[cfg(feature = "full-tests")]
 #[path = "history_undo.rs"]
 mod history_undo;
+#[path = "hot_text_layout.rs"]
+mod hot_text_layout;
 #[path = "http_transport_error_redaction.rs"]
 mod http_transport_error_redaction;
 #[cfg(feature = "full-tests")]
