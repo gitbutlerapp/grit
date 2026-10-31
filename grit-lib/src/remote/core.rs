@@ -555,8 +555,12 @@ impl Remote {
             opts.diagnostics = Some(repo.diagnostics());
             opts.network_trace = repo.network_trace_enabled();
         }
+        let protocol_version = upload_pack_protocol_version(opts.http_protocol_version, repo)?;
+        if opts.http_protocol_version.is_none() {
+            opts.http_protocol_version = Some(protocol_version);
+        }
         let connect = ConnectOptions {
-            protocol_version: 2,
+            protocol_version,
             diagnostics: opts.diagnostics.clone(),
             network_trace: opts.network_trace,
             ..Default::default()
@@ -904,6 +908,10 @@ impl Remote {
         repo: Option<&Repository>,
     ) -> RemoteResult<Vec<RemoteRef>> {
         let wire = url.as_wire_url().ok_or(RemoteError::UnsupportedScheme)?;
+        let mut opts = opts.clone();
+        if opts.protocol_version.is_none() {
+            opts.protocol_version = Some(list_refs_protocol_version(None, repo)?);
+        }
         let requested = opts.protocol_version.unwrap_or(2);
         let connect_opts = ConnectOptions {
             protocol_version: requested,
@@ -911,17 +919,17 @@ impl Remote {
         };
         match url {
             RemoteUrl::Http(_) | RemoteUrl::Https(_) => {
-                list_refs_http(wire, local_git_dir, odb, opts, http_factory, repo)
+                list_refs_http(wire, local_git_dir, odb, &opts, http_factory, repo)
             }
             RemoteUrl::Git(_) => {
                 let mut conn =
                     GitDaemonTransport::new().connect(wire, Service::UploadPack, &connect_opts)?;
-                list_refs_from_connection(&mut *conn, local_git_dir, odb, opts)
+                list_refs_from_connection(&mut *conn, local_git_dir, odb, &opts)
             }
             RemoteUrl::Ssh(_) => {
                 let transport = ssh_transport(repo, None);
                 let mut conn = transport.connect(wire, Service::UploadPack, &connect_opts)?;
-                list_refs_from_connection(&mut *conn, local_git_dir, odb, opts)
+                list_refs_from_connection(&mut *conn, local_git_dir, odb, &opts)
             }
             RemoteUrl::Local(_) | RemoteUrl::File(_) | RemoteUrl::Bundle(_) => unreachable!(),
         }
@@ -941,6 +949,26 @@ fn repo_context(repo: Option<&Repository>) -> (&Path, Option<&Path>, Option<Odb>
         Some(r) => (r.git_dir(), r.work_tree(), Some(r.odb().clone())),
         None => (Path::new("."), None, None),
     }
+}
+
+fn upload_pack_protocol_version(explicit: Option<u8>, repo: &Repository) -> RemoteResult<u8> {
+    if let Some(v) = explicit {
+        return Ok(v);
+    }
+    crate::protocol::try_effective_client_protocol_version_from_config(
+        repo.config().map_err(RemoteError::Library)?.as_ref(),
+    )
+    .map_err(RemoteError::Library)
+}
+
+fn list_refs_protocol_version(explicit: Option<u8>, repo: Option<&Repository>) -> RemoteResult<u8> {
+    if let Some(v) = explicit {
+        return Ok(v);
+    }
+    if let Some(repo) = repo {
+        return upload_pack_protocol_version(None, repo);
+    }
+    Ok(2)
 }
 
 /// Whether the local repository at `git_dir` has promisor remotes of its own

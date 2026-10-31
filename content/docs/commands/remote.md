@@ -39,7 +39,7 @@ A remote is another copy of the repository that you fetch from and push to, usua
 
 `grit remote rename` renames a configured remote. When the remote uses the default fetch refspec into `refs/remotes/<name>/`, every remote-tracking ref is renamed in one transaction (reflogs preserved), then the config section is renamed, default fetch refspecs are updated, and `branch.*.remote`, `branch.*.pushRemote`, and `remote.pushDefault` entries that pointed at the old name are retargeted. Custom fetch refspecs that do not map into `refs/remotes/<old>/` are left unchanged. `--dry-run` reports counts without changing the repository.
 
-`grit remote refs` lists references on a configured remote name or a literal URL, scp-style `host:path` or path (same transports as [`grit clone`](../clone/)), matching `git ls-remote` ordering. An argument that is none of these fails with `unknown remote`. SSH URLs use the same `GIT_SSH_COMMAND`, `GIT_SSH`, and `core.sshCommand` resolution as [`grit clone`](../clone/) and [`grit fetch`](../fetch/).
+`grit remote refs` lists references on a configured remote name or a literal URL, scp-style `host:path` or path (same transports as [`grit clone`](../clone/)), matching `git ls-remote` ordering. An argument that is none of these fails with `unknown remote`. SSH URLs use the same `GIT_SSH_COMMAND`, `GIT_SSH`, and `core.sshCommand` resolution as [`grit clone`](../clone/) and [`grit fetch`](../fetch/). Like fetch, listing uses `protocol.version` from config (default **2**): SSH sets `GIT_PROTOCOL=version=N` on the ssh child when `N > 0`, and adds `-o SendEnv=GIT_PROTOCOL` when the resolved ssh program is OpenSSH (or when `GIT_SSH_VARIANT=ssh`).
 
 ## Options
 
