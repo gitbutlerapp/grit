@@ -7,6 +7,10 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
+use grit_lib::porcelain::replay::ReplayDirection;
+use grit_lib::porcelain::replay_sequence::{
+    start_replay_sequence, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
+};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -400,6 +404,125 @@ fn issue_1090_resolve_commit_keeps_non_conflict_files() {
         grit_tree, git_tree,
         "merge commit tree should match system git"
     );
+}
+
+/// Issue #2381: sibling directories `a/` and `a0/` must not blow the stack during merge.
+#[test]
+fn merge_sibling_dirs_a_and_a0_reports_conflicts() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "a@b"]);
+    git(root, &["config", "user.name", "t"]);
+    fs::create_dir_all(root.join("a")).expect("a");
+    fs::create_dir_all(root.join("a0")).expect("a0");
+    fs::write(root.join("a/f"), "base\n").expect("a/f");
+    fs::write(root.join("a0/f"), "base\n").expect("a0/f");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["branch", "-m", "main"]);
+
+    git(root, &["switch", "-q", "-c", "one"]);
+    fs::write(root.join("a/f"), "one\n").expect("one a");
+    fs::write(root.join("a0/f"), "one\n").expect("one a0");
+    git(root, &["commit", "-qam", "one"]);
+
+    git(root, &["switch", "-q", "main"]);
+    git(root, &["switch", "-q", "-c", "two"]);
+    fs::write(root.join("a/f"), "two\n").expect("two a");
+    fs::write(root.join("a0/f"), "two\n").expect("two a0");
+    git(root, &["commit", "-qam", "two"]);
+
+    git(root, &["switch", "-q", "one"]);
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open repo");
+    let one_oid = ObjectId::from_hex(&git_out(root, &["rev-parse", "HEAD"])).expect("one");
+    let two_oid = ObjectId::from_hex(&git_out(root, &["rev-parse", "two"])).expect("two");
+
+    let outcome = integrate_branch(
+        &repo,
+        "refs/heads/one",
+        one_oid,
+        two_oid,
+        "two",
+        &mut NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("integrate merge two into one");
+    assert!(
+        matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }),
+        "expected conflicts merging two into one, got {outcome:?}"
+    );
+
+    assert!(repo.git_dir().join("MERGE_HEAD").exists());
+    let index = repo.index_handle().load().expect("index");
+    assert!(index.get(b"a/f", 1).is_some());
+    assert!(index.get(b"a/f", 2).is_some());
+    assert!(index.get(b"a/f", 3).is_some());
+    assert!(index.get(b"a0/f", 1).is_some());
+    assert!(index.get(b"a0/f", 2).is_some());
+    assert!(index.get(b"a0/f", 3).is_some());
+
+    let fsck = Command::new("git")
+        .current_dir(root)
+        .args(["fsck", "--strict"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("fsck");
+    assert!(
+        fsck.status.success(),
+        "git fsck: {}",
+        String::from_utf8_lossy(&fsck.stderr)
+    );
+}
+
+#[test]
+fn pick_sibling_dirs_a_and_a0_reports_conflicts() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "a@b"]);
+    git(root, &["config", "user.name", "t"]);
+    fs::create_dir_all(root.join("a")).expect("a");
+    fs::create_dir_all(root.join("a0")).expect("a0");
+    fs::write(root.join("a/f"), "base\n").expect("a/f");
+    fs::write(root.join("a0/f"), "base\n").expect("a0/f");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["branch", "-m", "main"]);
+
+    git(root, &["switch", "-q", "-c", "one"]);
+    fs::write(root.join("a/f"), "one\n").expect("one a");
+    fs::write(root.join("a0/f"), "one\n").expect("one a0");
+    git(root, &["commit", "-qam", "one"]);
+
+    git(root, &["switch", "-q", "main"]);
+    git(root, &["switch", "-q", "-c", "two"]);
+    fs::write(root.join("a/f"), "two\n").expect("two a");
+    fs::write(root.join("a0/f"), "two\n").expect("two a0");
+    git(root, &["commit", "-qam", "two"]);
+    let pick_oid = ObjectId::from_hex(&git_out(root, &["rev-parse", "two"])).expect("two tip");
+
+    git(root, &["switch", "-q", "one"]);
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open repo");
+
+    let outcome = start_replay_sequence(
+        &repo,
+        &ReplaySequenceRequest {
+            commits: vec![pick_oid],
+            direction: ReplayDirection::Pick,
+            committer: ident().parse().expect("committer"),
+            options: ReplayOptions::default(),
+        },
+        &mut NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("pick two onto one");
+    assert!(
+        matches!(outcome, SequenceOutcome::Conflicts { .. }),
+        "expected pick conflicts, got {outcome:?}"
+    );
+    assert!(repo.git_dir().join("CHERRY_PICK_HEAD").exists());
 }
 
 #[test]
