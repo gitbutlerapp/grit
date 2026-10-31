@@ -9,6 +9,12 @@ use crate::unpack_objects::delta_uncompressed_result_size_if_complete;
 
 const READ_CHUNK: usize = 64 * 1024;
 
+/// Compressed input read per inflate step for loose objects (streaming and bulk).
+pub(crate) const LOOSE_INFLATE_INPUT_CHUNK: usize = 256 * 1024;
+
+/// Maximum decompressed bytes passed to one zlib `decompress` call on a loose object.
+pub(crate) const LOOSE_INFLATE_OUTPUT_CHUNK: usize = 256 * 1024;
+
 /// Largest up-front output reservation taken from a loose object's declared size.
 ///
 /// The header is untrusted until the stream has been fully inflated, so a corrupt size
@@ -62,11 +68,15 @@ fn declared_loose_object_len(out: &[u8]) -> Option<usize> {
 fn loose_output_growth(len: usize, declared: Option<usize>, filled: usize) -> usize {
     match declared {
         Some(total) if total > len => {
-            let target = total.min(len.saturating_mul(2).max(MAX_HEADER_SIZE_RESERVE));
+            let target = total
+                .min(len.saturating_mul(2).max(MAX_HEADER_SIZE_RESERVE))
+                .min(len + LOOSE_INFLATE_OUTPUT_CHUNK);
             target - len
         }
-        _ if len == 0 => filled.saturating_mul(4).max(256),
-        _ => len.max(256),
+        _ if len == 0 => filled
+            .saturating_mul(4)
+            .clamp(256, LOOSE_INFLATE_OUTPUT_CHUNK),
+        _ => len.clamp(256, LOOSE_INFLATE_OUTPUT_CHUNK),
     }
 }
 
@@ -419,8 +429,8 @@ impl ZlibInflateScratch {
         self.reset();
         out.clear();
         let mut input = std::mem::take(&mut self.input);
-        if input.len() < READ_CHUNK {
-            input.resize(READ_CHUNK, 0);
+        if input.len() < LOOSE_INFLATE_INPUT_CHUNK {
+            input.resize(LOOSE_INFLATE_INPUT_CHUNK, 0);
         }
         let mut read_budget = LooseFileReadBudget::new(file)?;
         let result = self.inflate_loose_reads(&mut input, file, out, limit, &mut read_budget);
@@ -484,7 +494,11 @@ impl ZlibInflateScratch {
             let dest: &mut [u8] = if into_tail {
                 &mut tail
             } else {
-                &mut out[len..]
+                let room = out
+                    .len()
+                    .saturating_sub(len)
+                    .min(LOOSE_INFLATE_OUTPUT_CHUNK);
+                &mut out[len..len + room]
             };
             let room = dest.len();
             let before_in = self.dec.total_in();

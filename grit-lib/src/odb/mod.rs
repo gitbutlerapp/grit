@@ -3238,7 +3238,7 @@ impl Odb {
                 return Ok(oid);
             }
         }
-        if self.overlay_active() || size < self.big_file_threshold()? {
+        if self.overlay_active() || size < stream::STREAMED_WRITE_MIN_SIZE {
             let len = usize::try_from(size).map_err(|_| {
                 Error::CorruptObject(format!("object size {size} exceeds address space"))
             })?;
@@ -3252,6 +3252,12 @@ impl Odb {
                 });
             }
             return self.write_with_options(kind, &data, options);
+        }
+        if size < self.big_file_threshold()? {
+            let loose = self.local_loose()?;
+            let oid = loose.write_payload_stream(kind, size, reader, options)?;
+            self.note_commit_object_written(kind);
+            return Ok(oid);
         }
         let staged = stream::StagedPack::write(
             &self.objects_dir.join("pack"),
@@ -3578,7 +3584,13 @@ impl Odb {
             });
         }
         let loose = self.local_loose()?;
-        let oid = loose.write_payload_stream_with(kind, size, WriteOptions::default(), supply)?;
+        let oid = loose.write_payload_stream_with(
+            kind,
+            size,
+            WriteOptions::default(),
+            self.pack_compression()?,
+            supply,
+        )?;
         self.note_commit_object_written(kind);
         Ok(oid)
     }

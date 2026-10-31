@@ -7992,11 +7992,7 @@ fn worktree_file_oid(
     materialize: bool,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<ObjectId> {
-    let stream_from = if materialize {
-        odb.big_file_threshold()?
-    } else {
-        hash_stream_threshold(odb)?
-    };
+    let stream_from = hash_stream_threshold(odb)?;
     worktree_blob_content_from(
         odb,
         path,

@@ -228,6 +228,8 @@ mod checkout_ignorecase_collision_commit;
 #[cfg(feature = "full-tests")]
 #[path = "checkout_in_place_umask_git_compat.rs"]
 mod checkout_in_place_umask_git_compat;
+#[path = "checkout_incompressible_blob_restore.rs"]
+mod checkout_incompressible_blob_restore;
 #[cfg(feature = "full-tests")]
 #[path = "checkout_large_blob_rss.rs"]
 mod checkout_large_blob_rss;
