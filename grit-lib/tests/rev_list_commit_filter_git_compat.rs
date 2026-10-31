@@ -1269,6 +1269,97 @@ fn bounded_path_since_with_large_limit_matches_git() {
             "path.txt",
         ],
     );
+    assert_rev_list_filter_matches_git(
+        wt,
+        &repo,
+        &[
+            "-n",
+            "5000",
+            "--author=Refs Harness",
+            "--since=1970-01-01 00:41:40 +0000",
+            "main",
+            "--",
+            "path.txt",
+        ],
+    );
+}
+
+#[test]
+fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let c0 =
+        commit_with_committer_timestamps(wt, "c0", &[], ("Alice", "a@x.com"), 1000, "old root");
+    let c1 = commit_with_committer_timestamps(
+        wt,
+        "c1",
+        &[c0],
+        ("Alice", "a@x.com"),
+        2000,
+        "past cutoff",
+    );
+    remove_loose_object(wt, c0);
+    let c2 = commit_with_committer_timestamps(wt, "c2", &[c1], ("Alice", "a@x.com"), 4000, "tip");
+    git(wt, &["update-ref", "refs/heads/main", &c2.to_hex()]);
+    commit_file(wt, "frontier-path.txt", "v1", "touch path");
+    let repo = open_grit_repo(wt);
+    assert_rev_list_filter_matches_git(
+        wt,
+        &repo,
+        &[
+            "-n",
+            "5000",
+            "--author=Refs Harness",
+            "--since=1970-01-01 00:41:40 +0000",
+            "main",
+            "--",
+            "frontier-path.txt",
+        ],
+    );
+
+    let parsed = parse_rev_list_cli(&[
+        "-n",
+        "5000",
+        "--author=Refs Harness",
+        "--since=1970-01-01 00:41:40 +0000",
+        "main",
+        "--",
+        "frontier-path.txt",
+    ]);
+    let (positive, negative) = support::expand_revision_tokens(
+        &parsed
+            .rev_args
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    );
+    let list_filter = CommitFilterBuilder::new()
+        .author("Refs Harness")
+        .build()
+        .expect("filter");
+    let opts = RevListOptions {
+        max_count: Some(5000),
+        since_cutoff: parsed.since_cutoff,
+        commit_filter: Some(Arc::new(list_filter)),
+        paths: parsed.paths,
+        missing_action: MissingAction::Error,
+        use_commit_graph: false,
+        ..RevListOptions::default()
+    };
+    let result = rev_list(&repo, &positive, &negative, &opts).expect("since path filter walk");
+    let git_oids = git_rev_list(
+        wt,
+        &[
+            "-n",
+            "5000",
+            "--author=Refs Harness",
+            "--since=1970-01-01 00:41:40 +0000",
+            "main",
+            "--",
+            "frontier-path.txt",
+        ],
+    );
+    assert_eq!(result.commits, git_oids);
 }
 
 #[test]

@@ -6495,17 +6495,20 @@ fn streaming_default_order_list(
     Ok(result)
 }
 
+fn path_limit_plain_walk_options(options: &RevListOptions) -> RevListOptions {
+    RevListOptions {
+        paths: Vec::new(),
+        pickaxe: None,
+        commit_filter: None,
+        ..options.clone()
+    }
+}
+
 fn can_use_bounded_path_limit_list(options: &RevListOptions) -> bool {
+    let plain = path_limit_plain_walk_options(options);
     let since_date_bounded = options.since_cutoff.is_some()
         && options.ordering == OrderingMode::Default
-        && plain_commit_walk(
-            &RevListOptions {
-                paths: Vec::new(),
-                pickaxe: None,
-                ..options.clone()
-            },
-            false,
-        );
+        && plain_commit_walk(&plain, false);
     (options.max_count.is_some() || since_date_bounded)
         && !options.paths.is_empty()
         && !options.full_history
@@ -6513,11 +6516,7 @@ fn can_use_bounded_path_limit_list(options: &RevListOptions) -> bool {
         && !options.simplify_merges
         && !options.sparse
         && !options.count
-        && (can_use_bounded_limit_list(&RevListOptions {
-            paths: Vec::new(),
-            pickaxe: None,
-            ..options.clone()
-        }) || since_date_bounded)
+        && (can_use_bounded_limit_list(&plain) || since_date_bounded)
 }
 
 fn repo_commit_graph_enabled(repo: &Repository, cfg: &ConfigSet) -> bool {
