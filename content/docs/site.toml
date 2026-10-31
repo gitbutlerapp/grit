@@ -175,6 +175,8 @@ baseline = [
   "grit-utils/baselines/status-scan-after.json",
   "grit-utils/baselines/daily-branch-json-4643-before.json",
   "grit-utils/baselines/daily-branch-json-4643-after.json",
+  "grit-utils/baselines/daily-branch-merged-peel-once-before.json",
+  "grit-utils/baselines/daily-branch-merged-peel-once-after.json",
   "grit-utils/baselines/clap-globals-5562.json",
   "grit-utils/baselines/daily-clap-globals-5562-before.json",
   "grit-utils/baselines/daily-clap-globals-5562-after.json",
