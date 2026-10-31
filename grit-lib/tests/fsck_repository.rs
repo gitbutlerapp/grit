@@ -1014,6 +1014,154 @@ fn dangling_commit_and_blob() {
     );
 }
 
+fn empty_tree_oid(dir: &std::path::Path) -> ObjectId {
+    let out = Command::new("git")
+        .current_dir(dir)
+        .args(["hash-object", "-w", "-t", "tree", "--stdin"])
+        .stdin(std::process::Stdio::from(
+            std::fs::File::open("/dev/null").expect("open /dev/null"),
+        ))
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("empty tree");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    ObjectId::from_hex(String::from_utf8_lossy(&out.stdout).trim()).expect("tree oid")
+}
+
+fn bad_parent_reachable_commit_body(dir: &std::path::Path) -> Vec<u8> {
+    format!("tree {}\nparent zzzz\n", empty_tree_oid(dir).to_hex()).into_bytes()
+}
+
+#[test]
+fn malformed_reachable_commit_bad_parent_does_not_panic() {
+    let (dir, repo) = init_repo();
+    one_commit(&repo);
+    let bad_hex = git_hash_object_literally(
+        dir.path(),
+        FixtureAlgo::Sha1,
+        "commit",
+        &bad_parent_reachable_commit_body(dir.path()),
+    )
+    .expect("literally write commit");
+    let bad = ObjectId::from_hex(bad_hex.trim()).expect("parse oid");
+    write_ref_loose(dir.path(), "refs/heads/bad", bad);
+    let git_out = Command::new("git")
+        .current_dir(dir.path())
+        .args(["fsck"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git fsck");
+    assert!(
+        !git_out.status.success(),
+        "git fsck must fail on bad parent"
+    );
+    let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
+    assert!(
+        !report.ok(
+            &repo.config().expect("config"),
+            &FsckOptions::full_repository(false)
+        ),
+        "fsck must not pass with bad parent commit"
+    );
+    assert!(
+        report.issues.iter().any(|i| {
+            matches!(
+                i,
+                FsckIssue::BadObject { oid, error }
+                    if oid == &bad && error.id == "badParentSha1"
+            )
+        }),
+        "bad parent commit must surface as badParentSha1: {:?}",
+        report.issues
+    );
+}
+
+#[test]
+fn malformed_reachable_commit_truncated_parent_header_does_not_panic() {
+    let (dir, repo) = init_repo();
+    one_commit(&repo);
+    let tree = empty_tree_oid(dir.path());
+    let body = format!("tree {}\nparent ", tree.to_hex());
+    assert_eq!(body.len(), 53, "truncation point for parent header");
+    let bad_hex =
+        git_hash_object_literally(dir.path(), FixtureAlgo::Sha1, "commit", body.as_bytes())
+            .expect("literally write commit");
+    let bad = ObjectId::from_hex(bad_hex.trim()).expect("parse oid");
+    write_ref_loose(dir.path(), "refs/heads/bad", bad);
+    let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
+    assert!(
+        report.issues.iter().any(|i| {
+            matches!(
+                i,
+                FsckIssue::BadObject { oid, error }
+                    if oid == &bad && error.id == "unterminatedHeader"
+            )
+        }),
+        "truncated parent header must surface as unterminatedHeader: {:?}",
+        report.issues
+    );
+}
+
+#[test]
+fn malformed_unreachable_commit_bad_parent_is_bad_object() {
+    let (dir, repo) = init_repo();
+    one_commit(&repo);
+    let bad_hex = git_hash_object_literally(
+        dir.path(),
+        FixtureAlgo::Sha1,
+        "commit",
+        &bad_parent_reachable_commit_body(dir.path()),
+    )
+    .expect("literally write commit");
+    let bad = ObjectId::from_hex(bad_hex.trim()).expect("parse oid");
+    let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
+    assert!(
+        report.issues.iter().any(|i| {
+            matches!(
+                i,
+                FsckIssue::BadObject { oid, error }
+                    if oid == &bad && error.id == "badParentSha1"
+            )
+        }),
+        "unreachable bad parent commit must be reported: {:?}",
+        report.issues
+    );
+}
+
+#[test]
+fn malformed_unreachable_commit_bad_parent_in_pack_does_not_panic() {
+    let (dir, repo) = init_repo();
+    one_commit(&repo);
+    let bad_hex = git_hash_object_literally(
+        dir.path(),
+        FixtureAlgo::Sha1,
+        "commit",
+        &bad_parent_reachable_commit_body(dir.path()),
+    )
+    .expect("literally write commit");
+    let bad = ObjectId::from_hex(bad_hex.trim()).expect("parse oid");
+    pack_loose_object_and_remove_loose(dir.path(), bad);
+    repo.odb().invalidate_packs();
+    let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
+    assert!(
+        report.issues.iter().any(|i| {
+            matches!(
+                i,
+                FsckIssue::BadObject { oid, error }
+                    if oid == &bad && error.id == "badParentSha1"
+            )
+        }),
+        "packed bad parent commit must be reported: {:?}",
+        report.issues
+    );
+}
+
 #[test]
 fn malformed_reachable_commit_is_bad_object_not_error() {
     let (dir, repo) = init_repo();
