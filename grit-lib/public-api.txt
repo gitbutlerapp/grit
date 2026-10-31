@@ -19956,6 +19956,7 @@ pub fn grit_lib::refs::reftable::ReftableReader::block_size(&self) -> u32
 pub fn grit_lib::refs::reftable::ReftableReader::for_each_ref(&self, impl core::ops::function::FnMut(&grit_lib::refs::reftable::RefRecord) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reftable::ReftableReader::for_each_ref_in_range(&self, &str, core::option::Option<&str>, impl core::ops::function::FnMut(&grit_lib::refs::reftable::RefRecord) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reftable::ReftableReader::from_arc(alloc::rcs::arc::Arc<[u8]>) -> grit_lib::error::Result<Self>
+pub fn grit_lib::refs::reftable::ReftableReader::from_mapped(alloc::rcs::arc::Arc<memmap2::Mmap>) -> grit_lib::error::Result<Self>
 pub fn grit_lib::refs::reftable::ReftableReader::lookup_ref(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::reftable::RefRecord>>
 pub fn grit_lib::refs::reftable::ReftableReader::max_update_index(&self) -> u64
 pub fn grit_lib::refs::reftable::ReftableReader::min_update_index(&self) -> u64
