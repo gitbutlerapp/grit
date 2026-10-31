@@ -117,8 +117,22 @@ pub fn merge(input: &MergeInput<'_>) -> Result<MergeOutput> {
             _ => similar::Algorithm::Myers,
         })
         .unwrap_or(similar::Algorithm::Myers);
-    let ours_ops = similar::capture_diff_slices(algo, &base_compare_lines, &ours_compare_lines);
-    let theirs_ops = similar::capture_diff_slices(algo, &base_compare_lines, &theirs_compare_lines);
+    let ours_ops = compact_merge_diff_ops(
+        similar::capture_diff_slices(algo, &base_compare_lines, &ours_compare_lines),
+        &base_lines,
+        &ours_lines,
+        &base_compare_lines,
+        &ours_compare_lines,
+        &ws_mode,
+    );
+    let theirs_ops = compact_merge_diff_ops(
+        similar::capture_diff_slices(algo, &base_compare_lines, &theirs_compare_lines),
+        &base_lines,
+        &theirs_lines,
+        &base_compare_lines,
+        &theirs_compare_lines,
+        &ws_mode,
+    );
 
     let mut insert_consumed = vec![false; base_lines.len() + 1];
     let mut hunks = compute_hunks(
@@ -1605,6 +1619,67 @@ fn lines_for_merge_diff_compare(lines: &[Vec<u8>], mode: &WhitespaceMode) -> Vec
         .collect()
 }
 
+/// Line body without terminators, for Git's indent heuristic during change compaction.
+fn merge_line_body_str(line: &[u8]) -> String {
+    if line.ends_with(b"\r\n") {
+        String::from_utf8_lossy(&line[..line.len() - 2]).into_owned()
+    } else if line.ends_with(b"\n") {
+        String::from_utf8_lossy(&line[..line.len() - 1]).into_owned()
+    } else {
+        String::from_utf8_lossy(line).into_owned()
+    }
+}
+
+fn merge_whitespace_for_compaction(ws_mode: &WhitespaceMode) -> crate::diff::WhitespaceMode {
+    crate::diff::WhitespaceMode {
+        ignore_all_space: ws_mode.ignore_all_space,
+        ignore_space_change: ws_mode.ignore_space_change,
+        ignore_space_at_eol: ws_mode.ignore_space_at_eol,
+        ignore_blank_lines: false,
+    }
+}
+
+/// Run Git `xdl_change_compact` (indent heuristic on) on a base→side diff, matching `git merge-file`.
+fn compact_merge_diff_ops(
+    ops: Vec<DiffOp>,
+    old_lines: &[Vec<u8>],
+    new_lines: &[Vec<u8>],
+    old_compare: &[Vec<u8>],
+    new_compare: &[Vec<u8>],
+    ws_mode: &WhitespaceMode,
+) -> Vec<DiffOp> {
+    let old_bodies: Vec<String> = old_lines.iter().map(|l| merge_line_body_str(l)).collect();
+    let new_bodies: Vec<String> = new_lines.iter().map(|l| merge_line_body_str(l)).collect();
+    let old_keys: Vec<String> = old_compare
+        .iter()
+        .map(|k| String::from_utf8_lossy(k).into_owned())
+        .collect();
+    let new_keys: Vec<String> = new_compare
+        .iter()
+        .map(|k| String::from_utf8_lossy(k).into_owned())
+        .collect();
+    let old_body_refs: Vec<&str> = old_bodies.iter().map(String::as_str).collect();
+    let new_body_refs: Vec<&str> = new_bodies.iter().map(String::as_str).collect();
+    let old_key_refs: Vec<&str> = old_keys.iter().map(String::as_str).collect();
+    let new_key_refs: Vec<&str> = new_keys.iter().map(String::as_str).collect();
+    crate::diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
+        &ops,
+        crate::diff_indent_heuristic::CompactSide {
+            lines: &old_body_refs,
+            keys: &old_key_refs,
+            compare_ids: None,
+        },
+        crate::diff_indent_heuristic::CompactSide {
+            lines: &new_body_refs,
+            keys: &new_key_refs,
+            compare_ids: None,
+        },
+        true,
+        merge_whitespace_for_compaction(ws_mode),
+        false,
+    )
+}
+
 fn normalize_line_for_compare(line: &[u8], mode: &WhitespaceMode) -> Vec<u8> {
     let mut bytes = line.to_vec();
 
@@ -1871,6 +1946,40 @@ mod tests {
         let theirs = "a\nb\nC\n"; // modify the last line, two lines away
         let (r, c) = do_merge(base, ours, theirs);
         assert_eq!(c, 0, "expected clean merge, got: {r:?}");
+    }
+
+    #[test]
+    fn issue_2397_delete_tail_vs_append_matches_git() {
+        let base = include_str!("../tests/fixtures/issue_2397_base.rs");
+        let ours = include_str!("../tests/fixtures/issue_2397_ours.rs");
+        let theirs = include_str!("../tests/fixtures/issue_2397_theirs.rs");
+        assert_merge_matches_git(
+            base.as_bytes(),
+            ours.as_bytes(),
+            theirs.as_bytes(),
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2397 cargo precise_pre_release",
+        );
+        let out = merge(&MergeInput {
+            base: base.as_bytes(),
+            ours: ours.as_bytes(),
+            theirs: theirs.as_bytes(),
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: None,
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .unwrap();
+        assert_eq!(out.conflicts, 1, "must conflict like git merge-file");
     }
 
     #[test]
