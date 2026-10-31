@@ -77,6 +77,24 @@ fn worktree_has_exact_dir_entry(parent: &Path, name: &str) -> bool {
         .any(|entry| entry.file_name().to_string_lossy() == name)
 }
 
+fn is_case_insensitive(dir: &Path) -> bool {
+    for attempt in 0..128_u32 {
+        let name = format!(".grit-icase-test-probe-{attempt:05}");
+        let lower = dir.join(&name);
+        if lower.exists() {
+            continue;
+        }
+        if std::fs::write(&lower, b"").is_err() {
+            return false;
+        }
+        let upper: String = name.chars().map(|c| c.to_ascii_uppercase()).collect();
+        let folded = dir.join(upper).exists();
+        let _ = std::fs::remove_file(&lower);
+        return folded;
+    }
+    false
+}
+
 fn hold_index_lock(repo: &Repository) -> std::fs::File {
     let lock_path = repo.index_handle().path().with_extension("lock");
     std::fs::OpenOptions::new()
@@ -743,6 +761,89 @@ fn mv_case_only_directory_with_ignorecase() {
             .expect("git ls-files");
         assert!(ls.status.success());
         assert_eq!(String::from_utf8_lossy(&ls.stdout).trim(), "docs/a.txt");
+    }
+}
+
+/// Tracked and untracked symlinks that resolve to the same directory must not be treated
+/// as a case-only directory dentry rename (would overwrite `dir` without `--force`).
+#[cfg(unix)]
+#[test]
+fn mv_ignorecase_symlink_pair_not_case_only_directory() {
+    if is_case_insensitive(std::env::temp_dir().as_path()) {
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    git(repo_dir, &["config", "core.ignorecase", "true"]);
+    fs::create_dir(repo_dir.join("target")).unwrap();
+    std::os::unix::fs::symlink("target", repo_dir.join("Dir")).unwrap();
+    std::os::unix::fs::symlink("./target", repo_dir.join("dir")).unwrap();
+    git(repo_dir, &["add", "Dir"]);
+    git(repo_dir, &["commit", "-q", "-m", "one"]);
+
+    let repo = grit_repo(repo_dir);
+    let err = move_path(&repo, "Dir", "dir", false).expect_err("must not clobber untracked dir");
+    assert!(
+        matches!(
+            err,
+            grit_lib::error::Error::MoveDestinationExists { .. }
+                | grit_lib::error::Error::MoveIntoSubdirectory { .. }
+        ),
+        "unexpected error: {err:?}"
+    );
+    assert!(
+        std::fs::read_link(repo_dir.join("dir"))
+            .expect("dir symlink")
+            .to_string_lossy()
+            == "./target",
+        "untracked dir symlink must be unchanged"
+    );
+}
+
+/// Issue #2376: on a folding volume `Dir` and `dir` are the same dentry; grit must not
+/// plan `dir/Dir`.
+#[test]
+fn mv_case_only_directory_on_folding_volume() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    if !is_case_insensitive(tmp.path()) {
+        return;
+    }
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    git(repo_dir, &["config", "core.ignorecase", "true"]);
+    fs::create_dir(repo_dir.join("Dir")).unwrap();
+    fs::write(repo_dir.join("Dir/x.txt"), "d\n").unwrap();
+    commit_all(repo_dir, "one");
+
+    let repo = grit_repo(repo_dir);
+    move_path(&repo, "Dir", "dir", false).expect("case-only directory mv on folding volume");
+
+    assert!(worktree_has_exact_dir_entry(repo_dir, "dir"));
+    assert!(!worktree_has_exact_dir_entry(repo_dir, "Dir"));
+    assert!(repo_dir.join("dir/x.txt").is_file());
+
+    let index = repo.index_handle().load().expect("index");
+    let entry = index
+        .get(b"dir/x.txt", 0)
+        .expect("index tracks renamed tree path");
+    assert_eq!(String::from_utf8_lossy(&entry.path), "dir/x.txt");
+
+    if Command::new("git").output().is_ok() {
+        let ls = Command::new("git")
+            .current_dir(repo_dir)
+            .args(["ls-files"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git ls-files");
+        assert!(ls.status.success());
+        assert_eq!(String::from_utf8_lossy(&ls.stdout).trim(), "dir/x.txt");
+        assert!(
+            git_diff_cached_rename(repo_dir),
+            "git diff --cached -M should detect the staged rename"
+        );
+        fsck_strict(repo_dir);
     }
 }
 
