@@ -128,7 +128,9 @@ pub fn commit_diff_files(
             repo.odb(),
             filtered,
             detail,
-            options.clone(),
+            options
+                .clone()
+                .with_renames(crate::diff::RenameDetection::Off),
             config,
             thread_policy,
         )?;
@@ -208,7 +210,7 @@ fn tree_diff_entries(
 ) -> Result<Vec<DiffEntry>> {
     let threshold = crate::diff::renames_from_config(config)
         .threshold_percent()
-        .unwrap_or(100);
+        .unwrap_or(crate::diff::RENAME_DETECTION_DISABLED);
     crate::diff::diff_trees_with_renames_and_policy(
         odb,
         old_tree,

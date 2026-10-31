@@ -17,7 +17,7 @@ Diffing in grit-lib centers on the [`diff`](rustdoc:grit_lib::diff) domain modul
 
 `diff_trees` compares two tree objects recursively and returns changed paths. Pass `None` for either side to diff against an empty tree. `diff_trees_show_tree_entries` can emit tree objects themselves (Git’s `diff-tree -t` behavior).
 
-`Diff::tree_to_tree` reads tree metadata only and prunes identical subtree object ids without opening them. The walk retains active directory frames and the ODB’s bounded parsed-tree cache; completed siblings do not accumulate in a second cache, and trees read for that cache are not also copied into the ODB’s raw-object cache. The returned `Vec<DiffEntry>` owns changed paths, modes and ids, so result memory still grows with the number of changes. `build_file_diffs` consumes these entries for `NameOnly` and `NameStatus`, reusing their path and mode strings without reading blob content; [`FileDiff::from_metadata`](rustdoc:grit_lib::diff::ListedFileDiff::from_metadata) builds the same row from one entry, so a caller can map a list into its own output type in a single pass. Rename detection is separate and may read blobs for similarity scoring. When a list has no added/deleted pair to score, [`detect_renames_with_policy`](rustdoc:grit_lib::diff::detect_renames_with_policy) returns it unchanged without reading content or copying it. Diff lists are in Git’s order, raw path bytes; [`sort_entries_by_path`](rustdoc:grit_lib::diff::sort_entries_by_path) restores that order after filtering or merging lists and costs one comparison pass when the list is already ordered. See the [tree metadata measurements](../../benchmarks/#tree-metadata-diff-2026-10-27) and the [CLI follow-up](../../benchmarks/#tree-metadata-diff-through-the-cli-2026-10-27).
+`Diff::tree_to_tree` reads tree metadata only and prunes identical subtree object ids without opening them. The walk retains active directory frames and the ODB’s bounded parsed-tree cache; completed siblings do not accumulate in a second cache, and trees read for that cache are not also copied into the ODB’s raw-object cache. The returned `Vec<DiffEntry>` owns changed paths, modes and ids, so result memory still grows with the number of changes; it does not pair renames. [`Diff::tree_to_tree_renames`](rustdoc:grit_lib::diff::Diff::tree_to_tree_renames) runs the same walk then [`detect_renames_with_policy`](rustdoc:grit_lib::diff::detect_renames_with_policy) when you want paired entries without building file bodies. [`build_file_diffs`](rustdoc:grit_lib::diff::build_file_diffs) applies [`DiffOptions::renames`](rustdoc:grit_lib::diff::DiffOptions::renames) (default similarity 50, Git `-M`) before stat or patch work; pass [`RenameDetection::Off`](rustdoc:grit_lib::diff::RenameDetection::Off) when the list already came from `detect_renames`, `diff_trees_with_renames`, or the CLI. For metadata-only output, [`FileDiff::from_metadata`](rustdoc:grit_lib::diff::ListedFileDiff::from_metadata) builds a row from one entry without line-diff blob reads, but rename detection may still read blob sides for scoring when renames are enabled. When a list has no added/deleted pair to score, rename detection returns it unchanged without reading content. Diff lists are in Git’s order, raw path bytes; [`sort_entries_by_path`](rustdoc:grit_lib::diff::sort_entries_by_path) restores that order after filtering or merging lists and costs one comparison pass when the list is already ordered. See the [tree metadata measurements](../../benchmarks/#tree-metadata-diff-2026-10-27) and the [CLI follow-up](../../benchmarks/#tree-metadata-diff-through-the-cli-2026-10-27).
 
 Commit-to-commit diffs resolve each commit’s tree with [`Odb::commit_tree`](rustdoc:grit_lib::objects::odb::Odb::commit_tree), then call `diff_trees` on the parent and child trees.
 
@@ -38,11 +38,12 @@ For a single modified file, read old and new bytes from [`Odb`](rustdoc:grit_lib
 [`DiffStat`](rustdoc:grit_lib::diff::DiffStat) is the data behind `--stat`, `--numstat` and `--shortstat`. [`DiffStat::from_files`](rustdoc:grit_lib::diff::DiffStat::from_files) takes the rows from `build_file_diffs` at any detail level: each row's counts come from [`FileDiff::line_stat`](rustdoc:grit_lib::diff::ListedFileDiff::line_stat), which uses the stat when one was computed and otherwise counts the structured or combined hunk lines, so a patch-mode listing and a stat-mode listing give the same diffstat. [`totals`](rustdoc:grit_lib::diff::DiffStat::totals) sums the rows. To draw bars, scale each row with [`LineStat::bar`](rustdoc:grit_lib::diff::LineStat::bar) against [`max_changes`](rustdoc:grit_lib::diff::DiffStat::max_changes) and a column budget; the returned [`StatBar`](rustdoc:grit_lib::diff::StatBar) gives `+` and `-` column counts. `grit diff --stat`, `grit show`, `grit log --stat` and `grit stash show` render this model.
 
 ```rust
-use grit_lib::diff::{build_file_diffs, DiffDetail, DiffOptions, DiffStat};
+use grit_lib::diff::{build_file_diffs, DiffDetail, DiffOptions, DiffStat, RenameDetection};
 use grit_lib::parallel::ThreadPolicy;
 
 let entries = repo.diff().tree_to_tree(Some(&old_tree), Some(&new_tree))?;
 let config = repo.config()?;
+// `DiffOptions::default()` pairs renames at Git's -M50 before counting lines.
 let files = build_file_diffs(
     repo.odb(),
     entries,
@@ -52,6 +53,7 @@ let files = build_file_diffs(
     &ThreadPolicy::default(),
 )?
 .files;
+// When entries are already rename-aware, pass `DiffOptions::default().with_renames(RenameDetection::Off)`.
 let stat = DiffStat::from_files(&files);
 for file in stat.files() {
     let bar = file.lines.bar(stat.max_changes(), 40);

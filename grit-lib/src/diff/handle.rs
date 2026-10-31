@@ -1,6 +1,9 @@
 //! Repository-scoped tree and index diffs via [`Diff`].
 use crate::diff::targets::collect_files_for_target;
-use crate::diff::{diff_index_to_tree, diff_index_to_worktree, diff_trees, DiffEntry, DiffOptions};
+use crate::diff::{
+    diff_index_to_tree, diff_index_to_worktree, diff_trees, diff_trees_with_renames_and_policy,
+    DiffEntry, DiffOptions,
+};
 use crate::diff::{DiffTarget, FileDiff, UncommittedDiff};
 use crate::error::Result;
 use crate::index::Index;
@@ -48,6 +51,29 @@ impl<'repo> Diff<'repo> {
         new_tree: Option<&ObjectId>,
     ) -> Result<Vec<DiffEntry>> {
         diff_trees(self.repo.odb(), old_tree, new_tree, "")
+    }
+
+    /// Like [`Self::tree_to_tree`], then pair renames using `options.renames` (Git `-M`).
+    ///
+    /// # Errors
+    ///
+    /// Propagates ODB read, tree walk, and rename detection errors.
+    pub fn tree_to_tree_renames(
+        &self,
+        old_tree: Option<&ObjectId>,
+        new_tree: Option<&ObjectId>,
+        options: &DiffOptions,
+    ) -> Result<Vec<DiffEntry>> {
+        let config = self.repo.config()?;
+        diff_trees_with_renames_and_policy(
+            self.repo.odb(),
+            old_tree,
+            new_tree,
+            "",
+            options.rename_threshold_u32(),
+            config.as_ref(),
+            &self.repo.thread_policy(),
+        )
     }
 
     /// Diff the index against a tree (typically `HEAD`'s tree).

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use grit_lib::diff::{
     build_file_diffs, diff_trees_with_renames_and_policy, DiffDetail, DiffOptions, DiffStatus,
-    DiffTarget, ListedFileDiff,
+    DiffTarget, ListedFileDiff, RenameDetection,
 };
 use grit_lib::objects::{ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
@@ -280,7 +280,7 @@ fn tree_metadata_matrix_matches_git_without_reading_blobs() {
                 .expect("metadata diff");
             for detail in [DiffDetail::NameOnly, DiffDetail::NameStatus] {
                 let counter = Arc::new(AtomicUsize::new(0));
-                let mut opts = DiffOptions::default();
+                let mut opts = DiffOptions::default().with_renames(RenameDetection::Off);
                 opts.blob_read_counter = Some(Arc::clone(&counter));
                 let out = build_file_diffs(
                     repo.odb(),

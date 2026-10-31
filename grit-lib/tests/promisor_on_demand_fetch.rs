@@ -15,6 +15,7 @@ use grit_lib::config::ConfigFile;
 use grit_lib::config::ConfigScope;
 use grit_lib::diff::{
     build_file_diffs, diff_commits_with_renames_and_policy, DiffDetail, DiffOptions,
+    RenameDetection,
 };
 use grit_lib::error::Error;
 use grit_lib::objects::pack::clear_pack_cache;
@@ -318,7 +319,7 @@ fn rename_detection_prefetch_batched_past_rename_limit() {
         repo.odb(),
         entries,
         DiffDetail::Stat,
-        DiffOptions::default(),
+        DiffOptions::default().with_renames(RenameDetection::Off),
         config.as_ref(),
         &thread_policy,
     )
@@ -363,7 +364,7 @@ fn tree_diff_prefetch_batched_past_rename_limit() {
         repo.odb(),
         entries,
         DiffDetail::Stat,
-        DiffOptions::default(),
+        DiffOptions::default().with_renames(RenameDetection::Off),
         config.as_ref(),
         &thread_policy,
     )
@@ -410,7 +411,7 @@ fn tree_diff_prefetch_uses_single_request() {
         repo.odb(),
         entries.clone(),
         DiffDetail::NameOnly,
-        DiffOptions::default(),
+        DiffOptions::default().with_renames(RenameDetection::Off),
         config.as_ref(),
         &thread_policy,
     )

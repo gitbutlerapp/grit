@@ -2883,6 +2883,24 @@ pub fn tree_oid_of_commit(odb: &Odb, commit_oid: &ObjectId) -> Result<ObjectId> 
     })
 }
 
+/// Tree OID to use as one side of a tree diff when the id names a commit or a tree.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidRef`] when `oid` is not a commit or tree, and object read/parse
+/// errors when it is missing or malformed.
+pub fn tree_oid_for_diff_side(odb: &Odb, oid: &ObjectId) -> Result<ObjectId> {
+    use crate::objects::{CommitRef, ObjectKind};
+    let object = odb.read(oid)?;
+    match object.kind {
+        ObjectKind::Commit => Ok(CommitRef::parse(&object.data)?.tree()),
+        ObjectKind::Tree => Ok(*oid),
+        actual => Err(Error::InvalidRef(format!(
+            "invalid ref: {oid} is not a commit or tree ({actual:?})"
+        ))),
+    }
+}
+
 /// Like [`tree_oid_of_commit`], but uses the repository commit-graph cache when available.
 ///
 /// # Errors

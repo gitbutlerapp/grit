@@ -9,7 +9,30 @@ use super::detail::{DiffDetail, DiffTotals, FileDiff, LineStat};
 use super::tree_content::{
     tree_diff_stat_parallel, tree_diff_structured_parallel, TreeDiffStructured,
 };
-use super::{DiffEntry, DiffOptions, DiffStatus};
+use super::{detect_renames_with_policy, DiffEntry, DiffOptions, DiffStatus};
+
+fn entries_with_options_renames(
+    odb: &Odb,
+    entries: Vec<DiffEntry>,
+    diff_options: &DiffOptions,
+    config: &ConfigSet,
+    thread_policy: &ThreadPolicy,
+) -> Result<Vec<DiffEntry>> {
+    if let Some(percent) = diff_options.rename_similarity_threshold() {
+        if percent <= 100 {
+            return detect_renames_with_policy(
+                odb,
+                None,
+                entries,
+                percent,
+                config,
+                thread_policy,
+                None,
+            );
+        }
+    }
+    Ok(entries)
+}
 
 fn path_from_entry(entry: &DiffEntry) -> String {
     entry
@@ -113,8 +136,12 @@ pub struct DiffFilesOutput {
 
 /// Fill per-file diff bodies for tree/index diff entries.
 ///
-/// Name-only and name-status skip blob reads for line diffs; stat loads blobs for
-/// counts only; patch runs the full structured line engine.
+/// Applies [`DiffOptions::renames`] to the entry list first (Git's default `-M50`), pairing
+/// added and deleted paths before stat or patch work. Use [`RenameDetection::Off`] when the
+/// caller already ran [`detect_renames`](crate::diff::detect_renames) or
+/// [`diff_trees_with_renames`](crate::diff::diff_trees_with_renames). Metadata-only
+/// [`DiffDetail::NameOnly`] and [`DiffDetail::NameStatus`] still skip line-diff blob reads,
+/// but rename detection may read blob sides for similarity scoring when renames are enabled.
 ///
 /// # Errors
 ///
@@ -127,6 +154,7 @@ pub fn build_file_diffs(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
 ) -> Result<DiffFilesOutput> {
+    let entries = entries_with_options_renames(odb, entries, &diff_options, config, thread_policy)?;
     match detail {
         DiffDetail::NameOnly | DiffDetail::NameStatus => {
             let files: Vec<FileDiff> = entries.into_iter().map(FileDiff::from_metadata).collect();
@@ -176,6 +204,7 @@ pub fn build_file_diffs_streaming(
     mut emit: impl FnMut(FileDiff) -> Result<()>,
 ) -> Result<()> {
     use super::tree_content::for_each_tree_diff_structured;
+    let entries = entries_with_options_renames(odb, entries, &diff_options, config, thread_policy)?;
     for_each_tree_diff_structured(
         odb,
         &entries,
@@ -271,5 +300,86 @@ mod tests {
             );
             assert!(file.stat.is_none() && file.structured.is_none());
         }
+    }
+
+    #[test]
+    fn build_file_diffs_applies_default_rename_detection() {
+        use crate::config::ConfigSet;
+        use crate::objects::{serialize_commit, CommitData, ObjectKind, TreeEntry};
+        use crate::parallel::ThreadPolicy;
+        use crate::repo::{InitOptions, Repository};
+
+        fn tree_with(repo: &Repository, entries: &[(&str, &[u8])]) -> ObjectId {
+            let mut tes = Vec::new();
+            for (name, data) in entries {
+                let oid = repo.odb().write(ObjectKind::Blob, data).expect("blob");
+                tes.push(TreeEntry {
+                    mode: 0o100644,
+                    name: name.as_bytes().to_vec(),
+                    oid,
+                });
+            }
+            let data = crate::objects::serialize_tree(&tes);
+            repo.odb().write(ObjectKind::Tree, &data).expect("tree")
+        }
+
+        fn write_commit(repo: &Repository, tree: ObjectId, parents: Vec<ObjectId>) -> ObjectId {
+            let ident = "A <a@example.com> 0 +0000";
+            let commit = CommitData {
+                tree,
+                parents,
+                author: ident.into(),
+                committer: ident.into(),
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: None,
+                message: "m\n".into(),
+                raw_message: None,
+                extra_headers: Vec::new(),
+            };
+            repo.odb()
+                .write(ObjectKind::Commit, &serialize_commit(&commit))
+                .expect("commit")
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let shared = b"same line\nsame line\nsame line\n";
+        let mut old_body = shared.to_vec();
+        old_body.extend_from_slice(b"tail\n");
+        let mut new_body = shared.to_vec();
+        new_body.extend_from_slice(b"tail2\n");
+        let parent_tree = tree_with(&repo, &[("old.txt", &old_body)]);
+        let parent = write_commit(&repo, parent_tree, vec![]);
+        let child_tree = tree_with(&repo, &[("new.txt", &new_body)]);
+        let _child = write_commit(&repo, child_tree, vec![parent]);
+        let old_tree = repo.odb().commit_tree(&parent).expect("tree");
+        let new_tree = repo.odb().commit_tree(&_child).expect("tree");
+        let entries = repo
+            .diff()
+            .tree_to_tree(Some(&old_tree), Some(&new_tree))
+            .expect("diff");
+        let config = ConfigSet::default();
+        let with_renames = build_file_diffs(
+            repo.odb(),
+            entries.clone(),
+            DiffDetail::Stat,
+            DiffOptions::default(),
+            &config,
+            &ThreadPolicy::default(),
+        )
+        .expect("stat");
+        assert_eq!(with_renames.files.len(), 1);
+        assert_eq!(with_renames.files[0].status, DiffStatus::Renamed);
+        let without = build_file_diffs(
+            repo.odb(),
+            entries,
+            DiffDetail::Stat,
+            DiffOptions::default().with_renames(crate::diff::RenameDetection::Off),
+            &config,
+            &ThreadPolicy::default(),
+        )
+        .expect("stat");
+        assert_eq!(without.files.len(), 2);
     }
 }

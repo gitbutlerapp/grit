@@ -154,7 +154,9 @@ fn diff_one_commit(
         odb,
         entries,
         opts.detail,
-        opts.diff_options.clone(),
+        opts.diff_options
+            .clone()
+            .with_renames(crate::diff::RenameDetection::Off),
         config,
         thread_policy,
     )?;
@@ -351,7 +353,9 @@ mod tests {
             repo.odb(),
             entries,
             opts.detail,
-            opts.diff_options.clone(),
+            opts.diff_options
+                .clone()
+                .with_renames(crate::diff::RenameDetection::Off),
             &config,
             &policy,
         )?;

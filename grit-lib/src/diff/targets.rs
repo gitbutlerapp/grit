@@ -15,8 +15,8 @@ use crate::diff::detail::LineStat;
 use crate::diff::diff_trees_with_renames_and_policy;
 use crate::diff::structured::StructuredHunk;
 use crate::diff::{
-    diff_commits_with_renames_and_policy, sort_entries_by_path, tree_diff_structured_parallel,
-    DiffEntry, DiffOptions, DiffStatus, TreeDiffStructured,
+    sort_entries_by_path, tree_diff_structured_parallel, DiffEntry, DiffOptions, DiffStatus,
+    TreeDiffStructured,
 };
 use crate::error::{Error, PathspecResolveError, Result};
 use crate::index::Index;
@@ -53,11 +53,11 @@ pub enum DiffTarget {
     WorktreeVsIndex,
     /// Patch introduced by one commit (parent tree vs commit tree).
     Commit(ObjectId),
-    /// Tree diff between two commits (`old` may be absent for root commits).
+    /// Tree diff between two commits or trees (`old` may be absent for root commits).
     Trees {
-        /// Older commit (left side of the range).
+        /// Older commit or tree (left side of the range).
         old: Option<ObjectId>,
-        /// Newer commit (right side).
+        /// Newer commit or tree (right side).
         new: ObjectId,
     },
 }
@@ -873,10 +873,14 @@ fn tree_commit_diff_entries(
     thread_policy: &ThreadPolicy,
     rename_threshold: u32,
 ) -> Result<Vec<DiffEntry>> {
-    let mut entries = diff_commits_with_renames_and_policy(
-        repo.odb(),
-        base,
-        tip,
+    let odb = repo.odb();
+    let base_tree = crate::diff::tree_oid_for_diff_side(odb, base)?;
+    let tip_tree = crate::diff::tree_oid_for_diff_side(odb, tip)?;
+    let mut entries = diff_trees_with_renames_and_policy(
+        odb,
+        Some(&base_tree),
+        Some(&tip_tree),
+        "",
         rename_threshold,
         config,
         thread_policy,

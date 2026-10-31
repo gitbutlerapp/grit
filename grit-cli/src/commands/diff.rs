@@ -658,7 +658,7 @@ fn outcome_from_entries(
         repo.odb(),
         entries,
         detail,
-        diff_options,
+        diff_options.with_renames(grit_lib::diff::RenameDetection::Off),
         config.as_ref(),
         &thread_policy,
     )?;
