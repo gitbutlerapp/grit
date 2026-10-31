@@ -979,6 +979,75 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn hard_reset_skips_conflict_only_removal_through_symlink_parent() {
+        use std::os::unix::fs::symlink;
+
+        let (_dir, repo) = init_repo();
+        let c1 = commit_file(&repo, "a", "clean\n", None);
+        let wt = repo.work_tree().expect("wt");
+        let outside = tempfile::tempdir().expect("outside");
+        std::fs::write(outside.path().join("f"), "outside-payload\n").expect("outside file");
+        let dir_b1 = repo
+            .odb()
+            .write(ObjectKind::Blob, b"d-base\n")
+            .expect("blob");
+        let dir_b3 = repo
+            .odb()
+            .write(ObjectKind::Blob, b"d-theirs\n")
+            .expect("blob");
+        let mut index = Index::new();
+        for (stage, oid, size) in [(1u8, dir_b1, 7u32), (3, dir_b3, 9)] {
+            let mut entry = crate::index::IndexEntry {
+                ctime_sec: 0,
+                ctime_nsec: 0,
+                mtime_sec: 0,
+                mtime_nsec: 0,
+                dev: 0,
+                ino: 0,
+                mode: crate::index::MODE_REGULAR,
+                uid: 0,
+                gid: 0,
+                size,
+                oid,
+                flags: 5,
+                flags_extended: None,
+                path: b"dir/f".to_vec(),
+                base_index_pos: 0,
+            };
+            entry.set_stage(stage);
+            index.add_or_replace(entry);
+        }
+        index.sort();
+        repo.write_index(&mut index).expect("write index");
+        let _ = std::fs::remove_dir_all(wt.join("dir"));
+        symlink(outside.path(), wt.join("dir")).expect("symlink dir");
+
+        reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset");
+
+        assert_eq!(
+            std::fs::read(outside.path().join("f")).expect("outside file"),
+            b"outside-payload\n"
+        );
+        assert!(wt
+            .join("dir")
+            .symlink_metadata()
+            .expect("dir link")
+            .is_symlink());
+        let _ = c1;
+    }
+
+    #[cfg(unix)]
     #[test]
     fn hard_reset_at_head_reverts_exec_bit_only_changes() {
         use std::os::unix::fs::PermissionsExt;

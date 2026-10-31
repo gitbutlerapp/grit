@@ -1704,6 +1704,7 @@ fn hard_reset_journal_conflict_only_unmerged_paths(
     journal: &mut CheckoutJournal,
 ) -> Result<Vec<PathBuf>> {
     let mut removed = Vec::new();
+    let mut parent_symlinks = crate::diff::SymlinkDirCache::default();
     for path in unmerged_paths {
         if tree_deleted.contains(path) || index_only_removed.contains(path) {
             continue;
@@ -1714,9 +1715,14 @@ fn hard_reset_journal_conflict_only_unmerged_paths(
         if sparse.is_some_and(|sparse| !sparse.includes_index_path(path)) {
             continue;
         }
-        let abs = crate::index::worktree_path_from_index_rel(work_tree, path);
-        let Ok(meta) = fs::symlink_metadata(&abs) else {
+        if parent_symlinks.has_symlink_in_path_bytes(work_tree, path, false, false) {
             continue;
+        }
+        let abs = crate::index::worktree_path_from_index_rel(work_tree, path);
+        let meta = match fs::symlink_metadata(&abs) {
+            Ok(meta) => meta,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(Error::Io(err)),
         };
         if meta.is_dir() {
             continue;
