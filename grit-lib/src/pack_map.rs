@@ -341,14 +341,26 @@ impl PackData {
     /// The bytes stay valid: later reads fault the pages back in from the file (usually
     /// straight from the page cache). Owned buffers and non-Unix platforms are left as is.
     pub(crate) fn release_resident(&self) {
+        self.release_resident_through(usize::MAX);
+    }
+
+    /// Drop mapped pages for the pack prefix `[0, end)` from the resident set.
+    ///
+    /// Later reads fault those pages back in from the file. `end` is clamped to the map length.
+    pub(crate) fn release_resident_through(&self, end: usize) {
         #[cfg(unix)]
-        if let Storage::Mapped { map, .. } = &self.storage {
-            // SAFETY: the mapping is a read-only shared file mapping and the file is never
-            // modified while mapped (see the type docs), so dropping its pages only makes
-            // the next read reload the same bytes from the file; no borrow observes a change.
-            let _ = unsafe {
-                map.unchecked_advise_range(memmap2::UncheckedAdvice::DontNeed, 0, map.len())
-            };
+        if end > 0 {
+            if let Storage::Mapped { map, .. } = &self.storage {
+                let end = end.min(map.len());
+                // SAFETY: read-only mapping; reloading pages returns the same bytes.
+                let _ = unsafe {
+                    map.unchecked_advise_range(memmap2::UncheckedAdvice::DontNeed, 0, end)
+                };
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = end;
         }
     }
 

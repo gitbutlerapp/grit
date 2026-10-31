@@ -16,9 +16,9 @@ use crate::git_dir::io_error::{map_objects_dir_io, GitDirPathOperation};
 use crate::hash::{self, ObjectPayloadHasher};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
 use crate::odb::WriteOptions;
-use crate::zlib_inflate::{with_loose_scratch, LooseFileReadBudget};
-
-const READ_CHUNK: usize = 64 * 1024;
+use crate::zlib_inflate::{
+    with_loose_scratch, LooseFileReadBudget, LOOSE_INFLATE_INPUT_CHUNK, LOOSE_INFLATE_OUTPUT_CHUNK,
+};
 /// Payload bytes read from a source stream per step when writing a loose object.
 const STREAM_CHUNK: usize = 128 * 1024;
 
@@ -684,8 +684,16 @@ impl LooseStore {
         reader: &mut dyn Read,
         options: WriteOptions,
     ) -> Result<ObjectId> {
-        self.write_payload_stream_with(kind, size, options, |chunk_sink| {
-            read_payload_chunks(reader, size, chunk_sink)
+        let (first, tail) = crate::odb::stream::read_first_payload_chunk(reader, size)?;
+        let compression =
+            crate::odb::stream::compression_after_first_chunk(&first, self.compression);
+        self.write_payload_stream_with(kind, size, options, compression, |chunk_sink| {
+            chunk_sink(&first)?;
+            if tail > 0 {
+                read_payload_chunks(reader, tail, chunk_sink)
+            } else {
+                Ok(())
+            }
         })
     }
 
@@ -695,6 +703,7 @@ impl LooseStore {
         kind: ObjectKind,
         size: u64,
         options: WriteOptions,
+        compression: Compression,
         mut supply: impl FnMut(&mut dyn FnMut(&[u8]) -> Result<()>) -> Result<()>,
     ) -> Result<ObjectId> {
         let prefix_dir = &self.objects_dir;
@@ -707,7 +716,7 @@ impl LooseStore {
             .open(&tmp_path)
             .map_err(Error::Io)?;
         let zlib_err = |e: io::Error| Error::Zlib(e.to_string());
-        let mut encoder = ZlibEncoder::new(file, self.compression);
+        let mut encoder = ZlibEncoder::new(file, compression);
         if let Err(e) = (|| {
             write!(encoder, "{} {}\0", kind, size).map_err(zlib_err)?;
             supply(&mut |chunk| {
@@ -940,9 +949,11 @@ impl LoosePayloadReader {
     }
 
     fn pump_zlib(&mut self, on_out: &mut dyn FnMut(&[u8])) -> Result<()> {
-        let mut out_chunk = [0u8; READ_CHUNK];
-        let produced = self.inflate_into(&mut out_chunk)?;
-        on_out(&out_chunk[..produced]);
+        let mut scratch = [0u8; LOOSE_INFLATE_OUTPUT_CHUNK];
+        let produced = self.inflate_into(&mut scratch)?;
+        if produced > 0 {
+            on_out(&scratch[..produced]);
+        }
         Ok(())
     }
 
@@ -953,10 +964,13 @@ impl LoosePayloadReader {
         if self.zlib_complete {
             return Ok(0);
         }
+        let cap = out.len().min(LOOSE_INFLATE_OUTPUT_CHUNK);
+        let out = &mut out[..cap];
         if self.pending_pos == self.pending.len() && !self.input_exhausted {
-            self.pending.resize(READ_CHUNK, 0);
-            let n = self.read_budget.read(&mut self.file, &mut self.pending)?;
-            self.pending.truncate(n);
+            let mut buf = [0u8; LOOSE_INFLATE_INPUT_CHUNK];
+            let n = self.read_budget.read(&mut self.file, &mut buf)?;
+            self.pending.clear();
+            self.pending.extend_from_slice(&buf[..n]);
             self.pending_pos = 0;
             self.input_exhausted = n == 0;
         }
@@ -1079,6 +1093,8 @@ mod tests {
     use std::io::Read;
 
     use super::super::{ObjectStore, WritableObjectStore};
+
+    const READ_CHUNK: usize = LOOSE_INFLATE_INPUT_CHUNK;
 
     #[test]
     fn lookup_prefix_scans_single_fanout_dir() {

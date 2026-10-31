@@ -5205,6 +5205,10 @@ pub(crate) fn pack_entry_raw_end(
 pub(crate) struct PackedWholeObject {
     /// The pack holding the object.
     pub(crate) pack: Arc<PackData>,
+    /// Start of this object's raw pack entry (type/size header).
+    pub(crate) entry_offset: u64,
+    /// End of this object's raw pack entry (exclusive).
+    pub(crate) entry_end: usize,
     /// Offset of the object's zlib stream, just past its entry header.
     pub(crate) zlib_offset: usize,
     /// End of the pack's object data (start of the trailing checksum).
@@ -5213,6 +5217,13 @@ pub(crate) struct PackedWholeObject {
     pub(crate) kind: ObjectKind,
     /// Uncompressed payload size from the entry header.
     pub(crate) size: u64,
+    /// Pack-index CRC32 for the raw entry when it has not been checked yet.
+    pub(crate) index_crc: Option<u32>,
+}
+
+/// How many local packs' indexes list `oid`.
+pub(crate) fn count_local_packs_holding(objects_dir: &Path, oid: &ObjectId) -> Result<usize> {
+    Ok(packs_holding(objects_dir, oid, PackPreference::Newest)?.len())
 }
 
 /// How the local packs store an object, from [`locate_packed_whole_object`].
@@ -5265,20 +5276,24 @@ pub(crate) fn locate_packed_whole_object(
         let Ok(kind) = packed_type_to_kind(packed_type) else {
             continue;
         };
-        if verify_crc {
-            if !packed_entry_matches_index_crc(idx, &pack, entry_offset)? {
-                continue;
-            }
-            // The CRC pass read the whole compressed entry; leave none of it resident so a
-            // caller streaming the object starts from a clean resident set.
-            pack.release_resident();
+        if verify_crc && !packed_entry_matches_index_crc(idx, &pack, entry_offset)? {
+            continue;
         }
+        let entry_end = pack_entry_raw_end(idx, &pack, entry_offset)?.unwrap_or(data_end);
+        let index_crc = if verify_crc {
+            None
+        } else {
+            idx.crc32_for_pack_offset(entry_offset).ok().flatten()
+        };
         return Ok(PackedEntry::Whole(PackedWholeObject {
             pack,
+            entry_offset,
+            entry_end,
             zlib_offset: pos,
             data_end,
             kind,
             size,
+            index_crc,
         }));
     }
     Ok(found)

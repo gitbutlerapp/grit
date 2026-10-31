@@ -3204,12 +3204,13 @@ impl Odb {
 
     /// Store `size` payload bytes of `kind` read from `reader` and return the object id.
     ///
-    /// Objects smaller than [`Self::big_file_threshold`] are read into memory and written like
-    /// [`Self::write_with_options`]. Bigger ones are hashed and deflated in fixed-size chunks
-    /// straight into a new single-object pack (at the [`ConfigSet::pack_objects_zlib_level`]
-    /// level), as Git does for big files, so memory use does not depend on `size`. If the
-    /// object already exists the new pack is discarded and the existing copy is freshened
-    /// unless `options.silent` is set.
+    /// Payloads below [`stream::STREAMED_WRITE_MIN_SIZE`] (1 MiB) are read into memory and
+    /// written like [`Self::write_with_options`]. From 1 MiB up to (but not including)
+    /// [`Self::big_file_threshold`] they are hashed and deflated in fixed-size chunks into a
+    /// loose object. At or above the threshold they go into a new single-object pack (at
+    /// [`ConfigSet::pack_objects_zlib_level`]), as Git does for big files, so memory use does
+    /// not depend on `size`. If the object already exists the new pack is discarded and the
+    /// existing copy is freshened unless `options.silent` is set.
     ///
     /// A custom primary receives the stream through [`WritableObjectStore::write_stream`];
     /// while the in-memory overlay is active the object is buffered into the overlay.
@@ -3238,7 +3239,7 @@ impl Odb {
                 return Ok(oid);
             }
         }
-        if self.overlay_active() || size < self.big_file_threshold()? {
+        if self.overlay_active() || size < stream::STREAMED_WRITE_MIN_SIZE {
             let len = usize::try_from(size).map_err(|_| {
                 Error::CorruptObject(format!("object size {size} exceeds address space"))
             })?;
@@ -3252,6 +3253,12 @@ impl Odb {
                 });
             }
             return self.write_with_options(kind, &data, options);
+        }
+        if size < self.big_file_threshold()? {
+            let loose = self.local_loose()?;
+            let oid = loose.write_payload_stream(kind, size, reader, options)?;
+            self.note_commit_object_written(kind);
+            return Ok(oid);
         }
         let staged = stream::StagedPack::write(
             &self.objects_dir.join("pack"),
@@ -3578,7 +3585,13 @@ impl Odb {
             });
         }
         let loose = self.local_loose()?;
-        let oid = loose.write_payload_stream_with(kind, size, WriteOptions::default(), supply)?;
+        let oid = loose.write_payload_stream_with(
+            kind,
+            size,
+            WriteOptions::default(),
+            self.pack_compression()?,
+            supply,
+        )?;
         self.note_commit_object_written(kind);
         Ok(oid)
     }

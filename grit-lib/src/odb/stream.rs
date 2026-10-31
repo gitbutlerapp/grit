@@ -1,8 +1,9 @@
 //! Bounded-memory object hashing and writing from a byte stream.
 //!
-//! Objects at or above `core.bigFileThreshold` are never held in memory: the payload is read
-//! in fixed-size chunks that feed the object hasher and a zlib encoder writing a
-//! single-object pack, which is how Git stores big files too.
+//! Payloads of at least [`STREAMED_WRITE_MIN_SIZE`] (1 MiB) are read in fixed-size chunks
+//! instead of being buffered whole: below [`crate::Odb::big_file_threshold`] they become loose
+//! objects; at or above the threshold they are written as a single-object pack, matching Git's
+//! large-file storage split.
 
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Read, Write};
@@ -19,6 +20,45 @@ use crate::pack_objects::{encode_pack_object_header, pack_type_code};
 
 /// Bytes read from the source per step; the only payload-sized buffer a stream holds.
 const CHUNK: usize = 128 * 1024;
+
+/// Payloads at least this large are written from a stream without buffering the whole body.
+pub(crate) const STREAMED_WRITE_MIN_SIZE: u64 = 1024 * 1024;
+
+/// When the first chunk does not shrink at the configured level, store the payload at zlib level 0.
+pub(crate) fn compression_after_first_chunk(first: &[u8], configured: Compression) -> Compression {
+    if first.is_empty() || configured.level() == 0 {
+        return configured;
+    }
+    let mut trial = Vec::new();
+    let mut enc = ZlibEncoder::new(&mut trial, configured);
+    if enc.write_all(first).is_err() || enc.finish().is_err() {
+        return configured;
+    }
+    if trial.len() >= first.len() {
+        Compression::none()
+    } else {
+        configured
+    }
+}
+
+/// Read up to one [`CHUNK`] of the first `size` payload bytes from `reader`.
+pub(crate) fn read_first_payload_chunk(reader: &mut dyn Read, size: u64) -> Result<(Vec<u8>, u64)> {
+    if size == 0 {
+        return Ok((Vec::new(), 0));
+    }
+    let take = usize::try_from(size.min(CHUNK as u64))
+        .map_err(|_| Error::CorruptObject(format!("object size {size} exceeds address space")))?;
+    let mut first = vec![0u8; take];
+    let n = reader.read(&mut first)?;
+    first.truncate(n);
+    if n == 0 {
+        return Err(Error::ObjectStreamTruncated {
+            expected: size,
+            actual: 0,
+        });
+    }
+    Ok((first, size - n as u64))
+}
 
 /// Offset of the single object in a pack: right after the 12-byte `PACK` header.
 const OBJECT_OFFSET: u64 = 12;
@@ -123,6 +163,8 @@ impl StagedPack {
         reader: &mut dyn Read,
         compression: Compression,
     ) -> Result<Self> {
+        let (first, tail) = read_first_payload_chunk(reader, size)?;
+        let compression = compression_after_first_chunk(&first, compression);
         let payload_len = usize::try_from(size).map_err(|_| {
             Error::CorruptObject(format!("object size {size} exceeds address space"))
         })?;
@@ -150,10 +192,14 @@ impl StagedPack {
         sink.write_all(&entry_header)?;
         let mut hasher = ObjectPayloadHasher::new(algo, kind, size);
         let mut encoder = ZlibEncoder::new(&mut sink, compression);
-        for_each_chunk(reader, size, |chunk| {
-            hasher.update(chunk);
-            encoder.write_all(chunk).map_err(Error::Io)
-        })?;
+        hasher.update(&first);
+        encoder.write_all(&first).map_err(Error::Io)?;
+        if tail > 0 {
+            for_each_chunk(reader, tail, |chunk| {
+                hasher.update(chunk);
+                encoder.write_all(chunk).map_err(Error::Io)
+            })?;
+        }
         encoder.finish()?;
         let oid = hasher.finish()?;
 

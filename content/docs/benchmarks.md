@@ -3049,6 +3049,8 @@ Follow-up measurements on 2026-10-26 used an AMD EPYC 7763 VM (4 vCPU), system G
 
 Raw samples, including current main in each scenario's `baseline_grit` field, are committed in `grit-utils/baselines/large-blob-materialization.json`. The `clone_large_blob_rss` integration test clones a 64 MiB loose blob through the public library API, checks that it is linked, runs system Git's fsck/status checks, and limits peak-RSS growth to 16 MiB. Before the statistics-walk fix it grew by 128 MiB and failed; afterward it passes.
 
+Issue [#2379](https://github.com/gitbutlerapp/grit/issues/2379): streaming inflate must stay fast as well as lean. On a 400 MiB incompressible blob, pre-fix grit restore took about 2.0 s loose / 1.3 s packed (≈3–4× system Git) while holding ≈9 MiB RSS. The fix caps each zlib `decompress` input/output window (256 KiB), verifies pack index CRC32 while inflating (instead of a separate pass that dropped the whole mapping), advises `DontNeed` only on the pack prefix already consumed, streams commits from 1 MiB with zlib level 0 when the first chunk does not shrink, and keeps `checkout_large_blob_rss` green. The `checkout_incompressible_blob_restore` integration test restores a 96 MiB incompressible blob loose and packed and fails if grit is more than 2.75× Git wall time on the host.
+
 The `checkout_large_blob_rss` integration test restores and switches to a 64 MiB blob, loose and packed, and fails if the process's peak RSS grows by 16 MiB or more. On the original pre-streaming baseline (`5d5136859`) it grows by 139 MiB. Packed-object RSS also includes resident pages of the compressed pack mapping; this can make the strict RSS-growth assertion sensitive to the process's earlier high-water mark.
 
 ```bash
