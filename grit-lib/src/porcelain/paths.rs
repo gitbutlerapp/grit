@@ -1029,7 +1029,7 @@ fn resolve_move_destination(
     index: &Index,
     src: &str,
     dst: &str,
-    ignorecase: bool,
+    _ignorecase: bool,
 ) -> Result<(String, bool)> {
     let src_is_dir = worktree_dentry_is_directory(work_tree, src)
         || index
@@ -1046,7 +1046,7 @@ fn resolve_move_destination(
     let dst_abs = work_tree.join(dst);
     let dst_is_dir = !same_case_directory
         && (dst_abs.is_dir()
-            || index_has_paths_under(index, dst, ignorecase)
+            || index_has_paths_under(index, dst, false)
             || index
                 .get(dst.as_bytes(), 0)
                 .is_some_and(|e| e.mode == MODE_TREE));
@@ -1537,6 +1537,48 @@ mod is_subdirectory_tests {
     fn ignorecase_rejects_move_into_case_folded_subdirectory() {
         assert!(is_subdirectory("dir/nested", "Dir", true));
         assert!(!is_subdirectory("dir/nested", "Dir", false));
+    }
+}
+
+#[cfg(test)]
+mod index_has_paths_under_tests {
+    use super::index_has_paths_under;
+
+    use crate::index::{Index, IndexEntry};
+    use crate::objects::ObjectId;
+
+    fn dummy_entry(path: &str) -> IndexEntry {
+        IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: 0o100644,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid: ObjectId::from_bytes(&[0u8; 20]).unwrap(),
+            flags: 0,
+            flags_extended: None,
+            path: path.as_bytes().to_vec(),
+            base_index_pos: 0,
+        }
+    }
+
+    #[test]
+    fn ignorecase_prefix_for_collision_not_destination_directory() {
+        let mut index = Index::new();
+        index.push_entry_unsorted(dummy_entry("Docs/a.txt"));
+        assert!(
+            index_has_paths_under(&index, "docs", true),
+            "icase prefix match is for collision detection"
+        );
+        assert!(
+            !index_has_paths_under(&index, "docs", false),
+            "destination-directory classification stays case-sensitive"
+        );
     }
 }
 

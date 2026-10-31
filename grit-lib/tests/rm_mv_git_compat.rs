@@ -766,6 +766,7 @@ fn mv_case_only_directory_with_ignorecase() {
 
 /// Tracked and untracked symlinks that resolve to the same directory must not be treated
 /// as a case-only directory dentry rename (would overwrite `dir` without `--force`).
+#[cfg(unix)]
 #[test]
 fn mv_ignorecase_symlink_pair_not_case_only_directory() {
     if is_case_insensitive(std::env::temp_dir().as_path()) {
