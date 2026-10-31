@@ -1,26 +1,37 @@
 #!/usr/bin/env python3
-"""Regenerate grit-lib/hot-text.ld: grit-lib's hot code path, laid out together.
+"""Regenerate grit-lib/hot-text.ld and grit-cli/hot-text.ld: the hot code path, laid out together.
 
 Short commands' peak RSS is mostly the binary's own code pages. The kernel maps file-backed
-text in 64 KiB fault-around windows, and the library functions an operation runs are spread
-over the whole `.text`: `grit status` on 10,000 files executes ~900 functions (1.4 MiB of
-code) that touched ~135 windows, so ~8.5 MiB of code became resident. With grit-lib's
-`hot-text-layout` feature, the linker places the functions listed in hot-text.ld in one
-`.text.grit_hot` output section in front of `.text` in every binary that links grit-lib
-(see grit-lib/build.rs).
+text in 64 KiB fault-around windows, and the functions an operation runs are spread over the
+whole `.text`: `grit status` on 10,000 files executes ~900 functions (1.4 MiB of code) that
+touched ~135 windows, so ~8.5 MiB of code became resident. Each window is also a page fault
+that maps 16 pages, which is most of a short command's wall time beyond `exec`.
 
-The list holds library code only: functions of grit-lib, the Rust runtime and grit-lib's own
-dependencies. A function that mentions any other crate (a CLI type, clap, output rendering)
-is left out. It is the union of what the library's common operations run (repository
-discovery and config, refs, object reads, revision walks, diffs, blame, the index and work
-tree, staging, committing, switching, stashing), profiled with callgrind on a clone through
-the shipped `grit` binary so inlining matches what is linked. Functions are ordered by how
-many workloads run them, so the core every operation shares comes first and stays dense.
+Two fragments come out of one profile:
+
+- grit-lib/hot-text.ld holds library code only: functions of grit-lib, the Rust runtime and
+  grit-lib's own dependencies. With grit-lib's `hot-text-layout` feature the linker places
+  them in one `.text.grit_hot` output section in front of `.text` in every binary that links
+  grit-lib (see grit-lib/build.rs), embedders included.
+- grit-cli/hot-text.ld holds everything else the shipped `grit` binary runs: the CLI's own
+  code, clap, and library generics the CLI instantiates. grit-cli/build.rs links it into the
+  `grit` binary only, as a `.text.grit_cli_hot` section next to the library's. Every command
+  runs argument parsing and the CLI's start-up before any library code, so without it those
+  functions alone fault in dozens of windows.
+
+Both lists are the union of what common operations run (repository discovery and config,
+refs and branches, object reads, revision walks, diffs, blame, the index and work tree,
+staging, committing, switching, stashing), profiled with callgrind on a clone through the
+shipped `grit` binary so inlining matches what is linked. Functions are ordered by how many
+workloads run them, so the core every operation shares comes first and stays dense.
 
 Each function's input section (`.text.<v0 symbol>`, or `.text.unlikely.<v0 symbol>` for
 `#[cold]` functions) is matched with the crate disambiguators (`Cs<hash>_`), back-references
 (`B<offset>_`) and numbered local-copy suffixes wildcarded, so the list keeps matching across
-version bumps and toolchain updates. A renamed or removed function simply stops matching and
+version bumps and toolchain updates. The instantiating crate a generic's symbol ends with is
+wildcarded too: LLVM merges identical instantiations from different crates into one copy,
+and which crate's name the survivor keeps changes from build to build (a stripped build
+differs from the unstripped one profiled here). A renamed or removed function simply stops matching and
 stays in `.text`; nothing breaks, the layout only degrades. Regenerate after large changes:
 
     CARGO_PROFILE_DIST_STRIP=false CARGO_TARGET_DIR=target/hot-text \\
@@ -44,7 +55,8 @@ from collections import Counter
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT = REPO_ROOT / "grit-lib" / "hot-text.ld"
+DEFAULT_LIB_OUTPUT = REPO_ROOT / "grit-lib" / "hot-text.ld"
+DEFAULT_CLI_OUTPUT = REPO_ROOT / "grit-cli" / "hot-text.ld"
 
 # The Rust runtime, linked into every binary.
 RUNTIME_CRATES = {"std", "core", "alloc", "compiler_builtins", "std_detect", "panic_unwind"}
@@ -74,6 +86,17 @@ WORKLOADS: list[tuple[str, str, list[list[str]]]] = [
     ("shortlog", "clean", [["shortlog"]]),
     ("blame", "clean", [["blame", FILE]]),
     ("refs", "clean", [["branch"], ["tag"], ["remote"], ["reflog"], ["worktree", "list"]]),
+    (
+        "branch",
+        "clean",
+        [
+            ["branch", "--json"],
+            ["branch", "--merged", "main"],
+            ["branch", "hot-text"],
+            ["branch", "--move", "hot-text", "hot-text-renamed"],
+            ["branch", "--force-delete", "hot-text-renamed"],
+        ],
+    ),
     ("resolve", "clean", [["resolve", "HEAD"], ["cat", f"HEAD:{FILE}"]]),
     ("config", "clean", [["config", "core.bare"]]),
     ("add", "dirty", [["add", FILE], ["restore", OTHER]]),
@@ -84,6 +107,9 @@ WORKLOADS: list[tuple[str, str, list[list[str]]]] = [
 
 CRATE_DISAMBIGUATOR = re.compile(r"Cs[0-9A-Za-z]+_")
 BACKREF = re.compile(r"B[0-9A-Za-z]*_")
+# The instantiating crate root that ends a generic's v0 symbol (`...Cs*_4grit`), once the
+# disambiguator is wildcarded.
+INSTANTIATING_CRATE = re.compile(r"Cs\*_([0-9]+)([A-Za-z_][A-Za-z0-9_]*)$")
 # Numbered local copies (`name.1234`, `name.llvm.5678`) are renumbered by every build.
 LOCAL_SUFFIX = re.compile(r"(\.llvm)?(\.[0-9]+)+$")
 CALLGRIND_FN = re.compile(r"^c?fn=\(\d+\) (.+)$")
@@ -250,33 +276,54 @@ def section_pattern(symbol: str) -> str:
     """Input-section globs for `symbol`; `#[cold]` functions live in `.text.unlikely.*`."""
     pattern = CRATE_DISAMBIGUATOR.sub("Cs*_", symbol)
     pattern = BACKREF.sub("B*_", pattern)
-    pattern = LOCAL_SUFFIX.sub(".*", pattern)
+    suffix = LOCAL_SUFFIX.search(pattern)
+    if suffix:
+        pattern = pattern[: suffix.start()]
+    crate = INSTANTIATING_CRATE.search(pattern)
+    if crate and int(crate.group(1)) == len(crate.group(2)):
+        pattern = pattern[: crate.start()] + "Cs*_*"
+    if suffix:
+        pattern += ".*"
     return f".text.{pattern} .text.unlikely.{pattern}"
 
 
-def render(patterns: list[str]) -> str:
-    lines = [
-        "/* Generated by scripts/gen_hot_text_layout.py; do not edit by hand.",
-        " *",
-        " * grit-lib's hot code path (library, runtime and dependency functions its common",
-        " * operations run) in one output section ahead of .text, ordered by how many",
-        " * workloads share them, so an operation faults in a few contiguous code windows",
-        " * instead of scattered ones. Linked through grit-lib's `hot-text-layout` feature",
-        " * (grit-lib/build.rs). Patterns that stop matching are harmless: the function stays",
-        " * in .text. */",
-        "SECTIONS",
-        "{",
-        "  .text.grit_hot : {",
-    ]
+LIB_HEADER = [
+    " * grit-lib's hot code path (library, runtime and dependency functions its common",
+    " * operations run) in one output section ahead of .text, ordered by how many",
+    " * workloads share them, so an operation faults in a few contiguous code windows",
+    " * instead of scattered ones. Linked through grit-lib's `hot-text-layout` feature",
+    " * (grit-lib/build.rs). Patterns that stop matching are harmless: the function stays",
+    " * in .text. */",
+]
+CLI_HEADER = [
+    " * The rest of the `grit` binary's hot code path (the CLI, clap, and library generics",
+    " * the CLI instantiates) in one output section ahead of .text, ordered by how many",
+    " * workloads share them. grit-lib/hot-text.ld holds the library's own functions; this",
+    " * fragment is linked into the `grit` binary only (grit-cli/build.rs). Patterns that",
+    " * stop matching are harmless: the function stays in .text. */",
+]
+
+
+def render(section: str, header: list[str], patterns: list[str]) -> str:
+    lines = ["/* Generated by scripts/gen_hot_text_layout.py; do not edit by hand.", " *"]
+    lines += header
+    lines += ["SECTIONS", "{", f"  {section} : {{"]
     lines += [f"    *({p})" for p in patterns]
     lines += ["  }", "}", "INSERT BEFORE .text;", ""]
     return "\n".join(lines)
 
 
+def ordered(first_seen: dict[str, None], shared: Counter[str]) -> list[str]:
+    """Patterns most workloads share first, ties in first-seen order."""
+    order = {p: i for i, p in enumerate(first_seen)}
+    return sorted(first_seen, key=lambda p: (-shared[p], order[p]))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--grit", type=Path, required=True, help="unstripped grit binary")
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--lib-output", type=Path, default=DEFAULT_LIB_OUTPUT)
+    parser.add_argument("--cli-output", type=Path, default=DEFAULT_CLI_OUTPUT)
     # Large enough that index parsing and the work-tree scans take their threaded paths.
     parser.add_argument("--files", type=int, default=10000, help="tracked files in the fixture")
     args = parser.parse_args()
@@ -289,10 +336,11 @@ def main() -> int:
     if not any(s.startswith("_R") for s in symbols):
         print(f"{grit} has no Rust symbols; build it with strip = false", file=sys.stderr)
         return 1
-    symbols = library_symbols(symbols, library_crates())
+    library = library_symbols(symbols, library_crates())
 
     # pattern -> number of workloads that ran it; dict order is first-seen order.
-    first_seen: dict[str, None] = {}
+    lib_seen: dict[str, None] = {}
+    cli_seen: dict[str, None] = {}
     shared: Counter[str] = Counter()
     with tempfile.TemporaryDirectory(prefix="grit-hot-text-") as tmp:
         root = Path(tmp)
@@ -306,17 +354,27 @@ def main() -> int:
                 env = run_env(isolated=i == 0)
                 out = root / f"{name}-{i}.callgrind"
                 for n in executed_functions(grit, repo, argv, out, env):
-                    if n in symbols:
-                        p = section_pattern(n)
-                        first_seen.setdefault(p, None)
-                        seen.add(p)
+                    if n not in symbols:
+                        continue
+                    p = section_pattern(n)
+                    (lib_seen if n in library else cli_seen).setdefault(p, None)
+                    seen.add(p)
             shared.update(seen)
-            print(f"{name}: {len(seen)} functions, {len(first_seen)} total", file=sys.stderr)
+            print(
+                f"{name}: {len(seen)} functions, {len(lib_seen)} library and "
+                f"{len(cli_seen)} CLI total",
+                file=sys.stderr,
+            )
 
-    order = {p: i for i, p in enumerate(first_seen)}
-    patterns = sorted(first_seen, key=lambda p: (-shared[p], order[p]))
-    args.output.write_text(render(patterns))
-    print(f"wrote {len(patterns)} patterns to {args.output}", file=sys.stderr)
+    # Wildcarded patterns can coincide; the library's fragment keeps a shared one.
+    cli_seen = {p: None for p in cli_seen if p not in lib_seen}
+    for section, header, seen_patterns, output in [
+        (".text.grit_hot", LIB_HEADER, lib_seen, args.lib_output),
+        (".text.grit_cli_hot", CLI_HEADER, cli_seen, args.cli_output),
+    ]:
+        patterns = ordered(seen_patterns, shared)
+        output.write_text(render(section, header, patterns))
+        print(f"wrote {len(patterns)} patterns to {output}", file=sys.stderr)
     return 0
 
 

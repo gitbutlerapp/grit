@@ -1,13 +1,17 @@
 //! `grit` enables grit-lib's `hot-text-layout` feature, so on x86_64 Linux GNU the library's
 //! hot code path shares one `.text.grit_hot` output section ahead of `.text` instead of being
-//! scattered across it (see `grit-lib/build.rs` and `scripts/gen_hot_text_layout.py`).
+//! scattered across it, and the CLI's own hot code path shares `.text.grit_cli_hot` (see
+//! `grit-lib/build.rs`, `grit-cli/build.rs` and `scripts/gen_hot_text_layout.py`).
 
 #![cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
 
 use std::error::Error;
 
-/// Below this the fragment has gone stale: most of its patterns no longer match anything.
+/// Below this the library fragment has gone stale: most of its patterns no longer match.
 const MIN_HOT_BYTES: u64 = 256 * 1024;
+
+/// Below this the CLI fragment has gone stale: most of its patterns no longer match.
+const MIN_CLI_HOT_BYTES: u64 = 128 * 1024;
 
 struct Section {
     name: Vec<u8>,
@@ -72,6 +76,17 @@ fn grit_binary_has_hot_text_section_ahead_of_text() -> Result<(), Box<dyn Error>
     assert!(
         hot.addr + hot.size <= text.addr,
         ".text.grit_hot is not ahead of .text"
+    );
+    let cli_hot =
+        find(b".text.grit_cli_hot").ok_or("grit was linked without grit-cli/hot-text.ld")?;
+    assert!(
+        cli_hot.size >= MIN_CLI_HOT_BYTES,
+        ".text.grit_cli_hot holds only {} bytes; regenerate grit-cli/hot-text.ld",
+        cli_hot.size
+    );
+    assert!(
+        cli_hot.addr + cli_hot.size <= text.addr,
+        ".text.grit_cli_hot is not ahead of .text"
     );
     Ok(())
 }
