@@ -18,6 +18,13 @@
     "dry_run": {
       "type": "boolean"
     },
+    "embedded_gitlinks": {
+      "description": "Nested repositories newly recorded as gitlinks (mode 160000).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "intent_to_add": {
       "items": {
         "type": "string"

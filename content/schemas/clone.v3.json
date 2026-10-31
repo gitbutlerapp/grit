@@ -210,6 +210,13 @@
       "description": "Whether the clone destination is a bare repository.",
       "type": "boolean"
     },
+    "bare_gitlink_paths": {
+      "description": "Gitlink paths with no `.gitmodules` entry (empty after checkout).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "blobs": {
       "anyOf": [
         {
@@ -369,7 +376,7 @@
       "type": "array"
     },
     "submodule_paths": {
-      "description": "Gitlink paths in the checked-out tree (submodules grit does not fetch).",
+      "description": "Gitlink paths listed in `.gitmodules` (submodules grit does not fetch).",
       "items": {
         "type": "string"
       },

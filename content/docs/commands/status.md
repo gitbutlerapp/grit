@@ -286,6 +286,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `staged` | array | Staged changes with `path`, `status`, and optional `old_path` (renames/copies). |
 | `unstaged` | array | Unstaged changes with `path`, `status`, and optional `old_path` (renames/copies). |
 | `untracked` | array | Untracked paths (raw UTF-8; JSON escapes control characters). With default `--untracked normal`, wholly untracked directories appear once (often with a trailing `/`); with `--untracked all`, every file path is listed. |
+| `embedded_repositories` | array | Untracked nested repositories that would be recorded as gitlinks if staged. Omitted when empty. Human and `--markdown` output print a one-line **note** on stderr for each path. |
 | `clean` | boolean | `true` when there is nothing to commit and nothing untracked. |
 | `merging` | boolean | **Deprecated.** Prefer `operation`. `true` when a merge is in progress (`MERGE_HEAD` exists). |
 | `in_progress` | array | **Deprecated.** Prefer `operation`. Stable operation ids while work is paused (for example `merge`, `rebase`). Omitted when empty. |

@@ -85,6 +85,9 @@ pub struct CommitOutcome {
     pub parents: Vec<String>,
     pub author: CommitAuthorOutcome,
     pub hooks_run: Vec<String>,
+    /// Nested repositories newly recorded as gitlinks while auto-staging before this commit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub embedded_gitlinks: Vec<String>,
 }
 
 impl CommitOutcome {
@@ -95,7 +98,12 @@ impl CommitOutcome {
 }
 
 impl HumanRender for CommitOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        crate::embedded_gitlink::emit_embedded_gitlink_warnings(
+            ctx.mode,
+            &self.embedded_gitlinks,
+            self.dry_run,
+        );
         if self.dry_run {
             outln!(
                 w,
@@ -137,7 +145,12 @@ impl HumanRender for CommitOutcome {
 }
 
 impl MarkdownRender for CommitOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        crate::embedded_gitlink::emit_embedded_gitlink_warnings(
+            ctx.mode,
+            &self.embedded_gitlinks,
+            self.dry_run,
+        );
         markdown::print_commit_outcome(w, self)?;
         Ok(())
     }
@@ -534,6 +547,7 @@ fn finish_commit_outcome(
             .iter()
             .map(|h| h.as_str().to_owned())
             .collect(),
+        embedded_gitlinks: outcome.embedded_gitlinks,
     })
 }
 

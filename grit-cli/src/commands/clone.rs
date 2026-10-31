@@ -227,9 +227,12 @@ pub struct CloneOutcome {
     /// Index paths that collided on a case-insensitive filesystem during checkout.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub path_collisions: Vec<String>,
-    /// Gitlink paths in the checked-out tree (submodules grit does not fetch).
+    /// Gitlink paths listed in `.gitmodules` (submodules grit does not fetch).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub submodule_paths: Vec<String>,
+    /// Gitlink paths with no `.gitmodules` entry (empty after checkout).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bare_gitlink_paths: Vec<String>,
     /// The server's prebuilt bundle the clone started from, when it offered
     /// one. `objects` and `bytes` include what it brought.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -458,6 +461,15 @@ impl MarkdownRender for CloneOutcome {
         if !self.submodule_paths.is_empty() {
             outln!(w, "- **submodule paths** (not fetched):");
             for path in &self.submodule_paths {
+                outln!(w, "  - `{path}`");
+            }
+        }
+        if !self.bare_gitlink_paths.is_empty() {
+            outln!(
+                w,
+                "- **bare gitlink paths** (empty checkout, not in `.gitmodules`):"
+            );
+            for path in &self.bare_gitlink_paths {
                 outln!(w, "  - `{path}`");
             }
         }
@@ -757,8 +769,10 @@ fn clone_into(
     let worktree_bytes = outcome.worktree_bytes;
     let path_collisions = outcome.path_collisions.clone();
     let submodule_paths = outcome.submodule_paths.clone();
+    let bare_gitlink_paths = outcome.bare_gitlink_paths.clone();
     emit_path_collision_warning(run.mode, &path_collisions);
     emit_submodule_note(run.mode, &submodule_paths);
+    crate::embedded_gitlink::emit_bare_gitlink_note(run.mode, &bare_gitlink_paths);
     let (no_checkout_reason, branches_with_commits) = match outcome.checkout {
         CloneCheckout::CheckedOut(_) => (None, None),
         CloneCheckout::Skipped => {
@@ -837,6 +851,7 @@ fn clone_into(
         branches_with_commits,
         path_collisions,
         submodule_paths,
+        bare_gitlink_paths,
         bare: outcome.bare,
         bundle,
     })
@@ -925,6 +940,7 @@ mod tests {
             branches_with_commits: None,
             path_collisions: Vec::new(),
             submodule_paths: Vec::new(),
+            bare_gitlink_paths: Vec::new(),
             bundle: None,
             bare: false,
         }

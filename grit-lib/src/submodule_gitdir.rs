@@ -615,23 +615,24 @@ pub fn path_inside_indexed_submodule(index: &Index, new_path: &str) -> bool {
     false
 }
 
-/// Returns true if `new_path` is under a submodule path declared in `.gitmodules`.
-pub fn path_inside_registered_submodule(work_tree: &Path, new_path: &str) -> bool {
+/// Paths declared in `.gitmodules` (`submodule.*.path`), normalized with `/`.
+pub fn registered_submodule_paths(work_tree: &Path) -> Vec<String> {
     let gitmodules = work_tree.join(".gitmodules");
     let Ok(content) = fs::read_to_string(&gitmodules) else {
-        return false;
+        return Vec::new();
     };
-    let Ok(mf) = ConfigFile::parse(&gitmodules, &content, ConfigScope::Local) else {
-        return false;
-    };
-    let mut paths: Vec<String> = Vec::new();
-    for e in &mf.entries {
-        if e.key.starts_with("submodule.") && e.key.ends_with(".path") {
-            if let Some(p) = e.value.as_deref() {
-                paths.push(p.replace('\\', "/"));
-            }
-        }
-    }
+    let (entries, _) =
+        ConfigFile::parse_gitmodules_best_effort(&gitmodules, &content, ConfigScope::Local);
+    entries
+        .into_iter()
+        .filter(|e| e.key.starts_with("submodule.") && e.key.ends_with(".path"))
+        .filter_map(|e| e.value.as_deref().map(|p| p.replace('\\', "/")))
+        .collect()
+}
+
+/// Returns true if `new_path` is under a submodule path declared in `.gitmodules`.
+pub fn path_inside_registered_submodule(work_tree: &Path, new_path: &str) -> bool {
+    let paths = registered_submodule_paths(work_tree);
     let new_norm = new_path.replace('\\', "/");
     for p in paths {
         if new_norm == p || new_norm.starts_with(&format!("{p}/")) {

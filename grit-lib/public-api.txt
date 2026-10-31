@@ -14038,6 +14038,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::add::Stage
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::add::StageOptions
 pub struct grit_lib::porcelain::add::StageOutcome
 pub grit_lib::porcelain::add::StageOutcome::added: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::add::StageOutcome::embedded_gitlinks: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::add::StageOutcome::intent_to_add: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::add::StageOutcome::modified: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::add::StageOutcome::removed: alloc::vec::Vec<alloc::string::String>
@@ -14644,6 +14645,7 @@ pub grit_lib::porcelain::commit::CommitOutcome::author: grit_lib::porcelain::com
 pub grit_lib::porcelain::commit::CommitOutcome::branch: core::option::Option<alloc::string::String>
 pub grit_lib::porcelain::commit::CommitOutcome::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::commit::CommitOutcome::changes: usize
+pub grit_lib::porcelain::commit::CommitOutcome::embedded_gitlinks: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::commit::CommitOutcome::files: alloc::vec::Vec<grit_lib::porcelain::commit::CommitFile>
 pub grit_lib::porcelain::commit::CommitOutcome::hooks_run: alloc::vec::Vec<grit_lib::command_runner::hooks::HookName>
 pub grit_lib::porcelain::commit::CommitOutcome::oid: grit_lib::objects::ObjectId
@@ -16188,7 +16190,19 @@ pub fn grit_lib::porcelain::stage_tracked::stage_tracked_modifications_in_index(
 pub fn grit_lib::porcelain::stage_tracked::stage_tracked_modifications_in_index_with_thresholds(&grit_lib::repo::Repository, &std::path::Path, &std::path::Path, &mut grit_lib::index::Index, grit_lib::porcelain::stage_tracked::IndexStagingThresholds) -> grit_lib::error::Result<grit_lib::porcelain::stage_tracked::StageTrackedSummary>
 pub fn grit_lib::porcelain::stage_tracked::stage_tracked_modifications_with_thresholds(&grit_lib::repo::Repository, &std::path::Path, grit_lib::porcelain::stage_tracked::IndexStagingThresholds) -> grit_lib::error::Result<grit_lib::porcelain::stage_tracked::StageTrackedSummary>
 pub mod grit_lib::porcelain::staging
-pub fn grit_lib::porcelain::staging::stage_worktree_changes(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<usize>
+pub struct grit_lib::porcelain::staging::StageWorktreeChangesOutcome
+pub grit_lib::porcelain::staging::StageWorktreeChangesOutcome::changed: usize
+pub grit_lib::porcelain::staging::StageWorktreeChangesOutcome::embedded_gitlinks: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
+pub fn grit_lib::porcelain::staging::StageWorktreeChangesOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
+impl core::cmp::PartialEq for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
+pub fn grit_lib::porcelain::staging::StageWorktreeChangesOutcome::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
+pub fn grit_lib::porcelain::staging::StageWorktreeChangesOutcome::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::staging::StageWorktreeChangesOutcome
+pub fn grit_lib::porcelain::staging::StageWorktreeChangesOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn grit_lib::porcelain::staging::stage_worktree_changes(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<grit_lib::porcelain::staging::StageWorktreeChangesOutcome>
 pub mod grit_lib::porcelain::stash
 pub enum grit_lib::porcelain::stash::StashMode
 pub grit_lib::porcelain::stash::StashMode::All
@@ -16595,6 +16609,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::Renam
 pub struct grit_lib::porcelain::status::StatusModel
 pub grit_lib::porcelain::status::StatusModel::conflict_details: alloc::vec::Vec<grit_lib::operation::Conflict>
 pub grit_lib::porcelain::status::StatusModel::conflicts: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::status::StatusModel::embedded_repositories: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::status::StatusModel::head: grit_lib::state::HeadState
 pub grit_lib::porcelain::status::StatusModel::head_tree: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::status::StatusModel::ignored: alloc::vec::Vec<alloc::string::String>
@@ -21213,6 +21228,7 @@ pub grit_lib::remote::clone::CloneOutcome::path: std::path::PathBuf
 pub grit_lib::remote::clone::CloneOutcome::path_collisions: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::clone::CloneOutcome::promisor: core::option::Option<grit_lib::objects::promisor_remote::PromisorHandshake>
 pub grit_lib::remote::clone::CloneOutcome::repo: grit_lib::repo::Repository
+pub grit_lib::remote::clone::CloneOutcome::bare_gitlink_paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::clone::CloneOutcome::submodule_paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::clone::CloneOutcome::tags: u64
 pub grit_lib::remote::clone::CloneOutcome::transfer: grit_lib::remote::transfer::TransferStats

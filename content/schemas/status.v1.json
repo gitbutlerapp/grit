@@ -356,6 +356,13 @@
     "detached": {
       "type": "boolean"
     },
+    "embedded_repositories": {
+      "description": "Untracked nested repositories that would be recorded as gitlinks if staged.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "gitbutler_workspace": {
       "anyOf": [
         {

@@ -25,6 +25,8 @@ On filesystems where Grit sets `core.filemode=false` (typical on Windows), every
 
 [`grit commit`](../commit/) stages every change before it records a commit, so you don't need `grit add` to commit. It's useful for starting to track a new file and checking what will be committed.
 
+Copying or cloning another Git repository into your tree (a directory that contains its own `.git`) is recorded as a **gitlink** (mode `160000`), not as ordinary files. Clones of your repository get an empty directory at that path. When `grit add` newly records such a path, human and `--markdown` output print a **warning** on stderr; `--json` includes `embedded_gitlinks` (omitted when empty). Remove `<path>/.git` and stage again if you meant to vendor the files inside.
+
 Touching a tracked file's timestamp without changing its bytes or mode is not a stage: `grit add` refreshes the index stat cache silently (same as Git) and reports nothing to stage.
 
 On Unix, explicit path operands must be valid UTF-8. An operand containing invalid UTF-8 bytes is rejected before the command runs, with exit status **2** and no changes to the repository. Human output reports the usage error on stderr; `--json` writes an error object with `kind: "usage"` on stdout, and `--markdown` writes `**Error:**` on stdout. The argument is never replaced with a similar Unicode filename.
@@ -105,6 +107,7 @@ Pass `--json` for stable, scripting-friendly output.
 | `staged` | number | Same as `count` for successful staging. |
 | `staged_hunks` | object | Path → hunk ids when `--hunks` staged something (empty object when unused). |
 | `staged_lines` | object | Path → line ranges when `--lines` staged something (empty object when unused). |
+| `embedded_gitlinks` | array | Nested repositories newly recorded as gitlinks. Omitted when empty. |
 
 ```json
 {
@@ -116,7 +119,8 @@ Pass `--json` for stable, scripting-friendly output.
   "count": 2,
   "staged": 2,
   "staged_hunks": {},
-  "staged_lines": {}
+  "staged_lines": {},
+  "embedded_gitlinks": ["vendor-hello"]
 }
 ```
 
