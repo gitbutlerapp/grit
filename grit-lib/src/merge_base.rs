@@ -2277,7 +2277,6 @@ impl SidePaint {
             ),
             date_slop: stop == HidePaintStop::TipsResolvedDateSlop,
             repair_left_only: stop == HidePaintStop::Converged,
-            hide_tips: hide.to_vec(),
             ..PaintWalk::default()
         };
         Self::paint(cache, tips, hide, walk)
@@ -2438,8 +2437,6 @@ struct PaintWalk {
     /// Run [`PaintWalk::repaint_left_only_reachable_from_hide`] when the frontier closes early
     /// ([`HidePaintStop::Converged`] range walks without a commit-graph).
     repair_left_only: bool,
-    /// Hide-side tips ([`SidePaint::compute_hiding`] `hide` argument).
-    hide_tips: Vec<ObjectId>,
 }
 
 /// Commits a [`HidePaintStop::TipsResolvedDateSlop`] paint pops past its date guard, so a hide
@@ -2464,12 +2461,15 @@ impl PaintWalk {
         if self.left_only_popped.is_empty() {
             return Ok(false);
         }
-        let mut hide_starts: Vec<ObjectId> = self
+        let hide_starts: Vec<ObjectId> = self
             .queued
             .keys()
             .copied()
             .filter(|oid| self.sides.get(oid).copied().unwrap_or(0) & PAINT_RIGHT != 0)
             .collect();
+        if hide_starts.is_empty() {
+            return Ok(false);
+        }
         let skew_probe: Vec<ObjectId> = self.left_only_popped.iter().copied().collect();
         let allowance = UNRANKED_SKEW_ALLOWANCE.whole_seconds();
         let clock_skewed = skew_probe.iter().any(|&left| {
@@ -2485,52 +2485,104 @@ impl PaintWalk {
         if !clock_skewed {
             return Ok(false);
         }
-        if hide_starts.is_empty() {
-            for tip in &self.hide_tips {
-                if self.sides.get(tip).copied().unwrap_or(0) & PAINT_RIGHT != 0 {
-                    hide_starts.push(*tip);
+        let mut changed = self.repaint_left_only_on_frontier(cache, &hide_starts)?;
+        if changed {
+            return Ok(true);
+        }
+        loop {
+            if !self.repaint_left_only_unpainted_bridges(cache, &hide_starts)? {
+                break;
+            }
+            changed = true;
+        }
+        Ok(changed)
+    }
+
+    /// Propagate hide-side paint along already-painted parents from queued hide-side starts,
+    /// stopping at commits already popped as reachable from both sides.
+    fn repaint_left_only_on_frontier(
+        &mut self,
+        cache: &mut CommitGraphCache<'_>,
+        hide_starts: &[ObjectId],
+    ) -> Result<bool> {
+        let mut visited = OidHashSet::default();
+        let mut stack = hide_starts.to_vec();
+        for &start in hide_starts {
+            visited.insert(start);
+        }
+        let mut changed = false;
+        while let Some(oid) = stack.pop() {
+            for parent in cache.parents_of(oid)? {
+                if !visited.insert(parent) {
+                    continue;
                 }
+                if self.popped.contains(&parent)
+                    && self.sides.get(&parent).copied() == Some(PAINT_BOTH)
+                {
+                    continue;
+                }
+                let painted = self.sides.get(&parent).copied();
+                if painted == Some(PAINT_BOTH) {
+                    continue;
+                }
+                let Some(side) = painted else {
+                    continue;
+                };
+                if side == PAINT_LEFT {
+                    changed = true;
+                    self.mark(cache, parent, PAINT_RIGHT)?;
+                    self.left_only_popped.remove(&parent);
+                }
+                stack.push(parent);
             }
         }
-        if hide_starts.is_empty() {
-            return Ok(false);
-        }
-        let walk_unpainted = true;
-        let visit_cap = usize::MAX / 4;
+        Ok(changed)
+    }
+
+    /// Walk unpainted bridges off queued hide-side starts until left-only popped commits are
+    /// repainted, stopping at already-popped [`PAINT_BOTH`] history.
+    fn repaint_left_only_unpainted_bridges(
+        &mut self,
+        cache: &mut CommitGraphCache<'_>,
+        hide_starts: &[ObjectId],
+    ) -> Result<bool> {
+        let visit_cap = hide_starts.len() * 64 + PAINT_SLOP + 64;
         let mut changed = false;
-        loop {
-            let mut progress = false;
-            for start in &hide_starts {
-                let mut stack = vec![*start];
-                let mut visited = OidHashSet::default();
-                visited.insert(*start);
-                while let Some(oid) = stack.pop() {
-                    if visited.len() > visit_cap {
-                        break;
+        for &start in hide_starts {
+            let mut stack = vec![start];
+            let mut visited = OidHashSet::default();
+            visited.insert(start);
+            while let Some(oid) = stack.pop() {
+                if visited.len() > visit_cap {
+                    break;
+                }
+                let from_queued = self.queued.contains_key(&oid);
+                let on_unpainted = !self.sides.contains_key(&oid);
+                for parent in cache.parents_of(oid)? {
+                    if !visited.insert(parent) {
+                        continue;
                     }
-                    for parent in cache.parents_of(oid)? {
-                        if !visited.insert(parent) {
+                    if self.popped.contains(&parent)
+                        && self.sides.get(&parent).copied() == Some(PAINT_BOTH)
+                    {
+                        continue;
+                    }
+                    if let Some(side) = self.sides.get(&parent).copied() {
+                        if side == PAINT_BOTH {
                             continue;
                         }
-                        if let Some(side) = self.sides.get(&parent).copied() {
-                            if side == PAINT_BOTH && !walk_unpainted {
-                                continue;
-                            }
-                            if side == PAINT_LEFT {
-                                progress = true;
-                                changed = true;
-                                self.mark(cache, parent, PAINT_RIGHT)?;
-                                self.left_only_popped.remove(&parent);
-                            }
-                        } else if !walk_unpainted {
-                            continue;
+                        if side == PAINT_LEFT {
+                            changed = true;
+                            self.mark(cache, parent, PAINT_RIGHT)?;
+                            self.left_only_popped.remove(&parent);
                         }
+                        stack.push(parent);
+                        continue;
+                    }
+                    if from_queued || on_unpainted {
                         stack.push(parent);
                     }
                 }
-            }
-            if !progress {
-                break;
             }
         }
         Ok(changed)
@@ -5178,6 +5230,31 @@ mod tests {
         assert_eq!(count, listed.len());
         assert_eq!(revwalk.len(), count);
         assert_eq!(revwalk_count, count);
+        Ok(())
+    }
+
+    #[test]
+    fn range_exclude_paint_converged_skew_repair_parent_reads_stay_local() -> Result<()> {
+        use super::intersect_walk_test_hooks::{
+            commit_parent_lookups, reset_commit_parent_lookups,
+        };
+
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let fixture = write_range_skew_paint_fixture(&repo)?;
+        clear_commit_linkage(&repo);
+        reset_commit_parent_lookups();
+        let _ = count_commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[fixture.positive_tip],
+            &fixture.hide,
+            ReachableCountFilter::default(),
+        )?;
+        let lookups = commit_parent_lookups();
+        assert!(
+            lookups <= 64,
+            "skew repair must not walk unpainted history ({lookups} parent reads)"
+        );
         Ok(())
     }
 
