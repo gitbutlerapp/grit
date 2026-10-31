@@ -572,7 +572,7 @@ fn index_matches_head_without_worktree_stat(
     let Some(ie) = index.get(path.as_bytes(), 0) else {
         return false;
     };
-    if ie.oid != oid || ie.mode != mode {
+    if ie.oid != oid || crate::index::canon_mode(ie.mode) != crate::index::canon_mode(mode) {
         return false;
     }
     !entry_is_racy_with_policy(ie, index_mtime, stat_policy)
@@ -644,7 +644,10 @@ fn staged_diff_for_tree_switch_paths(
                     score: None,
                 });
             }
-            (HeadTreeSide::Present { oid, mode }, Some(ie)) if ie.oid != oid || ie.mode != mode => {
+            (HeadTreeSide::Present { oid, mode }, Some(ie))
+                if ie.oid != oid
+                    || crate::index::canon_mode(ie.mode) != crate::index::canon_mode(mode) =>
+            {
                 staged.push(DiffEntry {
                     status: DiffStatus::for_content_change(mode, ie.mode),
                     old_path: Some(path.clone()),

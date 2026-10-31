@@ -1068,9 +1068,10 @@ fn index_matches_target_tree_entry(
     path: &str,
     target: TargetTreeEntry,
 ) -> bool {
-    index
-        .get(path.as_bytes(), 0)
-        .is_some_and(|entry| entry.oid == target.oid && entry.mode == target.mode)
+    index.get(path.as_bytes(), 0).is_some_and(|entry| {
+        entry.oid == target.oid
+            && crate::index::canon_mode(entry.mode) == crate::index::canon_mode(target.mode)
+    })
 }
 
 /// True when `entry` is a submodule directory that drifted from its index gitlink (another
