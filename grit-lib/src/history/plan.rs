@@ -289,14 +289,12 @@ fn plan_rewrite_with_order_impl(
                 first
             } else if let Some(refs) = scoped_refs_override.as_ref().and_then(|r| r.first()) {
                 refs.1
-            } else if let Some((mapping, _)) = seed.as_ref() {
-                mapping
-                    .keys()
-                    .copied()
-                    .next()
-                    .ok_or_else(|| HistoryError::NotInHistory {
+            } else if let Some((mapping, rewritten)) = seed.as_ref() {
+                oldest_from_resume_seed(mapping, rewritten).ok_or_else(|| {
+                    HistoryError::NotInHistory {
                         commit: ObjectId::null(repo.odb().hash_algo()),
-                    })?
+                    }
+                })?
             } else {
                 return Err(HistoryError::NotInHistory {
                     commit: ObjectId::null(repo.odb().hash_algo()),
@@ -304,14 +302,12 @@ fn plan_rewrite_with_order_impl(
             }
         } else if let Some(refs) = scoped_refs_override.as_ref().and_then(|r| r.first()) {
             refs.1
-        } else if let Some((mapping, _)) = seed.as_ref() {
-            mapping
-                .keys()
-                .copied()
-                .next()
-                .ok_or_else(|| HistoryError::NotInHistory {
+        } else if let Some((mapping, rewritten)) = seed.as_ref() {
+            oldest_from_resume_seed(mapping, rewritten).ok_or_else(|| {
+                HistoryError::NotInHistory {
                     commit: ObjectId::null(repo.odb().hash_algo()),
-                })?
+                }
+            })?
         } else {
             return Err(HistoryError::NotInHistory {
                 commit: ObjectId::null(repo.odb().hash_algo()),
@@ -938,6 +934,16 @@ fn library_err(err: Error) -> HistoryError {
     HistoryError::Planning {
         message: err.to_string(),
     }
+}
+
+fn oldest_from_resume_seed(
+    mapping: &HashMap<ObjectId, ObjectId>,
+    rewritten: &[RewrittenCommit],
+) -> Option<ObjectId> {
+    rewritten
+        .first()
+        .map(|row| row.old)
+        .or_else(|| mapping.keys().next().copied())
 }
 
 fn oldest_edited_commit(repo: &Repository, edits: &HistoryEdits) -> Result<ObjectId, HistoryError> {
