@@ -22809,6 +22809,8 @@ pub struct grit_lib::remote::serve::ReceiveOutcome
 pub grit_lib::remote::serve::ReceiveOutcome::bytes_received: u64
 pub grit_lib::remote::serve::ReceiveOutcome::hooks: alloc::vec::Vec<grit_lib::remote::serve::HookRunRecord>
 pub grit_lib::remote::serve::ReceiveOutcome::objects_received: u32
+pub grit_lib::remote::serve::ReceiveOutcome::post_receive_callback_error: core::option::Option<grit_lib::remote::serve::RefUpdateRefusal>
+pub grit_lib::remote::serve::ReceiveOutcome::post_update_callback_error: core::option::Option<grit_lib::remote::serve::RefUpdateRefusal>
 pub grit_lib::remote::serve::ReceiveOutcome::push_options: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::serve::ReceiveOutcome::unpack_error: core::option::Option<grit_lib::remote::serve::UnpackError>
 pub grit_lib::remote::serve::ReceiveOutcome::updates: alloc::vec::Vec<grit_lib::remote::serve::RefUpdateResult>

@@ -436,8 +436,9 @@ pub trait ReceiveHook {
     /// Run after refs were updated and the `post-receive` script, like a
     /// `post-receive` hook for in-process policy and audit.
     ///
-    /// Non-zero script exit codes do not undo ref updates; returning an error
-    /// here is for the embedder only and does not change what the client sees.
+    /// Ref updates and the client's status report are already fixed when this
+    /// runs. A refusal is recorded on [`ReceiveOutcome::post_receive_callback_error`]
+    /// and does not change them (same as a failing `post-receive` script).
     fn post_receive(
         &self,
         commands: &[&RefCommand],
@@ -449,6 +450,9 @@ pub trait ReceiveHook {
     }
 
     /// Run after the `post-update` script for the same applied updates.
+    ///
+    /// Refusals are recorded on [`ReceiveOutcome::post_update_callback_error`]
+    /// without changing ref updates or the client report.
     fn post_update(
         &self,
         commands: &[&RefCommand],
@@ -503,6 +507,24 @@ pub struct ReceiveOutcome {
     pub bytes_received: u64,
     /// Object count from the pack header (zero when no pack was sent).
     pub objects_received: u32,
+    /// [`ReceiveHook::post_receive`] refused after refs were updated.
+    pub post_receive_callback_error: Option<RefUpdateRefusal>,
+    /// [`ReceiveHook::post_update`] refused after refs were updated.
+    pub post_update_callback_error: Option<RefUpdateRefusal>,
+}
+
+struct AppliedPush {
+    updates: Vec<RefUpdateResult>,
+    post_receive_callback_error: Option<RefUpdateRefusal>,
+    post_update_callback_error: Option<RefUpdateRefusal>,
+}
+
+fn applied_push(updates: Vec<RefUpdateResult>) -> AppliedPush {
+    AppliedPush {
+        updates,
+        post_receive_callback_error: None,
+        post_update_callback_error: None,
+    }
 }
 
 /// Serve one push session: advertise refs, read the ref updates and pack, store
@@ -725,6 +747,8 @@ pub fn receive_pack_with_hook_cancellable(
     };
 
     let mut hook_records = Vec::new();
+    let mut post_receive_callback_error = None;
+    let mut post_update_callback_error = None;
     let updates = if unpack_error.is_some() {
         request
             .commands
@@ -733,7 +757,7 @@ pub fn receive_pack_with_hook_cancellable(
             .collect()
     } else {
         stop.poll().map_err(|_| ServeError::Cancelled)?;
-        apply_commands_with_hooks(
+        let applied = apply_commands_with_hooks(
             repo,
             &request,
             opts,
@@ -744,7 +768,10 @@ pub fn receive_pack_with_hook_cancellable(
             &shallow,
             sideband.then_some(&mut *output),
             &mut hook_records,
-        )?
+        )?;
+        post_receive_callback_error = applied.post_receive_callback_error;
+        post_update_callback_error = applied.post_update_callback_error;
+        applied.updates
     };
 
     if sideband {
@@ -770,6 +797,8 @@ pub fn receive_pack_with_hook_cancellable(
         push_options: request.push_options.clone(),
         bytes_received,
         objects_received,
+        post_receive_callback_error,
+        post_update_callback_error,
     })
 }
 
@@ -1033,7 +1062,7 @@ fn apply_commands_with_hooks(
     shallow: &ShallowPlan,
     mut sideband_out: Option<&mut dyn Write>,
     hook_records: &mut Vec<HookRunRecord>,
-) -> Result<Vec<RefUpdateResult>> {
+) -> Result<AppliedPush> {
     let lookup_odb = quarantine.as_ref().map(|q| q.odb());
     let head_branch = ref_update_policy::head_branch(repo);
     let checked_out = ref_update_policy::checked_out_branch(repo);
@@ -1074,7 +1103,7 @@ fn apply_commands_with_hooks(
     let atomic = request.caps.contains("atomic");
     if atomic && results.iter().any(|r| r.error.is_some()) {
         refuse_remaining(&mut results, &RefUpdateRefusal::AtomicTransactionFailed);
-        return Ok(results);
+        return Ok(applied_push(results));
     }
 
     let accepted: Vec<RefCommand> = request
@@ -1094,7 +1123,7 @@ fn apply_commands_with_hooks(
             &hook_ctx,
         ) {
             refuse_remaining(&mut results, &refusal);
-            return Ok(results);
+            return Ok(applied_push(results));
         }
     }
 
@@ -1105,11 +1134,11 @@ fn apply_commands_with_hooks(
     hook_records.push(hook_record("pre-receive", &pre_result));
     if !pre_result.is_ok() {
         refuse_remaining(&mut results, &RefUpdateRefusal::PreReceiveHookDeclined);
-        return Ok(results);
+        return Ok(applied_push(results));
     }
 
     if results.iter().all(|r| r.error.is_some()) {
-        return Ok(results);
+        return Ok(applied_push(results));
     }
 
     let mut migrated_pack_keeps = Vec::new();
@@ -1136,7 +1165,7 @@ fn apply_commands_with_hooks(
 
     if atomic && results.iter().any(|r| r.error.is_some()) {
         refuse_remaining(&mut results, &RefUpdateRefusal::AtomicTransactionFailed);
-        return Ok(results);
+        return Ok(applied_push(results));
     }
 
     let new_roots: HashSet<ObjectId> = shallow
@@ -1155,7 +1184,7 @@ fn apply_commands_with_hooks(
         }
         if atomic {
             refuse_remaining(&mut results, &RefUpdateRefusal::AtomicTransactionFailed);
-            return Ok(results);
+            return Ok(applied_push(results));
         }
     }
 
@@ -1195,27 +1224,35 @@ fn apply_commands_with_hooks(
         .filter(|(_, r)| r.error.is_none())
         .map(|(c, _)| c)
         .collect();
+    let mut post_receive_callback_error = None;
+    let mut post_update_callback_error = None;
     if !successful.is_empty() {
         let post_result = scripts.post_receive(&successful);
         relay_hook_sideband(&mut sideband_out, &post_result)?;
         hook_records.push(hook_record("post-receive", &post_result));
-        let _ = hook.post_receive(
-            &successful,
-            repo.odb(),
-            &ReceiveHookContext {
-                push_options: &request.push_options,
-            },
-        );
+        post_receive_callback_error = hook
+            .post_receive(
+                &successful,
+                repo.odb(),
+                &ReceiveHookContext {
+                    push_options: &request.push_options,
+                },
+            )
+            .err();
 
         let pu_result = scripts.post_update(&successful);
         relay_hook_sideband(&mut sideband_out, &pu_result)?;
         hook_records.push(hook_record("post-update", &pu_result));
-        let _ = hook.post_update(&successful, repo.odb());
+        post_update_callback_error = hook.post_update(&successful, repo.odb()).err();
     }
 
     drop(migrated_pack_keeps);
 
-    Ok(results)
+    Ok(AppliedPush {
+        updates: results,
+        post_receive_callback_error,
+        post_update_callback_error,
+    })
 }
 
 /// Refuse every update that has not been refused yet.
