@@ -678,33 +678,6 @@ pub fn path_inside_registered_submodule_name(work_tree: &Path, new_path: &str) -
     false
 }
 
-/// Fails when `submodulePathConfig` is off and `new_path` would nest inside an existing submodule.
-///
-/// `index` is optional; when set, checked gitlinks match Git's `die_path_inside_submodule`.
-pub fn die_path_inside_submodule_when_disabled(
-    git_dir: &Path,
-    work_tree: &Path,
-    new_path: &str,
-    index: Option<&Index>,
-) -> Result<()> {
-    if submodule_path_config_enabled(git_dir) {
-        return Ok(());
-    }
-    if path_inside_registered_submodule(work_tree, new_path) {
-        return Err(Error::Config(
-            "cannot add submodule: path inside existing submodule".into(),
-        ));
-    }
-    if let Some(ix) = index {
-        if path_inside_indexed_submodule(ix, new_path) {
-            return Err(Error::Config(
-                "cannot add submodule: path inside existing submodule".into(),
-            ));
-        }
-    }
-    Ok(())
-}
-
 /// Sets `core.worktree` in the submodule repo at `modules_dir`.
 ///
 /// Stores a path relative to `modules_dir` (e.g. `../../../sub1`), matching C Git and

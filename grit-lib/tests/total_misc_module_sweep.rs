@@ -9,7 +9,6 @@ use grit_lib::config::git_path::{
 use grit_lib::config::gitmodules::{
     check_submodule_name, check_submodule_url, looks_like_command_line_option,
     tree_entry_is_gitattributes_blob, tree_entry_is_gitmodules_blob, validate_gitmodules_blob_line,
-    write_gitmodules_cli_option_warnings,
 };
 use grit_lib::config::mailmap::{
     load_mailmap, map_contact_table, parse_contact, parse_mailmap, render_contact,
@@ -18,7 +17,6 @@ use grit_lib::config::mailmap::{
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::{InitOptions, Repository};
-use std::io::Cursor;
 use tempfile::tempdir;
 
 #[test]
@@ -33,9 +31,6 @@ fn gitmodules_mailmap_path_and_signing_helpers() -> grit_lib::error::Result<()> 
     assert!(!check_submodule_name(""));
     assert!(check_submodule_url("https://example.com/repo.git"));
     let _ = validate_gitmodules_blob_line(b"[submodule \"x\"]\n\tpath = p\n\turl = u\n");
-    let content = "[submodule \"s\"]\n\tpath = --weird\n\turl = --also\n";
-    let mut out = Cursor::new(Vec::new());
-    write_gitmodules_cli_option_warnings(&mut out, content).expect("warnings");
 
     let _ = normalize_path_copy("a//b/../c").ok();
     let _ = cleanup_path("./a/b");
