@@ -257,8 +257,8 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     );
     assert_eq!(
         r2.status,
-        PushRefStatus::RejectNonFastForward,
-        "client-side non-ff detection should reject before sending"
+        PushRefStatus::RejectNeedsForce,
+        "client-side diverged non-ff detection should reject before sending"
     );
 
     // The remote ref must be unchanged by the rejected push.

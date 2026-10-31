@@ -103,13 +103,13 @@ $ grit push origin v1
   pushed v1 → origin refs/tags/v1
 
 $ grit push origin HEAD:refs/heads/bench
-  pushed refs → origin refs/heads/bench
+  pushed main → origin refs/heads/bench
 
 $ grit push --dry-run
   would push main → origin refs/heads/main
 
 $ grit push --tags
-  pushed refs → origin refs/tags/v0.1
+  pushed v0.1 → origin refs/tags/v0.1
 
 $ grit push --delete v0.1
   deleted v0.1 from origin
@@ -128,11 +128,18 @@ $ echo $?
 1
 ```
 
-When someone else pushed first:
+When someone else pushed first (your branch is behind the remote):
 
 ```console
 $ grit push
   rejected origin refs/heads/main: not a fast-forward — run `grit pull` first
+```
+
+When your branch was rewritten and no longer fast-forwards (for example after a rebase):
+
+```console
+$ grit push
+  rejected origin refs/heads/main: not a fast-forward — run `grit push --force-with-lease` after integrating, or `grit pull` first
 ```
 
 When the remote moved since your last fetch:

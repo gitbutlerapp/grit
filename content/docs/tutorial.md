@@ -180,7 +180,7 @@ $ grit push
 
 To replay your own commits onto another base without fetching first, use [`grit rebase`](../rebase/) (default upstream is `@{upstream}`; `--onto` for Git's `--onto`).
 
-After rewriting commits with [`grit history`](../history/) (reword, drop, fixup, squash, or rebase), fetch so your remote-tracking refs are current, then push with a lease:
+After rewriting commits with [`grit history`](../history/) (reword, drop, fixup, squash, or rebase), fetch so your remote-tracking refs are current, then push with a lease. A plain `grit push` after a rewrite is rejected with a hint to use `--force-with-lease` (or pull first):
 
 ```console
 $ grit fetch origin

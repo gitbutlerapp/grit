@@ -8,7 +8,7 @@
 //!
 //!   * new ref (create)                       -> `Ok` `[new branch]`
 //!   * fast-forward update                    -> `Ok`
-//!   * non-fast-forward without force         -> client `RejectNonFastForward`
+//!   * diverged non-fast-forward without force -> client `RejectNeedsForce`
 //!   * forced non-fast-forward                -> `Ok` (forced), ref moves
 //!   * deletion                               -> `Ok`, no pack streamed, ref gone
 //!   * up-to-date (re-push same tip)          -> `UpToDate` no-op (no wire round)
@@ -683,8 +683,8 @@ fn run_push_matrix(label: &str, bare: &Path, graph: &Graph, push: &Pusher<'_>) {
     let r = result_for(&out, "refs/heads/main");
     assert_eq!(
         r.status,
-        PushRefStatus::RejectNonFastForward,
-        "[{label}] non-ff push must be client-rejected, got {:?}",
+        PushRefStatus::RejectNeedsForce,
+        "[{label}] diverged non-ff push must be client-rejected, got {:?}",
         r.status
     );
     assert!(r.status.is_error());
@@ -816,7 +816,7 @@ fn run_push_matrix(label: &str, bare: &Path, graph: &Graph, push: &Pusher<'_>) {
     let bad = result_for(&out, "refs/heads/main");
     assert_eq!(
         bad.status,
-        PushRefStatus::RejectNonFastForward,
+        PushRefStatus::RejectNeedsForce,
         "[{label}] atomic: the bad ref keeps its rejection, got {:?}",
         bad.status
     );

@@ -262,7 +262,11 @@ pub fn resolve_push(
 
     if follow_tags {
         let extra = follow_tag_push_specs(repo, &resolved.specs, ctx)?;
-        resolved.specs.extend(extra);
+        if !extra.is_empty() {
+            resolved.specs.extend(extra);
+            resolved.kind = PushPlanKind::Refspecs;
+            resolved.branch_label = None;
+        }
     }
 
     apply_force_mode(

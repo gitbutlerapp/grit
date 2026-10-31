@@ -1348,7 +1348,9 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
     assert!(
         matches!(
             r2.status,
-            PushRefStatus::RejectNonFastForward | PushRefStatus::RemoteRejected
+            PushRefStatus::RejectNonFastForward
+                | PushRefStatus::RejectNeedsForce
+                | PushRefStatus::RemoteRejected
         ),
         "expected non-ff/remote rejection, got {:?} ({:?})",
         r2.status,
