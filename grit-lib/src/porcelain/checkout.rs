@@ -1625,6 +1625,7 @@ fn scan_index_blob_stats_for_hard_reset(
         WorktreeBlobScanOptions {
             preload_index: false,
             stat_parallel_threads: None,
+            parallel_stat_without_preload: true,
         },
         &repo.thread_policy(),
         config,

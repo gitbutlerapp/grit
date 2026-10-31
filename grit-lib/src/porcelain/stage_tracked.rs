@@ -417,12 +417,14 @@ fn stage_tracked_modifications_in_index_body(
         WorktreeBlobScanOptions {
             preload_index,
             stat_parallel_threads: None,
+            ..WorktreeBlobScanOptions::default()
         },
         blob_count,
     );
     let blob_scan_opts = WorktreeBlobScanOptions {
         preload_index,
         stat_parallel_threads: Some(stat_threads),
+        ..WorktreeBlobScanOptions::default()
     };
     let parallelism = thread_policy
         .resolve(
