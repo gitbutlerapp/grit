@@ -289,3 +289,46 @@ near zero. The native block includes paired-bootstrap 95% intervals from 5,000
 resamples of the 60 round indices (reset RNG seed 4626 per case), taking
 `median(candidate) - median(stock)`. Loader-only and GNU-time cross-checks use
 the runner's isolated environment, recorded in `isolated_env_overrides`.
+
+## Hot text layout
+
+Short commands' peak RSS is mostly the binary's own code: the kernel maps file-backed text
+in 64 KB fault-around windows, so a function run once makes its whole window resident, and
+the library functions an operation runs are otherwise scattered over the whole `.text`.
+`grit-lib`'s `hot-text-layout` feature lays the library's hot code path out contiguously in
+every binary that links it; `grit` enables it (see
+[Benchmarks](benchmarks.md#status-memory-is-code-layout-2026-10-31)).
+
+- [`grit-lib/hot-text.ld`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/hot-text.ld)
+  lists the functions of grit-lib, the Rust runtime and grit-lib's own dependencies that the
+  library's common operations run. Anything that names another crate, such as a CLI type
+  or clap, is left out.
+- `grit-lib/build.rs` publishes the fragment as a native library. LLD reads it as an
+  implicit linker script and places the listed functions in one `.text.grit_hot` output
+  section ahead of `.text`.
+- GNU ld rejects `SECTIONS` in implicit scripts, so the feature only acts on
+  `x86_64-unknown-linux-gnu`, where rustc links with LLD by default. Set
+  `GRIT_HOT_TEXT_LAYOUT=0` to turn it off, for example when linking with another linker.
+- Patterns glob input-section names with crate hashes wildcarded, so version bumps keep
+  them matching. A function that is renamed or no longer runs simply stays in `.text`.
+- The `hot_text_layout` test fails if the section is missing, smaller than 256 KiB (the
+  sign that most patterns stopped matching), or not ahead of `.text`.
+
+Regenerate the list after large library changes, from an unstripped `dist` build:
+
+```bash
+CARGO_PROFILE_DIST_STRIP=false CARGO_TARGET_DIR=target/hot-text \
+  cargo build --profile dist -p grit-cli
+python3 scripts/gen_hot_text_layout.py --grit target/hot-text/dist/grit
+```
+
+The script needs `valgrind`. It builds a 10,000-file clone (packed objects and refs, tags,
+an upstream) and runs the library's common operations through the shipped binary, so
+inlining matches what is linked: status, diff, log, show, revision walks, blame, refs,
+config, add, commit, switch and stash. Each workload starts right after a reset, so its
+first step also takes the index-refresh path. Callgrind records every function each step
+runs; the script keeps the library's and orders them by how many workloads share them.
+
+To see where a run's resident pages are, stop the process at `exit_group` under `gdb` and
+read `/proc/<pid>/smaps` (per mapping) or `/proc/<pid>/pagemap` (per page, to map back to
+symbols with `nm`).

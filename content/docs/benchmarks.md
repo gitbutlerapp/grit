@@ -52,6 +52,87 @@ directory and stay within noise: a second run in reverse order measured
 and
 [`daily-switch-sparse-unique-5841-after.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-switch-sparse-unique-5841-after.json).
 
+## Status memory is code layout (2026-10-31)
+
+`grit status` used about twice Git's peak RSS on `synth-10k` (20.1 MB against 9.7 MB on `status/clean@synth-10k`). None of the gap is data. Heaptrack puts the whole run's heap peak at 1.75 MB, and at exit a status run holds 1.35 MB of anonymous memory against Git's 2.0 MB. The index, untracked walk and ignore rules are already smaller than Git's. The rest is file-backed pages of the binary:
+
+- A status run executes about 880 functions, 1.4 MB of machine code, but they were spread over 135 of the 392 64 KB windows of the 25 MB `.text`. The kernel maps file-backed text a whole fault-around window at a time, so about 8.5 MB of code became resident against Git's 1.85 MB. `madvise` cannot turn fault-around off.
+- How much of that is fixed cost: `grit --version` took 5.9 MB, `status` on a one-file repository 13.3 MB, and on 10,000 files only 1.3 MB more.
+- Every operation has the same problem. Repository discovery, config, refs, object and pack reads and the index are library code shared by every command, scattered like the rest.
+
+Rules that need no profile do not help. Simulating layouts from `nm` sizes and callgrind's executed set:
+
+- Grouping whole crates or the library's core modules leaves status at 138–146 windows, against 147 for the original layout.
+- Hot/cold splitting (`-C llvm-args=-hot-cold-split` with `-z keep-text-section-prefix`) moved only 0.85 MB out and made status RSS worse.
+- What works is placing the functions that run next to each other.
+
+`grit-lib` now has a `hot-text-layout` feature, and `grit` enables it:
+
+- [`grit-lib/hot-text.ld`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/hot-text.ld) lists the library's hot code path: functions of `grit-lib`, the Rust runtime and grit-lib's own dependencies that the library's common operations run. Anything naming another crate (a CLI type, clap, output rendering) is left out.
+- `grit-lib/build.rs` publishes the fragment as a native library, so it reaches every binary that links grit-lib, embedders included. LLD reads it as an implicit linker script and places the functions in one `.text.grit_hot` section, about 3.2 MB, in front of `.text`.
+- Functions are ordered by how many workloads run them, so the core every operation shares comes first.
+- The feature acts only on `x86_64-unknown-linux-gnu`, where rustc links with LLD.
+- See [Hot text layout](benchmarking.md#hot-text-layout) for how it is generated.
+
+The CLI's own code (argument parsing, dispatch, rendering) keeps its default placement. That is most of what still separates this from a layout that also orders the binary's own functions: in a direct run on `synth-10k` such a layout brought settled `status` to 9.3 MB, while the library layout gives 11.5 MB, from 14.2 MB.
+
+Rows from `grit-bench daily` on `dist` builds, before and after run back to back against the system `git`: status rows with 15 runs and 3 warmups, the others with 10 runs and 2 warmups. The setup was a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0, and "base" is `3c14b849f`. Reports: `daily-status-hot-text-before.json` → `daily-status-hot-text-after.json` and `daily-hot-text-related-before.json` → `daily-hot-text-related-after.json`. Peak RSS is the largest sample of the row, taken through `/bin/sh` (about 2 MB above a direct run for either tool), so it includes the first run after each prepare hook.
+
+| Scenario | git ms / MB | base ms / MB | + layout ms / MB | RSS vs git | time vs git |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `status/clean@synth-10k` | 7.31 / 9.7 | 7.86 / 20.1 | 7.17 / **17.6** | 2.07× → 1.82× | 1.05 → 0.98 |
+| `status/dirty@synth-10k` | 10.69 / 9.7 | 9.16 / 17.1 | 7.23 / **14.4** | 1.76× → 1.48× | 0.78 → 0.68 |
+| `status/renamed@synth-10k` | 7.56 / 9.7 | 7.37 / 19.9 | 7.71 / **16.7** | 2.06× → 1.72× | 1.04 → 1.02 |
+| `status/clean@small` | 1.66 / 7.4 | 3.12 / 15.3 | 2.46 / **10.9** | 2.04× → 1.47× | 1.59 → 1.48 |
+| `status/dirty@small` | 1.76 / 7.5 | 3.71 / 15.6 | 2.53 / **11.6** | 2.06× → 1.55× | 1.72 → 1.44 |
+| `status/clean@synth-100k` | 70.07 / 30.4 | 51.74 / 35.6 | 52.28 / **34.3** | 1.18× → 1.13× | 0.75 → 0.75 |
+| `status/dirty@synth-100k` | 103.43 / 30.2 | 61.12 / 39.9 | 54.91 / **37.1** | 1.32× → 1.23× | 0.58 → 0.53 |
+| `status/paths@synth-100k` | 48.71 / 30.3 | 53.45 / 40.0 | 45.30 / **36.8** | 1.32× → 1.21× | 1.09 → 0.93 |
+| `status/clean@deep-tree` | 1140.87 / 40.6 | 388.16 / 42.8 | 392.21 / **41.4** | 1.06× → 1.02× | 0.34 → 0.34 |
+| `status/dirty@deep-tree` | 1231.58 / 41.3 | 453.70 / 54.7 | 439.86 / **51.6** | 1.32× → 1.25× | 0.38 → 0.36 |
+| `diff/worktree@synth-10k` | 7.07 / 9.9 | 7.22 / 17.6 | 7.20 / **14.9** | 1.77× → 1.50× | 1.07 → 1.02 |
+| `show/head@synth-10k` | 2.00 / 8.9 | 3.12 / 16.7 | 2.82 / **14.1** | 1.95× → 1.59× | 1.54 → 1.41 |
+| `add/modified@synth-10k` | 16.81 / 12.4 | 11.75 / 23.0 | 10.68 / **20.1** | 1.85× → 1.61× | 0.69 → 0.64 |
+| `commit/small@synth-10k` | 27.77 / 13.7 | 18.12 / 22.1 | 17.12 / **20.2** | 1.59× → 1.47× | 0.64 → 0.62 |
+| `switch/branch@synth-10k` | 25.76 / 10.7 | 20.12 / 18.7 | 21.35 / **15.9** | 1.75× → 1.48× | 0.82 → 0.83 |
+| `stash/push-pop@synth-10k` | 222.78 / 18.4 | 144.72 / 22.7 | 149.13 / **19.7** | 1.23× → 1.07× | 0.60 → 0.67 |
+| `reset/hard@synth-10k` | 16.00 / 11.1 | 21.82 / 19.4 | 22.67 / **17.6** | 1.75× → 1.59× | 1.41 → 1.42 |
+| `merge/clean@synth-10k` | 126.07 / 14.3 | 57.27 / 22.0 | 63.72 / **19.5** | 1.54× → 1.37× | 0.53 → 0.51 |
+| `notes/list@synth-10k` | 1.37 / 7.0 | 2.02 / 13.0 | 1.97 / **11.6** | 2.06× → 1.66× | 1.50 → 1.44 |
+| `reflog/list@synth-10k` | 3.90 / 9.5 | 4.43 / 12.9 | 4.37 / **12.2** | 1.35× → 1.29× | 1.16 → 1.12 |
+| `clean/untracked@synth-10k` | 4.68 / 8.7 | 5.07 / 14.8 | 4.94 / **13.4** | 1.65× → 1.53× | 1.15 → 1.06 |
+| `gc/pack-refs@synth-10k` | 1.70 / 7.1 | 3.59 / 12.7 | 3.19 / **12.0** | 1.82× → 1.70× | 2.10 → 1.88 |
+
+`notes`, `reset`, `merge`, `clean` and `gc` are not in the profiling workload; they shrink because they share the library core.
+
+Single-sitting times drift with the machine. Alternating rounds show no slowdown:
+
+| Command | base ms | + layout ms |
+| --- | ---: | ---: |
+| `status` on `synth-10k`, dirty, prepare before every run (5 × 20) | 7.78 | **7.46** |
+| `status` on `synth-10k`, clean, prepare before every run (5 × 20) | 7.28 | **6.98** |
+| `status` on `synth-100k`, dirty, prepare before every run (5 × 8) | 58.66 | 55.73 |
+| `status` on `small`, settled (5 × 100) | 2.35 | **2.17** |
+| `diff` on `synth-10k`, settled (4 × 60) | 5.50 | **5.06** |
+| `log --limit 20` on `synth-10k` (4 × 60) | 2.19 | 2.10 |
+| `merge/clean@synth-10k`, three alternating daily runs | 55.21 | 54.55 |
+| `stash/push-pop@synth-10k`, three alternating daily runs | 128.82 | 126.79 |
+| `status/renamed@synth-10k`, three alternating daily runs | 7.22 | 6.76 |
+
+GNU `time` peak RSS on `synth-10k` (median of three):
+
+- Status: settled 14.2 → 11.5 MB.
+- Diffs and history: `diff` 14.6 → 12.3 MB, `log --limit 20` 12.2 → 10.7 MB, `show HEAD` 13.7 → 11.9 MB, `blame` 19.2 → 17.5 MB.
+- Refs: `branch` 10.3 → 9.3 MB, `tag` 10.3 → 9.2 MB.
+
+What remains of the status gap is the CLI's own scattered code plus read-only data: `.rela.dyn` (576 KB, read whole by the loader) and the `.rodata` and `.data.rel.ro` pages startup touches, about 2.2 MB.
+
+```bash
+./target/dist/grit-bench daily --only status/clean@synth-10k,status/dirty@synth-10k,status/renamed@synth-10k,status/clean@synth-100k,status/dirty@synth-100k,status/paths@synth-100k,status/clean@deep-tree,status/dirty@deep-tree,status/clean@small,status/dirty@small \
+  --min-runs 15 --warmup 3 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-status-hot-text-after.json
+./target/dist/grit-bench daily --only diff/worktree@synth-10k,show/head@synth-10k,add/modified@synth-10k,commit/small@synth-10k,switch/branch@synth-10k,stash/push-pop@synth-10k,reset/hard@synth-10k,notes/list@synth-10k,reflog/list@synth-10k,merge/clean@synth-10k,clean/untracked@synth-10k,gc/pack-refs@synth-10k \
+  --min-runs 10 --warmup 2 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-hot-text-related-after.json
+```
 ## Deepening a shallow fetch negotiates (2026-10-29)
 
 A fetch with `--deepen`, `--depth` or into a shallow repository used to send the server no `have` lines, so the server packed every object of the deepened history. On `fetch/deepen@git-git` (a depth-1 `master` deepened by 50 commits, served by `git http-backend`), grit received 59k objects (43 MiB) that the client already held through its other branches, and spent most of its 5.5 s waiting for the server to build that pack and then indexing it. Git negotiates and receives 175 objects.
