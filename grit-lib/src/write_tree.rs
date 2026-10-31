@@ -576,6 +576,93 @@ fn ensure_empty_blob_for_intent_to_add(odb: &Odb, index: &Index) -> Result<()> {
     Ok(())
 }
 
+/// True when `path` lies in directory `prefix` (not a sibling like `a0` for prefix `a`).
+fn index_path_in_dir(path: &[u8], prefix: &str) -> bool {
+    if prefix.is_empty() {
+        return true;
+    }
+    let pb = prefix.as_bytes();
+    path.len() > pb.len() && path.starts_with(pb) && path[pb.len()] == b'/'
+}
+
+fn entry_relative_to_dir_prefix<'a>(path: &'a [u8], dir_prefix: &[u8]) -> Result<&'a [u8]> {
+    if dir_prefix.is_empty() {
+        return Ok(path);
+    }
+    path.strip_prefix(dir_prefix)
+        .and_then(|suffix| suffix.strip_prefix(b"/"))
+        .ok_or_else(|| {
+            Error::IndexError(format!(
+                "index path {} is not under tree prefix {}",
+                String::from_utf8_lossy(path),
+                String::from_utf8_lossy(dir_prefix)
+            ))
+        })
+}
+
+struct PartialWritePathIndex<'a> {
+    paths: std::collections::HashSet<&'a [u8]>,
+    ancestor_dirs: std::collections::HashSet<&'a [u8]>,
+}
+
+impl<'a> PartialWritePathIndex<'a> {
+    fn new(paths: &'a std::collections::HashSet<Vec<u8>>) -> Self {
+        let mut index = Self {
+            paths: std::collections::HashSet::new(),
+            ancestor_dirs: std::collections::HashSet::new(),
+        };
+        for path in paths {
+            index.paths.insert(path.as_slice());
+            for (i, &b) in path.iter().enumerate() {
+                if b == b'/' && !index.ancestor_dirs.contains(&path[..i]) {
+                    index.ancestor_dirs.insert(&path[..i]);
+                }
+            }
+        }
+        index
+    }
+
+    fn subtree_touched(&self, prefix: &[u8]) -> bool {
+        if prefix.is_empty() {
+            return !self.paths.is_empty();
+        }
+        self.paths.contains(prefix) || self.ancestor_dirs.contains(prefix)
+    }
+
+    fn contains(&self, path: &[u8]) -> bool {
+        self.paths.contains(path)
+    }
+}
+
+fn index_has_entry_under(index: &Index, dir: &[u8]) -> bool {
+    let dir_prefix = if dir.is_empty() {
+        None
+    } else {
+        let mut prefix = dir.to_vec();
+        prefix.push(b'/');
+        Some(prefix)
+    };
+    let start = dir_prefix
+        .as_ref()
+        .map(|prefix| {
+            index
+                .entries
+                .partition_point(|e| e.path.as_slice() < prefix.as_slice())
+        })
+        .unwrap_or(0);
+    for entry in &index.entries[start..] {
+        if let Some(prefix) = &dir_prefix {
+            if !entry.path.starts_with(prefix) {
+                break;
+            }
+        }
+        if entry.stage() == 0 && !entry.intent_to_add() && entry.mode != MODE_TREE {
+            return true;
+        }
+    }
+    false
+}
+
 /// Build and write tree object(s) from index entries and return the tree OID.
 ///
 /// The `prefix` argument optionally limits the write to a subtree path.
@@ -604,6 +691,9 @@ pub fn write_tree_from_index_subset(
 
 /// Build and write tree object(s) from index entries and return the tree OID.
 ///
+/// When `prefix` is non-empty, only index entries **inside** that directory are included:
+/// `prefix` must match a whole path component (for example `"a"` selects `a/f` but not `a0/f`).
+///
 /// Unlike [`write_tree_update_index`], this does not read or update the index cache-tree
 /// extension. Callers that need incremental reuse must use [`write_tree_update_index`] on a
 /// mutable index instead.
@@ -626,7 +716,7 @@ pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> Result<O
             entry.stage() == 0
                 && !entry.intent_to_add()
                 && entry.mode != MODE_TREE
-                && entry.path.starts_with(prefix_bytes)
+                && index_path_in_dir(&entry.path, prefix)
         })
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
@@ -741,13 +831,7 @@ fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> Result<O
 
     for entry in entries {
         let path = &entry.path;
-        let rel = if dir_prefix.is_empty() {
-            path.as_slice()
-        } else {
-            path.strip_prefix(dir_prefix)
-                .and_then(|suffix| suffix.strip_prefix(b"/"))
-                .unwrap_or(path.as_slice())
-        };
+        let rel = entry_relative_to_dir_prefix(path, dir_prefix)?;
 
         if let Some(slash_pos) = rel.iter().position(|&byte| byte == b'/') {
             let child_name = rel[..slash_pos].to_vec();
@@ -808,13 +892,7 @@ fn build_cache_tree_node(
 
     for entry in entries {
         let path = &entry.path;
-        let rel = if dir_prefix.is_empty() {
-            path.as_slice()
-        } else {
-            path.strip_prefix(dir_prefix)
-                .and_then(|suffix| suffix.strip_prefix(b"/"))
-                .unwrap_or(path.as_slice())
-        };
+        let rel = entry_relative_to_dir_prefix(path, dir_prefix)?;
 
         if let Some(slash_pos) = rel.iter().position(|&byte| byte == b'/') {
             let child_name = rel[..slash_pos].to_vec();
@@ -907,28 +985,12 @@ pub fn write_tree_partial_from_index(
         }
     }
 
-    fn subtree_affected(paths_from_index: &std::collections::HashSet<Vec<u8>>, dir: &[u8]) -> bool {
-        paths_from_index
-            .iter()
-            .any(|p| p == dir || (p.starts_with(dir) && p.get(dir.len()) == Some(&b'/')))
-    }
-
-    fn index_has_entry_under(index: &Index, dir: &[u8]) -> bool {
-        index.entries.iter().any(|entry| {
-            entry.stage() == 0
-                && !entry.intent_to_add()
-                && entry.mode != MODE_TREE
-                && entry.path.starts_with(dir)
-                && entry.path.get(dir.len()) == Some(&b'/')
-        })
-    }
-
     fn merge_level(
         odb: &Odb,
         index: &Index,
         base_tree_oid: &ObjectId,
         prefix: &[u8],
-        paths_from_index: &std::collections::HashSet<Vec<u8>>,
+        path_index: &PartialWritePathIndex<'_>,
     ) -> Result<ObjectId> {
         let base_obj = odb.read(base_tree_oid)?;
         let base_entries = parse_tree(&base_obj.data)?;
@@ -936,13 +998,13 @@ pub fn write_tree_partial_from_index(
         let mut by_name: BTreeMap<Vec<u8>, TreeEntry> = BTreeMap::new();
         for te in base_entries {
             let fp = full_path(prefix, &te.name);
-            if !subtree_affected(paths_from_index, &fp) {
+            if !path_index.subtree_touched(&fp) {
                 by_name.insert(te.name.clone(), te);
             } else if te.mode == MODE_TREE {
-                if paths_from_index.contains(&fp) && !index_has_entry_under(index, &fp) {
+                if path_index.contains(&fp) && !index_has_entry_under(index, &fp) {
                     continue;
                 }
-                let sub_oid = merge_level(odb, index, &te.oid, &fp, paths_from_index)?;
+                let sub_oid = merge_level(odb, index, &te.oid, &fp, path_index)?;
                 if is_empty_tree_oid(odb, &sub_oid) {
                     continue;
                 }
@@ -954,7 +1016,7 @@ pub fn write_tree_partial_from_index(
                         oid: sub_oid,
                     },
                 );
-            } else if paths_from_index.contains(&fp) {
+            } else if path_index.contains(&fp) {
                 if let Some(ie) = index.entries.iter().find(|e| {
                     e.stage() == 0 && !e.intent_to_add() && e.mode != MODE_TREE && e.path == fp
                 }) {
@@ -977,7 +1039,7 @@ pub fn write_tree_partial_from_index(
             if ie.stage() != 0 || ie.intent_to_add() || ie.mode == MODE_TREE {
                 continue;
             }
-            if !paths_from_index.contains(&ie.path) {
+            if !path_index.contains(&ie.path) {
                 continue;
             }
             let rel = if prefix.is_empty() {
@@ -996,8 +1058,8 @@ pub fn write_tree_partial_from_index(
                     continue;
                 }
                 let sub_prefix = full_path(prefix, &dir_name);
-                let sub_oid =
-                    write_tree_from_index(odb, index, &String::from_utf8_lossy(&sub_prefix))?;
+                let empty_base = odb.empty_tree_oid()?;
+                let sub_oid = merge_level(odb, index, &empty_base, &sub_prefix, path_index)?;
                 by_name.insert(
                     dir_name.clone(),
                     TreeEntry {
@@ -1031,7 +1093,8 @@ pub fn write_tree_partial_from_index(
         odb.write(ObjectKind::Tree, &data)
     }
 
-    merge_level(odb, index, base_tree_oid, b"", paths_from_index)
+    let path_index = PartialWritePathIndex::new(paths_from_index);
+    merge_level(odb, index, base_tree_oid, b"", &path_index)
 }
 
 fn canonicalize_blob_mode(mode: u32) -> u32 {
@@ -1798,6 +1861,61 @@ mod tests {
         assert!(odb.exists(&subset));
         cache_tree_update(&odb, &mut index, WriteTreeFlags::silent()).unwrap();
         assert!(index.cache_tree.is_some());
+    }
+
+    #[test]
+    fn write_tree_from_index_prefix_is_component_aware() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob_a = odb.write(ObjectKind::Blob, b"a").unwrap();
+        let blob_a0 = odb.write(ObjectKind::Blob, b"a0").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("a/f", MODE_REGULAR, blob_a));
+        index.add_or_replace(entry("a0/f", MODE_REGULAR, blob_a0));
+
+        let tree_oid = write_tree_from_index(&odb, &index, "a").unwrap();
+        let top = parse_tree(&odb.read(&tree_oid).unwrap().data).unwrap();
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].name, b"f");
+        assert_eq!(top[0].oid, blob_a);
+    }
+
+    #[test]
+    fn partial_write_tree_sibling_dirs_absent_from_base() {
+        use std::collections::HashSet;
+
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob_a = odb.write(ObjectKind::Blob, b"one").unwrap();
+        let blob_a0 = odb.write(ObjectKind::Blob, b"one0").unwrap();
+        let base_tree = odb.empty_tree_oid().unwrap();
+
+        let mut index = Index::new();
+        index.add_or_replace(entry("a/f", MODE_REGULAR, blob_a));
+        index.add_or_replace(entry("a0/f", MODE_REGULAR, blob_a0));
+
+        let mut paths = HashSet::new();
+        paths.insert(b"a/f".to_vec());
+        paths.insert(b"a0/f".to_vec());
+        let merged =
+            write_tree_partial_from_index(&odb, &index, &base_tree, &paths).expect("partial");
+
+        let top = parse_tree(&odb.read(&merged).unwrap().data).unwrap();
+        assert_eq!(top.len(), 2);
+        let a_entry = top.iter().find(|e| e.name == b"a").expect("dir a");
+        let a0_entry = top.iter().find(|e| e.name == b"a0").expect("dir a0");
+        assert_eq!(a_entry.mode, MODE_TREE);
+        assert_eq!(a0_entry.mode, MODE_TREE);
+
+        let a_tree = parse_tree(&odb.read(&a_entry.oid).unwrap().data).unwrap();
+        assert_eq!(a_tree.len(), 1);
+        assert_eq!(a_tree[0].name, b"f");
+        assert_eq!(a_tree[0].oid, blob_a);
+
+        let a0_tree = parse_tree(&odb.read(&a0_entry.oid).unwrap().data).unwrap();
+        assert_eq!(a0_tree.len(), 1);
+        assert_eq!(a0_tree[0].name, b"f");
+        assert_eq!(a0_tree[0].oid, blob_a0);
     }
 
     #[test]
