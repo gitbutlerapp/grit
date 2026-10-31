@@ -642,6 +642,15 @@ impl HumanRender for HistoryRewriteOutcome {
                 outln!(w, "Exec commands ran; branch is unchanged");
                 return Ok(());
             }
+            if let Some(head) = &self.head {
+                outln!(
+                    w,
+                    "Rebased branch tip from {} to {}",
+                    short(&head.old),
+                    short(&head.new)
+                );
+                return Ok(());
+            }
             outln!(w, "Already up to date");
             return Ok(());
         }
