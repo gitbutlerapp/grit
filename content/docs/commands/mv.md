@@ -21,6 +21,8 @@ Grit refuses untracked sources, overwriting an existing destination without `--f
 
 On case-insensitive volumes with `core.ignorecase=true`, case-only renames (for example `README.md` to `readme.md`) succeed: the worktree spelling updates and the index tracks the destination path, matching `git mv`.
 
+When a move leaves a source directory empty, grit leaves that directory on disk (same as `git mv`).
+
 ## Options
 
 | Option | Description |

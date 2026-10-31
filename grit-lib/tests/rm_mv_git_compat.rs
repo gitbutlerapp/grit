@@ -269,6 +269,68 @@ fn mv_file_detected_as_rename_by_git() {
 }
 
 #[test]
+fn mv_leaves_empty_source_directories() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    fs::create_dir_all(repo_dir.join("a/b")).unwrap();
+    fs::write(repo_dir.join("a/b/y"), "3\n").unwrap();
+    fs::create_dir_all(repo_dir.join("d")).unwrap();
+    fs::write(repo_dir.join("d/q"), "4\n").unwrap();
+    commit_all(repo_dir, "init");
+
+    let git_dir = tempfile::tempdir().expect("git twin");
+    let git_repo_dir = git_dir.path();
+    git(git_repo_dir, &["init", "-q", "-b", "main"]);
+    fs::create_dir_all(git_repo_dir.join("a/b")).unwrap();
+    fs::write(git_repo_dir.join("a/b/y"), "3\n").unwrap();
+    fs::create_dir_all(git_repo_dir.join("d")).unwrap();
+    fs::write(git_repo_dir.join("d/q"), "4\n").unwrap();
+    commit_all(git_repo_dir, "init");
+
+    let repo = grit_repo(repo_dir);
+    move_path(&repo, "a/b/y", "a/y2", false).expect("mv a/b/y -> a/y2");
+    move_path(&repo, "d/q", "a/q", false).expect("mv d/q -> a/q");
+
+    git(git_repo_dir, &["mv", "a/b/y", "a/y2"]);
+    git(git_repo_dir, &["mv", "d/q", "a/q"]);
+
+    assert!(
+        repo_dir.join("a/b").is_dir(),
+        "emptied a/b must remain after moving its only file"
+    );
+    assert!(
+        repo_dir.join("d").is_dir(),
+        "emptied d must remain after moving its only file"
+    );
+    assert_eq!(
+        fs::read_to_string(repo_dir.join("a/y2")).unwrap(),
+        "3\n",
+        "moved file contents"
+    );
+    assert_eq!(
+        fs::read_to_string(repo_dir.join("a/q")).unwrap(),
+        "4\n",
+        "moved file contents"
+    );
+    assert_eq!(
+        git_porcelain(repo_dir),
+        git_porcelain(git_repo_dir),
+        "staged status must match git mv twin"
+    );
+
+    fs::create_dir_all(repo_dir.join("src/lib")).unwrap();
+    fs::write(repo_dir.join("src/lib/mod.rs"), "mod\n").unwrap();
+    commit_all(repo_dir, "add src tree");
+    move_path(&repo, "src/lib", "vendor/lib", false).expect("mv src/lib -> vendor/lib");
+    assert!(
+        repo_dir.join("src").is_dir(),
+        "src must remain when only src/lib was moved out"
+    );
+    assert!(repo_dir.join("vendor/lib/mod.rs").is_file());
+}
+
+#[test]
 fn mv_directory_tree() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo_dir = tmp.path();
