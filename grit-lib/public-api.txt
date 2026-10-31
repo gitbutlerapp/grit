@@ -27399,6 +27399,8 @@ pub grit_lib::revwalk::history::RebaseSessionError::ExecHeadChanged
 pub grit_lib::revwalk::history::RebaseSessionError::ExecHeadChanged::expected: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::RebaseSessionError::ForeignRebaseInProgress
 pub grit_lib::revwalk::history::RebaseSessionError::History(grit_lib::revwalk::history::HistoryError)
+pub grit_lib::revwalk::history::RebaseSessionError::InvalidStateOid
+pub grit_lib::revwalk::history::RebaseSessionError::InvalidStateOid::value: alloc::string::String
 pub grit_lib::revwalk::history::RebaseSessionError::Library(grit_lib::error::Error)
 pub grit_lib::revwalk::history::RebaseSessionError::NoRebaseInProgress
 pub grit_lib::revwalk::history::RebaseSessionError::NotOnBranch

@@ -1571,6 +1571,9 @@ fn map_rebase_session_error(repo: &Repository, err: RebaseSessionError) -> anyho
         RebaseSessionError::AbortRefMoved { name } => anyhow::anyhow!(
             "{name} moved while the rebase was being aborted; retry `grit rebase --abort`"
         ),
+        RebaseSessionError::InvalidStateOid { value } => anyhow::anyhow!(
+            "the saved rebase plan is corrupt ({value:?} is not an object id); remove .git/rebase-merge to discard it"
+        ),
         RebaseSessionError::History(e) => history_error("rebase")(e),
         RebaseSessionError::Library(e) => e.into(),
         _ => err.into(),

@@ -325,10 +325,10 @@ fn continue_after_commit_during_rebase_conflict() {
     std::fs::write(wt.join("f"), "1\nR\n3\n").expect("resolve");
     commit_with_scope(
         &grit,
-        &CommitRequest {
-            message: "resolved o1\n".into(),
-            committer: Some(IDENT.parse().expect("IDENT")),
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("resolved o1\n");
+            req.committer = Some(IDENT.parse().expect("IDENT"));
+            req
         },
         CommitScope::AutoStage,
         &mut grit_lib::progress::NullProgress,
@@ -397,6 +397,44 @@ fn continue_nothing_to_commit_when_index_matches_stop_head() {
     assert!(grit.git_dir().join("rebase-merge/grit-plan").is_file());
 }
 
+#[test]
+fn skip_reports_invalid_oid_in_grit_plan() {
+    let (repo, upstream, onto, tip, _) = conflict_rebase_fixture();
+    let wt = repo.worktree();
+    let grit = open_grit(wt);
+    let opts = start_opts(upstream, Some(onto), tip);
+    git(wt, &["switch", "topic"]);
+    start_rebase(
+        &grit,
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("stop");
+    let path = grit.git_dir().join("rebase-merge/grit-plan");
+    let raw = std::fs::read_to_string(&path).expect("grit-plan");
+    let mut value: serde_json::Value = serde_json::from_str(&raw).expect("json");
+    value.as_object_mut().expect("object").insert(
+        "orig_head".into(),
+        serde_json::Value::String("not-an-oid".into()),
+    );
+    std::fs::write(&path, serde_json::to_vec_pretty(&value).expect("encode")).expect("write");
+
+    let err = skip_rebase(
+        &grit,
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("corrupt plan skip");
+    assert!(
+        matches!(&err, RebaseSessionError::InvalidStateOid { value } if value == "not-an-oid"),
+        "{err:?}"
+    );
+    assert!(!err.is_cancelled());
+    assert!(path.is_file(), "a failed skip must leave the plan in place");
+}
+
 fn strip_stopped_head_from_grit_plan(git_dir: &std::path::Path) {
     let path = git_dir.join("rebase-merge/grit-plan");
     let raw = std::fs::read_to_string(&path).expect("grit-plan");
@@ -438,10 +476,10 @@ fn continue_after_commit_with_legacy_grit_plan_missing_stopped_head() {
     std::fs::write(wt.join("f"), "1\nR\n3\n").expect("resolve");
     commit_with_scope(
         &grit,
-        &CommitRequest {
-            message: "resolved o1\n".into(),
-            committer: Some(IDENT.parse().expect("IDENT")),
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("resolved o1\n");
+            req.committer = Some(IDENT.parse().expect("IDENT"));
+            req
         },
         CommitScope::AutoStage,
         &mut grit_lib::progress::NullProgress,
@@ -650,9 +688,10 @@ fn commit_during_rebase_conflict_uses_merge_msg_without_dash_m() {
     std::fs::write(wt.join("f.txt"), "resolved\n").expect("resolve");
     commit_with_scope(
         &grit,
-        &CommitRequest {
-            committer: Some(IDENT.parse().expect("IDENT")),
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("");
+            req.committer = Some(IDENT.parse().expect("IDENT"));
+            req
         },
         CommitScope::AutoStage,
         &mut grit_lib::progress::NullProgress,
