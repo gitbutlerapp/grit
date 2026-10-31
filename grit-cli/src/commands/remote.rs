@@ -518,6 +518,9 @@ pub fn run_refs(
         crate::RemoteRefSortArg::Name => SortKey::Name,
         crate::RemoteRefSortArg::Version => SortKey::Version,
     };
+    let protocol_version =
+        grit_lib::remote::protocol::try_effective_client_protocol_version_from_config(&config)
+            .context("could not read protocol.version")?;
     let opts = ListRefsOptions {
         prefixes: cli.prefixes.clone(),
         heads: cli.heads,
@@ -529,9 +532,7 @@ pub fn run_refs(
         },
         limit: cli.limit,
         versionsort_suffixes: config.get_all("versionsort.suffix"),
-        // Match `git ls-remote` on smart HTTP: use the ref advertisement from the
-        // initial `info/refs` GET instead of a v2 `ls-refs` POST when both work.
-        protocol_version: Some(0),
+        protocol_version: Some(protocol_version),
         ..Default::default()
     };
     let remote = resolve_remote_argument(&config, remote_or_url).map_err(map_remote_error)?;

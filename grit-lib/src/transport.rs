@@ -19,10 +19,10 @@
 //! run of each ref line, so SHA-256 (64-hex) advertisements parse the same way
 //! SHA-1 (40-hex) ones do.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::{BufReader, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout};
 use std::sync::Arc;
 
@@ -956,6 +956,55 @@ fn remote_service_cmd(service: Service, quoted_path: &str) -> String {
     format!("{} {quoted_path}", service.wire_name())
 }
 
+const OPENSSH_SENDENV_GIT_PROTOCOL: &str = "SendEnv=GIT_PROTOCOL";
+
+fn is_ssh_program_basename(name: &OsStr) -> bool {
+    name.to_string_lossy().eq_ignore_ascii_case("ssh")
+        || name.to_string_lossy().eq_ignore_ascii_case("ssh.exe")
+}
+
+fn shell_command_leading_program(cmd: &OsStr) -> Option<&OsStr> {
+    let s = cmd.to_str()?;
+    let token = s.split_whitespace().next()?;
+    Some(OsStr::new(token))
+}
+
+/// Whether the resolved ssh invocation should receive `-o SendEnv=GIT_PROTOCOL` (OpenSSH only).
+///
+/// Matches Git: basename `ssh` / `ssh.exe` (case-insensitive) or a shell command whose leading
+/// token resolves to that basename is treated as OpenSSH without running `ssh -V`.
+fn ssh_invocation_is_openssh(env: &crate::environment::Environment, resolved: &SshCommand) -> bool {
+    if let Some(variant) = env.var_os("GIT_SSH_VARIANT") {
+        let v = variant.to_string_lossy();
+        if v.eq_ignore_ascii_case("ssh") {
+            return true;
+        }
+        if !v.eq_ignore_ascii_case("auto") {
+            return false;
+        }
+    }
+    let program = match resolved {
+        SshCommand::Program(prog) => Path::new(prog),
+        SshCommand::ShellCommand(cmd) => {
+            let Some(token) = shell_command_leading_program(cmd) else {
+                return false;
+            };
+            Path::new(token)
+        }
+        SshCommand::Auto => return false,
+    };
+    program.file_name().is_some_and(is_ssh_program_basename)
+}
+
+fn push_openssh_sendenv_args(args: &mut Vec<OsString>) {
+    args.push(OsString::from("-o"));
+    args.push(OsString::from(OPENSSH_SENDENV_GIT_PROTOCOL));
+}
+
+fn openssh_sendenv_option_fragment() -> &'static str {
+    " -o SendEnv=GIT_PROTOCOL"
+}
+
 /// How the [`SshTransport`] invokes ssh.
 ///
 /// `Auto` reproduces Git's precedence: `$GIT_SSH_COMMAND` (a shell command
@@ -1393,15 +1442,23 @@ impl SshTransport {
             ));
         }
 
-        match self
+        let resolved = self
             .ssh_command
-            .resolve(self.ssh_env.as_ref(), self.ssh_config.as_deref())
-        {
+            .resolve(self.ssh_env.as_ref(), self.ssh_config.as_deref());
+        let openssh_sendenv = opts.protocol_version > 0
+            && ssh_invocation_is_openssh(self.ssh_env.as_ref(), &resolved);
+
+        match resolved {
             SshCommand::ShellCommand(cmd) => {
                 let cmd = cmd.to_string_lossy();
+                let sendenv = if openssh_sendenv {
+                    openssh_sendenv_option_fragment()
+                } else {
+                    ""
+                };
                 let port_opt = match port {
-                    Some(p) => format!(" -p {}", shell_words::quote(p)),
-                    None => String::new(),
+                    Some(p) => format!("{sendenv} -p {}", shell_words::quote(p)),
+                    None => sendenv.to_string(),
                 };
                 let script = format!(
                     "{cmd}{port_opt} {} {}",
@@ -1425,6 +1482,9 @@ impl SshTransport {
             }
             SshCommand::Program(prog) => {
                 let mut args = Vec::new();
+                if openssh_sendenv {
+                    push_openssh_sendenv_args(&mut args);
+                }
                 if let Some(p) = port {
                     args.push(OsString::from("-p"));
                     args.push(OsString::from(p));
@@ -1790,6 +1850,148 @@ mod tests {
                 }
             ),
             "expected NoHandshake, got {err}"
+        );
+    }
+
+    fn command_spec_has_sendenv(spec: &CommandSpec) -> bool {
+        if spec
+            .args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1] == OPENSSH_SENDENV_GIT_PROTOCOL)
+        {
+            return true;
+        }
+        match &spec.shell {
+            Some(ShellInvocation::DashC { script, .. }) => {
+                script.contains("-o SendEnv=GIT_PROTOCOL")
+            }
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn ssh_basename_program_adds_sendenv_without_git_ssh_variant() {
+        use crate::command_runner::RecordingRunner;
+
+        let runner = RecordingRunner::always_success();
+        let transport = SshTransport::with_program("ssh").with_command_runner(runner.clone());
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        let _ = transport.connect("example.com:repo.git", Service::UploadPack, &opts);
+        let specs = runner.specs();
+        assert_eq!(specs.len(), 1, "ssh spawn must be recorded");
+        assert!(
+            command_spec_has_sendenv(&specs[0]),
+            "program named ssh must get SendEnv without ssh -V probe or GIT_SSH_VARIANT"
+        );
+        assert!(
+            specs[0]
+                .env
+                .set
+                .iter()
+                .any(|(k, v)| { k == "GIT_PROTOCOL" && v.to_string_lossy() == "version=2" }),
+            "GIT_PROTOCOL must be set on the ssh child for v2"
+        );
+    }
+
+    #[test]
+    fn ssh_basename_shell_command_adds_sendenv_without_git_ssh_variant() {
+        use crate::command_runner::RecordingRunner;
+
+        let runner = RecordingRunner::always_success();
+        let transport = SshTransport::with_shell_command("ssh -o BatchMode=yes")
+            .with_command_runner(runner.clone());
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        let _ = transport.connect("example.com:repo.git", Service::UploadPack, &opts);
+        let specs = runner.specs();
+        assert_eq!(specs.len(), 1);
+        assert!(
+            command_spec_has_sendenv(&specs[0]),
+            "shell command starting with ssh must inject SendEnv in the script"
+        );
+    }
+
+    #[test]
+    fn ssh_plink_variant_skips_sendenv_even_for_ssh_basename() {
+        use crate::command_runner::RecordingRunner;
+        use crate::environment::Environment;
+
+        let runner = RecordingRunner::always_success();
+        let env = Arc::new(Environment::from_vars(
+            [("GIT_SSH_VARIANT", "plink")].map(|(k, v)| (OsString::from(k), OsString::from(v))),
+            PathBuf::from("."),
+        ));
+        let transport = SshTransport::with_program("ssh")
+            .with_command_runner(runner.clone())
+            .with_ssh_environment(env);
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        let _ = transport.connect("example.com:repo.git", Service::UploadPack, &opts);
+        assert!(
+            !command_spec_has_sendenv(&runner.specs()[0]),
+            "GIT_SSH_VARIANT=plink must not add SendEnv"
+        );
+    }
+
+    #[test]
+    fn ssh_non_openssh_program_omits_sendenv_but_keeps_git_protocol_env() {
+        use crate::command_runner::RecordingRunner;
+
+        let runner = RecordingRunner::always_success();
+        let transport = SshTransport::with_program("/usr/local/bin/fake-ssh")
+            .with_command_runner(runner.clone());
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        let _ = transport.connect("example.com:repo.git", Service::UploadPack, &opts);
+        let specs = runner.specs();
+        assert_eq!(specs.len(), 1);
+        let args: Vec<String> = specs[0]
+            .args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            !args.iter().any(|a| a.contains("SendEnv")),
+            "non-OpenSSH programs must not get SendEnv, got {args:?}"
+        );
+        assert!(
+            specs[0].env.set.iter().any(|(k, _)| k == "GIT_PROTOCOL"),
+            "GIT_PROTOCOL env must still be set for the child process"
+        );
+    }
+
+    #[test]
+    fn ssh_v0_omits_git_protocol_env() {
+        use crate::command_runner::RecordingRunner;
+        use crate::environment::Environment;
+
+        let runner = RecordingRunner::always_success();
+        let env = Arc::new(Environment::from_vars(
+            [("GIT_SSH_VARIANT", "ssh")].map(|(k, v)| (OsString::from(k), OsString::from(v))),
+            PathBuf::from("."),
+        ));
+        let transport = SshTransport::with_program("ssh")
+            .with_command_runner(runner.clone())
+            .with_ssh_environment(env);
+        let _ = transport.connect(
+            "example.com:repo.git",
+            Service::ReceivePack,
+            &ConnectOptions::default(),
+        );
+        let specs = runner.specs();
+        assert_eq!(specs.len(), 1);
+        assert!(
+            !specs[0].env.set.iter().any(|(k, _)| k == "GIT_PROTOCOL"),
+            "protocol v0 must not set GIT_PROTOCOL on the ssh child"
         );
     }
 

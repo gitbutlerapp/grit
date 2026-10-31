@@ -336,3 +336,67 @@ fn fetch_over_ssh_program_lands_refs_and_objects() {
 
     run_fetch_and_assert(&transport, &url, &source, &tmp.path().join("local-prog"));
 }
+
+#[test]
+fn fake_ssh_inherits_git_protocol_env_for_v2_upload_pack() {
+    if Command::new("sh").arg("-c").arg("exit 0").status().is_err() {
+        eprintln!("SKIP: no POSIX sh available");
+        return;
+    }
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let probe = tmp.path().join("git-protocol.txt");
+    let script = tmp.path().join("probe-ssh.sh");
+    let body = format!(
+        r#"#!/bin/sh
+if [ -n "$GIT_PROTOCOL" ]; then
+  printf '%s' "$GIT_PROTOCOL" > {probe}
+fi
+cmd=
+for cmd in "$@"; do :; done
+case "$cmd" in
+  "git-upload-pack "*) cmd="git upload-pack ${{cmd#git-upload-pack }}" ;;
+esac
+eval "exec $cmd"
+"#,
+        probe = shell_escape_path(&probe)
+    );
+    write_executable(&script, &body);
+
+    let source = tmp.path().join("source");
+    std::fs::create_dir_all(&source).unwrap();
+    build_source(&source);
+
+    let transport = SshTransport::with_program(&script);
+    let url = format!("fakehost:{}", source.to_str().expect("utf8 path"));
+    let opts = ConnectOptions {
+        protocol_version: 2,
+        ..Default::default()
+    };
+    let conn = transport
+        .connect(&url, Service::UploadPack, &opts)
+        .expect("connect");
+    let _ = conn.protocol_version();
+    drop(conn);
+
+    let recorded = std::fs::read_to_string(&probe).unwrap_or_default();
+    assert_eq!(
+        recorded, "version=2",
+        "ssh child must inherit GIT_PROTOCOL=version=2 for upload-pack v2"
+    );
+}
+
+fn shell_escape_path(path: &Path) -> String {
+    path.to_str()
+        .map(|s| format!("'{s}'"))
+        .unwrap_or_else(|| "'?'".to_owned())
+}
+
+fn write_executable(script: &Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::write(script, body).expect("write script");
+    let mut perms = std::fs::metadata(script).expect("metadata").permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(script, perms).expect("chmod");
+}
