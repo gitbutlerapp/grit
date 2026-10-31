@@ -1261,14 +1261,6 @@ impl TableBytes {
     fn is_mapped(&self) -> bool {
         matches!(self, TableBytes::Mapped(_))
     }
-
-    #[cfg(test)]
-    fn mapped_arc(&self) -> Option<&Arc<Mmap>> {
-        match self {
-            TableBytes::Mapped(map) => Some(map),
-            TableBytes::Owned(_) => None,
-        }
-    }
 }
 
 /// Reads a single reftable file from a byte buffer.
