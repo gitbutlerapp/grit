@@ -385,6 +385,8 @@ pub enum grit_lib::blame::BlameFinalSource
 pub grit_lib::blame::BlameFinalSource::Contents(alloc::vec::Vec<u8>)
 pub grit_lib::blame::BlameFinalSource::Revision
 pub grit_lib::blame::BlameFinalSource::Worktree
+impl grit_lib::blame::BlameFinalSource
+pub const fn grit_lib::blame::BlameFinalSource::uncommitted_author_name(&self) -> &'static str
 impl core::clone::Clone for grit_lib::blame::BlameFinalSource
 pub fn grit_lib::blame::BlameFinalSource::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::blame::BlameFinalSource
@@ -520,6 +522,8 @@ pub grit_lib::blame::BlameHunk::commit: grit_lib::objects::ObjectId
 pub grit_lib::blame::BlameHunk::count: usize
 pub grit_lib::blame::BlameHunk::final_start: usize
 pub grit_lib::blame::BlameHunk::ignored: bool
+pub grit_lib::blame::BlameHunk::lines: core::ops::range::Range<usize>
+pub grit_lib::blame::BlameHunk::not_committed: bool
 pub grit_lib::blame::BlameHunk::original_path: alloc::string::String
 pub grit_lib::blame::BlameHunk::original_start: usize
 pub grit_lib::blame::BlameHunk::unblamable: bool
@@ -595,7 +599,9 @@ pub struct grit_lib::blame::BlameResult
 pub grit_lib::blame::BlameResult::commits: std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, grit_lib::blame::BlameCommitInfo>
 pub grit_lib::blame::BlameResult::lines: alloc::vec::Vec<grit_lib::blame::BlameAttributedLine>
 impl grit_lib::blame::BlameResult
+pub fn grit_lib::blame::BlameResult::hunk_lines(&self, &grit_lib::blame::BlameHunk) -> &[grit_lib::blame::BlameAttributedLine]
 pub fn grit_lib::blame::BlameResult::hunks(&self) -> alloc::vec::Vec<grit_lib::blame::BlameHunk>
+pub fn grit_lib::blame::BlameResult::name_uncommitted_author(&mut self, &grit_lib::blame::BlameFinalSource)
 impl core::clone::Clone for grit_lib::blame::BlameResult
 pub fn grit_lib::blame::BlameResult::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::blame::BlameResult
