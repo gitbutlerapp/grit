@@ -971,6 +971,21 @@ fn decide_push_wire(
             send: true,
         })
     } else {
+        let remote_ahead = if crate::merge_base::is_ancestor_odb_walk_with_graph(
+            local_odb,
+            local_odb.commit_graph_chain().as_deref(),
+            src,
+            old,
+        )? {
+            true
+        } else {
+            crate::merge_base::is_ancestor(local, src, old).unwrap_or(false)
+        };
+        let status = if remote_ahead {
+            PushRefStatus::RejectNonFastForward
+        } else {
+            PushRefStatus::RejectNeedsForce
+        };
         Ok(PushDecision {
             result: PushRefResult {
                 local_ref: crate::transfer::push_spec_local_ref(spec),
@@ -979,7 +994,7 @@ fn decide_push_wire(
                 new_oid: Some(src),
                 forced: false,
                 deletion: false,
-                status: PushRefStatus::RejectNonFastForward,
+                status,
                 message: Some("non-fast-forward".to_owned()),
             },
             new_tip: None,

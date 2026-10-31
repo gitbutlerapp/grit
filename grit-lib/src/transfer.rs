@@ -954,6 +954,7 @@ impl PrePushGate<'_> {
                     r.status,
                     PushRefStatus::UpToDate
                         | PushRefStatus::RejectNonFastForward
+                        | PushRefStatus::RejectNeedsForce
                         | PushRefStatus::RejectStale
                         | PushRefStatus::RejectRemoteRefMissing
                 )
@@ -3155,6 +3156,7 @@ fn decide_push(
             apply: true,
         })
     } else {
+        let status = push_reject_status_when_not_fast_forward(local_repo, old, src);
         Ok(PushDecision {
             result: PushRefResult {
                 local_ref: push_spec_local_ref(spec),
@@ -3163,12 +3165,29 @@ fn decide_push(
                 new_oid: Some(src),
                 forced: false,
                 deletion: false,
-                status: PushRefStatus::RejectNonFastForward,
+                status,
                 message: Some("non-fast-forward".to_owned()),
             },
             action: PushAction::None,
             apply: false,
         })
+    }
+}
+
+/// When an update is not a fast-forward and force was not given, distinguish
+/// "remote is strictly ahead" from a diverged history that needs force.
+fn push_reject_status_when_not_fast_forward(
+    local_repo: Option<&crate::repo::Repository>,
+    old: crate::objects::ObjectId,
+    src: crate::objects::ObjectId,
+) -> PushRefStatus {
+    let remote_ahead = local_repo
+        .map(|r| crate::merge_base::is_ancestor(r, src, old).unwrap_or(false))
+        .unwrap_or(false);
+    if remote_ahead {
+        PushRefStatus::RejectNonFastForward
+    } else {
+        PushRefStatus::RejectNeedsForce
     }
 }
 

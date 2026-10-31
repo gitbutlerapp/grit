@@ -1,11 +1,12 @@
 ---
 source: grit-test-support/src/cli_fixture.rs
+assertion_line: 539
 expression: payload
 ---
 {
   "human": {
     "exit": 0,
-    "stdout": "  origin refs/tags/v0.1 already up to date\n  pushed --tags → origin refs/tags/v0.2\n",
+    "stdout": "  origin refs/tags/v0.1 already up to date\n  pushed v0.2 → origin refs/tags/v0.2\n",
     "stderr": ""
   },
   "json": {
@@ -15,7 +16,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Push to `origin`\n- **`refs/tags/v0.1`** · `origin refs/tags/v0.1` already up to date\n- **`refs/tags/v0.2`** · pushed `refs` → `origin refs/tags/v0.2`\n",
+    "stdout": "## Push to `origin`\n- **`refs/tags/v0.1`** · `origin refs/tags/v0.1` already up to date\n- **`refs/tags/v0.2`** · pushed `v0.2` → `origin refs/tags/v0.2`\n",
     "stderr": ""
   }
 }

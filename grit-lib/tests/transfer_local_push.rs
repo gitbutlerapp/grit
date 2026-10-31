@@ -142,10 +142,7 @@ fn push_local_full_lifecycle() {
         &grit_lib::progress::NeverCancel,
     )
     .expect("non-ff push call");
-    assert_eq!(
-        outcome.results[0].status,
-        PushRefStatus::RejectNonFastForward
-    );
+    assert_eq!(outcome.results[0].status, PushRefStatus::RejectNeedsForce);
     // Remote ref unchanged.
     assert_eq!(remote_ref(remote_git, "refs/heads/main"), Some(c2));
 

@@ -2066,7 +2066,7 @@ pub fn print_remote_push_messages(w: &mut dyn Write, messages: &[String]) -> any
 pub fn print_push_results(
     w: &mut dyn Write,
     remote: &str,
-    branch: &str,
+    kind: crate::commands::push::PushKind,
     dry_run: bool,
     results: &[crate::commands::push::PushRefResult],
 ) -> anyhow::Result<()> {
@@ -2094,18 +2094,21 @@ pub fn print_push_results(
                             result.ref_name
                         );
                     }
-                } else if dry_run {
-                    outln!(
-                        w,
-                        "- **`{}`** · would push `{branch}` → `{target}`",
-                        result.ref_name
-                    );
                 } else {
-                    outln!(
-                        w,
-                        "- **`{}`** · pushed `{branch}` → `{target}`",
-                        result.ref_name
-                    );
+                    let label = crate::commands::push::push_result_source_label(result, kind);
+                    if dry_run {
+                        outln!(
+                            w,
+                            "- **`{}`** · would push `{label}` → `{target}`",
+                            result.ref_name
+                        );
+                    } else {
+                        outln!(
+                            w,
+                            "- **`{}`** · pushed `{label}` → `{target}`",
+                            result.ref_name
+                        );
+                    }
                 }
             }
             crate::commands::push::PushRefOutcomeStatus::UpToDate => outln!(

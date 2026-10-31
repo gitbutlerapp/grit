@@ -762,8 +762,8 @@ fn sha256_push_over_git_daemon() {
     drop(conn2);
     assert_eq!(
         outcome2.results[0].status,
-        PushRefStatus::RejectNonFastForward,
-        "non-fast-forward sha256 push must be rejected"
+        PushRefStatus::RejectNeedsForce,
+        "diverged non-fast-forward sha256 push must be rejected"
     );
     assert_eq!(
         resolve_ref(&bare, "refs/heads/main").expect("remote main still set"),

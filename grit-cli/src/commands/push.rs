@@ -34,10 +34,6 @@ pub struct PushOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
-    /// Short ref name for human and markdown summaries (branch, tag, or `--tags`).
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub summary_label: Option<String>,
     pub results: Vec<PushRefResult>,
     pub rejected: bool,
     /// True when `--dry-run` was used (no refs or objects written).
@@ -131,14 +127,18 @@ pub(crate) fn ref_short_display(full_ref: &str) -> &str {
     full_ref
 }
 
+pub(crate) fn push_result_source_label(result: &PushRefResult, kind: PushKind) -> &str {
+    if let Some(src) = result.src.as_deref() {
+        return ref_short_display(src);
+    }
+    if kind == PushKind::Tags {
+        return "--tags";
+    }
+    ref_short_display(&result.ref_name)
+}
+
 impl HumanRender for PushOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let label = match (self.summary_label.as_deref(), self.kind) {
-            (Some(b), _) => b,
-            (_, PushKind::Tags) => "--tags",
-            (_, PushKind::Delete) => "--delete",
-            _ => "refs",
-        };
         for result in &self.results {
             let target = format!("{} {}", self.remote, result.ref_name);
             match result.status {
@@ -150,10 +150,13 @@ impl HumanRender for PushOutcome {
                         } else {
                             outln!(w, "  deleted {short} from {}", self.remote);
                         }
-                    } else if self.dry_run {
-                        outln!(w, "  would push {label} → {target}");
                     } else {
-                        outln!(w, "  pushed {label} → {target}");
+                        let label = push_result_source_label(result, self.kind);
+                        if self.dry_run {
+                            outln!(w, "  would push {label} → {target}");
+                        } else {
+                            outln!(w, "  pushed {label} → {target}");
+                        }
                     }
                 }
                 PushRefOutcomeStatus::UpToDate => outln!(w, "  {target} already up to date"),
@@ -186,13 +189,8 @@ impl HumanRender for PushOutcome {
 
 impl MarkdownRender for PushOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let label = self
-            .summary_label
-            .as_deref()
-            .or(self.branch.as_deref())
-            .unwrap_or("refs");
         markdown::print_remote_push_messages(w, &self.remote_messages)?;
-        markdown::print_push_results(w, &self.remote, label, self.dry_run, &self.results)?;
+        markdown::print_push_results(w, &self.remote, self.kind, self.dry_run, &self.results)?;
         if let Some(url) = &self.origin_added {
             writeln!(w, "\nAdded remote `origin` → `{url}`.")?;
         }
@@ -338,6 +336,13 @@ pub fn run(
                     rejected = true;
                     Some("not a fast-forward — run `grit pull` first".to_owned())
                 }
+                PushRefStatus::RejectNeedsForce => {
+                    rejected = true;
+                    Some(
+                        "not a fast-forward — run `grit push --force-with-lease` after integrating, or `grit pull` first"
+                            .to_owned(),
+                    )
+                }
                 PushRefStatus::RejectStale => {
                     rejected = true;
                     Some("stale".to_owned())
@@ -373,7 +378,6 @@ pub fn run(
         })
         .collect();
 
-    let summary_label = plan.branch_label.clone();
     let branch = match plan.kind {
         PushPlanKind::Branch | PushPlanKind::Delete => plan.branch_label,
         _ => None,
@@ -383,7 +387,6 @@ pub fn run(
         remote: plan.remote,
         kind: plan.kind.into(),
         branch,
-        summary_label,
         results,
         rejected,
         dry_run,
