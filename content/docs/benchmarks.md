@@ -52,6 +52,35 @@ On `release` builds `log/json-100@git-git` goes from 4.64 ms / 24.8 MB to 4.17 m
   --min-runs 20 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-log-json-100-6206-after.json
 ```
 
+## Small commit diffs stay on one thread (2026-10-31)
+
+`show`, `diff A B` and `log --stat` load and diff each changed file of a commit as one unit of work. With `core.preloadIndex` on (Git's default), any commit touching two or more files sent those units to the worker pool. On `show/head@synth-10k`, a commit of eight two-line files, that meant three new threads, each with its own stack, allocator arena and pack inflater, to do less work than starting them cost: about 0.3 ms more wall time and 30% more CPU than running serially.
+
+Timing `grit show` on git.git commits with the pool on and off (`core.preloadIndex=false`) put the crossover at about 18 files. Up to 17 files the serial run was as fast or faster (by 0.1–0.35 ms); from 18 files the pool won, taking less than half the serial time at 225 files. Commits with few but very large files gain nothing from the pool either, since each file is diffed by one thread. `grit-lib` now uses the pool for 16 or more entries (or from the caller's `ThreadPolicy::min_items_override`). Starting it two files early costs a few tenths of a millisecond on 16- and 17-file commits, while starting it late would give up larger wins.
+
+Daily rows, mean of two alternating rounds of 30 runs each (`dist` builds, page cache dropped before the session), on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0. "Base" is `d2551aef4`, which already links the CLI hot-text layout (next section). Reports: `daily-show-diff-pool-5993-before.json` → `daily-show-diff-pool-5993-after.json` (round one).
+
+| Scenario | git ms / MiB | base | + change |
+| --- | ---: | ---: | ---: |
+| `show/head@synth-10k` | 2.00 / 8.5 | 2.66 / 10.8 | **2.38** / **9.5** |
+| `show/head@git-git` | 1.94 / 8.4 | 2.21 / 9.6 | 2.26 / 9.8 |
+| `show/head@big-blobs` | 1.59 / 7.1 | 2.00 / 9.3 | 1.92 / 9.3 |
+| `log/stat-n50@git-git` | 96.36 / 38.8 | 154.48 / 77.0 | 158.29 / **74.6** |
+| `diff/worktree@synth-10k` | 7.19 / 9.4 | 7.23 / 11.8 | 6.93 / 12.4 |
+
+`git-git` and `big-blobs` show one-file commits, which were already serial; their rows are noise. `log --stat -n 50` on git.git is mostly merges and one-file commits (three of the fifty touch two files); it peaks about 2.4 MiB lower, and its time is within noise: four interleaved hyperfine series of 40 runs read 158.3 and 151.2 ms for the base against 154.7 and 158.5 ms with the change. `patch-id/commit@git-git` measured 1.8–1.9 ms for both binaries in 300 interleaved hyperfine runs. Commit sizes from git.git (`show` medians of 40 runs, ms, measured on the earlier base `b19e946fe`):
+
+| Files changed | base | + change | git |
+| ---: | ---: | ---: | ---: |
+| 8 | 4.71 | **4.52** | 4.37 |
+| 12 | 6.95 | **6.55** | 7.46 |
+| 16 | 8.66 | 8.46 | 9.13 |
+| 28 | 8.55 | 8.58 | 14.85 |
+| 109 | 8.80 | 8.61 | 18.81 |
+| 225 | 19.43 | 19.19 | 37.28 |
+
+Peak RSS comparisons between two builds need the page cache in the same state. A binary that was just copied into place showed about 0.4 MiB more resident code and read-only data than the same file after `echo 3 > /proc/sys/vm/drop_caches`, on identical runs. Both builds above were measured after dropping the cache.
+
 ## The CLI joins the hot text layout (2026-10-31)
 
 `branch/list@many-refs` lists the one local branch of a clone with 10,000 packed refs. The work is tiny: grit runs 1.70 million user-space instructions, Git 1.32 million. Yet grit took 1.86 ms against Git's 1.32 ms and 11.0 MB against 6.7 MB. Both gaps are page faults, 336 against Git's 170, and most of the time a short command spends in the kernel goes to mapping file pages on those faults.

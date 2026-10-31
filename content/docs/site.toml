@@ -121,6 +121,8 @@ baseline = [
   "grit-utils/baselines/daily-status-hot-text-after.json",
   "grit-utils/baselines/daily-hot-text-related-before.json",
   "grit-utils/baselines/daily-hot-text-related-after.json",
+  "grit-utils/baselines/daily-show-diff-pool-5993-before.json",
+  "grit-utils/baselines/daily-show-diff-pool-5993-after.json",
   "grit-utils/baselines/daily-config-parse-5571-before.json",
   "grit-utils/baselines/daily-config-parse-5571-after.json",
   "grit-utils/baselines/daily-config-set-before.json",
