@@ -524,13 +524,12 @@ fn hot_get_in_repo(
 }
 
 fn hot_set_in_repo(key: &str, value: &str, dry_run: bool) -> Result<ConfigOutcome> {
-    let repo = context::discover()?;
+    let location = context::locate_repository()?;
     let env = context::environment();
-    let git_dir = repo.git_dir().to_path_buf();
     let preview = set_config_value(
         ConfigLocation::Local,
         &env,
-        Some(&git_dir),
+        Some(location.git_dir()),
         key,
         value,
         dry_run,
@@ -545,10 +544,15 @@ fn hot_set_in_repo(key: &str, value: &str, dry_run: bool) -> Result<ConfigOutcom
 }
 
 fn hot_unset_in_repo(key: &str, dry_run: bool) -> Result<ConfigOutcome> {
-    let repo = context::discover()?;
+    let location = context::locate_repository()?;
     let env = context::environment();
-    let git_dir = repo.git_dir().to_path_buf();
-    match unset_config_value(ConfigLocation::Local, &env, Some(&git_dir), key, dry_run) {
+    match unset_config_value(
+        ConfigLocation::Local,
+        &env,
+        Some(location.git_dir()),
+        key,
+        dry_run,
+    ) {
         Ok(preview) => Ok(ConfigOutcome::Unset {
             key: key.to_owned(),
             dry_run,
@@ -562,8 +566,8 @@ fn hot_unset_in_repo(key: &str, dry_run: bool) -> Result<ConfigOutcome> {
 }
 
 fn read_merged_config(env: &grit_lib::config::environment::Environment) -> Result<ConfigSet> {
-    if let Ok(repo) = context::discover() {
-        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")
+    if let Ok((_, config)) = context::locate_repository_with_config() {
+        Ok(config)
     } else {
         ConfigSet::load(env, None, true).context("could not load config")
     }
@@ -918,7 +922,7 @@ fn load_for_read(
 fn git_dir_for_location(location: &ConfigLocation) -> Result<Option<PathBuf>> {
     match location {
         ConfigLocation::Local | ConfigLocation::Worktree => {
-            Ok(Some(context::discover()?.git_dir().to_path_buf()))
+            Ok(Some(context::locate_repository()?.git_dir().to_path_buf()))
         }
         ConfigLocation::Global | ConfigLocation::System | ConfigLocation::File(_) => Ok(None),
     }
@@ -928,7 +932,9 @@ fn optional_git_dir_for_read(location: &ConfigLocation) -> Result<Option<PathBuf
     match location {
         ConfigLocation::Local | ConfigLocation::Worktree => git_dir_for_location(location),
         ConfigLocation::Global | ConfigLocation::System | ConfigLocation::File(_) => {
-            Ok(context::discover().ok().map(|r| r.git_dir().to_path_buf()))
+            Ok(context::locate_repository()
+                .ok()
+                .map(|r| r.git_dir().to_path_buf()))
         }
     }
 }

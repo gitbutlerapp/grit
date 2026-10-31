@@ -278,3 +278,167 @@ fn config_local_flag() -> TestResult {
     assert_eq!(v["scope"], "local");
     Ok(())
 }
+
+fn git_ok(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("spawn git");
+    assert!(
+        out.status.success(),
+        "git {args:?} stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+#[test]
+fn config_set_from_subdirectory_rewrites_local_file_for_git() -> TestResult {
+    let scratch = Scratch::new("config-set-subdir")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(repo.join("a/b"))?;
+    git_ok(&repo, &["init", "-q", "."]);
+    let config = repo.join(".git/config");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o600))?;
+    }
+
+    grit_ok(&repo.join("a/b"), &["config", "review.subdir", "first"]);
+    grit_ok(&repo.join("a/b"), &["config", "review.subdir", "second"]);
+    assert_eq!(git_ok(&repo, &["config", "review.subdir"]), "second");
+    assert_eq!(
+        git_ok(&repo, &["config", "--get-all", "review.subdir"]),
+        "second"
+    );
+    assert!(!repo.join(".git/config.lock").exists());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(fs::metadata(&config)?.permissions().mode() & 0o777, 0o600);
+    }
+
+    let out = grit(&repo.join("a"), &["config", "review.subdir"]);
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "second");
+    Ok(())
+}
+
+#[test]
+fn config_set_from_linked_worktree_writes_common_config() -> TestResult {
+    let scratch = Scratch::new("config-set-linked")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    git_ok(&repo, &["init", "-q", "."]);
+    git_ok(
+        &repo,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "c",
+        ],
+    );
+    let linked = scratch.child("linked");
+    git_ok(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            linked.to_str().unwrap(),
+            "-b",
+            "side",
+        ],
+    );
+
+    grit_ok(&linked, &["config", "review.linked", "yes"]);
+    assert_eq!(
+        git_ok(&repo, &["config", "--local", "review.linked"]),
+        "yes"
+    );
+    assert_eq!(git_ok(&linked, &["config", "review.linked"]), "yes");
+    Ok(())
+}
+
+#[test]
+fn config_set_rejects_unsupported_repository_format() -> TestResult {
+    let scratch = Scratch::new("config-set-format")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    git_ok(&repo, &["init", "-q", "."]);
+    let config = repo.join(".git/config");
+    fs::write(&config, "[core]\n\trepositoryformatversion = 99\n")?;
+
+    let out = grit(&repo, &["config", "review.format", "x"]);
+    assert!(!out.status.success());
+    assert_eq!(
+        fs::read_to_string(&config)?,
+        "[core]\n\trepositoryformatversion = 99\n"
+    );
+    Ok(())
+}
+
+/// `grit config <key> <value>` reads the config cascade once to resolve the repository layout,
+/// rewrites only the local file, and touches no refs or object database.
+#[cfg(target_os = "linux")]
+#[test]
+fn config_set_opens_only_the_local_config() -> TestResult {
+    if Command::new("strace").arg("-V").output().is_err() {
+        eprintln!("skipping: strace not installed");
+        return Ok(());
+    }
+    let scratch = Scratch::new("config-set-strace")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    git_ok(&repo, &["init", "-q", "."]);
+    let global = scratch.child("global.cfg");
+    fs::write(&global, "[user]\n\tname = Global\n")?;
+    let log = scratch.child("strace.txt");
+
+    let status = Command::new("strace")
+        .args(["-f", "-e", "trace=file", "-o", log.to_str().unwrap(), GRIT])
+        .args(["config", "review.strace", "v"])
+        .current_dir(&repo)
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_CONFIG_GLOBAL", &global)
+        .status()?;
+    assert!(status.success());
+
+    let trace = fs::read_to_string(&log)?;
+    let global_reads = trace
+        .lines()
+        .filter(|l| l.contains("openat(") && l.contains("global.cfg"))
+        .count();
+    assert_eq!(global_reads, 1, "global config read once:\n{trace}");
+    for needle in [
+        "packed-refs",
+        "refs/replace",
+        "refs/heads",
+        "objects/pack",
+        "objects/info",
+    ] {
+        assert!(
+            !trace.lines().any(|l| l.contains(needle)),
+            "config set touched {needle}:\n{trace}"
+        );
+    }
+    let config_reads = trace
+        .lines()
+        .filter(|l| l.contains("openat(") && l.contains(".git/config\""))
+        .count();
+    assert!(
+        config_reads <= 3,
+        "expected at most 3 opens of .git/config, got {config_reads}:\n{trace}"
+    );
+    assert_eq!(git_ok(&repo, &["config", "review.strace"]), "v");
+    Ok(())
+}

@@ -5090,6 +5090,10 @@ fn test_inject_index_write_fail() -> Result<()> {
     })
 }
 
+#[path = "repo_location.rs"]
+mod location;
+pub use location::RepositoryLocation;
+
 #[cfg(test)]
 #[path = "repo_line_coverage_tests.rs"]
 mod line_coverage_tests;

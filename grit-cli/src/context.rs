@@ -11,7 +11,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::ident::Signature;
 use grit_lib::objects::{parse_commit, CommitData, ObjectId};
 use grit_lib::parallel::ThreadPolicy;
-use grit_lib::repo::Repository;
+use grit_lib::repo::{Repository, RepositoryLocation};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use time::OffsetDateTime;
@@ -101,6 +101,23 @@ pub struct CommitSummary {
 pub fn discover() -> Result<Repository> {
     let (options, _sink) = diagnostics::repository_options(false);
     Repository::discover(None, &options).context("not in a repository")
+}
+
+/// Locate the repository from the current directory without opening it.
+pub fn locate_repository() -> Result<RepositoryLocation> {
+    RepositoryLocation::discover(&location_options()).context("not in a repository")
+}
+
+/// Like [`locate_repository`], and also return the repository's merged config.
+pub fn locate_repository_with_config() -> Result<(RepositoryLocation, ConfigSet)> {
+    RepositoryLocation::discover_with_config(&location_options()).context("not in a repository")
+}
+
+fn location_options() -> grit_lib::config::environment::RepositoryOptions {
+    let mut options = grit_lib::config::environment::RepositoryOptions::default();
+    options.environment = environment();
+    options.diagnostics = std::sync::Arc::new(diagnostics::CliDiagnosticSink::new());
+    options
 }
 
 /// Like [`discover`], but returns the diagnostic sink used for warnings.
