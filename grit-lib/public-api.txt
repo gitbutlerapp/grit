@@ -18293,6 +18293,8 @@ pub fn grit_lib::repo::Repository::resolve_ref_name(&self, &str) -> core::result
 pub fn grit_lib::repo::Repository::revision_label(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::object_inspect::RevisionLabel>>
 pub fn grit_lib::repo::Repository::verify_object(&self, &str, core::option::Option<grit_lib::objects::ObjectKind>) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::revwalk::object_inspect::ResolveError>
 pub fn grit_lib::repo::Repository::with_object_stream_for_display<R>(&self, &grit_lib::objects::ObjectId, impl core::ops::function::FnOnce(grit_lib::objects::odb::store::ObjectStream<'_>) -> grit_lib::error::Result<R>) -> grit_lib::error::Result<core::option::Option<R>>
+impl core::convert::From<&grit_lib::repo::Repository> for grit_lib::repo::RepositoryLocation
+pub fn grit_lib::repo::RepositoryLocation::from(&grit_lib::repo::Repository) -> Self
 impl core::fmt::Debug for grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl !core::marker::Freeze for grit_lib::repo::Repository
@@ -25840,6 +25842,8 @@ pub fn grit_lib::repo::Repository::resolve_ref_name(&self, &str) -> core::result
 pub fn grit_lib::repo::Repository::revision_label(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::object_inspect::RevisionLabel>>
 pub fn grit_lib::repo::Repository::verify_object(&self, &str, core::option::Option<grit_lib::objects::ObjectKind>) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::revwalk::object_inspect::ResolveError>
 pub fn grit_lib::repo::Repository::with_object_stream_for_display<R>(&self, &grit_lib::objects::ObjectId, impl core::ops::function::FnOnce(grit_lib::objects::odb::store::ObjectStream<'_>) -> grit_lib::error::Result<R>) -> grit_lib::error::Result<core::option::Option<R>>
+impl core::convert::From<&grit_lib::repo::Repository> for grit_lib::repo::RepositoryLocation
+pub fn grit_lib::repo::RepositoryLocation::from(&grit_lib::repo::Repository) -> Self
 impl core::fmt::Debug for grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl !core::marker::Freeze for grit_lib::repo::Repository
@@ -25863,6 +25867,30 @@ impl core::marker::Unpin for grit_lib::repo::RepositoryBuilder
 impl core::marker::UnsafeUnpin for grit_lib::repo::RepositoryBuilder
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::RepositoryBuilder
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::RepositoryBuilder
+pub struct grit_lib::repo::RepositoryLocation
+impl grit_lib::repo::RepositoryLocation
+pub fn grit_lib::repo::RepositoryLocation::discover(&grit_lib::config::environment::RepositoryOptions) -> grit_lib::error::Result<Self>
+pub fn grit_lib::repo::RepositoryLocation::discover_with_config(&grit_lib::config::environment::RepositoryOptions) -> grit_lib::error::Result<(Self, grit_lib::config::ConfigSet)>
+pub fn grit_lib::repo::RepositoryLocation::git_dir(&self) -> &std::path::Path
+pub fn grit_lib::repo::RepositoryLocation::local_config_path(&self) -> std::path::PathBuf
+pub fn grit_lib::repo::RepositoryLocation::work_tree(&self) -> core::option::Option<&std::path::Path>
+impl core::clone::Clone for grit_lib::repo::RepositoryLocation
+pub fn grit_lib::repo::RepositoryLocation::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo::RepositoryLocation
+impl core::cmp::PartialEq for grit_lib::repo::RepositoryLocation
+pub fn grit_lib::repo::RepositoryLocation::eq(&self, &Self) -> bool
+impl core::convert::From<&grit_lib::repo::Repository> for grit_lib::repo::RepositoryLocation
+pub fn grit_lib::repo::RepositoryLocation::from(&grit_lib::repo::Repository) -> Self
+impl core::fmt::Debug for grit_lib::repo::RepositoryLocation
+pub fn grit_lib::repo::RepositoryLocation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::repo::RepositoryLocation
+impl core::marker::Freeze for grit_lib::repo::RepositoryLocation
+impl core::marker::Send for grit_lib::repo::RepositoryLocation
+impl core::marker::Sync for grit_lib::repo::RepositoryLocation
+impl core::marker::Unpin for grit_lib::repo::RepositoryLocation
+impl core::marker::UnsafeUnpin for grit_lib::repo::RepositoryLocation
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::RepositoryLocation
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::RepositoryLocation
 pub fn grit_lib::repo::common_git_dir_for_config(&std::path::Path) -> std::path::PathBuf
 pub fn grit_lib::repo::early_config_ignore_repo_reason(&std::path::Path) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::repo::early_config_ignore_repo_reason_for_text(core::option::Option<&str>) -> core::option::Option<alloc::string::String>
