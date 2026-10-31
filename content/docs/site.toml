@@ -125,6 +125,8 @@ baseline = [
   "grit-utils/baselines/daily-perf-5414-related-after.json",
   "grit-utils/baselines/daily-reset-undo-commit-5128-before.json",
   "grit-utils/baselines/daily-reset-undo-commit-5128-after.json",
+  "grit-utils/baselines/daily-reset-undo-commit-5845-before.json",
+  "grit-utils/baselines/daily-reset-undo-commit-5845-after.json",
   "grit-utils/baselines/daily-revs-graph-range-1669-before.json",
   "grit-utils/baselines/daily-revs-graph-range-1669-after.json",
   "grit-utils/baselines/tree-metadata-2083.json",

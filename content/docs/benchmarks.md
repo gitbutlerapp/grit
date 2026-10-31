@@ -576,6 +576,44 @@ Without tags the same reset takes about 3 ms. Of the remaining gap to Git, rough
 lists the 954 refs, the parallel header reads take 1.6 to 1.9 ms (mostly per-stream inflate
 setup), and process start-up and the ref and reflog update take the rest.
 
+## Undoing a commit after the tags were packed (2026-10-31)
+
+Two costs were left in `reset --soft HEAD~1` on `git/git` without a commit-graph. The
+orphaned-commit report still dated all 947 packed tag tips before its first step, which read
+every tagged commit's header and faulted most of the 10 MB pack index into memory. And reset
+logged each reflog line in a ref transaction of its own, which loads the whole reflog. That made
+every reset cost grow with `HEAD`'s history, about 16 ms of reflog work at 24,000 lines.
+
+A ref recorded in `packed-refs` names a commit that existed when the file was written, so
+within the one-day clock-skew allowance the report already relies on, it can only reach commits
+dated at most a day after that. The report now hides only the target, loose refs, the stash and
+other worktrees' `HEAD`s first. It keeps that answer when every commit left behind is dated more
+than a day after `packed-refs` was last written. Otherwise it stops at the first older commit and
+runs the full walk, so the counts match the full walk. Reset now moves the ref in one
+compare-and-swap transaction and appends the reflog lines, as merge does.
+
+Factory VM, four vCPUs, Rust 1.99.0, `release` profile, system Git 2.43.0. Main is
+`3c14b849f`. Hyperfine, 5 warmups and 30 runs per tool with the commit to undo made in
+`--prepare`. Peak RSS is the median of five `/usr/bin/time` runs. The fixture is a
+`v2.47.0` clone with 947 packed annotated tags:
+
+| Shape | Git (ms / MiB) | Main (ms / MiB) | Branch (ms / MiB) |
+| --- | ---: | ---: | ---: |
+| Fresh clone, 1-line `HEAD` reflog | 1.95 / 6.2 | 6.81 / 26.9 | 6.48 / 27.8 |
+| Fresh clone, 2,000-line `HEAD` reflog | 1.94 / 6.2 | 9.41 / 28.1 | 7.53 / 27.5 |
+| `packed-refs` 3 days old, 1-line reflog | 1.93 / 6.1 | 8.00 / 26.9 | 4.20 / 18.6 |
+| `packed-refs` 3 days old, 2,000-line reflog | 1.81 / 6.1 | 8.89 / 27.7 | 4.04 / 18.3 |
+
+The daily harness clones its fixture minutes before timing, so its `reset/undo-commit@git-git`
+row is the first shape: the tags were packed within the skew allowance of the undone commit, and
+the report still has to read them. The committed `daily-reset-undo-commit-5845-before.json`
+(main) and `daily-reset-undo-commit-5845-after.json` (branch) cover every `reset/*` scenario
+except `reset/blobless@git-git`, plus the `switch`, `log` and `tag` rows that list or peel
+packed refs. `reset/blobless@git-git` fails its pre-timing check on this VM with main too. Apart
+from the target (7.59 ms on main, 7.21 ms on the branch), every row stays within run-to-run noise.
+The apparent move in `reset/sparse@sparse-unique-120k` reversed in an interleaved rerun (38.6 and
+42.5 ms on main, 38.4 and 37.5 ms on the branch).
+
 ## Tree metadata diff (2026-10-27)
 
 Issue [#2083](https://github.com/gitbutlerapp/grit/issues/2083) exposed a second,
