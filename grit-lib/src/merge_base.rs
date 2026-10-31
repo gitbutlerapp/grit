@@ -1151,7 +1151,8 @@ impl ReachableWalkState {
                 continue;
             }
             if cutoffs.since.is_some_and(|since| key.time < since) {
-                self.after_processed(cache, oid)?;
+                // Match Git: when every other queued commit is also older than `--since`, stop
+                // before enqueueing this commit's parents. Otherwise keep walking for clock skew.
                 let stop = self.heap.is_empty()
                     || self
                         .heap
@@ -1161,6 +1162,7 @@ impl ReachableWalkState {
                     self.heap.clear();
                     return Ok(None);
                 }
+                self.after_processed(cache, oid)?;
                 continue;
             }
             let hidden = self.is_hidden(cache, oid)?;
@@ -1647,8 +1649,7 @@ pub fn try_linear_chain_commits_with_cutoffs(
             out.push(cur);
         }
         if below_since {
-            stack.extend(parents);
-            continue;
+            break;
         }
         if let Some(&parent) = parents.first() {
             stack.push(parent);

@@ -5505,6 +5505,13 @@ fn streaming_date_walk<'r>(
         if visit(graph, oid)? == WalkControl::Stop {
             break;
         }
+        if !author_dates {
+            if let Some(since) = since_cutoff {
+                if date < since && date_heap_past_since_frontier(&heap, since) {
+                    break;
+                }
+            }
+        }
         for parent in graph.parents_of(oid)? {
             if excluded.contains(&parent) || !queued.insert(parent) {
                 continue;
@@ -5515,13 +5522,6 @@ fn streaming_date_walk<'r>(
                 seq: next_seq,
             });
             next_seq += 1;
-        }
-        if !author_dates {
-            if let Some(since) = since_cutoff {
-                if date < since && date_heap_past_since_frontier(&heap, since) {
-                    break;
-                }
-            }
         }
     }
     Ok(())
@@ -6190,9 +6190,17 @@ fn try_bounded_limit_list(
         && options.ordering == OrderingMode::Default
         && (options.since_cutoff.is_some() || options.until_cutoff.is_some())
     {
-        match crate::merge_base::try_linear_chain_commits_with_cutoffs(
-            repo, include[0], need, cutoffs,
-        )? {
+        // `--since` needs Git's date-priority heap and frontier stop; the linear-chain fast
+        // path walks first-parent order and would keep scanning after an old commit even when
+        // every queued commit is still older than the cutoff (clock-skewed histories).
+        let linear = if options.since_cutoff.is_none() {
+            crate::merge_base::try_linear_chain_commits_with_cutoffs(
+                repo, include[0], need, cutoffs,
+            )?
+        } else {
+            None
+        };
+        match linear {
             Some(list) => list,
             None => commits_reachable_excluding_ancestors_of_with_graph(
                 repo,
@@ -6474,6 +6482,12 @@ fn try_bounded_path_limit_list(
             break;
         }
 
+        if let Some(since) = since_frontier {
+            if item.date < since && date_heap_past_since_frontier(&heap, since) {
+                break;
+            }
+        }
+
         for parent in action.parents_to_walk {
             if excluded.contains(&parent) || !queued.insert(parent) {
                 continue;
@@ -6484,12 +6498,6 @@ fn try_bounded_path_limit_list(
                 seq: next_seq,
             });
             next_seq += 1;
-        }
-
-        if let Some(since) = since_frontier {
-            if item.date < since && date_heap_past_since_frontier(&heap, since) {
-                break;
-            }
         }
     }
 
