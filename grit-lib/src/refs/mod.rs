@@ -1336,6 +1336,11 @@ fn parse_packed_ref_data_line_borrowed<'a>(
 ///
 /// Full scans (no prefix, or all of `refs/`) and files without the trait read every line:
 /// they reject a carriage return or invalid UTF-8 anywhere in the file.
+enum StreamRecordsError {
+    OutOfOrder,
+    Packed(Error),
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct PackedRefsFileView {
     data: std::sync::Arc<crate::pack_map::PackData>,
@@ -1574,7 +1579,6 @@ impl PackedRefsFileView {
 
     /// Collect a full scan in file order before building the sorted cache. This avoids a
     /// temporary hash table and its arbitrary iteration order on already sorted files.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn full_map(&self, path: &Path) -> Result<BTreeMap<String, ObjectId>> {
         let (mut records, in_order) =
             self.parse_region::<Vec<_>>(path, 0, self.data.len(), None, None)?;
@@ -1613,72 +1617,193 @@ impl PackedRefsFileView {
         Ok(map)
     }
 
-    /// Like [`Self::map_for_prefix_filtered`], but invokes `f` for each record instead of
-    /// building a map.
+    /// Walk `packed-refs` records in file order without building a map.
     ///
-    /// Returns [`ControlFlow::Break`] when `f` stops the scan. Unsorted files, and sorted
-    /// files whose records are out of order, fall back to a sorted materialized scan so
-    /// iteration matches [`RefStore::for_each_ref`] name order.
-    pub(crate) fn for_each_prefix_filtered(
+    /// Names are borrowed from the mapped file bytes. When the header declares `sorted` and
+    /// the requested range is in order, only that byte range is read; otherwise the file is
+    /// scanned from the start or the walk falls back to [`Self::map_for_prefix_filtered`].
+    ///
+    /// # Errors
+    ///
+    /// Malformed lines propagate like other packed-refs parsers. A sorted range that is out
+    /// of order falls back to the map path instead of failing.
+    pub(crate) fn for_each_record(
         &self,
         path: &Path,
         prefix: Option<&str>,
         keep: Option<PackedRecordFilter<'_>>,
-        mut f: PackedRecordForEach<'_>,
+        mut f: impl FnMut(&str, ObjectId, PackedPeel) -> ControlFlow<()>,
     ) -> Result<ControlFlow<()>> {
         if !self.sorted {
-            return self.for_each_prefix_filtered_sorted(path, prefix, keep, f);
+            return self.for_each_record_fallback(path, prefix, keep, &BTreeSet::new(), &mut f);
         }
-        let prefix_trim = prefix.map(|p| p.trim_end_matches('/'));
-        let range_prefix = prefix_trim.filter(|p| !p.is_empty() && *p != "refs");
-        if let Some((begin, end)) = range_prefix.and_then(|prefix| self.prefix_region(prefix)) {
-            if self.region_records_in_order(path, begin, end, prefix_trim, keep)? {
-                let (_, flow) =
-                    self.for_each_region(path, begin, end, prefix_trim, keep, &mut f)?;
-                return Ok(flow);
+        let mut prove = |_: &str, _: ObjectId, _: PackedPeel| ControlFlow::Continue(());
+        match self.walk_records(path, prefix, keep, false, &mut prove) {
+            Err(StreamRecordsError::OutOfOrder) => {
+                return self.for_each_record_fallback(path, prefix, keep, &BTreeSet::new(), &mut f);
             }
+            Err(StreamRecordsError::Packed(e)) => return Err(e),
+            Ok(_) => {}
         }
-        if self.region_records_in_order(path, 0, self.data.len(), prefix_trim, keep)? {
-            let (_, flow) =
-                self.for_each_region(path, 0, self.data.len(), prefix_trim, keep, &mut f)?;
-            return Ok(flow);
+        match self.walk_records(path, prefix, keep, true, &mut f) {
+            Ok(flow) => Ok(flow),
+            Err(StreamRecordsError::OutOfOrder) => {
+                self.for_each_record_fallback(path, prefix, keep, &BTreeSet::new(), &mut f)
+            }
+            Err(StreamRecordsError::Packed(e)) => Err(e),
         }
-        self.for_each_prefix_filtered_sorted(path, prefix, keep, f)
     }
 
-    /// Whether records in `[begin, end)` are in nondecreasing name order (strict parse, no visitor).
-    fn region_records_in_order(
-        &self,
-        path: &Path,
-        begin: usize,
-        end: usize,
-        prefix: Option<&str>,
-        keep: Option<PackedRecordFilter<'_>>,
-    ) -> Result<bool> {
-        let (_, in_order) =
-            self.parse_region::<DiscardPackedRecords>(path, begin, end, prefix, keep)?;
-        Ok(in_order)
-    }
-
-    fn for_each_prefix_filtered_sorted(
+    fn for_each_record_fallback(
         &self,
         path: &Path,
         prefix: Option<&str>,
         keep: Option<PackedRecordFilter<'_>>,
-        f: PackedRecordForEach<'_>,
+        already_emitted: &BTreeSet<String>,
+        f: &mut impl FnMut(&str, ObjectId, PackedPeel) -> ControlFlow<()>,
     ) -> Result<ControlFlow<()>> {
         let map = self.map_for_prefix_filtered(path, prefix, keep)?;
-        let mut names: Vec<_> = map.keys().cloned().collect();
-        names.sort_unstable();
+        let mut names: Vec<String> = map.keys().cloned().collect();
+        names.sort();
         for name in names {
-            let Some(oid) = map.get(&name) else {
+            if already_emitted.contains(&name) {
                 continue;
-            };
-            if f(&name, *oid, None).is_break() {
+            }
+            let oid = map[&name];
+            if f(&name, oid, PackedPeel::Unknown).is_break() {
                 return Ok(ControlFlow::Break(()));
             }
         }
         Ok(ControlFlow::Continue(()))
+    }
+
+    fn walk_records(
+        &self,
+        path: &Path,
+        prefix: Option<&str>,
+        keep: Option<PackedRecordFilter<'_>>,
+        emit: bool,
+        f: &mut impl FnMut(&str, ObjectId, PackedPeel) -> ControlFlow<()>,
+    ) -> std::result::Result<ControlFlow<()>, StreamRecordsError> {
+        let prefix_trim = prefix.map(|p| p.trim_end_matches('/'));
+        let prefix_upper = if self.sorted {
+            prefix_trim.and_then(list_prefix_upper_bound)
+        } else {
+            None
+        };
+        let ref_opts = RefNameOptions {
+            allow_onelevel: false,
+            refspec_pattern: false,
+            normalize: false,
+        };
+        let (mut pos, end) = self.record_scan_range(prefix_trim, prefix_upper.as_deref());
+        let mut prev_name = "";
+        let mut expect_peel = false;
+        let mut pending: Option<(&str, ObjectId, Option<ObjectId>)> = None;
+        let mut flush = |pending: &mut Option<(&str, ObjectId, Option<ObjectId>)>| {
+            let Some((refname, oid, peeled)) = pending.take() else {
+                return Ok(ControlFlow::Continue(()));
+            };
+            let peel = if self.peel_trait.covers(refname) {
+                peeled.map_or(PackedPeel::NotTag, PackedPeel::Peeled)
+            } else {
+                PackedPeel::Unknown
+            };
+            if keep.is_some_and(|keep| !keep(refname, &oid, peel)) {
+                return Ok(ControlFlow::Continue(()));
+            }
+            if !emit {
+                return Ok(ControlFlow::Continue(()));
+            }
+            if f(refname, oid, peel).is_break() {
+                Ok(ControlFlow::Break(()))
+            } else {
+                Ok(ControlFlow::Continue(()))
+            }
+        };
+
+        while pos < end {
+            let line_end = packed_line_end(&self.data, pos).min(end);
+            if self.data[pos..line_end].contains(&b'\r') {
+                return Err(StreamRecordsError::Packed(packed_refs_unexpected_line(
+                    path,
+                    "<contains carriage return>",
+                )));
+            }
+            let line = std::str::from_utf8(&self.data[pos..line_end]).map_err(|_| {
+                StreamRecordsError::Packed(packed_refs_unexpected_line(path, "<invalid utf-8>"))
+            })?;
+            if line.is_empty() {
+                if pos + 1 < end {
+                    return Err(StreamRecordsError::Packed(packed_refs_unexpected_line(
+                        path, line,
+                    )));
+                }
+                break;
+            }
+            if line.starts_with('#') {
+                if flush(&mut pending)?.is_break() {
+                    return Ok(ControlFlow::Break(()));
+                }
+                expect_peel = false;
+                pos = line_end + 1;
+                continue;
+            }
+            if line.starts_with('^') {
+                let peel = parse_packed_ref_peel_line(path, line, expect_peel)
+                    .map_err(StreamRecordsError::Packed)?;
+                if let Some((_, _, stored)) = pending.as_mut() {
+                    *stored = Some(peel);
+                }
+                expect_peel = false;
+                pos = line_end + 1;
+                continue;
+            }
+            let (refname, oid) = parse_packed_ref_data_line_borrowed(path, line, &ref_opts)
+                .map_err(StreamRecordsError::Packed)?;
+            if self.sorted && !prev_name.is_empty() && refname < prev_name {
+                return Err(StreamRecordsError::OutOfOrder);
+            }
+            if flush(&mut pending)?.is_break() {
+                return Ok(ControlFlow::Break(()));
+            }
+            prev_name = refname;
+            let in_prefix = prefix_trim.is_none_or(|p| ref_name_matches_list_prefix(refname, p));
+            if in_prefix {
+                pending = Some((refname, oid, None));
+            } else if self.sorted {
+                if let Some(upper) = prefix_upper.as_deref() {
+                    if refname >= upper {
+                        break;
+                    }
+                }
+            }
+            expect_peel = true;
+            pos = line_end + 1;
+        }
+        if flush(&mut pending)?.is_break() {
+            return Ok(ControlFlow::Break(()));
+        }
+        Ok(ControlFlow::Continue(()))
+    }
+
+    fn record_scan_range(
+        &self,
+        prefix_trim: Option<&str>,
+        prefix_upper: Option<&str>,
+    ) -> (usize, usize) {
+        let len = self.data.len();
+        if self.sorted {
+            if let Some(p) = prefix_trim.filter(|p| !p.is_empty() && *p != "refs") {
+                let first = self.lower_bound(p);
+                let end = prefix_upper.map_or(len, |upper| self.lower_bound(upper));
+                if end < first {
+                    return (len, len);
+                }
+                return (first, end);
+            }
+        }
+        (self.body_start, len)
     }
 
     /// Byte range a prefix scan of a sorted file covers, including the neighbouring records
@@ -1747,28 +1872,6 @@ impl PackedRefsFileView {
             .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
         parse_packed_refs_region(path, region, prefix, keep, self.peel_trait)
     }
-
-    /// [`Self::parse_region`] with a per-record callback instead of a map.
-    fn for_each_region(
-        &self,
-        path: &Path,
-        begin: usize,
-        end: usize,
-        prefix: Option<&str>,
-        keep: Option<PackedRecordFilter<'_>>,
-        f: PackedRecordForEach<'_>,
-    ) -> Result<(bool, ControlFlow<()>)> {
-        let bytes = &self.data[begin..end];
-        if memchr::memchr(b'\r', bytes).is_some() {
-            return Err(packed_refs_unexpected_line(
-                path,
-                "<contains carriage return>",
-            ));
-        }
-        let region = std::str::from_utf8(bytes)
-            .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
-        for_each_packed_refs_region(path, region, prefix, keep, self.peel_trait, f)
-    }
 }
 
 /// What a `packed-refs` record tells about the object its ref names, given the file's
@@ -1786,18 +1889,6 @@ pub(crate) enum PackedPeel {
 /// Decides, from its storage name, object id and [`PackedPeel`], whether a `packed-refs`
 /// record is listed.
 pub(crate) type PackedRecordFilter<'a> = &'a dyn Fn(&str, &ObjectId, PackedPeel) -> bool;
-
-/// Visitor for a streaming [`PackedRefsFileView`] scan.
-pub(crate) type PackedRecordForEach<'a> =
-    &'a mut dyn FnMut(&str, ObjectId, Option<ObjectId>) -> ControlFlow<()>;
-
-/// Collector for [`PackedRefsFileView::parse_region`] order probes (no storage).
-#[derive(Default)]
-struct DiscardPackedRecords;
-
-impl Extend<(String, ObjectId)> for DiscardPackedRecords {
-    fn extend<T: IntoIterator<Item = (String, ObjectId)>>(&mut self, _: T) {}
-}
 
 /// Strictly parse the `packed-refs` lines of `region`, keeping refs that match `prefix`, and
 /// report whether the names of the records it parsed are in nondecreasing order.
@@ -1871,82 +1962,6 @@ fn parse_packed_refs_region<C: Default + Extend<(String, ObjectId)>>(
     }
     flush(&mut map, &mut pending);
     Ok((map, in_order))
-}
-
-/// [`parse_packed_refs_region`] with a per-record callback instead of a map.
-fn for_each_packed_refs_region(
-    path: &Path,
-    region: &str,
-    prefix: Option<&str>,
-    keep: Option<PackedRecordFilter<'_>>,
-    peel_trait: PackedPeelTrait,
-    f: PackedRecordForEach<'_>,
-) -> Result<(bool, ControlFlow<()>)> {
-    let ref_opts = RefNameOptions {
-        allow_onelevel: false,
-        refspec_pattern: false,
-        normalize: false,
-    };
-    let mut in_order = true;
-    let mut prev_name = "";
-    let mut pending: Option<(&str, ObjectId, Option<ObjectId>)> = None;
-    let flush = |pending: &mut Option<(&str, ObjectId, Option<ObjectId>)>,
-                 f: PackedRecordForEach<'_>| {
-        let (Some(keep), Some((refname, oid, peeled))) = (keep, pending.take()) else {
-            return ControlFlow::Continue(());
-        };
-        let peel = if peel_trait.covers(refname) {
-            peeled.map_or(PackedPeel::NotTag, PackedPeel::Peeled)
-        } else {
-            PackedPeel::Unknown
-        };
-        if keep(refname, &oid, peel) {
-            f(refname, oid, peeled)
-        } else {
-            ControlFlow::Continue(())
-        }
-    };
-    let mut expect_peel = false;
-    let mut lines = region.split('\n').peekable();
-    while let Some(line) = lines.next() {
-        if line.is_empty() {
-            if lines.peek().is_some() {
-                return Err(packed_refs_unexpected_line(path, line));
-            }
-            break;
-        }
-        if line.starts_with('#') {
-            if flush(&mut pending, f).is_break() {
-                return Ok((in_order, ControlFlow::Break(())));
-            }
-            expect_peel = false;
-            continue;
-        }
-        if line.starts_with('^') {
-            let peel = parse_packed_ref_peel_line(path, line, expect_peel)?;
-            if let Some((_, _, peeled)) = pending.as_mut() {
-                *peeled = Some(peel);
-            }
-            expect_peel = false;
-            continue;
-        }
-        if flush(&mut pending, f).is_break() {
-            return Ok((in_order, ControlFlow::Break(())));
-        }
-        let (refname, oid) = parse_packed_ref_data_line_borrowed(path, line, &ref_opts)?;
-        in_order &= prev_name <= refname;
-        prev_name = refname;
-        if prefix.is_none_or(|p| ref_name_matches_list_prefix(refname, p)) {
-            if keep.is_some() {
-                pending = Some((refname, oid, None));
-            } else if f(refname, oid, None).is_break() {
-                return Ok((in_order, ControlFlow::Break(())));
-            }
-        }
-        expect_peel = true;
-    }
-    let flow = flush(&mut pending, f);
-    Ok((in_order, flow))
 }
 
 fn read_packed_refs_file_view(store: &Path) -> Result<Option<PackedRefsFileView>> {
@@ -6515,6 +6530,81 @@ mod packed_refs_parse_tests {
         for name in every {
             assert!(loaded.get(name).is_some(), "{name}");
         }
+    }
+
+    #[test]
+    fn garbage_between_sorted_records_rejects_listing() {
+        let dir = tempdir().unwrap();
+        let git_dir = dir.path();
+        fs::create_dir_all(git_dir.join("refs/heads")).unwrap();
+        let oid = "1111111111111111111111111111111111111111";
+        fs::write(
+            store::paths::packed_refs_path(git_dir),
+            format!(
+                "# pack-refs with: sorted\n{oid} refs/heads/a\nthis is not a valid packed-refs line\n{oid} refs/heads/b\n"
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            list_refs(git_dir, "refs/"),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+    }
+
+    #[test]
+    fn for_each_record_streaming_matches_map_and_stops_early() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let oid = "1111111111111111111111111111111111111111";
+        let header = "# pack-refs with: peeled fully-peeled sorted\n";
+        let body = format!("{header}{oid} refs/heads/a\n{oid} refs/heads/b\n{oid} refs/tags/t\n");
+        let view =
+            PackedRefsFileView::from_bytes(&path, body.into_bytes(), HashAlgo::Sha1).unwrap();
+        let mut streamed = Vec::new();
+        let _ = view
+            .for_each_record(&path, Some("refs/heads"), None, |name, _, _| {
+                streamed.push(name.to_owned());
+                ControlFlow::Continue(())
+            })
+            .unwrap();
+        assert_eq!(
+            streamed,
+            sorted_names(view.map_for_prefix(&path, Some("refs/heads")).unwrap())
+        );
+        let mut count = 0;
+        assert!(view
+            .for_each_record(&path, Some("refs/heads"), None, |_, _, _| {
+                count += 1;
+                ControlFlow::Break(())
+            })
+            .unwrap()
+            .is_break());
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn for_each_record_break_before_corrupt_tail_ok_while_full_scan_errors() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let oid = "1111111111111111111111111111111111111111";
+        let good_only = format!(
+            "# pack-refs with: peeled fully-peeled sorted\n{oid} refs/heads/good\n{oid} refs/heads/good2\n"
+        );
+        let with_corrupt_tail = format!(
+            "# pack-refs with: peeled fully-peeled sorted\n{oid} refs/heads/good\n{oid} refs/heads/good2\n{oid} refs/heads/bad..name\n"
+        );
+        let view =
+            PackedRefsFileView::from_bytes(&path, good_only.into_bytes(), HashAlgo::Sha1).unwrap();
+        assert!(view
+            .for_each_record(&path, None, None, |_, _, _| ControlFlow::Break(()))
+            .unwrap()
+            .is_break());
+        let view =
+            PackedRefsFileView::from_bytes(&path, with_corrupt_tail.into_bytes(), HashAlgo::Sha1)
+                .unwrap();
+        assert!(view
+            .for_each_record(&path, None, None, |_, _, _| ControlFlow::Continue(()))
+            .is_err());
     }
 
     #[test]
