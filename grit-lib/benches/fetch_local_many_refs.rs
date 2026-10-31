@@ -21,12 +21,10 @@ fn bench(c: &mut Criterion) {
         ("none", TagMode::None),
         ("all", TagMode::All),
     ] {
-        let opts = FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-            tags,
-            remote_name: Some("origin".into()),
-            ..Default::default()
-        };
+        let mut opts = FetchOptions::default();
+        opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+        opts.tags = tags;
+        opts.remote_name = Some("origin".into());
         group.bench_function(name, |b| {
             b.iter(|| {
                 let outcome =

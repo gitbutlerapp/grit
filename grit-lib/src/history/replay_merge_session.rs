@@ -1,6 +1,6 @@
 //! Cached upstream delta for replaying commits across a moved first parent (rebase onto).
 
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
+#[cfg(test)]
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
@@ -20,43 +20,39 @@ use crate::write_tree::write_tree_partial_from_index;
 
 use super::error::HistoryError;
 
-thread_local! { // hygiene: replay merge metrics for tests and unstable-bench-helpers
-    #[cfg(any(test, feature = "unstable-bench-helpers"))]
+thread_local! { // hygiene: replay merge metrics for unit tests
+    #[cfg(test)]
     static REPLAY_MERGE_METRICS: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
 }
 
 /// Test hook: number of three-way tree merges performed by planning.
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-#[doc(hidden)]
+#[cfg(test)]
 #[must_use]
-pub fn test_merge_tree_call_count() -> usize {
+pub(crate) fn test_merge_tree_call_count() -> usize {
     REPLAY_MERGE_METRICS.with(|c| c.get().0)
 }
 
 /// Reset [`test_merge_tree_call_count`].
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-#[doc(hidden)]
-pub fn test_reset_merge_tree_call_count() {
+#[cfg(test)]
+pub(crate) fn test_reset_merge_tree_call_count() {
     REPLAY_MERGE_METRICS.with(|c| c.set((0, 0)));
 }
 
 /// Test hook: full fork→onto diff/rename scans during replay planning.
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-#[doc(hidden)]
+#[cfg(test)]
 #[must_use]
-pub fn test_upstream_delta_scan_count() -> usize {
+pub(crate) fn test_upstream_delta_scan_count() -> usize {
     REPLAY_MERGE_METRICS.with(|c| c.get().1)
 }
 
 /// Reset [`test_upstream_delta_scan_count`].
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-#[doc(hidden)]
-pub fn test_reset_upstream_delta_scan_count() {
+#[cfg(test)]
+pub(crate) fn test_reset_upstream_delta_scan_count() {
     REPLAY_MERGE_METRICS.with(|c| c.set((0, 0)));
 }
 
 pub(crate) fn record_merge_call() {
-    #[cfg(any(test, feature = "unstable-bench-helpers"))]
+    #[cfg(test)]
     REPLAY_MERGE_METRICS.with(|c| {
         let (merges, scans) = c.get();
         c.set((merges + 1, scans));
@@ -64,7 +60,7 @@ pub(crate) fn record_merge_call() {
 }
 
 fn record_upstream_delta_scan() {
-    #[cfg(any(test, feature = "unstable-bench-helpers"))]
+    #[cfg(test)]
     REPLAY_MERGE_METRICS.with(|c| {
         let (merges, scans) = c.get();
         c.set((merges, scans + 1));

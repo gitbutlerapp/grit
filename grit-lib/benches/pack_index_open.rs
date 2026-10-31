@@ -56,7 +56,7 @@ fn bench_pack_index_open_and_lookups(c: &mut Criterion) {
             || read_pack_index_no_verify(&fx.idx_path).expect("open"),
             |idx| {
                 for oid in &fx.sample_oids {
-                    black_box(idx.find_offset(oid));
+                    let _ = black_box(idx.find_offset(oid));
                 }
             },
             BatchSize::SmallInput,
