@@ -1,5 +1,6 @@
 //! System-git round-trip for concurrent disjoint ref updates (issue #2250).
 
+use std::fs;
 use std::process::Command;
 use std::sync::Arc;
 
@@ -70,4 +71,71 @@ fn files_disjoint_ref_updates_git_show_ref_and_fsck() {
     }
     let fsck = git_fsck(tmp.path(), true);
     assert!(fsck.ok, "{fsck:?}");
+}
+
+#[test]
+fn git_creates_ref_over_stale_empty_directory_at_exact_ref_path() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+    let sig = Signature::new(
+        "A",
+        "a@example.com",
+        OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time"),
+    )
+    .expect("sig");
+    let blob = repo
+        .objects()
+        .write(ObjectKind::Blob, b"x\n")
+        .expect("blob");
+    let tree = repo
+        .objects()
+        .write_tree([TreeEntry {
+            mode: 0o100644,
+            name: b"f".to_vec(),
+            oid: blob,
+        }])
+        .expect("tree");
+    let commit = repo
+        .objects()
+        .write_commit(&NewCommit::new(tree, sig.clone(), sig, "c"))
+        .expect("commit");
+
+    let stale = repo.git_dir().join("refs/tags/empty");
+    fs::create_dir_all(&stale).expect("stale empty directory at ref path");
+    assert!(stale.is_dir());
+
+    let update = Command::new("git")
+        .args([
+            "-C",
+            tmp.path().to_str().expect("utf8"),
+            "update-ref",
+            "refs/tags/empty",
+            &commit.to_hex(),
+        ])
+        .status()
+        .expect("git update-ref");
+    assert!(
+        update.success(),
+        "git must create a ref over an empty directory at the ref path"
+    );
+    assert!(
+        stale.is_file(),
+        "git replaces the empty directory with the ref file"
+    );
+
+    let show = Command::new("git")
+        .args([
+            "-C",
+            tmp.path().to_str().expect("utf8"),
+            "show-ref",
+            "refs/tags/empty",
+        ])
+        .output()
+        .expect("git show-ref");
+    assert!(show.status.success(), "{show:?}");
+    let stdout = String::from_utf8_lossy(&show.stdout);
+    assert!(
+        stdout.contains(&commit.to_hex()),
+        "expected {commit} in show-ref output:\n{stdout}"
+    );
 }

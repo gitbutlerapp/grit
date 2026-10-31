@@ -2644,7 +2644,7 @@ pub(crate) fn remove_empty_ref_directory(path: &Path) {
 }
 
 /// Return true if the directory tree rooted at `dir` contains any non-directory entry.
-fn dir_tree_has_files(dir: &Path) -> bool {
+pub(crate) fn dir_tree_has_files(dir: &Path) -> bool {
     let Ok(entries) = fs::read_dir(dir) else {
         // Unreadable: treat conservatively as "has files" so we do not delete it.
         return true;

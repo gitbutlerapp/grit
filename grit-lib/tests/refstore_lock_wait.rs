@@ -568,6 +568,27 @@ fn files_prepare_disjoint_ref_while_another_transaction_is_open() {
     );
 }
 
+#[test]
+fn files_create_over_stale_empty_directory_at_exact_ref_path() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path();
+    fs::create_dir_all(path.join("refs/heads")).expect("refs");
+    fs::write(path.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+    let stale = path.join("refs/tags/empty");
+    fs::create_dir_all(&stale).expect("stale empty directory at ref path");
+    assert!(stale.is_dir());
+
+    let store = files_store(path);
+    let value = oid(42);
+    commit_ref_update_on_store(&store, set("refs/tags/empty", value, Expected::Missing))
+        .expect("empty directory at ref path must not block create");
+    assert_eq!(
+        store.read_raw("refs/tags/empty").expect("read"),
+        Some(RawRef::Direct(value))
+    );
+    assert!(stale.is_file(), "ref file replaces the empty directory");
+}
+
 fn assert_a_vs_a_slash_b_create_race_once(path: &Path) {
     fs::create_dir_all(path.join("refs/heads")).expect("refs");
     fs::write(path.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");

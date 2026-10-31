@@ -353,7 +353,7 @@ impl FilesRefStore {
         let route = self.route(name);
         for base in self.store_bases() {
             let ref_path = base.join(&route.storage_name);
-            if ref_path.is_dir() {
+            if ref_path.is_dir() && crate::refs::dir_tree_has_files(&ref_path) {
                 let blocking = first_loose_ref_file_under(&ref_path)
                     .map(|p| loose_storage_path_to_refname(base, &p))
                     .unwrap_or_else(|| format!("{name}/…"));
@@ -948,11 +948,14 @@ impl FilesRefStore {
         if let Some(reason) = self.name_unavailable_if_ancestor_is_loose_file(refname) {
             return Err(Error::RefStore(RefStoreError::NameUnavailable { reason }));
         }
-        if self
-            .acquire_ref_lock_mapped(lock_path, refname, wait)
-            .is_ok()
-        {
+        let Err(first_err) = self.acquire_ref_lock_mapped(lock_path, refname, wait) else {
             return Ok(());
+        };
+        if matches!(first_err, Error::RefStore(RefStoreError::LockHeld { .. })) {
+            return Err(first_err);
+        }
+        if !Self::lock_acquire_suggests_missing_parent(&first_err) {
+            return self.map_lock_io_to_name_unavailable(refname, lock_path, first_err);
         }
         if let Some(parent) = lock_path.parent() {
             if parent.is_file() {
@@ -981,7 +984,39 @@ impl FilesRefStore {
         if let Some(reason) = self.name_unavailable_if_ancestor_is_loose_file(refname) {
             return Err(Error::RefStore(RefStoreError::NameUnavailable { reason }));
         }
-        self.acquire_ref_lock_mapped(lock_path, refname, wait)
+        match self.acquire_ref_lock_mapped(lock_path, refname, wait) {
+            Ok(()) => Ok(()),
+            Err(err) => self.map_lock_io_to_name_unavailable(refname, lock_path, err),
+        }
+    }
+
+    fn map_lock_io_to_name_unavailable(
+        &self,
+        refname: &str,
+        lock_path: &Path,
+        err: Error,
+    ) -> Result<()> {
+        let (_, ref_path, _) = self.ref_lock_paths(refname);
+        if let Some(reason) = name_unavailable_if_lock_path_io_blocked(
+            &self.common_dir,
+            refname,
+            &ref_path,
+            lock_path,
+            &err,
+        ) {
+            Err(Error::RefStore(RefStoreError::NameUnavailable { reason }))
+        } else {
+            Err(err)
+        }
+    }
+
+    /// Whether a failed lock acquisition likely means the lock path's parent directory is missing.
+    fn lock_acquire_suggests_missing_parent(err: &Error) -> bool {
+        match err {
+            Error::GitDirPathIo { source, .. } => source.kind() == io::ErrorKind::NotFound,
+            Error::Io(source) => source.kind() == io::ErrorKind::NotFound,
+            _ => false,
+        }
     }
 
     /// Whether a strict ancestor of `refname` is already stored as a loose ref file (blocks
@@ -1066,17 +1101,43 @@ impl FilesRefStore {
         lock: &Path,
         value: &RawRef,
     ) -> Result<()> {
+        if let Some(parent) = lock.parent() {
+            if parent.is_file() {
+                return Err(Error::RefStore(RefStoreError::NameUnavailable {
+                    reason: RefnameUnavailable::AncestorExists {
+                        blocking: loose_storage_path_to_refname(common_dir, parent),
+                        new_ref: refname.to_owned(),
+                    },
+                }));
+            }
+        }
+        if path.is_dir() && crate::refs::dir_tree_has_files(path) {
+            return Err(Error::RefStore(RefStoreError::NameUnavailable {
+                reason: name_unavailable_after_loose_rename_conflict(refname, path, common_dir),
+            }));
+        }
         let content = match value {
             RawRef::Direct(oid) => format!("{oid}\n"),
             RawRef::Symbolic(target) => format!("ref: {target}\n"),
         };
-        io_with_ref_store_path(
+        match io_with_ref_store_path(
             common_dir,
             checkout_git_dir,
             lock,
             GitDirPathOperation::UpdateRef,
             fs::write(lock, content),
-        )?;
+        ) {
+            Ok(()) => {}
+            Err(err) => {
+                if let Some(reason) =
+                    name_unavailable_if_lock_path_io_blocked(common_dir, refname, path, lock, &err)
+                {
+                    let _ = fs::remove_file(lock);
+                    return Err(Error::RefStore(RefStoreError::NameUnavailable { reason }));
+                }
+                return Err(err);
+            }
+        }
         // An empty directory tree left by deleted nested refs may occupy the ref's path.
         let renamed = fs::rename(lock, path).or_else(|err| {
             if !path.is_dir() {
@@ -2141,6 +2202,47 @@ fn first_loose_ref_file_under(dir: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn name_unavailable_if_lock_path_io_blocked(
+    common_dir: &Path,
+    refname: &str,
+    ref_path: &Path,
+    lock: &Path,
+    err: &Error,
+) -> Option<RefnameUnavailable> {
+    let source = match err {
+        Error::GitDirPathIo { source, .. } => source,
+        Error::Io(source) => source,
+        _ => return None,
+    };
+    if lock.extension().is_none_or(|e| e != "lock") {
+        return None;
+    }
+    let ancestor_path = ref_path.parent().filter(|p| p.is_file());
+    let lock_parent = lock.parent().filter(|p| p.is_file());
+    if let Some(blocking) = ancestor_path.or(lock_parent) {
+        return Some(RefnameUnavailable::AncestorExists {
+            blocking: loose_storage_path_to_refname(common_dir, blocking),
+            new_ref: refname.to_owned(),
+        });
+    }
+    match source.kind() {
+        io::ErrorKind::AlreadyExists
+        | io::ErrorKind::NotADirectory
+        | io::ErrorKind::IsADirectory => {
+            if let Some((blocking, _)) = refname.rsplit_once('/') {
+                if blocking != "refs" {
+                    return Some(RefnameUnavailable::AncestorExists {
+                        blocking: blocking.to_owned(),
+                        new_ref: refname.to_owned(),
+                    });
+                }
+            }
+            None
+        }
+        _ => None,
+    }
 }
 
 fn name_unavailable_after_loose_rename_conflict(
