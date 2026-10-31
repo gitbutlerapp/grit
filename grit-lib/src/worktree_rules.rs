@@ -6,7 +6,8 @@
 //! [`Repository`] config snapshot and index view, then threaded through those paths.
 //! Attribute files along parent directories and per-directory `.gitignore` files are
 //! loaded at most once per [`WorktreeRules`] instance (memoized inside the value, not
-//! in process globals).
+//! in process globals). Merged attribute stacks are kept only for the directory chain of
+//! the latest lookup, so memory follows path depth rather than the number of directories.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -105,11 +106,27 @@ struct AttributeState {
     /// When true, nested and root `.gitattributes` come only from [`Index`] blobs (checkout smudge).
     gitattributes_index_only: bool,
     /// Global + root `.gitattributes` (lowest precedence among file sources).
-    stack_prefix: ParsedGitAttributes,
+    stack_prefix: Arc<ParsedGitAttributes>,
     /// `.git/info/attributes` — applied after all worktree `.gitattributes` along the path.
     info_rules: ParsedGitAttributes,
-    dir_fragment: RefCell<HashMap<String, ParsedGitAttributes>>,
-    stack_without_info_by_dir: RefCell<HashMap<String, ParsedGitAttributes>>,
+    /// Parsed `.gitattributes` of each directory that has one (in the worktree or the index).
+    /// Directories without one are not recorded, so this stays as small as the set of files.
+    dir_fragment: RefCell<HashMap<String, Arc<ParsedGitAttributes>>>,
+    /// Attribute stacks for the directory chain of the latest lookup, outermost first.
+    /// Callers look paths up in index order, so consecutive lookups share most of the chain.
+    dir_stack: RefCell<Vec<DirFrame>>,
+    /// [`Self::stack_prefix`] with `info_rules` applied, for paths at the top level.
+    root_merged: RefCell<Option<Arc<ParsedGitAttributes>>>,
+}
+
+/// One directory on [`AttributeState::dir_stack`].
+struct DirFrame {
+    dir: String,
+    /// Rules from the global file down to this directory's `.gitattributes`. Shared with the
+    /// parent frame when this directory adds none.
+    stack: Arc<ParsedGitAttributes>,
+    /// `stack` with `info/attributes` applied, built on first use.
+    merged: Option<Arc<ParsedGitAttributes>>,
 }
 
 impl WorktreeRules {
@@ -167,10 +184,11 @@ impl WorktreeRules {
             odb: repo.odb().clone(),
             gitattributes_index: gitattributes_index_map(index),
             gitattributes_index_only,
-            stack_prefix,
+            stack_prefix: Arc::new(stack_prefix),
             info_rules,
             dir_fragment: RefCell::new(HashMap::new()),
-            stack_without_info_by_dir: RefCell::new(HashMap::new()),
+            dir_stack: RefCell::new(Vec::new()),
+            root_merged: RefCell::new(None),
         };
         Ok(Self {
             config,
@@ -236,7 +254,7 @@ impl WorktreeRules {
     #[must_use]
     pub fn attribute_rules_for_path(&self, rel_path: &str) -> Vec<AttrRule> {
         let parent = parent_dir_key(rel_path);
-        self.attrs.merged_for_dir(&parent).rules
+        self.attrs.merged_for_dir(&parent).rules.clone()
     }
 
     /// Resolved attributes for `rel_path` using this context's config snapshot.
@@ -255,33 +273,77 @@ impl WorktreeRules {
 }
 
 impl AttributeState {
-    fn merged_for_dir(&self, dir: &str) -> ParsedGitAttributes {
-        let mut merged = self.stack_without_info_for_dir(dir);
-        append_parsed(&mut merged, self.info_rules.clone(), true);
-        merged
-    }
-
-    fn stack_without_info_for_dir(&self, dir: &str) -> ParsedGitAttributes {
-        if let Some(hit) = self.stack_without_info_by_dir.borrow().get(dir).cloned() {
-            return hit;
+    /// Every attribute source that applies to paths directly inside `dir` (`""` for the top
+    /// level), with `info/attributes` last.
+    fn merged_for_dir(&self, dir: &str) -> Arc<ParsedGitAttributes> {
+        if dir.is_empty() {
+            let mut root = self.root_merged.borrow_mut();
+            return Arc::clone(root.get_or_insert_with(|| self.with_info(&self.stack_prefix)));
         }
-        let stack = if dir.is_empty() {
-            self.stack_prefix.clone()
-        } else {
-            let parent = parent_of_dir(dir);
-            let mut parsed = self.stack_without_info_for_dir(&parent);
-            append_parsed(&mut parsed, self.load_dir_fragment(dir), false);
-            parsed
+        self.enter_dir(dir);
+        let mut frames = self.dir_stack.borrow_mut();
+        let Some(frame) = frames.last_mut() else {
+            return self.with_info(&self.stack_prefix);
         };
-        self.stack_without_info_by_dir
-            .borrow_mut()
-            .insert(dir.to_owned(), stack.clone());
-        stack
+        Arc::clone(
+            frame
+                .merged
+                .get_or_insert_with(|| self.with_info(&frame.stack)),
+        )
     }
 
-    fn load_dir_fragment(&self, dir: &str) -> ParsedGitAttributes {
-        if let Some(hit) = self.dir_fragment.borrow().get(dir).cloned() {
-            return hit;
+    fn with_info(&self, stack: &Arc<ParsedGitAttributes>) -> Arc<ParsedGitAttributes> {
+        let info = &self.info_rules;
+        if info.rules.is_empty() && info.macros.defs.is_empty() && info.warnings.is_empty() {
+            return Arc::clone(stack);
+        }
+        let mut merged = ParsedGitAttributes::clone(stack);
+        append_parsed(&mut merged, info.clone(), true);
+        Arc::new(merged)
+    }
+
+    /// Make [`Self::dir_stack`] the chain of directories from the top level down to `dir`
+    /// (non-empty, `/`-separated), keeping the frames it shares with the previous chain.
+    fn enter_dir(&self, dir: &str) {
+        let ends: Vec<usize> = dir
+            .match_indices('/')
+            .map(|(at, _)| at)
+            .chain(std::iter::once(dir.len()))
+            .collect();
+        let mut frames = self.dir_stack.borrow_mut();
+        // The frames form one chain, so the deepest frame that matches its prefix of `dir`
+        // proves every shallower one matches too.
+        let shared = (1..=frames.len().min(ends.len()))
+            .rev()
+            .find(|&depth| frames[depth - 1].dir == dir[..ends[depth - 1]])
+            .unwrap_or(0);
+        frames.truncate(shared);
+        for &end in &ends[shared..] {
+            let prefix = &dir[..end];
+            let parent = frames
+                .last()
+                .map_or(&self.stack_prefix, |frame| &frame.stack);
+            let stack = match self.load_dir_fragment(prefix) {
+                Some(fragment) if !fragment.rules.is_empty() || !fragment.warnings.is_empty() => {
+                    let mut stack = ParsedGitAttributes::clone(parent);
+                    append_parsed(&mut stack, ParsedGitAttributes::clone(&fragment), false);
+                    Arc::new(stack)
+                }
+                _ => Arc::clone(parent),
+            };
+            frames.push(DirFrame {
+                dir: prefix.to_owned(),
+                stack,
+                merged: None,
+            });
+        }
+    }
+
+    /// The parsed `.gitattributes` of `dir`, or `None` when it has none in the worktree or
+    /// (as a fallback) the index.
+    fn load_dir_fragment(&self, dir: &str) -> Option<Arc<ParsedGitAttributes>> {
+        if let Some(hit) = self.dir_fragment.borrow().get(dir) {
+            return Some(Arc::clone(hit));
         }
         let mut parsed = ParsedGitAttributes::default();
         let ga_stored = if dir.is_empty() {
@@ -303,27 +365,32 @@ impl AttributeState {
                     parsed.rules.append(&mut p.rules);
                     parsed.warnings.append(&mut p.warnings);
                 }
-                self.dir_fragment
-                    .borrow_mut()
-                    .insert(dir.to_owned(), parsed.clone());
-                return parsed;
+                return Some(self.remember_fragment(dir, parsed));
             }
         }
-        if let Some(oid) = self.gitattributes_index.get(&key) {
-            if let Ok(obj) = self.odb.read(oid) {
-                if let Ok(content) = String::from_utf8(obj.data) {
-                    if content.len() <= MAX_ATTR_FILE_BYTES {
-                        let mut p =
-                            parse_gitattributes_file_content_with_base(&content, &ga_stored, dir);
-                        parsed.rules.append(&mut p.rules);
-                        parsed.warnings.append(&mut p.warnings);
-                    }
+        let oid = self.gitattributes_index.get(&key)?;
+        if let Ok(obj) = self.odb.read(oid) {
+            if let Ok(content) = String::from_utf8(obj.data) {
+                if content.len() <= MAX_ATTR_FILE_BYTES {
+                    let mut p =
+                        parse_gitattributes_file_content_with_base(&content, &ga_stored, dir);
+                    parsed.rules.append(&mut p.rules);
+                    parsed.warnings.append(&mut p.warnings);
                 }
             }
         }
+        Some(self.remember_fragment(dir, parsed))
+    }
+
+    fn remember_fragment(
+        &self,
+        dir: &str,
+        parsed: ParsedGitAttributes,
+    ) -> Arc<ParsedGitAttributes> {
+        let parsed = Arc::new(parsed);
         self.dir_fragment
             .borrow_mut()
-            .insert(dir.to_owned(), parsed.clone());
+            .insert(dir.to_owned(), Arc::clone(&parsed));
         parsed
     }
 }
@@ -342,14 +409,6 @@ fn append_parsed(
 
 fn parent_dir_key(rel_path: &str) -> String {
     Path::new(rel_path)
-        .parent()
-        .map(|p| p.to_string_lossy().replace('\\', "/"))
-        .filter(|s| !s.is_empty())
-        .unwrap_or_default()
-}
-
-fn parent_of_dir(dir: &str) -> String {
-    Path::new(dir)
         .parent()
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .filter(|s| !s.is_empty())
