@@ -33,6 +33,14 @@ fn result_models_implement_serialize() {
     assert_serialize::<grit_lib::porcelain::status::StatusModel>();
     assert_serialize::<grit_lib::porcelain::log::LoadedCommit>();
     assert_serialize::<grit_lib::diff::DiffEntry>();
+    assert_serialize::<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>();
+}
+
+fn assert_deserialize<T: serde::de::DeserializeOwned>() {}
+
+#[test]
+fn workspace_snapshot_implement_deserialize() {
+    assert_deserialize::<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>();
 }
 
 fn sample_signature() -> grit_lib::ident::Signature {

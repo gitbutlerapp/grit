@@ -466,6 +466,17 @@ impl serde::Serialize for ObjectId {
     }
 }
 
+#[cfg(feature = "serde-models")]
+impl<'de> serde::Deserialize<'de> for ObjectId {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let hex = String::deserialize(deserializer)?;
+        Self::from_hex(&hex).map_err(serde::de::Error::custom)
+    }
+}
+
 /// Marker bit in [`HEX_DECODE`] for bytes that are not hex digits.
 const HEX_INVALID: u8 = 0x10;
 

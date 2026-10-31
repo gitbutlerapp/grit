@@ -37,7 +37,7 @@ use crate::repo::Repository;
 
 /// The current state of HEAD.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum HeadState {
     /// HEAD points to a branch via a symbolic ref (e.g. `ref: refs/heads/main`).
