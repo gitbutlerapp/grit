@@ -1774,6 +1774,7 @@ fn create_commit_with_index(
         .map_err(|detail| Error::CorruptObject(format!("commit would fail fsck: {detail}")))?;
     poll_cancel(progress, cancel)?;
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
+    repo.odb().flush()?;
 
     let concluding_replay = read_cherry_pick_head(repo.git_dir())?.is_some()
         || read_revert_head(repo.git_dir())?.is_some();
@@ -2002,7 +2003,9 @@ pub fn write_commit_object(
 ) -> Result<ObjectId> {
     let config = repo.config()?;
     let bytes = prepare_commit_bytes(repo, config.as_ref(), data, sign_override)?;
-    repo.odb().write(ObjectKind::Commit, &bytes)
+    let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
+    repo.odb().flush()?;
+    Ok(oid)
 }
 
 fn empty_commit_error(repo: &Repository, index: &mut Index, req: &CommitRequest) -> Error {

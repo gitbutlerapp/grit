@@ -10948,6 +10948,10 @@ pub trait grit_lib::objects::odb::store::WritableObjectStore: grit_lib::objects:
 pub trait grit_lib::objects::odb::store::WritableObjectStore: grit_lib::objects::odb::store::ObjectStore
 pub fn grit_lib::objects::odb::store::WritableObjectStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
 pub fn grit_lib::objects::odb::store::WritableObjectStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::WritableObjectStore::flush(&self) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::WritableObjectStore::flush(&self) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::WritableObjectStore::rollback(&self) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::WritableObjectStore::rollback(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::store::WritableObjectStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::store::WritableObjectStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::store::WritableObjectStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
@@ -11155,6 +11159,7 @@ pub fn grit_lib::objects::odb::Odb::exists_materialized_local(&self, &grit_lib::
 pub fn grit_lib::objects::odb::Odb::exists_stored(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::objects::odb::Odb::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::freshen_object(&self, &grit_lib::objects::ObjectId) -> bool
+pub fn grit_lib::objects::odb::Odb::flush(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::hash_algo(&self) -> grit_lib::objects::HashAlgo
 pub fn grit_lib::objects::odb::Odb::hash_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
@@ -11174,6 +11179,7 @@ pub fn grit_lib::objects::odb::Odb::read_into(&self, &grit_lib::objects::ObjectI
 pub fn grit_lib::objects::odb::Odb::read_loose_verify_oid(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::objects::odb::Odb::refresh_file_alternates_from_disk(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::register_submodule_object_directories_from_index(&self, &std::path::Path, &grit_lib::index::Index)
+pub fn grit_lib::objects::odb::Odb::rollback(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::sources(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::objects::odb::CompositeStore>>
 pub fn grit_lib::objects::odb::Odb::with_config_git_dir(self, std::path::PathBuf) -> Self
 pub fn grit_lib::objects::odb::Odb::with_env_alternate_dirs(self, alloc::vec::Vec<std::path::PathBuf>) -> Self
@@ -11375,6 +11381,8 @@ pub fn alloc::rcs::arc::Arc<T>::read_into(&self, &grit_lib::objects::ObjectId, &
 pub fn alloc::rcs::arc::Arc<T>::refresh(&self) -> grit_lib::error::Result<bool>
 pub trait grit_lib::objects::odb::WritableObjectStore: grit_lib::objects::odb::store::ObjectStore
 pub fn grit_lib::objects::odb::WritableObjectStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::WritableObjectStore::flush(&self) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::WritableObjectStore::rollback(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::WritableObjectStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::WritableObjectStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 impl grit_lib::objects::odb::store::WritableObjectStore for grit_lib::objects::odb::FilesSource
@@ -18183,6 +18191,7 @@ pub fn grit_lib::objects::odb::Odb::exists_materialized_local(&self, &grit_lib::
 pub fn grit_lib::objects::odb::Odb::exists_stored(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::objects::odb::Odb::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::freshen_object(&self, &grit_lib::objects::ObjectId) -> bool
+pub fn grit_lib::objects::odb::Odb::flush(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::hash_algo(&self) -> grit_lib::objects::HashAlgo
 pub fn grit_lib::objects::odb::Odb::hash_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
@@ -18202,6 +18211,7 @@ pub fn grit_lib::objects::odb::Odb::read_into(&self, &grit_lib::objects::ObjectI
 pub fn grit_lib::objects::odb::Odb::read_loose_verify_oid(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::objects::odb::Odb::refresh_file_alternates_from_disk(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::register_submodule_object_directories_from_index(&self, &std::path::Path, &grit_lib::index::Index)
+pub fn grit_lib::objects::odb::Odb::rollback(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::sources(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::objects::odb::CompositeStore>>
 pub fn grit_lib::objects::odb::Odb::with_config_git_dir(self, std::path::PathBuf) -> Self
 pub fn grit_lib::objects::odb::Odb::with_env_alternate_dirs(self, alloc::vec::Vec<std::path::PathBuf>) -> Self

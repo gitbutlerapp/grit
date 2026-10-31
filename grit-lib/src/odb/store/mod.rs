@@ -258,6 +258,33 @@ pub trait WritableObjectStore: ObjectStore {
     ///
     /// Propagates backend failures.
     fn freshen(&self, oid: &ObjectId) -> Result<bool>;
+
+    /// Make prior successful [`Self::write`] calls durable (commit a transaction, fsync, …).
+    ///
+    /// Grit calls this after bulk ingest and before ref updates that publish new commits.
+    /// Reads on this store must observe every write that returned `Ok` even before
+    /// [`Self::flush`]; flush is the durability barrier for crash recovery.
+    ///
+    /// Default is a no-op. Do not flush automatically from [`Self::write`]; backends batch
+    /// many writes between flush calls.
+    ///
+    /// # Errors
+    ///
+    /// Propagates backend persistence failures.
+    fn flush(&self) -> Result<()> {
+        Ok(())
+    }
+
+    /// Discard unflushed writes from the current batch after a failed ingest or similar.
+    ///
+    /// Default is a no-op. After a successful [`Self::flush`], rollback is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Propagates backend failures while aborting the batch.
+    fn rollback(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Forward both traits through a pointer type so a store behind `Arc`, `Box` or `&` is
@@ -338,6 +365,14 @@ macro_rules! forward_object_store {
 
             fn freshen(&self, oid: &ObjectId) -> Result<bool> {
                 (**self).freshen(oid)
+            }
+
+            fn flush(&self) -> Result<()> {
+                (**self).flush()
+            }
+
+            fn rollback(&self) -> Result<()> {
+                (**self).rollback()
             }
         }
     };

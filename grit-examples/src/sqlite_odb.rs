@@ -6,6 +6,7 @@
 use std::io::{self, Read, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use flate2::read::ZlibDecoder;
@@ -27,6 +28,7 @@ pub struct SqliteOdbStore {
     algo: HashAlgo,
     compression: Compression,
     conn: Mutex<Connection>,
+    write_batch_open: AtomicBool,
 }
 
 impl SqliteOdbStore {
@@ -47,6 +49,7 @@ impl SqliteOdbStore {
             algo,
             compression: Compression::default(),
             conn: Mutex::new(conn),
+            write_batch_open: AtomicBool::new(false),
         })
     }
 
@@ -64,6 +67,7 @@ impl SqliteOdbStore {
             algo,
             compression: Compression::default(),
             conn: Mutex::new(conn),
+            write_batch_open: AtomicBool::new(false),
         })
     }
 
@@ -129,23 +133,28 @@ impl SqliteOdbStore {
         Ok(Some(zlib))
     }
 
-    fn insert_zlib(&self, oid: &ObjectId, store_bytes: &[u8]) -> Result<()> {
+    fn begin_write_batch_if_needed(&self, conn: &Connection) -> Result<()> {
+        if self.write_batch_open.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        conn.execute_batch("BEGIN IMMEDIATE").map_err(sqlite_err)?;
+        self.write_batch_open.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn insert_zlib(&self, conn: &Connection, oid: &ObjectId, store_bytes: &[u8]) -> Result<()> {
+        self.begin_write_batch_if_needed(conn)?;
         let mut zlib = Vec::new();
         {
             let mut enc = ZlibEncoder::new(&mut zlib, self.compression);
             enc.write_all(store_bytes).map_err(Error::Io)?;
             enc.finish().map_err(|e| Error::Zlib(e.to_string()))?;
         }
-        let guard = self
-            .conn
-            .lock()
-            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
-        guard
-            .execute(
-                "INSERT OR IGNORE INTO objects (oid, zlib) VALUES (?1, ?2)",
-                params![oid.as_bytes().to_vec(), zlib],
-            )
-            .map_err(sqlite_err)?;
+        conn.execute(
+            "INSERT OR IGNORE INTO objects (oid, zlib) VALUES (?1, ?2)",
+            params![oid.as_bytes().to_vec(), zlib],
+        )
+        .map_err(sqlite_err)?;
         Ok(())
     }
 }
@@ -192,6 +201,42 @@ impl ObjectStore for SqliteOdbStore {
             )
             .map_err(sqlite_err)?;
         Ok(count > 0)
+    }
+
+    fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+        if oids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let guard = self
+            .conn
+            .lock()
+            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+        let placeholders = (1..=oids.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!("SELECT oid FROM objects WHERE oid IN ({placeholders})");
+        let mut stmt = guard.prepare(&sql).map_err(sqlite_err)?;
+        let params: Vec<Vec<u8>> = oids.iter().map(|oid| oid.as_bytes().to_vec()).collect();
+        let param_refs: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(param_refs.iter()), |row| {
+                let oid_bytes: Vec<u8> = row.get(0)?;
+                Ok(oid_bytes)
+            })
+            .map_err(sqlite_err)?;
+        let mut present = vec![false; oids.len()];
+        for row in rows {
+            let oid_bytes = row.map_err(sqlite_err)?;
+            if let Some(pos) = oids
+                .iter()
+                .position(|oid| oid.as_bytes() == oid_bytes.as_slice())
+            {
+                present[pos] = true;
+            }
+        }
+        Ok(present)
     }
 
     fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
@@ -267,16 +312,41 @@ impl ObjectStore for SqliteOdbStore {
 impl WritableObjectStore for SqliteOdbStore {
     fn write(&self, kind: ObjectKind, data: &[u8], _options: WriteOptions) -> Result<ObjectId> {
         let oid = hash::hash_object(self.algo, kind, data)?;
-        if self.contains(&oid)? {
-            return Ok(oid);
-        }
         let store_bytes = build_store_bytes(kind, data);
-        self.insert_zlib(&oid, &store_bytes)?;
+        let guard = self
+            .conn
+            .lock()
+            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+        self.insert_zlib(&guard, &oid, &store_bytes)?;
         Ok(oid)
     }
 
     fn freshen(&self, oid: &ObjectId) -> Result<bool> {
         self.contains(oid)
+    }
+
+    fn flush(&self) -> Result<()> {
+        if !self.write_batch_open.swap(false, Ordering::Relaxed) {
+            return Ok(());
+        }
+        let guard = self
+            .conn
+            .lock()
+            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+        guard.execute_batch("COMMIT").map_err(sqlite_err)?;
+        Ok(())
+    }
+
+    fn rollback(&self) -> Result<()> {
+        if !self.write_batch_open.swap(false, Ordering::Relaxed) {
+            return Ok(());
+        }
+        let guard = self
+            .conn
+            .lock()
+            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+        guard.execute_batch("ROLLBACK").map_err(sqlite_err)?;
+        Ok(())
     }
 }
 
