@@ -31008,6 +31008,19 @@ impl core::marker::Unpin for grit_lib::worktree::ignore::IgnorePatternMatch
 impl core::marker::UnsafeUnpin for grit_lib::worktree::ignore::IgnorePatternMatch
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::ignore::IgnorePatternMatch
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::ignore::IgnorePatternMatch
+pub struct grit_lib::worktree::ignore::RepoPathNormalizer<'a>
+impl<'a> grit_lib::worktree::ignore::RepoPathNormalizer<'a>
+pub fn grit_lib::worktree::ignore::RepoPathNormalizer<'a>::new(&'a grit_lib::repo::Repository, &'a std::path::Path) -> grit_lib::error::Result<Self>
+pub fn grit_lib::worktree::ignore::RepoPathNormalizer<'a>::normalize(&self, &str) -> grit_lib::error::Result<alloc::string::String>
+impl<'a> core::fmt::Debug for grit_lib::worktree::ignore::RepoPathNormalizer<'a>
+pub fn grit_lib::worktree::ignore::RepoPathNormalizer<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Freeze for grit_lib::worktree::ignore::RepoPathNormalizer<'a>
+impl<'a> core::marker::Send for grit_lib::worktree::ignore::RepoPathNormalizer<'a>
+impl<'a> core::marker::Sync for grit_lib::worktree::ignore::RepoPathNormalizer<'a>
+impl<'a> core::marker::Unpin for grit_lib::worktree::ignore::RepoPathNormalizer<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::worktree::ignore::RepoPathNormalizer<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::ignore::RepoPathNormalizer<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::ignore::RepoPathNormalizer<'a>
 pub fn grit_lib::worktree::ignore::normalize_repo_relative(&grit_lib::repo::Repository, &std::path::Path, &str) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::worktree::ignore::parse_sparse_patterns_from_blob(&str) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::worktree::ignore::path_in_sparse_checkout(&str, &[alloc::string::String], core::option::Option<&std::path::Path>) -> bool
