@@ -647,19 +647,6 @@ pub fn expire_reflog_unreachable(
     Ok(pruned)
 }
 
-/// Format a reflog entry back into the on-disk line format.
-#[cfg_attr(not(test), allow(dead_code))]
-fn format_reflog_entry(entry: &ReflogEntry) -> String {
-    if entry.message.is_empty() {
-        format!("{} {} {}\n", entry.old_oid, entry.new_oid, entry.identity)
-    } else {
-        format!(
-            "{} {} {}\t{}\n",
-            entry.old_oid, entry.new_oid, entry.identity, entry.message
-        )
-    }
-}
-
 /// Extract the Unix timestamp from an identity string.
 ///
 /// Identity format: `Name <email> <timestamp> <tz>`

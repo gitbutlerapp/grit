@@ -78,7 +78,6 @@ pub fn fixup(
     let target_commit = load_commit(repo, target)?;
     let target_tree = target_commit.tree;
 
-    record_fixup_merge();
     let merge = merge_trees_three_way(
         repo,
         head_tree,
@@ -440,14 +439,6 @@ fn fixup_target_became_empty(
 ) -> Result<bool, HistoryError> {
     let parent_tree = first_parent_tree(repo, target)?;
     Ok(merged_tree == parent_tree)
-}
-
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-static FIXUP_MERGE_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0); // hygiene: merge-call counter for tests and unstable-bench-helpers
-
-fn record_fixup_merge() {
-    #[cfg(any(test, feature = "unstable-bench-helpers"))]
-    FIXUP_MERGE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Repository-relative paths that differ between the index and `HEAD`'s tree (stage 0).

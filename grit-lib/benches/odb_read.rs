@@ -24,9 +24,9 @@ fn bench_idx_lookup(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(name), idx, |b, index| {
             b.iter(|| {
                 if name.ends_with("_hit") {
-                    black_box(index.find_offset(hit));
+                    let _ = black_box(index.find_offset(hit));
                 } else {
-                    black_box(index.find_offset(miss));
+                    let _ = black_box(index.find_offset(miss));
                 }
             });
         });

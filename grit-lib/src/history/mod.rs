@@ -95,8 +95,6 @@ pub use rebase_session::{
     abort_rebase, continue_rebase, skip_rebase, start_rebase, start_rebase_with_exec, RebaseAbort,
     RebaseOutcome, RebaseSessionError, RebaseStop, StartRebaseOptions,
 };
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-pub use replay_merge_session::{test_merge_tree_call_count, test_reset_merge_tree_call_count};
 pub use reword::{normalize_rewrite_message, reword, reword_with, RewordOptions};
 pub use split::split;
 pub use squash::{squash, SquashMessage, SquashOptions};
