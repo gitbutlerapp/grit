@@ -149,6 +149,8 @@ baseline = [
   "grit-utils/baselines/filtered-revision-count.json",
   "grit-utils/baselines/daily-switch-sparse-unique-5096-before.json",
   "grit-utils/baselines/daily-switch-sparse-unique-5096-after.json",
+  "grit-utils/baselines/daily-switch-sparse-unique-5841-before.json",
+  "grit-utils/baselines/daily-switch-sparse-unique-5841-after.json",
   "grit-utils/baselines/filtered-revision-count-range.json",
   "grit-utils/baselines/revs-startup-4992.json",
   "grit-utils/baselines/ignore-normalization-dist.json",

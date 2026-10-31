@@ -2605,18 +2605,26 @@ fn checkout_commit_index_update(
     }
 }
 
-/// Record that `index_mut` now matches `tree`: keep a still-valid cache tree and point its
-/// root at `tree`, or build one from `tree` when the entry counts agree.
+/// Record that `index_mut` now matches `tree`: keep a cache tree and point its root at `tree`
+/// (a sparse index's only when its root is valid), or build one from `tree` when the entry
+/// counts agree.
 fn attach_checkout_result_cache_tree(
     repo: &Repository,
     index_mut: &mut Index,
     tree: &ObjectId,
 ) -> Result<()> {
-    if index_mut.cache_tree.is_some() {
+    let sparse = index_mut.has_sparse_directory_placeholders();
+    // A retargeted sparse-directory row leaves an invalid root behind; rebuilding it reuses every
+    // valid node and reads no excluded subtree.
+    if index_mut
+        .cache_tree
+        .as_ref()
+        .is_some_and(|root| !sparse || root.entry_count >= 0)
+    {
         index_mut.cache_tree_root = Some(*tree);
         return Ok(());
     }
-    if index_mut.has_sparse_directory_placeholders() {
+    if sparse {
         let target = crate::porcelain::index_from_tree::index_from_tree_reusing_cache_tree(
             repo, tree, index_mut,
         )?;

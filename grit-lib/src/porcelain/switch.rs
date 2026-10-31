@@ -154,16 +154,28 @@ impl SwitchOutcome {
 }
 
 fn switch_path_collisions(repo: &Repository, index: &Index) -> Result<Vec<String>> {
-    let config = repo.config()?;
-    let ignorecase = config
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
-    Ok(if ignorecase {
+    Ok(if ignores_case(repo)? {
         crate::path_icase::icase_checkout_collision_paths(index, true)
     } else {
         Vec::new()
     })
+}
+
+/// [`switch_path_collisions`] of the index on disk, read (and sparse-expanded) only when the
+/// repository ignores case.
+fn switch_path_collisions_on_disk(repo: &Repository) -> Result<Vec<String>> {
+    if !ignores_case(repo)? {
+        return Ok(Vec::new());
+    }
+    switch_path_collisions(repo, &repo.load_index()?)
+}
+
+fn ignores_case(repo: &Repository) -> Result<bool> {
+    Ok(repo
+        .config()?
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
+        .unwrap_or(false))
 }
 
 pub(crate) struct PreparedSwitch {
@@ -598,11 +610,19 @@ fn switch_to_target(
             )
         }
     };
-    crate::porcelain::index_from_tree::prepare_index_for_tree_transition(
-        repo,
-        &target_tree,
-        &mut index,
-    )?;
+    match head_tree.as_ref() {
+        Some(head) => crate::porcelain::index_from_tree::prepare_index_for_head_transition(
+            repo,
+            head,
+            &target_tree,
+            &mut index,
+        )?,
+        None => crate::porcelain::index_from_tree::prepare_index_for_tree_transition(
+            repo,
+            &target_tree,
+            &mut index,
+        )?,
+    }
     let snapshot = WorktreeSnapshot { index, head_tree };
 
     let prepared = prepare_tree_switch_allow_local_with_snapshot(repo, &target_tree, snapshot)?;
@@ -655,8 +675,7 @@ fn switch_to_target(
         }
     }
 
-    let index = repo.load_index()?;
-    let path_collisions = switch_path_collisions(repo, &index)?;
+    let path_collisions = switch_path_collisions_on_disk(repo)?;
     Ok(
         SwitchOutcome::new(branch_label, created, detached, target_oid, false, 0)
             .with_stranded(stranded)
@@ -811,6 +830,15 @@ fn plan_allow_local_tree_transition_core(
     let from_tree_ref = from_tree_oid.as_ref();
     let tree_changes = if from_tree_ref == Some(to_tree) {
         Vec::new()
+    } else if snapshot.index.has_sparse_directory_placeholders() {
+        // Only switch keeps sparse-directory rows here, and its preparation leaves each one
+        // recording the target subtree, so nothing inside them changes.
+        crate::diff::diff_trees_outside_sparse_directories(
+            repo.odb(),
+            &snapshot.index,
+            from_tree_ref,
+            Some(to_tree),
+        )?
     } else if trust_index_for_old_tree {
         crate::diff::diff_trees_with_index(
             repo.odb(),
