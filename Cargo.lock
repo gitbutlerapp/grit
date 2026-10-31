@@ -959,7 +959,6 @@ dependencies = [
  "grit-lib",
  "grit-protocol",
  "hex",
- "http-body-util",
  "rusqlite",
  "serde",
  "serde_json",
