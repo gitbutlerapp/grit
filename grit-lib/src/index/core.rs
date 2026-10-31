@@ -4145,6 +4145,9 @@ const INDEX_WRITE_CHUNK: usize = 128 * 1024;
 /// Headroom reserved past [`INDEX_WRITE_CHUNK`] so the entry that crosses it rarely reallocates.
 const INDEX_WRITE_CHUNK_SLACK: usize = 8 * 1024;
 
+/// Receives each drained chunk of a streamed index body.
+type IndexChunkSink<'a> = &'a mut dyn FnMut(&[u8]) -> io::Result<()>;
+
 /// Serialized index body under construction.
 ///
 /// Without a sink the whole body accumulates in `buf`. With a sink, `buf` is handed over and
@@ -4154,7 +4157,7 @@ const INDEX_WRITE_CHUNK_SLACK: usize = 8 * 1024;
 struct IndexBodyOut<'a> {
     buf: Vec<u8>,
     drained: usize,
-    sink: Option<&'a mut dyn FnMut(&[u8]) -> io::Result<()>>,
+    sink: Option<IndexChunkSink<'a>>,
 }
 
 impl IndexBodyOut<'_> {
