@@ -87,6 +87,8 @@ pub enum ErrorKind {
     NothingStaged,
     /// Genuinely nothing to commit (clean tree or auto-stage cancel-out).
     NothingToCommit,
+    /// Nested git checkout has no commit on its current branch (`paths`).
+    EmbeddedRepoWithoutCommit,
     /// `HEAD` is on a GitButler workspace, which GitButler rewrites; commit with `but commit`.
     #[serde(rename = "gitbutler_workspace")]
     GitButlerWorkspace,
@@ -153,6 +155,7 @@ impl ErrorKind {
             Self::GitDirPathIo,
             Self::NothingStaged,
             Self::NothingToCommit,
+            Self::EmbeddedRepoWithoutCommit,
             Self::GitButlerWorkspace,
         ]
     }

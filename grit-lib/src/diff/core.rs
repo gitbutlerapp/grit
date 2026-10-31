@@ -12254,6 +12254,43 @@ pub(crate) fn is_unregistered_embedded_git_repo(index: &Index, rel: &str, abs: &
     crate::submodule_gitdir::is_valid_git_dir(&git_dir)
 }
 
+/// Whether staging should record a gitlink, refuse, or treat the path as a normal directory.
+pub(crate) enum EmbeddedGitRepoStage {
+    /// Path is not an unregistered embedded repository.
+    NotEmbedded,
+    /// HEAD resolves to a commit that can be stored as mode `160000`.
+    Gitlink(crate::objects::ObjectId),
+}
+
+/// Classify a worktree path for embedded-repository staging.
+///
+/// Unlike [`is_unregistered_embedded_git_repo`], registered gitlinks (including unmerged
+/// conflict stages) are still checked so an unborn nested HEAD cannot collapse conflicts.
+///
+/// Returns [`EmbeddedGitRepoStage::NotEmbedded`] when the path is not a nested checkout.
+/// Returns [`EmbeddedGitRepoStage::Gitlink`] when HEAD resolves. Otherwise returns
+/// [`crate::error::Error::EmbeddedRepoWithoutCommit`].
+pub(crate) fn classify_embedded_git_repo_for_stage(
+    _index: &Index,
+    rel: &str,
+    abs: &Path,
+) -> crate::error::Result<EmbeddedGitRepoStage> {
+    if rel.is_empty() {
+        return Ok(EmbeddedGitRepoStage::NotEmbedded);
+    }
+    let Some(git_dir) = submodule_embedded_git_dir(abs) else {
+        return Ok(EmbeddedGitRepoStage::NotEmbedded);
+    };
+    if !crate::submodule_gitdir::is_valid_git_dir(&git_dir) {
+        return Ok(EmbeddedGitRepoStage::NotEmbedded);
+    }
+    let path = rel.trim_end_matches('/').to_owned();
+    match read_submodule_head_oid_for_stage(abs) {
+        Some(oid) => Ok(EmbeddedGitRepoStage::Gitlink(oid)),
+        None => Err(crate::error::Error::EmbeddedRepoWithoutCommit { path }),
+    }
+}
+
 /// Walk upward from `sub_dir` to find the nearest containing Git work tree.
 fn find_superproject_git(sub_dir: &Path) -> Option<(PathBuf, PathBuf)> {
     let mut cur = sub_dir.parent()?;
@@ -12280,14 +12317,7 @@ fn find_superproject_git(sub_dir: &Path) -> Option<(PathBuf, PathBuf)> {
     }
 }
 
-/// Read the HEAD commit OID from a submodule working tree directory.
-///
-/// Handles both embedded `.git` directories and `gitdir:` gitfiles pointing at
-/// `.git/modules/...` (or other locations). Returns `None` if the path is not
-/// a checkout or has no resolvable HEAD.
-pub fn read_submodule_head_oid(sub_dir: &Path) -> Option<ObjectId> {
-    // Submodule `.git` may be a gitfile pointing at `.git/modules/<name>` in another superproject
-    // after `cp -R`. Prefer the current superproject's module dir when present.
+fn submodule_git_dir_for_head_read(sub_dir: &Path) -> Option<PathBuf> {
     let mut git_dir = submodule_embedded_git_dir(sub_dir)?;
     if let Some((super_wt, super_git_dir)) = find_superproject_git(sub_dir) {
         let rel = sub_dir.strip_prefix(&super_wt).ok()?;
@@ -12307,31 +12337,51 @@ pub fn read_submodule_head_oid(sub_dir: &Path) -> Option<ObjectId> {
             }
         }
     }
+    Some(git_dir)
+}
+
+fn read_submodule_head_oid_from_git_dir(
+    git_dir: &Path,
+    allow_branch_fallback: bool,
+) -> Option<ObjectId> {
     let head_content = fs::read_to_string(git_dir.join("HEAD")).ok()?;
     let head_trimmed = head_content.trim();
     if head_trimmed.starts_with("ref: ") {
-        // Use the full ref resolver so packed-refs and worktrees match Git. If `HEAD` is a stale
-        // symref (e.g. still `refs/heads/master` while only `main` exists), fall back like
-        // `resolve_gitlink_ref` / `git add` on embedded repos (`t6437-submodule-merge`).
-        match crate::refs::resolve_ref(&git_dir, "HEAD") {
+        match crate::refs::resolve_ref(git_dir, "HEAD") {
             Ok(oid) => Some(oid),
-            Err(_) => {
-                let mut found = None;
+            Err(_) if allow_branch_fallback => {
                 for branch in ["main", "master"] {
                     let p = git_dir.join("refs/heads").join(branch);
                     if let Ok(s) = fs::read_to_string(&p) {
                         if let Ok(o) = ObjectId::from_hex(s.trim()) {
-                            found = Some(o);
-                            break;
+                            return Some(o);
                         }
                     }
                 }
-                found
+                None
             }
+            Err(_) => None,
         }
     } else {
         ObjectId::from_hex(head_trimmed).ok()
     }
+}
+
+/// Read the HEAD commit OID from a submodule working tree directory.
+///
+/// Handles both embedded `.git` directories and `gitdir:` gitfiles pointing at
+/// `.git/modules/...` (or other locations). Returns `None` if the path is not
+/// a checkout or has no resolvable HEAD.
+pub fn read_submodule_head_oid(sub_dir: &Path) -> Option<ObjectId> {
+    let git_dir = submodule_git_dir_for_head_read(sub_dir)?;
+    read_submodule_head_oid_from_git_dir(&git_dir, true)
+}
+
+/// Like [`read_submodule_head_oid`], but requires `HEAD` itself to resolve (no `main`/`master`
+/// fallback). Used when staging embedded repositories so a broken symref matches Git's refusal.
+pub(crate) fn read_submodule_head_oid_for_stage(sub_dir: &Path) -> Option<ObjectId> {
+    let git_dir = submodule_git_dir_for_head_read(sub_dir)?;
+    read_submodule_head_oid_from_git_dir(&git_dir, false)
 }
 
 /// True when a populated submodule checkout is *broken*: its `HEAD` resolves to a commit OID, but

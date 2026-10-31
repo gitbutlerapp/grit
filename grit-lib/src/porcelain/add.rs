@@ -11,8 +11,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::diff::{
-    empty_blob_oid, is_unregistered_embedded_git_repo, materialize_worktree_blob,
-    mode_from_metadata, read_submodule_head_oid, DiffEntry, DiffIndexToWorktreeOptions, DiffStatus,
+    classify_embedded_git_repo_for_stage, empty_blob_oid, is_unregistered_embedded_git_repo,
+    materialize_worktree_blob, mode_from_metadata, read_submodule_head_oid, DiffEntry,
+    DiffIndexToWorktreeOptions, DiffStatus, EmbeddedGitRepoStage,
 };
 use crate::error::{Error, Result};
 use crate::hash::Parallelism;
@@ -1022,14 +1023,17 @@ fn stage_unmerged_paths_matching_pathspecs(
             }
         }
         if meta.is_dir() && !meta.file_type().is_symlink() {
-            if let Some(head_oid) = read_submodule_head_oid(&abs) {
-                if dry_run {
+            match classify_embedded_git_repo_for_stage(index, rel, &abs)? {
+                EmbeddedGitRepoStage::Gitlink(head_oid) => {
+                    if dry_run {
+                        modified.push(rel.to_owned());
+                        continue;
+                    }
+                    stage_gitlink_at(rel, &meta, head_oid, index)?;
                     modified.push(rel.to_owned());
                     continue;
                 }
-                stage_gitlink_at(rel, &meta, head_oid, index)?;
-                modified.push(rel.to_owned());
-                continue;
+                EmbeddedGitRepoStage::NotEmbedded => {}
             }
             if index
                 .entries
@@ -1480,12 +1484,14 @@ fn stage_untracked_paths_parallel(
         batch_entries.reserve(blobs.len());
         for blob in blobs {
             let abs = crate::repo_relpath::worktree_abs(work_tree, &blob.index_relpath);
-            if blob.meta.is_dir()
-                && !blob.meta.file_type().is_symlink()
-                && read_submodule_head_oid(&abs).is_some()
-            {
-                deferred.push(blob.index_relpath);
-                continue;
+            if blob.meta.is_dir() && !blob.meta.file_type().is_symlink() {
+                match classify_embedded_git_repo_for_stage(index, &blob.index_relpath, &abs)? {
+                    EmbeddedGitRepoStage::Gitlink(_) => {
+                        deferred.push(blob.index_relpath);
+                        continue;
+                    }
+                    EmbeddedGitRepoStage::NotEmbedded => {}
+                }
             }
             let index_path = storage_bytes(&blob.index_relpath);
             icase_map.remove_alias_of(index, &index_path);
@@ -1575,13 +1581,12 @@ fn stage_untracked_path(
         return Ok(());
     }
 
-    if meta.is_dir() && !meta.file_type().is_symlink() && read_submodule_head_oid(&abs).is_some() {
-        let head_oid = read_submodule_head_oid(&abs).ok_or_else(|| {
-            Error::Message(format!(
-                "could not resolve submodule HEAD for '{index_relpath}'"
-            ))
-        })?;
-        return stage_gitlink_at(&index_relpath, &meta, head_oid, index);
+    if meta.is_dir() && !meta.file_type().is_symlink() {
+        if let EmbeddedGitRepoStage::Gitlink(head_oid) =
+            classify_embedded_git_repo_for_stage(index, &index_relpath, &abs)?
+        {
+            return stage_gitlink_at(&index_relpath, &meta, head_oid, index);
+        }
     }
 
     let file_attrs = rules.file_attrs(&as_utf8_for_matching(&index_relpath), false);
@@ -1880,7 +1885,7 @@ fn collect_force_ignored_untracked(
             continue;
         }
         if is_dir {
-            walk_worktree_files_under(work_tree, &rel, &mut out)?;
+            walk_worktree_files_under(index, work_tree, &rel, &mut out)?;
         } else {
             out.push(rel);
         }
@@ -1888,8 +1893,20 @@ fn collect_force_ignored_untracked(
     Ok(out)
 }
 
-fn walk_worktree_files_under(work_tree: &Path, rel_dir: &str, out: &mut Vec<String>) -> Result<()> {
-    let abs_dir = work_tree.join(rel_dir);
+fn walk_worktree_files_under(
+    index: &Index,
+    work_tree: &Path,
+    rel_dir: &str,
+    out: &mut Vec<String>,
+) -> Result<()> {
+    let rel_norm = rel_dir.trim_end_matches('/');
+    let abs_dir = work_tree.join(rel_norm);
+    if matches!(
+        classify_embedded_git_repo_for_stage(index, rel_norm, &abs_dir)?,
+        EmbeddedGitRepoStage::Gitlink(_)
+    ) {
+        return Ok(());
+    }
     let mut stack = vec![abs_dir];
     while let Some(dir) = stack.pop() {
         for entry in fs::read_dir(&dir).map_err(Error::Io)? {
@@ -1970,7 +1987,7 @@ fn stage_intent_to_add_paths(
         let meta = fs::symlink_metadata(&resolved.abs).map_err(Error::Io)?;
         if meta.is_dir() && !meta.file_type().is_symlink() {
             let mut under = Vec::new();
-            walk_worktree_files_under(work_tree, &resolved.index_relpath, &mut under)?;
+            walk_worktree_files_under(index, work_tree, &resolved.index_relpath, &mut under)?;
             file_paths.extend(under);
         } else if meta.is_file() || meta.file_type().is_symlink() {
             file_paths.insert(resolved.index_relpath);
@@ -3315,6 +3332,42 @@ mod tests {
     }
 
     #[test]
+    fn stage_refuses_embedded_repo_without_commit() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let mut index = Index::new();
+        stage_file_in_index(&repo, &mut index, "a", b"a\n");
+        write_index(&repo, &mut index);
+        let sub = root.join("tool/sub");
+        fs::create_dir_all(&sub).unwrap();
+        open_nested_repo(&sub);
+        fs::write(sub.join("main.rs"), b"fn main() {}\n").unwrap();
+        fs::write(root.join("tool/sibling.txt"), b"s\n").unwrap();
+
+        let err = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["tool".into()],
+                pathspec_sources: vec!["tool".into()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            Error::EmbeddedRepoWithoutCommit { path } if path == "tool/sub"
+        ));
+
+        let index = repo.load_index().unwrap();
+        assert!(index.get(b"tool/sub", 0).is_none());
+        assert!(index.get(b"tool/sibling.txt", 0).is_none());
+        assert_eq!(index.entries.len(), 1);
+    }
+
+    #[test]
     fn stage_all_records_unregistered_embedded_repo_as_gitlink() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
@@ -3567,6 +3620,52 @@ mod tests {
         let entry = index.get(b"sub", 0).unwrap();
         assert_eq!(entry.mode, MODE_GITLINK);
         assert_eq!(entry.oid, new_head);
+    }
+
+    #[test]
+    fn stage_unmerged_gitlink_refuses_unborn_nested_head() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let sub = root.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let sub_repo = open_nested_repo(&sub);
+        let base_oid = commit_in_repo(&sub_repo, "inside.txt", b"base\n", "base");
+        let ours_oid = commit_in_repo(&sub_repo, "inside.txt", b"ours\n", "ours");
+        let theirs_oid = commit_in_repo(&sub_repo, "inside.txt", b"theirs\n", "theirs");
+        fs::write(sub.join(".git/HEAD"), "ref: refs/heads/does-not-exist\n").unwrap();
+
+        let mut index = Index::new();
+        index
+            .entries
+            .push(conflict_index_entry("sub", 1, base_oid, MODE_GITLINK));
+        index
+            .entries
+            .push(conflict_index_entry("sub", 2, ours_oid, MODE_GITLINK));
+        index
+            .entries
+            .push(conflict_index_entry("sub", 3, theirs_oid, MODE_GITLINK));
+        write_index(&repo, &mut index);
+        let index_path = repo.git_dir().join("index");
+        let index_before = fs::read(&index_path).unwrap();
+
+        let err = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["sub".to_owned()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            Error::EmbeddedRepoWithoutCommit { path } if path == "sub"
+        ));
+        assert_eq!(fs::read(&index_path).unwrap(), index_before);
+        let index = repo.load_index().unwrap();
+        assert!(index.has_unmerged_entries());
     }
 
     #[test]

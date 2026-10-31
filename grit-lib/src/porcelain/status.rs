@@ -1750,6 +1750,12 @@ fn visit_untracked_directory(
     }
 
     if !rel.is_empty() && is_unregistered_embedded_git_repo(index, rel, abs) {
+        if check_only {
+            if let Some(out) = visible_out {
+                out.set(true);
+            }
+            return Ok(());
+        }
         untracked_out.push(format!("{rel}/"));
         return Ok(());
     }
@@ -3876,6 +3882,90 @@ mod status_op_tests {
             entries_read <= 8,
             "check-only probe must stop at the first visible entry, not scan all \
              3000 files (read {entries_read} directory entries during probe)"
+        );
+    }
+
+    fn open_nested_repo(nested_root: &std::path::Path) {
+        let git = nested_root.join(".git");
+        fs::create_dir_all(git.join("objects")).unwrap();
+        fs::create_dir_all(git.join("refs/heads")).unwrap();
+        fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            git.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn status_collapses_directory_with_embedded_repo() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        init_min_repo(root);
+
+        let nested_only = root.join("tool/sub");
+        fs::create_dir_all(&nested_only).unwrap();
+        open_nested_repo(&nested_only);
+        fs::write(nested_only.join("main.rs"), b"fn main() {}\n").unwrap();
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let normal = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+        assert_eq!(normal.untracked, vec!["tool/"]);
+
+        let all = status(
+            &repo,
+            &StatusOptions {
+                untracked: UntrackedMode::All,
+                ..StatusOptions::default()
+            },
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+        assert_eq!(all.untracked, vec!["tool/sub/"]);
+
+        let sibling = root.join("top");
+        fs::create_dir_all(sibling.join("inner")).unwrap();
+        open_nested_repo(&sibling.join("inner"));
+        fs::write(sibling.join("sib.txt"), b"y\n").unwrap();
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let normal = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+        assert_eq!(normal.untracked, vec!["tool/", "top/"]);
+
+        let all = status(
+            &repo,
+            &StatusOptions {
+                untracked: UntrackedMode::All,
+                ..StatusOptions::default()
+            },
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+        assert_eq!(
+            all.untracked,
+            vec!["tool/sub/", "top/inner/", "top/sib.txt"]
         );
     }
 

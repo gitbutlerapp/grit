@@ -378,6 +378,20 @@ fn map_add_error(err: LibError) -> anyhow::Error {
             msg.push_str("Use --force if you really want to add them.");
             anyhow::anyhow!("{msg}")
         }
+        LibError::EmbeddedRepoWithoutCommit { path } => {
+            let human =
+                format!("cannot stage '{path}': embedded git repository has no commit checked out");
+            anyhow::Error::new(crate::json_error::StructuredCliError {
+                payload: crate::json_error::StructuredJsonError {
+                    paths: Some(vec![path]),
+                    ..crate::json_error::StructuredJsonError::new(
+                        human.clone(),
+                        crate::error_kind::ErrorKind::EmbeddedRepoWithoutCommit,
+                    )
+                },
+                human,
+            })
+        }
         other => json_error::map_lib_error(other),
     }
 }

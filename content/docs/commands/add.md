@@ -29,6 +29,8 @@ Copying or cloning another Git repository into your tree (a directory that conta
 
 Touching a tracked file's timestamp without changing its bytes or mode is not a stage: `grit add` refreshes the index stat cache silently (same as Git) and reports nothing to stage.
 
+A directory that contains an embedded git repository (for example after `git init` inside the tree, or `cargo new` in a subdirectory) is staged as a **gitlink** (mode `160000`) when that nested repository has at least one commit checked out on its current branch. When the nested repository has **no commits yet**, `grit add` refuses with `embedded_repo_without_commit`, leaves the index unchanged, and does not record the path as a regular file.
+
 On Unix, explicit path operands must be valid UTF-8. An operand containing invalid UTF-8 bytes is rejected before the command runs, with exit status **2** and no changes to the repository. Human output reports the usage error on stderr; `--json` writes an error object with `kind: "usage"` on stdout, and `--markdown` writes `**Error:**` on stdout. The argument is never replaced with a similar Unicode filename.
 
 On an interactive terminal (human output, not `--json` or `--markdown`), a live **Staging** line on stderr counts the files hashed into the index; nothing is drawn when stderr is not a TTY.
