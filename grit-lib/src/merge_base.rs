@@ -833,6 +833,23 @@ pub struct ReachableWalkState {
     use_commit_graph: bool,
     /// When the hide paint may stop (see [`HidePaintStop`]).
     hide_paint_stop: HidePaintStop,
+    /// Dates the hide paint requires of every commit it pops as reachable from the tips alone.
+    left_window: Option<LeftDateWindow>,
+}
+
+/// Committer dates (Unix seconds) a [`SidePaint::compute_hiding`] paint requires of every
+/// commit it pops as reachable from the tips alone: later than `after`, no later than `until`.
+/// The paint gives up at the first commit outside them ([`SidePaint::left_outside_window`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LeftDateWindow {
+    after: i64,
+    until: i64,
+}
+
+impl LeftDateWindow {
+    fn contains(self, committed_at: i64) -> bool {
+        self.after < committed_at && committed_at <= self.until
+    }
 }
 
 /// When [`SidePaint::compute_hiding`] may stop painting.
@@ -913,6 +930,7 @@ impl ReachableWalkState {
             paint: None,
             use_commit_graph,
             hide_paint_stop: HidePaintStop::default(),
+            left_window: None,
         };
         for &tip in tips {
             if state.hide.contains(&tip) {
@@ -998,6 +1016,7 @@ impl ReachableWalkState {
             hide,
             use_commit_graph: true,
             hide_paint_stop: HidePaintStop::default(),
+            left_window: None,
         }
     }
 
@@ -1055,6 +1074,7 @@ impl ReachableWalkState {
             &pending,
             &self.hide,
             self.hide_paint_stop,
+            self.left_window,
         )?);
         Ok(())
     }
@@ -1275,11 +1295,73 @@ pub(crate) fn count_commits_left_behind(
             HidePaintStop::TipsResolvedDateSlop
         };
     }
+    drain_left_behind(&mut state, &mut cache, retain_newest)
+}
+
+/// [`count_commits_left_behind`] with `hide` missing the refs a store recorded at
+/// `recorded_at` (Unix seconds), such as the records of `packed-refs`, or `None` when the
+/// answer could differ from the one the full hide set gives.
+///
+/// A recorded ref names a commit that existed at `recorded_at`, so everything it reaches was
+/// made before then and, within the clock-skew allowance the date-slop paint already relies on
+/// ([`UNRANKED_SKEW_ALLOWANCE`]), is dated at most that much after it. When every commit left
+/// behind is dated later than that, the omitted refs reach none of them. A commit dated more
+/// than the allowance past `now` says nothing about when it was made, so it ends the shortcut
+/// too. The paint stops at the first commit outside those dates, so a `None` costs no more
+/// than the history dated after `recorded_at`.
+///
+/// Also `None` when the walk does not end by date: with a commit-graph (whose exact paint
+/// needs no reads for the omitted tips), grafts, replace refs or shallow boundaries. Like
+/// [`count_commits_left_behind`] without a commit-graph, the count can be wrong under heavy
+/// clock skew.
+///
+/// # Errors
+///
+/// Propagates commit read and parse errors from the walk.
+pub(crate) fn count_commits_left_behind_after(
+    repo: &Repository,
+    tips: &[ObjectId],
+    hide: &[ObjectId],
+    retain_newest: usize,
+    recorded_at: i64,
+    now: i64,
+) -> Result<Option<(usize, Vec<ObjectId>)>> {
+    let mut cache = CommitGraphCache::new(repo);
+    if hide.is_empty()
+        || cache.graph.is_some()
+        || !cache.shallow_boundaries.is_empty()
+        || cache.has_parent_rewrites()?
+    {
+        return Ok(None);
+    }
+    let allowance = UNRANKED_SKEW_ALLOWANCE.whole_seconds();
+    let mut state = ReachableWalkState::new(repo, tips, hide)?;
+    state.hide_paint_stop = HidePaintStop::TipsResolvedDateSlop;
+    state.left_window = Some(LeftDateWindow {
+        after: recorded_at.saturating_add(allowance),
+        until: now.saturating_add(allowance),
+    });
+    state.ensure_paint(&mut cache)?;
+    if state
+        .paint
+        .as_ref()
+        .is_none_or(|paint| paint.left_outside_window)
+    {
+        return Ok(None);
+    }
+    drain_left_behind(&mut state, &mut cache, retain_newest).map(Some)
+}
+
+/// Emit every commit `state` leaves after its hide paint: the full count and the newest
+/// `retain_newest` of them.
+fn drain_left_behind(
+    state: &mut ReachableWalkState,
+    cache: &mut CommitGraphCache<'_>,
+    retain_newest: usize,
+) -> Result<(usize, Vec<ObjectId>)> {
     let mut newest = Vec::new();
     let mut total = 0usize;
-    while let Some(oid) =
-        state.pop_next_emit(&mut cache, ReachableWalkCommitterCutoffs::default())?
-    {
+    while let Some(oid) = state.pop_next_emit(cache, ReachableWalkCommitterCutoffs::default())? {
         total += 1;
         if newest.len() < retain_newest {
             newest.push(oid);
@@ -1396,9 +1478,11 @@ pub fn count_commits_reachable_excluding_ancestors_of(
     let paint = match (generations_bound_paint, filter.first_parent_only) {
         (true, true) => SidePaint::compute_hiding_first_parent(&mut cache, tips, hide)?,
         (true, false) => {
-            SidePaint::compute_hiding(&mut cache, tips, hide, HidePaintStop::TipsResolved)?
+            SidePaint::compute_hiding(&mut cache, tips, hide, HidePaintStop::TipsResolved, None)?
         }
-        (false, _) => SidePaint::compute_hiding(&mut cache, tips, hide, HidePaintStop::Converged)?,
+        (false, _) => {
+            SidePaint::compute_hiding(&mut cache, tips, hide, HidePaintStop::Converged, None)?
+        }
     };
     if unfiltered && !filter.first_parent_only {
         return Ok(paint.count_only(PAINT_LEFT));
@@ -2072,6 +2156,9 @@ const PAINT_BOTH: u8 = PAINT_LEFT | PAINT_RIGHT;
 #[derive(Clone, Debug, Default)]
 struct SidePaint {
     sides: OidHashMap<u8>,
+    /// The paint stopped at a commit reachable from the left side alone dated outside its
+    /// [`LeftDateWindow`], so `sides` is incomplete.
+    left_outside_window: bool,
 }
 
 impl SidePaint {
@@ -2100,8 +2187,10 @@ impl SidePaint {
         tips: &[ObjectId],
         hide: &[ObjectId],
         stop: HidePaintStop,
+        left_window: Option<LeftDateWindow>,
     ) -> Result<Self> {
         let walk = PaintWalk {
+            left_window,
             skip_missing_right: true,
             open_while_left_only: matches!(
                 stop,
@@ -2166,6 +2255,16 @@ impl SidePaint {
             }
             walk.popped.insert(node.oid);
             let side = walk.sides.get(&node.oid).copied().unwrap_or(0);
+            if side == PAINT_LEFT
+                && walk
+                    .left_window
+                    .is_some_and(|window| !window.contains(node.committed_at))
+            {
+                return Ok(Self {
+                    sides: walk.sides,
+                    left_outside_window: true,
+                });
+            }
             if walk.date_slop && side == PAINT_LEFT && node.rank == UNRANKED_COMMIT {
                 walk.left_floor = Some(
                     walk.left_floor
@@ -2181,7 +2280,10 @@ impl SidePaint {
                 walk.mark(cache, parent, side)?;
             }
         }
-        Ok(Self { sides: walk.sides })
+        Ok(Self {
+            sides: walk.sides,
+            left_outside_window: false,
+        })
     }
 
     /// Number of painted commits reachable from `side` only.
@@ -2203,7 +2305,10 @@ impl SidePaint {
                 (oid, flipped)
             })
             .collect();
-        Self { sides }
+        Self {
+            sides,
+            left_outside_window: self.left_outside_window,
+        }
     }
 
     /// Whether `side` reaches `oid`, or [`None`] when the walk never painted it.
@@ -2236,6 +2341,8 @@ struct PaintWalk {
     left_floor: Option<i64>,
     /// Pass the left paint to first parents only ([`SidePaint::compute_hiding_first_parent`]).
     left_first_parent_only: bool,
+    /// Stop when a commit popped as reachable from the left side alone is dated outside it.
+    left_window: Option<LeftDateWindow>,
 }
 
 /// Commits a [`HidePaintStop::TipsResolvedDateSlop`] paint pops past its date guard, so a hide
@@ -5098,6 +5205,90 @@ mod tests {
             let child = write_commit_same_time(&repo.odb(), &[wip], "child", 9_000_100)?;
             hide.push(child);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn left_behind_walk_after_a_recording_reads_none_of_the_recorded_tips() -> Result<()> {
+        use super::intersect_walk_test_hooks::{
+            commit_parent_lookups, reset_commit_parent_lookups,
+        };
+        const DAY: i64 = 86_400;
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let history = write_many_tags(&repo, 2 * PRIME_TIPS_MIN)?;
+        let tip = *history.trunk.last().expect("trunk");
+        let repo = packed_over_refs(&dir, repo, &history.refs)?;
+        let recorded_at = 5_000_000;
+        let now = recorded_at + 30 * DAY;
+        let hide: Vec<ObjectId> = history.refs.iter().map(|(_, oid)| *oid).collect();
+        let wip = write_commit_same_time(&repo.odb(), &[tip], "wip", recorded_at + 2 * DAY)?;
+        let next = write_commit_same_time(&repo.odb(), &[wip], "next", recorded_at + 3 * DAY)?;
+
+        for tips in [vec![wip], vec![next]] {
+            clear_commit_linkage(&repo);
+            let full = count_commits_left_behind(&repo, &tips, &hide, 20)?;
+            clear_commit_linkage(&repo);
+            reset_commit_parent_lookups();
+            let after =
+                count_commits_left_behind_after(&repo, &tips, &[tip], 20, recorded_at, now)?;
+            assert_eq!(after, Some(full), "{tips:?}");
+            assert!(
+                commit_parent_lookups() < 16,
+                "the recorded tags must not be read: {} lookups",
+                commit_parent_lookups()
+            );
+        }
+        assert_eq!(
+            count_commits_left_behind_after(&repo, &[next], &[tip], 1, recorded_at, now)?,
+            Some((2, vec![next]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn left_behind_walk_after_a_recording_gives_up_outside_its_dates() -> Result<()> {
+        const DAY: i64 = 86_400;
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let history = write_many_tags(&repo, 4)?;
+        let tip = *history.trunk.last().expect("trunk");
+        let repo = packed_over_refs(&dir, repo, &history.refs)?;
+        let recorded_at = 5_000_000;
+        let now = recorded_at + 30 * DAY;
+        let left = |time: i64| -> Result<Option<(usize, Vec<ObjectId>)>> {
+            let wip = write_commit_same_time(&repo.odb(), &[tip], "wip", time)?;
+            clear_commit_linkage(&repo);
+            count_commits_left_behind_after(&repo, &[wip], &[tip], 20, recorded_at, now)
+        };
+        // Within the skew allowance of the recording, or more than it past `now`.
+        assert_eq!(left(recorded_at + DAY / 2)?, None);
+        assert_eq!(left(recorded_at + DAY)?, None);
+        assert_eq!(left(now + 2 * DAY)?, None);
+        assert!(left(recorded_at + DAY + 1)?.is_some());
+        assert!(left(now + DAY)?.is_some());
+
+        // An older commit further down the left-behind history stops the walk too.
+        let old = write_commit_same_time(&repo.odb(), &[tip], "old", recorded_at - DAY)?;
+        let fresh = write_commit_same_time(&repo.odb(), &[old], "fresh", recorded_at + 2 * DAY)?;
+        clear_commit_linkage(&repo);
+        assert_eq!(
+            count_commits_left_behind_after(&repo, &[fresh], &[tip], 20, recorded_at, now)?,
+            None
+        );
+
+        // Grafts rewrite parents, so a recorded ref could reach anything.
+        std::fs::create_dir_all(repo.git_dir().join("info"))?;
+        std::fs::write(
+            repo.git_dir().join("info/grafts"),
+            format!("{} {}\n", history.trunk[1], history.trunk[0]),
+        )?;
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let wip = write_commit_same_time(&repo.odb(), &[tip], "grafted", recorded_at + 2 * DAY)?;
+        assert_eq!(
+            count_commits_left_behind_after(&repo, &[wip], &[tip], 20, recorded_at, now)?,
+            None
+        );
         Ok(())
     }
 

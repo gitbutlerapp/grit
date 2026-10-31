@@ -215,6 +215,17 @@ impl FilesRefStore {
         Ok(guard.file.clone())
     }
 
+    /// When the common dir's `packed-refs` was last written (`None` without one).
+    ///
+    /// Writers publish the file by renaming a new one over it, so this reads the metadata
+    /// afresh: after any read through this store it can only be later than the write of the
+    /// records that read saw, never earlier.
+    pub(crate) fn packed_refs_written_at(&self) -> Option<std::time::SystemTime> {
+        fs::metadata(super::paths::packed_refs_path(&self.common_dir))
+            .and_then(|meta| meta.modified())
+            .ok()
+    }
+
     fn lookup_packed_oid(&self, storage_name: &str) -> Result<Option<ObjectId>> {
         self.refresh_packed_cache_if_stale()?;
         let guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());

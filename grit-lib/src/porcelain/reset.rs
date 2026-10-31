@@ -58,6 +58,9 @@ pub struct ResetOptions {
     /// Soft, mixed (default), hard, or keep reset.
     pub mode: ResetMode,
     /// Committer recorded on reset reflog entries (name, email, and timestamp).
+    ///
+    /// The timestamp also stands for the current time in the orphaned-commit report: commits
+    /// dated more than a day after it make the report read every ref it hides behind.
     pub identity: Signature,
     /// Reflog message (e.g. `reset: moving to HEAD~1`).
     pub message: String,
@@ -278,6 +281,7 @@ fn plan_reset(
         previous,
         opts.target,
         opts.effective_orphan_limit(),
+        Some(opts.identity.time.unix_timestamp()),
     )?;
 
     Ok((
@@ -1465,10 +1469,113 @@ mod tests {
         git(root, &["fsck", "--strict", "--no-dangling"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn orphan_count_matches_git_rev_list_with_tags_packed_before_the_new_work() {
+        const DAY: i64 = 86_400;
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let old_date = format!("@{} +0000", now - 5 * DAY);
+        let old = [
+            ("GIT_COMMITTER_DATE", old_date.as_str()),
+            ("GIT_AUTHOR_DATE", old_date.as_str()),
+        ];
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        git(root, &["init", "-q", "-b", "main", "."]);
+        let mut trunk = Vec::new();
+        for i in 1..=100 {
+            git_env(
+                root,
+                &old,
+                &["commit", "-q", "--allow-empty", "-m", &format!("c{i}")],
+            );
+            trunk.push(git(root, &["rev-parse", "HEAD"]).trim().to_owned());
+            if i <= 75 {
+                git_env(root, &old, &["tag", &format!("t{i}")]);
+            }
+        }
+        git_env(
+            root,
+            &old,
+            &["tag", "-a", "-m", "keep", "old-keep", &trunk[74]],
+        );
+        git(root, &["pack-refs", "--all"]);
+        // A clone or `pack-refs` four days ago, after the history it records.
+        let packed = root.join(".git/packed-refs");
+        std::fs::File::options()
+            .write(true)
+            .open(&packed)
+            .expect("packed-refs")
+            .set_modified(
+                std::time::SystemTime::UNIX_EPOCH
+                    + std::time::Duration::from_secs(u64::try_from(now - 4 * DAY).expect("time")),
+            )
+            .expect("mtime");
+        for i in 1..=3 {
+            git(
+                root,
+                &["commit", "-q", "--allow-empty", "-m", &format!("local{i}")],
+            );
+        }
+        let local1 = git(root, &["rev-parse", "HEAD~2"]).trim().to_owned();
+        let open = || {
+            Repository::open(
+                &root.join(".git"),
+                &crate::environment::RepositoryOptions::empty().with_work_tree(root),
+            )
+            .expect("open")
+        };
+        let check = |target: &str, label: &str| {
+            let mut opts = reset_opts(ObjectId::from_hex(target).expect("oid"), ResetMode::Soft);
+            opts.identity = format!("T <t@t> {now} +0000").parse().expect("identity");
+            opts.orphan_limit = 100;
+            let preview = preview_reset(&open(), &opts).expect("preview");
+            let mut expected: Vec<ObjectId> = git(
+                root,
+                &[
+                    "rev-list",
+                    "main",
+                    "--not",
+                    "--exclude=main",
+                    "--branches",
+                    "--tags",
+                    target,
+                ],
+            )
+            .lines()
+            .map(|l| ObjectId::from_hex(l).expect("oid"))
+            .collect();
+            let mut got: Vec<ObjectId> = preview.orphaned_commits.iter().map(|c| c.oid).collect();
+            assert_eq!(preview.orphaned_total, expected.len(), "{label}");
+            got.sort_unstable();
+            expected.sort_unstable();
+            assert_eq!(got, expected, "{label}");
+            preview.orphaned_total
+        };
+
+        // Only the new commits are left behind: the packed tags cannot hold them.
+        assert_eq!(check(&trunk[99], "undo the new work"), 3);
+        // The walk reaches history from before `packed-refs`, so the packed tags count again:
+        // `old-keep` holds c75 and below.
+        assert_eq!(check(&trunk[59], "reset into packed history"), 28);
+        // A loose tag made after the packing holds what it points at.
+        git(root, &["tag", "-a", "-m", "keep", "keep-local1", &local1]);
+        assert_eq!(check(&trunk[99], "loose tag on new work"), 2);
+        assert_eq!(check(&trunk[59], "loose tag over packed history"), 2);
+    }
+
     fn git(dir: &std::path::Path, args: &[&str]) -> String {
+        git_env(dir, &[], args)
+    }
+
+    fn git_env(dir: &std::path::Path, env: &[(&str, &str)], args: &[&str]) -> String {
         let out =
             grit_test_support::merge_git_config_env(&mut std::process::Command::new("git"), &[])
                 .current_dir(dir)
+                .envs(env.iter().copied())
                 .args(args)
                 .env("GIT_CONFIG_GLOBAL", "/dev/null")
                 .env("GIT_CONFIG_SYSTEM", "/dev/null")

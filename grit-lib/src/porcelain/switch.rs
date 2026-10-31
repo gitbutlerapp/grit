@@ -733,7 +733,7 @@ fn stranded_by_leaving_detached_head(
     let HeadState::Detached { oid: previous } = head else {
         return Ok(OrphanComputation::default());
     };
-    compute_orphan_info(repo, head, *previous, target, DEFAULT_ORPHAN_LIMIT)
+    compute_orphan_info(repo, head, *previous, target, DEFAULT_ORPHAN_LIMIT, None)
 }
 
 fn count_unique_tree_change_paths(tree_changes: &[DiffEntry]) -> usize {

@@ -2253,9 +2253,6 @@ impl PackedRefPeels {
             return empty;
         };
         let peel_trait = view.peel_trait;
-        if peel_trait == PackedPeelTrait::None {
-            return empty;
-        }
         let unsorted = (!view.sorted).then(|| {
             view.records()
                 .map(|start| (Box::<[u8]>::from(view.record_name(start)), start))
@@ -2287,6 +2284,15 @@ impl PackedRefPeels {
         if !self.peel_trait.covers(refname) {
             return None;
         }
+        self.record(refname, oid)?.peeled
+    }
+
+    /// What `packed-refs` says about `refname` when it records `oid`, the ref's current value.
+    ///
+    /// Answers whatever the peel trait, so it also tells a listing which values come from (or
+    /// agree with) `packed-refs`. `None` when the file has no record for `refname` or records
+    /// another value (a loose ref overrides it).
+    pub(crate) fn record(&self, refname: &str, oid: &ObjectId) -> Option<PackedRecord> {
         let view = self.view.as_ref()?;
         let start = match &self.unsorted {
             Some(map) => *map.get(refname.as_bytes())?,
@@ -2305,8 +2311,20 @@ impl PackedRefPeels {
         };
         let hex = std::str::from_utf8(&view.data[start..start + view.hex_len]).ok()?;
         let packed_oid = ObjectId::from_hex(hex).ok()?;
-        (packed_oid == *oid).then(|| peel_oid_following_line(&view.data, start))
+        (packed_oid == *oid).then(|| PackedRecord {
+            peeled: self
+                .peel_trait
+                .covers(refname)
+                .then(|| peel_oid_following_line(&view.data, start)),
+        })
     }
+}
+
+/// A `packed-refs` record that holds a ref's current value ([`PackedRefPeels::record`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PackedRecord {
+    /// Same as [`PackedRefPeels::peeled`]: `None` when the peel trait does not cover the ref.
+    pub(crate) peeled: Option<Option<ObjectId>>,
 }
 
 /// The peel guarantee declared by the `# pack-refs with:` header of `text`.

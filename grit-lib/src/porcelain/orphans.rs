@@ -6,7 +6,9 @@
 use crate::change_id::resolved_change_id;
 use crate::error::Result;
 use crate::git_path::path_for_disk_compare;
-use crate::merge_base::{count_commits_left_behind, is_ancestor_unless_rewound};
+use crate::merge_base::{
+    count_commits_left_behind, count_commits_left_behind_after, is_ancestor_unless_rewound,
+};
 use crate::objects::{parse_commit, read_commit_subject_line, ObjectId};
 use crate::refs;
 use crate::repo::Repository;
@@ -50,6 +52,11 @@ pub(crate) struct OrphanComputation {
 /// wrong under heavy clock skew (a ref reaching a commit through history dated more than a
 /// day before it). The report is advisory; nothing is written based on it.
 ///
+/// With `now` (Unix seconds), the walk first leaves out the refs `packed-refs` records and
+/// keeps that answer when every commit left behind is dated well after the file was written
+/// ([`count_commits_left_behind_after`]): a fresh commit undone in a repository with
+/// hundreds of packed tags then reads none of the tagged commits.
+///
 /// # Errors
 ///
 /// Ref listing, worktree listing, or commit reads fail.
@@ -59,13 +66,23 @@ pub(crate) fn compute_orphan_info(
     previous: ObjectId,
     target: ObjectId,
     limit: usize,
+    now: Option<i64>,
 ) -> Result<OrphanComputation> {
     if previous == target || is_ancestor_unless_rewound(repo, previous, target)? {
         return Ok(OrphanComputation::default());
     }
+    let tips = std::slice::from_ref(&previous);
     let hide = orphan_hide_tips(repo, head, target)?;
-    let (total, oids) =
-        count_commits_left_behind(repo, std::slice::from_ref(&previous), &hide, limit)?;
+    let bounded = match (now, hide.packed_written_at) {
+        (Some(now), Some(written_at)) if !hide.packed.is_empty() => {
+            count_commits_left_behind_after(repo, tips, &hide.unpacked, limit, written_at, now)?
+        }
+        _ => None,
+    };
+    let (total, oids) = match bounded {
+        Some(found) => found,
+        None => count_commits_left_behind(repo, tips, &hide.all(), limit)?,
+    };
     let truncated = total > oids.len();
     let commits = oids
         .into_iter()
@@ -78,11 +95,31 @@ pub(crate) fn compute_orphan_info(
     })
 }
 
+/// The tips that keep commits reachable once `HEAD` moves, split by where their value is
+/// recorded.
+struct OrphanHideTips {
+    /// Refs whose value `packed-refs` records.
+    packed: Vec<ObjectId>,
+    /// `target`, loose refs, `refs/stash` and other worktrees' `HEAD`s.
+    unpacked: Vec<ObjectId>,
+    /// When `packed-refs` was last written (Unix seconds, rounded up), read after the listing.
+    packed_written_at: Option<i64>,
+}
+
+impl OrphanHideTips {
+    fn all(&self) -> Vec<ObjectId> {
+        let mut all = [self.packed.as_slice(), self.unpacked.as_slice()].concat();
+        all.sort_unstable();
+        all.dedup();
+        all
+    }
+}
+
 fn orphan_hide_tips(
     repo: &Repository,
     head: &HeadState,
     target: ObjectId,
-) -> Result<Vec<ObjectId>> {
+) -> Result<OrphanHideTips> {
     let moving_branch = match head {
         HeadState::Branch { refname, .. } => Some(refname.as_str()),
         _ => None,
@@ -90,20 +127,25 @@ fn orphan_hide_tips(
     // Tips stay unpeeled: the walk peels each one once and skips those that name no commit.
     // A `packed-refs` peel line already names the tag's target, so that tag is never read.
     // A malformed `packed-refs` only loses the shortcut.
-    let packed = refs::PackedRefPeels::for_store(repo.refs(), repo.git_dir()).ok();
+    let listed = refs::list_refs_for_repository(repo, "refs/")?;
+    let peels = refs::PackedRefPeels::for_store(repo.refs(), repo.git_dir()).ok();
+    let packed_written_at = repo
+        .refs()
+        .as_files()
+        .and_then(|files| files.packed_refs_written_at())
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|age| i64::try_from(age.as_secs() + u64::from(age.subsec_nanos() > 0)).ok());
+    let mut packed = Vec::new();
     let mut hide = vec![target];
-    hide.extend(
-        refs::list_refs_for_repository(repo, "refs/")?
-            .into_iter()
-            .filter(|(refname, _)| moving_branch != Some(refname.as_str()))
-            .map(|(refname, oid)| {
-                packed
-                    .as_ref()
-                    .and_then(|p| p.peeled(&refname, &oid))
-                    .flatten()
-                    .unwrap_or(oid)
-            }),
-    );
+    for (refname, oid) in listed {
+        if moving_branch == Some(refname.as_str()) {
+            continue;
+        }
+        match peels.as_ref().and_then(|p| p.record(&refname, &oid)) {
+            Some(record) => packed.push(record.peeled.flatten().unwrap_or(oid)),
+            None => hide.push(oid),
+        }
+    }
     if let Ok(oid) = repo.resolve_ref_oid("refs/stash") {
         hide.push(oid);
     }
@@ -120,7 +162,11 @@ fn orphan_hide_tips(
     }
     hide.sort_unstable();
     hide.dedup();
-    Ok(hide)
+    Ok(OrphanHideTips {
+        packed,
+        unpacked: hide,
+        packed_written_at,
+    })
 }
 
 /// True when this listed worktree is the one whose `HEAD` ref or file is being moved.
