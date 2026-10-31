@@ -1,13 +1,10 @@
 //! `grit ignore check` — query whether paths match exclude rules.
 
-use std::io::Write;
-use std::path::Path;
-
 use anyhow::{bail, Context, Result};
-use grit_lib::repo::Repository;
-use grit_lib::worktree::ignore::{normalize_repo_relative, IgnoreMatch, IgnoreSource};
+use grit_lib::worktree::ignore::{IgnoreMatch, IgnoreSource, RepoPathNormalizer};
 use schemars::JsonSchema;
 use serde::Serialize;
+use std::io::Write;
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
@@ -45,22 +42,24 @@ pub enum IgnoreSourceJson {
     CoreExcludesFile { path: String },
 }
 
-impl From<&IgnoreSource> for IgnoreSourceJson {
-    fn from(value: &IgnoreSource) -> Self {
+impl From<IgnoreSource> for IgnoreSourceJson {
+    fn from(value: IgnoreSource) -> Self {
         match value {
-            IgnoreSource::PerDirectory(path) => Self::PerDirectory { path: path.clone() },
+            IgnoreSource::PerDirectory(path) => Self::PerDirectory { path },
             IgnoreSource::InfoExclude => Self::InfoExclude,
-            IgnoreSource::CoreExcludesFile(path) => Self::CoreExcludesFile { path: path.clone() },
+            IgnoreSource::CoreExcludesFile(path) => Self::CoreExcludesFile { path },
         }
     }
 }
 
-fn match_to_json(m: &IgnoreMatch) -> IgnoreMatchJson {
-    IgnoreMatchJson {
-        source: (&m.source).into(),
-        line_number: m.line_number,
-        pattern_text: m.pattern_text.clone(),
-        negative: m.negative,
+impl From<IgnoreMatch> for IgnoreMatchJson {
+    fn from(m: IgnoreMatch) -> Self {
+        Self {
+            source: m.source.into(),
+            line_number: m.line_number,
+            pattern_text: m.pattern_text,
+            negative: m.negative,
+        }
     }
 }
 
@@ -138,33 +137,29 @@ pub fn run(paths: &[String], all: bool) -> Result<IgnoreCheckOutcome> {
         .index_handle()
         .load()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let repo_paths = normalize_paths(&repo, &cwd, paths)?;
+    let normalizer = RepoPathNormalizer::new(&repo, &cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let repo_paths = paths
+        .iter()
+        .map(|path| normalizer.normalize(path))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     let checks = repo
         .ignore_check(&repo_paths, &index)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     let any_ignored = checks.iter().any(|c| c.ignored);
     let entries: Vec<IgnoreCheckEntryJson> = checks
-        .iter()
+        .into_iter()
         .filter(|c| all || c.ignored)
         .map(|c| IgnoreCheckEntryJson {
-            path: c.path.clone(),
+            path: c.path,
             ignored: c.ignored,
-            matched: c.matched.as_ref().map(match_to_json),
+            matched: c.matched.map(Into::into),
         })
         .collect();
     Ok(IgnoreCheckOutcome {
         any_ignored,
         entries,
     })
-}
-
-fn normalize_paths(repo: &Repository, cwd: &Path, paths: &[String]) -> Result<Vec<String>> {
-    let mut out = Vec::with_capacity(paths.len());
-    for path in paths {
-        let rel = normalize_repo_relative(repo, cwd, path).map_err(|e| anyhow::anyhow!("{e}"))?;
-        out.push(rel);
-    }
-    Ok(out)
 }
 
 /// Exit **0** when at least one path is ignored, **1** when none are.
