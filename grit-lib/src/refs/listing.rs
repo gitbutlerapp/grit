@@ -35,9 +35,10 @@ use crate::error::Error;
 use crate::ident::committer_unix_seconds_for_ordering_bytes;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::refs::query_reachability::{self, ReachRow};
 use crate::refs::store::{RefEntry, RefStore};
 use crate::refs::version_sort::compare_refname_versions;
-use crate::refs::{query_reachability, PackedRefPeels};
+use crate::refs::PackedRefPeels;
 use crate::repo::Repository;
 use crate::wildmatch::{wildmatch, WM_CASEFOLD};
 
@@ -674,32 +675,39 @@ fn finish_query(
     repo: Option<&Repository>,
     peel: PeelTips,
 ) -> QueryResult<Vec<RefListing>> {
-    let bounded_contains = query_reachability::can_bound_contains(query);
-    let peel = (peel == PeelTips::Always || query_has_reachability(query)) && !bounded_contains;
-    if let Some(odb) = odb.filter(|_| peel) {
-        // A malformed `packed-refs` only loses the shortcut; peeling falls back to the objects.
-        let to_peel = collected.iter().filter(|c| c.peeled.is_none()).count();
-        let packed = repo
-            .filter(|_| to_peel >= PACKED_PEELS_MIN_REFS)
-            .and_then(|r| PackedRefPeels::for_store(r.refs(), r.git_dir()).ok());
+    if query_has_reachability(query) {
+        // Filtering peels the tips it judges, so only the refs it keeps without having
+        // peeled them are peeled afterwards; each tip's header is read once.
+        let repo = repo.ok_or(RefQueryError::MissingObjectDatabase)?;
+        let packed = packed_peels_for(repo, &collected);
+        let mut rows: Vec<ReachRow> = collected
+            .iter()
+            .map(|c| ReachRow {
+                oid: c.oid,
+                peeled: c
+                    .peeled
+                    .map(Some)
+                    .or_else(|| packed.as_ref().and_then(|p| p.peeled(&c.full_name, &c.oid))),
+            })
+            .collect();
+        let keep = query_reachability::filter_listings_by_reachability(repo, query, &mut rows)?;
+        let mut verdicts = keep.into_iter().zip(rows);
+        collected.retain_mut(|entry| {
+            let Some((keep, row)) = verdicts.next() else {
+                return false;
+            };
+            if keep {
+                match row.peeled {
+                    Some(peeled) => entry.peeled = peeled,
+                    None => fill_peeled(repo.odb(), None, entry),
+                }
+            }
+            keep
+        });
+    } else if let Some(odb) = odb.filter(|_| peel == PeelTips::Always) {
+        let packed = repo.and_then(|r| packed_peels_for(r, &collected));
         for entry in &mut collected {
             fill_peeled(odb, packed.as_ref(), entry);
-        }
-    }
-    if query_has_reachability(query) {
-        let repo = repo.ok_or(RefQueryError::MissingObjectDatabase)?;
-        let mut reach_rows: Vec<(String, ObjectId, Option<ObjectId>)> = collected
-            .iter()
-            .map(|c| (c.full_name.clone(), c.oid, c.peeled))
-            .collect();
-        query_reachability::filter_listings_by_reachability(repo, query, &mut reach_rows)?;
-        let keep: std::collections::HashSet<String> =
-            reach_rows.into_iter().map(|(name, _, _)| name).collect();
-        collected.retain(|c| keep.contains(&c.full_name));
-        if bounded_contains {
-            for entry in &mut collected {
-                fill_peeled(repo.odb(), None, entry);
-            }
         }
     }
     if matches!(query.sort.key, SortKey::Date) {
@@ -741,6 +749,17 @@ fn finish_query(
 /// Loading the peel lines indexes the whole file, which in a repository with many packed
 /// refs costs more than a handful of object-header reads.
 pub(crate) const PACKED_PEELS_MIN_REFS: usize = 64;
+
+/// `packed-refs` peel lines for `collected`, when enough refs lack a peel to pay for them.
+///
+/// A malformed `packed-refs` only loses the shortcut; peeling falls back to the objects.
+fn packed_peels_for(repo: &Repository, collected: &[CollectedRef]) -> Option<PackedRefPeels> {
+    let to_peel = collected.iter().filter(|c| c.peeled.is_none()).count();
+    if to_peel < PACKED_PEELS_MIN_REFS {
+        return None;
+    }
+    PackedRefPeels::for_store(repo.refs(), repo.git_dir()).ok()
+}
 
 /// Set `entry.peeled` for annotated tags, preferring `packed-refs` peel lines over
 /// reading the tag object.
