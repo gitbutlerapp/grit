@@ -320,7 +320,9 @@ fn switch_worktree_clean_for_paths(
             BlobDiskLookup::Missing => {
                 dirty.insert(String::from_utf8_lossy(&ie.path).into_owned());
             }
-            BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+            BlobDiskLookup::Io(_) => {
+                dirty.insert(String::from_utf8_lossy(&ie.path).into_owned());
+            }
             BlobDiskLookup::Present(stat) => {
                 let mismatch = if ie.mode == MODE_GITLINK {
                     !stat.is_dir

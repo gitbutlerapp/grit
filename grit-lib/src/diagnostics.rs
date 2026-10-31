@@ -219,6 +219,13 @@ pub enum Warning {
         /// Why the value or operation was rejected.
         reason: String,
     },
+    /// A work-tree path could not be accessed (for example permission denied); the scan continued.
+    WorktreeAccessFailed {
+        /// Repository-relative path (directories often end with `/`).
+        path: String,
+        /// OS error detail.
+        detail: String,
+    },
 }
 
 /// Optional trace events (network debugging, etc.), separate from [`Warning`].

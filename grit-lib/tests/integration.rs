@@ -1867,6 +1867,9 @@ mod status_tracked_listing_git_compat;
 #[path = "status_unmerged_kinds_git_compat.rs"]
 mod status_unmerged_kinds_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "status_unreadable_directory_2361.rs"]
+mod status_unreadable_directory_2361;
+#[cfg(feature = "full-tests")]
 #[path = "status_unreadable_tracked_file_2107.rs"]
 mod status_unreadable_tracked_file_2107;
 #[cfg(feature = "full-tests")]

@@ -3224,6 +3224,9 @@ pub grit_lib::diagnostics::Warning::SubmoduleMultipleConfigs::name: alloc::strin
 pub grit_lib::diagnostics::Warning::SubmoduleMultipleConfigs::option: alloc::string::String
 pub grit_lib::diagnostics::Warning::SuspiciousSubmoduleName
 pub grit_lib::diagnostics::Warning::SuspiciousSubmoduleName::name: alloc::string::String
+pub grit_lib::diagnostics::Warning::WorktreeAccessFailed
+pub grit_lib::diagnostics::Warning::WorktreeAccessFailed::detail: alloc::string::String
+pub grit_lib::diagnostics::Warning::WorktreeAccessFailed::path: alloc::string::String
 impl core::clone::Clone for grit_lib::diagnostics::Warning
 pub fn grit_lib::diagnostics::Warning::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::diagnostics::Warning
@@ -4828,6 +4831,7 @@ pub struct grit_lib::diff::DiffIndexToWorktreeOptions
 pub grit_lib::diff::DiffIndexToWorktreeOptions::cancel_watch: core::option::Option<alloc::rcs::arc::Arc<core::sync::atomic::AtomicBool>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::command_runner: core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::config: core::option::Option<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
+pub grit_lib::diff::DiffIndexToWorktreeOptions::diagnostics: core::option::Option<grit_lib::diagnostics::DiagnosticsHandle>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::error_on_broken_gitlinks: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::for_status: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::fsmonitor_query_boundary: core::option::Option<grit_lib::worktree::fsmonitor::FsmonitorQueryBoundary>
@@ -17699,6 +17703,9 @@ pub grit_lib::prelude::Warning::SubmoduleMultipleConfigs::name: alloc::string::S
 pub grit_lib::prelude::Warning::SubmoduleMultipleConfigs::option: alloc::string::String
 pub grit_lib::prelude::Warning::SuspiciousSubmoduleName
 pub grit_lib::prelude::Warning::SuspiciousSubmoduleName::name: alloc::string::String
+pub grit_lib::prelude::Warning::WorktreeAccessFailed
+pub grit_lib::prelude::Warning::WorktreeAccessFailed::detail: alloc::string::String
+pub grit_lib::prelude::Warning::WorktreeAccessFailed::path: alloc::string::String
 impl core::clone::Clone for grit_lib::diagnostics::Warning
 pub fn grit_lib::diagnostics::Warning::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::diagnostics::Warning

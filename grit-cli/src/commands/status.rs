@@ -113,6 +113,10 @@ pub struct StatusOutcome {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(default)]
     pub gitbutler_workspace: Option<GitButlerWorkspaceJson>,
+    /// Non-fatal warnings emitted while scanning the worktree (for example unreadable directories).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub warnings: Vec<crate::diagnostics::WarningRecord>,
 
     // Human-only state, not part of the JSON schema.
     #[serde(skip)]
@@ -946,7 +950,7 @@ pub struct StatusCliArgs {
 }
 
 pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
-    let repo = context::discover()?;
+    let (repo, sink) = context::discover_with_warnings()?;
     let config = repo.config().context("could not load config")?;
     let mut status_opts = status_options_from_config(&config)?;
     if let Some(mode) = args.untracked {
@@ -1046,6 +1050,7 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
             })
         });
     Ok(StatusOutcome {
+        warnings: sink.warnings(),
         branch,
         detached: matches!(model.head, HeadState::Detached { .. }),
         head: model.head.oid().map(ObjectId::to_hex),

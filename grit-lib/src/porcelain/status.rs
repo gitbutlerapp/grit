@@ -1253,8 +1253,12 @@ fn split_tracked_untracked_tasks(
             };
             split_any = true;
             let _ = matcher.note_directory_entered(repo, Some(index), &rel);
-            let Ok(entries) = fs::read_dir(task.entry.path()) else {
-                continue;
+            let entries = match fs::read_dir(task.entry.path()) {
+                Ok(entries) => entries,
+                Err(e) => {
+                    warn_if_untracked_directory_unreadable(repo, &rel, &e);
+                    continue;
+                }
             };
             let parent: Arc<str> = Arc::from(rel);
             next.extend(
@@ -1482,6 +1486,22 @@ fn visit_untracked_read_dir_lazy(
     Ok(())
 }
 
+fn warn_if_untracked_directory_unreadable(repo: &Repository, rel: &str, err: &std::io::Error) {
+    if err.kind() == std::io::ErrorKind::PermissionDenied {
+        let path = if rel.is_empty() {
+            "./".to_owned()
+        } else if rel.ends_with('/') {
+            rel.to_owned()
+        } else {
+            format!("{rel}/")
+        };
+        repo.warn(crate::diagnostics::Warning::WorktreeAccessFailed {
+            path,
+            detail: err.to_string(),
+        });
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn visit_untracked_node(
     repo: &Repository,
@@ -1510,7 +1530,10 @@ fn visit_untracked_node(
 
     let entries = match fs::read_dir(abs) {
         Ok(e) => e,
-        Err(_) => return Ok(()),
+        Err(e) => {
+            warn_if_untracked_directory_unreadable(repo, rel, &e);
+            return Ok(());
+        }
     };
     #[cfg(test)]
     untracked_walk_probe::record_dir_read();
@@ -1918,7 +1941,13 @@ fn traditional_normal_directory_only(
     while let Some(dir) = stack.pop() {
         let entries = match fs::read_dir(&dir) {
             Ok(e) => e,
-            Err(_) => continue,
+            Err(e) => {
+                if let Ok(rel) = dir.strip_prefix(work_tree) {
+                    let rel = rel.to_string_lossy();
+                    warn_if_untracked_directory_unreadable(repo, rel.as_ref(), &e);
+                }
+                continue;
+            }
         };
         let mut sorted: Vec<_> = entries.filter_map(|e| e.ok()).collect();
         sorted.sort_by_key(|e| e.file_name());
@@ -2403,6 +2432,7 @@ pub fn status(
                 command_runner: Some(repo.command_runner()),
                 fsmonitor_query_boundary: opts.fsmonitor_query_boundary,
                 cancel_watch: Some(std::sync::Arc::clone(&watch)),
+                diagnostics: Some(repo.diagnostics()),
                 ..Default::default()
             },
             Some(cancel_poll),

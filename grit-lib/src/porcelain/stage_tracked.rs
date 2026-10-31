@@ -508,6 +508,13 @@ fn stage_tracked_modifications_in_index_body(
                 }
             }
             BlobDiskLookup::Io(e) => {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    repo.warn(crate::diagnostics::Warning::WorktreeAccessFailed {
+                        path: rel_path.to_owned(),
+                        detail: e.to_string(),
+                    });
+                    return Ok(());
+                }
                 return Err(map_worktree_io(
                     rel_path,
                     WorktreePathOperation::Metadata,
@@ -1997,7 +2004,6 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn unreadable_parent_does_not_stage_deletion() {
-        use std::io::ErrorKind;
         use std::os::unix::fs::PermissionsExt;
 
         let (_dir, repo) = init_repo();
@@ -2012,11 +2018,9 @@ mod tests {
         perms.set_mode(0o000);
         fs::set_permissions(&locked, perms).unwrap();
 
-        let err = stage_tracked_modifications(&repo, wt).unwrap_err();
-        let Error::Io(io_err) = err else {
-            panic!("expected I/O error, got {err:?}");
-        };
-        assert_eq!(io_err.kind(), ErrorKind::PermissionDenied);
+        let summary = stage_tracked_modifications(&repo, wt).unwrap();
+        assert!(summary.modified.is_empty());
+        assert!(summary.removed.is_empty());
 
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
         let index = repo.load_index().unwrap();

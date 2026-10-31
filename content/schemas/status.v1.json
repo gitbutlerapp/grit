@@ -273,6 +273,21 @@
       ],
       "type": "object"
     },
+    "WarningRecord": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
     "WorkspaceHeadJson": {
       "description": "One head merged into a GitButler workspace.",
       "properties": {
@@ -465,6 +480,13 @@
         }
       ],
       "description": "Upstream tracking comparison when it differs from `target`, or `null`."
+    },
+    "warnings": {
+      "description": "Non-fatal warnings emitted while scanning the worktree (for example unreadable directories).",
+      "items": {
+        "$ref": "#/definitions/WarningRecord"
+      },
+      "type": "array"
     }
   },
   "required": [

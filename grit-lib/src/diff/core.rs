@@ -4849,6 +4849,9 @@ pub struct DiffIndexToWorktreeOptions {
     /// When set, long loops abort with [`crate::error::Error::Cancelled`] once the flag is raised
     /// (see [`crate::progress::cancel_watch_arc`] and [`crate::progress::poll_cancel_watch`]).
     pub cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// When set, work-tree access failures during status emit [`crate::diagnostics::Warning`]
+    /// values here instead of aborting the diff.
+    pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
 }
 
 impl Default for DiffIndexToWorktreeOptions {
@@ -4871,6 +4874,7 @@ impl Default for DiffIndexToWorktreeOptions {
             restrict_to_paths: None,
             hash_blobs_without_write: false,
             cancel_watch: None,
+            diagnostics: None,
         }
     }
 }
@@ -5063,6 +5067,36 @@ fn unreadable_worktree_blob_is_modified(err: &Error, materialize_dirty_blobs: bo
                 ..
             }
         )
+}
+
+fn warn_worktree_access_failed(
+    diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
+    path: &str,
+    err: &std::io::Error,
+) {
+    if let Some(handle) = diagnostics {
+        crate::diagnostics::warn(
+            handle,
+            crate::diagnostics::Warning::WorktreeAccessFailed {
+                path: path.to_owned(),
+                detail: err.to_string(),
+            },
+        );
+    }
+}
+
+fn blob_disk_lookup_io_result(
+    diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
+    path: &str,
+    err: std::io::Error,
+    for_status: bool,
+    materialize_dirty_blobs: bool,
+) -> Result<()> {
+    if for_status && !materialize_dirty_blobs {
+        warn_worktree_access_failed(diagnostics, path, &err);
+        return Ok(());
+    }
+    Err(Error::Io(err))
 }
 
 /// Whether status may report `ie` modified because the worktree size (already munged to the
@@ -5858,7 +5892,15 @@ fn diff_index_to_worktree_inner(
                     score: None,
                 });
             }
-            BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+            BlobDiskLookup::Io(e) => {
+                blob_disk_lookup_io_result(
+                    options.diagnostics.as_ref(),
+                    path_str_ref,
+                    e,
+                    options.for_status,
+                    materialize_dirty_blobs,
+                )?;
+            }
             BlobDiskLookup::Present(stat) => {
                 if materialize_dirty_blobs {
                     staging_stat_cache.insert(path_str_ref.to_owned(), stat.fields);

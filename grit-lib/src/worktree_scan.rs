@@ -919,9 +919,6 @@ where
                 }
                 lookup => lookup,
             };
-            if let BlobDiskLookup::Io(e) = lookup {
-                return Err(Error::Io(e));
-            }
             visit(entry_index, rel_path, lookup)?;
         }
         return Ok(());
@@ -939,17 +936,36 @@ where
         return Ok(());
     }
 
-    let (dir_readable, on_disk) = read_directory_map(&abs_dir, entry_indices.len())?;
-    for &entry_index in entry_indices {
-        boundary.poll_stride(cancel_stride)?;
-        let rel_path = entry_rel_path(index, entry_index)?;
-        let file_name = entry_file_name(index, entry_index)?;
-        let lookup = if !dir_readable {
-            BlobDiskLookup::Missing
-        } else {
-            lookup_blob_in_directory(&on_disk, file_name, || file_abs(rel_path))
-        };
-        visit(entry_index, rel_path, lookup)?;
+    match read_directory_map(&abs_dir, entry_indices.len())? {
+        DirectoryReadOutcome::Listed(on_disk) => {
+            for &entry_index in entry_indices {
+                boundary.poll_stride(cancel_stride)?;
+                let rel_path = entry_rel_path(index, entry_index)?;
+                let file_name = entry_file_name(index, entry_index)?;
+                let lookup = lookup_blob_in_directory(&on_disk, file_name, || file_abs(rel_path));
+                visit(entry_index, rel_path, lookup)?;
+            }
+        }
+        DirectoryReadOutcome::Missing => {
+            for &entry_index in entry_indices {
+                boundary.poll_stride(cancel_stride)?;
+                let rel_path = entry_rel_path(index, entry_index)?;
+                visit(entry_index, rel_path, BlobDiskLookup::Missing)?;
+            }
+        }
+        DirectoryReadOutcome::Inaccessible(err) => {
+            let kind = err.kind();
+            let detail = err.to_string();
+            for &entry_index in entry_indices {
+                boundary.poll_stride(cancel_stride)?;
+                let rel_path = entry_rel_path(index, entry_index)?;
+                visit(
+                    entry_index,
+                    rel_path,
+                    BlobDiskLookup::Io(io::Error::new(kind, detail.clone())),
+                )?;
+            }
+        }
     }
     Ok(())
 }
@@ -1101,7 +1117,7 @@ where
             let error = io::Error::last_os_error();
             match error.kind() {
                 io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => BlobDiskLookup::Missing,
-                _ => return Err(Error::Io(error)),
+                _ => BlobDiskLookup::Io(error),
             }
         };
         visit(entry_index, rel, lookup)?;
@@ -1181,12 +1197,11 @@ fn lookup_lone_blob_in_directory(
     let rd = match fs::read_dir(abs_dir) {
         Ok(rd) => rd,
         Err(e)
-            if e.kind() == io::ErrorKind::NotFound
-                || e.kind() == io::ErrorKind::PermissionDenied
-                || e.kind() == io::ErrorKind::NotADirectory =>
+            if e.kind() == io::ErrorKind::NotFound || e.kind() == io::ErrorKind::NotADirectory =>
         {
             return BlobDiskLookup::Missing;
         }
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return BlobDiskLookup::Io(e),
         Err(e) => return BlobDiskLookup::Io(e),
     };
     for item in rd {
@@ -1757,8 +1772,14 @@ fn lookup_blob_in_directory(
 /// One directory listing keyed by raw file name (`.git` excluded).
 type DirectoryMap = hashbrown::HashMap<Vec<u8>, fs::DirEntry>;
 
+enum DirectoryReadOutcome {
+    Listed(DirectoryMap),
+    Missing,
+    Inaccessible(io::Error),
+}
+
 /// `expected` sizes the map up front (the tracked entries in this directory).
-fn read_directory_map(abs_dir: &Path, expected: usize) -> Result<(bool, DirectoryMap)> {
+fn read_directory_map(abs_dir: &Path, expected: usize) -> Result<DirectoryReadOutcome> {
     if probe_counts(abs_dir) {
         WORKTREE_READ_DIR_PROBE.fetch_add(1, Ordering::Relaxed);
     }
@@ -1773,14 +1794,15 @@ fn read_directory_map(abs_dir: &Path, expected: usize) -> Result<(bool, Director
                 }
                 on_disk.insert(name, entry);
             }
-            Ok((true, on_disk))
+            Ok(DirectoryReadOutcome::Listed(on_disk))
         }
         Err(e)
-            if e.kind() == io::ErrorKind::NotFound
-                || e.kind() == io::ErrorKind::PermissionDenied
-                || e.kind() == io::ErrorKind::NotADirectory =>
+            if e.kind() == io::ErrorKind::NotFound || e.kind() == io::ErrorKind::NotADirectory =>
         {
-            Ok((false, DirectoryMap::new()))
+            Ok(DirectoryReadOutcome::Missing)
+        }
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+            Ok(DirectoryReadOutcome::Inaccessible(e))
         }
         Err(e) => Err(Error::Io(e)),
     }
@@ -2139,8 +2161,9 @@ mod tests {
         let dir = tmp.path().join("leaf");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("tracked.txt"), b"payload\n").unwrap();
-        let (readable, map) = read_directory_map(&dir, 1).unwrap();
-        assert!(readable);
+        let DirectoryReadOutcome::Listed(map) = read_directory_map(&dir, 1).unwrap() else {
+            panic!("expected readable directory listing");
+        };
         let lookup = lookup_blob_in_directory(&map, b"tracked.txt", || {
             dir.join("wrong-parent/tracked.txt")
         });

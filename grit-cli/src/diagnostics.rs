@@ -196,6 +196,9 @@ pub fn format_warning_message(w: &Warning) -> String {
             "pack bitmap ignored at {}: {reason}",
             path.display()
         ),
+        Warning::WorktreeAccessFailed { path, detail } => {
+            format!("cannot access worktree path '{path}': {detail}")
+        }
         _ => format!("{w:?}"),
     }
 }
@@ -242,6 +245,7 @@ fn warning_kind(w: &Warning) -> String {
         Warning::MidxPackIndexUnavailable { .. } => "midx_pack_index_unavailable".into(),
         Warning::MidxUnknownPreferredPack { .. } => "midx_unknown_preferred_pack".into(),
         Warning::PackBitmapIgnored { .. } => "pack_bitmap_ignored".into(),
+        Warning::WorktreeAccessFailed { .. } => "worktree_access_failed".into(),
         _ => "other".into(),
     }
 }
