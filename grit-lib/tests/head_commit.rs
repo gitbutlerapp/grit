@@ -1,5 +1,5 @@
-//! [`Repository::head_commit`] on repositories written by the system `git`, on an injected ref
-//! store, and through the history engine that relies on it.
+//! [`Repository::head_commit`] and [`Repository::head_tree`] on repositories written by the
+//! system `git`, on an injected ref store, and through the history engine that relies on them.
 
 #![allow(clippy::expect_used)]
 
@@ -19,6 +19,7 @@ use grit_lib::repo::{Repository, RepositoryBuilder};
 use grit_lib::revwalk::history::{
     move_commit, EmptyPolicy, HistoryError, Placement, RefScope, RewriteOptions,
 };
+use grit_lib::state::{resolve_head_for_repository, HeadState};
 use grit_test_support::git;
 
 fn open(dir: &Path) -> Repository {
@@ -77,6 +78,46 @@ fn head_naming_a_missing_non_branch_ref_is_invalid_head() {
     fs::write(repo.git_dir().join("HEAD"), "ref: refs/tags/missing\n").expect("write HEAD");
     let err = repo.head_commit().expect_err("invalid");
     assert!(matches!(err, Error::InvalidHead), "{err:?}");
+}
+
+fn git_head_tree(dir: &Path) -> ObjectId {
+    git(dir, &["rev-parse", "HEAD^{tree}"])
+        .trim()
+        .parse()
+        .expect("HEAD tree oid")
+}
+
+#[test]
+fn head_tree_matches_git_on_a_branch_and_detached() {
+    let dir = repo_with_two_commits();
+    assert_eq!(
+        open(dir.path()).head_tree().expect("head tree"),
+        Some(git_head_tree(dir.path()))
+    );
+    git(dir.path(), &["checkout", "-q", "--detach", "HEAD~1"]);
+    assert_eq!(
+        open(dir.path()).head_tree().expect("head tree"),
+        Some(git_head_tree(dir.path()))
+    );
+}
+
+#[test]
+fn head_tree_is_none_on_an_unborn_branch() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    assert_eq!(open(dir.path()).head_tree().expect("unborn"), None);
+}
+
+#[test]
+fn head_tree_of_an_invalid_head_is_invalid_head_but_head_state_tree_is_none() {
+    let dir = repo_with_two_commits();
+    let repo = open(dir.path());
+    fs::write(repo.git_dir().join("HEAD"), "ref: refs/tags/missing\n").expect("write HEAD");
+    let err = repo.head_tree().expect_err("invalid");
+    assert!(matches!(err, Error::InvalidHead), "{err:?}");
+    let head = resolve_head_for_repository(&repo).expect("resolve");
+    assert_eq!(head, HeadState::Invalid);
+    assert_eq!(head.tree(repo.odb()).expect("lenient"), None);
 }
 
 #[test]
