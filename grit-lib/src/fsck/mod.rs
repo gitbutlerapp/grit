@@ -41,8 +41,9 @@ use crate::gitmodules::{fsck_dot_special_tree_pass, DotFsckIssue, DotFsckTracker
 use crate::index::MODE_GITLINK;
 use crate::midx::verify_midx;
 use crate::objects::{
-    oid_hash_map, oid_hash_set, oid_hash_set_from, parse_commit, parse_tag, HashAlgo, ObjectId,
-    ObjectKind, OidHashMap, OidHashSet, TreeEntryRef, TreeRefIter,
+    oid_hash_map, oid_hash_set, oid_hash_set_from, parse_commit,
+    parse_commit_tree_and_parents_lenient, parse_tag, HashAlgo, ObjectId, ObjectKind, OidHashMap,
+    OidHashSet, TreeEntryRef, TreeRefIter,
 };
 use crate::odb::Odb;
 use crate::pack::{prepare_pack_for_object_fsck, PackFsckTrailerIssue};
@@ -636,7 +637,7 @@ fn validated_links_for(
         ObjectKind::Commit => {
             let (tree, parents) = match parse_commit(data) {
                 Ok(c) => (c.tree, c.parents),
-                Err(_) => commit_link_targets(data, algo)?,
+                Err(_) => parse_commit_tree_and_parents_lenient(data, algo.hex_len())?,
             };
             Some(ValidatedObjectLinks::Commit {
                 tree,
@@ -668,35 +669,6 @@ fn record_validated_object(
     if let Some(parsed) = validated_links_for(kind, data, algo) {
         links.insert(oid, parsed);
     }
-}
-
-/// Parse `tree` and `parent` lines from a commit buffer even when author/committer headers fail fsck.
-fn commit_link_targets(data: &[u8], algo: HashAlgo) -> Option<(ObjectId, Vec<ObjectId>)> {
-    let hex_len = algo.hex_len();
-    if data.len() < 5 + hex_len || !data.starts_with(b"tree ") {
-        return None;
-    }
-    let mut i = 5usize;
-    let tree_hex = std::str::from_utf8(&data[i..i + hex_len]).ok()?;
-    let tree = ObjectId::from_hex(tree_hex).ok()?;
-    i += hex_len;
-    if data.get(i) == Some(&b'\n') {
-        i += 1;
-    }
-    let mut parents = Vec::new();
-    while data
-        .get(i..)
-        .is_some_and(|tail| tail.starts_with(b"parent "))
-    {
-        i += 7;
-        let parent_hex = std::str::from_utf8(&data[i..i + hex_len]).ok()?;
-        parents.push(ObjectId::from_hex(parent_hex).ok()?);
-        i += hex_len;
-        if data.get(i) == Some(&b'\n') {
-            i += 1;
-        }
-    }
-    Some((tree, parents))
 }
 
 fn dedupe_issues(issues: &mut Vec<FsckIssue>) {
@@ -1357,7 +1329,7 @@ fn walk_connectivity(
             ObjectKind::Commit => {
                 let Some((tree, parents)) = (match parse_commit(&obj.data) {
                     Ok(c) => Some((c.tree, c.parents)),
-                    Err(_) => commit_link_targets(&obj.data, algo),
+                    Err(_) => parse_commit_tree_and_parents_lenient(&obj.data, algo.hex_len()),
                 }) else {
                     continue;
                 };
