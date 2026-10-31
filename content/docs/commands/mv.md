@@ -19,7 +19,7 @@ When the destination is an existing directory, each source is moved into that di
 
 Grit refuses untracked sources, overwriting an existing destination without `--force`, and moving a directory into one of its own subdirectories.
 
-On case-insensitive volumes with `core.ignorecase=true`, case-only renames (for example `README.md` to `readme.md`) succeed: the worktree spelling updates and the index tracks the destination path, matching `git mv`.
+On case-insensitive volumes with `core.ignorecase=true`, case-only renames succeed: the worktree spelling updates and the index tracks the destination path. That includes renaming a tracked directory to a case-only spelling (for example `Dir` to `dir`), which updates every indexed path under that tree (for example `Dir/x.txt` becomes `dir/x.txt`). Single-file case-only renames behave like `git mv`; upstream Git still fails directory case-only renames on APFS.
 
 When a move leaves a source directory empty, grit leaves that directory on disk (same as `git mv`).
 

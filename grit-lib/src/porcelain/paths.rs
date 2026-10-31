@@ -11,7 +11,7 @@ use crate::diff::{
 use crate::error::{Error, Result};
 use crate::index::{index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE};
 use crate::objects::ObjectId;
-use crate::path_icase::paths_equal;
+use crate::path_icase::{paths_equal, worktree_filesystem_case_insensitive};
 use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
 use crate::pathspec::pathspec_is_exclude;
 use crate::porcelain::checkout::remove_empty_parent_dirs;
@@ -258,8 +258,11 @@ pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result
 /// Move one or more tracked sources into `opts.destination`, updating the index once.
 ///
 /// When multiple sources are given, `destination` must name an existing directory; each
-/// source is moved under that directory using its final path component. With `dry_run`,
-/// every validation runs but the index and work tree are left unchanged.
+/// source is moved under that directory using its final path component. On
+/// case-insensitive volumes with `core.ignorecase=true`, renaming a tracked directory
+/// to a case-only spelling (for example `Dir` to `dir`) renames every indexed path
+/// under that tree and updates the worktree dentry spelling. With `dry_run`, every
+/// validation runs but the index and work tree are left unchanged.
 ///
 /// # Errors
 ///
@@ -526,7 +529,8 @@ fn plan_single_move(params: PlanSingleMoveParams<'_>) -> Result<SingleMovePlan> 
         });
     }
 
-    let (final_dst, dst_is_dir_target) = resolve_move_destination(work_tree, index, src, dst)?;
+    let (final_dst, dst_is_dir_target) =
+        resolve_move_destination(work_tree, index, src, dst, ignorecase)?;
     let final_dst = normalize_and_validate_repo_relative(repo, work_tree, &final_dst)?;
 
     if multi_source && !dst_is_dir_target {
@@ -543,7 +547,7 @@ fn plan_single_move(params: PlanSingleMoveParams<'_>) -> Result<SingleMovePlan> 
         )));
     }
 
-    if is_subdirectory(&final_dst, src) {
+    if is_subdirectory(&final_dst, src, ignorecase) {
         return Err(Error::MoveIntoSubdirectory {
             src: src.to_owned(),
             destination: final_dst,
@@ -1025,25 +1029,83 @@ fn resolve_move_destination(
     index: &Index,
     src: &str,
     dst: &str,
+    ignorecase: bool,
 ) -> Result<(String, bool)> {
-    let dst_abs = work_tree.join(dst);
-    let dst_is_dir = dst_abs.is_dir()
-        || index_paths_under(index, dst, false)
-            .iter()
-            .any(|p| p.starts_with(dst))
+    let src_is_dir = work_tree.join(src).is_dir()
         || index
-            .get(dst.as_bytes(), 0)
-            .is_some_and(|e| e.mode == MODE_TREE);
+            .get(src.as_bytes(), 0)
+            .is_some_and(|e| e.mode == MODE_TREE)
+        || !index_paths_under(index, src, false).is_empty();
 
+    let same_case_directory = src_is_dir
+        && src != dst
+        && paths_equal(src.as_bytes(), dst.as_bytes(), true)
+        && (worktree_filesystem_case_insensitive(work_tree)
+            || worktree_paths_same_identity(work_tree, src, dst));
+
+    let dst_abs = work_tree.join(dst);
+    let dst_is_dir = !same_case_directory
+        && (dst_abs.is_dir()
+            || index_has_paths_under(index, dst, ignorecase)
+            || index
+                .get(dst.as_bytes(), 0)
+                .is_some_and(|e| e.mode == MODE_TREE));
+
+    Ok(resolve_move_destination_path(
+        src,
+        dst,
+        dst_is_dir,
+        same_case_directory,
+    ))
+}
+
+/// Pure destination resolution for a single tracked source (unit-tested on all platforms).
+#[must_use]
+fn resolve_move_destination_path(
+    src: &str,
+    dst: &str,
+    dst_is_dir: bool,
+    same_case_directory: bool,
+) -> (String, bool) {
+    if same_case_directory {
+        return (dst.to_string(), false);
+    }
     if dst_is_dir {
         let base = Path::new(src)
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or(src);
-        Ok((format!("{dst}/{base}"), true))
+        (format!("{dst}/{base}"), true)
     } else {
-        Ok((dst.to_string(), false))
+        (dst.to_string(), false)
     }
+}
+
+fn index_has_paths_under(index: &Index, prefix: &str, ignorecase: bool) -> bool {
+    if ignorecase {
+        return index.entries.iter().filter(|e| e.stage() == 0).any(|e| {
+            let path = String::from_utf8_lossy(&e.path);
+            index_path_at_destination(&path, prefix, true) && path != prefix
+        });
+    }
+    !index_paths_under(index, prefix, false).is_empty()
+}
+
+#[cfg(unix)]
+fn worktree_paths_same_identity(work_tree: &Path, a: &str, b: &str) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    let a_abs = work_tree.join(a);
+    let b_abs = work_tree.join(b);
+    let (Ok(ma), Ok(mb)) = (a_abs.metadata(), b_abs.metadata()) else {
+        return false;
+    };
+    ma.dev() == mb.dev() && ma.ino() == mb.ino()
+}
+
+#[cfg(not(unix))]
+fn worktree_paths_same_identity(_work_tree: &Path, _a: &str, _b: &str) -> bool {
+    false
 }
 
 fn destination_exists(
@@ -1054,13 +1116,18 @@ fn destination_exists(
     ignorecase: bool,
     renames: &[(String, String)],
 ) -> bool {
-    if ignorecase && case_only_rename_to(renames, dst) {
+    if ignorecase
+        && (case_only_rename_to(renames, dst) || renames_are_case_only_tree_to(renames, dst))
+    {
         return index_has_unrelated_entries(index, dst, ignorecase, renames);
     }
 
     let abs = work_tree.join(dst);
     if abs.exists() {
-        if ignorecase && rename_sources_cover_path(renames, dst) {
+        if ignorecase
+            && (rename_sources_cover_path(renames, dst)
+                || renames_are_case_only_tree_to(renames, dst))
+        {
             return index_has_unrelated_entries(index, dst, ignorecase, renames);
         }
         return true;
@@ -1073,6 +1140,32 @@ fn case_only_rename_to(renames: &[(String, String)], dst: &str) -> bool {
     renames.iter().any(|(from, to)| {
         to == dst && from != to && paths_equal(from.as_bytes(), to.as_bytes(), true)
     })
+}
+
+fn renames_are_case_only_tree_to(renames: &[(String, String)], dst: &str) -> bool {
+    !renames.is_empty()
+        && renames
+            .iter()
+            .all(|(from, to)| case_only_rename_under_dst(from, to, dst))
+}
+
+fn case_only_rename_under_dst(from: &str, to: &str, dst: &str) -> bool {
+    if from == to || !paths_equal(from.as_bytes(), to.as_bytes(), true) {
+        return false;
+    }
+    if to == dst {
+        return paths_equal(from.as_bytes(), dst.as_bytes(), true);
+    }
+    let plen = dst.len();
+    if to.len() <= plen || to.as_bytes().get(plen) != Some(&b'/') {
+        return false;
+    }
+    if !paths_equal(&to.as_bytes()[..plen], dst.as_bytes(), true) {
+        return false;
+    }
+    from.len() > plen
+        && from.as_bytes().get(plen) == Some(&b'/')
+        && paths_equal(&from.as_bytes()[..plen], &to.as_bytes()[..plen], true)
 }
 
 fn rename_sources_cover_path(renames: &[(String, String)], path: &str) -> bool {
@@ -1092,7 +1185,7 @@ fn index_has_unrelated_entries(
     if ignorecase {
         return index.entries.iter().filter(|e| e.stage() == 0).any(|e| {
             let path = String::from_utf8_lossy(&e.path);
-            if !index_path_at_destination(&path, dst) {
+            if !index_path_at_destination(&path, dst, true) {
                 return false;
             }
             !rename_from.contains(path.as_ref())
@@ -1106,15 +1199,23 @@ fn index_has_unrelated_entries(
     paths.iter().any(|p| !rename_from.contains(p.as_str()))
 }
 
-fn index_path_at_destination(path: &str, dst: &str) -> bool {
-    if paths_equal(path.as_bytes(), dst.as_bytes(), true) {
+fn index_path_at_destination(path: &str, dst: &str, ignorecase: bool) -> bool {
+    if paths_equal(path.as_bytes(), dst.as_bytes(), ignorecase) {
         return true;
     }
-    if path == dst {
+    if !ignorecase && path == dst {
         return true;
     }
     let plen = dst.len();
-    path.len() > plen && path.starts_with(dst) && path.as_bytes()[plen] == b'/'
+    if path.len() <= plen || path.as_bytes().get(plen) != Some(&b'/') {
+        return false;
+    }
+    let prefix = &path[..plen];
+    if ignorecase {
+        paths_equal(prefix.as_bytes(), dst.as_bytes(), true)
+    } else {
+        prefix == dst
+    }
 }
 
 fn worktree_paths_to_clear(work_tree: &Path, index: &Index, dst: &str) -> Vec<String> {
@@ -1137,12 +1238,20 @@ fn clear_destination_index(index: &mut Index, dst: &str) {
     }
 }
 
-fn is_subdirectory(candidate: &str, parent_dir: &str) -> bool {
-    if candidate == parent_dir {
+fn is_subdirectory(candidate: &str, parent_dir: &str, ignorecase: bool) -> bool {
+    if paths_equal(candidate.as_bytes(), parent_dir.as_bytes(), ignorecase) {
         return false;
     }
     let plen = parent_dir.len();
-    candidate.starts_with(parent_dir) && candidate.as_bytes().get(plen) == Some(&b'/')
+    if candidate.len() <= plen || candidate.as_bytes().get(plen) != Some(&b'/') {
+        return false;
+    }
+    let prefix = &candidate[..plen];
+    if ignorecase {
+        paths_equal(prefix.as_bytes(), parent_dir.as_bytes(), true)
+    } else {
+        prefix == parent_dir
+    }
 }
 
 fn ensure_worktree_move_sources_exist(
@@ -1412,10 +1521,31 @@ mod path_validation_tests {
 }
 
 #[cfg(test)]
+mod resolve_move_destination_tests {
+    use super::resolve_move_destination_path;
+
+    #[test]
+    fn case_only_directory_rename_uses_destination_spelling() {
+        assert_eq!(
+            resolve_move_destination_path("Dir", "dir", true, true),
+            ("dir".into(), false)
+        );
+    }
+
+    #[test]
+    fn real_directory_destination_appends_basename() {
+        assert_eq!(
+            resolve_move_destination_path("Dir", "other", true, false),
+            ("other/Dir".into(), true)
+        );
+    }
+}
+
+#[cfg(test)]
 mod destination_exists_tests {
     use super::{
-        case_only_rename_to, destination_exists, index_has_unrelated_entries,
-        rename_sources_cover_path,
+        case_only_rename_to, case_only_rename_under_dst, destination_exists,
+        index_has_unrelated_entries, rename_sources_cover_path, renames_are_case_only_tree_to,
     };
     use crate::index::Index;
     use crate::index::IndexEntry;
@@ -1476,6 +1606,50 @@ mod destination_exists_tests {
         assert!(
             index_has_unrelated_entries(&index, "readme.md", true, &renames),
             "distinct index spellings at the same icase path must block"
+        );
+    }
+
+    #[test]
+    fn case_only_tree_rename_helpers() {
+        let renames = vec![
+            ("Dir/x.txt".into(), "dir/x.txt".into()),
+            ("Dir/y.txt".into(), "dir/y.txt".into()),
+        ];
+        assert!(renames_are_case_only_tree_to(&renames, "dir"));
+        assert!(case_only_rename_under_dst("Dir/x.txt", "dir/x.txt", "dir"));
+        assert!(!renames_are_case_only_tree_to(&renames, "other"));
+    }
+
+    #[test]
+    fn ignorecase_tree_collision_allows_case_only_destination() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        std::fs::create_dir_all(wt.join("Dir")).unwrap();
+        std::fs::write(wt.join("Dir/x.txt"), b"x\n").unwrap();
+        let mut index = Index::new();
+        index.push_entry_unsorted(dummy_entry("Dir/x.txt"));
+        let renames = vec![("Dir/x.txt".into(), "dir/x.txt".into())];
+        assert!(
+            !destination_exists(wt, &index, "dir", false, true, &renames),
+            "case-only directory tree must not collide with itself on a folding volume"
+        );
+    }
+
+    #[test]
+    fn ignorecase_tree_blocks_distinct_destination_directory() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        std::fs::create_dir_all(wt.join("Dir")).unwrap();
+        std::fs::create_dir_all(wt.join("dir")).unwrap();
+        std::fs::write(wt.join("Dir/x.txt"), b"x\n").unwrap();
+        std::fs::write(wt.join("dir/extra.txt"), b"y\n").unwrap();
+        let mut index = Index::new();
+        index.push_entry_unsorted(dummy_entry("Dir/x.txt"));
+        index.push_entry_unsorted(dummy_entry("dir/extra.txt"));
+        let renames = vec![("Dir/x.txt".into(), "dir/x.txt".into())];
+        assert!(
+            destination_exists(wt, &index, "dir", false, true, &renames),
+            "unrelated tracked paths under the destination must still block"
         );
     }
 }
