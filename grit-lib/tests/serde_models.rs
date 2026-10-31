@@ -104,6 +104,7 @@ fn porcelain_dtos_serialize_to_stable_json_shapes() {
         staged: vec![],
         unstaged: vec![],
         untracked: vec![],
+        embedded_repositories: vec![],
         ignored: vec![],
         conflicts: vec!["a.txt".into()],
         conflict_details: vec![Conflict {

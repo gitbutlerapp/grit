@@ -48,6 +48,9 @@ pub struct AddOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     pub(crate) no_paths: bool,
+    /// Nested repositories newly recorded as gitlinks (mode 160000).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub embedded_gitlinks: Vec<String>,
 }
 
 impl AddOutcome {
@@ -64,6 +67,7 @@ impl AddOutcome {
             staged_hunks: BTreeMap::new(),
             staged_lines: BTreeMap::new(),
             no_paths,
+            embedded_gitlinks: outcome.embedded_gitlinks,
         }
     }
 
@@ -85,12 +89,18 @@ impl AddOutcome {
             staged_hunks,
             staged_lines: outcome.staged_lines,
             no_paths: false,
+            embedded_gitlinks: Vec::new(),
         }
     }
 }
 
 impl HumanRender for AddOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        crate::embedded_gitlink::emit_embedded_gitlink_warnings(
+            ctx.mode,
+            &self.embedded_gitlinks,
+            self.dry_run,
+        );
         let prefix = if self.dry_run {
             "Would stage"
         } else {
@@ -115,7 +125,12 @@ impl HumanRender for AddOutcome {
 }
 
 impl MarkdownRender for AddOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        crate::embedded_gitlink::emit_embedded_gitlink_warnings(
+            ctx.mode,
+            &self.embedded_gitlinks,
+            self.dry_run,
+        );
         markdown::print_add_outcome(w, self)?;
         Ok(())
     }
@@ -258,6 +273,7 @@ pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {
         staged_hunks: BTreeMap::new(),
         staged_lines: BTreeMap::new(),
         no_paths: false,
+        embedded_gitlinks: Vec::new(),
     })
 }
 

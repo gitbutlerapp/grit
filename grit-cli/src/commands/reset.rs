@@ -304,6 +304,7 @@ mod tests {
     fn render_markdown_text(outcome: &ResetCliOutcome) -> String {
         let ctx = RenderContext {
             now: OffsetDateTime::UNIX_EPOCH,
+            mode: crate::output::OutputMode::Human,
         };
         let mut buf = Vec::new();
         outcome
@@ -315,6 +316,7 @@ mod tests {
     fn render_human_text(outcome: &ResetCliOutcome) -> String {
         let ctx = RenderContext {
             now: OffsetDateTime::UNIX_EPOCH,
+            mode: crate::output::OutputMode::Human,
         };
         let mut buf = Vec::new();
         outcome.render_human(&mut buf, &ctx).expect("render");

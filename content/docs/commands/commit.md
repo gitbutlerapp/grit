@@ -25,7 +25,7 @@ grit commit --patch-file <file|-> -m <message>
 
 ## Description
 
-By default, `grit commit` **auto-stages** every change in the working tree (modified, deleted and untracked files) and records a new commit on the current branch. With `core.ignorecase=true` on a case-folding volume, auto-staging keeps indexed path spellings (same as [`grit add`](add.md)) and does not rewrite either spelling of a case-colliding path when the shared on-disk file already matches one of the indexed blobs (including directory-name collisions such as `Docs/` vs `docs/`); use [`grit mv`](mv.md) to change a path's case on purpose.
+By default, `grit commit` **auto-stages** every change in the working tree (modified, deleted and untracked files) and records a new commit on the current branch. When auto-staging newly records a nested repository as a gitlink, grit prints the same **warning** as [`grit add`](add.md) on stderr (human and `--markdown`); `--json` includes `embedded_gitlinks` for paths introduced in that staging pass only (not when the gitlink was already in the index). With `core.ignorecase=true` on a case-folding volume, auto-staging keeps indexed path spellings (same as [`grit add`](add.md)) and does not rewrite either spelling of a case-colliding path when the shared on-disk file already matches one of the indexed blobs (including directory-name collisions such as `Docs/` vs `docs/`); use [`grit mv`](mv.md) to change a path's case on purpose.
 
 On a [GitButler workspace](../status/#gitbutler-workspaces), `grit commit` refuses (exit **1**, `kind: "gitbutler_workspace"`) and changes nothing, because GitButler rewrites the `gitbutler/workspace` branch and would lose the commit. Commit with `but commit`, or switch to a branch first.
 
@@ -204,6 +204,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `parents` | array of strings | Parent commit OIDs that would be stored |
 | `author` | object | `name`, `email`, and `date` (RFC 3339, same shape as [`grit log`](../log/) / [`grit show`](../show/)) |
 | `hooks_run` | array of strings | Hook names that ran, in order (`pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit`, and `post-rewrite` after `--amend`); empty on dry-run |
+| `embedded_gitlinks` | array | Nested repositories newly recorded as gitlinks during auto-staging for this commit. Omitted when empty. |
 
 Example:
 

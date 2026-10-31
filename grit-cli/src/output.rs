@@ -34,6 +34,8 @@ use grit_lib::porcelain::log::DecorationKind;
 pub struct RenderContext {
     /// Current time with repository timezone semantics applied at capture.
     pub now: OffsetDateTime,
+    /// Selected stdout format for this invocation.
+    pub mode: OutputMode,
 }
 
 /// Write one line to `w`, treating a closed pipe as success.
@@ -427,6 +429,7 @@ mod tests {
     fn sample_ctx() -> RenderContext {
         RenderContext {
             now: OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid timestamp"),
+            mode: OutputMode::Human,
         }
     }
 

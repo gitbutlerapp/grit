@@ -912,6 +912,9 @@ pub struct CommitOutcome {
     pub change_id: Option<ChangeId>,
     /// Path-level changes vs the parent tree (`git diff --name-status` between parent and new tree).
     pub files: Vec<CommitFile>,
+    /// Gitlink paths introduced while auto-staging before this commit (empty when nothing new was
+    /// recorded as a nested repository).
+    pub embedded_gitlinks: Vec<String>,
 }
 
 impl CommitOutcome {
@@ -1012,8 +1015,13 @@ pub fn commit_worktree(
     if req.skip_pre_commit_tree_match {
         req.staged_change_count = Some(staged_count);
     }
+    let embedded_gitlinks = staged.embedded_gitlinks.clone();
     let persist = index_lock.map(|lock| LockedIndex { index: None, lock });
     let result = create_commit_with_index(repo, head, &mut index, &req, progress, cancel, persist);
+    let result = result.map(|mut outcome| {
+        outcome.embedded_gitlinks = embedded_gitlinks;
+        outcome
+    });
     if matches!(result, Err(Error::NothingToCommit))
         && !req.dry_run
         && (staged_count > 0 || stat_refreshed)
@@ -1280,6 +1288,7 @@ fn finish_commit_dry_run(
         changes,
         change_id: None,
         files,
+        embedded_gitlinks: Vec::new(),
     })
 }
 
@@ -1847,6 +1856,7 @@ fn create_commit_with_index(
         changes,
         change_id: stored_change_id,
         files: commit_files,
+        embedded_gitlinks: Vec::new(),
     })
 }
 

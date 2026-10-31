@@ -89,6 +89,13 @@
     "dry_run": {
       "type": "boolean"
     },
+    "embedded_gitlinks": {
+      "description": "Nested repositories newly recorded as gitlinks while auto-staging before this commit.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "files": {
       "items": {
         "$ref": "#/definitions/CommitFileOutcome"

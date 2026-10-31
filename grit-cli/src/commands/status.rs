@@ -79,6 +79,9 @@ pub struct StatusOutcome {
     pub staged: Vec<ChangeJson>,
     pub unstaged: Vec<ChangeJson>,
     pub untracked: Vec<String>,
+    /// Untracked nested repositories that would be recorded as gitlinks if staged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub embedded_repositories: Vec<String>,
     pub clean: bool,
     /// True when a merge is in progress (`MERGE_HEAD` exists). Deprecated: prefer `operation`.
     pub merging: bool,
@@ -487,6 +490,10 @@ impl StatusOutcome {
             self.render_conflicts_by_kind(w, display)?;
         }
         ui::print_untracked(w, &self.untracked, display)?;
+        crate::embedded_gitlink::emit_embedded_repository_status_notes(
+            crate::output::OutputMode::Human,
+            &self.embedded_repositories,
+        );
         ui::print_ignored(w, ignored, display)?;
         Ok(())
     }
@@ -824,6 +831,10 @@ impl StatusOutcome {
             self.render_markdown_conflicts_by_kind(w, display)?;
         }
         markdown::print_untracked(w, &self.untracked, display)?;
+        crate::embedded_gitlink::emit_embedded_repository_status_notes(
+            crate::output::OutputMode::Markdown,
+            &self.embedded_repositories,
+        );
         markdown::print_ignored(w, ignored, display)?;
         Ok(())
     }
@@ -1053,6 +1064,7 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         staged,
         unstaged,
         untracked: model.untracked,
+        embedded_repositories: model.embedded_repositories,
         clean,
         merging,
         in_progress: operations.into_iter().map(in_progress_label).collect(),

@@ -105,6 +105,9 @@ pub struct StageOutcome {
     pub removed: Vec<String>,
     /// Paths recorded with the intent-to-add bit (`git add -N`).
     pub intent_to_add: Vec<String>,
+    /// Nested repositories newly recorded as gitlinks (mode 160000) because they were not yet
+    /// indexed at stage 0.
+    pub embedded_gitlinks: Vec<String>,
     /// Index stat cache refreshed without staging new content (not counted in [`Self::total`]).
     pub(crate) stat_refreshed: bool,
 }
@@ -138,6 +141,7 @@ fn sort_outcome_paths_in_index_order(outcome: &mut StageOutcome, index: &Index) 
     sort_paths(&mut outcome.modified);
     sort_paths(&mut outcome.removed);
     sort_paths(&mut outcome.intent_to_add);
+    sort_paths(&mut outcome.embedded_gitlinks);
 }
 
 fn sort_outcome_paths_lexicographic(outcome: &mut StageOutcome) {
@@ -146,6 +150,7 @@ fn sort_outcome_paths_lexicographic(outcome: &mut StageOutcome) {
         &mut outcome.modified,
         &mut outcome.removed,
         &mut outcome.intent_to_add,
+        &mut outcome.embedded_gitlinks,
     ] {
         paths.sort();
         paths.dedup();
@@ -1479,7 +1484,8 @@ fn stage_untracked_paths_parallel(
         scope.poll()?;
         scope.sink().inc(1);
         if dry_run_list_only {
-            outcome.added.push(path);
+            outcome.added.push(path.clone());
+            outcome.embedded_gitlinks.push(path);
             continue;
         }
         icase_map.remove_alias_of(index, &storage_bytes(&path));
@@ -1493,7 +1499,8 @@ fn stage_untracked_paths_parallel(
             dry_run,
             matches,
         )?;
-        outcome.added.push(path);
+        outcome.added.push(path.clone());
+        outcome.embedded_gitlinks.push(path);
     }
 
     Ok(())
@@ -3301,6 +3308,73 @@ mod tests {
         assert!(index.get(b"inner/i", 0).is_none());
     }
 
+    #[test]
+    fn stage_all_reports_unregistered_embedded_repo_in_outcome() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a"), b"a\n").unwrap();
+        let sub = root.join("inner");
+        fs::create_dir_all(&sub).unwrap();
+        let sub_repo = open_nested_repo(&sub);
+        let head = commit_in_repo(&sub_repo, "i", b"i\n", "i");
+        set_branch_head(&sub_repo, head);
+
+        let outcome = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: Vec::new(),
+                pathspec_sources: Vec::new(),
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+
+        assert_eq!(outcome.embedded_gitlinks, vec!["inner".to_owned()]);
+    }
+
+    #[test]
+    fn stage_does_not_report_already_indexed_gitlink_as_embedded() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let sub = root.join("inner");
+        fs::create_dir_all(&sub).unwrap();
+        let sub_repo = open_nested_repo(&sub);
+        let head = commit_in_repo(&sub_repo, "i", b"i\n", "i");
+        set_branch_head(&sub_repo, head);
+
+        stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["inner".to_owned()],
+                pathspec_sources: vec!["inner".to_owned()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+
+        let outcome = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["inner".to_owned()],
+                pathspec_sources: vec!["inner".to_owned()],
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+
+        assert!(outcome.embedded_gitlinks.is_empty());
+    }
+
     fn seed_one_file_dirs(root: &Path, count: usize) {
         for i in 0..count {
             let dir = root.join(format!("d{i}"));
@@ -4259,6 +4333,7 @@ mod tests {
             modified: vec![valid_display.clone(), invalid_display.clone()],
             removed: Vec::new(),
             intent_to_add: Vec::new(),
+            embedded_gitlinks: Vec::new(),
             stat_refreshed: false,
         };
         sort_outcome_paths_in_index_order(&mut outcome, &index);
@@ -4287,6 +4362,7 @@ mod tests {
             modified,
             removed: Vec::new(),
             intent_to_add: Vec::new(),
+            embedded_gitlinks: Vec::new(),
             stat_refreshed: false,
         };
 

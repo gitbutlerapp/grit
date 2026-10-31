@@ -277,6 +277,8 @@ pub struct StatusModel {
     pub unstaged: Vec<DiffEntry>,
     /// Untracked paths (subject to [`StatusOptions::untracked`]).
     pub untracked: Vec<String>,
+    /// Untracked nested repositories that would be recorded as gitlinks if staged.
+    pub embedded_repositories: Vec<String>,
     /// Ignored paths (subject to [`StatusOptions::ignored`]).
     pub ignored: Vec<String>,
     /// Paths with unmerged index stages (1–3), sorted and deduplicated.
@@ -2228,6 +2230,33 @@ pub fn normalize_status_conflicts(
 
 use crate::progress::ProgressSink;
 
+fn embedded_unregistered_git_repositories(
+    work_tree: &Path,
+    index: &Index,
+    untracked: &[String],
+    precompose_unicode: bool,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for path in untracked {
+        let rel = path.trim_end_matches('/');
+        if rel.is_empty() {
+            continue;
+        }
+        let abs = if precompose_unicode {
+            crate::unicode_normalization::resolve_worktree_path_for_staging(work_tree, rel, true)
+                .abs
+        } else {
+            work_tree.join(rel)
+        };
+        if is_unregistered_embedded_git_repo(index, rel, &abs) {
+            out.push(format!("{rel}/"));
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Compute the status of `repo`'s work tree as a [`StatusModel`].
 ///
 /// This is the clean library computation: load and sparse-expand the index,
@@ -2473,6 +2502,13 @@ pub fn status(
 
     let operation = status_operation(&state, !conflicts.is_empty());
 
+    let precompose_unicode = repo_config
+        .as_ref()
+        .and_then(|c| c.get_bool("core.precomposeunicode").and_then(|r| r.ok()))
+        .unwrap_or(false);
+    let embedded_repositories =
+        embedded_unregistered_git_repositories(work_tree, &index, &untracked, precompose_unicode);
+
     Ok(StatusModel {
         head,
         head_tree,
@@ -2481,6 +2517,7 @@ pub fn status(
         staged,
         unstaged,
         untracked,
+        embedded_repositories,
         ignored,
         conflicts,
         conflict_details,
@@ -2974,6 +3011,7 @@ mod guidance_tests {
             staged: Vec::new(),
             unstaged: Vec::new(),
             untracked: Vec::new(),
+            embedded_repositories: Vec::new(),
             ignored: Vec::new(),
             conflicts: Vec::new(),
             conflict_details: Vec::new(),

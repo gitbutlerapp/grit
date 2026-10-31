@@ -367,8 +367,10 @@ pub struct CloneOutcome {
     pub worktree_bytes: u64,
     /// Index paths that collided on a case-insensitive filesystem during checkout.
     pub path_collisions: Vec<String>,
-    /// Gitlink paths materialized during checkout (submodules grit does not fetch).
+    /// Gitlink paths listed in `.gitmodules` (submodules grit does not fetch).
     pub submodule_paths: Vec<String>,
+    /// Gitlink paths with no `.gitmodules` entry (empty directories after clone).
+    pub bare_gitlink_paths: Vec<String>,
     /// Whether the destination is a bare repository.
     pub bare: bool,
     /// Whether a bundle from the server's `bundle-uri` seeded the clone.
@@ -668,8 +670,10 @@ pub struct CloneIntoOutcome {
     pub worktree_bytes: u64,
     /// Case-collision paths during checkout.
     pub path_collisions: Vec<String>,
-    /// Submodule gitlink paths materialized at checkout.
+    /// Gitlink paths listed in `.gitmodules`.
     pub submodule_paths: Vec<String>,
+    /// Gitlink paths with no `.gitmodules` entry.
+    pub bare_gitlink_paths: Vec<String>,
     /// Whether a bundle-uri seed ran.
     pub bundle: crate::bundle_uri::BundleSeed,
     /// Whether a partial-clone filter was applied by the server.
@@ -718,6 +722,7 @@ pub fn clone_into(
         worktree_bytes: outcome.worktree_bytes,
         path_collisions: outcome.path_collisions,
         submodule_paths: outcome.submodule_paths,
+        bare_gitlink_paths: outcome.bare_gitlink_paths,
         bundle: outcome.bundle,
         filter_sent: outcome.filter_sent,
     })
@@ -977,24 +982,30 @@ fn clone_after_claim(
     let mut worktree_bytes = 0;
     let mut path_collisions = Vec::new();
     let mut submodule_paths = Vec::new();
+    let mut bare_gitlink_paths = Vec::new();
     if opts.checkout && !bare {
         if let CloneCheckout::CheckedOut(checkout_oid) = checkout {
             // Objects and refs are in place: from here on a failure keeps the repository,
             // as Git does, so the checkout can be retried.
-            (files, worktree_bytes, path_collisions, submodule_paths) =
-                perform_clone_checkout(&repo, checkout_oid, progress, cancel).map_err(
-                    |source| {
-                        if source.is_cancelled() {
-                            CloneError::Library(source)
-                        } else {
-                            CloneError::CheckoutFailed {
-                                path: opts.dest.clone(),
-                                commit: checkout_oid,
-                                source: Box::new(source),
-                            }
+            (
+                files,
+                worktree_bytes,
+                path_collisions,
+                submodule_paths,
+                bare_gitlink_paths,
+            ) = perform_clone_checkout(&repo, checkout_oid, progress, cancel).map_err(
+                |source| {
+                    if source.is_cancelled() {
+                        CloneError::Library(source)
+                    } else {
+                        CloneError::CheckoutFailed {
+                            path: opts.dest.clone(),
+                            commit: checkout_oid,
+                            source: Box::new(source),
                         }
-                    },
-                )?;
+                    }
+                },
+            )?;
         }
     } else if matches!(checkout, CloneCheckout::CheckedOut(_)) {
         checkout = CloneCheckout::Skipped;
@@ -1015,6 +1026,7 @@ fn clone_after_claim(
         worktree_bytes,
         path_collisions,
         submodule_paths,
+        bare_gitlink_paths,
         bare,
         bundle,
         filter_sent: fetch_outcome.filter_sent,
@@ -1032,12 +1044,14 @@ fn gitlink_paths_in_index(index: &crate::index::Index) -> Vec<String> {
         .collect()
 }
 
+type CloneCheckoutStats = (u64, u64, Vec<String>, Vec<String>, Vec<String>);
+
 fn perform_clone_checkout(
     repo: &Repository,
     commit: ObjectId,
     progress: &mut dyn Progress,
     cancel: &dyn Cancel,
-) -> Result<(u64, u64, Vec<String>, Vec<String>)> {
+) -> Result<CloneCheckoutStats> {
     let tree = crate::diff::tree_oid_of_commit_in_repo(repo, &commit)?;
     let checkout = crate::porcelain::checkout::checkout_between_trees_with_progress(
         repo, None, &tree, progress, cancel,
@@ -1050,13 +1064,35 @@ fn perform_clone_checkout(
         .unwrap_or(false);
     let (files, worktree_bytes) =
         crate::path_icase::icase_worktree_file_stats(&index, repo.work_tree(), ignorecase);
-    let submodule_paths = gitlink_paths_in_index(&index);
+    let (submodule_paths, bare_gitlink_paths) =
+        classify_gitlink_paths(repo, gitlink_paths_in_index(&index));
     Ok((
         files,
         worktree_bytes,
         checkout.path_collisions,
         submodule_paths,
+        bare_gitlink_paths,
     ))
+}
+
+fn classify_gitlink_paths(repo: &Repository, gitlinks: Vec<String>) -> (Vec<String>, Vec<String>) {
+    let Some(work_tree) = repo.work_tree() else {
+        return (Vec::new(), gitlinks);
+    };
+    let registered: std::collections::HashSet<String> =
+        crate::submodule_gitdir::registered_submodule_paths(work_tree)
+            .into_iter()
+            .collect();
+    let mut submodule_paths = Vec::new();
+    let mut bare_gitlink_paths = Vec::new();
+    for path in gitlinks {
+        if registered.contains(&path) {
+            submodule_paths.push(path);
+        } else {
+            bare_gitlink_paths.push(path);
+        }
+    }
+    (submodule_paths, bare_gitlink_paths)
 }
 
 fn resolve_clone_ref(repo: &Repository, refname: &str) -> ObjectId {
