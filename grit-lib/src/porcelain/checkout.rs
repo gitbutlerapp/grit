@@ -972,6 +972,8 @@ fn checkout_hard_to_tree_journaled(
     lock: &mut IndexLock,
     journal: &mut CheckoutJournal,
 ) -> Result<()> {
+    let pre_reset_index = repo.load_index_preserving_sparse()?;
+    let pre_reset_index_mtime = crate::diff::index_mtime_for_diff(&pre_reset_index, None);
     let mut index =
         crate::porcelain::index_from_tree::load_index_for_hard_reset(repo, target_tree)?;
     let trees_differ = head_tree != target_tree;
@@ -986,10 +988,28 @@ fn checkout_hard_to_tree_journaled(
     } else {
         Vec::new()
     };
+    let tree_stable_between_commits = if trees_differ {
+        hard_reset_tree_stable_between_commits(&pre_reset_index, &changes)
+    } else {
+        BTreeSet::new()
+    };
+    let config = repo.config()?;
+    let unstaged_tree_stable_paths = if trees_differ
+        && !tree_stable_between_commits.is_empty()
+        && !pre_reset_index.has_sparse_directory_placeholders()
+    {
+        hard_reset_unstaged_tree_stable_paths(
+            repo,
+            work_tree,
+            &pre_reset_index,
+            pre_reset_index_mtime,
+            &tree_stable_between_commits,
+            config.as_ref(),
+        )?
+    } else {
+        BTreeSet::new()
+    };
     crate::porcelain::index_from_tree::expand_sparse_for_tree_changes(repo, &mut index, &changes)?;
-    // Raciness is judged against the index as it was before the reset: the tree-diff checkout
-    // below rewrites the index, which would make racily clean entries look settled.
-    let pre_reset_index_mtime = crate::diff::index_mtime_for_diff(&index, None);
     let tree_deleted: HashSet<Vec<u8>> = changes
         .iter()
         .filter(|change| change.status == DiffStatus::Deleted)
@@ -1069,6 +1089,12 @@ fn checkout_hard_to_tree_journaled(
             written_by_tree_diff.insert(crate::repo_relpath::storage_bytes(path).into_owned());
         }
     }
+    let sparse = SparseCheckout::load(repo)?;
+    let stat_policy = crate::index::StatMatchPolicy::from_config(Some(config.as_ref()));
+    let trust_filemode = config
+        .get_bool("core.filemode")
+        .and_then(|r| r.ok())
+        .unwrap_or(true);
     // Hard reset reapplies the sparse definition. Tracked files that caused skip-worktree
     // to be cleared are removed again; paths still marked skip-worktree (including the
     // expectFilesOutsideOfPatterns opt-out) and untracked files are left alone. Only retain
@@ -1176,6 +1202,7 @@ fn checkout_hard_to_tree_journaled(
         &index,
         trees_differ,
         &written_by_tree_diff,
+        &tree_stable_between_commits,
         sparse.as_ref(),
     );
     let worktree_stats = scan_index_blob_stats_for_hard_reset(
@@ -1201,6 +1228,12 @@ fn checkout_hard_to_tree_journaled(
             }
             if trees_differ && written_by_tree_diff.contains(path) {
                 return HardResetEntryAction::Written(None);
+            }
+            if trees_differ && tree_stable_between_commits.contains(path) {
+                if unstaged_tree_stable_paths.contains(path) {
+                    return HardResetEntryAction::Write;
+                }
+                return HardResetEntryAction::Keep;
             }
             let existing = &index.entries[pos];
             match worktree_stats.get(pos) {
@@ -1655,11 +1688,99 @@ fn hard_reset_tree_diff_filled_all_entries(
     })
 }
 
+/// Paths whose blob is identical in the head and target trees (not listed in the tree diff).
+fn hard_reset_tree_stable_between_commits(
+    pre_reset_index: &Index,
+    changes: &[DiffEntry],
+) -> BTreeSet<Vec<u8>> {
+    let mut touched = BTreeSet::new();
+    for change in changes {
+        if let Some(path) = &change.old_path {
+            touched.insert(crate::repo_relpath::storage_bytes(path).into_owned());
+        }
+        if let Some(path) = &change.new_path {
+            touched.insert(crate::repo_relpath::storage_bytes(path).into_owned());
+        }
+    }
+    pre_reset_index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0)
+        .filter(|e| !e.skip_worktree())
+        .filter(|e| !e.is_sparse_directory_placeholder())
+        .filter(|e| e.mode != MODE_GITLINK)
+        .filter(|e| !touched.contains(&e.path))
+        .map(|e| e.path.clone())
+        .collect()
+}
+
+/// Dirty tracked paths among tree-stable rows, using one restricted index-to-worktree diff.
+fn hard_reset_unstaged_tree_stable_paths(
+    repo: &Repository,
+    work_tree: &Path,
+    pre_reset_index: &Index,
+    index_mtime: Option<(u32, u32)>,
+    tree_stable: &BTreeSet<Vec<u8>>,
+    config: &ConfigSet,
+) -> Result<BTreeSet<Vec<u8>>> {
+    let restrict: BTreeSet<String> = tree_stable
+        .iter()
+        .filter_map(|path| std::str::from_utf8(path).ok())
+        .map(str::to_owned)
+        .collect();
+    let mut index = pre_reset_index.clone();
+    let (entries, _) = crate::diff::diff_index_to_worktree_with_options(
+        repo.odb(),
+        &mut index,
+        work_tree,
+        crate::diff::DiffIndexToWorktreeOptions {
+            index_mtime,
+            for_status: true,
+            refresh_index_stat_in_pass: false,
+            refresh_fsmonitor: false,
+            repository_git_dir: Some(repo.git_dir().to_path_buf()),
+            config: Some(Arc::new(config.clone())),
+            restrict_to_paths: Some(Arc::new(restrict)),
+            stat_parallel_threads: hard_reset_stat_parallel_threads(
+                repo,
+                config,
+                tree_stable.len(),
+            ),
+            thread_policy: Some(repo.thread_policy()),
+            simplify_gitlinks: true,
+            ignore_submodule_untracked: true,
+            ..crate::diff::DiffIndexToWorktreeOptions::default()
+        },
+    )?;
+    Ok(entries
+        .into_iter()
+        .filter_map(|entry| entry.old_path)
+        .map(|path| crate::repo_relpath::storage_bytes(&path).into_owned())
+        .collect())
+}
+
+fn hard_reset_stat_parallel_threads(
+    repo: &Repository,
+    config: &ConfigSet,
+    path_count: usize,
+) -> Option<usize> {
+    if path_count < 32 {
+        return None;
+    }
+    Some(
+        repo.thread_policy()
+            .resolve(ParallelOp::IndexRefresh, config)
+            .threads
+            .get(),
+    )
+}
+
 /// Index positions that need a worktree stat before hard reset can choose keep vs verify.
 fn hard_reset_stat_probe_positions(
     index: &Index,
     trees_differ: bool,
     written_by_tree_diff: &BTreeSet<Vec<u8>>,
+    tree_stable_between_commits: &BTreeSet<Vec<u8>>,
     sparse: Option<&SparseCheckout>,
 ) -> Vec<usize> {
     let mut positions = Vec::new();
@@ -1676,6 +1797,9 @@ fn hard_reset_stat_probe_positions(
             continue;
         }
         if trees_differ && written_by_tree_diff.contains(&entry.path) {
+            continue;
+        }
+        if trees_differ && tree_stable_between_commits.contains(&entry.path) {
             continue;
         }
         positions.push(pos);
@@ -1714,7 +1838,7 @@ fn scan_index_blob_stats_for_hard_reset(
         &plan,
         WorktreeBlobScanOptions {
             preload_index: false,
-            stat_parallel_threads: None,
+            stat_parallel_threads: hard_reset_stat_parallel_threads(repo, config, positions.len()),
             parallel_stat_without_preload: true,
         },
         &repo.thread_policy(),

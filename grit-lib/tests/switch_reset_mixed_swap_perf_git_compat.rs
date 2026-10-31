@@ -1,6 +1,6 @@
 //! Issue #2380: mixed delete/add checkout on a wide tree should stay near system `git`.
 //!
-//! `GRIT_SWAP_PERF=1 cargo test -p grit-lib --test switch_reset_mixed_swap_perf_git_compat --release`
+//! `GRIT_SWAP_PERF=1 cargo test -p grit-lib switch_reset_mixed_swap_near_git --release --features full-tests`
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -144,6 +144,28 @@ fn warm_median(
     median(samples)
 }
 
+/// Issue repro: grit switch to base, git reset index to base, then time grit reset to swap.
+fn warm_median_grit_reset(
+    root: &std::path::Path,
+    grit: &std::path::Path,
+    reset_target: &str,
+) -> Duration {
+    let prep = || {
+        run_cmd(root, grit, &["switch", "base"]);
+        git(root, &["reset", "-q", "--hard", "origin/base"]);
+    };
+    for _ in 0..WARM_RUNS {
+        prep();
+        let _ = timed(root, grit, &["reset", "--hard", reset_target]);
+    }
+    let mut samples = Vec::with_capacity(WARM_RUNS);
+    for _ in 0..WARM_RUNS {
+        prep();
+        samples.push(timed(root, grit, &["reset", "--hard", reset_target]));
+    }
+    median(samples)
+}
+
 #[test]
 fn switch_reset_mixed_swap_near_git() {
     if std::env::var("GRIT_SWAP_PERF").ok().as_deref() != Some("1") {
@@ -185,7 +207,7 @@ fn switch_reset_mixed_swap_near_git() {
         &["reset", "--hard", "swap"],
         "base",
     );
-    let grit_reset = warm_median(&work, &grit, &["reset", "--hard", "swap"], "base");
+    let grit_reset = warm_median_grit_reset(&work, &grit, "swap");
 
     let switch_ratio = grit_switch.as_secs_f64() / git_switch.as_secs_f64();
     let reset_ratio = grit_reset.as_secs_f64() / git_reset.as_secs_f64();
