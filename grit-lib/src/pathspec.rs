@@ -2078,6 +2078,8 @@ impl From<PathOutsideRepository> for PathspecResolveError {
 ///
 /// This keeps the `cwd` prefix case-sensitive (via an internal `prefix:` magic
 /// token) while still honoring magic options like `icase` for the tail.
+/// Specs that include `top` (or short `:/`) stay repo-root-relative: the tail is
+/// not prefixed with the process cwd and no `prefix:` token is injected.
 /// Returns `None` when `spec` is not a parseable magic pathspec.
 pub fn resolve_magic_pathspec(spec: &str, cwd_prefix: &str) -> Option<String> {
     if !spec.starts_with(":(") {
@@ -2096,6 +2098,10 @@ fn resolve_magic_pathspec_parts(magic_prefix: &str, tail: &str, cwd_prefix: &str
 
     if let Some(rooted_tail) = tail.strip_prefix('/') {
         return format!("{magic_prefix}{}", normalize_relative_path_str(rooted_tail));
+    }
+
+    if long_magic_prefix_has_top(magic_prefix) {
+        return format!("{magic_prefix}{tail}");
     }
 
     let combined = if cwd_prefix.is_empty() {
@@ -2130,6 +2136,19 @@ fn has_magic_prefix_token(magic_prefix: &str) -> bool {
         .split(',')
         .map(str::trim)
         .any(|token| token.starts_with("prefix:"))
+}
+
+fn long_magic_prefix_has_top(magic_prefix: &str) -> bool {
+    let Some(inner) = magic_prefix
+        .strip_prefix(":(")
+        .and_then(|s| s.strip_suffix(')'))
+    else {
+        return false;
+    };
+    inner
+        .split(',')
+        .map(str::trim)
+        .any(|token| token.eq_ignore_ascii_case("top"))
 }
 
 fn inject_magic_prefix_token(magic_prefix: &str, prefix: &str) -> String {
@@ -2353,6 +2372,9 @@ fn resolve_pathspec_impl(pathspec: &str, work_tree: &Path, prefix: Option<&str>)
             if !p.is_empty() && !literal_pathspecs_enabled() {
                 let cwd_ps = format!("{}/", p.trim_end_matches('/'));
                 if pathspec.starts_with(":(") {
+                    if pathspec_has_top(pathspec) {
+                        return pathspec.to_owned();
+                    }
                     if let Some(resolved) = resolve_magic_pathspec(pathspec, &cwd_ps) {
                         return resolved;
                     }
@@ -3065,6 +3087,50 @@ mod resolved_pathspecs_tests {
 }
 
 #[cfg(test)]
+mod resolve_magic_pathspec_tests {
+    use super::*;
+
+    #[test]
+    fn top_magic_does_not_inject_cwd_prefix() {
+        assert_eq!(
+            resolve_magic_pathspec(":(top)a/g.c", "a/b/").expect("magic"),
+            ":(top)a/g.c"
+        );
+        assert_eq!(
+            resolve_magic_pathspec(":(top,glob)a/**/*.c", "a/b/").expect("magic"),
+            ":(top,glob)a/**/*.c"
+        );
+        assert_eq!(
+            resolve_magic_pathspec(":(exclude,top)a/b", "a/b/").expect("magic"),
+            ":(exclude,top)a/b"
+        );
+    }
+
+    #[test]
+    fn non_top_magic_still_injects_prefix_from_subdirectory() {
+        assert_eq!(
+            resolve_magic_pathspec(":(glob)**/f.txt", "sub/").expect("magic"),
+            ":(glob,prefix:sub/)**/f.txt"
+        );
+        assert_eq!(
+            resolve_magic_pathspec(":(exclude)vendor", "sub/").expect("magic"),
+            ":(exclude,prefix:sub/)vendor"
+        );
+    }
+
+    #[test]
+    fn resolve_pathspec_top_from_subdirectory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let wt = dir.path();
+        std::fs::create_dir_all(wt.join("a/b")).expect("mkdir");
+        assert_eq!(
+            resolve_pathspec(":(top)a/g.c", wt, Some("a/b")),
+            ":(top)a/g.c"
+        );
+    }
+}
+
+#[cfg(test)]
 mod rev_walk_pathspec_resolution_tests {
     use super::*;
     use crate::config::environment::{Environment, RepositoryOptions};
@@ -3118,5 +3184,20 @@ mod rev_walk_pathspec_resolution_tests {
             false,
             &[spec.to_owned()]
         ));
+    }
+
+    #[test]
+    fn top_magic_from_subdirectory_stays_unprefixed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let wt = dir.path();
+        std::fs::create_dir_all(wt.join("a/b")).expect("mkdir");
+        Repository::init(wt, &InitOptions::default()).expect("init");
+        let repo = repo_from_sub(wt, &wt.join("a/b"));
+        let specs = repo
+            .resolve_rev_walk_pathspecs(&[":(top)a/g.c".to_owned()])
+            .expect("resolve");
+        assert_eq!(specs, [":(top)a/g.c"]);
+        assert!(pathspec_matches(&specs[0], "a/g.c"));
+        assert!(!pathspec_matches(&specs[0], "a/b/h.c"));
     }
 }

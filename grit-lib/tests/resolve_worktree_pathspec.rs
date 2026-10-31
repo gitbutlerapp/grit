@@ -47,6 +47,30 @@ fn magic_pathspecs_pass_through() {
     );
 }
 
+/// Regression for #2355: `:(top)` must not gain `prefix:<cwd>/` when cwd is a subdirectory.
+#[test]
+fn top_magic_pathspecs_stay_repo_root_relative_from_prefix() {
+    let (_dir, repo) = init_repo();
+    let prefix = "a/b";
+    let cases = [":(top)a/g.c", ":(top,glob)a/**/*.c", ":(exclude,top)a/b"];
+    for spec in cases {
+        assert_eq!(
+            repo.resolve_worktree_pathspec(spec, Some(prefix))
+                .expect("resolve"),
+            spec,
+            "spec must not be cwd-prefixed"
+        );
+    }
+    let (dir, repo) = init_repo();
+    let sub = dir.path().join("a/b");
+    fs::create_dir_all(&sub).expect("sub");
+    fs::write(dir.path().join("a/g.c"), b"1\n").expect("g.c");
+    fs::write(sub.join("h.c"), b"1\n").expect("h.c");
+    let raw = vec![":(top)a/g.c".to_string()];
+    let resolved = ResolvedPathspecs::resolve(&repo, &sub, &raw, None).expect("resolve batch");
+    assert_eq!(resolved.specs, raw);
+}
+
 #[test]
 fn absolute_path_outside_work_tree_is_a_typed_error() {
     let (_dir, repo) = init_repo();

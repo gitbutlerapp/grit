@@ -727,6 +727,176 @@ fn log_and_revs_trailing_pathspec_from_subdirectory_matches_git() {
     assert_eq!(grit_from_file, git_from_file);
 }
 
+fn init_issue_2355_fixture(dir: &std::path::Path) {
+    assert!(run_git(dir, &["init", "-q"]).status.success());
+    assert!(run_git(dir, &["config", "user.email", "a@b"])
+        .status
+        .success());
+    assert!(run_git(dir, &["config", "user.name", "n"]).status.success());
+    assert!(run_git(dir, &["config", "commit.gpgsign", "false"])
+        .status
+        .success());
+    fs::create_dir_all(dir.join("a/b")).expect("dirs");
+    fs::write(dir.join("a/g.c"), b"1\n").expect("g.c");
+    fs::write(dir.join("a/b/h.c"), b"1\n").expect("h.c");
+    assert!(run_git(dir, &["add", "-A"]).status.success());
+    assert!(run_git(dir, &["commit", "-qm", "init"]).status.success());
+    fs::OpenOptions::new()
+        .append(true)
+        .open(dir.join("a/g.c"))
+        .expect("open g")
+        .write_all(b"m\n")
+        .expect("append g");
+    fs::OpenOptions::new()
+        .append(true)
+        .open(dir.join("a/b/h.c"))
+        .expect("open h")
+        .write_all(b"m\n")
+        .expect("append h");
+}
+
+fn stdout_lines(out: &std::process::Output) -> Vec<String> {
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+/// Regression for #2355: long-form `:(top)` pathspecs from a subdirectory match Git.
+#[test]
+fn top_pathspec_from_subdirectory_matches_git() {
+    let grit = env!("CARGO_BIN_EXE_grit");
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    init_issue_2355_fixture(dir.path());
+    let sub = dir.path().join("a/b");
+
+    let git_diff = run_git(&sub, &["diff", "--name-only", "--", ":(top)a/g.c"]);
+    assert!(git_diff.status.success(), "git diff");
+    let git_diff_names = stdout_lines(&git_diff);
+    let grit_diff = run_grit(grit, &sub, &["diff", "--name-only", "--", ":(top)a/g.c"]);
+    assert!(
+        grit_diff.status.success(),
+        "grit diff: {}",
+        String::from_utf8_lossy(&grit_diff.stderr)
+    );
+    assert_eq!(stdout_lines(&grit_diff), git_diff_names);
+
+    let git_status = run_git(&sub, &["status", "--short", "--", ":(top)a/g.c"]);
+    assert!(git_status.status.success(), "git status");
+    let grit_status = run_grit(grit, &sub, &["status", "--short", "--", ":(top)a/g.c"]);
+    assert!(
+        grit_status.status.success(),
+        "grit status: {}",
+        String::from_utf8_lossy(&grit_status.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&git_status.stdout),
+        String::from_utf8_lossy(&grit_status.stdout)
+    );
+
+    assert!(run_git(&sub, &["add", "--", ":(top)a/g.c"])
+        .status
+        .success());
+    let git_after_add = ls_files_sorted(dir.path());
+    let dir2 = tempfile::TempDir::new().expect("tempdir2");
+    init_issue_2355_fixture(dir2.path());
+    let sub2 = dir2.path().join("a/b");
+    assert!(run_grit(grit, &sub2, &["add", "--", ":(top)a/g.c"])
+        .status
+        .success());
+    assert_eq!(ls_files_sorted(dir2.path()), git_after_add);
+
+    let dir3 = tempfile::TempDir::new().expect("tempdir3");
+    init_issue_2355_fixture(dir3.path());
+    let sub3 = dir3.path().join("a/b");
+    assert!(run_git(&sub3, &["add", "--", ":(top)a/g.c"])
+        .status
+        .success());
+    assert!(run_git(&sub3, &["restore", "--", ":(top)a/g.c"])
+        .status
+        .success());
+    let git_restored = fs::read_to_string(dir3.path().join("a/g.c")).expect("read g");
+    let dir4 = tempfile::TempDir::new().expect("tempdir4");
+    init_issue_2355_fixture(dir4.path());
+    let sub4 = dir4.path().join("a/b");
+    assert!(run_grit(grit, &sub4, &["add", "--", ":(top)a/g.c"])
+        .status
+        .success());
+    assert!(run_grit(grit, &sub4, &["restore", "--", ":(top)a/g.c"])
+        .status
+        .success());
+    assert_eq!(
+        fs::read_to_string(dir4.path().join("a/g.c")).expect("read g"),
+        git_restored
+    );
+
+    let dir5 = tempfile::TempDir::new().expect("tempdir5");
+    init_issue_2355_fixture(dir5.path());
+    let sub5 = dir5.path().join("a/b");
+    assert!(run_git(&sub5, &["add", "--", ":(top)a/g.c"])
+        .status
+        .success());
+    assert!(run_git(&sub5, &["rm", "--cached", "--", ":(top)a/g.c"])
+        .status
+        .success());
+    let git_rm_index = ls_files_sorted(dir5.path());
+    let dir6 = tempfile::TempDir::new().expect("tempdir6");
+    init_issue_2355_fixture(dir6.path());
+    let sub6 = dir6.path().join("a/b");
+    assert!(run_grit(grit, &sub6, &["add", "--", ":(top)a/g.c"])
+        .status
+        .success());
+    assert!(
+        run_grit(grit, &sub6, &["rm", "--cached", "--", ":(top)a/g.c"])
+            .status
+            .success()
+    );
+    assert_eq!(ls_files_sorted(dir6.path()), git_rm_index);
+
+    let git_stash = run_git(&sub, &["stash", "push", "--", ":(top,glob)a/*.c"]);
+    assert!(git_stash.status.success(), "git stash");
+    let dir7 = tempfile::TempDir::new().expect("tempdir7");
+    init_issue_2355_fixture(dir7.path());
+    let sub7 = dir7.path().join("a/b");
+    let grit_stash = run_grit(grit, &sub7, &["stash", "push", "--", ":(top,glob)a/*.c"]);
+    assert!(
+        grit_stash.status.success(),
+        "grit stash: {}",
+        String::from_utf8_lossy(&grit_stash.stderr)
+    );
+
+    let git_range = run_git(
+        &sub,
+        &[
+            "diff",
+            "--name-only",
+            "HEAD~1",
+            "HEAD",
+            "--",
+            ":(top,glob)a/**/*.c",
+        ],
+    );
+    assert!(git_range.status.success(), "git range diff");
+    let grit_range = run_grit(
+        grit,
+        &sub,
+        &[
+            "diff",
+            "--name-only",
+            "HEAD~1",
+            "HEAD",
+            "--",
+            ":(top,glob)a/**/*.c",
+        ],
+    );
+    assert!(
+        grit_range.status.success(),
+        "grit range diff: {}",
+        String::from_utf8_lossy(&grit_range.stderr)
+    );
+    assert_eq!(stdout_lines(&grit_range), stdout_lines(&git_range));
+}
+
 #[test]
 fn show_pathspec_from_file_in_bare_repo_succeeds() {
     let grit = env!("CARGO_BIN_EXE_grit");
