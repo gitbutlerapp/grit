@@ -478,12 +478,94 @@ fn uncommitted_commit_info_carries_the_given_time() {
     );
     let info = &result.commits[&ObjectId::zero()];
     assert_eq!(info.author_time, 1_800_000_000);
-    assert!(info.author.is_empty() && info.summary.is_empty());
+    assert_eq!(
+        info.author,
+        "Not Committed Yet <not.committed.yet> 1800000000 +0000"
+    );
+    assert_eq!(info.summary, "Not Committed Yet");
     let without_time = blame(&repo, "f.txt", &worktree_options());
     assert_eq!(without_time.commits[&ObjectId::zero()].author_time, 0);
     let hunks = result.hunks();
-    assert!(hunks[0].commit.is_zero());
+    assert!(hunks[0].commit.is_zero() && hunks[0].not_committed);
     assert_eq!((hunks[0].final_start, hunks[0].count), (1, 1));
+    assert_eq!(hunks[0].lines(&result)[0].content, "new");
+    assert!(!hunks[1].not_committed);
+    assert_eq!(hunks[1].lines(&result)[0].content, "zero");
+
+    let external = blame(
+        &repo,
+        "f.txt",
+        &BlameOptions {
+            now: Some(now),
+            final_source: BlameFinalSource::Contents(b"buffer\nzero\n".to_vec()),
+            ..BlameOptions::default()
+        },
+    );
+    let info = &external.commits[&ObjectId::zero()];
+    assert_eq!(
+        info.author,
+        "External file (--contents) <not.committed.yet> 1800000000 +0000"
+    );
+    assert_eq!(info.summary, "External file (--contents)");
+}
+
+fn porcelain_author_of_zero_commit(output: &str) -> Option<String> {
+    let mut in_zero_group = false;
+    for raw in output.lines() {
+        if raw.starts_with("0000000000000000000000000000000000000000 ") {
+            in_zero_group = true;
+        } else if let Some(name) = raw.strip_prefix("author ").filter(|_| in_zero_group) {
+            return Some(name.to_owned());
+        } else if raw.starts_with('\t') {
+            in_zero_group = false;
+        }
+    }
+    None
+}
+
+#[test]
+fn uncommitted_author_name_matches_git_porcelain() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    history(root);
+    std::fs::write(root.join("f.txt"), "new\nzero\n").unwrap();
+    let repo = open_repo(root);
+    let worktree = blame(&repo, "f.txt", &worktree_options());
+    let git_worktree = git(root, &["blame", "--porcelain", "--", "f.txt"]);
+    let name = |result: &BlameResult| {
+        let author = &result.commits[&ObjectId::zero()].author;
+        author[..author.find(" <").unwrap()].to_owned()
+    };
+    assert_eq!(
+        porcelain_author_of_zero_commit(&git_worktree).as_deref(),
+        Some(name(&worktree).as_str())
+    );
+
+    let buffer = root.join("buffer.txt");
+    std::fs::write(&buffer, "buffer\nzero\n").unwrap();
+    let contents = blame(
+        &repo,
+        "f.txt",
+        &BlameOptions {
+            final_source: BlameFinalSource::Contents(std::fs::read(&buffer).unwrap()),
+            ..BlameOptions::default()
+        },
+    );
+    let git_contents = git(
+        root,
+        &[
+            "blame",
+            "--porcelain",
+            "--contents",
+            buffer.to_str().unwrap(),
+            "--",
+            "f.txt",
+        ],
+    );
+    assert_eq!(
+        porcelain_author_of_zero_commit(&git_contents).as_deref(),
+        Some(name(&contents).as_str())
+    );
 }
 
 #[test]

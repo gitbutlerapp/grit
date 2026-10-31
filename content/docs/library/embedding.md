@@ -154,7 +154,13 @@ the buffer. Lines that exist only in that content have
 set and the null object id as `commit`; their
 [`BlameCommitInfo`](rustdoc:grit_lib::blame::BlameCommitInfo) carries
 [`BlameOptions::now`](rustdoc:grit_lib::blame::BlameOptions::now) as the author
-time, with the labels left to the caller. Resolve `-L` specs against the same
+time and the `Not Committed Yet` (or `External file (--contents)`) identity from
+[`BlameFinalSource::uncommitted_commit_info`](rustdoc:grit_lib::blame::BlameFinalSource::uncommitted_commit_info).
+[`BlameResult::hunks`](rustdoc:grit_lib::blame::BlameResult::hunks) groups
+lines the way `git blame --porcelain` does; each
+[`BlameHunk`](rustdoc:grit_lib::blame::BlameHunk) flags uncommitted runs with
+`not_committed` and borrows its own lines with
+[`BlameHunk::lines`](rustdoc:grit_lib::blame::BlameHunk::lines). Resolve `-L` specs against the same
 text with
 [`resolve_blame_line_range_with_options`](rustdoc:grit_lib::blame::resolve_blame_line_range_with_options).
 Nothing is written to the object database.

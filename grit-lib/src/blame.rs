@@ -19,7 +19,7 @@
 //! # }
 //! ```
 
-use std::ops::RangeInclusive;
+use std::ops::{Range, RangeInclusive};
 use std::sync::OnceLock;
 
 use similar::{Algorithm as SimilarAlgorithm, DiffOp};
@@ -4674,6 +4674,46 @@ pub enum BlameFinalSource {
     Contents(Vec<u8>),
 }
 
+/// Email in the author identity of uncommitted lines (see
+/// [`BlameFinalSource::uncommitted_commit_info`]), used for every final source; Git's
+/// porcelain output reports `external.file` instead for `--contents`.
+pub const BLAME_NOT_COMMITTED_EMAIL: &str = "not.committed.yet";
+
+impl BlameFinalSource {
+    /// Author name and summary [`blame_file`] reports for lines that exist only in this source.
+    ///
+    /// Returns `"External file (--contents)"` for [`Contents`](Self::Contents) and
+    /// `"Not Committed Yet"` otherwise, the author names Git's porcelain output uses.
+    /// [`Revision`](Self::Revision) never yields uncommitted lines; it shares the worktree
+    /// label so the method is total.
+    #[must_use]
+    pub const fn uncommitted_label(&self) -> &'static str {
+        match self {
+            Self::Contents(_) => "External file (--contents)",
+            Self::Revision | Self::Worktree => "Not Committed Yet",
+        }
+    }
+
+    /// Commit metadata [`blame_file`] stores under the null object id for uncommitted lines.
+    ///
+    /// The author is `"<label> <not.committed.yet> <time> +0000"` and the summary repeats
+    /// the label, where the label is [`Self::uncommitted_label`].
+    ///
+    /// # Parameters
+    ///
+    /// - `now`: author time to report (Git reports the current time); `None` reports `0`.
+    #[must_use]
+    pub fn uncommitted_commit_info(&self, now: Option<time::OffsetDateTime>) -> BlameCommitInfo {
+        let label = self.uncommitted_label();
+        let author_time = now.map_or(0, |now| now.unix_timestamp());
+        BlameCommitInfo {
+            author: format!("{label} <{BLAME_NOT_COMMITTED_EMAIL}> {author_time} +0000"),
+            author_time,
+            summary: label.to_owned(),
+        }
+    }
+}
+
 /// One blamed line returned by [`blame_file`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlameAttributedLine {
@@ -4722,13 +4762,40 @@ pub struct BlameHunk {
     pub ignored: bool,
     /// Set when every line in the hunk could not be blamed past an ignored revision.
     pub unblamable: bool,
+    /// Set when every line in the hunk exists only in the uncommitted content selected by
+    /// [`BlameOptions::final_source`]; `commit` is then the null object id.
+    pub not_committed: bool,
+    /// Indices of this hunk's lines in the [`BlameResult::lines`] it was grouped from
+    /// (`line_indices.len() == count`). Use [`Self::lines`] to borrow them.
+    pub line_indices: Range<usize>,
+}
+
+impl BlameHunk {
+    /// Borrow the lines of `result` this hunk covers, in final-line order.
+    ///
+    /// # Parameters
+    ///
+    /// - `result`: the [`BlameResult`] whose [`BlameResult::hunks`] produced this hunk.
+    ///
+    /// # Returns
+    ///
+    /// `count` lines. When `result` is not the one this hunk came from and
+    /// [`Self::line_indices`] falls outside `result.lines`, returns an empty slice.
+    #[must_use]
+    pub fn lines<'r>(&self, result: &'r BlameResult) -> &'r [BlameAttributedLine] {
+        result
+            .lines
+            .get(self.line_indices.clone())
+            .unwrap_or_default()
+    }
 }
 
 /// Metadata for a commit referenced by [`BlameResult::lines`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlameCommitInfo {
     /// Author identity line (`Name <email> <epoch> <tz>`); empty when the commit has no
-    /// `author` header.
+    /// `author` header. For uncommitted lines (the null object id) this is the identity
+    /// described by [`BlameFinalSource::uncommitted_commit_info`].
     pub author: String,
     /// Author timestamp (Unix seconds); `0` when the author line has none.
     pub author_time: i64,
@@ -4767,6 +4834,8 @@ impl BlameResult {
                     count: slice.len(),
                     ignored: slice[0].ignored,
                     unblamable: slice[0].unblamable,
+                    not_committed: slice[0].not_committed,
+                    line_indices: start..i,
                 });
                 start = i;
             }
@@ -4885,11 +4954,7 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
             for line in &lines {
                 commits.entry(line.commit).or_insert_with(|| {
                     if line.not_committed {
-                        BlameCommitInfo {
-                            author: String::new(),
-                            author_time: options.now.map_or(0, |now| now.unix_timestamp()),
-                            summary: String::new(),
-                        }
+                        options.final_source.uncommitted_commit_info(options.now)
                     } else {
                         load_blame_commit_info(odb, line.commit)
                     }
@@ -5698,6 +5763,92 @@ mod tests {
         assert_eq!(hunks[0].final_start, 1);
         assert_eq!(hunks[1].count, 1);
         assert_eq!(hunks[1].original_path, "b.txt");
+        assert_eq!(hunks[0].line_indices, 0..2);
+        assert_eq!(hunks[1].line_indices, 2..3);
+        assert!(!hunks[0].not_committed);
+        let contents: Vec<_> = hunks[0]
+            .lines(&result)
+            .iter()
+            .map(|line| line.content.as_str())
+            .collect();
+        assert_eq!(contents, ["one", "two"]);
+        assert_eq!(hunks[1].lines(&result)[0].content, "three");
+        let truncated = BlameResult {
+            lines: result.lines[..1].to_vec(),
+            commits: HashMap::new(),
+        };
+        assert!(hunks[1].lines(&truncated).is_empty());
+    }
+
+    fn uncommitted_line(final_line: usize, content: &str) -> BlameAttributedLine {
+        BlameAttributedLine {
+            commit: crate::objects::ObjectId::zero(),
+            original_line: final_line,
+            final_line,
+            original_path: "f.txt".to_owned(),
+            content: content.to_owned(),
+            encoding_lossy: false,
+            content_bytes: None,
+            ignored: false,
+            unblamable: false,
+            not_committed: true,
+        }
+    }
+
+    #[test]
+    fn blame_result_hunks_mark_uncommitted_runs() {
+        let result = BlameResult {
+            lines: vec![uncommitted_line(1, "a"), uncommitted_line(2, "b")],
+            commits: HashMap::new(),
+        };
+        let hunks = result.hunks();
+        assert_eq!(hunks.len(), 1);
+        assert!(hunks[0].not_committed && hunks[0].commit.is_zero());
+        assert_eq!(hunks[0].line_indices, 0..2);
+        assert_eq!(hunks[0].lines(&result), result.lines.as_slice());
+        assert!(BlameResult {
+            lines: Vec::new(),
+            commits: HashMap::new(),
+        }
+        .hunks()
+        .is_empty());
+    }
+
+    #[test]
+    fn uncommitted_label_depends_on_final_source() {
+        assert_eq!(
+            BlameFinalSource::Worktree.uncommitted_label(),
+            "Not Committed Yet"
+        );
+        assert_eq!(
+            BlameFinalSource::Revision.uncommitted_label(),
+            "Not Committed Yet"
+        );
+        assert_eq!(
+            BlameFinalSource::Contents(Vec::new()).uncommitted_label(),
+            "External file (--contents)"
+        );
+    }
+
+    #[test]
+    fn uncommitted_commit_info_formats_identity() {
+        let now = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let info = BlameFinalSource::Worktree.uncommitted_commit_info(Some(now));
+        assert_eq!(
+            info,
+            BlameCommitInfo {
+                author: "Not Committed Yet <not.committed.yet> 1700000000 +0000".to_owned(),
+                author_time: 1_700_000_000,
+                summary: "Not Committed Yet".to_owned(),
+            }
+        );
+        let external = BlameFinalSource::Contents(b"x\n".to_vec()).uncommitted_commit_info(None);
+        assert_eq!(
+            external.author,
+            "External file (--contents) <not.committed.yet> 0 +0000"
+        );
+        assert_eq!(external.author_time, 0);
+        assert_eq!(external.summary, "External file (--contents)");
     }
 
     #[test]

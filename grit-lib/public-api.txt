@@ -385,6 +385,9 @@ pub enum grit_lib::blame::BlameFinalSource
 pub grit_lib::blame::BlameFinalSource::Contents(alloc::vec::Vec<u8>)
 pub grit_lib::blame::BlameFinalSource::Revision
 pub grit_lib::blame::BlameFinalSource::Worktree
+impl grit_lib::blame::BlameFinalSource
+pub fn grit_lib::blame::BlameFinalSource::uncommitted_commit_info(&self, core::option::Option<time::offset_date_time::OffsetDateTime>) -> grit_lib::blame::BlameCommitInfo
+pub const fn grit_lib::blame::BlameFinalSource::uncommitted_label(&self) -> &'static str
 impl core::clone::Clone for grit_lib::blame::BlameFinalSource
 pub fn grit_lib::blame::BlameFinalSource::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::blame::BlameFinalSource
@@ -520,9 +523,13 @@ pub grit_lib::blame::BlameHunk::commit: grit_lib::objects::ObjectId
 pub grit_lib::blame::BlameHunk::count: usize
 pub grit_lib::blame::BlameHunk::final_start: usize
 pub grit_lib::blame::BlameHunk::ignored: bool
+pub grit_lib::blame::BlameHunk::line_indices: core::ops::range::Range<usize>
+pub grit_lib::blame::BlameHunk::not_committed: bool
 pub grit_lib::blame::BlameHunk::original_path: alloc::string::String
 pub grit_lib::blame::BlameHunk::original_start: usize
 pub grit_lib::blame::BlameHunk::unblamable: bool
+impl grit_lib::blame::BlameHunk
+pub fn grit_lib::blame::BlameHunk::lines<'r>(&self, &'r grit_lib::blame::BlameResult) -> &'r [grit_lib::blame::BlameAttributedLine]
 impl core::clone::Clone for grit_lib::blame::BlameHunk
 pub fn grit_lib::blame::BlameHunk::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::blame::BlameHunk
@@ -669,6 +676,7 @@ impl core::marker::Unpin for grit_lib::blame::IgnoreRevsSources
 impl core::marker::UnsafeUnpin for grit_lib::blame::IgnoreRevsSources
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::IgnoreRevsSources
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::blame::IgnoreRevsSources
+pub const grit_lib::blame::BLAME_NOT_COMMITTED_EMAIL: &str
 pub fn grit_lib::blame::blame_file(&grit_lib::repo::Repository, &str, &grit_lib::blame::BlameOptions) -> grit_lib::error::Result<grit_lib::blame::BlameResult>
 pub fn grit_lib::blame::build_exact_relocate_line_map(&[&str], &[&str], &[core::option::Option<usize>]) -> alloc::vec::Vec<core::option::Option<usize>>
 pub fn grit_lib::blame::build_fuzzy_line_map(&[&str], &[&str], &[core::option::Option<usize>]) -> alloc::vec::Vec<core::option::Option<usize>>
