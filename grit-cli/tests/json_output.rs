@@ -796,6 +796,24 @@ fn revs_json_truncated() -> TestResult {
 }
 
 #[test]
+fn revs_json_exact_limit_not_truncated() -> TestResult {
+    let scratch = Scratch::new("revs-exact-limit")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    for i in 0..2 {
+        write_file(&repo.join("a.txt"), &format!("v{i}\n"));
+        gs_ok(&repo, &["add", "a.txt"]);
+        gs_ok(&repo, &["commit", &format!("c{i}")]);
+    }
+    let v = gs_json(&repo, &["revs", "HEAD", "--limit", "2"]);
+    assert_eq!(v["commits"].as_array().unwrap().len(), 2);
+    assert_eq!(v["truncated"], Value::Bool(false));
+    assert_eq!(v["next"], Value::Null);
+    Ok(())
+}
+
+#[test]
 fn log_json_paging_through_merge_matches_git_order() -> TestResult {
     let scratch = Scratch::new("log-merge-page")?;
     let repo = scratch.child("repo");

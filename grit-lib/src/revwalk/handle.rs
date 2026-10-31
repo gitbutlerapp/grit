@@ -149,6 +149,7 @@ impl<'repo> RevWalk<'repo> {
             since: options.since,
             until: options.until,
             first_parent: options.first_parent,
+            retain_commit_bytes: false,
         };
         Ok(RevWalkCommitIter {
             inner: open_commit_stream(self.repo, &include, &exclude, &params)?,
@@ -165,7 +166,7 @@ impl Iterator for RevWalkCommitIter<'_> {
     type Item = Result<ObjectId>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
+        self.inner.next().map(|item| item.map(|row| row.oid))
     }
 }
 
@@ -242,6 +243,7 @@ mod commit_iter_tests {
         };
         let all: Vec<_> = open_commit_stream(&repo, std::slice::from_ref(&newest), &[], &params)
             .expect("stream")
+            .map(|item| item.map(|row| row.oid))
             .collect::<Result<Vec<_>>>()
             .expect("walk");
         assert_eq!(all.len(), 4);
@@ -257,6 +259,7 @@ mod commit_iter_tests {
             },
         )
         .expect("stream")
+        .map(|item| item.map(|row| row.oid))
         .collect::<Result<Vec<_>>>()
         .expect("walk");
         assert!(filtered.is_empty());

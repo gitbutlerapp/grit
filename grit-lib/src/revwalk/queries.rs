@@ -12,7 +12,8 @@ use crate::repo::Repository;
 use std::sync::Arc;
 
 use crate::rev_list::{
-    rev_list, split_revision_token, OrderingMode, RevListOptions, RevListResult,
+    open_commit_stream, rev_list, split_revision_token, CommitStream, CommitStreamItem,
+    CommitStreamParams, OrderingMode, RevListOptions, RevListResult,
 };
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{
@@ -420,7 +421,65 @@ fn try_single_positive_bounded_page(
     ))
 }
 
+/// Whether [`RevWalk::commits_stream`] can serve `walk` instead of a full [`RevWalk::rev_list_result`].
+///
+/// Returns false for path limits, ordering tweaks, filters, symmetric diff markers, and other
+/// options that need the full rev-list engine.
+#[must_use]
+pub fn rev_walk_list_supports_stream(walk: &RevWalkListOptions) -> bool {
+    !walk.graph
+        && walk.paths.is_empty()
+        && !walk.reverse
+        && !walk.first_parent
+        && walk.merges == MergeFilter::Any
+        && walk.commit_filter.as_ref().is_none_or(|f| !f.is_active())
+        && walk.pickaxe.is_none()
+        && !walk.left_right
+        && !walk.cherry_mark
+}
+
+/// Lazy commit walk over the same tokens and [`RevWalkListOptions`] as [`RevWalk::rev_list_result`],
+/// for plain default-order reachable history.
+pub type RevWalkCommitStream<'repo> = CommitStream<'repo>;
+
+/// One commit from [`RevWalk::commits_stream`].
+pub type RevWalkCommitStreamItem = CommitStreamItem;
+
 impl<'repo> RevWalk<'repo> {
+    /// Lazy commit walk for plain default-order history (same tokens and [`RevWalkListOptions`] as
+    /// [`Self::rev_list_result`], without object/cherry side tables).
+    ///
+    /// Returns [`None`] when [`rev_walk_list_supports_stream`] is false; use [`Self::rev_list_result`]
+    /// for path limits, `--reverse`, filters, `--graph`, and symmetric diff markers.
+    ///
+    /// # Errors
+    ///
+    /// Propagates rev-parse and walk setup errors.
+    pub fn commits_stream(
+        &self,
+        tokens: &[&str],
+        walk: &RevWalkListOptions,
+    ) -> Result<Option<RevWalkCommitStream<'repo>>> {
+        if !rev_walk_list_supports_stream(walk) {
+            return Ok(None);
+        }
+        let (tips, hide) = resolve_log_walk_tips_and_hide(self.repository(), tokens, walk)?;
+        let params = CommitStreamParams {
+            skip: walk.skip,
+            limit: walk.limit,
+            since: walk.since,
+            until: walk.until,
+            first_parent: walk.first_parent,
+            retain_commit_bytes: walk.retain_commit_data,
+        };
+        Ok(Some(open_commit_stream(
+            self.repository(),
+            &tips,
+            &hide,
+            &params,
+        )?))
+    }
+
     /// List commit object ids reachable from `tokens` in default `rev-list` order.
     ///
     /// Each token is a plain tip, `^tip`, `A..B`, or `A...B` (see [`parse_rev_walk_tokens`]);
@@ -670,5 +729,70 @@ mod tests {
             merge_filter_to_parent_bounds(MergeFilter::NoMerges),
             (None, Some(1))
         );
+    }
+
+    fn repo_with_commits(count: usize) -> (tempfile::TempDir, Repository) {
+        use crate::ident::Signature;
+        use crate::porcelain::commit::{create_commit, CommitRequest};
+        use crate::progress::{NeverCancel, NullProgress};
+        use crate::repo::{InitOptions, Repository};
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        for i in 0..count {
+            let mut req = CommitRequest::new(format!("commit {i}"));
+            req.allow_empty = true;
+            req.author =
+                Some(Signature::new("A", "a@example.com", repo.identity_now()).expect("author"));
+            req.committer =
+                Some(Signature::new("C", "c@example.com", repo.identity_now()).expect("committer"));
+            create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
+        }
+        (dir, repo)
+    }
+
+    #[test]
+    fn commits_stream_matches_rev_list_for_all_refs() {
+        let (_dir, repo) = repo_with_commits(4);
+        let walk = RevWalkListOptions {
+            refs: vec![RefSelection::All],
+            ..RevWalkListOptions::default()
+        };
+        let tokens = ["HEAD"];
+        let listed = repo
+            .rev_walk()
+            .rev_list_result(&tokens, &walk)
+            .expect("list")
+            .commits;
+        let streamed: Vec<_> = repo
+            .rev_walk()
+            .commits_stream(&tokens, &walk)
+            .expect("stream")
+            .expect("some")
+            .map(|item| item.expect("walk").oid)
+            .collect();
+        assert_eq!(streamed, listed);
+    }
+
+    #[test]
+    fn commits_stream_honors_limit_without_full_walk() {
+        let (_dir, repo) = repo_with_commits(5);
+        let walk = RevWalkListOptions {
+            limit: Some(2),
+            ..RevWalkListOptions::default()
+        };
+        let mut stream = repo
+            .rev_walk()
+            .commits_stream(&["HEAD"], &walk)
+            .expect("stream")
+            .expect("some");
+        let collected: Vec<_> = stream.by_ref().take(2).map(|r| r.unwrap().oid).collect();
+        assert_eq!(collected.len(), 2);
+        drop(stream);
+        let all = repo
+            .rev_walk()
+            .rev_list_result(&["HEAD"], &RevWalkListOptions::default())
+            .expect("list")
+            .commits;
+        assert_eq!(all.len(), 5);
     }
 }

@@ -156,7 +156,7 @@ fn write_json<T: Serialize>(w: &mut dyn Write, value: &T, filter: Option<&str>) 
     Ok(())
 }
 
-fn json_write(result: Result<(), serde_json::Error>) -> Result<()> {
+pub(crate) fn json_write(result: Result<(), serde_json::Error>) -> Result<()> {
     match result {
         Ok(()) => Ok(()),
         Err(e) if e.io_error_kind() == Some(ErrorKind::BrokenPipe) => Ok(()),

@@ -19,6 +19,7 @@ Common helpers that do not need a full repository walk:
 `RevWalk` has two ways to list commits:
 
 - [`RevWalk::commits`](rustdoc:grit_lib::revwalk::RevWalk::commits), [`rev_list_result`](rustdoc:grit_lib::revwalk::RevWalk::rev_list_result) and [`count`](rustdoc:grit_lib::revwalk::RevWalk::count) take revision **tokens** (`&["main", "^v1.0"]`, `&["main...topic"]`) plus [`RevWalkListOptions`](rustdoc:grit_lib::revwalk::queries::RevWalkListOptions). This is the API most callers want. Ref selections (`--all`, `--branches`) go in `RevWalkListOptions::refs` and path limits in `RevWalkListOptions::paths`, not in the tokens.
+- For plain default-order walks (no path limits, filters, or symmetric diff markers), [`RevWalk::commits_stream`](rustdoc:grit_lib::revwalk::RevWalk::commits_stream) yields commits lazily with the same tokens and options, optionally retaining raw commit bytes the walk already read (`RevWalkListOptions::retain_commit_data`).
 - [`RevWalk::walk`](rustdoc:grit_lib::revwalk::RevWalk::walk) takes **one** spec (`main`, `^tip`, `A..B` or `A...B`) plus the full engine [`RevListOptions`](rustdoc:grit_lib::revwalk::rev_list::RevListOptions) described below. Options, `--`, and several space-separated tokens fail with `RevListError::UnsupportedWalkSpec`, so use `commits` for those.
 
 Both list the symmetric difference for `A...B`, exactly like `git rev-list A...B`. [`parse_rev_walk_tokens`](rustdoc:grit_lib::revwalk::parse_rev_walk_tokens) does the expansion if you call `rev_list` yourself.

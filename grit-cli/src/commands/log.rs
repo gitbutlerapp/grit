@@ -44,6 +44,10 @@ use crate::markdown;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, OutputMode, RenderContext};
 use crate::pathspec_args::TrailingPathspecArgs;
 use crate::rev_select::{self, RevSelectArgs};
+use crate::stream_commit_list::{
+    begin_commits_json_document, finish_commits_json_document, flush_or_broken_pipe,
+    open_plain_stream, pull_batch, write_all_or_broken_pipe, write_json_array_element,
+};
 use crate::ui;
 
 /// How many commits to show per page when the caller does not set `-n` / `--max-count`.
@@ -414,6 +418,179 @@ impl MarkdownRender for LogOutcome {
         }
         Ok(())
     }
+}
+
+/// Whether [`stream_listing`] can replace a full [`run`] for this query.
+pub fn listing_can_stream(
+    rev: &RevSelectArgs,
+    pathspecs: &TrailingPathspecArgs,
+    display: LogDisplayOptions,
+    cursor: &Option<String>,
+    format: &DiffFormatArgs,
+) -> Result<bool> {
+    if cursor.as_ref().is_some_and(|token| !token.is_empty()) {
+        return Ok(false);
+    }
+    if display.group_by.is_some() || display.graph {
+        return Ok(false);
+    }
+    if format.log_patch_text() {
+        return Ok(false);
+    }
+    let repo = context::discover()?;
+    let env = repo.environment();
+    let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
+    let default_tips = default_tips(&repo, rev)?;
+    let default_tips: Vec<&str> = default_tips.iter().map(String::as_str).collect();
+    let walk_opts = rev.to_rev_walk_options(&repo, env, &default_tips, walk_paths.as_slice())?;
+    if !crate::stream_commit_list::plain_walk_streamable(&walk_opts) {
+        return Ok(false);
+    }
+    let token_refs = rev.rev_tokens(&default_tips);
+    Ok(LogWalkQuery::from_rev_walk(&repo, &token_refs, &walk_opts)?.is_some())
+}
+
+/// Whether the caller asked for enough commits that incremental listing helps.
+#[must_use]
+pub fn listing_should_stream_incrementally(rev: &RevSelectArgs, non_terminal: bool) -> bool {
+    match rev.max_count() {
+        Some(0) => false,
+        Some(n) => n > PAGE,
+        None => !non_terminal,
+    }
+}
+
+/// Walk and render commits in batches for plain date-order log queries.
+pub fn stream_listing(
+    rev: RevSelectArgs,
+    pathspecs: TrailingPathspecArgs,
+    format: DiffFormatArgs,
+    display: LogDisplayOptions,
+    output_mode: OutputMode,
+    ctx: &RenderContext,
+    w: &mut dyn Write,
+) -> Result<()> {
+    if rev.max_count() == Some(0) {
+        return write_empty_log_stream(w, output_mode, display, ctx);
+    }
+    let repo = context::discover()?;
+    let env = repo.environment();
+    let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
+    let path_args = walk_paths.as_slice();
+    let default_tips = default_tips(&repo, &rev)?;
+    let default_tips: Vec<&str> = default_tips.iter().map(String::as_str).collect();
+    let walk_opts = rev.to_rev_walk_options(&repo, env, &default_tips, path_args)?;
+    let token_refs = rev.rev_tokens(&default_tips);
+    let fetch_cap = fetch_limit_plus_one(rev.max_count());
+    let mut stream = open_plain_stream(&repo, &token_refs, &walk_opts, fetch_cap)?;
+    let max = rev.max_count();
+    let mut emitted = 0usize;
+    let mut pulled = 0usize;
+    let mut truncated = false;
+    let mut first_json = true;
+    let mut first_batch = true;
+    let mut columns = display.columns;
+    if output_mode == OutputMode::Json {
+        begin_commits_json_document(w)?;
+    }
+    loop {
+        let cap = if first_batch {
+            crate::stream_commit_list::FIRST_BATCH
+        } else {
+            crate::stream_commit_list::BATCH
+        };
+        let Some(mut batch) = pull_batch(&mut stream, cap)? else {
+            break;
+        };
+        first_batch = false;
+        pulled += batch.oids.len();
+        if let Some(limit) = max {
+            if pulled > limit {
+                truncated = true;
+            }
+            if emitted + batch.oids.len() > limit {
+                let keep = limit.saturating_sub(emitted);
+                batch.oids.truncate(keep);
+                let keep_set: std::collections::HashSet<_> = batch.oids.iter().copied().collect();
+                batch.walked.retain(|oid| keep_set.contains(oid));
+            }
+        }
+        if batch.oids.is_empty() {
+            break;
+        }
+        let batch_truncated = truncated || max.is_some_and(|n| pulled > n);
+        let outcome = build_commit_outcome(
+            &repo,
+            &batch.oids,
+            batch.walked,
+            format,
+            path_args,
+            None,
+            batch_truncated && max.is_some(),
+            display,
+            output_mode,
+            None,
+            LogGraphBuild::default(),
+        )?;
+        if columns.is_none() && !outcome.commit_rows.is_empty() {
+            columns = Some(ui::CommitColumns::for_stream(
+                &outcome.commit_rows,
+                ctx.now.unix_timestamp(),
+            ));
+        }
+        let mut batch_display = display;
+        batch_display.columns = columns;
+        let mut batch_outcome = outcome;
+        batch_outcome.display = batch_display;
+        match output_mode {
+            OutputMode::Human | OutputMode::Markdown => {
+                let mut buf = Vec::new();
+                if output_mode == OutputMode::Human {
+                    batch_outcome.render_human(&mut buf, ctx)?;
+                } else {
+                    batch_outcome.render_markdown(&mut buf, ctx)?;
+                }
+                if write_all_or_broken_pipe(w, &buf)? {
+                    return Ok(());
+                }
+            }
+            OutputMode::Json => {
+                for commit in &batch_outcome.commits {
+                    write_json_array_element(w, &mut first_json, commit)?;
+                }
+            }
+        }
+        emitted += batch.oids.len();
+        if flush_or_broken_pipe(w)? {
+            return Ok(());
+        }
+        if max.is_some_and(|n| emitted >= n) {
+            break;
+        }
+    }
+    if output_mode == OutputMode::Json {
+        let final_truncated = truncated || max.is_some_and(|n| pulled > n);
+        finish_commits_json_document(w, final_truncated, "")?;
+    }
+    Ok(())
+}
+
+fn write_empty_log_stream(
+    w: &mut dyn Write,
+    output_mode: OutputMode,
+    display: LogDisplayOptions,
+    ctx: &RenderContext,
+) -> Result<()> {
+    let outcome = empty_outcome(display)?;
+    match output_mode {
+        OutputMode::Json => {
+            begin_commits_json_document(w)?;
+            finish_commits_json_document(w, false, "")?;
+        }
+        OutputMode::Human => outcome.render_human(w, ctx)?,
+        OutputMode::Markdown => outcome.render_markdown(w, ctx)?,
+    }
+    Ok(())
 }
 
 /// List one page (or all) of the commits `rev` and `pathspecs` select.
