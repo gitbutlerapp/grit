@@ -2022,7 +2022,10 @@ fn pending_tree_merge_index_rows(index: &Index, merged: &TreeMergeOutput) -> Tre
     }
 }
 
-/// Tree OID to record in a commit after a three-way merge (applies conflict-marker policy).
+/// Tree OID for checkout after a conflicted three-way merge (applies conflict-marker policy).
+///
+/// Callers that only need a transient layout for worktree checkout should build this while a
+/// mem overlay is active on the ODB so marker blobs and the composed tree are not persisted.
 pub fn materialized_merge_result_tree(
     odb: &Odb,
     merged: &TreeMergeOutput,

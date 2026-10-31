@@ -1187,6 +1187,7 @@ fn integrate_at_tip_without_hooks(
         style,
         ..TreeMergeConflictPresentation::default()
     };
+    let _ephemeral_merge_objects = MemOverlayGuard::enter(repo.odb());
     let merged = merge_trees_three_way(
         repo,
         base.tree,
@@ -1203,9 +1204,7 @@ fn integrate_at_tip_without_hooks(
     if tree_merge_has_conflicts(&merged) {
         let details = conflicts_from_tree_merge(&merged);
         let paths: Vec<String> = details.iter().map(|c| c.path.clone()).collect();
-        let materialized = materialized_merge_result_tree(repo.odb(), &merged)?;
-        ensure_merge_tree_transition_allowed(repo, Some(&into_tree), &materialized)?;
-        apply_conflict_merge_worktree(repo, &into_tree, &merged, &materialized, progress, cancel)?;
+        apply_conflict_merge_worktree(repo, &into_tree, &merged, progress, cancel)?;
         let merge_msg = merge_message_text(label, options.message.as_deref());
         if matches!(options.commit, MergeCommitMode::Squash) {
             write_squash_msg_file(repo, into_oid, other_oid)?;
@@ -1215,6 +1214,8 @@ fn integrate_at_tip_without_hooks(
         }
         return Ok(IntegrateBranchOutcome::Conflicts { paths, details });
     }
+
+    repo.odb().persist_mem_overlay()?;
 
     let commit_preflight = if matches!(options.commit, MergeCommitMode::Commit) {
         let config = repo.config()?;
@@ -1947,15 +1948,17 @@ pub(crate) fn apply_conflict_merge_worktree(
     repo: &Repository,
     head_tree: &ObjectId,
     merged: &TreeMergeOutput,
-    materialized: &ObjectId,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<()> {
+    let _overlay = MemOverlayGuard::enter(repo.odb());
+    let materialized = materialized_merge_result_tree(repo.odb(), merged)?;
+    ensure_merge_tree_transition_allowed(repo, Some(head_tree), &materialized)?;
     apply_conflict_tree_merge_to_worktree(
         repo,
         head_tree,
         merged,
-        materialized,
+        &materialized,
         &conflict_path_set(merged),
         progress,
         cancel,

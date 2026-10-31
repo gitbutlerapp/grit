@@ -9,10 +9,7 @@ use crate::command_runner::{
 };
 use crate::error::Error;
 use crate::merge_file::{ConflictStyle, MergeFavor};
-use crate::merge_trees::{
-    materialized_merge_result_tree, merge_trees_three_way, DirectoryRenameMode,
-    WhitespaceMergeOptions,
-};
+use crate::merge_trees::{merge_trees_three_way, DirectoryRenameMode, WhitespaceMergeOptions};
 use crate::objects::ObjectId;
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::merge::apply_conflict_merge_worktree;
@@ -664,6 +661,7 @@ fn stop_on_replay_conflict(
             .map_err(exec_io)?;
         checkout_exec_tree_transition(repo, Some(&session.current_tree), &parent_tree)?;
         session.current_tree = parent_tree;
+        let _ephemeral_merge_objects = crate::porcelain::merge::MemOverlayGuard::enter(repo.odb());
         let merge = merge_trees_three_way(
             repo,
             commit_tree_for_apply(repo, old_parent)?,
@@ -675,15 +673,17 @@ fn stop_on_replay_conflict(
             replay_conflict_labels(plan.commits[row].old, &data).presentation(ConflictStyle::Merge),
             DirectoryRenameMode::from_repo(repo)?,
         )?;
-        let materialized = materialized_merge_result_tree(repo.odb(), &merge)?;
-        apply_conflict_merge_worktree(
-            repo,
-            &parent_tree,
-            &merge,
-            &materialized,
-            &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
-        )?;
+        if crate::operation::tree_merge_has_conflicts(&merge) {
+            apply_conflict_merge_worktree(
+                repo,
+                &parent_tree,
+                &merge,
+                &mut crate::progress::NullProgress,
+                &crate::progress::NeverCancel,
+            )?;
+            return Ok(parent);
+        }
+        repo.odb().persist_mem_overlay()?;
         Ok(parent)
     };
     let parent = match checkout() {

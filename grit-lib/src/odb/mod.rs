@@ -980,6 +980,41 @@ impl Odb {
         }
     }
 
+    /// Write every object in the active mem overlay as a loose object in this repository, then
+    /// clear the overlay. No-op when the overlay is inactive or empty.
+    ///
+    /// # Errors
+    ///
+    /// Propagates overlay iteration and [`Self::write_local`] failures.
+    pub fn persist_mem_overlay(&self) -> Result<()> {
+        use std::ops::ControlFlow;
+
+        let store = match self.overlay_store() {
+            Some(store) => store,
+            None => return Ok(()),
+        };
+        let mut oids = Vec::new();
+        store.for_each_object(&mut |oid| {
+            oids.push(*oid);
+            ControlFlow::Continue(())
+        })?;
+        let mut payloads = Vec::with_capacity(oids.len());
+        for oid in oids {
+            let obj = store
+                .read(&oid)?
+                .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))?;
+            payloads.push((obj.kind, obj.data));
+        }
+        self.mem_overlay_active.store(false, Ordering::Release);
+        if let Ok(mut guard) = self.mem_overlay.write() {
+            *guard = None;
+        }
+        for (kind, data) in payloads {
+            self.write_local(kind, &data)?;
+        }
+        Ok(())
+    }
+
     /// Whether the in-memory write overlay is currently enabled.
     #[must_use]
     pub(crate) fn is_mem_overlay_active(&self) -> bool {

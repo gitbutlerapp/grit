@@ -899,6 +899,9 @@ mod issue_1413_empty_subtree;
 #[path = "issue_1614_merge_no_dangling_empty_tree.rs"]
 mod issue_1614_merge_no_dangling_empty_tree;
 #[cfg(feature = "full-tests")]
+#[path = "issue_2403_no_dangling_after_rebase_or_merge_abort.rs"]
+mod issue_2403_no_dangling_after_rebase_or_merge_abort;
+#[cfg(feature = "full-tests")]
 #[path = "large_blob_memory.rs"]
 mod large_blob_memory;
 #[cfg(feature = "full-tests")]

@@ -18,9 +18,8 @@ use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::merge_file::{ConflictStyle, MergeFavor};
 use crate::merge_trees::{
-    materialized_merge_result_tree, merge_trees_three_way, merge_trees_three_way_cached,
-    DirectoryRenameMode, MergeTreeCache, ReplayConflictLabels, TreeMergeConflictPresentation,
-    WhitespaceMergeOptions,
+    merge_trees_three_way, merge_trees_three_way_cached, DirectoryRenameMode, MergeTreeCache,
+    ReplayConflictLabels, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, CommitData, ObjectId};
 use crate::operation::Conflict;
@@ -1143,6 +1142,7 @@ fn apply_one_step(
 
     let labels = ReplayConflictLabels::new(source_oid, &entry.subject);
     let presentation = replay_step_presentation(&labels, *head, source_oid, opts);
+    let _ephemeral_merge_objects = MemOverlayGuard::enter(repo.odb());
     let merged = merge_trees_three_way_cached(
         repo,
         merge_cache,
@@ -1157,12 +1157,13 @@ fn apply_one_step(
     )?;
 
     if crate::operation::tree_merge_has_conflicts(&merged) {
-        let materialized = materialized_merge_result_tree(repo.odb(), &merged)?;
-        apply_conflict_merge_worktree(repo, &ours_tree, &merged, &materialized, progress, cancel)?;
+        apply_conflict_merge_worktree(repo, &ours_tree, &merged, progress, cancel)?;
         return Ok(StepResult::Conflicts {
             conflicts: crate::operation::conflicts_from_tree_merge(&merged),
         });
     }
+
+    repo.odb().persist_mem_overlay()?;
 
     let new_tree = merged.result_tree;
     let empty_compare_tree = if opts.no_commit { ours_tree } else { head_tree };

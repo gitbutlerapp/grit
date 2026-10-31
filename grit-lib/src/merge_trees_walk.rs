@@ -399,6 +399,10 @@ pub(crate) fn compose_merged_tree_oid(
         crate::objects::tree_entry_cmp(&a.name, a.mode == MODE_DIR, &b.name, b.mode == MODE_DIR)
     });
 
+    if out_entries.is_empty() {
+        return Ok(*empty_tree);
+    }
+
     let data = serialize_tree(&out_entries);
     odb.write(ObjectKind::Tree, &data)
 }

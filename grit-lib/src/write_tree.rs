@@ -576,6 +576,25 @@ fn ensure_empty_blob_for_intent_to_add(odb: &Odb, index: &Index) -> Result<()> {
     Ok(())
 }
 
+fn ensure_empty_blob_for_partial_index_write(
+    odb: &Odb,
+    index: &Index,
+    paths_from_index: &std::collections::HashSet<Vec<u8>>,
+) -> Result<()> {
+    let needs_empty = index.entries.iter().any(|e| {
+        e.stage() == 0
+            && !e.intent_to_add()
+            && e.mode != MODE_TREE
+            && paths_from_index.contains(&e.path)
+            && e.oid.is_empty_blob()
+            && !odb.exists(&e.oid)
+    });
+    if needs_empty {
+        let _ = odb.write(ObjectKind::Blob, b"")?;
+    }
+    Ok(())
+}
+
 /// True when `path` lies in directory `prefix` (not a sibling like `a0` for prefix `a`).
 fn index_path_in_dir(path: &[u8], prefix: &str) -> bool {
     if prefix.is_empty() {
@@ -972,7 +991,7 @@ pub fn write_tree_partial_from_index(
     base_tree_oid: &ObjectId,
     paths_from_index: &std::collections::HashSet<Vec<u8>>,
 ) -> Result<ObjectId> {
-    let _ = odb.write(ObjectKind::Blob, b"");
+    ensure_empty_blob_for_partial_index_write(odb, index, paths_from_index)?;
 
     fn full_path(prefix: &[u8], name: &[u8]) -> Vec<u8> {
         if prefix.is_empty() {
@@ -1878,6 +1897,27 @@ mod tests {
         assert_eq!(top.len(), 1);
         assert_eq!(top[0].name, b"f");
         assert_eq!(top[0].oid, blob_a);
+    }
+
+    #[test]
+    fn partial_write_tree_does_not_materialize_empty_blob_without_need() {
+        use std::collections::HashSet;
+
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob = odb.write(ObjectKind::Blob, b"content").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("only.txt", MODE_REGULAR, blob));
+        let base_tree = odb.empty_tree_oid().unwrap();
+        let mut paths = HashSet::new();
+        paths.insert(b"only.txt".to_vec());
+        let _tree =
+            write_tree_partial_from_index(&odb, &index, &base_tree, &paths).expect("partial");
+        let empty_blob = crate::diff::empty_blob_oid();
+        assert!(
+            !odb.exists(&empty_blob),
+            "partial write must not store the canonical empty blob when unused"
+        );
     }
 
     #[test]
