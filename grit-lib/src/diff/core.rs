@@ -6116,7 +6116,9 @@ fn diff_index_to_worktree_inner(
                             worktree_mode,
                             ie.oid,
                         ));
-                    } else if !icase_collisions.as_ref().is_some_and(|map| {
+                        return Ok(());
+                    }
+                    if !icase_collisions.as_ref().is_some_and(|map| {
                         map.diff_requires_worktree_hash(&index.entries[entry_index].path)
                     }) && try_push_status_modified_on_size_mismatch(
                         odb,
@@ -6129,7 +6131,25 @@ fn diff_index_to_worktree_inner(
                         || conversion_is_identity(entry_index, path_str_ref),
                         &mut result,
                     )? {
-                    } else if !refresh_content_verified[entry_index] {
+                        return Ok(());
+                    }
+                    if refresh_content_verified[entry_index] {
+                        if worktree_mode == ie.mode {
+                            if crate::fsmonitor::mark_fsmonitor_valid_proven_clean(
+                                index,
+                                entry_index,
+                            ) {
+                                fsmonitor_valid_updated = true;
+                            }
+                        } else {
+                            result.push(worktree_content_change_entry(
+                                ie,
+                                path_str_ref,
+                                worktree_mode,
+                                ie.oid,
+                            ));
+                        }
+                    } else {
                         staging_hash_jobs.push(StagingHashJob::new(
                             entry_index,
                             worktree_mode,
