@@ -370,7 +370,7 @@ pub(crate) mod worktree_rules;
 mod worktree_rules_tests;
 mod worktree_scan;
 pub use crate::hooks::{HookName, PostOperationHooks};
-#[cfg(any(test, feature = "full-tests"))]
+#[cfg(test)]
 pub use crate::porcelain::checkout::{checkout_spool_probe_count, reset_checkout_spool_probe};
 pub use worktree_scan::PARALLEL_STAT_MIN_ENTRIES;
 #[doc(hidden)]
