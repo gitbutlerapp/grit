@@ -174,7 +174,7 @@ fn blame_line_marker(unblamable: bool, ignored: bool) -> char {
 }
 
 /// Strip trailing line terminators from blamed line text for display and JSON.
-fn normalize_blame_line_content(content: String) -> String {
+fn normalize_blame_line_content(content: &str) -> String {
     content.trim_end_matches(['\n', '\r']).to_owned()
 }
 
@@ -222,11 +222,6 @@ pub fn run(
         None if explicit_rev.is_none() && repo.work_tree().is_some() => BlameFinalSource::Worktree,
         None => BlameFinalSource::Revision,
     };
-    let uncommitted_label = if matches!(final_source, BlameFinalSource::Contents(_)) {
-        "External file (--contents)"
-    } else {
-        "Not Committed Yet"
-    };
     let mut options = BlameOptions {
         start: Some(start),
         final_source,
@@ -268,40 +263,21 @@ pub fn run(
     options.ignore = ignore;
     options.whitespace = whitespace;
     options.copy_detection = copy_detection;
-    let mut result = blame_file(&repo, &blame_path, &options)?;
-    label_uncommitted(&mut result, uncommitted_label);
+    let result = blame_file(&repo, &blame_path, &options)?;
 
     Ok(outcome_from_result(
         blame_path,
         start.to_hex(),
-        result,
+        &result,
         group,
         now.unix_timestamp(),
     ))
 }
 
-/// Give uncommitted lines the author identity Git's porcelain output shows for them.
-fn label_uncommitted(result: &mut BlameResult, label: &str) {
-    let uncommitted: Vec<_> = result
-        .lines
-        .iter()
-        .filter(|line| line.not_committed)
-        .map(|line| line.commit)
-        .collect();
-    for oid in uncommitted {
-        if let Some(info) = result.commits.get_mut(&oid) {
-            if info.author.is_empty() {
-                info.author = format!("{label} <not.committed.yet> {} +0000", info.author_time);
-                info.summary = label.to_owned();
-            }
-        }
-    }
-}
-
 fn outcome_from_result(
     file: String,
     rev: String,
-    result: BlameResult,
+    result: &BlameResult,
     group: bool,
     now: i64,
 ) -> BlameOutcome {
@@ -329,7 +305,7 @@ fn outcome_from_result(
             })
             .unwrap_or_else(|| ("unknown".to_owned(), "?".to_owned()));
 
-        let content = normalize_blame_line_content(line.content.clone());
+        let content = normalize_blame_line_content(&line.content);
         let marker = blame_line_marker(line.unblamable, line.ignored);
         lines_json.push(BlameLineJson {
             commit: commit_hex.clone(),
@@ -354,46 +330,32 @@ fn outcome_from_result(
     }
 
     let (lines, hunks) = if group {
-        let raw_hunks = result.hunks();
-        let mut line_cursor = 0usize;
-        let mut hunks_json = Vec::with_capacity(raw_hunks.len());
-        for hunk in raw_hunks {
-            let final_end = hunk
-                .final_start
-                .saturating_add(hunk.count.saturating_sub(1));
-            let mut hunk_lines = Vec::with_capacity(hunk.count);
-            let mut hunk_encoding_lossy = Vec::with_capacity(hunk.count);
-            for _ in 0..hunk.count {
-                let line = &result.lines[line_cursor];
-                debug_assert!(
-                    line.final_line >= hunk.final_start && line.final_line <= final_end,
-                    "line final {} hunk {}..={}",
-                    line.final_line,
-                    hunk.final_start,
-                    final_end
-                );
-                line_cursor += 1;
-                hunk_lines.push(normalize_blame_line_content(line.content.clone()));
-                hunk_encoding_lossy.push(line.encoding_lossy);
-            }
-            let line_encoding_lossy = hunk_encoding_lossy
-                .iter()
-                .any(|&v| v)
-                .then_some(hunk_encoding_lossy);
-            hunks_json.push(BlameHunkJson {
-                commit: hunk.commit.to_hex(),
-                original_path: hunk.original_path,
-                original_start: hunk.original_start,
-                final_start: hunk.final_start,
-                count: hunk.count,
-                ignored: hunk.ignored.then_some(true),
-                unblamable: hunk.unblamable.then_some(true),
-                not_committed: hunk.commit.is_zero().then_some(true),
-                lines: hunk_lines,
-                line_encoding_lossy,
-            });
-        }
-        debug_assert_eq!(line_cursor, result.lines.len());
+        let hunks_json = result
+            .hunks()
+            .into_iter()
+            .map(|hunk| {
+                let lines = hunk.lines(result);
+                let line_encoding_lossy = lines
+                    .iter()
+                    .any(|line| line.encoding_lossy)
+                    .then(|| lines.iter().map(|line| line.encoding_lossy).collect());
+                BlameHunkJson {
+                    commit: hunk.commit.to_hex(),
+                    original_path: hunk.original_path,
+                    original_start: hunk.original_start,
+                    final_start: hunk.final_start,
+                    count: hunk.count,
+                    ignored: hunk.ignored.then_some(true),
+                    unblamable: hunk.unblamable.then_some(true),
+                    not_committed: hunk.not_committed.then_some(true),
+                    lines: lines
+                        .iter()
+                        .map(|line| normalize_blame_line_content(&line.content))
+                        .collect(),
+                    line_encoding_lossy,
+                }
+            })
+            .collect();
         (None, Some(hunks_json))
     } else {
         (Some(lines_json), None)
@@ -415,8 +377,8 @@ mod tests {
 
     #[test]
     fn normalize_blame_line_content_strips_trailing_crlf() {
-        assert_eq!(normalize_blame_line_content("x\r\n".to_owned()), "x");
-        assert_eq!(normalize_blame_line_content("y\n".to_owned()), "y");
-        assert_eq!(normalize_blame_line_content("z".to_owned()), "z");
+        assert_eq!(normalize_blame_line_content("x\r\n"), "x");
+        assert_eq!(normalize_blame_line_content("y\n"), "y");
+        assert_eq!(normalize_blame_line_content("z"), "z");
     }
 }
