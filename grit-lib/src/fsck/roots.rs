@@ -3,8 +3,8 @@
 use crate::error::Result;
 use crate::index::{CacheTreeNode, MODE_GITLINK};
 use crate::objects::ObjectId;
-use crate::reflog::all_reflog_oids;
-use crate::refs::{self, Ref};
+use crate::reflog::{all_reflog_oids, reflog_oids_on_store};
+use crate::refs;
 use crate::repo::Repository;
 use crate::state::HeadState;
 use crate::worktree::list_worktrees;
@@ -13,7 +13,8 @@ use std::collections::HashSet;
 /// Object ids that anchor connectivity and dangling-object classification.
 ///
 /// Includes every ref tip, detached `HEAD` oids (repository and linked worktrees),
-/// all reflog `old`/`new` oids (main git dir and each linked worktree admin dir),
+/// all reflog `old`/`new` oids from the repository ref store (including an injected
+/// backend), plus linked-worktree admin-dir reflogs on disk,
 /// index entries (all stages), cache-tree oids, and the stash ref when present.
 ///
 /// # Errors
@@ -23,18 +24,15 @@ pub fn reachability_roots(repo: &Repository) -> Result<Vec<ObjectId>> {
     let git_dir = repo.git_dir();
     let mut roots: HashSet<ObjectId> = HashSet::new();
 
-    for (_, oid) in refs::list_refs(git_dir, "refs/")? {
+    for (_, oid) in refs::list_refs_in(repo, "refs/")? {
         roots.insert(oid);
     }
 
-    let head_path = git_dir.join("HEAD");
-    if head_path.is_file() {
-        if let Ref::Direct(oid) = refs::read_ref_file(&head_path)? {
-            roots.insert(oid);
-        }
+    if let Ok(oid) = refs::resolve_ref_in(repo, "HEAD") {
+        roots.insert(oid);
     }
 
-    if let Ok(oid) = refs::resolve_ref(git_dir, "refs/stash") {
+    if let Ok(oid) = refs::resolve_ref_in(repo, "refs/stash") {
         roots.insert(oid);
     }
 
@@ -51,7 +49,7 @@ pub fn reachability_roots(repo: &Repository) -> Result<Vec<ObjectId>> {
         }
     }
 
-    roots.extend(all_reflog_oids(git_dir)?);
+    roots.extend(reflog_oids_on_store(repo.refs())?);
     for wt in &worktrees {
         if wt.admin_dir != git_dir {
             roots.extend(all_reflog_oids(&wt.admin_dir)?);
@@ -110,12 +108,23 @@ fn collect_cache_tree_oids(node: &CacheTreeNode, out: &mut HashSet<ObjectId>) {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+    use std::sync::Arc;
+
     use super::*;
+    use crate::config::environment::RepositoryOptions;
+    use crate::ident::Signature;
+    use crate::maintenance::repository_fsck::{fsck, FsckOptions};
+    use crate::objects::odb::{store::MemoryStore, OdbBuilder};
+    use crate::objects::{HashAlgo, NewCommit, ObjectKind};
     use crate::porcelain::add::stage_for_commit;
     use crate::porcelain::commit::{create_commit, CommitRequest};
-    use crate::progress::NullProgress;
-    use crate::repo::InitOptions;
+    use crate::progress::{NeverCancel, NullProgress};
+    use crate::refs::store::{
+        Expected, MemoryRefStore, RawRef, RefTransaction, RefUpdate, ReflogUpdate,
+    };
+    use crate::repo::{InitOptions, RepositoryBuilder};
     use tempfile::TempDir;
+    use time::OffsetDateTime;
 
     #[test]
     fn reachability_roots_includes_index_staged_blob() {
@@ -153,5 +162,84 @@ mod tests {
             .oid;
         let roots = reachability_roots(&repo).expect("roots");
         assert!(roots.contains(&staged));
+    }
+
+    #[test]
+    fn injected_ref_store_reflog_commit_is_reachability_root() {
+        let dir = TempDir::new().unwrap();
+        let git_dir = dir.path().join("mem.git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        let repo = RepositoryBuilder::new(RepositoryOptions::empty())
+            .odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .ref_store(Arc::new(MemoryRefStore::new()))
+            .initial_branch("main")
+            .open(&git_dir, None)
+            .unwrap();
+        let sig = Signature::new(
+            "T",
+            "t@example.com",
+            OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+        )
+        .unwrap();
+        let tree = repo.odb().write(ObjectKind::Tree, &[]).unwrap();
+        let c1 = repo
+            .objects()
+            .write_commit(&NewCommit::new(
+                tree,
+                sig.clone(),
+                sig.clone(),
+                "c1".to_string(),
+            ))
+            .unwrap();
+        let c2 = repo
+            .objects()
+            .write_commit(&NewCommit::new(
+                tree,
+                sig.clone(),
+                sig.clone(),
+                "c2".to_string(),
+            ))
+            .unwrap();
+        let ts = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let update = |new, exp, msg: &str| {
+            let txn = RefTransaction::new()
+                .update(RefUpdate {
+                    name: "refs/heads/main".into(),
+                    new_value: Some(RawRef::Direct(new)),
+                    expected: exp,
+                    flags: Default::default(),
+                    reflog: Some(ReflogUpdate {
+                        identity: "T <t@example.com>".into(),
+                        message: msg.into(),
+                        time: ts,
+                        old_oid: None,
+                        new_oid: None,
+                    }),
+                })
+                .unwrap();
+            repo.refs().prepare(txn).unwrap().commit().unwrap();
+        };
+        update(c1, Expected::Missing, "branch: Created");
+        update(c2, Expected::Oid(c1), "reset: moving to c2");
+
+        let roots = reachability_roots(&repo).unwrap();
+        assert!(roots.contains(&c1), "reflog-only commit must be a root");
+
+        let report = fsck(
+            &repo,
+            &FsckOptions::default().with_check_dangling(true),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+        assert!(
+            !report.dangling.iter().any(|(_, oid)| *oid == c1),
+            "reflog-only commit must not be dangling: {:?}",
+            report.dangling
+        );
     }
 }

@@ -704,6 +704,29 @@ pub(crate) fn reflog_refs_on_store(
     Ok(names)
 }
 
+/// Every non-zero object id mentioned in any reflog on `store`.
+///
+/// # Errors
+///
+/// Propagates backend read failures.
+pub(crate) fn reflog_oids_on_store(
+    store: &dyn crate::refs::store::RefStore,
+) -> Result<HashSet<ObjectId>> {
+    let mut out = HashSet::new();
+    for name in reflog_refs_on_store(store)? {
+        store.for_each_reflog_entry(&name, false, &mut |entry| {
+            if !entry.old_oid.is_zero() {
+                out.insert(entry.old_oid);
+            }
+            if !entry.new_oid.is_zero() {
+                out.insert(entry.new_oid);
+            }
+            ControlFlow::Continue(())
+        })?;
+    }
+    Ok(out)
+}
+
 /// List all refs that have reflogs.
 pub fn list_reflog_refs(git_dir: &Path) -> Result<Vec<String>> {
     if crate::refs::store::open_ref_store(git_dir)?.format()
