@@ -336,7 +336,7 @@ impl UnpackSink for Odb {
         }
         if !self.uses_files_primary() {
             let data = rd.decompress(size)?;
-            return self.write_local(kind, &data);
+            return self.write_with_options(kind, &data, WriteOptions::default());
         }
         self.write_local_stream_with(kind, size_u64, |chunk_sink| {
             rd.decompress_into(size, chunk_sink)
@@ -511,15 +511,23 @@ pub fn ingest_pack_into_with_progress(
     progress: Option<&mut dyn ProgressSink>,
     cancel: Option<&dyn Cancel>,
 ) -> Result<IngestedObjects> {
-    unpack_into(
+    match unpack_into(
         reader,
         &StoreSink { store, bases },
         opts,
         progress,
         cancel,
         None,
-    )
-    .map(Unpacked::into_ingested)
+    ) {
+        Ok(unpacked) => {
+            store.flush()?;
+            Ok(unpacked.into_ingested())
+        }
+        Err(err) => {
+            let _ = store.rollback();
+            Err(err)
+        }
+    }
 }
 
 /// Like [`ingest_pack_into_with_progress`], writing into `odb` the way [`unpack_objects`]
@@ -531,7 +539,16 @@ pub(crate) fn ingest_pack_into_odb(
     progress: Option<&mut dyn ProgressSink>,
     cancel: Option<&dyn Cancel>,
 ) -> Result<IngestedObjects> {
-    unpack_into(reader, odb, opts, progress, cancel, None).map(Unpacked::into_ingested)
+    match unpack_into(reader, odb, opts, progress, cancel, None) {
+        Ok(unpacked) => {
+            odb.flush()?;
+            Ok(unpacked.into_ingested())
+        }
+        Err(err) => {
+            let _ = odb.rollback();
+            Err(err)
+        }
+    }
 }
 
 /// Everything [`unpack_into`] resolved.

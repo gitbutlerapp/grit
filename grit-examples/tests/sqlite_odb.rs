@@ -23,6 +23,7 @@ fn seed_sqlite(algo: HashAlgo) -> impl Fn(&[(ObjectKind, Vec<u8>)]) -> SqliteOdb
             WritableObjectStore::write(&store, *kind, data, WriteOptions::default())
                 .expect("seed write");
         }
+        store.flush().expect("persist seeded objects");
         SqliteOdbStore::open(store.path()).expect("reopen sqlite store")
     }
 }
@@ -63,15 +64,41 @@ fn sqlite_odb_reopen_append_reopen() -> grit_lib::error::Result<()> {
     let path = dir.path().join("objects.sqlite");
     let oid_a = {
         let store = SqliteOdbStore::create(&path, HashAlgo::Sha1)?;
-        WritableObjectStore::write(&store, ObjectKind::Blob, b"a", WriteOptions::default())?
+        let oid =
+            WritableObjectStore::write(&store, ObjectKind::Blob, b"a", WriteOptions::default())?;
+        store.flush()?;
+        oid
     };
     let oid_b = {
         let store = SqliteOdbStore::open(&path)?;
-        WritableObjectStore::write(&store, ObjectKind::Blob, b"b", WriteOptions::default())?
+        let oid =
+            WritableObjectStore::write(&store, ObjectKind::Blob, b"b", WriteOptions::default())?;
+        store.flush()?;
+        oid
     };
     let store = SqliteOdbStore::open(&path)?;
     assert_eq!(store.read(&oid_a)?.expect("first blob").data, b"a");
     assert_eq!(store.read(&oid_b)?.expect("second blob").data, b"b");
+    Ok(())
+}
+
+#[test]
+fn sqlite_odb_rollback_discards_unflushed_writes() -> grit_lib::error::Result<()> {
+    let dir = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
+    let path = dir.path().join("objects.sqlite");
+    let oid = {
+        let store = SqliteOdbStore::create(&path, HashAlgo::Sha1)?;
+        let oid = WritableObjectStore::write(
+            &store,
+            ObjectKind::Blob,
+            b"volatile",
+            WriteOptions::default(),
+        )?;
+        store.rollback()?;
+        oid
+    };
+    let store = SqliteOdbStore::open(&path)?;
+    assert!(store.read(&oid)?.is_none());
     Ok(())
 }
 

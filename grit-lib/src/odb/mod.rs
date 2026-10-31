@@ -3314,6 +3314,36 @@ impl Odb {
         self.write_with_options(kind, data, WriteOptions::default())
     }
 
+    /// Persist batched writes on a custom primary store.
+    ///
+    /// No-op for a files-backed primary. See [`WritableObjectStore::flush`].
+    ///
+    /// # Errors
+    ///
+    /// Propagates the primary store's flush failure.
+    pub fn flush(&self) -> Result<()> {
+        if let Some(primary) = &self.custom_primary {
+            primary.flush()
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Discard unflushed writes on a custom primary store after a failed bulk ingest.
+    ///
+    /// No-op for a files-backed primary. See [`WritableObjectStore::rollback`].
+    ///
+    /// # Errors
+    ///
+    /// Propagates the primary store's rollback failure.
+    pub fn rollback(&self) -> Result<()> {
+        if let Some(primary) = &self.custom_primary {
+            primary.rollback()
+        } else {
+            Ok(())
+        }
+    }
+
     /// Create all 256 loose-object prefix directories (`objects/xx/`).
     ///
     /// Bulk `git add`-style staging calls this once before parallel loose writes. A no-op for
@@ -3479,6 +3509,14 @@ impl Odb {
             .write_prehashed(oid, ObjectKind::Blob, data, options)
     }
     /// Like [`Self::write`], with control over freshen behaviour on existing objects.
+    ///
+    /// With a custom primary, grit does not probe read sources or alternates before
+    /// writing: [`WritableObjectStore::write`] is idempotent and duplicate detection
+    /// belongs in the store. Objects reachable only through a read source are still
+    /// copied into the primary when written here (same as [`Self::write_local`] on a
+    /// files primary). [`WriteOptions::trust_new_loose`] and
+    /// [`WriteOptions::assume_loose_only_existence`] apply only to the files-backed
+    /// primary path.
     pub fn write_with_options(
         &self,
         kind: ObjectKind,
@@ -3488,20 +3526,7 @@ impl Odb {
         let oid = hash_object_data_with(self.hash_algo(), kind, data)?;
 
         if let Some(primary) = &self.custom_primary {
-            let already_exists = if options.trust_new_loose {
-                false
-            } else if options.assume_loose_only_existence {
-                primary.contains(&oid)?
-            } else {
-                self.object_exists_for_write_skip(&oid)
-            };
-            if self.overlay_active()
-                && !already_exists
-                && self.overlay_store_object(oid, kind, data)
-            {
-                return Ok(oid);
-            }
-            if already_exists {
+            if self.overlay_active() && self.overlay_store_object(oid, kind, data) {
                 return Ok(oid);
             }
             let oid = WritableObjectStore::write(primary.as_ref(), kind, data, options)?;
@@ -4389,6 +4414,93 @@ mod tests {
         assert!(odb
             .write_loose_zlib_prehashed(&oid, b"not zlib", WriteOptions::default())
             .is_err());
+    }
+
+    #[test]
+    fn custom_primary_write_skips_odb_contains_probes() {
+        use crate::objects::HashAlgo;
+        use std::ops::ControlFlow;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        #[derive(Debug)]
+        struct Counting(MemoryStore, AtomicUsize, AtomicUsize);
+
+        impl ObjectStore for Counting {
+            fn hash_algo(&self) -> HashAlgo {
+                self.0.hash_algo()
+            }
+            fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+                self.0.read(oid)
+            }
+            fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+                self.0.read_info(oid)
+            }
+            fn contains(&self, oid: &ObjectId) -> Result<bool> {
+                self.1.fetch_add(1, Ordering::Relaxed);
+                self.0.contains(oid)
+            }
+            fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+                self.2.fetch_add(1, Ordering::Relaxed);
+                self.0.contains_many(oids)
+            }
+            fn for_each_object(
+                &self,
+                f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+            ) -> Result<()> {
+                self.0.for_each_object(f)
+            }
+        }
+
+        impl WritableObjectStore for Counting {
+            fn write(
+                &self,
+                kind: ObjectKind,
+                data: &[u8],
+                options: WriteOptions,
+            ) -> Result<ObjectId> {
+                self.0.write(kind, data, options)
+            }
+            fn freshen(&self, oid: &ObjectId) -> Result<bool> {
+                self.0.freshen(oid)
+            }
+        }
+
+        let dir = TempDir::new().unwrap();
+        let objects = dir.path().join("objects");
+        fs::create_dir_all(&objects).unwrap();
+        let primary = Arc::new(Counting(
+            MemoryStore::new(HashAlgo::Sha1),
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+        ));
+        let read_source = Arc::new(Counting(
+            MemoryStore::new(HashAlgo::Sha1),
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+        ));
+        read_source
+            .0
+            .write(ObjectKind::Blob, b"only upstream", WriteOptions::default())
+            .unwrap();
+        let odb = OdbBuilder::files(&objects)
+            .primary(primary.clone())
+            .push_read_source(read_source.clone())
+            .alternates(false)
+            .build();
+
+        odb.write(ObjectKind::Blob, b"new local").unwrap();
+        assert_eq!(primary.1.load(Ordering::Relaxed), 0);
+        assert_eq!(read_source.1.load(Ordering::Relaxed), 0);
+
+        odb.write(ObjectKind::Blob, b"only upstream").unwrap();
+        assert_eq!(primary.1.load(Ordering::Relaxed), 0);
+        assert!(primary
+            .0
+            .contains(
+                &hash::hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"only upstream").unwrap()
+            )
+            .unwrap());
     }
 
     /// Re-writing an object that already exists as a loose file must not replace it; Git

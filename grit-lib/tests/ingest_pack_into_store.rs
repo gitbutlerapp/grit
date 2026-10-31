@@ -9,8 +9,10 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io::{Cursor, Write};
+use std::ops::ControlFlow;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -18,13 +20,13 @@ use grit_lib::error::Error;
 use grit_lib::objects::index_pack::{
     ingest_received_pack, ingest_received_pack_path, IngestPackOptions,
 };
-use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
-use grit_lib::objects::odb::OdbBuilder;
+use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, ObjectStream, WritableObjectStore};
+use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
 use grit_lib::objects::pack_objects::{build_pack, PackBuildOptions};
 use grit_lib::objects::unpack_objects::{
     ingest_pack_into, ingest_pack_into_with_progress, pack_is_thin, UnpackOptions,
 };
-use grit_lib::objects::{hash::hash_object, HashAlgo, ObjectId};
+use grit_lib::objects::{hash::hash_object, HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::progress::{FlagCancel, ProgressPhase, ProgressSink};
 use grit_lib::refs::store::MemoryRefStore;
 use grit_lib::repo::{Repository, RepositoryBuilder};
@@ -581,4 +583,227 @@ fn files_primary_ingest_still_installs_a_pack() {
         &["update-ref", "refs/heads/main", tip.trim()],
     );
     git(scratch.path(), &["fsck", "--full", "--strict"]);
+}
+
+#[derive(Debug)]
+struct CountingStore {
+    inner: MemoryStore,
+    contains: AtomicUsize,
+    contains_many: AtomicUsize,
+    writes: AtomicUsize,
+    flushes: AtomicUsize,
+    rollbacks: AtomicUsize,
+}
+
+impl CountingStore {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            inner: MemoryStore::new(HashAlgo::Sha1),
+            contains: AtomicUsize::new(0),
+            contains_many: AtomicUsize::new(0),
+            writes: AtomicUsize::new(0),
+            flushes: AtomicUsize::new(0),
+            rollbacks: AtomicUsize::new(0),
+        })
+    }
+
+    fn snapshot(&self) -> StoreCalls {
+        StoreCalls {
+            contains: self.contains.load(Ordering::Relaxed),
+            contains_many: self.contains_many.load(Ordering::Relaxed),
+            writes: self.writes.load(Ordering::Relaxed),
+            flushes: self.flushes.load(Ordering::Relaxed),
+            rollbacks: self.rollbacks.load(Ordering::Relaxed),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StoreCalls {
+    contains: usize,
+    contains_many: usize,
+    writes: usize,
+    flushes: usize,
+    rollbacks: usize,
+}
+
+impl ObjectStore for CountingStore {
+    fn hash_algo(&self) -> HashAlgo {
+        self.inner.hash_algo()
+    }
+
+    fn read(&self, oid: &ObjectId) -> grit_lib::error::Result<Option<Object>> {
+        self.inner.read(oid)
+    }
+
+    fn read_info(&self, oid: &ObjectId) -> grit_lib::error::Result<Option<ObjectInfo>> {
+        self.inner.read_info(oid)
+    }
+
+    fn contains(&self, oid: &ObjectId) -> grit_lib::error::Result<bool> {
+        self.contains.fetch_add(1, Ordering::Relaxed);
+        self.inner.contains(oid)
+    }
+
+    fn contains_many(&self, oids: &[ObjectId]) -> grit_lib::error::Result<Vec<bool>> {
+        self.contains_many.fetch_add(1, Ordering::Relaxed);
+        self.inner.contains_many(oids)
+    }
+
+    fn open_stream(&self, oid: &ObjectId) -> grit_lib::error::Result<Option<ObjectStream<'_>>> {
+        self.inner.open_stream(oid)
+    }
+
+    fn for_each_object(
+        &self,
+        f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+    ) -> grit_lib::error::Result<()> {
+        self.inner.for_each_object(f)
+    }
+}
+
+impl WritableObjectStore for CountingStore {
+    fn write(
+        &self,
+        kind: ObjectKind,
+        data: &[u8],
+        options: WriteOptions,
+    ) -> grit_lib::error::Result<ObjectId> {
+        self.writes.fetch_add(1, Ordering::Relaxed);
+        self.inner.write(kind, data, options)
+    }
+
+    fn freshen(&self, oid: &ObjectId) -> grit_lib::error::Result<bool> {
+        self.inner.freshen(oid)
+    }
+
+    fn flush(&self) -> grit_lib::error::Result<()> {
+        self.flushes.fetch_add(1, Ordering::Relaxed);
+        self.inner.flush()
+    }
+
+    fn rollback(&self) -> grit_lib::error::Result<()> {
+        self.rollbacks.fetch_add(1, Ordering::Relaxed);
+        self.inner.rollback()
+    }
+}
+
+#[test]
+fn custom_primary_ingest_and_write_skip_read_source_contains_probes() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).expect("mkdir");
+    git_cmd(&src)
+        .args(["init", "-q", "-b", "main"])
+        .status()
+        .expect("init");
+    for i in 0..50 {
+        fs::write(src.join(format!("f{i}.txt")), format!("file {i}\n")).expect("write");
+    }
+    git(&src, &["add", "."]);
+    git(&src, &["commit", "-q", "-m", "files"]);
+    let source = Repository::open(&src.join(".git"), &RepositoryOptions::empty()).expect("open");
+    let tip =
+        grit_lib::revwalk::rev_parse::resolve_revision(&source, "HEAD").expect("resolve HEAD");
+    let pack = build_pack(source.odb(), &[tip], &[], &PackBuildOptions::default()).expect("pack");
+
+    let gd = tmp.path().join("custom.git");
+    fs::create_dir_all(&gd).expect("mkdir");
+    let primary = CountingStore::new();
+    let read_source = CountingStore::new();
+    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
+        .odb_builder(
+            OdbBuilder::files(gd.join("objects"))
+                .primary(primary.clone())
+                .push_read_source(read_source.clone())
+                .alternates(false),
+        )
+        .ref_store(Arc::new(MemoryRefStore::new()))
+        .initial_branch("main")
+        .open(&gd, None)
+        .expect("open");
+
+    let ingested =
+        ingest_received_pack(pack, repo.odb(), &IngestPackOptions::default()).expect("ingest");
+    let n = ingested.object_ids.len();
+    assert!(n > 10, "fixture should ingest many objects");
+
+    let primary_after_ingest = primary.snapshot();
+    let read_after_ingest = read_source.snapshot();
+    assert_eq!(primary_after_ingest.contains, 0);
+    assert_eq!(primary_after_ingest.contains_many, 0);
+    assert_eq!(primary_after_ingest.writes, n);
+    assert_eq!(primary_after_ingest.flushes, 1);
+    assert_eq!(read_after_ingest.contains, 0);
+    assert_eq!(read_after_ingest.writes, 0);
+    assert_eq!(read_after_ingest.flushes, 0);
+
+    const EXTRA: usize = 100;
+    for i in 0..EXTRA {
+        repo.odb()
+            .write(ObjectKind::Blob, format!("blob {i}").as_bytes())
+            .expect("write");
+    }
+    let primary_after_writes = primary.snapshot();
+    let read_after_writes = read_source.snapshot();
+    assert_eq!(primary_after_writes.contains, 0);
+    assert_eq!(primary_after_writes.contains_many, 0);
+    assert_eq!(primary_after_writes.writes, n + EXTRA);
+    assert_eq!(read_after_writes.contains, 0);
+    assert_eq!(read_after_writes.writes, 0);
+
+    let existing = *ingested
+        .object_ids
+        .iter()
+        .next()
+        .expect("at least one object");
+    let payload = primary.read(&existing).unwrap().unwrap().data;
+    let writes_before = primary.snapshot().writes;
+    assert_eq!(
+        repo.odb().write(ObjectKind::Blob, &payload).unwrap(),
+        existing
+    );
+    assert_eq!(primary.snapshot().writes, writes_before + 1);
+    assert_eq!(primary.snapshot().contains, 0);
+
+    let remote_oid = read_source
+        .inner
+        .write(ObjectKind::Blob, b"remote layer", WriteOptions::default())
+        .expect("seed read source");
+    assert!(!primary.inner.contains(&remote_oid).unwrap());
+    let writes_before = primary.snapshot().writes;
+    repo.odb()
+        .write(ObjectKind::Blob, b"remote layer")
+        .expect("materialize into primary");
+    assert!(primary.inner.contains(&remote_oid).unwrap());
+    assert_eq!(primary.snapshot().writes, writes_before + 1);
+    assert_eq!(primary.snapshot().contains, 0);
+}
+
+#[test]
+fn custom_primary_ingest_rollback_on_failure() {
+    let upstream = git_history(2, "sha1");
+    let pack = pack_objects(upstream.path(), "main\n", &[]);
+    let mut corrupt = pack.clone();
+    if let Some(byte) = corrupt.last_mut() {
+        *byte ^= 0xff;
+    }
+    let gd = tempfile::tempdir().expect("tempdir");
+    let primary = CountingStore::new();
+    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
+        .odb_builder(
+            OdbBuilder::files(gd.path().join("objects"))
+                .primary(primary.clone())
+                .alternates(false),
+        )
+        .ref_store(Arc::new(MemoryRefStore::new()))
+        .initial_branch("main")
+        .open(gd.path(), None)
+        .expect("open");
+
+    let err = ingest_received_pack(corrupt, repo.odb(), &IngestPackOptions::default())
+        .expect_err("checksum mismatch");
+    assert!(matches!(err, Error::CorruptObject(_)));
+    assert_eq!(primary.snapshot().rollbacks, 1);
+    assert_eq!(primary.snapshot().flushes, 0);
 }
