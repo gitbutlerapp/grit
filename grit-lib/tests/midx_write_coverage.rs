@@ -556,30 +556,6 @@ fn write_default_v2_midx_roundtrip() {
 }
 
 #[test]
-fn format_midx_dump_and_show_objects_layers() {
-    let Some((repo, objects, oids)) = multi_pack_repo(HashAlgo::Sha1, 2) else {
-        eprintln!("SKIP: fixture");
-        return;
-    };
-    let pack_dir = objects.join("pack");
-    grit_write_midx(&pack_dir, &WriteMultiPackIndexOptions::default());
-    let dump = grit_lib::objects::midx::format_midx_dump(&objects).expect("dump");
-    assert!(dump.contains("header:"));
-    assert!(dump.contains("packs:"));
-    let show = grit_lib::objects::midx::format_midx_show_objects(&objects).expect("show");
-    assert!(show.contains(&oids[0].to_hex()));
-    let tip = tip_midx_path(&pack_dir);
-    let hex = midx_trailing_hex(&tip);
-    let layer_dump =
-        grit_lib::objects::midx::format_midx_dump_layer(&objects, Some(&hex)).expect("layer dump");
-    assert!(layer_dump.contains("num_objects:"));
-    let layer_show = grit_lib::objects::midx::format_midx_show_objects_layer(&objects, Some(&hex))
-        .expect("layer show");
-    assert!(layer_show.lines().count() >= oids.len());
-    let _ = repo;
-}
-
-#[test]
 fn midx_reuse_tables_bitmaps_and_sidecars() {
     let Some((repo, objects, oids)) = multi_pack_repo(HashAlgo::Sha1, 2) else {
         eprintln!("SKIP: fixture");
@@ -589,27 +565,11 @@ fn midx_reuse_tables_bitmaps_and_sidecars() {
     grit_write_midx(&pack_dir, &WriteMultiPackIndexOptions::default());
     let _ = grit_lib::objects::midx::cached_tip_midx_path(&pack_dir);
     let _ = grit_lib::objects::midx::load_midx_reuse_tables(&objects).expect("reuse");
-    match grit_lib::objects::midx::read_midx_btmp_ranges(&objects) {
-        Ok(ranges) if ranges.is_empty() => {
-            let formatted = grit_lib::objects::midx::format_midx_bitmapped_packs(&objects);
-            assert!(
-                formatted.as_ref().map(|s| s.is_empty()).unwrap_or(true)
-                    || formatted.as_ref().is_ok_and(|s| s.contains("no bitmapped")),
-                "expected empty or no-bitmap message, got: {formatted:?}"
-            );
-        }
-        Ok(ranges) => {
-            let formatted = grit_lib::objects::midx::format_midx_bitmapped_packs(&objects)
-                .expect("bitmaps when btmp ranges exist");
-            assert!(
-                !formatted.is_empty(),
-                "non-empty btmp ranges ({}) should produce output",
-                ranges.len()
-            );
-        }
-        Err(_) => {
-            // Fixture MIDX may omit BTMP; formatting must fail cleanly without a chunk.
-            assert!(grit_lib::objects::midx::format_midx_bitmapped_packs(&objects).is_err());
+    if let Ok(ranges) = grit_lib::objects::midx::read_midx_btmp_ranges(&objects) {
+        let mut next_pos = 0;
+        for range in &ranges {
+            assert_eq!(range.bitmap_pos, next_pos, "BTMP ranges are contiguous");
+            next_pos += range.bitmap_nr;
         }
     }
     let tip = tip_midx_path(&pack_dir);

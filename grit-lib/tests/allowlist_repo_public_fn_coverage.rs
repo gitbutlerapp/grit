@@ -17,11 +17,10 @@ use grit_lib::commit::signing::verify_tag;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::gitmodules::gitdir::{
     compute_default_submodule_gitdir, connect_submodule_work_tree_and_git_dir,
-    die_path_inside_submodule_when_disabled, ensure_submodule_gitdir_config, hash_blob_sha1_hex,
-    init_submodule_head_from_gitlink, is_git_directory, migrate_gitdir_configs,
-    path_inside_indexed_submodule, path_inside_registered_submodule,
-    path_inside_registered_submodule_name, set_submodule_repo_worktree,
-    submodule_gitdir_filesystem_path, submodule_gitdir_outer_conflict,
+    ensure_submodule_gitdir_config, hash_blob_sha1_hex, init_submodule_head_from_gitlink,
+    is_git_directory, migrate_gitdir_configs, path_inside_indexed_submodule,
+    path_inside_registered_submodule, path_inside_registered_submodule_name,
+    set_submodule_repo_worktree, submodule_gitdir_filesystem_path, submodule_gitdir_outer_conflict,
     submodule_path_config_enabled, validate_encoded_submodule_git_dir,
     validate_legacy_submodule_git_dir, write_submodule_gitfile,
 };
@@ -40,9 +39,7 @@ use grit_lib::notes::NotesTreeEntry;
 use grit_lib::objects::index_pack::{
     ingest_received_pack_path, install_pack_bytes, install_pack_path, IngestPackOptions,
 };
-use grit_lib::objects::midx::{
-    format_midx_bitmapped_packs, midx_sidecar_path_for_midx_file, read_midx_btmp_ranges,
-};
+use grit_lib::objects::midx::{midx_sidecar_path_for_midx_file, read_midx_btmp_ranges};
 use grit_lib::objects::odb::store::loose::enumerate_loose_objects;
 use grit_lib::objects::pack::{
     clear_pack_delta_base_cache, configure_delta_base_cache_from_config,
@@ -178,7 +175,6 @@ fn bundle_pack_odb_and_midx_paths() {
         Some(1),
     );
 
-    let _ = format_midx_bitmapped_packs(repo.odb().objects_dir());
     let _ = read_midx_btmp_ranges(repo.odb().objects_dir());
     let _ = midx_sidecar_path_for_midx_file(&idx_path, "bitmap");
 
@@ -463,12 +459,6 @@ fn mailmap_gitmodules_submodule_and_write_tree() {
     let _ = path_inside_indexed_submodule(&index, "sub/file");
     let _ = path_inside_registered_submodule(dir.path(), "sub/file");
     let _ = path_inside_registered_submodule_name(dir.path(), "sub/file");
-    let _ = die_path_inside_submodule_when_disabled(
-        git_dir.as_path(),
-        dir.path(),
-        "sub/new",
-        Some(&index),
-    );
     let modules = git_dir.join("modules").join("sub");
     fs::create_dir_all(&modules.join("objects")).expect("modules");
     let sub_wt = dir.path().join("sub");

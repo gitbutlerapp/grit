@@ -587,21 +587,8 @@ fn t7063_collect_untracked_matches_git_deep_tree() {
 }
 
 #[test]
-fn index_name_hash_lazy_ignorecase_lookup() {
-    use grit_lib::index::index_name_hash_lazy::{
-        dump_lazy_init_name_hash, memihash, test_lazy_init_name_hash,
-    };
-    use grit_lib::index::Index;
+fn index_name_hash_memihash_folds_ascii_case() {
+    use grit_lib::index::index_name_hash_lazy::memihash;
 
     assert_eq!(memihash(b"Path/File"), memihash(b"path/file"));
-
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let root = tmp.path();
-    git(root, &["init", "-q", "-b", "main", "."]);
-    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let mut idx = Index::empty(2);
-    idx.add_or_replace(entry_from_worktree_path(&repo, "Mixed/Case.txt", b"x"));
-    let threads = test_lazy_init_name_hash(&idx, false).expect("lazy init");
-    assert_eq!(threads, 0, "small index uses single-threaded lazy path");
-    dump_lazy_init_name_hash(&idx, false).expect("dump lazy hashes");
 }

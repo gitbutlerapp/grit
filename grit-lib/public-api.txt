@@ -2244,7 +2244,6 @@ pub mod grit_lib::config::gitmodules
 pub mod grit_lib::config::gitmodules::gitdir
 pub fn grit_lib::config::gitmodules::gitdir::compute_default_submodule_gitdir(&std::path::Path, &std::path::Path, &grit_lib::config::ConfigFile, &str) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::config::gitmodules::gitdir::connect_submodule_work_tree_and_git_dir(&std::path::Path, &std::path::Path, &grit_lib::config::ConfigFile, &str, &std::path::Path) -> grit_lib::error::Result<()>
-pub fn grit_lib::config::gitmodules::gitdir::die_path_inside_submodule_when_disabled(&std::path::Path, &std::path::Path, &str, core::option::Option<&grit_lib::index::Index>) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::gitmodules::gitdir::ensure_submodule_gitdir_config(&std::path::Path, &std::path::Path, &mut grit_lib::config::ConfigFile, &str) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::config::gitmodules::gitdir::hash_blob_sha1_hex(&[u8]) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::config::gitmodules::gitdir::init_submodule_head_from_gitlink(&std::path::Path, &str) -> grit_lib::error::Result<()>
@@ -2328,7 +2327,6 @@ pub fn grit_lib::config::gitmodules::tree_entry_is_gitmodules_blob(u32, &[u8]) -
 pub fn grit_lib::config::gitmodules::tree_entry_reserved_dot_symlink(u32, &[u8]) -> core::option::Option<&'static str>
 pub fn grit_lib::config::gitmodules::validate_gitmodules_blob_line(&[u8]) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::gitmodules::verify_gitmodules_for_commit(&grit_lib::objects::odb::Odb, grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
-pub fn grit_lib::config::gitmodules::write_gitmodules_cli_option_warnings(&mut dyn core::io::write::Write, &str) -> core::io::error::Result<()>
 pub mod grit_lib::config::handle
 pub struct grit_lib::config::handle::ConfigHandle<'repo>
 impl<'repo> grit_lib::config::handle::ConfigHandle<'repo>
@@ -6945,10 +6943,7 @@ impl<'repo> core::marker::UnsafeUnpin for grit_lib::index::handle::IndexHandle<'
 impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::handle::IndexHandle<'repo>
 impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::index::handle::IndexHandle<'repo>
 pub mod grit_lib::index::index_name_hash_lazy
-pub fn grit_lib::index::index_name_hash_lazy::dump_lazy_init_name_hash(&grit_lib::index::Index, bool) -> core::result::Result<(), alloc::string::String>
 pub fn grit_lib::index::index_name_hash_lazy::memihash(&[u8]) -> u32
-pub fn grit_lib::index::index_name_hash_lazy::memihash_cont(u32, &[u8]) -> u32
-pub fn grit_lib::index::index_name_hash_lazy::test_lazy_init_name_hash(&grit_lib::index::Index, bool) -> core::result::Result<usize, alloc::string::String>
 pub mod grit_lib::index::resolve_undo
 pub struct grit_lib::index::resolve_undo::ResolveUndoRecord
 pub grit_lib::index::resolve_undo::ResolveUndoRecord::modes: [u32; 3]
@@ -10100,11 +10095,6 @@ pub fn grit_lib::objects::midx::cached_tip_midx_path(&std::path::Path) -> core::
 pub fn grit_lib::objects::midx::clear_pack_midx_state(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::midx::compact_multi_pack_index(&std::path::Path, &str, &str, bool, bool, core::option::Option<u8>) -> core::result::Result<(), grit_lib::objects::midx::CompactError>
 pub fn grit_lib::objects::midx::evict_midx_read_cache_for_pack_dir(&std::path::Path)
-pub fn grit_lib::objects::midx::format_midx_bitmapped_packs(&std::path::Path) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::objects::midx::format_midx_dump(&std::path::Path) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::objects::midx::format_midx_dump_layer(&std::path::Path, core::option::Option<&str>) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::objects::midx::format_midx_show_objects(&std::path::Path) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::objects::midx::format_midx_show_objects_layer(&std::path::Path, core::option::Option<&str>) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::objects::midx::load_midx_reuse_tables(&std::path::Path) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::midx::MidxReuseTables>>
 pub fn grit_lib::objects::midx::load_midx_reuse_tables_from_path(&std::path::Path) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::midx::MidxReuseTables>>
 pub fn grit_lib::objects::midx::midx_checksum_hex(&std::path::Path) -> grit_lib::error::Result<alloc::string::String>
