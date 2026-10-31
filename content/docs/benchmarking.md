@@ -289,3 +289,30 @@ near zero. The native block includes paired-bootstrap 95% intervals from 5,000
 resamples of the 60 round indices (reset RNG seed 4626 per case), taking
 `median(candidate) - median(stock)`. Loader-only and GNU-time cross-checks use
 the runner's isolated environment, recorded in `isolated_env_overrides`.
+
+## Hot text layout
+
+Short commands' peak RSS is mostly the `grit` binary's own code: the kernel maps
+file-backed text in 64 KB fault-around windows, so a function run once makes its whole
+window resident. On Linux, `grit-cli/build.rs` links `grit` with
+[`grit-cli/hot-text.ld`](https://github.com/gitbutlerapp/grit/blob/main/grit-cli/hot-text.ld),
+which gathers the functions `grit status` runs into one `.text.grit_hot` output section
+ahead of `.text` (see [Benchmarks](benchmarks.md#status-memory-is-code-layout-2026-10-31)).
+The fragment globs input-section names with crate hashes wildcarded, so version bumps keep
+it matching; a function that is renamed or no longer runs simply stays in `.text`.
+
+Regenerate it after large changes to the status path, from an unstripped `dist` build:
+
+```bash
+CARGO_PROFILE_DIST_STRIP=false CARGO_TARGET_DIR=target/hot-text \
+  cargo build --profile dist -p grit-cli
+python3 scripts/gen_hot_text_layout.py --grit target/hot-text/dist/grit
+```
+
+The script needs `valgrind`. It builds a census-shaped 10,000-file clone and records,
+with callgrind, every function each status scenario runs, both right after a census-style
+prepare and on the refreshed index. To see where a run's resident pages are, stop the
+process at `exit_group` under `gdb` and read `/proc/<pid>/smaps` (per mapping) or
+`/proc/<pid>/pagemap` (per page, to map back to symbols with `nm`). Set
+`GRIT_HOT_TEXT_LAYOUT=0` to link without the fragment, for example with a linker that
+lacks `INSERT`.
