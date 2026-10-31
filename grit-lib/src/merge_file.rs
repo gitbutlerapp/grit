@@ -1621,13 +1621,34 @@ fn lines_for_merge_diff_compare(lines: &[Vec<u8>], mode: &WhitespaceMode) -> Vec
 
 /// Line body without terminators, for Git's indent heuristic during change compaction.
 fn merge_line_body_str(line: &[u8]) -> String {
-    if line.ends_with(b"\r\n") {
-        String::from_utf8_lossy(&line[..line.len() - 2]).into_owned()
+    let body = if line.ends_with(b"\r\n") {
+        &line[..line.len() - 2]
     } else if line.ends_with(b"\n") {
-        String::from_utf8_lossy(&line[..line.len() - 1]).into_owned()
+        &line[..line.len() - 1]
     } else {
-        String::from_utf8_lossy(line).into_owned()
+        line
+    };
+    std::str::from_utf8(body)
+        .map(str::to_owned)
+        .unwrap_or_else(|_| {
+            body.iter()
+                .map(|b| char::from_u32(0xE000 + u32::from(*b)).unwrap_or('\0'))
+                .collect()
+        })
+}
+
+fn intern_merge_compare_keys(keys: &[Vec<u8>]) -> (Vec<&'static str>, Vec<u32>) {
+    use std::collections::HashMap;
+    let mut table: HashMap<&[u8], u32> = HashMap::new();
+    let mut ids = Vec::with_capacity(keys.len());
+    for key in keys {
+        let next = table.len() as u32;
+        let id = *table.entry(key.as_slice()).or_insert(next);
+        ids.push(id);
     }
+    // `recs_match` uses `compare_ids` when present; keys are placeholders only.
+    let placeholders = vec![""; keys.len()];
+    (placeholders, ids)
 }
 
 fn merge_whitespace_for_compaction(ws_mode: &WhitespaceMode) -> crate::diff::WhitespaceMode {
@@ -1650,29 +1671,21 @@ fn compact_merge_diff_ops(
 ) -> Vec<DiffOp> {
     let old_bodies: Vec<String> = old_lines.iter().map(|l| merge_line_body_str(l)).collect();
     let new_bodies: Vec<String> = new_lines.iter().map(|l| merge_line_body_str(l)).collect();
-    let old_keys: Vec<String> = old_compare
-        .iter()
-        .map(|k| String::from_utf8_lossy(k).into_owned())
-        .collect();
-    let new_keys: Vec<String> = new_compare
-        .iter()
-        .map(|k| String::from_utf8_lossy(k).into_owned())
-        .collect();
+    let (old_key_refs, old_key_ids) = intern_merge_compare_keys(old_compare);
+    let (new_key_refs, new_key_ids) = intern_merge_compare_keys(new_compare);
     let old_body_refs: Vec<&str> = old_bodies.iter().map(String::as_str).collect();
     let new_body_refs: Vec<&str> = new_bodies.iter().map(String::as_str).collect();
-    let old_key_refs: Vec<&str> = old_keys.iter().map(String::as_str).collect();
-    let new_key_refs: Vec<&str> = new_keys.iter().map(String::as_str).collect();
     crate::diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
         &ops,
         crate::diff_indent_heuristic::CompactSide {
             lines: &old_body_refs,
             keys: &old_key_refs,
-            compare_ids: None,
+            compare_ids: Some(&old_key_ids),
         },
         crate::diff_indent_heuristic::CompactSide {
             lines: &new_body_refs,
             keys: &new_key_refs,
-            compare_ids: None,
+            compare_ids: Some(&new_key_ids),
         },
         true,
         merge_whitespace_for_compaction(ws_mode),
@@ -1946,6 +1959,40 @@ mod tests {
         let theirs = "a\nb\nC\n"; // modify the last line, two lines away
         let (r, c) = do_merge(base, ours, theirs);
         assert_eq!(c, 0, "expected clean merge, got: {r:?}");
+    }
+
+    #[test]
+    fn non_utf8_distinct_lines_stay_clean_like_git_merge_file() {
+        let base = b"start\n\xff\nmiddle\n\xfe\n";
+        let ours = b"start\n\xfe\n";
+        let theirs = b"start\n\xff\nmiddle\n\xfe\nappend\n";
+        assert_merge_matches_git(
+            base,
+            ours,
+            theirs,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "non-UTF-8 compare keys must not collapse via lossy UTF-8",
+        );
+        let out = merge(&MergeInput {
+            base,
+            ours,
+            theirs,
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: None,
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .unwrap();
+        assert_eq!(out.conflicts, 0);
     }
 
     #[test]

@@ -271,10 +271,11 @@ fn recs_match(xdf: &XdFile<'_>, i: isize, j: isize, ws: WhitespaceMode) -> bool 
     if ui >= xdf.nrec() || uj >= xdf.nrec() {
         return false;
     }
+    if let Some(ids) = xdf.compare_ids {
+        return ids[ui] == ids[uj];
+    }
     if ws.normalizes_line_compare() {
         ws.normalize_line_for_compare(xdf.keys[ui]) == ws.normalize_line_for_compare(xdf.keys[uj])
-    } else if let Some(ids) = xdf.compare_ids {
-        ids[ui] == ids[uj]
     } else {
         xdf.keys[ui] == xdf.keys[uj]
     }
