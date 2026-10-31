@@ -619,13 +619,13 @@ fn collect_resolved_ref_entries(
 ) -> Result<Vec<(String, ObjectId)>> {
     let mut results = Vec::new();
     for_each(&mut |entry: &RefEntry| {
-        let oid = entry
-            .peeled
-            .or_else(|| match &entry.value {
-                StoreRawRef::Direct(oid) => Some(*oid),
-                StoreRawRef::Symbolic(target) => store.resolve(target).ok(),
-            })
-            .or_else(|| store.resolve(&entry.name).ok());
+        let oid = match &entry.value {
+            StoreRawRef::Direct(oid) => Some(*oid),
+            StoreRawRef::Symbolic(target) => entry
+                .peeled
+                .or_else(|| store.resolve(target).ok())
+                .or_else(|| store.resolve(&entry.name).ok()),
+        };
         if let Some(oid) = oid {
             results.push((entry.name.clone(), oid));
         }
@@ -4874,6 +4874,11 @@ pub(crate) fn list_refs_glob_in(
 /// [`crate::refs::References::list`] when you already have a
 /// [`crate::repo::Repository`].
 ///
+/// Each returned object id is the ref's stored value: symbolic refs are followed
+/// to their target oid. For direct refs (including annotated tags in
+/// `packed-refs`), that is the ref line's object id, not the optional `^` peel
+/// to a commit (peel metadata is for listing decoration and upload-pack only).
+///
 /// Uses the on-disk ref backend (files or reftable) and applies linked-worktree
 /// visibility rules when `git_dir` is a linked worktree git directory.
 ///
@@ -5562,6 +5567,27 @@ mod refname_available_tests {
             listed.iter().any(|(n, _)| n == "refs/ns/p/x"),
             "got {listed:?}"
         );
+    }
+
+    #[test]
+    fn list_refs_packed_annotated_tag_uses_tag_object_not_peel() {
+        let dir = tempdir().unwrap();
+        let tag_oid: ObjectId = "1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        let commit_oid: ObjectId = "2222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
+        let body = format!(
+            "# pack-refs with: peeled fully-peeled sorted \n\
+             {} refs/tags/v1\n\
+             ^{}\n",
+            tag_oid.to_hex(),
+            commit_oid.to_hex()
+        );
+        fs::write(dir.path().join("packed-refs"), body).unwrap();
+        let listed = list_refs(dir.path(), "refs/tags/").unwrap();
+        assert_eq!(listed, vec![("refs/tags/v1".to_owned(), tag_oid)]);
     }
 
     #[test]

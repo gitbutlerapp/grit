@@ -247,7 +247,6 @@ mod exit_status_contract;
 #[cfg(feature = "full-tests")]
 #[path = "fetch_all_cli.rs"]
 mod fetch_all_cli;
-#[cfg(unix)]
 #[path = "fetch_interrupt.rs"]
 mod fetch_interrupt;
 #[cfg(feature = "full-tests")]
@@ -366,6 +365,7 @@ mod log_loose_tags_memory;
 #[cfg(feature = "full-tests")]
 #[path = "log_pickaxe_json.rs"]
 mod log_pickaxe_json;
+#[cfg(feature = "full-tests")]
 #[path = "log_reverse_limit.rs"]
 mod log_reverse_limit;
 #[path = "log_terminal_cli.rs"]
@@ -611,7 +611,7 @@ mod status_midx_memory;
 #[cfg(feature = "full-tests")]
 #[path = "status_paths_renames.rs"]
 mod status_paths_renames;
-#[cfg(unix)]
+#[cfg(feature = "full-tests")]
 #[path = "status_unreadable_directory_cli.rs"]
 mod status_unreadable_directory_cli;
 #[cfg(feature = "full-tests")]
