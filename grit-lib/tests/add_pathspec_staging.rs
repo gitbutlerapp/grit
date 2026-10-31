@@ -64,6 +64,58 @@ fn add_directory_trailing_slash_pathspec_stages_under_prefix() {
 }
 
 #[test]
+fn add_attr_pathspec_stages_matching_modified_and_errors_when_nothing_matches() {
+    let (_dir, repo) = init_repo();
+    let wt = repo.work_tree().unwrap();
+    fs::write(wt.join(".gitattributes"), "*.c myattr\n").unwrap();
+    fs::write(wt.join("a.c"), b"v1\n").unwrap();
+    fs::write(wt.join("b.txt"), b"note\n").unwrap();
+    grit_test_support::git(wt, &["add", "."]);
+    grit_test_support::git(wt, &["commit", "-m", "init"]);
+
+    fs::write(wt.join("a.c"), b"v2\n").unwrap();
+    fs::write(wt.join("b.txt"), b"changed\n").unwrap();
+    stage_paths(&repo, &[":(attr:myattr)"]).expect("stage attr");
+    let wt = repo.work_tree().unwrap();
+    let staged = grit_test_support::git(wt, &["diff", "--cached", "--name-only"]);
+    assert_eq!(staged.trim(), "a.c", "only *.c paths match :(attr:myattr)");
+    let unstaged = grit_test_support::git(wt, &["diff", "--name-only"]);
+    assert!(
+        unstaged.lines().any(|l| l == "b.txt"),
+        "b.txt should remain unstaged: {unstaged}"
+    );
+
+    fs::write(wt.join("b.txt"), b"again\n").unwrap();
+    let err = stage_paths(&repo, &[":(attr:no-such)"]).expect_err("no match");
+    assert!(
+        matches!(err, Error::Message(ref m) if m.contains("did not match any files")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn add_attr_pathspec_with_trailing_directory_pattern_stages_under_prefix() {
+    let (_dir, repo) = init_repo();
+    let wt = repo.work_tree().unwrap();
+    fs::create_dir_all(wt.join("a")).unwrap();
+    fs::write(wt.join(".gitattributes"), "*.c myattr\n").unwrap();
+    fs::write(wt.join("a/g.c"), b"v1\n").unwrap();
+    fs::write(wt.join("b.txt"), b"note\n").unwrap();
+    grit_test_support::git(wt, &["add", "."]);
+    grit_test_support::git(wt, &["commit", "-m", "init"]);
+
+    fs::write(wt.join("a/g.c"), b"v2\n").unwrap();
+    fs::write(wt.join("b.txt"), b"changed\n").unwrap();
+    stage_paths(&repo, &[":(attr:myattr)a/"]).expect("stage attr under a/");
+    let staged = grit_test_support::git(wt, &["diff", "--cached", "--name-only"]);
+    assert_eq!(
+        staged.trim(),
+        "a/g.c",
+        "attr + directory prefix must stage matching paths"
+    );
+}
+
+#[test]
 fn add_glob_pathspec_stages_matching_untracked() {
     let (_dir, repo) = init_repo();
     let wt = repo.work_tree().unwrap();

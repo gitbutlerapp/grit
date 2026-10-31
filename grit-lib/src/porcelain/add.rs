@@ -31,8 +31,8 @@ use crate::path_icase::{
 use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
 use crate::pathspec::{
     context_from_mode_bits, exact_literal_pathspec_set, has_glob_chars,
-    matches_pathspec_list_with_context, pathspec_is_exclude, sorted_paths_match_pathspec,
-    PathspecListMatcher, PathspecMatchContext,
+    matches_pathspec_list_with_context, pathspec_has_attr_magic, pathspec_is_exclude,
+    sorted_paths_match_pathspec, PathspecListMatcher, PathspecMatchContext, PathspecMatcher,
 };
 use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::porcelain::index_mode::{
@@ -377,17 +377,31 @@ fn staging_path_matches(
 }
 
 fn restricted_index_paths_for_pathspecs(
+    repo: &Repository,
     index: &Index,
     pathspecs: &[String],
     base_ctx: PathspecMatchContext,
-) -> BTreeSet<String> {
+) -> Result<BTreeSet<String>> {
+    if pathspecs.iter().any(|s| pathspec_has_attr_magic(s)) {
+        let matcher = repo.pathspec_matcher(pathspecs)?;
+        let mut paths = BTreeSet::new();
+        for entry in &index.entries {
+            let Ok(path) = std::str::from_utf8(&entry.path) else {
+                continue;
+            };
+            if matcher.matches_entry(path, entry.mode) {
+                paths.insert(path.to_owned());
+            }
+        }
+        return Ok(paths);
+    }
     if let Some(exact) = exact_literal_pathspec_set(pathspecs, base_ctx) {
         if exact.iter().all(|p| {
             index
                 .get(p.as_bytes(), 0)
                 .is_some_and(|e| e.mode != MODE_TREE)
         }) {
-            return exact;
+            return Ok(exact);
         }
     }
     if staging_pathspecs_need_entry_mode_context(pathspecs) {
@@ -400,7 +414,7 @@ fn restricted_index_paths_for_pathspecs(
                 paths.insert(path.to_owned());
             }
         }
-        return paths;
+        return Ok(paths);
     }
     let matcher = PathspecListMatcher::new(pathspecs, base_ctx);
     let mut paths: BTreeSet<String> = index
@@ -421,7 +435,7 @@ fn restricted_index_paths_for_pathspecs(
             }
         }
     }
-    paths
+    Ok(paths)
 }
 
 enum StagingPathspecFilter<'a> {
@@ -429,6 +443,10 @@ enum StagingPathspecFilter<'a> {
     ModeAware {
         pathspecs: &'a [String],
         base_ctx: PathspecMatchContext,
+        index_path_modes: HashMap<Vec<u8>, u32>,
+    },
+    Attr {
+        matcher: PathspecMatcher<'a>,
         index_path_modes: HashMap<Vec<u8>, u32>,
     },
 }
@@ -442,24 +460,42 @@ impl StagingPathspecFilter<'_> {
                 base_ctx,
                 index_path_modes,
             } => staging_path_matches(path, index_path_modes, pathspecs, *base_ctx),
+            Self::Attr {
+                matcher,
+                index_path_modes,
+            } => {
+                if let Some(&mode) = index_path_modes.get(path.as_bytes()) {
+                    matcher.matches_entry(path, mode)
+                } else {
+                    matcher.matches(path)
+                }
+            }
         }
     }
 }
 
 fn staging_pathspec_filter<'a>(
+    repo: &Repository,
     index: &Index,
     pathspecs: &'a [String],
     base_ctx: PathspecMatchContext,
-) -> StagingPathspecFilter<'a> {
+) -> Result<StagingPathspecFilter<'a>> {
+    if pathspecs.iter().any(|s| pathspec_has_attr_magic(s)) {
+        return Ok(StagingPathspecFilter::Attr {
+            matcher: repo.pathspec_matcher(pathspecs)?,
+            index_path_modes: staging_index_path_modes(index),
+        });
+    }
     if staging_pathspecs_need_entry_mode_context(pathspecs) {
-        StagingPathspecFilter::ModeAware {
+        return Ok(StagingPathspecFilter::ModeAware {
             pathspecs,
             base_ctx,
             index_path_modes: staging_index_path_modes(index),
-        }
-    } else {
-        StagingPathspecFilter::List(PathspecListMatcher::new(pathspecs, base_ctx))
+        });
     }
+    Ok(StagingPathspecFilter::List(PathspecListMatcher::new(
+        pathspecs, base_ctx,
+    )))
 }
 
 fn stage_via_worktree_diff(
@@ -604,10 +640,11 @@ fn stage_inner_on_index(
         None
     } else {
         Some(Arc::new(restricted_index_paths_for_pathspecs(
+            repo,
             index,
             staging_pathspecs.as_ref(),
             pathspec_ctx,
-        )))
+        )?))
     };
     let mut tracked_scan_summary = None;
     let (unstaged, staging_stats) = if index.entries.is_empty() {
@@ -730,7 +767,8 @@ fn stage_inner_on_index(
         }
     }
 
-    let pathspec_filter = staging_pathspec_filter(index, staging_pathspecs.as_ref(), pathspec_ctx);
+    let pathspec_filter =
+        staging_pathspec_filter(repo, index, staging_pathspecs.as_ref(), pathspec_ctx)?;
     let matches = |path: &str| staging_pathspecs.is_empty() || pathspec_filter.matches(path);
 
     if opts.intent_to_add {

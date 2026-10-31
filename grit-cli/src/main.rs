@@ -2964,6 +2964,7 @@ fn dispatch(
                 graph_ascii: graph_ascii && !graph_unicode,
                 line_counts: terminal,
                 columns: None,
+                no_commits_in_repo: false,
             };
             if format.patch_text && opts.mode != OutputMode::Human {
                 bail!("`--patch-text` cannot be used with --json or --markdown");

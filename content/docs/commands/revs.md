@@ -45,7 +45,7 @@ with a deep history. As in Git, `--first-parent` follows first parents from the
 included tips only; everything an excluded tip reaches through any parent stays
 excluded.
 
-Path arguments after `--` limit history to commits that touched those paths. Operands use Git pathspec cwd rules (same as [`grit diff`](../diff/)): from a subdirectory, `.` limits to that directory, and bare filenames are relative to the current directory, not the repository root.
+Path arguments after `--` limit history to commits that touched those paths. Operands use Git pathspec cwd rules (same as [`grit diff`](../diff/)): from a subdirectory, `.` limits to that directory, and bare filenames are relative to the current directory, not the repository root. Attribute pathspecs such as `:(attr:myattr)` use the repository's current `.gitattributes` stack (work tree, index, `info/attributes`, and macros), the same way as [`grit diff`](../diff/); they do not read historical trees' attribute files.
 
 Author, committer, message, and pickaxe filters use the same rules as [`grit log`](../log/) (`-S`, `-G`, `--pickaxe-regex`, and the same `-i` / `-F` / mailmap behavior). Invalid patterns exit **129** with `kind: "invalid_pattern"` in `--json` output.
 
