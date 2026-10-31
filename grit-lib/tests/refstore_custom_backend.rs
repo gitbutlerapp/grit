@@ -11,8 +11,8 @@ use grit_lib::refs::store::backend::{
     apply_transaction, check_transaction, resolve_symbolic, RefBatchState,
 };
 use grit_lib::refs::store::{
-    BackendError, PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore,
-    RefStoreError, RefTransaction,
+    BackendError, MemoryRefStore, PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat,
+    RefStore, RefStoreError, RefTransaction,
 };
 use grit_test_support::refstore_conformance::run_suite;
 
@@ -190,6 +190,91 @@ fn custom_backend_built_on_public_helpers_passes_conformance_suite() {
     run_suite(|| Arc::new(MapStore::default()) as Arc<dyn RefStore>);
 }
 
+/// Forwards to [`MemoryRefStore`] but uses an unsafe read/`replace_reflog` rewrite (issue #2395).
+#[derive(Debug)]
+struct PlainForwarding(MemoryRefStore);
+
+impl RefStore for PlainForwarding {
+    fn format(&self) -> RefStorageFormat {
+        RefStorageFormat::Custom("plain-forwarding")
+    }
+
+    fn read_raw(&self, name: &str) -> Result<Option<RawRef>> {
+        self.0.read_raw(name)
+    }
+
+    fn for_each_ref(
+        &self,
+        prefix: &str,
+        f: &mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
+    ) -> Result<()> {
+        self.0.for_each_ref(prefix, f)
+    }
+
+    fn prepare(
+        &self,
+        txn: RefTransaction,
+    ) -> std::result::Result<Box<dyn PreparedRefTransaction + Send + '_>, RefStoreError> {
+        self.0.prepare(txn)
+    }
+
+    fn reflog_exists(&self, name: &str) -> Result<bool> {
+        self.0.reflog_exists(name)
+    }
+
+    fn for_each_reflog_entry(
+        &self,
+        name: &str,
+        reverse: bool,
+        f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
+    ) -> Result<()> {
+        self.0.for_each_reflog_entry(name, reverse, f)
+    }
+
+    fn create_reflog(&self, name: &str) -> Result<()> {
+        self.0.create_reflog(name)
+    }
+
+    fn delete_reflog(&self, name: &str) -> Result<()> {
+        self.0.delete_reflog(name)
+    }
+
+    fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()> {
+        self.0.replace_reflog(name, entries)
+    }
+
+    fn rewrite_reflog(
+        &self,
+        name: &str,
+        transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
+    ) -> Result<()> {
+        let mut entries = Vec::new();
+        self.for_each_reflog_entry(name, false, &mut |entry| {
+            entries.push(entry.clone());
+            ControlFlow::Continue(())
+        })?;
+        let rewritten = transform(entries)?;
+        self.replace_reflog(name, rewritten)
+    }
+
+    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
+        self.0.for_each_reflog_ref(f)
+    }
+}
+
+#[test]
+fn unsafe_rewrite_reflog_pattern_fails_conformance() {
+    use grit_test_support::refstore_conformance::rewrite_reflog_serializes_concurrent_append;
+    let store = Arc::new(PlainForwarding(MemoryRefStore::new())) as Arc<dyn RefStore>;
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        rewrite_reflog_serializes_concurrent_append(store);
+    }));
+    assert!(
+        outcome.is_err(),
+        "unsafe rewrite_reflog must fail the concurrent-append conformance case"
+    );
+}
+
 #[test]
 fn custom_format_reports_its_name() {
     let store = MapStore::default();
@@ -260,6 +345,14 @@ impl RefStore for Offline {
 
     fn replace_reflog(&self, _name: &str, _entries: Vec<ReflogEntry>) -> Result<()> {
         Ok(())
+    }
+
+    fn rewrite_reflog(
+        &self,
+        _name: &str,
+        _transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
+    ) -> Result<()> {
+        Err(RefStoreError::backend(ConnectionLost).into())
     }
 
     fn for_each_reflog_ref(&self, _f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
