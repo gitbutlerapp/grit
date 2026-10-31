@@ -3204,7 +3204,7 @@ impl Odb {
 
     /// Store `size` payload bytes of `kind` read from `reader` and return the object id.
     ///
-    /// Payloads below [`stream::STREAMED_WRITE_MIN_SIZE`] (1 MiB) are read into memory and
+    /// Payloads below 1 MiB (`stream::STREAMED_WRITE_MIN_SIZE`) are read into memory and
     /// written like [`Self::write_with_options`]. From 1 MiB up to (but not including)
     /// [`Self::big_file_threshold`] they are hashed and deflated in fixed-size chunks into a
     /// loose object. At or above the threshold they go into a new single-object pack (at
