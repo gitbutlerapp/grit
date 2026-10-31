@@ -92,6 +92,43 @@ fn t0601_peeled_and_sorted_traits_match_git() {
     assert_list_refs_match_git(wt_path(&repo), "refs/");
 }
 
+/// `list_refs` must report the tag object for packed annotated tags (git
+/// `for-each-ref %(objectname)`), not the peeled commit from the `^` line.
+#[test]
+fn packed_annotated_tag_list_refs_uses_tag_object_not_peel() {
+    let repo = files_repo();
+    let wt = wt_path(&repo);
+    let git_dir = git_dir(&repo);
+    let commit = git_empty_commit_oid(wt);
+    git(wt, &["tag", "-a", "ann-packed", "-m", "release"]);
+    let tag_oid: ObjectId = git(wt, &["rev-parse", "refs/tags/ann-packed"])
+        .trim()
+        .parse()
+        .unwrap();
+    write_packed_refs(
+        &git_dir,
+        &format!(
+            "# pack-refs with: peeled fully-peeled sorted\n\
+             {} refs/tags/ann-packed\n\
+             ^{}\n",
+            tag_oid.to_hex(),
+            commit.to_hex()
+        ),
+    );
+    fs::remove_file(git_dir.join("refs/tags/ann-packed")).ok();
+    git(
+        wt,
+        &["update-ref", "refs/tags/loose-ann", &tag_oid.to_hex()],
+    );
+    assert_list_refs_match_git(wt, "refs/tags/");
+    for (name, oid) in list_refs(git_dir, "refs/tags/").expect("list_refs") {
+        assert_eq!(
+            oid, tag_oid,
+            "{name} must list the annotated tag object, not ^{commit}"
+        );
+    }
+}
+
 fn wt_path(repo: &TestRepo) -> &Path {
     repo.worktree()
 }

@@ -619,13 +619,13 @@ fn collect_resolved_ref_entries(
 ) -> Result<Vec<(String, ObjectId)>> {
     let mut results = Vec::new();
     for_each(&mut |entry: &RefEntry| {
-        let oid = entry
-            .peeled
-            .or_else(|| match &entry.value {
-                StoreRawRef::Direct(oid) => Some(*oid),
-                StoreRawRef::Symbolic(target) => store.resolve(target).ok(),
-            })
-            .or_else(|| store.resolve(&entry.name).ok());
+        let oid = match &entry.value {
+            StoreRawRef::Direct(oid) => Some(*oid),
+            StoreRawRef::Symbolic(target) => entry
+                .peeled
+                .or_else(|| store.resolve(target).ok())
+                .or_else(|| store.resolve(&entry.name).ok()),
+        };
         if let Some(oid) = oid {
             results.push((entry.name.clone(), oid));
         }
@@ -4873,6 +4873,11 @@ pub(crate) fn list_refs_glob_in(
 /// [`crate::refs::store::RefStore`]. Prefer [`list_refs_for_repository`] or
 /// [`crate::refs::References::list`] when you already have a
 /// [`crate::repo::Repository`].
+///
+/// Each returned object id is the ref's stored value: symbolic refs are followed
+/// to their target oid. For direct refs (including annotated tags in
+/// `packed-refs`), that is the ref line's object id, not the optional `^` peel
+/// to a commit (peel metadata is for listing decoration and upload-pack only).
 ///
 /// Uses the on-disk ref backend (files or reftable) and applies linked-worktree
 /// visibility rules when `git_dir` is a linked worktree git directory.
