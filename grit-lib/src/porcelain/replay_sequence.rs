@@ -24,9 +24,8 @@ use crate::merge_trees::{
 };
 use crate::objects::{parse_commit, CommitData, ObjectId};
 use crate::operation::Conflict;
-use crate::porcelain::checkout::checkout_between_trees;
+use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::commit::{stamp_change_id_on_new_commit, write_commit_object};
-use crate::porcelain::index_from_tree::index_from_tree_with_worktree_stats;
 use crate::porcelain::merge::{apply_conflict_merge_worktree, MemOverlayGuard};
 use crate::porcelain::replay::ReplayDirection;
 use crate::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
@@ -1937,9 +1936,13 @@ fn read_created_records(repo: &Repository) -> Result<Vec<ReplayCreated>> {
 
 fn reset_index_worktree_to_head(repo: &Repository, head_oid: &ObjectId) -> Result<()> {
     let head_tree = repo.odb().commit_tree(head_oid)?;
-    let mut index = index_from_tree_with_worktree_stats(repo, &head_tree)?;
-    repo.write_index(&mut index)?;
-    checkout_between_trees(repo, None, &head_tree)?;
+    checkout_hard_to_tree_from_head_tree(
+        repo,
+        &head_tree,
+        &head_tree,
+        &mut crate::progress::NullProgress,
+        &crate::progress::NeverCancel,
+    )?;
     Ok(())
 }
 

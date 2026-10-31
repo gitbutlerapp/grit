@@ -16,6 +16,7 @@ use grit_lib::porcelain::replay_sequence::{
     skip_replay_step, start_replay_sequence, ReplayAbortOutcome, ReplayCreated, ReplayEmptyPolicy,
     ReplayOptions, ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
 };
+use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";
@@ -1401,4 +1402,94 @@ fn subjects_skip_leading_blank_message_lines_like_git() {
     );
     assert_eq!(created[0].subject, "blank-led subject");
     git_fsck_strict(root.path());
+}
+
+fn pick_modify_delete_conflict_setup(root: &Path) -> (String, ObjectId) {
+    commit_file(root, "a", "a\n", "a");
+    git(root, &["switch", "-c", "topic"]);
+    commit_file(root, "b", "b\n", "addb");
+    fs::write(root.join("b"), "b\nb2\n").unwrap();
+    git(root, &["commit", "-qam", "editb"]);
+    let pick = git(root, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(root, &["switch", "main"]);
+    commit_file(root, "m", "m\n", "m");
+    let start = oid_from_rev(root, "HEAD");
+    (pick, start)
+}
+
+fn assert_worktree_matches_git_oracle(grit_root: &Path, git_root: &Path) {
+    let grit_status = git(grit_root, &["status", "--porcelain"]);
+    let oracle_status = git(git_root, &["status", "--porcelain"]);
+    assert_eq!(grit_status, oracle_status, "status must match git oracle");
+    assert!(
+        !grit_root.join("b").exists(),
+        "conflicted path b must not remain on disk"
+    );
+}
+
+#[test]
+fn pick_abort_skip_and_hard_reset_remove_modify_delete_conflict_files() {
+    let grit_root = tempfile::tempdir().expect("tempdir");
+    let git_root = tempfile::tempdir().expect("tempdir");
+    init_repo(grit_root.path());
+    init_repo(git_root.path());
+    let (pick_grit, start) = pick_modify_delete_conflict_setup(grit_root.path());
+    let (pick_git, _) = pick_modify_delete_conflict_setup(git_root.path());
+    let pick_oid = ObjectId::from_hex(&pick_grit).expect("pick oid");
+
+    let grit_repo = open_repo(grit_root.path());
+    let out = start_replay_sequence(
+        &grit_repo,
+        &pick_req(vec![pick_oid], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
+    assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
+
+    let home = git_root.path().join(".git-home");
+    let _ = fs::create_dir_all(&home);
+    let cp = Command::new("git")
+        .current_dir(git_root.path())
+        .args(["cherry-pick", &pick_git])
+        .env("HOME", &home)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git cherry-pick");
+    assert!(!cp.status.success(), "cherry-pick should stop on conflict");
+    git(git_root.path(), &["cherry-pick", "--abort"]);
+
+    abort_replay_sequence(&grit_repo).expect("abort");
+    assert_eq!(oid_from_rev(grit_root.path(), "HEAD"), start);
+    assert_worktree_matches_git_oracle(grit_root.path(), git_root.path());
+    git_fsck_strict(grit_root.path());
+
+    start_replay_sequence(
+        &grit_repo,
+        &pick_req(vec![pick_oid], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick again");
+    skip_replay_step(&grit_repo, &replay_ident(), &mut NullProgress, &NeverCancel).expect("skip");
+    assert_worktree_matches_git_oracle(grit_root.path(), git_root.path());
+    git_fsck_strict(grit_root.path());
+
+    start_replay_sequence(
+        &grit_repo,
+        &pick_req(vec![pick_oid], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick third time");
+    reset_to_commit(
+        &grit_repo,
+        &ResetOptions::new(start, ResetMode::Hard, replay_ident(), "hard reset"),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("hard reset");
+    assert_worktree_matches_git_oracle(grit_root.path(), git_root.path());
+    git_fsck_strict(grit_root.path());
 }
