@@ -2276,6 +2276,8 @@ impl SidePaint {
                 HidePaintStop::TipsResolved | HidePaintStop::TipsResolvedDateSlop
             ),
             date_slop: stop == HidePaintStop::TipsResolvedDateSlop,
+            repair_left_only: stop == HidePaintStop::Converged,
+            hide_tips: hide.to_vec(),
             ..PaintWalk::default()
         };
         Self::paint(cache, tips, hide, walk)
@@ -2363,7 +2365,7 @@ impl SidePaint {
                     walk.mark(cache, parent, side)?;
                 }
             }
-            if !walk.repaint_left_only_reachable_from_hide(cache)? {
+            if !walk.repair_left_only || !walk.repaint_left_only_reachable_from_hide(cache)? {
                 break;
             }
         }
@@ -2433,13 +2435,17 @@ struct PaintWalk {
     left_first_parent_only: bool,
     /// Stop when a commit popped as reachable from the left side alone is dated outside it.
     left_window: Option<LeftDateWindow>,
+    /// Run [`PaintWalk::repaint_left_only_reachable_from_hide`] when the frontier closes early
+    /// ([`HidePaintStop::Converged`] range walks without a commit-graph).
+    repair_left_only: bool,
+    /// Hide-side tips ([`SidePaint::compute_hiding`] `hide` argument).
+    hide_tips: Vec<ObjectId>,
 }
 
 /// Commits a [`HidePaintStop::TipsResolvedDateSlop`] paint pops past its date guard, so a hide
 /// commit dated slightly too old still repaints the ancestor it reaches. Git's `rev-list` walks
 /// the same number of commits past its "everything left is uninteresting" point.
 const PAINT_SLOP: usize = 5;
-
 /// How much older than a popped left-only commit a queued hide commit without a generation may
 /// be dated and still keep a [`HidePaintStop::TipsResolvedDateSlop`] paint going: the clock
 /// skew it tolerates exactly.
@@ -2458,23 +2464,68 @@ impl PaintWalk {
         if self.left_only_popped.is_empty() {
             return Ok(false);
         }
+        let mut hide_starts: Vec<ObjectId> = self
+            .queued
+            .keys()
+            .copied()
+            .filter(|oid| self.sides.get(oid).copied().unwrap_or(0) & PAINT_RIGHT != 0)
+            .collect();
+        let skew_probe: Vec<ObjectId> = self.left_only_popped.iter().copied().collect();
+        let allowance = UNRANKED_SKEW_ALLOWANCE.whole_seconds();
+        let clock_skewed = skew_probe.iter().any(|&left| {
+            let Ok(left_time) = cache.commit_time(left) else {
+                return false;
+            };
+            hide_starts.iter().any(|&start| {
+                cache
+                    .commit_time(start)
+                    .is_ok_and(|start_time| left_time.abs_diff(start_time) > allowance as u64)
+            })
+        });
+        if !clock_skewed {
+            return Ok(false);
+        }
+        if hide_starts.is_empty() {
+            for tip in &self.hide_tips {
+                if self.sides.get(tip).copied().unwrap_or(0) & PAINT_RIGHT != 0 {
+                    hide_starts.push(*tip);
+                }
+            }
+        }
+        if hide_starts.is_empty() {
+            return Ok(false);
+        }
+        let walk_unpainted = true;
+        let visit_cap = usize::MAX / 4;
         let mut changed = false;
         loop {
             let mut progress = false;
-            let queued: Vec<ObjectId> = self.queued.keys().copied().collect();
-            for oid in queued {
-                if self.sides.get(&oid).copied().unwrap_or(0) & PAINT_RIGHT == 0 {
-                    continue;
-                }
-                for parent in cache.parents_of(oid)? {
-                    if !self.left_only_popped.contains(&parent) {
-                        continue;
+            for start in &hide_starts {
+                let mut stack = vec![*start];
+                let mut visited = OidHashSet::default();
+                visited.insert(*start);
+                while let Some(oid) = stack.pop() {
+                    if visited.len() > visit_cap {
+                        break;
                     }
-                    progress = true;
-                    changed = true;
-                    self.mark(cache, parent, PAINT_RIGHT)?;
-                    if self.sides.get(&parent).copied().unwrap_or(0) & PAINT_RIGHT != 0 {
-                        self.left_only_popped.remove(&parent);
+                    for parent in cache.parents_of(oid)? {
+                        if !visited.insert(parent) {
+                            continue;
+                        }
+                        if let Some(side) = self.sides.get(&parent).copied() {
+                            if side == PAINT_BOTH && !walk_unpainted {
+                                continue;
+                            }
+                            if side == PAINT_LEFT {
+                                progress = true;
+                                changed = true;
+                                self.mark(cache, parent, PAINT_RIGHT)?;
+                                self.left_only_popped.remove(&parent);
+                            }
+                        } else if !walk_unpainted {
+                            continue;
+                        }
+                        stack.push(parent);
                     }
                 }
             }
@@ -5069,7 +5120,9 @@ mod tests {
         let odb = repo.odb();
         let base = write_commit_same_time(odb, &[], "base", 100)?;
         let skewed = write_commit_same_time(odb, &[base], "skewed ahead", 1_000)?;
-        let behind = write_commit_same_time(odb, &[skewed], "behind skewed", 150)?;
+        let mid1 = write_commit_same_time(odb, &[skewed], "hide chain 1", 1_010)?;
+        let mid2 = write_commit_same_time(odb, &[mid1], "hide chain 2", 1_020)?;
+        let behind = write_commit_same_time(odb, &[mid2], "behind skewed", 150)?;
         let held = write_commit_same_time(odb, &[behind], "held hide tip", 200)?;
         let mut filler = base;
         for i in 0..10 {

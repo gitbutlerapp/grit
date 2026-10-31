@@ -528,8 +528,10 @@ fn range_skew_paint_repo() -> (PathBuf, String, String, String) {
     let mut s = ImportStream::default();
     let base = s.commit("main", 100, &[]);
     let skewed = s.commit("skewed", 1_000, &[base]);
-    let behind = s.commit("held", 150, &[skewed]);
-    let held = s.commit("held", 200, &[behind]);
+    let mid1 = s.commit("chain", 1_010, &[skewed]);
+    let mid2 = s.commit("chain", 1_020, &[mid1]);
+    let behind = s.commit("held", 150, &[mid2]);
+    let _held = s.commit("held", 200, &[behind]);
     let mut filler = base;
     for i in 0..10 {
         filler = s.commit("filler", 500 + i, &[filler]);
