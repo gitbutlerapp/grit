@@ -572,6 +572,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::BlameLine
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::blame::BlameLine
 pub struct grit_lib::blame::BlameOptions
 pub grit_lib::blame::BlameOptions::copy_detection: grit_lib::blame::CopyDetection
+pub grit_lib::blame::BlameOptions::move_detection: bool
 pub grit_lib::blame::BlameOptions::final_source: grit_lib::blame::BlameFinalSource
 pub grit_lib::blame::BlameOptions::first_parent_only: bool
 pub grit_lib::blame::BlameOptions::ignore: grit_lib::blame::IgnoreRevs
@@ -579,6 +580,8 @@ pub grit_lib::blame::BlameOptions::line_range: core::option::Option<core::ops::r
 pub grit_lib::blame::BlameOptions::now: core::option::Option<time::offset_date_time::OffsetDateTime>
 pub grit_lib::blame::BlameOptions::start: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::blame::BlameOptions::whitespace: grit_lib::diff::WhitespaceMode
+impl grit_lib::blame::BlameOptions
+pub fn grit_lib::blame::BlameOptions::move_detection_enabled(&self) -> bool
 impl core::clone::Clone for grit_lib::blame::BlameOptions
 pub fn grit_lib::blame::BlameOptions::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::blame::BlameOptions
@@ -681,7 +684,7 @@ pub fn grit_lib::blame::blame_file(&grit_lib::repo::Repository, &str, &grit_lib:
 pub fn grit_lib::blame::build_exact_relocate_line_map(&[&str], &[&str], &[core::option::Option<usize>]) -> alloc::vec::Vec<core::option::Option<usize>>
 pub fn grit_lib::blame::build_fuzzy_line_map(&[&str], &[&str], &[core::option::Option<usize>]) -> alloc::vec::Vec<core::option::Option<usize>>
 pub fn grit_lib::blame::build_line_map(&[&str], &[&str], grit_lib::blame::BlameDiffAlgorithm, bool) -> alloc::vec::Vec<core::option::Option<usize>>
-pub fn grit_lib::blame::compute_blame(&grit_lib::objects::odb::Odb, grit_lib::objects::ObjectId, &str, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, grit_lib::blame::BlameDiffAlgorithm, core::option::Option<&grit_lib::blame::BlameTextconvContext>, bool, usize, bool, &std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, alloc::vec::Vec<grit_lib::objects::ObjectId>>, bool, core::option::Option<core::ops::range::RangeInclusive<usize>>, grit_lib::diff::WhitespaceMode, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::blame::BlameLine>>
+pub fn grit_lib::blame::compute_blame(&grit_lib::objects::odb::Odb, grit_lib::objects::ObjectId, &str, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, grit_lib::blame::BlameDiffAlgorithm, core::option::Option<&grit_lib::blame::BlameTextconvContext>, bool, usize, bool, bool, &std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, alloc::vec::Vec<grit_lib::objects::ObjectId>>, bool, core::option::Option<core::ops::range::RangeInclusive<usize>>, grit_lib::diff::WhitespaceMode, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::blame::BlameLine>>
 pub fn grit_lib::blame::parse_diff_algorithm_name(&str) -> core::option::Option<grit_lib::blame::BlameDiffAlgorithm>
 pub fn grit_lib::blame::read_object_for_blame(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, core::option::Option<&grit_lib::repo::Repository>) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::blame::resolve_blame_line_range(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &str, &str) -> core::result::Result<core::ops::range::RangeInclusive<usize>, grit_lib::line_range::LineRangeError>

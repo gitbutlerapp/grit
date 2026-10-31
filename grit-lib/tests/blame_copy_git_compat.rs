@@ -116,6 +116,16 @@ fn git_copy_args(level: CopyDetection) -> Vec<&'static str> {
     }
 }
 
+fn git_blame_with_extra(dir: &Path, file: &str, extra: &[&str]) -> Vec<PorcelainLine> {
+    let mut args: Vec<String> = vec!["blame".into(), "--porcelain".into()];
+    args.extend(extra.iter().map(|s| (*s).to_owned()));
+    args.push("--".into());
+    args.push(file.into());
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = git_output(dir, &arg_refs);
+    parse_git_blame_porcelain(&out, file)
+}
+
 fn git_blame_copy(
     dir: &Path,
     file: &str,
@@ -141,7 +151,7 @@ fn grit_blame_copy(
     level: CopyDetection,
     line_range: Option<std::ops::RangeInclusive<usize>>,
 ) -> Vec<PorcelainLine> {
-    let result = blame_file(
+    grit_blame_with_options(
         repo,
         file,
         &BlameOptions {
@@ -150,7 +160,14 @@ fn grit_blame_copy(
             ..Default::default()
         },
     )
-    .expect("blame_file");
+}
+
+fn grit_blame_with_options(
+    repo: &Repository,
+    file: &str,
+    options: &BlameOptions,
+) -> Vec<PorcelainLine> {
+    let result = blame_file(repo, file, options).expect("blame_file");
     let mut out = Vec::new();
     for line in result.lines {
         out.push(PorcelainLine {
@@ -400,4 +417,119 @@ fn exact_rename_reports_original_path_like_git() {
 fn two_hop_exact_rename_reports_original_path_like_git() {
     let (tmp, repo) = fixture_two_hop_exact_rename_preserves_original_path();
     assert_blame_copy_matches(&repo, tmp.path(), "dest.txt", CopyDetection::Off, None);
+}
+
+/// Issue #2370: within-file block move should credit the original commit when `-M` / `-C` is on.
+fn fixture_within_file_block_move() -> (tempfile::TempDir, Repository, ObjectId, ObjectId) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_path_buf();
+    git_run(&root, &["init", "-q", "-b", "main"]);
+    let content: String = (201..=230)
+        .map(|i| format!("unique line number {i} with some padding text to be distinctive\n"))
+        .collect();
+    std::fs::write(root.join("m.txt"), &content).unwrap();
+    git_run(&root, &["add", "."]);
+    git_run(&root, &["commit", "-m", "c1"]);
+    let c1_hex = git_output(&root, &["rev-parse", "HEAD"]).trim().to_owned();
+    let c1: ObjectId = c1_hex.parse().expect("c1 oid");
+    let lines: Vec<&str> = content.lines().collect();
+    let moved: String = lines[10..]
+        .iter()
+        .chain(&lines[..10])
+        .map(|line| format!("{line}\n"))
+        .collect();
+    std::fs::write(root.join("m.txt"), moved).unwrap();
+    git_run(&root, &["commit", "-a", "-m", "move block"]);
+    let move_hex = git_output(&root, &["rev-parse", "HEAD"]).trim().to_owned();
+    let move_oid: ObjectId = move_hex.parse().expect("move oid");
+    (tmp, open_repo(&root), c1, move_oid)
+}
+
+fn fixture_below_threshold_within_file_move() -> (tempfile::TempDir, Repository, ObjectId) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_path_buf();
+    git_run(&root, &["init", "-q", "-b", "main"]);
+    let content = "x\ny\nz\na\nb\nc\n";
+    std::fs::write(root.join("m.txt"), content).unwrap();
+    git_run(&root, &["add", "."]);
+    git_run(&root, &["commit", "-m", "c1"]);
+    let c1_hex = git_output(&root, &["rev-parse", "HEAD"]).trim().to_owned();
+    let c1: ObjectId = c1_hex.parse().expect("c1 oid");
+    std::fs::write(root.join("m.txt"), "a\nb\nc\nx\ny\nz\n").unwrap();
+    git_run(&root, &["commit", "-a", "-m", "move small"]);
+    (tmp, open_repo(&root), c1)
+}
+
+#[test]
+fn within_file_block_move_matches_git_move_detection() {
+    let (tmp, repo, c1, move_oid) = fixture_within_file_block_move();
+    let git_lines = git_blame_with_extra(tmp.path(), "m.txt", &["-M"]);
+    let grit_lines = grit_blame_with_options(
+        &repo,
+        "m.txt",
+        &BlameOptions {
+            move_detection: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(git_lines, grit_lines);
+    assert!(
+        grit_lines.iter().all(|l| l.commit == c1),
+        "expected original commit, not move commit {move_oid}"
+    );
+}
+
+#[test]
+fn within_file_block_move_off_leaves_block_on_moving_commit() {
+    let (tmp, repo, c1, move_oid) = fixture_within_file_block_move();
+    let git_lines = git_blame_with_extra(tmp.path(), "m.txt", &[]);
+    let grit_lines = grit_blame_copy(&repo, "m.txt", CopyDetection::Off, None);
+    assert_eq!(git_lines, grit_lines);
+    let on_c1 = grit_lines.iter().filter(|l| l.commit == c1).count();
+    let on_move = grit_lines.iter().filter(|l| l.commit == move_oid).count();
+    assert_eq!(on_c1, 20);
+    assert_eq!(on_move, 10);
+}
+
+#[test]
+fn within_file_block_move_each_copy_level_matches_git() {
+    let (tmp, repo, c1, _) = fixture_within_file_block_move();
+    for level in [
+        CopyDetection::FromModifiedFiles,
+        CopyDetection::FromCreatingCommit,
+        CopyDetection::FromAnyCommit,
+    ] {
+        let git_extra = git_copy_args(level);
+        let grit_lines = grit_blame_copy(&repo, "m.txt", level, None);
+        let git_lines = git_blame_with_extra(tmp.path(), "m.txt", &git_extra);
+        assert_eq!(git_lines, grit_lines, "level {level:?}");
+        assert!(grit_lines.iter().all(|l| l.commit == c1), "level {level:?}");
+    }
+}
+
+#[test]
+fn within_file_line_permutation_matches_git_move_detection() {
+    let (tmp, repo, c1) = fixture_below_threshold_within_file_move();
+    let move_oid: ObjectId = git_output(tmp.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .expect("move oid");
+    let git_m = git_blame_with_extra(tmp.path(), "m.txt", &["-M"]);
+    let grit_m = grit_blame_with_options(
+        &repo,
+        "m.txt",
+        &BlameOptions {
+            move_detection: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(git_m, grit_m);
+    assert!(grit_m
+        .iter()
+        .filter(|l| l.final_line <= 3)
+        .all(|l| l.commit == c1));
+    assert!(grit_m
+        .iter()
+        .filter(|l| l.final_line > 3)
+        .all(|l| l.commit == move_oid));
 }

@@ -1086,6 +1086,10 @@ enum Command {
         /// Detect lines copied from other files (`git blame -C`; repeat up to three times).
         #[arg(short = 'C', long = "copy-detection", action = clap::ArgAction::Count)]
         copy_detection: u8,
+        /// Detect lines moved within the same file (`git blame -M`). Enabled automatically when
+        /// `-C` is used; Git treats copy detection as implying move detection.
+        #[arg(short = 'M', long = "move-detection")]
+        move_detection: bool,
         /// Blame this file's content (`-` for stdin) instead of the working tree, on top of
         /// the revision (default `HEAD`); lines not in the revision show as uncommitted.
         #[arg(long, value_name = "FILE")]
@@ -3093,6 +3097,7 @@ fn dispatch(
             group,
             ignore_all_space,
             copy_detection,
+            move_detection,
             contents,
         } => emit_success(
             &commands::blame::run(
@@ -3106,6 +3111,7 @@ fn dispatch(
                 group,
                 ignore_all_space,
                 copy_detection,
+                move_detection,
                 contents,
                 ctx.now,
             )?,
