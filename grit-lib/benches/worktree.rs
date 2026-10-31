@@ -12,7 +12,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::index::{Index, IndexParseContext};
 use grit_lib::objects::HashAlgo;
 use grit_lib::parallel::ThreadPolicy;
-use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
+use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::status::{
     collect_untracked_and_ignored, status, IgnoredMode, StatusOptions,
 };
