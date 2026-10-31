@@ -1672,20 +1672,14 @@ impl Index {
         commit: bool,
         policy: crate::parallel::ThreadPolicy,
     ) -> Result<()> {
-        let body = self.serialize_index_body(config, policy)?;
-
         if let Some(lock) = existing_lock {
             if lock.index_path != path {
                 return Err(Error::Message(
                     "index lock path does not match write target".into(),
                 ));
             }
-            let checksum: Vec<u8> = if skip_hash {
-                vec![0u8; self.hash_algo.len()]
-            } else {
-                hash_index_body(self.hash_algo, &body)
-            };
-            lock.write_index_contents(&body, &checksum)?;
+            self.stream_index_file(&mut lock.file, skip_hash, config, policy)?;
+            lock.reopen_after_write()?;
             if commit {
                 lock.commit_replace_index()?;
             }
@@ -1711,14 +1705,13 @@ impl Index {
         let wrote_pid_file = lockfile_pid_enabled;
         let (tmp_path, mut lock_file) = lock_file.into_open_file()?;
 
-        if let Err(e) =
-            write_index_body_and_trailer(&mut lock_file, self.hash_algo, skip_hash, &body)
-        {
+        if let Err(e) = self.stream_index_file(&mut lock_file, skip_hash, config, policy) {
+            drop(lock_file);
             let _ = fs::remove_file(&tmp_path);
             if wrote_pid_file {
                 let _ = fs::remove_file(&pid_path);
             }
-            return Err(Error::Io(e));
+            return Err(e);
         }
         drop(lock_file);
 
@@ -1735,15 +1728,38 @@ impl Index {
         Ok(())
     }
 
-    fn serialize_index_body(
+    /// Serialize the index into `file` followed by its trailing checksum (zeros when `skip_hash`).
+    ///
+    /// The body is streamed through a buffer of at most [`INDEX_WRITE_CHUNK`] bytes (plus one
+    /// entry or extension), so writing a 100k-entry index does not hold a second full copy of it
+    /// in memory next to the parsed entries.
+    fn stream_index_file(
         &mut self,
+        file: &mut fs::File,
+        skip_hash: bool,
         config: Option<&ConfigSet>,
         policy: crate::parallel::ThreadPolicy,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<()> {
         self.ensure_canonical_order();
-        let mut body = Vec::new();
-        self.serialize_into_with_options(&mut body, config, policy)?;
-        Ok(body)
+        let mut hasher = (!skip_hash).then(|| self.hash_algo.checksum_hasher());
+        let mut sink = |chunk: &[u8]| -> io::Result<()> {
+            if let Some(hasher) = hasher.as_mut() {
+                hasher.update(chunk);
+            }
+            file.write_all(chunk)
+        };
+        let mut body = IndexBodyOut {
+            buf: Vec::new(),
+            drained: 0,
+            sink: Some(&mut sink),
+        };
+        self.serialize_body(&mut body, config, policy)?;
+        let checksum = match hasher {
+            Some(hasher) => hasher.finalize(),
+            None => vec![0u8; self.hash_algo.len()],
+        };
+        file.write_all(&checksum)?;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -1751,12 +1767,20 @@ impl Index {
     ///
     /// Callers must have sorted entries when using format 4 (path compression depends on order).
     pub(crate) fn serialize_into(&self, out: &mut Vec<u8>) -> Result<()> {
-        self.serialize_into_with_options(out, None, crate::parallel::ThreadPolicy::default())
+        let mut body = IndexBodyOut {
+            buf: std::mem::take(out),
+            drained: 0,
+            sink: None,
+        };
+        let result = self.serialize_body(&mut body, None, crate::parallel::ThreadPolicy::default());
+        *out = body.buf;
+        result
     }
 
-    pub(crate) fn serialize_into_with_options(
+    /// Serialise the index body (header, entries, extensions; no trailing checksum) into `out`.
+    fn serialize_body(
         &self,
-        out: &mut Vec<u8>,
+        out: &mut IndexBodyOut<'_>,
         config: Option<&ConfigSet>,
         policy: crate::parallel::ThreadPolicy,
     ) -> Result<()> {
@@ -1777,11 +1801,17 @@ impl Index {
         } else {
             self.version
         };
-        out.reserve(self.estimate_body_capacity(write_version, config));
+        let estimate = self.estimate_body_capacity(write_version, config);
+        out.buf.reserve(if out.sink.is_some() {
+            estimate.min(INDEX_WRITE_CHUNK + INDEX_WRITE_CHUNK_SLACK)
+        } else {
+            estimate
+        });
         // Header
-        out.extend_from_slice(b"DIRC");
-        out.extend_from_slice(&write_version.to_be_bytes());
-        out.extend_from_slice(&(self.entries.len() as u32).to_be_bytes());
+        out.buf.extend_from_slice(b"DIRC");
+        out.buf.extend_from_slice(&write_version.to_be_bytes());
+        out.buf
+            .extend_from_slice(&(self.entries.len() as u32).to_be_bytes());
 
         let ieot_blocks = ieot_block_count_for_write(policy, config, self.entries.len());
         let ieot_stride = ieot_blocks.map(|b| entries_per_ieot_block(self.entries.len(), b));
@@ -1789,7 +1819,7 @@ impl Index {
             entries: Vec::new(),
         };
         let mut nr_in_block = 0u32;
-        let mut block_start_offset = out.len();
+        let mut block_start_offset = out.position();
 
         if write_version == 4 {
             let mut previous_path: Vec<u8> = Vec::new();
@@ -1806,11 +1836,12 @@ impl Index {
                         if !previous_path.is_empty() {
                             previous_path[0] = 0;
                         }
-                        block_start_offset = out.len();
+                        block_start_offset = out.position();
                     }
                 }
-                serialize_entry_v4(entry, &mut previous_path, out);
+                serialize_entry_v4(entry, &mut previous_path, &mut out.buf);
                 nr_in_block += 1;
+                out.drain_if_full()?;
             }
         } else {
             for (i, entry) in self.entries.iter().enumerate() {
@@ -1821,11 +1852,12 @@ impl Index {
                             nr: nr_in_block,
                         });
                         nr_in_block = 0;
-                        block_start_offset = out.len();
+                        block_start_offset = out.position();
                     }
                 }
-                serialize_entry(entry, write_version, out);
+                serialize_entry(entry, write_version, &mut out.buf);
                 nr_in_block += 1;
+                out.drain_if_full()?;
             }
         }
         if ieot_blocks.is_some() && nr_in_block > 0 {
@@ -1835,18 +1867,23 @@ impl Index {
             });
         }
 
-        let extension_offset = out.len();
+        let extension_offset = out.position();
         let write_eoie = record_end_of_index_entries(config);
         let mut eoie_header_bytes: Option<Vec<u8>> = write_eoie.then(Vec::new);
 
         if !ieot_table.entries.is_empty() {
             let mut payload = Vec::new();
             write_ieot_payload(&ieot_table, &mut payload);
-            append_index_extension(out, &mut eoie_header_bytes, INDEX_EXT_IEOT, &payload);
+            append_index_extension(
+                &mut out.buf,
+                &mut eoie_header_bytes,
+                INDEX_EXT_IEOT,
+                &payload,
+            );
         }
         if self.sparse_directories {
             append_index_extension(
-                out,
+                &mut out.buf,
                 &mut eoie_header_bytes,
                 INDEX_EXT_SPARSE_DIRECTORIES,
                 &[],
@@ -1854,14 +1891,19 @@ impl Index {
         }
         if let Some(uc) = &self.untracked_cache {
             let payload = untracked_cache::write_untracked_extension(uc);
-            append_index_extension(out, &mut eoie_header_bytes, INDEX_EXT_UNTRACKED, &payload);
+            append_index_extension(
+                &mut out.buf,
+                &mut eoie_header_bytes,
+                INDEX_EXT_UNTRACKED,
+                &payload,
+            );
         }
-        self.append_fsmonitor_extension(out, &mut eoie_header_bytes)?;
+        self.append_fsmonitor_extension(&mut out.buf, &mut eoie_header_bytes)?;
         if let Some(ru) = &self.resolve_undo {
             let payload = write_resolve_undo_payload(ru);
             if !payload.is_empty() {
                 append_index_extension(
-                    out,
+                    &mut out.buf,
                     &mut eoie_header_bytes,
                     INDEX_EXT_RESOLVE_UNDO,
                     &payload,
@@ -1882,20 +1924,31 @@ impl Index {
                 .unwrap_or_else(EwahBitmap::new);
             let payload =
                 crate::split_index::serialize_link_extension_payload(&sl.base_oid, &del, &rep);
-            append_index_extension(out, &mut eoie_header_bytes, INDEX_EXT_LINK, &payload);
+            append_index_extension(
+                &mut out.buf,
+                &mut eoie_header_bytes,
+                INDEX_EXT_LINK,
+                &payload,
+            );
         }
         if let Some(cache_tree) = &self.cache_tree {
             let mut payload = Vec::new();
             serialize_cache_tree_node(cache_tree, &mut payload);
-            append_index_extension(out, &mut eoie_header_bytes, INDEX_EXT_CACHE_TREE, &payload);
+            append_index_extension(
+                &mut out.buf,
+                &mut eoie_header_bytes,
+                INDEX_EXT_CACHE_TREE,
+                &payload,
+            );
         }
         if write_eoie {
             let mut eoie_payload = Vec::new();
             eoie_payload.extend_from_slice(&(extension_offset as u32).to_be_bytes());
             let headers = eoie_header_bytes.as_deref().unwrap_or(&[]);
             eoie_payload.extend_from_slice(&self.hash_algo.checksum_digest(headers));
-            append_index_extension(out, &mut None, INDEX_EXT_EOIE, &eoie_payload);
+            append_index_extension(&mut out.buf, &mut None, INDEX_EXT_EOIE, &eoie_payload);
         }
+        out.drain()?;
         Ok(())
     }
 
@@ -4002,10 +4055,8 @@ pub struct IndexLock {
 }
 
 impl IndexLock {
-    /// Write serialized index bytes into the held lock file without replacing `index`.
-    pub(crate) fn write_index_contents(&mut self, body: &[u8], checksum: &[u8]) -> Result<()> {
-        self.file.write_all(body).map_err(Error::Io)?;
-        self.file.write_all(checksum).map_err(Error::Io)?;
+    /// Close the handle the index was just written through and hold the lock with a fresh one.
+    pub(crate) fn reopen_after_write(&mut self) -> Result<()> {
         drop(std::mem::replace(
             &mut self.file,
             fs::OpenOptions::new()
@@ -4088,27 +4139,51 @@ fn hash_index_body(algo: HashAlgo, body: &[u8]) -> Vec<u8> {
     algo.checksum_digest(body)
 }
 
-/// Write index bytes and trailing checksum in one buffered pass, updating the digest while writing.
-fn write_index_body_and_trailer(
-    file: &mut fs::File,
-    algo: HashAlgo,
-    skip_hash: bool,
-    body: &[u8],
-) -> io::Result<()> {
-    use std::io::BufWriter;
-    let mut out = BufWriter::with_capacity(256 * 1024, file);
-    if skip_hash {
-        out.write_all(body)?;
-        out.write_all(&vec![0u8; algo.len()])?;
-        return out.flush();
+/// Bytes [`IndexBodyOut`] buffers before handing them to its sink when streaming an index write.
+const INDEX_WRITE_CHUNK: usize = 128 * 1024;
+
+/// Headroom reserved past [`INDEX_WRITE_CHUNK`] so the entry that crosses it rarely reallocates.
+const INDEX_WRITE_CHUNK_SLACK: usize = 8 * 1024;
+
+/// Serialized index body under construction.
+///
+/// Without a sink the whole body accumulates in `buf`. With a sink, `buf` is handed over and
+/// cleared each time it reaches [`INDEX_WRITE_CHUNK`] between entries, so memory stays bounded
+/// however many entries the index has. [`Self::position`] is the absolute body offset either way,
+/// which the IEOT and EOIE extensions record.
+struct IndexBodyOut<'a> {
+    buf: Vec<u8>,
+    drained: usize,
+    sink: Option<&'a mut dyn FnMut(&[u8]) -> io::Result<()>>,
+}
+
+impl IndexBodyOut<'_> {
+    /// Offset of the next byte from the start of the body.
+    fn position(&self) -> usize {
+        self.drained + self.buf.len()
     }
-    let mut hasher = algo.checksum_hasher();
-    for chunk in body.chunks(256 * 1024) {
-        hasher.update(chunk);
-        out.write_all(chunk)?;
+
+    /// Hand `buf` to the sink once it holds at least [`INDEX_WRITE_CHUNK`] bytes.
+    fn drain_if_full(&mut self) -> io::Result<()> {
+        if self.buf.len() < INDEX_WRITE_CHUNK {
+            return Ok(());
+        }
+        self.drain()
     }
-    out.write_all(&hasher.finalize())?;
-    out.flush()
+
+    /// Hand everything buffered to the sink; a no-op for in-memory serialization.
+    fn drain(&mut self) -> io::Result<()> {
+        let Some(sink) = self.sink.as_mut() else {
+            return Ok(());
+        };
+        if self.buf.is_empty() {
+            return Ok(());
+        }
+        sink(&self.buf)?;
+        self.drained += self.buf.len();
+        self.buf.clear();
+        Ok(())
+    }
 }
 
 impl Index {
@@ -6347,6 +6422,152 @@ mod tests {
         }
         assert_eq!(fs::read(&lock_path).unwrap(), b"foreign");
         assert!(!path.exists());
+    }
+
+    fn streaming_fixture(version: u32) -> Index {
+        let mut idx = Index::new();
+        idx.version = version;
+        for i in 0..6000 {
+            idx.add_or_replace(make_entry(&format!("dir{:02}/sub/file-{i:05}.txt", i % 37)));
+        }
+        idx
+    }
+
+    fn streaming_config() -> crate::config::ConfigSet {
+        use crate::config::{ConfigFile, ConfigScope};
+        let file = ConfigFile::parse(
+            Path::new("config"),
+            "[index]\n\tthreads = 4\n",
+            ConfigScope::Local,
+        )
+        .unwrap();
+        let mut cfg = crate::config::ConfigSet::new();
+        cfg.merge(&file);
+        cfg
+    }
+
+    fn in_memory_index_file(
+        idx: &Index,
+        cfg: &crate::config::ConfigSet,
+        policy: crate::parallel::ThreadPolicy,
+        skip_hash: bool,
+    ) -> Vec<u8> {
+        let mut body = IndexBodyOut {
+            buf: Vec::new(),
+            drained: 0,
+            sink: None,
+        };
+        idx.serialize_body(&mut body, Some(cfg), policy).unwrap();
+        let mut file = body.buf;
+        let checksum = if skip_hash {
+            vec![0u8; idx.hash_algo.len()]
+        } else {
+            idx.hash_algo.checksum_digest(&file)
+        };
+        file.extend_from_slice(&checksum);
+        file
+    }
+
+    #[test]
+    fn streamed_write_matches_in_memory_serialization_across_chunks() {
+        let policy = crate::parallel::ThreadPolicy::with_threads_override(Some(4));
+        let cfg = streaming_config();
+        for version in [2, 4] {
+            for skip_hash in [false, true] {
+                let dir = TempDir::new().unwrap();
+                let path = dir.path().join("index");
+                let mut idx = streaming_fixture(version);
+                let expected = in_memory_index_file(&idx, &cfg, policy, skip_hash);
+                assert!(
+                    expected.len() > 3 * INDEX_WRITE_CHUNK,
+                    "fixture must span several chunks"
+                );
+                idx.write_to_path_with_config_and_policy(&path, skip_hash, Some(&cfg), policy)
+                    .unwrap();
+                let written = fs::read(&path).unwrap();
+                assert!(
+                    written == expected,
+                    "v{version} skip_hash={skip_hash}: streamed index differs from in-memory body"
+                );
+                assert!(!path.with_extension("lock").exists());
+
+                let ctx = crate::index::IndexParseContext::from_policy(policy);
+                let loaded =
+                    Index::parse_with_algo_and_config(&written, idx.hash_algo, Some(&cfg), ctx)
+                        .unwrap();
+                assert_eq!(loaded.entries.len(), idx.entries.len());
+                assert!(loaded
+                    .entries
+                    .iter()
+                    .zip(&idx.entries)
+                    .all(|(a, b)| a.path == b.path && a.oid == b.oid));
+            }
+        }
+    }
+
+    #[test]
+    fn streamed_write_through_held_lock_matches_in_memory_serialization() {
+        let policy = crate::parallel::ThreadPolicy::with_threads_override(Some(4));
+        let cfg = streaming_config();
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("index");
+        let mut idx = streaming_fixture(2);
+        let expected = in_memory_index_file(&idx, &cfg, policy, false);
+
+        let mut lock = IndexLock::acquire(&path, Some(&cfg)).unwrap();
+        idx.write_to_path_with_config_and_lock_mode_policy(
+            &path,
+            false,
+            Some(&cfg),
+            Some(&mut lock),
+            false,
+            policy,
+        )
+        .unwrap();
+        assert!(
+            !path.exists(),
+            "uncommitted lock must not replace the index"
+        );
+        assert!(fs::read(path.with_extension("lock")).unwrap() == expected);
+        lock.commit_replace_index().unwrap();
+        assert!(fs::read(&path).unwrap() == expected);
+        assert!(!path.with_extension("lock").exists());
+    }
+
+    #[test]
+    fn index_body_out_drains_only_when_full_and_tracks_offsets() {
+        let mut chunks: Vec<usize> = Vec::new();
+        let mut sink = |chunk: &[u8]| -> io::Result<()> {
+            chunks.push(chunk.len());
+            Ok(())
+        };
+        let mut out = IndexBodyOut {
+            buf: Vec::new(),
+            drained: 0,
+            sink: Some(&mut sink),
+        };
+        out.buf.resize(INDEX_WRITE_CHUNK - 1, 0);
+        out.drain_if_full().unwrap();
+        assert_eq!(out.position(), INDEX_WRITE_CHUNK - 1);
+        out.buf.extend_from_slice(&[1, 2]);
+        out.drain_if_full().unwrap();
+        assert!(out.buf.is_empty());
+        assert_eq!(out.position(), INDEX_WRITE_CHUNK + 1);
+        out.buf.push(3);
+        out.drain().unwrap();
+        out.drain().unwrap();
+        assert_eq!(out.position(), INDEX_WRITE_CHUNK + 2);
+        assert_eq!(chunks, vec![INDEX_WRITE_CHUNK + 1, 1]);
+
+        let mut in_memory = IndexBodyOut {
+            buf: vec![0; INDEX_WRITE_CHUNK * 2],
+            drained: 0,
+            sink: None,
+        };
+        in_memory.drain_if_full().unwrap();
+        in_memory.drain().unwrap();
+        assert_eq!(in_memory.buf.len(), INDEX_WRITE_CHUNK * 2);
+        assert_eq!(in_memory.position(), INDEX_WRITE_CHUNK * 2);
     }
 
     #[test]
