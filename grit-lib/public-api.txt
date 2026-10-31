@@ -22649,6 +22649,20 @@ impl core::marker::Unpin for grit_lib::remote::serve::RefUpdateRefusal
 impl core::marker::UnsafeUnpin for grit_lib::remote::serve::RefUpdateRefusal
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::RefUpdateRefusal
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::RefUpdateRefusal
+pub struct grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::error::Error for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::fmt::Debug for grit_lib::remote::serve::RequestBodyLimitExceeded
+pub fn grit_lib::remote::serve::RequestBodyLimitExceeded::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::remote::serve::RequestBodyLimitExceeded
+pub fn grit_lib::remote::serve::RequestBodyLimitExceeded::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::marker::Send for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::marker::Sync for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::marker::Unpin for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::marker::UnsafeUnpin for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::RequestBodyLimitExceeded
+pub fn grit_lib::remote::serve::io_error_is_request_body_limit(&core::io::error::Error) -> bool
 pub enum grit_lib::remote::serve::ServeError
 pub grit_lib::remote::serve::ServeError::Cancelled
 pub grit_lib::remote::serve::ServeError::InvalidDeepenNot

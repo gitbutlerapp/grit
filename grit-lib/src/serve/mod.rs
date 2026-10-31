@@ -108,6 +108,29 @@ pub enum ServeError {
     PackInterrupted(Box<ServeError>),
 }
 
+/// A fetch request body grew past the transport's decoded-size limit.
+///
+/// Smart HTTP wraps upload-pack input with a byte cap. The wrapper surfaces this
+/// as the inner error of [`ServeError::Io`]. Upload-pack must return that error
+/// to the transport instead of encoding it as a protocol v2 `ERR` line.
+#[derive(Debug)]
+pub struct RequestBodyLimitExceeded;
+
+impl std::fmt::Display for RequestBodyLimitExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "fetch request body exceeds the decoded size limit")
+    }
+}
+
+impl std::error::Error for RequestBodyLimitExceeded {}
+
+/// Whether `err` is a fetch request-body limit from a transport wrapper.
+#[must_use]
+pub fn io_error_is_request_body_limit(err: &std::io::Error) -> bool {
+    err.get_ref()
+        .is_some_and(|inner| inner.is::<RequestBodyLimitExceeded>())
+}
+
 /// Why a missing object could not be served; see [`ServeError::ObjectMissing`].
 ///
 /// A repository whose large blobs live on a large-object promisor (LOP) leaves

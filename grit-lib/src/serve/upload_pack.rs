@@ -238,6 +238,10 @@ pub fn upload_pack_cancellable(
                         Err(err)
                     }
                 }
+                ServeError::Io(ref e) if super::io_error_is_request_body_limit(e) => {
+                    counter.flush()?;
+                    Err(err)
+                }
                 err if opts.stateless_rpc && opts.protocol == ProtocolVersion::V2 => {
                     let msg = serve_error_client_message(&err);
                     write_line(&mut counter, &format!("ERR {msg}"))?;
@@ -1900,5 +1904,73 @@ mod tests {
             .write_loose_materialize(ObjectKind::Tree, b"")
             .unwrap();
         assert!(ready_to_send_pack(&fx.repo, &[tree, fx.commits[4]], &have).unwrap());
+    }
+
+    #[test]
+    fn v2_stateless_request_body_limit_is_not_an_err_line() {
+        use std::io::{Cursor, Read};
+
+        use super::super::RequestBodyLimitExceeded;
+
+        struct LimitAfter<R> {
+            inner: R,
+            max: usize,
+            read: usize,
+        }
+
+        impl<R: Read> Read for LimitAfter<R> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = self.inner.read(buf)?;
+                if n == 0 {
+                    return Ok(0);
+                }
+                self.read = self.read.saturating_add(n);
+                if self.read > self.max {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        RequestBodyLimitExceeded,
+                    ));
+                }
+                Ok(n)
+            }
+        }
+
+        fn pkt_line(buf: &mut Vec<u8>, line: &str) {
+            let payload = format!("{line}\n");
+            buf.extend(format!("{:04x}", payload.len() + 4).as_bytes());
+            buf.extend(payload.as_bytes());
+        }
+
+        let fx = fixture(1, &[]);
+        let oid = fx.commits[0].to_hex();
+        let mut body = Vec::new();
+        pkt_line(&mut body, "command=fetch");
+        pkt_line(&mut body, "object-format=sha1");
+        body.extend(b"0001");
+        pkt_line(&mut body, &format!("want {oid}"));
+        pkt_line(&mut body, "done");
+        body.extend(b"0000");
+
+        let mut input = LimitAfter {
+            inner: Cursor::new(body),
+            max: 32,
+            read: 0,
+        };
+        let mut output = Vec::new();
+        let opts = ServeOptions {
+            protocol: ProtocolVersion::V2,
+            stateless_rpc: true,
+            ..ServeOptions::default()
+        };
+        let err = upload_pack(&fx.repo, &mut input, &mut output, &mut opts.clone())
+            .expect_err("limit must fail before v2 ERR output");
+        match err {
+            ServeError::Io(e) => assert!(super::super::io_error_is_request_body_limit(&e)),
+            other => panic!("expected Io limit error, got {other:?}"),
+        }
+        assert!(
+            output.is_empty(),
+            "v2 limit errors must not be written as ERR pkt-lines"
+        );
     }
 }

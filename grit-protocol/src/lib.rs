@@ -48,9 +48,9 @@ impl Error {
     /// error rather than a server error. During receive-pack that is the only source of
     /// stream errors: the response is collected in memory, and repository failures are
     /// reported as other [`serve::ServeError`] variants or inside the status report.
-    /// Upload-pack can
-    /// also return stream errors while reading repository data, so do not use this to
-    /// classify upload-pack failures.
+    /// Upload-pack can also return stream errors while reading repository data. When the
+    /// inner error is [`grit_lib::remote::serve::RequestBodyLimitExceeded`], smart HTTP
+    /// maps the failure to 413; other upload-pack stream errors are usually server faults.
     ///
     /// # Returns
     ///
@@ -189,7 +189,7 @@ pub(crate) fn run_upload_pack(
         protocol_version,
         stateless_rpc,
         advertise_refs,
-        input,
+        &mut &*input,
         repository_options,
         extensions,
         &mut output,
@@ -203,7 +203,7 @@ pub(crate) fn run_upload_pack_to(
     protocol_version: Option<u8>,
     stateless_rpc: bool,
     advertise_refs: bool,
-    input: &[u8],
+    input: &mut dyn Read,
     repository_options: &RepositoryOptions,
     extensions: &Extensions,
     output: &mut dyn std::io::Write,
@@ -230,7 +230,7 @@ pub(crate) fn run_upload_pack_to(
     // The promisor fetcher in `repository_options` is used only when this request may
     // fetch missing promised objects; otherwise the served repository fetches nothing.
     opts.attach_promisor_fetcher(&repo, &config, repository_options.promisor_fetcher.clone());
-    let _summary = serve::upload_pack(&repo, &mut &*input, output, &mut opts)?;
+    let _summary = serve::upload_pack(&repo, input, output, &mut opts)?;
     Ok(())
 }
 
