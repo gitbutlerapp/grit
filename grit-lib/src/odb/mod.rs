@@ -1015,6 +1015,33 @@ impl Odb {
         Ok(())
     }
 
+    /// Write selected overlay objects to loose storage, leaving the overlay active.
+    ///
+    /// Skips `oid`s that are absent from the overlay or already stored locally.
+    ///
+    /// # Errors
+    ///
+    /// Propagates overlay read and [`Self::write_local`] failures.
+    pub fn persist_mem_overlay_objects(
+        &self,
+        oids: impl IntoIterator<Item = ObjectId>,
+    ) -> Result<()> {
+        let store = match self.overlay_store() {
+            Some(store) => store,
+            None => return Ok(()),
+        };
+        for oid in oids {
+            if self.exists_local(&oid) {
+                continue;
+            }
+            let Some(obj) = store.read(&oid)? else {
+                continue;
+            };
+            self.write_local(obj.kind, &obj.data)?;
+        }
+        Ok(())
+    }
+
     /// Whether the in-memory write overlay is currently enabled.
     #[must_use]
     pub(crate) fn is_mem_overlay_active(&self) -> bool {

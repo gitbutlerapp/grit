@@ -2096,6 +2096,33 @@ pub fn materialized_merge_result_tree(
     write_tree_partial_from_index(odb, &patch_index, &merged.result_tree, &patch_paths)
 }
 
+/// Persist merge objects that stay referenced from stage-0 index rows after a conflict stop.
+///
+/// Marker blobs and the ephemeral materialized checkout tree remain in the mem overlay only.
+pub(crate) fn persist_referenced_stage0_merge_objects(
+    odb: &Odb,
+    merged: &TreeMergeOutput,
+) -> crate::error::Result<()> {
+    use std::collections::HashSet;
+
+    let mut unmerged_paths = HashSet::new();
+    unmerged_paths.extend(merged.conflict_content.keys().cloned());
+    for entry in merged.index.entries() {
+        if entry.stage() != 0 {
+            unmerged_paths.insert(entry.path.clone());
+        }
+    }
+
+    let mut oids = HashSet::new();
+    for entry in merged.index.entries() {
+        if entry.stage() != 0 || unmerged_paths.contains(&entry.path) {
+            continue;
+        }
+        oids.insert(entry.oid);
+    }
+    odb.persist_mem_overlay_objects(oids)
+}
+
 /// True when the index tree matches `head_tree_oid` (used for empty pick detection).
 pub fn index_tree_oid_matches_head(
     odb: &Odb,
@@ -2852,6 +2879,48 @@ mod tests {
             path: path.as_bytes().to_vec(),
             base_index_pos: 0,
         }
+    }
+
+    #[test]
+    fn persist_referenced_stage0_merge_objects_flushes_overlay_blobs() {
+        use crate::objects::ObjectKind;
+        use crate::odb::Odb;
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().expect("tempdir");
+        let objects = dir.path().join("objects");
+        let odb = Odb::new(&objects);
+        odb.enable_mem_overlay();
+        let stage0_blob = odb
+            .write(ObjectKind::Blob, b"auto-merged")
+            .expect("overlay blob");
+        assert!(!odb.exists_local(&stage0_blob));
+        let marker_blob = odb.write(ObjectKind::Blob, b"<<<<").expect("marker");
+
+        let conflict_path = b"conflict.txt".to_vec();
+        let auto_path = b"auto.txt".to_vec();
+        let mut merge_index = Index::new();
+        merge_index.push_entry_unsorted(sparse_merge_test_entry("auto.txt", stage0_blob, 0));
+        merge_index.push_entry_unsorted(sparse_merge_test_entry("conflict.txt", zero_oid(), 2));
+        merge_index.push_entry_unsorted(sparse_merge_test_entry("conflict.txt", zero_oid(), 3));
+        merge_index.sort();
+        let mut conflict_content = BTreeMap::new();
+        conflict_content.insert(conflict_path.clone(), marker_blob);
+        let mut touched = HashSet::new();
+        touched.insert(conflict_path);
+        touched.insert(auto_path);
+        let merged = TreeMergeOutput {
+            index: merge_index,
+            conflict_content,
+            result_tree: zero_oid(),
+            touched_paths: touched,
+            rename_conflicts: Vec::new(),
+            directory_rename_conflicts: Vec::new(),
+        };
+
+        persist_referenced_stage0_merge_objects(&odb, &merged).expect("persist stage-0");
+        assert!(odb.exists_local(&stage0_blob));
+        assert!(!odb.exists_local(&marker_blob));
     }
 
     #[test]

@@ -1962,7 +1962,8 @@ pub(crate) fn apply_conflict_merge_worktree(
         &conflict_path_set(merged),
         progress,
         cancel,
-    )
+    )?;
+    crate::merge_trees::persist_referenced_stage0_merge_objects(repo.odb(), merged)
 }
 
 fn record_merge_in_progress(git_dir: &Path, other_oid: ObjectId, merge_msg: String) -> Result<()> {

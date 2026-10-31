@@ -4,7 +4,6 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::PostOperationHooks;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
 use grit_lib::progress::{NeverCancel, NullProgress};
@@ -13,12 +12,13 @@ use grit_lib::revwalk::history::{
     start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest,
     RefScope, RewriteOptions, StartRebaseOptions,
 };
+use grit_lib::PostOperationHooks;
 use grit_test_support::git;
 use grit_test_support::objects::git_supports_sha256;
 
 const EMPTY_BLOB_SHA1: &str = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
 const EMPTY_TREE_SHA1: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-const EMPTY_BLOB_SHA256: &str = "473a0f4c8025794925fb1a877869d6389cf612d";
+const EMPTY_BLOB_SHA256: &str = "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
 const EMPTY_TREE_SHA256: &str = "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321";
 
 fn object_loose(git_dir: &Path, hex: &str) -> std::path::PathBuf {
@@ -33,19 +33,23 @@ fn git_fsck_strict(worktree: &Path) {
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .output()
         .expect("git fsck");
-    assert!(
-        out.status.success(),
-        "git fsck --strict: {}",
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "git fsck --strict: {combined}");
     assert!(
-        !stderr.contains("dangling tree"),
-        "unexpected dangling tree:\n{stderr}"
+        !combined.contains("dangling tree"),
+        "unexpected dangling tree:\n{combined}"
     );
     assert!(
-        !stderr.contains("dangling blob"),
-        "unexpected dangling blob:\n{stderr}"
+        !combined.contains("dangling blob"),
+        "unexpected dangling blob:\n{combined}"
+    );
+    assert!(
+        !combined.contains("missing blob"),
+        "missing blob:\n{combined}"
     );
 }
 
@@ -182,31 +186,30 @@ fn conflicted_merge_abort_leaves_no_dangling_empty_objects() {
 }
 
 #[test]
-fn conflict_with_clean_add_keeps_added_blob_without_extra_danglers() {
+fn conflict_with_clean_auto_merge_keeps_stage0_blob_reachable() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     git(root, &["init", "-q", "-b", "main"]);
     git(root, &["config", "user.name", "A"]);
     git(root, &["config", "user.email", "a@x.test"]);
 
-    std::fs::write(root.join("a.txt"), "base").expect("write a");
-    git(root, &["add", "a.txt"]);
+    std::fs::write(root.join("conflict.txt"), "base\n").expect("write conflict");
+    std::fs::write(root.join("auto.txt"), "base auto\n").expect("write auto");
+    git(root, &["add", "conflict.txt", "auto.txt"]);
     git(root, &["commit", "-m", "base"]);
     git(root, &["branch", "side"]);
     git(root, &["switch", "side"]);
-    std::fs::write(root.join("added.txt"), "new on side").expect("write added");
-    git(root, &["add", "added.txt"]);
-    git(root, &["commit", "-m", "side add"]);
+    std::fs::write(root.join("conflict.txt"), "side\n").expect("write conflict");
+    std::fs::write(root.join("auto.txt"), "same auto\n").expect("write auto");
+    git(root, &["add", "conflict.txt", "auto.txt"]);
+    git(root, &["commit", "-m", "side"]);
     git(root, &["switch", "main"]);
-    std::fs::write(root.join("a.txt"), "main change").expect("write a");
-    git(root, &["add", "a.txt"]);
-    git(root, &["commit", "-m", "main change"]);
+    std::fs::write(root.join("conflict.txt"), "main\n").expect("write conflict");
+    std::fs::write(root.join("auto.txt"), "same auto\n").expect("write auto");
+    git(root, &["add", "conflict.txt", "auto.txt"]);
+    git(root, &["commit", "-m", "main"]);
 
     let git_dir = root.join(".git");
-    let added_blob = git(root, &["rev-parse", "side:added.txt"])
-        .trim()
-        .to_owned();
-
     let repo = open(root);
     let outcome = integrate_branch(
         &repo,
@@ -220,14 +223,23 @@ fn conflict_with_clean_add_keeps_added_blob_without_extra_danglers() {
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
 
+    let index = repo.load_index().expect("index");
+    let auto_entry = index
+        .entries
+        .iter()
+        .find(|e| e.stage() == 0 && e.path == b"auto.txt")
+        .expect("stage-0 auto.txt after conflict merge");
+    let auto_blob = auto_entry.oid.to_hex();
     assert!(
-        object_loose(&git_dir, &added_blob).exists(),
-        "clean-add blob from the other branch must remain reachable"
+        object_loose(&git_dir, &auto_blob).exists(),
+        "auto-merged stage-0 blob must be stored on disk during conflict"
     );
+    git_fsck_strict(root);
+
     abort_branch_merge(&repo).expect("abort");
     assert!(
-        object_loose(&git_dir, &added_blob).exists(),
-        "added blob must stay after abort"
+        object_loose(&git_dir, &auto_blob).exists(),
+        "auto-merged blob must remain after abort"
     );
     assert_canonical_empty_objects_absent(&git_dir, EMPTY_BLOB_SHA1, EMPTY_TREE_SHA1);
     git_fsck_strict(root);
