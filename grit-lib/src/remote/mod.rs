@@ -139,3 +139,5 @@ pub mod sideband_lines {
     //! sideband_lines API (re-exported at this path).
     pub use crate::sideband_lines::*;
 }
+
+pub use crate::transport_path::redact_url_for_display;

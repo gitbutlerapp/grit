@@ -168,7 +168,7 @@ pub fn transfer_header(verb: &str, remote: &str, url: Option<&str>, color: bool)
         line.push_str(&paint(
             color,
             DIM,
-            &grit_lib::remote::transport_path::redact_url_for_display(url),
+            &grit_lib::remote::redact_url_for_display(url),
         ));
     }
     line

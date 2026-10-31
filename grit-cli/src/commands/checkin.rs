@@ -7,12 +7,14 @@ use anyhow::{bail, Result};
 use grit_lib::error::Error as LibError;
 use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::porcelain::pull::PullError;
-use grit_lib::remote::snapshot_checkout::{
-    branches_with_work, give_change_ids, land_integration, push_for_checkin, same_branch_name,
-    suggest_work_branch, valid_branch_name, CheckinBranch, CheckinRequest, CheckinRule,
-    CheckinStatus, CheckoutError, IntegrateRequest, IntegrateStatus, Landing,
+use grit_lib::remote::{
+    redact_url_for_display,
+    snapshot_checkout::{
+        branches_with_work, give_change_ids, land_integration, push_for_checkin, same_branch_name,
+        suggest_work_branch, valid_branch_name, CheckinBranch, CheckinRequest, CheckinRule,
+        CheckinStatus, CheckoutError, IntegrateRequest, IntegrateStatus, Landing,
+    },
 };
-use grit_lib::remote::transport_path::redact_url_for_display;
 use schemars::JsonSchema;
 use serde::Serialize;
 

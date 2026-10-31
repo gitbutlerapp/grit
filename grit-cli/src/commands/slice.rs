@@ -10,8 +10,7 @@ use grit_lib::remote::snapshot_checkout::{
     CheckoutClient, CheckoutMarker, Ident, Slice, SliceChange, SliceDeleteRequest, SliceRequest,
     SLICES_PATH,
 };
-use grit_lib::remote::transport_path::redact_url_for_display;
-use grit_lib::remote::HttpClientFactory;
+use grit_lib::remote::{redact_url_for_display, HttpClientFactory};
 use schemars::JsonSchema;
 use serde::Serialize;
 

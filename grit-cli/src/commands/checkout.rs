@@ -17,8 +17,7 @@ use grit_lib::remote::snapshot_checkout::{
     BranchRefreshResult, CheckoutClient, CheckoutMarker, CheckoutRequest, CheckoutState,
     RefreshOutcome,
 };
-use grit_lib::remote::transport_path::redact_url_for_display;
-use grit_lib::remote::HttpClientFactory;
+use grit_lib::remote::{redact_url_for_display, HttpClientFactory};
 use schemars::JsonSchema;
 use serde::Serialize;
 
