@@ -89,7 +89,10 @@ fn time_restore(warmup: impl Fn(), run: impl Fn()) -> Duration {
     median(samples)
 }
 
-#[cfg_attr(debug_assertions, ignore = "wall-time gate: run with cargo test --release")]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "wall-time gate: run with cargo test --release"
+)]
 #[test]
 fn loose_incompressible_restore_is_not_orders_of_magnitude_slower_than_git() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -101,14 +104,8 @@ fn loose_incompressible_restore_is_not_orders_of_magnitude_slower_than_git() {
     git(root, &["add", "big.bin"]);
     git(root, &["commit", "-qm", "big"]);
 
-    let git_time = time_restore(
-        || restore_with_git(root),
-        || restore_with_git(root),
-    );
-    let grit_time = time_restore(
-        || restore_with_grit(root),
-        || restore_with_grit(root),
-    );
+    let git_time = time_restore(|| restore_with_git(root), || restore_with_git(root));
+    let grit_time = time_restore(|| restore_with_grit(root), || restore_with_grit(root));
 
     let ratio = grit_time.as_secs_f64() / git_time.as_secs_f64().max(1e-9);
     assert!(
@@ -117,10 +114,16 @@ fn loose_incompressible_restore_is_not_orders_of_magnitude_slower_than_git() {
     );
 
     git(root, &["fsck", "--no-progress"]);
-    assert_eq!(fs::metadata(root.join("big.bin")).expect("meta").len(), BLOB_BYTES as u64);
+    assert_eq!(
+        fs::metadata(root.join("big.bin")).expect("meta").len(),
+        BLOB_BYTES as u64
+    );
 }
 
-#[cfg_attr(debug_assertions, ignore = "wall-time gate: run with cargo test --release")]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "wall-time gate: run with cargo test --release"
+)]
 #[test]
 fn packed_incompressible_restore_is_not_orders_of_magnitude_slower_than_git() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -133,14 +136,8 @@ fn packed_incompressible_restore_is_not_orders_of_magnitude_slower_than_git() {
     git(root, &["commit", "-qm", "big"]);
     git(root, &["repack", "-adq"]);
 
-    let git_time = time_restore(
-        || restore_with_git(root),
-        || restore_with_git(root),
-    );
-    let grit_time = time_restore(
-        || restore_with_grit(root),
-        || restore_with_grit(root),
-    );
+    let git_time = time_restore(|| restore_with_git(root), || restore_with_git(root));
+    let grit_time = time_restore(|| restore_with_grit(root), || restore_with_grit(root));
 
     let ratio = grit_time.as_secs_f64() / git_time.as_secs_f64().max(1e-9);
     assert!(
