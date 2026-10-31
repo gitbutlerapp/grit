@@ -536,14 +536,8 @@ fn xdiff_changed_flags_trimmed_byte_ids(
     ((full1, full2), ids1_full, ids2_full)
 }
 
-fn merge_compare_str_owned(keys: &[Vec<u8>]) -> Vec<String> {
-    keys.iter()
-        .map(|key| {
-            std::str::from_utf8(key)
-                .map(ToString::to_string)
-                .unwrap_or_else(|_| String::from_utf8_lossy(key).into_owned())
-        })
-        .collect()
+fn merge_dummy_line_refs(len: usize) -> Vec<&'static str> {
+    vec![""; len]
 }
 
 enum MergeFileCompactAlgorithm {
@@ -571,62 +565,69 @@ pub(crate) fn merge_file_compacted_line_ops(
     new_compare: &[Vec<u8>],
     diff_algorithm: Option<&str>,
 ) -> Vec<similar::DiffOp> {
-    const INDENT_HEURISTIC: bool = false;
-    let old_owned = merge_compare_str_owned(old_compare);
-    let new_owned = merge_compare_str_owned(new_compare);
-    let old_keys: Vec<&str> = old_owned.iter().map(String::as_str).collect();
-    let new_keys: Vec<&str> = new_owned.iter().map(String::as_str).collect();
-    let old_side = diff_indent_heuristic::CompactSide {
-        lines: &old_keys,
-        keys: &old_keys,
-        compare_ids: None,
-    };
-    let new_side = diff_indent_heuristic::CompactSide {
-        lines: &new_keys,
-        keys: &new_keys,
-        compare_ids: None,
-    };
+    use crate::diff::git_histogram::histogram_changed_flags_bytes;
+    use crate::line_interner::ByteLineInterner;
 
-    match parse_merge_file_compact_algorithm(diff_algorithm) {
+    const INDENT_HEURISTIC: bool = false;
+    let algo = parse_merge_file_compact_algorithm(diff_algorithm);
+    match algo {
         MergeFileCompactAlgorithm::Myers { need_min } => {
             let ((changed1, changed2), old_key_ids, new_key_ids) =
                 xdiff_changed_flags_trimmed_byte_ids(old_compare, new_compare, need_min);
+            let old_lines = merge_dummy_line_refs(old_compare.len());
+            let new_lines = merge_dummy_line_refs(new_compare.len());
             diff_indent_heuristic::apply_change_compact_to_masks(
                 changed1,
                 changed2,
                 diff_indent_heuristic::CompactSide {
+                    lines: &old_lines,
+                    keys: &old_lines,
                     compare_ids: Some(&old_key_ids),
-                    ..old_side
                 },
                 diff_indent_heuristic::CompactSide {
+                    lines: &new_lines,
+                    keys: &new_lines,
                     compare_ids: Some(&new_key_ids),
-                    ..new_side
                 },
                 INDENT_HEURISTIC,
             )
         }
-        MergeFileCompactAlgorithm::Histogram => {
-            let (changed1, changed2) = git_xdiff::histogram_changed_flags(&old_keys, &new_keys);
-            let raw = changed_flags_to_ops(&changed1, &changed2, old_keys.len(), new_keys.len());
+        MergeFileCompactAlgorithm::Histogram | MergeFileCompactAlgorithm::Patience => {
+            let old_refs: Vec<&[u8]> = old_compare.iter().map(|line| line.as_slice()).collect();
+            let new_refs: Vec<&[u8]> = new_compare.iter().map(|line| line.as_slice()).collect();
+            let mut interner =
+                ByteLineInterner::with_capacity(old_compare.len() + new_compare.len());
+            let old_key_ids = interner.intern_all(old_compare);
+            let new_key_ids = interner.intern_all(new_compare);
+            let histogram = matches!(algo, MergeFileCompactAlgorithm::Histogram);
+            let (changed1, changed2) = if histogram {
+                histogram_changed_flags_bytes(&old_refs, &new_refs, |c1, c2, o0, o1, n0, n1| {
+                    git_xdiff::merge_myers_region_bytes(
+                        &old_refs, &new_refs, c1, c2, o0, o1, n0, n1,
+                    );
+                })
+            } else {
+                git_xdiff::patience_changed_flags_bytes(&old_refs, &new_refs)
+            };
+            let raw =
+                changed_flags_to_ops(&changed1, &changed2, old_compare.len(), new_compare.len());
+            let old_lines = merge_dummy_line_refs(old_compare.len());
+            let new_lines = merge_dummy_line_refs(new_compare.len());
             diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
                 &raw,
-                old_side,
-                new_side,
+                diff_indent_heuristic::CompactSide {
+                    lines: &old_lines,
+                    keys: &old_lines,
+                    compare_ids: Some(&old_key_ids),
+                },
+                diff_indent_heuristic::CompactSide {
+                    lines: &new_lines,
+                    keys: &new_lines,
+                    compare_ids: Some(&new_key_ids),
+                },
                 INDENT_HEURISTIC,
                 super::WhitespaceMode::default(),
-                true,
-            )
-        }
-        MergeFileCompactAlgorithm::Patience => {
-            let (changed1, changed2) = git_xdiff::patience_changed_flags(&old_keys, &new_keys);
-            let raw = changed_flags_to_ops(&changed1, &changed2, old_keys.len(), new_keys.len());
-            diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
-                &raw,
-                old_side,
-                new_side,
-                INDENT_HEURISTIC,
-                super::WhitespaceMode::default(),
-                false,
+                histogram,
             )
         }
     }
@@ -2305,9 +2306,18 @@ mod git_xdiff {
 
     /// Patience diff: match unique lines, then recurse on gaps with xdiff Myers.
     pub fn patience_changed_flags(lines1: &[&str], lines2: &[&str]) -> (Vec<bool>, Vec<bool>) {
+        let b1: Vec<&[u8]> = lines1.iter().map(|l| l.as_bytes()).collect();
+        let b2: Vec<&[u8]> = lines2.iter().map(|l| l.as_bytes()).collect();
+        patience_changed_flags_bytes(&b1, &b2)
+    }
+
+    pub fn patience_changed_flags_bytes(
+        lines1: &[&[u8]],
+        lines2: &[&[u8]],
+    ) -> (Vec<bool>, Vec<bool>) {
         let mut changed1 = vec![false; lines1.len()];
         let mut changed2 = vec![false; lines2.len()];
-        patience_recurse(
+        patience_recurse_bytes(
             lines1,
             lines2,
             &mut changed1,
@@ -2321,9 +2331,9 @@ mod git_xdiff {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn patience_recurse(
-        lines1: &[&str],
-        lines2: &[&str],
+    fn patience_recurse_bytes(
+        lines1: &[&[u8]],
+        lines2: &[&[u8]],
         changed1: &mut [bool],
         changed2: &mut [bool],
         o_start: usize,
@@ -2343,9 +2353,9 @@ mod git_xdiff {
             return;
         }
 
-        let anchors = patience_anchors(lines1, lines2, o_start, o_end, n_start, n_end);
+        let anchors = patience_anchors_bytes(lines1, lines2, o_start, o_end, n_start, n_end);
         if anchors.is_empty() {
-            merge_myers_region(
+            merge_myers_region_bytes(
                 lines1, lines2, changed1, changed2, o_start, o_end, n_start, n_end,
             );
             return;
@@ -2354,30 +2364,30 @@ mod git_xdiff {
         let mut prev_o = o_start;
         let mut prev_n = n_start;
         for (ao, an) in anchors {
-            patience_recurse(lines1, lines2, changed1, changed2, prev_o, ao, prev_n, an);
+            patience_recurse_bytes(lines1, lines2, changed1, changed2, prev_o, ao, prev_n, an);
             prev_o = ao + 1;
             prev_n = an + 1;
         }
-        patience_recurse(
+        patience_recurse_bytes(
             lines1, lines2, changed1, changed2, prev_o, o_end, prev_n, n_end,
         );
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn patience_anchors(
-        lines1: &[&str],
-        lines2: &[&str],
+    fn patience_anchors_bytes(
+        lines1: &[&[u8]],
+        lines2: &[&[u8]],
         o_start: usize,
         o_end: usize,
         n_start: usize,
         n_end: usize,
     ) -> Vec<(usize, usize)> {
-        use std::collections::HashMap;
+        use hashbrown::HashMap;
 
         let old_slice = &lines1[o_start..o_end];
         let new_slice = &lines2[n_start..n_end];
-        let mut old_pos: HashMap<&str, Vec<usize>> = HashMap::new();
-        let mut new_pos: HashMap<&str, Vec<usize>> = HashMap::new();
+        let mut old_pos: HashMap<&[u8], Vec<usize>> = HashMap::new();
+        let mut new_pos: HashMap<&[u8], Vec<usize>> = HashMap::new();
         for (i, line) in old_slice.iter().enumerate() {
             old_pos.entry(*line).or_default().push(o_start + i);
         }
@@ -2464,16 +2474,32 @@ mod git_xdiff {
         n_start: usize,
         n_end: usize,
     ) {
-        use crate::line_interner::LineInterner;
+        let b1: Vec<&[u8]> = lines1.iter().map(|l| l.as_bytes()).collect();
+        let b2: Vec<&[u8]> = lines2.iter().map(|l| l.as_bytes()).collect();
+        merge_myers_region_bytes(&b1, &b2, changed1, changed2, o_start, o_end, n_start, n_end);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn merge_myers_region_bytes(
+        lines1: &[&[u8]],
+        lines2: &[&[u8]],
+        changed1: &mut [bool],
+        changed2: &mut [bool],
+        o_start: usize,
+        o_end: usize,
+        n_start: usize,
+        n_end: usize,
+    ) {
+        use crate::line_interner::ByteLineInterner;
 
         let old_slice = &lines1[o_start..o_end];
         let new_slice = &lines2[n_start..n_end];
         if old_slice.is_empty() && new_slice.is_empty() {
             return;
         }
-        let mut interner = LineInterner::with_capacity(old_slice.len() + new_slice.len());
-        let ids1 = interner.intern_all(old_slice);
-        let ids2 = interner.intern_all(new_slice);
+        let mut interner = ByteLineInterner::with_capacity(old_slice.len() + new_slice.len());
+        let ids1: Vec<u32> = old_slice.iter().map(|line| interner.intern(line)).collect();
+        let ids2: Vec<u32> = new_slice.iter().map(|line| interner.intern(line)).collect();
         let (sub1, sub2) = changed_flags(&ids1, &ids2, false);
         for (i, ch) in sub1.iter().enumerate() {
             if *ch {
@@ -2512,6 +2538,17 @@ pub(crate) fn myers_rediff_changed_masks_for_region<'a>(
     let ids1 = interner.intern_all(&old_keys);
     let ids2 = interner.intern_all(&new_keys);
     git_xdiff::changed_flags(&ids1, &ids2, false)
+}
+
+/// Myers rediff on pre-interned merge compare-key ids (byte-accurate).
+pub(crate) fn myers_rediff_changed_masks_for_region_ids(
+    old_ids: &[u32],
+    new_ids: &[u32],
+) -> (Vec<bool>, Vec<bool>) {
+    if old_ids.is_empty() && new_ids.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    git_xdiff::changed_flags(old_ids, new_ids, false)
 }
 
 /// Convert per-token `changed` flags (Git xdiff style) into `similar::DiffOp`s.

@@ -324,10 +324,17 @@ fn apply_myers_rediff_region(
     if o_start >= o_end && n_start >= n_end {
         return;
     }
-    let old_slice = &xdf.keys[o_start..o_end];
-    let new_slice = &xdfo.keys[n_start..n_end];
     let (sub_old, sub_new) =
-        crate::diff::myers_rediff_changed_masks_for_region(old_slice, new_slice, ws);
+        if let (Some(old_ids), Some(new_ids)) = (xdf.compare_ids, xdfo.compare_ids) {
+            crate::diff::myers_rediff_changed_masks_for_region_ids(
+                &old_ids[o_start..o_end],
+                &new_ids[n_start..n_end],
+            )
+        } else {
+            let old_slice = &xdf.keys[o_start..o_end];
+            let new_slice = &xdfo.keys[n_start..n_end];
+            crate::diff::myers_rediff_changed_masks_for_region(old_slice, new_slice, ws)
+        };
     for (i, changed) in sub_old.iter().enumerate() {
         xdf.set_changed(o_start + i, *changed);
     }

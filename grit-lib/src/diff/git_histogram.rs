@@ -62,7 +62,7 @@ struct OldWindowIndex {
 
 impl OldWindowIndex {
     fn try_build(
-        old: &[&str],
+        old: &[&[u8]],
         old_start: usize,
         old_len: usize,
         work: &mut HistogramWork,
@@ -77,7 +77,7 @@ impl OldWindowIndex {
         let mut nodes: Vec<ClassNode> = Vec::new();
 
         for line in (old_start..old_end).rev() {
-            let bucket = hash_line(old[line]) as usize & mask;
+            let bucket = hash_line_bytes(old[line]) as usize & mask;
             let mut chain = 0u32;
             let mut cursor = heads[bucket];
             let mut merged = false;
@@ -119,20 +119,20 @@ impl OldWindowIndex {
         })
     }
 
-    fn lines_equal(&self, old: &[&str], o: usize, new: &[&str], n: usize) -> bool {
+    fn lines_equal(&self, old: &[&[u8]], o: usize, new: &[&[u8]], n: usize) -> bool {
         old[o] == new[n]
     }
 }
 
-fn hash_line(text: &str) -> u64 {
+fn hash_line_bytes(text: &[u8]) -> u64 {
     let mut h = DefaultHasher::new();
     text.hash(&mut h);
     h.finish()
 }
 
 struct AnchorSearch<'a> {
-    old: &'a [&'a str],
-    new: &'a [&'a str],
+    old: &'a [&'a [u8]],
+    new: &'a [&'a [u8]],
     old_start: usize,
     old_end: usize,
     new_start: usize,
@@ -158,7 +158,7 @@ impl AnchorSearch<'_> {
     }
 
     fn consider_new_line(&mut self, new_line: usize) {
-        let bucket = hash_line(self.new[new_line]) as usize & self.index.table_mask;
+        let bucket = hash_line_bytes(self.new[new_line]) as usize & self.index.table_mask;
         let mut node_idx = self.index.heads[bucket];
         let mut next_new_hint = new_line + 1;
         while let Some(ni) = node_idx {
@@ -307,8 +307,8 @@ struct TextRange {
 }
 
 fn align_region<F>(
-    old: &[&str],
-    new: &[&str],
+    old: &[&[u8]],
+    new: &[&[u8]],
     changed1: &mut [bool],
     changed2: &mut [bool],
     fallback: &mut F,
@@ -439,10 +439,41 @@ where
     histogram_changed_flags_with_work(old, new, &mut myers_fallback, &mut HistogramWork::default())
 }
 
+/// Histogram alignment on merge-style compare keys (arbitrary bytes per line).
+pub fn histogram_changed_flags_bytes<F>(
+    old: &[&[u8]],
+    new: &[&[u8]],
+    mut myers_fallback: F,
+) -> (Vec<bool>, Vec<bool>)
+where
+    F: FnMut(&mut [bool], &mut [bool], usize, usize, usize, usize),
+{
+    histogram_changed_flags_bytes_with_work(
+        old,
+        new,
+        &mut myers_fallback,
+        &mut HistogramWork::default(),
+    )
+}
+
 /// Like [`histogram_changed_flags`], but fills `work` with deterministic operation counts.
 pub fn histogram_changed_flags_with_work<F>(
     old: &[&str],
     new: &[&str],
+    myers_fallback: &mut F,
+    work: &mut HistogramWork,
+) -> (Vec<bool>, Vec<bool>)
+where
+    F: FnMut(&mut [bool], &mut [bool], usize, usize, usize, usize),
+{
+    let old_bytes: Vec<&[u8]> = old.iter().map(|line| line.as_bytes()).collect();
+    let new_bytes: Vec<&[u8]> = new.iter().map(|line| line.as_bytes()).collect();
+    histogram_changed_flags_bytes_with_work(&old_bytes, &new_bytes, myers_fallback, work)
+}
+
+pub fn histogram_changed_flags_bytes_with_work<F>(
+    old: &[&[u8]],
+    new: &[&[u8]],
     myers_fallback: &mut F,
     work: &mut HistogramWork,
 ) -> (Vec<bool>, Vec<bool>)
