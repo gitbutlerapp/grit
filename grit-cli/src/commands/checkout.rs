@@ -17,6 +17,7 @@ use grit_lib::remote::snapshot_checkout::{
     BranchRefreshResult, CheckoutClient, CheckoutMarker, CheckoutRequest, CheckoutState,
     RefreshOutcome,
 };
+use grit_lib::remote::transport_path::redact_url_for_display;
 use grit_lib::remote::HttpClientFactory;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -176,7 +177,8 @@ pub fn run(
         let Some(found) = slices.slices.iter().find(|s| s.name == name) else {
             let names: Vec<&str> = slices.slices.iter().map(|s| s.name.as_str()).collect();
             anyhow::bail!(
-                "{url} has no slice {name}; {}",
+                "{} has no slice {name}; {}",
+                redact_url_for_display(url),
                 if names.is_empty() {
                     "it has none yet (make one with `grit slice new <name> --path <dir>`)"
                         .to_owned()
@@ -267,7 +269,7 @@ pub fn run(
     drop(progress);
 
     Ok(CheckoutOutcome {
-        url: client.url().repo_url.clone(),
+        url: redact_url_for_display(&client.url().repo_url),
         path: dest.display().to_string(),
         branch: info.branch,
         work,

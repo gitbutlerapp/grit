@@ -760,7 +760,7 @@ fn target_refused(refusal: &TargetRefusal) -> Rejection {
         } => (
             StatusCode::CONFLICT,
             format!(
-                "{branch} conflicts with {target} in {}; rebase it onto the newest {target} and try again",
+                "{branch} conflicts with {target} in {}; run `grit pull`, then integrate {branch} again",
                 list(paths)
             ),
         ),

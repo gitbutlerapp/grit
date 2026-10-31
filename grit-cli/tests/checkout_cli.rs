@@ -292,6 +292,55 @@ fn checkouts_are_one_commit_of_the_paths_asked_for() {
     assert!(!home.join("co3").exists());
 }
 
+fn url_with_embedded_token(base: &str, token: &str) -> String {
+    format!(
+        "http://admin%40example.com:{}@{}",
+        token.trim(),
+        base.trim_start_matches("http://")
+    )
+}
+
+fn assert_checkout_error_redacts_token(home: &Path, url: &str, token: &str, extra: &[&str]) {
+    let mut args: Vec<String> = extra.iter().map(|s| (*s).to_owned()).collect();
+    args.push("checkout".to_owned());
+    args.push(url.to_owned());
+    args.extend([
+        "-p".to_owned(),
+        "no/such/path".to_owned(),
+        "--into".to_owned(),
+        "leak-test".to_owned(),
+    ]);
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = run(home, home, &arg_refs);
+    assert!(!out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        !combined.contains(token),
+        "token leaked in output mode {extra:?}: {combined}"
+    );
+    assert!(
+        !combined.contains("admin%40example.com"),
+        "username leaked: {combined}"
+    );
+    assert!(
+        combined.contains("no/such/path") || combined.contains("not in the repository"),
+        "expected path error: {combined}"
+    );
+}
+
+#[test]
+fn checkout_errors_redact_credentials_in_human_json_and_markdown() {
+    let (_tmp, home, repos) = setup();
+    let (_server, url) = serve(&home, &repos);
+    let token = std::fs::read_to_string(home.join("token")).expect("token");
+    let credentialed = url_with_embedded_token(&format!("{url}/demo.git"), &token);
+    assert_checkout_error_redacts_token(&home, &credentialed, &token, &[]);
+    assert_checkout_error_redacts_token(&home, &credentialed, &token, &["--json"]);
+    assert_checkout_error_redacts_token(&home, &credentialed, &token, &["--markdown"]);
+}
+
 #[test]
 fn servers_without_the_checkout_endpoint_are_refused() {
     let tmp = tempfile::tempdir().expect("tempdir");

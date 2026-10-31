@@ -165,7 +165,11 @@ pub fn transfer_header(verb: &str, remote: &str, url: Option<&str>, color: bool)
     );
     if let Some(url) = url.filter(|u| !u.is_empty() && *u != remote) {
         line.push(' ');
-        line.push_str(&paint(color, DIM, url));
+        line.push_str(&paint(
+            color,
+            DIM,
+            &grit_lib::remote::transport_path::redact_url_for_display(url),
+        ));
     }
     line
 }

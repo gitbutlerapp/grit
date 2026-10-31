@@ -12,6 +12,7 @@ use grit_lib::remote::snapshot_checkout::{
     suggest_work_branch, valid_branch_name, CheckinBranch, CheckinRequest, CheckinRule,
     CheckinStatus, CheckoutError, IntegrateRequest, IntegrateStatus, Landing,
 };
+use grit_lib::remote::transport_path::redact_url_for_display;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -264,7 +265,7 @@ fn check_in(
         })
         .collect();
     Ok(CheckinOutcome {
-        url: co.marker.url.clone(),
+        url: redact_url_for_display(&co.marker.url),
         gave_change_ids,
         refused: branches.iter().any(|b| b.status == "refused"),
         branches,
@@ -302,7 +303,7 @@ pub fn run(names: &[String], force: bool, mode: OutputMode) -> Result<CheckinOut
     let branches = chosen_branches(&co, names)?;
     if branches.is_empty() {
         return Ok(CheckinOutcome {
-            url: co.marker.url.clone(),
+            url: redact_url_for_display(&co.marker.url),
             gave_change_ids: gave,
             branches: Vec::new(),
             refused: false,

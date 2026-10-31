@@ -10,6 +10,7 @@ use grit_lib::remote::snapshot_checkout::{
     CheckoutClient, CheckoutMarker, Ident, Slice, SliceChange, SliceDeleteRequest, SliceRequest,
     SLICES_PATH,
 };
+use grit_lib::remote::transport_path::redact_url_for_display;
 use grit_lib::remote::HttpClientFactory;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -204,7 +205,7 @@ pub fn list(url: Option<&str>) -> Result<SliceListOutcome> {
     let client = target.client()?;
     let slices = client.slices()?;
     Ok(SliceListOutcome {
-        url: client.url().repo_url.clone(),
+        url: redact_url_for_display(&client.url().repo_url),
         target: slices.target,
         head: slices.head,
         slices: slices.slices.into_iter().map(SliceJson::from).collect(),

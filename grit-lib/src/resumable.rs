@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::fetch::Progress;
 use crate::progress::{Cancel, ProgressPhase, ProgressUnit};
 use crate::transport::http::{HttpClient, HttpMethod, HttpRequest, HttpResponse};
+use crate::transport_path::redact_url_for_display;
 
 /// TUS protocol version this client and `grit serve` speak.
 pub const TUS_VERSION: &str = "1.0.0";
@@ -89,11 +90,29 @@ pub enum ResumableEvent {
     },
 }
 
+fn resumable_status_message(url: &str, status: u16) -> String {
+    format!("HTTP {status} from {}", redact_url_for_display(url))
+}
+
+fn resumable_protocol_message(url: &str, detail: &str) -> String {
+    format!(
+        "unexpected response from {}: {detail}",
+        redact_url_for_display(url)
+    )
+}
+
+fn resumable_exhausted_message(url: &str, attempts: u32, last: &str) -> String {
+    format!(
+        "the transfer of {} kept failing after {attempts} attempts: {last}",
+        redact_url_for_display(url)
+    )
+}
+
 /// Why a resumable transfer failed.
 #[derive(Debug, thiserror::Error)]
 pub enum ResumableError {
     /// The server answered with a status the transfer cannot continue from.
-    #[error("HTTP {status} from {url}")]
+    #[error("{}", resumable_status_message(.url, *status))]
     Status {
         /// The request URL.
         url: String,
@@ -101,7 +120,7 @@ pub enum ResumableError {
         status: u16,
     },
     /// The server's answer did not follow the protocol.
-    #[error("unexpected response from {url}: {detail}")]
+    #[error("{}", resumable_protocol_message(.url, .detail))]
     Protocol {
         /// The request URL.
         url: String,
@@ -109,7 +128,7 @@ pub enum ResumableError {
         detail: String,
     },
     /// The connection kept dropping.
-    #[error("the transfer of {url} kept failing after {attempts} attempts: {last}")]
+    #[error("{}", resumable_exhausted_message(.url, *attempts, .last))]
     Exhausted {
         /// The URL being transferred.
         url: String,
@@ -1216,6 +1235,44 @@ mod tests {
                 HttpMethod::Get | HttpMethod::Put | HttpMethod::Delete => reply(405, vec![]),
             })
         }
+    }
+
+    #[test]
+    fn resumable_error_display_redacts_url_credentials() {
+        const TOKEN: &str = "grit_bundle_download_secret";
+        let url = format!("http://user:{TOKEN}@127.0.0.1:8080/.grit/checkouts/demo/bundle");
+        for text in [
+            ResumableError::Status {
+                url: url.clone(),
+                status: 404,
+            }
+            .to_string(),
+            ResumableError::Protocol {
+                url: url.clone(),
+                detail: "no length".to_owned(),
+            }
+            .to_string(),
+            ResumableError::Exhausted {
+                url: url.clone(),
+                attempts: 3,
+                last: "connection reset".to_owned(),
+            }
+            .to_string(),
+        ] {
+            assert!(!text.contains(TOKEN), "token leaked: {text}");
+            assert!(!text.contains("user:"), "user leaked: {text}");
+            assert!(text.contains("127.0.0.1:8080"), "host missing: {text}");
+        }
+        assert!(
+            ResumableError::Exhausted {
+                url: "http://h/b".to_owned(),
+                attempts: 1,
+                last: "x".to_owned(),
+            }
+            .to_string()
+            .contains("http://h/b"),
+            "URLs without credentials stay unchanged"
+        );
     }
 
     #[test]

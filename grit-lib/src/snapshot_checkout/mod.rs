@@ -111,6 +111,33 @@ use crate::odb::Odb;
 use crate::progress::Cancel;
 use crate::repo::{InitOptions, Repository};
 use crate::transport::http::{HttpClient, HttpMethod, HttpRequest};
+use crate::transport_path::redact_url_for_display;
+
+fn checkout_not_offered_message(url: &str, endpoint: &str) -> String {
+    format!(
+        "{} offers no grit checkout (no {} endpoint); it may be a plain Git server, or the repository may not exist",
+        redact_url_for_display(url),
+        redact_url_for_display(endpoint),
+    )
+}
+
+fn checkout_server_message(url: &str, message: &str, status: u16) -> String {
+    format!("{}: {message} (HTTP {status})", redact_url_for_display(url))
+}
+
+fn checkout_protocol_message(url: &str, detail: &str) -> String {
+    format!(
+        "unexpected answer from {}: {detail}",
+        redact_url_for_display(url)
+    )
+}
+
+fn checkout_invalid_url_message(url: &str) -> String {
+    format!(
+        "{} is not an http(s) URL of a repository",
+        redact_url_for_display(url)
+    )
+}
 
 /// Path under the server root where snapshot checkouts are served:
 /// `/.grit/checkouts/<repository>`.
@@ -556,7 +583,7 @@ pub struct CheckoutErrorBody {
 #[derive(Debug, thiserror::Error)]
 pub enum CheckoutError {
     /// The server has no snapshot-checkout endpoint for this repository.
-    #[error("{url} offers no grit checkout (no {endpoint} endpoint); it may be a plain Git server, or the repository may not exist")]
+    #[error("{}", checkout_not_offered_message(.url, .endpoint))]
     NotOffered {
         /// The URL the user gave.
         url: String,
@@ -564,7 +591,7 @@ pub enum CheckoutError {
         endpoint: String,
     },
     /// The server refused a request.
-    #[error("{url}: {message} (HTTP {status})")]
+    #[error("{}", checkout_server_message(.url, .message, *status))]
     Server {
         /// The request URL.
         url: String,
@@ -574,7 +601,7 @@ pub enum CheckoutError {
         message: String,
     },
     /// The URL cannot name a repository.
-    #[error("{0} is not an http(s) URL of a repository")]
+    #[error("{}", checkout_invalid_url_message(.0))]
     InvalidUrl(String),
     /// A path is not a plain path inside the repository.
     #[error("{path}: {reason}")]
@@ -677,7 +704,7 @@ pub enum CheckoutError {
     #[error(transparent)]
     Pull(Box<crate::porcelain::pull::PullError>),
     /// The server's answer could not be parsed.
-    #[error("unexpected answer from {url}: {detail}")]
+    #[error("{}", checkout_protocol_message(.url, .detail))]
     Protocol {
         /// The request URL.
         url: String,
@@ -1976,6 +2003,45 @@ mod tests {
             matches!(err, CheckoutError::PromisedBlobsNotFetched { oid, count: 1, .. } if oid == big),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn checkout_error_display_redacts_url_credentials() {
+        const TOKEN: &str = "grit_07ec1be79abd2747c4eecaef7d7c5123c98d7cd1";
+        let url = format!("http://admin%40x.com:{TOKEN}@127.0.0.1:8080/.grit/checkouts/demo");
+        let endpoint = format!("{url}/integrate");
+        let samples = [
+            CheckoutError::NotOffered {
+                url: url.clone(),
+                endpoint: endpoint.clone(),
+            }
+            .to_string(),
+            CheckoutError::Server {
+                url: endpoint.clone(),
+                status: 409,
+                message: "cursoragent/pebble conflicts with master in lib.rs".to_owned(),
+            }
+            .to_string(),
+            CheckoutError::Protocol {
+                url: endpoint.clone(),
+                detail: "not json".to_owned(),
+            }
+            .to_string(),
+            CheckoutError::InvalidUrl(url.clone()).to_string(),
+        ];
+        assert!(
+            samples[0].contains("/.grit/checkouts/demo"),
+            "path missing: {}",
+            samples[0]
+        );
+        for text in &samples {
+            assert!(!text.contains(TOKEN), "token leaked: {text}");
+            assert!(
+                !text.contains("admin%40x.com") && !text.contains("admin@x.com"),
+                "user leaked: {text}"
+            );
+            assert!(text.contains("127.0.0.1:8080"), "host missing: {text}");
+        }
     }
 
     #[test]
