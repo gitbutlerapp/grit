@@ -65,19 +65,17 @@ fn receiving_pack(dest: &Path) -> bool {
     }
     let incoming = dest.join(".git/objects/incoming");
     if fs::read_dir(&incoming).is_ok_and(|entries| {
-        entries.flatten().any(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with("pack-receive-")
-        })
+        entries
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().starts_with("pack-receive-"))
     }) {
         return true;
     }
     let objects = dest.join(".git/objects");
     fs::read_dir(&objects).is_ok_and(|entries| {
-        entries.flatten().any(|e| {
-            !matches!(e.file_name().to_str(), Some("info" | "pack" | "incoming"))
-        })
+        entries
+            .flatten()
+            .any(|e| !matches!(e.file_name().to_str(), Some("info" | "pack" | "incoming")))
     })
 }
 
@@ -107,9 +105,7 @@ fn interrupt_fetch(
     let mut saw_pack = false;
     while Instant::now() < deadline {
         if let Some(status) = child.try_wait().expect("wait") {
-            panic!(
-                "fetch finished before a temporary pack appeared: {status:?}"
-            );
+            panic!("fetch finished before a temporary pack appeared: {status:?}");
         }
         if receiving_pack(dest) {
             saw_pack = true;

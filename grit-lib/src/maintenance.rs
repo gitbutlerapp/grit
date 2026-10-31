@@ -1490,7 +1490,8 @@ pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<Pru
         .ok_or(Error::UnsupportedObjectStore {
             operation: "prune temporary objects",
         })?;
-    let temp = prune_stale_temporary_objects_with_cutoff(objects_dir, keep_newer_than, opts.dry_run)?;
+    let temp =
+        prune_stale_temporary_objects_with_cutoff(objects_dir, keep_newer_than, opts.dry_run)?;
     stats.pruned += temp.pruned;
     stats.kept += temp.kept;
     Ok(stats)
@@ -3718,7 +3719,9 @@ mod tests {
 
     #[test]
     fn pack_install_stage_name_matches_only_grit_staging_dirs() {
-        assert!(is_grit_pack_install_stage_name(".pack-deadbeef-install-1_0"));
+        assert!(is_grit_pack_install_stage_name(
+            ".pack-deadbeef-install-1_0"
+        ));
         assert!(!is_grit_pack_install_stage_name(".notes-install-backup"));
         assert!(!is_grit_pack_install_stage_name(".cache-install-state"));
         assert!(is_grit_pack_install_stage_name(
