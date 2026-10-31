@@ -65,6 +65,23 @@ fn assert_merge_file_matches_git(
     );
 }
 
+fn seq_1_30_with_trailing_newline() -> Vec<u8> {
+    (1..=30)
+        .fold(String::new(), |mut s, i| {
+            use std::fmt::Write;
+            let _ = writeln!(s, "{i}");
+            s
+        })
+        .into_bytes()
+}
+
+fn replace_in_bytes(data: &[u8], from: &str, to: &str) -> Vec<u8> {
+    String::from_utf8(data.to_vec())
+        .expect("utf8")
+        .replace(from, to)
+        .into_bytes()
+}
+
 #[test]
 fn t6427_diff3_and_zdiff3_markers_match_git_merge_file() {
     let base = b"1\n2\n3\n4\n5\n";
@@ -335,5 +352,52 @@ fn issue_2259_ignore_cr_at_eol_clean_for_interior_edit() {
     assert_eq!(
         grit_out.conflicts, 0,
         "ignore_cr_at_eol should auto-merge CR-only EOL diffs"
+    );
+}
+
+/// Issue #2392: EOF newline from the side that also changed line count must win (git merge-file).
+#[test]
+fn issue_2392_repro_a_matches_git_merge_file() {
+    let base = seq_1_30_with_trailing_newline();
+    let ours = replace_in_bytes(&base, "20\n", "twenty\n");
+    let theirs_str: String = (1..=30)
+        .filter(|i| *i != 10)
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let theirs = theirs_str.into_bytes();
+    assert_merge_file_matches_git(
+        &[],
+        &base,
+        &ours,
+        &theirs,
+        ConflictStyle::Merge,
+        MergeFavor::None,
+        7,
+        "issue 2392 repro A",
+    );
+}
+
+#[test]
+fn issue_2392_repro_b_matches_git_merge_file() {
+    let mut base = seq_1_30_with_trailing_newline();
+    base.pop();
+    let ours_no_10: String = String::from_utf8(base.clone())
+        .unwrap()
+        .lines()
+        .filter(|l| *l != "10")
+        .collect::<Vec<_>>()
+        .join("\n");
+    let ours = format!("{ours_no_10}\n").into_bytes();
+    let theirs = replace_in_bytes(&base, "20\n", "twenty\n");
+    assert_merge_file_matches_git(
+        &[],
+        &base,
+        &ours,
+        &theirs,
+        ConflictStyle::Merge,
+        MergeFavor::None,
+        7,
+        "issue 2392 repro B",
     );
 }

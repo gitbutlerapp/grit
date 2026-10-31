@@ -87,6 +87,9 @@ pub struct MergeOutput {
 
 /// Perform a three-way line-level merge.
 ///
+/// Line comparison uses full records (including trailing `\n`) unless whitespace-ignore
+/// options are set, matching `git merge-file` byte-for-byte in the default mode.
+///
 /// # Errors
 ///
 /// Currently infallible but returns `Result` for future extension.
@@ -100,8 +103,8 @@ pub fn merge(input: &MergeInput<'_>) -> Result<MergeOutput> {
         ignore_space_at_eol: input.ignore_space_at_eol,
         ignore_cr_at_eol: input.ignore_cr_at_eol,
     };
-    // Ignore trailing `\n` / `\r\n` / `\r` when diffing (git `xdl_recmatch`), so clean merges
-    // match `git merge-file` when only the final newline differs (t6403).
+    // Default mode compares full line records (including `\n`); whitespace-ignore flags normalize
+    // bodies the way git's merge diff does when `-w`/`-b`/EOL flags are set.
     let base_compare_lines = lines_for_merge_diff_compare(&base_lines, &ws_mode);
     let ours_compare_lines = lines_for_merge_diff_compare(&ours_lines, &ws_mode);
     let theirs_compare_lines = lines_for_merge_diff_compare(&theirs_lines, &ws_mode);
@@ -460,9 +463,19 @@ fn strip_line_terminator(line: &[u8]) -> &[u8] {
     line
 }
 
-/// Line body used for merge comparison: drop the record-separating `\n`, but keep a `\r` that
-/// precedes `\n` unless [`WhitespaceMode::ignore_cr_at_eol`] (git record hash / `xdl_recmatch`).
+/// Bytes used when diffing or comparing lines during merge.
+///
+/// With no whitespace-ignore flags, the full record is compared (including a trailing `\n`), so
+/// a missing final newline is its own change. Whitespace modes strip/normalize like git merge
+/// with `-w`, `-b`, or EOL-related flags.
 fn line_content_for_merge_compare(line: &[u8], mode: &WhitespaceMode) -> Vec<u8> {
+    if !mode.ignore_all_space
+        && !mode.ignore_space_change
+        && !mode.ignore_space_at_eol
+        && !mode.ignore_cr_at_eol
+    {
+        return line.to_vec();
+    }
     let (body, from_crlf_record) = if line.ends_with(b"\r\n") {
         (&line[..line.len() - 1], true)
     } else if line.ends_with(b"\n") {
@@ -807,14 +820,10 @@ fn compute_hunks(
             {
                 end += 1;
             }
-            let terminator_only_diff = base.len() == ours.len()
-                && (pos..end).all(|i| merge_line_equal(&base[i], &ours[i], ws_mode))
-                && (pos..end).any(|i| base[i] != ours[i]);
             let unchanged_lines = if ws_mode.ignore_all_space
                 || ws_mode.ignore_space_change
                 || ws_mode.ignore_space_at_eol
                 || ws_mode.ignore_cr_at_eol
-                || terminator_only_diff
             {
                 &ours[pos..end]
             } else {
@@ -2086,6 +2095,208 @@ mod tests {
             ConflictStyle::Merge,
             MergeFavor::None,
             "replace vs trailing insert",
+        );
+    }
+
+    fn seq_1_30_with_trailing_newline() -> Vec<u8> {
+        (1..=30)
+            .fold(String::new(), |mut s, i| {
+                use std::fmt::Write;
+                let _ = writeln!(s, "{i}");
+                s
+            })
+            .into_bytes()
+    }
+
+    fn replace_in_bytes(data: &[u8], from: &str, to: &str) -> Vec<u8> {
+        String::from_utf8(data.to_vec())
+            .expect("utf8")
+            .replace(from, to)
+            .into_bytes()
+    }
+
+    #[test]
+    fn issue_2392_repro_a_theirs_drops_eof_newline_with_earlier_delete() {
+        let base = seq_1_30_with_trailing_newline();
+        let ours = replace_in_bytes(&base, "20\n", "twenty\n");
+        let theirs_str: String = (1..=30)
+            .filter(|i| *i != 10)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let theirs_bytes = theirs_str.into_bytes();
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs_bytes,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2392 repro A",
+        );
+        assert!(
+            !grit_merge_bytes(&base, &ours, &theirs_bytes).ends_with(b"\n"),
+            "merged file should not end with newline"
+        );
+    }
+
+    #[test]
+    fn issue_2392_repro_b_ours_adds_eof_newline_with_earlier_delete() {
+        let mut base = seq_1_30_with_trailing_newline();
+        base.pop(); // drop final newline on base
+        let mut ours = base.clone();
+        // delete line 10 from ours and add final newline
+        let ours_str = String::from_utf8(ours.clone()).unwrap();
+        let ours_no_10: String = ours_str
+            .lines()
+            .filter(|l| *l != "10")
+            .collect::<Vec<_>>()
+            .join("\n");
+        ours = format!("{ours_no_10}\n").into_bytes();
+        let theirs = replace_in_bytes(&base, "20\n", "twenty\n");
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2392 repro B",
+        );
+        assert!(
+            grit_merge_bytes(&base, &ours, &theirs).ends_with(b"\n"),
+            "merged file should end with newline"
+        );
+    }
+
+    fn grit_merge_bytes(base: &[u8], ours: &[u8], theirs: &[u8]) -> Vec<u8> {
+        merge(&MergeInput {
+            base,
+            ours,
+            theirs,
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: None,
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .expect("merge")
+        .content
+    }
+
+    #[test]
+    fn issue_2392_same_size_edit_plus_eof_newline_on_theirs() {
+        let base = seq_1_30_with_trailing_newline();
+        let ours = replace_in_bytes(&base, "20\n", "twenty\n");
+        let mut theirs = replace_in_bytes(&base, "5\n", "five\n");
+        theirs.pop(); // drop EOF newline
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2392 same-size theirs EOF",
+        );
+    }
+
+    #[test]
+    fn issue_2392_same_size_edit_plus_eof_newline_on_ours() {
+        let base = seq_1_30_with_trailing_newline();
+        let mut ours = replace_in_bytes(&base, "5\n", "five\n");
+        ours.pop();
+        let theirs = replace_in_bytes(&base, "20\n", "twenty\n");
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2392 same-size ours EOF",
+        );
+    }
+
+    #[test]
+    fn issue_2392_newline_only_change_on_one_side() {
+        let base = seq_1_30_with_trailing_newline();
+        let ours = base.clone();
+        let mut theirs = base.clone();
+        theirs.pop();
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2392 newline only theirs",
+        );
+        assert_merge_matches_git(
+            &base,
+            &theirs,
+            &ours,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2392 newline only ours",
+        );
+    }
+
+    #[test]
+    fn issue_2392_both_drop_eof_and_edit_different_lines() {
+        let base = seq_1_30_with_trailing_newline();
+        let mut ours = replace_in_bytes(&base, "5\n", "five\n");
+        ours.pop();
+        let mut theirs = replace_in_bytes(&base, "25\n", "twenty-five\n");
+        theirs.pop();
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2392 both drop EOF",
+        );
+    }
+
+    #[test]
+    fn issue_2392_adjacent_penultimate_edit_vs_eof_newline_conflict() {
+        let base = b"1\n2\n3\n4\n5\n";
+        let ours = b"1\n2\n3\n4\nFIVE\n";
+        let theirs = b"1\n2\n3\n4\n5";
+        assert_merge_matches_git(
+            base,
+            ours,
+            theirs,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2392 penultimate vs EOF",
+        );
+    }
+
+    #[test]
+    fn issue_2392_eof_newline_toggle_vs_insert_at_eof() {
+        let base = b"1\n2\n3\n";
+        let ours = b"1\n2\n3\n4\n";
+        let theirs = b"1\n2\n3";
+        assert_merge_matches_git(
+            base,
+            ours,
+            theirs,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2392 insert vs drop newline",
         );
     }
 
