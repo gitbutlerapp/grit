@@ -429,7 +429,7 @@ fn first_parent_tree(repo: &Repository, commit: &CommitData) -> Result<ObjectId,
     if commit.parents.is_empty() {
         return Ok(empty);
     }
-    commit_tree(repo, commit.parents[0])
+    Ok(commit_tree(repo, commit.parents[0])?)
 }
 
 fn fixup_target_became_empty(

@@ -40,6 +40,7 @@ use super::rebase::{
     RebaseRequest,
 };
 use super::types::RefScope;
+use super::{commit_tree, load_commit};
 use super::types::{
     AppliedRewrite, ApplyOptions, CommitEdit, HistoryEdits, PlannedRefUpdate, RewriteOptions,
     RewritePlan, RewrittenCommit,

@@ -106,20 +106,24 @@ pub use types::{
 };
 pub use undo::undo_last_rewrite;
 
-/// Read and parse commit `oid`; failures stay typed as [`HistoryError::Library`].
+/// Read and parse commit `oid`.
+///
+/// Returns the library [`Error`](crate::error::Error) unwrapped so `?` lands it in the caller's
+/// own library variant: [`HistoryError::Library`] for rewrites, and
+/// [`RebaseSessionError::Library`] for rebase sessions, which the CLI forwards typed.
 fn load_commit(
     repo: &crate::repo::Repository,
     oid: crate::objects::ObjectId,
-) -> Result<crate::objects::CommitData, HistoryError> {
-    Ok(repo.odb().read_commit(&oid)?)
+) -> crate::error::Result<crate::objects::CommitData> {
+    repo.odb().read_commit(&oid)
 }
 
-/// Root tree of commit `commit`; failures stay typed as [`HistoryError::Library`].
+/// Root tree of commit `commit`; failures are returned like [`load_commit`]'s.
 fn commit_tree(
     repo: &crate::repo::Repository,
     commit: crate::objects::ObjectId,
-) -> Result<crate::objects::ObjectId, HistoryError> {
-    Ok(repo.odb().commit_tree(&commit)?)
+) -> crate::error::Result<crate::objects::ObjectId> {
+    repo.odb().commit_tree(&commit)
 }
 
 #[cfg(test)]
@@ -194,19 +198,33 @@ mod tests {
         let (_dir, repo, _tip, blob) = repo_with_history();
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("hex");
         let err = load_commit(&repo, missing).unwrap_err();
-        assert!(
-            matches!(&err, HistoryError::Library(inner) if matches!(**inner, Error::ObjectNotFound(_))),
-            "{err:?}"
-        );
+        assert!(matches!(err, Error::ObjectNotFound(_)), "{err:?}");
         let err = commit_tree(&repo, blob).unwrap_err();
         assert!(
             matches!(
+                err,
+                Error::UnexpectedObjectKind { oid, expected: ObjectKind::Commit, actual: ObjectKind::Blob }
+                    if oid == blob
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn helper_errors_land_in_each_callers_library_variant() {
+        let (_dir, repo, _tip, blob) = repo_with_history();
+        let history = || -> Result<ObjectId, HistoryError> { Ok(commit_tree(&repo, blob)?) };
+        let err = history().unwrap_err();
+        assert!(
+            matches!(&err, HistoryError::Library(inner) if matches!(**inner, Error::UnexpectedObjectKind { .. })),
+            "{err:?}"
+        );
+        let session = || -> Result<ObjectId, RebaseSessionError> { Ok(commit_tree(&repo, blob)?) };
+        let err = session().unwrap_err();
+        assert!(
+            matches!(
                 &err,
-                HistoryError::Library(inner) if matches!(
-                    **inner,
-                    Error::UnexpectedObjectKind { oid, expected: ObjectKind::Commit, actual: ObjectKind::Blob }
-                        if oid == blob
-                )
+                RebaseSessionError::Library(Error::UnexpectedObjectKind { .. })
             ),
             "{err:?}"
         );
