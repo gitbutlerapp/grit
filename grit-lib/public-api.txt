@@ -22651,20 +22651,6 @@ impl core::marker::Unpin for grit_lib::remote::serve::RefUpdateRefusal
 impl core::marker::UnsafeUnpin for grit_lib::remote::serve::RefUpdateRefusal
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::RefUpdateRefusal
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::RefUpdateRefusal
-pub struct grit_lib::remote::serve::RequestBodyLimitExceeded
-impl core::error::Error for grit_lib::remote::serve::RequestBodyLimitExceeded
-impl core::fmt::Debug for grit_lib::remote::serve::RequestBodyLimitExceeded
-pub fn grit_lib::remote::serve::RequestBodyLimitExceeded::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::fmt::Display for grit_lib::remote::serve::RequestBodyLimitExceeded
-pub fn grit_lib::remote::serve::RequestBodyLimitExceeded::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::remote::serve::RequestBodyLimitExceeded
-impl core::marker::Send for grit_lib::remote::serve::RequestBodyLimitExceeded
-impl core::marker::Sync for grit_lib::remote::serve::RequestBodyLimitExceeded
-impl core::marker::Unpin for grit_lib::remote::serve::RequestBodyLimitExceeded
-impl core::marker::UnsafeUnpin for grit_lib::remote::serve::RequestBodyLimitExceeded
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::RequestBodyLimitExceeded
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::RequestBodyLimitExceeded
-pub fn grit_lib::remote::serve::io_error_is_request_body_limit(&core::io::error::Error) -> bool
 pub enum grit_lib::remote::serve::ServeError
 pub grit_lib::remote::serve::ServeError::Cancelled
 pub grit_lib::remote::serve::ServeError::InvalidDeepenNot
@@ -22889,6 +22875,19 @@ impl core::marker::Unpin for grit_lib::remote::serve::RejectedObject
 impl core::marker::UnsafeUnpin for grit_lib::remote::serve::RejectedObject
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::RejectedObject
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::RejectedObject
+pub struct grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::error::Error for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::fmt::Debug for grit_lib::remote::serve::RequestBodyLimitExceeded
+pub fn grit_lib::remote::serve::RequestBodyLimitExceeded::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::remote::serve::RequestBodyLimitExceeded
+pub fn grit_lib::remote::serve::RequestBodyLimitExceeded::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::marker::Send for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::marker::Sync for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::marker::Unpin for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::marker::UnsafeUnpin for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::RequestBodyLimitExceeded
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::RequestBodyLimitExceeded
 pub struct grit_lib::remote::serve::ServeOptions
 pub grit_lib::remote::serve::ServeOptions::accepted_promisor_remotes: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::serve::ServeOptions::advertise_refs: bool
@@ -22967,6 +22966,7 @@ pub fn F::update(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects
 pub fn F::update_ctx(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects::odb::Odb, &grit_lib::remote::serve::ReceiveHookContext<'_>) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
 pub fn grit_lib::remote::serve::checked_out_branch(&grit_lib::repo::Repository) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::remote::serve::head_branch(&grit_lib::repo::Repository) -> core::option::Option<alloc::string::String>
+pub fn grit_lib::remote::serve::io_error_is_request_body_limit(&core::io::error::Error) -> bool
 pub fn grit_lib::remote::serve::receive_pack(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions, &grit_lib::remote::serve::ReceivePolicy) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::ReceiveOutcome>
 pub fn grit_lib::remote::serve::receive_pack_with_hook(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions, &grit_lib::remote::serve::ReceivePolicy, &dyn grit_lib::remote::serve::ReceiveHook) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::ReceiveOutcome>
 pub fn grit_lib::remote::serve::receive_pack_with_hook_cancellable(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions, &grit_lib::remote::serve::ReceivePolicy, &dyn grit_lib::remote::serve::ReceiveHook, &dyn grit_lib::progress::Cancel) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::ReceiveOutcome>

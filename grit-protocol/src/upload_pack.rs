@@ -74,12 +74,13 @@ pub fn advertise_refs_to(
     extensions: &Extensions,
     output: &mut dyn std::io::Write,
 ) -> Result<()> {
+    let mut empty: &[u8] = &[];
     run_upload_pack_to(
         repo_path,
         protocol_version,
         false,
         true,
-        &[],
+        &mut empty,
         repository_options,
         extensions,
         output,
