@@ -48,9 +48,9 @@ impl Error {
     /// error rather than a server error. During receive-pack that is the only source of
     /// stream errors: the response is collected in memory, and repository failures are
     /// reported as other [`serve::ServeError`] variants or inside the status report.
-    /// Upload-pack can
-    /// also return stream errors while reading repository data, so do not use this to
-    /// classify upload-pack failures.
+    /// Upload-pack can also return stream errors while reading repository data. When the
+    /// inner error is [`grit_lib::remote::serve::RequestBodyLimitExceeded`], smart HTTP
+    /// maps the failure to 413; other upload-pack stream errors are usually server faults.
     ///
     /// # Returns
     ///

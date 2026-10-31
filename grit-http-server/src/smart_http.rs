@@ -24,6 +24,7 @@ use axum::{
     http::{header, response::Builder, HeaderMap, Response, StatusCode},
     response::IntoResponse,
 };
+use grit_lib::remote::serve::{io_error_is_request_body_limit, RequestBodyLimitExceeded};
 use grit_protocol::RepositoryOptions;
 
 /// The two smart HTTP services.
@@ -73,10 +74,21 @@ impl Service {
 /// Maximum decoded size of a `POST <repo>/git-upload-pack` body.
 ///
 /// A clone of a repository with millions of refs sends one `want` line per ref; those
-/// requests are streamed and counted as they are decoded. Push bodies carry the whole pack,
-/// so they are streamed separately and only limited by the repository's
+/// requests are streamed and counted as they are decoded. Bodies of exactly this size are
+/// allowed; only decoded sizes **greater than** this value are rejected. Push bodies carry
+/// the whole pack, so they are streamed separately and only limited by the repository's
 /// `receive.maxInputSize`, like `git http-backend`.
 pub const MAX_FETCH_REQUEST_BODY: usize = 1024 * 1024 * 1024;
+
+/// Environment variable used by integration tests to lower [`MAX_FETCH_REQUEST_BODY`]
+/// without building multi-gibibyte request bodies (`GRIT_HTTP_MAX_FETCH_BODY`).
+fn fetch_body_limit() -> usize {
+    std::env::var("GRIT_HTTP_MAX_FETCH_BODY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(MAX_FETCH_REQUEST_BODY)
+}
 
 /// Parse the requested protocol version from the `Git-Protocol` request header.
 ///
@@ -386,18 +398,6 @@ fn payload_too_large() -> Response<Body> {
     (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response()
 }
 
-/// A fetch request body expanded past [`MAX_FETCH_REQUEST_BODY`].
-#[derive(Debug)]
-struct FetchBodyTooLarge;
-
-impl std::fmt::Display for FetchBodyTooLarge {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "fetch request body exceeds the decoded size limit")
-    }
-}
-
-impl std::error::Error for FetchBodyTooLarge {}
-
 /// Counts decoded bytes and fails once the limit is exceeded.
 struct DecodedByteLimit<R> {
     inner: R,
@@ -407,20 +407,23 @@ struct DecodedByteLimit<R> {
 
 impl<R: Read> Read for DecodedByteLimit<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if self.decoded >= self.max {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                FetchBodyTooLarge,
-            ));
-        }
-        let n = self.inner.read(buf)?;
-        self.decoded = self.decoded.saturating_add(n);
         if self.decoded > self.max {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                FetchBodyTooLarge,
+                RequestBodyLimitExceeded,
             ));
         }
+        let n = self.inner.read(buf)?;
+        if n == 0 {
+            return Ok(0);
+        }
+        if self.decoded.saturating_add(n) > self.max {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                RequestBodyLimitExceeded,
+            ));
+        }
+        self.decoded = self.decoded.saturating_add(n);
         Ok(n)
     }
 }
@@ -434,20 +437,23 @@ struct FetchGzip<R: Read> {
 
 impl<R: Read> Read for FetchGzip<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if self.decoded >= self.max {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                FetchBodyTooLarge,
-            ));
-        }
-        let n = self.decoder.read(buf)?;
-        self.decoded = self.decoded.saturating_add(n);
         if self.decoded > self.max {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                FetchBodyTooLarge,
+                RequestBodyLimitExceeded,
             ));
         }
+        let n = self.decoder.read(buf)?;
+        if n == 0 {
+            return Ok(0);
+        }
+        if self.decoded.saturating_add(n) > self.max {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                RequestBodyLimitExceeded,
+            ));
+        }
+        self.decoded = self.decoded.saturating_add(n);
         Ok(n)
     }
 }
@@ -456,7 +462,14 @@ impl<R: Read> Read for FetchGzip<R> {
 ///
 /// Call on the blocking thread: the gzip decoder reads its header as soon as it is created.
 fn decoded_fetch_reader(raw: impl Read + Send + 'static, encoding: BodyEncoding) -> Box<dyn Read> {
-    let max = MAX_FETCH_REQUEST_BODY;
+    decoded_fetch_reader_with_limit(raw, encoding, fetch_body_limit())
+}
+
+fn decoded_fetch_reader_with_limit(
+    raw: impl Read + Send + 'static,
+    encoding: BodyEncoding,
+    max: usize,
+) -> Box<dyn Read> {
     match encoding {
         BodyEncoding::Identity => Box::new(DecodedByteLimit {
             inner: raw,
@@ -583,10 +596,7 @@ fn upload_pack_error_response(err: &grit_protocol::Error) -> Response<Body> {
     let Some(io) = err.request_stream_error() else {
         return internal_error(&format!("git-upload-pack failed: {err}"));
     };
-    if io
-        .get_ref()
-        .is_some_and(|inner| inner.is::<FetchBodyTooLarge>())
-    {
+    if io_error_is_request_body_limit(io) {
         return payload_too_large();
     }
     (StatusCode::BAD_REQUEST, "could not read request body").into_response()
@@ -614,12 +624,16 @@ mod tests {
     use std::io::Write;
 
     /// Decode a fetch body the way [`rpc`] does for upload-pack requests.
-    fn decode_fetch(headers: &HeaderMap, body: &[u8]) -> std::io::Result<Vec<u8>> {
+    fn decode_fetch_with_limit(
+        headers: &HeaderMap,
+        body: &[u8],
+        max: usize,
+    ) -> std::io::Result<Vec<u8>> {
         let encoding = body_encoding(headers).map_err(|_| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "bad encoding header")
         })?;
         let mut out = Vec::new();
-        decoded_fetch_reader(std::io::Cursor::new(body.to_vec()), encoding)
+        decoded_fetch_reader_with_limit(std::io::Cursor::new(body.to_vec()), encoding, max)
             .read_to_end(&mut out)?;
         Ok(out)
     }
@@ -649,33 +663,40 @@ mod tests {
         let plain = b"0012command=fetch\n";
         let gzip = gzip_bytes(plain);
         let headers = gzip_content_encoding_header();
-        let out = decode_fetch(&headers, &gzip).expect("decode gzip body");
+        let out = decode_fetch_with_limit(&headers, &gzip, 1024 * 1024).expect("decode gzip body");
         assert_eq!(out, plain);
     }
 
     #[test]
-    fn gzip_decoded_body_over_limit_returns_fetch_body_too_large() {
-        let plain = vec![0u8; MAX_FETCH_REQUEST_BODY + 1];
+    fn gzip_decoded_body_over_limit_returns_request_body_limit() {
+        const MAX: usize = 4096;
+        let plain = vec![0u8; MAX + 1];
         let gzip = gzip_bytes(&plain);
         let headers = gzip_content_encoding_header();
-        let err = decode_fetch(&headers, &gzip).expect_err("oversized gzip must fail");
+        let err =
+            decode_fetch_with_limit(&headers, &gzip, MAX).expect_err("oversized gzip must fail");
         assert!(
-            err.get_ref()
-                .is_some_and(|inner| inner.is::<FetchBodyTooLarge>()),
-            "expected FetchBodyTooLarge, got {err}"
+            io_error_is_request_body_limit(&err),
+            "expected RequestBodyLimitExceeded, got {err}"
         );
     }
 
     #[test]
-    fn identity_body_over_limit_returns_fetch_body_too_large() {
-        let body = vec![0u8; MAX_FETCH_REQUEST_BODY + 1];
+    fn identity_body_over_limit_returns_request_body_limit() {
+        const MAX: usize = 4096;
+        let body = vec![0u8; MAX + 1];
         let headers = HeaderMap::new();
-        let err = decode_fetch(&headers, &body).expect_err("oversized body must fail");
-        assert!(
-            err.get_ref()
-                .is_some_and(|inner| inner.is::<FetchBodyTooLarge>()),
-            "expected FetchBodyTooLarge, got {err}"
-        );
+        let err = decode_fetch_with_limit(&headers, &body, MAX).expect_err("oversized body");
+        assert!(io_error_is_request_body_limit(&err), "got {err}");
+    }
+
+    #[test]
+    fn identity_body_at_exact_limit_decodes() {
+        const MAX: usize = 8192;
+        let body = vec![0u8; MAX];
+        let headers = HeaderMap::new();
+        let out = decode_fetch_with_limit(&headers, &body, MAX).expect("exact limit");
+        assert_eq!(out.len(), MAX);
     }
 
     #[test]
@@ -683,29 +704,29 @@ mod tests {
         let oid = "a".repeat(40);
         let pkt = want_pkt_line(&oid);
         let mut body = String::new();
-        while body.len() < 40 * 1024 * 1024 {
+        while body.len() < 512 * 1024 {
             body.push_str(&pkt);
         }
         body.push_str("0000");
         let headers = HeaderMap::new();
-        let out = decode_fetch(&headers, body.as_bytes()).expect("large want body");
+        let out = decode_fetch_with_limit(&headers, body.as_bytes(), body.len())
+            .expect("large want body");
         assert_eq!(out.len(), body.len());
     }
 
     #[test]
-    fn gzip_repetitive_want_lines_over_32mib_decode_under_fetch_cap() {
+    fn gzip_repetitive_want_lines_decode_under_injected_cap() {
         let oid = "b".repeat(40);
         let pkt = want_pkt_line(&oid);
         let mut plain = String::new();
-        while plain.len() < 35 * 1024 * 1024 {
+        while plain.len() < 256 * 1024 {
             plain.push_str(&pkt);
         }
         plain.push_str("0000");
         let gzip = gzip_bytes(plain.as_bytes());
         let headers = gzip_content_encoding_header();
-        let out = decode_fetch(&headers, &gzip).expect("gzip want flood");
-        assert!(out.len() > 32 * 1024 * 1024);
-        assert!(out.len() < MAX_FETCH_REQUEST_BODY);
+        let out = decode_fetch_with_limit(&headers, &gzip, plain.len()).expect("gzip want flood");
+        assert_eq!(out.len(), plain.len());
     }
 
     #[test]
@@ -740,12 +761,13 @@ mod tests {
 
     #[tokio::test]
     async fn streamed_fetch_body_over_limit_fails() {
-        let chunk: Vec<u8> = (0..=255u8).cycle().take(1024 * 1024).collect();
-        let chunks = vec![chunk; MAX_FETCH_REQUEST_BODY / (1024 * 1024) + 2];
+        const MAX: usize = 4096;
+        let chunk: Vec<u8> = (0..=255u8).cycle().take(1024).collect();
+        let chunks = vec![chunk; MAX / 1024 + 2];
         let read = tokio::task::spawn_blocking(move || {
             let raw = streaming_body_reader(chunked_body(chunks));
             let mut out = Vec::new();
-            decoded_fetch_reader(raw, BodyEncoding::Identity).read_to_end(&mut out)
+            decoded_fetch_reader_with_limit(raw, BodyEncoding::Identity, MAX).read_to_end(&mut out)
         });
         let err = match read.await {
             Ok(Err(e)) => e,
@@ -753,9 +775,8 @@ mod tests {
             Err(e) => panic!("join: {e}"),
         };
         assert!(
-            err.get_ref()
-                .is_some_and(|inner| inner.is::<FetchBodyTooLarge>()),
-            "expected FetchBodyTooLarge, got {err}"
+            io_error_is_request_body_limit(&err),
+            "expected RequestBodyLimitExceeded, got {err}"
         );
     }
 

@@ -20,7 +20,7 @@ grit serve users [--root <path>] [--db <file>]
 
 `grit serve` runs a Git server over HTTP. Any Git client, `git` or `grit`, can clone, fetch and push through it, and a browser shows each repository's branches and recent commits. Fetch speaks Git protocol v0, v1 and v2 (whichever the client asks for); push uses receive-pack, which has no v2 form. Everything runs in-process: the server needs no `git` or other `grit` binary.
 
-Fetch and clone POST bodies (`git-upload-pack`) are streamed as they arrive; the server stops decoding once the body grows past 1 GiB (matching a generous reading of Git's `http.maxRequestBuffer`), which is enough for several million `want` lines. Push bodies are streamed separately and are limited only by each repository's `receive.maxInputSize`.
+Fetch and clone POST bodies (`git-upload-pack`) are streamed as they arrive; the server rejects decoded bodies larger than 1 GiB with HTTP 413 (matching a generous reading of Git's `http.maxRequestBuffer`), which is enough for several million `want` lines. Push bodies are streamed separately and are limited only by each repository's `receive.maxInputSize`.
 
 `--root` names what to serve:
 
