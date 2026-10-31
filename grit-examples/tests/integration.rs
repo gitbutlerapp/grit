@@ -26,6 +26,8 @@ mod guide_config;
 #[cfg(feature = "full-tests")]
 #[path = "guide_diff.rs"]
 mod guide_diff;
+#[path = "guide_identity.rs"]
+mod guide_identity;
 #[cfg(feature = "full-tests")]
 #[path = "guide_index.rs"]
 mod guide_index;

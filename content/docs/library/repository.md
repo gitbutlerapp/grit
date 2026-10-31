@@ -67,20 +67,9 @@ Transport options, the stash identity, and notes authors and committers are pass
 
 Author, committer, and stash identities are typed [`Signature`](rustdoc:grit_lib::ident::Signature) values (name, email, and an `OffsetDateTime`), not pre-formatted strings. [`Repository::identity`](rustdoc:grit_lib::repo::Repository::identity) resolves the one Git would record for an [`IdentRole`](rustdoc:grit_lib::config::ident_resolve::IdentRole) at a timestamp: it honours `GIT_AUTHOR_*` / `GIT_COMMITTER_*` (including the `*_DATE` overrides) from the handle's environment and `author.*`, `committer.*` and `user.*` config, and fails with [`Error::Identity`](rustdoc:grit_lib::error::Error::Identity) (a typed `IdentityError`) when no identity is configured or a date override is not a date Git accepts. The same resolution without a repository is [`resolve_signature_with`](rustdoc:grit_lib::config::ident_resolve::resolve_signature_with).
 
-```rust
-use grit_lib::config::ident_resolve::IdentRole;
-use grit_lib::porcelain::commit::CommitRequest;
+Use [`CommitRequest::new`](rustdoc:grit_lib::porcelain::commit::CommitRequest::new) for the message, then set public fields such as `author`. `CommitRequest` and `ContinueOptions` (merge `--continue`) take `Option<Signature>`, where `None` means the repository's identity for that role (for example, leave `committer` unset and `create_commit` uses the handle's committer identity); `RewriteOptions`, `StashPushOptions` and `NotesWriteOptions` take a `Signature`. Build one by hand with [`Signature::new`](rustdoc:grit_lib::ident::Signature::new), parse a full `Name <email> <unix> <±HHMM>` header line with `str::parse`, or stamp a `--author`-style contact with [`AuthorContact::signature`](rustdoc:grit_lib::ident::AuthorContact::signature). Reflog entries use [`resolve_loose_committer_identity_with`](rustdoc:grit_lib::config::ident_resolve::resolve_loose_committer_identity_with), which never fails. [`Repository::identity_now`](rustdoc:grit_lib::repo::Repository::identity_now) gives the handle's clock (its reference time when one was set) in its `TZ`.
 
-let author = repo.identity(IdentRole::Author, repo.identity_now())?;
-let request = CommitRequest {
-    message: "first\n".into(),
-    author: Some(author),
-    committer: None, // the repository's committer identity
-    ..Default::default()
-};
-```
-
-`CommitRequest` and `ContinueOptions` (merge `--continue`) take `Option<Signature>`, where `None` means the repository's identity for that role; `RewriteOptions`, `StashPushOptions` and `NotesWriteOptions` take a `Signature`. Build one by hand with [`Signature::new`](rustdoc:grit_lib::ident::Signature::new), parse a full `Name <email> <unix> <±HHMM>` header line with `str::parse`, or stamp a `--author`-style contact with [`AuthorContact::signature`](rustdoc:grit_lib::ident::AuthorContact::signature). Reflog entries use [`resolve_loose_committer_identity_with`](rustdoc:grit_lib::config::ident_resolve::resolve_loose_committer_identity_with), which never fails. [`Repository::identity_now`](rustdoc:grit_lib::repo::Repository::identity_now) gives the handle's clock (its reference time when one was set) in its `TZ`.
+<!-- include: grit-examples/src/bin/guide_identity.rs -->
 
 ## Errors
 

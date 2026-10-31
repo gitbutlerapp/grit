@@ -89,6 +89,11 @@ path = "src/bin/ingest_pack_into_store.rs"
 test = false
 
 [[bin]]
+name = "guide_identity"
+path = "src/bin/guide_identity.rs"
+test = false
+
+[[bin]]
 name = "guide_index"
 path = "src/bin/guide_index.rs"
 test = false
