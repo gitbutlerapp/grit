@@ -404,6 +404,7 @@ required-features = ["full-tests"]
 [[test]]
 name = "fsmonitor_valid_status"
 path = "tests/fsmonitor_valid_status.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "status_optional_locks_git_compat"
