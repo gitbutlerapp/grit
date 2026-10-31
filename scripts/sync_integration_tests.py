@@ -44,8 +44,12 @@ ENTRY = "integration.rs"
 # Integration modules that must stay in the default suite despite using system git.
 DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
     ("grit-lib", "fetch_reflog_git_compat"),
+    ("grit-lib", "merge_df_integrate_issue_2359"),
+    ("grit-lib", "merge_file_issue_2369_git_compat"),
     ("grit-lib", "push_packed_tag_regression"),
     ("grit-lib", "reset_hard_at_head_restores_worktree"),
+    ("grit-lib", "rev_list_attr_pathspec"),
+    ("grit-lib", "serve_upload_pack_advertise"),
     ("grit-lib", "status_index_refresh_race"),
 }
 MODULE_CFG_OVERRIDE: dict[tuple[str, str], str] = {

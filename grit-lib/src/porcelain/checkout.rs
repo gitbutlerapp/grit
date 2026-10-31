@@ -1060,11 +1060,6 @@ fn checkout_hard_to_tree_journaled(
         journal,
     )?);
 
-    let tree_diff_touched = if trees_differ {
-        hard_reset_tree_diff_touched_paths(&changes)
-    } else {
-        BTreeSet::new()
-    };
     let mut written_by_tree_diff: BTreeSet<Vec<u8>> = BTreeSet::new();
     for change in &changes {
         if change.status == DiffStatus::Deleted {
@@ -1181,7 +1176,6 @@ fn checkout_hard_to_tree_journaled(
         &index,
         trees_differ,
         &written_by_tree_diff,
-        &tree_diff_touched,
         sparse.as_ref(),
     );
     let worktree_stats = scan_index_blob_stats_for_hard_reset(
@@ -1207,9 +1201,6 @@ fn checkout_hard_to_tree_journaled(
             }
             if trees_differ && written_by_tree_diff.contains(path) {
                 return HardResetEntryAction::Written(None);
-            }
-            if trees_differ && !tree_diff_touched.contains(path.as_slice()) {
-                return HardResetEntryAction::Keep;
             }
             let existing = &index.entries[pos];
             match worktree_stats.get(pos) {
@@ -1665,24 +1656,10 @@ fn hard_reset_tree_diff_filled_all_entries(
 }
 
 /// Index positions that need a worktree stat before hard reset can choose keep vs verify.
-fn hard_reset_tree_diff_touched_paths(changes: &[DiffEntry]) -> BTreeSet<Vec<u8>> {
-    let mut touched = BTreeSet::new();
-    for change in changes {
-        if let Some(path) = &change.old_path {
-            touched.insert(crate::repo_relpath::storage_bytes(path).into_owned());
-        }
-        if let Some(path) = &change.new_path {
-            touched.insert(crate::repo_relpath::storage_bytes(path).into_owned());
-        }
-    }
-    touched
-}
-
 fn hard_reset_stat_probe_positions(
     index: &Index,
     trees_differ: bool,
     written_by_tree_diff: &BTreeSet<Vec<u8>>,
-    tree_diff_touched: &BTreeSet<Vec<u8>>,
     sparse: Option<&SparseCheckout>,
 ) -> Vec<usize> {
     let mut positions = Vec::new();
@@ -1699,9 +1676,6 @@ fn hard_reset_stat_probe_positions(
             continue;
         }
         if trees_differ && written_by_tree_diff.contains(&entry.path) {
-            continue;
-        }
-        if trees_differ && !tree_diff_touched.contains(&entry.path) {
             continue;
         }
         positions.push(pos);

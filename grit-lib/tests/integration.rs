@@ -976,7 +976,6 @@ mod merge_continue_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "merge_detached_head_git_compat.rs"]
 mod merge_detached_head_git_compat;
-#[cfg(feature = "full-tests")]
 #[path = "merge_df_integrate_issue_2359.rs"]
 mod merge_df_integrate_issue_2359;
 #[path = "merge_diff_line_coverage.rs"]
@@ -999,7 +998,6 @@ mod merge_eol_crlf_conflict_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "merge_file_git_compat.rs"]
 mod merge_file_git_compat;
-#[cfg(feature = "full-tests")]
 #[path = "merge_file_issue_2369_git_compat.rs"]
 mod merge_file_issue_2369_git_compat;
 #[cfg(feature = "full-tests")]
@@ -1610,7 +1608,6 @@ mod restore_hunks_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "restore_staged_conflict_issue_2155.rs"]
 mod restore_staged_conflict_issue_2155;
-#[cfg(feature = "full-tests")]
 #[path = "rev_list_attr_pathspec.rs"]
 mod rev_list_attr_pathspec;
 #[cfg(feature = "full-tests")]
@@ -1755,7 +1752,6 @@ mod serve_shallow_filter;
 #[cfg(feature = "full-tests")]
 #[path = "serve_shallow_include_tag.rs"]
 mod serve_shallow_include_tag;
-#[cfg(feature = "full-tests")]
 #[path = "serve_upload_pack_advertise.rs"]
 mod serve_upload_pack_advertise;
 #[cfg(feature = "full-tests")]
