@@ -436,7 +436,6 @@ fn reverse_worktree_rename(work_tree: &Path, from: &str, to: &str, ignorecase: b
     }
     rename_worktree_entry(&to_abs, &from_abs, ignorecase)
         .map_err(|e| Error::PathError(format!("rolling back rename '{to}' -> '{from}': {e}")))?;
-    remove_empty_parent_dirs(work_tree, &to_abs);
     Ok(())
 }
 
@@ -866,7 +865,6 @@ fn remove_backed_up_worktree_path(work_tree: &Path, backup: &WorktreePathBackup)
     let path = backup.rel();
     let abs = work_tree.join(path);
     fs::remove_file(&abs).map_err(|e| Error::PathError(format!("removing '{path}': {e}")))?;
-    remove_empty_parent_dirs(work_tree, &abs);
     Ok(())
 }
 
@@ -1261,7 +1259,6 @@ fn rename_worktree_paths(
                 renames[0].0, renames[0].1
             ))
         })?;
-        remove_empty_parent_dirs(work_tree, &from);
         return Ok(());
     }
 
@@ -1275,7 +1272,6 @@ fn rename_worktree_paths(
         rename_worktree_entry(&src_abs, &dst_abs, ignorecase).map_err(|e| {
             Error::PathError(format!("renaming directory '{src}' -> '{final_dst}': {e}"))
         })?;
-        remove_empty_parent_dirs(work_tree, &src_abs);
         return Ok(());
     }
 
@@ -1289,7 +1285,6 @@ fn rename_worktree_paths(
         if from_abs.exists() {
             rename_worktree_entry(&from_abs, &to_abs, ignorecase)
                 .map_err(|e| Error::PathError(format!("renaming '{from}' -> '{to}': {e}")))?;
-            remove_empty_parent_dirs(work_tree, &from_abs);
         }
     }
     Ok(())
