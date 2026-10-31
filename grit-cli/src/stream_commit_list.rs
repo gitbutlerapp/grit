@@ -148,6 +148,7 @@ mod tests {
     #[test]
     fn finish_json_matches_revs_outcome_keys() {
         let mut buf = Vec::new();
+        begin_commits_json_document(&mut buf).unwrap();
         finish_commits_json_document(&mut buf, true, ",\"count\":null").unwrap();
         let v: serde_json::Value = serde_json::from_slice(&buf).unwrap();
         assert_eq!(v["truncated"], true);

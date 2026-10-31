@@ -282,6 +282,7 @@ pub fn stream_listing(
     let max = rev.max_count();
     let mut truncated = false;
     let mut emitted = 0usize;
+    let mut pulled_from_stream = 0usize;
     let mut first_json = true;
     let mut first_batch = true;
     if output_mode == OutputMode::Json {
@@ -296,10 +297,12 @@ pub fn stream_listing(
             break;
         };
         first_batch = false;
+        pulled_from_stream += batch.oids.len();
         if let Some(limit) = max {
+            if pulled_from_stream > limit {
+                truncated = true;
+            }
             if emitted + batch.oids.len() >= limit {
-                truncated = emitted + batch.oids.len() > limit
-                    || fetch_cap.is_some_and(|cap| cap > limit);
                 let keep = limit.saturating_sub(emitted);
                 batch.oids.truncate(keep);
                 let keep: std::collections::HashSet<_> = batch.oids.iter().copied().collect();
@@ -344,13 +347,8 @@ pub fn stream_listing(
         if flush_or_broken_pipe(w)? {
             return Ok(());
         }
-        if let Some(limit) = max {
-            if emitted >= limit {
-                if fetch_cap.is_some_and(|cap| cap > limit) {
-                    truncated = true;
-                }
-                break;
-            }
+        if max.is_some_and(|limit| emitted >= limit) {
+            break;
         }
     }
     if output_mode == OutputMode::Json {
