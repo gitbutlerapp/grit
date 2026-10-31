@@ -599,6 +599,9 @@ mod diff_whitespace_git_compat;
 #[path = "diff_worktree_eol_git_compat.rs"]
 mod diff_worktree_eol_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "diff_worktree_stale_index.rs"]
+mod diff_worktree_stale_index;
+#[cfg(feature = "full-tests")]
 #[path = "diff_worktree_stat_git_compat.rs"]
 mod diff_worktree_stat_git_compat;
 #[cfg(feature = "full-tests")]

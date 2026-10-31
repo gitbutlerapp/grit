@@ -4898,19 +4898,42 @@ fn poll_diff_cancel(
     Ok(())
 }
 
+/// One tracked file the parallel pass must hash, queued once per stat-dirty index entry.
+///
+/// A stale index can queue every entry, so the job names its entry by position instead of
+/// owning copies of it, and the workers rebuild paths from the shared index.
 struct StagingHashJob {
     entry_index: usize,
-    rel_path: String,
-    file_path: PathBuf,
-    entry: IndexEntry,
-    /// Worktree mode after [`crate::index::WorktreeModePolicy`] against `entry.mode`.
+    /// Worktree mode after [`crate::index::WorktreeModePolicy`] against the entry's mode.
     worktree_mode: u32,
-    file_attrs: crate::crlf::FileAttrs,
+    /// `None` when the path has default attributes, which is the common case.
+    file_attrs: Option<Box<crate::crlf::FileAttrs>>,
+}
+
+impl StagingHashJob {
+    fn new(entry_index: usize, worktree_mode: u32, file_attrs: crate::crlf::FileAttrs) -> Self {
+        let file_attrs =
+            (file_attrs != crate::crlf::FileAttrs::default()).then(|| Box::new(file_attrs));
+        Self {
+            entry_index,
+            worktree_mode,
+            file_attrs,
+        }
+    }
+}
+
+/// Where the parallel pass finds the index entries and files its jobs name.
+struct StagingHashSource<'a> {
+    index: &'a Index,
+    work_tree: &'a Path,
+    precompose_unicode: bool,
+    ignorecase: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
 fn parallel_process_blob_worktree_jobs(
     odb: &Odb,
+    source: &StagingHashSource<'_>,
     jobs: &[StagingHashJob],
     thread_policy: &crate::parallel::ThreadPolicy,
     config: &crate::config::ConfigSet,
@@ -4937,30 +4960,31 @@ fn parallel_process_blob_worktree_jobs(
     } else {
         hash_stream_threshold(odb)?
     };
+    let default_attrs = crate::crlf::FileAttrs::default();
 
-    let rows = try_par_map::<StagingHashJob, Option<(usize, DiffEntry)>, Error, _>(
+    // Each job yields only the worktree side's oid when the entry changed; most jobs on a
+    // stale index find clean files, so diff entries are built afterwards for the few changes.
+    let new_oids = try_par_map::<StagingHashJob, Option<ObjectId>, Error, _>(
         jobs,
         par_opts,
         est_bytes,
         |job| {
-            let modified = |new_oid| {
-                Ok(Some((
-                    job.entry_index,
-                    worktree_content_change_entry(
-                        &job.entry,
-                        &job.rel_path,
-                        job.worktree_mode,
-                        new_oid,
-                    ),
-                )))
-            };
+            let entry = &source.index.entries[job.entry_index];
+            let rel_path = crate::repo_relpath::storage_string(&entry.path);
+            let modified = |new_oid| Ok(Some(new_oid));
+            let file_path = index_entry_worktree_abs_bytes(
+                source.work_tree,
+                &entry.path,
+                source.precompose_unicode,
+                source.ignorecase,
+            );
             let content = match read_regular_worktree_blob(
                 odb,
-                &job.file_path,
+                &file_path,
                 conv,
-                &job.file_attrs,
-                &job.rel_path,
-                Some(&job.entry),
+                job.file_attrs.as_deref().unwrap_or(&default_attrs),
+                &rel_path,
+                Some(entry),
                 filter_process,
                 stream_from,
             ) {
@@ -4971,8 +4995,8 @@ fn parallel_process_blob_worktree_jobs(
                 Err(err) => return Err(err),
             };
             let eff_oid = content.object_id(odb, store_dirty_blobs)?;
-            if eff_oid != job.entry.oid || job.worktree_mode != job.entry.mode {
-                let new_oid = if eff_oid != job.entry.oid && !materialize_dirty_blobs {
+            if eff_oid != entry.oid || job.worktree_mode != entry.mode {
+                let new_oid = if eff_oid != entry.oid && !materialize_dirty_blobs {
                     zero_oid()
                 } else {
                     eff_oid
@@ -4987,9 +5011,21 @@ fn parallel_process_blob_worktree_jobs(
         ParallelHashError::Task(err) => err,
     })?;
 
-    let mut rows: Vec<(usize, DiffEntry)> = rows.into_iter().flatten().collect();
-    rows.sort_by_key(|(idx, _)| *idx);
-    result.extend(rows.into_iter().map(|(_, d)| d));
+    let mut changed: Vec<(usize, u32, ObjectId)> = jobs
+        .iter()
+        .zip(new_oids)
+        .filter_map(|(job, new_oid)| new_oid.map(|oid| (job.entry_index, job.worktree_mode, oid)))
+        .collect();
+    changed.sort_by_key(|(idx, _, _)| *idx);
+    result.extend(
+        changed
+            .into_iter()
+            .map(|(entry_index, worktree_mode, new_oid)| {
+                let entry = &source.index.entries[entry_index];
+                let rel_path = crate::repo_relpath::storage_string(&entry.path);
+                worktree_content_change_entry(entry, &rel_path, worktree_mode, new_oid)
+            }),
+    );
     Ok(())
 }
 
@@ -5919,20 +5955,11 @@ fn diff_index_to_worktree_inner(
                         &mut result,
                     )? {
                     } else if !refresh_content_verified[entry_index] {
-                        let file_path = index_entry_worktree_abs_bytes(
-                            work_tree,
-                            &index.entries[entry_index].path,
-                            precompose_unicode,
-                            ignorecase,
-                        );
-                        staging_hash_jobs.push(StagingHashJob {
+                        staging_hash_jobs.push(StagingHashJob::new(
                             entry_index,
-                            rel_path: path_str_ref.to_owned(),
-                            file_path,
-                            entry: ie.clone(),
                             worktree_mode,
-                            file_attrs: file_attrs_for(path_str_ref),
-                        });
+                            file_attrs_for(path_str_ref),
+                        ));
                     }
                 } else {
                     // The scan's lstat already proves an unchanged, non-racy entry clean, and the
@@ -5985,6 +6012,12 @@ fn diff_index_to_worktree_inner(
     if parallel_blob_work && !staging_hash_jobs.is_empty() {
         parallel_process_blob_worktree_jobs(
             odb,
+            &StagingHashSource {
+                index,
+                work_tree,
+                precompose_unicode,
+                ignorecase,
+            },
             &staging_hash_jobs,
             &thread_policy,
             &config,
