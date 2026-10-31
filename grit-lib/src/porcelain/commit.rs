@@ -1398,6 +1398,78 @@ fn commit_identity_line(
     }
 }
 
+const NEXT_INDEX_FILE_PREFIX: &str = "next-index-";
+
+/// Reclaim `next-index-<pid>` hook index copies left when a commit process was killed.
+///
+/// Scans [`Repository::git_dir`], the common git directory when it differs, and each linked
+/// worktree admin directory. Only removes files whose suffix is a decimal PID that is not the
+/// current process and is not running on this host; non-numeric suffixes are left alone.
+pub(crate) fn reap_stale_next_index_files(repo: &Repository, dry_run: bool) -> Result<usize> {
+    let mut reaped = 0;
+    for dir in next_index_git_dirs(repo)? {
+        reaped += reap_stale_next_index_files_in_dir(&dir, dry_run)?;
+    }
+    Ok(reaped)
+}
+
+fn next_index_git_dirs(repo: &Repository) -> Result<Vec<PathBuf>> {
+    use crate::worktree::list_worktrees;
+
+    let git_dir = repo.git_dir().to_path_buf();
+    let common = repo.common_git_dir().to_path_buf();
+    let mut dirs = vec![git_dir.clone()];
+    if common != git_dir {
+        dirs.push(common);
+    }
+    for wt in list_worktrees(repo)? {
+        if !dirs.iter().any(|d| d == &wt.admin_dir) {
+            dirs.push(wt.admin_dir);
+        }
+    }
+    Ok(dirs)
+}
+
+fn reap_stale_next_index_files_in_dir(dir: &Path, dry_run: bool) -> Result<usize> {
+    use crate::lockfile::is_process_running;
+
+    let current = u64::from(process::id());
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e.into()),
+    };
+    let mut reaped = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let Some(pid_str) = name.strip_prefix(NEXT_INDEX_FILE_PREFIX) else {
+            continue;
+        };
+        if pid_str.is_empty() || !pid_str.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(pid) = pid_str.parse::<u64>() else {
+            continue;
+        };
+        if pid == current || is_process_running(pid) {
+            continue;
+        }
+        if dry_run {
+            reaped += 1;
+            continue;
+        }
+        let path = entry.path();
+        if is_process_running(pid) {
+            continue;
+        }
+        if fs::remove_file(&path).is_ok() {
+            reaped += 1;
+        }
+    }
+    Ok(reaped)
+}
+
 /// Removes a partial-commit hook index file on drop (Git `next-index-<pid>`).
 struct TempHookIndexFile(PathBuf);
 
@@ -2041,6 +2113,32 @@ mod tests {
     fn write_index(repo: &Repository, index: &mut Index) {
         index.sort();
         repo.write_index(index).unwrap();
+    }
+
+    #[test]
+    fn reap_stale_next_index_files_removes_dead_pid_only() {
+        let dir = TempDir::new().unwrap();
+        let repo = init_repo(dir.path());
+        let git = repo.git_dir();
+        let dead_pid = 99_999_999_u64;
+        let live_pid = u64::from(std::process::id());
+        fs::write(git.join(format!("next-index-{dead_pid}")), b"orphan").unwrap();
+        fs::write(git.join(format!("next-index-{live_pid}")), b"live").unwrap();
+        fs::write(git.join("next-index-not-a-pid"), b"weird").unwrap();
+        assert_eq!(reap_stale_next_index_files(&repo, false).unwrap(), 1);
+        assert!(!git.join(format!("next-index-{dead_pid}")).exists());
+        assert!(git.join(format!("next-index-{live_pid}")).exists());
+        assert!(git.join("next-index-not-a-pid").exists());
+    }
+
+    #[test]
+    fn begin_index_update_reaps_stale_next_index_file() {
+        let dir = TempDir::new().unwrap();
+        let repo = init_repo(dir.path());
+        let dead = repo.git_dir().join("next-index-99999998");
+        fs::write(&dead, b"x").unwrap();
+        let _lock = repo.begin_index_update().unwrap();
+        assert!(!dead.exists());
     }
 
     #[test]

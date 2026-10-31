@@ -2275,6 +2275,7 @@ impl Repository {
     /// Returns [`Error::Io`] when the lock file already exists or cannot be created.
     pub(crate) fn begin_index_update(&self) -> Result<crate::index::IndexLock> {
         test_inject_index_write_fail()?;
+        let _ = crate::porcelain::commit::reap_stale_next_index_files(self, false)?;
         let path = self.index_path_for_env()?;
         let cfg = self.config()?;
         crate::index::IndexLock::acquire(&path, Some(cfg.as_ref()))

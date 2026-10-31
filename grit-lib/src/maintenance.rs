@@ -1629,6 +1629,9 @@ fn duration_ms(d: std::time::Duration) -> u64 {
 
 /// Run pack-refs, reflog expiry, repack, prune, and commit-graph maintenance.
 ///
+/// Reclaims stale `next-index-<pid>` hook index copies (from interrupted commits) before any
+/// phase, including when [`RepackOptions::dry_run`] is set (dry-run counts but does not delete).
+///
 /// Unless [`RepackOptions::dry_run`] is set, holds the repository's `gc.pid` lock for the
 /// whole run, so it never overlaps another grit or Git gc (see [`GcLock`]).
 ///
@@ -1960,6 +1963,8 @@ fn windows_dns_host_name() -> Option<String> {
 
 fn gc_locked(repo: &Repository, opts: &GcOptions, now: i64) -> Result<GcStats> {
     let mut stats = GcStats::default();
+    let dry_run = opts.repack.dry_run;
+    let _ = crate::porcelain::commit::reap_stale_next_index_files(repo, dry_run)?;
     let cfg = repo.config()?;
     let prune_policy = gc_loose_prune_policy(&cfg, now)?;
     // Settled before any phase, so a bad config value changes nothing.
@@ -1968,8 +1973,6 @@ fn gc_locked(repo: &Repository, opts: &GcOptions, now: i64) -> Result<GcStats> {
     } else {
         None
     };
-    let dry_run = opts.repack.dry_run;
-
     if opts.pack_refs && gc_should_pack_refs(repo, &cfg)? && !dry_run {
         let start = Instant::now();
         stats.pack_refs = Some(pack_refs(repo, &PackRefsOptions::with_all(true))?);
@@ -3780,5 +3783,93 @@ mod tests {
         .expect("dry-run gc");
         assert!(stats.prune.pruned >= 1);
         assert!(pack_dir.join("tmp_pack_old").exists());
+    }
+
+    #[test]
+    fn gc_reaps_stale_next_index_files_in_git_and_linked_worktree() {
+        use crate::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
+
+        let (dir, repo) = repo_with_config("");
+        std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
+        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+        let ident = "Test <t@example.com> 1 +0000".to_string();
+        create_commit(
+            &repo,
+            &CommitRequest {
+                message: "init".into(),
+                author: Some(ident.parse().expect("signature")),
+                committer: Some(ident.parse().expect("signature")),
+                allow_empty: false,
+                sign_override: None,
+                amend: false,
+                assume_worktree_synced: false,
+                skip_pre_commit_tree_match: false,
+                staged_change_count: None,
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("commit");
+        let main_git = repo.git_dir().to_path_buf();
+        let dead_pid = 99_999_997_u64;
+        let live_pid = u64::from(std::process::id());
+        fs::write(
+            main_git.join(format!("next-index-{dead_pid}")),
+            b"main orphan",
+        )
+        .unwrap();
+        fs::write(
+            main_git.join(format!("next-index-{live_pid}")),
+            b"main live",
+        )
+        .unwrap();
+
+        let linked_path = dir.path().join("linked-wt");
+        add_linked_worktree(
+            &repo,
+            &AddLinkedWorktreeOptions {
+                path: linked_path.clone(),
+                branch: Some(WorktreeBranch::Create("linked".into())),
+                start_point: Some("HEAD".into()),
+                force: false,
+                lock: None,
+                no_checkout: true,
+                track: false,
+            },
+        )
+        .expect("linked worktree");
+        let linked_git = crate::worktree::list_worktrees(&repo)
+            .unwrap()
+            .into_iter()
+            .find(|e| e.path == linked_path)
+            .expect("linked entry")
+            .admin_dir;
+        fs::write(
+            linked_git.join(format!("next-index-{dead_pid}")),
+            b"linked orphan",
+        )
+        .unwrap();
+
+        gc(&repo, &GcOptions::default()).expect("gc");
+        assert!(!main_git.join(format!("next-index-{dead_pid}")).exists());
+        assert!(main_git.join(format!("next-index-{live_pid}")).exists());
+        assert!(!linked_git.join(format!("next-index-{dead_pid}")).exists());
+
+        fs::write(main_git.join(format!("next-index-{dead_pid}")), b"again").unwrap();
+        gc(
+            &repo,
+            &GcOptions {
+                repack: RepackOptions {
+                    dry_run: true,
+                    ..RepackOptions::default()
+                },
+                ..GcOptions::default()
+            },
+        )
+        .expect("dry-run gc");
+        assert!(main_git.join(format!("next-index-{dead_pid}")).exists());
+        gc(&repo, &GcOptions::default()).expect("gc again");
+        assert!(!main_git.join(format!("next-index-{dead_pid}")).exists());
     }
 }
