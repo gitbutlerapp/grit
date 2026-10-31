@@ -267,7 +267,7 @@ pub(crate) fn index_from_tree_reusing_cache_tree(
 /// [`prepare_index_for_tree_transition`].
 pub(crate) fn load_index_for_hard_reset(repo: &Repository, target: &ObjectId) -> Result<Index> {
     let mut index = repo.load_index_preserving_sparse()?;
-    prepare_sparse_rows(repo, target, &mut index, true)?;
+    prepare_sparse_rows(repo, target, &mut index, SparseRetarget::Always)?;
     Ok(index)
 }
 
@@ -280,16 +280,43 @@ pub(crate) fn prepare_index_for_tree_transition(
     target: &ObjectId,
     index: &mut Index,
 ) -> Result<()> {
-    prepare_sparse_rows(repo, target, index, false)
+    prepare_sparse_rows(repo, target, index, SparseRetarget::Never)
 }
 
-/// Shared body of [`prepare_index_for_tree_transition`] and [`load_index_for_hard_reset`];
-/// `retarget` keeps candidates whose target subtree differs and points them at it.
+/// Like [`prepare_index_for_tree_transition`] for a checkout that moves `HEAD` from tree `head`
+/// to `target` and keeps local changes.
+///
+/// An absent excluded directory whose row still records `head`'s subtree has nothing staged and
+/// nothing on disk, so it stays opaque and takes the target subtree id (as Git's two-way merge
+/// does for a sparse directory). Afterwards every sparse-directory row records the target
+/// subtree at its path, so the head-to-target diff need not enter those directories.
+pub(crate) fn prepare_index_for_head_transition(
+    repo: &Repository,
+    head: &ObjectId,
+    target: &ObjectId,
+    index: &mut Index,
+) -> Result<()> {
+    prepare_sparse_rows(repo, target, index, SparseRetarget::FromHead(head))
+}
+
+/// Which sparse-directory rows whose subtree differs from the target stay opaque.
+#[derive(Clone, Copy)]
+enum SparseRetarget<'a> {
+    /// None: such rows are expanded.
+    Never,
+    /// Rows that record this tree's subtree at their path.
+    FromHead(&'a ObjectId),
+    /// Every row the target still has a tree for.
+    Always,
+}
+
+/// Shared body of [`prepare_index_for_tree_transition`], [`prepare_index_for_head_transition`]
+/// and [`load_index_for_hard_reset`]; kept rows whose target subtree differs are pointed at it.
 fn prepare_sparse_rows(
     repo: &Repository,
     target: &ObjectId,
     index: &mut Index,
-    retarget: bool,
+    retarget: SparseRetarget<'_>,
 ) -> Result<()> {
     let config = repo.config()?;
     if !index.has_sparse_directory_placeholders() {
@@ -321,7 +348,27 @@ fn prepare_sparse_rows(
     }
     let mut keep = std::collections::BTreeMap::new();
     if !candidates.is_empty() {
-        matching_sparse_trees(repo, target, b"", &candidates, retarget, &mut keep, protect)?;
+        sparse_candidate_subtrees(repo, target, b"", &candidates, &mut keep, protect)?;
+        match retarget {
+            SparseRetarget::Always => {}
+            SparseRetarget::Never => keep.retain(|path, oid| candidates.get(path) == Some(oid)),
+            SparseRetarget::FromHead(head) => {
+                let changed: std::collections::BTreeMap<_, _> = candidates
+                    .iter()
+                    .filter(|(path, oid)| keep.get(*path).is_some_and(|target| target != *oid))
+                    .map(|(path, oid)| (path.clone(), *oid))
+                    .collect();
+                let mut at_head = std::collections::BTreeMap::new();
+                if !changed.is_empty() {
+                    sparse_candidate_subtrees(repo, head, b"", &changed, &mut at_head, protect)?;
+                }
+                keep.retain(|path, oid| {
+                    candidates
+                        .get(path)
+                        .is_some_and(|row| row == oid || at_head.get(path) == Some(row))
+                });
+            }
+        }
     }
     index.expand_sparse_directories_matching(repo.odb(), protect, |row| {
         !keep.contains_key(&row.path)
@@ -343,16 +390,15 @@ fn prepare_sparse_rows(
     Ok(())
 }
 
-/// Walk `tree` (at directory `prefix`, no trailing slash) and record in `keep` the sparse-directory
-/// `candidates` that stay opaque, with the target subtree id each must record: identical subtrees,
-/// or any subtree when `retarget` is set. Descends only into directories holding candidates.
-fn matching_sparse_trees(
+/// Walk `tree` (at directory `prefix`, no trailing slash) and record in `found` the subtree id
+/// `tree` holds at each sparse-directory path of `candidates` (keys end in `/`). Candidates
+/// without a subtree in `tree` are left out. Descends only into directories holding candidates.
+fn sparse_candidate_subtrees(
     repo: &Repository,
     tree: &ObjectId,
     prefix: &[u8],
     candidates: &std::collections::BTreeMap<Vec<u8>, ObjectId>,
-    retarget: bool,
-    keep: &mut std::collections::BTreeMap<Vec<u8>, ObjectId>,
+    found: &mut std::collections::BTreeMap<Vec<u8>, ObjectId>,
     protect: ProtectOptions,
 ) -> Result<()> {
     let obj = repo.odb().read(tree)?;
@@ -370,17 +416,15 @@ fn matching_sparse_trees(
         }
         let mut path = join_rel(prefix, &entry.name);
         path.push(b'/');
-        if let Some(oid) = candidates.get(&path) {
-            if retarget || *oid == entry.oid {
-                keep.insert(path, entry.oid);
-            }
+        if candidates.contains_key(&path) {
+            found.insert(path, entry.oid);
         } else if candidates
             .range(path.clone()..)
             .next()
             .is_some_and(|(key, _)| key.starts_with(&path))
         {
             path.pop();
-            matching_sparse_trees(repo, &entry.oid, &path, candidates, retarget, keep, protect)?;
+            sparse_candidate_subtrees(repo, &entry.oid, &path, candidates, found, protect)?;
         }
     }
     Ok(())
@@ -1238,6 +1282,188 @@ mod tests {
             assert!(!dir.path().join("c").exists());
             assert_eq!(fs::read(dir.path().join("top")).expect("top"), b"t\n");
         }
+    }
+
+    #[test]
+    fn head_transition_retargets_only_rows_that_record_the_head_subtree() {
+        let (_dir, repo, t1, t2, _, _) = sparse_two_commit_repo();
+        let head_c = subtree_oid(&repo, &t2, b"c");
+        let target_c = subtree_oid(&repo, &t1, b"c");
+        assert_ne!(head_c, target_c);
+
+        let mut index = repo.load_index_preserving_sparse().expect("index");
+        prepare_index_for_head_transition(&repo, &t2, &t1, &mut index).expect("transition");
+        let c = index.get(b"c/", 0).expect("c/ stays opaque");
+        assert!(c.is_sparse_directory_placeholder() && c.skip_worktree());
+        assert_eq!(c.oid, target_c);
+        assert_eq!(
+            index.get(b"a/", 0).expect("a/").oid,
+            subtree_oid(&repo, &t1, b"a")
+        );
+        assert!(!index.entries.iter().any(|e| e.path.starts_with(b"c/z")));
+
+        // A row already at the target subtree stays opaque as before.
+        let mut staged_target = repo.load_index_preserving_sparse().expect("index");
+        staged_target.get_mut(b"c/", 0).expect("c/").oid = target_c;
+        prepare_index_for_head_transition(&repo, &t2, &t1, &mut staged_target).expect("same");
+        assert_eq!(staged_target.get(b"c/", 0).expect("c/").oid, target_c);
+
+        // A row matching neither side holds staged content and is expanded for the guards.
+        let mut staged_other = repo.load_index_preserving_sparse().expect("index");
+        staged_other.get_mut(b"c/", 0).expect("c/").oid = subtree_oid(&repo, &t1, b"a");
+        prepare_index_for_head_transition(&repo, &t2, &t1, &mut staged_other).expect("other");
+        assert!(staged_other.get(b"c/", 0).is_none());
+        assert!(staged_other.get(b"c/x", 0).is_some());
+    }
+
+    #[test]
+    fn sparse_switch_never_reads_or_expands_changed_excluded_trees() {
+        use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+        use crate::progress::NeverCancel;
+        let (dir, repo, t1, t2, c1, c2) = sparse_two_commit_repo();
+        let tree_c1 = subtree_oid(&repo, &t1, b"c");
+        let tree_c2 = subtree_oid(&repo, &t2, b"c");
+        for oid in [tree_c1, tree_c2] {
+            fs::remove_file(loose_object_path(&repo, &oid)).expect("drop c tree");
+        }
+        drop(repo);
+        let repo =
+            Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("reopen");
+        for (commit, tree, c_tree) in [(c1, t1, tree_c1), (c2, t2, tree_c2), (c1, t1, tree_c1)] {
+            switch_repository(
+                &repo,
+                &SwitchOptions {
+                    mode: SwitchMode::Detached {
+                        commit,
+                        reflog_to_label: commit.to_string(),
+                    },
+                    dry_run: false,
+                    hooks: crate::PostOperationHooks::Skip,
+                },
+                &mut NullProgress,
+                &NeverCancel,
+            )
+            .expect("switch");
+            assert_eq!(repo.odb().hot_path_metrics().sparse_expanded_rows(), 0);
+            let raw = Index::load(&repo.index_path()).expect("raw index");
+            let rows: Vec<(&[u8], ObjectId)> = raw
+                .entries
+                .iter()
+                .map(|e| (e.path.as_slice(), e.oid))
+                .collect();
+            assert_eq!(
+                rows,
+                [
+                    (b"a/".as_slice(), subtree_oid(&repo, &tree, b"a")),
+                    (b"c/".as_slice(), c_tree),
+                    (b"top".as_slice(), raw.entries[2].oid),
+                ]
+            );
+            assert!(raw.entries[..2].iter().all(|e| e.skip_worktree()));
+            assert_eq!(raw.cache_tree_root, Some(tree));
+            crate::write_tree::verify_cache_tree(&raw).expect("sparse cache-tree");
+            assert!(!dir.path().join("c").exists());
+            assert_eq!(fs::read(dir.path().join("top")).expect("top"), b"t\n");
+        }
+    }
+
+    #[test]
+    fn sparse_switch_refuses_to_drop_staged_content_in_excluded_directory() {
+        use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+        use crate::progress::NeverCancel;
+        let (_dir, repo, t1, _t2, c1, _) = sparse_two_commit_repo();
+        let mut index = repo.load_index_preserving_sparse().expect("index");
+        // Stage an unrelated tree as `c/`: it matches neither HEAD nor the target.
+        index.get_mut(b"c/", 0).expect("c/").oid = subtree_oid(&repo, &t1, b"a");
+        index.cache_tree = None;
+        index.cache_tree_root = None;
+        let raw_before = {
+            repo.write_index(&mut index).expect("write staged");
+            fs::read(repo.index_path()).expect("index bytes")
+        };
+        let err = switch_repository(
+            &repo,
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: c1,
+                    reflog_to_label: c1.to_string(),
+                },
+                dry_run: false,
+                hooks: crate::PostOperationHooks::Skip,
+            },
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect_err("staged c/ content must block the switch");
+        assert!(matches!(err, Error::WouldOverwrite { .. }), "{err:?}");
+        assert_eq!(
+            fs::read(repo.index_path()).expect("index bytes"),
+            raw_before
+        );
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn sparse_switch_retargets_changed_excluded_directories_git_compat() {
+        use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+        use crate::progress::NeverCancel;
+        let grit_dir = TempDir::new().expect("tempdir");
+        let git_dir = TempDir::new().expect("tempdir");
+        for dir in [&grit_dir, &git_dir] {
+            grit_test_support::sparse_scale::create(
+                Path::new("git"),
+                dir.path(),
+                12_000,
+                true,
+                2_000,
+            )
+            .expect("sparse fixture");
+        }
+        let git = |dir: &TempDir, args: &[&str]| grit_test_support::git(dir.path(), args);
+        let repo =
+            Repository::discover(Some(grit_dir.path()), &RepositoryOptions::empty()).expect("repo");
+        for name in ["sparse-base", "sparse-edited", "sparse-base"] {
+            let commit: ObjectId = git(&grit_dir, &["rev-parse", name])
+                .trim()
+                .parse()
+                .expect("oid");
+            switch_repository(
+                &repo,
+                &SwitchOptions {
+                    mode: SwitchMode::Detached {
+                        commit,
+                        reflog_to_label: commit.to_string(),
+                    },
+                    dry_run: false,
+                    hooks: crate::PostOperationHooks::Skip,
+                },
+                &mut NullProgress,
+                &NeverCancel,
+            )
+            .expect("switch");
+            git(&git_dir, &["switch", "-q", "--detach", name]);
+            assert_eq!(repo.odb().hot_path_metrics().sparse_expanded_rows(), 0);
+            assert_eq!(
+                git(&grit_dir, &["ls-files", "--sparse", "-s", "-t"]),
+                git(&git_dir, &["ls-files", "--sparse", "-s", "-t"]),
+                "grit's index after switching to {name} must match Git's"
+            );
+            assert_eq!(
+                git(&grit_dir, &["write-tree"]).trim(),
+                git(&grit_dir, &["rev-parse", &format!("{name}^{{tree}}")]).trim()
+            );
+            assert!(git(&grit_dir, &["status", "--porcelain"]).is_empty());
+            git(&grit_dir, &["fsck", "--strict"]);
+        }
+        // Git can keep switching on the index grit wrote.
+        git(&grit_dir, &["switch", "-q", "--detach", "sparse-edited"]);
+        assert_eq!(
+            git(&grit_dir, &["ls-files", "--sparse"]).lines().count(),
+            700
+        );
     }
 
     #[test]
