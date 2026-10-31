@@ -350,6 +350,19 @@ impl FilesRefStore {
         packed: Option<&crate::refs::PackedRefsFileView>,
         ancestors: &mut HashMap<String, bool>,
     ) -> std::result::Result<(), RefnameUnavailable> {
+        let route = self.route(name);
+        for base in self.store_bases() {
+            let ref_path = base.join(&route.storage_name);
+            if ref_path.is_dir() {
+                let blocking = first_loose_ref_file_under(&ref_path)
+                    .map(|p| loose_storage_path_to_refname(base, &p))
+                    .unwrap_or_else(|| format!("{name}/…"));
+                return Err(RefnameUnavailable::DescendantExists {
+                    blocking,
+                    new_ref: name.to_owned(),
+                });
+            }
+        }
         let mut blocking = BTreeSet::new();
         for (slash, _) in name.match_indices('/') {
             let ancestor = &name[..slash];
@@ -935,9 +948,12 @@ impl FilesRefStore {
         if let Some(reason) = self.name_unavailable_if_ancestor_is_loose_file(refname) {
             return Err(Error::RefStore(RefStoreError::NameUnavailable { reason }));
         }
-        let Err(err) = self.acquire_ref_lock_mapped(lock_path, refname, wait) else {
+        if self
+            .acquire_ref_lock_mapped(lock_path, refname, wait)
+            .is_ok()
+        {
             return Ok(());
-        };
+        }
         if let Some(parent) = lock_path.parent() {
             if parent.is_file() {
                 return Err(Error::RefStore(RefStoreError::NameUnavailable {
@@ -953,8 +969,19 @@ impl FilesRefStore {
                 }
                 self.io_ref_store(parent, GitDirPathOperation::CreateDir, Err(source))?;
             }
+            if parent.is_file() {
+                return Err(Error::RefStore(RefStoreError::NameUnavailable {
+                    reason: RefnameUnavailable::AncestorExists {
+                        blocking: loose_storage_path_to_refname(&self.common_dir, parent),
+                        new_ref: refname.to_owned(),
+                    },
+                }));
+            }
         }
-        Err(err)
+        if let Some(reason) = self.name_unavailable_if_ancestor_is_loose_file(refname) {
+            return Err(Error::RefStore(RefStoreError::NameUnavailable { reason }));
+        }
+        self.acquire_ref_lock_mapped(lock_path, refname, wait)
     }
 
     /// Whether a strict ancestor of `refname` is already stored as a loose ref file (blocks
