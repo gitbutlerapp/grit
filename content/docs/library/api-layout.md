@@ -42,6 +42,15 @@ Examples:
 
 Removed **view modules** (use domains above instead): `object_store`, `references`, `worktree_index`, `revision`, `diffing`, `merging`, `configuration`, and the empty `plumbing` scaffold.
 
+Removed **test-only functions** that reproduced Git `test-tool` dumps or printed Git's CLI warnings, with no caller outside `grit-lib`'s own tests:
+
+| Removed | Use instead |
+| --- | --- |
+| `objects::midx::format_midx_dump`, `format_midx_dump_layer`, `format_midx_show_objects`, `format_midx_show_objects_layer`, `format_midx_bitmapped_packs` | [`read_midx_objects`](rustdoc:grit_lib::objects::midx::read_midx_objects), [`read_midx_btmp_ranges`](rustdoc:grit_lib::objects::midx::read_midx_btmp_ranges) |
+| `index::index_name_hash_lazy::dump_lazy_init_name_hash`, `test_lazy_init_name_hash`, `memihash_cont` | [`memihash`](rustdoc:grit_lib::index::index_name_hash_lazy::memihash) |
+| `config::gitmodules::write_gitmodules_cli_option_warnings` | [`looks_like_command_line_option`](rustdoc:grit_lib::config::gitmodules::looks_like_command_line_option) |
+| `config::gitmodules::gitdir::die_path_inside_submodule_when_disabled` | [`path_inside_registered_submodule`](rustdoc:grit_lib::config::gitmodules::gitdir::path_inside_registered_submodule), [`path_inside_indexed_submodule`](rustdoc:grit_lib::config::gitmodules::gitdir::path_inside_indexed_submodule) |
+
 ## Nested implementation modules
 
 Some canonical paths re-export **submodules** of the flat implementation (for example `grit_lib::objects::odb::store` is the public path for the object-store backend). Prefer the canonical prefix in all new code.

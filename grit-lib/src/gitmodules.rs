@@ -7,7 +7,6 @@
 //! `check_submodule_url`).
 
 use std::collections::HashSet;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -504,93 +503,6 @@ fn split_fsck_colon(msg: &str) -> (&'static str, &str) {
         "gitmodulesUpdate" => ("gitmodulesUpdate", b),
         _ => ("gitmodules", msg),
     }
-}
-
-/// Write Git-style warnings for submodule path/url values that look like CLI options.
-pub fn write_gitmodules_cli_option_warnings(
-    w: &mut dyn Write,
-    content: &str,
-) -> std::io::Result<()> {
-    if let Ok(config) = ConfigFile::parse(Path::new(".gitmodules"), content, ConfigScope::Local) {
-        let mut any = false;
-        for entry in &config.entries {
-            let key = &entry.key;
-            let Some(rest) = key.strip_prefix("submodule.") else {
-                continue;
-            };
-            let Some(last_dot) = rest.rfind('.') else {
-                continue;
-            };
-            let var = &rest[last_dot + 1..];
-            if var != "path" && var != "url" {
-                continue;
-            }
-            let Some(value) = entry.value.as_deref() else {
-                continue;
-            };
-            if looks_like_command_line_option(value) {
-                writeln!(
-                    w,
-                    "{}",
-                    crate::diagnostics::warning_line(&format!(
-                        "ignoring '{key}' which may be interpreted as a command-line option: {value}"
-                    ))
-                )?;
-                any = true;
-            }
-        }
-        if any {
-            return Ok(());
-        }
-    }
-
-    // Fallback: raw scan (handles minimal `.gitmodules` that the strict parser rejects).
-    let mut subsection: Option<&str> = None;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') {
-            subsection = None;
-            if let Some(inner) = trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-                let inner = inner.trim();
-                if let Some(rest) = inner.strip_prefix("submodule") {
-                    let rest = rest.trim();
-                    let name = rest
-                        .strip_prefix('"')
-                        .and_then(|s| s.strip_suffix('"'))
-                        .unwrap_or(rest);
-                    if !name.is_empty() {
-                        subsection = Some(name);
-                    }
-                }
-            }
-            continue;
-        }
-        let Some((raw_key, raw_val)) = trimmed.split_once('=') else {
-            continue;
-        };
-        let key = raw_key.trim();
-        if key != "path" && key != "url" {
-            continue;
-        }
-        let mut val = raw_val.trim();
-        if val.len() >= 2 && val.starts_with('"') && val.ends_with('"') {
-            val = &val[1..val.len() - 1];
-        }
-        if looks_like_command_line_option(val) {
-            let key_full = match subsection {
-                Some(name) => format!("submodule.{name}.{key}"),
-                None => key.to_string(),
-            };
-            writeln!(
-                w,
-                "{}",
-                crate::diagnostics::warning_line(&format!(
-                    "ignoring '{key_full}' which may be interpreted as a command-line option: {val}"
-                ))
-            )?;
-        }
-    }
-    Ok(())
 }
 
 /// Returns `true` when `name` is allowed as a submodule logical name (Git `check_submodule_name`).

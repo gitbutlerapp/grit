@@ -22,7 +22,6 @@ use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::MissingAction;
 
 struct PackBitmapFixture {
-    repo: Repository,
     sample_commit: ObjectId,
     have_commit: ObjectId,
     odb: Odb,
@@ -75,7 +74,7 @@ fn load_fixture() -> Option<PackBitmapFixture> {
         );
         return None;
     }
-    let repo = Repository::open(&bare, &RepositoryOptions::empty()).ok()?;
+    Repository::open(&bare, &RepositoryOptions::empty()).ok()?;
     let out = Command::new("git")
         .current_dir(&bare)
         .args(["rev-parse", "HEAD"])
@@ -101,7 +100,6 @@ fn load_fixture() -> Option<PackBitmapFixture> {
         ObjectId::from_hex(std::str::from_utf8(&have_out.stdout).ok()?.trim()).ok()?;
     let odb = Odb::new(&bare.join("objects")).with_config_git_dir(bare.to_path_buf());
     Some(PackBitmapFixture {
-        repo,
         sample_commit,
         have_commit,
         odb,
