@@ -1,6 +1,5 @@
 //! Move `HEAD` and optionally the index and working tree to a target commit.
 
-use crate::config::ConfigSet;
 use crate::diff::DiffEntry;
 use crate::error::{Error, Result};
 use crate::ident::Signature;
@@ -13,7 +12,7 @@ use crate::porcelain::switch::{
 };
 use crate::porcelain::worktree_guard::{load_worktree_snapshot, local_change_diffs};
 use crate::refs;
-use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags, ReflogUpdate};
+use crate::refs::store::{Expected, RawRef};
 use crate::repo::Repository;
 use crate::state::{
     clear_merge_state, clear_replay_state, resolve_head_for_repository, write_orig_head, HeadState,
@@ -206,23 +205,7 @@ pub fn reset_to_commit(
     clear_merge_state(repo.git_dir())?;
     clear_replay_state(repo.git_dir())?;
     let ref_updated = if previous != opts.target {
-        match &head {
-            HeadState::Branch { refname, .. } => {
-                update_moving_ref(repo, refname, previous, opts.target, opts)?;
-                refname.clone()
-            }
-            HeadState::Detached { .. } => {
-                refs::update_direct_ref_on_store(
-                    repo.refs(),
-                    repo.git_dir(),
-                    "HEAD",
-                    &opts.target,
-                )?;
-                append_reset_reflogs(repo, &["HEAD"], previous, opts.target, opts)?;
-                "HEAD".to_owned()
-            }
-            HeadState::Invalid => return Err(Error::InvalidHead),
-        }
+        move_head_tip(repo, &head, previous, opts)?
     } else {
         ref_label
     };
@@ -412,53 +395,48 @@ fn commit_tree_oid(repo: &Repository, commit: &ObjectId) -> Result<ObjectId> {
     }
 }
 
-fn update_moving_ref(
+/// Move the branch `head` names (or detached `HEAD`) from `previous` to `opts.target` with a
+/// compare-and-swap, then log the move in its reflog and `HEAD`'s where
+/// `core.logAllRefUpdates` asks for it or the reflog exists. Returns the name of the ref
+/// that moved.
+///
+/// The reflog lines are appended after the ref transaction rather than written in it, as
+/// [`crate::porcelain::merge`] does: the files store reloads a ref's whole reflog when a
+/// transaction logs to it, which would make every reset cost grow with `HEAD`'s history.
+fn move_head_tip(
     repo: &Repository,
-    refname: &str,
-    old: ObjectId,
-    new: ObjectId,
+    head: &HeadState,
+    previous: ObjectId,
     opts: &ResetOptions,
-) -> Result<()> {
-    refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), refname, &new)?;
-    append_reset_reflogs(repo, &[refname, "HEAD"], old, new, opts)
-}
-
-/// Append `old -> new` to each of `names`' reflogs where `core.logAllRefUpdates` logs it.
-fn append_reset_reflogs(
-    repo: &Repository,
-    names: &[&str],
-    old: ObjectId,
-    new: ObjectId,
-    opts: &ResetOptions,
-) -> Result<()> {
-    let config =
-        ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
-    let log = ReflogUpdate {
-        identity: opts.identity.reflog_name_email(),
-        message: opts.message.clone(),
-        time: opts.identity.time,
-        old_oid: Some(old),
-        new_oid: Some(new),
+) -> Result<String> {
+    let (moved, logged): (&str, &[&str]) = match head {
+        HeadState::Branch { refname, .. } => (refname, &[refname.as_str(), "HEAD"]),
+        HeadState::Detached { .. } => ("HEAD", &["HEAD"]),
+        HeadState::Invalid => return Err(Error::InvalidHead),
     };
-    for name in names {
-        if refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), name) {
-            refs::commit_ref_update_on_store(
-                repo.refs(),
-                RefUpdate {
-                    name: (*name).to_owned(),
-                    new_value: Some(RawRef::Direct(new)),
-                    expected: Expected::Any,
-                    reflog: Some(log.clone()),
-                    flags: RefUpdateFlags {
-                        no_deref: true,
-                        log_only: true,
-                        ..Default::default()
-                    },
-                },
-            )?;
-        }
+    refs::store_write_value_on_store(
+        repo.refs(),
+        repo.git_dir(),
+        moved,
+        Some(RawRef::Direct(opts.target)),
+        Expected::Oid(previous),
+        None,
+    )?;
+    let config = repo.config()?;
+    let identity = opts.identity.header_line();
+    for name in logged {
+        refs::append_reflog_on_store(
+            repo.refs(),
+            name,
+            &previous,
+            &opts.target,
+            &identity,
+            &opts.message,
+            false,
+            &config,
+        )?;
     }
-    Ok(())
+    Ok(moved.to_owned())
 }
 
 #[cfg(test)]
@@ -1565,6 +1543,87 @@ mod tests {
         git(root, &["tag", "-a", "-m", "keep", "keep-local1", &local1]);
         assert_eq!(check(&trunk[99], "loose tag on new work"), 2);
         assert_eq!(check(&trunk[59], "loose tag over packed history"), 2);
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn reset_appends_reflog_lines_and_keeps_existing_ones_byte_for_byte() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        git(root, &["init", "-q", "-b", "main", "."]);
+        for i in 1..=3 {
+            git(
+                root,
+                &["commit", "-q", "--allow-empty", "-m", &format!("c{i}")],
+            );
+        }
+        let oid = |rev: &str| git(root, &["rev-parse", rev]).trim().to_owned();
+        let (c1, c2, c3) = (oid("HEAD~2"), oid("HEAD~1"), oid("HEAD"));
+        let head_log = root.join(".git/logs/HEAD");
+        let branch_log = root.join(".git/logs/refs/heads/main");
+        // A line Git wrote for a subject in a legacy encoding: not UTF-8.
+        let mut bytes = std::fs::read(&head_log).expect("head log");
+        bytes.extend_from_slice(format!("{c3} {c3} T <t@t> 1 +0000\tcaf").as_bytes());
+        bytes.extend_from_slice(b"\xe9\n");
+        std::fs::write(&head_log, &bytes).expect("legacy line");
+        let open = || {
+            Repository::open(
+                &root.join(".git"),
+                &crate::environment::RepositoryOptions::empty().with_work_tree(root),
+            )
+            .expect("open")
+        };
+        let reset = |target: &str, message: &str| {
+            let mut opts = reset_opts(ObjectId::from_hex(target).expect("oid"), ResetMode::Soft);
+            opts.identity = "R <r@r> 1700000000 -0030".parse().expect("identity");
+            opts.message = message.to_owned();
+            reset_to_commit(&open(), &opts, &mut NullProgress, &NeverCancel).expect("reset")
+        };
+        let line = |old: &str, new: &str, message: &str| {
+            format!("{old} {new} R <r@r> 1700000000 -0030\t{message}\n").into_bytes()
+        };
+
+        let branch_before = std::fs::read(&branch_log).expect("branch log");
+        let outcome = reset(&c1, "reset: moving to HEAD~2");
+        assert_eq!(outcome.ref_updated, "refs/heads/main");
+        assert_eq!(oid("main"), c1);
+        let after = std::fs::read(&head_log).expect("head log");
+        assert_eq!(
+            after,
+            [bytes.clone(), line(&c3, &c1, "reset: moving to HEAD~2")].concat()
+        );
+        let branch_after = std::fs::read(&branch_log).expect("branch log");
+        assert_eq!(
+            branch_after,
+            [
+                branch_before.clone(),
+                line(&c3, &c1, "reset: moving to HEAD~2")
+            ]
+            .concat()
+        );
+
+        git(root, &["switch", "-q", "--detach", &c2]);
+        let head_before = std::fs::read(&head_log).expect("head log");
+        let outcome = reset(&c1, "reset: moving to c1");
+        assert_eq!(outcome.ref_updated, "HEAD");
+        assert_eq!(oid("HEAD"), c1);
+        assert_eq!(
+            std::fs::read(&head_log).expect("head log"),
+            [head_before, line(&c2, &c1, "reset: moving to c1")].concat()
+        );
+        assert_eq!(
+            std::fs::read(&branch_log).expect("branch log"),
+            branch_after,
+            "a detached reset leaves the branch log alone"
+        );
+        assert_eq!(oid("HEAD@{0}"), c1);
+        assert_eq!(oid("HEAD@{1}"), c2);
+        assert_eq!(oid("main@{0}"), c1);
+        assert_eq!(oid("main@{1}"), c3);
+        git(root, &["fsck", "--strict", "--no-dangling"]);
     }
 
     fn git(dir: &std::path::Path, args: &[&str]) -> String {
