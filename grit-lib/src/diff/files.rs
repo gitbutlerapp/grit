@@ -137,7 +137,7 @@ pub struct DiffFilesOutput {
 /// Fill per-file diff bodies for tree/index diff entries.
 ///
 /// Applies [`DiffOptions::renames`] to the entry list first (Git's default `-M50`), pairing
-/// added and deleted paths before stat or patch work. Use [`RenameDetection::Off`] when the
+/// added and deleted paths before stat or patch work. Use [`RenameDetection::Off`](crate::diff::RenameDetection::Off) when the
 /// caller already ran [`detect_renames`](crate::diff::detect_renames) or
 /// [`diff_trees_with_renames`](crate::diff::diff_trees_with_renames). Metadata-only
 /// [`DiffDetail::NameOnly`] and [`DiffDetail::NameStatus`] still skip line-diff blob reads,

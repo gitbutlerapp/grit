@@ -105,7 +105,7 @@ pub struct DiffOptions {
     /// Apply Git's indent heuristic when generating hunks.
     pub indent_heuristic: bool,
     /// Rename detection applied by [`super::build_file_diffs`] and tree content loaders when
-    /// entries are not already paired (default [`RenameDetection::Similarity`](50), Git `-M`).
+    /// entries are not already paired (default similarity 50 via [`RenameDetection::Similarity`], Git `-M`).
     pub renames: RenameDetection,
     /// `--diff-filter` status selection (applied after rename detection).
     pub filter: Option<DiffFilter>,
