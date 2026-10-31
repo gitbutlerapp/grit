@@ -24,10 +24,6 @@ pub mod hide_refs {
     //! hide_refs API (re-exported at this path).
     pub use crate::hide_refs::*;
 }
-pub mod ref_exclusions {
-    //! ref_exclusions API (re-exported at this path).
-    pub use crate::ref_exclusions::*;
-}
 pub mod ref_storage {
     //! ref_storage API (re-exported at this path).
     pub use crate::ref_storage::*;

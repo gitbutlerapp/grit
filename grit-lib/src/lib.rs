@@ -315,7 +315,6 @@ mod quote_path_root;
 mod read_dir_kind;
 pub(crate) mod receive_pack;
 pub(crate) mod receive_quarantine;
-pub(crate) mod ref_exclusions;
 pub(crate) mod ref_namespace;
 pub(crate) mod ref_storage;
 pub(crate) mod reflog;

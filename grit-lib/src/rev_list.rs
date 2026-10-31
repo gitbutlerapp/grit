@@ -1,13 +1,11 @@
 //! Commit traversal and output planning for `rev-list`.
 //!
-//! This module implements a focused `rev-list` subset used by the v2 test
-//! wave: revision ranges, `--all`, `--stdin` argument ingestion, commit walk
-//! limits, ordering (`--topo-order`, `--date-order`, `--reverse`), and basic
-//! output shaping (`--count`, `--parents`, `--format`).
+//! Revision ranges, `--all`, `--stdin` revision lines, commit walk limits,
+//! ordering (`--topo-order`, `--date-order`, `--reverse`), path simplification,
+//! object walks with `--filter`, and counting (`--count`).
 
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
-use std::fs;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -33,7 +31,6 @@ use crate::pack_bitmap::BitmapIndex;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
 use crate::pathspec::{pathspec_has_attr_magic, PathspecMatcher};
 use crate::progress::poll_watch;
-use crate::ref_exclusions::{git_namespace_prefix, strip_git_namespace, RefExclusions};
 use crate::reflog::{list_reflog_refs, read_reflog};
 use crate::refs;
 use crate::repo::Repository;
@@ -308,44 +305,6 @@ impl ObjectFilter {
             ObjectKind::Commit | ObjectKind::Tag => self.includes_commit_or_tag_object(kind),
         }
     }
-}
-
-/// Reachable object IDs enumerated the same way as `git rev-list --objects --no-object-names --all`,
-/// optionally with `--filter` and `--filter-provided-objects` (used by `git cat-file --batch-all-objects`).
-pub fn reachable_object_ids_for_cat_file(
-    repo: &Repository,
-    filter: Option<&ObjectFilter>,
-    filter_provided_objects: bool,
-) -> Result<Vec<ObjectId>> {
-    let opts = RevListOptions {
-        all_refs: true,
-        objects: true,
-        no_object_names: true,
-        quiet: true,
-        filter: filter.cloned(),
-        filter_provided_objects,
-        ..Default::default()
-    };
-    let result = rev_list(repo, &[], &[], &opts)?;
-    let mut set = BTreeSet::new();
-    for (i, oid) in result.commits.iter().enumerate() {
-        if result.objects_print_commit.get(i).copied().unwrap_or(true) {
-            set.insert(*oid);
-        }
-    }
-    for (oid, _) in &result.objects {
-        set.insert(*oid);
-    }
-    Ok(set.into_iter().collect())
-}
-
-/// Objects matching `filter`, for `cat-file --batch-all-objects --filter` (same set as
-/// `rev-list --objects --all --filter --filter-provided-objects`).
-pub fn object_ids_for_cat_file_filtered(
-    repo: &Repository,
-    filter: &ObjectFilter,
-) -> Result<Vec<ObjectId>> {
-    reachable_object_ids_for_cat_file(repo, Some(filter), true)
 }
 
 /// Parse a size with optional k/m/g suffix.
@@ -940,109 +899,6 @@ fn cherry_patch_groups(
         .collect()
 }
 
-/// Per-commit bisection score for `rev-list --bisect*` output.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BisectEntry {
-    /// Candidate commit object ID.
-    pub oid: ObjectId,
-    /// Number of candidate commits reachable from `oid`, including `oid`.
-    pub reaches: usize,
-    /// Git's bisection distance, `min(reaches, all - reaches)`.
-    pub distance: usize,
-}
-
-/// Bisection analysis result for a selected revision set.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BisectSelection {
-    /// Best midpoint candidate, if the selected set is non-empty.
-    pub best: Option<BisectEntry>,
-    /// All candidates sorted as `--bisect-all` requires.
-    pub all: Vec<BisectEntry>,
-    /// Total number of commits in the bisection set.
-    pub total: usize,
-}
-
-/// Rank rev-list commits for Git-compatible bisection helpers.
-///
-/// # Parameters
-///
-/// - `repo` - repository used for parent lookup.
-/// - `commits` - selected commit set from a normal `rev-list` traversal.
-/// - `first_parent` - when true, follow only first parents while counting reachability.
-///
-/// # Returns
-///
-/// A [`BisectSelection`] containing the best midpoint plus the complete sorted candidate list.
-///
-/// # Errors
-///
-/// Returns repository/object errors when parent commits cannot be loaded.
-pub fn select_bisect_commits(
-    repo: &Repository,
-    commits: &[ObjectId],
-    first_parent: bool,
-) -> Result<BisectSelection> {
-    let total = commits.len();
-    if total == 0 {
-        return Ok(BisectSelection {
-            best: None,
-            all: Vec::new(),
-            total: 0,
-        });
-    }
-
-    let candidates: HashSet<ObjectId> = commits.iter().copied().collect();
-    let mut graph = CommitGraph::new(repo, first_parent);
-    let mut entries = Vec::with_capacity(commits.len());
-    for &oid in commits {
-        let reaches = count_reachable_candidates(&mut graph, oid, &candidates)?;
-        let distance = reaches.min(total.saturating_sub(reaches));
-        entries.push(BisectEntry {
-            oid,
-            reaches,
-            distance,
-        });
-    }
-
-    let mut sorted = entries.clone();
-    sorted.sort_by(|a, b| b.distance.cmp(&a.distance).then_with(|| a.oid.cmp(&b.oid)));
-
-    let mut best = None;
-    for entry in &entries {
-        if best
-            .as_ref()
-            .is_none_or(|current: &BisectEntry| entry.distance > current.distance)
-        {
-            best = Some(entry.clone());
-        }
-    }
-    Ok(BisectSelection {
-        best,
-        all: sorted,
-        total,
-    })
-}
-
-fn count_reachable_candidates(
-    graph: &mut CommitGraph<'_>,
-    oid: ObjectId,
-    candidates: &HashSet<ObjectId>,
-) -> Result<usize> {
-    let mut stack = vec![oid];
-    let mut seen = HashSet::new();
-    while let Some(current) = stack.pop() {
-        if !seen.insert(current) {
-            continue;
-        }
-        for parent in graph.parents_of(current)? {
-            if candidates.contains(&parent) {
-                stack.push(parent);
-            }
-        }
-    }
-    Ok(seen.len())
-}
-
 fn retain_maximal_commits(
     graph: &mut CommitGraph<'_>,
     candidates: &mut HashSet<ObjectId>,
@@ -1142,12 +998,11 @@ pub fn rev_list(
 
     if options.all_refs {
         if options.objects {
-            let (tips, roots) =
-                all_ref_commit_tips_and_object_roots(repo, &RefExclusions::default())?;
+            let (tips, roots) = all_ref_commit_tips_and_object_roots(repo)?;
             include.extend(tips);
             object_roots.extend(roots);
         } else {
-            include.extend(all_ref_tips(repo, &RefExclusions::default())?);
+            include.extend(all_ref_tips(repo)?);
         }
     }
 
@@ -1432,7 +1287,7 @@ pub fn rev_list(
         // `rev-list --simplify-by-decoration` with no CLI-computed decoration filter): keep
         // commits pointed at by a ref tip. Proper parent-rewriting simplification (below,
         // after ordering) runs when `simplify_by_decoration_oids` is populated.
-        let decorated = all_ref_tips(repo, &RefExclusions::default())?;
+        let decorated = all_ref_tips(repo)?;
         included.retain(|oid| decorated.contains(oid));
     }
 
@@ -2145,17 +2000,6 @@ impl ExpectedObjectKind {
     }
 }
 
-/// Non-commit root from revision arguments (`tag`, `rev:path`, raw tree/blob OID), for object walks.
-#[derive(Clone, Debug)]
-pub struct ObjectWalkRoot {
-    /// Object id of the peeled non-commit (tree or blob) or tag target.
-    pub oid: ObjectId,
-    /// `input` field.
-    pub input: String,
-    /// Path within the tree for `rev:path` blob roots.
-    pub root_path: Option<String>,
-}
-
 #[derive(Clone, Debug)]
 struct RootObject {
     oid: ObjectId,
@@ -2414,14 +2258,6 @@ pub fn resolve_specs_for_commit_stream(
     resolve_specs_with_options(repo, specs, false)
 }
 
-/// Resolve revision strings to commit tips and non-commit roots (tags, trees, blobs, `rev:path`).
-///
-/// Used by `test-tool path-walk` and similar object walks that mirror `git` revision parsing.
-/// Resolve revision strings to commit OIDs (for negative specs / exclusions).
-pub fn resolve_revision_commits(repo: &Repository, specs: &[String]) -> Result<Vec<ObjectId>> {
-    resolve_specs(repo, specs)
-}
-
 /// Resolve revision argument strings to commit OIDs for history walks (`log`, `rev-list`).
 ///
 /// Each spec is interpreted like Git's `handle_revision_arg` for a plain commit tip: ranges
@@ -2440,33 +2276,7 @@ pub fn resolve_revision_specs_to_commits(
 ///
 /// Propagates ref listing and peel errors.
 pub fn all_ref_commit_tips_for_walk(repo: &Repository) -> Result<Vec<ObjectId>> {
-    all_ref_tips(repo, &RefExclusions::default())
-}
-
-/// `resolve_object_walk_roots` function.
-pub fn resolve_object_walk_roots(
-    repo: &Repository,
-    specs: &[String],
-) -> Result<(Vec<ObjectId>, Vec<ObjectWalkRoot>)> {
-    let (commits, roots, _tip_annotated_tag_by_commit) = resolve_specs_for_objects(repo, specs)?;
-    Ok((
-        commits,
-        roots
-            .into_iter()
-            .map(|r| ObjectWalkRoot {
-                oid: r.oid,
-                input: r.input,
-                root_path: r.root_path,
-            })
-            .collect(),
-    ))
-}
-
-fn resolve_specs_for_objects(
-    repo: &Repository,
-    specs: &[String],
-) -> Result<ResolvedSpecsWithTagMap> {
-    resolve_specs_for_objects_with_options(repo, specs, false, MissingAction::Error)
+    all_ref_tips(repo)
 }
 
 fn resolve_specs_for_objects_with_options(
@@ -4589,54 +4399,6 @@ fn dense_path_limited_action(
     })
 }
 
-/// Whether `oid` would be included in a dense path-limited history walk for `paths`.
-///
-/// Matches the non-Bloom parts of the internal `commit_touches_paths` helper with `full_history = false` and
-/// `sparse = false`: single-parent commits require a tree change on `paths` vs their parent;
-/// merge commits are omitted when exactly one parent is tree-same on `paths` (Git `TREESAME`
-/// simplification). Used by `log -g -- <path>` to align with Git's reflog path filtering.
-pub fn commit_visible_for_dense_pathspecs(
-    repo: &Repository,
-    oid: ObjectId,
-    paths: &[String],
-) -> Result<bool> {
-    if paths.is_empty() {
-        return Ok(true);
-    }
-    let paths = RevPathspecCheck::build(repo, paths)?;
-    let commit = load_commit(repo, oid)?;
-    let parents = commit.parents.clone();
-
-    if parents.is_empty() {
-        return tree_has_pathspec_match(repo, commit.tree, "", &paths);
-    }
-
-    if parents.len() == 1 {
-        let parent = load_commit(repo, parents[0])?;
-        return trees_differ_for_pathspecs(repo, commit.tree, parent.tree, "", &paths);
-    }
-
-    let mut treesame_parents = 0usize;
-    let mut differs_any = false;
-    for parent_oid in &parents {
-        let parent = load_commit(repo, *parent_oid)?;
-        let differs = trees_differ_for_pathspecs(repo, commit.tree, parent.tree, "", &paths)?;
-        if differs {
-            differs_any = true;
-        } else {
-            treesame_parents += 1;
-        }
-    }
-
-    if treesame_parents == 1 {
-        return Ok(false);
-    }
-    if differs_any {
-        return Ok(true);
-    }
-    Ok(false)
-}
-
 fn compute_cherry_patch_id(
     repo: &Repository,
     oid: &ObjectId,
@@ -4787,16 +4549,6 @@ fn tree_has_pathspec_match_cached(
 /// Pathspec-scoped tree comparison (Git `rev_compare_tree` / tree-diff pruning).
 ///
 /// Walks only directories that pathspecs may match instead of flattening whole trees.
-fn trees_differ_for_pathspecs(
-    repo: &Repository,
-    old_tree: ObjectId,
-    new_tree: ObjectId,
-    prefix: &str,
-    paths: &RevPathspecCheck<'_>,
-) -> Result<bool> {
-    trees_differ_for_pathspecs_optional(repo, Some(old_tree), Some(new_tree), prefix, paths, None)
-}
-
 fn trees_differ_for_pathspecs_optional(
     repo: &Repository,
     old_tree: Option<ObjectId>,
@@ -5602,7 +5354,7 @@ where
     let mut include = resolve_specs_with_options(repo, positive_specs, options.ignore_missing)?;
     let exclude = resolve_specs_with_options(repo, negative_specs, options.ignore_missing)?;
     if options.all_refs {
-        include.extend(all_ref_tips(repo, &RefExclusions::default())?);
+        include.extend(all_ref_tips(repo)?);
     }
     if include.is_empty() {
         return Ok(true);
@@ -5629,7 +5381,7 @@ pub(crate) fn try_bitmap_reachable_commit_set_for_specs(
     let mut include = resolve_specs_with_options(repo, positive_specs, options.ignore_missing)?;
     let exclude = resolve_specs_with_options(repo, negative_specs, options.ignore_missing)?;
     if options.all_refs {
-        include.extend(all_ref_tips(repo, &RefExclusions::default())?);
+        include.extend(all_ref_tips(repo)?);
     }
     if include.is_empty() {
         return Ok(None);
@@ -6922,17 +6674,10 @@ fn parse_revision_stdin_lines(repo: &Repository, lines: &[String]) -> Result<Std
     Ok((positive, negative, stdin_all_refs, Vec::new()))
 }
 
-/// Read `--stdin` revision lines from the process stdin stream.
-fn read_revisions_from_stdin_lines(repo: &Repository) -> Result<StdinRevisionSpecs> {
-    let stdin = std::io::read_to_string(std::io::stdin()).map_err(Error::Io)?;
-    let lines: Vec<String> = stdin.lines().map(std::borrow::ToOwned::to_owned).collect();
-    parse_revision_stdin_lines(repo, &lines)
-}
-
-/// Merge command-line revision strings with explicit `--stdin` lines (tests and embedders).
+/// Merge command-line revision strings with explicit `--stdin` lines.
 ///
-/// Same behavior as [`collect_revision_specs_with_stdin`] when stdin contains `lines`.
-/// Ref pseudo-options (`--all`, `--branches[=<glob>]`, `--tags`, `--remotes`, `--glob`) list
+/// Returns `(positive_specs, negative_specs, stdin_saw_all, stdin_pathspecs)`. Stdin lines use
+/// their own `--not` toggle, independent of the command line. Ref pseudo-options (`--all`, `--branches[=<glob>]`, `--tags`, `--remotes`, `--glob`) list
 /// refs through [`Repository::refs`], so an injected ref store is honoured.
 ///
 /// # Errors
@@ -6954,41 +6699,6 @@ pub fn collect_revision_specs_from_stdin_lines(
 
     let owned: Vec<String> = lines.iter().map(|s| (*s).to_owned()).collect();
     let (s_pos, s_neg, stdin_all_refs, stdin_paths) = parse_revision_stdin_lines(repo, &owned)?;
-    positive.extend(s_pos);
-    negative.extend(s_neg);
-
-    Ok((positive, negative, stdin_all_refs, stdin_paths))
-}
-
-/// Merge command-line revision strings with `--stdin` lines (and optional stdin pathspecs).
-///
-/// Returns `(positive_specs, negative_specs, stdin_saw_all, stdin_pathspecs)`.
-///
-/// Command-line `--not` is applied while building `args_specs` (see `rev-list`); stdin uses an
-/// independent `--not` toggle, matching Git.
-///
-/// # Errors
-///
-/// Returns [`Error::Message`] for Git-compatible `fatal:` stderr lines from stdin mode.
-pub fn collect_revision_specs_with_stdin(
-    repo: &Repository,
-    args_specs: &[String],
-    read_stdin: bool,
-) -> Result<StdinRevisionSpecs> {
-    let mut positive = Vec::new();
-    let mut negative = Vec::new();
-
-    for spec in args_specs {
-        let (pos, neg) = split_revision_token(spec);
-        positive.extend(pos);
-        negative.extend(neg);
-    }
-
-    if !read_stdin {
-        return Ok((positive, negative, false, Vec::new()));
-    }
-
-    let (s_pos, s_neg, stdin_all_refs, stdin_paths) = read_revisions_from_stdin_lines(repo)?;
     positive.extend(s_pos);
     negative.extend(s_neg);
 
@@ -7372,22 +7082,6 @@ fn subject_line_from_commit_message(message: &str) -> String {
         .to_owned()
 }
 
-fn commit_tips_from_ref_pairs(
-    repo: &Repository,
-    pairs: &[(String, ObjectId)],
-    exclusions: &RefExclusions,
-) -> Result<Vec<ObjectId>> {
-    let namespace_prefix = git_namespace_prefix();
-    let mut raw = Vec::new();
-    for (refname, oid) in pairs {
-        if exclusions.ref_excluded(strip_git_namespace(refname, &namespace_prefix), refname) {
-            continue;
-        }
-        raw.push(*oid);
-    }
-    peel_ref_oids_to_unique_commits(repo, raw)
-}
-
 fn peel_ref_oids_to_unique_commits(repo: &Repository, raw: Vec<ObjectId>) -> Result<Vec<ObjectId>> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
@@ -7542,25 +7236,23 @@ fn ref_pairs_for_all(repo: &Repository) -> Result<Vec<(String, ObjectId)>> {
     Ok(pairs)
 }
 
-fn all_ref_tips(repo: &Repository, exclusions: &RefExclusions) -> Result<Vec<ObjectId>> {
-    let pairs = ref_pairs_for_all(repo)?;
-    commit_tips_from_ref_pairs(repo, &pairs, exclusions)
+fn all_ref_tips(repo: &Repository) -> Result<Vec<ObjectId>> {
+    let raw = ref_pairs_for_all(repo)?
+        .into_iter()
+        .map(|(_, oid)| oid)
+        .collect();
+    peel_ref_oids_to_unique_commits(repo, raw)
 }
 
 /// One pass over `--all` refs: unique commit tips plus object roots for `--objects`.
 fn all_ref_commit_tips_and_object_roots(
     repo: &Repository,
-    exclusions: &RefExclusions,
 ) -> Result<(Vec<ObjectId>, Vec<RootObject>)> {
-    let namespace_prefix = git_namespace_prefix();
     let pairs = ref_pairs_for_all(repo)?;
     let mut commits = HashSet::new();
     let mut roots = Vec::new();
     let mut seen_roots = HashSet::new();
     for (refname, oid) in pairs {
-        if exclusions.ref_excluded(strip_git_namespace(&refname, &namespace_prefix), &refname) {
-            continue;
-        }
         let Ok(object) = repo.odb().read(&oid) else {
             continue;
         };
@@ -7615,15 +7307,6 @@ fn all_ref_commit_tips_and_object_roots(
     let mut tips: Vec<ObjectId> = commits.into_iter().collect();
     tips.sort();
     Ok((tips, roots))
-}
-
-/// Expand named refs to peeled unique commit tips, applying `--exclude` / `--exclude-hidden` rules.
-pub fn commit_tips_from_named_refs(
-    repo: &Repository,
-    pairs: &[(String, ObjectId)],
-    exclusions: &RefExclusions,
-) -> Result<Vec<ObjectId>> {
-    commit_tips_from_ref_pairs(repo, pairs, exclusions)
 }
 
 /// Commit OIDs listed in `.git/shallow` (shallow clone boundaries).
@@ -7929,30 +7612,6 @@ impl PartialOrd for CommitDateKey {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
-}
-
-/// Read every line from a newline-delimited file.
-///
-/// # Errors
-///
-/// Returns [`Error::Io`] when the file cannot be read.
-pub fn read_lines(path: &Path) -> Result<Vec<String>> {
-    let content = fs::read_to_string(path)?;
-    Ok(content.lines().map(|line| line.to_owned()).collect())
-}
-
-/// Check if a token uses the symmetric diff `...` notation.
-#[must_use]
-pub fn is_symmetric_diff(token: &str) -> bool {
-    token.contains("...") && !token.contains("....")
-}
-
-/// Split a symmetric diff token into (lhs, rhs).
-#[must_use]
-pub fn split_symmetric_diff(token: &str) -> Option<(String, String)> {
-    token
-        .split_once("...")
-        .map(|(l, r)| (l.to_owned(), r.to_owned()))
 }
 
 fn commit_parent_trees(
@@ -9578,14 +9237,10 @@ mod tests {
     }
 
     #[test]
-    fn split_revision_token_and_symmetric_diff() {
+    fn split_revision_token_two_dot_range() {
         let (pos, neg) = split_revision_token("main..feature");
         assert_eq!(pos, vec!["feature".to_owned()]);
         assert_eq!(neg, vec!["main".to_owned()]);
-        assert!(is_symmetric_diff("a...b"));
-        let pair = split_symmetric_diff("left...right").expect("sym");
-        assert_eq!(pair.0, "left");
-        assert_eq!(pair.1, "right");
     }
 
     fn minimal_repo() -> (TempDir, Repository) {
@@ -9648,13 +9303,6 @@ mod tests {
     }
 
     #[test]
-    fn symmetric_diff_helpers() {
-        assert!(!is_symmetric_diff("a..b"));
-        assert!(is_symmetric_diff("a...b"));
-        assert!(split_symmetric_diff("not-symmetric").is_none());
-    }
-
-    #[test]
     fn split_revision_token_range_and_caret() {
         let (pos, neg) = split_revision_token("main..feature");
         assert_eq!(pos, vec!["feature".to_owned()]);
@@ -9688,15 +9336,6 @@ mod tests {
         ] {
             assert!(!is_unexpanded_symmetric_range(spec), "{spec}");
         }
-    }
-
-    #[test]
-    fn symmetric_diff_token_detection() {
-        assert!(is_symmetric_diff("main...feature"));
-        assert!(!is_symmetric_diff("main..feature"));
-        let (l, r) = split_symmetric_diff("a...b").expect("split");
-        assert_eq!(l, "a");
-        assert_eq!(r, "b");
     }
 
     #[test]
@@ -9766,6 +9405,33 @@ mod tests {
         );
     }
 
+    /// Commits and objects `rev_list --objects --all [--filter]` reports, as a sorted set.
+    fn reachable_object_ids(
+        repo: &Repository,
+        filter: Option<&ObjectFilter>,
+        filter_provided_objects: bool,
+    ) -> Result<Vec<ObjectId>> {
+        let opts = RevListOptions {
+            all_refs: true,
+            objects: true,
+            no_object_names: true,
+            quiet: true,
+            filter: filter.cloned(),
+            filter_provided_objects,
+            ..Default::default()
+        };
+        let result = rev_list(repo, &[], &[], &opts)?;
+        let mut set: BTreeSet<ObjectId> = result
+            .commits
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| result.objects_print_commit.get(*i).copied().unwrap_or(true))
+            .map(|(_, oid)| *oid)
+            .collect();
+        set.extend(result.objects.iter().map(|(oid, _)| *oid));
+        Ok(set.into_iter().collect())
+    }
+
     #[test]
     fn reachable_object_ids_respects_blob_none_filter() {
         let dir = tempdir().expect("tempdir");
@@ -9793,8 +9459,8 @@ mod tests {
             .expect("commit");
         crate::refs::write_ref(&repo.git_dir(), "refs/heads/main", &commit).expect("ref");
         let _ = blob;
-        let ids = reachable_object_ids_for_cat_file(&repo, Some(&ObjectFilter::BlobNone), false)
-            .expect("reachable");
+        let ids =
+            reachable_object_ids(&repo, Some(&ObjectFilter::BlobNone), false).expect("reachable");
         assert!(ids.contains(&commit));
         assert!(ids.contains(&tree));
         assert!(!ids.iter().any(|id| *id == blob));
@@ -9883,7 +9549,7 @@ mod tests {
             .expect("commit");
         crate::refs::write_ref(&repo.git_dir(), "refs/heads/main", &commit).expect("ref");
         let filter = ObjectFilter::BlobNone;
-        let ids = object_ids_for_cat_file_filtered(&repo, &filter).expect("filtered");
+        let ids = reachable_object_ids(&repo, Some(&filter), true).expect("filtered");
         assert!(ids.contains(&commit));
         assert!(!ids.contains(&blob));
     }
@@ -9943,45 +9609,6 @@ mod tests {
     }
 
     #[test]
-    fn select_bisect_commits_ranks_linear_history() {
-        let dir = tempdir().expect("tempdir");
-        Repository::init(
-            dir.path(),
-            &InitOptions {
-                bare: true,
-
-                ref_storage: crate::RefStorageFormat::Files,
-                ..InitOptions::default()
-            },
-        )
-        .expect("init");
-        let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
-        let ident = "T <t@e.com> 1 +0000";
-        let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
-        let mut parent: Option<ObjectId> = None;
-        let mut tips = Vec::new();
-        for i in 0..5 {
-            let mut body = format!("tree {tree}\n");
-            if let Some(p) = parent {
-                body.push_str(&format!("parent {p}\n"));
-            }
-            body.push_str(&format!("author {ident}\ncommitter {ident}\n\nc{i}\n"));
-            let oid = repo
-                .odb()
-                .write(ObjectKind::Commit, body.as_bytes())
-                .expect("c");
-            parent = Some(oid);
-            tips.push(oid);
-        }
-        let empty = select_bisect_commits(&repo, &[], false).expect("empty");
-        assert!(empty.best.is_none());
-        let sel = select_bisect_commits(&repo, &tips, false).expect("bisect");
-        assert_eq!(sel.total, tips.len());
-        assert!(sel.best.is_some());
-        assert_eq!(sel.all.len(), tips.len());
-    }
-
-    #[test]
     fn rev_list_maximal_simplify_merges_and_parents() {
         let (_dir, repo, base, tip) = unit_test_repo_with_merge();
         let all = rev_list(
@@ -10034,7 +9661,8 @@ mod tests {
     #[test]
     fn resolve_revision_commits_and_split_tokens() {
         let (_dir, repo, _, tip) = unit_test_repo_with_merge();
-        let resolved = resolve_revision_commits(&repo, &[String::from("main")]).expect("resolve");
+        let resolved =
+            resolve_revision_specs_to_commits(&repo, &[String::from("main")]).expect("resolve");
         assert!(resolved.contains(&tip));
         let (pos, neg) = split_revision_token("HEAD^..HEAD");
         assert!(!pos.is_empty());
@@ -10069,7 +9697,7 @@ mod tests {
         crate::refs::write_ref(&repo.git_dir(), "refs/heads/main", &commit).expect("ref");
         let _ = blob;
         let filter = ObjectFilter::parse("combine:blob%3Alimit%3D5+tree%3A1").expect("combine");
-        let ids = object_ids_for_cat_file_filtered(&repo, &filter).expect("ids");
+        let ids = reachable_object_ids(&repo, Some(&filter), true).expect("ids");
         assert!(!ids.is_empty());
         let _ = commit;
         assert_eq!(
@@ -10270,10 +9898,6 @@ mod line_coverage_tests {
         let since_grafts =
             shallow_grafts_for_upload_pack_rev_list(&repo, &[tip], &[], Some(50), &[])?;
         let _ = since_grafts;
-        let list_path = repo.git_dir().join("rev-list-input.txt");
-        fs::write(&list_path, format!("main\n^{}\n", commits[0].to_hex())).expect("list");
-        let lines = read_lines(&list_path)?;
-        assert_eq!(lines.len(), 2);
         let (_specs, _neg, _all, paths) = collect_revision_specs_from_stdin_lines(
             &repo,
             &[String::from("HEAD")],
@@ -10319,7 +9943,7 @@ mod line_coverage_tests {
         let (_dir, repo, _tip) = seed_repo(120, true);
         for n in 0..32 {
             let spec = format!("HEAD~{n}");
-            let _ = resolve_revision_commits(&repo, &[spec])?;
+            let _ = resolve_revision_specs_to_commits(&repo, &[spec])?;
         }
         for objects in [false, true] {
             for filter in [
@@ -10349,54 +9973,29 @@ mod line_coverage_tests {
     }
 
     #[test]
-    fn bisect_filters_and_cat_file_helpers() -> Result<()> {
-        use crate::ref_exclusions::RefExclusions;
+    fn filters_and_ref_helpers() -> Result<()> {
         let (_dir, repo, tip) = seed_repo(40, true);
-        let default_out = rev_list(
+        let err = rev_list(
             &repo,
-            &[String::from("main")],
+            &[String::from("main...side")],
             &[],
-            &RevListOptions::default(),
-        )?;
-        let _ = select_bisect_commits(&repo, &default_out.commits, false)?;
-        let _ = select_bisect_commits(&repo, &default_out.commits, true)?;
-        assert!(is_symmetric_diff("main...side"));
-        if let Some((left, right)) = split_symmetric_diff("main...side") {
-            let err = rev_list(
-                &repo,
-                &[format!("{left}...{right}")],
-                &[],
-                &RevListOptions {
-                    left_right: true,
-                    ..RevListOptions::default()
-                },
-            )
-            .expect_err("raw symmetric range");
-            assert!(matches!(
-                err,
-                Error::RevList(RevListError::UnexpandedSymmetricRange { ref spec }) if spec == "main...side"
-            ));
-        }
+            &RevListOptions {
+                left_right: true,
+                ..RevListOptions::default()
+            },
+        )
+        .expect_err("raw symmetric range");
+        assert!(matches!(
+            err,
+            Error::RevList(RevListError::UnexpandedSymmetricRange { ref spec }) if spec == "main...side"
+        ));
         let _ = expand_object_filter_for_protocol("blob:limit=1k")
             .map_err(|msg| Error::Message(msg))?;
         let _ = url_encode_object_filter_subspec("path:src/");
         let (pos, neg) = split_revision_token("main ^main~2 -- tracked.txt");
         assert!(!pos.is_empty());
         let _ = neg;
-        for oid in &default_out.commits {
-            let _ = commit_visible_for_dense_pathspecs(&repo, *oid, &["tracked.txt".to_owned()])?;
-        }
-        let filter = ObjectFilter::BlobLimit(512);
-        let _ = reachable_object_ids_for_cat_file(&repo, Some(&filter), true)?;
-        let _ = object_ids_for_cat_file_filtered(&repo, &filter)?;
         let _ = tag_targets(&repo)?;
-        let pairs = vec![
-            (String::from("refs/heads/main"), tip),
-            (String::from("refs/heads/side"), tip),
-        ];
-        let _ = commit_tips_from_named_refs(&repo, &pairs, &RefExclusions::default())?;
-        let (_pos, _neg, _all, _paths) =
-            collect_revision_specs_with_stdin(&repo, &[String::from("main")], false)?;
         let borders = shallow_borders_reachable_from_wants(&repo, &[tip]);
         let _ = borders;
         Ok(())
@@ -10633,13 +10232,15 @@ mod line_coverage_tests {
             .expect("tag");
         fs::write(repo.git_dir().join("refs/heads/main"), format!("{tip}\n")).expect("main");
         fs::write(repo.git_dir().join("refs/tags/v1"), format!("{tag}\n")).expect("tag ref");
-        let _ = resolve_object_walk_roots(
+        let _ = resolve_specs_for_objects_with_options(
             &repo,
             &[
                 String::from("main^{tree}"),
                 String::from("refs/tags/v1"),
                 String::from("main^{commit}"),
             ],
+            false,
+            MissingAction::Error,
         )?;
         let opts = RevListOptions {
             objects: true,

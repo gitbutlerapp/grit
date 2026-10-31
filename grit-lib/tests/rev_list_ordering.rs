@@ -1575,13 +1575,6 @@ fn rev_list_option_smoke_exercises_library_paths() {
         let _ = grit_lib::revwalk::rev_list::rev_list(&grit, &specs, &[], &opts)
             .expect("rev_list smoke");
     }
-    let _ = grit_lib::revwalk::rev_list::select_bisect_commits(
-        &grit,
-        &grit_rev_list_commits_in_repo(&grit, &specs, &[], &RevListOptions::default())
-            .expect("tips"),
-        false,
-    )
-    .expect("bisect");
 }
 
 const ISSUE_1067_DATE: &str = "2026-01-01T00:00:00Z";

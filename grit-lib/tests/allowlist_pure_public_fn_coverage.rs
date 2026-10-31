@@ -31,7 +31,6 @@ use grit_lib::porcelain::log::{
     normalize_glob_ref, peel_to_commit_hex, DecorationFilter,
 };
 use grit_lib::porcelain::revert::commits_to_revert;
-use grit_lib::refs::ref_exclusions::RefExclusions;
 use grit_lib::refs::store::paths::{logs_refs_dir_path, logs_refs_subdir_path};
 use grit_lib::refs::{ref_update_flags, verify_branch_commit_cas};
 use grit_lib::remote::clone::{cleanup_failed_clone, derive_clone_dir};
@@ -280,8 +279,6 @@ fn pkt_line_promisor_and_ref_helpers() {
 
     assert!(parse_advertisement("version https://git-scm.com/docs/pack-protocol/2\n").is_empty());
 
-    let mut excl = RefExclusions::default();
-    excl.clear();
     let _ = ref_update_flags("refs/heads/main");
     let oid = ObjectId::from_bytes(&[1u8; 20]).expect("oid");
     verify_branch_commit_cas(Some(oid), Some(oid), "refs/heads/main").expect("cas");

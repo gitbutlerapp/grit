@@ -541,13 +541,13 @@ Shared harness: [`grit-lib/tests/support/diff_harness.rs`](grit-lib/tests/suppor
 | upstream file | scenario | Rust test | status |
 | --- | --- | --- | --- |
 | t6000-rev-list-misc.sh (simplify) | `--simplify-by-decoration` with `--boundary` (decorated root/tip, middle pruned) | `rev_list_ordering.rs` (`simplify_by_decoration_boundary_match_git`) | covered |
-| `t6002-rev-list-bisect.sh` | `--bisect-all` distances vs `select_bisect_commits` | `rev_list_simplify_objects.rs` (`t6002_bisect_all_matches_git`) | covered |
+| `t6002-rev-list-bisect.sh` | `--bisect-all` distances (no bisect command or library API) | not applicable | skip |
 | `t6004-rev-list-path-optim.sh` | path-limited trivial parent optimization | `rev_list_simplify_objects.rs` (`t6004_path_limited_trivial_optimization_matches_git`) | covered |
 | `t6012-rev-list-simplify.sh` | default / `--full-history` / `--simplify-merges` / `--first-parent` path limiting | `rev_list_simplify_objects.rs` (`t6012_simplification_modes_match_git`) | covered |
 | `t6016-rev-list-graph-simplify-history.sh` | `--graph` history layout (not commit OID lists) | not applicable | skip |
 | `t6017-rev-list-stdin.sh` | `--stdin` revision pseudo-options | `rev_list_simplify_objects.rs` (`t6017_stdin_revision_specs_match_git_semantics`); `rev_list_stdin_ref_glob_git_compat.rs` (`stdin_branches_tags_remotes_match_git`, `stdin_glob_and_tag_patterns_match_git`) | covered |
 | `t6018-rev-list-glob.sh` | `--glob` ref patterns from stdin | `rev_list_simplify_objects.rs` (`t6018_ref_globs_and_exclude_match_git`); `rev_list_stdin_ref_glob_git_compat.rs` (`stdin_glob_and_tag_patterns_match_git`) | covered |
-| `t6021-rev-list-exclude-hidden.sh` | `uploadpack.hideRefs` exclusion | `rev_list_simplify_objects.rs` (`t6021_exclude_hidden_refs_match_git`) | covered |
+| `t6021-rev-list-exclude-hidden.sh` | `uploadpack.hideRefs` / `receive.hideRefs` exclusion in ref advertisements (no `--exclude-hidden` walk option) | `serve_ls_refs_prefix.rs` (`ls_refs_matches_git_upload_pack_byte_for_byte`, `v0_advertisements_match_git_apart_from_capabilities`) | covered |
 | `t6022-rev-list-missing.sh` | `--missing=` with `--objects` | `rev_list_simplify_objects.rs` (`t6022_missing_actions_match_git`) | covered |
 | `t6102-rev-list-unexpected-objects.sh` | typed errors for type-mismatched object walks | `rev_list_simplify_objects.rs` (`t6102_unexpected_object_types_typed_error`) | covered |
 | `t6110-rev-list-sparse.sh` | `--first-parent --boundary` on `HEAD^..` | `rev_list_simplify_objects.rs` (`t6110_first_parent_boundary_matches_git`) | covered |

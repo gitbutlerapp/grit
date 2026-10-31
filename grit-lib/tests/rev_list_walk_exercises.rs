@@ -3,15 +3,10 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::refs;
-use grit_lib::refs::ref_exclusions::RefExclusions;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{
-    commit_tips_from_named_refs, commit_visible_for_dense_pathspecs, merge_bases,
-    object_ids_for_cat_file_filtered, reachable_object_ids_for_cat_file, resolve_object_walk_roots,
-    resolve_revision_commits, rev_list, select_bisect_commits,
-    shallow_borders_reachable_from_wants, shallow_boundary_oids, tag_targets, MissingAction,
-    ObjectFilter, OrderingMode, RevListOptions,
+    merge_bases, resolve_revision_specs_to_commits, rev_list, shallow_borders_reachable_from_wants,
+    shallow_boundary_oids, tag_targets, MissingAction, ObjectFilter, OrderingMode, RevListOptions,
 };
 use std::collections::HashSet;
 use std::fs;
@@ -115,7 +110,7 @@ fn path_limited_simplify_and_full_history() {
 }
 
 #[test]
-fn object_walk_filters_and_roots() {
+fn object_walk_filters() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");
     let commits = seed_linear(&repo, 2);
@@ -126,28 +121,22 @@ fn object_walk_filters_and_roots() {
     ]);
     let opts = RevListOptions {
         objects: true,
-        filter: Some(filter.clone()),
+        filter: Some(filter),
         filter_print_omitted: true,
         filter_provided_objects: true,
         ..RevListOptions::default()
     };
     let out = rev_list(&repo, &[tip.to_hex()], &[], &opts).expect("objects");
     assert!(!out.objects.is_empty());
-    let roots = resolve_object_walk_roots(&repo, &[tip.to_hex()]).expect("roots");
-    assert!(!roots.1.is_empty() || !roots.0.is_empty());
-    let cat_ids = object_ids_for_cat_file_filtered(&repo, &filter).expect("cat");
-    assert!(!cat_ids.is_empty());
 }
 
 #[test]
-fn bisect_merge_bases_and_render() {
+fn merge_bases_linear_and_first_parent() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");
     let commits = seed_linear(&repo, 5);
     let tip = *commits.last().expect("tip");
     let mid = commits[2];
-    let selection = select_bisect_commits(&repo, &commits, false).expect("bisect");
-    assert_eq!(selection.all.len(), commits.len());
     let bases = merge_bases(&repo, tip, mid, false).expect("merge-base");
     assert!(!bases.is_empty());
     let bases_fp = merge_bases(&repo, tip, mid, true).expect("merge-base fp");
@@ -204,30 +193,18 @@ fn rev_list_limit_boundary_cherry_and_all_refs() {
 }
 
 #[test]
-fn ref_tips_exclusions_and_revision_resolve() {
+fn revision_resolve_and_tag_targets() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");
-    let commits = seed_linear(&repo, 2);
-    let hidden = commits[0];
-    fs::create_dir_all(repo.git_dir().join("refs/hidden")).expect("hidden dir");
-    fs::write(
-        repo.git_dir().join("refs/hidden/only"),
-        format!("{hidden}\n"),
-    )
-    .expect("hidden ref");
-    let pairs = refs::list_refs(repo.git_dir(), "refs/").expect("refs");
-    let mut exclusions = RefExclusions::default();
-    exclusions.add_excluded_ref("refs/hidden/*");
-    let tips = commit_tips_from_named_refs(&repo, &pairs, &exclusions).expect("tips");
-    assert!(!tips.contains(&hidden));
-    let resolved = resolve_revision_commits(&repo, &["main".to_owned()]).expect("resolve");
+    seed_linear(&repo, 2);
+    let resolved = resolve_revision_specs_to_commits(&repo, &["main".to_owned()]).expect("resolve");
     assert_eq!(resolved.len(), 1);
     let tags = tag_targets(&repo).expect("tags");
     assert!(tags.is_empty());
 }
 
 #[test]
-fn shallow_and_cat_file_reachability() {
+fn shallow_and_filtered_reachability() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");
     let commits = seed_linear(&repo, 3);
@@ -237,10 +214,20 @@ fn shallow_and_cat_file_reachability() {
     assert!(bounds.contains(&tip));
     let borders = shallow_borders_reachable_from_wants(&repo, &[tip]);
     assert_eq!(borders, vec![tip]);
-    let all = reachable_object_ids_for_cat_file(&repo, None, false).expect("all");
-    let none = reachable_object_ids_for_cat_file(&repo, Some(&ObjectFilter::BlobNone), false)
-        .expect("no blobs");
-    assert!(none.len() < all.len());
+    let walk = |filter: Option<ObjectFilter>| {
+        let opts = RevListOptions {
+            all_refs: true,
+            objects: true,
+            no_object_names: true,
+            filter,
+            ..RevListOptions::default()
+        };
+        rev_list(&repo, &[], &[], &opts)
+            .expect("walk")
+            .objects
+            .len()
+    };
+    assert!(walk(Some(ObjectFilter::BlobNone)) < walk(None));
 }
 
 #[test]
@@ -278,8 +265,6 @@ fn dense_pathspec_visibility_and_parent_filters() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");
     let (_base, _side, tip) = seed_merge(&repo);
-    let _visible = commit_visible_for_dense_pathspecs(&repo, tip, &["other".to_owned()])
-        .expect("visible check");
     let out = rev_list(
         &repo,
         &[tip.to_hex()],

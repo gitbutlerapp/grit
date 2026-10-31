@@ -19,7 +19,6 @@ use grit_lib::diff::merge_diff::{
 };
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::refs;
-use grit_lib::refs::ref_exclusions::RefExclusions;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{
     common_git_dir_for_config, early_config_ignore_repo_reason, ensure_core_bare,
@@ -27,9 +26,7 @@ use grit_lib::repo::{
     validate_repo_config, validate_repo_format, worktree_config_enabled, InitOptions, Repository,
 };
 use grit_lib::revwalk::rev_list::{
-    commit_tips_from_named_refs, commit_visible_for_dense_pathspecs, merge_bases,
-    object_ids_for_cat_file_filtered, reachable_object_ids_for_cat_file, resolve_object_walk_roots,
-    resolve_revision_commits, rev_list, shallow_borders_reachable_from_wants,
+    merge_bases, resolve_revision_specs_to_commits, rev_list, shallow_borders_reachable_from_wants,
     shallow_boundary_oids, tag_targets, MissingAction, ObjectFilter, OrderingMode, RevListOptions,
 };
 
@@ -272,18 +269,18 @@ fn rev_list_deep_history_and_ref_matrix() -> grit_lib::error::Result<()> {
         }
     }
 
-    let pairs = refs::list_refs(repo.git_dir(), "refs/")?;
-    let tips = commit_tips_from_named_refs(&repo, &pairs, &RefExclusions::default())?;
-    assert!(!tips.is_empty());
-    let _ = resolve_revision_commits(&repo, &["main".to_owned(), "side".to_owned()])?;
-    let _ = resolve_object_walk_roots(&repo, &["main".to_owned()])?;
+    let _ = resolve_revision_specs_to_commits(&repo, &["main".to_owned(), "side".to_owned()])?;
     let _ = tag_targets(&repo)?;
     let _ = shallow_boundary_oids(repo.git_dir());
     let _ = shallow_borders_reachable_from_wants(&repo, &[tip]);
-    let filter = ObjectFilter::BlobLimit(4096);
-    let _ = object_ids_for_cat_file_filtered(&repo, &filter)?;
-    let _ = reachable_object_ids_for_cat_file(&repo, Some(&filter), false)?;
-    let _ = commit_visible_for_dense_pathspecs(&repo, tip, &["files/f0.txt".to_owned()])?;
+    let filtered = RevListOptions {
+        all_refs: true,
+        objects: true,
+        no_object_names: true,
+        filter: Some(ObjectFilter::BlobLimit(4096)),
+        ..RevListOptions::default()
+    };
+    let _ = rev_list(&repo, &[], &[], &filtered)?;
     let _ = merge_bases(&repo, tip, mid, false)?;
     Ok(())
 }

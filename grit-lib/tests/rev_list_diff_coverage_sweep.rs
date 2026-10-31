@@ -13,7 +13,7 @@ use grit_lib::parallel::ThreadPolicy;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{
-    merge_bases, resolve_object_walk_roots, rev_list, ObjectFilter, OrderingMode, RevListOptions,
+    merge_bases, rev_list, ObjectFilter, OrderingMode, RevListOptions,
 };
 use std::collections::HashSet;
 use std::fs;
@@ -82,9 +82,6 @@ fn symmetric_range_ancestry_and_object_roots() -> grit_lib::error::Result<()> {
     };
     let out = rev_list(&repo, &[String::from("main")], &[], &opts)?;
     assert_eq!(out.commits.len(), 2);
-
-    let roots = resolve_object_walk_roots(&repo, &[String::from("main")])?;
-    assert!(!roots.0.is_empty());
     Ok(())
 }
 
@@ -235,13 +232,18 @@ fn long_merged_history_object_walk_and_decoration() -> grit_lib::error::Result<(
             &opts,
         )?;
     }
-    let _ = resolve_object_walk_roots(
+    let _ = rev_list(
         &repo,
         &[
             String::from("main^{tree}"),
             String::from("refs/tags/v1"),
             String::from("main^{commit}"),
         ],
+        &[],
+        &RevListOptions {
+            objects: true,
+            ..RevListOptions::default()
+        },
     )?;
     Ok(())
 }

@@ -23,8 +23,8 @@ use grit_lib::revwalk::merge_base::{
     MergeBaseForDiffError,
 };
 use grit_lib::revwalk::rev_list::{
-    merge_bases, resolve_object_walk_roots, resolve_revision_commits, rev_list, ObjectFilter,
-    OrderingMode, RevListOptions,
+    merge_bases, resolve_revision_specs_to_commits, rev_list, ObjectFilter, OrderingMode,
+    RevListOptions,
 };
 use grit_lib::revwalk::rev_parse::{
     resolve_revision, resolve_revision_as_commit, resolve_revision_for_range_end,
@@ -174,16 +174,21 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
         }
     }
 
-    let roots = resolve_object_walk_roots(
+    let roots = rev_list(
         &repo,
         &[
             String::from("main^{tree}"),
             String::from("HEAD^{commit}"),
             String::from("feature"),
         ],
+        &[],
+        &RevListOptions {
+            objects: true,
+            ..RevListOptions::default()
+        },
     )?;
-    assert!(!roots.0.is_empty());
-    let _ = resolve_revision_commits(&repo, &["main".to_owned(), "feature".to_owned()])?;
+    assert!(!roots.commits.is_empty());
+    let _ = resolve_revision_specs_to_commits(&repo, &["main".to_owned(), "feature".to_owned()])?;
 
     let tree: ObjectId = git(wt, &["rev-parse", "HEAD^{tree}"])
         .trim()
