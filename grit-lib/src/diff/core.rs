@@ -472,6 +472,63 @@ fn xdiff_changed_flags_trimmed_ids(
     ((full1, full2), ids1_full, ids2_full)
 }
 
+fn xdiff_changed_flags_trimmed_preinterned(
+    ids1_full: &[u32],
+    ids2_full: &[u32],
+    need_min: bool,
+) -> (Vec<bool>, Vec<bool>) {
+    let nrec1 = ids1_full.len();
+    let nrec2 = ids2_full.len();
+    if nrec1 == 0 && nrec2 == 0 {
+        return (Vec::new(), Vec::new());
+    }
+
+    let lim = nrec1.min(nrec2);
+    let mut head = 0usize;
+    while head < lim && ids1_full[head] == ids2_full[head] {
+        head += 1;
+    }
+    let mut tail = 0usize;
+    let rem = lim - head;
+    while tail < rem && ids1_full[nrec1 - 1 - tail] == ids2_full[nrec2 - 1 - tail] {
+        tail += 1;
+    }
+    let shared_records = head + tail;
+    if shared_records == 0 {
+        return git_xdiff::changed_flags(ids1_full, ids2_full, need_min);
+    }
+    let cut_ids1 = &ids1_full[head..nrec1 - tail];
+    let cut_ids2 = &ids2_full[head..nrec2 - tail];
+    let nclasses = ids1_full
+        .iter()
+        .chain(ids2_full)
+        .max()
+        .map_or(0, |&max| max as usize + 1);
+    let mut shared_counts = vec![0u32; nclasses];
+    for &id in &ids1_full[..head] {
+        shared_counts[id as usize] += 1;
+    }
+    for &id in &ids1_full[nrec1 - tail..] {
+        shared_counts[id as usize] += 1;
+    }
+    let (mid1, mid2) = git_xdiff::changed_flags_with_shared(
+        cut_ids1,
+        cut_ids2,
+        &shared_counts,
+        shared_records,
+        need_min,
+    );
+    let mut full1 = vec![false; nrec1];
+    let mut full2 = vec![false; nrec2];
+    if !mid1.is_empty() {
+        full1[head..nrec1 - tail].copy_from_slice(&mid1);
+    }
+    if !mid2.is_empty() {
+        full2[head..nrec2 - tail].copy_from_slice(&mid2);
+    }
+    (full1, full2)
+}
+
 fn xdiff_changed_flags_trimmed_byte_ids(
     old_compare: &[Vec<u8>],
     new_compare: &[Vec<u8>],
@@ -485,55 +542,52 @@ fn xdiff_changed_flags_trimmed_byte_ids(
         return ((Vec::new(), Vec::new()), Vec::new(), Vec::new());
     }
     let mut interner = ByteLineInterner::with_capacity(nrec1 + nrec2);
-    let ids1_full = interner.intern_all(old_compare);
-    let ids2_full = interner.intern_all(new_compare);
-
-    let lim = nrec1.min(nrec2);
-    let mut head = 0usize;
-    while head < lim && ids1_full[head] == ids2_full[head] {
-        head += 1;
-    }
-    let mut tail = 0usize;
-    let rem = lim - head;
-    while tail < rem && ids1_full[nrec1 - 1 - tail] == ids2_full[nrec2 - 1 - tail] {
-        tail += 1;
-    }
-    let shared_records = head + tail;
-    let (full1, full2) = if shared_records == 0 {
-        git_xdiff::changed_flags(&ids1_full, &ids2_full, need_min)
-    } else {
-        let cut_ids1 = &ids1_full[head..nrec1 - tail];
-        let cut_ids2 = &ids2_full[head..nrec2 - tail];
-        let nclasses = ids1_full
-            .iter()
-            .chain(&ids2_full)
-            .max()
-            .map_or(0, |&max| max as usize + 1);
-        let mut shared_counts = vec![0u32; nclasses];
-        for &id in &ids1_full[..head] {
-            shared_counts[id as usize] += 1;
-        }
-        for &id in &ids1_full[nrec1 - tail..] {
-            shared_counts[id as usize] += 1;
-        }
-        let (mid1, mid2) = git_xdiff::changed_flags_with_shared(
-            cut_ids1,
-            cut_ids2,
-            &shared_counts,
-            shared_records,
-            need_min,
-        );
-        let mut full1 = vec![false; nrec1];
-        let mut full2 = vec![false; nrec2];
-        if !mid1.is_empty() {
-            full1[head..nrec1 - tail].copy_from_slice(&mid1);
-        }
-        if !mid2.is_empty() {
-            full2[head..nrec2 - tail].copy_from_slice(&mid2);
-        }
-        (full1, full2)
-    };
+    let ids1_full = interner.intern_all_vecs(old_compare);
+    let ids2_full = interner.intern_all_vecs(new_compare);
+    let (full1, full2) = xdiff_changed_flags_trimmed_preinterned(&ids1_full, &ids2_full, need_min);
     ((full1, full2), ids1_full, ids2_full)
+}
+
+/// Intern compare keys for base and both merge sides in one pass (shared token ids).
+pub(crate) fn intern_merge_compare_three_way(
+    base: &[Vec<u8>],
+    ours: &[Vec<u8>],
+    theirs: &[Vec<u8>],
+) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
+    use crate::line_interner::ByteLineInterner;
+
+    let mut interner = ByteLineInterner::with_capacity(base.len() + ours.len() + theirs.len());
+    (
+        interner.intern_all_vecs(base),
+        interner.intern_all_vecs(ours),
+        interner.intern_all_vecs(theirs),
+    )
+}
+
+pub(crate) fn merge_myops_from_preinterned_ids(
+    old_ids: &[u32],
+    new_ids: &[u32],
+    need_min: bool,
+) -> Vec<similar::DiffOp> {
+    const INDENT_HEURISTIC: bool = false;
+    let (changed1, changed2) = xdiff_changed_flags_trimmed_preinterned(old_ids, new_ids, need_min);
+    let old_lines = merge_dummy_line_refs(old_ids.len());
+    let new_lines = merge_dummy_line_refs(new_ids.len());
+    diff_indent_heuristic::apply_change_compact_to_masks(
+        changed1,
+        changed2,
+        diff_indent_heuristic::CompactSide {
+            lines: &old_lines,
+            keys: &old_lines,
+            compare_ids: Some(old_ids),
+        },
+        diff_indent_heuristic::CompactSide {
+            lines: &new_lines,
+            keys: &new_lines,
+            compare_ids: Some(new_ids),
+        },
+        INDENT_HEURISTIC,
+    )
 }
 
 fn merge_dummy_line_refs(len: usize) -> Vec<&'static str> {
@@ -572,33 +626,17 @@ pub(crate) fn merge_file_compacted_line_ops(
     let algo = parse_merge_file_compact_algorithm(diff_algorithm);
     match algo {
         MergeFileCompactAlgorithm::Myers { need_min } => {
-            let ((changed1, changed2), old_key_ids, new_key_ids) =
+            let ((_, _), old_key_ids, new_key_ids) =
                 xdiff_changed_flags_trimmed_byte_ids(old_compare, new_compare, need_min);
-            let old_lines = merge_dummy_line_refs(old_compare.len());
-            let new_lines = merge_dummy_line_refs(new_compare.len());
-            diff_indent_heuristic::apply_change_compact_to_masks(
-                changed1,
-                changed2,
-                diff_indent_heuristic::CompactSide {
-                    lines: &old_lines,
-                    keys: &old_lines,
-                    compare_ids: Some(&old_key_ids),
-                },
-                diff_indent_heuristic::CompactSide {
-                    lines: &new_lines,
-                    keys: &new_lines,
-                    compare_ids: Some(&new_key_ids),
-                },
-                INDENT_HEURISTIC,
-            )
+            merge_myops_from_preinterned_ids(&old_key_ids, &new_key_ids, need_min)
         }
         MergeFileCompactAlgorithm::Histogram | MergeFileCompactAlgorithm::Patience => {
             let old_refs: Vec<&[u8]> = old_compare.iter().map(|line| line.as_slice()).collect();
             let new_refs: Vec<&[u8]> = new_compare.iter().map(|line| line.as_slice()).collect();
             let mut interner =
                 ByteLineInterner::with_capacity(old_compare.len() + new_compare.len());
-            let old_key_ids = interner.intern_all(old_compare);
-            let new_key_ids = interner.intern_all(new_compare);
+            let old_key_ids = interner.intern_all_vecs(old_compare);
+            let new_key_ids = interner.intern_all_vecs(new_compare);
             let histogram = matches!(algo, MergeFileCompactAlgorithm::Histogram);
             let (changed1, changed2) = if histogram {
                 histogram_changed_flags_bytes(&old_refs, &new_refs, |c1, c2, o0, o1, n0, n1| {
@@ -2498,8 +2536,8 @@ mod git_xdiff {
             return;
         }
         let mut interner = ByteLineInterner::with_capacity(old_slice.len() + new_slice.len());
-        let ids1: Vec<u32> = old_slice.iter().map(|line| interner.intern(line)).collect();
-        let ids2: Vec<u32> = new_slice.iter().map(|line| interner.intern(line)).collect();
+        let ids1 = interner.intern_all_bytes(old_slice);
+        let ids2 = interner.intern_all_bytes(new_slice);
         let (sub1, sub2) = changed_flags(&ids1, &ids2, false);
         for (i, ch) in sub1.iter().enumerate() {
             if *ch {

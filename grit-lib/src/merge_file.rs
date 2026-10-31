@@ -16,7 +16,9 @@
 //! Pure insertions (ops with empty old_range) are attached to the adjacent
 //! base position and emitted as OnlyOurs / OnlyTheirs hunks.
 
-use crate::diff::merge_file_compacted_line_ops;
+use crate::diff::{
+    intern_merge_compare_three_way, merge_file_compacted_line_ops, merge_myops_from_preinterned_ids,
+};
 use crate::error::Result;
 use similar::{DiffOp, DiffTag};
 
@@ -111,16 +113,38 @@ pub fn merge(input: &MergeInput<'_>) -> Result<MergeOutput> {
     let theirs_compare_lines = lines_for_merge_diff_compare(&theirs_lines, &ws_mode);
 
     let diff_algorithm = input.diff_algorithm.as_deref();
-    let ours_ops = merge_file_compacted_line_ops(
-        &base_compare_lines,
-        &ours_compare_lines,
-        diff_algorithm,
-    );
-    let theirs_ops = merge_file_compacted_line_ops(
-        &base_compare_lines,
-        &theirs_compare_lines,
-        diff_algorithm,
-    );
+    let (ours_ops, theirs_ops) = match diff_algorithm.map(str::to_lowercase).as_deref() {
+        None | Some("myers") => {
+            let (base_ids, ours_ids, theirs_ids) = intern_merge_compare_three_way(
+                &base_compare_lines,
+                &ours_compare_lines,
+                &theirs_compare_lines,
+            );
+            (
+                merge_myops_from_preinterned_ids(&base_ids, &ours_ids, false),
+                merge_myops_from_preinterned_ids(&base_ids, &theirs_ids, false),
+            )
+        }
+        Some("minimal") => {
+            let (base_ids, ours_ids, theirs_ids) = intern_merge_compare_three_way(
+                &base_compare_lines,
+                &ours_compare_lines,
+                &theirs_compare_lines,
+            );
+            (
+                merge_myops_from_preinterned_ids(&base_ids, &ours_ids, true),
+                merge_myops_from_preinterned_ids(&base_ids, &theirs_ids, true),
+            )
+        }
+        _ => (
+            merge_file_compacted_line_ops(&base_compare_lines, &ours_compare_lines, diff_algorithm),
+            merge_file_compacted_line_ops(
+                &base_compare_lines,
+                &theirs_compare_lines,
+                diff_algorithm,
+            ),
+        ),
+    };
 
     let mut insert_consumed = vec![false; base_lines.len() + 1];
     let mut hunks = compute_hunks(
@@ -1989,6 +2013,72 @@ mod tests {
         assert_eq!(out.conflicts, 0, "historical merge is clean for Git");
     }
 
+    fn repeated_anchor_histogram_fixture() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        let base_lines: Vec<String> = (0..80)
+            .map(|i| match i % 3 {
+                0 => "}".to_string(),
+                1 => String::new(),
+                _ => "\treturn ret;".to_string(),
+            })
+            .collect();
+        let base = base_lines
+            .iter()
+            .map(|l| format!("{l}\n"))
+            .collect::<String>()
+            .into_bytes();
+        let mut theirs_lines = base_lines.clone();
+        theirs_lines.drain(50..53);
+        let theirs = theirs_lines
+            .iter()
+            .map(|l| format!("{l}\n"))
+            .collect::<String>()
+            .into_bytes();
+        let mut ours_lines = base_lines;
+        for i in 0..11 {
+            ours_lines.insert(53 + i, format!("inserted {i}"));
+        }
+        let ours = ours_lines
+            .iter()
+            .map(|l| format!("{l}\n"))
+            .collect::<String>()
+            .into_bytes();
+        (base, ours, theirs)
+    }
+
+    #[test]
+    fn repeated_anchor_deletion_vs_insert_histogram_matches_git() {
+        let (base, ours, theirs) = repeated_anchor_histogram_fixture();
+        assert_merge_matches_git(
+            &base,
+            &ours,
+            &theirs,
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "repeated anchor myers",
+        );
+        let hist = merge(&MergeInput {
+            base: &base,
+            ours: &ours,
+            theirs: &theirs,
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: Some("histogram".into()),
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .unwrap();
+        assert_eq!(hist.conflicts, 0);
+        let git_out = git_merge_file_bytes(&base, &ours, &theirs, &[]);
+        assert_eq!(hist.content, git_out);
+    }
+
     #[test]
     fn merge_non_utf8_compare_keys_histogram_and_patience_match_git() {
         let base = b"\x80\n";
@@ -3010,16 +3100,10 @@ mod tests {
         let base_compare_lines = normalize_lines_for_compare(&base_lines, &ws_mode);
         let ours_compare_lines = normalize_lines_for_compare(&ours_lines, &ws_mode);
         let theirs_compare_lines = normalize_lines_for_compare(&theirs_lines, &ws_mode);
-        let ours_ops = merge_file_compacted_line_ops(
-            &base_compare_lines,
-            &ours_compare_lines,
-            None,
-        );
-        let theirs_ops = merge_file_compacted_line_ops(
-            &base_compare_lines,
-            &theirs_compare_lines,
-            None,
-        );
+        let ours_ops =
+            merge_file_compacted_line_ops(&base_compare_lines, &ours_compare_lines, None);
+        let theirs_ops =
+            merge_file_compacted_line_ops(&base_compare_lines, &theirs_compare_lines, None);
         let mut insert_consumed = vec![false; base_lines.len() + 1];
         let hunks = compute_hunks(
             &base_lines,
