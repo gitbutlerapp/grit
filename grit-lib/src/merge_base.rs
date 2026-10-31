@@ -5169,20 +5169,32 @@ mod tests {
     }
 
     fn write_range_skew_paint_fixture(repo: &Repository) -> Result<RangeSkewPaintFixture> {
+        const DAY: i64 = 86_400;
+        const DEEP_UNPAINTED: usize = 45;
         let odb = repo.odb();
-        let base = write_commit_same_time(odb, &[], "base", 100)?;
-        let skewed = write_commit_same_time(odb, &[base], "skewed ahead", 1_000)?;
-        let mid1 = write_commit_same_time(odb, &[skewed], "hide chain 1", 1_010)?;
-        let mid2 = write_commit_same_time(odb, &[mid1], "hide chain 2", 1_020)?;
-        let behind = write_commit_same_time(odb, &[mid2], "behind skewed", 150)?;
-        let held = write_commit_same_time(odb, &[behind], "held hide tip", 200)?;
+        let base = write_commit_same_time(odb, &[], "base", 10 * DAY)?;
+        let mut deep = base;
+        for i in 0..DEEP_UNPAINTED {
+            deep = write_commit_same_time(
+                odb,
+                &[deep],
+                &format!("deep unpainted {i}"),
+                11 * DAY + i as i64,
+            )?;
+        }
+        let skewed = write_commit_same_time(odb, &[base], "skewed ahead", 100 * DAY)?;
+        let mid1 = write_commit_same_time(odb, &[skewed], "hide chain 1", 100 * DAY + 600)?;
+        let mid2 = write_commit_same_time(odb, &[mid1, deep], "hide chain 2", 100 * DAY + 1_200)?;
+        // More than [`UNRANKED_SKEW_ALLOWANCE`] before `skewed` and the queued hide tip.
+        let behind = write_commit_same_time(odb, &[mid2], "behind skewed", 50 * DAY)?;
+        let held = write_commit_same_time(odb, &[behind], "held hide tip", 48 * DAY)?;
         let mut filler = base;
         for i in 0..10 {
-            filler = write_commit_same_time(odb, &[filler], &format!("filler {i}"), 500 + i)?;
+            filler = write_commit_same_time(odb, &[filler], &format!("filler {i}"), 60 * DAY + i)?;
         }
-        let side = write_commit_same_time(odb, &[base], "side work", 600)?;
-        let merge = write_commit_same_time(odb, &[side, skewed], "merge skewed in", 900)?;
-        let positive_tip = write_commit_same_time(odb, &[merge, filler], "positive tip", 950)?;
+        let side = write_commit_same_time(odb, &[base], "side work", 70 * DAY)?;
+        let merge = write_commit_same_time(odb, &[side, skewed], "merge skewed in", 90 * DAY)?;
+        let positive_tip = write_commit_same_time(odb, &[merge, filler], "positive tip", 95 * DAY)?;
         Ok(RangeSkewPaintFixture {
             positive_tip,
             hide: vec![held, filler, base],
