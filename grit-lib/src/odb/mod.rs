@@ -986,7 +986,7 @@ impl Odb {
     /// # Errors
     ///
     /// Propagates overlay iteration and [`Self::write_local`] failures.
-    pub fn persist_mem_overlay(&self) -> Result<()> {
+    pub(crate) fn persist_mem_overlay(&self) -> Result<()> {
         use std::ops::ControlFlow;
 
         let store = match self.overlay_store() {
@@ -1022,7 +1022,7 @@ impl Odb {
     /// # Errors
     ///
     /// Propagates overlay read and [`Self::write_local`] failures.
-    pub fn persist_mem_overlay_objects(
+    pub(crate) fn persist_mem_overlay_objects(
         &self,
         oids: impl IntoIterator<Item = ObjectId>,
     ) -> Result<()> {

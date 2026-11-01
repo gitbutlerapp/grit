@@ -25,7 +25,7 @@ fn object_loose(git_dir: &Path, hex: &str) -> std::path::PathBuf {
     git_dir.join(format!("objects/{}/{}", &hex[..2], &hex[2..]))
 }
 
-fn git_fsck_strict(worktree: &Path) {
+fn git_fsck_combined(worktree: &Path) -> (std::process::Output, String) {
     let out = Command::new("git")
         .current_dir(worktree)
         .args(["fsck", "--strict"])
@@ -38,6 +38,20 @@ fn git_fsck_strict(worktree: &Path) {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+    (out, combined)
+}
+
+fn git_fsck_strict_no_missing(worktree: &Path) {
+    let (out, combined) = git_fsck_combined(worktree);
+    assert!(out.status.success(), "git fsck --strict: {combined}");
+    assert!(
+        !combined.contains("missing blob"),
+        "missing blob:\n{combined}"
+    );
+}
+
+fn git_fsck_strict(worktree: &Path) {
+    let (out, combined) = git_fsck_combined(worktree);
     assert!(out.status.success(), "git fsck --strict: {combined}");
     assert!(
         !combined.contains("dangling tree"),
@@ -185,6 +199,10 @@ fn conflicted_merge_abort_leaves_no_dangling_empty_objects() {
     git_fsck_strict(root);
 }
 
+fn ten_line_auto_base() -> String {
+    (0..10).map(|i| format!("line{i}\n")).collect::<String>()
+}
+
 #[test]
 fn conflict_with_clean_auto_merge_keeps_stage0_blob_reachable() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -193,21 +211,34 @@ fn conflict_with_clean_auto_merge_keeps_stage0_blob_reachable() {
     git(root, &["config", "user.name", "A"]);
     git(root, &["config", "user.email", "a@x.test"]);
 
+    let auto_base = ten_line_auto_base();
     std::fs::write(root.join("conflict.txt"), "base\n").expect("write conflict");
-    std::fs::write(root.join("auto.txt"), "base auto\n").expect("write auto");
+    std::fs::write(root.join("auto.txt"), &auto_base).expect("write auto");
     git(root, &["add", "conflict.txt", "auto.txt"]);
     git(root, &["commit", "-m", "base"]);
     git(root, &["branch", "side"]);
     git(root, &["switch", "side"]);
     std::fs::write(root.join("conflict.txt"), "side\n").expect("write conflict");
-    std::fs::write(root.join("auto.txt"), "same auto\n").expect("write auto");
+    std::fs::write(
+        root.join("auto.txt"),
+        auto_base.replace("line2\n", "line2-side\n"),
+    )
+    .expect("write auto side");
     git(root, &["add", "conflict.txt", "auto.txt"]);
     git(root, &["commit", "-m", "side"]);
     git(root, &["switch", "main"]);
     std::fs::write(root.join("conflict.txt"), "main\n").expect("write conflict");
-    std::fs::write(root.join("auto.txt"), "same auto\n").expect("write auto");
+    std::fs::write(
+        root.join("auto.txt"),
+        auto_base.replace("line7\n", "line7-main\n"),
+    )
+    .expect("write auto main");
     git(root, &["add", "conflict.txt", "auto.txt"]);
     git(root, &["commit", "-m", "main"]);
+
+    let side_auto = git(root, &["rev-parse", "side:auto.txt"]).trim().to_owned();
+    let main_auto = git(root, &["rev-parse", "main:auto.txt"]).trim().to_owned();
+    assert_ne!(side_auto, main_auto);
 
     let git_dir = root.join(".git");
     let repo = open(root);
@@ -230,19 +261,17 @@ fn conflict_with_clean_auto_merge_keeps_stage0_blob_reachable() {
         .find(|e| e.stage() == 0 && e.path == b"auto.txt")
         .expect("stage-0 auto.txt after conflict merge");
     let auto_blob = auto_entry.oid.to_hex();
+    assert_ne!(auto_blob, side_auto);
+    assert_ne!(auto_blob, main_auto);
     assert!(
         object_loose(&git_dir, &auto_blob).exists(),
-        "auto-merged stage-0 blob must be stored on disk during conflict"
+        "new auto-merged stage-0 blob must be stored on disk during conflict"
     );
-    git_fsck_strict(root);
+    git_fsck_strict_no_missing(root);
 
     abort_branch_merge(&repo).expect("abort");
-    assert!(
-        object_loose(&git_dir, &auto_blob).exists(),
-        "auto-merged blob must remain after abort"
-    );
     assert_canonical_empty_objects_absent(&git_dir, EMPTY_BLOB_SHA1, EMPTY_TREE_SHA1);
-    git_fsck_strict(root);
+    git_fsck_strict_no_missing(root);
 }
 
 #[test]
