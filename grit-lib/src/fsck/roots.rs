@@ -19,6 +19,7 @@ use std::sync::Arc;
 /// all reflog `old`/`new` oids from the repository ref store (including an injected
 /// backend), plus linked-worktree admin-dir reflogs on disk,
 /// every non-bare worktree index (main and linked, including prunable entries),
+/// the `GIT_INDEX_FILE` index when set (in addition to each worktree's own index),
 /// and the stash ref when present.
 ///
 /// # Errors
@@ -67,6 +68,7 @@ pub fn reachability_roots(repo: &Repository) -> Result<Vec<ObjectId>> {
         let index = load_index_for_reachability(repo, wt)?;
         collect_index_object_roots(&index, &mut roots);
     }
+    collect_git_index_file_roots(repo, &mut roots)?;
 
     Ok(roots.into_iter().collect())
 }
@@ -87,14 +89,21 @@ pub fn index_object_roots(repo: &Repository) -> Result<HashSet<ObjectId>> {
         let index = load_index_for_reachability(repo, &wt)?;
         collect_index_object_roots(&index, &mut out);
     }
+    collect_git_index_file_roots(repo, &mut out)?;
     Ok(out)
 }
 
 fn load_index_for_reachability(repo: &Repository, wt: &WorktreeEntry) -> Result<Index> {
-    if wt.is_current {
-        return repo.load_index();
-    }
     load_linked_worktree_index(repo, &wt.admin_dir)
+}
+
+fn collect_git_index_file_roots(repo: &Repository, out: &mut HashSet<ObjectId>) -> Result<()> {
+    if repo.environment().git_index_file.is_none() {
+        return Ok(());
+    }
+    let index = repo.load_index()?;
+    collect_index_object_roots(&index, out);
+    Ok(())
 }
 
 fn load_linked_worktree_index(repo: &Repository, admin_dir: &Path) -> Result<Index> {

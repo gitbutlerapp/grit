@@ -157,15 +157,21 @@ pub(crate) fn prune_loose_unreachable_with(
     Ok(stats)
 }
 
-/// Object ids named directly by refs (any kind), used as roots for [`prune_loose_unreachable`].
+/// Ref tips and symbolic-`HEAD`-less detached oids only — not a safe root set for prune.
 ///
-/// Includes annotated tag objects, blob/tree tips, and detached-HEAD oids. Does not peel tags to
-/// commits only — the reachability walk expands each root through the object graph.
+/// Includes annotated tag objects, blob/tree tips, and detached-HEAD oids when `HEAD` is not
+/// symbolic. Does not walk reflogs, indexes, stash, or linked worktrees. Embedders pruning loose
+/// objects should use [`crate::maintenance::collect_maintenance_object_roots`] and
+/// [`crate::maintenance::prune_loose_objects`] instead; pass extra roots to
+/// [`prune_loose_unreachable`] only when unioning with that set (for example Jujutsu).
+///
+/// Pack bitmap generation uses this narrower set so unreachable blobs staged only in an index do
+/// not inflate the bitmap.
 ///
 /// # Errors
 ///
 /// Propagates ref listing or HEAD read failures.
-pub fn collect_referenced_object_roots(git_dir: &Path) -> Result<Vec<ObjectId>> {
+pub(crate) fn collect_referenced_object_roots(git_dir: &Path) -> Result<Vec<ObjectId>> {
     let mut roots = HashSet::new();
     for (_, oid) in refs::list_refs(git_dir, "refs/")? {
         roots.insert(oid);

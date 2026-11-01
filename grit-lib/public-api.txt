@@ -19399,7 +19399,6 @@ impl core::marker::Unpin for grit_lib::refs::gc::RefTransactionItem
 impl core::marker::UnsafeUnpin for grit_lib::refs::gc::RefTransactionItem
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::gc::RefTransactionItem
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::gc::RefTransactionItem
-pub fn grit_lib::refs::gc::collect_referenced_object_roots(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::refs::gc::prune_loose_unreachable(&grit_lib::objects::odb::Odb, &[grit_lib::objects::ObjectId], core::option::Option<std::time::SystemTime>) -> grit_lib::error::Result<grit_lib::refs::gc::PruneStats>
 pub fn grit_lib::refs::gc::prune_loose_unreachable_with_dry_run(&grit_lib::objects::odb::Odb, &[grit_lib::objects::ObjectId], core::option::Option<std::time::SystemTime>, bool) -> grit_lib::error::Result<grit_lib::refs::gc::PruneStats>
 pub fn grit_lib::refs::gc::remote_default_branch_local(&std::path::Path) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>

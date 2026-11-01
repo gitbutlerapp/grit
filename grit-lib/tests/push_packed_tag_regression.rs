@@ -5,7 +5,6 @@
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::gc::collect_referenced_object_roots;
 use grit_lib::refs::list_refs;
 use grit_lib::remote::push_plan::{
     follow_tag_push_specs, resolve_push, PushPlanContext, PushRequest,
@@ -78,9 +77,6 @@ fn packed_annotated_tags_push_is_up_to_date_and_preserves_remote_tag() {
         .filter(|(name, _)| name == "refs/tags/v1")
         .collect();
     assert_eq!(listed, vec![("refs/tags/v1".to_owned(), tag_oid)]);
-
-    let roots = collect_referenced_object_roots(&local.join(".git")).expect("roots");
-    assert!(roots.contains(&tag_oid));
 
     let repo = open_repo(&local);
     let config = load_config(&repo);
