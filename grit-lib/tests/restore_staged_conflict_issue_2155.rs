@@ -126,11 +126,11 @@ fn staged_only(pathspec: &str) -> RestoreOptions {
 
 fn commit_req() -> CommitRequest {
     let id = "T <t@e.test> 1700000000 +0000";
-    CommitRequest {
-        message: "after".to_owned(),
-        author: Some(id.parse().expect("signature")),
-        committer: Some(id.parse().expect("signature")),
-        ..Default::default()
+    {
+        let mut req = CommitRequest::new("after".to_owned());
+        req.author = Some(id.parse().expect("signature"));
+        req.committer = Some(id.parse().expect("signature"));
+        req
     }
 }
 

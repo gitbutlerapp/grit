@@ -65,11 +65,11 @@ fn process_options(dir: &Path) -> RepositoryOptions {
 
 fn commit_second(repo: &Repository) -> grit_lib::error::Result<grit_lib::objects::ObjectId> {
     let id = "T <t@e.x> 1700000000 +0000".to_string();
-    let req = CommitRequest {
-        message: "second".into(),
-        author: Some(id.parse().expect("signature")),
-        committer: Some(id.parse().expect("signature")),
-        ..Default::default()
+    let req = {
+        let mut req = CommitRequest::new("second");
+        req.author = Some(id.parse().expect("signature"));
+        req.committer = Some(id.parse().expect("signature"));
+        req
     };
     commit_worktree(
         repo,

@@ -44,11 +44,9 @@ fn empty_repo(tmp: &Path, name: &str) -> PathBuf {
 }
 
 fn grit_fetch(local: &Path, up: &Path, spec: &str) -> FetchOutcome {
-    let opts = FetchOptions {
-        refspecs: vec![spec.to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec![spec.to_owned()];
+    opts.tags = TagMode::Following;
     fetch_local(&local.join(".git"), &up.join(".git"), &opts).expect("grit fetch")
 }
 
@@ -193,11 +191,9 @@ fn ssh_fetch(
     let mut conn = transport
         .connect(&url, Service::UploadPack, &connect_opts)
         .expect("connect");
-    let mut opts = FetchOptions {
-        refspecs: vec![spec.to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec![spec.to_owned()];
+    opts.tags = TagMode::Following;
     fetch_remote(
         &local.join(".git"),
         conn.as_mut(),

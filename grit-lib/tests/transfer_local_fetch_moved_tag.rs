@@ -8,6 +8,13 @@ use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode, UpdateMode};
 use grit_test_support::git;
 
+fn following_remote_heads() -> FetchOptions {
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::Following;
+    opts
+}
+
 #[test]
 fn fetch_local_following_ignores_moved_tag_without_force() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -25,11 +32,7 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
     let local_git = local.join(".git");
     let remote_git = remote.join(".git");
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
-    };
+    let opts = following_remote_heads();
     fetch_local(&local_git, &remote_git, &opts).expect("initial fetch");
 
     let tag_before = resolve_ref(&local_git, "refs/tags/newtag").expect("tag after first fetch");
@@ -95,11 +98,7 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
     let local_git = local.join(".git");
     let remote_git = remote.join(".git");
 
-    let base = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
-    };
+    let base = following_remote_heads();
     fetch_local(&local_git, &remote_git, &base).expect("seed");
 
     let tag_before = resolve_ref(&local_git, "refs/tags/newtag").unwrap();
@@ -109,10 +108,8 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
     git(&remote, &["tag", "-f", "newtag"]);
     let tag_after = rev_parse(&remote, "refs/tags/newtag");
 
-    let all_tags = FetchOptions {
-        tags: TagMode::All,
-        ..base.clone()
-    };
+    let mut all_tags = base.clone();
+    all_tags.tags = TagMode::All;
     let rejected = fetch_local(&local_git, &remote_git, &all_tags).expect("fetch --tags");
     assert!(rejected.has_rejections());
     let tag_update = rejected
@@ -126,10 +123,8 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
         tag_before
     );
 
-    let forced = FetchOptions {
-        force: true,
-        ..all_tags
-    };
+    let mut forced = all_tags;
+    forced.force = true;
     let applied = fetch_local(&local_git, &remote_git, &forced).expect("fetch --tags --force");
     assert!(!applied.has_rejections());
     assert_eq!(

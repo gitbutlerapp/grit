@@ -488,7 +488,7 @@ fn uncommitted_commit_info_carries_the_given_time() {
     let hunks = result.hunks();
     assert!(hunks[0].commit.is_zero() && hunks[0].not_committed);
     assert_eq!((hunks[0].final_start, hunks[0].count), (1, 1));
-    assert!(hunks[0].lines(&result)[0].not_committed);
+    assert!(result.hunk_lines(&hunks[0])[0].not_committed);
     assert!(!hunks[1].not_committed);
 }
 

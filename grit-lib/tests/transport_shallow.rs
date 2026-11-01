@@ -154,11 +154,9 @@ fn shallow_depth1_over_daemon(protocol_version: u8) {
         }
     };
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        fetch_depth: FetchDepth::depth(1),
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+    opts.fetch_depth = FetchDepth::depth(1);
     let outcome = fetch_remote(
         &local_git,
         &mut *conn,
@@ -332,11 +330,9 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
             return;
         }
     };
-    let mut shallow_opts = FetchOptions {
-        refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        fetch_depth: FetchDepth::depth(1),
-        ..Default::default()
-    };
+    let mut shallow_opts = FetchOptions::new();
+    shallow_opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+    shallow_opts.fetch_depth = FetchDepth::depth(1);
     fetch_remote(
         &local_git,
         &mut *conn,
@@ -367,11 +363,9 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
             return;
         }
     };
-    let mut unshallow_opts = FetchOptions {
-        refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        fetch_depth: Some(FetchDepth::Unshallow),
-        ..Default::default()
-    };
+    let mut unshallow_opts = FetchOptions::new();
+    unshallow_opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+    unshallow_opts.fetch_depth = Some(FetchDepth::Unshallow);
     let outcome = fetch_remote(
         &local_git,
         &mut *conn,

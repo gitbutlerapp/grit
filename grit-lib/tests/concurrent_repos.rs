@@ -208,15 +208,15 @@ fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
         let ident = format!("{} <{}@example.com> 1 +0000", fx.author, fx.author);
         create_commit(
             &repo,
-            &CommitRequest {
-                message: format!("commit {i}"),
-                author: Some(ident.parse().expect("signature")),
-                committer: Some(ident.parse().expect("signature")),
-                allow_empty: false,
-                sign_override: None,
-                amend: false,
-                assume_worktree_synced: false,
-                ..Default::default()
+            &{
+                let mut req = CommitRequest::new(format!("commit {i}"));
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
             },
             &mut NullProgress,
             &NeverCancel,
@@ -422,15 +422,15 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
         let ident = Signature::new(name, email, repo.identity_now()).expect("signature");
         create_commit(
             &repo,
-            &CommitRequest {
-                message: "seed".into(),
-                author: Some(ident.clone()),
-                committer: Some(ident),
-                allow_empty: false,
-                sign_override: None,
-                amend: false,
-                assume_worktree_synced: false,
-                ..Default::default()
+            &{
+                let mut req = CommitRequest::new("seed");
+                req.author = Some(ident.clone());
+                req.committer = Some(ident);
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
             },
             &mut NullProgress,
             &NeverCancel,
@@ -483,16 +483,10 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
         );
         let cfg = repo.config().expect("config");
         let email = cfg.get("user.email").unwrap_or_default();
-        fetch_local(
-            repo.git_dir(),
-            upstream,
-            &FetchOptions {
-                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-                tags: TagMode::None,
-                ..Default::default()
-            },
-        )
-        .expect("fetch");
+        let mut fetch_opts = FetchOptions::new();
+        fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+        fetch_opts.tags = TagMode::None;
+        fetch_local(repo.git_dir(), upstream, &fetch_opts).expect("fetch");
         let main_ref = format!("refs/remotes/origin/{default_branch}");
         let main_tip = grit_lib::refs::resolve_ref(repo.git_dir(), &main_ref).expect("main tip");
         let topic_tip = grit_lib::refs::resolve_ref(repo.git_dir(), "refs/remotes/origin/topic")

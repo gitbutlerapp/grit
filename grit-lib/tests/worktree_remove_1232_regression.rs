@@ -40,23 +40,23 @@ fn open_grit_inherited_autocrlf(root: &Path, system_cfg: &Path) -> Repository {
 }
 
 fn commit_request(message: &str) -> CommitRequest {
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(
+    {
+        let mut req = CommitRequest::new(message.to_owned());
+        req.author = Some(
             "Test <t@example.com> 1000000000 +0000"
                 .parse()
                 .expect("signature"),
-        ),
-        committer: Some(
+        );
+        req.committer = Some(
             "Test <t@example.com> 1000000000 +0000"
                 .parse()
                 .expect("signature"),
-        ),
-        allow_empty: false,
-        sign_override: None,
-        amend: false,
-        assume_worktree_synced: false,
-        ..Default::default()
+        );
+        req.allow_empty = false;
+        req.sign_override = None;
+        req.amend = false;
+        req.assume_worktree_synced = false;
+        req
     }
 }
 

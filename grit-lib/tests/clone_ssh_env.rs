@@ -238,19 +238,12 @@ fn fetch_honors_core_ssh_command_when_env_unset() {
     .unwrap();
 
     let remote = Remote::from_config(&repo.config().unwrap(), "origin").unwrap();
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    fetch_opts.tags = TagMode::Following;
+    fetch_opts.environment = Environment::empty();
     remote
-        .fetch(
-            &repo,
-            FetchOptions {
-                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-                tags: TagMode::Following,
-                environment: Environment::empty(),
-                ..Default::default()
-            },
-            &mut NoProgress,
-            &NeverCancel,
-            None,
-        )
+        .fetch(&repo, fetch_opts, &mut NoProgress, &NeverCancel, None)
         .expect("fetch");
 
     let calls = std::fs::read_to_string(&log).expect("log");

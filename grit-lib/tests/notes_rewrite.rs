@@ -322,14 +322,14 @@ fn amend_copies_note_when_post_rewrite_runs() {
     let repo = open_grit(dir.path());
     std::fs::write(dir.path().join("f"), "2\n").expect("write");
     git_cmd(dir.path(), &["add", "f"]);
-    let request = CommitRequest {
-        message: "init amended".into(),
-        author: Some(IDENT.parse().expect("signature")),
-        committer: Some(IDENT.parse().expect("signature")),
-        amend: true,
-        allow_empty: true,
-        post_rewrite: PostOperationHooks::Run,
-        ..Default::default()
+    let request = {
+        let mut req = CommitRequest::new("init amended");
+        req.author = Some(IDENT.parse().expect("signature"));
+        req.committer = Some(IDENT.parse().expect("signature"));
+        req.amend = true;
+        req.allow_empty = true;
+        req.post_rewrite = PostOperationHooks::Run;
+        req
     };
     let outcome = create_commit(
         &repo,

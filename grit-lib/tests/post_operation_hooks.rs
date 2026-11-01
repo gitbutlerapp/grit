@@ -571,13 +571,13 @@ fn conflicted_no_commit_or_skipped_merge_runs_no_post_merge() {
 }
 
 fn commit_request(message: &str, amend: bool) -> CommitRequest {
-    CommitRequest {
-        message: message.into(),
-        author: Some(IDENT.parse().expect("signature")),
-        committer: Some(IDENT.parse().expect("signature")),
-        amend,
-        allow_empty: true,
-        ..Default::default()
+    {
+        let mut req = CommitRequest::new(message);
+        req.author = Some(IDENT.parse().expect("signature"));
+        req.committer = Some(IDENT.parse().expect("signature"));
+        req.amend = amend;
+        req.allow_empty = true;
+        req
     }
 }
 
@@ -625,10 +625,8 @@ fn amend_without_post_rewrite_runs_only_post_commit() {
     fx.commit("f", "1\n", "c1");
     let repo = fx.repo();
 
-    let request = CommitRequest {
-        post_rewrite: PostOperationHooks::Skip,
-        ..commit_request("amended", true)
-    };
+    let mut request = commit_request("amended", true);
+    request.post_rewrite = PostOperationHooks::Skip;
     let outcome = create_commit(
         &repo,
         &request,

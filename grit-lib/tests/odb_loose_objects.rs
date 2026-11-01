@@ -8,9 +8,9 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use grit_lib::config::environment::Environment;
 use grit_lib::error::Error;
+use grit_lib::objects::odb::store::loose::read_loose_object_info;
 use grit_lib::objects::odb::{
-    hash_algo_for_git_dir, hash_algo_for_objects_dir, read_loose_object_info, Odb, WriteOptions,
-    BULK_NEW_LOOSE_WRITE,
+    hash_algo_for_git_dir, hash_algo_for_objects_dir, Odb, WriteOptions, BULK_NEW_LOOSE_WRITE,
 };
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_test_support::objects::{
@@ -248,7 +248,7 @@ fn assert_corrupt_loose(err: Error, oid: &ObjectId, path: &std::path::Path) {
             assert_eq!(got_oid, *oid);
             assert_eq!(got_path, path);
             assert!(
-                matches!(*source, Error::Zlib(_) | Error::CorruptObject(_)),
+                matches!(source.as_ref(), Error::Zlib(_) | Error::CorruptObject(_)),
                 "source: {source:?}"
             );
         }

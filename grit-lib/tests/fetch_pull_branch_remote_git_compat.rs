@@ -108,18 +108,11 @@ fn fetch_without_remote_updates_branch_remote_tracking_ref_like_git() {
     assert_eq!(invocation.remote, "backup");
 
     let remote = resolve_remote_argument(config.as_ref(), &invocation.remote).expect("remote");
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.refspecs = invocation.user_refspecs;
+    fetch_opts.environment = Environment::empty();
     remote
-        .fetch(
-            &repo,
-            FetchOptions {
-                refspecs: invocation.user_refspecs,
-                environment: Environment::empty(),
-                ..Default::default()
-            },
-            &mut NoProgress,
-            &NeverCancel,
-            None,
-        )
+        .fetch(&repo, fetch_opts, &mut NoProgress, &NeverCancel, None)
         .expect("fetch");
     assert_eq!(rev(&grit_dir, "refs/remotes/backup/main"), tip);
     assert_eq!(rev(&grit_dir, "refs/remotes/origin/main"), origin_before);

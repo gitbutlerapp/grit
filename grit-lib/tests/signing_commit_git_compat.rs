@@ -88,15 +88,15 @@ fn create_commit_ssh_signs_when_gpgsign_true() {
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "grit signed".to_owned(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("grit signed".to_owned());
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,
@@ -182,15 +182,15 @@ fn amend_unsigned_drops_signed_tip_signature() {
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "signed tip".to_owned(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("signed tip".to_owned());
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,
@@ -202,15 +202,15 @@ fn amend_unsigned_drops_signed_tip_signature() {
 
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "signed tip amended".to_owned(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: Some(false),
-            amend: true,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("signed tip amended".to_owned());
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = Some(false);
+            req.amend = true;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,
@@ -282,15 +282,15 @@ fn amend_resigns_with_single_fresh_signature() {
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "signed tip".to_owned(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("signed tip".to_owned());
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,
@@ -307,15 +307,15 @@ fn amend_resigns_with_single_fresh_signature() {
     .expect("stage");
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "signed amend".to_owned(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: true,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("signed amend".to_owned());
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = None;
+            req.amend = true;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,

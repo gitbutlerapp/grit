@@ -35,17 +35,11 @@ fn fetch_literal_path_leaves_origin_tracking_refs_unchanged() {
     let origin_before = origin_tip(&clone);
     let o1_main = resolve_ref(&o1.join(".git"), "refs/heads/main").expect("o1 main");
 
-    fetch_local(
-        &local_git,
-        &o2.join(".git"),
-        &FetchOptions {
-            refspecs: vec![Remote::ANONYMOUS_FETCH_REFSPEC.to_owned()],
-            tags: TagMode::None,
-            fetch_source: Some(o2.to_str().unwrap().to_owned()),
-            ..Default::default()
-        },
-    )
-    .expect("fetch o2");
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.refspecs = vec![Remote::ANONYMOUS_FETCH_REFSPEC.to_owned()];
+    fetch_opts.tags = TagMode::None;
+    fetch_opts.fetch_source = Some(o2.to_str().unwrap().to_owned());
+    fetch_local(&local_git, &o2.join(".git"), &fetch_opts).expect("fetch o2");
 
     assert_eq!(origin_tip(&clone), origin_before);
     assert_eq!(origin_tip(&clone), o1_main);
@@ -116,17 +110,11 @@ fn explicit_url_refspec_fetch_head_records_fetched_branch_not_default() {
     let local_git = clone.join(".git");
     let o2_path = o2.to_str().unwrap();
 
-    fetch_local(
-        &local_git,
-        &o2.join(".git"),
-        &FetchOptions {
-            refspecs: vec![format!("refs/heads/otherbr:refs/remotes/foreign/otherbr")],
-            tags: TagMode::None,
-            fetch_source: Some(o2_path.to_owned()),
-            ..Default::default()
-        },
-    )
-    .expect("fetch otherbr");
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.refspecs = vec![format!("refs/heads/otherbr:refs/remotes/foreign/otherbr")];
+    fetch_opts.tags = TagMode::None;
+    fetch_opts.fetch_source = Some(o2_path.to_owned());
+    fetch_local(&local_git, &o2.join(".git"), &fetch_opts).expect("fetch otherbr");
 
     let other_tip = resolve_ref(&o2.join(".git"), "refs/heads/otherbr").expect("otherbr tip");
     let main_tip = resolve_ref(&o2.join(".git"), "refs/heads/main").expect("main tip");

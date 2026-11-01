@@ -455,15 +455,15 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
         let ident = "Test <t@example.com> 1 +0000".to_string();
         let out = create_commit(
             repo,
-            &CommitRequest {
-                message: message.to_owned(),
-                author: Some(ident.parse().expect("signature")),
-                committer: Some(ident.parse().expect("signature")),
-                allow_empty: false,
-                sign_override: None,
-                amend: false,
-                assume_worktree_synced: false,
-                ..Default::default()
+            &{
+                let mut req = CommitRequest::new(message.to_owned());
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
             },
             &mut NullProgress,
             &grit_lib::progress::NeverCancel,

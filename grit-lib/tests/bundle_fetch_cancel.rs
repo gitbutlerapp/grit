@@ -37,11 +37,9 @@ fn bundle_fetch_returns_cancelled_when_signalled_before_unbundle() {
     let flag = FlagCancel::new();
     flag.cancel();
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::Following;
     let err =
         fetch_from_bundle_with_progress(&dest.join(".git"), &bundle, &opts, &mut NoProgress, &flag)
             .expect_err("cancelled before bundle ingest");

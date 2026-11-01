@@ -82,10 +82,7 @@ fn ignorecase_unrelated_commit_preserves_dual_case_dirs_on_sensitive_volume() {
     stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
     commit_worktree(
         &repo,
-        &CommitRequest {
-            message: "unrelated".to_owned(),
-            ..CommitRequest::default()
-        },
+        &CommitRequest::new("unrelated"),
         &mut NullProgress,
         &NeverCancel,
     )
@@ -261,10 +258,7 @@ fn ignorecase_commit_keeps_index_spelling_on_folding_volume() {
     stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
     commit_worktree(
         &repo,
-        &CommitRequest {
-            message: "two".to_owned(),
-            ..CommitRequest::default()
-        },
+        &CommitRequest::new("two"),
         &mut NullProgress,
         &NeverCancel,
     )

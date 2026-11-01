@@ -371,11 +371,9 @@ fn sha256_fetch_over_git_daemon_v2() {
         conn.capabilities()
     );
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::All;
     let outcome = fetch_remote(
         &local_git,
         &mut *conn,
@@ -546,11 +544,9 @@ fn sha256_fetch_over_smart_http() {
 
     // 2. Fetch via http_fetch.
     let client = http_client_arc(UreqHttpClient::new());
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::All;
     let outcome = http_fetch(client.clone(), &local_git, &url, &mut opts, &mut NoProgress)
         .expect("sha256 http_fetch over grit-http-server");
 

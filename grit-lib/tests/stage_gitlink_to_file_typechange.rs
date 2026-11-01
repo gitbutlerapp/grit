@@ -78,11 +78,11 @@ fn stage_and_commit(repo: &Repository) {
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
     commit_with_scope(
         repo,
-        &CommitRequest {
-            message: "replace with file".to_owned(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("replace with file".to_owned());
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req
         },
         CommitScope::Staged,
         &mut NullProgress,

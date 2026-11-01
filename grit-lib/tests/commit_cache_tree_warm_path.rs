@@ -87,7 +87,7 @@ fn noop_tracked_restage_preserves_cache_tree_at_campaign_scale() {
 
 fn commit_worktree_req(message: &str, allow_empty: bool) -> CommitRequest {
     let mut req = CommitRequest::new(message);
-    let sig = ident().parse().expect("signature");
+    let sig: grit_lib::ident::Signature = ident().parse().expect("signature");
     req.author = Some(sig.clone());
     req.committer = Some(sig);
     req.allow_empty = allow_empty;

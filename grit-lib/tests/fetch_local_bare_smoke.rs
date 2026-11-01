@@ -25,10 +25,8 @@ fn fetch_local_from_bare_remote_with_loose_objects_only() {
     std::fs::create_dir_all(&consumer).unwrap();
     grit_test_support::git(&consumer, &["init", "-q", "-b", "main", "."]);
     let local_git = consumer.join(".git");
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     fetch_local(&local_git, &bare, &opts).expect("fetch from bare remote");
     resolve_ref(&local_git, "refs/remotes/origin/main").expect("tracking ref");
 }

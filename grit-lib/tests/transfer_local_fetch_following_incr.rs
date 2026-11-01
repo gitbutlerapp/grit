@@ -23,11 +23,9 @@ fn fetch_local_incremental_following_imports_reachable_tag() {
     let local_git = local.join(".git");
     let remote_git = remote.join(".git");
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::Following;
     fetch_local(&local_git, &remote_git, &opts).expect("initial fetch");
 
     std::fs::write(remote.join("next.txt"), b"second\n").unwrap();
@@ -96,11 +94,9 @@ fn fetch_local_incremental_following_with_existing_tags_matches_git() {
         git(dir, &["init", "-q", "-b", "main", "."]);
     }
     let local_git = local.join(".git");
-    let opts = FetchOptions {
-        refspecs: vec![refspec.to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec![refspec.to_owned()];
+    opts.tags = TagMode::Following;
     fetch_local(&local_git, &remote_git, &opts).expect("initial fetch");
     git(&reference, &["fetch", "-q", remote_url, refspec]);
     let moving_before = rev_parse(&local, "refs/tags/moving");
@@ -170,11 +166,9 @@ fn fetch_local_incremental_following_imports_lightweight_tag_on_existing_tip() {
     let local_git = local.join(".git");
     let remote_git = remote.join(".git");
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+    opts.tags = TagMode::Following;
     fetch_local(&local_git, &remote_git, &opts).expect("initial fetch");
 
     git(&remote, &["tag", "lightweight-on-existing-tip"]);

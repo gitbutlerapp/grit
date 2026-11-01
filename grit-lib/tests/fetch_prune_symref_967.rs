@@ -123,13 +123,11 @@ fn fetch_local_prune_slash_remote_name_no_phantom_head_delete() {
     let tmp = tempfile::tempdir().unwrap();
     let (local_git, remote_git) = setup_slash_remote_layout(tmp.path());
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/team/origin/*".to_owned()],
-        remote_name: Some("team/origin".to_owned()),
-        tags: TagMode::Following,
-        prune: true,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/team/origin/*".to_owned()];
+    opts.remote_name = Some("team/origin".to_owned());
+    opts.tags = TagMode::Following;
+    opts.prune = true;
     for pass in 1..=2 {
         let outcome = fetch_local(&local_git, &remote_git, &opts).expect("fetch");
         let noisy: Vec<_> = outcome
@@ -153,12 +151,10 @@ fn fetch_local_prune_twice_reports_no_updates_when_up_to_date() {
     let tmp = tempfile::tempdir().unwrap();
     let (local_git, remote_git, _) = setup_clone_like_layout(tmp.path());
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        prune: true,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::Following;
+    opts.prune = true;
     let first = fetch_local(&local_git, &remote_git, &opts).expect("first fetch");
     let noisy: Vec<_> = first
         .updates

@@ -357,11 +357,9 @@ fn v2_clone_from_scratch_no_haves_and_not_v0() {
     assert_eq!(conn.protocol_version(), 2, "expected v2 negotiation");
     assert!(conn.advertised_refs().is_empty(), "v2 advertises no refs");
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::None;
     fetch_remote(
         &local_git,
         &mut *conn,
@@ -451,11 +449,9 @@ fn v2_incremental_offers_haves_and_pack_is_minimal() {
             }
         };
         assert_eq!(conn.protocol_version(), 2);
-        let mut opts = FetchOptions {
-            refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-            tags: TagMode::None,
-            ..Default::default()
-        };
+        let mut opts = FetchOptions::new();
+        opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+        opts.tags = TagMode::None;
         fetch_remote(
             &local_git,
             &mut *conn,
@@ -508,11 +504,9 @@ fn v2_incremental_offers_haves_and_pack_is_minimal() {
     let mut conn = TeeConn::new(raw_conn);
     let captured = conn.captured();
     assert_eq!(conn.protocol_version(), 2);
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+    opts.tags = TagMode::None;
     fetch_remote(
         &local_git,
         &mut conn,
@@ -599,11 +593,9 @@ fn v2_unborn_remote_is_empty_and_does_not_hang() {
     };
     assert_eq!(conn.protocol_version(), 2);
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::All;
 
     // This must return PROMPTLY. The v2 server runs a persistent serve_loop; if
     // `finish_send` regressed (write side never closed), an ls-refs-only fetch
@@ -701,12 +693,10 @@ fn v2_tag_modes_all_and_following() {
             }
         };
         assert_eq!(conn.protocol_version(), 2);
-        let mut opts = FetchOptions {
-            // Only fetch main; tags come via TagMode.
-            refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-            tags: TagMode::All,
-            ..Default::default()
-        };
+        let mut opts = FetchOptions::new();
+        // Only fetch main; tags come via TagMode.
+        opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+        opts.tags = TagMode::All;
         fetch_remote(
             &local_git,
             &mut *conn,
@@ -741,11 +731,9 @@ fn v2_tag_modes_all_and_following() {
             .connect(&srv.url, Service::UploadPack, &opts_v2)
             .expect("connect follow");
         assert_eq!(conn.protocol_version(), 2);
-        let mut opts = FetchOptions {
-            refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-            tags: TagMode::Following,
-            ..Default::default()
-        };
+        let mut opts = FetchOptions::new();
+        opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+        opts.tags = TagMode::Following;
         fetch_remote(
             &local_git,
             &mut *conn,
@@ -810,11 +798,9 @@ fn v2_ref_prefix_filtering_excludes_tags() {
     assert_eq!(conn.protocol_version(), 2);
 
     // Heads only, NO tag following -> ls-refs must only ask for HEAD + refs/heads/.
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::None;
     let outcome = fetch_remote(
         &local_git,
         &mut *conn,
@@ -948,11 +934,9 @@ fn v2_sha256_fetch_lands_refs_and_objects() {
         conn.capabilities()
     );
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::All;
     let outcome = fetch_remote(
         &local_git,
         &mut *conn,

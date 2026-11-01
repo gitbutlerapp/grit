@@ -77,11 +77,10 @@ fn setup_tracked_pair(tag: &str) -> (PathBuf, PathBuf) {
 }
 
 fn fetch_opts(env: &Environment) -> FetchOptions {
-    FetchOptions {
-        tags: TagMode::Following,
-        environment: env.clone(),
-        ..Default::default()
-    }
+    let mut opts = FetchOptions::new();
+    opts.tags = TagMode::Following;
+    opts.environment = env.clone();
+    opts
 }
 
 fn pull_rebase_grit(repo: &Repository) -> grit_lib::porcelain::pull::PullOutcome {
