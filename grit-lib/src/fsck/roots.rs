@@ -135,13 +135,18 @@ fn collect_index_object_roots(index: &Index, out: &mut HashSet<ObjectId>) {
     }
 }
 
+/// Whether a resolve-undo stage mode names a blob in this object database (Git `S_ISREG`).
+fn is_reg_resolve_undo_mode(mode: u32) -> bool {
+    mode != 0 && (mode & 0o170000) == 0o100000
+}
+
 fn collect_resolve_undo_oids(
     undo: &std::collections::BTreeMap<Vec<u8>, ResolveUndoRecord>,
     out: &mut HashSet<ObjectId>,
 ) {
     for record in undo.values() {
         for i in 0..3 {
-            if record.modes[i] != 0 && !record.oids[i].is_zero() {
+            if is_reg_resolve_undo_mode(record.modes[i]) && !record.oids[i].is_zero() {
                 out.insert(record.oids[i]);
             }
         }
@@ -353,6 +358,77 @@ mod tests {
             "git fsck: {}",
             String::from_utf8_lossy(&fsck.stderr)
         );
+    }
+
+    #[test]
+    fn prune_succeeds_with_gitlink_resolve_undo_from_index_info() {
+        use std::io::Write;
+
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .output()
+                .expect("git");
+            assert!(
+                out.status.success(),
+                "git {}: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["commit", "--allow-empty", "-qm", "base"]);
+        let index_info = "160000 1111111111111111111111111111111111111111 1\tsub\n\
+                          160000 2222222222222222222222222222222222222222 2\tsub\n\
+                          160000 3333333333333333333333333333333333333333 3\tsub\n";
+        let mut child = Command::new("git")
+            .current_dir(root)
+            .args(["update-index", "--index-info"])
+            .stdin(std::process::Stdio::piped())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .spawn()
+            .expect("spawn index-info");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(index_info.as_bytes())
+            .expect("write index-info");
+        assert!(
+            child.wait().expect("wait").success(),
+            "git update-index --index-info failed"
+        );
+        git(&[
+            "update-index",
+            "--cacheinfo",
+            "160000,1111111111111111111111111111111111111111,sub",
+        ]);
+
+        let repo =
+            Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open grit");
+        let gitlink =
+            ObjectId::from_hex("1111111111111111111111111111111111111111").expect("gitlink oid");
+        let roots = reachability_roots(&repo).expect("roots");
+        assert!(
+            !roots.contains(&gitlink),
+            "submodule commit oids in REUC must not be superproject roots"
+        );
+
+        let mut opts = PruneOptions::default();
+        opts.older_than = Some(SystemTime::now());
+        prune_loose_objects(&repo, &opts).expect("prune with gitlink REUC");
+
+        git(&["fsck", "--strict"]);
     }
 
     #[test]
