@@ -361,6 +361,9 @@ fn stage_with_hint(
 }
 
 fn map_apply_error(err: grit_lib::error::ApplyError) -> anyhow::Error {
+    if err == grit_lib::error::ApplyError::Cancelled {
+        return crate::json_error::map_lib_error(LibError::Cancelled);
+    }
     anyhow::anyhow!("{err}")
 }
 

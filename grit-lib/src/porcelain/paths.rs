@@ -227,23 +227,26 @@ pub fn remove_paths(
     poll_cancel(&mut NullProgress, cancel)?;
     index = repo.load_index()?;
     let path_bytes: Vec<&[u8]> = to_remove.iter().map(|p| p.as_bytes()).collect();
-    index.remove_paths(path_bytes);
-    poll_cancel(&mut NullProgress, cancel)?;
-    repo.commit_index_update(&mut lock, &mut index, !opts.cached)?;
 
+    let mut worktree_backups: Vec<WorktreePathBackup> = Vec::new();
     if !opts.cached {
-        let mut removed_worktree: Vec<PathBuf> = Vec::new();
         for path in &to_remove {
-            poll_cancel(&mut NullProgress, cancel)?;
-            let abs = work_tree.join(path);
-            if abs.is_file() || abs.is_symlink() {
-                fs::remove_file(&abs)
-                    .map_err(|e| Error::PathError(format!("removing '{}': {e}", path)))?;
-                removed_worktree.push(abs);
+            poll_remove_cancel(work_tree, &worktree_backups, cancel)?;
+            if let Some(backup) = snapshot_worktree_path(work_tree, path)? {
+                remove_backed_up_worktree_path(work_tree, &backup)?;
+                worktree_backups.push(backup);
             }
         }
-        remove_empty_parent_dirs_batch(work_tree, &removed_worktree);
+        let removed_abs: Vec<PathBuf> = worktree_backups
+            .iter()
+            .map(|backup| work_tree.join(backup.rel()))
+            .collect();
+        remove_empty_parent_dirs_batch(work_tree, &removed_abs);
     }
+
+    index.remove_paths(path_bytes);
+    poll_remove_cancel(work_tree, &worktree_backups, cancel)?;
+    repo.commit_index_update(&mut lock, &mut index, !opts.cached)?;
 
     Ok(RemoveOutcome { removed: to_remove })
 }
@@ -414,12 +417,32 @@ pub fn move_paths(
         ));
     }
 
-    poll_cancel(&mut NullProgress, cancel)?;
+    if let Err(err) = poll_cancel(&mut NullProgress, cancel) {
+        return Err(abort_failed_move_worktree(
+            work_tree,
+            &completed_worktree_renames,
+            &cleared_backup,
+            ignorecase,
+            err,
+        ));
+    }
 
     repo.flush_index_update(&mut lock, &mut index)?;
     repo.finish_index_update(&mut lock, true)?;
 
     Ok(MoveOutcome { moves })
+}
+
+fn poll_remove_cancel(
+    work_tree: &Path,
+    backups: &[WorktreePathBackup],
+    cancel: &dyn Cancel,
+) -> Result<()> {
+    if let Err(err) = poll_cancel(&mut NullProgress, cancel) {
+        let _ = restore_worktree_backups(work_tree, backups);
+        return Err(err);
+    }
+    Ok(())
 }
 
 fn validate_unique_move_destinations(moves: &[PathMove]) -> Result<()> {
@@ -2393,6 +2416,105 @@ mod move_rollback_tests {
             "SOURCE-DIR\n",
             "must not restore descendant backup when directory rollback failed"
         );
+    }
+}
+
+#[cfg(test)]
+mod cancel_regression_tests {
+    use std::fs;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::error::Error;
+    use crate::porcelain::add::{stage, StageOptions};
+    use crate::progress::{Cancel, NullProgress};
+    use crate::repo::{init_repository, Repository};
+
+    use super::{move_path, remove_paths, RemoveOptions};
+
+    /// Cancels on the Nth `is_cancelled` poll (1-based).
+    struct CancelOnNthCheck {
+        calls: AtomicUsize,
+        cancel_from: usize,
+    }
+
+    impl Cancel for CancelOnNthCheck {
+        fn is_cancelled(&self) -> bool {
+            self.calls.fetch_add(1, Ordering::SeqCst) >= self.cancel_from
+        }
+    }
+
+    fn init_repo(root: &std::path::Path) -> Repository {
+        init_repository(root, false, "main", None, Default::default()).expect("init")
+    }
+
+    #[test]
+    fn remove_paths_cancel_during_worktree_removal_restores_files_and_index() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"a\n").unwrap();
+        fs::write(root.join("b.txt"), b"b\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+        let index_before = fs::read(repo.index_path()).expect("read index");
+
+        // After lock poll, cancel while removing the second worktree file.
+        let cancel = CancelOnNthCheck {
+            calls: AtomicUsize::new(0),
+            cancel_from: 3,
+        };
+        let err = remove_paths(
+            &repo,
+            &RemoveOptions {
+                pathspecs: vec!["a.txt".into(), "b.txt".into()],
+                force: true,
+                ..RemoveOptions::default()
+            },
+            &cancel,
+        )
+        .expect_err("cancelled rm");
+        assert!(matches!(err, Error::Cancelled));
+        assert_eq!(
+            fs::read(repo.index_path()).expect("read index"),
+            index_before
+        );
+        assert!(root.join("a.txt").is_file());
+        assert!(root.join("b.txt").is_file());
+    }
+
+    #[test]
+    fn move_paths_cancel_after_worktree_rename_rolls_back() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"a\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+        let index_before = fs::read(repo.index_path()).expect("read index");
+
+        // After lock poll and loop guard, cancel at the final pre-commit poll.
+        let cancel = CancelOnNthCheck {
+            calls: AtomicUsize::new(0),
+            cancel_from: 2,
+        };
+        let err = move_path(&repo, "a.txt", "b.txt", false, &cancel).expect_err("cancelled mv");
+        assert!(matches!(err, Error::Cancelled));
+        assert_eq!(
+            fs::read(repo.index_path()).expect("read index"),
+            index_before
+        );
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("b.txt").exists());
     }
 }
 

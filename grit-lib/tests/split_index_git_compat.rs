@@ -451,7 +451,14 @@ fn issue_2003_split_index_rm_mv_updates_index_for_git() {
     );
     assert_index_matches_git(root, &repo);
 
-    move_path(&repo, "c.txt", "c2.txt", false, &grit_lib::progress::NeverCancel).expect("mv c.txt -> c2.txt");
+    move_path(
+        &repo,
+        "c.txt",
+        "c2.txt",
+        false,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("mv c.txt -> c2.txt");
     assert!(
         git(root, &["ls-files"])
             .split_whitespace()
@@ -489,7 +496,14 @@ fn issue_2003_split_index_rm_mv_many_files_status_matches_git() {
     .expect("rm one tracked file");
     assert_index_matches_git(root, &repo);
 
-    move_path(&repo, "f0040.txt", "f0040-renamed.txt", false, &grit_lib::progress::NeverCancel).expect("mv");
+    move_path(
+        &repo,
+        "f0040.txt",
+        "f0040-renamed.txt",
+        false,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("mv");
     assert_index_matches_git(root, &repo);
     assert!(
         !git(root, &["ls-files"]).contains("f0040.txt"),

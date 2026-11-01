@@ -440,6 +440,9 @@ fn upsert_index_entry(index: &mut Index, path: &str, oid: ObjectId, mode: u32) {
 }
 
 fn library_err_path(path: &str, err: Error) -> ApplyError {
+    if matches!(err, Error::Cancelled) {
+        return ApplyError::Cancelled;
+    }
     ApplyError::Failed {
         path: path.to_string(),
         message: err.to_string(),
@@ -518,6 +521,24 @@ mod tests {
             upsert_index_entry(&mut index, path, oid, MODE_REGULAR);
         }
         (dir, repo, index)
+    }
+
+    #[test]
+    fn apply_patch_to_index_and_write_cancelled_leaves_index_untouched() {
+        use crate::progress::FlagCancel;
+        use std::fs;
+
+        let (_dir, repo, mut index) = repo_with_index(&[("f.txt", b"a\n")]);
+        repo.write_index(&mut index).expect("write index");
+        let before = fs::read(repo.index_path()).expect("read index");
+        let cancel = FlagCancel::new();
+        cancel.cancel();
+        let patch = one_line_patch("f.txt", "a", "b");
+        let err =
+            apply_patch_to_index_and_write(&repo, &[patch], &IndexApplyOptions::default(), &cancel)
+                .expect_err("cancelled");
+        assert_eq!(err, ApplyError::Cancelled);
+        assert_eq!(fs::read(repo.index_path()).expect("read index"), before);
     }
 
     fn blob_at(repo: &Repository, index: &Index, path: &str) -> Vec<u8> {

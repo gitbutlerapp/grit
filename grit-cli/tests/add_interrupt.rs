@@ -38,8 +38,9 @@ fn index_locked(repo: &Path) -> bool {
     repo.join(".git/index.lock").exists()
 }
 
-fn interrupt_add(repo: &Path, deliver: fn(&Child)) -> String {
-    let mut child = spawn_grit(repo, &["add"]);
+fn interrupt_add(repo: &Path, args: &[&str], deliver: fn(&Child)) -> (i32, String) {
+    let index_before = fs::read(repo.join(".git/index")).expect("read index");
+    let mut child = spawn_grit(repo, args);
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         if child.try_wait().expect("wait").is_some() {
@@ -53,7 +54,15 @@ fn interrupt_add(repo: &Path, deliver: fn(&Child)) -> String {
         std::thread::sleep(Duration::from_micros(200));
     }
     let out = child.wait_with_output().expect("wait");
-    String::from_utf8_lossy(&out.stderr).into_owned()
+    assert_eq!(
+        fs::read(repo.join(".git/index")).expect("read index after"),
+        index_before,
+        "index must be unchanged after interrupt"
+    );
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
 }
 
 #[test]
@@ -61,7 +70,8 @@ fn ctrl_c_during_add_leaves_no_lock_and_allows_retry() {
     let base = tempfile::tempdir().expect("tempdir");
     let repo = base.path().join("repo");
     seed_repo(&repo);
-    let stderr = interrupt_add(&repo, sigint);
+    let (code, stderr) = interrupt_add(&repo, &["add"], sigint);
+    assert_eq!(code, 130, "stderr: {stderr}");
     assert!(
         git_dir_locks(&repo).is_empty(),
         "interrupted add left locks {:?}: {stderr}",
@@ -83,7 +93,8 @@ fn sigterm_and_sighup_during_add_leave_no_lock() {
     let repo = base.path().join("repo");
     seed_repo(&repo);
     for deliver in [sigterm as fn(&Child), sighup] {
-        let stderr = interrupt_add(&repo, deliver);
+        let (code, stderr) = interrupt_add(&repo, &["add"], deliver);
+        assert_eq!(code, 130, "{stderr}");
         assert!(
             git_dir_locks(&repo).is_empty(),
             "interrupted add left locks {:?}: {stderr}",
@@ -91,4 +102,28 @@ fn sigterm_and_sighup_during_add_leave_no_lock() {
         );
         assert!(stderr.contains("operation cancelled"), "{stderr}");
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn sigterm_during_add_patch_file_exits_130() {
+    use interrupt_common::sigterm;
+
+    let base = tempfile::tempdir().expect("tempdir");
+    let repo = base.path().join("repo");
+    seed_repo(&repo);
+    fs::write(
+        repo.join("stage.patch"),
+        "diff --git a/d00/f0000.txt b/d00/f0000.txt\n\
+         --- a/d00/f0000.txt\n\
+         +++ b/d00/f0000.txt\n\
+         @@ -1 +1 @@\n\
+         -base 0\n\
+         +staged\n",
+    )
+    .expect("write patch");
+    let (code, stderr) = interrupt_add(&repo, &["add", "--patch-file", "stage.patch"], sigterm);
+    assert_eq!(code, 130, "{stderr}");
+    assert!(git_dir_locks(&repo).is_empty(), "{stderr}");
+    assert!(stderr.contains("operation cancelled"), "{stderr}");
 }
