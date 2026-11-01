@@ -433,6 +433,169 @@ fn no_trailing_newline_rename_similarity_matches_git() {
 }
 
 #[test]
+fn pathspec_on_rename_source_side_matches_git_delete_not_rename() {
+    let (dr, parent, commit) = t4001_rename_repo();
+    let wt = &dr.worktree;
+    let git_lines = git_name_status(wt, &[&parent.to_hex(), &commit.to_hex(), "--", "path0"]);
+    assert_eq!(git_lines, ["D\tpath0"]);
+    let grit_entries = dr
+        .repo
+        .diff()
+        .entries(
+            &grit_lib::diff::DiffTarget::Trees {
+                old: Some(parent),
+                new: commit,
+            },
+            &["path0".to_owned()],
+            &grit_lib::diff::DiffOptions::default(),
+        )
+        .expect("entries");
+    assert_eq!(grit_name_status(&grit_entries), git_lines);
+}
+
+#[test]
+fn pathspec_on_rename_destination_side_matches_git_add_not_rename() {
+    let (dr, parent, commit) = t4001_rename_repo();
+    let wt = &dr.worktree;
+    let git_lines = git_name_status(wt, &[&parent.to_hex(), &commit.to_hex(), "--", "path1"]);
+    assert_eq!(git_lines, ["A\tpath1"]);
+    let grit_entries = dr
+        .repo
+        .diff()
+        .entries(
+            &grit_lib::diff::DiffTarget::Trees {
+                old: Some(parent),
+                new: commit,
+            },
+            &["path1".to_owned()],
+            &grit_lib::diff::DiffOptions::default(),
+        )
+        .expect("entries");
+    assert_eq!(grit_name_status(&grit_entries), git_lines);
+}
+
+#[test]
+fn pathspec_covering_both_rename_sides_still_reports_rename() {
+    let (dr, parent, commit) = t4001_rename_repo();
+    let wt = &dr.worktree;
+    let git_lines = git_name_status(
+        wt,
+        &[&parent.to_hex(), &commit.to_hex(), "--", "path0", "path1"],
+    );
+    let grit_entries = dr
+        .repo
+        .diff()
+        .entries(
+            &grit_lib::diff::DiffTarget::Trees {
+                old: Some(parent),
+                new: commit,
+            },
+            &["path0".to_owned(), "path1".to_owned()],
+            &grit_lib::diff::DiffOptions::default(),
+        )
+        .expect("entries");
+    assert_eq!(grit_name_status(&grit_entries), git_lines);
+    assert!(
+        grit_entries.iter().any(|e| e.status == DiffStatus::Renamed),
+        "both sides in pathspec must still pair as rename"
+    );
+}
+
+#[test]
+fn commit_tree_attr_pathspec_matches_git_name_status() {
+    let dr = DiffRepo::init();
+    let wt = &dr.worktree;
+    fs::write(wt.join(".gitattributes"), "*.rs foo\n").unwrap();
+    fs::write(wt.join("a.rs"), "one\n").unwrap();
+    fs::write(wt.join("b.txt"), "text\n").unwrap();
+    git_quiet(wt, &["add", "-A"]);
+    git_quiet(wt, &["commit", "-qm", "base"]);
+    fs::write(wt.join("a.rs"), "two\n").unwrap();
+    fs::write(wt.join("b.txt"), "changed\n").unwrap();
+    git_quiet(wt, &["add", "a.rs", "b.txt"]);
+    git_quiet(wt, &["commit", "-qm", "edit"]);
+    let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
+    let commit = rev_parse_tree(wt, "HEAD^{tree}");
+    let spec = vec![":(attr:foo)".to_owned()];
+    let git_lines = git_name_status(
+        wt,
+        &[&parent.to_hex(), &commit.to_hex(), "--", ":(attr:foo)"],
+    );
+    let grit_entries = dr
+        .repo
+        .diff()
+        .entries(
+            &grit_lib::diff::DiffTarget::Trees {
+                old: Some(parent),
+                new: commit,
+            },
+            &spec,
+            &grit_lib::diff::DiffOptions::default(),
+        )
+        .expect("entries");
+    assert_eq!(grit_name_status(&grit_entries), git_lines);
+    assert_eq!(grit_name_status(&grit_entries), ["M\ta.rs"]);
+}
+
+#[test]
+fn pathspec_prunes_tree_walk_before_rename_on_large_delete_add_set() {
+    let dr = DiffRepo::init();
+    let wt = &dr.worktree;
+    fs::create_dir(wt.join("old")).unwrap();
+    fs::create_dir(wt.join("new")).unwrap();
+    fs::write(wt.join("keep.txt"), "stay\n").unwrap();
+    for i in 0..300 {
+        fs::write(wt.join(format!("old/{i:03}.txt")), format!("old {i}\n")).unwrap();
+    }
+    git_quiet(wt, &["add", "."]);
+    git_quiet(wt, &["commit", "-qm", "base"]);
+    let parent = rev_parse_tree(wt, "HEAD^{tree}");
+    for i in 0..300 {
+        fs::remove_file(wt.join(format!("old/{i:03}.txt"))).unwrap();
+        fs::write(wt.join(format!("new/{i:03}.txt")), format!("new {i}\n")).unwrap();
+    }
+    git_quiet(wt, &["add", "-A"]);
+    git_quiet(wt, &["commit", "-qm", "swap"]);
+    let commit = rev_parse_tree(wt, "HEAD^{tree}");
+
+    let full = dr
+        .repo
+        .diff()
+        .entries(
+            &grit_lib::diff::DiffTarget::Trees {
+                old: Some(parent),
+                new: commit,
+            },
+            &[],
+            &grit_lib::diff::DiffOptions::default(),
+        )
+        .expect("full");
+    assert_eq!(full.len(), 601);
+
+    let limited = dr
+        .repo
+        .diff()
+        .entries(
+            &grit_lib::diff::DiffTarget::Trees {
+                old: Some(parent),
+                new: commit,
+            },
+            &["old/050.txt".to_owned()],
+            &grit_lib::diff::DiffOptions::default(),
+        )
+        .expect("limited");
+    assert_eq!(limited.len(), 1);
+    assert_eq!(limited[0].status, DiffStatus::Deleted);
+    assert_eq!(limited[0].path(), "old/050.txt");
+
+    let git_lines = git_name_status(
+        wt,
+        &[&parent.to_hex(), &commit.to_hex(), "--", "old/050.txt"],
+    );
+    assert_eq!(grit_name_status(&limited), git_lines);
+}
+
+#[test]
 fn patch_id_stable_matches_git_on_span_scored_rename() {
     use grit_lib::diff::patch_ids::PatchIdMode;
     use grit_lib::repo::Repository;
