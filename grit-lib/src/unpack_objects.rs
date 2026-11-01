@@ -2391,6 +2391,26 @@ mod tests {
     }
 
     #[test]
+    fn test_apply_delta_prefix_into_stops_after_prefix() {
+        let base = b"author A <a@b.com> 1 +0000\n\nbody";
+        let mut delta = Vec::new();
+        delta.push(base.len() as u8);
+        delta.push(base.len() as u8);
+        delta.push(0x80 | 0x01 | 0x10);
+        delta.push(0u8);
+        delta.push(base.len() as u8);
+
+        let mut out = Vec::new();
+        apply_delta_prefix_into(&mut out, base, &delta, 32, |buf| {
+            buf.windows(7).any(|w| w == b"author ")
+        })
+        .unwrap();
+        assert!(out.len() <= 32);
+        assert!(out.starts_with(b"author A"));
+        assert_eq!(apply_delta(base, &delta).unwrap(), base);
+    }
+
+    #[test]
     fn test_apply_delta_insert_only() {
         let base = b"";
         let mut delta = Vec::new();

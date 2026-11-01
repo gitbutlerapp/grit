@@ -730,14 +730,7 @@ pub fn run(
     walk_opts.graph = display.graph;
 
     if display.group_by == Some(LogGroupBy::Author) {
-        return run_log_group_by_author(
-            &repo,
-            &token_refs,
-            &walk_opts,
-            &rev,
-            display,
-            output_mode,
-        );
+        return run_log_group_by_author(&repo, &token_refs, &walk_opts, &rev, display, output_mode);
     }
 
     let needs_rev_walk = display.graph

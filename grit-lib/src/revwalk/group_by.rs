@@ -1,7 +1,6 @@
 //! Group walked commits for summary views (author shortlog-style reports).
 
 use std::collections::{HashMap, HashSet};
-use std::hash::Hasher;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -114,7 +113,7 @@ pub fn mailmap_for_grouping(repo: &Repository, use_mailmap: bool) -> Result<Opti
 
 struct AuthorCounter {
     entries: Vec<(String, String, usize)>,
-    index: HashMap<u128, usize>,
+    index: HashMap<(String, String), usize>,
 }
 
 impl AuthorCounter {
@@ -127,7 +126,7 @@ impl AuthorCounter {
 
     fn absorb(&mut self, other: Self) {
         for (name, email, count) in other.entries {
-            let key = author_identity_key(&name, &email);
+            let key = (name.clone(), email.clone());
             if let Some(&idx) = self.index.get(&key) {
                 self.entries[idx].2 += count;
             } else {
@@ -153,13 +152,13 @@ impl AuthorCounter {
     }
 
     fn add_borrowed(&mut self, name: &str, email: &str) {
-        let key = author_identity_key(name, email);
+        let key = (name.to_owned(), email.to_owned());
         if let Some(&idx) = self.index.get(&key) {
             self.entries[idx].2 += 1;
             return;
         }
         let idx = self.entries.len();
-        self.entries.push((name.to_owned(), email.to_owned(), 1));
+        self.entries.push((key.0.clone(), key.1.clone(), 1));
         self.index.insert(key, idx);
     }
 
@@ -644,24 +643,6 @@ fn count_authors_single_pack(
     Ok(())
 }
 
-fn author_identity_key(name: &str, email: &str) -> u128 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    hash_ascii_insensitive(name, &mut hasher);
-    hash_ascii_insensitive(email, &mut hasher);
-    let lo = hasher.finish();
-    hasher = std::collections::hash_map::DefaultHasher::new();
-    hash_ascii_insensitive(email, &mut hasher);
-    hash_ascii_insensitive(name, &mut hasher);
-    let hi = hasher.finish();
-    ((hi as u128) << 64) | lo as u128
-}
-
-fn hash_ascii_insensitive(s: &str, hasher: &mut impl Hasher) {
-    for b in s.bytes() {
-        hasher.write_u8(b.to_ascii_lowercase());
-    }
-}
-
 fn sort_author_groups(groups: &mut [AuthorGroup]) {
     groups.sort_by(|a, b| {
         b.count
@@ -871,5 +852,69 @@ fn author_sort_key(group: &AuthorGroup) -> String {
         format!("<{}>", group.email)
     } else {
         format!("{} <{}>", group.name, group.email)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
+    use crate::repo::{InitOptions, Repository};
+
+    fn write_commit(
+        repo: &Repository,
+        name: &str,
+        email: &str,
+        tree: ObjectId,
+        parents: Vec<ObjectId>,
+    ) -> ObjectId {
+        let ident = format!("{name} <{email}> 1 +0000");
+        let commit = CommitData {
+            tree,
+            parents,
+            author: ident.clone(),
+            committer: ident,
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: "msg".into(),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        };
+        let data = serialize_commit(&commit);
+        repo.odb()
+            .write(ObjectKind::Commit, &data)
+            .expect("write commit")
+    }
+
+    #[test]
+    fn count_only_groups_preserve_ascii_case_distinct_identities() -> Result<()> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default())?;
+        let tree = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904")?;
+        let o1 = write_commit(&repo, "Case", "a@example.com", tree, vec![]);
+        let o2 = write_commit(&repo, "CASE", "A@example.com", tree, vec![o1]);
+        let oids = [o1, o2];
+
+        let full = group_commits_by_author(
+            &repo,
+            &oids,
+            None,
+            GroupByAuthorOptions { count_only: false },
+        )?;
+        let counts = group_commits_by_author(
+            &repo,
+            &oids,
+            None,
+            GroupByAuthorOptions { count_only: true },
+        )?;
+
+        assert_eq!(full.len(), 2);
+        assert_eq!(counts.len(), 2);
+        assert_eq!(
+            full.iter().map(|g| g.count).collect::<Vec<_>>(),
+            counts.iter().map(|g| g.count).collect::<Vec<_>>()
+        );
+        Ok(())
     }
 }

@@ -181,6 +181,50 @@ fn verify_pack_has_delta_commit(root: &std::path::Path) -> bool {
 }
 
 #[test]
+fn group_by_author_count_only_matches_full_for_case_distinct_authors() -> grit_lib::error::Result<()>
+{
+    let dir = tempfile::tempdir()?;
+    let root = dir.path();
+    git(root, &["init", "-b", "main"]);
+    git(root, &["config", "log.mailmap", "false"]);
+    commit_as(root, "Case", "a@example.com", "one");
+    commit_as(root, "CASE", "A@example.com", "two");
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::default())?;
+    let walk = RevWalkListOptions::default();
+    let full = group_commits_by_author_from_rev(
+        &repo,
+        &["HEAD"],
+        &walk,
+        None,
+        GroupByAuthorOptions { count_only: false },
+    )?;
+    let counts = group_commits_by_author_from_rev(
+        &repo,
+        &["HEAD"],
+        &walk,
+        None,
+        GroupByAuthorOptions { count_only: true },
+    )?;
+
+    assert_eq!(full.len(), 2);
+    assert_eq!(counts.len(), 2);
+    assert_eq!(
+        full.iter().map(|g| g.count).collect::<Vec<_>>(),
+        counts.iter().map(|g| g.count).collect::<Vec<_>>()
+    );
+
+    let git_out = git_stdout(root, &["shortlog", "-sn", "HEAD"]);
+    let git_lines: Vec<&str> = git_out
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    assert_eq!(counts.len(), git_lines.len());
+    Ok(())
+}
+
+#[test]
 fn group_by_author_matches_git_shortlog_sne() -> grit_lib::error::Result<()> {
     let dir = tempfile::tempdir()?;
     let root = dir.path();

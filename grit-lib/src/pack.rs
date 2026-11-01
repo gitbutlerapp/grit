@@ -4489,9 +4489,10 @@ impl SingleLocalPackReader {
         }))
     }
 
-    /// Inflate the start of commit `oid` into an internal buffer (undeltified entries only).
+    /// Inflate the start of commit `oid` into an internal buffer.
     ///
-    /// Returns `None` when the object is missing, not a commit, or stored as a delta.
+    /// Resolves deltified pack entries via the delta-base cache and prefix delta apply.
+    /// Returns `None` when the object is missing, not a commit, or cannot be resolved.
     ///
     /// # Errors
     ///
