@@ -5464,13 +5464,9 @@ fn rev_list_unexpected_kind(oid: ObjectId, expected: &'static str) -> Error {
 }
 
 fn load_commit(repo: &Repository, oid: ObjectId) -> Result<crate::objects::CommitData> {
-    let object = repo.odb().read(&oid)?;
-    if object.kind != ObjectKind::Commit {
-        return Err(rev_list_unexpected_kind(oid, "commit"));
-    }
     #[cfg(test)]
     repo.odb().hot_path_metrics().record_commit_parse();
-    parse_commit(&object.data)
+    repo.read_commit_with_replace(&oid)
 }
 
 /// Like [`load_commit`], inflating into the reusable `buf` instead of a fresh object.
@@ -5482,7 +5478,7 @@ fn load_commit_into(
     oid: ObjectId,
     buf: &mut Vec<u8>,
 ) -> Result<crate::objects::CommitData> {
-    if repo.odb().read_into(&oid, buf)? != ObjectKind::Commit {
+    if repo.read_commit_into_with_replace(&oid, buf)? != ObjectKind::Commit {
         return Err(rev_list_unexpected_kind(oid, "commit"));
     }
     #[cfg(test)]
@@ -7512,11 +7508,11 @@ pub(crate) struct CommitGraph<'r> {
 /// Goes through [`crate::odb::Odb::read`] so loose commits land in the ODB's session cache
 /// and resolved pack delta bases stay cached, as for every other commit read in a walk.
 fn read_commit_bytes(repo: &Repository, oid: ObjectId) -> Result<Vec<u8>> {
-    let object = repo.odb().read(&oid)?;
-    if object.kind != ObjectKind::Commit {
-        return Err(rev_list_unexpected_kind(oid, "commit"));
+    match repo.read_commit_bytes_with_replace(&oid) {
+        Ok(bytes) => Ok(bytes),
+        Err(Error::UnexpectedObjectKind { .. }) => Err(rev_list_unexpected_kind(oid, "commit")),
+        Err(other) => Err(other),
     }
-    Ok(object.data)
 }
 
 impl<'r> CommitGraph<'r> {
@@ -7687,11 +7683,11 @@ impl<'r> CommitGraph<'r> {
         if self.subjects.contains_key(&oid) {
             return Ok(());
         }
-        let object = self.repo.odb().read(&oid)?;
-        if object.kind != ObjectKind::Commit {
-            return Ok(());
-        }
-        if let Ok(subject) = crate::objects::read_commit_subject_line(&object.data) {
+        let bytes = match self.repo.read_commit_bytes_with_replace(&oid) {
+            Ok(bytes) => bytes,
+            Err(_) => return Ok(()),
+        };
+        if let Ok(subject) = crate::objects::read_commit_subject_line(&bytes) {
             self.subjects.insert(oid, subject);
         }
         Ok(())
@@ -7735,15 +7731,17 @@ impl<'r> CommitGraph<'r> {
             hashbrown::hash_map::Entry::Vacant(entry) => {
                 let bytes = match extent {
                     CommitExtent::Whole => read_commit_bytes(repo, oid)?,
-                    CommitExtent::ThroughSubject => repo
-                        .odb()
-                        .read_commit_through_subject(&oid)
-                        .map_err(|err| match err {
-                            Error::UnexpectedObjectKind { .. } => {
-                                rev_list_unexpected_kind(oid, "commit")
-                            }
-                            other => other,
-                        })?,
+                    CommitExtent::ThroughSubject => {
+                        let effective = repo.object_id_after_replace(&oid);
+                        repo.odb().read_commit_through_subject(&effective).map_err(
+                            |err| match err {
+                                Error::UnexpectedObjectKind { .. } => {
+                                    rev_list_unexpected_kind(oid, "commit")
+                                }
+                                other => other,
+                            },
+                        )?
+                    }
                 };
                 Ok(entry.insert(bytes))
             }
@@ -7761,23 +7759,25 @@ impl<'r> CommitGraph<'r> {
         if self.parents.contains_key(&oid) {
             return Ok(());
         }
-        if let Some(chain) = &self.graph_chain {
-            if let Some((mut parents, ctime)) = chain.graph_commit(&oid) {
-                if self.shallow_boundaries.contains(&oid) {
-                    parents.clear();
-                }
-                if let Some(graft_parents) = self.graft_parents.get(&oid) {
-                    parents = graft_parents.clone();
-                }
-                if self.first_parent_only {
-                    self.full_parent_counts.insert(oid, parents.len());
-                    if parents.len() > 1 {
-                        parents.truncate(1);
+        if self.repo.object_id_after_replace(&oid) == oid {
+            if let Some(chain) = &self.graph_chain {
+                if let Some((mut parents, ctime)) = chain.graph_commit(&oid) {
+                    if self.shallow_boundaries.contains(&oid) {
+                        parents.clear();
                     }
+                    if let Some(graft_parents) = self.graft_parents.get(&oid) {
+                        parents = graft_parents.clone();
+                    }
+                    if self.first_parent_only {
+                        self.full_parent_counts.insert(oid, parents.len());
+                        if parents.len() > 1 {
+                            parents.truncate(1);
+                        }
+                    }
+                    self.committer_time.insert(oid, ctime);
+                    self.parents.insert(oid, parents);
+                    return Ok(());
                 }
-                self.committer_time.insert(oid, ctime);
-                self.parents.insert(oid, parents);
-                return Ok(());
             }
         }
         if self.retained.is_some() {

@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::error::Result;
-use crate::objects::{read_commit_subject_line, ObjectId, ObjectKind};
+use crate::objects::{read_commit_subject_line, ObjectId};
 use crate::repo::Repository;
 use crate::rev_list::CommitGraph;
 
@@ -61,14 +61,8 @@ pub fn log_graph_materialize(
 }
 
 fn read_subject_only(repo: &Repository, oid: ObjectId) -> Result<String> {
-    let object = repo.odb().read(&oid)?;
-    if object.kind != ObjectKind::Commit {
-        return Err(crate::error::Error::CorruptObject(format!(
-            "expected commit object, got {:?} for {oid}",
-            object.kind
-        )));
-    }
-    read_commit_subject_line(&object.data)
+    let bytes = repo.read_commit_bytes_with_replace(&oid)?;
+    read_commit_subject_line(&bytes)
 }
 
 /// Rewrite parents for every commit in `visible`, skipping filtered-out ancestors.
@@ -152,7 +146,7 @@ fn load_parents(
     if let Some(parents) = cache.get(&oid) {
         return Ok(parents.clone());
     }
-    let commit = repo.odb().read_commit(&oid)?;
+    let commit = repo.read_commit_with_replace(&oid)?;
     cache.insert(oid, commit.parents.clone());
     Ok(commit.parents)
 }

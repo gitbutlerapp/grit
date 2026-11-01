@@ -74,6 +74,8 @@ pub struct RepoCaches {
     commit_graph_warn_seen: Mutex<HashSet<String>>,
     commit_graph: Mutex<Option<Arc<CommitGraphChain>>>,
     commit_linkage: Mutex<CommitLinkageCache>,
+    /// Resolved `refs/replace/` redirects for this handle (built once when the directory is non-empty).
+    replace_redirects: Mutex<Option<OidHashMap<ObjectId>>>,
     bitmap_index: BitmapIndexCache,
     diagnostics: Mutex<DiagnosticsHandle>,
     /// Cached change-id header probe `(odb fingerprint, result)` for this handle.
@@ -117,6 +119,7 @@ impl RepoCaches {
             commit_graph_warn_seen: Mutex::new(HashSet::new()),
             commit_graph: Mutex::new(None),
             commit_linkage: Mutex::new(CommitLinkageCache::default()),
+            replace_redirects: Mutex::new(None),
             bitmap_index: BitmapIndexCache::default(),
             diagnostics: Mutex::new(diagnostics),
             stored_change_id_header_likely: Mutex::new(None),
@@ -135,6 +138,10 @@ impl RepoCaches {
     /// Shared commit parent/timestamp cache for merge-base and revwalk.
     pub(crate) fn commit_linkage(&self) -> &Mutex<CommitLinkageCache> {
         &self.commit_linkage
+    }
+
+    pub(crate) fn replace_redirects(&self) -> &Mutex<Option<OidHashMap<ObjectId>>> {
+        &self.replace_redirects
     }
 
     /// Return the diagnostic sink for this cache arena.

@@ -738,9 +738,16 @@ mod tests {
             hide: Vec::new(),
             cutoffs: ReachableWalkCommitterCutoffs::default(),
         };
-        let page = LogWalkCursor::step(&repo, &query, None, 10)?;
+        let mut page = LogWalkCursor::step(&repo, &query, None, 10)?;
         assert!(page.commits.contains(&mid));
-        assert!(!page.commit_data.contains(&mid));
+        assert!(page.commit_data.contains(&mid));
+        let replaced = page
+            .commit_data
+            .take_commit(&mid)
+            .transpose()?
+            .expect("mid data");
+        assert_eq!(replaced.message.trim(), "replacement");
+        assert_eq!(replaced.parents, vec![base]);
         assert!(page.commit_data.contains(&base));
         Ok(())
     }

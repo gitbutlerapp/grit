@@ -15,7 +15,7 @@ use crate::diff::detail::LineStat;
 use crate::diff::structured::StructuredHunk;
 use crate::diff::{
     apply_diff_filter, sort_entries_by_path, tree_diff_structured_parallel,
-    tree_oid_of_commit_in_repo, DiffEntry, DiffOptions, DiffStatus, TreeDiffStructured,
+    DiffEntry, DiffOptions, DiffStatus, TreeDiffStructured,
 };
 use crate::error::{Error, PathspecResolveError, Result};
 use crate::index::Index;
@@ -1023,10 +1023,10 @@ fn commit_diff_entries(
     thread_policy: &ThreadPolicy,
     rename_threshold: u32,
 ) -> Result<super::core::DiffEntriesResult> {
-    let commit = repo.odb().read_commit(oid)?;
+    let commit = repo.read_commit_with_replace(oid)?;
     let new_tree = commit.tree;
     let old_tree = match commit.parents.first() {
-        Some(parent) => Some(tree_oid_of_commit_in_repo(repo, parent)?),
+        Some(parent) => Some(repo.read_commit_with_replace(parent)?.tree),
         None => None,
     };
 

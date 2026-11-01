@@ -749,14 +749,15 @@ impl<'repo> NavParentCache<'repo> {
         if let Some(grafted) = self.grafts.get(&commit_oid) {
             return Ok(grafted.clone());
         }
-        if let Some(graph) = &self.graph {
-            if let Some((parents, _)) = graph.graph_commit(&commit_oid) {
-                return Ok(parents);
+        if self.repo.object_id_after_replace(&commit_oid) == commit_oid {
+            if let Some(graph) = &self.graph {
+                if let Some((parents, _)) = graph.graph_commit(&commit_oid) {
+                    return Ok(parents);
+                }
             }
         }
-        // Reachability uses effective parents, whereas navigation reads the object's own
-        // parents. Share metadata only when shallow/promisor boundaries and rewrites cannot
-        // make those differ. This also avoids inflating a range endpoint's chain twice.
+        // Share metadata only when shallow/promisor boundaries and rewrites cannot make
+        // cached parents differ from what we parse here.
         let share_linkage = *self.share_linkage.get_or_init(|| {
             self.grafts.is_empty()
                 && crate::shallow::load_shallow_boundaries(self.repo.git_dir()).is_empty()
@@ -776,13 +777,16 @@ impl<'repo> NavParentCache<'repo> {
                 return Ok(parents.clone());
             }
         }
-        let object = self.repo.odb().read(&commit_oid)?;
-        if object.kind != ObjectKind::Commit {
-            return Err(Error::InvalidRef(format!(
-                "invalid ref: {commit_oid} is not a commit"
-            )));
-        }
-        let commit = crate::objects::CommitRef::parse(&object.data)?;
+        let bytes = match self.repo.read_commit_bytes_with_replace(&commit_oid) {
+            Err(Error::UnexpectedObjectKind { .. }) => {
+                return Err(Error::InvalidRef(format!(
+                    "invalid ref: {commit_oid} is not a commit"
+                )));
+            }
+            Err(other) => return Err(other),
+            Ok(bytes) => bytes,
+        };
+        let commit = crate::objects::CommitRef::parse(&bytes)?;
         let parents = commit.parents().to_vec();
         if share_linkage {
             let mut cache = self
@@ -5297,8 +5301,8 @@ mod line_coverage_tests {
             "the range walk must reuse navigation metadata"
         );
 
-        // Navigation reads original parents, while the subsequent walk observes shallow
-        // boundaries and replacements. Neither may consume the other's parent cache.
+        // Shallow boundaries trim parents for walks; navigation still reads the object
+        // parents until shallow applies on the walk side.
         fs::write(repo.git_dir().join("shallow"), format!("{child}\n"))?;
         let shallow_repo = Repository::open(&repo.git_dir(), &RepositoryOptions::empty())?;
         assert_eq!(
@@ -5325,7 +5329,8 @@ mod line_coverage_tests {
         assert_eq!(
             NavParentCache::new(&replaced_repo, NavigationMetadata::RetainForWalk)
                 .parents_of(child)?,
-            vec![root]
+            Vec::<ObjectId>::new(),
+            "replace ref overlays parents for navigation"
         );
         assert_eq!(
             count_commits_reachable_excluding_ancestors_of(

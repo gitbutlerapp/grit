@@ -47,7 +47,7 @@ use crate::git_path::path_for_error_message;
 use crate::hooks::run_hook;
 use crate::index::Index;
 use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
-use crate::objects::{HashAlgo, ObjectId};
+use crate::objects::{parse_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::repo_caches::RepoCaches;
 use crate::rev_parse::is_inside_work_tree;
@@ -2789,21 +2789,99 @@ impl Repository {
         if !settings.use_replace_refs {
             return None;
         }
-        let replace_ref =
-            self.common_git_dir
-                .join(format!("{}{}", settings.replace_ref_base, oid.to_hex()));
-        if !replace_ref.is_file() {
-            return None;
+        let mut slot = self
+            .caches
+            .replace_redirects()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if slot.is_none() {
+            *slot = Some(load_replace_redirect_map(self));
         }
-        let content = std::fs::read_to_string(&replace_ref).ok()?;
-        let hex = content.trim();
-        let replacement_oid = hex.parse::<crate::objects::ObjectId>().ok()?;
-        if self.odb.read_info(&replacement_oid).is_ok() {
-            Some(replacement_oid)
-        } else {
-            None
+        slot.as_ref()?.get(oid).copied()
+    }
+
+    /// Raw commit bytes for history traversal at `oid`, honoring `refs/replace`.
+    pub(crate) fn read_commit_bytes_with_replace(&self, oid: &ObjectId) -> Result<Vec<u8>> {
+        let effective = self.object_id_after_replace(oid);
+        let object = self.odb.read(&effective)?;
+        if object.kind != ObjectKind::Commit {
+            return Err(Error::UnexpectedObjectKind {
+                oid: effective,
+                expected: ObjectKind::Commit,
+                actual: object.kind,
+            });
+        }
+        Ok(object.data)
+    }
+
+    /// Parsed commit for history traversal at `oid`, honoring `refs/replace`.
+    pub(crate) fn read_commit_with_replace(&self, oid: &ObjectId) -> Result<CommitData> {
+        parse_commit(&self.read_commit_bytes_with_replace(oid)?)
+    }
+
+    /// Like [`Odb::read_into`], but follows replace refs for commit reads.
+    pub(crate) fn read_commit_into_with_replace(
+        &self,
+        oid: &ObjectId,
+        buf: &mut Vec<u8>,
+    ) -> Result<ObjectKind> {
+        let effective = self.object_id_after_replace(oid);
+        self.odb().read_into(&effective, buf)
+    }
+}
+
+fn load_replace_redirect_map(repo: &Repository) -> crate::objects::OidHashMap<ObjectId> {
+    use crate::objects::oid_hash_map;
+    use std::collections::HashSet;
+
+    let mut direct = oid_hash_map();
+    let Some(ref_base) = repo.replace_ref_base_if_enabled() else {
+        return direct;
+    };
+    let replace_dir = repo.common_git_dir.join(ref_base.trim_end_matches('/'));
+    let Ok(entries) = fs::read_dir(replace_dir) else {
+        return direct;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        let Ok(original) = name.parse::<ObjectId>() else {
+            continue;
+        };
+        let Ok(content) = fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let Ok(replacement) = content.trim().parse::<ObjectId>() else {
+            continue;
+        };
+        if repo.odb().read_info(&replacement).is_ok() {
+            direct.insert(original, replacement);
         }
     }
+
+    let mut resolved = oid_hash_map();
+    for &original in direct.keys() {
+        let mut cur = original;
+        let mut seen = HashSet::new();
+        while let Some(&next) = direct.get(&cur) {
+            if !seen.insert(cur) {
+                break;
+            }
+            cur = next;
+        }
+        if cur != original {
+            resolved.insert(original, cur);
+        }
+    }
+    resolved
 }
 
 /// Resolve the common git directory for linked worktrees.
