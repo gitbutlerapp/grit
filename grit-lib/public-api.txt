@@ -14064,6 +14064,7 @@ pub fn grit_lib::pathspec::context_from_mode_bits(u32) -> grit_lib::pathspec::Pa
 pub fn grit_lib::pathspec::context_from_mode_octal(&str) -> grit_lib::pathspec::PathspecMatchContext
 pub fn grit_lib::pathspec::extend_pathspec_list_implicit_cwd(&[alloc::string::String], core::option::Option<&str>) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::pathspec::has_glob_chars(&str) -> bool
+pub fn grit_lib::pathspec::is_long_magic_pathspec_token(&str) -> bool
 pub fn grit_lib::pathspec::literal_pathspecs_enabled() -> bool
 pub fn grit_lib::pathspec::matches_ls_tree_pathspec(&str, &str, u32, &[grit_lib::worktree::attributes::AttrRule]) -> bool
 pub fn grit_lib::pathspec::matches_pathspec(&str, &str) -> bool
@@ -14091,7 +14092,6 @@ pub fn grit_lib::pathspec::pathspec_wants_descent_for_rev_tree(&str, &[alloc::st
 pub fn grit_lib::pathspec::pathspec_wants_descent_into_tree(&str, &str) -> bool
 pub fn grit_lib::pathspec::pathspecs_allow_bloom(&[alloc::string::String]) -> bool
 pub fn grit_lib::pathspec::precompose_argv_pathspec(&str) -> alloc::borrow::Cow<'_, str>
-pub fn grit_lib::pathspec::is_long_magic_pathspec_token(&str) -> bool
 pub fn grit_lib::pathspec::resolve_magic_pathspec(&str, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::pathspec::resolve_pathspec(&str, &std::path::Path, core::option::Option<&str>) -> alloc::string::String
 pub fn grit_lib::pathspec::resolve_pathspec_in_worktree(&str, &str, &std::path::Path, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::pathspec::PathOutsideRepository>
@@ -22531,6 +22531,20 @@ pub fn grit_lib::remote::receive_pack::pack_object_count(&[u8]) -> core::option:
 pub fn grit_lib::remote::receive_pack::receive_unpack_limit(&grit_lib::config::ConfigSet) -> i32
 pub fn grit_lib::remote::receive_pack::should_use_unpack_objects(&[u8], &grit_lib::config::ConfigSet) -> bool
 pub mod grit_lib::remote::resumable
+pub enum grit_lib::remote::resumable::ResumableDownloadDest
+pub grit_lib::remote::resumable::ResumableDownloadDest::Private(std::path::PathBuf)
+pub grit_lib::remote::resumable::ResumableDownloadDest::Shared
+pub grit_lib::remote::resumable::ResumableDownloadDest::Shared::dest: std::path::PathBuf
+pub grit_lib::remote::resumable::ResumableDownloadDest::Shared::lock: std::fs::File
+impl core::fmt::Debug for grit_lib::remote::resumable::ResumableDownloadDest
+pub fn grit_lib::remote::resumable::ResumableDownloadDest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::remote::resumable::ResumableDownloadDest
+impl core::marker::Send for grit_lib::remote::resumable::ResumableDownloadDest
+impl core::marker::Sync for grit_lib::remote::resumable::ResumableDownloadDest
+impl core::marker::Unpin for grit_lib::remote::resumable::ResumableDownloadDest
+impl core::marker::UnsafeUnpin for grit_lib::remote::resumable::ResumableDownloadDest
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::resumable::ResumableDownloadDest
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::resumable::ResumableDownloadDest
 pub enum grit_lib::remote::resumable::ResumableError
 pub grit_lib::remote::resumable::ResumableError::Cancelled
 pub grit_lib::remote::resumable::ResumableError::Exhausted
@@ -22658,6 +22672,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::resumable::Tu
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::resumable::TusUpload
 pub const grit_lib::remote::resumable::TUS_PATCH_CONTENT_TYPE: &str
 pub const grit_lib::remote::resumable::TUS_VERSION: &str
+pub fn grit_lib::remote::resumable::claim_resumable_download(&std::path::Path, &std::path::Path) -> core::io::error::Result<grit_lib::remote::resumable::ResumableDownloadDest>
 pub fn grit_lib::remote::resumable::discard_download(&std::path::Path) -> core::io::error::Result<()>
 pub fn grit_lib::remote::resumable::download_resumable(&dyn grit_lib::remote::transport::http::HttpClient, &str, &std::path::Path, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::remote::resumable::Result<grit_lib::remote::resumable::DownloadOutcome>
 pub fn grit_lib::remote::resumable::resolve_url(&str, &str) -> core::option::Option<alloc::string::String>
@@ -31361,6 +31376,7 @@ pub fn grit_lib::worktree::pathspec::context_from_mode_bits(u32) -> grit_lib::pa
 pub fn grit_lib::worktree::pathspec::context_from_mode_octal(&str) -> grit_lib::pathspec::PathspecMatchContext
 pub fn grit_lib::worktree::pathspec::extend_pathspec_list_implicit_cwd(&[alloc::string::String], core::option::Option<&str>) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::worktree::pathspec::has_glob_chars(&str) -> bool
+pub fn grit_lib::worktree::pathspec::is_long_magic_pathspec_token(&str) -> bool
 pub fn grit_lib::worktree::pathspec::literal_pathspecs_enabled() -> bool
 pub fn grit_lib::worktree::pathspec::matches_ls_tree_pathspec(&str, &str, u32, &[grit_lib::worktree::attributes::AttrRule]) -> bool
 pub fn grit_lib::worktree::pathspec::matches_pathspec(&str, &str) -> bool

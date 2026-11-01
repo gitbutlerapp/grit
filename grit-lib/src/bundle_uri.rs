@@ -31,7 +31,10 @@ use crate::pkt_line::{self, Packet};
 use crate::progress::{Cancel, ProgressPhase, ProgressSink, ProgressUnit};
 use crate::protocol_v2::{cap_lines_for_command_request, server_advertises_bundle_uri};
 use crate::repo::Repository;
-use crate::resumable::{discard_download, download_resumable, resolve_url, ResumableError};
+use crate::resumable::{
+    claim_resumable_download, discard_download, download_resumable, resolve_url,
+    ResumableDownloadDest, ResumableError,
+};
 use crate::transfer::TransferStats;
 use crate::transport::http::{discover_upload_pack_exact, HttpClient};
 
@@ -276,6 +279,8 @@ pub fn bundle_cache_path(cache_dir: &Path, uri: &str) -> PathBuf {
 /// - `client`: the HTTP client for the remote.
 /// - `repo_url`: the remote repository URL.
 /// - `cache_dir`: where bundle downloads are kept; created when missing.
+///   Parallel clones coordinate through an exclusive lock on a sibling `.lock`
+///   file; losers download into a private one-off file in the same directory.
 /// - `progress`: receives the download's
 ///   [`crate::resumable::ResumableEvent`]s and the unpacking phases.
 /// - `cancel`: checked while the bundle is downloaded and unpacked. A
@@ -326,8 +331,12 @@ fn seed_from(
     progress: &mut dyn Progress,
     cancel: &dyn Cancel,
 ) -> Result<SeededBundle> {
-    std::fs::create_dir_all(cache_dir)?;
-    let dest = bundle_cache_path(cache_dir, uri);
+    let shared_dest = bundle_cache_path(cache_dir, uri);
+    let slot = claim_resumable_download(cache_dir, &shared_dest)?;
+    let (dest, _lock) = match slot {
+        ResumableDownloadDest::Shared { dest, lock } => (dest, Some(lock)),
+        ResumableDownloadDest::Private(dest) => (dest, None),
+    };
     let downloaded =
         download_resumable(client, uri, &dest, progress, cancel).map_err(|e| match e {
             ResumableError::Cancelled => Error::Cancelled,
@@ -503,5 +512,209 @@ mod tests {
             bundle_cache_path(dir, "http://h/b")
         );
         assert!(bundle_cache_path(dir, "x").starts_with(dir));
+    }
+
+    #[test]
+    #[ignore = "spawned by concurrent_bundle_cache_seeds_in_two_processes"]
+    fn concurrent_bundle_cache_probe_seed() {
+        use std::io::Cursor;
+        use std::path::PathBuf;
+
+        use crate::config::environment::RepositoryOptions;
+        use crate::fetch::NoProgress;
+        use crate::progress::NeverCancel;
+        use crate::repo::{InitOptions, Repository};
+        use crate::transport::http::{HttpClient, HttpRequest, HttpResponse};
+
+        struct LocalBundle {
+            url: String,
+            data: Vec<u8>,
+        }
+
+        impl HttpClient for LocalBundle {
+            fn get(&self, _: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
+                unreachable!()
+            }
+
+            fn post(
+                &self,
+                _: &str,
+                _: &str,
+                _: &str,
+                _: &[u8],
+                _: Option<&str>,
+            ) -> crate::error::Result<Vec<u8>> {
+                unreachable!()
+            }
+
+            fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
+                assert_eq!(request.url, self.url);
+                Ok(HttpResponse {
+                    status: 200,
+                    headers: vec![
+                        ("content-length".to_owned(), self.data.len().to_string()),
+                        ("etag".to_owned(), "\"probe\"".to_owned()),
+                    ],
+                    body: Box::new(Cursor::new(self.data.clone())),
+                })
+            }
+        }
+
+        let url = std::env::var("GRIT_BUNDLE_CACHE_URL").expect("GRIT_BUNDLE_CACHE_URL");
+        let cache =
+            PathBuf::from(std::env::var("GRIT_BUNDLE_CACHE_DIR").expect("GRIT_BUNDLE_CACHE_DIR"));
+        let bundle_file = std::env::var("GRIT_BUNDLE_CACHE_FILE").expect("GRIT_BUNDLE_CACHE_FILE");
+        let data = std::fs::read(bundle_file).expect("read bundle");
+        let work = tempfile::tempdir().expect("work tree");
+        Repository::init(
+            work.path(),
+            &InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let repo = Repository::open(
+            &work.path().join(".git"),
+            &RepositoryOptions::empty().with_work_tree(work.path()),
+        )
+        .expect("open");
+        let client = LocalBundle {
+            url: url.clone(),
+            data,
+        };
+        let mut progress = NoProgress;
+        let seeded = seed_from(&repo, &client, &url, &cache, &mut progress, &NeverCancel)
+            .expect("seed_from");
+        assert!(!seeded.refs.is_empty(), "bundle seed should record tips");
+        eprintln!("grit-bundle-cache-probe-seeded");
+    }
+
+    #[test]
+    fn concurrent_bundle_cache_seeds_in_two_processes() {
+        use std::process::{Command, Stdio};
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let upstream = tmp.path().join("upstream");
+        std::fs::create_dir_all(&upstream).expect("mkdir upstream");
+        assert!(std::process::Command::new("git")
+            .current_dir(&upstream)
+            .args(["init", "-q", "-b", "main", "."])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("git init")
+            .success());
+        assert!(std::process::Command::new("git")
+            .current_dir(&upstream)
+            .args(["config", "user.email", "t@example.com"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("git config")
+            .success());
+        std::fs::write(upstream.join("seed.txt"), "seed\n").expect("write");
+        assert!(std::process::Command::new("git")
+            .current_dir(&upstream)
+            .args(["add", "seed.txt"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("git add")
+            .success());
+        assert!(std::process::Command::new("git")
+            .current_dir(&upstream)
+            .args(["commit", "-qm", "seed"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("git commit")
+            .success());
+        let bundle_path = tmp.path().join("repo.bundle");
+        assert!(std::process::Command::new("git")
+            .current_dir(&upstream)
+            .args([
+                "bundle",
+                "create",
+                bundle_path.to_str().expect("utf-8"),
+                "refs/heads/main",
+            ])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("git bundle create")
+            .success());
+        let bundle_bytes = std::fs::read(&bundle_path).expect("read bundle");
+        let url = "http://127.0.0.1:8099/demo/bundles/probe.bundle".to_owned();
+
+        let cache = tmp.path().join("cache");
+        std::fs::create_dir_all(&cache).expect("mkdir cache");
+        let shared_dest = bundle_cache_path(&cache, &url);
+        let shared_part = shared_dest.with_file_name(format!(
+            "{}.part",
+            shared_dest
+                .file_name()
+                .and_then(|n| n.to_str())
+                .expect("name")
+        ));
+
+        let exe = std::env::current_exe().expect("test executable");
+        let mut children = Vec::new();
+        for _ in 0..2 {
+            children.push(
+                Command::new(&exe)
+                    .args([
+                        "bundle_uri::tests::concurrent_bundle_cache_probe_seed",
+                        "--exact",
+                        "--ignored",
+                        "--nocapture",
+                    ])
+                    .env("GRIT_BUNDLE_CACHE_URL", &url)
+                    .env(
+                        "GRIT_BUNDLE_CACHE_DIR",
+                        cache.to_str().expect("cache utf-8"),
+                    )
+                    .env(
+                        "GRIT_BUNDLE_CACHE_FILE",
+                        bundle_path.to_str().expect("bundle utf-8"),
+                    )
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .expect("spawn probe"),
+            );
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut outputs = Vec::new();
+        for mut child in children {
+            while child.try_wait().expect("try_wait").is_none() {
+                assert!(Instant::now() < deadline, "probe subprocess timed out");
+                thread::sleep(Duration::from_millis(50));
+            }
+            let out = child.wait_with_output().expect("wait");
+            assert!(
+                out.status.success(),
+                "probe failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            outputs.push(out);
+        }
+        for out in &outputs {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                stderr.contains("grit-bundle-cache-probe-seeded"),
+                "expected seeded marker: {stderr}"
+            );
+        }
+        // A shared partial left for resume must survive concurrent private downloads.
+        if shared_part.exists() {
+            let len = shared_part.metadata().map(|m| m.len()).unwrap_or(0);
+            assert!(
+                len <= u64::try_from(bundle_bytes.len()).expect("bundle size"),
+                "shared partial should not be corrupt/truncated by a peer"
+            );
+        }
     }
 }

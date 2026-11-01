@@ -10,7 +10,9 @@ use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::short_hex;
 use grit_lib::progress::NeverCancel;
-use grit_lib::remote::resumable::{discard_download, download_resumable};
+use grit_lib::remote::resumable::{
+    claim_resumable_download, discard_download, download_resumable, ResumableDownloadDest,
+};
 use grit_lib::remote::snapshot_checkout::{
     materialize, normalize_paths, suggest_work_branch, BranchInfo, BranchRefresh,
     BranchRefreshResult, CheckoutClient, CheckoutMarker, CheckoutRequest, CheckoutState,
@@ -231,8 +233,12 @@ pub fn run(
         .unwrap_or_else(|| "work".to_owned());
 
     let cache = download_dir().unwrap_or_else(|| std::env::temp_dir().join("grit-checkouts"));
-    std::fs::create_dir_all(&cache)?;
-    let bundle = cache.join(format!("{}.bundle", info.root));
+    let shared_bundle = cache.join(format!("{}.bundle", info.root));
+    let slot = claim_resumable_download(&cache, &shared_bundle)?;
+    let (bundle, _lock) = match slot {
+        ResumableDownloadDest::Shared { dest, lock } => (dest, Some(lock)),
+        ResumableDownloadDest::Private(dest) => (dest, None),
+    };
     let downloaded = download_resumable(
         http.as_ref(),
         &client.bundle_url(&info.id),
