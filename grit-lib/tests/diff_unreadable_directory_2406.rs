@@ -226,4 +226,42 @@ mod unix {
             "git should show deletion: {git_diff}"
         );
     }
+
+    #[test]
+    fn attr_pathspec_shows_staged_deletion_from_head_tree() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        git(root, &["init", "-q", "-b", "main", "."]);
+        git(root, &["config", "user.email", "t@example.com"]);
+        git(root, &["config", "user.name", "Test"]);
+        fs::write(root.join(".gitattributes"), "*.txt foo\n").expect("write attributes");
+        fs::write(root.join("old.txt"), "x\n").expect("write old.txt");
+        fs::write(root.join("other.c"), "c\n").expect("write other.c");
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+        git(root, &["rm", "old.txt"]);
+
+        let fx = open_repo(root);
+        let entries = fx
+            .repo
+            .diff()
+            .entries(
+                &DiffTarget::WorktreeVsHead,
+                &[":(attr:foo)".into()],
+                &DiffOptions::default(),
+            )
+            .expect("attr pathspec diff");
+        assert!(
+            entries
+                .iter()
+                .any(|e| { e.path() == "old.txt" && e.status == DiffStatus::Deleted }),
+            "expected old.txt deletion for :(attr:foo), got {entries:?}"
+        );
+
+        let git_diff = git(root, &["diff", "HEAD", "--", ":(attr:foo)"]);
+        assert!(
+            git_diff.contains("old.txt"),
+            "git should show old.txt under attr pathspec: {git_diff}"
+        );
+    }
 }

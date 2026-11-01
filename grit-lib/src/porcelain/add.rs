@@ -382,6 +382,34 @@ fn staging_path_matches(
     }
 }
 
+/// Whether a blob path (tree or index entry) is selected by `pathspecs`, including `:(attr:...)`
+/// magic and `:(exclude)` semantics.
+pub(crate) fn blob_path_matches_restrict_pathspecs(
+    path: &str,
+    mode: u32,
+    pathspecs: &[String],
+    base_ctx: PathspecMatchContext,
+    attr_matcher: Option<&PathspecMatcher<'_>>,
+) -> Result<bool> {
+    if pathspecs.is_empty() {
+        return Ok(true);
+    }
+    if pathspecs.iter().any(|s| pathspec_has_attr_magic(s)) {
+        let matcher = attr_matcher.ok_or_else(|| {
+            Error::Message(
+                "internal error: attr pathspec matcher missing for tree path filter".into(),
+            )
+        })?;
+        return Ok(matcher.matches_entry(path, mode));
+    }
+    if staging_pathspecs_need_entry_mode_context(pathspecs) {
+        return Ok(index_path_matches_staging_pathspecs(
+            path, mode, pathspecs, base_ctx,
+        ));
+    }
+    Ok(PathspecListMatcher::new(pathspecs, base_ctx).matches(path))
+}
+
 pub(crate) fn restricted_index_paths_for_pathspecs(
     repo: &Repository,
     index: &Index,

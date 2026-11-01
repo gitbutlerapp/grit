@@ -272,15 +272,27 @@ pub(crate) fn pathspec_restrict_paths_for_scan(
     if pathspecs.is_empty() {
         return Ok(None);
     }
+    let base_ctx = repo.pathspec_match_context();
     let mut paths = crate::porcelain::add::restricted_index_paths_for_pathspecs(
-        repo,
-        index,
-        pathspecs,
-        repo.pathspec_match_context(),
+        repo, index, pathspecs, base_ctx,
     )?;
     if let Some(tree) = base_tree {
-        for (path, _, _) in super::flatten_tree_entries(repo.odb(), tree)? {
-            if crate::pathspec::matches_pathspec_list(&path, pathspecs) {
+        let attr_matcher = if pathspecs
+            .iter()
+            .any(|s| crate::pathspec::pathspec_has_attr_magic(s))
+        {
+            Some(repo.pathspec_matcher(pathspecs)?)
+        } else {
+            None
+        };
+        for (path, mode, _) in super::flatten_tree_entries(repo.odb(), tree)? {
+            if crate::porcelain::add::blob_path_matches_restrict_pathspecs(
+                &path,
+                mode.bits(),
+                pathspecs,
+                base_ctx,
+                attr_matcher.as_ref(),
+            )? {
                 paths.insert(path);
             }
         }
