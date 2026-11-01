@@ -477,7 +477,29 @@ fn hash_collision_from_chain(err: &Error) -> Option<ObjectId> {
 }
 
 /// Wrap [`LibError::HashCollision`] anywhere in the chain as [`StructuredCliError`].
+fn would_overwrite_from_pull(err: &PullError) -> Option<Error> {
+    if let PullError::Repository(LibError::WouldOverwrite {
+        reason,
+        paths,
+        message,
+    }) = err
+    {
+        Some(would_overwrite_error(
+            *reason,
+            paths.clone(),
+            message.clone(),
+        ))
+    } else {
+        None
+    }
+}
+
 fn would_overwrite_from_chain(err: &Error) -> Option<Error> {
+    if let Some(pull) = err.downcast_ref::<PullError>() {
+        if let Some(structured) = would_overwrite_from_pull(pull) {
+            return Some(structured);
+        }
+    }
     if let Some(LibError::WouldOverwrite {
         reason,
         paths,
@@ -491,6 +513,11 @@ fn would_overwrite_from_chain(err: &Error) -> Option<Error> {
         ));
     }
     for cause in err.chain() {
+        if let Some(pull) = cause.downcast_ref::<PullError>() {
+            if let Some(structured) = would_overwrite_from_pull(pull) {
+                return Some(structured);
+            }
+        }
         if let Some(LibError::WouldOverwrite {
             reason,
             paths,

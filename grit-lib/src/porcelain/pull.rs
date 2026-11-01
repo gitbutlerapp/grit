@@ -1259,6 +1259,40 @@ mod tests {
         ignore = "starts system git or is heavy; run with --features full-tests"
     )]
     #[test]
+    fn fast_forward_pull_refuses_overlapping_local_changes() {
+        let tmp = TempDir::new().expect("tempdir");
+        let (origin, clone) = origin_and_clone(&tmp);
+        let tip_before = git(&clone, &["rev-parse", "main"]);
+        commit(&origin, "a.txt", "two");
+        std::fs::write(clone.join("a.txt"), "local edit\n").expect("write");
+        let repo = open(&clone);
+        let err = pull(
+            &repo,
+            &pull_options(&repo),
+            &mut NoProgress,
+            &NeverCancel,
+            None,
+        )
+        .expect_err("blocked");
+        assert!(
+            matches!(
+                &err,
+                PullError::Repository(Error::WouldOverwrite { paths, .. }) if paths == &["a.txt"]
+            ),
+            "{err:?}"
+        );
+        assert_eq!(git(&clone, &["rev-parse", "main"]), tip_before);
+        assert!(
+            git(&clone, &["status", "--porcelain"]).contains("M a.txt"),
+            "worktree still dirty"
+        );
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
     fn pull_maps_custom_fetch_refspec() {
         let tmp = TempDir::new().expect("tempdir");
         let (origin, clone) = origin_and_clone(&tmp);
