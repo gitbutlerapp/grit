@@ -223,7 +223,7 @@ pub(crate) fn index_from_tree_with_seeded_stats(
     Ok(index)
 }
 
-/// Copy skip-worktree from matching stage-0 seed rows (same path, mode and oid).
+/// Copy user skip-worktree from seed stage-0 rows with the same path (oid/mode may differ).
 fn carry_seed_skip_worktree(index: &mut Index, seed: &Index) {
     let mut seeds = seed
         .entries
@@ -243,9 +243,7 @@ fn carry_seed_skip_worktree(index: &mut Index, seed: &Index) {
         if src.path.as_slice() != entry.path.as_slice() {
             continue;
         }
-        if src.oid == entry.oid && src.mode == entry.mode {
-            entry.set_skip_worktree(true);
-        }
+        entry.set_skip_worktree(true);
         seeds.next();
     }
 }

@@ -188,6 +188,105 @@ fn reset_hard_parent_same_blob_keeps_skip_worktree_edit() {
 }
 
 #[test]
+fn reset_mixed_cross_blob_keeps_skip_worktree_flag() {
+    let (dir, repo, head) = seed_skip_worktree_repo();
+    let root = dir.path();
+    git(
+        root,
+        &["update-index", "--no-skip-worktree", "config.local"],
+    );
+    std::fs::write(root.join("config.local"), "DB_URL=committed-new\n").expect("tree bump");
+    git(root, &["add", "config.local"]);
+    git(root, &["commit", "-qm", "bump config in tree"]);
+    git(root, &["update-index", "--skip-worktree", "config.local"]);
+    std::fs::write(root.join("config.local"), "DB_URL=prod-password-123\n").expect("local");
+    reset_to_commit(
+        &repo,
+        &reset_opts(head, ResetMode::Mixed),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("mixed reset to init");
+    assert_config_local_skip_worktree(root);
+    assert_eq!(
+        std::fs::read_to_string(root.join("config.local")).expect("read"),
+        "DB_URL=prod-password-123\n"
+    );
+}
+
+#[test]
+fn reset_hard_cross_blob_clean_worktree_keeps_skip_worktree() {
+    let (dir, repo, head) = seed_skip_worktree_repo();
+    let root = dir.path();
+    let init_blob = git(root, &["rev-parse", "HEAD:config.local"])
+        .trim()
+        .to_string();
+    git(
+        root,
+        &["update-index", "--no-skip-worktree", "config.local"],
+    );
+    std::fs::write(root.join("config.local"), "DB_URL=committed-new\n").expect("tree bump");
+    git(root, &["add", "config.local"]);
+    git(root, &["commit", "-qm", "bump config in tree"]);
+    std::fs::write(root.join("config.local"), "DB_URL=localhost\n").expect("match index blob");
+    git(
+        root,
+        &[
+            "update-index",
+            "--cacheinfo",
+            "100644",
+            &init_blob,
+            "config.local",
+        ],
+    );
+    git(root, &["update-index", "--skip-worktree", "config.local"]);
+    reset_to_commit(
+        &repo,
+        &reset_opts(head, ResetMode::Hard),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("hard reset to init");
+    assert_config_local_skip_worktree(root);
+    assert_eq!(
+        std::fs::read_to_string(root.join("config.local")).expect("read"),
+        "DB_URL=localhost\n"
+    );
+}
+
+#[test]
+fn reset_hard_aborts_when_skip_worktree_path_removed_in_target() {
+    let (dir, repo, head) = seed_skip_worktree_repo();
+    let root = dir.path();
+    std::fs::write(root.join("secret.local"), "private\n").expect("new secret");
+    git(root, &["add", "secret.local"]);
+    git(root, &["commit", "-qm", "add secret"]);
+    git(root, &["update-index", "--skip-worktree", "secret.local"]);
+    std::fs::write(root.join("secret.local"), "PRIVATE-EDIT\n").expect("local edit");
+    let err = reset_to_commit(
+        &repo,
+        &reset_opts(head, ResetMode::Hard),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, Error::WouldOverwrite { .. }),
+        "expected WouldOverwrite, got {err:?}"
+    );
+    assert!(
+        root.join("secret.local").exists(),
+        "skip-worktree file must survive refused reset"
+    );
+    let tags = git_ls_files_verbose_map(root);
+    assert_eq!(
+        tags.get("secret.local").copied(),
+        Some('S'),
+        "skip-worktree bit must remain after refused reset"
+    );
+}
+
+#[test]
 fn reset_hard_aborts_when_skip_worktree_blob_changes_and_worktree_dirty() {
     let (dir, repo, head) = seed_skip_worktree_repo();
     let root = dir.path();

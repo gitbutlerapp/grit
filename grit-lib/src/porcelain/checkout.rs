@@ -1106,18 +1106,18 @@ fn checkout_hard_to_tree_journaled(
             .map(|(path, _)| path.clone())
             .collect();
         crate::diff::apply_hard_reset_index_plan(&mut index, align_plan);
+        if !skip_worktree_snapshot.is_empty() {
+            hard_reset_abort_if_skip_worktree_dirty(
+                repo,
+                work_tree,
+                &skip_worktree_snapshot,
+                &index,
+                sparse.as_ref(),
+                &config,
+            )?;
+        }
         deleted_abs_paths =
             hard_reset_journal_index_only_removals(work_tree, &index_only_removals, journal)?;
-    }
-    if !skip_worktree_snapshot.is_empty() {
-        hard_reset_abort_if_skip_worktree_dirty(
-            repo,
-            work_tree,
-            &skip_worktree_snapshot,
-            &index,
-            sparse.as_ref(),
-            &config,
-        )?;
     }
     let sparse = SparseCheckout::load(repo)?;
     deleted_abs_paths.extend(hard_reset_journal_conflict_only_unmerged_paths(
@@ -1250,6 +1250,7 @@ fn checkout_hard_to_tree_journaled(
                 None,
             );
         }
+        hard_reset_apply_skip_worktree_snapshot(&mut index, &skip_worktree_snapshot);
         let mtime_hint = Some(crate::index::stage0_mtime_max(&index.entries));
         crate::progress::poll_cancel(progress, cancel)?;
         write_checkout_index(repo, &mut index, lock, true, mtime_hint, journal)?;
@@ -1601,6 +1602,7 @@ fn checkout_hard_to_tree_journaled(
             None,
         );
     }
+    hard_reset_apply_skip_worktree_snapshot(&mut index, &skip_worktree_snapshot);
     let mtime_hint = Some(crate::index::stage0_mtime_max(&index.entries));
     crate::progress::poll_cancel(progress, cancel)?;
     if trees_differ && !written_by_tree_diff.is_empty() {
@@ -2053,6 +2055,21 @@ fn hard_reset_normalize_index_row(entry: &mut IndexEntry) {
     entry.base_index_pos = 0;
 }
 
+/// Reapply skip-worktree for paths that had the bit before hard reset began.
+fn hard_reset_apply_skip_worktree_snapshot(
+    index: &mut Index,
+    snapshot: &BTreeMap<Vec<u8>, ObjectId>,
+) {
+    if snapshot.is_empty() {
+        return;
+    }
+    for entry in index.entries.iter_mut().filter(|e| e.stage() == 0) {
+        if snapshot.contains_key(entry.path.as_slice()) {
+            entry.set_skip_worktree(true);
+        }
+    }
+}
+
 /// Stage-0 row after hard reset when the worktree file is left unchanged.
 fn hard_reset_keep_index_row(entry: &IndexEntry, preserve_skip_worktree: bool) -> IndexEntry {
     let mut row = index_entry_with_recorded_stat(entry);
@@ -2078,13 +2095,14 @@ fn hard_reset_abort_if_skip_worktree_dirty(
         if sparse.is_some_and(|s| !s.includes_index_path(path)) {
             continue;
         }
-        let Some(current) = index.get(path, 0) else {
-            continue;
+        let rel = crate::repo_relpath::storage_string(path);
+        let target_changed = match index.get(path, 0) {
+            None => true,
+            Some(current) => current.oid != index_oid,
         };
-        if current.oid == index_oid {
+        if !target_changed {
             continue;
         }
-        let rel = crate::repo_relpath::storage_string(path);
         let abs = crate::index::worktree_path_from_index_rel(work_tree, path);
         let Ok(meta) = fs::symlink_metadata(&abs) else {
             continue;
