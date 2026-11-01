@@ -1001,4 +1001,93 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn geometric_auto_compaction_keeps_delete_tombstone_issue_2448() {
+        use crate::objects::{hash::hash_object, HashAlgo, ObjectKind};
+        use crate::refs::ref_storage::RefStorageFormat;
+        use crate::refs::store::{open_ref_store, RefUpdateFlags, ReflogUpdate};
+        use crate::repo::{InitOptions, Repository};
+
+        fn oid(n: u8) -> ObjectId {
+            hash_object(
+                HashAlgo::Sha1,
+                ObjectKind::Blob,
+                format!("3-{n}").as_bytes(),
+            )
+            .expect("oid")
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &InitOptions::new()
+                .with_initial_branch("main")
+                .with_ref_storage(RefStorageFormat::Reftable),
+        )
+        .expect("init");
+        let store = open_ref_store(&dir.path().join(".git")).expect("store");
+        let steps: [(&str, Option<u8>, bool); 6] = [
+            ("refs/tags/t/u", Some(1), true),
+            ("refs/heads/a/b", Some(2), true),
+            ("refs/heads/c", Some(3), true),
+            ("refs/heads/d", Some(4), true),
+            ("refs/heads/d", Some(5), false),
+            ("refs/heads/c", None, false),
+        ];
+        for (i, (name, value, log)) in steps.into_iter().enumerate() {
+            let txn = RefTransaction::new()
+                .update(RefUpdate {
+                    name: name.into(),
+                    new_value: value.map(|n| RawRef::Direct(oid(n))),
+                    expected: Expected::Any,
+                    reflog: log.then(|| ReflogUpdate {
+                        identity: "T <t@e.x>".into(),
+                        message: format!("step {i}"),
+                        time: time::OffsetDateTime::from_unix_timestamp(1_700_000_000)
+                            .expect("time"),
+                        old_oid: None,
+                        new_oid: None,
+                    }),
+                    flags: RefUpdateFlags::default(),
+                })
+                .expect("txn");
+            store
+                .prepare(txn)
+                .expect("prepare")
+                .commit()
+                .expect("commit");
+        }
+
+        assert!(
+            store.read_raw("refs/heads/c").expect("read").is_none(),
+            "deleted ref must be absent on this store"
+        );
+        let fresh = open_ref_store(&dir.path().join(".git")).expect("fresh");
+        assert!(
+            fresh
+                .read_raw("refs/heads/c")
+                .expect("fresh read")
+                .is_none(),
+            "deleted ref must stay absent after reopen"
+        );
+        let mut listed = Vec::new();
+        store
+            .for_each_ref("refs/", &mut |entry| {
+                listed.push(entry.name.clone());
+                ControlFlow::Continue(())
+            })
+            .expect("list");
+        assert!(
+            !listed.iter().any(|name| name == "refs/heads/c"),
+            "for_each_ref must not list deleted ref: {listed:?}"
+        );
+
+        let git_dir = dir.path().join(".git");
+        let stack = ReftableStack::open(&git_dir).expect("stack");
+        assert!(
+            stack.table_names().len() > 1,
+            "expected multi-table stack after geometric compaction"
+        );
+    }
 }
