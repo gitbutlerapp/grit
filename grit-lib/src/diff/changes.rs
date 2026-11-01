@@ -582,9 +582,9 @@ impl<'repo> UncommittedDiff<'repo> {
         target: &DiffTarget,
         pathspecs: &[String],
         options: &DiffOptions,
-    ) -> Result<Vec<DiffEntry>> {
+    ) -> Result<super::core::DiffEntriesResult> {
         let renames = options.renames;
-        let entries = match target {
+        let result = match target {
             DiffTarget::IndexVsHead => {
                 let head_tree = resolve_head_for_repository(self.repo)?.tree(self.repo.odb())?;
                 let restrict = pathspec_restrict_paths_for_scan(
@@ -593,12 +593,18 @@ impl<'repo> UncommittedDiff<'repo> {
                     pathspecs,
                     head_tree.as_ref(),
                 )?;
-                self.staged_entries_for_paths(renames, restrict)?
+                super::core::DiffEntriesResult {
+                    entries: self.staged_entries_for_paths(renames, restrict)?,
+                    inexact_rename_skipped: None,
+                }
             }
             DiffTarget::WorktreeVsIndex => {
                 let restrict =
                     pathspec_restrict_paths_for_scan(self.repo, &self.index, pathspecs, None)?;
-                self.unstaged_entries_for_paths(renames, restrict)?
+                super::core::DiffEntriesResult {
+                    entries: self.unstaged_entries_for_paths(renames, restrict)?,
+                    inexact_rename_skipped: None,
+                }
             }
             DiffTarget::WorktreeVsHead => {
                 let head_tree = resolve_head_for_repository(self.repo)?.tree(self.repo.odb())?;
@@ -608,7 +614,14 @@ impl<'repo> UncommittedDiff<'repo> {
                     pathspecs,
                     head_tree.as_ref(),
                 )?;
-                self.worktree_entries_for_paths(head_tree.as_ref(), renames, restrict)?
+                super::core::DiffEntriesResult {
+                    entries: self.worktree_entries_for_paths(
+                        head_tree.as_ref(),
+                        renames,
+                        restrict,
+                    )?,
+                    inexact_rename_skipped: None,
+                }
             }
             DiffTarget::WorktreeVsTree(tree) => {
                 let restrict = pathspec_restrict_paths_for_scan(
@@ -617,13 +630,19 @@ impl<'repo> UncommittedDiff<'repo> {
                     pathspecs,
                     Some(tree),
                 )?;
-                self.worktree_entries_for_paths(Some(tree), renames, restrict)?
+                super::core::DiffEntriesResult {
+                    entries: self.worktree_entries_for_paths(Some(tree), renames, restrict)?,
+                    inexact_rename_skipped: None,
+                }
             }
-            DiffTarget::Commit(_) | DiffTarget::Trees { .. } => {
-                stored_target_entries(self.repo, target, options)?.unwrap_or_default()
-            }
+            DiffTarget::Commit(_) | DiffTarget::Trees { .. } => stored_target_entries(
+                self.repo,
+                target,
+                options,
+            )?
+            .unwrap_or_default(),
         };
-        limit_target_entries(self.repo, entries, pathspecs, options)
+        limit_target_entries(self.repo, result, pathspecs, options)
     }
 
     /// Changes on the other side of the index for the paths in `primary_paths`, which feed
@@ -665,6 +684,7 @@ impl<'repo> UncommittedDiff<'repo> {
         let options = DiffOptions::default().with_renames(renames);
         let entries: Vec<DiffEntry> = self
             .entries(&peer_target, pathspecs, &options)?
+            .entries
             .into_iter()
             .filter(|entry| {
                 let display = entry

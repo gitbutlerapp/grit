@@ -225,6 +225,9 @@ mod diff_pathspec;
 #[path = "diff_rename_algorithm_filter_flags.rs"]
 mod diff_rename_algorithm_filter_flags;
 #[cfg(feature = "full-tests")]
+#[path = "diff_rename_limit_notice.rs"]
+mod diff_rename_limit_notice;
+#[cfg(feature = "full-tests")]
 #[path = "diff_single_traversal.rs"]
 mod diff_single_traversal;
 #[cfg(feature = "full-tests")]
@@ -336,8 +339,6 @@ mod issue_1653_gc_repack;
 #[cfg(feature = "full-tests")]
 #[path = "issue_1876_gc_midx_version.rs"]
 mod issue_1876_gc_midx_version;
-#[path = "json_error_kinds_2413.rs"]
-mod json_error_kinds_2413;
 #[cfg(feature = "full-tests")]
 #[path = "json_output.rs"]
 mod json_output;

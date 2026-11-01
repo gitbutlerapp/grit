@@ -654,11 +654,15 @@ fn lib_file_to_cli(f: ListedFileDiff, detail: DiffDetail) -> FileDiff {
 
 fn outcome_from_entries(
     repo: &grit_lib::repo::Repository,
-    entries: Vec<DiffEntry>,
+    diff_result: grit_lib::diff::DiffEntriesResult,
     detail: DiffDetail,
     diff_options: DiffOptions,
     format: DiffFormatArgs,
 ) -> Result<DiffOutcome> {
+    if let Some(skipped) = diff_result.inexact_rename_skipped {
+        emit_inexact_rename_notice(&skipped);
+    }
+    let entries = diff_result.entries;
     if matches!(detail, DiffDetail::NameOnly | DiffDetail::NameStatus) {
         let files = entries
             .into_iter()
@@ -923,28 +927,31 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let format = opts.format;
     let (entries, changes) = match target {
         DiffTarget::IndexVsHead => {
-            let entries = uncommitted_entries(
+            let diff_result = uncommitted_entries(
                 &mut uncommitted_diff(&repo)?,
                 &target,
                 &pathspecs,
                 &diff_options,
             )?;
-            let changes = load_object_changes(&repo, &entries)?;
-            (entries, Some((changes, PatchSide::Blob)))
+            let changes = load_object_changes(&repo, &diff_result.entries)?;
+            (diff_result.entries, Some((changes, PatchSide::Blob)))
         }
         DiffTarget::WorktreeVsIndex
         | DiffTarget::WorktreeVsHead
         | DiffTarget::WorktreeVsTree(_) => {
             let mut uncommitted = uncommitted_diff(&repo)?;
-            let entries =
+            let diff_result =
                 uncommitted_entries(&mut uncommitted, &target, &pathspecs, &diff_options)?;
-            let changes = uncommitted.load_worktree_changes(entries.clone())?;
-            (entries, Some((changes, PatchSide::Worktree)))
+            let changes = uncommitted.load_worktree_changes(diff_result.entries.clone())?;
+            (diff_result.entries, Some((changes, PatchSide::Worktree)))
         }
-        _ => (
-            stored_entries(&repo, &target, &pathspecs, &diff_options)?,
-            None,
-        ),
+        _ => {
+            let diff_result = stored_entries(&repo, &target, &pathspecs, &diff_options)?;
+            if let Some(skipped) = diff_result.inexact_rename_skipped {
+                emit_inexact_rename_notice(&skipped);
+            }
+            (diff_result.entries, None)
+        }
     };
     patch_text_outcome(&repo, entries, changes, diff_options, format, quiet)
 }
@@ -981,7 +988,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     outcome_from_entries(&repo, entries, detail, diff_options, format)?
                 }
                 _ => {
-                    let staged = load_object_changes(&repo, &entries)?;
+                    let staged = load_object_changes(&repo, &entries.entries)?;
                     let peer = if opts.emit_json_hunk_ids {
                         uncommitted
                             .peer_changes(
@@ -1014,7 +1021,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 uncommitted_entries(&mut uncommitted, &target, &pathspecs, &diff_options)?;
             match detail {
                 DiffDetail::Stat => {
-                    let changes = uncommitted.load_worktree_changes(entries)?;
+                    let changes = uncommitted.load_worktree_changes(entries.entries)?;
                     drop(uncommitted);
                     outcome_stat_from_changes(changes, diff_options, format)
                 }
@@ -1023,7 +1030,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     outcome_from_entries(&repo, entries, detail, diff_options, format)?
                 }
                 _ => {
-                    let unstaged = uncommitted.load_worktree_changes(entries)?;
+                    let unstaged = uncommitted.load_worktree_changes(entries.entries)?;
                     let peer = if opts.emit_json_hunk_ids {
                         uncommitted
                             .peer_changes(
@@ -1054,7 +1061,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             let mut uncommitted = uncommitted_diff(&repo)?;
             let entries =
                 uncommitted_entries(&mut uncommitted, &target, &pathspecs, &diff_options)?;
-            let changes = uncommitted.load_worktree_changes(entries)?;
+            let changes = uncommitted.load_worktree_changes(entries.entries)?;
             drop(uncommitted);
             match detail {
                 DiffDetail::NameOnly | DiffDetail::NameStatus => {
@@ -1350,7 +1357,7 @@ fn uncommitted_entries(
     target: &DiffTarget,
     pathspecs: &[String],
     diff_options: &DiffOptions,
-) -> Result<Vec<DiffEntry>> {
+) -> Result<grit_lib::diff::DiffEntriesResult> {
     uncommitted
         .entries(target, pathspecs, diff_options)
         .context("could not diff the index or working tree")
@@ -1362,7 +1369,7 @@ fn stored_entries(
     target: &DiffTarget,
     pathspecs: &[String],
     diff_options: &DiffOptions,
-) -> Result<Vec<DiffEntry>> {
+) -> Result<grit_lib::diff::DiffEntriesResult> {
     repo.diff()
         .entries(target, pathspecs, diff_options)
         .context("could not diff commits")
@@ -1501,12 +1508,19 @@ fn outcome_stat_from_changes(
 
 fn tree_diff_outcome(
     repo: &grit_lib::repo::Repository,
-    entries: Vec<DiffEntry>,
+    diff_result: grit_lib::diff::DiffEntriesResult,
     detail: DiffDetail,
     diff_options: DiffOptions,
     format: DiffFormatArgs,
     body_delivery: DiffBodyDelivery,
 ) -> Result<DiffOutcome> {
+    let grit_lib::diff::DiffEntriesResult {
+        entries,
+        inexact_rename_skipped,
+    } = diff_result;
+    if let Some(skipped) = inexact_rename_skipped {
+        emit_inexact_rename_notice(&skipped);
+    }
     if detail == DiffDetail::Patch {
         match body_delivery {
             DiffBodyDelivery::MetadataOnly => Ok(DiffOutcome {
@@ -1535,7 +1549,16 @@ fn tree_diff_outcome(
             }
         }
     } else {
-        outcome_from_entries(repo, entries, detail, diff_options, format)
+        outcome_from_entries(
+            repo,
+            grit_lib::diff::DiffEntriesResult {
+                entries,
+                inexact_rename_skipped: None,
+            },
+            detail,
+            diff_options,
+            format,
+        )
     }
 }
 

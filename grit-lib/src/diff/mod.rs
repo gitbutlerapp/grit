@@ -33,6 +33,7 @@ mod options;
 mod patch_log;
 pub mod pickaxe;
 mod posix_ere;
+mod rename_blob_cache;
 mod rename_lines;
 mod stat;
 pub(crate) use core::is_func_line;

@@ -223,9 +223,91 @@ fn bench_diff_renames_adoc_similar(c: &mut Criterion) {
     group.finish();
 }
 
+fn basename_over_limit_fixture(count: usize) -> RenameBenchFixture {
+    let root = TempDir::new().expect("tempdir");
+    let git_dir = root.path().join(".git");
+    std::fs::create_dir_all(git_dir.join("objects")).expect("objects");
+    let odb = Odb::new(&git_dir.join("objects"));
+
+    let mut entries: Vec<DiffEntry> = Vec::with_capacity(count * 2);
+    for i in 0..count {
+        let old_data = format!("payload {i} line one\nline two\n").into_bytes();
+        let new_data = format!("payload {i} line one\nline two edited\n").into_bytes();
+        let old_oid = odb.write(ObjectKind::Blob, &old_data).expect("write old");
+        let new_oid = odb.write(ObjectKind::Blob, &new_data).expect("write new");
+        entries.push(DiffEntry {
+            status: DiffStatus::Deleted,
+            old_path: Some(format!("old/{i}/readme.txt")),
+            new_path: None,
+            old_mode: FileMode::REGULAR,
+            new_mode: FileMode::ABSENT,
+            old_oid,
+            new_oid: zero_oid(),
+            score: None,
+        });
+        entries.push(DiffEntry {
+            status: DiffStatus::Added,
+            old_path: None,
+            new_path: Some(format!("new/{i}/readme.txt")),
+            old_mode: FileMode::ABSENT,
+            new_mode: FileMode::REGULAR,
+            old_oid: zero_oid(),
+            new_oid,
+            score: None,
+        });
+    }
+
+    let mut config = bench_config();
+    let limit = ConfigFile::parse(
+        Path::new("limit"),
+        "[diff]\n\trenameLimit = 500\n",
+        ConfigScope::Local,
+    )
+    .expect("parse limit");
+    config.merge(&limit);
+
+    RenameBenchFixture {
+        _root: root,
+        odb,
+        entries,
+        config,
+    }
+}
+
+fn bench_diff_renames_basename_over_limit(c: &mut Criterion) {
+    let policy = ThreadPolicy::with_threads_override(Some(1))
+        .min_items_override(Some(0))
+        .min_total_bytes_override(Some(0));
+    let fx = basename_over_limit_fixture(800);
+    let mut group = c.benchmark_group("diff_renames_basename_over_limit");
+    group.throughput(Throughput::Elements(
+        u64::try_from(fx.entries.len()).expect("count"),
+    ));
+    group.bench_function("threads=1", |b| {
+        b.iter(|| {
+            black_box(
+                detect_renames_with_policy(
+                    &fx.odb,
+                    None,
+                    fx.entries.clone(),
+                    50,
+                    &fx.config,
+                    &policy,
+                    None,
+                    DetectRenamesOptions::default(),
+                )
+                .expect("detect renames")
+                .entries,
+            );
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     diff_renames,
     bench_diff_renames,
-    bench_diff_renames_adoc_similar
+    bench_diff_renames_adoc_similar,
+    bench_diff_renames_basename_over_limit
 );
 criterion_main!(diff_renames);

@@ -260,13 +260,21 @@ fn entries_for_every_target_match_git_name_status() {
                 .diff()
                 .entries(target, &pathspecs, &options)
                 .expect("Diff::entries");
-            assert_eq!(names(&via_handle), expected, "Diff::entries {context}");
+            assert_eq!(
+                names(&via_handle.entries),
+                expected,
+                "Diff::entries {context}"
+            );
 
             let mut uncommitted = repo.diff().uncommitted().expect("uncommitted");
             let via_uncommitted = uncommitted
                 .entries(target, &pathspecs, &options)
                 .expect("UncommittedDiff::entries");
-            assert_eq!(names(&via_uncommitted), expected, "uncommitted {context}");
+            assert_eq!(
+                names(&via_uncommitted.entries),
+                expected,
+                "uncommitted {context}"
+            );
         }
     }
 }

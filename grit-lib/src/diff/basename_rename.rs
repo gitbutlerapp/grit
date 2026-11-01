@@ -2,10 +2,13 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::diff_rename_parallel::parallel_load_optional_blobs;
 use crate::error::Result;
 use crate::objects::FileMode;
 use crate::odb::Odb;
+use crate::parallel::ParallelOptions;
 
+use super::rename_blob_cache::RenameBlobCache;
 use super::rename_lines::RenameLineTable;
 use super::DiffEntry;
 
@@ -226,6 +229,8 @@ pub(crate) fn apply_basename_rename_pairs(
     renames: &mut Vec<DiffEntry>,
     threshold: u32,
     cancel_watch: Option<&std::sync::atomic::AtomicBool>,
+    cache: &mut RenameBlobCache,
+    par_opts: ParallelOptions,
 ) -> Result<()> {
     let min_score = min_basename_score(threshold);
     let dirs_removed = dirs_removed_from_entries(deleted, added, used_deleted, used_added);
@@ -249,6 +254,14 @@ pub(crate) fn apply_basename_rename_pairs(
     }
 
     let (sources, dests) = build_basename_maps(deleted, added, used_deleted, used_added);
+
+    struct BasenameCandidate {
+        src_index: usize,
+        ai: usize,
+    }
+    let mut candidates: Vec<BasenameCandidate> = Vec::new();
+    let mut need_deleted = vec![false; deleted.len()];
+    let mut need_added = vec![false; added.len()];
 
     for (i, del) in deleted.iter().enumerate() {
         poll_rename_cancel(cancel_watch)?;
@@ -295,21 +308,77 @@ pub(crate) fn apply_basename_rename_pairs(
             continue;
         }
 
-        let old_bytes = odb.read(&del.old_oid).ok().map(|o| o.data);
-        let new_bytes = read_added_entry_bytes(odb, add, work_root);
-        let (Some(old_data), Some(new_data)) = (old_bytes, new_bytes) else {
+        need_deleted[src_index] = true;
+        need_added[ai] = true;
+        candidates.push(BasenameCandidate { src_index, ai });
+    }
+
+    if candidates.is_empty() {
+        return Ok(());
+    }
+
+    let loaded_deleted = parallel_load_optional_blobs(odb, deleted.len(), par_opts, 0, |di| {
+        if !need_deleted[di] {
+            return None;
+        }
+        odb.read(&deleted[di].old_oid).ok().map(|o| o.data)
+    });
+    for (di, opt) in loaded_deleted.into_iter().enumerate() {
+        if let Some(data) = opt {
+            cache.insert_deleted_bytes(di, data);
+        }
+    }
+    let loaded_added = parallel_load_optional_blobs(odb, added.len(), par_opts, 0, |ai| {
+        if !need_added[ai] {
+            return None;
+        }
+        read_added_entry_bytes(odb, &added[ai], work_root)
+    });
+    for (ai, opt) in loaded_added.into_iter().enumerate() {
+        if let Some(data) = opt {
+            cache.insert_added_bytes(ai, data);
+        }
+    }
+
+    let mut scores: Vec<(u32, usize, usize)> = Vec::new();
+    for cand in candidates {
+        poll_rename_cancel(cancel_watch)?;
+        let Some(old_bytes) = cache
+            .deleted_blob(odb, deleted, cand.src_index)
+            .map(|b| b.to_vec())
+        else {
+            continue;
+        };
+        let Some(new_bytes) = cache
+            .added_blob(odb, added, cand.ai, work_root)
+            .map(|b| b.to_vec())
+        else {
             continue;
         };
         let score = RenameLineTable::similarity_score(
-            &RenameLineTable::from_blob(&old_data),
-            &RenameLineTable::from_blob(&new_data),
+            &RenameLineTable::from_blob(&old_bytes),
+            &RenameLineTable::from_blob(&new_bytes),
         );
-        if score < min_score {
+        if score >= min_score {
+            scores.push((score, cand.src_index, cand.ai));
+        }
+    }
+
+    scores.sort_by(|a, b| {
+        let a_same = same_basename_entry(&deleted[a.1], &added[a.2]);
+        let b_same = same_basename_entry(&deleted[b.1], &added[b.2]);
+        b_same
+            .cmp(&a_same)
+            .then_with(|| b.0.cmp(&a.0))
+    });
+
+    for (score, src_index, ai) in scores {
+        if used_deleted[src_index] || used_added[ai] {
             continue;
         }
-
         used_deleted[src_index] = true;
         used_added[ai] = true;
+        let add = &added[ai];
         renames.push(DiffEntry {
             status: super::DiffStatus::Renamed,
             old_path: deleted[src_index].old_path.clone(),
@@ -325,4 +394,10 @@ pub(crate) fn apply_basename_rename_pairs(
         }
     }
     Ok(())
+}
+
+fn same_basename_entry(del: &DiffEntry, add: &DiffEntry) -> bool {
+    let old = del.old_path.as_deref().unwrap_or("");
+    let new = add.new_path.as_deref().unwrap_or("");
+    path_basename(old) == path_basename(new) && !path_basename(old).is_empty()
 }
