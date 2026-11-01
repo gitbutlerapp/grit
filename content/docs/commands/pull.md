@@ -188,6 +188,17 @@ $ grit pull
 error: cannot pull while a rebase is in progress; finish it with `grit rebase --continue` or cancel it with `grit rebase --abort`
 ```
 
+When local edits on a path the pull would update would be overwritten (fast-forward, merge, or rebase):
+
+```console
+$ grit pull
+error: local changes would be overwritten by merge
+  f
+hint: commit them with `grit commit`, or set them aside with `grit stash`, then try again
+```
+
+On overwrite refusal with `--json`, stdout is a single object with `kind` `would_overwrite` and `would_overwrite.reason` (`local_changes` or `untracked`) plus a sorted `paths` array, and a `hint` — the same shape as [`grit merge`](../merge/) and [`grit switch`](../switch/). For example `{"error":"local changes would be overwritten by merge","hint":"…","kind":"would_overwrite","would_overwrite":{"paths":["f"],"reason":"local_changes"}}`. See the [error schema](/schemas/error/v1.json).
+
 With `--json` that is `{"error":"no upstream configured for branch main","hint":"…","kind":"branch_no_upstream"}`. A missing remote is `kind` `remote_not_found` and an authentication failure `auth_required` or `auth_rejected`, each with a `hint` (see [Exit codes](../exit-codes/)).
 
 ## JSON output

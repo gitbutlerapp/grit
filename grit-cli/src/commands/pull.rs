@@ -159,6 +159,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
                         &repo, "pull", kind,
                     ));
                 }
+                PullError::Repository(lib) => crate::json_error::map_lib_error(lib),
                 rest => anyhow::Error::new(rest),
             });
         }

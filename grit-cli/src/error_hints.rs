@@ -17,7 +17,7 @@ use grit_lib::remote::push_plan::PushPlanError;
 use grit_lib::remote::{RemoteError, DEFAULT_REMOTE};
 
 use crate::error_kind::ErrorKind;
-use crate::json_error::{StructuredCliError, StructuredJsonError};
+use crate::json_error::{would_overwrite_error, StructuredCliError, StructuredJsonError};
 use crate::usage_hints;
 
 /// Paths shown in human messages and hints before the rest are summarized as a count.
@@ -162,6 +162,11 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             Some("check the URL, and that you have access to the repository".to_owned()),
             None,
         )),
+        LibError::WouldOverwrite {
+            reason,
+            paths,
+            message,
+        } => Some(would_overwrite_error(*reason, paths.clone(), message.clone())),
         LibError::DirtyWorktree { paths, .. } => Some(Error::new(StructuredCliError {
             human: format!("{err}{}", indented_paths(paths)),
             payload: StructuredJsonError {
@@ -679,6 +684,22 @@ mod tests {
         assert_eq!(p.paths, Some(strings(&["f"])));
         assert_eq!(p.error, "unmerged paths still have conflict markers");
         assert!(p.hint.expect("hint").contains("conflict markers in f"));
+    }
+
+    #[test]
+    fn would_overwrite_from_pull_repository_is_guided() {
+        let err = Error::new(PullError::Repository(LibError::WouldOverwrite {
+            reason: OverwriteReason::LocalChanges,
+            paths: strings(&["f"]),
+            message: "local changes would be overwritten by merge".into(),
+        }));
+        let p = payload(err);
+        assert_eq!(p.kind, ErrorKind::WouldOverwrite);
+        assert_eq!(
+            p.would_overwrite.as_ref().expect("wo").paths,
+            strings(&["f"])
+        );
+        assert!(p.hint.expect("hint").contains("grit stash"));
     }
 
     #[test]
