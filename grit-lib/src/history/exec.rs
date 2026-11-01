@@ -98,6 +98,8 @@ struct ExecDetachedSession<'a> {
     prestate: &'a ExecPrestate,
     current_tree: ObjectId,
     active: bool,
+    /// Untracked paths present immediately before the current exec command runs.
+    untracked_before_command: HashSet<String>,
 }
 
 impl ExecDetachedSession<'_> {
@@ -110,14 +112,19 @@ impl ExecDetachedSession<'_> {
     }
 
     /// Restore the saved `HEAD`, index, and tracked files, then drop only untracked
-    /// paths that appeared after the exec session snapshot (failed commands).
+    /// paths that appeared after the per-command snapshot taken before the failing run.
     fn restore_after_failed_command(&mut self) -> Result<(), HistoryError> {
         if !self.active {
             return Ok(());
         }
         self.active = false;
         restore_exec_prestate(self.repo, self.prestate, self.current_tree)?;
-        remove_untracked_created_during_exec(self.repo, self.prestate)
+        remove_untracked_created_during_exec(self.repo, &self.untracked_before_command)
+    }
+
+    fn snapshot_untracked_before_command(&mut self) -> Result<(), HistoryError> {
+        self.untracked_before_command = snapshot_untracked_paths(self.repo)?;
+        Ok(())
     }
 }
 
@@ -445,6 +452,7 @@ fn verify_rebase_with_exec_inner(
         prestate: &prestate,
         current_tree: prestate.head_tree,
         active: false,
+        untracked_before_command: prestate.untracked_paths.clone(),
     };
     let mut rewrites = ExecRewrites::new(plan);
     execute_plan(
@@ -488,11 +496,13 @@ pub(super) fn run_exec_at_tip(
         prestate: &prestate,
         current_tree: tip_tree,
         active: true,
+        untracked_before_command: prestate.untracked_paths.clone(),
     };
     let mut tip = tip;
     let mut runs = Vec::new();
     let mut tip_tree = tip_tree;
     for command in &spec.commands {
+        session.snapshot_untracked_before_command()?;
         let output = match run_exec_command(runner, command, worktree) {
             Ok(output) => output,
             Err(err) => return Err(fail_exec_session(&mut session, err, true)),
@@ -655,6 +665,7 @@ fn execute_plan(
                     pending_pick: false,
                 },
             )?;
+            session.snapshot_untracked_before_command()?;
             let output = match run_exec_command(runner, command, worktree) {
                 Ok(output) => output,
                 Err(err) => return Err(fail_exec_session(session, err, preserve_grit_rebase)),
@@ -991,12 +1002,12 @@ fn snapshot_untracked_paths(repo: &Repository) -> Result<HashSet<String>, Histor
 
 fn remove_untracked_created_during_exec(
     repo: &Repository,
-    pre: &ExecPrestate,
+    baseline: &HashSet<String>,
 ) -> Result<(), HistoryError> {
     let worktree = repo.work_tree().ok_or(HistoryError::BareRepository)?;
     let current = snapshot_untracked_paths(repo)?;
     for path in current {
-        if pre.untracked_paths.contains(&path) {
+        if baseline.contains(&path) {
             continue;
         }
         let full = worktree.join(&path);
@@ -1377,6 +1388,7 @@ pub(super) fn resume_exec_rebase(
         prestate: &prestate,
         current_tree,
         active: true,
+        untracked_before_command: prestate.untracked_paths.clone(),
     };
     let exec = match execute_plan(
         &mut session,
