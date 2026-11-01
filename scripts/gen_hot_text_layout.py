@@ -21,22 +21,31 @@ Two fragments come out of one profile:
 
 Both lists are the union of what common operations run (repository discovery and config,
 refs and branches, object reads, revision walks, diffs, blame, the index and work tree,
-staging, committing, switching, stashing), profiled with callgrind on a clone through the
-shipped `grit` binary so inlining matches what is linked. Functions are ordered by how many
-workloads run them, so the core every operation shares comes first and stays dense.
+staging, committing, switching, stashing), profiled with callgrind on a clone through
+`grit` binaries built like the ones that run them, so inlining matches what is linked: the
+shipped `dist` build (fat LTO, one codegen unit) and the `release` build that development
+and local benchmarking use (ThinLTO over many codegen units, which inlines less and keeps
+more functions apart). Functions are ordered by how many workloads run them, so the core
+every operation shares comes first and stays dense.
 
 Each function's input section (`.text.<v0 symbol>`, or `.text.unlikely.<v0 symbol>` for
 `#[cold]` functions) is matched with the crate disambiguators (`Cs<hash>_`), back-references
 (`B<offset>_`) and numbered local-copy suffixes wildcarded, so the list keeps matching across
-version bumps and toolchain updates. The instantiating crate a generic's symbol ends with is
-wildcarded too: LLVM merges identical instantiations from different crates into one copy,
-and which crate's name the survivor keeps changes from build to build (a stripped build
-differs from the unstripped one profiled here). A renamed or removed function simply stops matching and
-stays in `.text`; nothing breaks, the layout only degrades. Regenerate after large changes:
+version bumps, toolchain updates and build profiles. The instantiating crate a generic's
+symbol ends with is wildcarded too: LLVM merges identical instantiations from different
+crates into one copy, and which crate's name the survivor keeps changes from build to build
+(a stripped build differs from the unstripped one profiled here). A renamed or removed
+function simply stops matching and stays in `.text`; nothing breaks, the layout only
+degrades. Regenerate after large changes:
 
     CARGO_PROFILE_DIST_STRIP=false CARGO_TARGET_DIR=target/hot-text \\
         cargo build --profile dist -p grit-cli
-    python3 scripts/gen_hot_text_layout.py --grit target/hot-text/dist/grit
+    CARGO_TARGET_DIR=target/hot-text cargo build --release -p grit-cli
+    python3 scripts/gen_hot_text_layout.py \\
+        --grit target/hot-text/dist/grit --grit target/hot-text/release/grit
+
+(Linking the `release` build against the fragments being replaced is fine: the profile
+reads function names, not addresses.)
 
 Requires valgrind (callgrind) and the system `git` to build the fixture.
 """
@@ -80,7 +89,8 @@ WORKLOADS: list[tuple[str, str, list[list[str]]]] = [
     ("diff", "dirty", [["diff"], ["diff", "--json"], ["diff", "HEAD~1"]]),
     ("diff-staged", "renamed", [["diff", "--cached"]]),
     ("log", "clean", [["log", "--limit", "20"], ["log", "--oneline", "--limit", "100"]]),
-    ("log-json", "clean", [["log", "--json", "--limit", "20"]]),
+    # Past one page, `--json` streams its rows in batches.
+    ("log-json", "clean", [["log", "--json", "--limit", "20"], ["log", "--json", "--limit", "100"]]),
     ("show", "clean", [["show", "HEAD"], ["show", "--json", "HEAD"]]),
     ("revs", "clean", [["revs", "--count", "HEAD"], ["merge-base", "main", "origin/main"]]),
     ("shortlog", "clean", [["shortlog"]]),
@@ -273,7 +283,13 @@ def mangled_crates(symbol: str) -> set[str]:
 
 
 def section_pattern(symbol: str) -> str:
-    """Input-section globs for `symbol`; `#[cold]` functions live in `.text.unlikely.*`."""
+    """Input-section globs for `symbol`; `#[cold]` functions live in `.text.unlikely.*`.
+
+    Whether a function carries a local-copy suffix depends on the build, not the function:
+    ThinLTO in the `release` profile renames functions it shares between codegen units to
+    `name.llvm.<n>`, while the single-unit `dist` build profiled here keeps most bare. Each
+    function therefore matches both with and without a suffix.
+    """
     pattern = CRATE_DISAMBIGUATOR.sub("Cs*_", symbol)
     pattern = BACKREF.sub("B*_", pattern)
     suffix = LOCAL_SUFFIX.search(pattern)
@@ -282,9 +298,8 @@ def section_pattern(symbol: str) -> str:
     crate = INSTANTIATING_CRATE.search(pattern)
     if crate and int(crate.group(1)) == len(crate.group(2)):
         pattern = pattern[: crate.start()] + "Cs*_*"
-    if suffix:
-        pattern += ".*"
-    return f".text.{pattern} .text.unlikely.{pattern}"
+    names = [pattern] if pattern.endswith("*") else [pattern, f"{pattern}.*"]
+    return " ".join(f"{section}.{name}" for section in (".text", ".text.unlikely") for name in names)
 
 
 LIB_HEADER = [
@@ -321,7 +336,13 @@ def ordered(first_seen: dict[str, None], shared: Counter[str]) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--grit", type=Path, required=True, help="unstripped grit binary")
+    parser.add_argument(
+        "--grit",
+        type=Path,
+        action="append",
+        required=True,
+        help="unstripped grit binary; repeat to profile several builds and merge their lists",
+    )
     parser.add_argument("--lib-output", type=Path, default=DEFAULT_LIB_OUTPUT)
     parser.add_argument("--cli-output", type=Path, default=DEFAULT_CLI_OUTPUT)
     # Large enough that index parsing and the work-tree scans take their threaded paths.
@@ -331,40 +352,46 @@ def main() -> int:
     if shutil.which("valgrind") is None:
         print("valgrind is required", file=sys.stderr)
         return 1
-    grit = args.grit.resolve()
-    symbols = defined_text_symbols(grit)
-    if not any(s.startswith("_R") for s in symbols):
-        print(f"{grit} has no Rust symbols; build it with strip = false", file=sys.stderr)
-        return 1
-    library = library_symbols(symbols, library_crates())
+    builds = []
+    crates = library_crates()
+    for grit in (path.resolve() for path in args.grit):
+        symbols = defined_text_symbols(grit)
+        if not any(s.startswith("_R") for s in symbols):
+            print(f"{grit} has no Rust symbols; build it with strip = false", file=sys.stderr)
+            return 1
+        builds.append((grit, symbols, library_symbols(symbols, crates)))
 
-    # pattern -> number of workloads that ran it; dict order is first-seen order.
+    # Dict order is first-seen order; `shared` counts the workloads that ran each pattern,
+    # in any of the builds.
     lib_seen: dict[str, None] = {}
     cli_seen: dict[str, None] = {}
-    shared: Counter[str] = Counter()
+    seen_by_workload: dict[str, set[str]] = {name: set() for name, _, _ in WORKLOADS}
     with tempfile.TemporaryDirectory(prefix="grit-hot-text-") as tmp:
         root = Path(tmp)
         repo, paths = build_fixture(root, args.files)
-        for name, shape, steps in WORKLOADS:
-            apply_shape(repo, paths, shape)
-            seen: set[str] = set()
-            for i, argv in enumerate(steps):
-                # The first step runs with the census's isolated config, later ones with the
-                # usual config cascade.
-                env = run_env(isolated=i == 0)
-                out = root / f"{name}-{i}.callgrind"
-                for n in executed_functions(grit, repo, argv, out, env):
-                    if n not in symbols:
-                        continue
-                    p = section_pattern(n)
-                    (lib_seen if n in library else cli_seen).setdefault(p, None)
-                    seen.add(p)
-            shared.update(seen)
-            print(
-                f"{name}: {len(seen)} functions, {len(lib_seen)} library and "
-                f"{len(cli_seen)} CLI total",
-                file=sys.stderr,
-            )
+        for b, (grit, symbols, library) in enumerate(builds):
+            for name, shape, steps in WORKLOADS:
+                apply_shape(repo, paths, shape)
+                seen = seen_by_workload[name]
+                for i, argv in enumerate(steps):
+                    # The first step runs with the census's isolated config, later ones with
+                    # the usual config cascade.
+                    env = run_env(isolated=i == 0)
+                    out = root / f"{b}-{name}-{i}.callgrind"
+                    for n in executed_functions(grit, repo, argv, out, env):
+                        if n not in symbols:
+                            continue
+                        p = section_pattern(n)
+                        (lib_seen if n in library else cli_seen).setdefault(p, None)
+                        seen.add(p)
+                print(
+                    f"{grit} {name}: {len(seen)} functions, {len(lib_seen)} "
+                    f"library and {len(cli_seen)} CLI total",
+                    file=sys.stderr,
+                )
+    shared: Counter[str] = Counter()
+    for seen in seen_by_workload.values():
+        shared.update(seen)
 
     # Wildcarded patterns can coincide; the library's fragment keeps a shared one.
     cli_seen = {p: None for p in cli_seen if p not in lib_seen}

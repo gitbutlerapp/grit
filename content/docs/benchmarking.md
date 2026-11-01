@@ -318,6 +318,10 @@ every binary that links it; `grit` enables it and lays out its own hot code the 
   `GRIT_HOT_TEXT_LAYOUT=0` to turn them off, for example when linking with another linker.
 - Patterns glob input-section names with crate hashes wildcarded, so version bumps keep
   them matching. A function that is renamed or no longer runs simply stays in `.text`.
+- Every function matches with and without a local-copy suffix. ThinLTO in the `release`
+  profile renames a function it shares between codegen units to `name.llvm.<n>`, while the
+  single-unit `dist` build keeps most names bare, so a list that pinned either form would
+  miss much of the other build.
 - The instantiating crate at the end of a generic's symbol is wildcarded as well. LLVM
   merges identical instantiations from different crates into one copy, and which crate's
   name the survivor keeps changes between builds: the stripped `dist` binary can name
@@ -329,21 +333,28 @@ every binary that links it; `grit` enables it and lays out its own hot code the 
   (256 KiB for the library, 128 KiB for the CLI, the sign that most patterns stopped
   matching), or not ahead of `.text`.
 
-Regenerate both lists after large library or CLI changes, from an unstripped `dist` build:
+Regenerate both lists after large library or CLI changes, from an unstripped `dist` build
+and a `release` build:
 
 ```bash
 CARGO_PROFILE_DIST_STRIP=false CARGO_TARGET_DIR=target/hot-text \
   cargo build --profile dist -p grit-cli
-python3 scripts/gen_hot_text_layout.py --grit target/hot-text/dist/grit
+CARGO_TARGET_DIR=target/hot-text cargo build --release -p grit-cli
+python3 scripts/gen_hot_text_layout.py \
+  --grit target/hot-text/dist/grit --grit target/hot-text/release/grit
 ```
 
 The script needs `valgrind`. It builds a 10,000-file clone (packed objects and refs, tags,
-an upstream) and runs the library's common operations through the shipped binary, so
-inlining matches what is linked: status, diff, log, show, revision walks, blame, refs,
-branch listing and edits, config, add, commit, switch and stash. Each workload starts right
-after a reset, so its first step also takes the index-refresh path. Callgrind records every
-function each step runs; the script splits them into the library's and the rest, and orders
-each list by how many workloads share a function.
+an upstream) and runs the library's common operations through each binary, so inlining
+matches what is linked: status, diff, log (one page and a streamed `--json` listing), show,
+revision walks, blame, refs, branch listing and edits, config, add, commit, switch and
+stash. Each workload starts right after a reset, so its first step also takes the
+index-refresh path. Callgrind records every function each step runs; the script merges what
+the builds ran, splits it into the library's functions and the rest, and orders each list by
+how many workloads share a function. Both builds matter: the shipped `dist` binary inlines
+more under fat LTO, while the `release` build that development and local benchmarking use
+keeps functions such as clap's command construction separate, and those are cold in a list
+taken from `dist` alone.
 
 To see where a run's resident pages are, stop the process at `exit_group` under `gdb` and
 read `/proc/<pid>/smaps` (per mapping) or `/proc/<pid>/pagemap` (per page, to map back to
