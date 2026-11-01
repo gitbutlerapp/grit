@@ -329,6 +329,11 @@ every binary that links it; `grit` enables it and lays out its own hot code the 
   after `grit`. About one pattern in eight names an instantiating crate; with it pinned,
   `grit branch` on the shipped build still faulted in 12 windows of plain `.text`, against
   5 with the wildcard.
+- Every alias of an executed function is listed. LLVM merges functions with identical code
+  (`RawVec<T>::grow_one` for every same-sized `T`) into one body and keeps the other names
+  as aliases at the same address. The body's input section is named after one of them,
+  while callgrind reports whichever name it picks for the address, so listing only that
+  name left 15 such bodies in `.text` on a `release` build of `grit status`.
 - The `hot_text_layout` test fails if either section is missing, smaller than its floor
   (256 KiB for the library, 128 KiB for the CLI, the sign that most patterns stopped
   matching), or not ahead of `.text`.
@@ -350,11 +355,20 @@ matches what is linked: status, diff, log (one page and a streamed `--json` list
 revision walks, blame, refs, branch listing and edits, config, add, commit, switch and
 stash. Each workload starts right after a reset, so its first step also takes the
 index-refresh path. Callgrind records every function each step runs; the script merges what
-the builds ran, splits it into the library's functions and the rest, and orders each list by
-how many workloads share a function. Both builds matter: the shipped `dist` binary inlines
-more under fat LTO, while the `release` build that development and local benchmarking use
-keeps functions such as clap's command construction separate, and those are cold in a list
-taken from `dist` alone.
+the builds ran and splits it into the library's functions and the rest. Each list keeps the
+functions that the same set of workloads runs together, and orders those groups in reflected
+binary (Gray code) order over the workloads, status first: neighbouring groups differ in as
+few workloads as possible, so each command's code forms a few long runs. Sorting by how many
+workloads share a function, as the lists did before, cut a command's code into one slice per
+sharing count. The order of `WORKLOADS` matters: the first two workloads' code is one run
+each, and the further down the list a workload is, the more runs its code splits into, so
+the commands whose memory matters most come first. The CLI's list keeps the older sort by
+sharing count and uses the Gray order only between equally shared functions: every command
+runs the CLI's start-up and argument parsing, so that shared core stays dense at the front,
+and the full Gray order there cost config and ref listings a window each. Both builds
+matter: the shipped `dist` binary inlines more under fat LTO, while the `release` build that
+development and local benchmarking use keeps functions such as clap's command construction
+separate, and those are cold in a list taken from `dist` alone.
 
 To see where a run's resident pages are, stop the process at `exit_group` under `gdb` and
 read `/proc/<pid>/smaps` (per mapping) or `/proc/<pid>/pagemap` (per page, to map back to
