@@ -67,10 +67,38 @@ fn index_file_count(repo: &std::path::Path) -> usize {
 }
 
 fn head_tree_file_count(repo: &std::path::Path) -> usize {
-    git(repo, &["ls-tree", "-r", "HEAD", "--name-only"])
-        .lines()
-        .filter(|l| !l.is_empty())
-        .count()
+    tree_file_count_at(repo, &tree_oid_of_head(repo))
+}
+
+fn tree_file_count_at(repo: &std::path::Path, tree: &ObjectId) -> usize {
+    git(
+        repo,
+        &["ls-tree", "-r", tree.to_hex().as_str(), "--name-only"],
+    )
+    .lines()
+    .filter(|l| !l.is_empty())
+    .count()
+}
+
+fn assert_index_matches_tree(repo: &std::path::Path, tree: &ObjectId) {
+    assert_eq!(
+        index_file_count(repo),
+        tree_file_count_at(repo, tree),
+        "index entry count must match tree {}",
+        tree.to_hex()
+    );
+    let diff_index = Command::new("git")
+        .current_dir(repo)
+        .args(["diff-index", "--quiet", "--cached", tree.to_hex().as_str()])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git diff-index");
+    assert!(
+        diff_index.success(),
+        "index must match tree {} (git diff-index --cached)",
+        tree.to_hex()
+    );
 }
 
 fn build_issue_2336_master_layout(repo_root: &std::path::Path) {
@@ -315,49 +343,86 @@ fn merge_fast_forward_twenty_dir_to_file_replacements_is_clean() {
     assert_clean_index_matches_head(tmp.path());
 }
 
+/// 100 dirs × 20 files + 100 dangling symlinks → files on `t2` (>2048 tree diff entries).
+#[cfg(unix)]
+fn build_large_mixed_dir_to_file_fixture(
+    repo_root: &std::path::Path,
+) -> (ObjectId, ObjectId, ObjectId, ObjectId) {
+    for i in 0..100 {
+        std::fs::create_dir_all(repo_root.join(format!("dir{i}/sub"))).expect("mkdir");
+        for j in 0..20 {
+            std::fs::write(
+                repo_root.join(format!("dir{i}/sub/f{j}")),
+                format!("{i}-{j}\n"),
+            )
+            .expect("write");
+        }
+        std::os::unix::fs::symlink("nonexistent", repo_root.join(format!("dangling{i}")))
+            .expect("symlink");
+    }
+    git(repo_root, &["add", "-A"]);
+    git(repo_root, &["commit", "-qm", "base"]);
+    let main_hex = git(repo_root, &["rev-parse", "HEAD"]).trim().to_owned();
+    let main_oid = ObjectId::from_hex(&main_hex).expect("main");
+    let from_tree = tree_oid_of_head(repo_root);
+
+    git(repo_root, &["switch", "-qc", "t2"]);
+    for i in 0..100 {
+        std::fs::remove_dir_all(repo_root.join(format!("dir{i}"))).expect("rm dir");
+        std::fs::write(repo_root.join(format!("dir{i}")), "file\n").expect("file");
+        std::fs::remove_file(repo_root.join(format!("dangling{i}"))).expect("rm symlink");
+        std::fs::write(repo_root.join(format!("dangling{i}")), "file\n").expect("symlink file");
+    }
+    git(repo_root, &["add", "-A"]);
+    git(repo_root, &["commit", "-qm", "t2"]);
+    let t2_hex = git(repo_root, &["rev-parse", "HEAD"]).trim().to_owned();
+    let t2_oid = ObjectId::from_hex(&t2_hex).expect("t2");
+    let to_tree = tree_oid_of_head(repo_root);
+
+    git(repo_root, &["switch", "-q", "main"]);
+    (main_oid, t2_oid, from_tree, to_tree)
+}
+
+#[cfg(unix)]
 #[test]
-fn checkout_mixed_dir_to_file_and_symlink_replacements_over_chunk_size() {
+fn switch_large_mixed_dir_to_file_and_symlink_replacements_both_ways() {
     let tmp = tempfile::tempdir().expect("tempdir");
     git(tmp.path(), &["init", "-q", "-b", "main", "."]);
     git(tmp.path(), &["config", "user.email", "t@example.com"]);
     git(tmp.path(), &["config", "user.name", "Test"]);
 
-    for i in 0..100 {
-        std::fs::create_dir_all(tmp.path().join(format!("dir{i}/sub"))).expect("mkdir");
-        for j in 0..20 {
-            std::fs::write(
-                tmp.path().join(format!("dir{i}/sub/f{j}")),
-                format!("{i}-{j}\n"),
-            )
-            .expect("write");
-        }
-        std::os::unix::fs::symlink("nonexistent", tmp.path().join(format!("dangling{i}")))
-            .expect("symlink");
-    }
-    git(tmp.path(), &["add", "-A"]);
-    git(tmp.path(), &["commit", "-qm", "base"]);
-    let from_tree = tree_oid_of_head(tmp.path());
-
-    git(tmp.path(), &["switch", "-qc", "t2"]);
-    for i in 0..100 {
-        std::fs::remove_dir_all(tmp.path().join(format!("dir{i}"))).expect("rm dir");
-        std::fs::write(tmp.path().join(format!("dir{i}")), "file\n").expect("file");
-        std::fs::remove_file(tmp.path().join(format!("dangling{i}"))).expect("rm symlink");
-        std::fs::write(tmp.path().join(format!("dangling{i}")), "file\n").expect("symlink file");
-    }
-    git(tmp.path(), &["add", "-A"]);
-    git(tmp.path(), &["commit", "-qm", "t2"]);
-    let to_tree = tree_oid_of_head(tmp.path());
-    git(tmp.path(), &["switch", "-q", "main"]);
+    let (main_oid, t2_oid, _from_tree, _to_tree) =
+        build_large_mixed_dir_to_file_fixture(tmp.path());
 
     let grit_repo = Repository::open(
         &tmp.path().join(".git"),
         &RepositoryOptions::empty().with_work_tree(tmp.path()),
     )
     .expect("open grit repo");
-    checkout_between_trees(&grit_repo, Some(&from_tree), &to_tree).expect("checkout t2 tree");
+    switch_existing(&grit_repo, "t2", t2_oid);
     assert_clean_index_matches_head(tmp.path());
 
+    switch_existing(&grit_repo, "main", main_oid);
+    assert_clean_index_matches_head(tmp.path());
+}
+
+#[cfg(unix)]
+#[test]
+fn hard_reset_large_mixed_dir_to_file_and_symlink_replacements() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main", "."]);
+    git(tmp.path(), &["config", "user.email", "t@example.com"]);
+    git(tmp.path(), &["config", "user.name", "Test"]);
+
+    let (_main_oid, _t2_oid, from_tree, to_tree) =
+        build_large_mixed_dir_to_file_fixture(tmp.path());
+    git(tmp.path(), &["switch", "-q", "t2"]);
+
+    let grit_repo = Repository::open(
+        &tmp.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(tmp.path()),
+    )
+    .expect("open grit repo");
     checkout_hard_to_tree_from_head_tree(
         &grit_repo,
         &to_tree,
@@ -365,8 +430,9 @@ fn checkout_mixed_dir_to_file_and_symlink_replacements_over_chunk_size() {
         &mut NullProgress,
         &NeverCancel,
     )
-    .expect("hard reset main tree");
-    assert_clean_index_matches_head(tmp.path());
+    .expect("hard reset to main tree");
+    assert_index_matches_tree(tmp.path(), &from_tree);
+    git_fsck(tmp.path());
 }
 
 #[test]
