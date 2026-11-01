@@ -10517,6 +10517,99 @@ mod tests {
         Ok((dir, repo, hide, tip))
     }
 
+    fn git_rev_list(repo_dir: &std::path::Path, args: &[&str]) -> Vec<ObjectId> {
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("-C").arg(repo_dir).arg("rev-list");
+        cmd.args(args);
+        let out = cmd.output().expect("git rev-list");
+        assert!(
+            out.status.success(),
+            "git rev-list failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(|line| line.parse().expect("oid"))
+            .collect()
+    }
+
+    /// Divergent `A..B` with a commit-graph: hide-side lazy paint must not treat the include
+    /// tip as hidden when it is not hide-reachable (Git oracle).
+    #[test]
+    fn bounded_range_path_limit_divergent_range_matches_git_with_commit_graph() -> Result<()> {
+        use crate::maintenance::{write_commit_graph, CommitGraphOptions};
+
+        let dir = tempdir()?;
+        Repository::init(
+            dir.path(),
+            &InitOptions {
+                bare: true,
+                ..InitOptions::default()
+            },
+        )?;
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let empty = repo.odb().write_loose_materialize(ObjectKind::Tree, b"")?;
+        let root = write_commit_on_tree(&repo, None, empty, "root", 100)?;
+        let mut parent = root;
+        for i in 0..12 {
+            parent = write_commit_on_tree(
+                &repo,
+                Some(parent),
+                empty,
+                &format!("branch-a {i}"),
+                200 + i,
+            )?;
+        }
+        let hide = parent;
+        let blob = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Blob, b"watched\n")?;
+        let mut tree_body = b"100644 watched.txt\0".to_vec();
+        tree_body.extend_from_slice(blob.as_bytes());
+        let path_tree = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Tree, &tree_body)?;
+        let tip = write_commit_on_tree(&repo, Some(root), path_tree, "branch-b touch", 500)?;
+
+        let mut git_cg = std::process::Command::new("git");
+        git_cg.arg("-C").arg(dir.path()).args([
+            "commit-graph",
+            "write",
+            "--reachable",
+            "--changed-paths",
+        ]);
+        let cg_out = git_cg.output().expect("git commit-graph write");
+        assert!(
+            cg_out.status.success(),
+            "git commit-graph write: {}",
+            String::from_utf8_lossy(&cg_out.stderr)
+        );
+        write_commit_graph(&repo, &CommitGraphOptions::default())?;
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+
+        let hide_hex = hide.to_hex();
+        let tip_hex = tip.to_hex();
+        let range = format!("{hide_hex}..{tip_hex}");
+        let expected = git_rev_list(
+            dir.path(),
+            &["-n", "1", range.as_str(), "--", "watched.txt"],
+        );
+        assert_eq!(expected, vec![tip], "git oracle");
+
+        let opts = RevListOptions {
+            max_count: Some(1),
+            paths: vec!["watched.txt".to_owned()],
+            use_commit_graph: true,
+            use_commit_graph_bloom: true,
+            commit_graph_read_changed_paths: true,
+            ..Default::default()
+        };
+        let result = rev_list(&repo, &[tip_hex], &[hide_hex], &opts)?;
+        assert_eq!(result.commits, expected);
+        Ok(())
+    }
+
     #[test]
     fn bounded_range_path_limit_lazy_hide_with_commit_graph() -> Result<()> {
         use crate::maintenance::{write_commit_graph, CommitGraphOptions};

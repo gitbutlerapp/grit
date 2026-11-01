@@ -1676,19 +1676,25 @@ impl LazyHidePaint {
             return Ok(false);
         }
         self.expand_until(cache, oid)?;
-        match self.sides.get(&oid) {
-            Some(side) => Ok(side & PAINT_RIGHT != 0),
-            None => Ok(true),
-        }
+        Ok(self
+            .sides
+            .get(&oid)
+            .is_some_and(|side| side & PAINT_RIGHT != 0))
     }
 
-    /// Walk hide-side ancestry in commit-graph generation order until `oid` is classified or
-    /// the frontier closes.
+    /// Walk hide-side ancestry in commit-graph generation order down to `oid`'s generation.
     fn expand_until(&mut self, cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<()> {
+        let target_rank = commit_rank_for_walk(cache, oid);
         while !self.sides.contains_key(&oid) {
             let Some(node) = self.heap.pop() else {
                 break;
             };
+            if target_rank != UNRANKED_COMMIT
+                && node.rank != UNRANKED_COMMIT
+                && node.rank < target_rank
+            {
+                break;
+            }
             if !self.popped.insert(node.oid) {
                 continue;
             }
@@ -1798,6 +1804,9 @@ impl RangeWalkHide {
     /// For lazy hide predicates, pass a [`CommitGraphCache`] via [`Self::is_hidden_with_cache`].
     #[must_use]
     pub fn is_hidden(&self, oid: ObjectId) -> bool {
+        if self.lazy.is_some() {
+            return self.hide_tips.contains(&oid);
+        }
         self.is_hidden_eager(oid)
     }
 
