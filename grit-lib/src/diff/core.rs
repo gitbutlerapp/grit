@@ -7927,9 +7927,11 @@ fn refresh_content_checks(
     struct ContentCheck {
         entry_index: usize,
         worktree_mode: u32,
-        file_attrs: crate::crlf::FileAttrs,
+        /// Position of the entry's attributes in `attrs`.
+        attrs_index: usize,
     }
 
+    let mut attrs = DistinctFileAttrs::default();
     let mut jobs = Vec::new();
     let mut total_bytes = 0usize;
     let mut cancel_stride = 0usize;
@@ -7950,15 +7952,17 @@ fn refresh_content_checks(
             continue;
         }
         total_bytes = total_bytes.saturating_add(ie.size as usize);
+        let file_attrs = (ctx.file_attrs_for)(&crate::repo_relpath::storage_string(&ie.path));
         jobs.push(ContentCheck {
             entry_index: *entry_index,
             worktree_mode: stat.git_mode,
-            file_attrs: (ctx.file_attrs_for)(&crate::repo_relpath::storage_string(&ie.path)),
+            attrs_index: attrs.intern(file_attrs),
         });
     }
     if jobs.is_empty() {
         return Ok(RefreshChecks::default());
     }
+    let attrs = attrs.0;
     let mut checks = vec![None; index.entries.len()];
     let (work_tree, precompose_unicode, ignorecase) =
         (ctx.work_tree, ctx.precompose_unicode, ctx.ignorecase);
@@ -7979,7 +7983,7 @@ fn refresh_content_checks(
             &file_path,
             job.worktree_mode,
             conv,
-            &job.file_attrs,
+            &attrs[job.attrs_index],
             &crate::repo_relpath::storage_string(&ie.path),
             Some(ie),
             filter_process,
@@ -8007,6 +8011,35 @@ fn refresh_content_checks(
         checks[job.entry_index] = Some(content);
     }
     Ok(RefreshChecks(checks))
+}
+
+/// The distinct attribute sets of the entries a scan hashes, so each entry stores an index
+/// instead of its own [`FileAttrs`](crate::crlf::FileAttrs) (a few hundred bytes).
+///
+/// Nearly every path of a repository resolves to the same few sets. Lookups compare against
+/// at most [`Self::SEARCH_LIMIT`] sets, the most recent first, so a tree with many distinct
+/// sets stores some twice instead of scanning a long list for every entry.
+#[derive(Default)]
+struct DistinctFileAttrs(Vec<crate::crlf::FileAttrs>);
+
+impl DistinctFileAttrs {
+    const SEARCH_LIMIT: usize = 16;
+
+    /// Index of `attrs` in the list, appending it when no recent set is equal.
+    fn intern(&mut self, attrs: crate::crlf::FileAttrs) -> usize {
+        let len = self.0.len();
+        let found = self
+            .0
+            .iter()
+            .rev()
+            .take(Self::SEARCH_LIMIT)
+            .position(|seen| *seen == attrs);
+        if let Some(back) = found {
+            return len - 1 - back;
+        }
+        self.0.push(attrs);
+        len
+    }
 }
 
 /// Results of [`refresh_content_checks`], by index entry position.
@@ -14556,6 +14589,67 @@ mod racy_index_mtime_diff_tests {
             "clean SHA-256 racy entry must not be reported modified: {diff:?}"
         );
     }
+
+    /// Racy entries are hashed with their own path's attributes even when the paths
+    /// alternate between attribute sets: CRLF files clean to LF, binary files hash as is.
+    #[test]
+    fn racy_entries_hash_with_their_own_attributes() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let git_dir = wt.join(".git");
+        fs::create_dir_all(git_dir.join("objects")).expect("objects dir");
+        fs::write(git_dir.join("config"), "[core]\n").expect("config");
+        fs::write(wt.join(".gitattributes"), "*.crlf eol=crlf\n*.bin -text\n").expect("attrs");
+        let odb = Odb::new(&git_dir.join("objects")).with_config_git_dir(git_dir.clone());
+
+        let files: [(&str, &[u8], &[u8]); 5] = [
+            ("a.crlf", b"one\r\ntwo\r\n", b"one\ntwo\n"),
+            ("b.bin", b"raw\r\nbytes\r\n", b"raw\r\nbytes\r\n"),
+            ("c.crlf", b"three\r\n", b"three\n"),
+            ("d.txt", b"plain\n", b"plain\n"),
+            ("e.bin", b"more\r\n", b"more\r\n"),
+        ];
+        let mut index = Index::new();
+        index.source_mtime = Some(INDEX_MTIME);
+        for (path, on_disk, blob) in files {
+            let file = wt.join(path);
+            fs::write(&file, on_disk).expect("write");
+            pin_mtime(&file, INDEX_MTIME.0, INDEX_MTIME.1);
+            let meta = fs::symlink_metadata(&file).expect("stat");
+            let oid = odb.hash(ObjectKind::Blob, blob).expect("hash");
+            index.entries.push(entry_from_metadata(
+                &meta,
+                path.as_bytes(),
+                oid,
+                MODE_REGULAR,
+            ));
+        }
+
+        let status_diff = |index: &mut Index| {
+            diff_index_to_worktree_with_options(
+                &odb,
+                index,
+                wt,
+                DiffIndexToWorktreeOptions {
+                    index_mtime: Some(INDEX_MTIME),
+                    repository_git_dir: Some(git_dir.clone()),
+                    refresh_index_stat_in_pass: true,
+                    for_status: true,
+                    ..Default::default()
+                },
+            )
+            .expect("diff")
+            .0
+        };
+        let diff = status_diff(&mut index.clone());
+        assert!(diff.is_empty(), "clean racy entries reported: {diff:?}");
+
+        fs::write(wt.join("c.crlf"), b"thrEe\r\n").expect("rewrite");
+        pin_mtime(&wt.join("c.crlf"), INDEX_MTIME.0, INDEX_MTIME.1);
+        let diff = status_diff(&mut index);
+        let paths: Vec<_> = diff.iter().map(DiffEntry::path).collect();
+        assert_eq!(paths, ["c.crlf"]);
+    }
 }
 
 #[cfg(test)]
@@ -16748,8 +16842,50 @@ mod line_coverage_tests {
 
 #[cfg(test)]
 mod refresh_checks_tests {
-    use super::{RefreshChecks, RefreshContent};
+    use super::{DistinctFileAttrs, RefreshChecks, RefreshContent};
+    use crate::crlf::{EolAttr, FileAttrs, TextAttr};
     use crate::objects::ObjectId;
+
+    fn attrs_with_eol(eol: EolAttr) -> FileAttrs {
+        FileAttrs {
+            eol,
+            ..FileAttrs::default()
+        }
+    }
+
+    #[test]
+    fn equal_attributes_share_one_slot() {
+        let mut attrs = DistinctFileAttrs::default();
+        assert_eq!(attrs.intern(FileAttrs::default()), 0);
+        assert_eq!(attrs.intern(attrs_with_eol(EolAttr::Crlf)), 1);
+        assert_eq!(attrs.intern(FileAttrs::default()), 0);
+        assert_eq!(attrs.intern(attrs_with_eol(EolAttr::Crlf)), 1);
+        let binary = FileAttrs {
+            text: TextAttr::Unset,
+            ..FileAttrs::default()
+        };
+        assert_eq!(attrs.intern(binary.clone()), 2);
+        assert_eq!(attrs.intern(binary), 2);
+        assert_eq!(attrs.0.len(), 3);
+        assert_eq!(attrs.0[1], attrs_with_eol(EolAttr::Crlf));
+    }
+
+    #[test]
+    fn sets_past_the_search_limit_are_stored_again() {
+        let mut attrs = DistinctFileAttrs::default();
+        let first = attrs.intern(FileAttrs::default());
+        for n in 0..DistinctFileAttrs::SEARCH_LIMIT {
+            let distinct = FileAttrs {
+                whitespace: Some(format!("tabwidth={}", n + 1)),
+                ..FileAttrs::default()
+            };
+            assert_eq!(attrs.intern(distinct), n + 1);
+        }
+        let again = attrs.intern(FileAttrs::default());
+        assert_ne!(again, first, "only the most recent sets are searched");
+        assert_eq!(attrs.0[again], attrs.0[first]);
+        assert_eq!(attrs.intern(FileAttrs::default()), again);
+    }
 
     #[test]
     fn empty_checks_answer_none_for_every_entry() {
