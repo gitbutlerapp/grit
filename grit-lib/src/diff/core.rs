@@ -2958,14 +2958,48 @@ pub(crate) fn diff_trees_outside_sparse_directories(
     diff_trees_opts(odb, old_tree_oid, new_tree_oid, "", false, hint.as_ref())
 }
 
+/// Whether directory `dir` may contain paths selected by `pathspecs` during a tree walk.
+fn tree_walk_directory_relevant(
+    dir: &str,
+    pathspecs: &[String],
+    pathspec_matcher: Option<&crate::pathspec::PathspecMatcher<'_>>,
+) -> bool {
+    if pathspecs.is_empty() {
+        return true;
+    }
+    if let Some(matcher) = pathspec_matcher {
+        return matcher.matches_entry(dir, 0o040000)
+            || crate::pathspec::pathspec_wants_descent_for_rev_tree(dir, pathspecs);
+    }
+    crate::pathspec::pathspec_entry_is_relevant(dir, true, pathspecs)
+}
+
+fn diff_entry_matches_pathspecs(
+    entry: &DiffEntry,
+    pathspecs: &[String],
+    pathspec_matcher: Option<&crate::pathspec::PathspecMatcher<'_>>,
+) -> bool {
+    let path = entry.path();
+    if path.is_empty() {
+        return false;
+    }
+    if let Some(matcher) = pathspec_matcher {
+        return matcher.matches_change(path, entry.old_path.as_deref());
+    }
+    crate::pathspec::matches_pathspec_list(path, pathspecs)
+}
+
 /// Like [`diff_trees`], but only paths `pathspecs` select (Git's pathspec-limited tree diff).
 ///
 /// Directories no pathspec can reach are not read. An empty list selects every path.
+/// When `pathspec_matcher` is set, matching uses the repository attribute stack (required for
+/// `:(attr:...)` magic).
 pub(crate) fn diff_trees_for_pathspecs(
     odb: &Odb,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
     pathspecs: &[String],
+    pathspec_matcher: Option<&crate::pathspec::PathspecMatcher<'_>>,
 ) -> Result<Vec<DiffEntry>> {
     if pathspecs.is_empty() {
         return diff_trees(odb, old_tree_oid, new_tree_oid, "");
@@ -2973,13 +3007,11 @@ pub(crate) fn diff_trees_for_pathspecs(
     crate::trace::trace_span!("grit.diff.tree");
     let hint = DiffTreesWalkHint {
         pathspecs,
+        pathspec_matcher,
         ..DiffTreesWalkHint::default()
     };
     let mut entries = diff_trees_opts(odb, old_tree_oid, new_tree_oid, "", false, Some(&hint))?;
-    entries.retain(|entry| {
-        let path = entry.path();
-        !path.is_empty() && crate::pathspec::matches_pathspec_list(path, pathspecs)
-    });
+    entries.retain(|entry| diff_entry_matches_pathspecs(entry, pathspecs, pathspec_matcher));
     Ok(entries)
 }
 
@@ -2993,6 +3025,7 @@ struct DiffTreesWalkHint<'a> {
     skip_sparse_directories: bool,
     /// When non-empty, do not descend into directories these pathspecs cannot match inside.
     pathspecs: &'a [String],
+    pathspec_matcher: Option<&'a crate::pathspec::PathspecMatcher<'a>>,
 }
 
 impl DiffTreesWalkHint<'_> {
@@ -3002,7 +3035,7 @@ impl DiffTreesWalkHint<'_> {
             return false;
         }
         if !self.pathspecs.is_empty()
-            && !crate::pathspec::pathspec_entry_is_relevant(dir, true, self.pathspecs)
+            && !tree_walk_directory_relevant(dir, self.pathspecs, self.pathspec_matcher)
         {
             return true;
         }
@@ -3088,7 +3121,44 @@ pub fn diff_trees_with_renames_and_policy(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
 ) -> Result<Vec<DiffEntry>> {
-    let mut entries = diff_trees(odb, old_tree_oid, new_tree_oid, prefix)?;
+    diff_trees_with_renames_for_pathspecs_and_policy(
+        odb,
+        old_tree_oid,
+        new_tree_oid,
+        prefix,
+        &[],
+        None,
+        rename_threshold,
+        config,
+        thread_policy,
+    )
+}
+
+/// Like [`diff_trees_with_renames_and_policy`], but limits the tree walk to `pathspecs` before
+/// rename detection (Git's pathspec-limited tree diff).
+///
+/// An empty `pathspecs` list diffs every path under `prefix`.
+///
+/// # Errors
+///
+/// Propagates errors from [`diff_trees`] and [`detect_renames_with_policy`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn diff_trees_with_renames_for_pathspecs_and_policy(
+    odb: &Odb,
+    old_tree_oid: Option<&ObjectId>,
+    new_tree_oid: Option<&ObjectId>,
+    prefix: &str,
+    pathspecs: &[String],
+    pathspec_matcher: Option<&crate::pathspec::PathspecMatcher<'_>>,
+    rename_threshold: u32,
+    config: &ConfigSet,
+    thread_policy: &ThreadPolicy,
+) -> Result<Vec<DiffEntry>> {
+    let mut entries = if pathspecs.is_empty() {
+        diff_trees(odb, old_tree_oid, new_tree_oid, prefix)?
+    } else {
+        diff_trees_for_pathspecs(odb, old_tree_oid, new_tree_oid, pathspecs, pathspec_matcher)?
+    };
     if rename_threshold <= 100 {
         entries = detect_renames_with_policy(
             odb,
@@ -9148,11 +9218,16 @@ pub fn detect_renames_with_policy(
     let mut renames: Vec<DiffEntry> = Vec::new();
 
     // Git always runs exact rename detection, regardless of renameLimit.
+    let mut added_by_oid: std::collections::HashMap<ObjectId, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (ai, add) in added.iter().enumerate() {
+        added_by_oid.entry(add.new_oid).or_default().push(ai);
+    }
     let mut exact_scores: Vec<(u32, usize, usize)> = Vec::new();
     for (di, del) in deleted.iter().enumerate() {
         poll_rename_cancel(cancel_watch)?;
-        for (ai, add) in added.iter().enumerate() {
-            if del.old_oid == add.new_oid {
+        if let Some(ais) = added_by_oid.get(&del.old_oid) {
+            for &ai in ais {
                 exact_scores.push((100, di, ai));
             }
         }
@@ -15687,6 +15762,124 @@ mod line_coverage_tests {
                 .all(|p| *p == (FileMode::REGULAR, FileMode::REGULAR)),
             "{pairs:?}"
         );
+    }
+
+    #[test]
+    fn exact_rename_detection_pairs_only_equal_blobs_among_many() -> Result<()> {
+        let temp = TempDir::new().expect("tempdir");
+        let odb = Odb::new(temp.path());
+        const N: usize = 200;
+        let shared = odb.write(ObjectKind::Blob, b"shared\n").expect("blob");
+        let mut old_names = Vec::with_capacity(N + 1);
+        let mut old_oids = Vec::with_capacity(N + 1);
+        for i in 0..N {
+            old_names.push(format!("old/{i:03}.txt"));
+            old_oids.push(
+                odb.write(ObjectKind::Blob, format!("old {i}\n").as_bytes())
+                    .expect("blob"),
+            );
+        }
+        old_names.push("shared-old.txt".to_owned());
+        old_oids.push(shared);
+        let old_pairs: Vec<(&str, ObjectId)> = old_names
+            .iter()
+            .zip(old_oids.iter().copied())
+            .map(|(name, oid)| (name.as_str(), oid))
+            .collect();
+
+        let mut new_names = Vec::with_capacity(N + 1);
+        let mut new_oids = Vec::with_capacity(N + 1);
+        for i in 0..N {
+            new_names.push(format!("new/{i:03}.txt"));
+            new_oids.push(
+                odb.write(ObjectKind::Blob, format!("new {i}\n").as_bytes())
+                    .expect("blob"),
+            );
+        }
+        new_names.push("shared-new.txt".to_owned());
+        new_oids.push(shared);
+        let new_pairs: Vec<(&str, ObjectId)> = new_names
+            .iter()
+            .zip(new_oids.iter().copied())
+            .map(|(name, oid)| (name.as_str(), oid))
+            .collect();
+
+        let old_tree = write_tree(&odb, &old_pairs);
+        let new_tree = write_tree(&odb, &new_pairs);
+        let raw = diff_trees(&odb, Some(&old_tree), Some(&new_tree), "")?;
+        assert_eq!(raw.len(), (N + 1) * 2);
+        let config = ConfigSet::new();
+        let policy = ThreadPolicy::default();
+        let renamed = detect_renames_with_policy(&odb, None, raw, 50, &config, &policy, None)?;
+        assert_eq!(
+            renamed
+                .iter()
+                .filter(|e| e.status == DiffStatus::Renamed)
+                .count(),
+            1
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pathspec_limited_diff_does_not_pair_outside_pathspec() -> Result<()> {
+        let temp = TempDir::new().expect("tempdir");
+        let odb = Odb::new(temp.path());
+        let shared = odb.write(ObjectKind::Blob, b"payload\n").expect("blob");
+        let mut old_names = Vec::new();
+        let mut old_oids = Vec::new();
+        for i in 0..50 {
+            old_names.push(format!("bulk/old/{i:02}.txt"));
+            old_oids.push(
+                odb.write(ObjectKind::Blob, format!("bulk old {i}\n").as_bytes())
+                    .expect("blob"),
+            );
+        }
+        old_names.push("target.txt".to_owned());
+        old_oids.push(shared);
+        let old_pairs: Vec<(&str, ObjectId)> = old_names
+            .iter()
+            .zip(old_oids.iter().copied())
+            .map(|(name, oid)| (name.as_str(), oid))
+            .collect();
+
+        let mut new_names = Vec::new();
+        let mut new_oids = Vec::new();
+        for i in 0..50 {
+            new_names.push(format!("bulk/new/{i:02}.txt"));
+            new_oids.push(
+                odb.write(ObjectKind::Blob, format!("bulk new {i}\n").as_bytes())
+                    .expect("blob"),
+            );
+        }
+        new_names.push("elsewhere.txt".to_owned());
+        new_oids.push(shared);
+        let new_pairs: Vec<(&str, ObjectId)> = new_names
+            .iter()
+            .zip(new_oids.iter().copied())
+            .map(|(name, oid)| (name.as_str(), oid))
+            .collect();
+
+        let old_tree = write_tree(&odb, &old_pairs);
+        let new_tree = write_tree(&odb, &new_pairs);
+        let config = ConfigSet::new();
+        let policy = ThreadPolicy::default();
+        let pathspecs = vec!["target.txt".to_owned()];
+        let entries = diff_trees_with_renames_for_pathspecs_and_policy(
+            &odb,
+            Some(&old_tree),
+            Some(&new_tree),
+            "",
+            &pathspecs,
+            None,
+            50,
+            &config,
+            &policy,
+        )?;
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].status, DiffStatus::Deleted);
+        assert_eq!(entries[0].path(), "target.txt");
+        Ok(())
     }
 
     #[test]

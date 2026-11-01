@@ -151,7 +151,7 @@ impl<'repo> Diff<'repo> {
         pathspecs: &[String],
         options: &DiffOptions,
     ) -> Result<Vec<DiffEntry>> {
-        match stored_target_entries(self.repo, target, options)? {
+        match stored_target_entries(self.repo, target, pathspecs, options)? {
             Some(entries) => limit_target_entries(self.repo, entries, pathspecs, options),
             None => self.uncommitted()?.entries(target, pathspecs, options),
         }

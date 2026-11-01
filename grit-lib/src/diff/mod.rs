@@ -17,7 +17,8 @@ mod commit_files_many;
 mod core;
 pub(crate) use core::myers_rediff_changed_masks_for_region;
 pub(crate) use core::{
-    intern_merge_compare_three_way, merge_file_compacted_line_ops, merge_myops_from_preinterned_ids,
+    diff_trees_with_renames_for_pathspecs_and_policy, intern_merge_compare_three_way,
+    merge_file_compacted_line_ops, merge_myops_from_preinterned_ids,
 };
 mod detail;
 mod files;

@@ -4414,8 +4414,14 @@ fn follow_path_into_parent_at_merge(
         return Ok(None);
     }
     let odb = repo.odb();
-    let entries =
-        diff_trees_for_pathspecs(odb, Some(&parent_tree), Some(&commit_tree), &path_specs)?;
+    let pathspec_matcher = repo.pathspec_matcher(&path_specs)?;
+    let entries = diff_trees_for_pathspecs(
+        odb,
+        Some(&parent_tree),
+        Some(&commit_tree),
+        &path_specs,
+        Some(&pathspec_matcher),
+    )?;
     let entries = if threshold >= 100 {
         entries
     } else {

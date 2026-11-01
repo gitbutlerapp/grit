@@ -620,7 +620,7 @@ impl<'repo> UncommittedDiff<'repo> {
                 self.worktree_entries_for_paths(Some(tree), renames, restrict)?
             }
             DiffTarget::Commit(_) | DiffTarget::Trees { .. } => {
-                stored_target_entries(self.repo, target, options)?.unwrap_or_default()
+                stored_target_entries(self.repo, target, pathspecs, options)?.unwrap_or_default()
             }
         };
         limit_target_entries(self.repo, entries, pathspecs, options)

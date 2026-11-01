@@ -215,7 +215,18 @@ impl Pickaxe {
     ) -> Result<bool> {
         let diff_options = crate::diff::DiffOptions::from_config(renames.config());
         let odb = repo.odb();
-        let entries = diff_trees_for_pathspecs(odb, parent_tree, Some(commit_tree), paths)?;
+        let pathspec_matcher = if paths.is_empty() {
+            None
+        } else {
+            Some(repo.pathspec_matcher(paths)?)
+        };
+        let entries = diff_trees_for_pathspecs(
+            odb,
+            parent_tree,
+            Some(commit_tree),
+            paths,
+            pathspec_matcher.as_ref(),
+        )?;
         // Rename pairing only ever combines an added path with a deleted one, so every other
         // entry can be tested (and can end the search) before paying for it.
         let mut unpaired = Vec::new();
