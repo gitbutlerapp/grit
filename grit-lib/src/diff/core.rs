@@ -46,41 +46,29 @@ use crate::userdiff::FuncnameMatcher;
 
 use super::rename_lines::RenameLineTable;
 use super::unified_emit::{
-    emit_unified_body_from_edits, line_ending_only_edits, EditSpan, LineEnding, LineSide,
-    UnifiedEmitOptions,
+    emit_unified_body_from_edits, line_ending_only_edits, EditSpan, LineSide, UnifiedEmitOptions,
 };
 
-/// Comparison keys for every line of `side`, which must be [`LineSide::from_text`] of `text`.
+/// Comparison keys for every line of `side`.
 ///
 /// Without whitespace normalization a key is the raw line including its `\n` (the same bytes as
-/// `line_diff_token`), borrowed from `text`. Under `-w`/`-b`/`--ignore-space-at-eol` the keys
-/// are normalized line bodies, kept in `normalized` so the returned slices can borrow them.
+/// `line_diff_token`), borrowed from the side's records. Under `-w`/`-b`/`--ignore-space-at-eol`
+/// the keys are normalized line bodies, kept in `normalized` so the returned slices can borrow
+/// them.
 fn line_compare_keys<'a>(
-    text: &'a str,
-    side: &LineSide<'a>,
+    side: &'a LineSide<'a>,
     ws: super::WhitespaceMode,
     normalized: &'a mut Vec<Cow<'a, str>>,
-) -> Vec<&'a str> {
-    if ws.normalizes_line_compare() {
-        // Git -w/-b compare normalized bodies only; EOF newline is whitespace.
-        normalized.extend(
-            side.lines
-                .iter()
-                .map(|line| ws.normalize_line_for_compare(line.body)),
-        );
-        return normalized.iter().map(Cow::as_ref).collect();
+) -> Cow<'a, [&'a str]> {
+    if !ws.normalizes_line_compare() {
+        return Cow::Borrowed(side.records());
     }
-    // Each body is a subslice of `text` that stops just before its `\n`, so the key is the body
-    // widened by that one byte.
-    let base = text.as_ptr() as usize;
-    side.lines
-        .iter()
-        .map(|line| {
-            let start = line.body.as_ptr() as usize - base;
-            let end = start + line.body.len() + usize::from(line.ending != LineEnding::Missing);
-            &text[start..end]
-        })
-        .collect()
+    // Git -w/-b compare normalized bodies only; EOF newline is whitespace.
+    normalized.extend(
+        side.lines()
+            .map(|line| ws.normalize_line_for_compare(line.body)),
+    );
+    Cow::Owned(normalized.iter().map(Cow::as_ref).collect())
 }
 
 #[path = "../structured_diff.rs"]
@@ -107,13 +95,13 @@ pub(crate) fn histogram_compacted_line_ops(
 ) -> Vec<similar::DiffOp> {
     let before = LineSide::from_text(old_content);
     let after = LineSide::from_text(new_content);
-    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
-    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+    let old_lines: Vec<&str> = before.lines().map(|l| l.body).collect();
+    let new_lines: Vec<&str> = after.lines().map(|l| l.body).collect();
     let old_len = old_lines.len();
     let new_len = new_lines.len();
     let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-    let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
-    let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+    let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
+    let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
 
     let (changed1, changed2) = git_xdiff::histogram_changed_flags(&old_compare, &new_compare);
 
@@ -268,8 +256,8 @@ where
 {
     let before = LineSide::from_text(old_content);
     let after = LineSide::from_text(new_content);
-    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
-    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+    let old_lines: Vec<&str> = before.lines().map(|l| l.body).collect();
+    let new_lines: Vec<&str> = after.lines().map(|l| l.body).collect();
     let ops = histogram_compacted_line_ops(old_content, new_content, indent_heuristic, ws);
     if ops.is_empty() {
         return String::new();
@@ -290,7 +278,7 @@ where
 
 /// Line bodies of `side`, as the change compaction reads them.
 fn line_bodies<'a>(side: &LineSide<'a>) -> Vec<&'a str> {
-    side.lines.iter().map(|l| l.body).collect()
+    side.lines().map(|l| l.body).collect()
 }
 
 /// Count insertions and deletions from compacted line diff ops (patch/stat alignment).
@@ -334,11 +322,11 @@ pub(crate) fn compacted_line_ops_for_options(
             if before.is_empty() && after.is_empty() {
                 return Vec::new();
             }
-            let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
-            let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+            let old_refs: Vec<&str> = before.lines().map(|l| l.body).collect();
+            let new_refs: Vec<&str> = after.lines().map(|l| l.body).collect();
             let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-            let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
-            let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+            let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
+            let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
             let (changed1, changed2) =
                 git_xdiff::patience_changed_flags(&old_compare, &new_compare);
             let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
@@ -366,13 +354,14 @@ pub(crate) fn compacted_line_ops_for_options(
                 return Vec::new();
             }
             let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-            let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
-            let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+            let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
+            let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
             git_xdiff_compacted_line_ops(
                 &old_compare,
                 &new_compare,
                 &before,
                 &after,
+                ws,
                 options.indent_heuristic,
                 options.algorithm == DiffAlgorithm::Minimal,
             )
@@ -423,6 +412,10 @@ fn xdiff_changed_flags_trimmed_ids(
     let mut interner = LineInterner::with_capacity(nrec1 + nrec2);
     let ids1_full = interner.intern_all(old_compare);
     let ids2_full = interner.intern_all(new_compare);
+    let nclasses = interner.len();
+    // Only the ids are needed from here on; freeing the table before the search keeps it out of
+    // the diff's peak memory.
+    drop(interner);
 
     let lim = nrec1.min(nrec2);
     let mut head = 0usize;
@@ -440,11 +433,6 @@ fn xdiff_changed_flags_trimmed_ids(
     } else {
         let cut_ids1 = &ids1_full[head..nrec1 - tail];
         let cut_ids2 = &ids2_full[head..nrec2 - tail];
-        let nclasses = ids1_full
-            .iter()
-            .chain(&ids2_full)
-            .max()
-            .map_or(0, |&max| max as usize + 1);
         let mut shared_counts = vec![0u32; nclasses];
         for &id in &ids1_full[..head] {
             shared_counts[id as usize] += 1;
@@ -671,28 +659,40 @@ pub(crate) fn merge_file_compacted_line_ops(
     }
 }
 
+/// Myers (or minimal) line alignment with Git's change compaction and indent heuristic.
+///
+/// `old_compare` / `new_compare` must be [`line_compare_keys`] of `before` / `after` under `ws`.
 pub(crate) fn git_xdiff_compacted_line_ops(
     old_compare: &[&str],
     new_compare: &[&str],
     before: &LineSide<'_>,
     after: &LineSide<'_>,
+    ws: super::WhitespaceMode,
     indent_heuristic: bool,
     need_min: bool,
 ) -> Vec<similar::DiffOp> {
     let ((changed1, changed2), old_key_ids, new_key_ids) =
         xdiff_changed_flags_trimmed_ids(old_compare, new_compare, need_min);
-    let old_lines = line_bodies(before);
-    let new_lines = line_bodies(after);
+    // Compaction reads line bodies only to measure indentation. A raw key is the body plus its
+    // newline, which that measure skips as trailing whitespace, so only normalized keys need
+    // the bodies collected separately.
+    let bodies;
+    let (old_lines, new_lines): (&[&str], &[&str]) = if ws.normalizes_line_compare() {
+        bodies = (line_bodies(before), line_bodies(after));
+        (&bodies.0, &bodies.1)
+    } else {
+        (old_compare, new_compare)
+    };
     diff_indent_heuristic::apply_change_compact_to_masks(
         changed1,
         changed2,
         diff_indent_heuristic::CompactSide {
-            lines: &old_lines,
+            lines: old_lines,
             keys: old_compare,
             compare_ids: Some(&old_key_ids),
         },
         diff_indent_heuristic::CompactSide {
-            lines: &new_lines,
+            lines: new_lines,
             keys: new_compare,
             compare_ids: Some(&new_key_ids),
         },
@@ -787,13 +787,14 @@ where
         return String::new();
     }
     let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-    let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
-    let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+    let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
+    let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
     let ops = git_xdiff_compacted_line_ops(
         &old_compare,
         &new_compare,
         &before,
         &after,
+        ws,
         indent_heuristic,
         need_min,
     );
@@ -846,11 +847,11 @@ where
     if before.is_empty() && after.is_empty() {
         return String::new();
     }
-    let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
-    let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+    let old_refs: Vec<&str> = before.lines().map(|l| l.body).collect();
+    let new_refs: Vec<&str> = after.lines().map(|l| l.body).collect();
     let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-    let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
-    let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+    let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
+    let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
     let (changed1, changed2) = git_xdiff::patience_changed_flags(&old_compare, &new_compare);
     let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
     let ops = diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
@@ -1067,12 +1068,12 @@ fn git_patience_unified_body_raw(
     if before.is_empty() && after.is_empty() {
         return String::new();
     }
-    let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
-    let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+    let old_refs: Vec<&str> = before.lines().map(|l| l.body).collect();
+    let new_refs: Vec<&str> = after.lines().map(|l| l.body).collect();
     let ws = super::WhitespaceMode::default();
     let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-    let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
-    let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+    let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
+    let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
     let (changed1, changed2) = git_xdiff::patience_changed_flags(&old_compare, &new_compare);
     let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
     let ops = diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
@@ -1734,8 +1735,8 @@ mod git_xdiff {
     }
 
     struct XdiffScratch {
-        count1: Vec<i64>,
-        count2: Vec<i64>,
+        count1: Vec<u32>,
+        count2: Vec<u32>,
         action1: Vec<u8>,
         action2: Vec<u8>,
         kvd: Vec<i64>,
@@ -1767,8 +1768,11 @@ mod git_xdiff {
         }
 
         fn prepare_kvd(&mut self, kvd_len: usize) {
+            // The search reads only diagonals it has written, so the contents never need
+            // clearing. A fresh zeroed allocation leaves the pages a small diff never reaches
+            // untouched, where growing in place would write every one of them.
             if self.kvd.len() < kvd_len {
-                self.kvd.resize(kvd_len, 0);
+                self.kvd = vec![0; kvd_len];
             }
         }
     }
@@ -2194,8 +2198,8 @@ mod git_xdiff {
             work.count2[id as usize] += 1;
         }
         for (id, &shared) in shared_counts.iter().enumerate().take(nclasses) {
-            work.count1[id] += i64::from(shared);
-            work.count2[id] += i64::from(shared);
+            work.count1[id] += shared;
+            work.count2[id] += shared;
         }
 
         let mut xdf1 = XdFile {
@@ -2235,6 +2239,11 @@ mod git_xdiff {
 
         // xdl_cleanup_records: classify and reduce to effective records.
         work.prepare_actions(nrec1, nrec2);
+        for xdf in [&mut xdf1, &mut xdf2] {
+            let span = usize::try_from(xdf.dend - xdf.dstart + 1).unwrap_or(0);
+            xdf.reference_index.reserve_exact(span);
+            xdf.effective_ids.reserve_exact(span);
+        }
 
         let mlim1 = if need_min {
             i64::MAX
@@ -2248,7 +2257,7 @@ mod git_xdiff {
         let mut idx = xdf1.dstart;
         while idx <= xdf1.dend {
             let id = ids1[idx as usize];
-            let nm = work.count2[id as usize];
+            let nm = i64::from(work.count2[id as usize]);
             work.action1[idx as usize] = if nm == 0 {
                 DISCARD
             } else if nm >= mlim1 {
@@ -2271,7 +2280,7 @@ mod git_xdiff {
         let mut idx = xdf2.dstart;
         while idx <= xdf2.dend {
             let id = ids2[idx as usize];
-            let nm = work.count1[id as usize];
+            let nm = i64::from(work.count1[id as usize]);
             work.action2[idx as usize] = if nm == 0 {
                 DISCARD
             } else if nm >= mlim2 {
@@ -13344,8 +13353,8 @@ mod line_compare_key_tests {
         for text in texts {
             let side = LineSide::from_text(text);
             let mut normalized = Vec::new();
-            let keys = line_compare_keys(text, &side, WhitespaceMode::default(), &mut normalized);
-            let expected: Vec<String> = side.lines.iter().map(line_diff_token).collect();
+            let keys = line_compare_keys(&side, WhitespaceMode::default(), &mut normalized);
+            let expected: Vec<String> = side.lines().map(|l| line_diff_token(&l)).collect();
             assert_eq!(keys, expected, "text {text:?}");
             let source = text.as_bytes().as_ptr_range();
             assert!(
@@ -13365,7 +13374,7 @@ mod line_compare_key_tests {
             ..WhitespaceMode::default()
         };
         let mut normalized = Vec::new();
-        let keys = line_compare_keys(text, &side, ws, &mut normalized);
+        let keys = line_compare_keys(&side, ws, &mut normalized);
         assert_eq!(keys, vec!["ab", "ab"]);
     }
 

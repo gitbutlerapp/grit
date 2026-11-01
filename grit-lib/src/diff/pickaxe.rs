@@ -488,8 +488,8 @@ fn line_grep_match(
 
     let before = LineSide::from_text(old_text);
     let after = LineSide::from_text(new_text);
-    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
-    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+    let old_lines: Vec<&str> = before.lines().map(|l| l.body).collect();
+    let new_lines: Vec<&str> = after.lines().map(|l| l.body).collect();
     for op in compacted_line_ops_for_options(old_text, new_text, diff_options) {
         match op {
             DiffOp::Equal { .. } => {}
