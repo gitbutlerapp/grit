@@ -19,6 +19,7 @@
 use crate::diff::{
     intern_merge_compare_three_way, merge_file_compacted_line_ops, merge_myops_from_preinterned_ids,
 };
+use crate::diff_indent_heuristic;
 use crate::error::Result;
 use similar::{DiffOp, DiffTag};
 
@@ -114,28 +115,24 @@ pub fn merge(input: &MergeInput<'_>) -> Result<MergeOutput> {
 
     let diff_algorithm = input.diff_algorithm.as_deref();
     let (ours_ops, theirs_ops) = match diff_algorithm.map(str::to_lowercase).as_deref() {
-        None | Some("myers") => {
-            let (base_ids, ours_ids, theirs_ids) = intern_merge_compare_three_way(
-                &base_compare_lines,
-                &ours_compare_lines,
-                &theirs_compare_lines,
-            );
-            (
-                merge_myops_from_preinterned_ids(&base_ids, &ours_ids, false),
-                merge_myops_from_preinterned_ids(&base_ids, &theirs_ids, false),
-            )
-        }
-        Some("minimal") => {
-            let (base_ids, ours_ids, theirs_ids) = intern_merge_compare_three_way(
-                &base_compare_lines,
-                &ours_compare_lines,
-                &theirs_compare_lines,
-            );
-            (
-                merge_myops_from_preinterned_ids(&base_ids, &ours_ids, true),
-                merge_myops_from_preinterned_ids(&base_ids, &theirs_ids, true),
-            )
-        }
+        None | Some("myers") => merge_side_ops_myers(
+            &base_lines,
+            &ours_lines,
+            &theirs_lines,
+            &base_compare_lines,
+            &ours_compare_lines,
+            &theirs_compare_lines,
+            false,
+        ),
+        Some("minimal") => merge_side_ops_myers(
+            &base_lines,
+            &ours_lines,
+            &theirs_lines,
+            &base_compare_lines,
+            &ours_compare_lines,
+            &theirs_compare_lines,
+            true,
+        ),
         _ => (
             merge_file_compacted_line_ops(&base_compare_lines, &ours_compare_lines, diff_algorithm),
             merge_file_compacted_line_ops(
@@ -159,7 +156,7 @@ pub fn merge(input: &MergeInput<'_>) -> Result<MergeOutput> {
     // Zealous diff3 (`adjust_zealous_hunks`) assumes the raw `compute_hunks` sequence.
     if !matches!(input.style, ConflictStyle::ZealousDiff3) {
         hunks = merge_adjacent_replace_and_trailing_insert_conflicts(hunks);
-        hunks = merge_deletion_anchor_trailing_insert_conflicts(hunks);
+        hunks = merge_repeated_anchor_eof_insert_conflicts(hunks, &base_lines);
         hunks = fold_adjacent_inserts_into_conflict(hunks);
         hunks = merge_adjacent_one_sided_line_changes_to_conflict(hunks);
     }
@@ -1244,27 +1241,30 @@ fn merge_adjacent_one_sided_line_changes_to_conflict(hunks: Vec<Hunk>) -> Vec<Hu
     out
 }
 
-/// Merge-ort conflicts when one side appends at EOF while the other side changed/deleted the
-/// base tail ending at a short unchanged anchor (possibly several one-sided hunks separated
-/// by single-line anchors). `compute_hunks` emits these as clean sequential hunks.
-fn merge_deletion_anchor_trailing_insert_conflicts(hunks: Vec<Hunk>) -> Vec<Hunk> {
-    const MIN_TAIL_BASE_LINES: usize = 10;
-
-    let Some(conflict) = try_eof_tail_insert_conflict(&hunks, MIN_TAIL_BASE_LINES) else {
+/// When merge-ort slides a deletion onto a repeated anchor line, an EOF insert on the other
+/// side overlaps that region. Only fold this pattern if the anchor line also appears inside
+/// the one-sided tail change (repeated-line alignment), not for unique tail blocks.
+fn merge_repeated_anchor_eof_insert_conflicts(
+    hunks: Vec<Hunk>,
+    base_lines: &[Vec<u8>],
+) -> Vec<Hunk> {
+    let Some(conflict) = try_repeated_anchor_eof_insert_conflict(&hunks, base_lines) else {
         return hunks;
     };
-    let start = conflict.start;
-    let mut out = hunks[..start].to_vec();
+    let mut out = hunks[..conflict.start].to_vec();
     out.push(conflict.hunk);
     out
 }
 
-struct EofTailConflict {
+struct RepeatedAnchorEofConflict {
     start: usize,
     hunk: Hunk,
 }
 
-fn try_eof_tail_insert_conflict(hunks: &[Hunk], min_tail_base: usize) -> Option<EofTailConflict> {
+fn try_repeated_anchor_eof_insert_conflict(
+    hunks: &[Hunk],
+    base_lines: &[Vec<u8>],
+) -> Option<RepeatedAnchorEofConflict> {
     let last = hunks.last()?;
     let Hunk::OnlyTheirs {
         base: ins_base,
@@ -1281,7 +1281,6 @@ fn try_eof_tail_insert_conflict(hunks: &[Hunk], min_tail_base: usize) -> Option<
     let mut conflict_base: Vec<Vec<u8>> = Vec::new();
     let mut conflict_ours: Vec<Vec<u8>> = Vec::new();
     let mut anchors: Vec<Vec<u8>> = Vec::new();
-    let mut total_base = 0usize;
 
     loop {
         if idx == 0 {
@@ -1296,9 +1295,8 @@ fn try_eof_tail_insert_conflict(hunks: &[Hunk], min_tail_base: usize) -> Option<
         if idx < 2 {
             break;
         }
-        let side = match &hunks[idx - 2] {
+        match &hunks[idx - 2] {
             Hunk::OnlyOurs { base, ours } if !base.is_empty() => {
-                total_base += base.len();
                 conflict_base.splice(0..0, base.iter().cloned());
                 let mut chunk = ours.clone();
                 if chunk.is_empty() {
@@ -1307,20 +1305,25 @@ fn try_eof_tail_insert_conflict(hunks: &[Hunk], min_tail_base: usize) -> Option<
                 conflict_ours.splice(0..0, chunk);
                 anchors.splice(0..0, vec![anchor[0].clone()]);
                 idx -= 2;
-                continue;
             }
             Hunk::OnlyTheirs { base, theirs } if !base.is_empty() && theirs.is_empty() => {
-                total_base += base.len();
                 conflict_base.splice(0..0, base.iter().cloned());
                 anchors.splice(0..0, vec![anchor[0].clone()]);
                 idx -= 2;
-                continue;
             }
             _ => break,
-        };
+        }
     }
 
-    if total_base < min_tail_base {
+    if anchors.is_empty() {
+        return None;
+    }
+    let anchor_line = &anchors[anchors.len() - 1];
+    let anchor_occurrences = base_lines
+        .iter()
+        .filter(|line| line.as_slice() == anchor_line.as_slice())
+        .count();
+    if anchor_occurrences < 2 {
         return None;
     }
 
@@ -1333,7 +1336,7 @@ fn try_eof_tail_insert_conflict(hunks: &[Hunk], min_tail_base: usize) -> Option<
         conflict_ours = anchors.clone();
     }
 
-    Some(EofTailConflict {
+    Some(RepeatedAnchorEofConflict {
         start: idx,
         hunk: Hunk::Conflict {
             base: conflict_base,
@@ -1731,6 +1734,82 @@ fn lines_for_merge_diff_compare(lines: &[Vec<u8>], mode: &WhitespaceMode) -> Vec
         .collect()
 }
 
+fn merge_line_body_str(line: &[u8]) -> String {
+    if line.ends_with(b"\r\n") {
+        String::from_utf8_lossy(&line[..line.len() - 2]).into_owned()
+    } else if line.ends_with(b"\n") {
+        String::from_utf8_lossy(&line[..line.len() - 1]).into_owned()
+    } else {
+        String::from_utf8_lossy(line).into_owned()
+    }
+}
+
+fn merge_line_bodies(lines: &[Vec<u8>]) -> Vec<String> {
+    lines.iter().map(|l| merge_line_body_str(l)).collect()
+}
+
+fn merge_side_ops_myers(
+    base_lines: &[Vec<u8>],
+    ours_lines: &[Vec<u8>],
+    theirs_lines: &[Vec<u8>],
+    base_compare: &[Vec<u8>],
+    ours_compare: &[Vec<u8>],
+    theirs_compare: &[Vec<u8>],
+    need_min: bool,
+) -> (Vec<DiffOp>, Vec<DiffOp>) {
+    let (base_ids, ours_ids, theirs_ids) =
+        intern_merge_compare_three_way(base_compare, ours_compare, theirs_compare);
+    let base_bodies = merge_line_bodies(base_lines);
+    let base_body_refs: Vec<&str> = base_bodies.iter().map(String::as_str).collect();
+    let ours_bodies = merge_line_bodies(ours_lines);
+    let ours_body_refs: Vec<&str> = ours_bodies.iter().map(String::as_str).collect();
+    let theirs_bodies = merge_line_bodies(theirs_lines);
+    let theirs_body_refs: Vec<&str> = theirs_bodies.iter().map(String::as_str).collect();
+    let ours_ops = merge_myops_from_preinterned_ids(&base_ids, &ours_ids, need_min);
+    let theirs_ops = merge_myops_from_preinterned_ids(&base_ids, &theirs_ids, need_min);
+    (
+        merge_indent_compact_side_ops(
+            &ours_ops,
+            &base_body_refs,
+            &ours_body_refs,
+            &base_ids,
+            &ours_ids,
+        ),
+        merge_indent_compact_side_ops(
+            &theirs_ops,
+            &base_body_refs,
+            &theirs_body_refs,
+            &base_ids,
+            &theirs_ids,
+        ),
+    )
+}
+
+fn merge_indent_compact_side_ops(
+    ops: &[DiffOp],
+    old_bodies: &[&str],
+    new_bodies: &[&str],
+    old_ids: &[u32],
+    new_ids: &[u32],
+) -> Vec<DiffOp> {
+    diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
+        ops,
+        diff_indent_heuristic::CompactSide {
+            lines: old_bodies,
+            keys: old_bodies,
+            compare_ids: Some(old_ids),
+        },
+        diff_indent_heuristic::CompactSide {
+            lines: new_bodies,
+            keys: new_bodies,
+            compare_ids: Some(new_ids),
+        },
+        true,
+        crate::diff::WhitespaceMode::default(),
+        false,
+    )
+}
+
 /// Line body without terminators, for Git's indent heuristic during change compaction.
 fn normalize_line_for_compare(line: &[u8], mode: &WhitespaceMode) -> Vec<u8> {
     let mut bytes = line.to_vec();
@@ -1821,6 +1900,55 @@ mod tests {
             String::from_utf8_lossy(&out.stderr)
         );
         out.stdout
+    }
+
+    fn assert_git_merge_tree_clean(base: &[u8], ours: &[u8], theirs: &[u8], context: &str) {
+        use std::process::Command;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let home = root.join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let run = |args: &[&str]| {
+            Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .env("HOME", &home)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .output()
+                .expect("git")
+        };
+        run(&["init", "-q", "-b", "main"]);
+        run(&["config", "user.email", "t@example.com"]);
+        run(&["config", "user.name", "Test"]);
+        std::fs::write(root.join("f"), base).expect("base");
+        run(&["add", "f"]);
+        run(&["commit", "-qm", "base"]);
+        let base_rev = String::from_utf8(run(&["rev-parse", "HEAD"]).stdout).expect("utf8");
+        let base_rev = base_rev.trim();
+        std::fs::write(root.join("f"), ours).expect("ours");
+        run(&["add", "f"]);
+        run(&["commit", "-qm", "ours"]);
+        let ours_rev = String::from_utf8(run(&["rev-parse", "HEAD"]).stdout).expect("utf8");
+        let ours_rev = ours_rev.trim();
+        std::fs::write(root.join("f"), theirs).expect("theirs");
+        run(&["add", "f"]);
+        run(&["commit", "-qm", "theirs"]);
+        let theirs_rev = String::from_utf8(run(&["rev-parse", "HEAD"]).stdout).expect("utf8");
+        let theirs_rev = theirs_rev.trim();
+        let merge_base = format!("--merge-base={base_rev}");
+        let out = run(&[
+            "merge-tree",
+            "--write-tree",
+            &merge_base,
+            ours_rev,
+            theirs_rev,
+        ]);
+        assert!(
+            out.status.success(),
+            "{context}: git merge-tree should merge cleanly, stderr={}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     fn assert_merge_matches_git(
@@ -2168,6 +2296,69 @@ mod tests {
         })
         .unwrap();
         assert_eq!(out.conflicts, 0);
+    }
+
+    #[test]
+    fn issue_2397_unique_tail_replace_and_eof_append_clean_like_merge_tree() {
+        let base: String = (0..20)
+            .map(|i| format!("base {i}\n"))
+            .chain(std::iter::once("anchor\n".to_string()))
+            .collect();
+        let ours = "anchor\n".to_string();
+        let theirs = format!("{base}appended\n");
+        assert_git_merge_tree_clean(
+            base.as_bytes(),
+            ours.as_bytes(),
+            theirs.as_bytes(),
+            "unique tail deletion + EOF append",
+        );
+        let out = merge(&MergeInput {
+            base: base.as_bytes(),
+            ours: ours.as_bytes(),
+            theirs: theirs.as_bytes(),
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: None,
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .unwrap();
+        assert_eq!(
+            out.conflicts, 0,
+            "must stay clean when git merge-tree merges cleanly"
+        );
+
+        let ours_replace = "replacement block\nanchor\n".to_string();
+        assert_git_merge_tree_clean(
+            base.as_bytes(),
+            ours_replace.as_bytes(),
+            theirs.as_bytes(),
+            "unique tail replace + EOF append",
+        );
+        let out_replace = merge(&MergeInput {
+            base: base.as_bytes(),
+            ours: ours_replace.as_bytes(),
+            theirs: theirs.as_bytes(),
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: None,
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .unwrap();
+        assert_eq!(out_replace.conflicts, 0);
     }
 
     #[test]
