@@ -278,7 +278,6 @@ fn worktree_has_changes(
         index,
         Some(config.as_ref()),
         Some(&worktree_rules),
-        crate::diff::DiffTreeToWorktreeExtras::default(),
     )?;
     let entries = apply_rename_detection_to_diff_entries(
         repo.odb(),

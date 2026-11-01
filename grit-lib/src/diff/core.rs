@@ -8523,12 +8523,33 @@ pub fn diff_tree_to_worktree_with_git_dir(
         index,
         config,
         None,
-        DiffTreeToWorktreeExtras::default(),
     )
 }
 
 /// Like [`diff_tree_to_worktree_with_git_dir`], with optional shared [`crate::worktree_rules::WorktreeRules`].
 pub fn diff_tree_to_worktree_with_git_dir_and_rules(
+    odb: &Odb,
+    tree_oid: Option<&ObjectId>,
+    work_tree: &Path,
+    repository_git_dir: &Path,
+    index: &Index,
+    config: Option<&ConfigSet>,
+    worktree_rules: Option<&crate::worktree_rules::WorktreeRules>,
+) -> Result<Vec<DiffEntry>> {
+    diff_tree_to_worktree_with_git_dir_and_rules_extras(
+        odb,
+        tree_oid,
+        work_tree,
+        repository_git_dir,
+        index,
+        config,
+        worktree_rules,
+        DiffTreeToWorktreeExtras::default(),
+    )
+}
+
+/// Like [`diff_tree_to_worktree_with_git_dir_and_rules`], with worktree access policy for the slow path.
+pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
     odb: &Odb,
     tree_oid: Option<&ObjectId>,
     work_tree: &Path,

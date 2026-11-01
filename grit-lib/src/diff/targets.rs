@@ -8,8 +8,8 @@ use thiserror::Error;
 
 use crate::config::ConfigSet;
 use crate::diff::changes::{
-    load_changes, load_object_changes, staged_entries_in, unstaged_entries_in, worktree_entries_in,
-    FileChange, WorktreeSide,
+    load_changes, load_object_changes, pathspec_restrict_paths_for_scan, staged_entries_in,
+    unstaged_entries_in, worktree_entries_in, FileChange, WorktreeSide,
 };
 use crate::diff::detail::LineStat;
 use crate::diff::diff_trees_with_renames_and_policy;
@@ -449,7 +449,10 @@ pub(crate) fn collect_files_for_target(
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::IndexVsHead => {
-            let restrict = expanded_index_paths_for_pathspecs(repo, pathspecs)?;
+            let index = repo.index_handle().load()?;
+            let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
+            let restrict =
+                pathspec_restrict_paths_for_scan(repo, &index, pathspecs, head_tree.as_ref())?;
             let changes = filter_file_changes(
                 staged_changes(repo, rename_threshold, restrict)?,
                 repo,
@@ -791,31 +794,13 @@ fn filter_tree_diff(
         .collect())
 }
 
-fn expanded_index_paths_for_pathspecs(
-    repo: &Repository,
-    pathspecs: &[String],
-) -> Result<Option<Arc<BTreeSet<String>>>> {
-    if pathspecs.is_empty() {
-        return Ok(None);
-    }
-    let index = repo.index_handle().load()?;
-    Ok(Some(Arc::new(
-        crate::porcelain::add::restricted_index_paths_for_pathspecs(
-            repo,
-            &index,
-            pathspecs,
-            repo.pathspec_match_context(),
-        )?,
-    )))
-}
-
 fn unstaged_changes(
     repo: &Repository,
     rename_threshold: u32,
     pathspecs: &[String],
 ) -> Result<Vec<FileChange>> {
     let mut index = repo.index_handle().load()?;
-    let restrict = expanded_index_paths_for_pathspecs(repo, pathspecs)?;
+    let restrict = pathspec_restrict_paths_for_scan(repo, &index, pathspecs, None)?;
     unstaged_changes_inner(repo, &mut index, rename_threshold, restrict)
 }
 
@@ -929,7 +914,7 @@ fn worktree_changes(
 ) -> Result<Vec<FileChange>> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let mut index = repo.index_handle().load()?;
-    let restrict = expanded_index_paths_for_pathspecs(repo, pathspecs)?;
+    let restrict = pathspec_restrict_paths_for_scan(repo, &index, pathspecs, base_tree)?;
     let rules = Arc::new(Mutex::new(WorktreeRules::from_repository(repo, &index)?));
     let entries = worktree_entries_in(
         repo,

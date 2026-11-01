@@ -9,7 +9,7 @@ mod unix {
 
     use grit_lib::config::environment::RepositoryOptions;
     use grit_lib::diagnostics::{CollectingDiagnostics, DiagnosticsHandle, Warning};
-    use grit_lib::diff::{DiffOptions, DiffTarget};
+    use grit_lib::diff::{DiffOptions, DiffStatus, DiffTarget};
     use grit_lib::progress::{NeverCancel, NullProgress};
     use grit_lib::repo::Repository;
     use grit_lib::stash::StashPushOptions;
@@ -171,5 +171,59 @@ mod unix {
         );
         let priv_b = fs::read_to_string(root.join("priv/b")).expect("priv/b readable again");
         assert_eq!(priv_b, "b\n");
+    }
+
+    #[test]
+    fn pathspec_shows_staged_deletion_absent_from_index() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        git(root, &["init", "-q", "-b", "main", "."]);
+        git(root, &["config", "user.email", "t@example.com"]);
+        git(root, &["config", "user.name", "Test"]);
+        fs::write(root.join("old.txt"), "x\n").expect("write old.txt");
+        fs::create_dir(root.join("dir")).expect("mkdir dir");
+        fs::write(root.join("dir/nested.txt"), "n\n").expect("write dir/nested.txt");
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+        git(root, &["rm", "old.txt", "dir/nested.txt"]);
+
+        let fx = open_repo(root);
+        let exact = fx
+            .repo
+            .diff()
+            .entries(
+                &DiffTarget::WorktreeVsHead,
+                &["old.txt".into()],
+                &DiffOptions::default(),
+            )
+            .expect("diff old.txt");
+        assert!(
+            exact
+                .iter()
+                .any(|e| e.path() == "old.txt" && e.status == DiffStatus::Deleted),
+            "expected staged deletion of old.txt, got {exact:?}"
+        );
+
+        let dir_spec = fx
+            .repo
+            .diff()
+            .entries(
+                &DiffTarget::WorktreeVsHead,
+                &["dir/".into()],
+                &DiffOptions::default(),
+            )
+            .expect("diff dir/");
+        assert!(
+            dir_spec
+                .iter()
+                .any(|e| { e.path() == "dir/nested.txt" && e.status == DiffStatus::Deleted }),
+            "expected staged deletion under dir/, got {dir_spec:?}"
+        );
+
+        let git_diff = git(root, &["diff", "HEAD", "--", "old.txt"]);
+        assert!(
+            git_diff.contains("deleted file"),
+            "git should show deletion: {git_diff}"
+        );
     }
 }

@@ -19,7 +19,7 @@ use crate::diff::targets::{
 use crate::diff::tree_content::{gitlink_line, load_new_side, load_old_side};
 use crate::diff::{
     apply_rename_detection_to_diff_entries, diff_index_to_tree_with_renames,
-    diff_index_to_worktree_with_renames, diff_tree_to_worktree_with_git_dir_and_rules,
+    diff_index_to_worktree_with_renames, diff_tree_to_worktree_with_git_dir_and_rules_extras,
     index_mtime_for_diff, line_change_counts, load_worktree_side_for_diff,
     peer_scope_includes_path, read_submodule_head_oid, sort_entries_by_path,
     submodule_porcelain_flags, DiffEntry, DiffIndexToWorktreeOptions, DiffOptions, DiffSide,
@@ -259,22 +259,33 @@ fn worktree_gitlink_line(entry: &DiffEntry, work_tree: &Path) -> String {
     }
 }
 
-fn index_paths_for_pathspecs(
+/// Paths to scan before a worktree or index diff when `pathspecs` limit the operation.
+///
+/// Includes index entries selected by the pathspecs plus blob paths in `base_tree` that match,
+/// so a staged deletion (absent from the index but present in `HEAD`) is not dropped.
+pub(crate) fn pathspec_restrict_paths_for_scan(
     repo: &Repository,
     index: &Index,
     pathspecs: &[String],
+    base_tree: Option<&ObjectId>,
 ) -> Result<Option<Arc<BTreeSet<String>>>> {
     if pathspecs.is_empty() {
         return Ok(None);
     }
-    Ok(Some(Arc::new(
-        crate::porcelain::add::restricted_index_paths_for_pathspecs(
-            repo,
-            index,
-            pathspecs,
-            repo.pathspec_match_context(),
-        )?,
-    )))
+    let mut paths = crate::porcelain::add::restricted_index_paths_for_pathspecs(
+        repo,
+        index,
+        pathspecs,
+        repo.pathspec_match_context(),
+    )?;
+    if let Some(tree) = base_tree {
+        for (path, _, _) in super::flatten_tree_entries(repo.odb(), tree)? {
+            if crate::pathspec::matches_pathspec_list(&path, pathspecs) {
+                paths.insert(path);
+            }
+        }
+    }
+    Ok(Some(Arc::new(paths)))
 }
 
 fn rename_threshold(renames: RenameDetection) -> u32 {
@@ -376,7 +387,7 @@ pub(crate) fn worktree_entries_in(
     let config = repo.config()?;
     let raw = {
         let rules = rules.lock().unwrap_or_else(|e| e.into_inner());
-        diff_tree_to_worktree_with_git_dir_and_rules(
+        diff_tree_to_worktree_with_git_dir_and_rules_extras(
             repo.odb(),
             base_tree,
             work_tree,
@@ -561,15 +572,39 @@ impl<'repo> UncommittedDiff<'repo> {
         options: &DiffOptions,
     ) -> Result<Vec<DiffEntry>> {
         let renames = options.renames;
-        let restrict = index_paths_for_pathspecs(self.repo, &self.index, pathspecs)?;
         let entries = match target {
-            DiffTarget::IndexVsHead => self.staged_entries_for_paths(renames, restrict)?,
-            DiffTarget::WorktreeVsIndex => self.unstaged_entries_for_paths(renames, restrict)?,
+            DiffTarget::IndexVsHead => {
+                let head_tree = resolve_head_for_repository(self.repo)?.tree(self.repo.odb())?;
+                let restrict = pathspec_restrict_paths_for_scan(
+                    self.repo,
+                    &self.index,
+                    pathspecs,
+                    head_tree.as_ref(),
+                )?;
+                self.staged_entries_for_paths(renames, restrict)?
+            }
+            DiffTarget::WorktreeVsIndex => {
+                let restrict =
+                    pathspec_restrict_paths_for_scan(self.repo, &self.index, pathspecs, None)?;
+                self.unstaged_entries_for_paths(renames, restrict)?
+            }
             DiffTarget::WorktreeVsHead => {
                 let head_tree = resolve_head_for_repository(self.repo)?.tree(self.repo.odb())?;
+                let restrict = pathspec_restrict_paths_for_scan(
+                    self.repo,
+                    &self.index,
+                    pathspecs,
+                    head_tree.as_ref(),
+                )?;
                 self.worktree_entries_for_paths(head_tree.as_ref(), renames, restrict)?
             }
             DiffTarget::WorktreeVsTree(tree) => {
+                let restrict = pathspec_restrict_paths_for_scan(
+                    self.repo,
+                    &self.index,
+                    pathspecs,
+                    Some(tree),
+                )?;
                 self.worktree_entries_for_paths(Some(tree), renames, restrict)?
             }
             DiffTarget::Commit(_) | DiffTarget::Trees { .. } => {

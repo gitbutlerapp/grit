@@ -193,7 +193,6 @@ mod tests {
             &index,
             Some(rules.config()),
             Some(&rules),
-            crate::diff::DiffTreeToWorktreeExtras::default(),
         )
         .unwrap();
         assert!(
