@@ -210,7 +210,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::apply::IndexApplyOutcome
 pub fn grit_lib::apply::apply_hunks_to_blob(&[u8], &[grit_lib::apply::Hunk], &grit_lib::apply::ApplyOptions) -> core::result::Result<alloc::vec::Vec<u8>, grit_lib::error::ApplyError>
 pub fn grit_lib::apply::apply_patch_to_blob(&[u8], &grit_lib::apply::FilePatch, &grit_lib::apply::BlobApplyOptions) -> core::result::Result<alloc::vec::Vec<u8>, grit_lib::error::ApplyError>
 pub fn grit_lib::apply::apply_patch_to_index(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &[grit_lib::apply::FilePatch], &grit_lib::apply::IndexApplyOptions) -> core::result::Result<grit_lib::apply::IndexApplyOutcome, grit_lib::error::ApplyError>
-pub fn grit_lib::apply::apply_patch_to_index_and_write(&grit_lib::repo::Repository, &[grit_lib::apply::FilePatch], &grit_lib::apply::IndexApplyOptions) -> core::result::Result<grit_lib::apply::IndexApplyOutcome, grit_lib::error::ApplyError>
+pub fn grit_lib::apply::apply_patch_to_index_and_write(&grit_lib::repo::Repository, &[grit_lib::apply::FilePatch], &grit_lib::apply::IndexApplyOptions, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::apply::IndexApplyOutcome, grit_lib::error::ApplyError>
 pub fn grit_lib::apply::inflate_binary_payload(&[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::apply::materialize_binary_patch_forward(&grit_lib::apply::BinaryPatchPayload, &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::apply::materialize_binary_patch_reverse(&grit_lib::apply::BinaryPatchPayload, &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -14992,6 +14992,7 @@ pub grit_lib::porcelain::hunk_select::HunkSelectError::InvalidMode::mode: alloc:
 pub grit_lib::porcelain::hunk_select::HunkSelectError::InvalidMode::path: alloc::string::String
 pub grit_lib::porcelain::hunk_select::HunkSelectError::MissingPath
 pub grit_lib::porcelain::hunk_select::HunkSelectError::PatchBuild
+pub grit_lib::porcelain::hunk_select::HunkSelectError::Cancelled
 pub grit_lib::porcelain::hunk_select::HunkSelectError::RangeOutOfBounds
 pub grit_lib::porcelain::hunk_select::HunkSelectError::RangeOutOfBounds::end: usize
 pub grit_lib::porcelain::hunk_select::HunkSelectError::RangeOutOfBounds::max_line: usize
@@ -15145,7 +15146,7 @@ pub fn grit_lib::porcelain::hunk_select::parse_hunk_id_list(&[alloc::string::Str
 pub fn grit_lib::porcelain::hunk_select::resolve_selection(&grit_lib::repo::Repository, grit_lib::diff::hunk_id::DiffSide, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], grit_lib::diff::DiffOptions) -> core::result::Result<alloc::vec::Vec<grit_lib::apply::FilePatch>, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::restore_hunks(&grit_lib::repo::Repository, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], bool, bool, bool) -> core::result::Result<grit_lib::porcelain::hunk_select::RestoreHunksOutcome, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::reverse_apply_patches_to_worktree(&grit_lib::repo::Repository, &[grit_lib::apply::FilePatch], &grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<(), grit_lib::error::ApplyError>
-pub fn grit_lib::porcelain::hunk_select::stage_hunks(&grit_lib::repo::Repository, grit_lib::diff::hunk_id::DiffSide, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], grit_lib::diff::DiffOptions, bool) -> core::result::Result<grit_lib::porcelain::hunk_select::StageHunksOutcome, grit_lib::porcelain::hunk_select::HunkSelectError>
+pub fn grit_lib::porcelain::hunk_select::stage_hunks(&grit_lib::repo::Repository, grit_lib::diff::hunk_id::DiffSide, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], grit_lib::diff::DiffOptions, bool, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::porcelain::hunk_select::StageHunksOutcome, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::unstaged_file_diffs(&grit_lib::repo::Repository, &[alloc::string::String]) -> core::result::Result<alloc::vec::Vec<(grit_lib::diff::FileDiff, alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>)>, grit_lib::error::Error>
 pub mod grit_lib::porcelain::index_mode
 pub enum grit_lib::porcelain::index_mode::StageExecutableHint
@@ -15780,9 +15781,9 @@ impl core::marker::Unpin for grit_lib::porcelain::paths::RemoveOutcome
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::paths::RemoveOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::paths::RemoveOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::paths::RemoveOutcome
-pub fn grit_lib::porcelain::paths::move_path(&grit_lib::repo::Repository, &str, &str, bool) -> grit_lib::error::Result<grit_lib::porcelain::paths::MoveOutcome>
-pub fn grit_lib::porcelain::paths::move_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::paths::MoveOptions) -> grit_lib::error::Result<grit_lib::porcelain::paths::MoveOutcome>
-pub fn grit_lib::porcelain::paths::remove_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::paths::RemoveOptions) -> grit_lib::error::Result<grit_lib::porcelain::paths::RemoveOutcome>
+pub fn grit_lib::porcelain::paths::move_path(&grit_lib::repo::Repository, &str, &str, bool, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::paths::MoveOutcome>
+pub fn grit_lib::porcelain::paths::move_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::paths::MoveOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::paths::MoveOutcome>
+pub fn grit_lib::porcelain::paths::remove_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::paths::RemoveOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::paths::RemoveOutcome>
 pub mod grit_lib::porcelain::pathspec_match
 pub fn grit_lib::porcelain::pathspec_match::ensure_pathspec_matches_known_in_repository(&grit_lib::repo::Repository, &str, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::pathspec_match::pathspec_matches_known_in_repository(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<bool>

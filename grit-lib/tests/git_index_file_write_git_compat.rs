@@ -187,6 +187,7 @@ fn remove_cached_with_git_index_file_edits_temp_index_only() {
             cached: true,
             ..Default::default()
         },
+        &grit_lib::progress::NeverCancel,
     )
     .expect("rm cached");
 

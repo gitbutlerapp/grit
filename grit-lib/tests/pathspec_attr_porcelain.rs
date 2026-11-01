@@ -199,6 +199,7 @@ fn objectmode_attr_pathspec_restore_stash_rm() {
             cached: true,
             ..Default::default()
         },
+        &grit_lib::progress::NeverCancel,
     )
     .expect("rm --cached executable");
     let ls = git(root, &["ls-files"]);
@@ -219,6 +220,7 @@ fn rm_cached_attr_pathspec() {
             cached: true,
             ..Default::default()
         },
+        &grit_lib::progress::NeverCancel,
     )
     .expect("rm --cached");
     let ls = git(root, &["ls-files"]);

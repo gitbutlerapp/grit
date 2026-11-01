@@ -14,7 +14,7 @@ use grit_lib::porcelain::hunk_select::{
     StageHunksOutcome,
 };
 use grit_lib::porcelain::index_mode::StageExecutableHint;
-use grit_lib::progress::{NeverCancel, ProgressSink};
+use grit_lib::progress::ProgressSink;
 use grit_lib::repo::Repository;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -164,6 +164,7 @@ pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
             | HunkSelectError::Apply(_)
             | HunkSelectError::Repository(_)
             | HunkSelectError::PatchBuild => 1,
+            HunkSelectError::Cancelled => 130,
         }
     } else {
         1
@@ -223,6 +224,7 @@ pub fn run_hunks(
     unified_context: Option<usize>,
     dry_run: bool,
 ) -> Result<AddOutcome> {
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
     let resolved = args.resolve(&repo)?;
     let (pathspecs, _) = resolved.into_pathspec_lists();
@@ -240,6 +242,7 @@ pub fn run_hunks(
         &pathspecs,
         diff_options,
         dry_run,
+        &interrupt,
     )
     .map_err(map_hunk_error)?;
     Ok(AddOutcome::from_hunks(outcome))
@@ -250,6 +253,7 @@ fn map_hunk_error(err: HunkSelectError) -> anyhow::Error {
 }
 
 pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
     let patches = crate::patch_selection::parse_patch_file(patch_file)?;
     let outcome = apply_patch_to_index_and_write(
@@ -259,6 +263,7 @@ pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {
             dry_run,
             ..IndexApplyOptions::default()
         },
+        &interrupt,
     )
     .map_err(map_apply_error)?;
     let count = outcome.added.len() + outcome.modified.len() + outcome.removed.len();
@@ -288,6 +293,7 @@ pub fn run(
     non_executable: bool,
     progress: &mut dyn ProgressSink,
 ) -> Result<AddOutcome> {
+    let interrupt = crate::interrupt::InterruptCancel::install();
     if executable && non_executable {
         bail!("--executable and --non-executable cannot be used together");
     }
@@ -322,6 +328,7 @@ pub fn run(
             StageExecutableHint::None
         },
         progress,
+        &interrupt,
     )?;
     Ok(AddOutcome::from_stage(outcome, dry_run, no_paths))
 }
@@ -336,6 +343,7 @@ fn stage_with_hint(
     force_ignored: bool,
     executable_hint: StageExecutableHint,
     progress: &mut dyn ProgressSink,
+    cancel: &dyn grit_lib::progress::Cancel,
 ) -> Result<StageOutcome> {
     let (pathspecs, pathspec_sources) = resolved.into_pathspec_lists();
     let opts = StageOptions {
@@ -349,7 +357,7 @@ fn stage_with_hint(
         force_ignored,
         ..StageOptions::default()
     };
-    stage_paths(repo, &opts, progress, &NeverCancel).map_err(map_add_error)
+    stage_paths(repo, &opts, progress, cancel).map_err(map_add_error)
 }
 
 fn map_apply_error(err: grit_lib::error::ApplyError) -> anyhow::Error {

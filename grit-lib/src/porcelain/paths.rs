@@ -22,6 +22,7 @@ use crate::porcelain::checkout::remove_empty_parent_dirs_batch;
 use crate::porcelain::pathspec_match::{
     index_stage0_path_modes, RepositoryPathspecFilter, REGULAR_FILE_MODE,
 };
+use crate::progress::{poll_cancel, Cancel, NullProgress};
 use crate::repo::Repository;
 
 /// Options for [`remove_paths`].
@@ -185,7 +186,11 @@ pub struct MoveOutcome {
 ///
 /// Returns [`Error::PathspecNoMatch`], [`Error::RemoveBlocked`],
 /// [`Error::NotRemovingRecursively`], or I/O / object-store failures.
-pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOutcome> {
+pub fn remove_paths(
+    repo: &Repository,
+    opts: &RemoveOptions,
+    cancel: &dyn Cancel,
+) -> Result<RemoveOutcome> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
 
     if opts.pathspecs.is_empty() {
@@ -219,14 +224,17 @@ pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOut
     }
 
     let mut lock = repo.begin_index_update()?;
+    poll_cancel(&mut NullProgress, cancel)?;
     index = repo.load_index()?;
     let path_bytes: Vec<&[u8]> = to_remove.iter().map(|p| p.as_bytes()).collect();
     index.remove_paths(path_bytes);
+    poll_cancel(&mut NullProgress, cancel)?;
     repo.commit_index_update(&mut lock, &mut index, !opts.cached)?;
 
     if !opts.cached {
         let mut removed_worktree: Vec<PathBuf> = Vec::new();
         for path in &to_remove {
+            poll_cancel(&mut NullProgress, cancel)?;
             let abs = work_tree.join(path);
             if abs.is_file() || abs.is_symlink() {
                 fs::remove_file(&abs)
@@ -247,7 +255,13 @@ pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOut
 /// # Errors
 ///
 /// Same as [`move_paths`].
-pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result<MoveOutcome> {
+pub fn move_path(
+    repo: &Repository,
+    src: &str,
+    dst: &str,
+    force: bool,
+    cancel: &dyn Cancel,
+) -> Result<MoveOutcome> {
     move_paths(
         repo,
         &MoveOptions {
@@ -256,6 +270,7 @@ pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result
             force,
             dry_run: false,
         },
+        cancel,
     )
 }
 
@@ -272,7 +287,11 @@ pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result
 ///
 /// Returns [`Error::InvalidPath`], [`Error::MoveSourceNotTracked`], [`Error::MoveDestinationExists`],
 /// and related move errors, or I/O failures.
-pub fn move_paths(repo: &Repository, opts: &MoveOptions) -> Result<MoveOutcome> {
+pub fn move_paths(
+    repo: &Repository,
+    opts: &MoveOptions,
+    cancel: &dyn Cancel,
+) -> Result<MoveOutcome> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     if opts.sources.is_empty() {
         return Err(Error::MoveNothingToMove {
@@ -327,6 +346,7 @@ pub fn move_paths(repo: &Repository, opts: &MoveOptions) -> Result<MoveOutcome> 
     }
 
     let mut lock = repo.begin_index_update()?;
+    poll_cancel(&mut NullProgress, cancel)?;
     index = repo.load_index()?;
 
     let mut force_clear_worktree: Vec<String> = Vec::new();
@@ -350,6 +370,15 @@ pub fn move_paths(repo: &Repository, opts: &MoveOptions) -> Result<MoveOutcome> 
 
     let mut completed_worktree_renames: Vec<(String, String)> = Vec::new();
     for plan in &planned {
+        if cancel.is_cancelled() {
+            return Err(abort_failed_move_worktree(
+                work_tree,
+                &completed_worktree_renames,
+                &cleared_backup,
+                ignorecase,
+                Error::Cancelled,
+            ));
+        }
         if opts.force {
             clear_destination_index(&mut index, &plan.final_dst);
         }
@@ -384,6 +413,8 @@ pub fn move_paths(repo: &Repository, opts: &MoveOptions) -> Result<MoveOutcome> 
             err,
         ));
     }
+
+    poll_cancel(&mut NullProgress, cancel)?;
 
     repo.flush_index_update(&mut lock, &mut index)?;
     repo.finish_index_update(&mut lock, true)?;
@@ -1699,6 +1730,7 @@ mod collect_removal_paths_tests {
                 force: true,
                 ..Default::default()
             },
+            &crate::progress::NeverCancel,
         )
         .expect("dry-run rm")
         .removed
@@ -1794,6 +1826,7 @@ mod collect_removal_paths_tests {
                 ignore_unmatch: true,
                 ..Default::default()
             },
+            &crate::progress::NeverCancel,
         )
         .expect("ignore unmatch");
         assert_eq!(outcome.removed, vec!["keep.txt".to_string()]);
@@ -1931,6 +1964,7 @@ mod collect_removal_paths_tests {
                 force: true,
                 ..Default::default()
             },
+            &crate::progress::NeverCancel,
         )
         .expect("dry-run rm");
         assert_eq!(outcome.removed.len(), 2);
@@ -2399,6 +2433,7 @@ mod index_lock_transaction_tests {
                 force: true,
                 ..Default::default()
             },
+            &crate::progress::NeverCancel,
         )
         .expect_err("injected write failure");
         set_test_inject_index_write_fail(false);
@@ -2421,7 +2456,14 @@ mod index_lock_transaction_tests {
         .unwrap();
 
         set_test_inject_index_write_fail(true);
-        let err = move_path(&repo, "a.txt", "b.txt", false).expect_err("injected write failure");
+        let err = move_path(
+            &repo,
+            "a.txt",
+            "b.txt",
+            false,
+            &crate::progress::NeverCancel,
+        )
+        .expect_err("injected write failure");
         set_test_inject_index_write_fail(false);
         assert!(matches!(err, crate::error::Error::Io(_)));
         assert!(root.join("a.txt").is_file());
@@ -2462,7 +2504,7 @@ mod trailing_slash_move_tests {
         fs::create_dir_all(root.join("dir")).unwrap();
         fs::write(root.join("c"), b"c\n").unwrap();
         stage_all(&repo);
-        move_path(&repo, "c", "dir/", false).expect("mv");
+        move_path(&repo, "c", "dir/", false, &crate::progress::NeverCancel).expect("mv");
         assert!(root.join("dir/c").is_file());
         assert!(!root.join("c").exists());
     }
@@ -2474,7 +2516,8 @@ mod trailing_slash_move_tests {
         let repo = init_repo(root);
         fs::write(root.join("c"), b"c\n").unwrap();
         stage_all(&repo);
-        let err = move_path(&repo, "c", "missing/", false).expect_err("mv");
+        let err = move_path(&repo, "c", "missing/", false, &crate::progress::NeverCancel)
+            .expect_err("mv");
         assert!(matches!(err, Error::MoveDestinationNotDirectory { .. }));
         assert!(root.join("c").is_file());
     }
@@ -2487,7 +2530,7 @@ mod trailing_slash_move_tests {
         fs::create_dir_all(root.join("src/nested")).unwrap();
         fs::write(root.join("src/nested/file"), b"x\n").unwrap();
         stage_all(&repo);
-        move_path(&repo, "src", "dest/", false).expect("mv");
+        move_path(&repo, "src", "dest/", false, &crate::progress::NeverCancel).expect("mv");
         assert!(root.join("dest/nested/file").is_file());
         assert!(!root.join("src").exists());
     }

@@ -131,11 +131,16 @@ pub fn apply_patch_to_index_and_write(
     repo: &Repository,
     patches: &[FilePatch],
     opts: &IndexApplyOptions,
+    cancel: &dyn crate::progress::Cancel,
 ) -> std::result::Result<IndexApplyOutcome, ApplyError> {
     let handle = repo.index_handle();
     let mut lock = handle.begin_update().map_err(|e| library_err_path("", e))?;
+    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
+        .map_err(|e| library_err_path("", e))?;
     let mut index = handle.load().map_err(|e| library_err_path("", e))?;
     let outcome = apply_patch_to_index(repo, &mut index, patches, opts)?;
+    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
+        .map_err(|e| library_err_path("", e))?;
     if opts.dry_run {
         return Ok(outcome);
     }

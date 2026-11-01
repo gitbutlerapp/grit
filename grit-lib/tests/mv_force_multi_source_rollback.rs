@@ -42,6 +42,7 @@ fn multi_source_missing_later_source_rolls_back_earlier_forced_move() {
             force: true,
             dry_run: false,
         },
+        &grit_lib::progress::NeverCancel,
     )
     .expect_err("missing later source");
 

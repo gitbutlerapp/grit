@@ -78,7 +78,13 @@ fn mixed_text_and_binary_patch_writes_git_compatible_index() {
     assert!(patches[1].is_toplevel_relative && patches[1].is_binary);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::default()).unwrap();
-    apply_patch_to_index_and_write(&repo, &patches, &IndexApplyOptions::default()).unwrap();
+    apply_patch_to_index_and_write(
+        &repo,
+        &patches,
+        &IndexApplyOptions::default(),
+        &grit_lib::progress::NeverCancel,
+    )
+    .unwrap();
     assert_eq!(git(root, &["write-tree"]), expected_tree);
     assert_eq!(git(root, &["show", ":a.txt"]), "after\n");
     assert_eq!(git(root, &["show", ":b.bin"]), "after\0");
@@ -126,7 +132,13 @@ fn quoted_patch_paths_roundtrip_through_git_index() {
     let expected_tree = git(root, &["write-tree"]);
     git(root, &["reset", "--mixed", "HEAD"]);
     let repo = Repository::discover(Some(root), &RepositoryOptions::default()).unwrap();
-    apply_patch_to_index_and_write(&repo, &patches, &IndexApplyOptions::default()).unwrap();
+    apply_patch_to_index_and_write(
+        &repo,
+        &patches,
+        &IndexApplyOptions::default(),
+        &grit_lib::progress::NeverCancel,
+    )
+    .unwrap();
     assert_eq!(git(root, &["write-tree"]), expected_tree);
     git(root, &["fsck", "--strict"]);
 

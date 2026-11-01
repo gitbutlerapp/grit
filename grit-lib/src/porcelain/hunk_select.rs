@@ -148,6 +148,9 @@ pub enum HunkSelectError {
     /// Selected hunks could not be turned into an apply patch.
     #[error("could not build patch for selected hunks")]
     PatchBuild,
+    /// Caller cancelled before the index was written.
+    #[error("operation cancelled")]
+    Cancelled,
 }
 
 impl From<Error> for HunkSelectError {
@@ -1159,6 +1162,7 @@ pub fn restore_hunks(
                 reverse: true,
                 head_tree_oid: repo.head_tree()?,
             },
+            &crate::progress::NeverCancel,
         )?;
         outcome
             .restored
@@ -1534,6 +1538,7 @@ pub fn stage_hunks(
     pathspecs: &[String],
     diff_options: DiffOptions,
     dry_run: bool,
+    cancel: &dyn crate::progress::Cancel,
 ) -> std::result::Result<StageHunksOutcome, HunkSelectError> {
     // Lock first so the selection is resolved against the index the patches are applied to. The
     // index is reloaded rather than kept across the diff, which would add it to the diff's peak.
@@ -1543,7 +1548,11 @@ pub fn stage_hunks(
     } else {
         Some(handle.begin_update()?)
     };
+    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
+        .map_err(|_| HunkSelectError::Cancelled)?;
     let resolved = resolve_selection_in(repo, None, side, selection, pathspecs, diff_options)?;
+    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
+        .map_err(|_| HunkSelectError::Cancelled)?;
     let mut index = handle.load()?;
     let apply = apply_patch_to_index(
         repo,
@@ -1554,6 +1563,8 @@ pub fn stage_hunks(
             ..IndexApplyOptions::default()
         },
     )?;
+    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
+        .map_err(|_| HunkSelectError::Cancelled)?;
     if let Some(lock) = lock.as_mut() {
         handle.commit_update(lock, &mut index, false)?;
     }
@@ -1706,6 +1717,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         let grit_tree =
@@ -1806,6 +1818,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         stage_hunks(
@@ -1818,6 +1831,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         git(root, &["fsck"]);
@@ -1864,6 +1878,7 @@ mod tests {
             &[],
             opts,
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         git(root, &["fsck"]);
@@ -1903,6 +1918,7 @@ mod tests {
             &["f.txt".into()],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap_err();
         assert!(
@@ -1935,6 +1951,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap_err();
         assert!(matches!(err, HunkSelectError::StaleId { .. }));
@@ -1976,6 +1993,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap_err();
         assert!(matches!(
@@ -2152,6 +2170,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         assert!(repo
@@ -2194,6 +2213,7 @@ mod tests {
             &[path.into()],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         let grit_tree =
@@ -2238,6 +2258,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         assert!(
@@ -2283,6 +2304,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         let file_pathspec = vec!["pkg/a.txt".to_string()];
@@ -2446,6 +2468,7 @@ mod tests {
             &[":(glob)*.txt".into()],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         git(root, &["fsck"]);
@@ -2486,6 +2509,7 @@ mod tests {
             &["f.txt".into()],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         git(root, &["fsck"]);
@@ -2523,6 +2547,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap_err();
         assert!(
@@ -2557,6 +2582,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap_err();
         assert!(matches!(err, HunkSelectError::RangeOutOfBounds { .. }));
@@ -2641,6 +2667,7 @@ mod tests {
             &["f.txt".into()],
             hunk_diff_opts(),
             true,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         assert!(outcome.dry_run);
@@ -2655,6 +2682,7 @@ mod tests {
             &["f.txt".into()],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         assert_eq!(outcome.staged_lines["f.txt"], ["1-15"]);
@@ -2758,6 +2786,7 @@ mod tests {
             &["f.txt".into()],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         git(root, &["commit", "-qm", "partial"]);
@@ -2775,6 +2804,7 @@ mod tests {
             &["f.txt".into()],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         stage_lines_and_compare_git(
@@ -2822,6 +2852,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
+            &crate::progress::NeverCancel,
         )
         .unwrap();
         let grit_tree =

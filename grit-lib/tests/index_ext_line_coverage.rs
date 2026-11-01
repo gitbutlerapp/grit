@@ -596,6 +596,7 @@ fn split_index_remove_entries_emits_delete_bitmaps() {
             cached: true,
             ..grit_lib::porcelain::paths::RemoveOptions::default()
         },
+        &grit_lib::progress::NeverCancel,
     )
     .expect("grit rm --cached through locked split write");
     let idx = repo.index_handle().load().expect("load");

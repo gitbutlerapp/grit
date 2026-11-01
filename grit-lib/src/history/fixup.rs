@@ -190,6 +190,7 @@ pub fn apply_fixup_hunk_selection(
         pathspecs,
         diff_opts,
         false,
+        &crate::progress::NeverCancel,
     ) {
         return Err(err.into());
     }
@@ -553,6 +554,7 @@ mod hunk_selection_restore_tests {
             &[],
             DiffOptions::default(),
             false,
+            &crate::progress::NeverCancel,
         )
         .expect("stage line-5");
         let selection = HunkSelection {
@@ -589,6 +591,7 @@ mod hunk_selection_restore_tests {
             &[],
             DiffOptions::default(),
             false,
+            &crate::progress::NeverCancel,
         )
         .expect("stage line-18");
         let apply_opts = ApplyOptions {

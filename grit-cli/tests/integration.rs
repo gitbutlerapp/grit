@@ -16,6 +16,8 @@ mod add_executable_cli;
 mod add_hunks;
 #[path = "add_intent_force.rs"]
 mod add_intent_force;
+#[path = "add_interrupt.rs"]
+mod add_interrupt;
 #[path = "add_lines.rs"]
 mod add_lines;
 #[cfg(feature = "full-tests")]
@@ -431,6 +433,8 @@ mod output_snapshots;
 #[cfg(feature = "full-tests")]
 #[path = "output_snapshots_network.rs"]
 mod output_snapshots_network;
+#[path = "paths_interrupt.rs"]
+mod paths_interrupt;
 #[cfg(feature = "full-tests")]
 #[path = "pathspec_args_cli.rs"]
 mod pathspec_args_cli;

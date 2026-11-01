@@ -75,6 +75,7 @@ pub fn run(sources: &[String], force: bool, dry_run: bool) -> Result<MvOutcome> 
     let resolved_srcs = resolve_paths(&repo, srcs)?;
     let resolved_dst = resolve_one(&repo, dst)?;
 
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let lib_outcome = move_paths(
         &repo,
         &MoveOptions {
@@ -83,8 +84,9 @@ pub fn run(sources: &[String], force: bool, dry_run: bool) -> Result<MvOutcome> 
             force,
             dry_run,
         },
+        &interrupt,
     )
-    .map_err(anyhow::Error::new)?;
+    .map_err(crate::json_error::map_lib_error)?;
 
     Ok(MvOutcome {
         moves: lib_outcome

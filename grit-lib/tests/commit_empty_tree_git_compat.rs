@@ -126,6 +126,7 @@ fn grit_remove_everything_commit_git_fsck_clean() {
             pathspecs: vec!["a".into()],
             ..RemoveOptions::default()
         },
+        &grit_lib::progress::NeverCancel,
     )
     .expect("rm a");
     let outcome = create_commit(

@@ -726,6 +726,7 @@ fn fixup_hunks_preserves_preexisting_staged_on_same_path() {
         &[],
         grit_lib::diff::DiffOptions::default(),
         false,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("stage first hunk");
     let staged_before = Command::new("git")
@@ -808,6 +809,7 @@ fn fixup_lines_preserves_preexisting_staged_and_consumes_selected_line() {
         &[],
         grit_lib::diff::DiffOptions::default(),
         false,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("stage line-5 hunk");
     let selection = HunkSelection {
@@ -889,6 +891,7 @@ fn fixup_lines_same_structured_hunk_preserves_unselected_and_staged() {
         &[],
         grit_lib::diff::DiffOptions::default(),
         false,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("stage line-18 only");
     let selection = HunkSelection {
@@ -979,6 +982,7 @@ fn fixup_lines_pre_staged_same_hunk_preserves_unselected_and_staged() {
         &[],
         grit_lib::diff::DiffOptions::default(),
         false,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("stage line-5 only");
     let selection = HunkSelection {
@@ -1152,6 +1156,7 @@ fn fixup_lines_insertion_with_pre_staged_restores_shifted_unselected_below() {
         &[],
         grit_lib::diff::DiffOptions::default(),
         false,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("stage line-3");
     let selection = HunkSelection {

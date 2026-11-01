@@ -196,7 +196,7 @@ fn remove_reads_index_after_waiting_for_lock() {
             force: true,
             ..RemoveOptions::default()
         };
-        remove_paths(&repo, &opts).map(|o| o.removed)
+        remove_paths(&repo, &opts, &grit_lib::progress::NeverCancel).map(|o| o.removed)
     });
     thread::sleep(HOLD_LOCK_FOR);
     write_entry_under_lock(dir, "a.txt", &mut lock);

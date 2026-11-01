@@ -239,6 +239,18 @@ fn stage_stops_on_cancel_argument() {
     ));
     assert_eq!(sink.seen, 0, "a cancelled stage hashes nothing");
     assert_index_untouched(&repo, &before);
+    let git_dir = repo.git_dir();
+    assert!(
+        !git_dir.join("index.lock").exists(),
+        "index.lock must be released after cancel"
+    );
+    assert!(
+        fs::read_dir(git_dir)
+            .expect("read .git")
+            .flatten()
+            .all(|e| !e.file_name().to_string_lossy().ends_with(".lock")),
+        "no lock files under .git after cancelled stage"
+    );
     let outcome = stage(
         &repo,
         &StageOptions::default(),

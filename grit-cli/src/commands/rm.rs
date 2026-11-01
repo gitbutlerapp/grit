@@ -66,9 +66,18 @@ pub fn run(
     if args.paths.is_empty() && args.pathspec_from_file.is_none() {
         bail!("you must specify path(s) to remove");
     }
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
     let resolved = args.resolve(&repo)?;
-    let outcome = rm(&repo, resolved, cached, force, dry_run, ignore_unmatch)?;
+    let outcome = rm(
+        &repo,
+        resolved,
+        cached,
+        force,
+        dry_run,
+        ignore_unmatch,
+        &interrupt,
+    )?;
     Ok(RmOutcome {
         removed: outcome.removed,
         dry_run,
@@ -82,6 +91,7 @@ fn rm(
     force: bool,
     dry_run: bool,
     ignore_unmatch: bool,
+    cancel: &dyn grit_lib::progress::Cancel,
 ) -> Result<RemoveOutcome> {
     let opts = RemoveOptions {
         pathspecs: resolved.specs,
@@ -92,7 +102,7 @@ fn rm(
         dry_run,
         ignore_unmatch,
     };
-    remove_paths(repo, &opts).map_err(|err| map_paths_error(err, cached))
+    remove_paths(repo, &opts, cancel).map_err(|err| map_paths_error(err, cached))
 }
 
 fn map_paths_error(err: grit_lib::error::Error, cached: bool) -> anyhow::Error {
@@ -100,7 +110,7 @@ fn map_paths_error(err: grit_lib::error::Error, cached: bool) -> anyhow::Error {
         grit_lib::error::Error::RemoveBlocked { paths } => {
             anyhow::anyhow!(blocked_message(&paths, cached))
         }
-        other => anyhow::Error::new(other),
+        other => crate::json_error::map_lib_error(other),
     }
 }
 

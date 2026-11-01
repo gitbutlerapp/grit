@@ -115,6 +115,7 @@ fn modify_delete_conflict_resolves_by_accepting_deletion() {
             pathspecs: vec!["f".into()],
             ..RemoveOptions::default()
         },
+        &grit_lib::progress::NeverCancel,
     )
     .expect("rm f");
     assert_eq!(rm_out.removed, vec!["f".to_owned()]);
