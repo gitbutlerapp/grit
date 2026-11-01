@@ -1382,6 +1382,9 @@ mod ref_target_verification;
 #[path = "ref_target_verification_git_compat.rs"]
 mod ref_target_verification_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "ref_update_kinds_git_compat.rs"]
+mod ref_update_kinds_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "reference_transaction_hook.rs"]
 mod reference_transaction_hook;
 #[cfg(feature = "full-tests")]
