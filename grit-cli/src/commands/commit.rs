@@ -6,7 +6,7 @@ use grit_lib::commit::{normalize_commit_date_override, parse_trailer_command_lin
 use crate::message_input::parse_author_cli;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
-use grit_lib::objects::parse_commit;
+use grit_lib::objects::{parse_commit, short_hex};
 use grit_lib::porcelain::commit::{
     commit_with_patch, commit_with_scope, default_commit_scope, pending_commit_message,
     CommitPatchError, CommitPatchInput, CommitRequest, CommitScope, HookPolicy,
@@ -128,7 +128,7 @@ impl HumanRender for CommitOutcome {
             w,
             "[{} {}] {}",
             self.branch_label(),
-            self.oid.as_deref().unwrap_or("").get(..7).unwrap_or(""),
+            short_hex(self.oid.as_deref().unwrap_or("")),
             self.subject
         );
         outln!(

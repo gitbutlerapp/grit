@@ -3,6 +3,7 @@
 use std::io::Write;
 
 use grit_lib::diff::{DiffEntry, DiffStatus};
+use grit_lib::objects::short_hex;
 
 use crate::commands::add::AddOutcome;
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
@@ -53,8 +54,7 @@ pub fn commit_bullet_with_decorations(
     head_branch: Option<&str>,
     now: i64,
 ) -> String {
-    let full = c.oid.to_hex();
-    let short = full.get(..7).unwrap_or(&full);
+    let short = c.oid.to_short_hex();
     let date = context::relative_date_from(c.timestamp, now);
     let deco = crate::log_display::format_decorations_folded(refs, head_branch);
     let decoration = if deco.is_empty() {
@@ -349,7 +349,7 @@ pub fn print_branch_list(
             .short_oid
             .as_deref()
             .or(branch.oid.as_deref())
-            .map(|oid| oid.get(..7).unwrap_or(oid))
+            .map(short_hex)
             .unwrap_or("");
         let current = if branch.current { "yes" } else { "" };
         let subject = branch
@@ -482,7 +482,7 @@ pub fn print_notes_list(
         return Ok(());
     }
     for entry in notes {
-        let short = entry.object.get(..7).unwrap_or(&entry.object);
+        let short = short_hex(&entry.object);
         let preview = entry.body.trim_end().replace('\n', " ");
         outln!(w, "- `{short}` — {preview}");
     }
@@ -500,11 +500,11 @@ pub fn print_tag_list(
     }
     outln!(w, "## Tags");
     for tag in tags {
-        let short = tag.oid.get(..7).unwrap_or(&tag.oid);
+        let short = short_hex(&tag.oid);
         let peel = tag
             .peeled
             .as_ref()
-            .map(|p| format!(" → `{}`", p.get(..7).unwrap_or(p.as_str())))
+            .map(|p| format!(" → `{}`", short_hex(p)))
             .unwrap_or_default();
         let subject = tag
             .annotation
@@ -584,11 +584,6 @@ pub fn print_fetch_updates(
         );
     }
     Ok(())
-}
-
-/// First seven hex digits of `oid` (all of it when shorter).
-pub(crate) fn short_hex(oid: &str) -> &str {
-    oid.get(..7).unwrap_or(oid)
 }
 
 fn short_change_id(id: &str) -> &str {

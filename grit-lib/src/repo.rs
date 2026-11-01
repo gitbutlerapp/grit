@@ -4581,8 +4581,7 @@ fn head_branch_name_for_outcome(git_dir: &Path) -> Result<String> {
     let head_text = fs::read_to_string(git_dir.join("HEAD"))?;
     let oid = head_text.trim();
     if crate::objects::ObjectId::from_hex(oid).is_ok() {
-        let end = oid.len().min(7);
-        return Ok(oid[..end].to_owned());
+        return Ok(crate::objects::short_hex(oid).to_owned());
     }
     Ok("HEAD".to_owned())
 }

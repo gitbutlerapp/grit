@@ -1,5 +1,6 @@
 //! `grit stash` — save and restore shelved work.
 
+use grit_lib::objects::short_hex;
 use grit_lib::progress::ProgressSink;
 use std::io::IsTerminal;
 use std::io::Write;
@@ -118,7 +119,7 @@ impl HumanRender for StashPushOutcome {
                 dry_run,
                 ..
             } => {
-                let short = oid.get(..7).unwrap_or(oid.as_str());
+                let short = short_hex(oid);
                 let verb = if *dry_run {
                     "Would stash"
                 } else {
@@ -182,7 +183,7 @@ impl StashListOutcome {
 impl HumanRender for StashListOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         for entry in &self.entries {
-            let short = entry.oid.get(..7).unwrap_or(&entry.oid);
+            let short = short_hex(&entry.oid);
             outln!(w, "stash@{{{}}} {}: {}", entry.index, short, entry.message);
         }
         Ok(())
@@ -196,7 +197,7 @@ impl MarkdownRender for StashListOutcome {
             return Ok(());
         }
         for entry in &self.entries {
-            let short = entry.oid.get(..7).unwrap_or(&entry.oid);
+            let short = short_hex(&entry.oid);
             outln!(
                 w,
                 "- **stash@{{{}}}** `{short}` — {}",

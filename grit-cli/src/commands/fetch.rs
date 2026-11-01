@@ -7,6 +7,7 @@ use crate::progress::summary::{stdout_color, transfer_header, TransferSummary};
 use crate::progress::TerminalProgress;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
+use grit_lib::objects::short_hex;
 use grit_lib::progress::Cancel;
 use grit_lib::remote::fetch_request::{resolve_fetch_invocation, resolve_remote_argument};
 use grit_lib::remote::transfer::{
@@ -291,10 +292,6 @@ impl MarkdownRender for FetchOutcome {
         }
         Ok(())
     }
-}
-
-fn short_hex(oid: &str) -> &str {
-    oid.get(..7).unwrap_or(oid)
 }
 
 pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchRunOutcome> {

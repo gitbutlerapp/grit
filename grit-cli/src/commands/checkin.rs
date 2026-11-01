@@ -5,7 +5,7 @@ use std::io::Write;
 
 use anyhow::{bail, Result};
 use grit_lib::error::Error as LibError;
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::snapshot_checkout::{
@@ -101,10 +101,6 @@ pub struct CheckinOutcome {
     pub refused: bool,
 }
 
-fn short(oid: &str) -> &str {
-    oid.get(..7).unwrap_or(oid)
-}
-
 /// What `grit checkin` says when no branch has work on the snapshot.
 const NOTHING_TO_CHECK_IN: &str =
     "nothing to check in: no branch has commits on top of the snapshot";
@@ -118,7 +114,7 @@ impl HumanRender for CheckinOutcome {
             outln!(w, "· {NOTHING_TO_CHECK_IN}");
         }
         for b in &self.branches {
-            let at = b.grafted.as_deref().map(short).unwrap_or_default();
+            let at = b.grafted.as_deref().map(short_hex).unwrap_or_default();
             let commits = if b.commits == 1 {
                 "1 commit".to_owned()
             } else {
@@ -134,14 +130,14 @@ impl HumanRender for CheckinOutcome {
                     w,
                     "✓ {} updated on the server {} → {at} ({commits}{rule})",
                     b.name,
-                    b.previous.as_deref().map(short).unwrap_or_default()
+                    b.previous.as_deref().map(short_hex).unwrap_or_default()
                 ),
                 "unchanged" => match b.previous.as_deref() {
                     Some(previous) if b.grafted.as_deref() != Some(previous) => outln!(
                         w,
                         "· {} has nothing new: the server's is ahead, at {} (`grit pull {}` brings it)",
                         b.name,
-                        short(previous),
+                        short_hex(previous),
                         b.name
                     ),
                     _ => outln!(w, "· {} already at {at} on the server", b.name),
@@ -376,8 +372,8 @@ impl HumanRender for IntegrateOutcome {
                 "✓ Merged {} into {} on the server: {} → {} ({} commit{})",
                 self.name,
                 self.target,
-                short(&self.previous),
-                short(&self.head),
+                short_hex(&self.previous),
+                short_hex(&self.head),
                 self.commits,
                 if self.commits == 1 { "" } else { "s" }
             ),

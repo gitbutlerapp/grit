@@ -801,10 +801,6 @@ pub struct WtStatusState {
     pub rewrite_apply_in_progress: bool,
 }
 
-fn abbrev_oid(oid: &ObjectId) -> String {
-    oid.to_hex()[..7].to_string()
-}
-
 fn read_trimmed_line(path: &Path) -> Option<String> {
     let s = fs::read_to_string(path).ok()?;
     let mut line = s.lines().next()?.to_string();
@@ -828,7 +824,7 @@ fn get_branch_display(git_dir: &Path, rel: &str) -> Option<String> {
         // keep full ref for remotes etc.
     } else if ObjectId::from_hex(&sb).is_ok() {
         let oid = ObjectId::from_hex(&sb).ok()?;
-        sb = abbrev_oid(&oid);
+        sb = oid.to_short_hex();
     } else if sb == "detached HEAD" {
         return None;
     }
@@ -855,7 +851,7 @@ fn ref_name_exists(git_dir: &Path, refname: &str) -> bool {
 
 fn dwim_detach_label(git_dir: &Path, target: &str, noid: ObjectId) -> String {
     if target == "HEAD" {
-        return abbrev_oid(&noid);
+        return noid.to_short_hex();
     }
     if target.starts_with("refs/") {
         if let Ok(oid) = crate::refs::resolve_ref(git_dir, target) {
@@ -881,7 +877,7 @@ fn dwim_detach_label(git_dir: &Path, target: &str, noid: ObjectId) -> String {
     if ObjectId::is_hex_len(target.len()) {
         if let Ok(oid) = ObjectId::from_hex(target) {
             if oid == noid {
-                return abbrev_oid(&noid);
+                return noid.to_short_hex();
             }
         }
     }
@@ -894,7 +890,7 @@ fn dwim_detach_label(git_dir: &Path, target: &str, noid: ObjectId) -> String {
     {
         return target.to_owned();
     }
-    abbrev_oid(&noid)
+    noid.to_short_hex()
 }
 
 fn wt_status_get_detached_from(git_dir: &Path, head_oid: ObjectId) -> Option<(String, bool)> {

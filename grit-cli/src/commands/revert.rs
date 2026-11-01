@@ -13,7 +13,7 @@ use crate::revision_errors::map_commit_spec_error;
 use anyhow::{bail, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     abort_replay_sequence, continue_replay_sequence, predict_replay_sequence, skip_replay_step,
@@ -182,14 +182,14 @@ impl HumanRender for RevertOutcome {
                 if self.dry_run == Some(true) {
                     outln!(w, "Would revert {} commit(s):", self.commits.len());
                     for entry in &self.commits {
-                        let short = entry.source.get(..7).unwrap_or(&entry.source);
+                        let short = short_hex(&entry.source);
                         outln!(w, "  {short}");
                     }
                     return Ok(());
                 }
                 for entry in &self.commits {
-                    let new_short = entry.oid.get(..7).unwrap_or(&entry.oid);
-                    let src_short = entry.source.get(..7).unwrap_or(&entry.source);
+                    let new_short = short_hex(&entry.oid);
+                    let src_short = short_hex(&entry.source);
                     outln!(w, "Reverted {src_short} → {new_short} {}", entry.subject);
                 }
             }
@@ -370,7 +370,7 @@ fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Er
         Error::DetachedHead => anyhow::anyhow!("HEAD is detached; grit revert needs a branch"),
         Error::UnbornHead => anyhow::anyhow!("no commits yet on this branch to revert onto"),
         Error::MergeCommit { oid } => {
-            let s = &oid.to_hex()[..7];
+            let s = oid.to_short_hex();
             anyhow::anyhow!(
                 "{s} is a merge commit — pass `--mainline 1` (or another parent number) to revert it"
             )

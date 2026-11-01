@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
+use grit_lib::objects::short_hex;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::resumable::{discard_download, download_resumable};
 use grit_lib::remote::snapshot_checkout::{
@@ -56,7 +57,7 @@ pub struct CheckoutOutcome {
 impl HumanRender for CheckoutOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         let color = crate::progress::summary::stdout_color();
-        let short = |s: &str| s.get(..7).unwrap_or(s).to_owned();
+        let short = |s: &str| short_hex(s).to_owned();
         outln!(
             w,
             "{} Checked out {} on {} in {}",
@@ -209,11 +210,7 @@ pub fn run(
             paint(
                 color,
                 DIM,
-                &format!(
-                    "of {} at {}",
-                    server.branch,
-                    server.head.get(..7).unwrap_or(&server.head)
-                )
+                &format!("of {} at {}", server.branch, short_hex(&server.head))
             ),
             paint(color, DIM, "→"),
             paint(color, BOLD, &dest.display().to_string()),

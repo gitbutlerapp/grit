@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Result};
 use grit_lib::error::Error as LibError;
+use grit_lib::objects::short_hex;
 use grit_lib::porcelain::switch::{
     resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
     SwitchMode, SwitchOptions,
@@ -15,7 +16,7 @@ use std::io::Write;
 use crate::commands::reset::OrphanedCommitJson;
 use crate::context;
 use crate::json_error;
-use crate::markdown::{self, short_hex};
+use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 fn is_false(value: &bool) -> bool {

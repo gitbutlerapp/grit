@@ -1497,7 +1497,7 @@ fn todo_lines(repo: &Repository, commits: &[ObjectId]) -> Result<String, RebaseS
     let mut out = String::new();
     for &oid in commits {
         let subject = super::subject::commit_message_subject_line(&load_commit(repo, oid)?.message);
-        let abbrev = &oid.to_hex()[..7];
+        let abbrev = oid.to_short_hex();
         out.push_str(&format!("pick {abbrev} {subject}\n"));
     }
     Ok(out)
