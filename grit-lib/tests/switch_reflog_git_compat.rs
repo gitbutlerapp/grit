@@ -172,7 +172,13 @@ fn run_repro_sequence(repo: &Repository) {
     switch_repository(
         repo,
         &SwitchOptions {
-            mode: resolve_create_branch(repo, "topic", None).unwrap(),
+            mode: resolve_create_branch(
+                repo,
+                "topic",
+                None,
+                grit_lib::porcelain::branch::TrackMode::Auto,
+            )
+            .unwrap(),
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
@@ -373,7 +379,13 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
     switch_repository(
         &repo,
         &SwitchOptions {
-            mode: resolve_create_branch(&repo, "topic", None).unwrap(),
+            mode: resolve_create_branch(
+                &repo,
+                "topic",
+                None,
+                grit_lib::porcelain::branch::TrackMode::Auto,
+            )
+            .unwrap(),
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
@@ -464,7 +476,13 @@ fn checkout_appends_existing_head_reflog_when_log_all_ref_updates_false() {
     switch_repository(
         &repo,
         &SwitchOptions {
-            mode: resolve_create_branch(&repo, "topic", None).expect("x"),
+            mode: resolve_create_branch(
+                &repo,
+                "topic",
+                None,
+                grit_lib::porcelain::branch::TrackMode::Auto,
+            )
+            .expect("x"),
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },

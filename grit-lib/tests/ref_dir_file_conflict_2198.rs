@@ -89,7 +89,13 @@ fn switch_create_over_a_ref_directory_names_the_ref() {
         let tmp = repo_with_rel_child(shape);
         let dir = tmp.path();
         let repo = open(dir);
-        let mode = resolve_create_branch(&repo, "rel", None).expect("resolve");
+        let mode = resolve_create_branch(
+            &repo,
+            "rel",
+            None,
+            grit_lib::porcelain::branch::TrackMode::Auto,
+        )
+        .expect("resolve");
         let err = switch_repository(
             &repo,
             &SwitchOptions {

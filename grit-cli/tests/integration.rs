@@ -636,6 +636,8 @@ mod status_untracked_mode;
 mod status_upstream;
 #[path = "status_utf8_paths.rs"]
 mod status_utf8_paths;
+#[path = "switch_create_upstream.rs"]
+mod switch_create_upstream;
 #[cfg(feature = "full-tests")]
 #[path = "switch_interrupt.rs"]
 mod switch_interrupt;

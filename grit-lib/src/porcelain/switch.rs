@@ -229,15 +229,20 @@ impl PreparedSwitch {
 
 /// Resolve `-c <branch> [<start-point>]`.
 ///
+/// When `start_point` names a remote-tracking branch, `track` controls whether
+/// [`SwitchMode::Create`] carries upstream config to write after checkout (same rules as
+/// [`crate::porcelain::branch::create_branch`]).
+///
 /// # Errors
 ///
 /// Returns [`Error::Branch`] when the name is invalid, the branch already exists, or there are no
 /// commits to branch from. A `start_point` that does not resolve or does not name a commit fails
-/// like [`resolve_revision_spec`].
+/// like [`resolve_revision_spec`]. [`TrackMode::Always`] fails when no upstream can be derived.
 pub fn resolve_create_branch(
     repo: &Repository,
     branch: &str,
     start_point: Option<&str>,
+    track: TrackMode,
 ) -> Result<SwitchMode> {
     validate_branch_short_name(branch).map_err(|reason| {
         Error::Branch(BranchError::InvalidName {
@@ -258,11 +263,14 @@ pub fn resolve_create_branch(
             .copied()
             .ok_or(Error::Branch(BranchError::NoCommits))?,
     };
+    let create_source_label = switch_create_reflog_source_label(start_point);
+    let track_upstream =
+        resolve_create_tracking(repo, branch, &create_source_label, start_oid, track)?;
     Ok(SwitchMode::Create {
         branch: branch.to_owned(),
         start_oid,
-        create_source_label: switch_create_reflog_source_label(start_point),
-        track_upstream: None,
+        create_source_label,
+        track_upstream,
     })
 }
 
@@ -1858,6 +1866,85 @@ mod tests {
     }
 
     #[test]
+    fn resolve_create_branch_from_remote_start_point_tracks_by_default() {
+        let (_dir, repo) = init_repo();
+        let tip = commit_on_branch(&repo, "main", "f", "1\n", None);
+        refs::write_ref(repo.git_dir(), "refs/remotes/origin/main", &tip).expect("remote");
+
+        let mode = resolve_create_branch(&repo, "work", Some("origin/main"), TrackMode::Auto)
+            .expect("resolve");
+        match &mode {
+            SwitchMode::Create {
+                branch,
+                track_upstream,
+                ..
+            } => {
+                assert_eq!(branch, "work");
+                assert_eq!(
+                    track_upstream.as_ref(),
+                    Some(&("origin".to_owned(), "refs/heads/main".to_owned()))
+                );
+            }
+            other => panic!("expected create, got {other:?}"),
+        }
+
+        switch_repository(
+            &repo,
+            &SwitchOptions {
+                mode,
+                dry_run: false,
+                hooks: crate::hooks::PostOperationHooks::Run,
+            },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("switch");
+        let config = repo.config().expect("config");
+        assert_eq!(config.get("branch.work.remote").as_deref(), Some("origin"));
+        assert_eq!(
+            config.get("branch.work.merge").as_deref(),
+            Some("refs/heads/main")
+        );
+    }
+
+    #[test]
+    fn resolve_create_branch_auto_respects_auto_setup_merge_false() {
+        let (_dir, repo) = init_repo();
+        let tip = commit_on_branch(&repo, "main", "f", "1\n", None);
+        refs::write_ref(repo.git_dir(), "refs/remotes/origin/main", &tip).expect("remote");
+        repo.config_handle()
+            .set_local("branch.autoSetupMerge", "false")
+            .expect("config");
+
+        let mode = resolve_create_branch(&repo, "work", Some("origin/main"), TrackMode::Auto)
+            .expect("resolve");
+        assert!(matches!(
+            mode,
+            SwitchMode::Create {
+                track_upstream: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn resolve_create_branch_never_skips_upstream_config() {
+        let (_dir, repo) = init_repo();
+        let tip = commit_on_branch(&repo, "main", "f", "1\n", None);
+        refs::write_ref(repo.git_dir(), "refs/remotes/origin/main", &tip).expect("remote");
+
+        let mode = resolve_create_branch(&repo, "work", Some("origin/main"), TrackMode::Never)
+            .expect("resolve");
+        assert!(matches!(
+            mode,
+            SwitchMode::Create {
+                track_upstream: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn remote_dwim_create_writes_upstream_branch_config() {
         let (_dir, repo) = init_repo();
         let tip = commit_on_branch(&repo, "main", "f", "1\n", None);
@@ -1998,7 +2085,8 @@ mod tests {
         let attached = switch_repository(
             &repo,
             &SwitchOptions {
-                mode: resolve_create_branch(&repo, "topic", None).expect("create mode"),
+                mode: resolve_create_branch(&repo, "topic", None, TrackMode::Auto)
+                    .expect("create mode"),
                 dry_run: false,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
@@ -2029,7 +2117,8 @@ mod tests {
             .expect("tag object");
         refs::write_ref(repo.git_dir(), "refs/tags/v1", &tag_oid).expect("tag ref");
 
-        let mode = resolve_create_branch(&repo, "from-tag", Some("v1")).expect("create mode");
+        let mode = resolve_create_branch(&repo, "from-tag", Some("v1"), TrackMode::Auto)
+            .expect("create mode");
         match mode {
             SwitchMode::Create { start_oid, .. } => assert_eq!(start_oid, tip),
             other => panic!("expected create, got {other:?}"),
@@ -2053,29 +2142,33 @@ mod tests {
         let tip = commit_on_branch(&repo, "main", "f", "x\n", None);
         switch_to(
             &repo,
-            resolve_create_branch(&repo, "side", None).expect("create mode"),
+            resolve_create_branch(&repo, "side", None, TrackMode::Auto).expect("create mode"),
             false,
         );
 
-        let dup = resolve_create_branch(&repo, "side", None).expect_err("duplicate");
+        let dup =
+            resolve_create_branch(&repo, "side", None, TrackMode::Auto).expect_err("duplicate");
         assert!(matches!(
             dup,
             Error::Branch(BranchError::AlreadyExists { ref name }) if name == "side"
         ));
         assert!(dup.to_string().contains("already exists"));
 
-        let bad = resolve_create_branch(&repo, "bad name", None).expect_err("bad name");
+        let bad =
+            resolve_create_branch(&repo, "bad name", None, TrackMode::Auto).expect_err("bad name");
         assert!(matches!(
             bad,
             Error::Branch(BranchError::InvalidName { ref name, .. }) if name == "bad name"
         ));
 
         let (_empty_dir, empty) = init_repo();
-        let none = resolve_create_branch(&empty, "topic", None).expect_err("no commits");
+        let none =
+            resolve_create_branch(&empty, "topic", None, TrackMode::Auto).expect_err("no commits");
         assert!(matches!(none, Error::Branch(BranchError::NoCommits)));
 
-        let missing = resolve_create_branch(&repo, "from-missing", Some("nosuchrev"))
-            .expect_err("missing start");
+        let missing =
+            resolve_create_branch(&repo, "from-missing", Some("nosuchrev"), TrackMode::Auto)
+                .expect_err("missing start");
         assert!(matches!(
             missing,
             Error::RevisionNotFound(spec) if spec == "nosuchrev"
@@ -2084,7 +2177,8 @@ mod tests {
         let tree_oid = repo.odb().write(ObjectKind::Tree, b"").expect("empty tree");
         let tree_spec = tree_oid.to_hex();
         let not_commit =
-            resolve_create_branch(&repo, "from-tree", Some(&tree_spec)).expect_err("tree start");
+            resolve_create_branch(&repo, "from-tree", Some(&tree_spec), TrackMode::Auto)
+                .expect_err("tree start");
         assert!(matches!(not_commit, Error::InvalidRef(_)));
         let _ = tip;
     }

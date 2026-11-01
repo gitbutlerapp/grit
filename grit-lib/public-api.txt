@@ -17058,7 +17058,7 @@ impl core::marker::Unpin for grit_lib::porcelain::switch::SwitchOutcome
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::switch::SwitchOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::switch::SwitchOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::switch::SwitchOutcome
-pub fn grit_lib::porcelain::switch::resolve_create_branch(&grit_lib::repo::Repository, &str, core::option::Option<&str>) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchMode>
+pub fn grit_lib::porcelain::switch::resolve_create_branch(&grit_lib::repo::Repository, &str, core::option::Option<&str>, grit_lib::porcelain::branch_error::TrackMode) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchMode>
 pub fn grit_lib::porcelain::switch::resolve_revision_spec(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::porcelain::switch::resolve_switch_target(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchMode>
 pub fn grit_lib::porcelain::switch::switch_repository(&grit_lib::repo::Repository, &grit_lib::porcelain::switch::SwitchOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchOutcome>

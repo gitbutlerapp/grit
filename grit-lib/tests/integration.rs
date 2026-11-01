@@ -506,6 +506,7 @@ mod create_commit_git_compat;
 mod crlf_utf_worktree_git_compat;
 #[path = "cross_pack_ref_delta_odb.rs"]
 mod cross_pack_ref_delta_odb;
+#[cfg(feature = "full-tests")]
 #[path = "custom_odb_porcelain.rs"]
 mod custom_odb_porcelain;
 #[cfg(feature = "full-tests")]
@@ -579,6 +580,7 @@ mod diff_rename_parallel;
 #[cfg(feature = "full-tests")]
 #[path = "diff_request.rs"]
 mod diff_request;
+#[cfg(feature = "full-tests")]
 #[path = "diff_skip_restrict_index_paths.rs"]
 mod diff_skip_restrict_index_paths;
 #[cfg(feature = "full-tests")]
@@ -1153,6 +1155,7 @@ mod odb_custom_primary_transport;
 #[cfg(feature = "full-tests")]
 #[path = "odb_env_object_directory.rs"]
 mod odb_env_object_directory;
+#[cfg(feature = "full-tests")]
 #[path = "odb_flush_before_publish_2443.rs"]
 mod odb_flush_before_publish_2443;
 #[cfg(feature = "full-tests")]
@@ -1980,6 +1983,7 @@ mod trailer_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "transfer_cargo_mirror.rs"]
 mod transfer_cargo_mirror;
+#[cfg(feature = "full-tests")]
 #[path = "transfer_custom_primary_contains.rs"]
 mod transfer_custom_primary_contains;
 #[cfg(feature = "full-tests")]

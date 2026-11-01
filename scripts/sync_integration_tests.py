@@ -49,6 +49,7 @@ DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
     ("grit-lib", "push_packed_tag_regression"),
     ("grit-lib", "push_tag_update_git_compat"),
     ("grit-cli", "push_tag_exists"),
+    ("grit-cli", "switch_create_upstream"),
     ("grit-lib", "reset_hard_at_head_restores_worktree"),
     ("grit-lib", "pathspec_attr_porcelain"),
     ("grit-lib", "rev_list_attr_pathspec"),

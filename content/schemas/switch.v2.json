@@ -84,6 +84,12 @@
     },
     "stranded_truncated": {
       "type": "boolean"
+    },
+    "upstream": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

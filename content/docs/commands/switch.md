@@ -36,7 +36,7 @@ Switching is refused while a merge, rebase, pick, revert or `am` is paused, whet
 
 A local branch can only be checked out in one worktree at a time (including linked worktrees created with `git worktree add`). Switching to a branch that is already checked out elsewhere fails.
 
-With `-c`, creates the branch at the current commit (or at `<start-point>` when you pass one), then switches to it.
+With `-c`, creates the branch at the current commit (or at `<start-point>` when you pass one), then switches to it. When `<start-point>` is a remote-tracking branch (for example `origin/main`), grit configures upstream tracking the same way as [`grit branch --track`](../branch/) and `git switch -c`, unless you pass `--no-track` or `branch.autoSetupMerge` is `false`/`simple`.
 
 When `<branch>` names a remote-tracking branch (for example `origin/feature`), Grit creates `feature` at the same commit and switches to it if no local branch exists yet. It also records upstream tracking in the repository config (`branch.feature.remote` and `branch.feature.merge`), the same keys `git switch` writes, so `grit status`, `grit pull`, and `grit push` use the matching remote branch.
 
@@ -58,6 +58,8 @@ Updating the working tree uses parallel checkout when the change set is large en
 | `-`, `@{-1}` | Switch to the previous branch (from the `HEAD` reflog); fails when there is no prior checkout entry. |
 | `<start-point>` | With `-c`, commit to create the branch from (defaults to `HEAD`). |
 | `-c`, `--create` | Create the branch first, then switch to it. Fails if the branch already exists. |
+| `-t`, `--track` | With `-c`, always configure upstream from the start point. |
+| `--no-track` | With `-c`, do not configure upstream. |
 | `--detach` | Check out a commit in detached `HEAD` mode instead of switching a branch. |
 | `--dry-run` | Run overwrite checks and report how many paths would change; do not update refs, the index, or the worktree. |
 
@@ -74,8 +76,13 @@ hooks: post-checkout
 $ grit switch -
 Switched to branch feature
 
+$ grit switch -c work origin/main
+Created and switched to branch work
+  tracking origin/main
+
 $ grit switch -c br2 origin/br2
 Created and switched to branch br2
+  tracking origin/br2
 
 $ grit switch --detach HEAD~1
 HEAD detached at a1b2c3d
@@ -144,6 +151,7 @@ Pass `--json` for stable, scripting-friendly output:
 | ----- | ---- | ------- |
 | `branch` | string or null | Short branch name `HEAD` is on after the switch; `null` when detached. |
 | `created` | boolean | `true` when `-c` or remote DWIM created the branch. |
+| `upstream` | string or null | When `-c` configured upstream tracking, the remote branch name (for example `origin/main`); omitted when none was set. |
 | `detached` | boolean | `true` when `HEAD` is detached after the switch (`branch` is `null`). |
 | `commit` | string or null | Full hex oid when `detached` is true; omitted when attached. |
 | `dry_run` | boolean | `true` when `--dry-run` was used (omitted when false). |

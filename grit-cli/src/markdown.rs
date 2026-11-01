@@ -1553,7 +1553,14 @@ pub fn print_switch_outcome(w: &mut dyn Write, outcome: &SwitchOutcome) -> anyho
     match outcome.branch.as_deref() {
         None => outln!(w, "- HEAD detached at `{}`", outcome.target_label()),
         Some(branch) if outcome.created => {
-            outln!(w, "- Created and switched to **`{branch}`**")
+            if let Some(up) = outcome.upstream.as_deref() {
+                outln!(
+                    w,
+                    "- Created and switched to **`{branch}`** (tracking `{up}`)"
+                );
+            } else {
+                outln!(w, "- Created and switched to **`{branch}`**");
+            }
         }
         Some(branch) => outln!(w, "- Switched to **`{branch}`**"),
     }

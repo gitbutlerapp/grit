@@ -1496,6 +1496,23 @@ enum Command {
         /// Create the branch first, then switch to it.
         #[arg(short = 'c', long = "create")]
         create: bool,
+        /// Configure upstream from the start point when creating with `-c`.
+        #[arg(
+            short = 't',
+            long = "track",
+            conflicts_with = "no_track",
+            requires = "create",
+            conflicts_with_all = ["detach"]
+        )]
+        track: bool,
+        /// Do not configure upstream when creating with `-c`.
+        #[arg(
+            long = "no-track",
+            conflicts_with = "track",
+            requires = "create",
+            conflicts_with_all = ["detach"]
+        )]
+        no_track: bool,
         /// Check out a commit in detached HEAD mode.
         #[arg(long = "detach")]
         detach: bool,
@@ -2750,7 +2767,7 @@ fn dispatch(
             paths,
             into: None,
         } if paths.is_empty() && !url.contains("://") => emit_success(
-            commands::switch::run(Some(url), None, false, false, false)?,
+            commands::switch::run(Some(url), None, false, false, false, false, false)?,
             opts,
             ctx,
         ),
@@ -3847,10 +3864,20 @@ fn dispatch(
             branch,
             start_point,
             create,
+            track,
+            no_track,
             detach,
             dry_run,
         } => {
-            let outcome = commands::switch::run(branch, start_point, create, detach, dry_run)?;
+            let outcome = commands::switch::run(
+                branch,
+                start_point,
+                create,
+                detach,
+                track,
+                no_track,
+                dry_run,
+            )?;
             commands::clone::emit_path_collision_warning(opts.mode, &outcome.path_collisions);
             emit_success(outcome, opts, ctx)
         }

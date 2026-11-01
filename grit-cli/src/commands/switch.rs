@@ -3,6 +3,7 @@
 use anyhow::{bail, Result};
 use grit_lib::error::Error as LibError;
 use grit_lib::objects::short_hex;
+use grit_lib::porcelain::branch::{upstream_tracking_display, TrackMode};
 use grit_lib::porcelain::switch::{
     resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
     SwitchMode, SwitchOptions,
@@ -29,6 +30,9 @@ pub struct SwitchOutcome {
     /// Branch `HEAD` is on after the switch, or JSON `null` when detached.
     pub branch: Option<String>,
     pub created: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
     pub detached: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
@@ -119,6 +123,9 @@ impl SwitchOutcome {
         };
         if self.created {
             outln!(w, "Created and switched to branch {branch}");
+            if let Some(up) = self.upstream.as_deref() {
+                outln!(w, "  tracking {up}");
+            }
         } else {
             outln!(w, "Switched to branch {branch}");
         }
@@ -152,11 +159,23 @@ impl MarkdownRender for SwitchOutcome {
     }
 }
 
+fn track_mode(track: bool, no_track: bool) -> TrackMode {
+    if no_track {
+        TrackMode::Never
+    } else if track {
+        TrackMode::Always
+    } else {
+        TrackMode::Auto
+    }
+}
+
 pub fn run(
     target: Option<String>,
     start_point: Option<String>,
     create: bool,
     detach: bool,
+    track: bool,
+    no_track: bool,
     dry_run: bool,
 ) -> Result<SwitchOutcome> {
     let repo = context::discover()?;
@@ -176,10 +195,24 @@ pub fn run(
         }
     } else if create {
         let branch = target.ok_or_else(|| anyhow::anyhow!("branch name required with --create"))?;
-        resolve_create_branch(&repo, &branch, start_point.as_deref()).map_err(anyhow::Error::new)?
+        resolve_create_branch(
+            &repo,
+            &branch,
+            start_point.as_deref(),
+            track_mode(track, no_track),
+        )
+        .map_err(anyhow::Error::new)?
     } else {
         let spec = target.ok_or_else(|| anyhow::anyhow!("branch or revision required"))?;
         resolve_switch_target(&repo, &spec).map_err(anyhow::Error::new)?
+    };
+
+    let upstream_display = match &mode {
+        SwitchMode::Create {
+            track_upstream: Some((remote, merge)),
+            ..
+        } => Some(upstream_tracking_display(remote, merge)),
+        _ => None,
     };
 
     let interrupt = crate::interrupt::InterruptCancel::install();
@@ -207,6 +240,7 @@ pub fn run(
     Ok(SwitchOutcome {
         branch: outcome.branch,
         created: outcome.created,
+        upstream: upstream_display,
         detached,
         commit: detached.then(|| outcome.commit.to_hex()),
         dry_run: outcome.dry_run,
