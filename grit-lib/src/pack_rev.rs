@@ -3,7 +3,7 @@
 //! Maps pack-file order (sorted by object offset) to index positions in the `.idx` OID table.
 
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use crate::config::ConfigSet;
@@ -148,17 +148,27 @@ fn shared_repo_from_pack_index_path(idx_path: &Path) -> i32 {
         .unwrap_or(PERM_UMASK)
 }
 
+fn read_pack_trailer(pack_path: &Path, hash_len: usize) -> Result<Vec<u8>> {
+    let mut file = fs::File::open(pack_path).map_err(Error::Io)?;
+    let len = file.metadata().map_err(Error::Io)?.len();
+    let hash_len_u64 = u64::try_from(hash_len).unwrap_or(u64::MAX);
+    if len < hash_len_u64 {
+        return Err(Error::CorruptObject("pack file too short for rev".into()));
+    }
+    file.seek(SeekFrom::End(-(hash_len as i64)))
+        .map_err(Error::Io)?;
+    let mut trailer = vec![0u8; hash_len];
+    file.read_exact(&mut trailer).map_err(Error::Io)?;
+    Ok(trailer)
+}
+
 fn write_pack_rev_sidecar_with_shared(index: &PackIndex, shared_repo: i32) -> Result<()> {
     let rev_path = rev_path_for_index(&index.idx_path);
     if rev_path.is_file() && verify_pack_rev_file(&rev_path, index).is_ok() {
         return Ok(());
     }
     let hash_len = index.hash_bytes();
-    let pack_data = fs::read(&index.pack_path).map_err(Error::Io)?;
-    if pack_data.len() < hash_len {
-        return Err(Error::CorruptObject("pack file too short for rev".into()));
-    }
-    let pack_checksum = pack_data[pack_data.len() - hash_len..].to_vec();
+    let pack_checksum = read_pack_trailer(&index.pack_path, hash_len)?;
     let offsets: Vec<u64> = (0..index.len())
         .map(|i| index.offset_at(i))
         .collect::<Result<Vec<_>>>()?;
