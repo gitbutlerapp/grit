@@ -22888,6 +22888,11 @@ pub grit_lib::remote::serve::RefUpdateRefusal::InvalidRefName
 pub grit_lib::remote::serve::RefUpdateRefusal::MissingObjects
 pub grit_lib::remote::serve::RefUpdateRefusal::NonFastForward
 pub grit_lib::remote::serve::RefUpdateRefusal::Policy(alloc::string::String)
+pub grit_lib::remote::serve::RefUpdateRefusal::PushCheckoutFailed
+pub grit_lib::remote::serve::RefUpdateRefusal::PushCheckoutHookDeclined
+pub grit_lib::remote::serve::RefUpdateRefusal::PushCheckoutStagedChanges
+pub grit_lib::remote::serve::RefUpdateRefusal::PushCheckoutUnstagedChanges
+pub grit_lib::remote::serve::RefUpdateRefusal::PushCheckoutUpToDateFailed
 pub grit_lib::remote::serve::RefUpdateRefusal::PreReceiveHookDeclined
 pub grit_lib::remote::serve::RefUpdateRefusal::RefStore(alloc::string::String)
 pub grit_lib::remote::serve::RefUpdateRefusal::ShallowUpdateNotAllowed
@@ -23059,8 +23064,33 @@ impl core::marker::Unpin for grit_lib::remote::serve::ReceiveOutcome
 impl core::marker::UnsafeUnpin for grit_lib::remote::serve::ReceiveOutcome
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::ReceiveOutcome
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::ReceiveOutcome
+pub enum grit_lib::remote::serve::DenyCurrentBranch
+pub grit_lib::remote::serve::DenyCurrentBranch::Ignore
+pub grit_lib::remote::serve::DenyCurrentBranch::Refuse
+pub grit_lib::remote::serve::DenyCurrentBranch::UpdateInstead
+pub grit_lib::remote::serve::DenyCurrentBranch::Warn
+impl grit_lib::remote::serve::DenyCurrentBranch
+pub fn grit_lib::remote::serve::DenyCurrentBranch::refuses_checked_out_update(self) -> bool
+impl core::clone::Clone for grit_lib::remote::serve::DenyCurrentBranch
+pub fn grit_lib::remote::serve::DenyCurrentBranch::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::serve::DenyCurrentBranch
+impl core::cmp::PartialEq for grit_lib::remote::serve::DenyCurrentBranch
+pub fn grit_lib::remote::serve::DenyCurrentBranch::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::remote::serve::DenyCurrentBranch
+pub fn grit_lib::remote::serve::DenyCurrentBranch::default() -> Self
+impl core::fmt::Debug for grit_lib::remote::serve::DenyCurrentBranch
+pub fn grit_lib::remote::serve::DenyCurrentBranch::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::serve::DenyCurrentBranch
+impl core::marker::StructuralPartialEq for grit_lib::remote::serve::DenyCurrentBranch
+impl core::marker::Freeze for grit_lib::remote::serve::DenyCurrentBranch
+impl core::marker::Send for grit_lib::remote::serve::DenyCurrentBranch
+impl core::marker::Sync for grit_lib::remote::serve::DenyCurrentBranch
+impl core::marker::Unpin for grit_lib::remote::serve::DenyCurrentBranch
+impl core::marker::UnsafeUnpin for grit_lib::remote::serve::DenyCurrentBranch
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::DenyCurrentBranch
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::DenyCurrentBranch
 pub struct grit_lib::remote::serve::ReceivePolicy
-pub grit_lib::remote::serve::ReceivePolicy::deny_current_branch: bool
+pub grit_lib::remote::serve::ReceivePolicy::deny_current_branch: grit_lib::remote::serve::DenyCurrentBranch
 pub grit_lib::remote::serve::ReceivePolicy::deny_delete_current: bool
 pub grit_lib::remote::serve::ReceivePolicy::deny_deletes: bool
 pub grit_lib::remote::serve::ReceivePolicy::deny_non_fast_forwards: bool
