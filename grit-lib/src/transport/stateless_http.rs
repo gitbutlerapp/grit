@@ -232,8 +232,6 @@ pub struct StatelessHttpConnection<C: HttpClient> {
     head_symref: Option<String>,
     protocol_version: u8,
     object_format: String,
-    /// Bytes already sent on prior upload-pack POSTs (stateless replay prefix).
-    sent_state: Vec<u8>,
     pending: Vec<u8>,
     response: Option<Box<dyn Read + Send>>,
     fail_read: Option<ErrRead>,
@@ -275,7 +273,6 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
             head_symref,
             protocol_version,
             object_format,
-            sent_state: Vec::new(),
             pending: Vec::new(),
             response: None,
             fail_read: None,
@@ -334,17 +331,10 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         if self.pending.is_empty() {
             return Ok(());
         }
-        let body = if self.protocol_version >= 2 {
-            // Protocol v2 stateless HTTP sends one command per POST (ls-refs, fetch, …),
-            // not a cumulative v0/v1 want/have transcript.
-            std::mem::take(&mut self.pending)
-        } else {
-            let mut body = self.sent_state.clone();
-            body.extend_from_slice(&self.pending);
-            self.sent_state.extend_from_slice(&self.pending);
-            self.pending.clear();
-            body
-        };
+        // Each POST carries a complete request: a v2 command, or a v0/v1 want
+        // block plus haves that the negotiation restates itself, as Git's
+        // stateless upload-pack stops reading at the first flush after the haves.
+        let body = std::mem::take(&mut self.pending);
         self.response = Some(self.request(&body)?);
         Ok(())
     }
@@ -655,6 +645,35 @@ mod tests {
         let mut reply = Vec::new();
         conn.reader().read_to_end(&mut reply)?;
         Ok(reply)
+    }
+
+    #[test]
+    fn v0_upload_pack_posts_each_request_as_written() {
+        let (server, seen) = FakeServer::new();
+        let mut conn = StatelessHttpConnection::new(
+            server,
+            Service::UploadPack,
+            "http://h/r.git".to_owned(),
+            0,
+            Vec::new(),
+            Vec::new(),
+            None,
+            "sha1".to_owned(),
+            None,
+        );
+        let wants = b"0032want 0123456789012345678901234567890123456789\n0000".to_vec();
+        let have = b"0032have 1123456789012345678901234567890123456789\n";
+        let mut round = wants.clone();
+        round.extend_from_slice(have);
+        round.extend_from_slice(b"0000");
+        let mut last = wants.clone();
+        last.extend_from_slice(b"0009done\n");
+        for body in [&wants, &round, &last] {
+            conn.writer().write_all(body).unwrap();
+            assert_eq!(read_reply(&mut conn).unwrap(), b"report");
+        }
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.buffered, vec![wants, round, last]);
     }
 
     #[test]

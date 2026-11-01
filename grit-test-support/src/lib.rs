@@ -8,6 +8,7 @@ pub mod binaries;
 pub mod blame;
 pub mod cli_fixture;
 pub mod commit;
+pub mod git_http_backend;
 pub mod net;
 pub mod objects;
 pub mod odb_conformance;
