@@ -3929,17 +3929,22 @@ fn find_best_contiguous_copy_match(
 }
 
 /// Contiguous `current_idx` groups for copy/move suspect chunks.
+///
+/// Several [`TrackedLine`] values may share one file line index after move/copy
+/// detection hands the same parent line to multiple final lines. Group by unique
+/// sorted indices so each file range is scored once and every tracked line is
+/// handled in exactly one group.
 fn group_contiguous_tracked(pending: &[TrackedLine]) -> Vec<(usize, usize)> {
     if pending.is_empty() {
         return Vec::new();
     }
-    let mut order: Vec<usize> = (0..pending.len()).collect();
-    order.sort_by_key(|&i| pending[i].current_idx);
+    let mut indices: Vec<usize> = pending.iter().map(|t| t.current_idx).collect();
+    indices.sort_unstable();
+    indices.dedup();
     let mut groups = Vec::new();
-    let mut start = pending[order[0]].current_idx;
+    let mut start = indices[0];
     let mut end = start + 1;
-    for &i in order.iter().skip(1) {
-        let idx = pending[i].current_idx;
+    for &idx in indices.iter().skip(1) {
         if idx == end {
             end += 1;
         } else {
@@ -5296,6 +5301,41 @@ fn author_epoch_from_identity(identity: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn group_contiguous_tracked_dedupes_shared_current_idx() {
+        let pending = vec![
+            TrackedLine {
+                final_lineno: 1,
+                current_idx: 0,
+                ignored: false,
+                source_path: None,
+                origin: 0,
+            },
+            TrackedLine {
+                final_lineno: 2,
+                current_idx: 0,
+                ignored: false,
+                source_path: None,
+                origin: 0,
+            },
+            TrackedLine {
+                final_lineno: 3,
+                current_idx: 1,
+                ignored: false,
+                source_path: None,
+                origin: 0,
+            },
+            TrackedLine {
+                final_lineno: 4,
+                current_idx: 1,
+                ignored: false,
+                source_path: None,
+                origin: 0,
+            },
+        ];
+        assert_eq!(group_contiguous_tracked(&pending), vec![(0, 2)]);
+    }
 
     #[test]
     fn blob_lines_preserves_interior_and_trailing_blank_lines() {
