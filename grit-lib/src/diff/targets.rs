@@ -12,7 +12,6 @@ use crate::diff::changes::{
     unstaged_entries_in, worktree_entries_in, FileChange, WorktreeSide,
 };
 use crate::diff::detail::LineStat;
-use crate::diff::diff_trees_with_renames_for_pathspecs_and_policy;
 use crate::diff::structured::StructuredHunk;
 use crate::diff::{
     apply_diff_filter, sort_entries_by_path, tree_diff_structured_parallel,
@@ -517,7 +516,7 @@ pub(crate) fn stored_target_entries(
     target: &DiffTarget,
     pathspecs: &[String],
     options: &DiffOptions,
-) -> Result<Option<Vec<DiffEntry>>> {
+) -> Result<Option<super::core::DiffEntriesResult>> {
     let rename_threshold = options.rename_threshold_u32();
     let entries = match target {
         DiffTarget::Commit(oid) => {
@@ -565,20 +564,22 @@ pub(crate) fn stored_target_entries(
 /// Keep the entries within `pathspecs` whose status passes `options.filter` (`--diff-filter`).
 pub(crate) fn limit_target_entries(
     repo: &Repository,
-    entries: Vec<DiffEntry>,
+    mut result: super::core::DiffEntriesResult,
     pathspecs: &[String],
     options: &DiffOptions,
-) -> Result<Vec<DiffEntry>> {
+) -> Result<super::core::DiffEntriesResult> {
     let entries = if pathspecs.is_empty() {
-        entries
+        result.entries
     } else {
         let matcher = repo.pathspec_matcher(pathspecs)?;
-        entries
+        result
+            .entries
             .into_iter()
             .filter(|entry| diff_entry_matches(&matcher, entry))
             .collect()
     };
-    Ok(apply_diff_filter(entries, options.filter))
+    result.entries = apply_diff_filter(entries, options.filter);
+    Ok(result)
 }
 
 fn filter_and_map_tree_structured(
@@ -965,12 +966,12 @@ fn tree_commit_diff_entries(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     rename_threshold: u32,
-) -> Result<Vec<DiffEntry>> {
+) -> Result<super::core::DiffEntriesResult> {
     let odb = repo.odb();
     let base_tree = super::core::tree_oid_for_diff_side(odb, base)?;
     let tip_tree = super::core::tree_oid_for_diff_side(odb, tip)?;
     let pathspec_matcher = pathspec_matcher_for_stored_diff(repo, pathspecs)?;
-    let mut entries = diff_trees_with_renames_for_pathspecs_and_policy(
+    let mut result = super::core::diff_trees_with_renames_for_pathspecs_and_policy_result(
         odb,
         Some(&base_tree),
         Some(&tip_tree),
@@ -981,8 +982,8 @@ fn tree_commit_diff_entries(
         config,
         thread_policy,
     )?;
-    sort_entries_by_path(&mut entries);
-    Ok(entries)
+    sort_entries_by_path(&mut result.entries);
+    Ok(result)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -996,7 +997,7 @@ fn tree_commit_changes(
     diff_options: DiffOptions,
     rename_threshold: u32,
 ) -> Result<Vec<TreeDiffStructured>> {
-    let entries = tree_commit_diff_entries(
+    let result = tree_commit_diff_entries(
         repo,
         base,
         tip,
@@ -1005,7 +1006,13 @@ fn tree_commit_changes(
         thread_policy,
         rename_threshold,
     )?;
-    tree_diff_structured_parallel(repo.odb(), entries, config, thread_policy, diff_options)
+    tree_diff_structured_parallel(
+        repo.odb(),
+        result.entries,
+        config,
+        thread_policy,
+        diff_options,
+    )
 }
 
 fn commit_diff_entries(
@@ -1015,7 +1022,7 @@ fn commit_diff_entries(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     rename_threshold: u32,
-) -> Result<Vec<DiffEntry>> {
+) -> Result<super::core::DiffEntriesResult> {
     let commit = repo.odb().read_commit(oid)?;
     let new_tree = commit.tree;
     let old_tree = match commit.parents.first() {
@@ -1024,7 +1031,7 @@ fn commit_diff_entries(
     };
 
     let pathspec_matcher = pathspec_matcher_for_stored_diff(repo, pathspecs)?;
-    let mut entries = diff_trees_with_renames_for_pathspecs_and_policy(
+    let mut result = super::core::diff_trees_with_renames_for_pathspecs_and_policy_result(
         repo.odb(),
         old_tree.as_ref(),
         Some(&new_tree),
@@ -1035,8 +1042,8 @@ fn commit_diff_entries(
         config,
         thread_policy,
     )?;
-    sort_entries_by_path(&mut entries);
-    Ok(entries)
+    sort_entries_by_path(&mut result.entries);
+    Ok(result)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1049,7 +1056,7 @@ fn commit_changes(
     diff_options: DiffOptions,
     rename_threshold: u32,
 ) -> Result<Vec<TreeDiffStructured>> {
-    let entries = commit_diff_entries(
+    let result = commit_diff_entries(
         repo,
         oid,
         pathspecs,
@@ -1057,7 +1064,13 @@ fn commit_changes(
         thread_policy,
         rename_threshold,
     )?;
-    tree_diff_structured_parallel(repo.odb(), entries, config, thread_policy, diff_options)
+    tree_diff_structured_parallel(
+        repo.odb(),
+        result.entries,
+        config,
+        thread_policy,
+        diff_options,
+    )
 }
 
 fn empty_tree_to_side_diff_entries(
@@ -1067,10 +1080,10 @@ fn empty_tree_to_side_diff_entries(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     rename_threshold: u32,
-) -> Result<Vec<DiffEntry>> {
+) -> Result<super::core::DiffEntriesResult> {
     let tip_tree = super::core::tree_oid_for_diff_side(repo.odb(), side)?;
     let pathspec_matcher = pathspec_matcher_for_stored_diff(repo, pathspecs)?;
-    let mut entries = diff_trees_with_renames_for_pathspecs_and_policy(
+    let mut result = super::core::diff_trees_with_renames_for_pathspecs_and_policy_result(
         repo.odb(),
         None,
         Some(&tip_tree),
@@ -1081,8 +1094,8 @@ fn empty_tree_to_side_diff_entries(
         config,
         thread_policy,
     )?;
-    sort_entries_by_path(&mut entries);
-    Ok(entries)
+    sort_entries_by_path(&mut result.entries);
+    Ok(result)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1095,7 +1108,7 @@ fn empty_tree_to_side_changes(
     diff_options: DiffOptions,
     rename_threshold: u32,
 ) -> Result<Vec<TreeDiffStructured>> {
-    let entries = empty_tree_to_side_diff_entries(
+    let result = empty_tree_to_side_diff_entries(
         repo,
         side,
         pathspecs,
@@ -1103,7 +1116,13 @@ fn empty_tree_to_side_changes(
         thread_policy,
         rename_threshold,
     )?;
-    tree_diff_structured_parallel(repo.odb(), entries, config, thread_policy, diff_options)
+    tree_diff_structured_parallel(
+        repo.odb(),
+        result.entries,
+        config,
+        thread_policy,
+        diff_options,
+    )
 }
 
 fn peel_diff_commit(repo: &Repository, oid: ObjectId) -> ResolveResult<ObjectId> {
@@ -1482,11 +1501,14 @@ mod tests {
             new_oid: ObjectId::zero(),
             score: None,
         };
-        let entries = vec![
-            entry(DiffStatus::Added, "a.txt"),
-            entry(DiffStatus::Deleted, "dir/b.txt"),
-            entry(DiffStatus::Modified, "dir/c.rs"),
-        ];
+        let entries = crate::diff::DiffEntriesResult {
+            entries: vec![
+                entry(DiffStatus::Added, "a.txt"),
+                entry(DiffStatus::Deleted, "dir/b.txt"),
+                entry(DiffStatus::Modified, "dir/c.rs"),
+            ],
+            inexact_rename_skipped: None,
+        };
         let paths = |kept: Vec<DiffEntry>| -> Vec<String> {
             kept.iter()
                 .map(|e| {
@@ -1499,20 +1521,20 @@ mod tests {
         };
         let all = DiffOptions::default();
         let kept = limit_target_entries(&repo, entries.clone(), &[], &all).expect("limit");
-        assert_eq!(paths(kept), ["a.txt", "dir/b.txt", "dir/c.rs"]);
+        assert_eq!(paths(kept.entries), ["a.txt", "dir/b.txt", "dir/c.rs"]);
 
         let kept =
             limit_target_entries(&repo, entries.clone(), &["dir".to_owned()], &all).expect("dir");
-        assert_eq!(paths(kept), ["dir/b.txt", "dir/c.rs"]);
+        assert_eq!(paths(kept.entries), ["dir/b.txt", "dir/c.rs"]);
 
         let added_or_deleted = all.with_filter(Some("AD".parse().expect("filter")));
         let kept =
             limit_target_entries(&repo, entries.clone(), &[], &added_or_deleted).expect("filter");
-        assert_eq!(paths(kept), ["a.txt", "dir/b.txt"]);
+        assert_eq!(paths(kept.entries), ["a.txt", "dir/b.txt"]);
 
         let kept = limit_target_entries(&repo, entries, &["dir".to_owned()], &added_or_deleted)
             .expect("both");
-        assert_eq!(paths(kept), ["dir/b.txt"]);
+        assert_eq!(paths(kept.entries), ["dir/b.txt"]);
     }
 
     #[test]

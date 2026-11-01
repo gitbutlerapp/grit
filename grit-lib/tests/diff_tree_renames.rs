@@ -6,11 +6,12 @@ use std::fs;
 
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{
-    diff_trees, diff_trees_show_tree_entries, diff_trees_with_renames, DiffPostprocessOptions,
-    GIT_DIFF_DEFAULT_BREAK_SCORE,
+    diff_trees, diff_trees_show_tree_entries, diff_trees_with_renames, postprocess_diff_entries,
+    DiffPostprocessOptions, InexactRenameDetectionSkipped, GIT_DIFF_DEFAULT_BREAK_SCORE,
 };
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
+use grit_lib::parallel::ThreadPolicy;
 
 use support::{
     assert_raw_matches_git, commits_diff_raw, config_with_kv, git_quiet, git_raw_lines,
@@ -827,4 +828,242 @@ fn t4006_diff_mode_raw_matches_git() {
     );
     let grit_lines = tree_diff_raw(&dr.repo, Some(&old), Some(&new), &config, &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "t4006 mode");
+}
+
+#[test]
+fn basename_preflight_shrinks_matrix_to_match_git() {
+    const UNIQUE: usize = 400;
+    const DUP: usize = 900;
+    let dr = DiffRepo::init();
+    let wt = &dr.worktree;
+    for i in 0..UNIQUE {
+        std::fs::create_dir_all(wt.join("old/dir")).unwrap();
+        let mut body = String::new();
+        for j in 1..=20 {
+            body.push_str(&format!("file {i} line {j}\n"));
+        }
+        std::fs::write(wt.join(format!("old/dir/unique{i}.rs")), body).unwrap();
+    }
+    for i in 0..DUP {
+        std::fs::create_dir_all(wt.join(format!("old/d{i}"))).unwrap();
+        std::fs::write(wt.join(format!("old/d{i}/README.md")), format!("old {i}\n")).unwrap();
+    }
+    git_quiet(wt, &["add", "."]);
+    git_quiet(wt, &["commit", "-qm", "base"]);
+
+    for i in 0..UNIQUE {
+        std::fs::create_dir_all(wt.join("new/dir")).unwrap();
+        let mut body = String::new();
+        for j in 1..=20 {
+            body.push_str(&format!("file {i} line {j}\n"));
+        }
+        body.push_str("extra\n");
+        std::fs::write(wt.join(format!("new/dir/unique{i}.rs")), body).unwrap();
+    }
+    for i in 0..DUP {
+        std::fs::create_dir_all(wt.join(format!("new/d{i}"))).unwrap();
+        std::fs::write(wt.join(format!("new/d{i}/README.md")), format!("new {i}\n")).unwrap();
+    }
+    std::fs::remove_dir_all(wt.join("old")).unwrap();
+    git_quiet(wt, &["add", "-A"]);
+    git_quiet(wt, &["commit", "-qm", "moved"]);
+
+    let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
+    let commit = rev_parse_tree(wt, "HEAD^{tree}");
+    let config = ConfigSet::new();
+    let opts = rename_opts(50);
+    let git_lines = git_raw_lines(
+        wt,
+        &[
+            "diff-tree",
+            "-r",
+            "-M50",
+            "--root",
+            "--raw",
+            &parent.to_hex(),
+            &commit.to_hex(),
+        ],
+    );
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    assert_raw_matches_git(&grit_lines, &git_lines, "basename shrink matrix");
+}
+
+#[test]
+fn basename_dir_guess_pairs_readme_after_exact_dir_rename() {
+    let dr = DiffRepo::init();
+    let wt = &dr.worktree;
+    std::fs::create_dir_all(wt.join("old/a")).unwrap();
+    std::fs::create_dir_all(wt.join("old/b")).unwrap();
+    std::fs::write(wt.join("old/a/README.md"), "a\n").unwrap();
+    std::fs::write(wt.join("old/b/README.md"), "b\n").unwrap();
+    std::fs::write(wt.join("old/a/exact.txt"), "same\n").unwrap();
+    git_quiet(wt, &["add", "."]);
+    git_quiet(wt, &["commit", "-qm", "base"]);
+
+    std::fs::create_dir_all(wt.join("new/a")).unwrap();
+    std::fs::create_dir_all(wt.join("new/b")).unwrap();
+    std::fs::write(wt.join("new/a/README.md"), "a\n").unwrap();
+    std::fs::write(wt.join("new/b/README.md"), "b\n").unwrap();
+    std::fs::write(wt.join("new/a/exact.txt"), "same\n").unwrap();
+    std::fs::remove_dir_all(wt.join("old")).unwrap();
+    git_quiet(wt, &["add", "-A"]);
+    git_quiet(wt, &["commit", "-qm", "moved"]);
+
+    let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
+    let commit = rev_parse_tree(wt, "HEAD^{tree}");
+    let config = ConfigSet::new();
+    let opts = rename_opts(50);
+    let git_lines = git_raw_lines(
+        wt,
+        &[
+            "diff-tree",
+            "-r",
+            "-M50",
+            "--root",
+            "--raw",
+            &parent.to_hex(),
+            &commit.to_hex(),
+        ],
+    );
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    assert_raw_matches_git(&grit_lines, &git_lines, "dir rename guess");
+}
+
+#[test]
+fn medium_similarity_same_basename_stays_unpaired_when_matrix_over_limit() {
+    let dr = DiffRepo::init();
+    let wt = &dr.worktree;
+    std::fs::write(wt.join("pair.txt"), "a\nb\nc\nd\ne\n").unwrap();
+    for i in 0..1100 {
+        std::fs::write(wt.join(format!("f{i}.txt")), format!("payload {i}\n")).unwrap();
+    }
+    git_quiet(wt, &["add", "."]);
+    git_quiet(wt, &["commit", "-qm", "base"]);
+
+    std::fs::remove_file(wt.join("pair.txt")).unwrap();
+    std::fs::write(wt.join("pair.txt"), "a\nb\nX\nd\ne\n").unwrap();
+    for i in 0..1100 {
+        std::fs::remove_file(wt.join(format!("f{i}.txt"))).unwrap();
+        std::fs::write(wt.join(format!("g{i}.txt")), format!("payload {i}\n")).unwrap();
+    }
+    git_quiet(wt, &["add", "-A"]);
+    git_quiet(wt, &["commit", "-qm", "changed"]);
+
+    let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
+    let commit = rev_parse_tree(wt, "HEAD^{tree}");
+    let config = ConfigSet::new();
+    let opts = rename_opts(50);
+    let git_lines = git_raw_lines(
+        wt,
+        &[
+            "diff-tree",
+            "-r",
+            "-M50",
+            "--root",
+            "--raw",
+            &parent.to_hex(),
+            &commit.to_hex(),
+        ],
+    );
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    assert_raw_matches_git(&grit_lines, &git_lines, "medium similarity over limit");
+}
+
+#[test]
+fn break_rewrite_skips_basename_heuristic() {
+    let dr = DiffRepo::init();
+    let wt = &dr.worktree;
+    std::fs::write(wt.join("old.txt"), "hello world\n").unwrap();
+    git_quiet(wt, &["add", "old.txt"]);
+    git_quiet(wt, &["commit", "-qm", "base"]);
+    std::fs::remove_file(wt.join("old.txt")).unwrap();
+    std::fs::write(wt.join("new.txt"), "hello world\n").unwrap();
+    git_quiet(wt, &["add", "-A"]);
+    git_quiet(wt, &["commit", "-qm", "rewrite"]);
+
+    let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
+    let commit = rev_parse_tree(wt, "HEAD^{tree}");
+    let config = ConfigSet::new();
+    let break_opts = DiffPostprocessOptions {
+        break_score: Some(50),
+        rename_threshold: 50,
+        ..Default::default()
+    };
+    let git_lines = git_raw_lines(
+        wt,
+        &[
+            "diff-tree",
+            "-r",
+            "-B50",
+            "-M50",
+            "--root",
+            "--raw",
+            &parent.to_hex(),
+            &commit.to_hex(),
+        ],
+    );
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &break_opts);
+    assert_raw_matches_git(&grit_lines, &git_lines, "break skips basename");
+}
+
+#[test]
+fn post_basename_overflow_sets_notice_and_matches_git() {
+    const N: usize = 1100;
+    let dr = DiffRepo::init();
+    let wt = &dr.worktree;
+    for i in 0..N {
+        std::fs::write(wt.join(format!("o{i}.txt")), format!("body {i}\n")).unwrap();
+    }
+    git_quiet(wt, &["add", "."]);
+    git_quiet(wt, &["commit", "-qm", "base"]);
+    for i in 0..N {
+        std::fs::remove_file(wt.join(format!("o{i}.txt"))).unwrap();
+        std::fs::write(wt.join(format!("n{i}.txt")), format!("body {i}\n")).unwrap();
+    }
+    git_quiet(wt, &["add", "-A"]);
+    git_quiet(wt, &["commit", "-qm", "renamed"]);
+
+    let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
+    let commit = rev_parse_tree(wt, "HEAD^{tree}");
+    let config = config_with_kv("diff", "renameLimit", "1000");
+    let opts = rename_opts(50);
+    let git_lines = git_raw_lines(
+        wt,
+        &[
+            "diff-tree",
+            "-r",
+            "-M50",
+            "--root",
+            "--raw",
+            &parent.to_hex(),
+            &commit.to_hex(),
+        ],
+    );
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    assert_raw_matches_git(&grit_lines, &git_lines, "post-basename overflow");
+
+    let raw = diff_trees(dr.repo.odb(), Some(&parent), Some(&commit), "").unwrap();
+    let mut notice = None;
+    let _ = postprocess_diff_entries(
+        dr.repo.odb(),
+        raw,
+        Some(&parent),
+        None,
+        None,
+        &config,
+        &ThreadPolicy::default(),
+        &opts,
+        Some(&mut notice),
+    )
+    .unwrap();
+    assert!(
+        matches!(
+            notice,
+            Some(InexactRenameDetectionSkipped {
+                configured_limit: Some(1000),
+                ..
+            })
+        ),
+        "expected renameLimit skip notice, got {notice:?}"
+    );
 }

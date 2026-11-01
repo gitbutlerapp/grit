@@ -12,13 +12,14 @@
 //! # Ok(())
 //! # }
 //! ```
+mod basename_rename;
 mod changes;
 mod commit_files_many;
 mod core;
 pub(crate) use core::myers_rediff_changed_masks_for_region;
 pub(crate) use core::{
-    diff_trees_with_renames_for_pathspecs_and_policy, intern_merge_compare_three_way,
-    merge_file_compacted_line_ops, merge_myops_from_preinterned_ids,
+    intern_merge_compare_three_way, merge_file_compacted_line_ops,
+    merge_myops_from_preinterned_ids,
 };
 mod detail;
 mod files;
@@ -33,6 +34,7 @@ mod options;
 mod patch_log;
 pub mod pickaxe;
 mod posix_ere;
+mod rename_blob_cache;
 mod rename_lines;
 mod stat;
 pub(crate) use core::is_func_line;

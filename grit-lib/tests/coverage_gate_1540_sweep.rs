@@ -219,6 +219,7 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
         &cfg,
         &policy,
         &opts,
+        None,
     )?;
 
     let commit_obj = repo.odb().read(&tip)?;

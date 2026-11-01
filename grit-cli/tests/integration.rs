@@ -225,6 +225,9 @@ mod diff_pathspec;
 #[path = "diff_rename_algorithm_filter_flags.rs"]
 mod diff_rename_algorithm_filter_flags;
 #[cfg(feature = "full-tests")]
+#[path = "diff_rename_limit_notice.rs"]
+mod diff_rename_limit_notice;
+#[cfg(feature = "full-tests")]
 #[path = "diff_single_traversal.rs"]
 mod diff_single_traversal;
 #[cfg(feature = "full-tests")]

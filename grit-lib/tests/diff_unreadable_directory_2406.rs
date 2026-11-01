@@ -199,6 +199,7 @@ mod unix {
             .expect("diff old.txt");
         assert!(
             exact
+                .entries
                 .iter()
                 .any(|e| e.path() == "old.txt" && e.status == DiffStatus::Deleted),
             "expected staged deletion of old.txt, got {exact:?}"
@@ -215,6 +216,7 @@ mod unix {
             .expect("diff dir/");
         assert!(
             dir_spec
+                .entries
                 .iter()
                 .any(|e| { e.path() == "dir/nested.txt" && e.status == DiffStatus::Deleted }),
             "expected staged deletion under dir/, got {dir_spec:?}"
@@ -253,6 +255,7 @@ mod unix {
             .expect("attr pathspec diff");
         assert!(
             entries
+                .entries
                 .iter()
                 .any(|e| { e.path() == "old.txt" && e.status == DiffStatus::Deleted }),
             "expected old.txt deletion for :(attr:foo), got {entries:?}"

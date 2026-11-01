@@ -280,6 +280,7 @@ fn combined_commit_diff_files(
         return Ok(DiffFilesOutput {
             files,
             totals: None,
+            inexact_rename_skipped: None,
         });
     }
     if detail == DiffDetail::NameStatus {
@@ -290,6 +291,7 @@ fn combined_commit_diff_files(
         return Ok(DiffFilesOutput {
             files,
             totals: None,
+            inexact_rename_skipped: None,
         });
     }
 
@@ -334,7 +336,11 @@ fn combined_commit_diff_files(
     } else {
         None
     };
-    Ok(DiffFilesOutput { files, totals })
+    Ok(DiffFilesOutput {
+        files,
+        totals,
+        inexact_rename_skipped: None,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

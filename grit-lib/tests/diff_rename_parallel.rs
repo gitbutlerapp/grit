@@ -8,8 +8,8 @@ use grit_lib::blame::{compute_blame, BlameDiffAlgorithm};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::diff::{
-    detect_copies_with_policy, detect_renames_with_policy, diff_trees, zero_oid, DiffEntry,
-    DiffStatus,
+    detect_copies_with_policy, detect_renames_with_policy, diff_trees, zero_oid,
+    DetectRenamesOptions, DiffEntry, DiffStatus,
 };
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
@@ -88,8 +88,10 @@ fn assert_serial_parallel_rename_match(
         config,
         &serial_policy(),
         None,
+        DetectRenamesOptions::default(),
     )
-    .expect("serial rename detection");
+    .expect("serial rename detection")
+    .entries;
     let parallel = detect_renames_with_policy(
         odb,
         None,
@@ -98,8 +100,10 @@ fn assert_serial_parallel_rename_match(
         config,
         &parallel_policy(),
         None,
+        DetectRenamesOptions::default(),
     )
-    .expect("parallel rename detection");
+    .expect("parallel rename detection")
+    .entries;
     assert_eq!(
         serial, parallel,
         "parallel rename detection must match serial output"
@@ -193,9 +197,18 @@ fn parallel_rename_matches_serial_exact_and_inexact() {
     let config = ConfigSet::new();
     assert_serial_parallel_rename_match(repo.odb(), raw.clone(), 50, &config);
 
-    let detected =
-        detect_renames_with_policy(repo.odb(), None, raw, 50, &config, &parallel_policy(), None)
-            .expect("detect renames");
+    let detected = detect_renames_with_policy(
+        repo.odb(),
+        None,
+        raw,
+        50,
+        &config,
+        &parallel_policy(),
+        None,
+        DetectRenamesOptions::default(),
+    )
+    .expect("detect renames")
+    .entries;
     let git_lines = git_rename_and_copy_lines(root, &parent, &commit);
     let grit_lines = rename_and_copy_lines(&detected);
     assert_eq!(
@@ -229,9 +242,18 @@ fn exact_renames_above_default_rename_limit_match_git() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let raw = diff_trees(repo.odb(), Some(&parent), Some(&commit), "").expect("diff");
     let config = ConfigSet::new();
-    let detected =
-        detect_renames_with_policy(repo.odb(), None, raw, 50, &config, &parallel_policy(), None)
-            .expect("detect renames");
+    let detected = detect_renames_with_policy(
+        repo.odb(),
+        None,
+        raw,
+        50,
+        &config,
+        &parallel_policy(),
+        None,
+        DetectRenamesOptions::default(),
+    )
+    .expect("detect renames")
+    .entries;
 
     let renames = detected
         .iter()
@@ -298,9 +320,18 @@ fn asymmetric_matrix_exact_matches_still_pair() {
     }
 
     let config = ConfigSet::new();
-    let detected =
-        detect_renames_with_policy(&odb, None, entries, 50, &config, &serial_policy(), None)
-            .expect("detect renames");
+    let detected = detect_renames_with_policy(
+        &odb,
+        None,
+        entries,
+        50,
+        &config,
+        &serial_policy(),
+        None,
+        DetectRenamesOptions::default(),
+    )
+    .expect("detect renames")
+    .entries;
     assert_eq!(
         detected
             .iter()

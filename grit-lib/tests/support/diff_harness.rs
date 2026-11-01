@@ -778,6 +778,7 @@ pub fn postprocess(
         config,
         &ThreadPolicy::default(),
         opts,
+        None,
     )
     .expect("postprocess")
 }

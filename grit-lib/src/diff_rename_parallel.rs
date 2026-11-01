@@ -19,7 +19,12 @@ pub(crate) struct RenameLimit {
     max: Option<NonZeroUsize>,
 }
 
-impl RenameLimit {}
+impl RenameLimit {
+    #[must_use]
+    pub(crate) fn configured_max(self) -> Option<usize> {
+        self.max.map(NonZeroUsize::get)
+    }
+}
 
 /// Resolve `diff.renameLimit` the way Git does for inexact rename/copy matrices.
 #[must_use]
