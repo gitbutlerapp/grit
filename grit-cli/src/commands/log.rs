@@ -729,8 +729,11 @@ pub fn run(
     let mut walk_opts = opts.clone();
     walk_opts.graph = display.graph;
 
+    if display.group_by == Some(LogGroupBy::Author) {
+        return run_log_group_by_author(&repo, &token_refs, &walk_opts, &rev, display, output_mode);
+    }
+
     let needs_rev_walk = display.graph
-        || display.group_by.is_some()
         || pathspecs.has_any()
         || walk_opts
             .commit_filter
@@ -755,49 +758,13 @@ pub fn run(
             None
         });
         fetch_opts.limit = fetch_limit_plus_one(page_limit);
-        fetch_opts.retain_commit_data = !display.graph && display.group_by.is_none();
+        fetch_opts.retain_commit_data = !display.graph;
         let mut list_result = walk
             .rev_list_result(&token_refs, &fetch_opts)
             .context("could not list commits")?;
         let parsed = std::mem::take(&mut list_result.commit_data);
         let graph_linkage = list_result.log_graph_linkage.clone();
         let (oids, truncated) = truncate_oid_list(list_result.commits, page_limit, rev.reverse);
-        if display.group_by == Some(LogGroupBy::Author) {
-            let use_mailmap = rev_select::log_mailmap_enabled(&repo, rev.no_mailmap);
-            let mailmap = mailmap_for_grouping(&repo, use_mailmap)?;
-            if display.group_count_only {
-                if rev.max_count().is_none() {
-                    let grouped = group_commits_by_author_from_rev(
-                        &repo,
-                        &token_refs,
-                        &fetch_opts,
-                        mailmap.as_ref(),
-                        GroupByAuthorOptions { count_only: true },
-                    )
-                    .context("could not group commits by author")?;
-                    return build_author_group_outcome_from_groups(&repo, grouped, false, display);
-                }
-                let oids = repo
-                    .rev_walk()
-                    .commits(&token_refs, &fetch_opts)
-                    .context("could not list commits")?;
-                let (oids, truncated) = truncate_oid_list(oids, rev.max_count(), rev.reverse);
-                let grouped = group_commits_by_author(
-                    &repo,
-                    &oids,
-                    mailmap.as_ref(),
-                    GroupByAuthorOptions { count_only: true },
-                )
-                .context("could not group commits by author")?;
-                return build_author_group_outcome_from_groups(&repo, grouped, truncated, display);
-            }
-            let oids = repo
-                .rev_walk()
-                .commits(&token_refs, &fetch_opts)
-                .context("could not list commits")?;
-            let (oids, truncated) = truncate_oid_list(oids, rev.max_count(), rev.reverse);
-            return build_author_group_outcome(&repo, &oids, truncated, display, use_mailmap);
-        }
         return build_commit_outcome(
             &repo,
             &oids,
@@ -908,23 +875,80 @@ fn empty_outcome(display: LogDisplayOptions) -> Result<LogOutcome> {
     })
 }
 
-fn build_author_group_outcome(
+fn run_log_group_by_author(
     repo: &grit_lib::repo::Repository,
-    oids: &[ObjectId],
-    truncated: bool,
+    token_refs: &[&str],
+    walk_opts: &grit_lib::revwalk::RevWalkListOptions,
+    rev: &RevSelectArgs,
     display: LogDisplayOptions,
-    use_mailmap: bool,
+    output_mode: OutputMode,
 ) -> Result<LogOutcome> {
+    let use_mailmap = rev_select::log_mailmap_enabled(repo, rev.no_mailmap);
+    let max_count = rev.max_count();
+    let reverse = rev.reverse;
     let mailmap = mailmap_for_grouping(repo, use_mailmap)?;
-    let grouped = group_commits_by_author(
-        repo,
-        oids,
-        mailmap.as_ref(),
-        GroupByAuthorOptions {
-            count_only: display.group_count_only,
-        },
-    )?;
-    build_author_group_outcome_from_groups(repo, grouped, truncated, display)
+    let need_commit_json = output_mode == OutputMode::Json && !display.group_count_only;
+    let group_options = GroupByAuthorOptions {
+        count_only: !need_commit_json,
+    };
+
+    if need_commit_json {
+        if let Some(limit) = max_count {
+            let mut fetch_opts = walk_opts.clone();
+            fetch_opts.limit = fetch_limit_plus_one(Some(limit));
+            let oids = repo
+                .rev_walk()
+                .commits(token_refs, &fetch_opts)
+                .context("could not list commits")?;
+            let (oids, truncated) = truncate_oid_list(oids, Some(limit), reverse);
+            let grouped = group_commits_by_author(
+                repo,
+                &oids,
+                mailmap.as_ref(),
+                GroupByAuthorOptions { count_only: false },
+            )
+            .context("could not group commits by author")?;
+            return build_author_group_outcome_from_groups(
+                repo,
+                grouped,
+                truncated,
+                display,
+                output_mode,
+            );
+        }
+        let grouped = group_commits_by_author_from_rev(
+            repo,
+            token_refs,
+            walk_opts,
+            mailmap.as_ref(),
+            GroupByAuthorOptions { count_only: false },
+        )
+        .context("could not group commits by author")?;
+        return build_author_group_outcome_from_groups(repo, grouped, false, display, output_mode);
+    }
+
+    if max_count.is_none() {
+        let grouped = group_commits_by_author_from_rev(
+            repo,
+            token_refs,
+            walk_opts,
+            mailmap.as_ref(),
+            group_options,
+        )
+        .context("could not group commits by author")?;
+        return build_author_group_outcome_from_groups(repo, grouped, false, display, output_mode);
+    }
+
+    let mut fetch_opts = walk_opts.clone();
+    fetch_opts.limit = fetch_limit_plus_one(max_count);
+    let oids = repo
+        .rev_walk()
+        .commits(token_refs, &fetch_opts)
+        .context("could not list commits")?;
+    let (oids, truncated) = truncate_oid_list(oids, max_count, reverse);
+    let grouped = group_commits_by_author(repo, &oids, mailmap.as_ref(), group_options)
+        .context("could not group commits by author")?;
+    build_author_group_outcome_from_groups(repo, grouped, truncated, display, output_mode)
 }
 
 fn build_author_group_outcome_from_groups(
@@ -932,8 +956,9 @@ fn build_author_group_outcome_from_groups(
     grouped: Vec<grit_lib::revwalk::AuthorGroup>,
     truncated: bool,
     display: LogDisplayOptions,
+    output_mode: OutputMode,
 ) -> Result<LogOutcome> {
-    let include_commits = !display.group_count_only;
+    let include_commits = output_mode == OutputMode::Json && !display.group_count_only;
     let loader = if include_commits {
         Some(CommitJsonLoader::new(repo)?)
     } else {

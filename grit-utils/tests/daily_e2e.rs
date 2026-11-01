@@ -349,6 +349,7 @@ const MATRIX_SMOKE_IDS: [&str; 43] = [
     "diff/staged@deep-tree",
     "log/oneline-100@synth-100k",
     "log/all@git-git",
+    "log/group-by-author@git-git",
     "log/path@git-git",
     "show/head@synth-10k",
     "show/head@big-blobs",

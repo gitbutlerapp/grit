@@ -1,7 +1,6 @@
 //! Group walked commits for summary views (author shortlog-style reports).
 
 use std::collections::{HashMap, HashSet};
-use std::hash::Hasher;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -114,7 +113,7 @@ pub fn mailmap_for_grouping(repo: &Repository, use_mailmap: bool) -> Result<Opti
 
 struct AuthorCounter {
     entries: Vec<(String, String, usize)>,
-    index: HashMap<u128, usize>,
+    index: HashMap<(String, String), usize>,
 }
 
 impl AuthorCounter {
@@ -127,7 +126,7 @@ impl AuthorCounter {
 
     fn absorb(&mut self, other: Self) {
         for (name, email, count) in other.entries {
-            let key = author_identity_key(&name, &email);
+            let key = (name.clone(), email.clone());
             if let Some(&idx) = self.index.get(&key) {
                 self.entries[idx].2 += count;
             } else {
@@ -153,13 +152,13 @@ impl AuthorCounter {
     }
 
     fn add_borrowed(&mut self, name: &str, email: &str) {
-        let key = author_identity_key(name, email);
+        let key = (name.to_owned(), email.to_owned());
         if let Some(&idx) = self.index.get(&key) {
             self.entries[idx].2 += 1;
             return;
         }
         let idx = self.entries.len();
-        self.entries.push((name.to_owned(), email.to_owned(), 1));
+        self.entries.push((key.0.clone(), key.1.clone(), 1));
         self.index.insert(key, idx);
     }
 
@@ -346,9 +345,12 @@ fn count_authors_at_pack_rows(
         return Ok(AuthorCounter::new());
     }
 
-    let threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
+    let config = repo.config()?;
+    let threads = repo
+        .thread_policy()
+        .resolve(crate::parallel::ParallelOp::DiffContent, config.as_ref())
+        .threads
+        .get()
         .clamp(1, 8);
     if entries.len() < PARALLEL_AUTHOR_COUNT_MIN || threads <= 1 {
         let mut reader =
@@ -449,7 +451,7 @@ fn shortlog_stack_walk_compatible(walk: &RevWalkListOptions, parsed: &RevWalkPar
         && parsed.symmetric_right.is_none()
 }
 
-fn load_commit_bytes_and_count_author(
+fn load_commit_prefix_and_count_author(
     repo: &Repository,
     objects_dir: &Path,
     pack_reader: &mut Option<SingleLocalPackReader>,
@@ -457,7 +459,7 @@ fn load_commit_bytes_and_count_author(
     mailmap: Option<&MailmapTable>,
     counter: &mut AuthorCounter,
     monotonic_pack_probe: bool,
-) -> Result<Vec<u8>> {
+) -> Result<Option<Vec<u8>>> {
     for _ in 0..3 {
         if pack_reader.is_none() {
             *pack_reader = SingleLocalPackReader::open_allow_loose_for_commits(objects_dir, &oid)?;
@@ -473,7 +475,7 @@ fn load_commit_bytes_and_count_author(
         };
         if let Some(prefix) = prefix {
             if accumulate_author_count(prefix, mailmap, counter).is_ok() {
-                return Ok(prefix.to_vec());
+                return Ok(None);
             }
             reader.clear_commit_header_prefix();
         } else if !reader.contains_oid(&oid)? {
@@ -487,7 +489,7 @@ fn load_commit_bytes_and_count_author(
             Ok(obj) => {
                 reader.clear_commit_header_prefix();
                 accumulate_author_count(&obj.data, mailmap, counter)?;
-                return Ok(obj.data);
+                return Ok(Some(obj.data));
             }
             Err(Error::ObjectNotFound(_)) => {
                 reader.clear_commit_header_prefix();
@@ -503,7 +505,7 @@ fn load_commit_bytes_and_count_author(
     *pack_reader = None;
     let obj = repo.odb().read(&oid)?;
     accumulate_author_count(&obj.data, mailmap, counter)?;
-    Ok(obj.data)
+    Ok(Some(obj.data))
 }
 
 fn accumulate_author_for_oid(
@@ -515,7 +517,7 @@ fn accumulate_author_for_oid(
     counter: &mut AuthorCounter,
     monotonic_pack_probe: bool,
 ) -> Result<()> {
-    load_commit_bytes_and_count_author(
+    load_commit_prefix_and_count_author(
         repo,
         objects_dir,
         pack_reader,
@@ -556,7 +558,7 @@ fn count_authors_stack_walk(
         if excluded.is_hidden(oid) || !seen.insert(oid) {
             continue;
         }
-        let commit_bytes = load_commit_bytes_and_count_author(
+        let full_commit = load_commit_prefix_and_count_author(
             repo,
             objects_dir,
             &mut pack_reader,
@@ -568,7 +570,18 @@ fn count_authors_stack_walk(
         let parents = if let Some(graph) = graph.as_mut() {
             graph.parents_of(oid)?
         } else {
-            parent_oids_from_commit_bytes(&commit_bytes, first_parent)?
+            let prefix = full_commit
+                .as_deref()
+                .or_else(|| {
+                    pack_reader
+                        .as_ref()
+                        .filter(|r| !r.commit_header_prefix().is_empty())
+                        .map(SingleLocalPackReader::commit_header_prefix)
+                })
+                .ok_or_else(|| {
+                    Error::CorruptObject("commit missing parent header after author count".into())
+                })?;
+            parent_oids_from_commit_bytes(prefix, first_parent)?
         };
         stack.extend(parents);
     }
@@ -628,24 +641,6 @@ fn count_authors_single_pack(
         )?;
     }
     Ok(())
-}
-
-fn author_identity_key(name: &str, email: &str) -> u128 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    hash_ascii_insensitive(name, &mut hasher);
-    hash_ascii_insensitive(email, &mut hasher);
-    let lo = hasher.finish();
-    hasher = std::collections::hash_map::DefaultHasher::new();
-    hash_ascii_insensitive(email, &mut hasher);
-    hash_ascii_insensitive(name, &mut hasher);
-    let hi = hasher.finish();
-    ((hi as u128) << 64) | lo as u128
-}
-
-fn hash_ascii_insensitive(s: &str, hasher: &mut impl Hasher) {
-    for b in s.bytes() {
-        hasher.write(&[b.to_ascii_lowercase()]);
-    }
 }
 
 fn sort_author_groups(groups: &mut [AuthorGroup]) {
@@ -857,5 +852,69 @@ fn author_sort_key(group: &AuthorGroup) -> String {
         format!("<{}>", group.email)
     } else {
         format!("{} <{}>", group.name, group.email)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
+    use crate::repo::{InitOptions, Repository};
+
+    fn write_commit(
+        repo: &Repository,
+        name: &str,
+        email: &str,
+        tree: ObjectId,
+        parents: Vec<ObjectId>,
+    ) -> ObjectId {
+        let ident = format!("{name} <{email}> 1 +0000");
+        let commit = CommitData {
+            tree,
+            parents,
+            author: ident.clone(),
+            committer: ident,
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: "msg".into(),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        };
+        let data = serialize_commit(&commit);
+        repo.odb()
+            .write(ObjectKind::Commit, &data)
+            .expect("write commit")
+    }
+
+    #[test]
+    fn count_only_groups_preserve_ascii_case_distinct_identities() -> Result<()> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default())?;
+        let tree = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904")?;
+        let o1 = write_commit(&repo, "Case", "a@example.com", tree, vec![]);
+        let o2 = write_commit(&repo, "CASE", "A@example.com", tree, vec![o1]);
+        let oids = [o1, o2];
+
+        let full = group_commits_by_author(
+            &repo,
+            &oids,
+            None,
+            GroupByAuthorOptions { count_only: false },
+        )?;
+        let counts = group_commits_by_author(
+            &repo,
+            &oids,
+            None,
+            GroupByAuthorOptions { count_only: true },
+        )?;
+
+        assert_eq!(full.len(), 2);
+        assert_eq!(counts.len(), 2);
+        assert_eq!(
+            full.iter().map(|g| g.count).collect::<Vec<_>>(),
+            counts.iter().map(|g| g.count).collect::<Vec<_>>()
+        );
+        Ok(())
     }
 }

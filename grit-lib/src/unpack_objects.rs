@@ -2117,6 +2117,147 @@ pub fn apply_delta_into(out: &mut Vec<u8>, base: &[u8], delta: &[u8]) -> Result<
     Ok(())
 }
 
+/// Apply `delta` onto `base`, materializing at most `max_out` bytes in `out`.
+///
+/// The full delta stream is validated against `dest_size`; COPY/INSERT bytes beyond what is
+/// needed for `out` are not copied once `out` already holds `max_out` bytes and
+/// `prefix_sufficient` returns true.
+///
+/// # Errors
+///
+/// Same as [`apply_delta_into`].
+pub(crate) fn apply_delta_prefix_into(
+    out: &mut Vec<u8>,
+    base: &[u8],
+    delta: &[u8],
+    max_out: usize,
+    prefix_sufficient: impl Fn(&[u8]) -> bool,
+) -> Result<()> {
+    let mut pos = 0usize;
+
+    let src_size = read_delta_varint(delta, &mut pos)?;
+    if src_size != base.len() {
+        return Err(Error::CorruptObject(format!(
+            "delta source size {src_size} != base size {}",
+            base.len()
+        )));
+    }
+    let dest_size = read_delta_varint(delta, &mut pos)?;
+    out.clear();
+    if out.capacity() < max_out.min(dest_size) {
+        out.reserve(max_out.min(dest_size) - out.capacity());
+    }
+
+    let mut result_len = 0usize;
+    let mut done = false;
+
+    while pos < delta.len() {
+        let cmd = delta[pos];
+        pos += 1;
+        if cmd == 0 {
+            return Err(Error::CorruptObject(
+                "reserved opcode 0 in delta stream".to_owned(),
+            ));
+        }
+        if cmd & 0x80 != 0 {
+            let mut offset = 0usize;
+            let mut size = 0usize;
+
+            macro_rules! maybe_read_byte {
+                ($flag:expr, $shift:expr, $target:expr) => {
+                    if cmd & $flag != 0 {
+                        let b = *delta.get(pos).ok_or_else(|| {
+                            Error::CorruptObject("truncated delta COPY operand".to_owned())
+                        })?;
+                        pos += 1;
+                        $target |= (b as usize) << $shift;
+                    }
+                };
+            }
+
+            maybe_read_byte!(0x01, 0, offset);
+            maybe_read_byte!(0x02, 8, offset);
+            maybe_read_byte!(0x04, 16, offset);
+            maybe_read_byte!(0x08, 24, offset);
+            maybe_read_byte!(0x10, 0, size);
+            maybe_read_byte!(0x20, 8, size);
+            maybe_read_byte!(0x40, 16, size);
+
+            if size == 0 {
+                size = 0x10000;
+            }
+
+            let end = offset.checked_add(size).ok_or_else(|| {
+                Error::CorruptObject("delta COPY range overflows usize".to_owned())
+            })?;
+            let chunk = base.get(offset..end).ok_or_else(|| {
+                Error::CorruptObject(format!(
+                    "delta COPY [{offset},{end}) out of range (base is {} bytes)",
+                    base.len()
+                ))
+            })?;
+            result_len = result_len
+                .checked_add(size)
+                .ok_or_else(|| Error::CorruptObject("delta result length overflow".to_owned()))?;
+            if !done {
+                let room = max_out.saturating_sub(out.len());
+                if room == 0 {
+                    if prefix_sufficient(out) {
+                        done = true;
+                    }
+                } else if chunk.len() <= room {
+                    out.extend_from_slice(chunk);
+                    if out.len() >= max_out && prefix_sufficient(out) {
+                        done = true;
+                        out.truncate(max_out);
+                    }
+                } else {
+                    out.extend_from_slice(&chunk[..room]);
+                    if prefix_sufficient(out) {
+                        done = true;
+                    }
+                }
+            }
+        } else {
+            let n = cmd as usize;
+            let chunk = delta
+                .get(pos..pos + n)
+                .ok_or_else(|| Error::CorruptObject("truncated delta INSERT data".to_owned()))?;
+            pos += n;
+            result_len = result_len
+                .checked_add(n)
+                .ok_or_else(|| Error::CorruptObject("delta result length overflow".to_owned()))?;
+            if !done {
+                let room = max_out.saturating_sub(out.len());
+                if room == 0 {
+                    if prefix_sufficient(out) {
+                        done = true;
+                    }
+                } else if chunk.len() <= room {
+                    out.extend_from_slice(chunk);
+                    if out.len() >= max_out && prefix_sufficient(out) {
+                        done = true;
+                        out.truncate(max_out);
+                    }
+                } else {
+                    out.extend_from_slice(&chunk[..room]);
+                    if prefix_sufficient(out) {
+                        done = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if result_len != dest_size {
+        return Err(Error::CorruptObject(format!(
+            "delta produced {result_len} bytes but expected {dest_size}"
+        )));
+    }
+
+    Ok(())
+}
+
 /// Uncompressed size of the object produced when `delta` is applied to its base.
 ///
 /// Reads only the second varint in the Git binary delta stream (after `src_size`).
@@ -2247,6 +2388,26 @@ mod tests {
 
         let result = apply_delta(base, &delta).unwrap();
         assert_eq!(result, b"hello world");
+    }
+
+    #[test]
+    fn test_apply_delta_prefix_into_stops_after_prefix() {
+        let base = b"author A <a@b.com> 1 +0000\n\nbody";
+        let mut delta = Vec::new();
+        delta.push(base.len() as u8);
+        delta.push(base.len() as u8);
+        delta.push(0x80 | 0x01 | 0x10);
+        delta.push(0u8);
+        delta.push(base.len() as u8);
+
+        let mut out = Vec::new();
+        apply_delta_prefix_into(&mut out, base, &delta, 32, |buf| {
+            buf.windows(7).any(|w| w == b"author ")
+        })
+        .unwrap();
+        assert!(out.len() <= 32);
+        assert!(out.starts_with(b"author A"));
+        assert_eq!(apply_delta(base, &delta).unwrap(), base);
     }
 
     #[test]
