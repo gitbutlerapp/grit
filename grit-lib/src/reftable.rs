@@ -377,6 +377,18 @@ pub struct LogRecord {
     pub message: String,
 }
 
+/// Whether `record` is an on-disk reflog deletion tombstone (log key value type 0).
+#[must_use]
+pub(crate) fn log_record_is_deletion(record: &LogRecord) -> bool {
+    record.name.is_empty()
+        && record.email.is_empty()
+        && record.message.is_empty()
+        && record.time_seconds == 0
+        && record.tz_offset == 0
+        && record.old_id.is_zero()
+        && record.new_id.is_zero()
+}
+
 /// Write options for reftable creation.
 #[derive(Debug, Clone)]
 pub struct WriteOptions {
@@ -579,9 +591,13 @@ impl EncRecord<'_> {
                 RefValue::Val2(..) => VALUE_TWO_OID,
                 RefValue::Symref(_) => VALUE_SYMREF,
             },
-            // grit only writes reflog updates (value_type 1), never the
-            // explicit-deletion form (value_type 0).
-            EncRecord::Log(_) => 1,
+            EncRecord::Log(l) => {
+                if log_record_is_deletion(l) {
+                    VALUE_DELETION
+                } else {
+                    1
+                }
+            }
             EncRecord::Obj { offsets, .. } => {
                 if !offsets.is_empty() && offsets.len() < 8 {
                     offsets.len() as u8
@@ -612,6 +628,9 @@ impl EncRecord<'_> {
                 }
             }
             EncRecord::Log(l) => {
+                if log_record_is_deletion(l) {
+                    return;
+                }
                 out.extend_from_slice(l.old_id.as_bytes());
                 out.extend_from_slice(l.new_id.as_bytes());
                 put_varint(l.name.len() as u64, out);
@@ -2644,19 +2663,62 @@ impl ReftableStack {
         table_names: &[String],
         refname: &str,
     ) -> Result<Vec<LogRecord>> {
+        let Some(min_update_index) = self.min_log_update_index_for_live_ref(refname)? else {
+            return Ok(Vec::new());
+        };
         let mut logs = Vec::new();
         for table_name in table_names {
             let path = self.reftable_dir.join(table_name);
             let data = fs::read(&path).map_err(Error::Io)?;
             let reader = ReftableReader::new(data)?;
             for log in reader.read_logs()? {
-                if log.refname == refname {
+                if log.refname == refname
+                    && log.update_index >= min_update_index
+                    && !log_record_is_deletion(&log)
+                {
                     logs.push(log);
                 }
             }
         }
         logs.sort_by_key(|a| std::cmp::Reverse(a.update_index));
         Ok(logs)
+    }
+
+    /// Lowest update index for reflog lines that belong to the ref's current life.
+    ///
+    /// After a deletion record, older log lines are ignored until the ref is created
+    /// again. Returns `None` when the ref is absent or deleted.
+    fn min_log_update_index_for_live_ref(&self, refname: &str) -> Result<Option<u64>> {
+        let names = self.table_names_for_read()?;
+        let cached = cached_stack_tables_for_names(&self.reftable_dir, &names)?;
+        let readers = self.stack_readers(&cached)?;
+        let mut events = Vec::new();
+        for reader in &readers {
+            reader.for_each_ref(|rec| {
+                if rec.name == refname {
+                    events.push(rec.clone());
+                }
+                ControlFlow::<()>::Continue(())
+            })?;
+        }
+        if events.is_empty() {
+            return Ok(Some(0));
+        }
+        events.sort_by_key(|rec| rec.update_index);
+        let mut min_log = 0u64;
+        let mut live = false;
+        for rec in events {
+            match rec.value {
+                RefValue::Deletion => {
+                    live = false;
+                    min_log = rec.update_index.saturating_add(1);
+                }
+                RefValue::Symref(_) | RefValue::Val1(_) | RefValue::Val2(..) => {
+                    live = true;
+                }
+            }
+        }
+        Ok(live.then_some(min_log))
     }
 
     /// Replace all log records for one ref and compact the stack.

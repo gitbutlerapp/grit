@@ -1,7 +1,7 @@
 //! Reftable-backed [`super::RefStore`] over [`crate::reftable::ReftableStack`].
 
 use std::borrow::ToOwned;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::ops::ControlFlow;
@@ -19,7 +19,7 @@ use crate::reftable::{
 };
 use crate::repo::init_repository;
 
-use super::apply::{apply_reflog_rename, ref_change_target, RefBatchState};
+use super::apply::{apply_reflog_rename, RefBatchState};
 use super::backend::{check_transaction_updates, partition_updates_allowing_failures};
 use super::error::RefStoreError;
 use super::semantics::{
@@ -69,7 +69,6 @@ struct LockedStackBatch {
     stack: ReftableStack,
     lock: TablesListLock,
     updates: Vec<ReftableTransactionUpdate>,
-    deleted_reflogs: Vec<String>,
     opts: WriteOptions,
 }
 
@@ -439,49 +438,18 @@ fn log_record_from_update(
     })
 }
 
-fn logical_reflog_names_touched(
-    git_dir: &Path,
-    refs: &BTreeMap<String, RawRef>,
-    update: &RefUpdate,
-) -> Vec<String> {
-    let mut names = vec![update.name.clone()];
-    if let Some(target_name) = deref_reflog_target(refs, update) {
-        let (target_store, _) = reftable_storage_location(git_dir, &target_name);
-        let (update_store, _) = reftable_storage_location(git_dir, &update.name);
-        if target_store == update_store {
-            names.push(target_name);
-        }
-    }
-    names
-}
-
 fn build_reftable_updates_for_stack(
     git_dir: &Path,
     refs: &BTreeMap<String, RawRef>,
     updates: &[RefUpdate],
-) -> StoreResult<(Vec<ReftableTransactionUpdate>, Vec<String>)> {
+) -> StoreResult<Vec<ReftableTransactionUpdate>> {
     let mut trial = refs.clone();
     let mut ref_values: BTreeMap<String, Option<RefValue>> = BTreeMap::new();
     let mut expected_old_for_ref: BTreeMap<String, Option<ObjectId>> = BTreeMap::new();
     let mut log_updates: Vec<ReftableTransactionUpdate> = Vec::new();
-    let mut clear_reflog: HashMap<String, bool> = HashMap::new();
 
     for update in updates {
         let ref_delete = !update.flags.log_only && update.new_value.is_none();
-        if ref_delete {
-            let snapshot = RefBatchState {
-                refs: trial.clone(),
-                reflogs: BTreeMap::new(),
-            };
-            if let Ok(Some(name)) = ref_change_target(&snapshot, update) {
-                clear_reflog.insert(name, true);
-            }
-        }
-        if update.reflog.is_some() && !ref_delete {
-            for name in logical_reflog_names_touched(git_dir, &trial, update) {
-                clear_reflog.insert(name, false);
-            }
-        }
         let target = reftable_write_target(&trial, git_dir, update)?;
         let value = target.value.clone();
         let old_oid = reflog_old_oid_before(&trial, refs, update);
@@ -531,27 +499,7 @@ fn build_reftable_updates_for_stack(
         });
     }
     out.extend(log_updates);
-    let deleted_reflogs = clear_reflog
-        .into_iter()
-        .filter(|(_, clear)| *clear)
-        .map(|(name, _)| name)
-        .collect();
-    Ok((out, deleted_reflogs))
-}
-
-fn clear_reflog_on_locked_stack(
-    git_dir: &Path,
-    stack: &mut ReftableStack,
-    logical_name: &str,
-) -> StoreResult<()> {
-    let (store_git_dir, storage_refname) = reftable_storage_location(git_dir, logical_name);
-    let mut markers = read_empty_reflog_markers(&store_git_dir);
-    markers.remove(&storage_refname);
-    write_empty_reflog_markers(&store_git_dir, &markers)
-        .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-    stack
-        .replace_logs_for_ref(&storage_refname, &[])
-        .map_err(|e| RefStoreError::Corrupt(e.to_string()))
+    Ok(out)
 }
 
 impl ReftableRefStore {
@@ -678,15 +626,13 @@ impl RefStore for ReftableRefStore {
                 group
             };
             let refs = snapshot.refs;
-            let (rt_updates, deleted_reflogs) =
-                build_reftable_updates_for_stack(&self.git_dir, &refs, &group)?;
+            let rt_updates = build_reftable_updates_for_stack(&self.git_dir, &refs, &group)?;
             let opts = self.write_options_for(&store_git_dir);
             stacks.push(LockedStackBatch {
                 _store_git_dir: store_git_dir,
                 stack,
                 lock,
                 updates: rt_updates,
-                deleted_reflogs,
                 opts,
             });
         }
@@ -785,6 +731,9 @@ impl RefStore for ReftableRefStore {
             refs.insert(log.refname);
         }
         for name in refs {
+            if stack.read_logs_for_ref(&name)?.is_empty() {
+                continue;
+            }
             if f(&name).is_break() {
                 break;
             }
@@ -850,9 +799,6 @@ impl PreparedRefTransaction for ReftablePrepared<'_> {
                     .stack
                     .maybe_auto_compact(&stack_batch.opts)
                     .map_err(map_reftable_err)?;
-            }
-            for name in stack_batch.deleted_reflogs {
-                clear_reflog_on_locked_stack(&self.store.git_dir, &mut stack_batch.stack, &name)?;
             }
             for rename in &batch.reflog_renames {
                 let (store_git_dir, _) =
