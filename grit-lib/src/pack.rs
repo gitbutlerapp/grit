@@ -6406,40 +6406,89 @@ mod tests {
             .stdout;
         let oid = ObjectId::from_hex(std::str::from_utf8(&oid_hex).unwrap().trim())
             .expect("parse oid");
-        odb.read(&oid).expect("warm pack hint");
         let indexes = read_local_pack_indexes(&objects).expect("indexes");
-        let (idx, offset) = indexes
+        let (idx_arc, offset) = indexes
             .iter()
             .find_map(|idx| {
                 idx.find_offset(&oid)
                     .ok()
                     .flatten()
-                    .map(|offset| (idx, offset))
+                    .map(|offset| (Arc::new(idx.clone()), offset))
             })
             .expect("oid in a pack");
-        let mut bytes = std::fs::read(&idx.pack_path).expect("read pack");
-        let flip_at = (offset as usize + 8).min(bytes.len().saturating_sub(1));
-        bytes[flip_at] ^= 0x55;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&idx.pack_path, std::fs::Permissions::from_mode(0o644))
-                .expect("chmod pack");
-        }
-        std::fs::write(&idx.pack_path, &bytes).expect("corrupt pack");
-        odb.invalidate_packs();
-        let err = odb.read(&oid).expect_err("read after corrupt");
-        assert!(
-            matches!(err, Error::CorruptPackedObject { .. }),
-            "read: {err:?}"
-        );
-        let err = odb
-            .read_into(&oid, &mut Vec::new())
-            .expect_err("read_into after corrupt");
-        assert!(
-            matches!(err, Error::CorruptPackedObject { .. }),
-            "read_into: {err:?}"
-        );
+        let corrupt_pack = |pack_path: &Path| {
+            let mut bytes = std::fs::read(pack_path).expect("read pack");
+            let flip_at = (offset as usize + 8).min(bytes.len().saturating_sub(1));
+            bytes[flip_at] ^= 0x55;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(pack_path, std::fs::Permissions::from_mode(0o644))
+                    .expect("chmod pack");
+            }
+            std::fs::write(pack_path, &bytes).expect("corrupt pack");
+        };
+        let assert_warm_hint = |label: &str| {
+            let hint = pack_cache::hinted_pack_index(&objects)
+                .unwrap_or_else(|| panic!("{label}: pack hint must be warm"));
+            assert_eq!(
+                hint.pack_path, idx_arc.pack_path,
+                "{label}: hint must target the corrupted pack"
+            );
+        };
+        let reseed_hint = || pack_cache::remember_pack_hit(&objects, &idx_arc);
+
+        odb.with_pack_read_context(|| {
+            odb.read(&oid).expect("warm pack hint");
+            assert_warm_hint("after warm read");
+
+            corrupt_pack(&idx_arc.pack_path);
+            assert!(
+                pack_cache::revalidate_stale_pack_bytes(&idx_arc.pack_path).expect("revalidate"),
+                "corrupt pack bytes must be observable in cache"
+            );
+            reseed_hint();
+            assert_warm_hint("before try_read_from_hinted_pack");
+
+            let hinted = pack_cache::try_read_from_hinted_pack(&objects, &oid)
+                .expect("hinted pack read must not propagate raw zlib");
+            assert!(
+                hinted.is_none(),
+                "damaged hinted read must fall through to full lookup"
+            );
+            assert_warm_hint("before odb.read after hinted shortcut");
+
+            let err = odb.read(&oid).expect_err("read after corrupt hinted miss");
+            assert!(
+                matches!(err, Error::CorruptPackedObject { .. }),
+                "read: {err:?}"
+            );
+
+            reseed_hint();
+            assert_warm_hint("before try_read_from_hinted_pack_into");
+
+            let mut buf = Vec::new();
+            let hinted_into = pack_cache::try_read_from_hinted_pack_into(
+                &objects,
+                &oid,
+                true,
+                &mut buf,
+            )
+            .expect("hinted pack read_into must not propagate raw zlib");
+            assert!(
+                hinted_into.is_none(),
+                "damaged hinted read_into must fall through to full lookup"
+            );
+            assert_warm_hint("before odb.read_into after hinted shortcut");
+
+            let err = odb
+                .read_into(&oid, &mut Vec::new())
+                .expect_err("read_into after corrupt hinted miss");
+            assert!(
+                matches!(err, Error::CorruptPackedObject { .. }),
+                "read_into: {err:?}"
+            );
+        });
     }
 
     #[test]
