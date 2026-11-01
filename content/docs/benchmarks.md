@@ -63,6 +63,35 @@ Run time moved within noise. Interleaved direct runs (prepare-free, 200 to 500 p
   --min-runs 20 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-status-clean-10k-6351-after.json
 ```
 
+## Packing refs merges into packed-refs in one pass (2026-11-01)
+
+`gc/pack-refs@synth-10k` packs one new loose tag into a `packed-refs` file of 935 records (`grit gc pack-refs`, against `git pack-refs`). On the `dist` build grit took 3.30 ms and 10.5 MB against Git's 1.72 ms and 7.1 MB. The files backend validated `packed-refs`, discarded the result, then parsed the file a second time into a `HashMap<String, _>`, copied and sorted every name as an owned `String`, and re-encoded every object id to write the file back. To decide whether each loose ref needed a peel line it inflated the whole object it named, through a 256 KiB scratch buffer that was mapped and unmapped on every run, and the two lock timeouts loaded the configuration from disk twice more.
+
+Packing now collects the loose candidates first, using the directory entries' types instead of two `stat` calls per entry and a header-only kind lookup instead of a full read. It then parses `packed-refs` once, into records that borrow their names from the file bytes, and merges the sorted loose refs in by name. A file that is not sorted, or repeats a name, is still sorted with the last record winning. The `packed-refs` lock is now taken before the file is read, as Git does, so a concurrent rewrite cannot be lost between the read and the rename, and the lock timeouts come from the repository's loaded configuration. Measured directly with 200 alternating spawns on a `release` build, `gc pack-refs` went from 2.7 ms to 2.3 ms (Git 1.5 ms), with 30% fewer page faults and system time down from 1.1 ms to 0.7 ms.
+
+What remains of the gap is mostly process start-up, which every command pays: `grit --version` alone costs about 1.2 ms and 5.4 MB on `dist`, most of it the copy-on-write faults on `.data.rel.ro` described in [the start-up relocation study](benchmarking.md#startup-relocation-comparison). Pack-refs code is also not part of the [hot text layout](benchmarking.md#hot-text-layout), whose workloads do not include `gc`, so it faults in about 13 windows of plain `.text` that `--version` does not touch.
+
+Rows from `grit-bench daily` on `dist` builds against the system `git` in one sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0. "base" is `3344230ec`. Times are medians of all samples from two alternating rounds (20 runs per round; the clone, `gc/default` and `remote/*` rows get fewer within the time budget), and peak RSS is the median of the rounds' peaks. Values are **milliseconds / MB**. Reports (first round): `daily-pack-refs-6454-before.json` → `daily-pack-refs-6454-after.json`.
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB | time vs git | RSS vs git |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `gc/pack-refs@synth-10k` | 1.72 / 7.1 | 3.30 / 10.5 | 2.85 / 10.4 | 1.91 → 1.65 | 1.48× → 1.46× |
+| `gc/default@synth-10k` | 345.11 / 49.7 | 276.94 / 50.4 | 270.14 / 50.8 | 0.80 → 0.78 | 1.01× → 1.02× |
+| `clone/bare@synth-10k` | 858.13 / 37.2 | 715.64 / 24.7 | 710.87 / 24.4 | 0.83 → 0.83 | 0.66× → 0.66× |
+| `clone/local@synth-10k` | 999.18 / 37.3 | 854.14 / 28.6 | 852.32 / 29.8 | 0.85 → 0.85 | 0.77× → 0.80× |
+| `clone/shallow-depth1@synth-10k` | 202.99 / 32.3 | 205.10 / 26.4 | 187.88 / 26.3 | 1.01 → 0.93 | 0.82× → 0.81× |
+| `branch/delete@many-refs` | 4.59 / 8.1 | 3.93 / 10.6 | 3.59 / 10.7 | 0.86 → 0.78 | 1.32× → 1.32× |
+| `tag/create@many-refs` | 1.56 / 7.7 | 2.44 / 10.6 | 2.59 / 10.9 | 1.56 → 1.66 | 1.37× → 1.41× |
+| `remote/remove@many-refs` | 831.93 / 10.1 | 217.77 / 23.7 | 219.39 / 23.8 | 0.26 → 0.26 | 2.34× → 2.35× |
+| `remote/rename@many-refs` | 56677.16 / 9.4 | 3549.41 / 83.4 | 3690.33 / 83.5 | 0.06 → 0.07 | 8.86× → 8.86× |
+
+Clones pack their imported refs through the same code, and ref deletions share the rewritten lock helper. The swings in the other rows are noise, checked directly. `grit tag` on the many-refs fixture measures 1.57 ms of task-clock with 333–334 page faults on both builds over 300 alternating runs. `remote rename` measures 4.05 s against 4.09 s when the after build runs first (run before-first, it reads 10% slower, because the fixture slows with every rename cycle). An HTTP clone of synth-10k has the same 6.25 MB heap peak on both builds, with 2,300 fewer allocations after, so the `clone/local` RSS step is in file-backed pages.
+
+```bash
+./target/dist/grit-bench daily --only gc/pack-refs@synth-10k,gc/default@synth-10k,clone/bare@synth-10k,clone/local@synth-10k,clone/shallow-depth1@synth-10k,branch/delete@many-refs,remote/remove@many-refs,remote/rename@many-refs,tag/create@many-refs \
+  --min-runs 20 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-pack-refs-6454-after.json
+```
+
 ## One-line log reads commits only through their subject (2026-11-01)
 
 `log/oneline-100@git-git` lists the last 100 commits of git.git one line each (`grit log --limit 100`), against `git log --oneline -100`. On the `dist` build grit took 3.50 ms against Git's 2.94 ms. The walk reads about 140 commits from the pack to order them by date, and inflated every one in full, keeping the bytes for the output rows. Those commits hold 115 KB of text, but a one-line row needs only the headers (parents and dates for the walk; author, date and change id for the row) and the subject: 40 KB. The other two thirds were message bodies inflated and then dropped.

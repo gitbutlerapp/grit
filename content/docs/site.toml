@@ -108,6 +108,8 @@ baseline = [
   "grit-utils/baselines/daily-status-clean-10k-6351-after.json",
   "grit-utils/baselines/daily-status-clean-10k-6351-related-before.json",
   "grit-utils/baselines/daily-status-clean-10k-6351-related-after.json",
+  "grit-utils/baselines/daily-pack-refs-6454-before.json",
+  "grit-utils/baselines/daily-pack-refs-6454-after.json",
   "grit-utils/baselines/daily-log-oneline-100-6310-before.json",
   "grit-utils/baselines/daily-log-oneline-100-6310-after.json",
   "grit-utils/baselines/daily-log-oneline-100-6310-headlines.json",
