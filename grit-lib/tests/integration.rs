@@ -261,6 +261,8 @@ mod checkout_replaced_top_level_dir_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "checkout_switch_away_invalid_index.rs"]
 mod checkout_switch_away_invalid_index;
+#[path = "clean_dir_mode_clean_tree_perf_git_compat.rs"]
+mod clean_dir_mode_clean_tree_perf_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "clean_untracked.rs"]
 mod clean_untracked;

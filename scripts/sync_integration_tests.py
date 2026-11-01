@@ -52,6 +52,7 @@ DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
     ("grit-lib", "rev_list_attr_pathspec"),
     ("grit-lib", "serve_upload_pack_advertise"),
     ("grit-lib", "status_index_refresh_race"),
+    ("grit-lib", "clean_dir_mode_clean_tree_perf_git_compat"),
 }
 MODULE_CFG_OVERRIDE: dict[tuple[str, str], str] = {
     ("grit-cli", "rebase_exec_interrupt"): "unix",
