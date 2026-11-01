@@ -575,6 +575,8 @@ pub(crate) mod pack_cache {
         indexes: Vec<Arc<PackIndex>>,
         midx_mtime: SystemTime,
         midx_pack_names: HashSet<String>,
+        /// True after [`idx_paths_on_disk`] matched the cached index set at [`Self::dir_mtime`].
+        idx_listing_verified: bool,
     }
 
     struct CachedIdx {
@@ -1058,6 +1060,7 @@ pub(crate) mod pack_cache {
                             indexes: Vec::new(),
                             midx_mtime: SystemTime::UNIX_EPOCH,
                             midx_pack_names: HashSet::new(),
+                            idx_listing_verified: true,
                         },
                     );
                 });
@@ -1097,6 +1100,7 @@ pub(crate) mod pack_cache {
                     indexes: out.clone(),
                     midx_mtime: midx_pack_names.0,
                     midx_pack_names: midx_pack_names.1,
+                    idx_listing_verified: false,
                 },
             );
         });
@@ -1212,39 +1216,51 @@ pub(crate) mod pack_cache {
         Ok(out)
     }
 
-    fn cached_dir_listing_stale(
-        pack_dir: &Path,
-        dir_mt: SystemTime,
-        cached: &CachedDir,
-    ) -> Result<bool> {
-        if cached.dir_mtime != dir_mt {
-            return Ok(true);
-        }
-        // Pack directory mtimes often have one-second resolution; external `git gc` / repack can
-        // replace `.idx` files without bumping the directory mtime (same wall-clock second).
-        let on_disk = idx_paths_on_disk(pack_dir)?;
-        let cached_paths: HashSet<PathBuf> = cached
-            .indexes
-            .iter()
-            .map(|idx| idx.idx_path.clone())
-            .collect();
-        Ok(on_disk != cached_paths)
-    }
-
     /// Re-scan `objects_dir`/`pack/` when its mtime changed since the cached listing (Git
     /// `reprepare_packed_git`), or when the set of pack index files no longer matches the
     /// cached listing. Returns true if the listing was refreshed.
     pub fn reprepare_dir_on_miss(objects_dir: &Path) -> Result<bool> {
         let pack_dir = objects_dir.join("pack");
         let dir_mt = dir_mtime(&pack_dir);
-        let needs_rescan =
-            crate::pack_store::PackStore::active_for_reads().with_catalog_read(|g| {
-                match g.by_dir.get(&pack_dir) {
-                    None => true,
-                    Some(c) => cached_dir_listing_stale(&pack_dir, dir_mt, c).unwrap_or(true),
+        let store = crate::pack_store::PackStore::active_for_reads();
+        enum ReprepareDecision {
+            Fresh,
+            Rescan,
+            VerifyIdxSet,
+        }
+        let decision = store.with_catalog_read(|g| match g.by_dir.get(&pack_dir) {
+            None => ReprepareDecision::Rescan,
+            Some(c) if c.dir_mtime != dir_mt => ReprepareDecision::Rescan,
+            Some(c) if c.idx_listing_verified => ReprepareDecision::Fresh,
+            Some(_) => ReprepareDecision::VerifyIdxSet,
+        });
+        match decision {
+            ReprepareDecision::Fresh => return Ok(false),
+            ReprepareDecision::Rescan => {
+                rescan_dir_indexes(objects_dir)?;
+                return Ok(true);
+            }
+            ReprepareDecision::VerifyIdxSet => {}
+        }
+        let cached_paths = store.with_catalog_read(|g| {
+            g.by_dir.get(&pack_dir).map(|c| {
+                c.indexes
+                    .iter()
+                    .map(|idx| idx.idx_path.clone())
+                    .collect::<HashSet<_>>()
+            })
+        });
+        let Some(cached_paths) = cached_paths else {
+            rescan_dir_indexes(objects_dir)?;
+            return Ok(true);
+        };
+        let on_disk = idx_paths_on_disk(&pack_dir)?;
+        if on_disk == cached_paths {
+            store.with_catalog(|g| {
+                if let Some(c) = g.by_dir.get_mut(&pack_dir) {
+                    c.idx_listing_verified = true;
                 }
             });
-        if !needs_rescan {
             return Ok(false);
         }
         rescan_dir_indexes(objects_dir)?;
@@ -6734,6 +6750,59 @@ mod tests {
             pack_cache::test_dir_rescan_count(&pack_dir),
             2,
             "miss path should re-scan when pack dir mtime changed"
+        );
+    }
+
+    #[test]
+    fn pack_added_same_pack_dir_mtime_found_on_miss() {
+        use crate::odb::Odb;
+
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        let pack_dir = objects.join("pack");
+        let (pack_a, oid_a, off_a) = single_blob_pack(b"pack-a");
+        install_synthetic_pack(&objects, "first", &pack_a, &[(oid_a, off_a)]);
+
+        let odb = Odb::new(&objects);
+        odb.read(&oid_a).expect("warm odb cache");
+
+        let saved_mt = filetime::FileTime::from_last_modification_time(
+            &std::fs::metadata(&pack_dir).expect("pack dir meta"),
+        );
+        let (pack_b, oid_b, off_b) = single_blob_pack(b"pack-b-same-second");
+        install_synthetic_pack_no_clear(&objects, "second", &pack_b, &[(oid_b, off_b)]);
+        filetime::set_file_mtime(&pack_dir, saved_mt).expect("restore pack dir mtime");
+
+        odb.read(&oid_b)
+            .expect("new pack visible after idx-set compare on miss");
+    }
+
+    #[test]
+    fn absent_object_misses_do_not_rescan_pack_dir() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        let pack_dir = objects.join("pack");
+        let (pack, oid, off) = single_blob_pack(b"cached-blob");
+        install_synthetic_pack(&objects, "only", &pack, &[(oid, off)]);
+        pack_cache::test_reset_dir_rescan_count(&pack_dir);
+
+        read_object_from_packs(&objects, &oid).expect("warm cache");
+        let after_warm = pack_cache::test_dir_rescan_count(&pack_dir);
+        let missing = ObjectId::from_hex("0000000000000000000000000000000000000001").expect("oid");
+        for _ in 0..128 {
+            assert!(matches!(
+                read_object_from_packs(&objects, &missing),
+                Err(Error::ObjectNotFound(_))
+            ));
+        }
+        assert_eq!(
+            pack_cache::test_dir_rescan_count(&pack_dir),
+            after_warm,
+            "absent oid misses must not re-scan the pack directory"
         );
     }
 

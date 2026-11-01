@@ -287,6 +287,8 @@ pub struct Odb {
     session_loose_reads: Arc<std::sync::Mutex<SessionLooseReads>>,
     /// Parsed or raw trees reused for the lifetime of this [`Odb`] handle (Git object cache).
     session_tree_entries: Arc<Mutex<SessionTreeEntries>>,
+    /// Negative loose-read caches keyed by `objects/` directory (shared across [`LooseStore`] opens).
+    loose_negative_caches: Arc<Mutex<HashMap<PathBuf, store::SharedLooseNegativeCache>>>,
 }
 
 /// Largest loose object [`Odb::read_unless_larger`] keeps in the session read cache. Its callers
@@ -562,6 +564,7 @@ impl Odb {
             attached_commit_graph: None,
             session_loose_reads: Arc::new(Mutex::new(SessionLooseReads::default())),
             session_tree_entries: Arc::new(Mutex::new(SessionTreeEntries::default())),
+            loose_negative_caches: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -616,6 +619,7 @@ impl Odb {
             attached_commit_graph: None,
             session_loose_reads: Arc::new(Mutex::new(SessionLooseReads::default())),
             session_tree_entries: Arc::new(Mutex::new(SessionTreeEntries::default())),
+            loose_negative_caches: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -947,6 +951,49 @@ impl Odb {
             break;
         }
         Arc::new(Vec::new())
+    }
+
+    /// Object directories whose loose and pack stores participate in repository fsck.
+    ///
+    /// Includes the primary `objects/` path and file/env alternates when enabled.
+    pub(crate) fn local_store_validation_object_dirs(&self) -> Vec<PathBuf> {
+        if !self.uses_files_primary() {
+            return Vec::new();
+        }
+        let mut dirs = Vec::new();
+        if let Some(primary) = self.files_objects_dir() {
+            dirs.push(primary.to_path_buf());
+        }
+        if self.alternates_enabled {
+            for alt in self.file_alternate_dirs_snapshot().iter() {
+                if !dirs.iter().any(|d| d == alt) {
+                    dirs.push(alt.clone());
+                }
+            }
+            for alt in self.env_alternate_dirs_snapshot().iter() {
+                if !dirs.iter().any(|d| d == alt) {
+                    dirs.push(alt.clone());
+                }
+            }
+        }
+        dirs
+    }
+
+    fn loose_negative_cache_for(&self, objects_dir: &Path) -> store::SharedLooseNegativeCache {
+        let key = objects_dir.to_path_buf();
+        if let Ok(guard) = self.loose_negative_caches.lock() {
+            if let Some(hit) = guard.get(&key) {
+                return Arc::clone(hit);
+            }
+        }
+        let mut guard = self
+            .loose_negative_caches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard
+            .entry(key)
+            .or_insert_with(|| Arc::new(Mutex::new(store::LooseNegativeCache::default())))
+            .clone()
     }
 
     #[cfg(test)]
@@ -2292,18 +2339,20 @@ impl Odb {
 
     fn local_loose(&self) -> Result<LooseStore> {
         self.require_files_primary("loose_write")?;
-        Ok(LooseStore::new(
+        Ok(LooseStore::new_with_negative_cache(
             self.objects_dir.clone(),
             self.hash_algo(),
             self.loose_compression()?,
+            self.loose_negative_cache_for(&self.objects_dir),
         ))
     }
 
     fn loose_at(&self, objects_dir: &Path) -> Result<LooseStore> {
-        Ok(LooseStore::new(
+        Ok(LooseStore::new_with_negative_cache(
             objects_dir.to_path_buf(),
             self.hash_algo(),
             self.loose_compression()?,
+            self.loose_negative_cache_for(objects_dir),
         ))
     }
 
@@ -3224,6 +3273,20 @@ impl Odb {
     pub fn enumerate_local_loose_objects(&self) -> Result<Vec<(ObjectId, PathBuf)>> {
         let primary = self.primary()?;
         let loose = primary.loose_store();
+        let mut out = Vec::new();
+        loose.for_each_object(&mut |oid| {
+            out.push((*oid, loose.object_path(oid)));
+            ControlFlow::Continue(())
+        })?;
+        Ok(out)
+    }
+
+    /// Enumerate loose objects under `objects_dir` as `(oid, path)`.
+    pub(crate) fn enumerate_loose_objects_at(
+        &self,
+        objects_dir: &Path,
+    ) -> Result<Vec<(ObjectId, PathBuf)>> {
+        let loose = self.loose_at(objects_dir)?;
         let mut out = Vec::new();
         loose.for_each_object(&mut |oid| {
             out.push((*oid, loose.object_path(oid)));
@@ -5663,6 +5726,57 @@ mod tests {
             odb.hot_path_metrics().loose_path_open_attempts(),
             0,
             "packed objects must not attempt a loose-path open"
+        );
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn alternate_packed_reads_do_not_rescan_local_pack_dir() {
+        use crate::pack::{clear_pack_cache, pack_cache};
+
+        let upstream = TempDir::new().unwrap();
+        git_in(upstream.path(), &["init", "-q", "-b", "main"]);
+        git_in(upstream.path(), &["config", "user.email", "t@example.com"]);
+        git_in(upstream.path(), &["config", "user.name", "T"]);
+        fs::write(
+            upstream.path().join("payload.txt"),
+            b"alternate-only-in-upstream",
+        )
+        .unwrap();
+        git_in(upstream.path(), &["add", "payload.txt"]);
+        git_in(upstream.path(), &["commit", "-m", "seed"]);
+        git_in(upstream.path(), &["repack", "-a", "-d"]);
+        let oid = git_rev_parse_oid(upstream.path(), "HEAD");
+
+        let layout = TempDir::new().unwrap();
+        git_in(
+            layout.path(),
+            &[
+                "clone",
+                "-q",
+                "--shared",
+                upstream.path().to_str().unwrap(),
+                "shared",
+            ],
+        );
+        let objects = layout.path().join("shared/.git/objects");
+        let local_pack = objects.join("pack");
+
+        clear_pack_cache();
+        let odb = Odb::new(&objects);
+        pack_cache::test_reset_dir_rescan_count(&local_pack);
+        odb.read(&oid).expect("alternate read");
+        let after_first = pack_cache::test_dir_rescan_count(&local_pack);
+        for _ in 0..512 {
+            odb.read_info(&oid).expect("repeat read_info");
+        }
+        assert_eq!(
+            pack_cache::test_dir_rescan_count(&local_pack),
+            after_first,
+            "alternate hits must not re-list the local pack directory"
         );
     }
 
