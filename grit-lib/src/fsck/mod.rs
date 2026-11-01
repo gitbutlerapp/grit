@@ -42,8 +42,8 @@ use crate::index::MODE_GITLINK;
 use crate::midx::verify_midx;
 use crate::objects::{
     oid_hash_map, oid_hash_set, oid_hash_set_from, parse_commit,
-    parse_commit_tree_and_parents_lenient, parse_tag, HashAlgo, ObjectId, ObjectKind, OidHashMap,
-    OidHashSet, TreeEntryRef, TreeRefIter,
+    parse_commit_tree_and_parents_lenient, parse_tag, parse_tree_with_oid_len, HashAlgo, ObjectId,
+    ObjectKind, OidHashMap, OidHashSet, TreeEntryRef, TreeRefIter,
 };
 use crate::odb::Odb;
 use crate::pack::{prepare_pack_for_object_fsck, PackFsckTrailerIssue};
@@ -466,18 +466,21 @@ pub fn fsck(
     let mut objects_checked = 0usize;
     let mut store_validated: OidHashSet = oid_hash_set();
     let mut store_links: OidHashMap<ValidatedObjectLinks> = oid_hash_map();
+    let mut store_referenced: OidHashSet = oid_hash_set();
 
     if !options.connectivity_only {
-        let (loose_count, loose_validated, loose_links) =
+        let (loose_count, loose_validated, loose_links, loose_referenced) =
             verify_loose_objects(repo, &config, options.strict, &mut issues, progress, cancel)?;
         objects_checked += loose_count;
         store_validated.extend(loose_validated);
         store_links.extend(loose_links);
-        let (pack_count, pack_validated, pack_links) =
+        store_referenced.extend(loose_referenced);
+        let (pack_count, pack_validated, pack_links, pack_referenced) =
             verify_pack_objects(repo, &config, options.strict, &mut issues, progress, cancel)?;
         objects_checked += pack_count;
         store_validated.extend(pack_validated);
         store_links.extend(pack_links);
+        store_referenced.extend(pack_referenced);
     }
 
     verify_midx_and_commit_graph(repo, &mut issues)?;
@@ -544,6 +547,9 @@ pub fn fsck(
         })?;
         for oid in all_objects {
             if reachable.contains(&oid) {
+                continue;
+            }
+            if store_referenced.contains(&oid) {
                 continue;
             }
             if let Ok(info) = odb.read_info_without_fetch(&oid) {
@@ -657,15 +663,50 @@ fn validated_links_for(
     }
 }
 
+fn record_referenced_from_object(
+    kind: ObjectKind,
+    data: &[u8],
+    algo: HashAlgo,
+    referenced: &mut OidHashSet,
+) {
+    match kind {
+        ObjectKind::Commit => {
+            if let Some(ValidatedObjectLinks::Commit { tree, parents }) =
+                validated_links_for(kind, data, algo)
+            {
+                referenced.insert(tree);
+                referenced.extend(parents.iter().copied());
+            }
+        }
+        ObjectKind::Tag => {
+            if let Some(ValidatedObjectLinks::Tag { object, .. }) =
+                validated_links_for(kind, data, algo)
+            {
+                referenced.insert(object);
+            }
+        }
+        ObjectKind::Tree => {
+            if let Ok(entries) = parse_tree_with_oid_len(data, algo.hex_len()) {
+                for entry in entries {
+                    referenced.insert(entry.oid);
+                }
+            }
+        }
+        ObjectKind::Blob => {}
+    }
+}
+
 fn record_validated_object(
     validated: &mut OidHashSet,
     links: &mut OidHashMap<ValidatedObjectLinks>,
+    referenced: &mut OidHashSet,
     oid: ObjectId,
     kind: ObjectKind,
     data: &[u8],
     algo: HashAlgo,
 ) {
     validated.insert(oid);
+    record_referenced_from_object(kind, data, algo, referenced);
     if let Some(parsed) = validated_links_for(kind, data, algo) {
         links.insert(oid, parsed);
     }
@@ -761,6 +802,7 @@ fn apply_loose_check_outcome(
     issues: &mut Vec<FsckIssue>,
     validated: &mut OidHashSet,
     links: &mut OidHashMap<ValidatedObjectLinks>,
+    referenced: &mut OidHashSet,
     dot: &mut DotFsckTracker,
 ) {
     match outcome {
@@ -768,7 +810,9 @@ fn apply_loose_check_outcome(
             obj,
             fsck_err: None,
         } => {
-            record_validated_object(validated, links, *oid, obj.kind, &obj.data, algo);
+            record_validated_object(
+                validated, links, referenced, *oid, obj.kind, &obj.data, algo,
+            );
             apply_dot_checks(dot, issues, config, strict, oid, obj.kind, &obj.data);
         }
         LooseCheckOutcome::Verified {
@@ -777,7 +821,9 @@ fn apply_loose_check_outcome(
         } => {
             push_bad_object(issues, config, strict, *oid, error.clone());
             if object_fsck_allows_link_cache(&error, config, strict) {
-                record_validated_object(validated, links, *oid, obj.kind, &obj.data, algo);
+                record_validated_object(
+                    validated, links, referenced, *oid, obj.kind, &obj.data, algo,
+                );
                 apply_dot_checks(dot, issues, config, strict, oid, obj.kind, &obj.data);
             }
         }
@@ -799,13 +845,26 @@ fn verify_loose_objects(
     issues: &mut Vec<FsckIssue>,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> Result<(usize, OidHashSet, OidHashMap<ValidatedObjectLinks>)> {
+) -> Result<(
+    usize,
+    OidHashSet,
+    OidHashMap<ValidatedObjectLinks>,
+    OidHashSet,
+)> {
     let odb = repo.odb();
     if !odb.uses_files_primary() {
         return verify_custom_primary_objects(repo, config, strict, issues, progress, cancel);
     }
     let algo = odb.hash_algo();
-    let loose = odb.enumerate_local_loose_objects()?;
+    let primary = odb.files_objects_dir().map(|p| p.to_path_buf());
+    let mut loose = Vec::new();
+    for objects_dir in odb.local_store_validation_object_dirs() {
+        if primary.as_ref() == Some(&objects_dir) {
+            loose.extend(odb.enumerate_local_loose_objects()?);
+        } else {
+            loose.extend(odb.enumerate_loose_objects_at(&objects_dir)?);
+        }
+    }
     let total = loose.len();
     progress.start(ProgressPhase::IndexingObjects, Some(total as u64));
     let par_opts: ParallelOptions = repo.thread_policy().resolve(ParallelOp::IndexPack, config);
@@ -820,6 +879,7 @@ fn verify_loose_objects(
     let mut checked = 0usize;
     let mut validated = oid_hash_set();
     let mut links = oid_hash_map();
+    let mut referenced = oid_hash_set();
 
     let mut record_outcomes = |batch: &[(ObjectId, PathBuf)], outcomes: Vec<LooseCheckOutcome>| {
         for ((oid, _), outcome) in batch.iter().zip(outcomes) {
@@ -839,6 +899,7 @@ fn verify_loose_objects(
                 issues,
                 &mut validated,
                 &mut links,
+                &mut referenced,
                 &mut dot,
             );
         }
@@ -865,7 +926,7 @@ fn verify_loose_objects(
         push_dot_issue(issues, config, strict, pending);
     }
     progress.finish();
-    Ok((checked, validated, links))
+    Ok((checked, validated, links, referenced))
 }
 
 /// Store validation for a custom primary ([`crate::odb::OdbBuilder::primary`]): every object
@@ -880,7 +941,12 @@ fn verify_custom_primary_objects(
     issues: &mut Vec<FsckIssue>,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> Result<(usize, OidHashSet, OidHashMap<ValidatedObjectLinks>)> {
+) -> Result<(
+    usize,
+    OidHashSet,
+    OidHashMap<ValidatedObjectLinks>,
+    OidHashSet,
+)> {
     let odb = repo.odb();
     let algo = odb.hash_algo();
     let fsck_opts = FsckObjectOptions::new(algo);
@@ -893,6 +959,7 @@ fn verify_custom_primary_objects(
     progress.start(ProgressPhase::IndexingObjects, Some(oids.len() as u64));
     let mut validated = oid_hash_set();
     let mut links = oid_hash_map();
+    let mut referenced = oid_hash_set();
     let mut dot = DotFsckTracker::default();
     let mut checked = 0usize;
     for oid in oids {
@@ -954,14 +1021,22 @@ fn verify_custom_primary_objects(
                 continue;
             }
         }
-        record_validated_object(&mut validated, &mut links, oid, obj.kind, &obj.data, algo);
+        record_validated_object(
+            &mut validated,
+            &mut links,
+            &mut referenced,
+            oid,
+            obj.kind,
+            &obj.data,
+            algo,
+        );
         apply_dot_checks(&mut dot, issues, config, strict, &oid, obj.kind, &obj.data);
     }
     for pending in dot.finish_pending(odb)? {
         push_dot_issue(issues, config, strict, pending);
     }
     progress.finish();
-    Ok((checked, validated, links))
+    Ok((checked, validated, links, referenced))
 }
 
 fn pack_object_read_issue(oid: ObjectId, err: Error) -> FsckIssue {
@@ -1046,6 +1121,7 @@ struct PackObjectFacts {
     fsck_error: Option<FsckError>,
     links: Option<ValidatedObjectLinks>,
     tree_dot: Option<Box<TreeDotFacts>>,
+    child_refs: Vec<ObjectId>,
 }
 
 /// `.gitmodules` / `.gitattributes` findings from one tree's entries.
@@ -1076,10 +1152,13 @@ impl PackObjectFacts {
                 })
             })
             .flatten();
+        let mut child_refs = oid_hash_set();
+        record_referenced_from_object(kind, data, opts.hash_algo, &mut child_refs);
         Self {
             fsck_error: fsck_object(kind, data, opts).err(),
             links: validated_links_for(kind, data, opts.hash_algo),
             tree_dot,
+            child_refs: child_refs.into_iter().collect(),
         }
     }
 }
@@ -1091,34 +1170,45 @@ fn verify_pack_objects(
     issues: &mut Vec<FsckIssue>,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> Result<(usize, OidHashSet, OidHashMap<ValidatedObjectLinks>)> {
+) -> Result<(
+    usize,
+    OidHashSet,
+    OidHashMap<ValidatedObjectLinks>,
+    OidHashSet,
+)> {
     let odb = repo.odb();
     let algo = odb.hash_algo();
     let fsck_opts = FsckObjectOptions::new(algo);
-    let Some(objects_dir) = odb.files_objects_dir() else {
-        return Ok((0, oid_hash_set(), oid_hash_map()));
-    };
-    let pack_dir = objects_dir.join("pack");
-    if !pack_dir.is_dir() {
-        return Ok((0, oid_hash_set(), oid_hash_map()));
+    let object_dirs = odb.local_store_validation_object_dirs();
+    if object_dirs.is_empty() {
+        return Ok((0, oid_hash_set(), oid_hash_map(), oid_hash_set()));
     }
-    let packs: Vec<PathBuf> = fs::read_dir(&pack_dir)
-        .map_err(Error::Io)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "idx"))
-        .collect();
-    progress.start(ProgressPhase::IndexingObjects, Some(packs.len() as u64));
+    let mut pack_jobs = Vec::new();
+    for objects_dir in object_dirs {
+        let pack_dir = objects_dir.join("pack");
+        if !pack_dir.is_dir() {
+            continue;
+        }
+        let packs: Vec<PathBuf> = fs::read_dir(&pack_dir)
+            .map_err(Error::Io)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "idx"))
+            .collect();
+        pack_jobs.extend(packs);
+    }
+    progress.start(ProgressPhase::IndexingObjects, Some(pack_jobs.len() as u64));
     let par_opts: ParallelOptions = repo.thread_policy().resolve(ParallelOp::IndexPack, config);
     let threads = par_opts.parallelism().threads();
     let cancel_watch = cancel_watch_arc(cancel);
     let mut checked = 0usize;
     let mut validated = oid_hash_set();
     let mut links = oid_hash_map();
+    let mut referenced = oid_hash_set();
     // Blob-side `.gitmodules` / `.gitattributes` checks run in `finish_pending`, once every
     // tree has registered the blobs it names.
     let mut dot = DotFsckTracker::default();
-    for (i, idx_path) in packs.iter().enumerate() {
+    for (i, idx_path) in pack_jobs.iter().enumerate() {
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
@@ -1176,6 +1266,7 @@ fn verify_pack_objects(
                         }
                     }
                     validated.insert(oid);
+                    referenced.extend(facts.child_refs.iter().copied());
                     if let Some(object_links) = facts.links {
                         links.insert(oid, object_links);
                     }
@@ -1200,18 +1291,20 @@ fn verify_pack_objects(
         push_dot_issue(issues, config, strict, pending);
     }
     progress.finish();
-    Ok((checked, validated, links))
+    Ok((checked, validated, links, referenced))
 }
 
 fn verify_midx_and_commit_graph(repo: &Repository, issues: &mut Vec<FsckIssue>) -> Result<()> {
     let odb = repo.odb();
-    if let Some(objects_dir) = odb.files_objects_dir() {
+    for objects_dir in odb.local_store_validation_object_dirs() {
         let pack_dir = objects_dir.join("pack");
         if pack_dir.join("multi-pack-index").is_file() {
             if let Err(errs) = verify_midx(&pack_dir) {
                 issues.push(FsckIssue::MidxInvalid { details: errs });
             }
         }
+    }
+    if let Some(objects_dir) = odb.files_objects_dir() {
         match CommitGraphChain::try_load(objects_dir) {
             Ok(None) => {}
             Ok(Some(_)) => {

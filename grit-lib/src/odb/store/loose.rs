@@ -1,10 +1,13 @@
 //! Loose-object storage under `objects/xx/<suffix>` (zlib-compressed Git objects).
 
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
 
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -21,6 +24,94 @@ use crate::zlib_inflate::{
 };
 /// Payload bytes read from a source stream per step when writing a loose object.
 const STREAM_CHUNK: usize = 128 * 1024;
+
+struct LooseNegativeCache {
+    objects_mtime: SystemTime,
+    absent_paths: HashSet<PathBuf>,
+    absent_fanout: HashSet<String>,
+}
+
+fn loose_negative_cache() -> &'static Mutex<HashMap<PathBuf, LooseNegativeCache>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, LooseNegativeCache>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn objects_dir_mtime(objects_dir: &Path) -> SystemTime {
+    fs::metadata(objects_dir)
+        .and_then(|m| m.modified())
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+}
+
+fn loose_negative_cache_entry(
+    objects_dir: &Path,
+) -> std::sync::MutexGuard<'static, HashMap<PathBuf, LooseNegativeCache>> {
+    let mut guard = loose_negative_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let mtime = objects_dir_mtime(objects_dir);
+    let key = objects_dir.to_path_buf();
+    match guard.get(&key) {
+        Some(entry) if entry.objects_mtime == mtime => {}
+        _ => {
+            guard.insert(
+                key,
+                LooseNegativeCache {
+                    objects_mtime: mtime,
+                    absent_paths: HashSet::new(),
+                    absent_fanout: HashSet::new(),
+                },
+            );
+        }
+    }
+    guard
+}
+
+fn loose_open_may_be_absent(objects_dir: &Path, path: &Path) -> bool {
+    let guard = loose_negative_cache_entry(objects_dir);
+    let Some(entry) = guard.get(&objects_dir.to_path_buf()) else {
+        return false;
+    };
+    if entry.absent_paths.contains(path) {
+        return true;
+    }
+    if let Some(prefix) = path
+        .strip_prefix(objects_dir)
+        .ok()
+        .and_then(|rel| rel.components().next())
+        .and_then(|c| c.as_os_str().to_str())
+        .filter(|s| s.len() == 2 && s.chars().all(|ch| ch.is_ascii_hexdigit()))
+    {
+        return entry.absent_fanout.contains(prefix);
+    }
+    false
+}
+
+fn loose_record_absent(objects_dir: &Path, path: &Path) {
+    let mut guard = loose_negative_cache_entry(objects_dir);
+    let Some(entry) = guard.get_mut(&objects_dir.to_path_buf()) else {
+        return;
+    };
+    entry.absent_paths.insert(path.to_path_buf());
+    if let Ok(rel) = path.strip_prefix(objects_dir) {
+        let mut parts = rel.components();
+        if let Some(prefix) = parts
+            .next()
+            .and_then(|c| c.as_os_str().to_str())
+            .filter(|s| s.len() == 2 && s.chars().all(|ch| ch.is_ascii_hexdigit()))
+        {
+            let fanout_dir = objects_dir.join(prefix);
+            if !fanout_dir.is_dir() {
+                entry.absent_fanout.insert(prefix.to_owned());
+            }
+        }
+    }
+}
+
+pub(crate) fn invalidate_loose_negative_cache(objects_dir: &Path) {
+    if let Ok(mut guard) = loose_negative_cache().lock() {
+        guard.remove(&objects_dir.to_path_buf());
+    }
+}
 
 /// On-disk loose object store for one `objects/` directory.
 #[derive(Debug, Clone)]
@@ -277,9 +368,15 @@ impl ObjectStore for LooseStore {
 
     fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
         let path = self.object_path(oid);
+        if loose_open_may_be_absent(&self.objects_dir, &path) {
+            return Ok(None);
+        }
         let file = match fs::File::open(&path) {
             Ok(f) => f,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                loose_record_absent(&self.objects_dir, &path);
+                return Ok(None);
+            }
             Err(err) => return Err(Error::Io(err)),
         };
         read_zlib_loose_payload_into(file, buf)?;
@@ -289,9 +386,15 @@ impl ObjectStore for LooseStore {
 
     fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
         let path = self.object_path(oid);
+        if loose_open_may_be_absent(&self.objects_dir, &path) {
+            return Ok(None);
+        }
         let mut file = match fs::File::open(&path) {
             Ok(f) => f,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                loose_record_absent(&self.objects_dir, &path);
+                return Ok(None);
+            }
             Err(err) => return Err(Error::Io(err)),
         };
         match loose_object_info_from_file(&mut file) {
@@ -302,9 +405,15 @@ impl ObjectStore for LooseStore {
 
     fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
         let path = self.object_path(oid);
+        if loose_open_may_be_absent(&self.objects_dir, &path) {
+            return Ok(None);
+        }
         let file = match fs::File::open(&path) {
             Ok(f) => f,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                loose_record_absent(&self.objects_dir, &path);
+                return Ok(None);
+            }
             Err(err) => return Err(Error::Io(err)),
         };
         let reader = LoosePayloadReader::open(file)?;
@@ -830,11 +939,13 @@ fn publish_loose_object(
         match fs::rename(&tmp_path, path) {
             Ok(()) => {
                 set_loose_object_mode(path);
+                invalidate_loose_negative_cache(objects_dir);
                 return Ok(());
             }
             Err(e) => {
                 let _ = fs::remove_file(&tmp_path);
                 if path.is_file() {
+                    invalidate_loose_negative_cache(objects_dir);
                     return Ok(());
                 }
                 if can_retry && e.kind() == io::ErrorKind::NotFound {

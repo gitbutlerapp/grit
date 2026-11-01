@@ -949,6 +949,32 @@ impl Odb {
         Arc::new(Vec::new())
     }
 
+    /// Object directories whose loose and pack stores participate in repository fsck.
+    ///
+    /// Includes the primary `objects/` path and file/env alternates when enabled.
+    pub(crate) fn local_store_validation_object_dirs(&self) -> Vec<PathBuf> {
+        if !self.uses_files_primary() {
+            return Vec::new();
+        }
+        let mut dirs = Vec::new();
+        if let Some(primary) = self.files_objects_dir() {
+            dirs.push(primary.to_path_buf());
+        }
+        if self.alternates_enabled {
+            for alt in self.file_alternate_dirs_snapshot().iter() {
+                if !dirs.iter().any(|d| d == alt) {
+                    dirs.push(alt.clone());
+                }
+            }
+            for alt in self.env_alternate_dirs_snapshot().iter() {
+                if !dirs.iter().any(|d| d == alt) {
+                    dirs.push(alt.clone());
+                }
+            }
+        }
+        dirs
+    }
+
     #[cfg(test)]
     pub(crate) fn exists_probe_count(&self) -> usize {
         self.exists_probe.load(Ordering::Relaxed)
@@ -3224,6 +3250,20 @@ impl Odb {
     pub fn enumerate_local_loose_objects(&self) -> Result<Vec<(ObjectId, PathBuf)>> {
         let primary = self.primary()?;
         let loose = primary.loose_store();
+        let mut out = Vec::new();
+        loose.for_each_object(&mut |oid| {
+            out.push((*oid, loose.object_path(oid)));
+            ControlFlow::Continue(())
+        })?;
+        Ok(out)
+    }
+
+    /// Enumerate loose objects under `objects_dir` as `(oid, path)`.
+    pub(crate) fn enumerate_loose_objects_at(
+        &self,
+        objects_dir: &Path,
+    ) -> Result<Vec<(ObjectId, PathBuf)>> {
+        let loose = self.loose_at(objects_dir)?;
         let mut out = Vec::new();
         loose.for_each_object(&mut |oid| {
             out.push((*oid, loose.object_path(oid)));
@@ -5663,6 +5703,57 @@ mod tests {
             odb.hot_path_metrics().loose_path_open_attempts(),
             0,
             "packed objects must not attempt a loose-path open"
+        );
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn alternate_packed_reads_do_not_rescan_local_pack_dir() {
+        use crate::pack::{clear_pack_cache, pack_cache};
+
+        let upstream = TempDir::new().unwrap();
+        git_in(upstream.path(), &["init", "-q", "-b", "main"]);
+        git_in(upstream.path(), &["config", "user.email", "t@example.com"]);
+        git_in(upstream.path(), &["config", "user.name", "T"]);
+        fs::write(
+            upstream.path().join("payload.txt"),
+            b"alternate-only-in-upstream",
+        )
+        .unwrap();
+        git_in(upstream.path(), &["add", "payload.txt"]);
+        git_in(upstream.path(), &["commit", "-m", "seed"]);
+        git_in(upstream.path(), &["repack", "-a", "-d"]);
+        let oid = git_rev_parse_oid(upstream.path(), "HEAD");
+
+        let layout = TempDir::new().unwrap();
+        git_in(
+            layout.path(),
+            &[
+                "clone",
+                "-q",
+                "--shared",
+                upstream.path().to_str().unwrap(),
+                "shared",
+            ],
+        );
+        let objects = layout.path().join("shared/.git/objects");
+        let local_pack = objects.join("pack");
+
+        clear_pack_cache();
+        let odb = Odb::new(&objects);
+        pack_cache::test_reset_dir_rescan_count(&local_pack);
+        odb.read(&oid).expect("alternate read");
+        let after_first = pack_cache::test_dir_rescan_count(&local_pack);
+        for _ in 0..512 {
+            odb.read_info(&oid).expect("repeat read_info");
+        }
+        assert_eq!(
+            pack_cache::test_dir_rescan_count(&local_pack),
+            after_first,
+            "alternate hits must not re-list the local pack directory"
         );
     }
 
