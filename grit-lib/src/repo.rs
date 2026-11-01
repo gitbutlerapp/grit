@@ -2299,6 +2299,7 @@ impl Repository {
     ) -> Result<()> {
         let path = lock.index_path.clone();
         let (skip_hash, cfg) = self.prepare_index_for_disk_write(&path, index)?;
+        self.odb.flush_for_publish()?;
         write_index_file_split(
             &path,
             &self.git_dir,
@@ -2634,6 +2635,7 @@ impl Repository {
     ) -> Result<()> {
         crate::trace::trace_span!("grit.index.write");
         let (skip_hash, cfg) = self.prepare_index_for_disk_write(path, index)?;
+        self.odb.flush_for_publish()?;
         write_index_file_split(
             path,
             &self.git_dir,

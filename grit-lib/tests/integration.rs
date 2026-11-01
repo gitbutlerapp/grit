@@ -1149,6 +1149,8 @@ mod odb_custom_primary_transport;
 #[cfg(feature = "full-tests")]
 #[path = "odb_env_object_directory.rs"]
 mod odb_env_object_directory;
+#[path = "odb_flush_before_publish_2443.rs"]
+mod odb_flush_before_publish_2443;
 #[cfg(feature = "full-tests")]
 #[path = "odb_lookup_prefix_git_compat.rs"]
 mod odb_lookup_prefix_git_compat;

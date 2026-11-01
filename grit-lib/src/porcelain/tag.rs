@@ -313,6 +313,7 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
     };
 
     if !req.dry_run {
+        repo.odb().flush_for_publish()?;
         refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), &tag_ref, &ref_oid)?;
     }
 
