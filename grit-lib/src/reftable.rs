@@ -2506,6 +2506,40 @@ impl ReftableStack {
         self.compact_range(start, end - 1, opts)
     }
 
+    /// Merge ref records from `table_names` for compaction output.
+    ///
+    /// Newest record wins. When the winner is a deletion, it is written into the
+    /// compacted table only if `preserve_deletion_tombstones` is set (non-bottom
+    /// compaction ranges that still have older tables below).
+    fn merge_refs_for_compaction(
+        &self,
+        table_names: &[String],
+        preserve_deletion_tombstones: bool,
+    ) -> Result<Vec<RefRecord>> {
+        let cached = cached_stack_tables_for_names(&self.reftable_dir, table_names)?;
+        let subset = Self::subset_stack(self.reftable_dir.clone(), table_names.to_vec());
+        let readers = subset.stack_readers(&cached)?;
+        let mut merged: BTreeMap<String, RefRecord> = BTreeMap::new();
+        for reader in readers {
+            reader.for_each_ref(|rec| {
+                match &rec.value {
+                    RefValue::Deletion => {
+                        if preserve_deletion_tombstones {
+                            merged.insert(rec.name.clone(), rec.clone());
+                        } else {
+                            merged.remove(&rec.name);
+                        }
+                    }
+                    _ => {
+                        merged.insert(rec.name.clone(), rec.clone());
+                    }
+                }
+                ControlFlow::<()>::Continue(())
+            })?;
+        }
+        Ok(merged.into_values().collect())
+    }
+
     fn compact_range(&mut self, first: usize, last: usize, opts: &WriteOptions) -> Result<()> {
         let mut guard = self.acquire_tables_list_lock()?;
         self.reload_table_names();
@@ -2513,8 +2547,8 @@ impl ReftableStack {
             return Ok(());
         }
         let compact_names: Vec<String> = self.table_names[first..=last].to_vec();
+        let refs = self.merge_refs_for_compaction(&compact_names, first > 0)?;
         let prefix_stack = Self::subset_stack(self.reftable_dir.clone(), compact_names.clone());
-        let refs = prefix_stack.read_refs()?;
         let logs = prefix_stack.read_all_logs()?;
 
         let mut min_idx = u64::MAX;
@@ -2938,8 +2972,8 @@ impl ReftableStack {
 
         let locked_prefix: Vec<String> = self.table_names[..first_unlocked].to_vec();
         let old_suffix: Vec<String> = self.table_names[first_unlocked..].to_vec();
+        let refs = self.merge_refs_for_compaction(&old_suffix, first_unlocked > 0)?;
         let suffix_stack = Self::subset_stack(self.reftable_dir.clone(), old_suffix.clone());
-        let refs = suffix_stack.read_refs()?;
         let logs = suffix_stack.read_all_logs()?;
 
         let mut min_idx = u64::MAX;
@@ -4456,6 +4490,155 @@ mod tests {
         assert_eq!(full.len(), 3);
         assert!(full.iter().any(|record| record.name == "HEAD"
             && record.value == RefValue::Symref("refs/heads/main".into())));
+    }
+
+    #[test]
+    fn compact_range_non_bottom_preserves_deletion_tombstone() {
+        use crate::objects::ObjectId;
+        use crate::repo::init_repository;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .expect("init");
+        let git_dir = dir.path().join(".git");
+        let mut opts = read_write_options(&git_dir);
+        opts.autocompaction_enabled = false;
+        let oid_c = ObjectId::from_bytes(&[0xcc; 20]).expect("oid");
+        let oid_other = ObjectId::from_bytes(&[0xdd; 20]).expect("oid");
+        let identity = "Compact Tomb <tomb@example.com> 1700000000 +0000";
+        reftable_write_ref_with_write_options(
+            &git_dir,
+            "refs/heads/c",
+            &oid_c,
+            Some(identity),
+            None,
+            &opts,
+        )
+        .expect("create c");
+        reftable_write_ref_with_write_options(
+            &git_dir,
+            "refs/heads/unrelated",
+            &oid_other,
+            Some(identity),
+            None,
+            &opts,
+        )
+        .expect("update unrelated");
+        reftable_delete_ref_with_write_options(&git_dir, "refs/heads/c", &opts).expect("delete c");
+
+        let mut stack = ReftableStack::open(&git_dir).expect("open");
+        assert!(
+            stack.table_names.len() >= 4,
+            "need init plus three ref tables, got {}",
+            stack.table_names.len()
+        );
+        let bottom = stack.table_names[0].clone();
+        let table_with_c = stack.table_names[1].clone();
+        let last = stack.table_names.len() - 1;
+        stack
+            .compact_range(last - 1, last, &opts)
+            .expect("compact suffix with delete");
+
+        assert!(stack.lookup_ref("refs/heads/c").expect("lookup").is_none());
+        let compacted_name = stack.table_names[last - 1].clone();
+        assert_ne!(compacted_name, bottom);
+        assert_ne!(compacted_name, table_with_c);
+        let compacted_data = fs::read(stack.reftable_dir.join(&compacted_name)).expect("read");
+        let compacted_reader = ReftableReader::new(compacted_data).expect("reader");
+        let compacted_refs = compacted_reader.read_refs().expect("refs");
+        assert!(
+            compacted_refs
+                .iter()
+                .any(|rec| { rec.name == "refs/heads/c" && rec.value == RefValue::Deletion }),
+            "compacted table must retain delete tombstone: {compacted_refs:?}"
+        );
+        let bottom_data = fs::read(stack.reftable_dir.join(&bottom)).expect("bottom");
+        let bottom_reader = ReftableReader::new(bottom_data).expect("bottom reader");
+        assert!(
+            !bottom_reader
+                .read_refs()
+                .expect("bottom refs")
+                .iter()
+                .any(|rec| rec.name == "refs/heads/c"),
+            "init table must remain untouched"
+        );
+        let c_table_data = fs::read(stack.reftable_dir.join(&table_with_c)).expect("c table");
+        let c_table_reader = ReftableReader::new(c_table_data).expect("c table reader");
+        assert!(
+            c_table_reader
+                .read_refs()
+                .expect("c table refs")
+                .iter()
+                .any(|rec| rec.name == "refs/heads/c"),
+            "older table must still hold the ref until shadowed"
+        );
+    }
+
+    #[test]
+    fn compact_range_from_bottom_omits_deletion_tombstone() {
+        use crate::objects::ObjectId;
+        use crate::repo::init_repository;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .expect("init");
+        let git_dir = dir.path().join(".git");
+        let mut opts = read_write_options(&git_dir);
+        opts.autocompaction_enabled = false;
+        let oid_c = ObjectId::from_bytes(&[0xcc; 20]).expect("oid");
+        let oid_other = ObjectId::from_bytes(&[0xdd; 20]).expect("oid");
+        let identity = "Compact Tomb <tomb@example.com> 1700000000 +0000";
+        reftable_write_ref_with_write_options(
+            &git_dir,
+            "refs/heads/c",
+            &oid_c,
+            Some(identity),
+            None,
+            &opts,
+        )
+        .expect("create c");
+        reftable_write_ref_with_write_options(
+            &git_dir,
+            "refs/heads/unrelated",
+            &oid_other,
+            Some(identity),
+            None,
+            &opts,
+        )
+        .expect("update unrelated");
+        reftable_delete_ref_with_write_options(&git_dir, "refs/heads/c", &opts).expect("delete c");
+
+        let mut stack = ReftableStack::open(&git_dir).expect("open");
+        let table_count = stack.table_names.len();
+        stack
+            .compact_range(0, table_count - 1, &opts)
+            .expect("compact all");
+        assert!(stack.lookup_ref("refs/heads/c").expect("lookup").is_none());
+        assert_eq!(stack.table_names.len(), 1);
+        let only = ReftableReader::new(
+            fs::read(stack.reftable_dir.join(&stack.table_names[0])).expect("read"),
+        )
+        .expect("reader");
+        assert!(
+            !only
+                .read_refs()
+                .expect("refs")
+                .iter()
+                .any(|rec| rec.name == "refs/heads/c"),
+            "full-stack compaction must not store delete tombstones"
+        );
     }
 
     #[test]
