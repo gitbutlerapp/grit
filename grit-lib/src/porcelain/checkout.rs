@@ -2066,12 +2066,33 @@ fn hard_reset_unrecorded_tree_diff_paths(
     check: HardResetStatCheck,
 ) -> Result<Vec<String>> {
     let mut unrecorded = Vec::new();
-    let mut probes: Vec<(usize, &str)> = Vec::new();
+    let mut probes: Vec<(usize, String)> = Vec::new();
     for change in changes {
         if change.status == DiffStatus::Added || change.old_mode.bits() == MODE_GITLINK {
             continue;
         }
         if crate::index::is_tree_mode(change.old_mode.bits()) {
+            if change.status != DiffStatus::Deleted {
+                continue;
+            }
+            let Some(dir) = change.old_path.as_deref() else {
+                continue;
+            };
+            if sparse.is_some_and(|sparse| sparse.checkout_skips(index, dir)) {
+                continue;
+            }
+            // Only paths tracked in the deleted subtree (HEAD), not nested untracked extras.
+            for path in coalesced_delete_scheduled_paths(repo.odb(), change)? {
+                if sparse.is_some_and(|sparse| sparse.checkout_skips(index, &path)) {
+                    continue;
+                }
+                let key = checkout_stored_index_path_bytes(&path);
+                match index.find_entry_pos(&key, 0) {
+                    Some(pos) if index.entries[pos].skip_worktree() => {}
+                    Some(pos) => probes.push((pos, path)),
+                    None => unrecorded.push(path),
+                }
+            }
             continue;
         }
         let Some(path) = change.old_path.as_deref() else {
@@ -2083,16 +2104,16 @@ fn hard_reset_unrecorded_tree_diff_paths(
         let key = checkout_stored_index_path_bytes(path);
         match index.find_entry_pos(&key, 0) {
             Some(pos) if index.entries[pos].skip_worktree() => {}
-            Some(pos) => probes.push((pos, path)),
+            Some(pos) => probes.push((pos, path.to_owned())),
             None => unrecorded.push(path.to_owned()),
         }
     }
-    let mut racy: Vec<(usize, &str, PathBuf, fs::Metadata)> = Vec::new();
+    let mut racy: Vec<(usize, String, PathBuf, fs::Metadata)> = Vec::new();
     for (pos, path) in probes {
         let entry = &index.entries[pos];
-        let abs = checkout_stored_worktree_abs(work_tree, path);
+        let abs = checkout_stored_worktree_abs(work_tree, &path);
         let Ok(meta) = fs::symlink_metadata(&abs) else {
-            unrecorded.push(path.to_owned());
+            unrecorded.push(path);
             continue;
         };
         let stat_clean = hard_reset_entry_stat_clean(
@@ -2103,7 +2124,7 @@ fn hard_reset_unrecorded_tree_diff_paths(
             None,
         );
         if !stat_clean {
-            unrecorded.push(path.to_owned());
+            unrecorded.push(path);
         } else if crate::diff::entry_is_racy_with_policy(entry, check.index_mtime, check.policy) {
             racy.push((pos, path, abs, meta));
         }
@@ -2115,7 +2136,7 @@ fn hard_reset_unrecorded_tree_diff_paths(
     if racy.len() > RACY_TREE_DIFF_CONTENT_VERIFY_MAX
         || racy_bytes > RACY_TREE_DIFF_CONTENT_VERIFY_MAX_BYTES
     {
-        unrecorded.extend(racy.iter().map(|(_, path, _, _)| (*path).to_owned()));
+        unrecorded.extend(racy.iter().map(|(_, path, _, _)| path.clone()));
         return Ok(unrecorded);
     }
     let rules = WorktreeRules::from_parts(repo, index, config.clone())?;
@@ -2150,7 +2171,7 @@ fn hard_reset_unrecorded_tree_diff_paths(
         racy.iter()
             .zip(unchanged)
             .filter(|(_, unchanged)| !unchanged)
-            .map(|((_, path, _, _), _)| (*path).to_owned()),
+            .map(|((_, path, _, _), _)| path.clone()),
     );
     Ok(unrecorded)
 }
@@ -2667,6 +2688,7 @@ fn checkout_coalesced_subtree_changes(
         };
         if wholesale_safe {
             wholesale_dirs.insert(dir.clone());
+            journal.record_removed_dir(dir);
             let abs = work_tree.join(dir);
             if abs.is_dir() && remove_wholesale_dir(&abs) {
                 deleted_abs_paths.push(abs);
