@@ -788,25 +788,6 @@ fn collect_untracked_collisions_for_added_path(
     matcher: &mut crate::ignore::IgnoreMatcher,
     untracked: &mut Vec<String>,
 ) -> Result<()> {
-    let abs = work_tree.join(added);
-    match fs::symlink_metadata(&abs) {
-        Ok(meta) => {
-            if meta.is_dir() {
-                collect_untracked_files_under_dir(
-                    repo, index, matcher, work_tree, added, untracked,
-                )?;
-            } else if meta.is_file() || meta.file_type().is_symlink() {
-                push_untracked_collision_if_present(repo, index, matcher, added, untracked)?;
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => {
-            if let Some(parent) = added.rsplit_once('/') {
-                push_untracked_collision_if_present(repo, index, matcher, parent.0, untracked)?;
-            }
-        }
-        Err(e) => return Err(Error::Io(e)),
-    }
     let mut prefix_len = 0usize;
     for component in added.split('/') {
         if prefix_len == 0 {
@@ -814,16 +795,23 @@ fn collect_untracked_collisions_for_added_path(
         } else {
             prefix_len += 1 + component.len();
         }
-        if prefix_len >= added.len() {
-            break;
-        }
-        let ancestor = &added[..prefix_len];
-        let ancestor_abs = work_tree.join(ancestor);
-        let Ok(meta) = fs::symlink_metadata(&ancestor_abs) else {
+        let rel = &added[..prefix_len];
+        let abs = work_tree.join(rel);
+        let Ok(meta) = fs::symlink_metadata(&abs) else {
             continue;
         };
-        if !meta.is_dir() && (meta.is_file() || meta.file_type().is_symlink()) {
-            push_untracked_collision_if_present(repo, index, matcher, ancestor, untracked)?;
+        if meta.file_type().is_symlink() {
+            push_untracked_collision_if_present(repo, index, matcher, rel, untracked)?;
+            return Ok(());
+        }
+        if meta.is_dir() {
+            if prefix_len >= added.len() {
+                collect_untracked_files_under_dir(repo, index, matcher, work_tree, rel, untracked)?;
+            }
+            continue;
+        }
+        if meta.is_file() {
+            push_untracked_collision_if_present(repo, index, matcher, rel, untracked)?;
         }
     }
     Ok(())
@@ -1882,6 +1870,90 @@ mod tests {
         )
         .expect("scan");
         assert!(hits.is_empty(), "ignored victim should not block: {hits:?}");
+    }
+
+    #[test]
+    fn added_lstat_untracked_tracked_symlink_does_not_follow_target() {
+        let (dir, repo) = init_repo();
+        let work_tree = repo.work_tree().expect("work tree");
+        std::fs::create_dir_all(dir.path().join("t/z.in")).expect("mkdir z.in");
+        std::fs::write(dir.path().join("t/z.in/Cargo.toml"), "tracked\n").expect("write target");
+        std::fs::create_dir_all(dir.path().join("t/inv")).expect("mkdir inv");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("../z.in", dir.path().join("t/inv/in")).expect("symlink");
+        #[cfg(not(unix))]
+        return;
+
+        let mut index = load_worktree_index(&repo).expect("index");
+        let link_oid = repo
+            .odb()
+            .write(crate::objects::ObjectKind::Blob, b"../z.in")
+            .expect("blob");
+        let link_entry = crate::index::entry_from_stat(
+            &dir.path().join("t/inv/in"),
+            b"t/inv/in",
+            link_oid,
+            crate::index::MODE_SYMLINK,
+        )
+        .expect("link entry");
+        index.add_or_replace(link_entry);
+        index.sort();
+
+        let hits = super::collect_untracked_for_added_tree_changes_lstat(
+            &repo,
+            &index,
+            work_tree,
+            &[added_entry("t/inv/in/Cargo.toml")],
+        )
+        .expect("scan");
+        assert!(
+            hits.is_empty(),
+            "tracked symlink must not follow target: {hits:?}"
+        );
+    }
+
+    #[test]
+    fn added_lstat_untracked_untracked_symlink_reports_link_not_child() {
+        let (dir, repo) = init_repo();
+        let work_tree = repo.work_tree().expect("work tree");
+        std::fs::create_dir_all(dir.path().join("real")).expect("mkdir");
+        std::fs::write(dir.path().join("real/inside.txt"), "x\n").expect("write");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("real", dir.path().join("link")).expect("symlink");
+        #[cfg(not(unix))]
+        return;
+
+        let index = load_worktree_index(&repo).expect("index");
+        let hits = super::collect_untracked_for_added_tree_changes_lstat(
+            &repo,
+            &index,
+            work_tree,
+            &[added_entry("link/inside.txt")],
+        )
+        .expect("scan");
+        assert_eq!(hits, vec!["link".to_owned()]);
+    }
+
+    #[test]
+    fn added_lstat_untracked_symlink_to_dir_does_not_walk_target() {
+        let (dir, repo) = init_repo();
+        let work_tree = repo.work_tree().expect("work tree");
+        std::fs::create_dir_all(dir.path().join("target/nested")).expect("mkdir");
+        std::fs::write(dir.path().join("target/nested/file.txt"), "x\n").expect("write");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("target", dir.path().join("link")).expect("symlink");
+        #[cfg(not(unix))]
+        return;
+
+        let index = load_worktree_index(&repo).expect("index");
+        let hits = super::collect_untracked_for_added_tree_changes_lstat(
+            &repo,
+            &index,
+            work_tree,
+            &[added_entry("link/nested/file.txt")],
+        )
+        .expect("scan");
+        assert_eq!(hits, vec!["link".to_owned()]);
     }
 
     #[test]
