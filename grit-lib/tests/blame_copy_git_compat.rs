@@ -507,6 +507,109 @@ fn within_file_block_move_each_copy_level_matches_git() {
     }
 }
 
+/// Issue #2426: repeated identical lines with `-M` / `-C` must not duplicate rows.
+fn fixture_repeated_line_move_detection() -> (tempfile::TempDir, Repository, ObjectId) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_path_buf();
+    git_run(&root, &["init", "-q", "-b", "main"]);
+    std::fs::write(root.join("f"), "\n").unwrap();
+    git_run(&root, &["add", "f"]);
+    git_run(&root, &["commit", "-m", "blank"]);
+    let long = "\tpos = cache_name_pos(name, strlen(name));";
+    std::fs::write(root.join("f"), format!("{long}\n")).unwrap();
+    git_run(&root, &["commit", "-a", "-m", "one"]);
+    let c1_hex = git_output(&root, &["rev-parse", "HEAD"]).trim().to_owned();
+    let c1: ObjectId = c1_hex.parse().expect("c1 oid");
+    std::fs::write(root.join("f"), format!("{long}\n{long}\n")).unwrap();
+    git_run(&root, &["commit", "-a", "-m", "two"]);
+    (tmp, open_repo(&root), c1)
+}
+
+fn fixture_repeated_line_plus_blank_move_detection() -> (tempfile::TempDir, Repository) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_path_buf();
+    git_run(&root, &["init", "-q", "-b", "main"]);
+    std::fs::write(root.join("f"), "\n\n").unwrap();
+    git_run(&root, &["add", "f"]);
+    git_run(&root, &["commit", "-m", "blank"]);
+    let long = "\tpos = cache_name_pos(name, strlen(name));";
+    std::fs::write(root.join("f"), format!("{long}\n\n")).unwrap();
+    git_run(&root, &["commit", "-a", "-m", "one"]);
+    std::fs::write(root.join("f"), format!("{long}\n{long}\n\n")).unwrap();
+    git_run(&root, &["commit", "-a", "-m", "two"]);
+    (tmp, open_repo(&root))
+}
+
+#[test]
+fn repeated_identical_lines_move_detection_one_row_per_file_line() {
+    let (tmp, repo, c1) = fixture_repeated_line_move_detection();
+    let file_line_count = std::fs::read_to_string(tmp.path().join("f"))
+        .unwrap()
+        .lines()
+        .count();
+    assert_eq!(file_line_count, 2);
+    for extra in [
+        &["-M"][..],
+        &["-C"][..],
+        &["-C", "-C"][..],
+        &["-C", "-C", "-C"][..],
+    ] {
+        let git_lines = git_blame_with_extra(tmp.path(), "f", extra);
+        assert_eq!(git_lines.len(), file_line_count, "git extra={extra:?}");
+        let copy_level = match extra.iter().filter(|s| **s == "-C").count() {
+            0 => CopyDetection::Off,
+            1 => CopyDetection::FromModifiedFiles,
+            2 => CopyDetection::FromCreatingCommit,
+            _ => CopyDetection::FromAnyCommit,
+        };
+        let grit_lines = grit_blame_with_options(
+            &repo,
+            "f",
+            &BlameOptions {
+                move_detection: extra.contains(&"-M"),
+                copy_detection: copy_level,
+                ..Default::default()
+            },
+        );
+        assert_eq!(grit_lines.len(), file_line_count, "grit extra={extra:?}");
+        assert_eq!(git_lines, grit_lines, "extra={extra:?}");
+    }
+    let plain = grit_blame_with_options(
+        &repo,
+        "f",
+        &BlameOptions {
+            move_detection: false,
+            copy_detection: CopyDetection::Off,
+            ..Default::default()
+        },
+    );
+    assert_eq!(plain.len(), 2);
+    assert!(
+        plain.iter().any(|l| l.final_line == 2 && l.commit != c1),
+        "second line without -M stays on adding commit"
+    );
+}
+
+#[test]
+fn repeated_line_and_blank_move_detection_matches_git() {
+    let (tmp, repo) = fixture_repeated_line_plus_blank_move_detection();
+    let git_lines = git_blame_with_extra(tmp.path(), "f", &["-M"]);
+    let grit_lines = grit_blame_with_options(
+        &repo,
+        "f",
+        &BlameOptions {
+            move_detection: true,
+            ..Default::default()
+        },
+    );
+    let file_line_count = std::fs::read_to_string(tmp.path().join("f"))
+        .unwrap()
+        .lines()
+        .count();
+    assert_eq!(grit_lines.len(), file_line_count);
+    assert_eq!(git_lines, grit_lines);
+}
+
 #[test]
 fn within_file_line_permutation_matches_git_move_detection() {
     let (tmp, repo, c1) = fixture_below_threshold_within_file_move();

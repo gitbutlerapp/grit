@@ -152,6 +152,42 @@ fn move_detection_within_file_matches_git() {
 }
 
 #[test]
+fn move_detection_repeated_lines_json_row_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    fs::write(root.join("f"), "\n").unwrap();
+    git(root, &["add", "f"]);
+    git(root, &["commit", "-m", "blank"]);
+    let long = "\tpos = cache_name_pos(name, strlen(name));";
+    fs::write(root.join("f"), format!("{long}\n")).unwrap();
+    git(root, &["commit", "-a", "-m", "one"]);
+    fs::write(root.join("f"), format!("{long}\n{long}\n")).unwrap();
+    git(root, &["commit", "-a", "-m", "two"]);
+    let file_lines = fs::read_to_string(root.join("f")).unwrap().lines().count();
+    for extra in ["-M", "-C"] {
+        let grit = gs_json(root, &["blame", extra, "f"]);
+        assert_eq!(
+            grit["lines"].as_array().map(|a| a.len()),
+            Some(file_lines),
+            "grit {extra}"
+        );
+        let mut git_cmd = Command::new("git");
+        git_cmd
+            .current_dir(root)
+            .args(["blame", "--porcelain", extra, "--", "f"]);
+        git_env(&mut git_cmd);
+        let git_out = git_cmd.output().unwrap();
+        assert!(git_out.status.success());
+        let tab_rows = String::from_utf8_lossy(&git_out.stdout)
+            .lines()
+            .filter(|l| l.starts_with('\t'))
+            .count();
+        assert_eq!(tab_rows, file_lines, "git {extra}");
+    }
+}
+
+#[test]
 fn copy_detection_rejects_more_than_three_flags() {
     let dir = tempfile::tempdir().unwrap();
     setup_copy_by_creation(dir.path());
