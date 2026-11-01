@@ -484,23 +484,16 @@ pub(crate) fn plan_blob_entries_by_dir_for_paths(
         dir_ranges: Vec::new(),
         indices: Vec::new(),
     };
+    let mut cursor = 0;
     for path in paths {
         let path_bytes = crate::repo_relpath::storage_bytes(path);
-        let Some(ie) = index.get(path_bytes.as_ref(), 0) else {
+        let path_bytes_ref = path_bytes.as_ref();
+        let Some(entry_index) = index.find_stage0_pos_from(path_bytes_ref, &mut cursor) else {
             continue;
         };
-        if !index_blob_scan_eligible(ie, index, false) {
+        if !index_blob_scan_eligible(&index.entries[entry_index], index, false) {
             continue;
         }
-        let path_bytes_ref = path_bytes.as_ref();
-        let Ok(entry_index) = index.entries.binary_search_by(|e| {
-            e.path
-                .as_slice()
-                .cmp(path_bytes_ref)
-                .then_with(|| e.stage().cmp(&0))
-        }) else {
-            continue;
-        };
         plan.push_entry(parent_dir_bytes(path_bytes_ref), entry_index);
     }
     plan.finish()

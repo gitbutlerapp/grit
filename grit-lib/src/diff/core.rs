@@ -6280,10 +6280,12 @@ fn diff_index_to_worktree_inner(
     }
 
     if let Some(limit) = options.restrict_to_paths.as_ref() {
+        let mut cursor = 0;
         for path in limit.iter() {
-            let Some(ie) = index.get(path.as_bytes(), 0) else {
+            let Some(pos) = index.find_stage0_pos_from(path.as_bytes(), &mut cursor) else {
                 continue;
             };
+            let ie = &index.entries[pos];
             if !index_entry_needs_worktree_diff_pass1(ie) {
                 continue;
             }

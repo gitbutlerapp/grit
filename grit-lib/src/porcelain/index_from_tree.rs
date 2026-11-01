@@ -258,17 +258,20 @@ pub(crate) fn index_from_tree_reusing_cache_tree(
     Ok(index)
 }
 
-/// Load the seed of a hard reset to `target`.
+/// Prepare `index`, loaded with [`Repository::load_index_preserving_sparse`], as the seed of a
+/// hard reset to `target`.
 ///
 /// Absent excluded directories stay opaque whenever `target` still has a tree at their path, even
 /// a different one: a hard reset discards staged content and never writes excluded paths, so the
 /// sparse-directory row simply takes the target subtree id (as Git's sparse-index reset does).
 /// Retargeted rows drop their cache-tree node. Everything else is prepared as in
 /// [`prepare_index_for_tree_transition`].
-pub(crate) fn load_index_for_hard_reset(repo: &Repository, target: &ObjectId) -> Result<Index> {
-    let mut index = repo.load_index_preserving_sparse()?;
-    prepare_sparse_rows(repo, target, &mut index, SparseRetarget::Always)?;
-    Ok(index)
+pub(crate) fn prepare_index_for_hard_reset(
+    repo: &Repository,
+    target: &ObjectId,
+    index: &mut Index,
+) -> Result<()> {
+    prepare_sparse_rows(repo, target, index, SparseRetarget::Always)
 }
 
 /// Prepare loaded rows once the transition's target tree has been resolved, keeping matching
@@ -311,7 +314,7 @@ enum SparseRetarget<'a> {
 }
 
 /// Shared body of [`prepare_index_for_tree_transition`], [`prepare_index_for_head_transition`]
-/// and [`load_index_for_hard_reset`]; kept rows whose target subtree differs are pointed at it.
+/// and [`prepare_index_for_hard_reset`]; kept rows whose target subtree differs are pointed at it.
 fn prepare_sparse_rows(
     repo: &Repository,
     target: &ObjectId,
@@ -1206,7 +1209,8 @@ mod tests {
         let new_c = subtree_oid(&repo, &t1, b"c");
         assert_ne!(old_c, new_c);
 
-        let index = load_index_for_hard_reset(&repo, &t1).expect("hard reset seed");
+        let mut index = repo.load_index_preserving_sparse().expect("index");
+        prepare_index_for_hard_reset(&repo, &t1, &mut index).expect("hard reset seed");
         let c = index.get(b"c/", 0).expect("c/ stays opaque");
         assert!(c.is_sparse_directory_placeholder() && c.skip_worktree());
         assert_eq!(c.oid, new_c);

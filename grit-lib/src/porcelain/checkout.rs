@@ -978,8 +978,8 @@ fn checkout_hard_to_tree_journaled(
 ) -> Result<()> {
     let pre_reset_index = repo.load_index_preserving_sparse()?;
     let pre_reset_index_mtime = crate::diff::index_mtime_for_diff(&pre_reset_index, None);
-    let mut index =
-        crate::porcelain::index_from_tree::load_index_for_hard_reset(repo, target_tree)?;
+    let mut index = pre_reset_index.clone();
+    crate::porcelain::index_from_tree::prepare_index_for_hard_reset(repo, target_tree, &mut index)?;
     let trees_differ = head_tree != target_tree;
     // Sparse-directory rows left by the load already record the target subtree.
     let changes = if trees_differ {
@@ -1338,13 +1338,9 @@ fn checkout_hard_to_tree_journaled(
 
     if trees_differ {
         for (&pos, action) in plan_positions.iter().zip(&mut actions) {
-            let path = &index.entries[pos].path;
             match action {
                 HardResetEntryAction::Keep | HardResetEntryAction::Written(_) => {
-                    let resolved = index.find_entry_pos(path, 0).filter(|&p| {
-                        let existing = &index.entries[p];
-                        !existing.stat_cache_unset()
-                    });
+                    let resolved = Some(pos).filter(|&p| !index.entries[p].stat_cache_unset());
                     *action = if matches!(action, HardResetEntryAction::Written(_)) {
                         HardResetEntryAction::Written(resolved)
                     } else if resolved.is_some() {
