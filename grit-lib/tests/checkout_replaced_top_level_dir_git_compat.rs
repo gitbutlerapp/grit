@@ -5,12 +5,35 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
+use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::PostOperationHooks;
 use grit_test_support::git;
+
+fn switch_existing(
+    repo: &Repository,
+    branch: &str,
+    oid: ObjectId,
+) -> grit_lib::porcelain::switch::SwitchOutcome {
+    switch_repository(
+        repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: branch.to_owned(),
+                oid,
+            },
+            dry_run: false,
+            hooks: PostOperationHooks::Skip,
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("switch")
+}
 
 fn git_porcelain(repo: &std::path::Path) -> String {
     git(repo, &["status", "--porcelain"])
@@ -78,6 +101,39 @@ fn build_issue_2336_new_layout(repo_root: &std::path::Path) {
     std::fs::write(repo_root.join("README"), b"x\n").expect("readme");
     git(repo_root, &["add", "-A"]);
     git(repo_root, &["commit", "-qm", "new"]);
+}
+
+fn build_issue_2415_dir_to_file_layout(repo_root: &std::path::Path, count: usize) {
+    for i in 1..=count {
+        std::fs::create_dir_all(repo_root.join(format!("d{i}/sub"))).expect("mkdir");
+        std::fs::write(repo_root.join(format!("d{i}/sub/f")), "x\n").expect("write");
+    }
+    git(repo_root, &["add", "-A"]);
+    git(repo_root, &["commit", "-qm", "base"]);
+}
+
+fn build_issue_2415_dir_to_file_branch(repo_root: &std::path::Path, count: usize) {
+    git(repo_root, &["switch", "-qc", "t2"]);
+    for i in 1..=count {
+        std::fs::remove_dir_all(repo_root.join(format!("d{i}"))).expect("rm dir");
+        std::fs::write(repo_root.join(format!("d{i}")), "file\n").expect("write file");
+    }
+    git(repo_root, &["add", "-A"]);
+    git(repo_root, &["commit", "-qm", "t2"]);
+}
+
+fn assert_clean_index_matches_head(repo: &std::path::Path) {
+    assert_eq!(
+        index_file_count(repo),
+        head_tree_file_count(repo),
+        "index entry count must match HEAD tree"
+    );
+    assert!(
+        git_porcelain(repo).trim().is_empty(),
+        "git status must be clean, got:\n{}",
+        git_porcelain(repo)
+    );
+    git_fsck(repo);
 }
 
 fn build_large_chunk_replaced_src(repo_root: &std::path::Path) -> (ObjectId, ObjectId, ObjectId) {
@@ -195,6 +251,122 @@ fn switch_detach_replaced_src_tree_matches_git_after_issue_2336_shape() {
         git_porcelain(tmp.path())
     );
     git_fsck(tmp.path());
+}
+
+#[test]
+fn switch_sixteen_dir_to_file_replacements_matches_git_index() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main", "."]);
+    git(tmp.path(), &["config", "user.email", "t@example.com"]);
+    git(tmp.path(), &["config", "user.name", "Test"]);
+    build_issue_2415_dir_to_file_layout(tmp.path(), 16);
+    build_issue_2415_dir_to_file_branch(tmp.path(), 16);
+    let t2_hex = git(tmp.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    let t2_oid = ObjectId::from_hex(&t2_hex).expect("t2");
+    git(tmp.path(), &["switch", "-q", "main"]);
+    let main_hex = git(tmp.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    let main_oid = ObjectId::from_hex(&main_hex).expect("main");
+
+    let grit_repo = Repository::open(
+        &tmp.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(tmp.path()),
+    )
+    .expect("open grit repo");
+    switch_existing(&grit_repo, "t2", t2_oid);
+    assert_clean_index_matches_head(tmp.path());
+
+    switch_existing(&grit_repo, "main", main_oid);
+    assert_clean_index_matches_head(tmp.path());
+}
+
+#[test]
+fn merge_fast_forward_twenty_dir_to_file_replacements_is_clean() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main", "."]);
+    git(tmp.path(), &["config", "user.email", "t@example.com"]);
+    git(tmp.path(), &["config", "user.name", "Test"]);
+    build_issue_2415_dir_to_file_layout(tmp.path(), 20);
+    let main_hex = git(tmp.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    let main_oid = ObjectId::from_hex(&main_hex).expect("main");
+    build_issue_2415_dir_to_file_branch(tmp.path(), 20);
+    let t2_hex = git(tmp.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    let t2_oid = ObjectId::from_hex(&t2_hex).expect("t2");
+    git(tmp.path(), &["switch", "-q", "main"]);
+
+    let grit_repo = Repository::open(
+        &tmp.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(tmp.path()),
+    )
+    .expect("open grit repo");
+    let outcome = integrate_branch(
+        &grit_repo,
+        "refs/heads/main",
+        main_oid,
+        t2_oid,
+        "t2",
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("ff merge");
+    assert!(matches!(
+        outcome,
+        IntegrateBranchOutcome::FastForward { .. }
+    ));
+    assert_clean_index_matches_head(tmp.path());
+}
+
+#[test]
+fn checkout_mixed_dir_to_file_and_symlink_replacements_over_chunk_size() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main", "."]);
+    git(tmp.path(), &["config", "user.email", "t@example.com"]);
+    git(tmp.path(), &["config", "user.name", "Test"]);
+
+    for i in 0..100 {
+        std::fs::create_dir_all(tmp.path().join(format!("dir{i}/sub"))).expect("mkdir");
+        for j in 0..20 {
+            std::fs::write(
+                tmp.path().join(format!("dir{i}/sub/f{j}")),
+                format!("{i}-{j}\n"),
+            )
+            .expect("write");
+        }
+        std::os::unix::fs::symlink("nonexistent", tmp.path().join(format!("dangling{i}")))
+            .expect("symlink");
+    }
+    git(tmp.path(), &["add", "-A"]);
+    git(tmp.path(), &["commit", "-qm", "base"]);
+    let from_tree = tree_oid_of_head(tmp.path());
+
+    git(tmp.path(), &["switch", "-qc", "t2"]);
+    for i in 0..100 {
+        std::fs::remove_dir_all(tmp.path().join(format!("dir{i}"))).expect("rm dir");
+        std::fs::write(tmp.path().join(format!("dir{i}")), "file\n").expect("file");
+        std::fs::remove_file(tmp.path().join(format!("dangling{i}"))).expect("rm symlink");
+        std::fs::write(tmp.path().join(format!("dangling{i}")), "file\n").expect("symlink file");
+    }
+    git(tmp.path(), &["add", "-A"]);
+    git(tmp.path(), &["commit", "-qm", "t2"]);
+    let to_tree = tree_oid_of_head(tmp.path());
+    git(tmp.path(), &["switch", "-q", "main"]);
+
+    let grit_repo = Repository::open(
+        &tmp.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(tmp.path()),
+    )
+    .expect("open grit repo");
+    checkout_between_trees(&grit_repo, Some(&from_tree), &to_tree).expect("checkout t2 tree");
+    assert_clean_index_matches_head(tmp.path());
+
+    checkout_hard_to_tree_from_head_tree(
+        &grit_repo,
+        &to_tree,
+        &from_tree,
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("hard reset main tree");
+    assert_clean_index_matches_head(tmp.path());
 }
 
 #[test]

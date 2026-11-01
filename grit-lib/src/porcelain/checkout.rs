@@ -13,7 +13,7 @@
 //! and make no presentation decisions — no colour, pager, tty, or stdout.
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -2507,6 +2507,8 @@ pub(crate) fn wholesale_blocked_top_level_directories(changes: &[DiffEntry]) -> 
         };
         if let Some((dir, _rest)) = path.split_once('/') {
             blocked.insert(dir.to_owned());
+        } else {
+            blocked.insert(path.to_owned());
         }
     }
     blocked
@@ -3076,6 +3078,106 @@ fn tree_changes_are_bulk_mod_add_delete(changes: &[DiffEntry]) -> bool {
         })
 }
 
+fn checkout_change_is_strict_descendant(path: &str, prefix: &str) -> bool {
+    path.strip_prefix(prefix)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Top-level or nested paths that become regular files while the diff removes strict descendants.
+fn checkout_dir_to_file_replacement_roots(changes: &[DiffEntry]) -> HashSet<String> {
+    let mut deleted_paths: HashSet<String> = HashSet::new();
+    for change in changes {
+        if change.status == DiffStatus::Deleted {
+            if let Some(path) = &change.old_path {
+                deleted_paths.insert(path.clone());
+            }
+        }
+    }
+    let mut roots = HashSet::new();
+    for change in changes {
+        if matches!(change.status, DiffStatus::Deleted | DiffStatus::Unmerged) {
+            continue;
+        }
+        let Some(path) = change.new_path.as_deref().or(change.old_path.as_deref()) else {
+            continue;
+        };
+        let mode = change.new_mode.bits();
+        if mode == MODE_TREE || mode == MODE_GITLINK {
+            continue;
+        }
+        if deleted_paths
+            .iter()
+            .any(|deleted| checkout_change_is_strict_descendant(deleted, path))
+        {
+            roots.insert(path.to_owned());
+        }
+    }
+    roots
+}
+
+fn checkout_change_atomic_group_key(
+    change: &DiffEntry,
+    roots: &HashSet<String>,
+    index: usize,
+) -> String {
+    if let Some(path) = change.old_path.as_deref() {
+        if change.status == DiffStatus::Deleted {
+            for root in roots {
+                if checkout_change_is_strict_descendant(path, root) {
+                    return format!("replace:{root}");
+                }
+            }
+        }
+    }
+    if let Some(path) = change.new_path.as_deref().or(change.old_path.as_deref()) {
+        if roots.contains(path) {
+            return format!("replace:{path}");
+        }
+    }
+    format!("singleton:{index}")
+}
+
+/// Pack tree diffs into bounded chunks without splitting a directory-to-file replacement group.
+fn partition_checkout_changes_for_chunking(
+    changes: &[DiffEntry],
+    max_chunk: usize,
+) -> Vec<Vec<DiffEntry>> {
+    if changes.len() <= max_chunk {
+        return vec![changes.to_vec()];
+    }
+    let roots = checkout_dir_to_file_replacement_roots(changes);
+    if roots.is_empty() {
+        return changes
+            .chunks(max_chunk)
+            .map(<[DiffEntry]>::to_vec)
+            .collect();
+    }
+
+    let mut grouped: HashMap<String, Vec<DiffEntry>> = HashMap::new();
+    let mut group_first: HashMap<String, usize> = HashMap::new();
+    for (index, change) in changes.iter().enumerate() {
+        let key = checkout_change_atomic_group_key(change, &roots, index);
+        group_first.entry(key.clone()).or_insert(index);
+        grouped.entry(key).or_default().push(change.clone());
+    }
+    let mut ordered_groups: Vec<String> = grouped.keys().cloned().collect();
+    ordered_groups.sort_by_key(|key| group_first[key]);
+
+    let mut chunks: Vec<Vec<DiffEntry>> = Vec::new();
+    let mut current: Vec<DiffEntry> = Vec::new();
+    for key in ordered_groups {
+        let batch = grouped.remove(&key).unwrap_or_default();
+        if !current.is_empty() && current.len() + batch.len() > max_chunk {
+            chunks.push(std::mem::take(&mut current));
+        }
+        current.extend(batch);
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
 fn bulk_write_checkout_eligible(changes: &[DiffEntry], rules: &WorktreeRules) -> bool {
     changes.len() >= BULK_ADD_CHECKOUT_MIN
         && changes
@@ -3122,7 +3224,6 @@ fn execute_checkout_write_changes_chunk(
     repo: &Repository,
     work_tree: &Path,
     changes: &[&DiffEntry],
-    index_mut: &mut Index,
     rules: &WorktreeRules,
     config: &Arc<ConfigSet>,
     conv: &ConversionConfig,
@@ -3136,9 +3237,9 @@ fn execute_checkout_write_changes_chunk(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
     journal: &mut CheckoutJournal,
-) -> Result<Vec<DelayedCheckoutTarget>> {
+) -> Result<(Vec<DelayedCheckoutTarget>, Vec<IndexEntry>)> {
     if changes.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
     let mut write_jobs: Vec<CheckoutWriteJob<'_>> = Vec::with_capacity(changes.len());
     for change in changes {
@@ -3199,8 +3300,7 @@ fn execute_checkout_write_changes_chunk(
             WriteJobOutcome::Delayed(target) => delayed_targets.push(*target),
         }
     }
-    index_mut.overwrite_stage0_entries(entries);
-    Ok(delayed_targets)
+    Ok((delayed_targets, entries))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3223,15 +3323,15 @@ fn checkout_bulk_added_tree_changes(
     let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
     let mut delayed = DelayedProcessCheckout::default();
     let mut pending_delayed = Vec::new();
+    let mut new_entries = Vec::new();
     let mut skip_ramp = apply.skip_parallel_write_ramp;
     let smudge_context = None;
     for chunk in changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK) {
         let chunk_refs: Vec<&DiffEntry> = chunk.iter().collect();
-        pending_delayed.extend(execute_checkout_write_changes_chunk(
+        let (delayed_targets, entries) = execute_checkout_write_changes_chunk(
             repo,
             work_tree,
             &chunk_refs,
-            index_mut,
             rules,
             config,
             conv,
@@ -3245,10 +3345,11 @@ fn checkout_bulk_added_tree_changes(
             progress,
             cancel,
             journal,
-        )?);
+        )?;
+        pending_delayed.extend(delayed_targets);
+        new_entries.extend(entries);
         skip_ramp = true;
     }
-    let mut new_entries = Vec::new();
     finish_delayed_checkouts(
         repo,
         rules,
@@ -3414,13 +3515,13 @@ fn checkout_bulk_mod_delete_tree_changes(
 
     let mut delayed = DelayedProcessCheckout::default();
     let mut pending_delayed = Vec::new();
+    let mut new_entries = Vec::new();
     let mut skip_ramp = apply.skip_parallel_write_ramp;
     for chunk in write_changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK) {
-        pending_delayed.extend(execute_checkout_write_changes_chunk(
+        let (delayed_targets, entries) = execute_checkout_write_changes_chunk(
             repo,
             work_tree,
             chunk,
-            index_mut,
             rules,
             config,
             conv,
@@ -3434,10 +3535,11 @@ fn checkout_bulk_mod_delete_tree_changes(
             progress,
             cancel,
             journal,
-        )?);
+        )?;
+        pending_delayed.extend(delayed_targets);
+        new_entries.extend(entries);
         skip_ramp = true;
     }
-    let mut new_entries = Vec::new();
     finish_delayed_checkouts(
         repo,
         rules,
@@ -3719,8 +3821,10 @@ fn apply_tree_changes_in_chunks(
         validate_diff_changes_for_worktree(extra, protect)?;
     }
 
+    let checkout_chunks =
+        partition_checkout_changes_for_chunking(changes, POPULATED_TREE_CHECKOUT_CHUNK);
     let mut apply_slices = |lock: &IndexLock| -> Result<()> {
-        for (i, chunk) in changes.chunks(POPULATED_TREE_CHECKOUT_CHUNK).enumerate() {
+        for (i, chunk) in checkout_chunks.iter().enumerate() {
             if i > 0 {
                 apply.skip_parallel_write_ramp = true;
             }
@@ -5666,6 +5770,34 @@ mod tests {
             });
         }
         assert!(bulk_mod_delete_checkout_eligible(&changes, &rules));
+    }
+
+    #[test]
+    fn wholesale_blocked_top_level_directories_blocks_dir_to_file_replacement() {
+        let changes = vec![
+            DiffEntry {
+                status: DiffStatus::Deleted,
+                old_path: Some("d1/sub/f".into()),
+                new_path: None,
+                old_mode: FileMode::REGULAR,
+                new_mode: FileMode::ABSENT,
+                old_oid: ObjectId::zero(),
+                new_oid: ObjectId::zero(),
+                score: None,
+            },
+            DiffEntry {
+                status: DiffStatus::Added,
+                old_path: None,
+                new_path: Some("d1".into()),
+                old_mode: FileMode::ABSENT,
+                new_mode: FileMode::REGULAR,
+                old_oid: ObjectId::zero(),
+                new_oid: ObjectId::zero(),
+                score: None,
+            },
+        ];
+        let blocked = super::wholesale_blocked_top_level_directories(&changes);
+        assert_eq!(blocked, BTreeSet::from(["d1".to_owned()]));
     }
 
     #[test]
