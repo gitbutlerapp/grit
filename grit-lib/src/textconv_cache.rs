@@ -193,6 +193,7 @@ fn write_notes_ref(
     };
     let bytes = serialize_commit(&commit);
     let commit_oid = odb.write(ObjectKind::Commit, &bytes)?;
+    odb.flush_for_publish()?;
     // Check the commit against `odb`, which may not be the files store under `git_dir`.
     let store = crate::refs::store::ObjectCheckedRefStore::new(
         crate::refs::store::open_ref_store(git_dir)?,

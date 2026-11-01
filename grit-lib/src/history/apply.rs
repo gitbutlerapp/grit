@@ -1410,6 +1410,11 @@ fn commit_planned_ref_updates(
             .update(update)
             .map_err(|e| map_ref_store_error(e, &planned.name))?;
     }
+    repo.odb()
+        .flush_for_publish()
+        .map_err(|e| HistoryError::RefApply {
+            message: e.to_string(),
+        })?;
     let wait = LockWait::files_ref_lock(config.as_ref().map(|c| c.as_ref()));
     let prepared = prepare_with_lock_wait(store, txn, wait).map_err(|e| {
         map_ref_store_error(

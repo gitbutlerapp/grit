@@ -276,6 +276,19 @@ pub trait WritableObjectStore: ObjectStore {
         Ok(())
     }
 
+    /// Like [`Self::flush`], but rolls back the current batch when flush fails.
+    ///
+    /// # Errors
+    ///
+    /// Propagates flush failures after attempting [`Self::rollback`].
+    fn flush_for_publish(&self) -> Result<()> {
+        if let Err(err) = self.flush() {
+            let _ = self.rollback();
+            return Err(err);
+        }
+        Ok(())
+    }
+
     /// Discard unflushed writes from the current batch after a failed ingest or similar.
     ///
     /// Default is a no-op. After a successful [`Self::flush`], rollback is a no-op.
@@ -370,6 +383,10 @@ macro_rules! forward_object_store {
 
             fn flush(&self) -> Result<()> {
                 (**self).flush()
+            }
+
+            fn flush_for_publish(&self) -> Result<()> {
+                (**self).flush_for_publish()
             }
 
             fn rollback(&self) -> Result<()> {

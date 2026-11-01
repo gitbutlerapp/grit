@@ -1777,7 +1777,7 @@ fn create_commit_with_index(
         .map_err(|detail| Error::CorruptObject(format!("commit would fail fsck: {detail}")))?;
     poll_cancel(progress, cancel)?;
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
-    repo.odb().flush()?;
+    repo.odb().flush_for_publish()?;
 
     let amend_notes_rewrite: Option<NotesRewritePlan> =
         if let Some(old_tip) = replaced_tip.filter(|_| req.amend && req.post_rewrite.enabled()) {
@@ -2017,7 +2017,7 @@ pub fn write_commit_object(
     let config = repo.config()?;
     let bytes = prepare_commit_bytes(repo, config.as_ref(), data, sign_override)?;
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
-    repo.odb().flush()?;
+    repo.odb().flush_for_publish()?;
     Ok(oid)
 }
 

@@ -3458,6 +3458,22 @@ impl Odb {
         }
     }
 
+    /// Persist staged object writes before publishing refs or the index.
+    ///
+    /// On flush failure, rolls back unflushed writes on a custom primary so a later
+    /// successful flush cannot make them durable.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the primary store's flush failure after attempting [`Self::rollback`].
+    pub fn flush_for_publish(&self) -> Result<()> {
+        if let Some(primary) = &self.custom_primary {
+            primary.flush_for_publish()
+        } else {
+            Ok(())
+        }
+    }
+
     /// Discard unflushed writes on a custom primary store after a failed bulk ingest.
     ///
     /// No-op for a files-backed primary. See [`WritableObjectStore::rollback`].

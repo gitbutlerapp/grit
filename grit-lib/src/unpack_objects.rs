@@ -520,7 +520,7 @@ pub fn ingest_pack_into_with_progress(
         None,
     ) {
         Ok(unpacked) => {
-            store.flush()?;
+            store.flush_for_publish()?;
             Ok(unpacked.into_ingested())
         }
         Err(err) => {
@@ -541,7 +541,7 @@ pub(crate) fn ingest_pack_into_odb(
 ) -> Result<IngestedObjects> {
     match unpack_into(reader, odb, opts, progress, cancel, None) {
         Ok(unpacked) => {
-            odb.flush()?;
+            odb.flush_for_publish()?;
             Ok(unpacked.into_ingested())
         }
         Err(err) => {

@@ -462,6 +462,7 @@ fn commit_notes_tree(
     commit: &NotesCommit<'_>,
 ) -> Result<ObjectId> {
     let oid = write_notes_commit_object(repo, entries, commit, parent.into_iter().collect())?;
+    repo.odb().flush_for_publish()?;
     update_notes_ref(repo, notes_ref, parent, oid, commit)?;
     Ok(oid)
 }
@@ -1192,6 +1193,7 @@ fn write_notes_commit_with_parents(
     };
     let oid = write_notes_commit_object(repo, entries, &commit, parents.to_vec())?;
     if let NotesRefUpdate::From(old) = update {
+        repo.odb().flush_for_publish()?;
         update_notes_ref(repo, notes_ref, old, oid, &commit)?;
     }
     Ok(oid)
