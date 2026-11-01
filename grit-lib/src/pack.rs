@@ -1100,7 +1100,7 @@ pub(crate) mod pack_cache {
                     indexes: out.clone(),
                     midx_mtime: midx_pack_names.0,
                     midx_pack_names: midx_pack_names.1,
-                    idx_listing_verified: true,
+                    idx_listing_verified: false,
                 },
             );
         });
@@ -6751,6 +6751,32 @@ mod tests {
             2,
             "miss path should re-scan when pack dir mtime changed"
         );
+    }
+
+    #[test]
+    fn pack_added_same_pack_dir_mtime_found_on_miss() {
+        use crate::odb::Odb;
+
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        let pack_dir = objects.join("pack");
+        let (pack_a, oid_a, off_a) = single_blob_pack(b"pack-a");
+        install_synthetic_pack(&objects, "first", &pack_a, &[(oid_a, off_a)]);
+
+        let odb = Odb::new(&objects);
+        odb.read(&oid_a).expect("warm odb cache");
+
+        let saved_mt = filetime::FileTime::from_last_modification_time(
+            &std::fs::metadata(&pack_dir).expect("pack dir meta"),
+        );
+        let (pack_b, oid_b, off_b) = single_blob_pack(b"pack-b-same-second");
+        install_synthetic_pack_no_clear(&objects, "second", &pack_b, &[(oid_b, off_b)]);
+        filetime::set_file_mtime(&pack_dir, saved_mt).expect("restore pack dir mtime");
+
+        odb.read(&oid_b)
+            .expect("new pack visible after idx-set compare on miss");
     }
 
     #[test]

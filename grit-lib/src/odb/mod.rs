@@ -287,6 +287,8 @@ pub struct Odb {
     session_loose_reads: Arc<std::sync::Mutex<SessionLooseReads>>,
     /// Parsed or raw trees reused for the lifetime of this [`Odb`] handle (Git object cache).
     session_tree_entries: Arc<Mutex<SessionTreeEntries>>,
+    /// Negative loose-read caches keyed by `objects/` directory (shared across [`LooseStore`] opens).
+    loose_negative_caches: Arc<Mutex<HashMap<PathBuf, store::SharedLooseNegativeCache>>>,
 }
 
 /// Largest loose object [`Odb::read_unless_larger`] keeps in the session read cache. Its callers
@@ -562,6 +564,7 @@ impl Odb {
             attached_commit_graph: None,
             session_loose_reads: Arc::new(Mutex::new(SessionLooseReads::default())),
             session_tree_entries: Arc::new(Mutex::new(SessionTreeEntries::default())),
+            loose_negative_caches: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -616,6 +619,7 @@ impl Odb {
             attached_commit_graph: None,
             session_loose_reads: Arc::new(Mutex::new(SessionLooseReads::default())),
             session_tree_entries: Arc::new(Mutex::new(SessionTreeEntries::default())),
+            loose_negative_caches: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -973,6 +977,23 @@ impl Odb {
             }
         }
         dirs
+    }
+
+    fn loose_negative_cache_for(&self, objects_dir: &Path) -> store::SharedLooseNegativeCache {
+        let key = objects_dir.to_path_buf();
+        if let Ok(guard) = self.loose_negative_caches.lock() {
+            if let Some(hit) = guard.get(&key) {
+                return Arc::clone(hit);
+            }
+        }
+        let mut guard = self
+            .loose_negative_caches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard
+            .entry(key)
+            .or_insert_with(|| Arc::new(Mutex::new(store::LooseNegativeCache::default())))
+            .clone()
     }
 
     #[cfg(test)]
@@ -2318,18 +2339,20 @@ impl Odb {
 
     fn local_loose(&self) -> Result<LooseStore> {
         self.require_files_primary("loose_write")?;
-        Ok(LooseStore::new(
+        Ok(LooseStore::new_with_negative_cache(
             self.objects_dir.clone(),
             self.hash_algo(),
             self.loose_compression()?,
+            self.loose_negative_cache_for(&self.objects_dir),
         ))
     }
 
     fn loose_at(&self, objects_dir: &Path) -> Result<LooseStore> {
-        Ok(LooseStore::new(
+        Ok(LooseStore::new_with_negative_cache(
             objects_dir.to_path_buf(),
             self.hash_algo(),
             self.loose_compression()?,
+            self.loose_negative_cache_for(objects_dir),
         ))
     }
 
