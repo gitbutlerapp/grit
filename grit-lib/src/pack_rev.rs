@@ -453,6 +453,46 @@ mod coverage_tests {
     }
 
     #[test]
+    fn rev_sidecar_takes_the_pack_trailer_checksum() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let idx_path = tmp.path().join("pack-x.idx");
+        let pack_checksum = [7u8; 20];
+        let a = ObjectId::from_hex("0102030405060708090a0b0c0d0e0f1011121314").expect("oid");
+        let b = ObjectId::from_hex("1102030405060708090a0b0c0d0e0f1011121314").expect("oid");
+        write_v2_pack_index_with_trailer(
+            &idx_path,
+            &[(a, 40, 0), (b, 12, 0)],
+            &pack_checksum,
+            20,
+            None,
+        )
+        .expect("write idx");
+        let pack_path = tmp.path().join("pack-x.pack");
+        let mut pack = b"PACK".to_vec();
+        pack.resize(4096, 0x55);
+        pack.extend_from_slice(&pack_checksum);
+        std::fs::write(&pack_path, &pack).expect("write pack");
+
+        write_pack_rev_sidecar_for_index_path_with_shared(&idx_path, PERM_UMASK)
+            .expect("write rev");
+        let index = read_pack_index(&idx_path).expect("load idx");
+        let rev_path = rev_path_for_index(&idx_path);
+        let rev = std::fs::read(&rev_path).expect("read rev");
+        assert_eq!(
+            rev,
+            build_pack_rev_bytes_from_index_order_offsets_and_checksum(&[40, 12], &pack_checksum)
+        );
+        assert!(verify_pack_rev_file(&rev_path, &index).is_ok());
+
+        std::fs::remove_file(&rev_path).expect("remove rev");
+        std::fs::write(&pack_path, [0u8; 10]).expect("truncate pack");
+        assert!(matches!(
+            write_pack_rev_sidecar_for_index_path_with_shared(&idx_path, PERM_UMASK),
+            Err(Error::CorruptObject(_))
+        ));
+    }
+
+    #[test]
     fn hashfile_checksum_valid_sha1_rejects_short_input() {
         assert!(!hashfile_checksum_valid_sha1(b"short"));
     }
