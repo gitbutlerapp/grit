@@ -223,18 +223,45 @@ fn bench_diff_renames_adoc_similar(c: &mut Criterion) {
     group.finish();
 }
 
-fn basename_over_limit_fixture(count: usize) -> RenameBenchFixture {
+/// Duplicate `readme.txt` basenames with directory votes seeded by exact renames.
+fn basename_duplicate_fixture(count: usize, rename_limit: i64) -> RenameBenchFixture {
     let root = TempDir::new().expect("tempdir");
     let git_dir = root.path().join(".git");
     std::fs::create_dir_all(git_dir.join("objects")).expect("objects");
     let odb = Odb::new(&git_dir.join("objects"));
 
-    let mut entries: Vec<DiffEntry> = Vec::with_capacity(count * 2);
+    let mut entries: Vec<DiffEntry> = Vec::with_capacity(count * 4);
     for i in 0..count {
-        let old_data = format!("payload {i} line one\nline two\n").into_bytes();
-        let new_data = format!("payload {i} line one\nline two edited\n").into_bytes();
-        let old_oid = odb.write(ObjectKind::Blob, &old_data).expect("write old");
-        let new_oid = odb.write(ObjectKind::Blob, &new_data).expect("write new");
+        let anchor = format!("anchor {i}\n").into_bytes();
+        let anchor_oid = odb.write(ObjectKind::Blob, &anchor).expect("anchor");
+
+        entries.push(DiffEntry {
+            status: DiffStatus::Deleted,
+            old_path: Some(format!("old/{i}/anchor.txt")),
+            new_path: None,
+            old_mode: FileMode::REGULAR,
+            new_mode: FileMode::ABSENT,
+            old_oid: anchor_oid,
+            new_oid: zero_oid(),
+            score: None,
+        });
+        entries.push(DiffEntry {
+            status: DiffStatus::Added,
+            old_path: None,
+            new_path: Some(format!("new/{i}/anchor.txt")),
+            old_mode: FileMode::ABSENT,
+            new_mode: FileMode::REGULAR,
+            old_oid: zero_oid(),
+            new_oid: anchor_oid,
+            score: None,
+        });
+
+        let old_readme = format!("readme body {i} line one\nline two\n").into_bytes();
+        let mut new_readme = old_readme.clone();
+        new_readme.extend_from_slice(b"line three edited\n");
+        let old_oid = odb.write(ObjectKind::Blob, &old_readme).expect("old readme");
+        let new_oid = odb.write(ObjectKind::Blob, &new_readme).expect("new readme");
+
         entries.push(DiffEntry {
             status: DiffStatus::Deleted,
             old_path: Some(format!("old/{i}/readme.txt")),
@@ -260,7 +287,7 @@ fn basename_over_limit_fixture(count: usize) -> RenameBenchFixture {
     let mut config = bench_config();
     let limit = ConfigFile::parse(
         Path::new("limit"),
-        "[diff]\n\trenameLimit = 500\n",
+        &format!("[diff]\n\trenameLimit = {rename_limit}\n"),
         ConfigScope::Local,
     )
     .expect("parse limit");
@@ -274,33 +301,36 @@ fn basename_over_limit_fixture(count: usize) -> RenameBenchFixture {
     }
 }
 
-fn bench_diff_renames_basename_over_limit(c: &mut Criterion) {
+fn bench_diff_renames_basename_duplicates(c: &mut Criterion) {
     let policy = ThreadPolicy::with_threads_override(Some(1))
         .min_items_override(Some(0))
         .min_total_bytes_override(Some(0));
-    let fx = basename_over_limit_fixture(800);
-    let mut group = c.benchmark_group("diff_renames_basename_over_limit");
-    group.throughput(Throughput::Elements(
-        u64::try_from(fx.entries.len()).expect("count"),
-    ));
-    group.bench_function("threads=1", |b| {
-        b.iter(|| {
-            black_box(
-                detect_renames_with_policy(
-                    &fx.odb,
-                    None,
-                    fx.entries.clone(),
-                    50,
-                    &fx.config,
-                    &policy,
-                    None,
-                    DetectRenamesOptions::default(),
-                )
-                .expect("detect renames")
-                .entries,
-            );
+    let mut group = c.benchmark_group("diff_renames_basename_duplicates");
+    group.sample_size(10);
+    for (name, count, limit) in [("limited_128", 128, 500_i64), ("unlimited_64", 64, 5000_i64)] {
+        let fx = basename_duplicate_fixture(count, limit);
+        group.throughput(Throughput::Elements(
+            u64::try_from(count * 4).expect("count"),
+        ));
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                black_box(
+                    detect_renames_with_policy(
+                        &fx.odb,
+                        None,
+                        fx.entries.clone(),
+                        50,
+                        &fx.config,
+                        &policy,
+                        None,
+                        DetectRenamesOptions::default(),
+                    )
+                    .expect("detect renames")
+                    .entries,
+                );
+            });
         });
-    });
+    }
     group.finish();
 }
 
@@ -308,6 +338,6 @@ criterion_group!(
     diff_renames,
     bench_diff_renames,
     bench_diff_renames_adoc_similar,
-    bench_diff_renames_basename_over_limit
+    bench_diff_renames_basename_duplicates
 );
 criterion_main!(diff_renames);

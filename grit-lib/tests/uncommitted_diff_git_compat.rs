@@ -400,7 +400,7 @@ fn bare_repository_rejects_working_tree_diffs() {
         .entries(&DiffTarget::Commit(head), &[], &options)
         .expect("commit target needs no work tree");
     assert_eq!(
-        names(&commit),
+        names(&commit.entries),
         git_lines(
             &bare,
             &[

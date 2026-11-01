@@ -5161,6 +5161,10 @@ pub struct DiffIndexToWorktreeOptions {
     /// When set, work-tree access failures during status emit [`crate::diagnostics::Warning`]
     /// values here instead of aborting the diff.
     pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+    /// When true with [`Self::diagnostics`], permission-denied worktree paths warn and are omitted
+    /// from the diff (not reported as deleted). Used by content diffs and stash; status sets
+    /// [`Self::for_status`] instead.
+    pub skip_inaccessible_paths: bool,
 }
 
 impl Default for DiffIndexToWorktreeOptions {
@@ -5184,8 +5188,29 @@ impl Default for DiffIndexToWorktreeOptions {
             hash_blobs_without_write: false,
             cancel_watch: None,
             diagnostics: None,
+            skip_inaccessible_paths: false,
         }
     }
+}
+
+/// Optional worktree access policy for [`diff_tree_to_worktree_with_git_dir_and_rules`]'s slow path.
+#[derive(Clone, Default)]
+pub struct DiffTreeToWorktreeExtras {
+    /// When true with [`Self::diagnostics`], skip permission-denied paths with a warning.
+    pub skip_inaccessible_paths: bool,
+    /// Warning sink paired with [`Self::skip_inaccessible_paths`].
+    pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+    /// Limit the walk to these index paths (expanded pathspecs).
+    pub restrict_to_paths: Option<std::sync::Arc<std::collections::BTreeSet<String>>>,
+}
+
+#[inline]
+fn worktree_diff_skips_inaccessible_paths(
+    for_status: bool,
+    skip_inaccessible_paths: bool,
+    materialize_dirty_blobs: bool,
+) -> bool {
+    (for_status || skip_inaccessible_paths) && !materialize_dirty_blobs
 }
 
 #[inline]
@@ -5253,6 +5278,7 @@ fn parallel_process_blob_worktree_jobs(
     materialize_dirty_blobs: bool,
     hash_blobs_without_write: bool,
     for_status: bool,
+    skip_inaccessible_paths: bool,
     diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
     conv: &crate::crlf::ConversionConfig,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
@@ -5308,6 +5334,7 @@ fn parallel_process_blob_worktree_jobs(
                     if status_skips_inaccessible_worktree_error(
                         &err,
                         for_status,
+                        skip_inaccessible_paths,
                         materialize_dirty_blobs,
                     ) =>
                 {
@@ -5411,13 +5438,23 @@ fn blob_disk_lookup_io_result(
     path: &str,
     err: std::io::Error,
     for_status: bool,
+    skip_inaccessible_paths: bool,
     materialize_dirty_blobs: bool,
 ) -> Result<()> {
-    if for_status && !materialize_dirty_blobs {
+    if worktree_diff_skips_inaccessible_paths(
+        for_status,
+        skip_inaccessible_paths,
+        materialize_dirty_blobs,
+    ) && io_err_is_permission_denied(&err)
+    {
         warn_worktree_access_failed(diagnostics, path, &err);
         return Ok(());
     }
-    Err(Error::Io(err))
+    Err(Error::WorktreePathIo {
+        operation: crate::worktree::WorktreePathOperation::Metadata,
+        path: path.to_owned(),
+        source: err,
+    })
 }
 
 fn io_err_is_permission_denied(err: &std::io::Error) -> bool {
@@ -5427,9 +5464,14 @@ fn io_err_is_permission_denied(err: &std::io::Error) -> bool {
 fn status_skips_inaccessible_worktree_error(
     err: &Error,
     for_status: bool,
+    skip_inaccessible_paths: bool,
     materialize_dirty_blobs: bool,
 ) -> bool {
-    if !for_status || materialize_dirty_blobs {
+    if !worktree_diff_skips_inaccessible_paths(
+        for_status,
+        skip_inaccessible_paths,
+        materialize_dirty_blobs,
+    ) {
         return false;
     }
     match err {
@@ -5465,30 +5507,69 @@ fn warn_and_skip_status_inaccessible(
     true
 }
 
+enum WorktreeSymlinkMetadata {
+    Found(fs::Metadata),
+    Absent,
+    Inaccessible,
+}
+
+fn probe_worktree_symlink_metadata(
+    file_path: &Path,
+    path_str: &str,
+    diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
+    for_status: bool,
+    skip_inaccessible_paths: bool,
+    materialize_dirty_blobs: bool,
+) -> Result<WorktreeSymlinkMetadata> {
+    match fs::symlink_metadata(file_path) {
+        Ok(meta) => Ok(WorktreeSymlinkMetadata::Found(meta)),
+        Err(e)
+            if e.kind() == std::io::ErrorKind::NotFound
+                || e.raw_os_error() == Some(20) /* ENOTDIR */ =>
+        {
+            Ok(WorktreeSymlinkMetadata::Absent)
+        }
+        Err(e) => {
+            if worktree_diff_skips_inaccessible_paths(
+                for_status,
+                skip_inaccessible_paths,
+                materialize_dirty_blobs,
+            ) && io_err_is_permission_denied(&e)
+            {
+                warn_worktree_access_failed(diagnostics, path_str, &e);
+                Ok(WorktreeSymlinkMetadata::Inaccessible)
+            } else {
+                Err(Error::WorktreePathIo {
+                    operation: crate::worktree::WorktreePathOperation::Metadata,
+                    path: path_str.to_owned(),
+                    source: e,
+                })
+            }
+        }
+    }
+}
+
 fn symlink_metadata_worktree_diff(
     file_path: &Path,
     path_str: &str,
     diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
     for_status: bool,
+    skip_inaccessible_paths: bool,
     materialize_dirty_blobs: bool,
 ) -> Result<Option<fs::Metadata>> {
-    match fs::symlink_metadata(file_path) {
-        Ok(meta) => Ok(Some(meta)),
-        Err(e)
-            if e.kind() == std::io::ErrorKind::NotFound
-                || e.raw_os_error() == Some(20) /* ENOTDIR */ =>
-        {
-            Ok(None)
-        }
-        Err(e) => {
-            if for_status && !materialize_dirty_blobs && io_err_is_permission_denied(&e) {
-                warn_worktree_access_failed(diagnostics, path_str, &e);
-                Ok(None)
-            } else {
-                Err(Error::Io(e))
-            }
-        }
-    }
+    Ok(
+        match probe_worktree_symlink_metadata(
+            file_path,
+            path_str,
+            diagnostics,
+            for_status,
+            skip_inaccessible_paths,
+            materialize_dirty_blobs,
+        )? {
+            WorktreeSymlinkMetadata::Found(meta) => Some(meta),
+            WorktreeSymlinkMetadata::Absent | WorktreeSymlinkMetadata::Inaccessible => None,
+        },
+    )
 }
 
 /// Whether status may report `ie` modified because the worktree size (already munged to the
@@ -5561,6 +5642,7 @@ fn push_index_blob_worktree_diff(
     materialize_dirty_blobs: bool,
     hash_blobs_without_write: bool,
     for_status: bool,
+    skip_inaccessible_paths: bool,
     diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
     icase_collisions: Option<&crate::path_icase::IcaseCheckoutCollisionMap>,
@@ -5654,6 +5736,7 @@ fn push_index_blob_worktree_diff(
             if status_skips_inaccessible_worktree_error(
                 &err,
                 for_status,
+                skip_inaccessible_paths,
                 materialize_dirty_blobs,
             ) =>
         {
@@ -6303,6 +6386,7 @@ fn diff_index_to_worktree_inner(
                     path_str_ref,
                     e,
                     options.for_status,
+                    options.skip_inaccessible_paths,
                     materialize_dirty_blobs,
                 )?;
             }
@@ -6457,6 +6541,7 @@ fn diff_index_to_worktree_inner(
                         path_str_ref,
                         options.diagnostics.as_ref(),
                         options.for_status,
+                        options.skip_inaccessible_paths,
                         materialize_dirty_blobs,
                     )?
                     else {
@@ -6476,6 +6561,7 @@ fn diff_index_to_worktree_inner(
                         materialize_dirty_blobs,
                         hash_blobs_without_write,
                         options.for_status,
+                        options.skip_inaccessible_paths,
                         options.diagnostics.as_ref(),
                         filter_fp,
                         icase_collisions.as_ref(),
@@ -6501,6 +6587,7 @@ fn diff_index_to_worktree_inner(
             materialize_dirty_blobs,
             hash_blobs_without_write,
             options.for_status,
+            options.skip_inaccessible_paths,
             options.diagnostics.as_ref(),
             &conv,
             filter_fp,
@@ -6511,16 +6598,14 @@ fn diff_index_to_worktree_inner(
 
     for (path, (_, base_entry)) in unmerged_base {
         let file_path = index_entry_worktree_abs(work_tree, &path, precompose_unicode, ignorecase);
-        let wt_meta = match fs::symlink_metadata(&file_path) {
-            Ok(meta) => Some(meta),
-            Err(e)
-                if e.kind() == std::io::ErrorKind::NotFound
-                    || e.raw_os_error() == Some(20) /* ENOTDIR */ =>
-            {
-                None
-            }
-            Err(e) => return Err(Error::Io(e)),
-        };
+        let wt_meta = symlink_metadata_worktree_diff(
+            &file_path,
+            &path,
+            options.diagnostics.as_ref(),
+            options.for_status,
+            options.skip_inaccessible_paths,
+            materialize_dirty_blobs,
+        )?;
 
         let new_mode = wt_meta.as_ref().map_or_else(
             || FileMode::ABSENT,
@@ -8488,6 +8573,30 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
     config: Option<&ConfigSet>,
     worktree_rules: Option<&crate::worktree_rules::WorktreeRules>,
 ) -> Result<Vec<DiffEntry>> {
+    diff_tree_to_worktree_with_git_dir_and_rules_extras(
+        odb,
+        tree_oid,
+        work_tree,
+        repository_git_dir,
+        index,
+        config,
+        worktree_rules,
+        DiffTreeToWorktreeExtras::default(),
+    )
+}
+
+/// Like [`diff_tree_to_worktree_with_git_dir_and_rules`], with worktree access policy for the slow path.
+#[allow(clippy::too_many_arguments)]
+pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
+    odb: &Odb,
+    tree_oid: Option<&ObjectId>,
+    work_tree: &Path,
+    repository_git_dir: &Path,
+    index: &Index,
+    config: Option<&ConfigSet>,
+    worktree_rules: Option<&crate::worktree_rules::WorktreeRules>,
+    extras: DiffTreeToWorktreeExtras,
+) -> Result<Vec<DiffEntry>> {
     use crate::config::ConfigSet;
     use crate::crlf;
 
@@ -8603,6 +8712,13 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
     let mut result = Vec::new();
 
     for path in &all_paths {
+        if extras
+            .restrict_to_paths
+            .as_ref()
+            .is_some_and(|limit| !limit.contains(path))
+        {
+            continue;
+        }
         if index_entries
             .get(path.as_bytes())
             .is_some_and(|ie| ie.skip_worktree())
@@ -8706,10 +8822,17 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
 
         let file_path = work_tree.join(path);
 
-        let wt_meta = match fs::symlink_metadata(&file_path) {
-            Ok(m) => Some(m),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(Error::Io(e)),
+        let wt_meta = match probe_worktree_symlink_metadata(
+            &file_path,
+            path,
+            extras.diagnostics.as_ref(),
+            false,
+            extras.skip_inaccessible_paths,
+            false,
+        )? {
+            WorktreeSymlinkMetadata::Found(m) => Some(m),
+            WorktreeSymlinkMetadata::Inaccessible => continue,
+            WorktreeSymlinkMetadata::Absent => None,
         };
 
         if unmerged_only_paths.contains(path) {
@@ -9138,7 +9261,14 @@ pub fn detect_renames_with_policy(
     );
 
     let mut blob_cache = super::rename_blob_cache::RenameBlobCache::new(deleted.len(), added.len());
-    if !detect_opts.skip_basename_heuristic {
+    if !detect_opts.skip_basename_heuristic
+        && super::basename_rename::basename_needs_similarity_scoring(
+            &deleted,
+            &added,
+            &used_deleted,
+            &used_added,
+        )
+    {
         let par_opts = diff_rename_parallel_options(config, thread_policy);
         super::basename_rename::apply_basename_rename_pairs(
             odb,
