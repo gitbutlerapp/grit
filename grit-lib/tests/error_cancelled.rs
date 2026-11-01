@@ -68,11 +68,9 @@ fn fetch_local_cancelled_at_start_is_classified() {
     let flag = FlagCancel::new();
     flag.cancel();
 
-    let opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::Following,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::Following;
     let err = fetch_local_with_progress(&local.join(".git"), &bare, &opts, &mut NoProgress, &flag)
         .expect_err("cancelled before fetch");
     assert!(err.is_cancelled(), "{err:?}");

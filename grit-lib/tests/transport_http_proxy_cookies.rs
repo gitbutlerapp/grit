@@ -160,11 +160,10 @@ fn setup(log_headers: Option<&Path>, set_cookie: Option<&str>) -> Option<Fixture
 }
 
 fn fetch_opts() -> FetchOptions {
-    FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
-    }
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::None;
+    opts
 }
 
 /// Read the server's `--log-headers` sink and return all logged lines.

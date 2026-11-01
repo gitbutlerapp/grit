@@ -121,15 +121,15 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
         stage_for_commit(repo, &mut NullProgress, &NeverCancel).expect("stage");
         create_commit(
             repo,
-            &CommitRequest {
-                message: format!("m {idx}"),
-                author: Some(ident.parse().expect("signature")),
-                committer: Some(ident.parse().expect("signature")),
-                allow_empty: false,
-                sign_override: None,
-                amend: false,
-                assume_worktree_synced: false,
-                ..Default::default()
+            &{
+                let mut req = CommitRequest::new(format!("m {idx}"));
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
             },
             &mut NullProgress,
             &NeverCancel,
@@ -1801,15 +1801,15 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
     let ident = "Test <t@example.com> 1 +0000".to_string();
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "base".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("base");
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &NeverCancel,
@@ -1823,15 +1823,15 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
     stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage child");
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "child".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("child");
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &NeverCancel,
@@ -2610,15 +2610,15 @@ fn grit_commit_all(repo: &Repository, path: &Path, message: &str) {
     let ident = "Test <t@example.com> 1 +0000".to_string();
     create_commit(
         repo,
-        &CommitRequest {
-            message: message.to_string(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new(message.to_string());
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &NeverCancel,
@@ -3197,17 +3197,9 @@ fn gc_prunes_stale_temporary_pack_files_like_git() {
         three_weeks_ago,
     )
     .expect("mtime");
-    gc(
-        &dry_repo,
-        &GcOptions {
-            repack: RepackOptions {
-                dry_run: true,
-                ..RepackOptions::default()
-            },
-            ..GcOptions::default()
-        },
-    )
-    .expect("gc dry-run");
+    let mut gc_opts = GcOptions::default();
+    gc_opts.repack.dry_run = true;
+    gc(&dry_repo, &gc_opts).expect("gc dry-run");
     assert!(dry_dir
         .path()
         .join(".git/objects/pack/tmp_pack_old")

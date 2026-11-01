@@ -123,15 +123,15 @@ fn one_commit(repo: &Repository) -> ObjectId {
     let ident = "T <t@example.com> 1 +0000".to_string();
     create_commit(
         repo,
-        &CommitRequest {
-            message: "c1".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("c1");
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &NeverCancel,
@@ -391,15 +391,15 @@ fn fsck_passes_on_deltified_pack_after_many_commits() {
         let ident = "T <t@example.com> 1 +0000".to_string();
         create_commit(
             &repo,
-            &CommitRequest {
-                message: format!("commit {i}"),
-                author: Some(ident.parse().expect("signature")),
-                committer: Some(ident.parse().expect("signature")),
-                allow_empty: false,
-                sign_override: None,
-                amend: false,
-                assume_worktree_synced: false,
-                ..Default::default()
+            &{
+                let mut req = CommitRequest::new(format!("commit {i}"));
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
             },
             &mut NullProgress,
             &NeverCancel,
@@ -443,15 +443,15 @@ fn fsck_reports_corrupt_deltified_object_and_still_checks_pack() {
         let ident = "T <t@example.com> 1 +0000".to_string();
         create_commit(
             &repo,
-            &CommitRequest {
-                message: format!("commit {i}"),
-                author: Some(ident.parse().expect("signature")),
-                committer: Some(ident.parse().expect("signature")),
-                allow_empty: false,
-                sign_override: None,
-                amend: false,
-                assume_worktree_synced: false,
-                ..Default::default()
+            &{
+                let mut req = CommitRequest::new(format!("commit {i}"));
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
             },
             &mut NullProgress,
             &NeverCancel,
@@ -1735,15 +1735,15 @@ fn fsck_commit_with_multibyte_name_at_byte_six() {
     let ident = "T <t@example.com> 1 +0000".to_string();
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "one".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("one");
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &NeverCancel,

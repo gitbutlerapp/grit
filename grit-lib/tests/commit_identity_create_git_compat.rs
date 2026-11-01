@@ -76,11 +76,11 @@ fn create_commit_signature_passes_git_fsck_strict() {
         OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time"),
     )
     .expect("signature");
-    let req = CommitRequest {
-        message: "first\n".into(),
-        author: Some(doc.clone()),
-        committer: Some(doc),
-        ..Default::default()
+    let req = {
+        let mut req = CommitRequest::new("first\n");
+        req.author = Some(doc.clone());
+        req.committer = Some(doc);
+        req
     };
     create_commit(
         &repo,
@@ -132,9 +132,9 @@ fn create_commit_defaults_to_repository_identity() {
 
     std::fs::write(root.join("a.txt"), "hi\n").expect("file");
     stage_worktree_changes(&repo, &[]).expect("stage");
-    let req = CommitRequest {
-        message: "first\n".into(),
-        ..Default::default()
+    let req = {
+        let mut req = CommitRequest::new("first\n");
+        req
     };
     create_commit(
         &repo,
@@ -170,10 +170,10 @@ fn repository_identity_reports_missing_configuration() {
         "unexpected error: {err}"
     );
 
-    let req = CommitRequest {
-        message: "x\n".into(),
-        allow_empty: true,
-        ..Default::default()
+    let req = {
+        let mut req = CommitRequest::new("x\n");
+        req.allow_empty = true;
+        req
     };
     let err = create_commit(
         &repo,
@@ -197,12 +197,12 @@ fn create_commit_rejects_unwritable_signatures() {
         time,
     };
 
-    let bad = CommitRequest {
-        message: "x\n".into(),
-        author: Some(injected.clone()),
-        committer: Some(injected),
-        allow_empty: true,
-        ..Default::default()
+    let bad = {
+        let mut req = CommitRequest::new("x\n");
+        req.author = Some(injected.clone());
+        req.committer = Some(injected);
+        req.allow_empty = true;
+        req
     };
     let err = create_commit(
         &repo,

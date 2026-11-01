@@ -77,18 +77,11 @@ fn fetch_from_git_bundle_matches_git_fetch() {
     )
     .unwrap();
     let mut progress = NoProgress;
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+    fetch_opts.tags = TagMode::None;
     let outcome = remote
-        .fetch(
-            &repo,
-            FetchOptions {
-                refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-                tags: TagMode::None,
-                ..Default::default()
-            },
-            &mut progress,
-            &NeverCancel,
-            None,
-        )
+        .fetch(&repo, fetch_opts, &mut progress, &NeverCancel, None)
         .expect("fetch bundle");
 
     assert!(git_in(
@@ -161,7 +154,7 @@ fn range_bundle_fetch_without_refspec_errors_before_ingest() {
             err,
             grit_lib::remote::RemoteError::Library(grit_lib::error::Error::FetchRefspec(
                 grit_lib::remote::fetch_request::FetchRefspecError::SourceNotFound {
-                    ref_name,
+                    ref ref_name,
                     ..
                 }
             )) if ref_name == "HEAD"
@@ -297,17 +290,10 @@ fn literal_bundle_fetch_writes_fetch_head() {
         &RepositoryOptions::empty().with_work_tree(dest.path()),
     )
     .unwrap();
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.tags = TagMode::None;
     remote
-        .fetch(
-            &repo,
-            FetchOptions {
-                tags: TagMode::None,
-                ..Default::default()
-            },
-            &mut NoProgress,
-            &NeverCancel,
-            None,
-        )
+        .fetch(&repo, fetch_opts, &mut NoProgress, &NeverCancel, None)
         .expect("anonymous bundle fetch");
 
     let grit_fetch_head = std::fs::read_to_string(dest.path().join(".git/FETCH_HEAD"))

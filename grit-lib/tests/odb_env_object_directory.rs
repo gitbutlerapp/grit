@@ -109,11 +109,11 @@ fn loose_objects(objects_dir: &Path) -> Vec<PathBuf> {
 }
 
 fn commit_request(message: &str) -> CommitRequest {
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(IDENT.parse().expect("signature")),
-        committer: Some(IDENT.parse().expect("signature")),
-        ..Default::default()
+    {
+        let mut req = CommitRequest::new(message.to_owned());
+        req.author = Some(IDENT.parse().expect("signature"));
+        req.committer = Some(IDENT.parse().expect("signature"));
+        req
     }
 }
 
@@ -389,17 +389,10 @@ fn all_files(dir: &Path) -> Vec<PathBuf> {
 fn fetch_into_quarantine(root: &Path, url: &str) {
     let repo = discover(quarantined(root)).expect("discover");
     let remote = Remote::from_url(url).expect("remote url");
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     repo.remotes()
-        .fetch(
-            &remote,
-            FetchOptions {
-                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-                ..Default::default()
-            },
-            &mut NoProgress,
-            &NeverCancel,
-            None,
-        )
+        .fetch(&remote, fetch_opts, &mut NoProgress, &NeverCancel, None)
         .expect("grit fetch");
 }
 

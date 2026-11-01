@@ -121,7 +121,7 @@ fn packed_annotated_tag_list_refs_uses_tag_object_not_peel() {
         &["update-ref", "refs/tags/loose-ann", &tag_oid.to_hex()],
     );
     assert_list_refs_match_git(wt, "refs/tags/");
-    for (name, oid) in list_refs(git_dir, "refs/tags/").expect("list_refs") {
+    for (name, oid) in list_refs(&git_dir, "refs/tags/").expect("list_refs") {
         assert_eq!(
             oid, tag_oid,
             "{name} must list the annotated tag object, not ^{commit}"

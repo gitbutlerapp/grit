@@ -100,11 +100,11 @@ fn status(root: &Path) -> String {
 }
 
 fn commit_req(message: &str) -> CommitRequest {
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(IDENT.parse().expect("signature")),
-        committer: Some(IDENT.parse().expect("signature")),
-        ..Default::default()
+    {
+        let mut req = CommitRequest::new(message.to_owned());
+        req.author = Some(IDENT.parse().expect("signature"));
+        req.committer = Some(IDENT.parse().expect("signature"));
+        req
     }
 }
 

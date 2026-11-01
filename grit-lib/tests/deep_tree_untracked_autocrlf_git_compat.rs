@@ -133,15 +133,15 @@ fn full_tree_add_and_commit_store_lf_with_autocrlf() {
     let ident = "Test <t@example.com> 1 +0000".to_string();
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "edit".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("edit");
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &NeverCancel,

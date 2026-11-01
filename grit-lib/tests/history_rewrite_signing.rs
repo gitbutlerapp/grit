@@ -117,15 +117,15 @@ fn signed_tip_via_grit(root: &Path, gpgsign: bool) -> ObjectId {
     let ident = "T <t@example.com> 1700000001 +0000".to_owned();
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "signed subject\n".to_owned(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("signed subject\n".to_owned());
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,

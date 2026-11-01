@@ -16,11 +16,11 @@ use grit_lib::worktree::pathspec::ResolvedPathspecs;
 
 fn commit_req(message: &str) -> CommitRequest {
     let id = "Moved Branch <moved@example.com> 1700000000 +0000".to_owned();
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(id.parse().expect("signature")),
-        committer: Some(id.parse().expect("signature")),
-        ..Default::default()
+    {
+        let mut req = CommitRequest::new(message.to_owned());
+        req.author = Some(id.parse().expect("signature"));
+        req.committer = Some(id.parse().expect("signature"));
+        req
     }
 }
 

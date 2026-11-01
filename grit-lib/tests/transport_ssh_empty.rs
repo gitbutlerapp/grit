@@ -124,11 +124,9 @@ fn fetch_empty_bare_over_ssh_is_noop() {
         .connect(&ssh_url(&bare), Service::UploadPack, &connect_opts_v2())
         .expect("connect");
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::None;
     fetch_remote(
         &local.join(".git"),
         &mut *conn,

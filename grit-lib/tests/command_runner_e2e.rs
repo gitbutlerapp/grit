@@ -102,15 +102,15 @@ fn create_commit_aborts_on_pre_commit_hook_failure() {
     let ident = "T <t@t> 1 +0000".to_string();
     let err = create_commit(
         &repo,
-        &CommitRequest {
-            message: "msg".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("msg");
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,
@@ -148,15 +148,15 @@ fn commit_msg_hook_receives_editmsg_path_argument() {
     let ident = "T <t@t> 1 +0000".to_string();
     create_commit(
         &repo,
-        &CommitRequest {
-            message: "hello commit".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("hello commit");
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = false;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,

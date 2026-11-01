@@ -134,11 +134,11 @@ fn commit_all(repo: &Repository, message: &str) {
     .expect("stage");
     commit_with_scope(
         repo,
-        &CommitRequest {
-            message: message.to_owned(),
-            author: Some(IDENT.parse().expect("signature")),
-            committer: Some(IDENT.parse().expect("signature")),
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new(message.to_owned());
+            req.author = Some(IDENT.parse().expect("signature"));
+            req.committer = Some(IDENT.parse().expect("signature"));
+            req
         },
         CommitScope::Staged,
         &mut NullProgress,

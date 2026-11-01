@@ -381,15 +381,15 @@ fn list_and_delete_on_reftable_backend() {
     let ident = "T <t@example.com> 1700000000 +0000";
     let tip = create_commit(
         &repo,
-        &CommitRequest {
-            message: "one".into(),
-            author: Some(ident.parse().expect("signature")),
-            committer: Some(ident.parse().expect("signature")),
-            allow_empty: true,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("one");
+            req.author = Some(ident.parse().expect("signature"));
+            req.committer = Some(ident.parse().expect("signature"));
+            req.allow_empty = true;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,

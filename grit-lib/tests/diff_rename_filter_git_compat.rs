@@ -450,7 +450,7 @@ fn pathspec_on_rename_source_side_matches_git_delete_not_rename() {
             &grit_lib::diff::DiffOptions::default(),
         )
         .expect("entries");
-    assert_eq!(grit_name_status(&grit_entries), git_lines);
+    assert_eq!(grit_name_status(&grit_entries.entries), git_lines);
 }
 
 #[test]
@@ -471,7 +471,7 @@ fn pathspec_on_rename_destination_side_matches_git_add_not_rename() {
             &grit_lib::diff::DiffOptions::default(),
         )
         .expect("entries");
-    assert_eq!(grit_name_status(&grit_entries), git_lines);
+    assert_eq!(grit_name_status(&grit_entries.entries), git_lines);
 }
 
 #[test]
@@ -494,9 +494,12 @@ fn pathspec_covering_both_rename_sides_still_reports_rename() {
             &grit_lib::diff::DiffOptions::default(),
         )
         .expect("entries");
-    assert_eq!(grit_name_status(&grit_entries), git_lines);
+    assert_eq!(grit_name_status(&grit_entries.entries), git_lines);
     assert!(
-        grit_entries.iter().any(|e| e.status == DiffStatus::Renamed),
+        grit_entries
+            .entries
+            .iter()
+            .any(|e| e.status == DiffStatus::Renamed),
         "both sides in pathspec must still pair as rename"
     );
 }
@@ -533,8 +536,8 @@ fn commit_tree_attr_pathspec_matches_git_name_status() {
             &grit_lib::diff::DiffOptions::default(),
         )
         .expect("entries");
-    assert_eq!(grit_name_status(&grit_entries), git_lines);
-    assert_eq!(grit_name_status(&grit_entries), ["M\ta.rs"]);
+    assert_eq!(grit_name_status(&grit_entries.entries), git_lines);
+    assert_eq!(grit_name_status(&grit_entries.entries), ["M\ta.rs"]);
 }
 
 #[test]
@@ -570,7 +573,7 @@ fn pathspec_prunes_tree_walk_before_rename_on_large_delete_add_set() {
             &grit_lib::diff::DiffOptions::default(),
         )
         .expect("full");
-    assert_eq!(full.len(), 601);
+    assert_eq!(full.entries.len(), 601);
 
     let limited = dr
         .repo
@@ -584,15 +587,15 @@ fn pathspec_prunes_tree_walk_before_rename_on_large_delete_add_set() {
             &grit_lib::diff::DiffOptions::default(),
         )
         .expect("limited");
-    assert_eq!(limited.len(), 1);
-    assert_eq!(limited[0].status, DiffStatus::Deleted);
-    assert_eq!(limited[0].path(), "old/050.txt");
+    assert_eq!(limited.entries.len(), 1);
+    assert_eq!(limited.entries[0].status, DiffStatus::Deleted);
+    assert_eq!(limited.entries[0].path(), "old/050.txt");
 
     let git_lines = git_name_status(
         wt,
         &[&parent.to_hex(), &commit.to_hex(), "--", "old/050.txt"],
     );
-    assert_eq!(grit_name_status(&limited), git_lines);
+    assert_eq!(grit_name_status(&limited.entries), git_lines);
 }
 
 #[test]

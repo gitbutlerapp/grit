@@ -466,15 +466,15 @@ fn notes_on_reftable_repository_use_the_ref_store() {
     .expect("init reftable");
     let commit = create_commit(
         &repo,
-        &CommitRequest {
-            message: "init".into(),
-            author: Some(IDENT.parse().expect("signature")),
-            committer: Some(IDENT.parse().expect("signature")),
-            allow_empty: true,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            ..Default::default()
+        &{
+            let mut req = CommitRequest::new("init");
+            req.author = Some(IDENT.parse().expect("signature"));
+            req.committer = Some(IDENT.parse().expect("signature"));
+            req.allow_empty = true;
+            req.sign_override = None;
+            req.amend = false;
+            req.assume_worktree_synced = false;
+            req
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,

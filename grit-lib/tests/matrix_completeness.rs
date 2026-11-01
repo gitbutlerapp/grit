@@ -220,11 +220,9 @@ fn fetch_v0_sideband_band3_fatal_is_typed_error_not_hang() {
         .with_caps(&["side-band-64k", "multi_ack_detailed", "ofs-delta"])
         .with_version(0);
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::None;
 
     let local_git_for_thread = local_git.clone();
     let err = with_watchdog(10, "fetch band-3", move || {
@@ -268,11 +266,9 @@ fn fetch_v0_err_after_done_is_typed_remote_error() {
         .with_caps(&["side-band-64k", "multi_ack_detailed", "ofs-delta"])
         .with_version(0);
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::None,
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::None;
 
     let local_git_for_thread = local_git.clone();
     let err = with_watchdog(10, "fetch ERR-after-done", move || {
@@ -840,12 +836,10 @@ fn shallow_depth1_with_all_tags_over_git_daemon() {
         }
     };
 
-    let mut opts = FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-        tags: TagMode::All,
-        fetch_depth: FetchDepth::depth(1),
-        ..Default::default()
-    };
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::All;
+    opts.fetch_depth = FetchDepth::depth(1);
     let outcome = fetch_remote(
         &local_git,
         &mut *conn,

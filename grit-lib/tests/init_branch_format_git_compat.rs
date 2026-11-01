@@ -145,15 +145,15 @@ fn init_sha256_then_commit_git_fsck_clean() {
         &grit_lib::progress::NeverCancel,
     )
     .expect("stage");
-    let req = grit_lib::porcelain::commit::CommitRequest {
-        message: "test".into(),
-        author: Some("T <t@e.com> 1 +0000".parse().expect("signature")),
-        committer: Some("T <t@e.com> 1 +0000".parse().expect("signature")),
-        allow_empty: false,
-        sign_override: None,
-        amend: false,
-        assume_worktree_synced: false,
-        ..Default::default()
+    let req = {
+        let mut req = grit_lib::porcelain::commit::CommitRequest::new("test");
+        req.author = Some("T <t@e.com> 1 +0000".parse().expect("signature"));
+        req.committer = Some("T <t@e.com> 1 +0000".parse().expect("signature"));
+        req.allow_empty = false;
+        req.sign_override = None;
+        req.amend = false;
+        req.assume_worktree_synced = false;
+        req
     };
     grit_lib::porcelain::commit::create_commit(
         &repo,

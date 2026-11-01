@@ -72,15 +72,15 @@ fn ident() -> grit_lib::ident::Signature {
 
 fn commit_req(message: &str) -> CommitRequest {
     let id = ident();
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(id.clone()),
-        committer: Some(id),
-        allow_empty: false,
-        sign_override: None,
-        amend: false,
-        assume_worktree_synced: false,
-        ..Default::default()
+    {
+        let mut req = CommitRequest::new(message.to_owned());
+        req.author = Some(id.clone());
+        req.committer = Some(id);
+        req.allow_empty = false;
+        req.sign_override = None;
+        req.amend = false;
+        req.assume_worktree_synced = false;
+        req
     }
 }
 

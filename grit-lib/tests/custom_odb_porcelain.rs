@@ -92,71 +92,12 @@ fn blob_id(data: &[u8]) -> ObjectId {
 }
 
 fn commit_request(message: &str) -> CommitRequest {
-    let mut req = CommitRequest::default();
-    req.message = message.to_owned();
-    req.author = Some(IDENT.parse().expect("signature"));
-    req.committer = Some(IDENT.parse().expect("signature"));
-    req
-}
-
-fn head_oid(repo: &Repository, branch: &str) -> ObjectId {
-    let refname = format!("refs/heads/{branch}");
-    repo.references()
-        .resolve(&RefName::try_from(refname.as_str()).expect("ref"))
-        .expect("resolve")
-}
-
-fn switch(repo: &Repository, mode: SwitchMode) {
-    switch_repository(
-        repo,
-        &SwitchOptions {
-            mode,
-            dry_run: false,
-            hooks: Default::default(),
-        },
-        &mut NullProgress,
-        &NeverCancel,
-    )
-    .expect("switch");
-}
-
-fn commit_path(repo: &Repository, path: &str, contents: &str, message: &str) {
-    fs::write(work_tree(repo).join(path), contents).expect("write");
-    stage(
-        repo,
-        &StageOptions {
-            pathspecs: vec![path.into()],
-            ..Default::default()
-        },
-        &mut NullProgress,
-        &NeverCancel,
-    )
-    .expect("stage");
-    commit_worktree(
-        repo,
-        &commit_request(message),
-        &mut NullProgress,
-        &NeverCancel,
-    )
-    .expect("commit");
-}
-
-fn assert_merge_commit_in_store(repo: &Repository, store: &MemoryStore, merge_oid: ObjectId) {
-    let commit = store
-        .read(&merge_oid)
-        .expect("read merge")
-        .expect("merge present");
-    assert_eq!(commit.kind, ObjectKind::Commit);
-    let tree_oid = repo.odb().commit_tree(&merge_oid).expect("tree");
-    assert!(
-        store.contains(&tree_oid).expect("tree contains"),
-        "merge tree must live in custom primary"
-    );
-    let tree = store
-        .read(&tree_oid)
-        .expect("read tree")
-        .expect("tree present");
-    assert_eq!(tree.kind, ObjectKind::Tree);
+    {
+        let mut req = CommitRequest::new(message.to_owned());
+        req.author = Some(IDENT.parse().expect("signature"));
+        req.committer = Some(IDENT.parse().expect("signature"));
+        req
+    }
 }
 
 fn index_oid(repo: &Repository, path: &str) -> ObjectId {

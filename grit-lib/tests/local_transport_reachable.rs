@@ -103,19 +103,12 @@ fn open_work_repo(dir: &Path) -> Repository {
 fn fetch_heads(dest: &Path, url: &str) {
     init_work_repo(dest);
     let repo = open_work_repo(dest);
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/o/*".to_owned()];
+    fetch_opts.tags = TagMode::None;
     Remote::from_url(url)
         .expect("url")
-        .fetch(
-            &repo,
-            FetchOptions {
-                refspecs: vec!["+refs/heads/*:refs/remotes/o/*".to_owned()],
-                tags: TagMode::None,
-                ..Default::default()
-            },
-            &mut NoProgress,
-            &NeverCancel,
-            None,
-        )
+        .fetch(&repo, fetch_opts, &mut NoProgress, &NeverCancel, None)
         .expect("fetch");
 }
 

@@ -487,15 +487,14 @@ fn grit_pull(dir: &Path, mode: PullMode) {
     let repo = open(dir);
     let mut env = Environment::empty();
     env.cwd = dir.to_path_buf();
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.tags = TagMode::Following;
+    fetch_opts.environment = env;
     pull(
         &repo,
         &PullOptions {
             mode: Some(mode),
-            fetch: FetchOptions {
-                tags: TagMode::Following,
-                environment: env,
-                ..Default::default()
-            },
+            fetch: fetch_opts,
             ..PullOptions::default()
         },
         &mut NoProgress,

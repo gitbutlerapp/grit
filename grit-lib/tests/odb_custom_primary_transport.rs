@@ -100,10 +100,15 @@ fn object_files(git_dir: &Path) -> Vec<String> {
 }
 
 fn fetch_all_branches() -> FetchOptions {
-    FetchOptions {
-        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
-        ..Default::default()
-    }
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+    opts
+}
+
+fn fetch_main_tracking() -> FetchOptions {
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".into()];
+    opts
 }
 
 /// Commit `blob` as `f.txt` on `refs/heads/main` through the repository's ODB.
@@ -213,10 +218,7 @@ fn fetch_incremental_into_custom_primary_uses_haves_from_store() {
     repo.remotes()
         .fetch(
             &remote,
-            FetchOptions {
-                refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".into()],
-                ..Default::default()
-            },
+            fetch_main_tracking(),
             &mut NoProgress,
             &NeverCancel,
             None,
@@ -231,10 +233,7 @@ fn fetch_incremental_into_custom_primary_uses_haves_from_store() {
     repo.remotes()
         .fetch(
             &remote,
-            FetchOptions {
-                refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".into()],
-                ..Default::default()
-            },
+            fetch_main_tracking(),
             &mut NoProgress,
             &NeverCancel,
             None,
@@ -256,10 +255,10 @@ fn fetch_dry_run_into_custom_primary_classifies_without_persisting() {
         .remotes()
         .fetch(
             &remote,
-            FetchOptions {
-                refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".into()],
-                dry_run: true,
-                ..Default::default()
+            {
+                let mut opts = fetch_main_tracking();
+                opts.dry_run = true;
+                opts
             },
             &mut NoProgress,
             &NeverCancel,
@@ -446,10 +445,10 @@ fn partial_fetch_custom_primary_is_refused() {
         .remotes()
         .fetch(
             &remote,
-            FetchOptions {
-                refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".into()],
-                filter: Some(grit_lib::remote::partial_clone::ObjectFilterSpec::BlobNone),
-                ..Default::default()
+            {
+                let mut opts = fetch_main_tracking();
+                opts.filter = Some(grit_lib::remote::partial_clone::ObjectFilterSpec::BlobNone);
+                opts
             },
             &mut NoProgress,
             &NeverCancel,
@@ -506,11 +505,11 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
         );
     }
 
-    let req = CommitRequest {
-        message: "first".into(),
-        author: Some("T <t@example.com> 1 +0000".parse().expect("signature")),
-        committer: Some("T <t@example.com> 1 +0000".parse().expect("signature")),
-        ..Default::default()
+    let req = {
+        let mut req = CommitRequest::new("first");
+        req.author = Some("T <t@example.com> 1 +0000".parse().expect("signature"));
+        req.committer = Some("T <t@example.com> 1 +0000".parse().expect("signature"));
+        req
     };
     let first = commit_with_scope(
         &repo,
@@ -544,10 +543,9 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
 
     // The auto-staging commit restages the other modification on the default path.
     fs::write(dir.path().join("new.txt"), "changed\n").expect("write");
-    let req = CommitRequest {
-        message: "second".into(),
-        ..req
-    };
+    let mut second_req = req;
+    second_req.message = "second".into();
+    let req = second_req;
     let second = commit_with_scope(
         &repo,
         &req,

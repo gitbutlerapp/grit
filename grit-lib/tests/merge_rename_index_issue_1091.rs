@@ -17,15 +17,15 @@ use support::{assert_grit_index_matches_git_ls_files, git_ls_files_stage};
 
 fn commit_req(message: &str) -> CommitRequest {
     let ident = "T <t@e.com> 1700000000 +0000".to_owned();
-    CommitRequest {
-        message: message.to_owned(),
-        author: Some(ident.parse().expect("signature")),
-        committer: Some(ident.parse().expect("signature")),
-        allow_empty: false,
-        sign_override: None,
-        amend: false,
-        assume_worktree_synced: false,
-        ..Default::default()
+    {
+        let mut req = CommitRequest::new(message.to_owned());
+        req.author = Some(ident.parse().expect("signature"));
+        req.committer = Some(ident.parse().expect("signature"));
+        req.allow_empty = false;
+        req.sign_override = None;
+        req.amend = false;
+        req.assume_worktree_synced = false;
+        req
     }
 }
 
