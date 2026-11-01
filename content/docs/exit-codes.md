@@ -37,7 +37,7 @@ $ grit push --json
 | --- | --- |
 | `conflict` | Merge, pick, rebase, or similar would introduce conflicts (`conflicts`, optional `commit`). A `grit history` rewrite or `grit rebase` that fails replaying another branch it would move also sets `refs` (full branch names) and a `hint` to pass `--update-refs head`. |
 | `hash_collision` | Refusing to store content that triggers SHA-1 collision detection (`oid`). |
-| `would_overwrite` | Checkout / switch would overwrite local or untracked files (`would_overwrite.reason`, `would_overwrite.paths`). The hint suggests `grit commit` or `grit stash` for local changes. |
+| `would_overwrite` | Checkout / switch / merge / pull would overwrite local or untracked files (`would_overwrite.reason`, `would_overwrite.paths`). The hint suggests `grit commit` or `grit stash` for local changes. |
 | `operation_in_progress` | `grit switch` refused while a merge, rebase, pick or revert is paused (grit's or one `git` started); finish or abort it first. |
 | `invalid_pattern` | Invalid filter pattern (exit 129). |
 | `usage` | Subcommand usage mistake (exit 2), e.g. `grit branch` flag combinations. |

@@ -284,6 +284,47 @@ fn switch_over_local_changes_names_files_and_suggests_stash() {
     assert!(failure.stderr.contains("\n  a\n"), "{}", failure.stderr);
 }
 
+#[test]
+fn pull_over_local_changes_names_files_and_suggests_stash() {
+    let root = tempfile::tempdir().expect("root");
+    let home = tempfile::tempdir().expect("home");
+    let (root, home) = (root.path(), home.path());
+    let srv = root.join("srv.git");
+    let run_git = |dir: &Path, args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("run git");
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    };
+    run_git(root, &["init", "-q", "--bare", "-b", "main", "srv.git"]);
+    ok(root, home, &["clone", srv.to_str().unwrap(), "a"]);
+    fs::write(root.join("a/f"), "1
+").expect("write");
+    ok(&root.join("a"), home, &["commit", "-m", "c1"]);
+    ok(&root.join("a"), home, &["push"]);
+    ok(root, home, &["clone", srv.to_str().unwrap(), "b"]);
+    fs::write(root.join("a/f"), "2
+").expect("write");
+    ok(&root.join("a"), home, &["commit", "-m", "c2"]);
+    ok(&root.join("a"), home, &["push"]);
+    let b = root.join("b");
+    fs::write(b.join("f"), "dirty
+").expect("write");
+
+    let failure = fails(&b, home, &["pull"]);
+    assert_eq!(
+        failure.json["would_overwrite"]["paths"],
+        serde_json::json!(["f"])
+    );
+    assert_eq!(failure.json["would_overwrite"]["reason"], "local_changes");
+    failure.assert_kind_and_hint("would_overwrite", "grit stash");
+    assert!(failure.stderr.contains("
+  f
+"), "{}", failure.stderr);
+}
+
 fn empty_repo() -> (tempfile::TempDir, tempfile::TempDir) {
     let repo = tempfile::tempdir().expect("repo");
     let home = tempfile::tempdir().expect("home");

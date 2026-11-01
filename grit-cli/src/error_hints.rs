@@ -162,6 +162,15 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             Some("check the URL, and that you have access to the repository".to_owned()),
             None,
         )),
+        LibError::WouldOverwrite {
+            reason,
+            paths,
+            message,
+        } => Some(crate::json_error::would_overwrite_error(
+            *reason,
+            paths.clone(),
+            message.clone(),
+        )),
         LibError::DirtyWorktree { paths, .. } => Some(Error::new(StructuredCliError {
             human: format!("{err}{}", indented_paths(paths)),
             payload: StructuredJsonError {
