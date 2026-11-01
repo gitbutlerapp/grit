@@ -159,6 +159,7 @@ pub fn merge(input: &MergeInput<'_>) -> Result<MergeOutput> {
     // Zealous diff3 (`adjust_zealous_hunks`) assumes the raw `compute_hunks` sequence.
     if !matches!(input.style, ConflictStyle::ZealousDiff3) {
         hunks = merge_adjacent_replace_and_trailing_insert_conflicts(hunks);
+        hunks = merge_deletion_anchor_trailing_insert_conflicts(hunks);
         hunks = fold_adjacent_inserts_into_conflict(hunks);
         hunks = merge_adjacent_one_sided_line_changes_to_conflict(hunks);
     }
@@ -1243,6 +1244,105 @@ fn merge_adjacent_one_sided_line_changes_to_conflict(hunks: Vec<Hunk>) -> Vec<Hu
     out
 }
 
+/// Merge-ort conflicts when one side appends at EOF while the other side changed/deleted the
+/// base tail ending at a short unchanged anchor (possibly several one-sided hunks separated
+/// by single-line anchors). `compute_hunks` emits these as clean sequential hunks.
+fn merge_deletion_anchor_trailing_insert_conflicts(hunks: Vec<Hunk>) -> Vec<Hunk> {
+    const MIN_TAIL_BASE_LINES: usize = 10;
+
+    let Some(conflict) = try_eof_tail_insert_conflict(&hunks, MIN_TAIL_BASE_LINES) else {
+        return hunks;
+    };
+    let start = conflict.start;
+    let mut out = hunks[..start].to_vec();
+    out.push(conflict.hunk);
+    out
+}
+
+struct EofTailConflict {
+    start: usize,
+    hunk: Hunk,
+}
+
+fn try_eof_tail_insert_conflict(hunks: &[Hunk], min_tail_base: usize) -> Option<EofTailConflict> {
+    let last = hunks.last()?;
+    let Hunk::OnlyTheirs {
+        base: ins_base,
+        theirs: ins,
+    } = last
+    else {
+        return None;
+    };
+    if !ins_base.is_empty() || ins.is_empty() {
+        return None;
+    }
+
+    let mut idx = hunks.len() - 1;
+    let mut conflict_base: Vec<Vec<u8>> = Vec::new();
+    let mut conflict_ours: Vec<Vec<u8>> = Vec::new();
+    let mut anchors: Vec<Vec<u8>> = Vec::new();
+    let mut total_base = 0usize;
+
+    loop {
+        if idx == 0 {
+            break;
+        }
+        let Hunk::Unchanged(anchor) = &hunks[idx - 1] else {
+            break;
+        };
+        if anchor.len() != 1 {
+            break;
+        }
+        if idx < 2 {
+            break;
+        }
+        let side = match &hunks[idx - 2] {
+            Hunk::OnlyOurs { base, ours } if !base.is_empty() => {
+                total_base += base.len();
+                conflict_base.splice(0..0, base.iter().cloned());
+                let mut chunk = ours.clone();
+                if chunk.is_empty() {
+                    chunk = anchor.clone();
+                }
+                conflict_ours.splice(0..0, chunk);
+                anchors.splice(0..0, vec![anchor[0].clone()]);
+                idx -= 2;
+                continue;
+            }
+            Hunk::OnlyTheirs { base, theirs } if !base.is_empty() && theirs.is_empty() => {
+                total_base += base.len();
+                conflict_base.splice(0..0, base.iter().cloned());
+                anchors.splice(0..0, vec![anchor[0].clone()]);
+                idx -= 2;
+                continue;
+            }
+            _ => break,
+        };
+    }
+
+    if total_base < min_tail_base {
+        return None;
+    }
+
+    for line in &anchors {
+        conflict_base.push(line.clone());
+    }
+    let mut conflict_theirs = anchors.clone();
+    conflict_theirs.extend(ins.iter().cloned());
+    if conflict_ours.is_empty() {
+        conflict_ours = anchors.clone();
+    }
+
+    Some(EofTailConflict {
+        start: idx,
+        hunk: Hunk::Conflict {
+            base: conflict_base,
+            ours: conflict_ours,
+            theirs: conflict_theirs,
+        },
+    })
+}
+
 fn merge_adjacent_replace_and_trailing_insert_conflicts(hunks: Vec<Hunk>) -> Vec<Hunk> {
     let mut out: Vec<Hunk> = Vec::with_capacity(hunks.len());
     let mut i = 0usize;
@@ -2068,6 +2168,71 @@ mod tests {
         })
         .unwrap();
         assert_eq!(out.conflicts, 0);
+    }
+
+    #[test]
+    fn tail_anchor_mid_file_insert_stays_clean() {
+        let base = "a\nb\nc\n";
+        let ours = "a\nx\nc\n";
+        let theirs = "a\nb\nc\nd\n";
+        let (r, c) = do_merge(base, ours, theirs);
+        assert_eq!(c, 0, "mid-file edit with EOF append stays clean: {r}");
+    }
+
+    #[test]
+    fn issue_2397_build_delete_tail_vs_append_conflicts_like_merge_ort() {
+        let base = include_str!("../tests/fixtures/issue_2397_build_base.rs");
+        let ours = include_str!("../tests/fixtures/issue_2397_build_ours.rs");
+        let theirs = include_str!("../tests/fixtures/issue_2397_build_theirs.rs");
+        let out = merge(&MergeInput {
+            base: base.as_bytes(),
+            ours: ours.as_bytes(),
+            theirs: theirs.as_bytes(),
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: None,
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .unwrap();
+        assert_eq!(
+            out.conflicts, 1,
+            "cargo 1d2a89627f7d build.rs must conflict like git merge-tree/cherry-pick"
+        );
+    }
+
+    #[test]
+    fn issue_2397_fae836_delete_tail_vs_append_conflicts_like_merge_ort() {
+        let base = include_str!("../tests/fixtures/issue_2397_fae836_base.rs");
+        let ours = include_str!("../tests/fixtures/issue_2397_fae836_ours.rs");
+        let theirs = include_str!("../tests/fixtures/issue_2397_fae836_theirs.rs");
+        let out = merge(&MergeInput {
+            base: base.as_bytes(),
+            ours: ours.as_bytes(),
+            theirs: theirs.as_bytes(),
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: None,
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .unwrap();
+        assert_eq!(
+            out.conflicts, 1,
+            "cargo fae83634754b features.rs must conflict like git merge-tree/cherry-pick"
+        );
     }
 
     #[test]
