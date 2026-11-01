@@ -12895,7 +12895,8 @@ fn read_submodule_head(sub_dir: &Path) -> Option<ObjectId> {
 #[must_use]
 pub fn submodule_embedded_git_dir(sub_dir: &Path) -> Option<PathBuf> {
     let gitfile = sub_dir.join(".git");
-    if gitfile.is_file() {
+    let meta = fs::metadata(&gitfile).ok()?;
+    if meta.is_file() {
         let content = fs::read_to_string(&gitfile).ok()?;
         let gitdir = content
             .lines()
@@ -12906,7 +12907,7 @@ pub fn submodule_embedded_git_dir(sub_dir: &Path) -> Option<PathBuf> {
         } else {
             sub_dir.join(gitdir)
         })
-    } else if gitfile.is_dir() {
+    } else if meta.is_dir() {
         Some(gitfile)
     } else {
         None
@@ -12920,14 +12921,7 @@ pub fn submodule_embedded_git_dir(sub_dir: &Path) -> Option<PathBuf> {
 /// `.git` directory placeholder.
 #[must_use]
 pub(crate) fn is_unregistered_embedded_git_repo(index: &Index, rel: &str, abs: &Path) -> bool {
-    if rel.is_empty() {
-        return false;
-    }
-    if index
-        .entries
-        .iter()
-        .any(|e| e.path.as_slice() == rel.as_bytes() && e.mode == crate::index::MODE_GITLINK)
-    {
+    if rel.is_empty() || index.has_gitlink_at(rel.as_bytes()) {
         return false;
     }
     let Some(git_dir) = submodule_embedded_git_dir(abs) else {

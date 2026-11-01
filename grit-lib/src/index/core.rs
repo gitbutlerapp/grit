@@ -2299,6 +2299,20 @@ impl Index {
         })
     }
 
+    /// Whether some entry (at any stage) records `path` as a gitlink (mode `160000`).
+    ///
+    /// Binary search on sorted indexes; a linear scan otherwise.
+    pub(crate) fn has_gitlink_at(&self, path: &[u8]) -> bool {
+        let is_gitlink = |e: &IndexEntry| e.mode == MODE_GITLINK;
+        if self.entries_sorted {
+            let (start, end) = self.path_run_range_sorted(path);
+            return self.entries[start..end].iter().any(is_gitlink);
+        }
+        self.entries
+            .iter()
+            .any(|e| e.path.as_slice() == path && is_gitlink(e))
+    }
+
     /// Inclusive start and exclusive end of entries strictly under `path/` (sorted indexes only).
     fn descendant_run_range_sorted(&self, path: &[u8]) -> (usize, usize) {
         let start = self.descendant_run_start_sorted(path);
@@ -5918,6 +5932,62 @@ mod tests {
         idx.remove_directory_prefixes(&BTreeSet::from(["d005".to_owned(), "d0050".to_owned()]));
         assert!(idx.get(b"d005/f0.txt", 0).is_none());
         assert!(idx.get(b"d005/f1.txt", 0).is_none());
+    }
+
+    #[test]
+    fn has_gitlink_at_matches_any_stage_sorted_and_unsorted() {
+        let gitlink = |path: &str, stage: u16| {
+            let mut e = make_entry(path);
+            e.mode = MODE_GITLINK;
+            e.flags |= stage << 12;
+            e
+        };
+        let entries = vec![
+            make_entry("a"),
+            gitlink("sub", 0),
+            make_entry("sub.txt"),
+            gitlink("theirs", 3),
+            make_entry("theirs/inner"),
+            make_entry("z"),
+        ];
+        let sorted = sorted_index(entries.clone());
+        let mut unsorted = Index::new();
+        unsorted.entries = entries.into_iter().rev().collect();
+        unsorted.entries_sorted = false;
+        for idx in [&sorted, &unsorted] {
+            assert!(idx.has_gitlink_at(b"sub"));
+            assert!(idx.has_gitlink_at(b"theirs"));
+            assert!(!idx.has_gitlink_at(b"a"));
+            assert!(!idx.has_gitlink_at(b"sub.txt"));
+            assert!(!idx.has_gitlink_at(b"su"));
+            assert!(!idx.has_gitlink_at(b"theirs/inner"));
+            assert!(!idx.has_gitlink_at(b"missing"));
+        }
+    }
+
+    /// Status and add probe every untracked path for an embedded repository; a linear index scan
+    /// per probe made `status`/`add -A` quadratic on large worktrees.
+    #[test]
+    fn has_gitlink_at_sorted_is_sublinear() {
+        const N: usize = 100_000;
+        const M: usize = 1_000;
+        let mut idx = Index::new();
+        for i in 0..N {
+            idx.add_or_replace(make_entry(&format!("file/{i:06}.txt")));
+        }
+        assert!(idx.entries_sorted);
+        let probes: Vec<Vec<u8>> = (0..M)
+            .map(|i| format!("untracked/{i:06}.txt").into_bytes())
+            .collect();
+        index_path_cmp::reset();
+        assert!(probes.iter().all(|p| !idx.has_gitlink_at(p)));
+        let cmps = index_path_cmp::take();
+        let log_n = (N as f64).log2().ceil() as usize;
+        let bound = 4 * M * log_n;
+        assert!(
+            cmps < bound,
+            "gitlink probe comparisons {cmps} should stay under {bound} (N={N}, M={M})"
+        );
     }
 
     #[test]
