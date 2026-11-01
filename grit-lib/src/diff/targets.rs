@@ -15,8 +15,8 @@ use crate::diff::detail::LineStat;
 use crate::diff::diff_trees_with_renames_and_policy;
 use crate::diff::structured::StructuredHunk;
 use crate::diff::{
-    sort_entries_by_path, tree_diff_structured_parallel, DiffEntry, DiffOptions, DiffStatus,
-    TreeDiffStructured,
+    apply_diff_filter, sort_entries_by_path, tree_diff_structured_parallel,
+    tree_oid_of_commit_in_repo, DiffEntry, DiffOptions, DiffStatus, TreeDiffStructured,
 };
 use crate::error::{Error, PathspecResolveError, Result};
 use crate::index::Index;
@@ -500,6 +500,68 @@ pub(crate) fn collect_files_for_target(
     Ok(files)
 }
 
+/// Metadata entries for a target that compares stored objects ([`DiffTarget::Commit`] and
+/// [`DiffTarget::Trees`]), sorted by path; `None` for a target that reads the index or working
+/// tree.
+pub(crate) fn stored_target_entries(
+    repo: &Repository,
+    target: &DiffTarget,
+    options: &DiffOptions,
+) -> Result<Option<Vec<DiffEntry>>> {
+    let rename_threshold = options.rename_threshold_u32();
+    let entries = match target {
+        DiffTarget::Commit(oid) => {
+            let config = repo.config()?;
+            commit_diff_entries(repo, oid, &config, &repo.thread_policy(), rename_threshold)?
+        }
+        DiffTarget::Trees { old, new } => {
+            let config = repo.config()?;
+            let thread_policy = repo.thread_policy();
+            match old {
+                Some(base) => tree_commit_diff_entries(
+                    repo,
+                    base,
+                    new,
+                    &config,
+                    &thread_policy,
+                    rename_threshold,
+                )?,
+                None => empty_tree_to_side_diff_entries(
+                    repo,
+                    new,
+                    &config,
+                    &thread_policy,
+                    rename_threshold,
+                )?,
+            }
+        }
+        DiffTarget::WorktreeVsHead
+        | DiffTarget::WorktreeVsTree(_)
+        | DiffTarget::IndexVsHead
+        | DiffTarget::WorktreeVsIndex => return Ok(None),
+    };
+    Ok(Some(entries))
+}
+
+/// Keep the entries within `pathspecs` whose status passes `options.filter` (`--diff-filter`).
+pub(crate) fn limit_target_entries(
+    repo: &Repository,
+    entries: Vec<DiffEntry>,
+    pathspecs: &[String],
+    options: &DiffOptions,
+) -> Result<Vec<DiffEntry>> {
+    let entries = if pathspecs.is_empty() {
+        entries
+    } else {
+        let matcher = repo.pathspec_matcher(pathspecs)?;
+        entries
+            .into_iter()
+            .filter(|entry| diff_entry_matches(&matcher, entry))
+            .collect()
+    };
+    Ok(apply_diff_filter(entries, options.filter))
+}
+
 fn filter_and_map_tree_structured(
     items: Vec<TreeDiffStructured>,
     repo: &Repository,
@@ -913,7 +975,7 @@ fn commit_diff_entries(
     let commit = repo.odb().read_commit(oid)?;
     let new_tree = commit.tree;
     let old_tree = match commit.parents.first() {
-        Some(parent) => Some(repo.odb().commit_tree(parent)?),
+        Some(parent) => Some(tree_oid_of_commit_in_repo(repo, parent)?),
         None => None,
     };
 
@@ -1314,6 +1376,71 @@ mod tests {
         let opts =
             DiffOptions::default().with_whitespace(crate::diff::WhitespaceMode::ignore_all_space());
         assert!(include_file_in_diff(&file, &opts));
+    }
+
+    #[test]
+    fn worktree_targets_have_no_stored_entries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo =
+            Repository::init(dir.path(), &crate::repo::InitOptions::default()).expect("init");
+        for target in [
+            DiffTarget::WorktreeVsHead,
+            DiffTarget::WorktreeVsTree(ObjectId::zero()),
+            DiffTarget::IndexVsHead,
+            DiffTarget::WorktreeVsIndex,
+        ] {
+            let entries = stored_target_entries(&repo, &target, &DiffOptions::default())
+                .expect("no object reads");
+            assert_eq!(entries, None, "{target:?}");
+        }
+    }
+
+    #[test]
+    fn limit_target_entries_applies_pathspecs_then_diff_filter() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo =
+            Repository::init(dir.path(), &crate::repo::InitOptions::default()).expect("init");
+        let entry = |status: DiffStatus, path: &str| DiffEntry {
+            status,
+            old_path: (status != DiffStatus::Added).then(|| path.to_owned()),
+            new_path: (status != DiffStatus::Deleted).then(|| path.to_owned()),
+            old_mode: FileMode::REGULAR,
+            new_mode: FileMode::REGULAR,
+            old_oid: ObjectId::zero(),
+            new_oid: ObjectId::zero(),
+            score: None,
+        };
+        let entries = vec![
+            entry(DiffStatus::Added, "a.txt"),
+            entry(DiffStatus::Deleted, "dir/b.txt"),
+            entry(DiffStatus::Modified, "dir/c.rs"),
+        ];
+        let paths = |kept: Vec<DiffEntry>| -> Vec<String> {
+            kept.iter()
+                .map(|e| {
+                    e.new_path
+                        .clone()
+                        .or(e.old_path.clone())
+                        .unwrap_or_default()
+                })
+                .collect()
+        };
+        let all = DiffOptions::default();
+        let kept = limit_target_entries(&repo, entries.clone(), &[], &all).expect("limit");
+        assert_eq!(paths(kept), ["a.txt", "dir/b.txt", "dir/c.rs"]);
+
+        let kept =
+            limit_target_entries(&repo, entries.clone(), &["dir".to_owned()], &all).expect("dir");
+        assert_eq!(paths(kept), ["dir/b.txt", "dir/c.rs"]);
+
+        let added_or_deleted = all.with_filter(Some("AD".parse().expect("filter")));
+        let kept =
+            limit_target_entries(&repo, entries.clone(), &[], &added_or_deleted).expect("filter");
+        assert_eq!(paths(kept), ["a.txt", "dir/b.txt"]);
+
+        let kept = limit_target_entries(&repo, entries, &["dir".to_owned()], &added_or_deleted)
+            .expect("both");
+        assert_eq!(paths(kept), ["dir/b.txt"]);
     }
 
     #[test]

@@ -3578,6 +3578,7 @@ impl grit_lib::diff::handle::Diff<'_>
 pub fn grit_lib::diff::handle::Diff<'_>::commit_files_many(&self, &[grit_lib::objects::ObjectId], &[alloc::string::String], grit_lib::diff::CommitFilesManyOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::CommitFilesResult>>
 pub fn grit_lib::diff::handle::Diff<'_>::commit_files_many_work(&self, &[grit_lib::diff::CommitFilesManyInput], &[alloc::string::String], grit_lib::diff::CommitFilesManyOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::CommitFilesResult>>
 impl<'repo> grit_lib::diff::handle::Diff<'repo>
+pub fn grit_lib::diff::handle::Diff<'repo>::entries(&self, &grit_lib::diff::DiffTarget, &[alloc::string::String], &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::handle::Diff<'repo>::files(&self, &grit_lib::diff::DiffTarget, &[alloc::string::String], &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::FileDiff>>
 pub fn grit_lib::diff::handle::Diff<'repo>::index_to_tree(&self, &grit_lib::index::Index, core::option::Option<&grit_lib::objects::ObjectId>, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::handle::Diff<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
@@ -4723,6 +4724,7 @@ impl grit_lib::diff::handle::Diff<'_>
 pub fn grit_lib::diff::handle::Diff<'_>::commit_files_many(&self, &[grit_lib::objects::ObjectId], &[alloc::string::String], grit_lib::diff::CommitFilesManyOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::CommitFilesResult>>
 pub fn grit_lib::diff::handle::Diff<'_>::commit_files_many_work(&self, &[grit_lib::diff::CommitFilesManyInput], &[alloc::string::String], grit_lib::diff::CommitFilesManyOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::CommitFilesResult>>
 impl<'repo> grit_lib::diff::handle::Diff<'repo>
+pub fn grit_lib::diff::handle::Diff<'repo>::entries(&self, &grit_lib::diff::DiffTarget, &[alloc::string::String], &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::handle::Diff<'repo>::files(&self, &grit_lib::diff::DiffTarget, &[alloc::string::String], &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::FileDiff>>
 pub fn grit_lib::diff::handle::Diff<'repo>::index_to_tree(&self, &grit_lib::index::Index, core::option::Option<&grit_lib::objects::ObjectId>, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::handle::Diff<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
@@ -5362,9 +5364,11 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::TreeDiffStructu
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::TreeDiffStructured
 pub struct grit_lib::diff::UncommittedDiff<'repo>
 impl<'repo> grit_lib::diff::UncommittedDiff<'repo>
+pub fn grit_lib::diff::UncommittedDiff<'repo>::entries(&mut self, &grit_lib::diff::DiffTarget, &[alloc::string::String], &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::UncommittedDiff<'repo>::index(&self) -> &grit_lib::index::Index
 pub fn grit_lib::diff::UncommittedDiff<'repo>::load_worktree_changes(&mut self, alloc::vec::Vec<grit_lib::diff::DiffEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::FileChange>>
 pub fn grit_lib::diff::UncommittedDiff<'repo>::new(&'repo grit_lib::repo::Repository, grit_lib::index::Index) -> Self
+pub fn grit_lib::diff::UncommittedDiff<'repo>::peer_changes<'a>(&mut self, grit_lib::diff::hunk_id::DiffSide, &[alloc::string::String], grit_lib::diff::RenameDetection, impl core::iter::traits::collect::IntoIterator<Item = &'a str>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::FileChange>>
 pub fn grit_lib::diff::UncommittedDiff<'repo>::staged_entries(&self, grit_lib::diff::RenameDetection) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::UncommittedDiff<'repo>::unstaged_entries(&mut self, grit_lib::diff::RenameDetection) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::UncommittedDiff<'repo>::worktree_entries(&mut self, core::option::Option<&grit_lib::objects::ObjectId>, grit_lib::diff::RenameDetection) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>

@@ -2,23 +2,28 @@
 //!
 //! [`UncommittedDiff`] collects [`DiffEntry`] rows for the index against `HEAD`, the working
 //! tree against the index, or the working tree against any tree, reusing one loaded index and
-//! one set of [`WorktreeRules`] for every step. [`UncommittedDiff::load_worktree_changes`] and
+//! one set of [`WorktreeRules`] for every step; [`UncommittedDiff::entries`] picks the comparison
+//! from a [`DiffTarget`] and applies pathspecs and `--diff-filter`.
+//! [`UncommittedDiff::load_worktree_changes`] and
 //! [`load_object_changes`] then turn entries into [`FileChange`]s whose bytes feed structured
 //! hunks ([`FileChange::structured`]) or line counts ([`FileChange::line_stat`]).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crate::diff::structured::{structured_file_diff, SideBytes, StructuredFileDiff};
-use crate::diff::targets::diff_index_to_tree_for_paths;
+use crate::diff::targets::{
+    diff_index_to_tree_for_paths, limit_target_entries, stored_target_entries,
+};
 use crate::diff::tree_content::{gitlink_line, load_new_side, load_old_side};
 use crate::diff::{
     apply_rename_detection_to_diff_entries, diff_index_to_tree_with_renames,
     diff_index_to_worktree_with_renames, diff_tree_to_worktree_with_git_dir_and_rules,
-    index_mtime_for_diff, line_change_counts, load_worktree_side_for_diff, read_submodule_head_oid,
-    sort_entries_by_path, submodule_porcelain_flags, DiffEntry, DiffIndexToWorktreeOptions,
-    DiffOptions, DiffStatus, LineStat, RenameDetection, RENAME_DETECTION_DISABLED,
+    index_mtime_for_diff, line_change_counts, load_worktree_side_for_diff,
+    peer_scope_includes_path, read_submodule_head_oid, sort_entries_by_path,
+    submodule_porcelain_flags, DiffEntry, DiffIndexToWorktreeOptions, DiffOptions, DiffSide,
+    DiffStatus, DiffTarget, LineStat, RenameDetection, RENAME_DETECTION_DISABLED,
 };
 use crate::error::{Error, Result};
 use crate::index::write_tree::cache_tree_extension_valid;
@@ -465,6 +470,100 @@ impl<'repo> UncommittedDiff<'repo> {
             base_tree,
             rename_threshold(renames),
         )
+    }
+
+    /// Changed paths for any [`DiffTarget`], limited to `pathspecs` and to the statuses in
+    /// `options.filter` (`--diff-filter`), sorted by path. No contents are loaded.
+    ///
+    /// [`DiffTarget::WorktreeVsHead`] compares with `HEAD`'s tree (the empty tree when unborn).
+    /// Commit and tree targets ignore the index, so prefer [`Diff::entries`](crate::diff::Diff::entries)
+    /// for them; it does not load one.
+    ///
+    /// # Parameters
+    ///
+    /// - `target` - what to compare, e.g. from [`resolve_diff_request`](crate::diff::resolve_diff_request).
+    /// - `pathspecs` - repository-relative pathspecs; empty means every path.
+    /// - `options` - only `renames` and `filter` are used.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::RequiresWorkTree`] for a working-tree target in a bare repository, plus
+    /// `HEAD` resolution, pathspec, worktree rule, I/O, and object read errors.
+    pub fn entries(
+        &mut self,
+        target: &DiffTarget,
+        pathspecs: &[String],
+        options: &DiffOptions,
+    ) -> Result<Vec<DiffEntry>> {
+        let renames = options.renames;
+        let entries = match target {
+            DiffTarget::IndexVsHead => self.staged_entries(renames)?,
+            DiffTarget::WorktreeVsIndex => self.unstaged_entries(renames)?,
+            DiffTarget::WorktreeVsHead => {
+                let head_tree = resolve_head_for_repository(self.repo)?.tree(self.repo.odb())?;
+                self.worktree_entries(head_tree.as_ref(), renames)?
+            }
+            DiffTarget::WorktreeVsTree(tree) => self.worktree_entries(Some(tree), renames)?,
+            DiffTarget::Commit(_) | DiffTarget::Trees { .. } => {
+                stored_target_entries(self.repo, target, options)?.unwrap_or_default()
+            }
+        };
+        limit_target_entries(self.repo, entries, pathspecs, options)
+    }
+
+    /// Changes on the other side of the index for the paths in `primary_paths`, which feed
+    /// [`hunk_ids_with_duplicate_peers`](crate::diff::hunk_ids_with_duplicate_peers) so hunk ids
+    /// stay stable when an identical hunk moves between the staged and unstaged sides.
+    ///
+    /// For [`DiffSide::Staged`] primaries this loads the unstaged changes on those paths; for
+    /// [`DiffSide::Unstaged`] the staged ones. [`DiffSide::Other`] has no peer side. A path
+    /// matches when it is the peer's display path or, for a rename, its old path. No
+    /// `--diff-filter` applies: ids must not depend on which statuses are shown.
+    ///
+    /// # Parameters
+    ///
+    /// - `side` - the side the primary changes came from.
+    /// - `pathspecs` - the pathspecs the primary changes were limited to.
+    /// - `renames` - rename detection, as for the primary changes.
+    /// - `primary_paths` - display paths of the primary changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::RequiresWorkTree`] for staged primaries in a bare repository, plus the
+    /// errors of [`Self::entries`] and of loading the changes.
+    pub fn peer_changes<'a>(
+        &mut self,
+        side: DiffSide,
+        pathspecs: &[String],
+        renames: RenameDetection,
+        primary_paths: impl IntoIterator<Item = &'a str>,
+    ) -> Result<Vec<FileChange>> {
+        let peer_target = match side {
+            DiffSide::Staged => DiffTarget::WorktreeVsIndex,
+            DiffSide::Unstaged => DiffTarget::IndexVsHead,
+            DiffSide::Other => return Ok(Vec::new()),
+        };
+        let primary: HashSet<&str> = primary_paths.into_iter().collect();
+        if primary.is_empty() {
+            return Ok(Vec::new());
+        }
+        let options = DiffOptions::default().with_renames(renames);
+        let entries: Vec<DiffEntry> = self
+            .entries(&peer_target, pathspecs, &options)?
+            .into_iter()
+            .filter(|entry| {
+                let display = entry
+                    .new_path
+                    .as_deref()
+                    .or(entry.old_path.as_deref())
+                    .unwrap_or("");
+                peer_scope_includes_path(display, entry.old_path.as_deref(), &primary)
+            })
+            .collect();
+        match side {
+            DiffSide::Staged => self.load_worktree_changes(entries),
+            DiffSide::Unstaged | DiffSide::Other => load_object_changes(self.repo, &entries),
+        }
     }
 
     /// Load entries from [`Self::unstaged_entries`] or [`Self::worktree_entries`]: old sides
