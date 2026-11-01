@@ -3,7 +3,7 @@
 use anyhow::{bail, Result};
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_list::RevListResult;
-use grit_lib::revwalk::LeftRightCounts;
+use grit_lib::revwalk::{CommitExtent, LeftRightCounts};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -280,7 +280,12 @@ pub fn stream_listing(
     let opts = rev.to_rev_walk_options(&repo, env, &[], &walk_paths)?;
     let token_refs = rev.rev_tokens(&[]);
     let fetch_cap = fetch_limit_plus_one(rev.max_count());
-    let mut stream = open_plain_stream(&repo, &token_refs, &opts, fetch_cap)?;
+    let extent = if output_mode == OutputMode::Json {
+        CommitExtent::Whole
+    } else {
+        CommitExtent::ThroughSubject
+    };
+    let mut stream = open_plain_stream(&repo, &token_refs, &opts, fetch_cap, extent)?;
     let loader = CommitJsonLoader::for_listed_commits();
     let now = context::wall_clock_now(env).unix_timestamp();
     let max = rev.max_count();

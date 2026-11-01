@@ -50,7 +50,9 @@ impl CommitJsonLoader {
         for oid in oids {
             let data = match parsed.take_commit(oid) {
                 Some(data) => data?,
-                None => repo.odb().read_commit(oid)?,
+                None => {
+                    grit_lib::objects::parse_commit(&repo.odb().read_commit_through_subject(oid)?)?
+                }
             };
             let resolved = grit_lib::change_id::resolved_change_id(oid, &data);
             let (author, timestamp) = context::author_and_time(&data.author);

@@ -20,6 +20,7 @@ use grit_lib::revwalk::group_by::{
     GroupByAuthorOptions,
 };
 use grit_lib::revwalk::log_walk::{LogWalkCursor, LogWalkQuery};
+use grit_lib::revwalk::CommitExtent;
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -505,7 +506,12 @@ pub fn stream_listing(
     let default_tips: Vec<&str> = default_tips.iter().map(String::as_str).collect();
     let token_refs = rev.rev_tokens(&default_tips);
     let fetch_cap = fetch_limit_plus_one(rev.max_count());
-    let mut stream = open_plain_stream(&repo, &token_refs, &walk_opts, fetch_cap)?;
+    let extent = if rows_need_commit_details(display, &format, output_mode) {
+        CommitExtent::Whole
+    } else {
+        CommitExtent::ThroughSubject
+    };
+    let mut stream = open_plain_stream(&repo, &token_refs, &walk_opts, fetch_cap, extent)?;
     let max = rev.max_count();
     let mut emitted = 0usize;
     let mut pulled = 0usize;
@@ -1094,6 +1100,18 @@ pub(crate) fn load_commits_with_format_for_oids(
     Ok((commits, commit_rows, commit_diffs))
 }
 
+/// Whether listing rows need whole commits (refs, diffs or JSON commit rows) rather than the
+/// author, date, change id and subject that [`CommitExtent::ThroughSubject`] keeps.
+fn rows_need_commit_details(
+    display: LogDisplayOptions,
+    format: &DiffFormatArgs,
+    output_mode: OutputMode,
+) -> bool {
+    display.decorate
+        || output_mode == OutputMode::Json
+        || (format.any_format_flag() && !format.log_patch_text())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_commit_outcome(
     repo: &grit_lib::repo::Repository,
@@ -1116,8 +1134,7 @@ fn build_commit_outcome(
         && display.oneline
         && !format.any_format_flag()
         && !display.decorate;
-    let need_refs = display.decorate || json_output;
-    let need_commit_details = need_refs || (format.any_format_flag() && !format.log_patch_text());
+    let need_commit_details = rows_need_commit_details(display, &format, output_mode);
     let plain_oneline = display.oneline
         && !need_commit_details
         && !display.decorate
@@ -1176,7 +1193,9 @@ fn build_commit_outcome(
                 let subject = match parsed.cached_subject_line(oid) {
                     Some(Ok(s)) => s,
                     Some(Err(e)) => return Err(e.into()),
-                    None => read_commit_subject_line(&repo.odb().read(oid)?.data)?,
+                    None => {
+                        read_commit_subject_line(&repo.odb().read_commit_through_subject(oid)?)?
+                    }
                 };
                 Ok(format!("{abbrev_hex} {subject}"))
             })

@@ -5,7 +5,8 @@ use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::log_walk::WalkedCommits;
 use grit_lib::revwalk::{
-    rev_walk_list_supports_stream, RevWalkCommitStream, RevWalkCommitStreamItem, RevWalkListOptions,
+    rev_walk_list_supports_stream, CommitExtent, RevWalkCommitStream, RevWalkCommitStreamItem,
+    RevWalkListOptions,
 };
 use std::io::Write;
 
@@ -131,16 +132,19 @@ pub fn write_all_or_broken_pipe(w: &mut dyn Write, buf: &[u8]) -> Result<bool> {
     }
 }
 
-/// Open a commit stream for `tokens`/`walk`, applying `limit_plus_one` when set.
+/// Open a commit stream for `tokens`/`walk`, applying `limit_plus_one` when set and keeping
+/// `extent` of each listed commit for rendering.
 pub fn open_plain_stream<'repo>(
     repo: &'repo Repository,
     tokens: &[&str],
     walk: &RevWalkListOptions,
     limit_plus_one: Option<usize>,
+    extent: CommitExtent,
 ) -> Result<RevWalkCommitStream<'repo>> {
     let mut stream_opts = walk.clone();
     stream_opts.limit = limit_plus_one;
     stream_opts.retain_commit_data = true;
+    stream_opts.retained_commit_extent = extent;
     repo.rev_walk()
         .commits_stream(tokens, &stream_opts)?
         .context("plain walk should stream")
