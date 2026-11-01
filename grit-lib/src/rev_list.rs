@@ -4355,6 +4355,30 @@ fn log_follow_rename_threshold(cfg: &ConfigSet) -> u32 {
     LOG_FOLLOW_RENAME_THRESHOLD_DEFAULT
 }
 
+/// Blob (or symlink) at a plain literal path in `tree`, using [`DenseWalkCache`] for tree reads.
+fn literal_path_leaf_at_tree(
+    repo: &Repository,
+    tree: ObjectId,
+    literal_path: &str,
+    cache: &mut DenseWalkCache,
+) -> Result<Option<(ObjectId, u32)>> {
+    let path_trimmed = literal_path.trim_end_matches('/');
+    let parts: Vec<&str> = path_trimmed.split('/').filter(|p| !p.is_empty()).collect();
+    if parts.is_empty() {
+        return Ok(None);
+    }
+    let (dir, leaf) = parts.split_at(parts.len().saturating_sub(1));
+    let leaf = leaf[0];
+    let (dir_oid, _) = tree_oids_at_literal_prefix_pair(repo, Some(tree), None, dir, cache)?;
+    let Some(dir_oid) = dir_oid else {
+        return Ok(None);
+    };
+    match cache.lookup_tree_component(repo, dir_oid, leaf)? {
+        CachedTreeChild::Found { oid, mode } if !is_tree_mode(mode) => Ok(Some((oid, mode))),
+        _ => Ok(None),
+    }
+}
+
 /// Path to use in `parent_tree` when walking `--follow` history from `commit_tree` at `follow_path`.
 ///
 /// Returns `None` when this parent does not carry the followed file (side branch).
@@ -4365,7 +4389,36 @@ fn follow_path_into_parent(
     _argv_path: &str,
     follow_path: &str,
     threshold: u32,
+    cache: &mut DenseWalkCache,
 ) -> Result<Option<String>> {
+    if let Some(literal) = normalized_plain_literal_treesame_path(repo, follow_path) {
+        let in_child = literal_path_leaf_at_tree(repo, commit_tree, &literal, cache)?.is_some();
+        let in_parent = literal_path_leaf_at_tree(repo, parent_tree, &literal, cache)?.is_some();
+        if in_child && in_parent {
+            return Ok(Some(follow_path.to_owned()));
+        }
+        if !in_child && in_parent {
+            return Ok(Some(follow_path.to_owned()));
+        }
+        if !in_child {
+            return Ok(None);
+        }
+        if threshold < 100 {
+            let odb = repo.odb();
+            let entries = diff_trees(odb, Some(&parent_tree), Some(&commit_tree), "")?;
+            let entries = detect_renames(odb, None, entries, threshold);
+            if let Some(old_path) = entries.into_iter().find_map(|e| {
+                if e.status == DiffStatus::Renamed && e.new_path.as_deref() == Some(follow_path) {
+                    e.old_path
+                } else {
+                    None
+                }
+            }) {
+                return Ok(Some(old_path));
+            }
+        }
+        return Ok(Some(follow_path.to_owned()));
+    }
     let path_specs = [follow_path.to_owned()];
     let path_check = RevPathspecCheck {
         specs: &path_specs,
@@ -4386,11 +4439,13 @@ fn follow_path_into_parent(
         let odb = repo.odb();
         let entries = diff_trees(odb, Some(&parent_tree), Some(&commit_tree), "")?;
         let entries = detect_renames(odb, None, entries, threshold);
-        if let Some(old_path) = entries
-            .into_iter()
-            .find(|e| e.status == DiffStatus::Renamed && e.new_path.as_deref() == Some(follow_path))
-            .and_then(|e| e.old_path)
-        {
+        if let Some(old_path) = entries.into_iter().find_map(|e| {
+            if e.status == DiffStatus::Renamed && e.new_path.as_deref() == Some(follow_path) {
+                e.old_path
+            } else {
+                None
+            }
+        }) {
             return Ok(Some(old_path));
         }
     }
@@ -4404,15 +4459,29 @@ fn follow_path_into_parent_at_merge(
     _argv_path: &str,
     follow_path: &str,
     threshold: u32,
+    cache: &mut DenseWalkCache,
 ) -> Result<Option<String>> {
-    let path_specs = [follow_path.to_owned()];
-    let path_check = RevPathspecCheck {
-        specs: &path_specs,
-        attr: None,
-    };
-    if !tree_has_pathspec_match(repo, commit_tree, "", &path_check)? {
-        return Ok(None);
+    if let Some(literal) = normalized_plain_literal_treesame_path(repo, follow_path) {
+        if !literal_path_leaf_at_tree(repo, commit_tree, &literal, cache)?.is_some() {
+            return Ok(None);
+        }
+        if literal_path_leaf_at_tree(repo, parent_tree, &literal, cache)?.is_some() {
+            return Ok(Some(follow_path.to_owned()));
+        }
+    } else {
+        let path_specs = [follow_path.to_owned()];
+        let path_check = RevPathspecCheck {
+            specs: &path_specs,
+            attr: None,
+        };
+        if !tree_has_pathspec_match(repo, commit_tree, "", &path_check)? {
+            return Ok(None);
+        }
+        if tree_has_pathspec_match(repo, parent_tree, "", &path_check)? {
+            return Ok(Some(follow_path.to_owned()));
+        }
     }
+    let path_specs = [follow_path.to_owned()];
     let odb = repo.odb();
     let pathspec_matcher = repo.pathspec_matcher(&path_specs)?;
     let entries = diff_trees_for_pathspecs(
@@ -4434,6 +4503,16 @@ fn follow_path_into_parent_at_merge(
     {
         return Ok(Some(old));
     }
+    if let Some(literal) = normalized_plain_literal_treesame_path(repo, follow_path) {
+        if literal_path_leaf_at_tree(repo, parent_tree, &literal, cache)?.is_some() {
+            return Ok(Some(follow_path.to_owned()));
+        }
+        return Ok(None);
+    }
+    let path_check = RevPathspecCheck {
+        specs: &path_specs,
+        attr: None,
+    };
     if tree_has_pathspec_match(repo, parent_tree, "", &path_check)? {
         return Ok(Some(follow_path.to_owned()));
     }
@@ -4495,38 +4574,13 @@ fn walk_dense_path_limited_closure(
             if action.visible {
                 selected.insert(oid);
             }
-            let commit_tree = graph.commit_tree(oid)?;
-            let parents = graph.parents_of(oid)?;
-            let merge = parents.len() > 1;
-            for parent in action.parents_to_walk {
-                if excluded.is_excluded(parent) || walked.contains(&parent) {
-                    continue;
+            if let Some(next_paths) = action.next_follow_paths.as_ref() {
+                for (parent, next_path) in action.parents_to_walk.iter().zip(next_paths.iter()) {
+                    if excluded.is_excluded(*parent) || walked.contains(parent) {
+                        continue;
+                    }
+                    queue.push_back((*parent, next_path.clone()));
                 }
-                let parent_tree = graph.commit_tree(parent)?;
-                let nth = parents.iter().position(|p| p == &parent).unwrap_or(0);
-                let next_path = if merge && nth > 0 {
-                    follow_path_into_parent_at_merge(
-                        repo,
-                        parent_tree,
-                        commit_tree,
-                        argv_path,
-                        &follow_path,
-                        follow_rename_threshold,
-                    )?
-                } else {
-                    follow_path_into_parent(
-                        repo,
-                        parent_tree,
-                        commit_tree,
-                        argv_path,
-                        &follow_path,
-                        follow_rename_threshold,
-                    )?
-                };
-                let Some(next_path) = next_path else {
-                    continue;
-                };
-                queue.push_back((parent, next_path));
             }
         }
     } else {
@@ -4558,6 +4612,8 @@ fn walk_dense_path_limited_closure(
 struct DensePathAction {
     visible: bool,
     parents_to_walk: Vec<ObjectId>,
+    /// Next `--follow` path for each parent in `parents_to_walk` (follow walks only).
+    next_follow_paths: Option<Vec<String>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4594,6 +4650,7 @@ fn dense_path_limited_action(
         return Ok(DensePathAction {
             visible,
             parents_to_walk: Vec::new(),
+            next_follow_paths: None,
         });
     }
 
@@ -4607,6 +4664,31 @@ fn dense_path_limited_action(
         let merge = parents.len() > 1;
         for (nth, parent_oid) in parents.iter().enumerate() {
             let parent_tree = graph.commit_tree(*parent_oid)?;
+            if !merge && nth == 0 && follow_path == argv_path && commit_tree != parent_tree {
+                let mut bloom_definitely_unchanged = false;
+                if let Some(ctx) = bloom {
+                    if let Some(chain) = ctx.chain {
+                        let bloom_ret = chain.bloom_precheck_for_paths(
+                            repo.odb(),
+                            oid,
+                            paths.specs(),
+                            ctx.cwd,
+                            ctx.changed_paths_version,
+                            ctx.read_changed_paths,
+                        )?;
+                        if let Some(stats) = ctx.stats {
+                            if let Ok(mut g) = stats.lock() {
+                                g.record_precheck(bloom_ret);
+                            }
+                        }
+                        bloom_definitely_unchanged = bloom_ret == BloomPrecheck::DefinitelyNot;
+                    }
+                }
+                if bloom_definitely_unchanged {
+                    lineage.push((*parent_oid, false, follow_path.to_owned()));
+                    continue;
+                }
+            }
             let propagate = if merge && nth > 0 {
                 follow_path_into_parent_at_merge(
                     repo,
@@ -4615,6 +4697,7 @@ fn dense_path_limited_action(
                     argv_path,
                     follow_path,
                     follow_rename_threshold,
+                    cache,
                 )?
             } else {
                 follow_path_into_parent(
@@ -4624,6 +4707,7 @@ fn dense_path_limited_action(
                     argv_path,
                     follow_path,
                     follow_rename_threshold,
+                    cache,
                 )?
             };
             let Some(parent_follow_path) = propagate else {
@@ -4636,6 +4720,22 @@ fn dense_path_limited_action(
             };
             let differs = if commit_tree == parent_tree {
                 false
+            } else if !merge
+                && nth == 0
+                && follow_path == argv_path
+                && parent_follow_path == follow_path
+            {
+                trees_differ_for_pathspecs_with_bloom(
+                    repo,
+                    commit_tree,
+                    parent_tree,
+                    "",
+                    paths,
+                    true,
+                    bloom,
+                    oid,
+                    Some(cache),
+                )?
             } else {
                 trees_differ_for_pathspecs_with_bloom(
                     repo,
@@ -4692,6 +4792,14 @@ fn dense_path_limited_action(
             true
         } else if parents.len() > 1 {
             false
+        } else if follow_path
+            == paths
+                .specs()
+                .first()
+                .map(String::as_str)
+                .unwrap_or(follow_path)
+        {
+            lineage.first().is_some_and(|(_, differs, _)| *differs)
         } else {
             let argv = paths
                 .specs()
@@ -4715,29 +4823,36 @@ fn dense_path_limited_action(
             let argv_unchanged = tree_has_pathspec_match(repo, commit_tree, "", &argv_check)?
                 && tree_has_pathspec_match(repo, parent_tree, "", &argv_check)?
                 && !argv_differs;
-            if follow_path == argv {
-                argv_differs
-            } else {
-                let follow_specs = [follow_path.to_owned()];
-                let follow_check = RevPathspecCheck {
-                    specs: &follow_specs,
-                    attr: None,
-                };
-                let follow_differs = trees_differ_for_pathspecs_optional(
-                    repo,
-                    Some(commit_tree),
-                    Some(parent_tree),
-                    "",
-                    &follow_check,
-                    Some(cache),
-                )?;
-                follow_differs && !argv_unchanged
-            }
+            let follow_specs = [follow_path.to_owned()];
+            let follow_check = RevPathspecCheck {
+                specs: &follow_specs,
+                attr: None,
+            };
+            let follow_differs = trees_differ_for_pathspecs_optional(
+                repo,
+                Some(commit_tree),
+                Some(parent_tree),
+                "",
+                &follow_check,
+                Some(cache),
+            )?;
+            follow_differs && !argv_unchanged
         };
+
+        let next_follow_paths: Vec<String> = parents_to_walk
+            .iter()
+            .filter_map(|parent_oid| {
+                lineage
+                    .iter()
+                    .find(|(p, _, _)| p == parent_oid)
+                    .map(|(_, _, path)| path.clone())
+            })
+            .collect();
 
         return Ok(DensePathAction {
             visible,
             parents_to_walk,
+            next_follow_paths: Some(next_follow_paths),
         });
     }
 
@@ -4790,6 +4905,7 @@ fn dense_path_limited_action(
     Ok(DensePathAction {
         visible,
         parents_to_walk,
+        next_follow_paths: None,
     })
 }
 
@@ -7042,44 +7158,18 @@ fn try_bounded_path_limit_list(
             break;
         }
 
-        let commit_tree = graph.commit_tree(oid)?;
-        let parents = graph.parents_of(oid)?;
-        let merge = parents.len() > 1;
-        for parent in action.parents_to_walk {
-            if excluded.is_hidden(parent) || !queued.insert(parent) {
+        let next_paths = action.next_follow_paths.as_ref();
+        for (idx, parent) in action.parents_to_walk.iter().enumerate() {
+            if excluded.is_hidden(*parent) || !queued.insert(*parent) {
                 continue;
             }
-            if let Some(ref fp) = follow_path {
-                let parent_tree = graph.commit_tree(parent)?;
-                let nth = parents.iter().position(|p| p == &parent).unwrap_or(0);
-                let next_path = if merge && nth > 0 {
-                    follow_path_into_parent_at_merge(
-                        repo,
-                        parent_tree,
-                        commit_tree,
-                        argv_path,
-                        fp,
-                        follow_threshold,
-                    )?
-                } else {
-                    follow_path_into_parent(
-                        repo,
-                        parent_tree,
-                        commit_tree,
-                        argv_path,
-                        fp,
-                        follow_threshold,
-                    )?
-                };
-                let Some(next_path) = next_path else {
-                    queued.remove(&parent);
-                    continue;
-                };
-                follow_paths.insert(parent, next_path);
+            if let (Some(fp), Some(paths)) = (follow_path.as_ref(), next_paths) {
+                let next = paths.get(idx).cloned().unwrap_or_else(|| fp.clone());
+                follow_paths.insert(*parent, next);
             }
             heap.push(CommitDateKey {
-                oid: parent,
-                date: graph.sort_key(parent, author_dates),
+                oid: *parent,
+                date: graph.sort_key(*parent, author_dates),
                 seq: next_seq,
             });
             next_seq += 1;
