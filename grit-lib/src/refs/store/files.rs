@@ -1497,6 +1497,7 @@ impl FilesRefStore {
         remove_empty_ref_directory(&path);
         let _ = fs::remove_file(&path);
         let _ = fs::remove_file(lock);
+        self.delete_reflog(refname)?;
         if let Some(parent) = path.parent() {
             ctx.emptied_dirs
                 .borrow_mut()
@@ -1862,14 +1863,20 @@ impl FilesRefStore {
                 extra_lock = Some(lock_path);
             }
             let write_result = (|| -> Result<()> {
-                if let (Some(old), Some(new)) = (old, new) {
+                let Some(new) = new else {
+                    if old.is_some() {
+                        self.delete_reflog(name)?;
+                    }
+                    return Ok(());
+                };
+                if let Some(old) = old {
                     if new.starts_with(old)
                         && self.append_reflog_entries(name, &new[old.len()..])?
                     {
                         return Ok(());
                     }
                 }
-                self.persist_reflog_atomic(name, new.map(Vec::as_slice).unwrap_or_default())
+                self.persist_reflog_atomic(name, new)
             })();
             if let Some(lock_path) = extra_lock {
                 let _ = fs::remove_file(&lock_path);
@@ -3409,6 +3416,46 @@ mod tests {
             "{err:?}"
         );
         assert!(!path.join("refs/heads/a.lock").exists());
+    }
+
+    #[test]
+    fn transaction_delete_unlinks_reflog_allows_nested_create() {
+        let dir = git_dir();
+        let path = dir.path();
+        let writer = store(path);
+        writer
+            .prepare(create_with_reflog("refs/heads/a", oid(1)))
+            .expect("create")
+            .commit()
+            .expect("commit");
+        assert!(path.join("logs/refs/heads/a").is_file());
+
+        let delete = RefTransaction::new()
+            .update(RefUpdate {
+                name: "refs/heads/a".to_owned(),
+                new_value: None,
+                expected: Expected::Any,
+                reflog: None,
+                flags: RefUpdateFlags::default(),
+            })
+            .expect("txn");
+        writer
+            .prepare(delete)
+            .expect("prepare")
+            .commit()
+            .expect("commit");
+        assert!(
+            !path.join("logs/refs/heads/a").exists(),
+            "delete must unlink the reflog, not leave an empty file"
+        );
+
+        writer
+            .prepare(create_with_reflog("refs/heads/a/b", oid(2)))
+            .expect("nested prepare")
+            .commit()
+            .expect("nested commit");
+        assert!(path.join("refs/heads/a/b").is_file());
+        assert!(path.join("logs/refs/heads/a/b").is_file());
     }
 
     fn create_with_reflog(name: &str, value: ObjectId) -> RefTransaction {

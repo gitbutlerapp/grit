@@ -307,13 +307,22 @@ fn apply_reflog_rename_map(
 
 /// Apply one update (ref change + optional reflog) to `state`.
 pub fn apply_update(state: &mut RefBatchState, update: &RefUpdate) -> StoreResult<()> {
-    let reflog_oids = update.reflog.as_ref().map(|_| {
-        (
-            reflog_old_oid_before(state, update),
-            reflog_new_oid_before(state, update),
-        )
-    });
-    let deref_target_reflog = update.reflog.as_ref().and_then(|_| {
+    let delete_reflog_name = if !update.flags.log_only && update.new_value.is_none() {
+        ref_change_target(state, update)?
+    } else {
+        None
+    };
+    let reflog_oids = if delete_reflog_name.is_none() {
+        update.reflog.as_ref().map(|_| {
+            (
+                reflog_old_oid_before(state, update),
+                reflog_new_oid_before(state, update),
+            )
+        })
+    } else {
+        None
+    };
+    let deref_target_reflog = reflog_oids.as_ref().and_then(|_| {
         if !should_deref_symref_update(state, update) {
             return None;
         }
@@ -321,6 +330,11 @@ pub fn apply_update(state: &mut RefBatchState, update: &RefUpdate) -> StoreResul
     });
 
     apply_ref_change(state, update)?;
+
+    if let Some(name) = delete_reflog_name {
+        state.reflogs.remove(&name);
+        return Ok(());
+    }
 
     if let (Some(log), Some((old_oid, new_oid))) = (&update.reflog, reflog_oids) {
         append_reflog_entry(&mut state.reflogs, &update.name, old_oid, new_oid, log);
@@ -333,13 +347,22 @@ pub fn apply_update(state: &mut RefBatchState, update: &RefUpdate) -> StoreResul
 
 fn apply_update_ctx(ctx: &mut RefWriteCtx<'_, '_>, update: &RefUpdate) -> StoreResult<()> {
     let read = ctx.refs.read();
-    let reflog_oids = update.reflog.as_ref().map(|_| {
-        (
-            reflog_old_oid_before_read(&read, update),
-            reflog_new_oid_before_read(&read, update),
-        )
-    });
-    let deref_target_reflog = update.reflog.as_ref().and_then(|_| {
+    let delete_reflog_name = if !update.flags.log_only && update.new_value.is_none() {
+        ref_change_target_read(&read, update)?
+    } else {
+        None
+    };
+    let reflog_oids = if delete_reflog_name.is_none() {
+        update.reflog.as_ref().map(|_| {
+            (
+                reflog_old_oid_before_read(&read, update),
+                reflog_new_oid_before_read(&read, update),
+            )
+        })
+    } else {
+        None
+    };
+    let deref_target_reflog = reflog_oids.as_ref().and_then(|_| {
         if !should_deref_symref_update_read(&read, update) {
             return None;
         }
@@ -347,6 +370,11 @@ fn apply_update_ctx(ctx: &mut RefWriteCtx<'_, '_>, update: &RefUpdate) -> StoreR
     });
 
     apply_ref_change_ctx(ctx, update)?;
+
+    if let Some(name) = delete_reflog_name {
+        ctx.reflogs.remove(&name);
+        return Ok(());
+    }
 
     if let (Some(log), Some((old_oid, new_oid))) = (&update.reflog, reflog_oids) {
         append_reflog_entry(ctx.reflogs, &update.name, old_oid, new_oid, log);

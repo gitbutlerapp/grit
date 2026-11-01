@@ -242,10 +242,12 @@ pub fn partition_updates_allowing_failures(
 ///
 /// Updates apply in transaction order. A direct-value update through a symbolic ref (without
 /// [`RefUpdateFlags::no_deref`](super::RefUpdateFlags::no_deref)) writes the end of the
-/// symbolic chain and logs the same entry on the symbolic ref and on that target. A delete
-/// with a [`ReflogUpdate`](super::ReflogUpdate) appends an entry whose new id is zero and
-/// keeps the reflog. Call [`check_transaction`] first; this function does not re-check
-/// expectations, so on error `state` may be partially updated (apply to a copy).
+/// symbolic chain and logs the same entry on the symbolic ref and on that target. A ref
+/// delete (not [`RefUpdateFlags::log_only`](super::RefUpdateFlags::log_only)) removes the
+/// deleted ref's reflog from `state.reflogs`, matching Git's files backend; a
+/// [`ReflogUpdate`](super::ReflogUpdate) on that delete does not append a line or keep the
+/// log. Call [`check_transaction`] first; this function does not re-check expectations, so on
+/// error `state` may be partially updated (apply to a copy).
 ///
 /// # Errors
 ///

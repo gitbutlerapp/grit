@@ -449,30 +449,33 @@ fn build_reftable_updates_for_stack(
     let mut log_updates: Vec<ReftableTransactionUpdate> = Vec::new();
 
     for update in updates {
+        let ref_delete = !update.flags.log_only && update.new_value.is_none();
         let target = reftable_write_target(&trial, git_dir, update)?;
         let value = target.value.clone();
         let old_oid = reflog_old_oid_before(&trial, refs, update);
         let new_oid = reflog_new_oid_before(&trial, refs, update);
         let (_, log_refname) = reftable_storage_location(git_dir, &update.name);
-        if let Some(log) = update.reflog.as_ref() {
-            let mut log_refnames = vec![log_refname];
-            if let Some(target_name) = deref_reflog_target(&trial, update) {
-                let (target_store, target_storage) =
-                    reftable_storage_location(git_dir, &target_name);
-                let (update_store, _) = reftable_storage_location(git_dir, &update.name);
-                if target_store == update_store {
-                    log_refnames.push(target_storage);
+        if !ref_delete {
+            if let Some(log) = update.reflog.as_ref() {
+                let mut log_refnames = vec![log_refname];
+                if let Some(target_name) = deref_reflog_target(&trial, update) {
+                    let (target_store, target_storage) =
+                        reftable_storage_location(git_dir, &target_name);
+                    let (update_store, _) = reftable_storage_location(git_dir, &update.name);
+                    if target_store == update_store {
+                        log_refnames.push(target_storage);
+                    }
                 }
-            }
-            for refname in log_refnames {
-                let record = log_record_from_update(git_dir, &refname, old_oid, new_oid, log)
-                    .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-                log_updates.push(ReftableTransactionUpdate {
-                    refname,
-                    value: None,
-                    log: Some(record),
-                    expected_old: None,
-                });
+                for refname in log_refnames {
+                    let record = log_record_from_update(git_dir, &refname, old_oid, new_oid, log)
+                        .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+                    log_updates.push(ReftableTransactionUpdate {
+                        refname,
+                        value: None,
+                        log: Some(record),
+                        expected_old: None,
+                    });
+                }
             }
         }
         if value.is_some() {
@@ -728,6 +731,9 @@ impl RefStore for ReftableRefStore {
             refs.insert(log.refname);
         }
         for name in refs {
+            if stack.read_logs_for_ref(&name)?.is_empty() {
+                continue;
+            }
             if f(&name).is_break() {
                 break;
             }
