@@ -223,13 +223,27 @@ fn terminal_log_no_pager() {
 }
 
 #[test]
+fn terminal_log_env_assignment_pager_runs_under_shell() {
+    let dir = repo_with_commits(3);
+    let paged = dir.path().join("paged.txt");
+    let pager = format!("PAGER_FLAG=1 cat > '{}'", paged.display());
+    let direct = log_on_terminal(dir.path(), &[], &pager);
+    assert!(
+        commit_lines(&direct).is_empty(),
+        "env-assignment pager output goes through the shell, not the terminal: {direct}"
+    );
+    let text = std::fs::read_to_string(&paged).expect("pager received output");
+    assert_eq!(
+        commit_lines(&text).len(),
+        3,
+        "shell ran PAGER_FLAG=1 cat: {text}"
+    );
+}
+
+#[test]
 fn terminal_log_missing_pager_falls_back_to_terminal() {
     let dir = repo_with_commits(3);
-    let direct = log_on_terminal(
-        dir.path(),
-        &[],
-        "definitely-not-a-pager-binary-6231",
-    );
+    let direct = log_on_terminal(dir.path(), &[], "definitely-not-a-pager-binary-6231");
     assert_eq!(
         commit_lines(&direct).len(),
         3,

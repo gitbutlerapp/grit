@@ -127,14 +127,57 @@ fn pager_failed(command: &str) {
     eprintln!("grit could not run the pager ({command}); writing log to the terminal instead");
 }
 
-/// Whether `command` needs a shell (`delta | less`, redirection, …).
+/// Whether `command` must run under a shell (pipelines, assignments, expansions, …).
 fn needs_shell(command: &str) -> bool {
-    command.as_bytes().iter().any(|&b| {
+    if command.as_bytes().iter().any(|&b| {
         matches!(
             b,
-            b'|' | b'&' | b';' | b'>' | b'<' | b'(' | b')' | b'$' | b'\'' | b'"' | b'`' | b'\n'
+            b'|' | b'&'
+                | b';'
+                | b'>'
+                | b'<'
+                | b'('
+                | b')'
+                | b'$'
+                | b'\''
+                | b'"'
+                | b'`'
+                | b'\n'
+                | b'~'
+                | b'*'
+                | b'?'
         )
-    })
+    }) {
+        return true;
+    }
+    if leading_env_assignment(command) {
+        return true;
+    }
+    #[cfg(windows)]
+    if command.contains('\\') && !command.contains('"') {
+        return true;
+    }
+    false
+}
+
+/// First word is a shell `NAME=value` assignment (not `prog --opt=val`).
+fn leading_env_assignment(command: &str) -> bool {
+    let Some(word) = command.split_whitespace().next() else {
+        return false;
+    };
+    matches!(
+        word.split_once('='),
+        Some((name, _)) if is_env_var_name(name)
+    )
+}
+
+fn is_env_var_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// The pager command line to run, or `None` when paging is turned off.
@@ -194,5 +237,14 @@ mod tests {
         assert!(!needs_shell("less -S"));
         assert!(needs_shell("delta | less"));
         assert!(needs_shell("less > /dev/null"));
+    }
+
+    #[test]
+    fn needs_shell_detects_assignments_and_expansions() {
+        assert!(needs_shell("PAGER_FLAG=1 /tmp/pager"));
+        assert!(needs_shell("LESS=FRX less"));
+        assert!(needs_shell("~/bin/less"));
+        assert!(needs_shell("less *.md"));
+        assert!(!needs_shell("/usr/bin/less -S"));
     }
 }
