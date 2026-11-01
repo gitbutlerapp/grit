@@ -14985,6 +14985,7 @@ pub enum grit_lib::porcelain::hunk_select::HunkSelectError
 pub grit_lib::porcelain::hunk_select::HunkSelectError::Apply(grit_lib::error::ApplyError)
 pub grit_lib::porcelain::hunk_select::HunkSelectError::Binary
 pub grit_lib::porcelain::hunk_select::HunkSelectError::Binary::path: alloc::string::String
+pub grit_lib::porcelain::hunk_select::HunkSelectError::Cancelled
 pub grit_lib::porcelain::hunk_select::HunkSelectError::Gitlink
 pub grit_lib::porcelain::hunk_select::HunkSelectError::Gitlink::path: alloc::string::String
 pub grit_lib::porcelain::hunk_select::HunkSelectError::InvalidMode
@@ -14992,7 +14993,6 @@ pub grit_lib::porcelain::hunk_select::HunkSelectError::InvalidMode::mode: alloc:
 pub grit_lib::porcelain::hunk_select::HunkSelectError::InvalidMode::path: alloc::string::String
 pub grit_lib::porcelain::hunk_select::HunkSelectError::MissingPath
 pub grit_lib::porcelain::hunk_select::HunkSelectError::PatchBuild
-pub grit_lib::porcelain::hunk_select::HunkSelectError::Cancelled
 pub grit_lib::porcelain::hunk_select::HunkSelectError::RangeOutOfBounds
 pub grit_lib::porcelain::hunk_select::HunkSelectError::RangeOutOfBounds::end: usize
 pub grit_lib::porcelain::hunk_select::HunkSelectError::RangeOutOfBounds::max_line: usize
@@ -27414,8 +27414,8 @@ impl core::iter::traits::iterator::Iterator for grit_lib::revwalk::handle::RevWa
 pub type grit_lib::revwalk::handle::RevWalkCommitIter<'_>::Item = core::result::Result<grit_lib::objects::ObjectId, grit_lib::error::Error>
 pub fn grit_lib::revwalk::handle::RevWalkCommitIter<'_>::next(&mut self) -> core::option::Option<Self::Item>
 impl<'repo> core::marker::Freeze for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
-impl<'repo> core::marker::Send for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
-impl<'repo> core::marker::Sync for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
+impl<'repo> !core::marker::Send for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
+impl<'repo> !core::marker::Sync for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
 impl<'repo> core::marker::Unpin for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
 impl<'repo> core::marker::UnsafeUnpin for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
 impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
@@ -29098,8 +29098,8 @@ impl core::iter::traits::iterator::Iterator for grit_lib::revwalk::rev_list::Com
 pub type grit_lib::revwalk::rev_list::CommitStream<'_>::Item = core::result::Result<grit_lib::revwalk::rev_list::CommitStreamItem, grit_lib::error::Error>
 pub fn grit_lib::revwalk::rev_list::CommitStream<'_>::next(&mut self) -> core::option::Option<Self::Item>
 impl<'repo> core::marker::Freeze for grit_lib::revwalk::rev_list::CommitStream<'repo>
-impl<'repo> core::marker::Send for grit_lib::revwalk::rev_list::CommitStream<'repo>
-impl<'repo> core::marker::Sync for grit_lib::revwalk::rev_list::CommitStream<'repo>
+impl<'repo> !core::marker::Send for grit_lib::revwalk::rev_list::CommitStream<'repo>
+impl<'repo> !core::marker::Sync for grit_lib::revwalk::rev_list::CommitStream<'repo>
 impl<'repo> core::marker::Unpin for grit_lib::revwalk::rev_list::CommitStream<'repo>
 impl<'repo> core::marker::UnsafeUnpin for grit_lib::revwalk::rev_list::CommitStream<'repo>
 impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::rev_list::CommitStream<'repo>
@@ -29946,8 +29946,8 @@ impl core::iter::traits::iterator::Iterator for grit_lib::revwalk::handle::RevWa
 pub type grit_lib::revwalk::handle::RevWalkCommitIter<'_>::Item = core::result::Result<grit_lib::objects::ObjectId, grit_lib::error::Error>
 pub fn grit_lib::revwalk::handle::RevWalkCommitIter<'_>::next(&mut self) -> core::option::Option<Self::Item>
 impl<'repo> core::marker::Freeze for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
-impl<'repo> core::marker::Send for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
-impl<'repo> core::marker::Sync for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
+impl<'repo> !core::marker::Send for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
+impl<'repo> !core::marker::Sync for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
 impl<'repo> core::marker::Unpin for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
 impl<'repo> core::marker::UnsafeUnpin for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
 impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::handle::RevWalkCommitIter<'repo>
