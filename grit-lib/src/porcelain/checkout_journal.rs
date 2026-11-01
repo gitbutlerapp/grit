@@ -397,7 +397,10 @@ impl CheckoutJournal {
         let index = repo.load_index().ok();
         let mut restore_targets: Vec<CheckoutRollbackRestore> = Vec::new();
         let mut restore_paths = HashSet::new();
-        let mut dir_cache = LeadingDirCache::new();
+        let mut dir_cache = repo
+            .config()
+            .map(|config| LeadingDirCache::for_config(config.as_ref()))
+            .unwrap_or_else(|_| LeadingDirCache::new());
         for entry in replaced.iter().rev() {
             if spooled.contains(&entry.path) {
                 continue;
@@ -720,20 +723,7 @@ fn cross_device_restore_from_spool(
 }
 
 pub(crate) fn create_symlink_at(target: &Path, link: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::symlink;
-        symlink(target, link)
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::{symlink_dir, symlink_file};
-        if target.is_dir() {
-            symlink_dir(target, link)
-        } else {
-            symlink_file(target, link)
-        }
-    }
+    crate::worktree::create_worktree_symlink(link, target)
 }
 
 #[cfg(test)]

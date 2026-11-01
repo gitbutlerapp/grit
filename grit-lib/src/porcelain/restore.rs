@@ -12,9 +12,7 @@ use crate::diff::{
 };
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
-use crate::index::{
-    entry_from_metadata, Index, IndexEntry, IndexLock, MODE_EXECUTABLE, MODE_GITLINK,
-};
+use crate::index::{Index, IndexEntry, IndexLock, MODE_EXECUTABLE, MODE_GITLINK, MODE_SYMLINK};
 use crate::merge_file::{is_binary, merge, ConflictStyle, MergeFavor, MergeInput};
 use crate::objects::ObjectKind;
 use crate::objects::{parse_commit, ObjectId};
@@ -22,8 +20,8 @@ use crate::pathspec::{
     pathspec_is_exclude, sorted_paths_match_pathspec, PathspecListMatcher, PathspecMatchContext,
 };
 use crate::porcelain::checkout::{
-    checkout_between_trees, remove_empty_parent_dirs, write_blob_to_worktree,
-    write_smudged_blob_to_worktree, CheckoutJournal, LeadingDirCache,
+    checkout_between_trees, index_entry_from_worktree_write, remove_empty_parent_dirs,
+    write_blob_to_worktree, write_smudged_blob_to_worktree, CheckoutJournal, LeadingDirCache,
 };
 use crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths;
 use crate::porcelain::stash::{flat_tree_lookup, flatten_tree_full, FlatTreeEntry};
@@ -714,8 +712,7 @@ fn apply_worktree_restore_inner(
         cancel,
     } = ctx;
     let config = repo.config()?;
-    let protect = crate::path_validate::ProtectOptions::from_config(&config);
-    let mut dir_cache = LeadingDirCache::with_protect(protect);
+    let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
 
     if !worktree_from_tree {
         let attr_index = index_out.gitattributes_snapshot();
@@ -923,7 +920,14 @@ fn restore_worktree_blob_from_index(
     journal.preserve_before_write(path)?;
     let meta = restore_blob_to_worktree(repo, rules, work_tree, path, &oid, mode, dir_cache)?;
     let index_path = crate::repo_relpath::storage_bytes(path);
-    index_out.add_or_replace(entry_from_metadata(&meta, index_path.as_ref(), oid, mode));
+    let symlink_target_len = symlink_target_byte_len(repo, &oid, mode)?;
+    index_out.add_or_replace(index_entry_from_worktree_write(
+        &meta,
+        index_path.as_ref(),
+        oid,
+        mode,
+        symlink_target_len,
+    ));
     *index_dirty = true;
     outcome.restored.push(path.to_string());
     Ok(())
@@ -953,25 +957,36 @@ fn restore_worktree_entry(
     )?;
     if worktree_from_tree {
         if let Some(existing) = existing_index {
-            index_out.add_or_replace(entry_from_metadata(
+            let symlink_target_len = symlink_target_byte_len(repo, &existing.oid, existing.mode)?;
+            index_out.add_or_replace(index_entry_from_worktree_write(
                 &meta,
                 path.as_bytes(),
                 existing.oid,
                 existing.mode,
+                symlink_target_len,
             ));
             *index_dirty = true;
         }
     } else {
-        index_out.add_or_replace(entry_from_metadata(
+        let symlink_target_len = symlink_target_byte_len(repo, &entry.oid, entry.mode)?;
+        index_out.add_or_replace(index_entry_from_worktree_write(
             &meta,
             path.as_bytes(),
             entry.oid,
             entry.mode,
+            symlink_target_len,
         ));
         *index_dirty = true;
     }
     outcome.restored.push(path.to_string());
     Ok(())
+}
+
+fn symlink_target_byte_len(repo: &Repository, oid: &ObjectId, mode: u32) -> Result<Option<usize>> {
+    if mode != MODE_SYMLINK {
+        return Ok(None);
+    }
+    Ok(Some(repo.odb().read(oid)?.data.len()))
 }
 
 fn index_entry_from_flat(path: &str, src: &FlatTreeEntry, size: u32) -> IndexEntry {
