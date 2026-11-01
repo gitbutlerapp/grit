@@ -56,6 +56,10 @@ pub struct RevSelectArgs {
     #[arg(long = "first-parent")]
     pub first_parent: bool,
 
+    /// Follow a single file path across renames (Git `log --follow`).
+    #[arg(long = "follow")]
+    pub follow: bool,
+
     /// Include only merge commits.
     #[arg(long = "merges", conflicts_with = "no_merges")]
     pub merges: bool,
@@ -219,6 +223,8 @@ impl RevSelectArgs {
             reverse: self.reverse,
             refs: ref_selections(self),
             first_parent: self.first_parent,
+            follow: self.follow,
+            full_history: false,
             paths: walk_paths.to_vec(),
             commit_filter,
             pickaxe,

@@ -12,6 +12,7 @@
 #[cfg(feature = "full-tests")]
 #[path = "receive_post_callback.rs"]
 mod receive_post_callback;
+#[cfg(feature = "full-tests")]
 #[path = "shallow_stateless_v0.rs"]
 mod shallow_stateless_v0;
 #[path = "spawn_guard.rs"]

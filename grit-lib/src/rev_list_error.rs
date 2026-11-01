@@ -75,6 +75,14 @@ pub enum RevListError {
         /// Expected object type name (`tree`, `blob`, `commit`, `tag`).
         expected: &'static str,
     },
+
+    /// [`crate::rev_list::RevListOptions::follow`] requires exactly one path after `--`.
+    #[error("--follow can only be used with exactly one path")]
+    FollowRequiresSinglePath,
+
+    /// [`crate::rev_list::RevListOptions::follow`] requires a plain file path (no globs or magic).
+    #[error("--follow requires a single literal file path")]
+    FollowRequiresLiteralPath,
 }
 
 #[cfg(test)]

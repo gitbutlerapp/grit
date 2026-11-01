@@ -1001,6 +1001,7 @@ mod merge_eol_crlf_conflict_git_compat;
 mod merge_file_git_compat;
 #[path = "merge_file_issue_2369_git_compat.rs"]
 mod merge_file_issue_2369_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "merge_file_issue_2397_git_compat.rs"]
 mod merge_file_issue_2397_git_compat;
 #[cfg(feature = "full-tests")]
@@ -1624,6 +1625,9 @@ mod rev_list_commit_filter_git_compat;
 mod rev_list_commit_graph_walk;
 #[path = "rev_list_diff_coverage_sweep.rs"]
 mod rev_list_diff_coverage_sweep;
+#[cfg(feature = "full-tests")]
+#[path = "rev_list_follow_git_compat.rs"]
+mod rev_list_follow_git_compat;
 #[path = "rev_list_object_segments.rs"]
 mod rev_list_object_segments;
 #[cfg(feature = "full-tests")]
