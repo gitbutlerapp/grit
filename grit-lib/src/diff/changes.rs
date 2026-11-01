@@ -58,7 +58,7 @@ pub struct FileChange {
     pub old_bytes: SideBytes,
     /// New side contents, read from the working tree for working-tree changes.
     pub new_bytes: SideBytes,
-    /// Either side is treated as binary; binary sides may not carry their bytes.
+    /// Either side is treated as binary; a binary change may carry neither side's bytes.
     pub binary: bool,
     /// The object ids differ (false for a mode-only change).
     pub content_changed: bool,
@@ -178,15 +178,21 @@ pub(crate) struct WorktreeSide<'a> {
 
 /// Load one entry's sides: the old side from the object database, the new side from the
 /// working tree when `worktree` is given, otherwise from the object database.
+///
+/// A binary new side makes the whole change binary, so the old blob is then not read at all.
 pub(crate) fn load_change(
     odb: &Odb,
     entry: DiffEntry,
     worktree: Option<&WorktreeSide<'_>>,
 ) -> Result<FileChange> {
-    let (old_bytes, old_binary) = load_old_side(odb, &entry, None)?;
     let (new_bytes, new_binary) = match worktree {
         Some(side) => load_worktree_new_side(odb, &entry, side)?,
         None => load_new_side(odb, &entry, None)?,
+    };
+    let (old_bytes, old_binary) = if new_binary {
+        (SideBytes::from_bytes(Vec::new()), false)
+    } else {
+        load_old_side(odb, &entry, None)?
     };
     Ok(FileChange::from_entry(
         entry,
@@ -337,7 +343,9 @@ pub(crate) fn staged_entries_in(
 
 /// Working tree against `index`, sorted by path.
 ///
-/// `restrict_to_paths` limits the scan to those paths and skips the fsmonitor refresh.
+/// `restrict_to_paths` limits the scan to those paths and skips the fsmonitor refresh. A file
+/// whose size changed (under an identity clean conversion) is reported without being hashed,
+/// with a null `new_oid`; loading its side reads the live file anyway.
 pub(crate) fn unstaged_entries_in(
     repo: &Repository,
     index: &mut Index,
@@ -354,6 +362,7 @@ pub(crate) fn unstaged_entries_in(
         config: Some(config),
         thread_policy: Some(repo.thread_policy()),
         refresh_index_stat_in_pass: false,
+        size_change_proves_modified: true,
         refresh_fsmonitor,
         worktree_rules: Some(Arc::clone(rules)),
         command_runner: Some(repo.command_runner()),
@@ -491,6 +500,9 @@ impl<'repo> UncommittedDiff<'repo> {
     }
 
     /// Working tree against the index (`grit diff --unstaged`), sorted by path.
+    ///
+    /// Like Git's `diff-files`, a working-tree side that was not hashed carries a null
+    /// `new_oid`; a tracked file whose size changed is reported that way without reading it.
     ///
     /// # Parameters
     ///
@@ -813,6 +825,108 @@ mod tests {
             worktree_gitlink_line(&gitlink, dir.path()),
             format!("Subproject commit {}\n", oid.to_hex())
         );
+    }
+
+    /// Repository whose index tracks `files`, staged from the working tree.
+    fn staged_repo(files: &[(&str, &[u8])]) -> (tempfile::TempDir, Repository) {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let repo = Repository::init(dir.path(), &InitOptions::default())
+            .unwrap_or_else(|e| panic!("init: {e}"));
+        for (path, bytes) in files {
+            std::fs::write(dir.path().join(path), bytes).unwrap_or_else(|e| panic!("write: {e}"));
+        }
+        crate::porcelain::add::stage(
+            &repo,
+            &crate::porcelain::add::StageOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap_or_else(|e| panic!("stage: {e}"));
+        (dir, repo)
+    }
+
+    fn unstaged(repo: &Repository) -> Vec<DiffEntry> {
+        let index = repo
+            .index_handle()
+            .load()
+            .unwrap_or_else(|e| panic!("index: {e}"));
+        UncommittedDiff::new(repo, index)
+            .unstaged_entries(RenameDetection::Off)
+            .unwrap_or_else(|e| panic!("unstaged: {e}"))
+    }
+
+    #[test]
+    fn unstaged_size_change_is_reported_without_hashing() {
+        let (dir, repo) = staged_repo(&[("grown.txt", b"one\n"), ("same.txt", b"aaaa\n")]);
+        std::fs::write(dir.path().join("grown.txt"), b"one\ntwo\n")
+            .unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(dir.path().join("same.txt"), b"bbbb\n").unwrap_or_else(|e| panic!("{e}"));
+
+        let metrics = repo.odb().hot_path_metrics();
+        metrics.set_blob_counting(true);
+        metrics.reset_blob_content_reads();
+        let entries = unstaged(&repo);
+        // Only the same-size file is read (to hash it); the size change alone proves the other.
+        assert_eq!(metrics.blob_content_reads(), 1);
+        assert_eq!(entries.len(), 2);
+        let grown = &entries[0];
+        assert_eq!(grown.path(), "grown.txt");
+        assert_eq!(grown.status, DiffStatus::Modified);
+        assert_eq!(grown.new_oid, ObjectId::zero());
+        // A same-size edit is only reported once hashing proves the content changed.
+        let same = &entries[1];
+        assert_eq!(same.path(), "same.txt");
+        assert_eq!(same.status, DiffStatus::Modified);
+
+        let index = repo
+            .index_handle()
+            .load()
+            .unwrap_or_else(|e| panic!("index: {e}"));
+        let changes = UncommittedDiff::new(&repo, index)
+            .load_worktree_changes(entries)
+            .unwrap_or_else(|e| panic!("load: {e}"));
+        assert!(changes[0].content_changed);
+        assert_eq!(
+            changes[0].line_stat(&DiffOptions::default()),
+            Some(LineStat {
+                insertions: 1,
+                deletions: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn binary_worktree_side_skips_reading_the_old_blob() {
+        let (dir, repo) = staged_repo(&[("data.bin", b"old text\n"), ("notes.txt", b"a\n")]);
+        std::fs::write(dir.path().join("data.bin"), b"new\0binary")
+            .unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(dir.path().join("notes.txt"), b"a\nb\n").unwrap_or_else(|e| panic!("{e}"));
+
+        let entries = unstaged(&repo);
+        let index = repo
+            .index_handle()
+            .load()
+            .unwrap_or_else(|e| panic!("index: {e}"));
+        let mut diff = UncommittedDiff::new(&repo, index);
+        let metrics = repo.odb().hot_path_metrics();
+        metrics.set_blob_counting(true);
+        metrics.reset_blob_content_reads();
+        let binary = diff
+            .load_worktree_changes(vec![entries[0].clone()])
+            .unwrap_or_else(|e| panic!("load: {e}"));
+        assert_eq!(binary[0].path, "data.bin");
+        assert!(binary[0].binary);
+        assert!(binary[0].content_changed);
+        // Only the working-tree file was read.
+        assert_eq!(metrics.blob_content_reads(), 1);
+
+        metrics.reset_blob_content_reads();
+        let text = diff
+            .load_worktree_changes(vec![entries[1].clone()])
+            .unwrap_or_else(|e| panic!("load: {e}"));
+        assert!(!text[0].binary);
+        assert_eq!(text[0].old_bytes.text(), "a\n");
+        assert_eq!(metrics.blob_content_reads(), 2);
     }
 
     #[test]

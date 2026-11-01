@@ -4853,6 +4853,7 @@ pub grit_lib::diff::DiffIndexToWorktreeOptions::refresh_index_stat_in_pass: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::repository_git_dir: core::option::Option<std::path::PathBuf>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::restrict_to_paths: core::option::Option<alloc::rcs::arc::Arc<alloc::collections::btree::set::BTreeSet<alloc::string::String>>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::simplify_gitlinks: bool
+pub grit_lib::diff::DiffIndexToWorktreeOptions::size_change_proves_modified: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::stat_parallel_threads: core::option::Option<usize>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::thread_policy: core::option::Option<grit_lib::parallel::ThreadPolicy>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::worktree_rules: core::option::Option<alloc::rcs::arc::Arc<std::sync::poison::mutex::Mutex<grit_lib::worktree::worktree_rules::WorktreeRules>>>

@@ -5237,6 +5237,14 @@ pub struct DiffIndexToWorktreeOptions {
     /// entries are not hashed. Content diffs must leave this off so a content change always
     /// carries a null worktree `new_oid` (`old_oid != new_oid`).
     pub for_status: bool,
+    /// Report a tracked file as modified without reading it when its size differs from the
+    /// index entry and its clean conversion is the identity (default `false`, implied by
+    /// [`Self::for_status`]).
+    ///
+    /// The entry carries a null worktree `new_oid`, so `old_oid != new_oid` still marks a
+    /// content change. Set this when the caller reads the worktree file afterwards anyway (a
+    /// patch or diffstat), so hashing it here would only repeat that read.
+    pub size_change_proves_modified: bool,
     /// When true (default), query `core.fsmonitor` before scanning the worktree.
     pub refresh_fsmonitor: bool,
     /// Injectable subprocess runner for fsmonitor hooks; defaults to the system runner.
@@ -5278,6 +5286,7 @@ impl Default for DiffIndexToWorktreeOptions {
             thread_policy: None,
             worktree_rules: None,
             for_status: false,
+            size_change_proves_modified: false,
             refresh_fsmonitor: true,
             command_runner: None,
             fsmonitor_query_boundary: None,
@@ -5739,6 +5748,7 @@ fn push_index_blob_worktree_diff(
     materialize_dirty_blobs: bool,
     hash_blobs_without_write: bool,
     for_status: bool,
+    size_change_proves_modified: bool,
     skip_inaccessible_paths: bool,
     diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
@@ -5802,7 +5812,7 @@ fn push_index_blob_worktree_diff(
             crate::index::munge_index_size(meta.len()),
             worktree_mode,
             meta.len(),
-            for_status,
+            size_change_proves_modified,
             || crate::crlf::git_conversion_is_identity(conv, &file_attrs),
             result,
         )?
@@ -6155,6 +6165,9 @@ fn diff_index_to_worktree_inner(
 
     let ignore_submodule_untracked = options.ignore_submodule_untracked;
     let simplify_gitlinks = options.simplify_gitlinks;
+    // Staging stores the worktree blob, so it always needs the file's object id.
+    let size_change_proves_modified =
+        !materialize_dirty_blobs && (options.for_status || options.size_change_proves_modified);
 
     let rules_lock = options
         .worktree_rules
@@ -6577,7 +6590,7 @@ fn diff_index_to_worktree_inner(
                         stat.worktree_size(),
                         worktree_mode,
                         stat.raw_size,
-                        options.for_status,
+                        size_change_proves_modified,
                         || conversion_is_identity(entry_index, path_str_ref),
                         &mut result,
                     )? {
@@ -6658,6 +6671,7 @@ fn diff_index_to_worktree_inner(
                         materialize_dirty_blobs,
                         hash_blobs_without_write,
                         options.for_status,
+                        size_change_proves_modified,
                         options.skip_inaccessible_paths,
                         options.diagnostics.as_ref(),
                         filter_fp,

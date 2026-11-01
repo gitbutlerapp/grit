@@ -461,7 +461,7 @@ pub(crate) fn side_bytes_after_blob_read(
     data: Vec<u8>,
     retain_binary_payload: bool,
 ) -> (SideBytes, bool) {
-    let binary = data.iter().take(8000).any(|&b| b == 0);
+    let binary = crate::crlf::is_binary(&data);
     if binary && !retain_binary_payload {
         (SideBytes::from_bytes(Vec::new()), true)
     } else {
@@ -506,7 +506,7 @@ pub fn load_odb_blob_side_for_diff(
 /// Classify raw blob bytes for line diffs (NUL in the first 8 KiB ⇒ binary).
 #[must_use]
 pub fn bytes_for_diff(data: Vec<u8>) -> (SideBytes, bool) {
-    if data.iter().take(8000).any(|&b| b == 0) {
+    if crate::crlf::is_binary(&data) {
         (SideBytes::from_bytes(Vec::new()), true)
     } else {
         (SideBytes::from_bytes(data), false)
