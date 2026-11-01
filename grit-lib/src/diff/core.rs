@@ -3098,7 +3098,9 @@ pub fn diff_trees_with_renames_and_policy(
             config,
             thread_policy,
             None,
-        )?;
+            DetectRenamesOptions::default(),
+        )?
+        .entries;
     }
     Ok(entries)
 }
@@ -3825,6 +3827,7 @@ pub fn apply_rename_detection_to_diff_entries(
             config,
             thread_policy,
             &opts,
+            None,
         )
     } else {
         detect_renames_with_policy(
@@ -3835,7 +3838,9 @@ pub fn apply_rename_detection_to_diff_entries(
             config,
             thread_policy,
             None,
+            DetectRenamesOptions::default(),
         )
+        .map(|r| r.entries)
     }
 }
 
@@ -8987,6 +8992,35 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
 
 // ── Rename detection ────────────────────────────────────────────────
 
+/// Emitted when unmatched rename candidates exceed [`diff.renameLimit`](https://git-scm.com/docs/git-config#Documentation/git-config.txt-diffrenameLimit) after exact and basename pairing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InexactRenameDetectionSkipped {
+    /// Unmatched delete-side candidates still eligible for inexact pairing.
+    pub unmatched_sources: usize,
+    /// Unmatched add-side candidates still eligible for inexact pairing.
+    pub unmatched_destinations: usize,
+    /// Configured `diff.renameLimit`, if any (`None` means unlimited).
+    pub configured_limit: Option<usize>,
+    /// Smallest limit that would allow the remaining matrix (`max(sources, destinations)`).
+    pub suggested_limit: usize,
+}
+
+/// Result of [`detect_renames_with_policy`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameDetectionResult {
+    /// Diff entries after rename pairing.
+    pub entries: Vec<DiffEntry>,
+    /// Set when inexact rename detection was skipped due to `diff.renameLimit`.
+    pub inexact_skipped: Option<InexactRenameDetectionSkipped>,
+}
+
+/// Options for [`detect_renames_with_policy`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DetectRenamesOptions {
+    /// Skip Git's basename pre-pass (break-rewrite and copy detection paths).
+    pub skip_basename_heuristic: bool,
+}
+
 fn read_added_entry_bytes(
     odb: &Odb,
     entry: &DiffEntry,
@@ -9022,8 +9056,18 @@ pub fn detect_renames(
 ) -> Vec<DiffEntry> {
     let config = ConfigSet::new();
     let policy = ThreadPolicy::default();
-    detect_renames_with_policy(odb, work_root, entries, threshold, &config, &policy, None)
-        .expect("rename detection")
+    detect_renames_with_policy(
+        odb,
+        work_root,
+        entries,
+        threshold,
+        &config,
+        &policy,
+        None,
+        DetectRenamesOptions::default(),
+    )
+    .expect("rename detection")
+    .entries
 }
 
 #[inline]
@@ -9046,6 +9090,7 @@ fn poll_rename_cancel(
 ///
 /// Returns object database errors from reading candidate blobs, and the cancellation
 /// error when `cancel_watch` is set.
+#[allow(clippy::too_many_arguments)]
 pub fn detect_renames_with_policy(
     odb: &Odb,
     work_root: Option<&Path>,
@@ -9054,13 +9099,17 @@ pub fn detect_renames_with_policy(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     cancel_watch: Option<&std::sync::atomic::AtomicBool>,
-) -> Result<Vec<DiffEntry>> {
+    detect_opts: DetectRenamesOptions,
+) -> Result<RenameDetectionResult> {
     poll_rename_cancel(cancel_watch)?;
     let has_deleted = entries.iter().any(|e| e.status == DiffStatus::Deleted);
     let has_added = entries.iter().any(|e| e.status == DiffStatus::Added);
     if (!has_deleted || !has_added) && entries_strictly_sorted_by_path(&entries) {
         // With unique sorted paths, regrouping and re-sorting would rebuild the same list.
-        return Ok(entries);
+        return Ok(RenameDetectionResult {
+            entries,
+            inexact_skipped: None,
+        });
     }
     // Split entries into deleted, added, and others.
     let mut deleted: Vec<DiffEntry> = Vec::new();
@@ -9081,7 +9130,10 @@ pub fn detect_renames_with_policy(
         result.extend(deleted);
         result.extend(added);
         sort_entries_by_path(&mut result);
-        return Ok(result);
+        return Ok(RenameDetectionResult {
+            entries: result,
+            inexact_skipped: None,
+        });
     }
 
     fn is_regularish_mode(mode: FileMode) -> bool {
@@ -9167,6 +9219,20 @@ pub fn detect_renames_with_policy(
         &mut renames,
     );
 
+    if !detect_opts.skip_basename_heuristic {
+        super::basename_rename::apply_basename_rename_pairs(
+            odb,
+            work_root,
+            &deleted,
+            &added,
+            &mut used_deleted,
+            &mut used_added,
+            &mut renames,
+            threshold,
+            cancel_watch,
+        )?;
+    }
+
     let remaining_deleted: Vec<usize> = used_deleted
         .iter()
         .enumerate()
@@ -9179,14 +9245,23 @@ pub fn detect_renames_with_policy(
         .collect();
 
     let rename_limit = parse_rename_limit(config);
+    let mut inexact_skipped = None;
     if !remaining_deleted.is_empty()
         && !remaining_added.is_empty()
-        && !inexact_matrix_exceeds_limit(
+        && inexact_matrix_exceeds_limit(
             remaining_added.len(),
             remaining_deleted.len(),
             rename_limit,
         )
     {
+        let suggested = remaining_deleted.len().max(remaining_added.len());
+        inexact_skipped = Some(InexactRenameDetectionSkipped {
+            unmatched_sources: remaining_deleted.len(),
+            unmatched_destinations: remaining_added.len(),
+            configured_limit: rename_limit.configured_max(),
+            suggested_limit: suggested,
+        });
+    } else if !remaining_deleted.is_empty() && !remaining_added.is_empty() {
         let par_opts = diff_rename_parallel_options(config, thread_policy);
 
         let mut prefetch_entries: Vec<DiffEntry> =
@@ -9371,7 +9446,10 @@ pub fn detect_renames_with_policy(
 
     result = prune_break_deletions_obviated_by_renames(result);
     sort_entries_by_path(&mut result);
-    Ok(result)
+    Ok(RenameDetectionResult {
+        entries: result,
+        inexact_skipped,
+    })
 }
 
 /// Detect copies among diff entries.
@@ -9991,6 +10069,7 @@ pub fn postprocess_diff_entries(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     opts: &DiffPostprocessOptions,
+    inexact_notice: Option<&mut Option<InexactRenameDetectionSkipped>>,
 ) -> Result<Vec<DiffEntry>> {
     let mut entries = entries;
     if let Some(break_score) = opts.break_score {
@@ -10031,7 +10110,8 @@ pub fn postprocess_diff_entries(
             thread_policy,
         )
     } else if opts.rename_threshold < 100 {
-        detect_renames_with_policy(
+        let skip_basename = opts.break_score.is_some();
+        let out = detect_renames_with_policy(
             odb,
             work_root,
             entries,
@@ -10039,7 +10119,16 @@ pub fn postprocess_diff_entries(
             config,
             thread_policy,
             None,
-        )
+            DetectRenamesOptions {
+                skip_basename_heuristic: skip_basename,
+            },
+        )?;
+        if let Some(slot) = inexact_notice {
+            if out.inexact_skipped.is_some() {
+                *slot = out.inexact_skipped;
+            }
+        }
+        Ok(out.entries)
     } else {
         Ok(entries)
     }
@@ -10108,7 +10197,9 @@ pub fn status_apply_rename_copy_detection(
             config,
             thread_policy,
             cancel_watch,
-        );
+            DetectRenamesOptions::default(),
+        )
+        .map(|r| r.entries);
     }
     let source_tree_entries: Vec<(String, FileMode, ObjectId)> = match head_tree {
         Some(oid) => flatten_tree(odb, oid, "")?
@@ -13123,8 +13214,18 @@ mod entry_order_tests {
         let policy = ThreadPolicy::default();
         let odb = Odb::new(Path::new("/nonexistent-objects"));
         let run = |entries: Vec<DiffEntry>| {
-            detect_renames_with_policy(&odb, None, entries, 50, &config, &policy, None)
-                .expect("no blob is read without both adds and deletes")
+            detect_renames_with_policy(
+                &odb,
+                None,
+                entries,
+                50,
+                &config,
+                &policy,
+                None,
+                DetectRenamesOptions::default(),
+            )
+            .expect("no blob is read without both adds and deletes")
+            .entries
         };
         let sorted = vec![
             entry(DiffStatus::Deleted, "a", None),
@@ -15740,8 +15841,17 @@ mod line_coverage_tests {
         assert!(!with_renames.is_empty());
         let config = ConfigSet::new();
         let policy = ThreadPolicy::default();
-        let detected =
-            detect_renames_with_policy(&odb, None, raw.clone(), 50, &config, &policy, None)?;
+        let detected = detect_renames_with_policy(
+            &odb,
+            None,
+            raw.clone(),
+            50,
+            &config,
+            &policy,
+            None,
+            DetectRenamesOptions::default(),
+        )?
+        .entries;
         let source_flat = flatten_tree_entries(&odb, &old_tree)?;
         let _ = detect_copies_with_policy(
             &odb,
@@ -15769,6 +15879,7 @@ mod line_coverage_tests {
             &config,
             &policy,
             &opts,
+            None,
         )?;
         assert!(!processed.is_empty());
         let _ = status_apply_rename_copy_detection(
@@ -16158,6 +16269,7 @@ mod line_coverage_tests {
                 &config,
                 &policy,
                 &opts,
+                None,
             )?;
         }
         Ok(())

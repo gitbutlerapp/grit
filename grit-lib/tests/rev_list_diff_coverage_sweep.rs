@@ -140,6 +140,7 @@ fn diff_postprocess_across_commit_pair() -> grit_lib::error::Result<()> {
         &config,
         &policy,
         &opts,
+        None,
     )?;
     assert!(!processed.is_empty());
 

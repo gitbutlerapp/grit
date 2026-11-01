@@ -12,6 +12,7 @@
 //! # Ok(())
 //! # }
 //! ```
+mod basename_rename;
 mod changes;
 mod commit_files_many;
 mod core;

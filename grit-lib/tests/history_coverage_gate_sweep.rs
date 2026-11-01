@@ -170,6 +170,7 @@ fn history_walk_diff_and_resolve_sweep() -> grit_lib::error::Result<()> {
         &config,
         &policy,
         &opts,
+        None,
     )?;
 
     let mut index = Index::new();

@@ -104,6 +104,7 @@ fn diff_core_many_tree_and_index_paths() -> grit_lib::error::Result<()> {
             &cfg,
             &policy,
             &opts,
+            None,
         )?;
         if let (Some(p_tree), Some(p_commit)) = (prev_tree, prev_commit) {
             let head = commit(&odb, new_tree, Some(p_commit), i);

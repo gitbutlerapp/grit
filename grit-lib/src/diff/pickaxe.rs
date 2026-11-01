@@ -13,7 +13,8 @@ use crate::diff::core::diff_trees_for_pathspecs;
 use crate::diff::posix_ere::PosixEre;
 use crate::diff::structured::SideBytes;
 use crate::diff::{
-    detect_renames_with_policy, renames_from_config, DiffEntry, DiffStatus, RenameDetection,
+    detect_renames_with_policy, renames_from_config, DetectRenamesOptions, DiffEntry, DiffStatus,
+    RenameDetection,
 };
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, FileMode, ObjectId};
@@ -246,15 +247,19 @@ impl Pickaxe {
             return Ok(false);
         }
         let pairs = match renames.threshold {
-            Some(threshold) => detect_renames_with_policy(
-                odb,
-                None,
-                unpaired,
-                threshold,
-                renames.config,
-                &ThreadPolicy::default(),
-                None,
-            )?,
+            Some(threshold) => {
+                detect_renames_with_policy(
+                    odb,
+                    None,
+                    unpaired,
+                    threshold,
+                    renames.config,
+                    &ThreadPolicy::default(),
+                    None,
+                    DetectRenamesOptions::default(),
+                )?
+                .entries
+            }
             None => unpaired,
         };
         for entry in &pairs {

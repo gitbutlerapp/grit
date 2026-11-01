@@ -523,11 +523,27 @@ pub fn render_log_commit_diff(w: &mut dyn Write, outcome: &DiffOutcome) -> Resul
     Ok(())
 }
 
+fn emit_inexact_rename_notice(skipped: &grit_lib::diff::InexactRenameDetectionSkipped) {
+    let limit = skipped
+        .configured_limit
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "none".into());
+    eprintln!(
+        "grit: skipped inexact rename detection for {} delete and {} add candidates (diff.renameLimit={limit}); raise the limit toward {} to compare more pairs",
+        skipped.unmatched_sources,
+        skipped.unmatched_destinations,
+        skipped.suggested_limit,
+    );
+}
+
 fn outcome_from_lib(
     output: DiffFilesOutput,
     format: DiffFormatArgs,
     detail: DiffDetail,
 ) -> DiffOutcome {
+    if let Some(skipped) = output.inexact_rename_skipped {
+        emit_inexact_rename_notice(&skipped);
+    }
     let totals = output.totals.map(DiffTotalsJson::from);
     let files = output
         .files

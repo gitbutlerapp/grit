@@ -131,6 +131,7 @@ fn diff_one_commit(
                     insertions: 0,
                     deletions: 0,
                 }),
+                inexact_rename_skipped: None,
             },
             parent_count: work.parent_count,
         });

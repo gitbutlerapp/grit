@@ -9,7 +9,10 @@ use super::detail::{DiffDetail, DiffTotals, FileDiff, LineStat};
 use super::tree_content::{
     tree_diff_stat_parallel, tree_diff_structured_parallel, TreeDiffStructured,
 };
-use super::{detect_renames_with_policy, DiffEntry, DiffOptions, DiffStatus};
+use super::{
+    detect_renames_with_policy, DetectRenamesOptions, DiffEntry, DiffOptions, DiffStatus,
+    InexactRenameDetectionSkipped,
+};
 
 fn entries_with_options_renames(
     odb: &Odb,
@@ -17,10 +20,11 @@ fn entries_with_options_renames(
     diff_options: &DiffOptions,
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
+    inexact_notice: Option<&mut Option<InexactRenameDetectionSkipped>>,
 ) -> Result<Vec<DiffEntry>> {
     if let Some(percent) = diff_options.rename_similarity_threshold() {
         if percent <= 100 {
-            return detect_renames_with_policy(
+            let out = detect_renames_with_policy(
                 odb,
                 None,
                 entries,
@@ -28,7 +32,14 @@ fn entries_with_options_renames(
                 config,
                 thread_policy,
                 None,
-            );
+                DetectRenamesOptions::default(),
+            )?;
+            if let Some(slot) = inexact_notice {
+                if out.inexact_skipped.is_some() {
+                    *slot = out.inexact_skipped;
+                }
+            }
+            return Ok(out.entries);
         }
     }
     Ok(entries)
@@ -132,6 +143,8 @@ pub struct DiffFilesOutput {
     pub files: Vec<FileDiff>,
     /// Aggregate counts for stat detail; `None` for patch and name-only modes.
     pub totals: Option<DiffTotals>,
+    /// Set when inexact rename detection was skipped due to `diff.renameLimit`.
+    pub inexact_rename_skipped: Option<InexactRenameDetectionSkipped>,
 }
 
 /// Fill per-file diff bodies for tree/index diff entries.
@@ -154,13 +167,22 @@ pub fn build_file_diffs(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
 ) -> Result<DiffFilesOutput> {
-    let entries = entries_with_options_renames(odb, entries, &diff_options, config, thread_policy)?;
+    let mut inexact_rename_skipped = None;
+    let entries = entries_with_options_renames(
+        odb,
+        entries,
+        &diff_options,
+        config,
+        thread_policy,
+        Some(&mut inexact_rename_skipped),
+    )?;
     match detail {
         DiffDetail::NameOnly | DiffDetail::NameStatus => {
             let files: Vec<FileDiff> = entries.into_iter().map(FileDiff::from_metadata).collect();
             Ok(DiffFilesOutput {
                 files,
                 totals: None,
+                inexact_rename_skipped,
             })
         }
         DiffDetail::Stat => {
@@ -170,7 +192,11 @@ pub fn build_file_diffs(
                 .map(|(entry, binary, stat)| file_diff_from_stat(entry, binary, stat))
                 .collect();
             let totals = Some(DiffTotals::from_files(&files));
-            Ok(DiffFilesOutput { files, totals })
+            Ok(DiffFilesOutput {
+                files,
+                totals,
+                inexact_rename_skipped,
+            })
         }
         DiffDetail::Patch => {
             let structured =
@@ -182,6 +208,7 @@ pub fn build_file_diffs(
             Ok(DiffFilesOutput {
                 files,
                 totals: None,
+                inexact_rename_skipped,
             })
         }
     }
@@ -204,7 +231,8 @@ pub fn build_file_diffs_streaming(
     mut emit: impl FnMut(FileDiff) -> Result<()>,
 ) -> Result<()> {
     use super::tree_content::for_each_tree_diff_structured;
-    let entries = entries_with_options_renames(odb, entries, &diff_options, config, thread_policy)?;
+    let entries =
+        entries_with_options_renames(odb, entries, &diff_options, config, thread_policy, None)?;
     for_each_tree_diff_structured(
         odb,
         &entries,

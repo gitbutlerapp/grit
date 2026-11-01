@@ -2630,7 +2630,9 @@ fn apply_status_renames(
         config,
         thread_policy,
         cancel_watch,
+        crate::diff::DetectRenamesOptions::default(),
     )
+    .map(|r| r.entries)
 }
 
 /// Render [`StatusModel`] as `git status --porcelain=v2` lines (no `#` headers).

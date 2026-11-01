@@ -7,7 +7,9 @@ use std::sync::OnceLock;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
-use grit_lib::diff::{detect_renames_with_policy, zero_oid, DiffEntry, DiffStatus};
+use grit_lib::diff::{
+    detect_renames_with_policy, zero_oid, DetectRenamesOptions, DiffEntry, DiffStatus,
+};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{FileMode, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
@@ -111,8 +113,10 @@ fn bench_diff_renames(c: &mut Criterion) {
                             &fx.config,
                             &policy,
                             None,
+                            DetectRenamesOptions::default(),
                         )
-                        .expect("detect renames"),
+                        .expect("detect renames")
+                        .entries,
                     );
                 });
             },
@@ -208,8 +212,10 @@ fn bench_diff_renames_adoc_similar(c: &mut Criterion) {
                         &fx.config,
                         &policy,
                         None,
+                        DetectRenamesOptions::default(),
                     )
-                    .expect("detect renames"),
+                    .expect("detect renames")
+                    .entries,
                 );
             });
         });

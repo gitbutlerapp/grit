@@ -4793,6 +4793,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffEntry
 pub struct grit_lib::diff::DiffFilesOutput
 pub grit_lib::diff::DiffFilesOutput::files: alloc::vec::Vec<grit_lib::diff::ListedFileDiff>
+pub grit_lib::diff::DiffFilesOutput::inexact_rename_skipped: core::option::Option<grit_lib::diff::InexactRenameDetectionSkipped>
 pub grit_lib::diff::DiffFilesOutput::totals: core::option::Option<grit_lib::diff::DiffTotals>
 impl core::clone::Clone for grit_lib::diff::DiffFilesOutput
 pub fn grit_lib::diff::DiffFilesOutput::clone(&self) -> Self
@@ -5480,8 +5481,18 @@ pub fn grit_lib::diff::count_changes_with_algorithm(&str, &str, similar::types::
 pub fn grit_lib::diff::count_git_lines(&[u8]) -> usize
 pub fn grit_lib::diff::detect_copies(&grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, bool, &[(alloc::string::String, grit_lib::objects::FileMode, grit_lib::objects::ObjectId)]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::detect_copies_with_policy(&grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, bool, &[(alloc::string::String, grit_lib::objects::FileMode, grit_lib::objects::ObjectId)], &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+pub struct grit_lib::diff::DetectRenamesOptions
+pub grit_lib::diff::DetectRenamesOptions::skip_basename_heuristic: bool
+pub struct grit_lib::diff::InexactRenameDetectionSkipped
+pub grit_lib::diff::InexactRenameDetectionSkipped::configured_limit: core::option::Option<usize>
+pub grit_lib::diff::InexactRenameDetectionSkipped::suggested_limit: usize
+pub grit_lib::diff::InexactRenameDetectionSkipped::unmatched_destinations: usize
+pub grit_lib::diff::InexactRenameDetectionSkipped::unmatched_sources: usize
+pub struct grit_lib::diff::RenameDetectionResult
+pub grit_lib::diff::RenameDetectionResult::entries: alloc::vec::Vec<grit_lib::diff::DiffEntry>
+pub grit_lib::diff::RenameDetectionResult::inexact_skipped: core::option::Option<grit_lib::diff::InexactRenameDetectionSkipped>
 pub fn grit_lib::diff::detect_renames(&grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32) -> alloc::vec::Vec<grit_lib::diff::DiffEntry>
-pub fn grit_lib::diff::detect_renames_with_policy(&grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, core::option::Option<&core::sync::atomic::AtomicBool>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+pub fn grit_lib::diff::detect_renames_with_policy(&grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, core::option::Option<&core::sync::atomic::AtomicBool>, grit_lib::diff::DetectRenamesOptions) -> grit_lib::error::Result<grit_lib::diff::RenameDetectionResult>
 pub fn grit_lib::diff::diff_commits(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diff_commits_with_renames(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, u32) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diff_commits_with_renames_and_policy(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, u32, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
@@ -5532,7 +5543,7 @@ pub fn grit_lib::diff::parse_diff_rename_score_token(&str) -> core::option::Opti
 pub fn grit_lib::diff::parse_diff_rename_threshold_percent(&str) -> core::option::Option<u8>
 pub fn grit_lib::diff::peer_hunks_by_primary_path(&std::collections::hash::set::HashSet<&str>, impl core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>)>) -> std::collections::hash::map::HashMap<alloc::string::String, alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>>
 pub fn grit_lib::diff::peer_scope_includes_path(&str, core::option::Option<&str>, &std::collections::hash::set::HashSet<&str>) -> bool
-pub fn grit_lib::diff::postprocess_diff_entries(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&std::path::Path>, core::option::Option<&grit_lib::diff::DiffPostprocessWorktree<'_>>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, &grit_lib::diff::DiffPostprocessOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+pub fn grit_lib::diff::postprocess_diff_entries(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&std::path::Path>, core::option::Option<&grit_lib::diff::DiffPostprocessWorktree<'_>>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, &grit_lib::diff::DiffPostprocessOptions, core::option::Option<&mut core::option::Option<grit_lib::diff::InexactRenameDetectionSkipped>>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::read_submodule_head_for_checkout(&std::path::Path) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::diff::read_submodule_head_oid(&std::path::Path) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::diff::read_worktree_bytes_for_mode(&std::path::Path, u32) -> core::io::error::Result<alloc::vec::Vec<u8>>

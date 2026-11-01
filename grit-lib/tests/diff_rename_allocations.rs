@@ -10,7 +10,8 @@ use std::cell::Cell;
 
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{
-    detect_copies_with_policy, detect_renames_with_policy, diff_trees, DiffStatus,
+    detect_copies_with_policy, detect_renames_with_policy, diff_trees, DetectRenamesOptions,
+    DiffStatus,
 };
 use grit_lib::parallel::ThreadPolicy;
 use support::{git_output, git_quiet, rev_parse_tree, DiffRepo};
@@ -107,8 +108,18 @@ fn inexact_document_renames_do_not_allocate_per_candidate_pair() {
     let policy = ThreadPolicy::with_threads_override(Some(1));
 
     let before = ALLOCATIONS.with(Cell::get);
-    let renamed =
-        detect_renames_with_policy(dr.repo.odb(), None, raw, 50, &config, &policy, None).unwrap();
+    let renamed = detect_renames_with_policy(
+        dr.repo.odb(),
+        None,
+        raw,
+        50,
+        &config,
+        &policy,
+        None,
+        DetectRenamesOptions::default(),
+    )
+    .unwrap()
+    .entries;
     let allocations = ALLOCATIONS.with(Cell::get) - before;
     eprintln!("{FILES} inexact renames: {allocations} allocations");
 

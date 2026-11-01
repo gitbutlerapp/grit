@@ -182,6 +182,7 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
                 &cfg,
                 &policy,
                 &post_opts,
+                None,
             )?;
             let _ = diff_trees_with_renames(repo.odb(), None, Some(&parsed.tree), "", 50)?;
         }
