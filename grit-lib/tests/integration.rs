@@ -1388,6 +1388,9 @@ mod racy_index_git_compat;
 #[path = "read_info_git_compat.rs"]
 mod read_info_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "receive_pack_ignorecase_ref_2471.rs"]
+mod receive_pack_ignorecase_ref_2471;
+#[cfg(feature = "full-tests")]
 #[path = "ref_dir_file_conflict_2198.rs"]
 mod ref_dir_file_conflict_2198;
 #[cfg(feature = "full-tests")]

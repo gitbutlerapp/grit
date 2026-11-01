@@ -2908,7 +2908,8 @@ fn push_store_ref_update(
 
 fn push_status_for_ref_store_error(err: &Error) -> PushRefStatus {
     match err {
-        Error::RefStore(crate::refs::store::RefStoreError::ExpectedMismatch {
+        Error::RefStore(crate::refs::store::RefStoreError::CreateExists { .. })
+        | Error::RefStore(crate::refs::store::RefStoreError::ExpectedMismatch {
             expected: crate::refs::store::Expected::Missing,
             ..
         }) => PushRefStatus::RejectAlreadyExists,
@@ -2932,7 +2933,8 @@ fn ref_store_error_refname(err: &Error) -> Option<String> {
         return None;
     };
     Some(match store_err {
-        crate::refs::store::RefStoreError::ExpectedMismatch { name, .. }
+        crate::refs::store::RefStoreError::CreateExists { name }
+        | crate::refs::store::RefStoreError::ExpectedMismatch { name, .. }
         | crate::refs::store::RefStoreError::DuplicateUpdate { name }
         | crate::refs::store::RefStoreError::LockHeld { name }
         | crate::refs::store::RefStoreError::InvalidRefName { name }

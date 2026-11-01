@@ -152,6 +152,52 @@ pub fn verify_create_conflicts(
     Ok(())
 }
 
+/// When `ignore_case`, reject each create whose name matches an existing ref or another
+/// create in `updates` under ASCII case folding (`core.ignorecase` on macOS/Windows).
+///
+/// Case-sensitive repositories pass `ignore_case: false` and this returns immediately.
+///
+/// # Errors
+///
+/// [`RefStoreError::CreateExists`] when a conflicting name is found.
+pub fn verify_create_casefold_conflicts(
+    ignore_case: bool,
+    existing: &BTreeMap<String, RawRef>,
+    updates: &[RefUpdate],
+) -> Result<(), RefStoreError> {
+    if !ignore_case {
+        return Ok(());
+    }
+    let extras: BTreeSet<&str> = updates.iter().map(|u| u.name.as_str()).collect();
+    for update in updates {
+        if update.new_value.is_none() || update.flags.log_only {
+            continue;
+        }
+        if existing.contains_key(&update.name) {
+            continue;
+        }
+        let name = update.name.as_str();
+        if existing
+            .keys()
+            .any(|other| other.as_str() != name && other.eq_ignore_ascii_case(name))
+        {
+            return Err(RefStoreError::CreateExists {
+                name: update.name.clone(),
+            });
+        }
+        if extras
+            .iter()
+            .copied()
+            .any(|other| other != name && other.eq_ignore_ascii_case(name))
+        {
+            return Err(RefStoreError::CreateExists {
+                name: update.name.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Whether `refname` can be created against a sorted ref map without scanning every key.
 fn verify_name_available_for_create_in_map(
     refname: &str,
@@ -354,6 +400,22 @@ mod tests {
             })
         );
         verify_create_conflicts(&existing, &[create("refs/heads/q!")]).expect("no conflict");
+    }
+
+    #[test]
+    fn ignorecase_rejects_casefold_duplicate_create() {
+        let existing: BTreeMap<String, RawRef> =
+            [("refs/heads/Foo".to_owned(), RawRef::Direct(oid(2)))].into();
+        let err = verify_create_casefold_conflicts(true, &existing, &[create("refs/heads/foo")])
+            .expect_err("casefold collision");
+        assert_eq!(
+            err,
+            RefStoreError::CreateExists {
+                name: "refs/heads/foo".to_owned()
+            }
+        );
+        verify_create_casefold_conflicts(false, &existing, &[create("refs/heads/foo")])
+            .expect("case-sensitive allows distinct spellings");
     }
 
     #[test]

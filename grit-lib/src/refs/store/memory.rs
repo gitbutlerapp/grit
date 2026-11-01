@@ -145,7 +145,8 @@ impl RefStore for MemoryRefStore {
                 let case_only = txn.case_only_renames().to_vec();
                 (updates, reflog_renames, case_only)
             };
-            let (accepted, rejected) = partition_updates_allowing_failures(&inner.state, updates)?;
+            let (accepted, rejected) =
+                partition_updates_allowing_failures(&inner.state, updates, None)?;
             inner.rejections = rejected;
             let mut accepted_txn = RefTransaction::from_updates(accepted)?;
             for rename in reflog_renames {

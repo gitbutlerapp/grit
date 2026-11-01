@@ -20450,6 +20450,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefStorageF
 #[non_exhaustive] pub enum grit_lib::refs::store::RefStoreError
 pub grit_lib::refs::store::RefStoreError::Backend(grit_lib::refs::store::BackendError)
 pub grit_lib::refs::store::RefStoreError::Corrupt(alloc::string::String)
+pub grit_lib::refs::store::RefStoreError::CreateExists
+pub grit_lib::refs::store::RefStoreError::CreateExists::name: alloc::string::String
 pub grit_lib::refs::store::RefStoreError::DuplicateUpdate
 pub grit_lib::refs::store::RefStoreError::DuplicateUpdate::name: alloc::string::String
 pub grit_lib::refs::store::RefStoreError::ExpectedMismatch

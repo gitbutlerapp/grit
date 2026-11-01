@@ -52,6 +52,15 @@ pub enum RefStoreError {
         reason: RefnameUnavailable,
     },
 
+    /// A create was requested for a ref name that already exists under ASCII case folding
+    /// when `core.ignorecase` is enabled (or the git directory is on a case-insensitive
+    /// volume).
+    #[error("reference '{name}' already exists")]
+    CreateExists {
+        /// Ref the caller tried to create.
+        name: String,
+    },
+
     /// The same ref name appears more than once in one transaction.
     #[error("multiple updates for ref '{name}' not allowed")]
     DuplicateUpdate {
