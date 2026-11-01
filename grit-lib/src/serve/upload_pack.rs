@@ -1620,6 +1620,65 @@ mod tests {
         }
     }
 
+    /// Linear `n` commits plus two one-commit branches from the tip (issue #2447 topology).
+    fn fixture_main_with_two_branches(n: usize) -> (Fixture, ObjectId, ObjectId) {
+        let fx = fixture(n, &[]);
+        let main_tip = *fx.commits.last().expect("tip");
+        let odb = fx.repo.odb();
+        let empty_tree = odb.write(crate::objects::ObjectKind::Tree, b"").unwrap();
+        let branch_a_body = format!(
+            "tree {empty_tree}\nparent {main_tip}\nauthor T <t@x> 0 +0000\ncommitter T <t@x> 0 +0000\n\na1\n",
+            empty_tree = empty_tree.to_hex(),
+            main_tip = main_tip.to_hex(),
+        );
+        let branch_a = odb
+            .write(crate::objects::ObjectKind::Commit, branch_a_body.as_bytes())
+            .unwrap();
+        let branch_z_body = format!(
+            "tree {empty_tree}\nparent {main_tip}\nauthor T <t@x> 0 +0000\ncommitter T <t@x> 0 +0000\n\nz1\n",
+            empty_tree = empty_tree.to_hex(),
+            main_tip = main_tip.to_hex(),
+        );
+        let branch_z = odb
+            .write(crate::objects::ObjectKind::Commit, branch_z_body.as_bytes())
+            .unwrap();
+        (fx, branch_a, branch_z)
+    }
+
+    #[test]
+    fn re_shallow_depth_one_does_not_unshallow_outside_want_window() {
+        let (fx, branch_a, branch_z) = fixture_main_with_two_branches(6);
+        let main_tip = *fx.commits.last().unwrap();
+        let req = ShallowRequest {
+            depth: Some(1),
+            client_shallow: vec![main_tip],
+            ..ShallowRequest::default()
+        };
+        let resp = compute_shallow_response(&fx.repo, &[branch_a, branch_z], &req).unwrap();
+        assert!(resp.unshallow.is_empty(), "main tip is not in want window");
+        assert!(resp.extra_wants.is_empty());
+        let mut shallow = resp.shallow.clone();
+        shallow.sort();
+        let mut expected = vec![branch_a, branch_z];
+        expected.sort();
+        assert_eq!(shallow, expected);
+    }
+
+    #[test]
+    fn re_shallow_depth_one_all_tips_get_shallow_lines() {
+        let (fx, branch_a, branch_z) = fixture_main_with_two_branches(6);
+        let main_tip = *fx.commits.last().unwrap();
+        let resp =
+            compute_shallow_response(&fx.repo, &[main_tip, branch_a, branch_z], &depth_request(1))
+                .unwrap();
+        assert!(resp.unshallow.is_empty());
+        let mut shallow = resp.shallow.clone();
+        shallow.sort();
+        let mut expected = vec![main_tip, branch_a, branch_z];
+        expected.sort();
+        assert_eq!(shallow, expected);
+    }
+
     #[cfg_attr(
         not(feature = "full-tests"),
         ignore = "starts system git or is heavy; run with --features full-tests"

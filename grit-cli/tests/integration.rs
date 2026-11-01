@@ -664,6 +664,9 @@ mod untracked_overwrite_merge_pick;
 #[path = "upload_pack_filter.rs"]
 mod upload_pack_filter;
 #[cfg(feature = "full-tests")]
+#[path = "upload_pack_re_shallow_branches.rs"]
+mod upload_pack_re_shallow_branches;
+#[cfg(feature = "full-tests")]
 #[path = "upload_pack_shallow_bitmaps.rs"]
 mod upload_pack_shallow_bitmaps;
 #[cfg(feature = "full-tests")]
