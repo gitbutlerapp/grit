@@ -7667,7 +7667,6 @@ pub const grit_lib::index::MODE_SYMLINK: u32
 pub const grit_lib::index::MODE_TREE: u32
 pub fn grit_lib::index::entry_from_metadata(&std::fs::Metadata, &[u8], grit_lib::objects::ObjectId, u32) -> grit_lib::index::IndexEntry
 pub fn grit_lib::index::entry_from_stat(&std::path::Path, &[u8], grit_lib::objects::ObjectId, u32) -> grit_lib::error::Result<grit_lib::index::IndexEntry>
-pub fn grit_lib::index::get_index_format_from_env() -> core::option::Option<u32>
 pub fn grit_lib::index::index_entries_stat_equivalent(&grit_lib::index::IndexEntry, &grit_lib::index::IndexEntry, grit_lib::index::StatMatchPolicy) -> bool
 pub fn grit_lib::index::index_file_mtime(&std::path::Path) -> core::option::Option<(u32, u32)>
 pub fn grit_lib::index::munge_index_size(u64) -> u32
@@ -22283,23 +22282,6 @@ impl core::marker::Unpin for grit_lib::remote::protocol::ProtocolError
 impl core::marker::UnsafeUnpin for grit_lib::remote::protocol::ProtocolError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::protocol::ProtocolError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::protocol::ProtocolError
-pub struct grit_lib::remote::protocol::ClientProtocolVersionInputs
-pub grit_lib::remote::protocol::ClientProtocolVersionInputs::config_param_version: core::option::Option<alloc::string::String>
-pub grit_lib::remote::protocol::ClientProtocolVersionInputs::git_test_protocol_version: core::option::Option<alloc::string::String>
-pub grit_lib::remote::protocol::ClientProtocolVersionInputs::repo_config_version: core::option::Option<alloc::string::String>
-impl core::clone::Clone for grit_lib::remote::protocol::ClientProtocolVersionInputs
-pub fn grit_lib::remote::protocol::ClientProtocolVersionInputs::clone(&self) -> Self
-impl core::default::Default for grit_lib::remote::protocol::ClientProtocolVersionInputs
-pub fn grit_lib::remote::protocol::ClientProtocolVersionInputs::default() -> Self
-impl core::fmt::Debug for grit_lib::remote::protocol::ClientProtocolVersionInputs
-pub fn grit_lib::remote::protocol::ClientProtocolVersionInputs::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::remote::protocol::ClientProtocolVersionInputs
-impl core::marker::Send for grit_lib::remote::protocol::ClientProtocolVersionInputs
-impl core::marker::Sync for grit_lib::remote::protocol::ClientProtocolVersionInputs
-impl core::marker::Unpin for grit_lib::remote::protocol::ClientProtocolVersionInputs
-impl core::marker::UnsafeUnpin for grit_lib::remote::protocol::ClientProtocolVersionInputs
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::protocol::ClientProtocolVersionInputs
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::protocol::ClientProtocolVersionInputs
 pub struct grit_lib::remote::protocol::ProtocolPolicyInputs
 pub grit_lib::remote::protocol::ProtocolPolicyInputs::blanket_allow: core::option::Option<alloc::string::String>
 pub grit_lib::remote::protocol::ProtocolPolicyInputs::git_allow_protocol: core::option::Option<alloc::string::String>
@@ -22324,7 +22306,6 @@ pub fn grit_lib::remote::protocol::client_git_protocol_header_value(u8) -> core:
 pub fn grit_lib::remote::protocol::parse_protocol_version_digit(&str) -> core::option::Option<u8>
 pub fn grit_lib::remote::protocol::protocol_from_user(core::option::Option<&str>) -> bool
 pub fn grit_lib::remote::protocol::try_effective_client_protocol_version_from_config(&grit_lib::config::ConfigSet) -> core::result::Result<u8, grit_lib::error::Error>
-pub fn grit_lib::remote::protocol::try_effective_client_protocol_version_from_inputs(&grit_lib::remote::protocol::ClientProtocolVersionInputs) -> core::result::Result<u8, grit_lib::error::Error>
 pub fn grit_lib::remote::protocol::try_protocol_version_from_config_value(&str) -> core::result::Result<u8, grit_lib::error::Error>
 pub mod grit_lib::remote::protocol_v2
 #[non_exhaustive] pub enum grit_lib::remote::protocol_v2::FetchResponseSection
@@ -29213,7 +29194,7 @@ pub grit_lib::revwalk::rev_list::RevListOptions::use_bitmap_index: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::use_commit_graph: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::use_commit_graph_bloom: bool
 impl grit_lib::revwalk::rev_list::RevListOptions
-pub fn grit_lib::revwalk::rev_list::RevListOptions::normalize_for_walk(&mut self, &grit_lib::repo::Repository, &grit_lib::config::ConfigSet)
+pub fn grit_lib::revwalk::rev_list::RevListOptions::normalize_for_walk(&mut self, &grit_lib::config::ConfigSet)
 impl core::clone::Clone for grit_lib::revwalk::rev_list::RevListOptions
 pub fn grit_lib::revwalk::rev_list::RevListOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::revwalk::rev_list::RevListOptions

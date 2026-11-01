@@ -428,42 +428,6 @@ pub(crate) fn should_rebuild_shared_index(index: &Index, cfg: &ConfigSet) -> boo
     total * (max_split as u64) < not_shared * 100
 }
 
-pub(crate) fn git_test_split_index_env() -> bool {
-    crate::environment::Environment::empty()
-        .var("GIT_TEST_SPLIT_INDEX")
-        .map(|v| {
-            let t = v.trim();
-            t == "1" || t.eq_ignore_ascii_case("true") || t.eq_ignore_ascii_case("yes")
-        })
-        .unwrap_or(false)
-}
-
-/// Whether cache-tree verification should run on index write.
-///
-/// Upstream's `write_locked_index` gates this on `git_env_bool("GIT_TEST_CHECK_CACHE_TREE", 0)`, but
-/// the upstream test harness (`test-lib.sh`) exports the variable as `true` by default — so in
-/// practice the check is *on* unless a test explicitly sets it to a falsy value. Grit mirrors that
-/// effective default: verification runs unless `GIT_TEST_CHECK_CACHE_TREE` is explicitly falsy
-/// (`0`/`false`/`no`/empty). This only ever rejects a genuinely corrupt cache-tree (e.g. one primed
-/// from a tree with duplicate path entries — `t4058-diff-duplicates`); well-formed trees always
-/// verify cleanly.
-pub(crate) fn git_test_check_cache_tree() -> bool {
-    match crate::environment::Environment::empty().var("GIT_TEST_CHECK_CACHE_TREE") {
-        Some(v) => {
-            let t = v.trim();
-            !(t.is_empty()
-                || t == "0"
-                || t.eq_ignore_ascii_case("false")
-                || t.eq_ignore_ascii_case("no"))
-        }
-        None => true,
-    }
-}
-
-pub(crate) fn git_test_split_index_force_reorder(base_oid: &ObjectId) -> bool {
-    git_test_split_index_env() && (base_oid.as_bytes()[0] & 15) < 6
-}
-
 pub(crate) fn shared_index_expire_threshold(cfg: &ConfigSet) -> u64 {
     let raw = cfg
         .get("splitIndex.sharedIndexExpire")
@@ -541,35 +505,26 @@ fn filetime_set_to_now(_path: &Path) -> io::Result<()> {
 /// Request from `update-index` for the next index write.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WriteSplitIndexRequest {
-    /// `Some(true)` / `Some(false)` for `--[no-]split-index`; `None` uses config / test env only.
+    /// `Some(true)` / `Some(false)` for `--[no-]split-index`; `None` uses config only.
     pub explicit: Option<bool>,
 }
 
 impl WriteSplitIndexRequest {
     /// Whether the next write should use split-index format.
     ///
-    /// Matches Git: `--split-index` still enables split index when `core.splitIndex` is false,
-    /// but emits a warning (see `builtin/update-index.c`).
+    /// An explicit request wins over `core.splitIndex` in either direction, as in Git.
     ///
     /// When `explicit` is `None`, an index that was already split (`split_link` set after load)
     /// stays split until `--no-split-index` (Git keeps `istate->split_index` across commands).
     pub fn want_write_split(self, cfg: &ConfigSet, index: &Index) -> bool {
         match self.explicit {
-            Some(false) => {
-                let _ = matches!(split_index_config(cfg), SplitIndexConfig::Enabled);
-                false
-            }
-            Some(true) => {
-                let _ = matches!(split_index_config(cfg), SplitIndexConfig::Disabled);
-                true
-            }
+            Some(explicit) => explicit,
             None => {
                 if matches!(split_index_config(cfg), SplitIndexConfig::Disabled) {
                     return false;
                 }
                 index.split_link.is_some()
                     || matches!(split_index_config(cfg), SplitIndexConfig::Enabled)
-                    || git_test_split_index_env()
             }
         }
     }
@@ -637,13 +592,9 @@ pub(crate) fn write_index_file_split(
     existing_lock: Option<&mut crate::index::IndexLock>,
     commit_lock: bool,
 ) -> Result<()> {
-    // Mirror upstream `write_locked_index`: under GIT_TEST_CHECK_CACHE_TREE, verify the cache-tree
-    // against the index before persisting. A duplicate-entry tree (t4058) produces a cache-tree
-    // whose entry counts exceed the deduplicated index, which must abort the write with the
-    // canonical "corrupted cache-tree" error rather than silently writing a broken index.
-    if git_test_check_cache_tree() {
-        crate::write_tree::verify_cache_tree(index)?;
-    }
+    // A duplicate-entry tree (t4058) primes a cache-tree whose entry counts exceed the
+    // deduplicated index; refuse to persist it rather than write a corrupt TREE extension.
+    crate::write_tree::verify_cache_tree(index)?;
 
     let want_split = request.want_write_split(cfg, index);
 
@@ -719,13 +670,7 @@ pub(crate) fn write_index_file_split(
 
     // A zero base oid is what Git leaves after writing the shared index under `index.skipHash`;
     // readers treat it as unsplit, so there is no usable shared index to reuse.
-    let mut rebuild = prev_base.is_zero()
-        || should_rebuild_shared_index(index, cfg)
-        || git_test_split_index_force_reorder(&prev_base);
-
-    if git_test_split_index_env() && index.split_link.is_none() {
-        rebuild = true;
-    }
+    let rebuild = prev_base.is_zero() || should_rebuild_shared_index(index, cfg);
 
     let base_snapshot: Vec<IndexEntry> = if rebuild {
         let mut v: Vec<IndexEntry> = index.entries.to_vec();

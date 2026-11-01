@@ -586,9 +586,9 @@ impl RevListOptions {
     /// Bloom filters for path-limited walks when the chain supports them. [`rev_list`] calls
     /// this automatically; with [`RevListOptions::default`], `-n` / `--count` use the same
     /// early-stop and commit-graph paths as the CLI.
-    pub fn normalize_for_walk(&mut self, repo: &Repository, cfg: &ConfigSet) {
+    pub fn normalize_for_walk(&mut self, cfg: &ConfigSet) {
         if self.use_commit_graph {
-            self.use_commit_graph = repo_commit_graph_enabled(repo, cfg);
+            self.use_commit_graph = repo_commit_graph_enabled(cfg);
         }
         if self.use_commit_graph
             && !self.paths.is_empty()
@@ -984,7 +984,7 @@ pub fn rev_list(
         .config()
         .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
     let mut walk_options = options.clone();
-    walk_options.normalize_for_walk(repo, repo_config.as_ref());
+    walk_options.normalize_for_walk(repo_config.as_ref());
     if walk_options.follow {
         crate::revwalk::queries::validate_follow_pathspecs(&walk_options.paths)?;
     }
@@ -1261,7 +1261,7 @@ pub fn rev_list(
     // commits like the latest layer's empty filters.
     let (bloom_chain, bloom_read_changed, bloom_version, bloom_cwd) = if !options.paths.is_empty() {
         let cfg = repo_config.as_ref();
-        let core_cg = repo_commit_graph_enabled(repo, cfg);
+        let core_cg = repo_commit_graph_enabled(cfg);
         let read_paths = cfg
             .get("commitgraph.readchangedpaths")
             .and_then(|v| crate::config::parse_bool(&v).ok())
@@ -6851,15 +6851,8 @@ fn can_use_bounded_path_limit_list(options: &RevListOptions) -> bool {
         && (can_use_bounded_limit_list(&plain) || since_date_bounded)
 }
 
-fn repo_commit_graph_enabled(repo: &Repository, cfg: &ConfigSet) -> bool {
-    let mut core_cg = match cfg.get_bool("core.commitgraph") {
-        Some(Ok(b)) => b,
-        _ => true,
-    };
-    if repo.environment().var("GIT_TEST_COMMIT_GRAPH").as_deref() == Some("0") {
-        core_cg = false;
-    }
-    core_cg
+fn repo_commit_graph_enabled(cfg: &ConfigSet) -> bool {
+    !matches!(cfg.get_bool("core.commitgraph"), Some(Ok(false)))
 }
 
 fn dense_bloom_context_for_paths(
@@ -6867,7 +6860,7 @@ fn dense_bloom_context_for_paths(
     repo_config: &ConfigSet,
     options: &RevListOptions,
 ) -> (Option<Arc<CommitGraphChain>>, bool, i32, Option<String>) {
-    let core_cg = repo_commit_graph_enabled(repo, repo_config);
+    let core_cg = repo_commit_graph_enabled(repo_config);
     let read_paths = repo_config
         .get("commitgraph.readchangedpaths")
         .and_then(|v| crate::config::parse_bool(&v).ok())

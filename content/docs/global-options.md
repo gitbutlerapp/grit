@@ -57,7 +57,7 @@ The `grit` CLI snapshots the process environment into [`Environment`](../library
 | `GIT_SSH`, `GIT_SSH_COMMAND` | SSH transport command (`GIT_SSH_COMMAND` overrides `core.sshCommand` and `GIT_SSH`; see Git precedence) |
 | `GIT_HTTP_LOW_SPEED_LIMIT`, `GIT_HTTP_LOW_SPEED_TIME` | HTTP low-speed abort thresholds |
 | `GIT_NOTES_REF`, `GIT_NOTES_DISPLAY_REF` | Notes ref selection |
-| `GIT_ATTR_SOURCE`, `GIT_INDEX_VERSION`, `GIT_PRINT_SHA1_ELLIPSIS` | Attributes, index format, diff OID display |
+| `GIT_ATTR_SOURCE` | Tree to read `.gitattributes` from |
 | `GIT_NAMESPACE`, `GIT_REPLACE_REF_BASE`, `GIT_NO_REPLACE_OBJECTS` | Ref namespaces and replace refs |
 | `GIT_OPTIONAL_LOCKS` | When set to `0`, `false`, `no`, or `off`, grit skips optional index writes during read-mostly commands such as `status` (same as `--no-optional-locks`). Unset means optional locks are allowed. |
 | `GRIT_TRACE` | Grit operation spans to stderr (`1` / `true` / `yes`), or appended to a file when set to an absolute path; see [Debugging and tracing](../debugging/) |
@@ -65,4 +65,4 @@ The `grit` CLI snapshots the process environment into [`Environment`](../library
 | `TZ` | Local timezone for dates when no explicit offset is given |
 | `GIT_EXEC_PATH`, `GIT_INSTALL_ROOT` | Git helper discovery (credentials) |
 
-Test-only knobs (`GIT_TEST_NO_WRITE_REV_INDEX`, `GIT_TEST_MIDX_WRITE_REV`, `GIT_TEST_REFTABLE_AUTOCOMPACTION`, `GIT_TEST_DATE_NOW`, and related values) are parsed into typed [`Environment`](../library/repository/) fields when present; they are not read elsewhere in `grit-lib`.
+The only test knobs grit honors are `GIT_TEST_NO_WRITE_REV_INDEX`, `GIT_TEST_REFTABLE_AUTOCOMPACTION`, `GIT_TEST_UTF8_NFD_TO_NFC` and `GIT_TEST_ASSUME_DIFFERENT_OWNER`, parsed into typed [`Environment`](../library/repository/) fields. Other `GIT_TEST_*` variables from Git's test suite, `GIT_INDEX_VERSION` and `GIT_PRINT_SHA1_ELLIPSIS` are ignored: set `index.version` in config to choose the index format.

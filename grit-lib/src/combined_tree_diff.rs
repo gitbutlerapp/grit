@@ -66,18 +66,6 @@ pub fn combined_raw_meta(p: &CombinedDiffPath, abbrev_len: Option<usize>) -> Str
         modes.push_str(&format!("{:06o} ", side.mode));
     }
     modes.push_str(&format!("{:06o}", p.merge_mode));
-    // When OIDs are abbreviated, Git appends `...` if `GIT_PRINT_SHA1_ELLIPSIS=yes`
-    // (matches the non-combined raw format).
-    let ellipsis = if abbrev_len.is_some()
-        && crate::environment::Environment::empty()
-            .var("GIT_PRINT_SHA1_ELLIPSIS")
-            .as_deref()
-            == Some("yes")
-    {
-        "..."
-    } else {
-        ""
-    };
     let mut oids = String::new();
     for side in &p.parents {
         let h = format!("{}", side.oid);
@@ -88,7 +76,6 @@ pub fn combined_raw_meta(p: &CombinedDiffPath, abbrev_len: Option<usize>) -> Str
         };
         oids.push(' ');
         oids.push_str(disp);
-        oids.push_str(ellipsis);
     }
     let rh = format!("{}", p.merge_oid);
     let rdisp = if let Some(len) = abbrev_len {
@@ -98,7 +85,6 @@ pub fn combined_raw_meta(p: &CombinedDiffPath, abbrev_len: Option<usize>) -> Str
     };
     oids.push(' ');
     oids.push_str(rdisp);
-    oids.push_str(ellipsis);
     oids.push(' ');
     let status: String = p
         .parents

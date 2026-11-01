@@ -2744,8 +2744,8 @@ fn apply_stash_commit(
                     // Adding non-zero stages drops this path from any valid stage-0
                     // cache-tree; invalidate it (Git's add_index_entry ->
                     // cache_tree_invalidate_path) so a stale TREE extension is not written
-                    // alongside the conflicted index (otherwise GIT_TEST_CHECK_CACHE_TREE
-                    // rejects it with "corrupted cache-tree has entries not present in
+                    // alongside the conflicted index (otherwise the index write rejects it
+                    // with "corrupted cache-tree has entries not present in
                     // index"; t7600 'merge with conflicted --autostash changes').
                     new_index.invalidate_cache_tree_for_path(path_bytes);
                     // Add stage entries
@@ -2969,8 +2969,8 @@ fn apply_stash_commit(
         new_index.sort();
         // A conflicted index (unmerged stages) cannot have a valid stage-0 cache-tree; drop the
         // TREE extension so write_index does not persist a stale one (which would fail
-        // GIT_TEST_CHECK_CACHE_TREE verification with "corrupted cache-tree has entries not
-        // present in index"). Mirrors Git, which only keeps a cache-tree for a fully merged index.
+        // cache-tree verification with "corrupted cache-tree has entries not present in
+        // index"). Mirrors Git, which only keeps a cache-tree for a fully merged index.
         new_index.clear_cache_tree();
     }
     // Refresh cached stat for entries restored from the stash trees whose worktree content matches
