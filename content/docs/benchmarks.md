@@ -185,6 +185,52 @@ What remains of the status gap is the CLI's own scattered code plus read-only da
 ./target/dist/grit-bench daily --only diff/worktree@synth-10k,show/head@synth-10k,add/modified@synth-10k,commit/small@synth-10k,switch/branch@synth-10k,stash/push-pop@synth-10k,reset/hard@synth-10k,notes/list@synth-10k,reflog/list@synth-10k,merge/clean@synth-10k,clean/untracked@synth-10k,gc/pack-refs@synth-10k \
   --min-runs 10 --warmup 2 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-hot-text-related-after.json
 ```
+## Protocol v0 fetches over smart HTTP negotiate like Git (2026-11-01)
+
+Since fetch honours `protocol.version` (2026-10-31), the daily matrix's `git http-backend` scenarios run grit on protocol v0, because the bench's global config sets `protocol.version=0`. That path had three problems:
+
+- **Lost requests.** Git's stateless upload-pack reads a v0 request only up to the first flush after its `have` lines, then exits. grit's HTTP connection replayed every earlier have round, flushes included, so the server answered the first round again and never saw `done`. Any fetch that sent haves got no pack, and `fetch/incremental`, `fetch/one-branch`, `pull/check` and `pull/fast-forward` on git.git failed their correctness checks. `fetch/dry-run` and `fetch/incremental-http` passed but took over 700 ms.
+- **A request line Git rejects.** A v0 `--deepen` sent `deepen-relative` as a request line as well as a capability. Git's upload-pack accepts it only as a capability, so it hung up on the request: `fetch/deepen` failed with "unexpected EOF after done".
+- **No haves when shallow.** A v0 shallow request offered no haves, so a deepen of git.git received 59k objects (43 MiB), as v2 did before the [earlier fix](#deepening-a-shallow-fetch-negotiates-2026-10-29).
+
+`grit-lib` now frames stateless v0 requests the way Git's `fetch-pack` does. Each POST is one complete request: the want block, then every `have` the server has acknowledged as `common`, then the next batch of haves and a flush, or `done`. The connection sends each body as written instead of replaying earlier rounds. Other changes:
+
+- A request without a deepen sends its want block with the first have round, not in a POST of its own.
+- Negotiation stops once the server says `ready`.
+- With a server that offers `no-done`, the pack follows `ready` directly, without one more POST that only carries `done`.
+- Rounds grow geometrically, as in v2.
+- The ACKs after `done` are read up to the final bare `ACK`.
+
+Shallow requests negotiate as in v2: the tips being deepened are offered as haves, no advertised tip is marked common in advance (Git skips that when deepening too), and the shallow list that every stateless reply repeats is consumed before its ACKs. Tests in `grit-lib/tests/fetch_v0_http_git_compat.rs` fetch from the system `git http-backend` (a new `grit_test_support::git_http_backend` server) on v0 and v2. They check each v0 request body, the shallow boundaries against git's, the object counts, and `git fsck`. They fail on the old code.
+
+Rows from `grit-bench daily` (10 runs, 3 warmups, `release` builds) against the system `git` in the same sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0. "daily build" is `8dbc58e77` (the 2026-10-27 census build, which still spoke v2), "main" is `7d41ce6df`. "fail" means grit failed the scenario's correctness check. Values are **milliseconds / MB**. Reports: `daily-fetch-v0-6196-daily-build.json`, `daily-fetch-v0-6196-before.json` → `daily-fetch-v0-6196-after.json`.
+
+| Scenario | git | daily build | main | + change |
+| --- | ---: | ---: | ---: | ---: |
+| `fetch/deepen@git-git` | 665.1 / 270.9 | 5425.4 / 78.1 | fail | **173.7** / 60.8 |
+| `fetch/incremental@git-git` | 111.9 / 70.9 | 47.5 / 50.4 | fail | **55.6** / 52.3 |
+| `fetch/one-branch@git-git` | 105.8 / 71.0 | 50.2 / 50.3 | fail | **53.6** / 52.4 |
+| `fetch/dry-run@git-git` | 104.6 / 70.7 | 47.4 / 50.9 | 721.9 / 69.2 | **52.0** / 52.7 |
+| `fetch/incremental-http@git-git` | 153.6 / 70.8 | 90.2 / 50.1 | 740.2 / 69.4 | **91.7** / 52.2 |
+| `pull/check@git-git` | 117.5 / 71.0 | 48.3 / 50.5 | fail | **61.3** / 52.4 |
+| `pull/fast-forward@git-git` | 117.4 / 76.4 | 56.4 / 50.4 | fail | **58.0** / 52.4 |
+| `fetch/noop@git-git` | 24.8 / 56.3 | 11.9 / 19.1 | 8.6 / 20.2 | 8.8 / 20.4 |
+| `fetch/noop-local@many-refs` | 20.7 / 23.6 | 19.1 / 19.9 | 15.5 / 20.7 | 15.4 / 21.6 |
+| `fetch/noop-local-no-tags@many-refs` | 19.2 / 23.8 | 14.2 / 19.8 | 11.7 / 20.7 | 11.9 / 21.4 |
+| `clone/shallow@git-git` | 1592.1 / 39.8 | 1658.0 / 57.4 | 1623.7 / 58.0 | 1623.8 / 56.1 |
+| `clone/blobless@git-git` | 8683.5 / 73.5 | 7171.8 / 66.9 | 7575.9 / 149.0 | 7299.1 / 149.8 |
+| `clone/http@synth-10k` | 758.6 / 36.9 | 697.4 / 33.6 | 602.6 / 50.5 | 606.0 / 50.2 |
+| `clone/shallow-depth1-http@synth-10k` | 191.9 / 32.1 | 198.5 / 31.2 | 200.5 / 31.9 | 202.2 / 32.5 |
+| `ls-remote/all@many-refs` | 14.5 / 28.0 | 14.4 / 18.8 | 13.5 / 19.7 | 13.6 / 20.1 |
+| `push/incremental-http@git-git` | 1641.8 / 333.7 | 959.3 / 90.7 | 962.3 / 92.2 | 979.4 / 92.8 |
+
+The clone, `ls-remote` and push rows send the same requests as before; three alternating reruns of `clone/shallow-depth1-http` (main 190–195 ms, this change 194–199 ms, git 194–229 ms) and `push/incremental-http` (974–987 ms against 978–991 ms) are within run-to-run noise. The incremental rows remain a few milliseconds above the daily build, which spoke protocol v2: a v0 `info/refs` advertises every ref (955 on git.git), and v2 asks only for the refs a refspec can match.
+
+```bash
+./target/release/grit-bench daily --only fetch/deepen@git-git --grit ./target/release/grit \
+  --min-runs 10 --warmup 3 --format json --output /tmp/fetch-deepen.json
+```
+
 ## Deepening a shallow fetch negotiates (2026-10-29)
 
 A fetch with `--deepen`, `--depth` or into a shallow repository used to send the server no `have` lines, so the server packed every object of the deepened history. On `fetch/deepen@git-git` (a depth-1 `master` deepened by 50 commits, served by `git http-backend`), grit received 59k objects (43 MiB) that the client already held through its other branches, and spent most of its 5.5 s waiting for the server to build that pack and then indexing it. Git negotiates and receives 175 objects.
