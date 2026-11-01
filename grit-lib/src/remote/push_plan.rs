@@ -14,6 +14,7 @@ use std::path::Path;
 use thiserror::Error;
 
 use crate::branch_tracking::{apply_push_set_upstream, remote_tracking_ref_for_remote_ref};
+use crate::config::gitmodules::gitdir::is_git_directory;
 use crate::config::{parse_git_config_maybe_bool, ConfigSet};
 use crate::merge_base::is_ancestor;
 use crate::objects::{ObjectId, ObjectKind};
@@ -643,8 +644,9 @@ pub struct PushInvocation {
 ///
 /// With `remote_flag` set, every positional is a refspec. Otherwise the first positional is the
 /// remote when it has a configured `remote.<name>.url` or looks like a literal URL or path
-/// (`scheme://`, `*.git`, `/abs/path`). A single other positional is a refspec pushed to the
-/// default remote; with more positionals the first one must name a remote.
+/// (`scheme://`, `*.git`, `/abs/path`, `.` / `..`, `./…` / `../…`, or an existing relative git
+/// directory). A single other positional is a refspec pushed to the default remote; with more
+/// positionals the first one must name a remote.
 ///
 /// # Errors
 ///
@@ -778,7 +780,13 @@ pub fn load_push_plan_context(
 }
 
 fn looks_like_literal_remote(name: &str) -> bool {
-    name.contains("://") || name.ends_with(".git") || name.starts_with('/')
+    if name.contains("://") || name.ends_with(".git") || name.starts_with('/') {
+        return true;
+    }
+    if name == "." || name == ".." || name.starts_with("./") || name.starts_with("../") {
+        return true;
+    }
+    is_git_directory(Path::new(name))
 }
 
 fn has_remote_url(config: &ConfigSet, name: &str) -> bool {
@@ -1580,7 +1588,17 @@ mod tests {
     #[test]
     fn push_invocation_first_positional_is_literal_url_or_path() {
         let config = ConfigSet::new();
-        for remote in ["https://example.com/r", "../sibling.git", "/srv/repo"] {
+        for remote in [
+            "https://example.com/r",
+            "../sibling.git",
+            "/srv/repo",
+            "../srv",
+            "./srv",
+            "./../srv",
+            "../deep/nb3",
+            ".",
+            "..",
+        ] {
             let invocation = resolve_push_invocation(&config, None, &strings(&[remote, "main"]))
                 .expect("invocation");
             assert_eq!(invocation.remote.as_deref(), Some(remote));
@@ -1660,8 +1678,10 @@ mod tests {
         );
         let origin = open_push_destination(&config, "origin").expect("origin");
         assert_eq!(origin.name.as_deref(), Some("origin"));
-        let literal = open_push_destination(&config, "/srv/other.git").expect("literal");
-        assert_eq!(literal.name, None);
+        for path in ["/srv/other.git", "../srv", "./srv"] {
+            let literal = open_push_destination(&config, path).expect("literal");
+            assert_eq!(literal.name, None, "{path}");
+        }
         assert!(matches!(
             open_push_destination(&config, "nourl"),
             Err(RemoteError::NoUrl { remote: Some(name) }) if name == "nourl"

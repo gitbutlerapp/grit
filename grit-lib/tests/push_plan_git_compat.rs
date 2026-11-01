@@ -742,6 +742,55 @@ fn push_to_literal_path_remote_is_readable_by_git() {
     assert!(out.ok(), "rev-parse: {}", out.stderr);
 }
 
+#[test]
+fn push_to_relative_path_remote_is_readable_by_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    let bare = tmp.path().join("srv");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&work, &["init", "-q", "-b", "main"]);
+    std::fs::write(work.join("f"), "1\n").unwrap();
+    git(&work, &["add", "f"]);
+    git(&work, &["commit", "-q", "-m", "c1"]);
+    git(&bare, &["init", "-q", "--bare", "-b", "main", "."]);
+
+    let repo = open_repo(&work);
+    let config = load_config(&repo);
+    let remote_path = "../srv".to_owned();
+    let invocation =
+        resolve_push_invocation(&config, None, &[remote_path.clone(), "main".to_owned()])
+            .expect("invocation");
+    assert_eq!(invocation.remote.as_deref(), Some(remote_path.as_str()));
+    let remote = open_push_destination(&config, &remote_path).expect("literal remote");
+    let plan = resolve_push(
+        &repo,
+        &config,
+        &PushRequest {
+            remote: invocation.remote,
+            refspecs: invocation.refspecs,
+            ..Default::default()
+        },
+        &PushPlanContext::default(),
+    )
+    .expect("plan");
+    remote
+        .push(
+            &repo,
+            &plan.specs,
+            PushOptions::default(),
+            &mut NoProgress,
+            &NeverCancel,
+            None,
+        )
+        .expect("push");
+    let out = git_cmd(&["rev-parse", "--verify", "refs/heads/main"])
+        .in_dir(&bare)
+        .exec();
+    assert!(out.ok(), "rev-parse: {}", out.stderr);
+    let fsck = git_cmd(&["fsck", "--strict"]).in_dir(&bare).exec();
+    assert!(fsck.ok(), "git fsck: {}", fsck.stderr);
+}
+
 fn list_remote_refs(bare: &Path) -> HashSet<String> {
     push_plan_context(bare).remote_ref_names
 }
