@@ -420,34 +420,52 @@ impl MarkdownRender for LogOutcome {
     }
 }
 
-/// Whether [`stream_listing`] can replace a full [`run`] for this query.
-pub fn listing_can_stream(
+/// The repository and walk a streamed listing runs on, set up once by
+/// [`listing_stream_plan`] and consumed by [`stream_listing`].
+pub struct LogStreamPlan {
+    repo: grit_lib::repo::Repository,
+    walk_paths: Vec<String>,
+    default_tips: Vec<String>,
+    walk_opts: grit_lib::revwalk::RevWalkListOptions,
+}
+
+/// The plan for [`stream_listing`] when it can replace a full [`run`] for this query, or
+/// `None` when it cannot.
+pub fn listing_stream_plan(
     rev: &RevSelectArgs,
     pathspecs: &TrailingPathspecArgs,
     display: LogDisplayOptions,
     cursor: &Option<String>,
     format: &DiffFormatArgs,
-) -> Result<bool> {
+) -> Result<Option<LogStreamPlan>> {
     if cursor.as_ref().is_some_and(|token| !token.is_empty()) {
-        return Ok(false);
+        return Ok(None);
     }
     if display.group_by.is_some() || display.graph {
-        return Ok(false);
+        return Ok(None);
     }
     if format.log_patch_text() {
-        return Ok(false);
+        return Ok(None);
     }
     let repo = context::discover()?;
-    let env = repo.environment();
     let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
     let default_tips = default_tips(&repo, rev)?;
-    let default_tips: Vec<&str> = default_tips.iter().map(String::as_str).collect();
-    let walk_opts = rev.to_rev_walk_options(&repo, env, &default_tips, walk_paths.as_slice())?;
+    let tip_refs: Vec<&str> = default_tips.iter().map(String::as_str).collect();
+    let walk_opts =
+        rev.to_rev_walk_options(&repo, repo.environment(), &tip_refs, walk_paths.as_slice())?;
     if !crate::stream_commit_list::plain_walk_streamable(&walk_opts) {
-        return Ok(false);
+        return Ok(None);
     }
-    let token_refs = rev.rev_tokens(&default_tips);
-    Ok(LogWalkQuery::from_rev_walk(&repo, &token_refs, &walk_opts)?.is_some())
+    let token_refs = rev.rev_tokens(&tip_refs);
+    if LogWalkQuery::from_rev_walk(&repo, &token_refs, &walk_opts)?.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(LogStreamPlan {
+        repo,
+        walk_paths,
+        default_tips,
+        walk_opts,
+    }))
 }
 
 /// Whether the caller asked for enough commits that incremental listing helps.
@@ -460,10 +478,11 @@ pub fn listing_should_stream_incrementally(rev: &RevSelectArgs, non_terminal: bo
     }
 }
 
-/// Walk and render commits in batches for plain date-order log queries.
+/// Walk and render commits in batches for plain date-order log queries, on the repository
+/// and walk [`listing_stream_plan`] set up.
 pub fn stream_listing(
+    plan: LogStreamPlan,
     rev: RevSelectArgs,
-    pathspecs: TrailingPathspecArgs,
     format: DiffFormatArgs,
     display: LogDisplayOptions,
     output_mode: OutputMode,
@@ -473,13 +492,14 @@ pub fn stream_listing(
     if rev.max_count() == Some(0) {
         return write_empty_log_stream(w, output_mode, display, ctx);
     }
-    let repo = context::discover()?;
-    let env = repo.environment();
-    let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
+    let LogStreamPlan {
+        repo,
+        walk_paths,
+        default_tips,
+        walk_opts,
+    } = plan;
     let path_args = walk_paths.as_slice();
-    let default_tips = default_tips(&repo, &rev)?;
     let default_tips: Vec<&str> = default_tips.iter().map(String::as_str).collect();
-    let walk_opts = rev.to_rev_walk_options(&repo, env, &default_tips, path_args)?;
     let token_refs = rev.rev_tokens(&default_tips);
     let fetch_cap = fetch_limit_plus_one(rev.max_count());
     let mut stream = open_plain_stream(&repo, &token_refs, &walk_opts, fetch_cap)?;

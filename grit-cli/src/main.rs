@@ -2976,16 +2976,18 @@ fn dispatch(
                 bail!("`--patch-text` cannot be used with --json or --markdown");
             }
             if !terminal {
-                if opts.filter.is_none()
-                    && commands::log::listing_can_stream(
-                        &rev, &pathspecs, display, &cursor, &format,
-                    )?
+                let plan = if opts.filter.is_none()
                     && commands::log::listing_should_stream_incrementally(&rev, true)
                 {
+                    commands::log::listing_stream_plan(&rev, &pathspecs, display, &cursor, &format)?
+                } else {
+                    None
+                };
+                if let Some(plan) = plan {
                     let stdout = std::io::stdout();
                     let mut lock = stdout.lock();
                     match commands::log::stream_listing(
-                        rev, pathspecs, format, display, opts.mode, ctx, &mut lock,
+                        plan, rev, format, display, opts.mode, ctx, &mut lock,
                     ) {
                         Ok(()) => return Ok(ExitStatus::Success),
                         Err(e) if is_broken_pipe(&e) => return Ok(ExitStatus::Success),
