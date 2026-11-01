@@ -9,7 +9,7 @@
 //! checking remote state with the system `git`.
 
 use grit_test_support::rev_parse;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
@@ -938,13 +938,10 @@ fn push_local_into_empty_repo_links_local_pack() {
     fsck_clean(remote_git);
 }
 
-#[test]
-fn push_local_shallow_repacked_missing_parent_fails() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let origin = tmp.path().join("origin.git");
-    let seed = tmp.path().join("seed");
-    let shallow = tmp.path().join("shallow");
-    let dest = tmp.path().join("dest.git");
+fn shallow_client_with_repack(tmp: &Path) -> (PathBuf, PathBuf, ObjectId, ObjectId) {
+    let origin = tmp.join("origin.git");
+    let seed = tmp.join("seed");
+    let shallow = tmp.join("shallow");
     std::fs::create_dir_all(&origin).unwrap();
     std::fs::create_dir_all(&seed).unwrap();
 
@@ -975,12 +972,67 @@ fn push_local_shallow_repacked_missing_parent_fails() {
     git(&shallow, &["repack", "-a", "-d", "-f"]);
     let shallow_git = shallow.join(".git");
     let tip = rev_parse(&shallow, "refs/heads/main");
+    let shallow_text = std::fs::read_to_string(shallow_git.join("shallow")).expect("shallow file");
+    let boundary = ObjectId::from_hex(shallow_text.lines().next().expect("one boundary").trim())
+        .expect("boundary oid");
+    (shallow_git, origin, tip, boundary)
+}
 
+#[test]
+fn push_local_shallow_to_empty_remote_with_shallow_update() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (shallow_git, _origin, tip, boundary) = shallow_client_with_repack(tmp.path());
+
+    let dest = tmp.path().join("dest.git");
+    std::fs::create_dir_all(&dest).unwrap();
+    git(&dest, &["init", "-q", "--bare", "-b", "main", "."]);
+    git(&dest, &["config", "receive.shallowUpdate", "true"]);
+    let dest_git = dest.as_path();
+
+    let spec = PushRefSpec {
+        src: Some(tip),
+        src_ref: None,
+        dst: "refs/heads/main".to_owned(),
+        force: false,
+        delete: false,
+        expected_old: None,
+        expect_absent: false,
+        ..Default::default()
+    };
+    let outcome = push_local(
+        &shallow_git,
+        dest_git,
+        &[spec],
+        &PushOptions::default(),
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("shallow push with receive.shallowUpdate");
+    assert_eq!(outcome.results.len(), 1);
+    assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
+    assert_eq!(remote_ref(dest_git, "refs/heads/main"), Some(tip));
+    assert_eq!(
+        std::fs::read_to_string(dest.join("shallow")).expect("shallow file"),
+        format!("{}\n", boundary.to_hex())
+    );
+    let (ok, out) = git_try(
+        dest_git,
+        &["cat-file", "-e", &format!("{}^", boundary.to_hex())],
+    );
+    assert!(!ok, "boundary parent must be absent on remote: {out}");
+    fsck_clean(dest_git);
+}
+
+#[test]
+fn push_local_shallow_to_empty_remote_refused_without_shallow_update() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (shallow_git, _origin, tip, _boundary) = shallow_client_with_repack(tmp.path());
+
+    let dest = tmp.path().join("dest.git");
     std::fs::create_dir_all(&dest).unwrap();
     git(&dest, &["init", "-q", "--bare", "-b", "main", "."]);
     let dest_git = dest.as_path();
 
-    let err = push_local(
+    let outcome = push_local(
         &shallow_git,
         dest_git,
         &[PushRefSpec {
@@ -996,17 +1048,49 @@ fn push_local_shallow_repacked_missing_parent_fails() {
         &PushOptions::default(),
         &grit_lib::progress::NeverCancel,
     )
-    .expect_err("shallow push must fail when parent objects are absent");
-    let msg = err.to_string();
+    .expect("push completes with per-ref refusal");
+    assert_eq!(outcome.results.len(), 1);
+    assert_eq!(outcome.results[0].status, PushRefStatus::RemoteRejected);
     assert!(
-        msg.contains("missing") || msg.contains("not found") || msg.contains("Object"),
-        "expected missing-object error, got: {msg}"
+        outcome.results[0]
+            .message
+            .as_deref()
+            .is_some_and(|m| m.contains("shallow update not allowed")),
+        "{:?}",
+        outcome.results[0].message
     );
-    assert_eq!(
-        remote_ref(dest_git, "refs/heads/main"),
-        None,
-        "ref must not be updated when object copy fails"
-    );
+    assert_eq!(remote_ref(dest_git, "refs/heads/main"), None);
+    assert!(!dest.join("shallow").exists());
+    let (loose, packs) = git_count_objects(dest_git);
+    assert_eq!(loose, 0, "no leftover loose objects");
+    assert_eq!(packs, 0, "no leftover packs");
+}
+
+#[test]
+fn push_local_shallow_to_remote_with_full_history_needs_no_shallow_file() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (shallow_git, origin, tip, _boundary) = shallow_client_with_repack(tmp.path());
+    let origin_git = origin.as_path();
+
+    let outcome = push_local(
+        &shallow_git,
+        origin_git,
+        &[PushRefSpec {
+            src: Some(tip),
+            src_ref: None,
+            dst: "refs/heads/main".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+            ..Default::default()
+        }],
+        &PushOptions::default(),
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("push onto remote that already has history");
+    assert_eq!(outcome.results[0].status, PushRefStatus::UpToDate);
+    assert!(!origin.join("shallow").exists());
 }
 
 fn git_count_objects(git_dir: &Path) -> (u32, u32) {

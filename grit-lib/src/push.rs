@@ -292,7 +292,8 @@ pub(crate) fn push_remote_with(
     //    push streams no pack at all (matching `git send-pack`); `receive-pack`
     //    does not read one after a delete-only command block, so sending an empty
     //    pack would leave unread bytes on the wire and reset the connection.
-    let commands = build_command_block(&plan, &adv, algo, opts)?;
+    let shallow = crate::shallow::load_shallow_oids(local_git_dir)?;
+    let commands = build_command_block(&plan, &adv, algo, opts, &shallow)?;
     let sent_refs: Vec<&str> = plan
         .to_send
         .iter()
@@ -645,6 +646,7 @@ fn build_command_block(
     adv: &AdvertisedState,
     algo: HashAlgo,
     opts: &PushOptions,
+    shallow: &[ObjectId],
 ) -> Result<Vec<u8>> {
     let zero_hex = "0".repeat(algo.hex_len());
     let mut command_caps = PUSH_CAPS_BASE.to_owned();
@@ -660,6 +662,9 @@ fn build_command_block(
     command_caps.push_str(&format!(" object-format={}", algo.name()));
 
     let mut commands: Vec<u8> = Vec::new();
+    for oid in shallow {
+        pkt_line::write_line_to_vec(&mut commands, &format!("shallow {}", oid.to_hex()))?;
+    }
     let mut first = true;
     for &i in &plan.to_send {
         let d = &plan.decisions[i];
@@ -713,6 +718,7 @@ struct PushPack {
     wants: Vec<ObjectId>,
     haves: Vec<ObjectId>,
     opts: PackBuildOptions,
+    source_shallow: HashSet<ObjectId>,
 }
 
 impl PushPack {
@@ -755,7 +761,13 @@ impl PushPack {
             PackBuildOptions::for_local_push(local_cfg.as_ref())
         };
         opts.use_ofs_delta = adv.server_ofs_delta;
-        Ok(Some(Self { wants, haves, opts }))
+        let source_shallow = crate::shallow::load_shallow_boundaries(local.git_dir());
+        Ok(Some(Self {
+            wants,
+            haves,
+            opts,
+            source_shallow,
+        }))
     }
 
     /// Stream the pack to `w`, stopping with [`Error::Cancelled`] once `stop` fires.
@@ -769,6 +781,8 @@ impl PushPack {
             local.odb(),
             &self.wants,
             &self.haves,
+            &HashSet::new(),
+            &self.source_shallow,
             &self.opts,
             w,
             stop,
@@ -1350,7 +1364,7 @@ mod tests {
                     push_options: vec!["ci.skip".to_owned()],
                     ..Default::default()
                 };
-                let block = build_command_block(&plan, &adv, HashAlgo::Sha1, &opts).unwrap();
+                let block = build_command_block(&plan, &adv, HashAlgo::Sha1, &opts, &[]).unwrap();
                 let pkts = decode_block(&block);
                 let (command, caps) = pkts[0].as_deref().unwrap().split_once('\0').unwrap();
                 assert_eq!(
@@ -1608,6 +1622,30 @@ mod tests {
     }
 
     #[test]
+    fn command_block_prepends_shallow_boundaries() {
+        let boundary = ObjectId::from_hex(&"a".repeat(40)).unwrap();
+        let new = ObjectId::from_hex(&"1".repeat(40)).unwrap();
+        let plan = PushPlan {
+            decisions: vec![send_decision("refs/heads/main", new)],
+            to_send: vec![0],
+        };
+        let block = build_command_block(
+            &plan,
+            &adv_state(false, false, true),
+            HashAlgo::Sha1,
+            &PushOptions::default(),
+            &[boundary],
+        )
+        .unwrap();
+        let pkts = decode_block(&block);
+        let expected_shallow = format!("shallow {}", boundary.to_hex());
+        assert_eq!(pkts[0].as_deref(), Some(expected_shallow.as_str()));
+        let cmd = pkts[1].as_deref().unwrap();
+        assert!(cmd.contains("refs/heads/main"));
+        assert_eq!(pkts[2], None, "trailing flush");
+    }
+
+    #[test]
     fn command_block_without_push_options_has_no_capability_or_lines() {
         let new = ObjectId::from_hex(&"1".repeat(40)).unwrap();
         let plan = PushPlan {
@@ -1619,6 +1657,7 @@ mod tests {
             &adv_state(false, false, true),
             HashAlgo::Sha1,
             &PushOptions::default(),
+            &[],
         )
         .unwrap();
         let pkts = decode_block(&block);
@@ -1647,8 +1686,14 @@ mod tests {
             push_options: vec!["ci.skip".to_owned(), "reviewer=alice".to_owned()],
             ..Default::default()
         };
-        let block = build_command_block(&plan, &adv_state(true, true, true), HashAlgo::Sha1, &opts)
-            .unwrap();
+        let block = build_command_block(
+            &plan,
+            &adv_state(true, true, true),
+            HashAlgo::Sha1,
+            &opts,
+            &[],
+        )
+        .unwrap();
         let pkts = decode_block(&block);
         // command line | flush | push-option ci.skip | push-option reviewer=alice | flush
         assert_eq!(

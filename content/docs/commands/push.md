@@ -35,6 +35,8 @@ Incremental SSH and HTTP pushes stop exploring advertised commit history once th
 
 On the remote, `receive.denyNonFastForwards`, `receive.denyDeletes`, and `receive.denyCurrentBranch` are enforced for every transport, including local-path remotes (not only [`grit receive-pack`](../receive-pack/) over HTTP).
 
+From a shallow clone, grit announces each shallow boundary in the push command stream (like Git) and sends only the reachable commits. When the remote does not already have the history below those boundaries, the remote must set `receive.shallowUpdate=true` or the update is refused with `shallow update not allowed`; see [`grit receive-pack`](../receive-pack/).
+
 A push to a local path or `file://` URL runs the remote repository's `pre-receive`, `update`, `post-receive` and `post-update` hooks just as [`grit receive-pack`](../receive-pack/) and Git do: the pushed objects wait in a quarantine that `pre-receive` can read, a non-zero `pre-receive` refuses every update (`pre-receive hook declined`) and keeps the objects out of the repository, a non-zero `update` refuses its own ref (`hook declined`), and `post-receive` and `post-update` run after the refs are written. Hook output is reported like any remote's messages. `--dry-run` runs none of these hooks, as with Git.
 
 Explicit refspecs follow Git push rules: any revision on the left (`HEAD`, tags, branches), optional `+` for force, `:dst` to delete, and a bare branch name DWIMs to the matching local ref (then through configured push refspecs when present).

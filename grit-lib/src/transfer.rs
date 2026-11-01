@@ -2539,6 +2539,7 @@ pub(crate) fn push_local_from(
     }
 
     let local_odb = local.odb();
+    let local_shallow = crate::shallow::load_shallow_boundaries(local_git_dir);
 
     // The remote's existing ref tips become the `haves` for pack building, so the
     // copied object closure excludes everything the remote already has.
@@ -2578,7 +2579,6 @@ pub(crate) fn push_local_from(
         } else {
             PackBuildOptions::for_local_push(local_cfg.as_ref())
         };
-        let empty_shallow = HashSet::new();
         let remote_shallow = crate::shallow::load_shallow_boundaries(remote_git_dir);
         let q = crate::receive_quarantine::ReceiveQuarantine::create(
             remote_repo.odb(),
@@ -2591,12 +2591,73 @@ pub(crate) fn push_local_from(
             &q_odb,
             &push_wants,
             &remote_have_tips,
-            &empty_shallow,
+            &local_shallow,
             &remote_shallow,
             &pack_opts,
             cancel,
         )?;
         quarantine = Some((q, q_odb));
+    }
+
+    let policy = crate::serve::ReceivePolicy::from_config(remote_cfg.as_ref());
+    let remote_shallow = crate::shallow::load_shallow_boundaries(remote_git_dir);
+    let shallow_announced = if local_shallow.is_empty() {
+        Vec::new()
+    } else {
+        crate::shallow::load_shallow_oids(local_git_dir)?
+    };
+    let mut shallow_info = if shallow_announced.is_empty() {
+        crate::shallow::PushShallowInfo::default()
+    } else {
+        crate::shallow::PushShallowInfo::classify(
+            &shallow_announced,
+            remote_repo.odb(),
+            &remote_shallow,
+        )?
+    };
+    let shallow_roots_odb = if opts.dry_run {
+        push_policy_object_lookup(remote_git_dir, local_git_dir)
+    } else if let Some((_, ref q_odb)) = quarantine {
+        q_odb.clone()
+    } else {
+        push_policy_object_lookup(remote_git_dir, local_git_dir)
+    };
+    if !shallow_info.is_empty() {
+        if let Some((_, ref q_odb)) = quarantine {
+            shallow_info.retain_received(q_odb)?;
+        }
+    }
+    let mut shallow_roots_by_decision = vec![Vec::new(); decisions.len()];
+    let mut push_shallow_hook_file = None;
+    if !shallow_info.is_empty() {
+        let receiver_tips = push_receiver_tips(&remote_repo)?;
+        let graph = remote_repo.odb().commit_graph_chain();
+        for (d, roots_out) in decisions.iter_mut().zip(&mut shallow_roots_by_decision) {
+            if !d.apply {
+                continue;
+            }
+            let roots = match &d.action {
+                PushAction::Update(src) => shallow_info.new_roots(
+                    &shallow_roots_odb,
+                    graph.as_deref(),
+                    *src,
+                    &remote_shallow,
+                    &receiver_tips,
+                )?,
+                _ => Vec::new(),
+            };
+            *roots_out = roots.clone();
+            if !roots.is_empty() && !policy.shallow_update {
+                d.refuse(&crate::serve::RefUpdateRefusal::ShallowUpdateNotAllowed);
+            }
+        }
+        if policy.shallow_update && !shallow_announced.is_empty() {
+            push_shallow_hook_file = Some(crate::shallow::temporary_push_shallow_file(
+                remote_git_dir,
+                &remote_shallow,
+                &shallow_announced,
+            )?);
+        }
     }
 
     // What a receive-pack would be sent: every update still going ahead, before the
@@ -2630,8 +2691,13 @@ pub(crate) fn push_local_from(
         });
     }
 
+    let hook_extra = push_shallow_hook_file
+        .as_ref()
+        .map(|f| crate::shallow::git_shallow_hook_env(f.path()))
+        .transpose()?
+        .unwrap_or_default();
     let scripts =
-        crate::serve::ReceiveHookScripts::new(&remote_repo, &opts.push_options, Vec::new());
+        crate::serve::ReceiveHookScripts::new(&remote_repo, &opts.push_options, hook_extra);
     let mut remote_messages = Vec::new();
     if !received.is_empty() {
         let commands: Vec<&crate::serve::RefCommand> = received.iter().collect();
@@ -2671,6 +2737,16 @@ pub(crate) fn push_local_from(
 
     #[cfg(test)]
     tests::run_push_hook(tests::PushHookPoint::BeforeRefCommit);
+
+    if !opts.dry_run {
+        let new_roots: HashSet<ObjectId> = decisions
+            .iter()
+            .zip(&shallow_roots_by_decision)
+            .filter(|(d, _)| d.apply)
+            .flat_map(|(_, roots)| roots.iter().copied())
+            .collect();
+        crate::shallow::add_shallow_boundaries(remote_git_dir, &new_roots)?;
+    }
 
     // Second pass: apply ref updates (one batch unless `atomic`, then batched non-atomic).
     let mut ref_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
@@ -2806,6 +2882,19 @@ fn relay_hook_output(
         lines.feed(stream, &mut record);
         lines.finish(&mut record);
     }
+}
+
+/// Ref tips on the receiver before a push, peeled through tags.
+fn push_receiver_tips(repo: &crate::repo::Repository) -> Result<HashSet<ObjectId>> {
+    use crate::serve::{for_each_advertised_ref, Peel};
+    let mut receiver_tips = HashSet::new();
+    for_each_advertised_ref(repo, &[], &[], Peel::Yes, |r| {
+        receiver_tips.insert(r.peeled.unwrap_or(r.oid));
+        Ok(std::ops::ControlFlow::Continue(()))
+    })
+    .map_err(|e| Error::Message(e.to_string()))?;
+    receiver_tips.extend(crate::refs::resolve_ref(repo.git_dir(), "HEAD").ok());
+    Ok(receiver_tips)
 }
 
 /// Object database for receive-policy checks during local push.

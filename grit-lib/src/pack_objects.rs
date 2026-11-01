@@ -482,14 +482,26 @@ pub fn write_pack_for_push(
     opts: &PackBuildOptions,
     w: &mut dyn Write,
 ) -> Result<PackStats> {
-    write_pack_for_push_with_cancel(odb, wants, haves, opts, w, &CancelSignal::never())
+    write_pack_for_push_with_cancel(
+        odb,
+        wants,
+        haves,
+        &HashSet::new(),
+        &HashSet::new(),
+        opts,
+        w,
+        &CancelSignal::never(),
+    )
 }
 
 /// [`write_pack_for_push`], stopping with [`Error::Cancelled`] once `stop` fires.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn write_pack_for_push_with_cancel(
     odb: &Odb,
     wants: &[ObjectId],
     haves: &[ObjectId],
+    have_shallow: &HashSet<ObjectId>,
+    source_shallow: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
     w: &mut dyn Write,
     stop: &CancelSignal<'_>,
@@ -501,8 +513,8 @@ pub(crate) fn write_pack_for_push_with_cancel(
             odb,
             wants,
             haves,
-            empty_object_id_hash_set(),
-            empty_object_id_hash_set(),
+            have_shallow,
+            source_shallow,
             None,
             opts,
             HaveBoundary::TipsOnly,

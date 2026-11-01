@@ -997,8 +997,8 @@ impl ShallowPlan {
             })
             .collect::<crate::error::Result<_>>()?;
         let hook_file = if policy.shallow_update {
-            Some(temporary_shallow_file(
-                repo,
+            Some(crate::shallow::temporary_push_shallow_file(
+                repo.git_dir(),
                 receiver_grafts,
                 &request.shallow,
             )?)
@@ -1013,40 +1013,8 @@ impl ShallowPlan {
         let Some(file) = &self.hook_file else {
             return Ok(Vec::new());
         };
-        let path = std::path::absolute(file.path())?;
-        Ok(vec![(
-            "GIT_SHALLOW_FILE".to_owned(),
-            path.to_string_lossy().into_owned(),
-        )])
+        crate::shallow::git_shallow_hook_env(file.path()).map_err(ServeError::Repository)
     }
-}
-
-/// Write the union of `receiver_grafts` and `client` to a temporary shallow
-/// file next to the repository's own.
-fn temporary_shallow_file(
-    repo: &Repository,
-    receiver_grafts: &HashSet<ObjectId>,
-    client: &[ObjectId],
-) -> Result<tempfile::NamedTempFile> {
-    let mut hexes: Vec<String> = receiver_grafts
-        .iter()
-        .chain(client)
-        .map(ObjectId::to_hex)
-        .collect();
-    hexes.sort_unstable();
-    hexes.dedup();
-    let dir = crate::shallow::shallow_file_path(repo.git_dir())
-        .parent()
-        .map(std::path::Path::to_path_buf)
-        .unwrap_or_else(|| repo.git_dir().to_path_buf());
-    let mut file = tempfile::Builder::new()
-        .prefix("shallow_")
-        .tempfile_in(dir)?;
-    for hex in hexes {
-        writeln!(file, "{hex}")?;
-    }
-    file.flush()?;
-    Ok(file)
 }
 
 /// Validate, run hooks, migrate quarantine objects, and apply ref updates.
