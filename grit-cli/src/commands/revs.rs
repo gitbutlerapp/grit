@@ -11,7 +11,7 @@ use std::io::Write;
 use crate::commits_json::{fetch_limit_plus_one, truncate_oid_list, CommitJsonLoader};
 use crate::context;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, OutputMode, RenderContext};
-use crate::pathspec_args::TrailingPathspecArgs;
+use crate::pathspec_args::{promote_long_magic_pathspecs_from_revs, TrailingPathspecArgs};
 use crate::rev_select::RevSelectArgs;
 use crate::stream_commit_list::{
     begin_commits_json_document, finish_commits_json_document, flush_or_broken_pipe,
@@ -250,6 +250,9 @@ pub fn listing_can_stream(
     }
     let repo = context::discover()?;
     let env = repo.environment();
+    let mut rev = rev.clone();
+    let mut pathspecs = pathspecs.clone();
+    promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
     let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
     let opts = rev.to_rev_walk_options(&repo, env, &[], &walk_paths)?;
     Ok(crate::stream_commit_list::plain_walk_streamable(&opts))
@@ -261,8 +264,8 @@ pub fn listing_can_stream(
 ///
 /// Propagates walk, load, and write errors other than a closed stdout pipe.
 pub fn stream_listing(
-    rev: RevSelectArgs,
-    pathspecs: TrailingPathspecArgs,
+    mut rev: RevSelectArgs,
+    mut pathspecs: TrailingPathspecArgs,
     output_mode: OutputMode,
     _ctx: &RenderContext,
     w: &mut dyn Write,
@@ -272,6 +275,7 @@ pub fn stream_listing(
     }
     let repo = context::discover()?;
     let env = repo.environment();
+    promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
     let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
     let opts = rev.to_rev_walk_options(&repo, env, &[], &walk_paths)?;
     let token_refs = rev.rev_tokens(&[]);
@@ -374,8 +378,8 @@ fn write_empty_streaming_document(w: &mut dyn Write, output_mode: OutputMode) ->
 }
 
 pub fn run(
-    rev: RevSelectArgs,
-    pathspecs: TrailingPathspecArgs,
+    mut rev: RevSelectArgs,
+    mut pathspecs: TrailingPathspecArgs,
     mode: RevsMode,
     output_mode: OutputMode,
 ) -> Result<RevsOutcome> {
@@ -392,6 +396,7 @@ pub fn run(
     }
     let repo = context::discover()?;
     let env = repo.environment();
+    promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
     let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
     let opts = rev.to_rev_walk_options(&repo, env, &[], &walk_paths)?;
     let walk = repo.rev_walk();

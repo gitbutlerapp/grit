@@ -2102,6 +2102,12 @@ pub fn resolve_magic_pathspec(spec: &str, cwd_prefix: &str) -> Option<String> {
     Some(resolve_magic_pathspec_parts(magic_prefix, tail, cwd_prefix))
 }
 
+/// Whether `token` is a long-form magic pathspec (`:(...)`) rather than a revision name.
+#[must_use]
+pub fn is_long_magic_pathspec_token(token: &str) -> bool {
+    resolve_magic_pathspec(token, "").is_some()
+}
+
 fn resolve_magic_pathspec_parts(magic_prefix: &str, tail: &str, cwd_prefix: &str) -> String {
     if has_magic_prefix_token(magic_prefix) {
         return format!("{magic_prefix}{tail}");
@@ -3100,6 +3106,13 @@ mod resolved_pathspecs_tests {
 #[cfg(test)]
 mod resolve_magic_pathspec_tests {
     use super::*;
+
+    #[test]
+    fn long_magic_token_predicate() {
+        assert!(is_long_magic_pathspec_token(":(attr:rust)"));
+        assert!(!is_long_magic_pathspec_token(":0:file"));
+        assert!(!is_long_magic_pathspec_token("main"));
+    }
 
     #[test]
     fn top_magic_does_not_inject_cwd_prefix() {

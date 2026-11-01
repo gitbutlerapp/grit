@@ -16,14 +16,15 @@ use crate::index::{Index, IndexEntry, IndexLock, MODE_EXECUTABLE, MODE_GITLINK, 
 use crate::merge_file::{is_binary, merge, ConflictStyle, MergeFavor, MergeInput};
 use crate::objects::ObjectKind;
 use crate::objects::{parse_commit, ObjectId};
-use crate::pathspec::{
-    pathspec_is_exclude, sorted_paths_match_pathspec, PathspecListMatcher, PathspecMatchContext,
-};
+use crate::pathspec::{pathspec_is_exclude, PathspecMatchContext};
 use crate::porcelain::checkout::{
     checkout_between_trees, index_entry_from_worktree_write, remove_empty_parent_dirs,
     write_blob_to_worktree, write_smudged_blob_to_worktree, CheckoutJournal, LeadingDirCache,
 };
 use crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths;
+use crate::porcelain::pathspec_match::{
+    positive_pathspec_matches_any_path, RepositoryPathspecFilter,
+};
 use crate::porcelain::stash::{flat_tree_lookup, flatten_tree_full, FlatTreeEntry};
 use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressSink};
 use crate::repo::Repository;
@@ -137,13 +138,14 @@ pub(crate) fn restore_paths_with_lock(
 ) -> Result<RestoreOutcome> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let pathspec_ctx = repo.pathspec_match_context();
+    let pathspec_filter = RepositoryPathspecFilter::try_new(repo, &opts.pathspecs)?;
     let restore_staged = opts.staged;
     // An index-only restore would collapse the conflict stages while the worktree keeps its
     // markers, so the next auto-staging commit would record them as the resolution.
     let index_only = restore_staged && !opts.worktree;
     let worktree_from_index = !restore_staged && matches!(opts.source, RestoreSource::Index);
     if index_only || worktree_from_index {
-        let unmerged = collect_conflict_matched_paths(&index, &opts.pathspecs, false, pathspec_ctx);
+        let unmerged = collect_conflict_matched_paths(&index, &pathspec_filter, false);
         if !unmerged.is_empty() {
             return Err(Error::RestorePathUnmerged {
                 paths: unmerged.into_iter().collect(),
@@ -174,14 +176,20 @@ pub(crate) fn restore_paths_with_lock(
         &index,
         head_entries.as_slice(),
         explicit_source_entries.as_deref(),
-        &opts.pathspecs,
+        &pathspec_filter,
         restore_staged,
         worktree_from_tree,
         opts.source,
         select_all_tracked,
-        pathspec_ctx,
     );
-    validate_pathspecs(opts, &matched, &index, select_all_tracked, pathspec_ctx)?;
+    validate_pathspecs(
+        repo,
+        opts,
+        &matched,
+        &index,
+        select_all_tracked,
+        pathspec_ctx,
+    )?;
 
     let index_source_entries = index_source_tree(
         opts,
@@ -221,7 +229,7 @@ pub(crate) fn restore_paths_with_lock(
             work_tree,
             worktree_from_tree,
             tree_source: explicit_source_entries.as_deref(),
-            pathspecs: &opts.pathspecs,
+            pathspec_filter: &pathspec_filter,
             matched: &matched,
             tracked_for_worktree_deletion: &tracked_before_index_restore,
             index_out: &mut index,
@@ -274,14 +282,10 @@ fn restore_conflict_paths(
 ) -> Result<RestoreOutcome> {
     let (mut lock, index) = repo.lock_and_load_index()?;
     let pathspec_ctx = repo.pathspec_match_context();
+    let pathspec_filter = RepositoryPathspecFilter::try_new(repo, &opts.pathspecs)?;
     let include_resolved_undo = opts.remerge.is_some();
-    let matched = collect_conflict_matched_paths(
-        &index,
-        &opts.pathspecs,
-        include_resolved_undo,
-        pathspec_ctx,
-    );
-    validate_unmerged_pathspecs(opts, &matched, pathspec_ctx)?;
+    let matched = collect_conflict_matched_paths(&index, &pathspec_filter, include_resolved_undo);
+    validate_unmerged_pathspecs(repo, opts, &matched, pathspec_ctx)?;
 
     let mut outcome = RestoreOutcome::default();
     let rules = WorktreeRules::from_repository(repo, &index)?;
@@ -334,11 +338,9 @@ pub fn conflict_style_from_config(repo: &Repository) -> ConflictStyle {
 
 fn collect_conflict_matched_paths(
     index: &Index,
-    pathspecs: &[String],
+    matcher: &RepositoryPathspecFilter<'_>,
     include_resolved_undo: bool,
-    pathspec_ctx: PathspecMatchContext,
 ) -> BTreeSet<String> {
-    let matcher = PathspecListMatcher::new(pathspecs, pathspec_ctx);
     let mut paths = BTreeSet::new();
     for entry in &index.entries {
         if entry.stage() == 0 {
@@ -363,6 +365,7 @@ fn collect_conflict_matched_paths(
 }
 
 fn validate_unmerged_pathspecs(
+    repo: &Repository,
     opts: &RestoreOptions,
     matched: &BTreeSet<String>,
     pathspec_ctx: PathspecMatchContext,
@@ -377,7 +380,7 @@ fn validate_unmerged_pathspecs(
         if pathspec_is_exclude(label) {
             continue;
         }
-        if !sorted_paths_match_pathspec(resolved, &matched_sorted, pathspec_ctx) {
+        if !positive_pathspec_matches_any_path(repo, resolved, &matched_sorted, pathspec_ctx)? {
             return Err(Error::PathspecNoMatch {
                 spec: label.clone(),
             });
@@ -550,14 +553,12 @@ fn collect_matched_paths(
     index: &Index,
     head_entries: &[FlatTreeEntry],
     source_entries: Option<&[FlatTreeEntry]>,
-    pathspecs: &[String],
+    matcher: &RepositoryPathspecFilter<'_>,
     restore_staged: bool,
     worktree_from_tree: bool,
     source: RestoreSource,
     select_all_tracked: bool,
-    pathspec_ctx: PathspecMatchContext,
 ) -> BTreeSet<String> {
-    let matcher = PathspecListMatcher::new(pathspecs, pathspec_ctx);
     let mut paths = BTreeSet::new();
     let skip_index_union = select_all_tracked && !restore_staged && !worktree_from_tree;
     if !skip_index_union {
@@ -566,7 +567,7 @@ fn collect_matched_paths(
                 continue;
             }
             let path = String::from_utf8_lossy(&entry.path);
-            if matcher.matches(&path) {
+            if matcher.matches_entry(&path, entry.mode) {
                 paths.insert(path.into_owned());
             }
         }
@@ -577,7 +578,7 @@ fn collect_matched_paths(
             RestoreSource::Tree(_) => source_entries.unwrap_or(&[]),
         };
         for entry in staged_source {
-            if matcher.matches(&entry.path) {
+            if matcher.matches_entry(&entry.path, entry.mode) {
                 paths.insert(entry.path.clone());
             }
         }
@@ -585,7 +586,7 @@ fn collect_matched_paths(
     if worktree_from_tree {
         if let Some(src) = source_entries {
             for entry in src {
-                if matcher.matches(&entry.path) {
+                if matcher.matches_entry(&entry.path, entry.mode) {
                     paths.insert(entry.path.clone());
                 }
             }
@@ -595,6 +596,7 @@ fn collect_matched_paths(
 }
 
 fn validate_pathspecs(
+    repo: &Repository,
     opts: &RestoreOptions,
     matched: &BTreeSet<String>,
     index: &Index,
@@ -614,7 +616,7 @@ fn validate_pathspecs(
         let hits = if select_all_tracked && matches!(resolved.as_str(), "." | ":/.") {
             index.entries.iter().any(|e| e.stage() == 0)
         } else {
-            sorted_paths_match_pathspec(resolved, &matched_sorted, pathspec_ctx)
+            positive_pathspec_matches_any_path(repo, resolved, &matched_sorted, pathspec_ctx)?
         };
         if !hits {
             return Err(Error::PathspecNoMatch {
@@ -675,7 +677,7 @@ struct WorktreeRestoreContext<'a> {
     work_tree: &'a Path,
     worktree_from_tree: bool,
     tree_source: Option<&'a [FlatTreeEntry]>,
-    pathspecs: &'a [String],
+    pathspec_filter: &'a RepositoryPathspecFilter<'a>,
     matched: &'a BTreeSet<String>,
     tracked_for_worktree_deletion: &'a HashSet<Vec<u8>>,
     index_out: &'a mut Index,
@@ -702,7 +704,7 @@ fn apply_worktree_restore_inner(
         work_tree,
         worktree_from_tree,
         tree_source,
-        pathspecs,
+        pathspec_filter,
         matched,
         tracked_for_worktree_deletion,
         index_out,
@@ -718,14 +720,13 @@ fn apply_worktree_restore_inner(
         let attr_index = index_out.gitattributes_snapshot();
         let rules = WorktreeRules::from_parts(repo, &attr_index, Arc::clone(&config))?;
         let index_mtime = index_mtime_for_diff(index_out, None);
-        let matcher = PathspecListMatcher::new(pathspecs, repo.pathspec_match_context());
         let mut to_write: Vec<usize> = Vec::new();
         for (pos, entry) in index_out.entries.iter().enumerate() {
             if entry.stage() != 0 {
                 continue;
             }
             let path = crate::repo_relpath::storage_string(&entry.path);
-            if !matcher.matches(&path) {
+            if !pathspec_filter.matches_entry(&path, entry.mode) {
                 continue;
             }
             if entry.mode == MODE_GITLINK {

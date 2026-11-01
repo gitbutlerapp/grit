@@ -1267,6 +1267,8 @@ mod patch_text_roundtrip;
 mod path_validate_fsck_parity;
 #[path = "pathspec_api_sweep.rs"]
 mod pathspec_api_sweep;
+#[path = "pathspec_attr_porcelain.rs"]
+mod pathspec_attr_porcelain;
 #[cfg(feature = "full-tests")]
 #[path = "pathspec_attr_repo.rs"]
 mod pathspec_attr_repo;
@@ -1774,6 +1776,7 @@ mod serve_upload_pack_promisor;
 #[cfg(feature = "full-tests")]
 #[path = "serve_upload_pack_v2_fetch.rs"]
 mod serve_upload_pack_v2_fetch;
+#[cfg(feature = "full-tests")]
 #[path = "session_cancel.rs"]
 mod session_cancel;
 #[cfg(feature = "full-tests")]

@@ -380,5 +380,19 @@ fn log_attr_pathspec_lists_commits_and_empty_filter_is_silent() -> TestResult {
     assert!(!miss_out.contains("No commits yet."));
     assert!(miss_out.trim().is_empty());
 
+    let out_no_sep = grit_run(&dir, &["log", "--oneline", ":(attr:myattr)"]);
+    assert!(
+        out_no_sep.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out_no_sep.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out_no_sep.stdout)
+            .lines()
+            .filter(|l| !l.is_empty())
+            .count(),
+        git_count
+    );
+
     Ok(())
 }

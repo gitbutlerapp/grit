@@ -14091,6 +14091,7 @@ pub fn grit_lib::pathspec::pathspec_wants_descent_for_rev_tree(&str, &[alloc::st
 pub fn grit_lib::pathspec::pathspec_wants_descent_into_tree(&str, &str) -> bool
 pub fn grit_lib::pathspec::pathspecs_allow_bloom(&[alloc::string::String]) -> bool
 pub fn grit_lib::pathspec::precompose_argv_pathspec(&str) -> alloc::borrow::Cow<'_, str>
+pub fn grit_lib::pathspec::is_long_magic_pathspec_token(&str) -> bool
 pub fn grit_lib::pathspec::resolve_magic_pathspec(&str, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::pathspec::resolve_pathspec(&str, &std::path::Path, core::option::Option<&str>) -> alloc::string::String
 pub fn grit_lib::pathspec::resolve_pathspec_in_worktree(&str, &str, &std::path::Path, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::pathspec::PathOutsideRepository>

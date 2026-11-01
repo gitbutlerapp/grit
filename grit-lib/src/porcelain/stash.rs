@@ -43,9 +43,7 @@ use crate::merge_trees::{
 use crate::objects::{parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::operation::{conflicts_from_index, Conflict};
-use crate::pathspec::{
-    has_glob_chars, matches_pathspec_list, pathspec_is_exclude, PathspecListMatcher,
-};
+use crate::pathspec::{has_glob_chars, pathspec_is_exclude};
 use crate::porcelain::add::restricted_index_paths_for_pathspecs;
 use crate::porcelain::branch_error::BranchError;
 use crate::porcelain::checkout::is_eligible_for_parallel_checkout;
@@ -60,6 +58,9 @@ use crate::porcelain::hunk_select::{
 use crate::porcelain::index_from_tree::{
     index_from_tree_with_seeded_stats, index_from_tree_with_seeded_worktree_stats,
     index_from_tree_with_worktree_stats,
+};
+use crate::porcelain::pathspec_match::{
+    positive_pathspec_matches_any_path, RepositoryPathspecFilter,
 };
 use crate::porcelain::restore::{restore_paths_with_lock, RestoreOptions, RestoreSource};
 use crate::porcelain::status::{
@@ -550,14 +551,19 @@ fn staged_change_paths(
     Ok(staged.into_iter().map(|e| e.path().to_string()).collect())
 }
 
-fn filter_paths_by_pathspecs(paths: Vec<String>, pathspecs: &[String]) -> Vec<String> {
+fn filter_paths_by_pathspecs(
+    repo: &Repository,
+    paths: Vec<String>,
+    pathspecs: &[String],
+) -> Result<Vec<String>> {
     if pathspecs.is_empty() {
-        return paths;
+        return Ok(paths);
     }
-    paths
+    let filter = RepositoryPathspecFilter::try_new(repo, pathspecs)?;
+    Ok(paths
         .into_iter()
-        .filter(|path| matches_pathspec_list(path, pathspecs))
-        .collect()
+        .filter(|path| filter.matches(path))
+        .collect())
 }
 
 fn staged_change_paths_for_options(
@@ -567,7 +573,7 @@ fn staged_change_paths_for_options(
     options: &StashPushOptions,
 ) -> Result<Vec<String>> {
     let paths = staged_change_paths(repo, index, head_tree)?;
-    Ok(filter_paths_by_pathspecs(paths, &options.pathspecs))
+    filter_paths_by_pathspecs(repo, paths, &options.pathspecs)
 }
 
 /// What [`has_stashable_changes`] found.
@@ -1136,8 +1142,11 @@ fn stash_push_pathspecs_active(options: &StashPushOptions) -> bool {
     !options.pathspecs.is_empty() && !selection_is_active(options)
 }
 
-fn pathspec_matcher<'a>(repo: &'a Repository, pathspecs: &'a [String]) -> PathspecListMatcher<'a> {
-    PathspecListMatcher::new(pathspecs, repo.pathspec_match_context())
+fn pathspec_matcher<'a>(
+    repo: &Repository,
+    pathspecs: &'a [String],
+) -> Result<RepositoryPathspecFilter<'a>> {
+    RepositoryPathspecFilter::try_new(repo, pathspecs)
 }
 
 fn index_stage0_paths(index: &Index) -> Vec<String> {
@@ -1168,13 +1177,13 @@ fn validate_stash_push_pathspecs(
         if pathspec_is_exclude(spec) {
             continue;
         }
-        if crate::pathspec::sorted_paths_match_pathspec(spec, &index_paths, ctx) {
+        if positive_pathspec_matches_any_path(repo, spec, &index_paths, ctx)? {
             continue;
         }
         if options.include_untracked {
             let untracked = collect_untracked_paths(repo, work_tree)?;
             let untracked_refs: Vec<&str> = untracked.iter().map(String::as_str).collect();
-            if crate::pathspec::sorted_paths_match_pathspec(spec, &untracked_refs, ctx) {
+            if positive_pathspec_matches_any_path(repo, spec, &untracked_refs, ctx)? {
                 continue;
             }
             if !has_glob_chars(spec) && !spec.starts_with(':') && work_tree.join(spec).exists() {
@@ -1190,12 +1199,12 @@ fn filter_paths_by_pathspec(
     repo: &Repository,
     pathspecs: &[String],
     paths: Vec<String>,
-) -> Vec<String> {
-    let matcher = pathspec_matcher(repo, pathspecs);
-    paths
+) -> Result<Vec<String>> {
+    let matcher = pathspec_matcher(repo, pathspecs)?;
+    Ok(paths
         .into_iter()
         .filter(|path| matcher.matches(path))
-        .collect()
+        .collect())
 }
 
 fn has_stashable_changes_for_pathspecs(
@@ -1204,7 +1213,7 @@ fn has_stashable_changes_for_pathspecs(
     head_tree: &ObjectId,
     options: &StashPushOptions,
 ) -> Result<bool> {
-    let matcher = pathspec_matcher(repo, &options.pathspecs);
+    let matcher = pathspec_matcher(repo, &options.pathspecs)?;
     let mut index = repo.load_index()?;
     let staged = diff_index_to_tree(repo.odb(), &index, Some(head_tree), true)?;
     if staged.iter().any(|e| matcher.matches(e.path())) {
@@ -1221,7 +1230,7 @@ fn has_stashable_changes_for_pathspecs(
             repo,
             &options.pathspecs,
             collect_untracked_paths(repo, work_tree)?,
-        );
+        )?;
         if !untracked.is_empty() {
             return Ok(true);
         }
@@ -1236,7 +1245,7 @@ fn apply_worktree_diff_to_index_for_pathspecs(
     pathspecs: &[String],
     scope: &mut ProgressScope<'_>,
 ) -> Result<()> {
-    let matcher = pathspec_matcher(repo, pathspecs);
+    let matcher = pathspec_matcher(repo, pathspecs)?;
     let index_mtime = index_file_mtime(&repo.index_path());
     let diff_opts = stash_worktree_diff_opts(repo, index, Some(pathspecs))?;
     let (unstaged, _) =
@@ -1286,17 +1295,18 @@ fn pathspecs_for_push_reset(
     let index_owned = index_stage0_paths(&index);
     let index_paths: Vec<&str> = index_owned.iter().map(String::as_str).collect();
     let ctx = repo.pathspec_match_context();
-    Ok(pathspecs
-        .iter()
-        .filter(|spec| {
-            if pathspec_is_exclude(spec) {
-                return false;
-            }
-            crate::pathspec::sorted_paths_match_pathspec(spec, &head_paths, ctx)
-                || crate::pathspec::sorted_paths_match_pathspec(spec, &index_paths, ctx)
-        })
-        .cloned()
-        .collect())
+    let mut kept = Vec::new();
+    for spec in pathspecs {
+        if pathspec_is_exclude(spec) {
+            continue;
+        }
+        if positive_pathspec_matches_any_path(repo, spec, &head_paths, ctx)?
+            || positive_pathspec_matches_any_path(repo, spec, &index_paths, ctx)?
+        {
+            kept.push(spec.clone());
+        }
+    }
+    Ok(kept)
 }
 
 fn reset_stash_push_pathspecs_to_head(
@@ -1436,7 +1446,7 @@ fn build_stash_commit(
     let untracked_paths = if options.include_untracked {
         let all = collect_untracked_paths(repo, work_tree)?;
         if pathspec_push {
-            filter_paths_by_pathspec(repo, &options.pathspecs, all)
+            filter_paths_by_pathspec(repo, &options.pathspecs, all)?
         } else {
             all
         }

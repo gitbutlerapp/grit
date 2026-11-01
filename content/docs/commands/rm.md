@@ -27,7 +27,7 @@ Grit refuses to remove a path when doing so would lose content that is stored no
 
 So the usual way to stop tracking an accidentally committed file (`.env`, build output) works even after you edited it: `grit rm --cached .env` keeps your copy on disk and stages the deletion. When a path is refused, nothing is changed; the error lists each refused path with its reason and suggests `--cached` only when it would help.
 
-Directory pathspecs remove every tracked file under that directory; trailing slashes on a directory path (or a path that names an existing directory) imply recursive removal.
+Directory pathspecs remove every tracked file under that directory; trailing slashes on a directory path (or a path that names an existing directory) imply recursive removal. Attribute pathspecs such as `:(attr:myattr)` use the same `.gitattributes` stack as [`grit log`](log.md) (including with `--cached`).
 
 `--dry-run` runs the same checks and lists paths that would be removed without writing the index or work tree. `--ignore-unmatch` treats non-matching pathspecs as success with an empty result (like `git rm --ignore-unmatch`).
 

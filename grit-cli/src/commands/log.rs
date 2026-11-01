@@ -42,7 +42,7 @@ use crate::log_display::{
 };
 use crate::markdown;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, OutputMode, RenderContext};
-use crate::pathspec_args::TrailingPathspecArgs;
+use crate::pathspec_args::{promote_long_magic_pathspecs_from_revs, TrailingPathspecArgs};
 use crate::rev_select::{self, RevSelectArgs};
 use crate::stream_commit_list::{
     begin_commits_json_document, finish_commits_json_document, flush_or_broken_pipe,
@@ -448,8 +448,11 @@ pub fn listing_stream_plan(
         return Ok(None);
     }
     let repo = context::discover()?;
+    let mut rev = rev.clone();
+    let mut pathspecs = pathspecs.clone();
+    promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
     let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
-    let default_tips = default_tips(&repo, rev)?;
+    let default_tips = default_tips(&repo, &rev)?;
     let tip_refs: Vec<&str> = default_tips.iter().map(String::as_str).collect();
     let walk_opts =
         rev.to_rev_walk_options(&repo, repo.environment(), &tip_refs, walk_paths.as_slice())?;
@@ -618,8 +621,8 @@ fn write_empty_log_stream(
 /// `cursor` resumes a paged walk from a `--cursor` token (an empty token is ignored);
 /// `page` sets how many commits to list when `-n` is not given.
 pub fn run(
-    rev: RevSelectArgs,
-    pathspecs: TrailingPathspecArgs,
+    mut rev: RevSelectArgs,
+    mut pathspecs: TrailingPathspecArgs,
     cursor: Option<String>,
     format: DiffFormatArgs,
     display: LogDisplayOptions,
@@ -654,6 +657,7 @@ pub fn run(
         ..display
     };
     let env = repo.environment();
+    promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
     let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
     let path_args = walk_paths.as_slice();
     let default_tips = default_tips(&repo, &rev)?;

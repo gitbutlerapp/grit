@@ -6,6 +6,7 @@ use crate::index::MODE_TREE;
 use crate::objects::{parse_tree, ObjectId};
 use crate::pathspec::{
     has_glob_chars, pathspec_has_attr_magic, pathspec_is_exclude, sorted_paths_match_pathspec,
+    PathspecListMatcher, PathspecMatchContext, PathspecMatcher,
 };
 use crate::repo::Repository;
 use crate::state::resolve_head_for_repository;
@@ -130,6 +131,73 @@ impl<'r> KnownPathspecChecker<'r> {
             work_tree.join(resolved).exists()
         }
     }
+}
+
+/// Pathspec list matching for porcelain commands: fast literal matching when no spec uses
+/// `:(attr:...)` magic, otherwise a repository [`PathspecMatcher`] with the attribute stack.
+pub(crate) enum RepositoryPathspecFilter<'a> {
+    List(PathspecListMatcher<'a>),
+    Attr(PathspecMatcher<'a>),
+}
+
+impl<'a> RepositoryPathspecFilter<'a> {
+    /// Builds a filter for `pathspecs`, loading gitattributes when any spec needs them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidAttrPathspec`] when an attribute pathspec is malformed.
+    pub(crate) fn try_new(repo: &Repository, pathspecs: &'a [String]) -> Result<Self> {
+        if pathspecs.iter().any(|s| pathspec_has_attr_magic(s)) {
+            Ok(Self::Attr(repo.pathspec_matcher(pathspecs)?))
+        } else {
+            Ok(Self::List(PathspecListMatcher::new(
+                pathspecs,
+                repo.pathspec_match_context(),
+            )))
+        }
+    }
+
+    /// Whether `path` is selected by the pathspec list.
+    #[must_use]
+    pub(crate) fn matches(&self, path: &str) -> bool {
+        match self {
+            Self::List(m) => m.matches(path),
+            Self::Attr(m) => m.matches(path),
+        }
+    }
+
+    /// Like [`Self::matches`], but honors index/tree entry `mode` for directory and submodule specs.
+    #[must_use]
+    pub(crate) fn matches_entry(&self, path: &str, mode: u32) -> bool {
+        match self {
+            Self::List(m) => m.matches(path),
+            Self::Attr(m) => m.matches_entry(path, mode),
+        }
+    }
+}
+
+/// Whether positive pathspec `spec` matches at least one path in `sorted_paths`.
+///
+/// Uses the repository attribute stack when `spec` carries `:(attr:...)` magic.
+///
+/// # Errors
+///
+/// Propagates attribute pathspec validation failures from [`Repository::pathspec_matcher`].
+pub(crate) fn positive_pathspec_matches_any_path(
+    repo: &Repository,
+    spec: &str,
+    sorted_paths: &[&str],
+    ctx: PathspecMatchContext,
+) -> Result<bool> {
+    if pathspec_is_exclude(spec) {
+        return Ok(true);
+    }
+    if pathspec_has_attr_magic(spec) {
+        let one = [spec.to_owned()];
+        let matcher = repo.pathspec_matcher(&one)?;
+        return Ok(sorted_paths.iter().any(|p| matcher.matches(p)));
+    }
+    Ok(sorted_paths_match_pathspec(spec, sorted_paths, ctx))
 }
 
 /// A pathspec without glob characters or `:` magic, which may name a worktree file directly.

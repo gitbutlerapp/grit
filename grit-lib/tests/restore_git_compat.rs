@@ -668,6 +668,76 @@ fn git_staged_then_grit_restore_staged() {
     git_fsck(dir.path());
 }
 
+fn setup_attr_vendored_fixture() -> (tempfile::TempDir, Repository) {
+    let (dir, repo) = init_repo();
+    fs::write(dir.path().join(".gitattributes"), "*.rs vendored\n").unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("src/a.rs"), "1\n").unwrap();
+    fs::write(dir.path().join("src/b.txt"), "1\n").unwrap();
+    git_cmd(dir.path(), &["add", "-A"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+    fs::write(dir.path().join("src/a.rs"), "1\n2\n").unwrap();
+    fs::write(dir.path().join("src/b.txt"), "1\n2\n").unwrap();
+    (dir, repo)
+}
+
+#[test]
+fn restore_attr_pathspec_worktree_matches_git() {
+    let (dir, repo) = setup_attr_vendored_fixture();
+    restore_paths(
+        &repo,
+        &restore_opts(&[":(attr:vendored)src"], false, true, RestoreSource::Index),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("restore attr worktree");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("src/a.rs")).unwrap(),
+        "1\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("src/b.txt")).unwrap(),
+        "1\n2\n"
+    );
+    git_fsck(dir.path());
+}
+
+#[test]
+fn restore_staged_attr_pathspec_matches_git() {
+    let (dir, repo) = setup_attr_vendored_fixture();
+    git_cmd(dir.path(), &["add", "src/a.rs"]);
+    restore_paths(
+        &repo,
+        &restore_opts(&[":(attr:vendored)src"], true, false, RestoreSource::Index),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("restore staged attr");
+    let staged = git_cmd(dir.path(), &["diff", "--cached", "--name-only"]);
+    assert!(staged.trim().is_empty());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("src/b.txt")).unwrap(),
+        "1\n2\n"
+    );
+    git_fsck(dir.path());
+}
+
+#[test]
+fn restore_attr_pathspec_no_match_errors() {
+    let (_dir, repo) = setup_attr_vendored_fixture();
+    let err = restore_paths(
+        &repo,
+        &restore_opts(&[":(attr:no-such)src"], false, true, RestoreSource::Index),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("no match");
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::PathspecNoMatch { .. }
+    ));
+}
+
 #[test]
 fn restore_index_readable_by_git_ls_files() {
     let (dir, repo) = init_repo();

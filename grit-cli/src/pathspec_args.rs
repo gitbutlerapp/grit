@@ -1,8 +1,10 @@
 //! Shared `--pathspec-from-file` / trailing path arguments for porcelain commands.
 
+use crate::rev_select::RevSelectArgs;
 use anyhow::{bail, Context, Result};
 use clap::Args;
 use grit_lib::error::PathspecFromFileParseError;
+use grit_lib::worktree::pathspec::is_long_magic_pathspec_token;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::{
     parse_pathspecs_from_source, PathspecInput, PathspecResolveError, ResolvedPathspecs,
@@ -137,6 +139,26 @@ impl TrailingPathspecArgs {
         }
         Ok(())
     }
+}
+
+/// Moves long-form magic pathspec tokens (`:(...)`) from `rev.revs` onto `pathspecs.paths`.
+///
+/// Clap places trailing operands in `revs` when no `--` separator is given; history commands treat
+/// these as path limits instead of revision names.
+pub fn promote_long_magic_pathspecs_from_revs(
+    rev: &mut RevSelectArgs,
+    pathspecs: &mut TrailingPathspecArgs,
+) {
+    let mut moved = Vec::new();
+    rev.revs.retain(|token| {
+        if is_long_magic_pathspec_token(token) {
+            moved.push(token.clone());
+            false
+        } else {
+            true
+        }
+    });
+    pathspecs.paths.extend(moved);
 }
 
 fn resolve_pathspec_args(

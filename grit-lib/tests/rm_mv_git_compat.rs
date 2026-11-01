@@ -188,6 +188,35 @@ fn rm_clean_file_staged_deletion() {
 }
 
 #[test]
+fn rm_cached_attr_pathspec_unstages_only_matching() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    fs::write(repo_dir.join(".gitattributes"), "*.rs vendored\n").unwrap();
+    fs::create_dir_all(repo_dir.join("src")).unwrap();
+    fs::write(repo_dir.join("src/a.rs"), "1\n").unwrap();
+    fs::write(repo_dir.join("src/b.txt"), "1\n").unwrap();
+    commit_all(repo_dir, "init");
+
+    let repo = grit_repo(repo_dir);
+    remove_paths(
+        &repo,
+        &RemoveOptions {
+            pathspecs: vec![":(attr:vendored)src".into()],
+            pathspec_sources: vec![":(attr:vendored)src".into()],
+            cached: true,
+            ..Default::default()
+        },
+    )
+    .expect("rm --cached attr");
+
+    let ls = git(repo_dir, &["ls-files"]);
+    assert!(ls.contains("src/b.txt"));
+    assert!(!ls.contains("src/a.rs"));
+    assert!(repo_dir.join("src/a.rs").is_file());
+}
+
+#[test]
 fn rm_cached_leaves_untracked_file() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo_dir = tmp.path();

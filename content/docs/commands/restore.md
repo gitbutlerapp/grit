@@ -28,7 +28,7 @@ Discards local changes for tracked paths you name. By default, `grit restore` re
 
 | Option | Description |
 | --- | --- |
-| `<path>…` | One or more pathspecs (required for full-file restore unless `--pathspec-from-file` is set). Optional with `--hunks` / `--lines` to narrow the diff scan. |
+| `<path>…` | One or more pathspecs (required for full-file restore unless `--pathspec-from-file` is set). Optional with `--hunks` / `--lines` to narrow the diff scan. Attribute pathspecs such as `:(attr:myattr)` use the same `.gitattributes` stack as [`grit log`](log.md). |
 | `--pathspec-from-file` | Read pathspecs from a file, or `-` for stdin (same rules as Git). |
 | `--pathspec-file-nul` | With `--pathspec-from-file`, entries are NUL-separated instead of line-based. |
 | `-S`, `--staged` | Restore the index (or unstage selected hunks with `--hunks` / `--lines`). |

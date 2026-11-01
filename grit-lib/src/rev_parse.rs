@@ -3518,6 +3518,9 @@ pub fn parse_index_colon_spec(spec: &str) -> Option<IndexColonSpec<'_>> {
     if !spec.starts_with(':') || spec.starts_with(":/") || spec.len() <= 1 {
         return None;
     }
+    if spec.starts_with(":(") {
+        return None;
+    }
     let rest = &spec[1..];
     if rest.is_empty() {
         return None;
@@ -4235,6 +4238,7 @@ mod line_coverage_tests {
             Some(("HEAD", "path/to"))
         );
         assert!(parse_index_colon_spec(":2:path").is_some());
+        assert!(parse_index_colon_spec(":(attr:rust)").is_none());
         assert!(split_double_dot_range("a..b").is_some());
         assert!(split_triple_dot_range("a...b").is_some());
         assert!(!split_double_dot_range("a...b").is_some());

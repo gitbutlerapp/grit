@@ -16,6 +16,7 @@ use crate::path_icase::{paths_equal, worktree_filesystem_case_insensitive};
 use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
 use crate::pathspec::pathspec_is_exclude;
 use crate::porcelain::checkout::remove_empty_parent_dirs;
+use crate::porcelain::pathspec_match::RepositoryPathspecFilter;
 use crate::repo::Repository;
 
 /// Options for [`remove_paths`].
@@ -654,7 +655,6 @@ fn collect_removal_paths(
     _work_tree: &Path,
     opts: &RemoveOptions,
 ) -> Result<Vec<String>> {
-    let pathspec_ctx = repo.pathspec_match_context();
     let sources = if opts.pathspec_sources.is_empty() {
         &opts.pathspecs
     } else {
@@ -667,15 +667,10 @@ fn collect_removal_paths(
             continue;
         }
         let spec = resolved.trim_end_matches('/');
+        let filter = RepositoryPathspecFilter::try_new(repo, std::slice::from_ref(resolved))?;
         let matches: Vec<String> = tracked
             .iter()
-            .filter(|path| {
-                crate::pathspec::matches_pathspec_list_with_context(
-                    path,
-                    std::slice::from_ref(resolved),
-                    pathspec_ctx,
-                )
-            })
+            .filter(|path| filter.matches(path))
             .cloned()
             .collect();
 
