@@ -90,6 +90,14 @@ pub const CASES: &[(&str, Case)] = &[
     ("symbolic_iteration_peel", symbolic_iteration_peel),
     ("direct_update_reflog_oids", direct_update_reflog_oids),
     ("delete_with_reflog_oids", delete_with_reflog_oids),
+    (
+        "delete_clears_reflog_then_nested_create",
+        delete_clears_reflog_then_nested_create,
+    ),
+    (
+        "delete_deep_then_shallow_sibling_create",
+        delete_deep_then_shallow_sibling_create,
+    ),
     ("symref_deref_delete", symref_deref_delete),
     (
         "symref_head_deref_delete_recreate_branch",
@@ -710,7 +718,7 @@ pub fn direct_update_reflog_oids(store: Arc<dyn RefStore>) {
     assert_eq!(entry.new_oid, oid(2));
 }
 
-/// A delete with a reflog line logs the old id and a zero new id.
+/// A delete with a reflog update still removes the ref's reflog (matching Git).
 pub fn delete_with_reflog_oids(store: Arc<dyn RefStore>) {
     seed_direct(store.as_ref(), "refs/heads/del", oid(5));
 
@@ -722,9 +730,89 @@ pub fn delete_with_reflog_oids(store: Arc<dyn RefStore>) {
     );
 
     assert_eq!(store.read_raw("refs/heads/del").expect("read"), None);
-    let entry = newest_reflog_entry(store.as_ref(), "refs/heads/del").expect("entry");
-    assert_eq!(entry.old_oid, oid(5));
-    assert!(entry.new_oid.is_zero());
+    assert!(
+        !store.reflog_exists("refs/heads/del").expect("exists"),
+        "ref delete must drop the reflog even when a ReflogUpdate is present"
+    );
+}
+
+/// Delete `refs/heads/a`, then create `refs/heads/a/b` with a reflog (Git issue #2450).
+pub fn delete_clears_reflog_then_nested_create(store: Arc<dyn RefStore>) {
+    let mut create = update(
+        "refs/heads/a",
+        Some(RawRef::Direct(oid(1))),
+        Expected::Missing,
+    );
+    create.reflog = Some(sample_log());
+    commit_txn(
+        store.as_ref(),
+        RefTransaction::new().update(create).expect("txn"),
+    );
+    assert!(store.reflog_exists("refs/heads/a").expect("exists"));
+
+    commit_txn(
+        store.as_ref(),
+        RefTransaction::new()
+            .update(update("refs/heads/a", None, Expected::Any))
+            .expect("txn"),
+    );
+    assert!(
+        !store.reflog_exists("refs/heads/a").expect("exists"),
+        "delete must remove the parent reflog file"
+    );
+
+    let mut nested = update(
+        "refs/heads/a/b",
+        Some(RawRef::Direct(oid(2))),
+        Expected::Missing,
+    );
+    nested.reflog = Some(sample_log());
+    commit_txn(
+        store.as_ref(),
+        RefTransaction::new().update(nested).expect("txn"),
+    );
+    assert_eq!(
+        store.read_raw("refs/heads/a/b").expect("read"),
+        Some(RawRef::Direct(oid(2)))
+    );
+    assert!(store.reflog_exists("refs/heads/a/b").expect("nested log"));
+}
+
+/// Delete a deep ref, then create a shallower sibling with a reflog.
+pub fn delete_deep_then_shallow_sibling_create(store: Arc<dyn RefStore>) {
+    let mut create = update(
+        "refs/heads/a/b/c",
+        Some(RawRef::Direct(oid(1))),
+        Expected::Missing,
+    );
+    create.reflog = Some(sample_log());
+    commit_txn(
+        store.as_ref(),
+        RefTransaction::new().update(create).expect("txn"),
+    );
+
+    commit_txn(
+        store.as_ref(),
+        RefTransaction::new()
+            .update(update("refs/heads/a/b/c", None, Expected::Any))
+            .expect("txn"),
+    );
+    assert!(!store.reflog_exists("refs/heads/a/b/c").expect("exists"));
+
+    let mut shallow = update(
+        "refs/heads/a",
+        Some(RawRef::Direct(oid(2))),
+        Expected::Missing,
+    );
+    shallow.reflog = Some(sample_log());
+    commit_txn(
+        store.as_ref(),
+        RefTransaction::new().update(shallow).expect("txn"),
+    );
+    assert_eq!(
+        store.read_raw("refs/heads/a").expect("read"),
+        Some(RawRef::Direct(oid(2)))
+    );
 }
 
 /// Deleting through a symref removes the target and keeps the symref.

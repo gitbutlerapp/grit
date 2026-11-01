@@ -187,7 +187,7 @@ pub trait RefStore: Send + Sync + Debug {
     ///
     /// [`backend::check_transaction`] performs steps 1 and 3–5 and
     /// [`backend::apply_transaction`] defines what [`PreparedRefTransaction::commit`] stores,
-    /// including reflog lines.
+    /// including appended reflog lines and removing a deleted ref's reflog.
     ///
     /// A backend does not look at objects. The store
     /// [`Repository::refs`](crate::repo::Repository::refs) returns (whatever backend it

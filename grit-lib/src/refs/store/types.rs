@@ -147,7 +147,9 @@ pub struct RefUpdate {
     pub new_value: Option<RawRef>,
     /// Required current state for compare-and-swap.
     pub expected: Expected,
-    /// Reflog line to append when the update commits (`None` skips reflog).
+    /// Reflog line to append when the update commits (`None` skips reflog). Ignored when
+    /// [`Self::new_value`] is `None` and the update is not log-only: deleting a ref drops
+    /// its reflog, matching Git.
     pub reflog: Option<ReflogUpdate>,
     /// Update modifiers.
     pub flags: RefUpdateFlags,
