@@ -85,17 +85,22 @@ pub fn finish_commits_json_document(
 }
 
 /// Serialize one commit value into a JSON array, with a leading comma when `first` is false.
+///
+/// The element is serialized into memory and written at once: serde emits many small
+/// fragments, and a line-buffered stdout scans each one for a newline.
 pub fn write_json_array_element<T: serde::Serialize>(
     w: &mut dyn Write,
     first: &mut bool,
     value: &T,
 ) -> Result<()> {
+    let mut buf = Vec::with_capacity(1024);
     if !*first {
-        stdio::io_result(write!(w, ",")).map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+        buf.push(b',');
     } else {
         *first = false;
     }
-    json_write(serde_json::to_writer(&mut *w, value))
+    json_write(serde_json::to_writer(&mut buf, value))?;
+    stdio::io_result(w.write_all(&buf)).map_err(|e| anyhow::anyhow!("writing output: {e}"))
 }
 
 /// Load human summaries for one batch, reusing walk bytes when present.
