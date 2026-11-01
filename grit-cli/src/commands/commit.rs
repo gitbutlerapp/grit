@@ -420,7 +420,7 @@ fn build_commit_request(
             .is_some_and(|m| !m.trim().is_empty()))
     };
     if message.is_none() && !amend && reuse_message_from.is_none() && !has_pending_message()? {
-        bail!("provide a commit message, e.g. grit commit \"what changed\"");
+        return Err(commit_message_required_error());
     }
     let message_text = message.as_deref().unwrap_or("");
 
@@ -580,14 +580,14 @@ fn resolve_commit_message(
     match (message, message_file) {
         (Some(m), None) => {
             if m.trim().is_empty() {
-                bail!("empty commit message");
+                return Err(empty_commit_message_error());
             }
             Ok(Some(m))
         }
         (None, Some(path)) => {
             let contents = read_message_file(&path)?;
             if contents.trim().is_empty() {
-                bail!("empty commit message");
+                return Err(empty_commit_message_error());
             }
             Ok(Some(contents))
         }
@@ -650,6 +650,22 @@ fn scope_json(scope: &CommitScope) -> CommitScopeJson {
     }
 }
 
+fn commit_message_required_error() -> anyhow::Error {
+    let human = "provide a commit message, e.g. grit commit \"what changed\"".to_owned();
+    anyhow::Error::new(StructuredCliError {
+        payload: StructuredJsonError::new(human.clone(), ErrorKind::CommitMessageRequired),
+        human,
+    })
+}
+
+fn empty_commit_message_error() -> anyhow::Error {
+    let human = "empty commit message".to_owned();
+    anyhow::Error::new(StructuredCliError {
+        payload: StructuredJsonError::new(human.clone(), ErrorKind::EmptyCommitMessage),
+        human,
+    })
+}
+
 fn nothing_staged_commit_error(unstaged: usize, untracked: usize) -> anyhow::Error {
     let total = unstaged + untracked;
     let files = if total == 1 { "file" } else { "files" };
@@ -668,9 +684,10 @@ fn nothing_staged_commit_error(unstaged: usize, untracked: usize) -> anyhow::Err
 
 fn map_commit_error(err: Error) -> anyhow::Error {
     match err {
-        Error::NothingStagedToCommit { unstaged, untracked } => {
-            nothing_staged_commit_error(unstaged, untracked)
-        }
+        Error::NothingStagedToCommit {
+            unstaged,
+            untracked,
+        } => nothing_staged_commit_error(unstaged, untracked),
         Error::NothingToCommit => anyhow::Error::new(StructuredCliError {
             payload: StructuredJsonError::new(
                 "nothing to commit — working tree clean",
@@ -678,9 +695,7 @@ fn map_commit_error(err: Error) -> anyhow::Error {
             ),
             human: "nothing to commit — working tree clean".to_owned(),
         }),
-        Error::IndexUnmerged => anyhow::anyhow!(
-            "cannot commit: unresolved merge conflicts remain — resolve each conflicted path (grit add or grit rm), then try again"
-        ),
+        unmerged @ Error::IndexUnmerged => anyhow::Error::new(unmerged),
         Error::AmendUnborn => anyhow::anyhow!("cannot amend: no commits on this branch yet"),
         Error::PartialCommitDuringMerge => {
             anyhow::anyhow!("cannot do a partial commit during a merge")
@@ -688,9 +703,7 @@ fn map_commit_error(err: Error) -> anyhow::Error {
         Error::PartialCommitDuringReplay => {
             anyhow::anyhow!("cannot do a partial commit during a cherry-pick or revert")
         }
-        Error::PathspecNoMatch { spec } => anyhow::anyhow!(
-            "pathspec '{spec}' did not match any file(s) known to git"
-        ),
+        pathspec @ Error::PathspecNoMatch { .. } => anyhow::Error::new(pathspec),
         Error::EmbeddedRepoWithoutCommit { path } => {
             let human = format!(
                 "cannot commit: '{path}' is an embedded git repository with no commit checked out"

@@ -1543,7 +1543,7 @@ fn map_rebase_outcome(outcome: RebaseOutcome) -> Result<RebaseCliOutcome> {
 
 fn map_rebase_session_error(repo: &Repository, err: RebaseSessionError) -> anyhow::Error {
     match err {
-        RebaseSessionError::NoRebaseInProgress => anyhow::anyhow!("no rebase in progress"),
+        RebaseSessionError::NoRebaseInProgress => anyhow::Error::new(err),
         RebaseSessionError::RebaseAlreadyInProgress => {
             let kind = grit_lib::state::operation_blocking_switch(repo.git_dir())
                 .ok()
@@ -1554,9 +1554,7 @@ fn map_rebase_session_error(repo: &Repository, err: RebaseSessionError) -> anyho
         RebaseSessionError::ForeignRebaseInProgress => anyhow::anyhow!(
             "this rebase was started by git; finish it with `git rebase --continue` or `git rebase --skip`, or cancel it with `grit rebase --abort`"
         ),
-        RebaseSessionError::UnmergedPaths => {
-            anyhow::anyhow!("cannot continue: unmerged paths remain in the index")
-        }
+        RebaseSessionError::UnmergedPaths => anyhow::Error::new(err),
         RebaseSessionError::NothingToCommit => {
             anyhow::anyhow!("nothing to commit after conflict resolution")
         }

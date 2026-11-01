@@ -1784,9 +1784,9 @@ fn validate_pathspecs(
         let matches_repo = checker.matches(resolved)?
             || pathspec_matches_unmerged_index_entries(index, &unmerged_paths, resolved, ctx);
         if !matches_repo {
-            return Err(Error::Message(format!(
-                "pathspec '{label}' did not match any files"
-            )));
+            return Err(Error::PathspecNoMatch {
+                spec: (*label).to_owned(),
+            });
         }
         if opts.force_ignored || opts.skip_pathspec_ignore_check {
             continue;
@@ -2663,7 +2663,7 @@ mod tests {
             )
             .unwrap_err();
             assert!(
-                matches!(&err, Error::Message(msg) if msg.contains(&format!("'{missing}'"))),
+                matches!(&err, Error::PathspecNoMatch { spec } if spec == missing),
                 "{missing}: {err:?}"
             );
         }

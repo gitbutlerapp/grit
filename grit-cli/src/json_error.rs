@@ -317,6 +317,15 @@ pub fn operation_in_progress_for_repo(
     operation_in_progress(action, kind, operation.as_ref())
 }
 
+/// Structured failure when merge/rebase/pick/revert `--continue` or `--abort` has nothing paused.
+pub fn no_operation_in_progress(human: impl Into<String>) -> Error {
+    let human = human.into();
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError::new(human.clone(), ErrorKind::NoOperationInProgress),
+        human,
+    })
+}
+
 pub fn operation_in_progress(
     action: &str,
     kind: InProgressOperation,
@@ -397,6 +406,15 @@ fn revision_not_found_payload_from_chain(err: &Error) -> Option<StructuredJsonEr
                 return Some(StructuredJsonError::new(
                     format!("revision '{spec}' not found"),
                     ErrorKind::RevisionNotFound,
+                ));
+            }
+            LibError::RevParse(
+                RevParseError::PathNotInRevision { .. }
+                | RevParseError::PathMissingFromWorktreeAndIndex { .. },
+            ) => {
+                return Some(StructuredJsonError::new(
+                    lib.to_string(),
+                    ErrorKind::PathNotFound,
                 ));
             }
             _ => {}

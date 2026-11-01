@@ -21,8 +21,6 @@ use std::collections::BTreeMap;
 use crate::commands::diff::{self, DiffOutcome};
 use crate::context;
 use crate::diff_render::{self, DiffStat};
-use crate::error_kind::ErrorKind;
-use crate::json_error::{StructuredCliError, StructuredJsonError};
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
@@ -787,14 +785,7 @@ fn map_stash_error(err: Error) -> anyhow::Error {
         Error::StashNoInitialCommit => {
             anyhow::anyhow!("you do not have the initial commit yet")
         }
-        Error::StashNotFound { n: 0 } => anyhow::Error::new(StructuredCliError {
-            human: "no stash entries".to_owned(),
-            payload: StructuredJsonError {
-                hint: Some("save local changes with `grit stash push`".to_owned()),
-                ..StructuredJsonError::new("no stash entries", ErrorKind::RevisionNotFound)
-            },
-        }),
-        Error::StashNotFound { n } => anyhow::anyhow!("no stash entry at index {n}"),
+        stash @ Error::StashNotFound { .. } => anyhow::Error::new(stash),
         Error::CorruptStash(msg) => anyhow::anyhow!("corrupt stash commit: {msg}"),
         Error::StashWouldOverwriteLocalChanges { paths } => {
             anyhow::anyhow!("local changes would be overwritten by stash:\n{paths}")
@@ -806,9 +797,7 @@ fn map_stash_error(err: Error) -> anyhow::Error {
         Error::StashIndexConflict => {
             anyhow::anyhow!("conflicts in index while applying stash with --index")
         }
-        Error::PathspecNoMatch { spec } => {
-            anyhow::anyhow!("pathspec '{spec}' did not match any file(s) known to git")
-        }
+        pathspec @ Error::PathspecNoMatch { .. } => anyhow::Error::new(pathspec),
         Error::HunkSelection(err) => anyhow::Error::new(err),
         Error::StashOptionConflict(msg) => anyhow::anyhow!("{msg}"),
         Error::Branch(err) => anyhow::Error::new(err),

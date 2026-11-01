@@ -406,7 +406,7 @@ fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Er
             anyhow::anyhow!("nothing to pick — that commit is already the current HEAD")
         }
         Error::NoReplayInProgress => {
-            anyhow::anyhow!("no cherry-pick in progress")
+            crate::json_error::no_operation_in_progress("no cherry-pick in progress")
         }
         Error::ReplayContinueUnmerged => anyhow::anyhow!(
             "cannot continue: resolve conflicts and stage the result (`grit add`), then run `grit pick --continue`"

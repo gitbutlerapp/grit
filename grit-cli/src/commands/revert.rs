@@ -385,7 +385,7 @@ fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Er
             anyhow::anyhow!("nothing to commit — the revert would not change the tree")
         }
         Error::NoReplayInProgress => {
-            anyhow::anyhow!("no revert in progress")
+            crate::json_error::no_operation_in_progress("no revert in progress")
         }
         Error::ReplaySkipAlreadyCommitted => anyhow::anyhow!(
             "nothing to skip: current step already committed; run `grit revert --continue` instead"

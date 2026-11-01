@@ -5057,6 +5057,39 @@ fn blame_revision_label(start: Option<ObjectId>, start_oid: ObjectId) -> String 
     }
 }
 
+/// Worktree path absent on disk: blame the revision when the path still exists at `start_oid`.
+fn blame_worktree_missing_path(
+    repo: &Repository,
+    odb: &Odb,
+    start_oid: ObjectId,
+    revision_label: &str,
+    file_path: &str,
+    path_bytes: &[u8],
+    index: &mut Option<Index>,
+) -> Result<Option<BlameOverlay>> {
+    let start_tree = get_blame_commit(odb, start_oid, &mut BlameCommitCache::default(), None)?.tree;
+    if resolve_path_in_tree_entry(odb, &start_tree, file_path)?.is_some() {
+        return Ok(None);
+    }
+    let staged = loaded_index(repo, index)?;
+    let mut known = (0..=3).any(|stage| staged.get(path_bytes, stage).is_some());
+    if !known {
+        let mut parents = vec![start_oid];
+        parents.extend(crate::state::read_merge_heads(repo.git_dir())?);
+        for parent in &parents[1..] {
+            if known {
+                break;
+            }
+            let tree = get_blame_commit(odb, *parent, &mut BlameCommitCache::default(), None)?.tree;
+            known = resolve_path_in_tree_entry(odb, &tree, file_path)?.is_some();
+        }
+    }
+    if !known {
+        return Err(blame_path_missing_in_revision(file_path, revision_label));
+    }
+    Ok(None)
+}
+
 /// Load the uncommitted final text `source` selects as an overlay on `start_oid`.
 ///
 /// Returns `None` for [`BlameFinalSource::Revision`] and when the text hashes to the blob
@@ -5088,13 +5121,27 @@ fn load_blame_overlay(
     let bytes = match (supplied, repo.work_tree(), attrs.as_ref()) {
         (None, Some(work_tree), Some(attrs)) => {
             let abs = crate::repo_relpath::worktree_abs(work_tree, file_path);
-            let meta = std::fs::symlink_metadata(&abs).map_err(|source| {
-                crate::worktree::map_worktree_io(
-                    rel_match.as_ref(),
-                    crate::worktree::WorktreePathOperation::Metadata,
-                    source,
-                )
-            })?;
+            let meta = match std::fs::symlink_metadata(&abs) {
+                Ok(meta) => meta,
+                Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                    return blame_worktree_missing_path(
+                        repo,
+                        odb,
+                        start_oid,
+                        revision_label,
+                        file_path,
+                        &path_bytes,
+                        &mut index,
+                    );
+                }
+                Err(source) => {
+                    return Err(crate::worktree::map_worktree_io(
+                        rel_match.as_ref(),
+                        crate::worktree::WorktreePathOperation::Metadata,
+                        source,
+                    ));
+                }
+            };
             let index_entry = if crate::crlf::clean_uses_autocrlf_index_guard(attrs, &conv) {
                 loaded_index(repo, &mut index)?.get(&path_bytes, 0)
             } else {

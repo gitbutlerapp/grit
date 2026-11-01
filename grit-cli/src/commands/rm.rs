@@ -100,7 +100,7 @@ fn map_paths_error(err: grit_lib::error::Error, cached: bool) -> anyhow::Error {
         grit_lib::error::Error::RemoveBlocked { paths } => {
             anyhow::anyhow!(blocked_message(&paths, cached))
         }
-        other => anyhow::anyhow!("{other}"),
+        other => anyhow::Error::new(other),
     }
 }
 

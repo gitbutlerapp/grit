@@ -957,7 +957,14 @@ fn map_tag_error(err: Error) -> anyhow::Error {
         }
         Error::Tag(tag_err) => match tag_err {
             TagError::AlreadyExists { name } => {
-                anyhow::anyhow!("tag '{name}' already exists (use --force to replace)")
+                let human = format!("tag '{name}' already exists (use --force to replace)");
+                anyhow::Error::new(crate::json_error::StructuredCliError {
+                    payload: crate::json_error::StructuredJsonError::new(
+                        human.clone(),
+                        crate::error_kind::ErrorKind::TagAlreadyExists,
+                    ),
+                    human,
+                })
             }
             TagError::InvalidName { detail } => anyhow::anyhow!("invalid tag name: {detail}"),
             TagError::NotFound { name } => anyhow::anyhow!("no tag named '{name}'"),
