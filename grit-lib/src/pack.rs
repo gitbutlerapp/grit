@@ -6404,8 +6404,8 @@ mod tests {
             .output()
             .expect("rev-parse")
             .stdout;
-        let oid = ObjectId::from_hex(std::str::from_utf8(&oid_hex).unwrap().trim())
-            .expect("parse oid");
+        let oid =
+            ObjectId::from_hex(std::str::from_utf8(&oid_hex).unwrap().trim()).expect("parse oid");
         let indexes = read_local_pack_indexes(&objects).expect("indexes");
         let (idx_arc, offset) = indexes
             .iter()
@@ -6468,13 +6468,9 @@ mod tests {
             assert_warm_hint("before try_read_from_hinted_pack_into");
 
             let mut buf = Vec::new();
-            let hinted_into = pack_cache::try_read_from_hinted_pack_into(
-                &objects,
-                &oid,
-                true,
-                &mut buf,
-            )
-            .expect("hinted pack read_into must not propagate raw zlib");
+            let hinted_into =
+                pack_cache::try_read_from_hinted_pack_into(&objects, &oid, true, &mut buf)
+                    .expect("hinted pack read_into must not propagate raw zlib");
             assert!(
                 hinted_into.is_none(),
                 "damaged hinted read_into must fall through to full lookup"
