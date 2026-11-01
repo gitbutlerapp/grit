@@ -206,23 +206,22 @@ fn signing_spawn(
     spec: CommandSpec,
     payload: Option<&[u8]>,
 ) -> Result<CommandOutput> {
-    let mut running = cfg
+    let running = cfg
         .command_runner
         .spawn(&spec)
         .map_err(|e| Error::Signing(format!("could not run signing program: {e}")))?;
-    if let Some(data) = payload {
-        let Some(stdin) = running.stdin_mut() else {
-            return Err(Error::Signing(
-                "could not write payload to signing program stdin".into(),
-            ));
-        };
-        stdin.write_all(data).map_err(|e| {
-            Error::Signing(format!("could not write payload to signing program: {e}"))
-        })?;
-    }
-    running
-        .wait_with_output()
-        .map_err(|e| Error::Signing(format!("failed waiting for signing program: {e}")))
+    let output = if let Some(data) = payload {
+        running
+            .feed_stdin_and_wait_with_output(Some(
+                crate::command_runner::ConcurrentStdinFeed::Bytes(data),
+            ))
+            .map_err(|e| Error::Signing(format!("failed waiting for signing program: {e}")))?
+    } else {
+        running
+            .wait_with_output()
+            .map_err(|e| Error::Signing(format!("failed waiting for signing program: {e}")))?
+    };
+    Ok(output)
 }
 
 fn stdin_pipe(data: &[u8]) -> CommandStdin {

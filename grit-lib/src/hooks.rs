@@ -5,8 +5,8 @@
 
 use crate::command_runner::{
     git_for_windows_tool_dirs, prepend_to_child_path, system_command_runner, CommandEnvironment,
-    CommandRunner, CommandSpec, CommandStdin, CommandStdio, RunningCommand, ScriptInterpreter,
-    ShellInvocation,
+    CommandRunner, CommandSpec, CommandStdin, CommandStdio, ConcurrentStdinFeed, RunningCommand,
+    ScriptInterpreter, ShellInvocation,
 };
 use crate::config::{parse_path, ConfigSet};
 use crate::environment::Environment;
@@ -1238,30 +1238,68 @@ fn run_hook_opts_with_cancel(
             Err(other) => return Err(other),
         };
 
-        if let Some(ref path) = stdin_file {
-            let file = match fs::File::open(path) {
-                Ok(f) => f,
-                Err(_e) => {
-                    return Ok(HookResult::Failed { status: 1, output });
+        let exit = if capture && stdin_piped && (stdin_file.is_some() || opts.stdin_data.is_some())
+        {
+            if cancel.is_cancelled() {
+                let pid = child.child_pid();
+                let kill_process_group = child.kill_process_group();
+                let mut child = child;
+                let _ = child.kill();
+                if let Some(pid) = pid {
+                    kill_pid_sigkill(pid, kill_process_group);
                 }
+                return Err(HookError::Cancelled);
+            }
+            let output_result = if let Some(ref path) = stdin_file {
+                let file = match fs::File::open(path) {
+                    Ok(f) => f,
+                    Err(_e) => {
+                        return Ok(HookResult::Failed { status: 1, output });
+                    }
+                };
+                child.feed_stdin_and_wait_with_output(Some(ConcurrentStdinFeed::File(file)))
+            } else if let Some(data) = opts.stdin_data {
+                child.feed_stdin_and_wait_with_output(Some(ConcurrentStdinFeed::Bytes(data)))
+            } else {
+                child.close_stdin();
+                child.wait_with_output()
             };
-            if let Some(stdin) = child.stdin_mut() {
-                let mut file = file;
-                let _ = crate::sigpipe::copy(&mut file, stdin);
+            match output_result {
+                Ok(o) => {
+                    output.stdout.extend_from_slice(&o.stdout);
+                    output.stderr.extend_from_slice(&o.stderr);
+                    o.status
+                }
+                Err(_) => crate::command_runner::CommandExit {
+                    success: false,
+                    code: Some(1),
+                },
             }
-        } else if let Some(data) = opts.stdin_data {
-            if let Some(stdin) = child.stdin_mut() {
-                let _ = crate::sigpipe::write_all(stdin, data);
+        } else {
+            if let Some(ref path) = stdin_file {
+                let file = match fs::File::open(path) {
+                    Ok(f) => f,
+                    Err(_e) => {
+                        return Ok(HookResult::Failed { status: 1, output });
+                    }
+                };
+                if let Some(stdin) = child.stdin_mut() {
+                    let mut file = file;
+                    let _ = crate::sigpipe::copy(&mut file, stdin);
+                }
+            } else if let Some(data) = opts.stdin_data {
+                if let Some(stdin) = child.stdin_mut() {
+                    let _ = crate::sigpipe::write_all(stdin, data);
+                }
             }
-        }
-        if stdin_piped {
-            child.close_stdin();
-        }
-
-        let exit = match wait_hook_command(child, capture, cancel, &mut output) {
-            Ok(exit) => exit,
-            Err(HookError::Cancelled) => return Err(HookError::Cancelled),
-            Err(other) => return Err(other),
+            if stdin_piped {
+                child.close_stdin();
+            }
+            match wait_hook_command(child, capture, cancel, &mut output) {
+                Ok(exit) => exit,
+                Err(HookError::Cancelled) => return Err(HookError::Cancelled),
+                Err(other) => return Err(other),
+            }
         };
 
         if !exit.success {
@@ -1817,30 +1855,68 @@ fn run_hook_opts_for_ref_context(
             Err(other) => return Err(other),
         };
 
-        if let Some(ref path) = stdin_file {
-            let file = match fs::File::open(path) {
-                Ok(f) => f,
-                Err(_e) => {
-                    return Ok(HookResult::Failed { status: 1, output });
+        let exit = if capture && stdin_piped && (stdin_file.is_some() || opts.stdin_data.is_some())
+        {
+            if cancel.is_cancelled() {
+                let pid = child.child_pid();
+                let kill_process_group = child.kill_process_group();
+                let mut child = child;
+                let _ = child.kill();
+                if let Some(pid) = pid {
+                    kill_pid_sigkill(pid, kill_process_group);
                 }
+                return Err(HookError::Cancelled);
+            }
+            let output_result = if let Some(ref path) = stdin_file {
+                let file = match fs::File::open(path) {
+                    Ok(f) => f,
+                    Err(_e) => {
+                        return Ok(HookResult::Failed { status: 1, output });
+                    }
+                };
+                child.feed_stdin_and_wait_with_output(Some(ConcurrentStdinFeed::File(file)))
+            } else if let Some(data) = opts.stdin_data {
+                child.feed_stdin_and_wait_with_output(Some(ConcurrentStdinFeed::Bytes(data)))
+            } else {
+                child.close_stdin();
+                child.wait_with_output()
             };
-            if let Some(stdin) = child.stdin_mut() {
-                let mut file = file;
-                let _ = crate::sigpipe::copy(&mut file, stdin);
+            match output_result {
+                Ok(o) => {
+                    output.stdout.extend_from_slice(&o.stdout);
+                    output.stderr.extend_from_slice(&o.stderr);
+                    o.status
+                }
+                Err(_) => crate::command_runner::CommandExit {
+                    success: false,
+                    code: Some(1),
+                },
             }
-        } else if let Some(data) = opts.stdin_data {
-            if let Some(stdin) = child.stdin_mut() {
-                let _ = crate::sigpipe::write_all(stdin, data);
+        } else {
+            if let Some(ref path) = stdin_file {
+                let file = match fs::File::open(path) {
+                    Ok(f) => f,
+                    Err(_e) => {
+                        return Ok(HookResult::Failed { status: 1, output });
+                    }
+                };
+                if let Some(stdin) = child.stdin_mut() {
+                    let mut file = file;
+                    let _ = crate::sigpipe::copy(&mut file, stdin);
+                }
+            } else if let Some(data) = opts.stdin_data {
+                if let Some(stdin) = child.stdin_mut() {
+                    let _ = crate::sigpipe::write_all(stdin, data);
+                }
             }
-        }
-        if stdin_piped {
-            child.close_stdin();
-        }
-
-        let exit = match wait_hook_command(child, capture, cancel, &mut output) {
-            Ok(exit) => exit,
-            Err(HookError::Cancelled) => return Err(HookError::Cancelled),
-            Err(other) => return Err(other),
+            if stdin_piped {
+                child.close_stdin();
+            }
+            match wait_hook_command(child, capture, cancel, &mut output) {
+                Ok(exit) => exit,
+                Err(HookError::Cancelled) => return Err(HookError::Cancelled),
+                Err(other) => return Err(other),
+            }
         };
 
         if !exit.success {
@@ -2085,6 +2161,46 @@ mod tests {
             OsString::from(r"C:\repo\.git\objects")
         );
         assert_eq!(value("GIT_PREFIX"), OsString::from(r"\\?\kept"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_hook_in_git_dir_drains_stderr_while_reading_large_stdin() {
+        use crate::repo::{InitOptions, Repository};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let hook = repo.git_dir().join("hooks").join("pre-receive");
+        fs::write(
+            &hook,
+            b"#!/bin/sh\nwhile read old new ref; do echo \"checking $ref\" >&2; done\nexit 0\n",
+        )
+        .expect("write hook");
+        let mut perms = fs::metadata(&hook).expect("meta").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&hook, perms).expect("chmod");
+
+        let stdin: Vec<u8> = (1..=3000)
+            .map(|i| {
+                format!(
+                    "1111111111111111111111111111111111111111 \
+                     2222222222222222222222222222222222222222 refs/heads/b{i}\n"
+                )
+            })
+            .collect::<String>()
+            .into_bytes();
+
+        let started = std::time::Instant::now();
+        let result = run_hook_in_git_dir(&repo, "pre-receive", &[], Some(&stdin), &[]);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "pre-receive hook I/O took {:?}",
+            started.elapsed()
+        );
+        assert!(result.is_ok());
+        let output = result.output().expect("hook output");
+        assert!(output.stderr.len() > 64 * 1024);
+        assert!(output.stderr.starts_with(b"checking "));
     }
 
     #[test]

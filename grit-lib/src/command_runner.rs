@@ -17,7 +17,7 @@
 
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
-use std::io::{self, Cursor, Read, Write};
+use std::io::{self, Cursor, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
@@ -236,6 +236,14 @@ pub struct RunningCommand {
     inner: RunningCommandInner,
 }
 
+/// Stdin written while stdout and stderr pipes are drained concurrently.
+pub(crate) enum ConcurrentStdinFeed<'a> {
+    /// Bytes copied to the child's stdin pipe.
+    Bytes(&'a [u8]),
+    /// File copied to stdin on a background thread ([`std::fs::File`] is [`Send`]).
+    File(std::fs::File),
+}
+
 impl RunningCommand {
     /// Build a handle from a spawned OS child and taken stdio pipes.
     #[must_use]
@@ -360,6 +368,69 @@ impl RunningCommand {
         }
     }
 
+    /// Feed stdin while draining stdout/stderr so hooks cannot deadlock on full pipes.
+    ///
+    /// Use this instead of writing to [`Self::stdin_mut`] before [`Self::wait_with_output`]
+    /// when the child may emit substantial stderr while still reading stdin (receive hooks).
+    ///
+    /// A [`ErrorKind::BrokenPipe`] from stdin writes is ignored (the child exited early).
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O errors from pipe reads or [`Child::wait`], other than broken pipe on stdin.
+    pub(crate) fn feed_stdin_and_wait_with_output(
+        self,
+        stdin_feed: Option<ConcurrentStdinFeed<'_>>,
+    ) -> io::Result<CommandOutput> {
+        match self.inner {
+            RunningCommandInner::System {
+                mut child,
+                stdin,
+                stdout,
+                stderr,
+                kill_process_group: _,
+            } => std::thread::scope(|scope| {
+                let drain = scope.spawn(move || drain_child_pipes(stdout, stderr));
+
+                if let Some(mut stdin_pipe) = stdin {
+                    if let Some(feed) = stdin_feed {
+                        let _ = scope.spawn(move || {
+                            write_stdin_feed(feed, &mut stdin_pipe);
+                            drop(stdin_pipe);
+                        });
+                    } else {
+                        drop(stdin_pipe);
+                    }
+                }
+
+                let (stdout_bytes, stderr_bytes) =
+                    drain.join().unwrap_or(Ok((Vec::new(), Vec::new())))?;
+                let status = child.wait()?.into();
+                Ok(CommandOutput {
+                    status,
+                    stdout: stdout_bytes,
+                    stderr: stderr_bytes,
+                })
+            }),
+            RunningCommandInner::Recording { state, mut stdin } => {
+                if let (Some(stdin_mut), Some(feed)) = (stdin.as_mut(), stdin_feed) {
+                    write_stdin_feed(feed, stdin_mut);
+                }
+                drop(stdin);
+                let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
+                let mut stdout_bytes = Vec::new();
+                if let Some(cursor) = &mut guard.stdout {
+                    let _ = cursor.read_to_end(&mut stdout_bytes);
+                }
+                Ok(CommandOutput {
+                    status: guard.exit,
+                    stdout: stdout_bytes,
+                    stderr: guard.stderr.clone(),
+                })
+            }
+        }
+    }
+
     /// Wait and collect piped stdout/stderr.
     ///
     /// # Errors
@@ -422,6 +493,18 @@ impl RunningCommand {
                 kill_process_group: _,
             } => Ok((child, stdin, stdout, stderr)),
             RunningCommandInner::Recording { .. } => Err(CommandHandleError),
+        }
+    }
+}
+
+fn write_stdin_feed(feed: ConcurrentStdinFeed<'_>, stdin: &mut dyn Write) {
+    let write_result = match feed {
+        ConcurrentStdinFeed::Bytes(data) => stdin.write_all(data).map(|_| ()),
+        ConcurrentStdinFeed::File(mut file) => io::copy(&mut file, stdin).map(|_| ()),
+    };
+    if let Err(e) = write_result {
+        if e.kind() != ErrorKind::BrokenPipe {
+            let _ = e;
         }
     }
 }
@@ -1328,6 +1411,71 @@ mod tests {
             "direct stdout={:?}",
             direct.stdout
         );
+    }
+
+    #[test]
+    fn feed_stdin_and_wait_with_output_avoids_hook_pipe_deadlock() {
+        let script = "while read line; do printf 'checking %s\\n' \"$line\" >&2; done";
+        let stdin_lines: String = (1..=3000)
+            .map(|i| format!("1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 refs/heads/b{i}\n"))
+            .collect();
+        let spec = CommandSpec {
+            program: "sh".into(),
+            args: Vec::new(),
+            shell: Some(ShellInvocation::DashC {
+                script: script.into(),
+                argv0: None,
+                args: Vec::new(),
+            }),
+            cwd: None,
+            env: CommandEnvironment::inherit_process_only(),
+            stdin: CommandStdin::Pipe(Vec::new()),
+            stdout: CommandStdio::Pipe,
+            stderr: CommandStdio::Pipe,
+        };
+        let started = std::time::Instant::now();
+        let out = SystemCommandRunner
+            .spawn(&spec)
+            .expect("spawn")
+            .feed_stdin_and_wait_with_output(Some(ConcurrentStdinFeed::Bytes(
+                stdin_lines.as_bytes(),
+            )))
+            .expect("wait");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "hook I/O took {:?}",
+            started.elapsed()
+        );
+        assert!(out.status.success);
+        assert!(out.stderr.len() > 64 * 1024);
+        assert!(out.stderr.starts_with(b"checking "));
+    }
+
+    #[test]
+    fn feed_stdin_and_wait_with_output_treats_broken_pipe_as_early_exit() {
+        let script = "exit 1";
+        let payload = vec![b'x'; 128 * 1024];
+        let spec = CommandSpec {
+            program: "sh".into(),
+            args: Vec::new(),
+            shell: Some(ShellInvocation::DashC {
+                script: script.into(),
+                argv0: None,
+                args: Vec::new(),
+            }),
+            cwd: None,
+            env: CommandEnvironment::inherit_process_only(),
+            stdin: CommandStdin::Pipe(Vec::new()),
+            stdout: CommandStdio::Pipe,
+            stderr: CommandStdio::Pipe,
+        };
+        let out = SystemCommandRunner
+            .spawn(&spec)
+            .expect("spawn")
+            .feed_stdin_and_wait_with_output(Some(ConcurrentStdinFeed::Bytes(&payload)))
+            .expect("wait");
+        assert!(!out.status.success);
+        assert_eq!(out.status.code, Some(1));
     }
 
     #[test]
