@@ -553,11 +553,20 @@ struct PopulatedTreeWalk<'a> {
 
 impl<'a> PopulatedTreeWalk<'a> {
     fn new(odb: &'a Odb, tree_oid: &ObjectId, protect: ProtectOptions) -> Result<Self> {
+        Self::new_at_prefix(odb, tree_oid, String::new(), protect)
+    }
+
+    fn new_at_prefix(
+        odb: &'a Odb,
+        tree_oid: &ObjectId,
+        prefix: String,
+        protect: ProtectOptions,
+    ) -> Result<Self> {
         let entries = (*odb.cached_tree_entries(tree_oid)?).clone();
         Ok(Self {
             odb,
             stack: vec![PopulatedTreeWalkFrame {
-                prefix: String::new(),
+                prefix,
                 entries,
                 index: 0,
             }],
@@ -978,7 +987,7 @@ fn checkout_hard_to_tree_journaled(
 ) -> Result<()> {
     let pre_reset_index = repo.load_index_preserving_sparse()?;
     let pre_reset_index_mtime = crate::diff::index_mtime_for_diff(&pre_reset_index, None);
-    let mut index = pre_reset_index.clone();
+    let mut index = pre_reset_index;
     crate::porcelain::index_from_tree::prepare_index_for_hard_reset(repo, target_tree, &mut index)?;
     let config = repo.config()?;
     let index_sparse = config
@@ -989,7 +998,7 @@ fn checkout_hard_to_tree_journaled(
     let trees_differ = head_tree != target_tree;
     // Sparse-directory rows left by the load already record the target subtree.
     let changes = if trees_differ {
-        crate::diff::diff_trees_outside_sparse_directories(
+        crate::diff::diff_trees_coalesced_for_checkout(
             repo.odb(),
             &index,
             Some(head_tree),
@@ -1000,34 +1009,29 @@ fn checkout_hard_to_tree_journaled(
     } else {
         Vec::new()
     };
-    let tree_stable_between_commits = if trees_differ {
-        hard_reset_tree_stable_between_commits(&pre_reset_index, &changes)
-    } else {
-        BTreeSet::new()
-    };
+    let tree_diff_touched = CoalescedSubtreeDiffPaths::from_changes(&changes);
     let config = repo.config()?;
-    let unstaged_tree_stable_paths = if trees_differ
-        && !tree_stable_between_commits.is_empty()
-        && !pre_reset_index.has_sparse_directory_placeholders()
-    {
-        hard_reset_unstaged_tree_stable_paths(
-            repo,
-            work_tree,
-            &pre_reset_index,
-            pre_reset_index_mtime,
-            &tree_stable_between_commits,
-            config.as_ref(),
-        )?
-    } else {
-        BTreeSet::new()
-    };
+    let unstaged_tree_stable_paths = if trees_differ && !index.has_sparse_directory_placeholders() {
+            hard_reset_unstaged_tree_stable_paths(
+                repo,
+                work_tree,
+                &index,
+                pre_reset_index_mtime,
+                &tree_diff_touched,
+                config.as_ref(),
+            )?
+        } else {
+            BTreeSet::new()
+        };
     crate::porcelain::index_from_tree::expand_sparse_for_tree_changes(repo, &mut index, &changes)?;
     let tree_deleted: HashSet<Vec<u8>> = changes
         .iter()
         .filter(|change| change.status == DiffStatus::Deleted)
+        .filter(|change| !crate::index::is_tree_mode(change.old_mode.bits()))
         .filter_map(|change| change.old_path.as_deref())
         .map(checkout_stored_index_path_bytes)
         .collect();
+    let tree_deleted_prefixes = tree_diff_touched.deleted_prefixes.clone();
     let unmerged_paths: BTreeSet<Vec<u8>> = index
         .entries
         .iter()
@@ -1084,7 +1088,13 @@ fn checkout_hard_to_tree_journaled(
         let index_only_removals: Vec<(Vec<u8>, u32)> = align_plan
             .remove_paths
             .iter()
-            .filter(|path| !tree_deleted.contains(*path))
+            .filter(|path| {
+                !tree_deleted.contains(*path)
+                    && !CoalescedSubtreeDiffPaths::path_under_any_prefix(
+                        path,
+                        &tree_deleted_prefixes,
+                    )
+            })
             .filter_map(|path| index.get(path, 0).map(|entry| (path.clone(), entry.mode)))
             .collect();
         index_only_removed_paths = index_only_removals
@@ -1107,8 +1117,12 @@ fn checkout_hard_to_tree_journaled(
     )?);
 
     let mut written_by_tree_diff: BTreeSet<Vec<u8>> = BTreeSet::new();
+    let written_tree_prefixes = tree_diff_touched.added_prefixes.clone();
     for change in &changes {
         if change.status == DiffStatus::Deleted {
+            continue;
+        }
+        if crate::index::is_tree_mode(change.new_mode.bits()) {
             continue;
         }
         if let Some(path) = &change.new_path {
@@ -1185,7 +1199,12 @@ fn checkout_hard_to_tree_journaled(
     }
 
     let skip_post_tree_diff_pass = trees_differ
-        && hard_reset_tree_diff_filled_all_entries(&index, &written_by_tree_diff, sparse.as_ref());
+        && hard_reset_tree_diff_filled_all_entries(
+            &index,
+            &written_by_tree_diff,
+            &written_tree_prefixes,
+            sparse.as_ref(),
+        );
     if skip_post_tree_diff_pass {
         let mut sparse_parent_symlinks = crate::diff::SymlinkDirCache::default();
         for (path, mode) in sparse_removals {
@@ -1228,7 +1247,8 @@ fn checkout_hard_to_tree_journaled(
         &index,
         trees_differ,
         &written_by_tree_diff,
-        &tree_stable_between_commits,
+        &written_tree_prefixes,
+        &tree_diff_touched,
         sparse.as_ref(),
     );
     let worktree_stats = scan_index_blob_stats_for_hard_reset(
@@ -1252,10 +1272,16 @@ fn checkout_hard_to_tree_journaled(
             if te.mode == MODE_GITLINK {
                 return HardResetEntryAction::Gitlink;
             }
-            if trees_differ && written_by_tree_diff.contains(path) {
+            if trees_differ
+                && (written_by_tree_diff.contains(path)
+                    || CoalescedSubtreeDiffPaths::path_under_any_prefix(
+                        path,
+                        &written_tree_prefixes,
+                    ))
+            {
                 return HardResetEntryAction::Written(None);
             }
-            if trees_differ && tree_stable_between_commits.contains(path) {
+            if trees_differ && !tree_diff_touched.contains_path(path) {
                 if unstaged_tree_stable_paths.contains(path) || index_align_touched.contains(path) {
                     return HardResetEntryAction::Write;
                 }
@@ -1672,9 +1698,20 @@ fn hard_reset_apply_tree_diff_checkout(
     for rel in unrecorded {
         journal.spool_remove(&rel)?;
     }
+    let leaf_changes = checkout_coalesced_subtree_changes(
+        repo,
+        work_tree,
+        changes,
+        progress,
+        cancel,
+        index,
+        apply.clone(),
+        CheckoutIndexWrite::Defer(lock),
+        journal,
+    )?;
     apply_tree_changes_in_chunks(
         repo,
-        changes,
+        &leaf_changes,
         progress,
         cancel,
         index,
@@ -1689,9 +1726,10 @@ fn hard_reset_apply_tree_diff_checkout(
 fn hard_reset_tree_diff_filled_all_entries(
     index: &Index,
     written_by_tree_diff: &BTreeSet<Vec<u8>>,
+    written_tree_prefixes: &[Vec<u8>],
     sparse: Option<&SparseCheckout>,
 ) -> bool {
-    if written_by_tree_diff.is_empty() {
+    if written_by_tree_diff.is_empty() && written_tree_prefixes.is_empty() {
         return false;
     }
     index.entries.iter().all(|entry| {
@@ -1707,34 +1745,10 @@ fn hard_reset_tree_diff_filled_all_entries(
         if sparse.is_some_and(|sparse| !sparse.includes_index_path(&entry.path)) {
             return true;
         }
-        written_by_tree_diff.contains(&entry.path) && !entry.stat_cache_unset()
+        (written_by_tree_diff.contains(&entry.path)
+            || CoalescedSubtreeDiffPaths::path_under_any_prefix(&entry.path, written_tree_prefixes))
+            && !entry.stat_cache_unset()
     })
-}
-
-/// Paths whose blob is identical in the head and target trees (not listed in the tree diff).
-fn hard_reset_tree_stable_between_commits(
-    pre_reset_index: &Index,
-    changes: &[DiffEntry],
-) -> BTreeSet<Vec<u8>> {
-    let mut touched = BTreeSet::new();
-    for change in changes {
-        if let Some(path) = &change.old_path {
-            touched.insert(crate::repo_relpath::storage_bytes(path).into_owned());
-        }
-        if let Some(path) = &change.new_path {
-            touched.insert(crate::repo_relpath::storage_bytes(path).into_owned());
-        }
-    }
-    pre_reset_index
-        .entries
-        .iter()
-        .filter(|e| e.stage() == 0)
-        .filter(|e| !e.skip_worktree())
-        .filter(|e| !e.is_sparse_directory_placeholder())
-        .filter(|e| e.mode != MODE_GITLINK)
-        .filter(|e| !touched.contains(&e.path))
-        .map(|e| e.path.clone())
-        .collect()
 }
 
 /// Dirty tracked paths among tree-stable rows, using one restricted index-to-worktree diff.
@@ -1743,14 +1757,20 @@ fn hard_reset_unstaged_tree_stable_paths(
     work_tree: &Path,
     pre_reset_index: &Index,
     index_mtime: Option<(u32, u32)>,
-    tree_stable: &BTreeSet<Vec<u8>>,
+    tree_diff_touched: &CoalescedSubtreeDiffPaths,
     config: &ConfigSet,
 ) -> Result<BTreeSet<Vec<u8>>> {
-    let restrict: BTreeSet<String> = tree_stable
+    let restrict: BTreeSet<String> = pre_reset_index
+        .entries
         .iter()
-        .filter_map(|path| std::str::from_utf8(path).ok())
+        .filter(|e| e.stage() == 0 && !tree_diff_touched.contains_path(&e.path))
+        .filter_map(|e| std::str::from_utf8(&e.path).ok())
         .map(str::to_owned)
         .collect();
+    if restrict.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let restrict_len = restrict.len();
     let mut index = pre_reset_index.clone();
     let (entries, _) = crate::diff::diff_index_to_worktree_with_options(
         repo.odb(),
@@ -1764,11 +1784,7 @@ fn hard_reset_unstaged_tree_stable_paths(
             repository_git_dir: Some(repo.git_dir().to_path_buf()),
             config: Some(Arc::new(config.clone())),
             restrict_to_paths: Some(Arc::new(restrict)),
-            stat_parallel_threads: hard_reset_stat_parallel_threads(
-                repo,
-                config,
-                tree_stable.len(),
-            ),
+            stat_parallel_threads: hard_reset_stat_parallel_threads(repo, config, restrict_len),
             thread_policy: Some(repo.thread_policy()),
             simplify_gitlinks: true,
             ignore_submodule_untracked: true,
@@ -1803,7 +1819,8 @@ fn hard_reset_stat_probe_positions(
     index: &Index,
     trees_differ: bool,
     written_by_tree_diff: &BTreeSet<Vec<u8>>,
-    tree_stable_between_commits: &BTreeSet<Vec<u8>>,
+    written_tree_prefixes: &[Vec<u8>],
+    tree_diff_touched: &CoalescedSubtreeDiffPaths,
     sparse: Option<&SparseCheckout>,
 ) -> Vec<usize> {
     let mut positions = Vec::new();
@@ -1819,10 +1836,16 @@ fn hard_reset_stat_probe_positions(
         if entry.mode == MODE_GITLINK {
             continue;
         }
-        if trees_differ && written_by_tree_diff.contains(&entry.path) {
+        if trees_differ
+            && (written_by_tree_diff.contains(&entry.path)
+                || CoalescedSubtreeDiffPaths::path_under_any_prefix(
+                    &entry.path,
+                    written_tree_prefixes,
+                ))
+        {
             continue;
         }
-        if trees_differ && tree_stable_between_commits.contains(&entry.path) {
+        if trees_differ && !tree_diff_touched.contains_path(&entry.path) {
             continue;
         }
         positions.push(pos);
@@ -2046,6 +2069,9 @@ fn hard_reset_unrecorded_tree_diff_paths(
     let mut probes: Vec<(usize, &str)> = Vec::new();
     for change in changes {
         if change.status == DiffStatus::Added || change.old_mode.bits() == MODE_GITLINK {
+            continue;
+        }
+        if crate::index::is_tree_mode(change.old_mode.bits()) {
             continue;
         }
         let Some(path) = change.old_path.as_deref() else {
@@ -2423,6 +2449,190 @@ pub(crate) fn checkout_tree_changes_with_index_deferred(
             .finish(repo, Err::<(), _>(err))
             .map(|_| unreachable!()),
     }
+}
+
+/// Paths touched by a coalesced tree diff (whole subtrees as one entry each).
+#[derive(Default)]
+struct CoalescedSubtreeDiffPaths {
+    deleted_prefixes: Vec<Vec<u8>>,
+    added_prefixes: Vec<Vec<u8>>,
+    leaf_paths: HashSet<Vec<u8>>,
+}
+
+impl CoalescedSubtreeDiffPaths {
+    fn from_changes(changes: &[DiffEntry]) -> Self {
+        let mut out = Self::default();
+        for change in changes {
+            match change.status {
+                DiffStatus::Deleted if crate::index::is_tree_mode(change.old_mode.bits()) => {
+                    if let Some(path) = &change.old_path {
+                        out.deleted_prefixes
+                            .push(crate::repo_relpath::storage_bytes(path).into_owned());
+                    }
+                }
+                DiffStatus::Added if crate::index::is_tree_mode(change.new_mode.bits()) => {
+                    if let Some(path) = &change.new_path {
+                        out.added_prefixes
+                            .push(crate::repo_relpath::storage_bytes(path).into_owned());
+                    }
+                }
+                _ => {
+                    if let Some(path) = change.old_path.as_deref().or(change.new_path.as_deref()) {
+                        out.leaf_paths
+                            .insert(crate::repo_relpath::storage_bytes(path).into_owned());
+                    }
+                }
+            }
+        }
+        out.deleted_prefixes.sort_unstable();
+        out.added_prefixes.sort_unstable();
+        out
+    }
+
+    fn contains_path(&self, path: &[u8]) -> bool {
+        if self.leaf_paths.contains(path) {
+            return true;
+        }
+        Self::path_under_any_prefix(path, &self.deleted_prefixes)
+            || Self::path_under_any_prefix(path, &self.added_prefixes)
+    }
+
+    fn path_under_any_prefix(path: &[u8], prefixes: &[Vec<u8>]) -> bool {
+        prefixes.iter().any(|prefix| {
+            path.starts_with(prefix)
+                && (path.len() == prefix.len() || path.get(prefix.len()) == Some(&b'/'))
+        })
+    }
+}
+
+fn diff_entry_is_coalesced_subtree(change: &DiffEntry) -> bool {
+    matches!(change.status, DiffStatus::Deleted if crate::index::is_tree_mode(change.old_mode.bits()))
+        || matches!(change.status, DiffStatus::Added if crate::index::is_tree_mode(change.new_mode.bits()))
+}
+
+/// Apply coalesced subtree add/delete entries; returns leaf-level diff rows for the rest.
+#[allow(clippy::too_many_arguments)]
+fn checkout_coalesced_subtree_changes(
+    repo: &Repository,
+    work_tree: &Path,
+    changes: &[DiffEntry],
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+    index_mut: &mut Index,
+    apply: CheckoutApplyOptions,
+    index_write: CheckoutIndexWrite<'_>,
+    journal: &mut CheckoutJournal,
+) -> Result<Vec<DiffEntry>> {
+    let mut coalesced = Vec::new();
+    let mut leaf = Vec::new();
+    for change in changes {
+        if diff_entry_is_coalesced_subtree(change) {
+            coalesced.push(change);
+        } else {
+            leaf.push(change.clone());
+        }
+    }
+    if coalesced.is_empty() {
+        return Ok(leaf);
+    }
+
+    let config = repo.config()?;
+    let protect = ProtectOptions::from_config(config.as_ref());
+    let ignorecase = config
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    let precompose = repo.pathspec_precompose_enabled();
+    let rules = if let Some(ref precomputed) = apply.precomputed_worktree_rules {
+        Rc::clone(precomputed)
+    } else {
+        Rc::new(checkout_worktree_rules(
+            repo,
+            index_mut,
+            changes,
+            config.clone(),
+        )?)
+    };
+    let conv = rules.conversion().clone();
+
+    let mut wholesale_dirs = BTreeSet::new();
+    let mut deleted_abs_paths = Vec::new();
+    for change in coalesced.iter().filter(|c| c.status == DiffStatus::Deleted) {
+        crate::progress::poll_cancel(progress, cancel)?;
+        let Some(path) = &change.old_path else {
+            continue;
+        };
+        wholesale_dirs.insert(path.clone());
+        let abs = work_tree.join(path);
+        if abs.is_dir() {
+            journal.spool_remove(path)?;
+            if remove_wholesale_dir(&abs) {
+                deleted_abs_paths.push(abs);
+            }
+        }
+        progress.inc(1);
+    }
+    remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
+
+    let sparse = SparseCheckout::load(repo)?;
+    let mut new_entries = Vec::new();
+    for change in coalesced.iter().filter(|c| c.status == DiffStatus::Added) {
+        crate::progress::poll_cancel(progress, cancel)?;
+        let Some(path) = &change.new_path else {
+            continue;
+        };
+        let mut walk =
+            PopulatedTreeWalk::new_at_prefix(repo.odb(), &change.new_oid, path.clone(), protect)?;
+        let mut chunk = Vec::with_capacity(POPULATED_TREE_CHECKOUT_CHUNK);
+        let mut apply_chunk = apply.clone();
+        apply_chunk.precomputed_worktree_rules = Some(Rc::clone(&rules));
+        apply_chunk.skip_promisor_prefetch = true;
+        while walk.fill_chunk(&mut chunk)? {
+            crate::progress::poll_cancel(progress, cancel)?;
+            let chunk_changes: Vec<DiffEntry> =
+                chunk.iter().map(populated_blob_to_added_diff).collect();
+            let worktree_changes = split_sparse_tree_changes(
+                sparse.as_ref(),
+                work_tree,
+                index_mut,
+                &chunk_changes,
+                &mut apply_chunk,
+            );
+            let chunk_refs: Vec<&DiffEntry> = worktree_changes.iter().collect();
+            let (_, entries) = execute_checkout_write_changes_chunk(
+                repo,
+                work_tree,
+                &chunk_refs,
+                rules.as_ref(),
+                &config,
+                &conv,
+                &apply_chunk,
+                precompose,
+                ignorecase,
+                &None,
+                &mut LeadingDirCache::for_config(config.as_ref()),
+                &mut DelayedProcessCheckout::default(),
+                true,
+                progress,
+                cancel,
+                journal,
+            )?;
+            new_entries.extend(entries);
+        }
+    }
+
+    checkout_commit_index_update(
+        repo,
+        index_mut,
+        &wholesale_dirs,
+        Vec::new(),
+        new_entries,
+        true,
+        &apply,
+        index_write,
+        journal,
+    )?;
+    Ok(leaf)
 }
 
 /// Top-level directories whose tracked files are entirely removed by `delete_paths`.

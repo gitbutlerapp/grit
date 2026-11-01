@@ -107,6 +107,179 @@ fn reset_peak_rss_kib(tool: &str, root: &Path, grit: &Path) -> u64 {
         .unwrap_or_else(|| panic!("{tool} probe printed no peak: {stdout}"))
 }
 
+fn fast_import_swap_dirs_repo(root: &Path, dirs: usize, mods: usize, files: usize, swap: usize) {
+    git_in(root)
+        .args(["init", "-q", "-b", "main"])
+        .status()
+        .expect("init");
+    git_in(root)
+        .args(["config", "user.name", "T"])
+        .status()
+        .expect("name");
+    git_in(root)
+        .args(["config", "user.email", "t@e.x"])
+        .status()
+        .expect("email");
+    let mut import = git_in(root)
+        .args(["fast-import", "--quiet"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .expect("fast-import");
+    let mut stream = String::new();
+    use std::fmt::Write as _;
+    writeln!(stream, "commit refs/heads/main").expect("w");
+    writeln!(stream, "committer T <t@e.x> 1700000000 +0000").expect("w");
+    writeln!(stream, "data 4").expect("w");
+    writeln!(stream, "init").expect("w");
+    for d in 0..dirs {
+        for s in 0..mods {
+            for k in 0..files {
+                let body = format!("file {d} {s} {k}\n");
+                writeln!(
+                    stream,
+                    "M 100644 inline pkg{d:03}/mod{s:02}/f{k:02}.txt\ndata {}",
+                    body.len()
+                )
+                .expect("w");
+                write!(stream, "{body}\n").expect("w");
+            }
+        }
+    }
+    writeln!(stream, "commit refs/heads/kd").expect("w");
+    writeln!(stream, "committer T <t@e.x> 1700000300 +0000").expect("w");
+    writeln!(stream, "data 2").expect("w");
+    writeln!(stream, "kd").expect("w");
+    writeln!(stream, "from refs/heads/main").expect("w");
+    for d in 0..swap {
+        writeln!(stream, "D pkg{d:03}").expect("w");
+        for s in 0..mods {
+            for k in 0..files {
+                let body = format!("new {d} {s} {k}\n");
+                writeln!(
+                    stream,
+                    "M 100644 inline newpkg{d:03}/mod{s:02}/g{k:02}.txt\ndata {}",
+                    body.len()
+                )
+                .expect("w");
+                write!(stream, "{body}\n").expect("w");
+            }
+        }
+    }
+    import
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(stream.as_bytes())
+        .expect("feed");
+    assert!(import.wait().expect("wait").success());
+    git_in(root)
+        .args(["switch", "-q", "--detach", "main"])
+        .status()
+        .expect("detach main");
+}
+
+/// Peak RSS of reset --hard across a wholesale delete+add tree transition (issue #2439).
+#[test]
+fn hard_reset_tree_transition_peak_rss_stays_near_git() {
+    let grit = grit_bin();
+    let git_root = tempfile::tempdir().expect("git");
+    let grit_root = tempfile::tempdir().expect("grit");
+    const DIRS: usize = 50;
+    const MODS: usize = 20;
+    const FILES: usize = 30;
+    const SWAP: usize = 15;
+    fast_import_swap_dirs_repo(git_root.path(), DIRS, MODS, FILES, SWAP);
+    fast_import_swap_dirs_repo(grit_root.path(), DIRS, MODS, FILES, SWAP);
+
+    let git_to_kd = reset_peak_rss_kib_with_target("git", git_root.path(), &grit, "kd");
+    let git_to_main = reset_peak_rss_kib_with_target("git", git_root.path(), &grit, "main");
+    let grit_to_kd = reset_peak_rss_kib_with_target("grit", grit_root.path(), &grit, "kd");
+    let grit_to_main = reset_peak_rss_kib_with_target("grit", grit_root.path(), &grit, "main");
+
+    eprintln!(
+        "transition RSS KiB: git kd={git_to_kd} main={git_to_main}; grit kd={grit_to_kd} main={grit_to_main}"
+    );
+    let limit = |git_peak: u64| git_peak * 2 + 16 * 1024;
+    assert!(
+        grit_to_kd <= limit(git_to_kd),
+        "grit kd {grit_to_kd} vs git {git_to_kd}"
+    );
+    assert!(
+        grit_to_main <= limit(git_to_main),
+        "grit main {grit_to_main} vs git {git_to_main}"
+    );
+    assert!(git_in(git_root.path())
+        .args(["fsck"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_in(grit_root.path())
+        .args(["fsck"])
+        .status()
+        .unwrap()
+        .success());
+}
+
+fn reset_peak_rss_kib_with_target(tool: &str, root: &Path, grit: &Path, target: &str) -> u64 {
+    let out = Command::new(std::env::current_exe().expect("test binary"))
+        .args([
+            "reset_hard_memory::rss_probe_target",
+            "--exact",
+            "--ignored",
+            "--nocapture",
+        ])
+        .args(["--test-threads=1", "-q"])
+        .env(PROBE_TOOL_ENV, tool)
+        .env(CHILD_REPO_ENV, root)
+        .env(GRIT_BIN_ENV, grit)
+        .env("GRIT_RESET_MEMORY_TARGET", target)
+        .output()
+        .expect("spawn rss probe");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{tool} probe to {target} failed: {stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("peak_kib="))
+        .and_then(|kib| kib.trim().parse().ok())
+        .unwrap_or_else(|| panic!("{tool} probe printed no peak: {stdout}"))
+}
+
+#[test]
+#[ignore = "run by hard_reset_tree_transition_peak_rss_stays_near_git in a child process"]
+fn rss_probe_target() {
+    let (Some(tool), Some(root), Some(grit_bin), Some(target)) = (
+        std::env::var_os(PROBE_TOOL_ENV),
+        std::env::var_os(CHILD_REPO_ENV),
+        std::env::var_os(GRIT_BIN_ENV),
+        std::env::var_os("GRIT_RESET_MEMORY_TARGET"),
+    ) else {
+        return;
+    };
+    let root = Path::new(&root);
+    let target = target.to_string_lossy();
+    let mut cmd = if tool == "git" {
+        let mut cmd = git_in(root);
+        cmd.args(["reset", "--hard", "-q", &target]);
+        cmd
+    } else {
+        let mut cmd = Command::new(grit_bin);
+        cmd.current_dir(root).args(["reset", "--hard", &target]);
+        cmd
+    };
+    cmd.stdout(Stdio::null()).stderr(Stdio::null());
+    run(cmd);
+    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+    assert_eq!(
+        unsafe { libc::getrusage(libc::RUSAGE_CHILDREN, &mut usage) },
+        0
+    );
+    println!("peak_kib={}", usage.ru_maxrss);
+}
+
 #[test]
 fn hard_reset_at_head_peak_rss_scales_like_git_on_wide_tree() {
     let grit = grit_bin();

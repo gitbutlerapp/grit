@@ -2972,6 +2972,28 @@ pub(crate) fn diff_trees_outside_sparse_directories(
     diff_trees_opts(odb, old_tree_oid, new_tree_oid, "", false, hint.as_ref())
 }
 
+/// Tree diff for hard reset and similar checkouts: index-backed old tree when clean, and one
+/// entry per wholly added or removed subtree instead of every file path.
+pub(crate) fn diff_trees_coalesced_for_checkout(
+    odb: &Odb,
+    index: &Index,
+    old_tree_oid: Option<&ObjectId>,
+    new_tree_oid: Option<&ObjectId>,
+) -> Result<Vec<DiffEntry>> {
+    crate::trace::trace_span!("grit.diff.tree");
+    let trust_index_for_old_tree = old_tree_oid.is_some()
+        && index.entries_sorted
+        && !index.entries.iter().any(|e| e.stage() != 0);
+    let hint = DiffTreesWalkHint {
+        index: trust_index_for_old_tree.then_some(index),
+        old_tree_matches: trust_index_for_old_tree,
+        coalesce_subtrees_for_checkout: true,
+        skip_sparse_directories: index.has_sparse_directory_placeholders(),
+        ..DiffTreesWalkHint::default()
+    };
+    diff_trees_opts(odb, old_tree_oid, new_tree_oid, "", false, Some(&hint))
+}
+
 /// Whether directory `dir` may contain paths selected by `pathspecs` during a tree walk.
 fn tree_walk_directory_relevant(
     dir: &str,
@@ -3035,6 +3057,8 @@ struct DiffTreesWalkHint<'a> {
     index: Option<&'a Index>,
     /// `index` holds exactly the old tree's entries, so deleted subtrees may be listed from it.
     old_tree_matches: bool,
+    /// Emit one tree entry per removed or added subtree instead of every descendant path.
+    coalesce_subtrees_for_checkout: bool,
     /// Do not descend into directories `index` holds as sparse-directory rows.
     skip_sparse_directories: bool,
     sparse: Option<&'a SparseCheckout>,
@@ -3801,7 +3825,7 @@ fn emit_deleted_opts(
         if index_hint.is_some_and(|hint| hint.sparse_excludes_tree(&path)) {
             return Ok(());
         }
-        if show_trees {
+        if show_trees || index_hint.is_some_and(|hint| hint.coalesce_subtrees_for_checkout) {
             result.push(DiffEntry {
                 status: DiffStatus::Deleted,
                 old_path: Some(path.clone()),
@@ -3812,6 +3836,9 @@ fn emit_deleted_opts(
                 new_oid: zero_oid(),
                 score: None,
             });
+        }
+        if index_hint.is_some_and(|hint| hint.coalesce_subtrees_for_checkout) {
+            return Ok(());
         }
         if let Some(index) = index_hint
             .filter(|hint| hint.old_tree_matches)
@@ -3868,7 +3895,7 @@ fn emit_added_opts(
             });
             return Ok(());
         }
-        if show_trees {
+        if show_trees || index_hint.is_some_and(|hint| hint.coalesce_subtrees_for_checkout) {
             result.push(DiffEntry {
                 status: DiffStatus::Added,
                 old_path: None,
@@ -3879,6 +3906,9 @@ fn emit_added_opts(
                 new_oid: entry.oid,
                 score: None,
             });
+        }
+        if index_hint.is_some_and(|hint| hint.coalesce_subtrees_for_checkout) {
+            return Ok(());
         }
         diff_subtrees_in_place(
             odb,
