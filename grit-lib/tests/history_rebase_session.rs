@@ -3273,7 +3273,7 @@ fn exec_abort_removes_staged_addition_and_restores_exact_index() {
 fn exec_abort_and_continue_preserve_untracked_around_dirty_stop() {
     use grit_lib::revwalk::history::HistoryError;
 
-    let (fixture, opts, plan) = exec_fixture();
+    let (fixture, _opts, plan) = exec_fixture();
     let wt = fixture.worktree();
     std::fs::write(wt.join("pre-existing.txt"), b"keep\n").expect("pre-existing");
     let err = run_dirty_exec(wt, &plan, "echo hook-edit >> f");
@@ -3287,7 +3287,8 @@ fn exec_abort_and_continue_preserve_untracked_around_dirty_stop() {
     let (fixture, opts, plan) = exec_fixture();
     let wt = fixture.worktree();
     std::fs::write(wt.join("pre-existing.txt"), b"keep\n").expect("pre-existing");
-    run_dirty_exec(wt, &plan, "echo hook-edit >> f").unwrap_err();
+    let err = run_dirty_exec(wt, &plan, "echo hook-edit >> f");
+    assert!(matches!(err, HistoryError::ExecDirty { .. }), "{err:?}");
     std::fs::write(wt.join("after-stop.txt"), b"keep\n").expect("after-stop");
     git(wt, &["stash", "push", "-m", "exec edits"]);
     let RebaseOutcome::ExecDone { .. } = continue_rebase(
@@ -3396,6 +3397,44 @@ fn exec_failure_during_recovery_rolls_back_and_clears_exec_stop() {
     assert!(!wt.join(".git/rebase-merge").exists());
     git(wt, &["stash", "pop"]);
     assert_eq!(std::fs::read(wt.join("f")).unwrap(), b"base\nedit\n");
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn exec_failure_after_recovery_preserves_untracked_created_while_stopped() {
+    use grit_lib::revwalk::history::{HistoryError, RebaseSessionError};
+    let (fixture, opts, plan) = exec_fixture();
+    let wt = fixture.worktree();
+    std::fs::write(wt.join("pre-existing.txt"), b"keep\n").expect("pre-existing");
+    let index = std::fs::read(wt.join(".git/index")).unwrap();
+    let error = run_exec(
+        wt,
+        &mut plan.clone(),
+        &[
+            "if ! test -f two; then echo hook-edit >> f; fi",
+            "touch command-created.txt; false",
+        ],
+    )
+    .unwrap_err();
+    assert!(matches!(error, HistoryError::ExecDirty { .. }), "{error:?}");
+    std::fs::write(wt.join("after-stop.txt"), b"keep\n").expect("after-stop");
+    git(wt, &["stash", "push", "-m", "exec edits"]);
+    let error = continue_rebase(
+        &open_grit(wt),
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .unwrap_err();
+    let RebaseSessionError::History(HistoryError::ExecFailed { .. }) = error else {
+        panic!("typed exec failure after recovery, got {error:?}")
+    };
+    assert_eq!(git_oid(wt, "HEAD"), opts.request.branch_tip);
+    assert_eq!(std::fs::read(wt.join(".git/index")).unwrap(), index);
+    assert!(!wt.join("command-created.txt").exists());
+    assert!(wt.join("pre-existing.txt").is_file());
+    assert!(wt.join("after-stop.txt").is_file());
+    assert!(!wt.join(".git/rebase-merge").exists());
     assert_git_fsck_strict(wt);
 }
 

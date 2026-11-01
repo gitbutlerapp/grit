@@ -1251,6 +1251,44 @@ fn exec_failure_after_dirty_stop_forwards_streams_and_exit_code() -> TestResult 
     Ok(())
 }
 
+#[test]
+fn exec_failure_after_dirty_stop_preserves_untracked_created_while_stopped() -> TestResult {
+    let scratch = Scratch::new("exec-recovery-untracked")?;
+    let dir = scratch.path();
+    let tip = init_dirty_exec_fixture(dir, 2)?;
+    fs::write(dir.join("pre-existing.txt"), "keep\n")?;
+    let stopped = gs(
+        dir,
+        [
+            "rebase",
+            "main",
+            "--exec",
+            "if ! test -f two; then echo hook-edit >> f; fi",
+            "--exec",
+            "touch command-created.txt; false",
+            "--json",
+        ],
+    )?;
+    assert_eq!(stopped.status, Some(1));
+    fs::write(dir.join("after-stop.txt"), "keep\n")?;
+    assert!(gs(dir, ["stash", "push", "-m", "exec edits"])?.success());
+    let failed = gs(dir, ["rebase", "--continue", "--json"])?;
+    assert_eq!(
+        failed.status,
+        Some(1),
+        "{}\n{}",
+        failed.stdout,
+        failed.stderr
+    );
+    assert_eq!(git(dir, &["rev-parse", "HEAD"])?.trim(), tip);
+    assert!(!dir.join("command-created.txt").exists());
+    assert!(dir.join("pre-existing.txt").is_file());
+    assert!(dir.join("after-stop.txt").is_file());
+    assert!(!dir.join(".git/rebase-merge").exists());
+    git_fsck_strict(dir)?;
+    Ok(())
+}
+
 /// Issue #2246: `--exec` must run when the branch is already based on the upstream.
 #[test]
 fn rebase_exec_runs_when_already_up_to_date_with_upstream() -> TestResult {
