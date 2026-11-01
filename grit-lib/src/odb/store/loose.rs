@@ -697,7 +697,7 @@ pub fn read_loose_object_info(path: &Path) -> Result<ObjectInfo> {
 
 fn oid_from_loose_object_path(path: &Path) -> Option<ObjectId> {
     let file_name = path.file_name()?.to_str()?;
-    if file_name.len() != 38 {
+    if !ObjectId::is_loose_suffix_len(file_name.len()) {
         return None;
     }
     let parent = path.parent()?.file_name()?.to_str()?;

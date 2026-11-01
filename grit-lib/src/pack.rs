@@ -553,6 +553,7 @@ pub(crate) mod pack_cache {
         match super::read_object_from_pack_at_offset(&idx, offset) {
             Ok(obj) => Ok(Some(obj)),
             Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(err) if err.is_object_read_wrap_source() => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -572,6 +573,7 @@ pub(crate) mod pack_cache {
         match super::read_object_at_depth_into(&idx, offset, 0, populate_delta_lru, buf) {
             Ok(kind) => Ok(Some(kind)),
             Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(err) if err.is_object_read_wrap_source() => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -6363,6 +6365,81 @@ mod tests {
         clear_pack_cache();
         let idx = read_pack_index(&pack_path.with_extension("idx")).ok()?;
         Some((tmp, idx, tip, odb))
+    }
+
+    #[test]
+    fn warm_hinted_pack_damage_returns_corrupt_packed_object_via_full_lookup() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        if !git_try(dir, &["init", "-q"]) {
+            return;
+        }
+        std::fs::write(dir.join("big.txt"), vec![0u8; 20_000]).expect("big");
+        git(dir, &["add", "big.txt"]);
+        git(dir, &["commit", "-qm", "one"]);
+        git(dir, &["repack", "-adq"]);
+        std::fs::write(dir.join("more.txt"), b"second pack\n").expect("more");
+        git(dir, &["add", "more.txt"]);
+        git(dir, &["commit", "-qm", "two"]);
+        git(dir, &["repack"]);
+        let objects = dir.join(".git/objects");
+        let pack_dir = objects.join("pack");
+        let pack_count = std::fs::read_dir(&pack_dir)
+            .expect("pack dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+            .count();
+        assert!(
+            pack_count >= 2,
+            "expected multiple packs for warm-hint regression, got {pack_count}"
+        );
+        let odb = Odb::new(&objects);
+        let oid_hex = Command::new("git")
+            .current_dir(dir)
+            .args(["rev-parse", "HEAD~1:big.txt"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("rev-parse")
+            .stdout;
+        let oid = ObjectId::from_hex(std::str::from_utf8(&oid_hex).unwrap().trim())
+            .expect("parse oid");
+        odb.read(&oid).expect("warm pack hint");
+        let indexes = read_local_pack_indexes(&objects).expect("indexes");
+        let (idx, offset) = indexes
+            .iter()
+            .find_map(|idx| {
+                idx.find_offset(&oid)
+                    .ok()
+                    .flatten()
+                    .map(|offset| (idx, offset))
+            })
+            .expect("oid in a pack");
+        let mut bytes = std::fs::read(&idx.pack_path).expect("read pack");
+        let flip_at = (offset as usize + 8).min(bytes.len().saturating_sub(1));
+        bytes[flip_at] ^= 0x55;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&idx.pack_path, std::fs::Permissions::from_mode(0o644))
+                .expect("chmod pack");
+        }
+        std::fs::write(&idx.pack_path, &bytes).expect("corrupt pack");
+        odb.invalidate_packs();
+        let err = odb.read(&oid).expect_err("read after corrupt");
+        assert!(
+            matches!(err, Error::CorruptPackedObject { .. }),
+            "read: {err:?}"
+        );
+        let err = odb
+            .read_into(&oid, &mut Vec::new())
+            .expect_err("read_into after corrupt");
+        assert!(
+            matches!(err, Error::CorruptPackedObject { .. }),
+            "read_into: {err:?}"
+        );
     }
 
     #[test]

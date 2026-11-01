@@ -2449,7 +2449,7 @@ impl Error {
 
     /// Attach loose-object path context to low-level read failures at the ODB boundary.
     #[must_use]
-    pub fn wrap_loose_read_failure(
+    pub(crate) fn wrap_loose_read_failure(
         oid: crate::objects::ObjectId,
         path: std::path::PathBuf,
         err: Error,
@@ -2470,7 +2470,7 @@ impl Error {
 
     /// Attach pack location context to low-level read failures at the ODB boundary.
     #[must_use]
-    pub fn wrap_packed_read_failure(
+    pub(crate) fn wrap_packed_read_failure(
         oid: crate::objects::ObjectId,
         pack: std::path::PathBuf,
         offset: u64,

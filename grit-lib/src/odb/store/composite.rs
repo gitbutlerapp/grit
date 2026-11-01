@@ -14,7 +14,7 @@ use super::{ObjectStore, ObjectStream};
 /// # Errors
 ///
 /// Reads ([`ObjectStore::read`], `read_into`, `read_info`, `open_stream`) skip past a backend
-/// whose copy is damaged ([`Error::is_damaged_object`]) and return a later
+/// whose copy is damaged ([`crate::error::Error::is_damaged_object`]) and return a later
 /// backend's good copy. When no backend returns the object, the first such corruption error is
 /// returned instead of `Ok(None)`. Any other backend error is returned immediately.
 #[derive(Debug)]
@@ -40,7 +40,7 @@ impl CompositeStore {
 
     /// Ask each child in order and return the first hit.
     ///
-    /// A child that reports a damaged copy ([`Error::is_damaged_object`]) does not
+    /// A child that reports a damaged copy ([`crate::error::Error::is_damaged_object`]) does not
     /// stop the lookup, since a later child may hold a good copy. If none does, the first such
     /// error is returned so a damaged object is never reported as missing. Any other error stops
     /// the lookup immediately.

@@ -9,7 +9,8 @@ use flate2::Compression;
 use grit_lib::config::environment::Environment;
 use grit_lib::error::Error;
 use grit_lib::objects::odb::{
-    hash_algo_for_git_dir, hash_algo_for_objects_dir, Odb, WriteOptions, BULK_NEW_LOOSE_WRITE,
+    hash_algo_for_git_dir, hash_algo_for_objects_dir, read_loose_object_info, Odb, WriteOptions,
+    BULK_NEW_LOOSE_WRITE,
 };
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_test_support::objects::{
@@ -316,6 +317,21 @@ fn t1060_loose_empty_file_returns_corrupt_loose_with_io_source() {
     let Err(err) = odb.open_stream(&oid) else {
         panic!("open_stream must fail on empty loose object");
     };
+    assert_corrupt_loose(err, &oid, &path);
+}
+
+#[test]
+fn read_loose_object_info_sha256_corrupt_wraps_corrupt_loose() {
+    if !git_supports_sha256() {
+        return;
+    }
+    let repo = init_repo(HashAlgo::Sha256);
+    let odb = Odb::new(&repo.objects_dir());
+    let oid = odb.write(ObjectKind::Blob, b"sha256-wrap").expect("write");
+    let path = odb.object_path(&oid);
+    make_loose_object_mutable(&path);
+    flip_byte_at(&path, 4).expect("flip");
+    let err = read_loose_object_info(&path).unwrap_err();
     assert_corrupt_loose(err, &oid, &path);
 }
 

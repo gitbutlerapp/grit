@@ -5933,14 +5933,14 @@ pub grit_lib::error::Error::CommitGraphParentMissing::commit: grit_lib::objects:
 pub grit_lib::error::Error::CommitGraphParentMissing::parent: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::CommitPathsRequired
 pub grit_lib::error::Error::Config(grit_lib::error::ConfigError)
-pub grit_lib::error::Error::CorruptObject(alloc::string::String)
-pub grit_lib::error::Error::CorruptLooseObject
+#[non_exhaustive] pub grit_lib::error::Error::CorruptLooseObject
 pub grit_lib::error::Error::CorruptLooseObject::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::CorruptLooseObject::path: std::path::PathBuf
 pub grit_lib::error::Error::CorruptLooseObject::source: alloc::boxed::Box<grit_lib::error::Error>
-pub grit_lib::error::Error::CorruptPackedObject
-pub grit_lib::error::Error::CorruptPackedObject::oid: grit_lib::objects::ObjectId
+pub grit_lib::error::Error::CorruptObject(alloc::string::String)
+#[non_exhaustive] pub grit_lib::error::Error::CorruptPackedObject
 pub grit_lib::error::Error::CorruptPackedObject::offset: u64
+pub grit_lib::error::Error::CorruptPackedObject::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::CorruptPackedObject::pack: std::path::PathBuf
 pub grit_lib::error::Error::CorruptPackedObject::source: alloc::boxed::Box<grit_lib::error::Error>
 pub grit_lib::error::Error::CorruptStash(&'static str)
@@ -6228,8 +6228,6 @@ pub fn grit_lib::error::Error::kind_name(&self) -> &'static str
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
-pub fn grit_lib::error::Error::wrap_loose_read_failure(grit_lib::objects::ObjectId, std::path::PathBuf, grit_lib::error::Error) -> Self
-pub fn grit_lib::error::Error::wrap_packed_read_failure(grit_lib::objects::ObjectId, std::path::PathBuf, u64, grit_lib::error::Error) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
@@ -9209,13 +9207,13 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::object_inspect::ObjectCont
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::ObjectContents
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::ObjectContents
 #[non_exhaustive] pub enum grit_lib::object_inspect::ResolveError
-pub grit_lib::object_inspect::ResolveError::DamagedObject(grit_lib::error::Error)
 pub grit_lib::object_inspect::ResolveError::AmbiguousChangeId
 pub grit_lib::object_inspect::ResolveError::AmbiguousChangeId::candidates: alloc::vec::Vec<grit_lib::revwalk::rev_parse_error::AmbiguousChangeIdHint>
 pub grit_lib::object_inspect::ResolveError::AmbiguousChangeId::spec: alloc::string::String
 pub grit_lib::object_inspect::ResolveError::AmbiguousShortObject
 pub grit_lib::object_inspect::ResolveError::AmbiguousShortObject::candidates: alloc::vec::Vec<grit_lib::revwalk::rev_parse_error::AmbiguousObjectHint>
 pub grit_lib::object_inspect::ResolveError::AmbiguousShortObject::spec: alloc::string::String
+pub grit_lib::object_inspect::ResolveError::DamagedObject(grit_lib::error::Error)
 pub grit_lib::object_inspect::ResolveError::PathNotInTree
 pub grit_lib::object_inspect::ResolveError::PathNotInTree::path: alloc::string::String
 pub grit_lib::object_inspect::ResolveError::PathNotInTree::revision: alloc::string::String
@@ -9232,6 +9230,7 @@ pub grit_lib::object_inspect::ResolveError::WrongObjectKind::spec: alloc::string
 impl core::convert::From<grit_lib::revwalk::rev_parse_error::RevParseError> for grit_lib::revwalk::object_inspect::ResolveError
 pub fn grit_lib::revwalk::object_inspect::ResolveError::from(grit_lib::revwalk::rev_parse_error::RevParseError) -> Self
 impl core::error::Error for grit_lib::revwalk::object_inspect::ResolveError
+pub fn grit_lib::revwalk::object_inspect::ResolveError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::revwalk::object_inspect::ResolveError
 pub fn grit_lib::revwalk::object_inspect::ResolveError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::revwalk::object_inspect::ResolveError
@@ -9241,8 +9240,8 @@ impl core::marker::Send for grit_lib::revwalk::object_inspect::ResolveError
 impl core::marker::Sync for grit_lib::revwalk::object_inspect::ResolveError
 impl core::marker::Unpin for grit_lib::revwalk::object_inspect::ResolveError
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::object_inspect::ResolveError
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
 pub enum grit_lib::object_inspect::RevisionLabel
 pub grit_lib::object_inspect::RevisionLabel::Branch
 pub grit_lib::object_inspect::RevisionLabel::Branch::name: alloc::string::String
@@ -17436,14 +17435,14 @@ pub grit_lib::prelude::Error::CommitGraphParentMissing::commit: grit_lib::object
 pub grit_lib::prelude::Error::CommitGraphParentMissing::parent: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::CommitPathsRequired
 pub grit_lib::prelude::Error::Config(grit_lib::error::ConfigError)
-pub grit_lib::prelude::Error::CorruptObject(alloc::string::String)
-pub grit_lib::prelude::Error::CorruptLooseObject
+#[non_exhaustive] pub grit_lib::prelude::Error::CorruptLooseObject
 pub grit_lib::prelude::Error::CorruptLooseObject::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::CorruptLooseObject::path: std::path::PathBuf
 pub grit_lib::prelude::Error::CorruptLooseObject::source: alloc::boxed::Box<grit_lib::error::Error>
-pub grit_lib::prelude::Error::CorruptPackedObject
-pub grit_lib::prelude::Error::CorruptPackedObject::oid: grit_lib::objects::ObjectId
+pub grit_lib::prelude::Error::CorruptObject(alloc::string::String)
+#[non_exhaustive] pub grit_lib::prelude::Error::CorruptPackedObject
 pub grit_lib::prelude::Error::CorruptPackedObject::offset: u64
+pub grit_lib::prelude::Error::CorruptPackedObject::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::CorruptPackedObject::pack: std::path::PathBuf
 pub grit_lib::prelude::Error::CorruptPackedObject::source: alloc::boxed::Box<grit_lib::error::Error>
 pub grit_lib::prelude::Error::CorruptStash(&'static str)
@@ -17731,8 +17730,6 @@ pub fn grit_lib::error::Error::kind_name(&self) -> &'static str
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
-pub fn grit_lib::error::Error::wrap_loose_read_failure(grit_lib::objects::ObjectId, std::path::PathBuf, grit_lib::error::Error) -> Self
-pub fn grit_lib::error::Error::wrap_packed_read_failure(grit_lib::objects::ObjectId, std::path::PathBuf, u64, grit_lib::error::Error) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
@@ -28837,6 +28834,7 @@ pub grit_lib::revwalk::object_inspect::ResolveError::AmbiguousChangeId::spec: al
 pub grit_lib::revwalk::object_inspect::ResolveError::AmbiguousShortObject
 pub grit_lib::revwalk::object_inspect::ResolveError::AmbiguousShortObject::candidates: alloc::vec::Vec<grit_lib::revwalk::rev_parse_error::AmbiguousObjectHint>
 pub grit_lib::revwalk::object_inspect::ResolveError::AmbiguousShortObject::spec: alloc::string::String
+pub grit_lib::revwalk::object_inspect::ResolveError::DamagedObject(grit_lib::error::Error)
 pub grit_lib::revwalk::object_inspect::ResolveError::PathNotInTree
 pub grit_lib::revwalk::object_inspect::ResolveError::PathNotInTree::path: alloc::string::String
 pub grit_lib::revwalk::object_inspect::ResolveError::PathNotInTree::revision: alloc::string::String
@@ -28853,6 +28851,7 @@ pub grit_lib::revwalk::object_inspect::ResolveError::WrongObjectKind::spec: allo
 impl core::convert::From<grit_lib::revwalk::rev_parse_error::RevParseError> for grit_lib::revwalk::object_inspect::ResolveError
 pub fn grit_lib::revwalk::object_inspect::ResolveError::from(grit_lib::revwalk::rev_parse_error::RevParseError) -> Self
 impl core::error::Error for grit_lib::revwalk::object_inspect::ResolveError
+pub fn grit_lib::revwalk::object_inspect::ResolveError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::revwalk::object_inspect::ResolveError
 pub fn grit_lib::revwalk::object_inspect::ResolveError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::revwalk::object_inspect::ResolveError
@@ -28862,8 +28861,8 @@ impl core::marker::Send for grit_lib::revwalk::object_inspect::ResolveError
 impl core::marker::Sync for grit_lib::revwalk::object_inspect::ResolveError
 impl core::marker::Unpin for grit_lib::revwalk::object_inspect::ResolveError
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::object_inspect::ResolveError
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
 pub enum grit_lib::revwalk::object_inspect::RevisionLabel
 pub grit_lib::revwalk::object_inspect::RevisionLabel::Branch
 pub grit_lib::revwalk::object_inspect::RevisionLabel::Branch::name: alloc::string::String
