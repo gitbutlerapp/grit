@@ -31,6 +31,7 @@ use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::commit_graph_file::CommitGraphChain;
 use crate::config::ConfigSet;
@@ -45,8 +46,11 @@ use crate::objects::{
     parse_commit_tree_and_parents_lenient, parse_tag, parse_tree_with_oid_len, HashAlgo, ObjectId,
     ObjectKind, OidHashMap, OidHashSet, TreeEntryRef, TreeRefIter,
 };
-use crate::odb::Odb;
-use crate::pack::{prepare_pack_for_object_fsck, PackFsckTrailerIssue};
+use crate::odb::{read_loose_object_info, Odb};
+use crate::pack::{
+    prepare_pack_for_object_fsck, read_object_info_from_pack_at_offset, read_pack_index_cached,
+    PackFsckTrailerIssue, SingleLocalPackReader,
+};
 use crate::pack_fsck_verify::{verify_pack_objects as verify_pack_file, PackFsckObjectOutcome};
 use crate::parallel::{pool_worthwhile, run_ordered_batches, ParallelOp, ParallelOptions};
 use crate::progress::{cancel_watch_arc, Cancel, ProgressPhase, ProgressSink};
@@ -491,6 +495,11 @@ pub fn fsck(
         }
     }
 
+    let mut connectivity_kinds = None;
+    if options.connectivity_only && options.check_connectivity {
+        connectivity_kinds = Some(build_connectivity_kind_map(repo, progress, cancel)?);
+    }
+
     let mut reachable = oid_hash_set();
     if options.check_connectivity {
         let index_roots_set = index_object_roots(repo)?;
@@ -518,6 +527,7 @@ pub fn fsck(
             &index_roots,
             &store_validated,
             &store_links,
+            connectivity_kinds.as_ref(),
             &config,
             options.strict,
             progress,
@@ -552,8 +562,12 @@ pub fn fsck(
             if store_referenced.contains(&oid) {
                 continue;
             }
-            if let Ok(info) = odb.read_info_without_fetch(&oid) {
-                dangling.push((info.kind, oid));
+            let kind = connectivity_kinds
+                .as_ref()
+                .and_then(|kinds| kinds.get(&oid).copied())
+                .or_else(|| odb.read_info_without_fetch(&oid).ok().map(|info| info.kind));
+            if let Some(kind) = kind {
+                dangling.push((kind, oid));
             }
         }
         dangling.sort_by_key(|a| a.1);
@@ -1294,6 +1308,137 @@ fn verify_pack_objects(
     Ok((checked, validated, links, referenced))
 }
 
+/// Maps every stored object to its kind using headers only (no blob inflation).
+fn build_connectivity_kind_map(
+    repo: &Repository,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+) -> Result<OidHashMap<ObjectKind>> {
+    let odb = repo.odb();
+    let mut kinds = oid_hash_map();
+
+    if !odb.uses_files_primary() {
+        odb.for_each_object(&mut |oid| {
+            if cancel.is_cancelled() {
+                return ControlFlow::Break(());
+            }
+            if kinds.contains_key(oid) {
+                return ControlFlow::Continue(());
+            }
+            if let Ok(info) = odb.read_info_without_fetch(oid) {
+                kinds.insert(*oid, info.kind);
+            }
+            ControlFlow::Continue(())
+        })?;
+        return Ok(kinds);
+    }
+
+    let primary = odb.files_objects_dir().map(|p| p.to_path_buf());
+    let mut loose_total = 0usize;
+    let mut loose_lists = Vec::new();
+    for objects_dir in odb.local_store_validation_object_dirs() {
+        let loose = if primary.as_ref() == Some(&objects_dir) {
+            odb.enumerate_local_loose_objects()?
+        } else {
+            odb.enumerate_loose_objects_at(&objects_dir)?
+        };
+        loose_total += loose.len();
+        loose_lists.push((objects_dir, loose));
+    }
+
+    let mut pack_jobs = 0usize;
+    for objects_dir in odb.local_store_validation_object_dirs() {
+        let pack_dir = objects_dir.join("pack");
+        if !pack_dir.is_dir() {
+            continue;
+        }
+        pack_jobs += fs::read_dir(&pack_dir)
+            .map_err(Error::Io)?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "idx"))
+            .count();
+    }
+
+    progress.start(
+        ProgressPhase::IndexingObjects,
+        Some((loose_total + pack_jobs) as u64),
+    );
+    let mut steps = 0u64;
+
+    for (_objects_dir, loose) in loose_lists {
+        for (oid, path) in loose {
+            if cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            if kinds.contains_key(&oid) {
+                continue;
+            }
+            let info = read_loose_object_info(&path)?;
+            kinds.insert(oid, info.kind);
+            steps += 1;
+            if steps.is_multiple_of(4096) {
+                progress.set(steps);
+            }
+        }
+    }
+
+    for objects_dir in odb.local_store_validation_object_dirs() {
+        let pack_dir = objects_dir.join("pack");
+        if !pack_dir.is_dir() {
+            continue;
+        }
+        let idx_paths: Vec<PathBuf> = fs::read_dir(&pack_dir)
+            .map_err(Error::Io)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "idx"))
+            .collect();
+        for idx_path in idx_paths {
+            if cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            steps += 1;
+            progress.set(steps);
+            let idx = read_pack_index_cached(&idx_path)?;
+            let reader =
+                SingleLocalPackReader::open_for_pack_index(&objects_dir, Arc::clone(&idx))?;
+            let mut entries: Vec<(ObjectId, u64)> = Vec::with_capacity(idx.len());
+            for entry in idx.iter() {
+                let oid = ObjectId::from_bytes(entry.oid())?;
+                if kinds.contains_key(&oid) {
+                    continue;
+                }
+                entries.push((oid, entry.offset()?));
+            }
+            entries.sort_by_key(|(_, offset)| *offset);
+            if let Some(reader) = reader {
+                let offsets: Vec<u64> = entries.iter().map(|(_, o)| *o).collect();
+                let header_kinds = reader.object_kinds_at_sorted_offsets(&offsets)?;
+                for ((oid, offset), header_kind) in entries.iter().zip(header_kinds) {
+                    if kinds.contains_key(oid) {
+                        continue;
+                    }
+                    let kind = match header_kind {
+                        Some(kind) => kind,
+                        None => read_object_info_from_pack_at_offset(&idx, *offset)?.kind,
+                    };
+                    kinds.insert(*oid, kind);
+                }
+            } else {
+                for (oid, offset) in entries {
+                    if kinds.contains_key(&oid) {
+                        continue;
+                    }
+                    let kind = read_object_info_from_pack_at_offset(&idx, offset)?.kind;
+                    kinds.insert(oid, kind);
+                }
+            }
+        }
+    }
+    progress.finish();
+    Ok(kinds)
+}
+
 fn verify_midx_and_commit_graph(repo: &Repository, issues: &mut Vec<FsckIssue>) -> Result<()> {
     let odb = repo.odb();
     for objects_dir in odb.local_store_validation_object_dirs() {
@@ -1333,6 +1478,7 @@ fn walk_connectivity(
     index_roots: &OidHashSet,
     store_validated: &OidHashSet,
     store_links: &OidHashMap<ValidatedObjectLinks>,
+    connectivity_kinds: Option<&OidHashMap<ObjectKind>>,
     config: &ConfigSet,
     strict: bool,
     progress: &mut dyn ProgressSink,
@@ -1343,10 +1489,12 @@ fn walk_connectivity(
     let odb = repo.odb();
     let algo = odb.hash_algo();
     let fsck_opts = FsckObjectOptions::new(algo);
+    let connectivity_only = connectivity_kinds.is_some();
     let mut issues = Vec::new();
     let mut dot = DotFsckTracker::default();
     let mut seen: OidHashSet = oid_hash_set();
     let mut queue: VecDeque<(ObjectId, ObjectId, WalkRootKind)> = VecDeque::new();
+    let mut read_buf = Vec::new();
     for &root in roots {
         if seen.insert(root) {
             let kind = if index_roots.contains(&root) {
@@ -1374,6 +1522,7 @@ fn walk_connectivity(
             walk_from_validated_links(
                 odb,
                 store_links,
+                connectivity_kinds,
                 config,
                 strict,
                 &mut issues,
@@ -1388,41 +1537,74 @@ fn walk_connectivity(
             );
             continue;
         }
-        // As in Git, fsck never fetches: a promised object stays missing.
-        let obj = match odb.try_read_once(&oid) {
-            Ok(Some(o)) => o,
-            Ok(None) | Err(_) => {
-                if root_kind == WalkRootKind::IndexOnly && parent.is_zero() {
-                    // Report once from [`fsck_index_missing_blobs`].
-                } else if should_emit(config, strict, "missingObject") {
-                    issues.push(FsckIssue::MissingObject {
-                        oid,
-                        referrer: MissingObjectReferrer::Object(parent),
-                    });
-                }
-                continue;
-            }
-        };
-        if !store_validated.contains(&oid) {
-            if let Err(err) = fsck_object(obj.kind, &obj.data, fsck_opts) {
-                push_bad_object(&mut issues, config, strict, oid, err);
-            }
-            apply_dot_checks(
-                &mut dot,
-                &mut issues,
-                config,
-                strict,
-                &oid,
-                obj.kind,
-                &obj.data,
-            );
+        if connectivity_only
+            && connectivity_kinds.is_some_and(|k| k.get(&oid) == Some(&ObjectKind::Blob))
+        {
+            continue;
         }
+        let (obj_kind, obj_data): (ObjectKind, Cow<'_, [u8]>) = if connectivity_only {
+            read_buf.clear();
+            let kind = if connectivity_kinds
+                .is_some_and(|k| k.get(&oid) == Some(&ObjectKind::Commit))
+                && odb.read_packed_commit_header_block_into(&oid, &mut read_buf)?
+            {
+                ObjectKind::Commit
+            } else {
+                match odb.read_into_caching_delta_bases(&oid, &mut read_buf) {
+                    Ok(kind) => kind,
+                    Err(Error::ObjectNotFound(_)) => {
+                        if root_kind == WalkRootKind::IndexOnly && parent.is_zero() {
+                            // Report once from [`fsck_index_missing_blobs`].
+                        } else if should_emit(config, strict, "missingObject") {
+                            issues.push(FsckIssue::MissingObject {
+                                oid,
+                                referrer: MissingObjectReferrer::Object(parent),
+                            });
+                        }
+                        continue;
+                    }
+                    Err(err) => return Err(err),
+                }
+            };
+            (kind, Cow::Borrowed(read_buf.as_slice()))
+        } else {
+            // As in Git, fsck never fetches: a promised object stays missing.
+            let obj = match odb.try_read_once(&oid) {
+                Ok(Some(o)) => o,
+                Ok(None) | Err(_) => {
+                    if root_kind == WalkRootKind::IndexOnly && parent.is_zero() {
+                        // Report once from [`fsck_index_missing_blobs`].
+                    } else if should_emit(config, strict, "missingObject") {
+                        issues.push(FsckIssue::MissingObject {
+                            oid,
+                            referrer: MissingObjectReferrer::Object(parent),
+                        });
+                    }
+                    continue;
+                }
+            };
+            if !store_validated.contains(&oid) {
+                if let Err(err) = fsck_object(obj.kind, &obj.data, fsck_opts) {
+                    push_bad_object(&mut issues, config, strict, oid, err);
+                }
+                apply_dot_checks(
+                    &mut dot,
+                    &mut issues,
+                    config,
+                    strict,
+                    &oid,
+                    obj.kind,
+                    &obj.data,
+                );
+            }
+            (obj.kind, Cow::Owned(obj.data))
+        };
 
-        match obj.kind {
+        match obj_kind {
             ObjectKind::Commit => {
-                let Some((tree, parents)) = (match parse_commit(&obj.data) {
+                let Some((tree, parents)) = (match parse_commit(&obj_data) {
                     Ok(c) => Some((c.tree, c.parents)),
-                    Err(_) => parse_commit_tree_and_parents_lenient(&obj.data, algo.hex_len()),
+                    Err(_) => parse_commit_tree_and_parents_lenient(&obj_data, algo.hex_len()),
                 }) else {
                     continue;
                 };
@@ -1435,6 +1617,7 @@ fn walk_connectivity(
                     follow_typed_link(
                         odb,
                         store_links,
+                        connectivity_kinds,
                         config,
                         strict,
                         &mut issues,
@@ -1450,6 +1633,7 @@ fn walk_connectivity(
                 follow_typed_link(
                     odb,
                     store_links,
+                    connectivity_kinds,
                     config,
                     strict,
                     &mut issues,
@@ -1466,19 +1650,20 @@ fn walk_connectivity(
                 walk_tree_entries_from_data(
                     odb,
                     store_links,
+                    connectivity_kinds,
                     config,
                     strict,
                     &mut issues,
                     &mut queue,
                     &mut seen,
                     oid,
-                    &obj.data,
+                    &obj_data,
                     algo.len(),
                     promised,
                 );
             }
             ObjectKind::Tag => {
-                let tag = match parse_tag(&obj.data) {
+                let tag = match parse_tag(&obj_data) {
                     Ok(t) => t,
                     Err(e) => {
                         push_corrupt_parse(&mut issues, config, strict, oid, e);
@@ -1492,6 +1677,7 @@ fn walk_connectivity(
                 follow_typed_link(
                     odb,
                     store_links,
+                    connectivity_kinds,
                     config,
                     strict,
                     &mut issues,
@@ -1507,8 +1693,10 @@ fn walk_connectivity(
             ObjectKind::Blob => {}
         }
     }
-    for pending in dot.finish_pending(odb)? {
-        push_dot_issue(&mut issues, config, strict, pending);
+    if !connectivity_only {
+        for pending in dot.finish_pending(odb)? {
+            push_dot_issue(&mut issues, config, strict, pending);
+        }
     }
     progress.finish();
     Ok((seen, issues))
@@ -1544,9 +1732,17 @@ enum ChildKindProbe {
 fn child_exists_with_kind(
     odb: &Odb,
     store_links: &OidHashMap<ValidatedObjectLinks>,
+    connectivity_kinds: Option<&OidHashMap<ObjectKind>>,
     target: ObjectId,
     expected: ObjectKind,
 ) -> ChildKindProbe {
+    if let Some(kinds) = connectivity_kinds {
+        return match kinds.get(&target) {
+            Some(kind) if *kind == expected => ChildKindProbe::Matches,
+            Some(_) => ChildKindProbe::WrongKind,
+            None => ChildKindProbe::Missing,
+        };
+    }
     if let Some(links) = store_links.get(&target) {
         return if link_kind_matches(links, expected) {
             ChildKindProbe::Matches
@@ -1565,6 +1761,7 @@ fn child_exists_with_kind(
 fn walk_tree_entries_from_data(
     odb: &Odb,
     store_links: &OidHashMap<ValidatedObjectLinks>,
+    connectivity_kinds: Option<&OidHashMap<ObjectKind>>,
     config: &ConfigSet,
     strict: bool,
     issues: &mut Vec<FsckIssue>,
@@ -1587,6 +1784,7 @@ fn walk_tree_entries_from_data(
         walk_one_tree_entry(
             odb,
             store_links,
+            connectivity_kinds,
             config,
             strict,
             issues,
@@ -1603,6 +1801,7 @@ fn walk_tree_entries_from_data(
 fn walk_one_tree_entry(
     odb: &Odb,
     store_links: &OidHashMap<ValidatedObjectLinks>,
+    connectivity_kinds: Option<&OidHashMap<ObjectKind>>,
     config: &ConfigSet,
     strict: bool,
     issues: &mut Vec<FsckIssue>,
@@ -1616,7 +1815,7 @@ fn walk_one_tree_entry(
         return;
     }
     if let Some(expected) = kind_for_tree_mode(entry.mode) {
-        match child_exists_with_kind(odb, store_links, entry.oid, expected) {
+        match child_exists_with_kind(odb, store_links, connectivity_kinds, entry.oid, expected) {
             ChildKindProbe::Missing => {
                 if promised.contains(&entry.oid) {
                     return;
@@ -1638,7 +1837,13 @@ fn walk_one_tree_entry(
                     });
                 }
             }
-            ChildKindProbe::Matches => enqueue(queue, seen, entry.oid, tree_oid),
+            ChildKindProbe::Matches => {
+                if connectivity_kinds.is_some() && expected == ObjectKind::Blob {
+                    seen.insert(entry.oid);
+                    return;
+                }
+                enqueue(queue, seen, entry.oid, tree_oid);
+            }
         }
     } else if should_emit(config, strict, "brokenLink") {
         issues.push(FsckIssue::BrokenLink {
@@ -1654,6 +1859,7 @@ fn walk_one_tree_entry(
 fn walk_from_validated_links(
     odb: &Odb,
     store_links: &OidHashMap<ValidatedObjectLinks>,
+    connectivity_kinds: Option<&OidHashMap<ObjectKind>>,
     config: &ConfigSet,
     strict: bool,
     issues: &mut Vec<FsckIssue>,
@@ -1673,6 +1879,7 @@ fn walk_from_validated_links(
                 follow_typed_link(
                     odb,
                     store_links,
+                    connectivity_kinds,
                     config,
                     strict,
                     issues,
@@ -1688,6 +1895,7 @@ fn walk_from_validated_links(
             follow_typed_link(
                 odb,
                 store_links,
+                connectivity_kinds,
                 config,
                 strict,
                 issues,
@@ -1707,6 +1915,7 @@ fn walk_from_validated_links(
             follow_typed_link(
                 odb,
                 store_links,
+                connectivity_kinds,
                 config,
                 strict,
                 issues,
@@ -1727,6 +1936,7 @@ fn walk_from_validated_links(
 fn follow_typed_link(
     odb: &Odb,
     store_links: &OidHashMap<ValidatedObjectLinks>,
+    connectivity_kinds: Option<&OidHashMap<ObjectKind>>,
     config: &ConfigSet,
     strict: bool,
     issues: &mut Vec<FsckIssue>,
@@ -1738,7 +1948,7 @@ fn follow_typed_link(
     link_name: &str,
     promised: &OidHashSet,
 ) {
-    match child_exists_with_kind(odb, store_links, target, expected) {
+    match child_exists_with_kind(odb, store_links, connectivity_kinds, target, expected) {
         ChildKindProbe::Missing => {
             if promised.contains(&target) {
                 return;
@@ -1760,7 +1970,13 @@ fn follow_typed_link(
                 });
             }
         }
-        ChildKindProbe::Matches => enqueue(queue, seen, target, parent),
+        ChildKindProbe::Matches => {
+            if connectivity_kinds.is_some() && expected == ObjectKind::Blob {
+                seen.insert(target);
+                return;
+            }
+            enqueue(queue, seen, target, parent);
+        }
     }
 }
 

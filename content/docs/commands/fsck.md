@@ -22,7 +22,7 @@ grit verify
 Verifies repository integrity without invoking the system `git` binary:
 
 - Full run: loose and packed object validation, connectivity from ref roots, refs, multi-pack-index, and commit-graph checks when present.
-- With `--connectivity-only`: walk reachability from refs and validate linked objects only (faster; skips store-wide object scans).
+- With `--connectivity-only`: walk reachability from refs, verify each linked object exists with the expected kind (commit, tree, tag, blob), and skip store-wide content validation and blob inflation (faster than a full run; does not re-hash or content-fsck every object).
 - With `--dangling` (or by default on a full run): list **dangling** objects — present in the object database (including alternates), not reachable from refs, and not referenced by another object (matches Git’s default dangling tips, not the full unreachable closure).
 
 In a shallow clone, the commits listed in `.git/shallow` count as having no parents, as in `git fsck`. Their missing parents are not reported. If a parent is present anyway, it is listed as dangling.
@@ -39,7 +39,7 @@ Packed objects are verified in a single streaming pass over each pack's delta tr
 
 | Option | Description |
 | --- | --- |
-| `--connectivity-only` | Skip full object-store validation; check connectivity from ref roots only. |
+| `--connectivity-only` | Skip full object-store validation; walk from ref roots and check object existence and link kinds (no per-object content fsck or blob body reads). |
 | `--dangling` | With `--connectivity-only`, also compute and list unreachable objects (full fsck always includes dangling). |
 | `--no-dangling` | Skip unreachable-object listing (matches Git `--no-dangling`). |
 | `--strict` | Treat ref-fsck warnings as errors. |
