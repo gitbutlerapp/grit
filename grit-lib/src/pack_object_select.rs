@@ -1123,8 +1123,14 @@ fn collect_reachable_excluding_with_name_hashes(
     if let Some(dropped) = dropped_root_trees.filter(|d| !d.is_empty()) {
         walk.ordered.retain(|oid| !dropped.contains(oid));
     }
+    let mut send = walk.ordered;
+    if let Some(peer) = peer_odb {
+        if !peer.uses_files_primary() && !peer.custom_primary_is_empty()? {
+            send = peer.missing_materialized_many(&send)?;
+        }
+    }
     Ok(WalkedObjects {
-        send: walk.ordered,
+        send,
         name_hashes: walk.name_hashes,
         edges: walk.edges,
         missing: walk.missing.unwrap_or_default(),
@@ -1243,10 +1249,12 @@ impl<'a> EnumerationWalk<'a> {
         {
             return true;
         }
-        self.boundary.contains(&oid)
-            || self
-                .peer_odb
-                .is_some_and(|peer| peer.exists_materialized_local_without_rescan(&oid))
+        if self.boundary.contains(&oid) {
+            return true;
+        }
+        self.peer_odb.is_some_and(|peer| {
+            peer.uses_files_primary() && peer.exists_materialized_local_without_rescan(&oid)
+        })
     }
 
     fn seal_have_reachable_commit(&mut self, oid: ObjectId) -> Result<()> {

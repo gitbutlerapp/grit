@@ -1331,7 +1331,7 @@ fn copy_objects_for_local_fetch(
         }
     }
 
-    let mut still_missing = objects_missing_from_peer(local_odb, send);
+    let mut still_missing = objects_missing_from_peer(local_odb, send)?;
     if still_missing.is_empty() {
         copy.finish(progress);
         // Every object in `send` is stored locally now, and only packs were installed.
@@ -1485,7 +1485,7 @@ fn copy_objects_for_local_push(
         refresh_local_odb_after_link(dest_odb);
     }
 
-    let mut still_missing = objects_missing_from_peer(dest_odb, send);
+    let mut still_missing = objects_missing_from_peer(dest_odb, send)?;
     if still_missing.is_empty() {
         return Ok(());
     }
@@ -1547,12 +1547,19 @@ fn copy_objects_for_local_push(
 /// Uses the on-disk check rather than [`Odb::exists`], which reports the empty
 /// tree as present even without an object file: the result may be packed
 /// as-is, and the peer must end up with every object it references.
-fn objects_missing_from_peer(peer_odb: &Odb, send: &[ObjectId]) -> Vec<ObjectId> {
+fn objects_missing_from_peer(peer_odb: &Odb, send: &[ObjectId]) -> Result<Vec<ObjectId>> {
+    if !peer_odb.uses_files_primary() {
+        if peer_odb.custom_primary_is_empty()? {
+            return Ok(send.to_vec());
+        }
+        return peer_odb.missing_materialized_many(send);
+    }
     peer_odb.reprepare_local_packs();
-    send.iter()
+    Ok(send
+        .iter()
         .copied()
         .filter(|oid| !peer_odb.exists_materialized_local_without_rescan(oid))
-        .collect()
+        .collect())
 }
 
 /// Stream the pack that copies `missing` (a subset of `send_set`) into the peer to `w`.
@@ -1669,9 +1676,13 @@ fn collect_reachable_excluding_peer(
 
     // The peer is not written during the walk, so one pack-directory refresh is
     // enough; a stale miss only means sending an object the peer already has.
-    peer_odb.reprepare_local_packs();
+    let peer_is_files = peer_odb.uses_files_primary();
+    if peer_is_files {
+        peer_odb.reprepare_local_packs();
+    }
     let at_boundary = |oid: ObjectId| {
-        peer_boundary.contains(&oid) || peer_odb.exists_materialized_local_without_rescan(&oid)
+        peer_boundary.contains(&oid)
+            || (peer_is_files && peer_odb.exists_materialized_local_without_rescan(&oid))
     };
 
     // `visited` also remembers boundary objects so each object is probed once.
@@ -1781,15 +1792,23 @@ fn bitmap_send_set(
     else {
         return Ok(None);
     };
-    peer_odb.reprepare_local_packs();
     let mut objects: Vec<ObjectId> = Vec::new();
-    for oid in reachable
-        .iter_grouped_by_kind()
-        .filter(|oid| !peer_odb.exists_materialized_local_without_rescan(oid))
-    {
-        objects.push(oid);
-        let n = objects.len() as u64;
-        crate::progress::report_object_progress_stride(enum_sink, n, enum_last, None);
+    if peer_odb.uses_files_primary() {
+        peer_odb.reprepare_local_packs();
+        for oid in reachable
+            .iter_grouped_by_kind()
+            .filter(|oid| !peer_odb.exists_materialized_local_without_rescan(oid))
+        {
+            objects.push(oid);
+            let n = objects.len() as u64;
+            crate::progress::report_object_progress_stride(enum_sink, n, enum_last, None);
+        }
+    } else {
+        for oid in reachable.iter_grouped_by_kind() {
+            objects.push(oid);
+            let n = objects.len() as u64;
+            crate::progress::report_object_progress_stride(enum_sink, n, enum_last, None);
+        }
     }
     let name_hashes = crate::pack_object_select::name_hashes_for_send(
         reachable.bitmap_index(),
@@ -2251,6 +2270,13 @@ pub(crate) fn fetch_local_into(
         prune_tracking_refs(local, &positive, &remote_refs, opts.dry_run, &mut updates)?;
     }
 
+    let tag_targets_ok = tag_refs_with_local_targets(
+        local_odb,
+        &remote_odb,
+        matched.iter().filter(|m| m.dest_is_tag).map(|m| m.oid),
+        &pack_oids,
+    )?;
+
     let mut store_batch: Vec<(String, crate::refs::store::RawRef)> =
         Vec::with_capacity(matched.len());
     for m in &matched {
@@ -2302,7 +2328,7 @@ pub(crate) fn fetch_local_into(
                 });
                 continue;
             }
-            if m.dest_is_tag && !ref_target_exists(local_odb, &remote_odb, m.oid)? {
+            if m.dest_is_tag && !tag_targets_ok.contains(&m.oid) {
                 updates.push(RefUpdate {
                     remote_ref: m.remote_ref.clone(),
                     local_ref: Some(local_ref.clone()),
@@ -3705,6 +3731,73 @@ fn ref_target_exists(local_odb: &Odb, remote_odb: &Odb, tag_oid: ObjectId) -> Re
         Ok((peeled, _)) => local_odb.contains(&peeled),
         Err(_) => Ok(false),
     }
+}
+
+/// Tag refs whose peeled targets (and annotated tag objects) exist locally after
+/// a local fetch.
+///
+/// Objects just copied are checked via `copied` without store probes. Custom
+/// primaries batch any remaining ids in one [`Odb::missing_materialized_many`]
+/// call instead of per-tag [`ref_target_exists`] scalar `contains` probes.
+fn tag_refs_with_local_targets(
+    local_odb: &Odb,
+    remote_odb: &Odb,
+    tag_oids: impl IntoIterator<Item = ObjectId>,
+    copied: &HashSet<ObjectId>,
+) -> Result<HashSet<ObjectId>> {
+    let mut ok = HashSet::new();
+    let mut pending: Vec<(ObjectId, ObjectId)> = Vec::new();
+
+    for tag_oid in tag_oids {
+        let Ok((peeled, _)) = remote_odb.peel_tags(tag_oid) else {
+            continue;
+        };
+        let peeled_copied = copied.contains(&peeled);
+        let tag_copied = tag_oid == peeled || copied.contains(&tag_oid);
+        if peeled_copied && tag_copied {
+            ok.insert(tag_oid);
+            continue;
+        }
+        if local_odb.uses_files_primary() {
+            if ref_target_exists(local_odb, remote_odb, tag_oid)? {
+                ok.insert(tag_oid);
+            }
+            continue;
+        }
+        pending.push((tag_oid, peeled));
+    }
+
+    if pending.is_empty() {
+        return Ok(ok);
+    }
+
+    let mut probe_ids = Vec::new();
+    for (tag_oid, peeled) in &pending {
+        if !copied.contains(peeled) {
+            probe_ids.push(*peeled);
+        }
+        if *tag_oid != *peeled && !copied.contains(tag_oid) {
+            probe_ids.push(*tag_oid);
+        }
+    }
+    probe_ids.sort_unstable();
+    probe_ids.dedup();
+    let missing: HashSet<ObjectId> = if probe_ids.is_empty() {
+        HashSet::new()
+    } else {
+        local_odb
+            .missing_materialized_many(&probe_ids)?
+            .into_iter()
+            .collect()
+    };
+    for (tag_oid, peeled) in pending {
+        let peeled_ok = copied.contains(&peeled) || !missing.contains(&peeled);
+        let tag_ok = tag_oid == peeled || copied.contains(&tag_oid) || !missing.contains(&tag_oid);
+        if peeled_ok && tag_ok {
+            ok.insert(tag_oid);
+        }
+    }
+    Ok(ok)
 }
 
 /// Message on [`PushRefStatus::RejectAlreadyExists`] when an existing remote tag

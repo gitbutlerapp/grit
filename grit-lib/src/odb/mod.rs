@@ -1959,6 +1959,56 @@ impl Odb {
         })
     }
 
+    /// Whether a custom primary holds no objects yet.
+    ///
+    /// Uses one enumeration pass and no `contains` / `contains_many` probes. Returns
+    /// `Ok(false)` when the primary is files-backed.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the primary store's [`ObjectStore::for_each_object`] failure.
+    pub(crate) fn custom_primary_is_empty(&self) -> Result<bool> {
+        use std::ops::ControlFlow;
+        let Some(primary) = &self.custom_primary else {
+            return Ok(false);
+        };
+        let mut empty = true;
+        primary.for_each_object(&mut |oid| {
+            let _ = oid;
+            empty = false;
+            ControlFlow::Break(())
+        })?;
+        Ok(empty)
+    }
+
+    /// The ids from `oids` that the custom primary does not materialize, in input order.
+    ///
+    /// Asks the primary once with [`ObjectStore::contains_many`]. The canonical empty
+    /// tree is not treated as present, and read sources and alternates are not consulted
+    /// (same scope as [`Self::exists_materialized_local`]).
+    ///
+    /// # Errors
+    ///
+    /// Propagates the primary store failure. Only valid when [`Self::uses_files_primary`]
+    /// is false.
+    pub(crate) fn missing_materialized_many(&self, oids: &[ObjectId]) -> Result<Vec<ObjectId>> {
+        let primary =
+            self.custom_primary
+                .as_ref()
+                .ok_or_else(|| Error::UnsupportedObjectStore {
+                    operation: "missing_materialized_many",
+                })?;
+        if oids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let present = primary.contains_many(oids)?;
+        Ok(oids
+            .iter()
+            .zip(present)
+            .filter_map(|(oid, has)| (!has).then_some(*oid))
+            .collect())
+    }
+
     /// Whether `oid` is in this database: the primary store, any extra read source
     /// ([`OdbBuilder::push_read_source`]) or an alternate object directory.
     ///
