@@ -1357,7 +1357,7 @@ fn issue_2431_cargo_workspaces_md_tree_merge_matches_git_ort() {
     let theirs = commit_file(history.worktree(), path, theirs_text, "theirs");
     hist_git(history.worktree(), &["switch", "ours-side"]);
 
-    let grit = open_grit_repo(&history);
+    let grit = open_grit_repo(history.worktree());
     let labels = CommitMergeLabels::from_commits(&ours, &theirs);
     assert_merge_commits_match_git(
         &history,
