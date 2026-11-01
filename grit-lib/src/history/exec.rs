@@ -858,6 +858,7 @@ fn stop_on_replay_conflict(
             .copied()
             .unwrap_or(old_parent);
         let parent_tree = commit_tree_for_apply(repo, parent)?;
+        repo.odb().flush_for_publish().map_err(exec_io)?;
         update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &parent)
             .map_err(exec_io)?;
         checkout_exec_tree_transition(repo, Some(&session.current_tree), &parent_tree)?;
@@ -1303,6 +1304,7 @@ pub(super) fn resume_exec_rebase(
         };
         if still_on_branch {
             let tip_tree = commit_tree_for_apply(repo, expected)?;
+            repo.odb().flush_for_publish().map_err(exec_io)?;
             update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &expected)
                 .map_err(exec_io)?;
             checkout_exec_tree_transition(repo, None, &tip_tree)

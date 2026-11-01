@@ -708,6 +708,7 @@ pub fn continue_rebase(
         let resolved =
             write_rebase_staged_resolution(repo, &state.rewrite, current, new_tree, &parents)
                 .map_err(RebaseSessionError::from)?;
+        repo.odb().flush_for_publish().map_err(map_lib)?;
         refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &resolved)
             .map_err(map_lib)?;
         ensure_worktree_clean_for_rebase_exec(repo).map_err(map_lib)?;
@@ -726,6 +727,7 @@ pub fn continue_rebase(
         let resolved =
             write_rebase_staged_resolution(repo, &state.rewrite, current, new_tree, &parents)
                 .map_err(RebaseSessionError::from)?;
+        repo.odb().flush_for_publish().map_err(map_lib)?;
         refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &resolved)
             .map_err(map_lib)?;
         ensure_worktree_clean_for_rebase_exec(repo).map_err(map_lib)?;
@@ -1363,6 +1365,7 @@ fn install_stopped_rebase(
     )?;
     write_persisted_state(repo.git_dir(), &persisted)?;
 
+    repo.odb().flush_for_publish().map_err(map_lib)?;
     refs::update_direct_ref_on_store(
         repo.refs(),
         repo.git_dir(),
