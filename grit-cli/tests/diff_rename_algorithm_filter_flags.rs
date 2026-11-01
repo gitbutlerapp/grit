@@ -127,6 +127,59 @@ fn diff_rename_algorithm_filter_flags() {
     assert_eq!(code, 0, "-M must not treat HEAD~1 as threshold: {stderr}");
 }
 
+fn json_paths(stdout: &str) -> Vec<String> {
+    let json: serde_json::Value = serde_json::from_str(stdout).expect("json");
+    json["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .map(|f| f["path"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn diff_filter_applies_to_every_diff_mode() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "T"]);
+    std::fs::write(root.join("keep.txt"), "one\n").unwrap();
+    std::fs::write(root.join("gone.txt"), "bye\n").unwrap();
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "base"]);
+    std::fs::write(root.join("keep.txt"), "two\n").unwrap();
+    std::fs::write(root.join("new.txt"), "hi\n").unwrap();
+    git(root, &["add", "new.txt"]);
+    std::fs::remove_file(root.join("gone.txt")).unwrap();
+
+    for (args, expected) in [
+        (vec!["--staged", "--diff-filter=A"], vec!["new.txt"]),
+        (vec!["--unstaged", "--diff-filter=D"], vec!["gone.txt"]),
+        (vec!["--diff-filter=M"], vec!["keep.txt"]),
+        (
+            vec!["--diff-filter=d", "--name-only"],
+            vec!["keep.txt", "new.txt"],
+        ),
+        (
+            vec!["--against", "HEAD", "--diff-filter=A", "--stat"],
+            vec!["new.txt"],
+        ),
+    ] {
+        let mut argv = vec!["diff", "--json"];
+        argv.extend(&args);
+        let (code, stdout, stderr) = grit(root, &argv);
+        assert_eq!(code, 0, "{args:?}: stderr={stderr}");
+        assert_eq!(json_paths(&stdout), expected, "{args:?}");
+    }
+
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "change"]);
+    let (code, stdout, stderr) = grit(root, &["diff", "HEAD", "--diff-filter=AD", "--json"]);
+    assert_eq!(code, 0, "stderr={stderr}");
+    assert_eq!(json_paths(&stdout), ["gone.txt", "new.txt"]);
+}
+
 #[test]
 fn diff_dash_m_pathspec_after_double_dash_is_not_rewrite() {
     let dir = tempfile::tempdir().expect("tempdir");
