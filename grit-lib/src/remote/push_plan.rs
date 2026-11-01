@@ -8,7 +8,7 @@
 //! advertisement with [`load_push_plan_context`], plans with [`resolve_push`], and sends the
 //! result through the [`Remote`] returned by [`open_push_destination`].
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use thiserror::Error;
@@ -248,9 +248,12 @@ pub fn resolve_push(
     let mut resolved = if request.refspecs.is_empty() {
         resolve_default_push(repo, config, &remote, ctx)?
     } else {
+        let local = LocalPushRefs::load(repo)?;
         let mut specs = Vec::new();
         for spec in &request.refspecs {
-            specs.extend(resolve_cli_refspec(repo, config, &remote, spec, ctx)?);
+            specs.extend(resolve_cli_refspec(
+                repo, config, &remote, spec, ctx, &local,
+            )?);
         }
         let branch_label = branch_label_from_specs(repo, &specs);
         ResolvedPush {
@@ -501,9 +504,10 @@ fn resolve_default_push(
                 positive_specs.push(spec);
             }
         }
+        let local = LocalPushRefs::load(repo)?;
         let mut specs = Vec::new();
         for spec in positive_specs {
-            specs.extend(expand_configured_push_refspec(repo, spec, ctx)?);
+            specs.extend(expand_configured_push_refspec(repo, spec, ctx, &local)?);
         }
         for item in negative_items {
             specs.retain(|s| !push_spec_excluded_by_negative(&item, s));
@@ -870,15 +874,16 @@ fn resolve_cli_refspec(
     remote: &str,
     spec: &str,
     ctx: &PushPlanContext,
+    local: &LocalPushRefs,
 ) -> PlanResult<Vec<PushRefSpec>> {
     if !spec.contains(':') {
-        return resolve_shorthand_refspec(repo, config, remote, spec, ctx);
+        return resolve_shorthand_refspec(repo, config, remote, spec, ctx, local);
     }
     let item = parse_push_refspec(spec).map_err(|e| PushPlanError::InvalidRefspec {
         spec: spec.to_owned(),
         reason: e.to_string(),
     })?;
-    resolve_parsed_refspec(repo, &item, ctx)
+    resolve_parsed_refspec(repo, &item, ctx, local)
 }
 
 fn resolve_shorthand_refspec(
@@ -887,15 +892,11 @@ fn resolve_shorthand_refspec(
     remote: &str,
     spec: &str,
     ctx: &PushPlanContext,
+    local: &LocalPushRefs,
 ) -> PlanResult<Vec<PushRefSpec>> {
-    let local_heads = list_local_refs(repo.git_dir(), "refs/heads/")?;
-    let local_tags = list_local_refs(repo.git_dir(), "refs/tags/")?;
-    let mut all = local_heads;
-    all.extend(local_tags);
-
-    let count = count_refname_match(spec, &all);
+    let count = local.count_refname_match(spec);
     if count == 1 {
-        let Some(matched) = refname_match(spec, &all) else {
+        let Some(matched) = local.refname_match(spec) else {
             return Err(PushPlanError::SrcRefspecNoMatch {
                 spec: spec.to_owned(),
             });
@@ -905,7 +906,7 @@ fn resolve_shorthand_refspec(
                 spec: mapped.clone(),
                 reason: e.to_string(),
             })?;
-            return resolve_parsed_refspec(repo, &item, ctx);
+            return resolve_parsed_refspec(repo, &item, ctx, local);
         }
         let item = RefspecItem {
             force: false,
@@ -913,7 +914,7 @@ fn resolve_shorthand_refspec(
             dst: Some(matched.0.clone()),
             ..Default::default()
         };
-        return resolve_parsed_refspec(repo, &item, ctx);
+        return push_spec_from_parsed_item(repo, &item, ctx, matched);
     }
     if count == 0 {
         // Treat as explicit refspec string (Git refspec_append).
@@ -921,7 +922,7 @@ fn resolve_shorthand_refspec(
             spec: spec.to_owned(),
             reason: e.to_string(),
         })?;
-        return resolve_parsed_refspec(repo, &item, ctx);
+        return resolve_parsed_refspec(repo, &item, ctx, local);
     }
     Err(PushPlanError::SrcRefspecAmbiguous {
         spec: spec.to_owned(),
@@ -952,22 +953,22 @@ fn expand_configured_push_refspec(
     repo: &Repository,
     spec: String,
     ctx: &PushPlanContext,
+    local: &LocalPushRefs,
 ) -> PlanResult<Vec<PushRefSpec>> {
     let item = parse_push_refspec(&spec).map_err(|e| PushPlanError::InvalidRefspec {
         spec: spec.clone(),
         reason: e.to_string(),
     })?;
     if item.matching {
-        let heads = list_local_refs(repo.git_dir(), "refs/heads/")?;
         let mut out = Vec::new();
-        for (name, oid) in heads {
-            if !ctx.remote_ref_names.contains(&name) {
+        for (name, oid) in local.heads() {
+            if !ctx.remote_ref_names.contains(name) {
                 continue;
             }
             out.push(push_spec(
-                Some(oid),
+                Some(*oid),
                 Some(name.clone()),
-                name,
+                name.clone(),
                 item.force,
                 false,
             ));
@@ -976,17 +977,16 @@ fn expand_configured_push_refspec(
     }
     if item.pattern {
         let prefix = item.src.as_deref().unwrap_or("");
-        let local = if prefix.starts_with("refs/tags/") {
-            list_local_refs(repo.git_dir(), "refs/tags/")?
+        let refs = if prefix.starts_with("refs/tags/") {
+            local.tags()
         } else {
-            list_local_refs(repo.git_dir(), "refs/heads/")?
+            local.heads()
         };
         let mut out = Vec::new();
-        for (name, _) in local {
-            if let Some(dst) = refspec_map_src(&item, &name) {
-                let oid = resolve_src_ref(repo, &name)?;
+        for (name, oid) in refs {
+            if let Some(dst) = refspec_map_src(&item, name) {
                 out.push(push_spec(
-                    Some(oid),
+                    Some(*oid),
                     Some(name.clone()),
                     dst,
                     item.force,
@@ -996,13 +996,14 @@ fn expand_configured_push_refspec(
         }
         return Ok(out);
     }
-    resolve_parsed_refspec(repo, &item, ctx)
+    resolve_parsed_refspec(repo, &item, ctx, local)
 }
 
 fn resolve_parsed_refspec(
     repo: &Repository,
     item: &RefspecItem,
     ctx: &PushPlanContext,
+    local: &LocalPushRefs,
 ) -> PlanResult<Vec<PushRefSpec>> {
     if item.negative {
         return Ok(Vec::new());
@@ -1016,6 +1017,7 @@ fn resolve_parsed_refspec(
                 ":".to_owned()
             },
             ctx,
+            local,
         );
     }
 
@@ -1043,46 +1045,74 @@ fn resolve_parsed_refspec(
     } else {
         match resolve_src_ref(repo, src_name) {
             Ok(oid) => oid,
-            Err(_) => {
-                let local = list_local_refs(repo.git_dir(), "refs/heads/")?;
-                let local_tags = list_local_refs(repo.git_dir(), "refs/tags/")?;
-                let mut all = local;
-                all.extend(local_tags);
-                match count_refname_match(src_name, &all) {
-                    0 => {
+            Err(_) => match local.count_refname_match(src_name) {
+                0 => {
+                    return Err(PushPlanError::SrcRefspecNoMatch {
+                        spec: src_name.to_owned(),
+                    });
+                }
+                1 => {
+                    let Some((name, oid)) = local.refname_match(src_name) else {
                         return Err(PushPlanError::SrcRefspecNoMatch {
                             spec: src_name.to_owned(),
                         });
-                    }
-                    1 => {
-                        let Some((name, oid)) = refname_match(src_name, &all) else {
-                            return Err(PushPlanError::SrcRefspecNoMatch {
-                                spec: src_name.to_owned(),
-                            });
-                        };
-                        let dst = resolve_dst_for_src(repo, item, &name, ctx)?;
-                        return Ok(vec![push_spec(
-                            Some(oid),
-                            Some(name.clone()),
-                            dst,
-                            item.force,
-                            false,
-                        )]);
-                    }
-                    _ => {
-                        return Err(PushPlanError::SrcRefspecAmbiguous {
-                            spec: src_name.to_owned(),
-                        });
-                    }
+                    };
+                    let dst = resolve_dst_for_src(repo, item, &name, ctx)?;
+                    return Ok(vec![push_spec(
+                        Some(oid),
+                        Some(name.clone()),
+                        dst,
+                        item.force,
+                        false,
+                    )]);
                 }
-            }
+                _ => {
+                    return Err(PushPlanError::SrcRefspecAmbiguous {
+                        spec: src_name.to_owned(),
+                    });
+                }
+            },
         }
     };
+
+    let known_src = if item.exact_sha1
+        || src_name.is_empty()
+        || src_name.eq_ignore_ascii_case("HEAD")
+        || src_name == "@"
+    {
+        None
+    } else {
+        local.refname_match(src_name)
+    };
+    let src_full = if item.exact_sha1 {
+        None
+    } else if let Some((name, _)) = &known_src {
+        Some(name.clone())
+    } else {
+        Some(full_src_ref_name(repo, src_name, local)?)
+    };
+    let src_label = src_full.clone();
+    let dst = resolve_dst_for_src(repo, item, src_label.as_deref().unwrap_or(src_name), ctx)?;
+    let mut spec = push_spec(Some(src_oid), src_label, dst, item.force, false);
+    if matches!(src_name, "HEAD" | "@") {
+        spec.hook_src_ref = Some("HEAD".to_owned());
+    }
+    Ok(vec![spec])
+}
+
+fn push_spec_from_parsed_item(
+    repo: &Repository,
+    item: &RefspecItem,
+    ctx: &PushPlanContext,
+    known_src: (String, ObjectId),
+) -> PlanResult<Vec<PushRefSpec>> {
+    let src_name = item.src.as_deref().unwrap_or("");
+    let src_oid = known_src.1;
 
     let src_full = if item.exact_sha1 {
         None
     } else {
-        Some(full_src_ref_name(repo, src_name)?)
+        Some(known_src.0.clone())
     };
     let src_label = src_full.clone();
     let dst = resolve_dst_for_src(repo, item, src_label.as_deref().unwrap_or(src_name), ctx)?;
@@ -1253,7 +1283,7 @@ fn resolve_src_ref(repo: &Repository, spec: &str) -> PlanResult<ObjectId> {
     })
 }
 
-fn full_src_ref_name(repo: &Repository, spec: &str) -> PlanResult<String> {
+fn full_src_ref_name(repo: &Repository, spec: &str, local: &LocalPushRefs) -> PlanResult<String> {
     if spec.eq_ignore_ascii_case("HEAD") {
         if let Ok(HeadState::Branch { short_name, .. }) = resolve_head(repo.git_dir()) {
             return Ok(format!("refs/heads/{short_name}"));
@@ -1262,15 +1292,82 @@ fn full_src_ref_name(repo: &Repository, spec: &str) -> PlanResult<String> {
     if spec.starts_with("refs/") {
         return Ok(spec.to_owned());
     }
-    let heads = list_local_refs(repo.git_dir(), "refs/heads/")?;
-    if let Some((name, _)) = refname_match(spec, &heads) {
-        return Ok(name);
-    }
-    let tags = list_local_refs(repo.git_dir(), "refs/tags/")?;
-    if let Some((name, _)) = refname_match(spec, &tags) {
+    if let Some((name, _)) = local.refname_match(spec) {
         return Ok(name);
     }
     Ok(spec.to_owned())
+}
+
+/// Local heads and tags loaded once for refspec planning.
+struct LocalPushRefs {
+    all: Vec<(String, ObjectId)>,
+    by_full: HashMap<String, ObjectId>,
+    by_short: HashMap<String, Vec<(String, ObjectId)>>,
+    heads: Vec<(String, ObjectId)>,
+    tags: Vec<(String, ObjectId)>,
+}
+
+impl LocalPushRefs {
+    fn load(repo: &Repository) -> PlanResult<Self> {
+        let heads = list_local_refs(repo.git_dir(), "refs/heads/")?;
+        let tags = list_local_refs(repo.git_dir(), "refs/tags/")?;
+        let mut all = Vec::with_capacity(heads.len() + tags.len());
+        let mut by_full = HashMap::with_capacity(heads.len() + tags.len());
+        let mut by_short: HashMap<String, Vec<(String, ObjectId)>> = HashMap::new();
+        for entry in heads.iter().chain(tags.iter()) {
+            all.push(entry.clone());
+            by_full.insert(entry.0.clone(), entry.1);
+            if let Some(short) = entry
+                .0
+                .strip_prefix("refs/heads/")
+                .or_else(|| entry.0.strip_prefix("refs/tags/"))
+            {
+                by_short
+                    .entry(short.to_owned())
+                    .or_default()
+                    .push(entry.clone());
+            }
+        }
+        Ok(Self {
+            all,
+            by_full,
+            by_short,
+            heads,
+            tags,
+        })
+    }
+
+    fn heads(&self) -> &[(String, ObjectId)] {
+        &self.heads
+    }
+
+    fn tags(&self) -> &[(String, ObjectId)] {
+        &self.tags
+    }
+
+    fn count_refname_match(&self, pattern: &str) -> usize {
+        if (pattern.starts_with("refs/heads/") || pattern.starts_with("refs/tags/"))
+            && self.by_full.contains_key(pattern)
+        {
+            return 1;
+        }
+        if let Some(entries) = self.by_short.get(pattern) {
+            return count_refname_match(pattern, entries);
+        }
+        count_refname_match(pattern, &self.all)
+    }
+
+    fn refname_match(&self, pattern: &str) -> Option<(String, ObjectId)> {
+        if pattern.starts_with("refs/heads/") || pattern.starts_with("refs/tags/") {
+            if let Some(oid) = self.by_full.get(pattern) {
+                return Some((pattern.to_owned(), *oid));
+            }
+        }
+        if let Some(entries) = self.by_short.get(pattern) {
+            return refname_match(pattern, entries);
+        }
+        refname_match(pattern, &self.all)
+    }
 }
 
 fn list_local_refs(git_dir: &Path, prefix: &str) -> PlanResult<Vec<(String, ObjectId)>> {
@@ -1890,5 +1987,136 @@ mod tests {
         )
         .expect_err("empty delete");
         assert_eq!(err, PushPlanError::DeleteWithoutRefs);
+    }
+
+    #[test]
+    fn many_shorthand_refspecs_resolve_local_heads() {
+        let (_tmp, repo) = init_repo();
+        let git_dir = repo.git_dir();
+        std::fs::write(
+            git_dir.join("config"),
+            r#"[remote "origin"]
+	url = /tmp/o.git
+"#,
+        )
+        .expect("config");
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+        let oid = ObjectId::from_hex("a".repeat(40).as_str()).expect("oid");
+        std::fs::create_dir_all(git_dir.join("refs/heads")).expect("heads");
+        std::fs::write(
+            git_dir.join("refs/heads/main"),
+            format!("{}\n", oid.to_hex()),
+        )
+        .expect("main");
+        for i in 1..=500 {
+            std::fs::write(
+                git_dir.join(format!("refs/heads/b{i}")),
+                format!("{}\n", oid.to_hex()),
+            )
+            .expect("branch");
+        }
+        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("config");
+        let refspecs: Vec<String> = (1..=500).map(|i| format!("b{i}")).collect();
+        let resolved = resolve_push(
+            &repo,
+            &config,
+            &PushRequest {
+                remote: Some("origin".to_owned()),
+                refspecs,
+                ..Default::default()
+            },
+            &PushPlanContext::default(),
+        )
+        .expect("resolve many shorthands");
+        assert_eq!(resolved.specs.len(), 500);
+        for (i, spec) in resolved.specs.iter().enumerate() {
+            let n = i + 1;
+            assert_eq!(spec.dst, format!("refs/heads/b{n}"));
+            assert_eq!(spec.src, Some(oid));
+            assert_eq!(
+                spec.src_ref.as_deref(),
+                Some(format!("refs/heads/b{n}").as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn shorthand_ambiguous_head_and_tag_same_name() {
+        let (_tmp, repo) = init_repo();
+        let git_dir = repo.git_dir();
+        std::fs::write(
+            git_dir.join("config"),
+            r#"[remote "origin"]
+	url = /tmp/o.git
+"#,
+        )
+        .expect("config");
+        let oid = ObjectId::from_hex("b".repeat(40).as_str()).expect("oid");
+        std::fs::create_dir_all(git_dir.join("refs/heads")).expect("heads");
+        std::fs::create_dir_all(git_dir.join("refs/tags")).expect("tags");
+        std::fs::write(
+            git_dir.join("refs/heads/release"),
+            format!("{}\n", oid.to_hex()),
+        )
+        .expect("head");
+        std::fs::write(
+            git_dir.join("refs/tags/release"),
+            format!("{}\n", oid.to_hex()),
+        )
+        .expect("tag");
+        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("config");
+        let err = resolve_push(
+            &repo,
+            &config,
+            &PushRequest {
+                remote: Some("origin".to_owned()),
+                refspecs: vec!["release".to_owned()],
+                ..Default::default()
+            },
+            &PushPlanContext::default(),
+        )
+        .expect_err("ambiguous");
+        assert_eq!(
+            err,
+            PushPlanError::SrcRefspecAmbiguous {
+                spec: "release".into()
+            }
+        );
+    }
+
+    #[test]
+    fn shorthand_honors_remote_push_mapping() {
+        let (_tmp, repo) = init_repo();
+        let git_dir = repo.git_dir();
+        std::fs::write(
+            git_dir.join("config"),
+            r#"[remote "origin"]
+	url = /tmp/o.git
+	push = refs/heads/main:refs/remotes/origin/main
+"#,
+        )
+        .expect("config");
+        let oid = ObjectId::from_hex("c".repeat(40).as_str()).expect("oid");
+        std::fs::create_dir_all(git_dir.join("refs/heads")).expect("heads");
+        std::fs::write(
+            git_dir.join("refs/heads/main"),
+            format!("{}\n", oid.to_hex()),
+        )
+        .expect("main");
+        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("config");
+        let resolved = resolve_push(
+            &repo,
+            &config,
+            &PushRequest {
+                remote: Some("origin".to_owned()),
+                refspecs: vec!["main".to_owned()],
+                ..Default::default()
+            },
+            &PushPlanContext::default(),
+        )
+        .expect("mapped shorthand");
+        assert_eq!(resolved.specs.len(), 1);
+        assert_eq!(resolved.specs[0].dst, "refs/remotes/origin/main");
+        assert_eq!(resolved.specs[0].src, Some(oid));
     }
 }

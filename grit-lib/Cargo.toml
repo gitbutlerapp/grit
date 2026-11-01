@@ -271,6 +271,10 @@ harness = false
 name = "fetch_local_many_refs"
 harness = false
 
+[[bench]]
+name = "push_resolve_many_refs"
+harness = false
+
 [dev-dependencies]
 bincode.workspace = true
 criterion.workspace = true
