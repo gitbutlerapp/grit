@@ -16008,9 +16008,19 @@ mod line_coverage_tests {
         assert_eq!(raw.len(), (N + 1) * 2);
         let config = ConfigSet::new();
         let policy = ThreadPolicy::default();
-        let renamed = detect_renames_with_policy(&odb, None, raw, 50, &config, &policy, None)?;
+        let renamed = detect_renames_with_policy(
+            &odb,
+            None,
+            raw,
+            50,
+            &config,
+            &policy,
+            None,
+            DetectRenamesOptions::default(),
+        )?;
         assert_eq!(
             renamed
+                .entries
                 .iter()
                 .filter(|e| e.status == DiffStatus::Renamed)
                 .count(),
