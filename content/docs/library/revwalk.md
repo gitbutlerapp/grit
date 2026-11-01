@@ -73,7 +73,7 @@ Bounded default-order filters inflate each visited commit once and reuse those b
 
 ## Describe (nearest tag)
 
-[`RevWalk::describe`](rustdoc:grit_lib::revwalk::RevWalk::describe) picks the reachable tag with the smallest exact range count from the tag’s peeled commit to the target revision ([`DescribeOptions`](rustdoc:grit_lib::revwalk::DescribeOptions), [`DescribedCommit`](rustdoc:grit_lib::revwalk::DescribedCommit)). The distance matches `grit revs --count tag..rev`, not necessarily Git’s lazy `git describe` depth. Tag reachability uses one ancestry walk over all tag tips (same batch idea as `git tag --merged`), not per-tag `is_ancestor` probes. With `first_parent`, only tags on the first-parent chain from the target commit are candidates.
+[`RevWalk::describe`](rustdoc:grit_lib::revwalk::RevWalk::describe) picks the reachable tag with the smallest exact range count from the tag’s peeled commit to the target revision ([`DescribeOptions`](rustdoc:grit_lib::revwalk::DescribeOptions), [`DescribedCommit`](rustdoc:grit_lib::revwalk::DescribedCommit)). The distance matches `grit revs --count tag..rev`, not necessarily Git’s lazy `git describe` depth. One commit-graph-backed backward walk from the target discovers every reachable tag and its distance (same idea as Git’s internal `describe` walk), instead of a separate rev-list count per tag. With `first_parent`, only the first parent is enqueued during that walk.
 
 ## Example
 

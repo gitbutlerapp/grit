@@ -2404,7 +2404,7 @@ fn commit_rank_for_walk(cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> u64 
 
 /// Heap ordering key: commit-graph generation when present, else [`UNRANKED_COMMIT`]
 /// with [`CommitGraphCache::commit_time`] as the tie-break (see [`PaintKey`]).
-fn push_commit_heap_key(
+pub(crate) fn push_commit_heap_key(
     cache: &mut CommitGraphCache<'_>,
     heap: &mut BinaryHeap<PaintKey>,
     seq: &mut u64,
@@ -2988,11 +2988,11 @@ impl PaintWalk {
 /// [`PaintWalk`] heap order: highest generation, then newest committer date,
 /// then first queued (Git's priority queue is stable for ties).
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
-struct PaintKey {
+pub(crate) struct PaintKey {
     rank: u64,
     committed_at: i64,
     seq: std::cmp::Reverse<u64>,
-    oid: ObjectId,
+    pub(crate) oid: ObjectId,
 }
 
 /// Newest committer timestamp first, matching `git merge-base` stdout ordering.
@@ -3348,7 +3348,7 @@ impl<'r> CommitGraphCache<'r> {
         Ok(visited)
     }
 
-    fn parents_of(&mut self, oid: ObjectId) -> Result<Vec<ObjectId>> {
+    pub(crate) fn parents_of(&mut self, oid: ObjectId) -> Result<Vec<ObjectId>> {
         #[cfg(test)]
         intersect_walk_test_hooks::record_commit_parent_query();
         if let Some(parents) = self.with_linkage(|link| link.parents.get(&oid).cloned()) {
@@ -3544,7 +3544,7 @@ impl<'r> CommitGraphCache<'r> {
     /// Committer timestamp (unix seconds) for `oid`, peeling tags to their commit.
     /// Populated as a side effect of [`Self::parents_of`]; missing/unreadable
     /// objects report `0` (treated as oldest, so they prune away).
-    fn commit_time(&mut self, oid: ObjectId) -> Result<i64> {
+    pub(crate) fn commit_time(&mut self, oid: ObjectId) -> Result<i64> {
         if let Some(t) = self.with_linkage(|link| link.times.get(&oid).copied()) {
             return Ok(t);
         }
