@@ -19,7 +19,7 @@ Downloads objects and updates refs from a remote. Your working tree and current 
 
 Each `<refspec>` selects what to fetch (`main`, `refs/heads/x:refs/heads/y`, `+refs/…` to force). When no refspecs are given, configured `remote.<name>.fetch` refspecs apply (usually all heads into `refs/remotes/<remote>/…`).
 
-When the source is a **literal path or URL** (not a configured remote), grit does not update `refs/remotes/origin/*` unless you pass refspecs with destinations. [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion) is updated for explicit refspecs.
+When the source is a **literal path or URL** (not a configured remote), grit does not update `refs/remotes/origin/*` unless you pass refspecs with destinations. With no refspecs, grit fetches the bundle's `HEAD` into [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion) (matching Git's anonymous fetch). A bundle whose header lists no `HEAD` — typical of incremental range bundles — fails with a clear ref error instead of reporting "already up to date"; pass an explicit refspec (for example `main:refs/remotes/bundle/main` or `main` to update `FETCH_HEAD` only) to take a listed branch.
 
 Human output lists each local ref with its remote source and old → new oids. Pruned refs show `deleted`; rejected updates are listed and exit **1** (same as [`grit push`](../push/) rejections). When a stale remote-tracking ref blocks another update (for example `origin/gone/x` still exists locally but the remote now has `gone`), grit still applies every ref it can and reports the blocked ref as rejected; the `reason` field suggests `grit fetch --prune` or `grit remote prune <remote>` when pruning would remove the stale ref.
 
