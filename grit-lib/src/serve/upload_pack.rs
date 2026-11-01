@@ -1665,6 +1665,26 @@ mod tests {
     }
 
     #[test]
+    fn depth_walk_stops_at_server_shallow_with_parents_in_object() {
+        let fx = fixture(10, &[]);
+        let tip = *fx.commits.last().unwrap();
+        let boundary = fx.commits[6];
+        std::fs::write(fx.repo.git_dir().join("shallow"), format!("{boundary}\n")).unwrap();
+        let server_shallow = crate::rev_list::shallow_boundary_oids(fx.repo.git_dir());
+        assert!(server_shallow.contains(&boundary));
+        let state =
+            crate::rev_list::upload_pack_shallow_depth_state(&fx.repo, &[tip], 10, &server_shallow);
+        assert!(
+            state.border_commits.contains(&boundary),
+            "server shallow boundary is a pack cut"
+        );
+        assert!(
+            !state.interior_commits.contains(&fx.commits[5]),
+            "must not walk past server shallow graft"
+        );
+    }
+
+    #[test]
     fn re_shallow_depth_one_all_tips_get_shallow_lines() {
         let (fx, branch_a, branch_z) = fixture_main_with_two_branches(6);
         let main_tip = *fx.commits.last().unwrap();

@@ -8180,10 +8180,8 @@ pub(crate) fn upload_pack_shallow_depth_state(
     let mut border_set = HashSet::new();
     for (&oid, &enter) in &enter_depth {
         let cur_depth = enter.saturating_add(1);
-        let parents = commit_parent_ids(repo, oid);
-        let server_shallow_graft = server_shallow.contains(&oid) && parents.is_empty();
 
-        if cur_depth >= depth || server_shallow_graft {
+        if cur_depth >= depth || server_shallow.contains(&oid) {
             if border_set.insert(oid) {
                 out.border_commits.push(oid);
             }
@@ -8229,12 +8227,11 @@ fn min_enter_depths_from_wants(
         };
         let cur_depth = enter.saturating_add(1);
 
-        let parents = commit_parent_ids(repo, oid);
-        let server_shallow_graft = server_shallow.contains(&oid) && parents.is_empty();
-        if cur_depth >= depth || server_shallow_graft {
+        if cur_depth >= depth || server_shallow.contains(&oid) {
             continue;
         }
 
+        let parents = commit_parent_ids(repo, oid);
         let mut parent_iter = parents.iter();
         let Some(first_parent) = parent_iter.next() else {
             continue;

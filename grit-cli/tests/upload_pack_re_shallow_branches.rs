@@ -145,3 +145,102 @@ fn grit_matches_git_on_re_shallow_all_heads() -> TestResult {
 
     Ok(())
 }
+
+fn linear_bare(root: &Path, commits: usize) -> Result<PathBuf, Box<dyn Error>> {
+    let work = root.join("linear-work");
+    std::fs::create_dir_all(&work)?;
+    git(&work, &["init", "-q", "-b", "main"])?;
+    for i in 1..=commits {
+        std::fs::write(work.join("f"), format!("{i}\n"))?;
+        git(&work, &["add", "f"])?;
+        git(&work, &["commit", "-q", "-m", &format!("c{i}")])?;
+    }
+    let bare = root.join("full.git");
+    git(
+        root,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            work.to_str().ok_or("utf8")?,
+            bare.to_str().ok_or("utf8")?,
+        ],
+    )?;
+    Ok(bare)
+}
+
+fn shallow_bare_server(root: &Path, full: &Path, depth: u32) -> Result<PathBuf, Box<dyn Error>> {
+    let shallow = root.join("shallow-server.git");
+    let url = format!("file://{}", full.canonicalize()?.display());
+    git(
+        root,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            "--depth",
+            &depth.to_string(),
+            &url,
+            shallow.to_str().ok_or("utf8")?,
+        ],
+    )?;
+    Ok(shallow)
+}
+
+fn clone_from_shallow_server(
+    root: &Path,
+    bare: &Path,
+    name: &str,
+    upload_pack: &str,
+    depth: u32,
+) -> Result<(usize, Vec<String>), Box<dyn Error>> {
+    let dest = root.join(name);
+    let url = format!("file://{}", bare.canonicalize()?.display());
+    let upload = format!("--upload-pack={upload_pack}");
+    git(
+        root,
+        &[
+            "-c",
+            "protocol.version=2",
+            "clone",
+            "-q",
+            "--depth",
+            &depth.to_string(),
+            &upload,
+            url.as_str(),
+            dest.to_str().ok_or("utf8")?,
+        ],
+    )?;
+    git(&dest, &["fsck", "--no-dangling"])?;
+    let count = git(&dest, &["rev-list", "--count", "--all"])?
+        .trim()
+        .parse::<usize>()?;
+    let git_dir = dest.join(".git");
+    let mut shallow: Vec<String> = std::fs::read_to_string(git_dir.join("shallow"))?
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    shallow.sort();
+    Ok((count, shallow))
+}
+
+#[test]
+fn grit_matches_git_clone_deeper_than_shallow_server() -> TestResult {
+    let root = std::env::temp_dir().join(format!("grit-shallow-srv-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root)?;
+    let full = linear_bare(&root, 10)?;
+    let server = shallow_bare_server(&root, &full, 3)?;
+
+    let git_up = "git-upload-pack";
+    let grit_up = format!("{GRIT} upload-pack");
+
+    let git_stats = clone_from_shallow_server(&root, &server, "git-clone", git_up, 5)?;
+    let grit_stats = clone_from_shallow_server(&root, &server, "grit-clone", &grit_up, 5)?;
+
+    assert_eq!(git_stats, grit_stats);
+    assert_eq!(git_stats.0, 3, "commits reachable on client");
+    assert_eq!(git_stats.1.len(), 1, ".git/shallow lines");
+
+    Ok(())
+}
