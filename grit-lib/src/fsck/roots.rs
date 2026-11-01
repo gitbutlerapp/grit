@@ -1,21 +1,25 @@
 //! Reachability root collection for fsck and garbage collection.
 
 use crate::error::Result;
-use crate::index::{CacheTreeNode, MODE_GITLINK};
+use crate::index::{CacheTreeNode, Index, MODE_GITLINK};
 use crate::objects::ObjectId;
 use crate::reflog::{all_reflog_oids, reflog_oids_on_store};
 use crate::refs;
 use crate::repo::Repository;
+use crate::resolve_undo::ResolveUndoRecord;
 use crate::state::HeadState;
-use crate::worktree::list_worktrees;
+use crate::worktree::{list_worktrees, WorktreeEntry};
 use std::collections::HashSet;
+use std::path::Path;
+use std::sync::Arc;
 
 /// Object ids that anchor connectivity and dangling-object classification.
 ///
 /// Includes every ref tip, detached `HEAD` oids (repository and linked worktrees),
 /// all reflog `old`/`new` oids from the repository ref store (including an injected
 /// backend), plus linked-worktree admin-dir reflogs on disk,
-/// index entries (all stages), cache-tree oids, and the stash ref when present.
+/// every non-bare worktree index (main and linked, including prunable entries),
+/// and the stash ref when present.
 ///
 /// # Errors
 ///
@@ -56,18 +60,12 @@ pub fn reachability_roots(repo: &Repository) -> Result<Vec<ObjectId>> {
         }
     }
 
-    let index = repo.load_index()?;
-    for entry in index.entries() {
-        if entry.mode == MODE_GITLINK || entry.oid.is_zero() {
+    for wt in &worktrees {
+        if wt.is_bare {
             continue;
         }
-        roots.insert(entry.oid);
-    }
-    if let Some(root) = index.cache_tree_root {
-        roots.insert(root);
-    }
-    if let Some(node) = &index.cache_tree {
-        collect_cache_tree_oids(node, &mut roots);
+        let index = load_index_for_reachability(repo, wt)?;
+        collect_index_object_roots(&index, &mut roots);
     }
 
     Ok(roots.into_iter().collect())
@@ -77,9 +75,49 @@ pub fn reachability_roots(repo: &Repository) -> Result<Vec<ObjectId>> {
 ///
 /// Used to route missing-object diagnostics through the index fsck pass instead of the
 /// connectivity walk (avoids duplicate `missingObject` reports for staged blobs).
+///
+/// Includes entries from every non-bare worktree index, not only the worktree the
+/// [`Repository`] handle was opened from.
 pub fn index_object_roots(repo: &Repository) -> Result<HashSet<ObjectId>> {
     let mut out = HashSet::new();
-    let index = repo.load_index()?;
+    for wt in list_worktrees(repo)? {
+        if wt.is_bare {
+            continue;
+        }
+        let index = load_index_for_reachability(repo, &wt)?;
+        collect_index_object_roots(&index, &mut out);
+    }
+    Ok(out)
+}
+
+fn load_index_for_reachability(repo: &Repository, wt: &WorktreeEntry) -> Result<Index> {
+    if wt.is_current {
+        return repo.load_index();
+    }
+    load_linked_worktree_index(repo, &wt.admin_dir)
+}
+
+fn load_linked_worktree_index(repo: &Repository, admin_dir: &Path) -> Result<Index> {
+    let index_path = admin_dir.join("index");
+    let parse_ctx = crate::index::IndexParseContext::from_policy(repo.thread_policy());
+    let cfg = repo
+        .config()
+        .unwrap_or_else(|_| Arc::new(crate::config::ConfigSet::new()));
+    let mut idx = Index::load_preserving_sparse_optional_with_context(
+        &index_path,
+        repo.odb(),
+        Some(cfg.as_ref()),
+        parse_ctx,
+    )?;
+    crate::split_index::resolve_split_index_if_needed(&mut idx, admin_dir, &index_path)?;
+    idx.expand_sparse_directory_placeholders(
+        repo.odb(),
+        crate::path_validate::ProtectOptions::from_config(cfg.as_ref()),
+    )?;
+    Ok(idx)
+}
+
+fn collect_index_object_roots(index: &Index, out: &mut HashSet<ObjectId>) {
     for entry in index.entries() {
         if entry.mode == MODE_GITLINK || entry.oid.is_zero() {
             continue;
@@ -90,9 +128,24 @@ pub fn index_object_roots(repo: &Repository) -> Result<HashSet<ObjectId>> {
         out.insert(root);
     }
     if let Some(node) = &index.cache_tree {
-        collect_cache_tree_oids(node, &mut out);
+        collect_cache_tree_oids(node, out);
     }
-    Ok(out)
+    if let Some(undo) = &index.resolve_undo {
+        collect_resolve_undo_oids(undo, out);
+    }
+}
+
+fn collect_resolve_undo_oids(
+    undo: &std::collections::BTreeMap<Vec<u8>, ResolveUndoRecord>,
+    out: &mut HashSet<ObjectId>,
+) {
+    for record in undo.values() {
+        for i in 0..3 {
+            if record.modes[i] != 0 && !record.oids[i].is_zero() {
+                out.insert(record.oids[i]);
+            }
+        }
+    }
 }
 
 fn collect_cache_tree_oids(node: &CacheTreeNode, out: &mut HashSet<ObjectId>) {
@@ -108,12 +161,15 @@ fn collect_cache_tree_oids(node: &CacheTreeNode, out: &mut HashSet<ObjectId>) {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+    use std::process::Command;
     use std::sync::Arc;
+    use std::time::{Duration, SystemTime};
 
     use super::*;
     use crate::config::environment::RepositoryOptions;
     use crate::ident::Signature;
     use crate::maintenance::repository_fsck::{fsck, FsckOptions};
+    use crate::maintenance::{prune_loose_objects, PruneOptions};
     use crate::objects::odb::{store::MemoryStore, OdbBuilder};
     use crate::objects::{HashAlgo, NewCommit, ObjectKind};
     use crate::porcelain::add::stage_for_commit;
@@ -122,21 +178,19 @@ mod tests {
     use crate::refs::store::{
         Expected, MemoryRefStore, RawRef, RefTransaction, RefUpdate, ReflogUpdate,
     };
-    use crate::repo::{InitOptions, RepositoryBuilder};
+    use crate::repo::{InitOptions, Repository, RepositoryBuilder};
+    use crate::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
+    use filetime::FileTime;
     use tempfile::TempDir;
     use time::OffsetDateTime;
 
-    #[test]
-    fn reachability_roots_includes_index_staged_blob() {
-        let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
-        std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
-        stage_for_commit(&repo, &mut NullProgress, &crate::progress::NeverCancel).expect("stage");
+    fn commit_all(repo: &Repository, message: &str) {
+        stage_for_commit(repo, &mut NullProgress, &NeverCancel).expect("stage");
         let ident = "T <t@example.com> 1 +0000".to_string();
         create_commit(
-            &repo,
+            repo,
             &CommitRequest {
-                message: "c".into(),
+                message: message.into(),
                 author: Some(ident.parse().expect("signature")),
                 committer: Some(ident.parse().expect("signature")),
                 allow_empty: false,
@@ -148,9 +202,17 @@ mod tests {
                 ..Default::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &NeverCancel,
         )
         .expect("commit");
+    }
+
+    #[test]
+    fn reachability_roots_includes_index_staged_blob() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
+        commit_all(&repo, "c");
         std::fs::write(repo.work_tree().unwrap().join("staged-only"), b"y").unwrap();
         stage_for_commit(&repo, &mut NullProgress, &crate::progress::NeverCancel).expect("stage2");
         let index = repo.load_index().expect("index");
@@ -162,6 +224,160 @@ mod tests {
             .oid;
         let roots = reachability_roots(&repo).expect("roots");
         assert!(roots.contains(&staged));
+    }
+
+    #[test]
+    fn reachability_roots_include_linked_worktree_index_from_main_and_linked_handles() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
+        commit_all(&repo, "base");
+
+        let linked_path = dir.path().join("linked");
+        add_linked_worktree(
+            &repo,
+            &AddLinkedWorktreeOptions {
+                path: linked_path.clone(),
+                branch: Some(WorktreeBranch::Create("linked".into())),
+                start_point: Some("HEAD".into()),
+                force: false,
+                lock: None,
+                no_checkout: false,
+                track: false,
+            },
+        )
+        .expect("linked");
+
+        let linked_repo = Repository::discover(Some(&linked_path), &RepositoryOptions::empty())
+            .expect("open linked");
+        std::fs::write(linked_path.join("linked-only.txt"), b"linked staged").unwrap();
+        stage_for_commit(&linked_repo, &mut NullProgress, &NeverCancel).expect("stage linked");
+        let linked_index = linked_repo.load_index().expect("linked index");
+        let linked_blob = linked_index
+            .entries()
+            .iter()
+            .find(|e| e.path.ends_with(b"linked-only.txt"))
+            .expect("linked entry")
+            .oid;
+
+        std::fs::write(
+            repo.work_tree().unwrap().join("main-only.txt"),
+            b"main staged",
+        )
+        .unwrap();
+        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage main");
+        let main_index = repo.load_index().expect("main index");
+        let main_blob = main_index
+            .entries()
+            .iter()
+            .find(|e| e.path.ends_with(b"main-only.txt"))
+            .expect("main entry")
+            .oid;
+
+        let roots_main = reachability_roots(&repo).expect("roots from main");
+        assert!(roots_main.contains(&linked_blob));
+        assert!(roots_main.contains(&main_blob));
+
+        let roots_linked = reachability_roots(&linked_repo).expect("roots from linked");
+        assert!(roots_linked.contains(&linked_blob));
+        assert!(roots_linked.contains(&main_blob));
+    }
+
+    #[test]
+    fn prune_keeps_blob_staged_only_in_linked_worktree_index() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
+        commit_all(&repo, "base");
+
+        let linked_path = dir.path().join("linked");
+        add_linked_worktree(
+            &repo,
+            &AddLinkedWorktreeOptions {
+                path: linked_path.clone(),
+                branch: Some(WorktreeBranch::Create("linked".into())),
+                start_point: Some("HEAD".into()),
+                force: false,
+                lock: None,
+                no_checkout: false,
+                track: false,
+            },
+        )
+        .expect("linked");
+
+        let linked_repo = Repository::discover(Some(&linked_path), &RepositoryOptions::empty())
+            .expect("open linked");
+        std::fs::write(linked_path.join("s.txt"), b"staged only in linked worktree").unwrap();
+        stage_for_commit(&linked_repo, &mut NullProgress, &NeverCancel).expect("stage");
+        let blob = linked_repo
+            .load_index()
+            .expect("index")
+            .entries()
+            .iter()
+            .find(|e| e.path.ends_with(b"s.txt"))
+            .expect("entry")
+            .oid;
+
+        let loose = repo.git_dir().join("objects").join(format!(
+            "{}/{}",
+            &blob.to_hex()[..2],
+            &blob.to_hex()[2..]
+        ));
+        assert!(loose.is_file());
+        let old = SystemTime::now() - Duration::from_secs(30 * 24 * 3600);
+        filetime::set_file_mtime(&loose, FileTime::from_system_time(old)).unwrap();
+
+        let mut opts = PruneOptions::default();
+        opts.older_than = Some(SystemTime::now());
+        let stats = prune_loose_objects(&repo, &opts).expect("prune");
+        assert_eq!(stats.pruned, 0, "linked index blob must stay reachable");
+
+        let status = Command::new("git")
+            .current_dir(&linked_path)
+            .args(["cat-file", "-e", &blob.to_hex()])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("git cat-file");
+        assert!(status.success(), "git must still read staged blob");
+
+        let fsck = Command::new("git")
+            .current_dir(&linked_path)
+            .args(["fsck", "--strict"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git fsck");
+        assert!(
+            fsck.status.success(),
+            "git fsck: {}",
+            String::from_utf8_lossy(&fsck.stderr)
+        );
+    }
+
+    #[test]
+    fn reachability_roots_tolerates_missing_linked_worktree_index() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
+        commit_all(&repo, "base");
+        let linked_path = dir.path().join("linked");
+        let entry = add_linked_worktree(
+            &repo,
+            &AddLinkedWorktreeOptions {
+                path: linked_path,
+                branch: Some(WorktreeBranch::Create("linked".into())),
+                start_point: Some("HEAD".into()),
+                force: false,
+                lock: None,
+                no_checkout: true,
+                track: false,
+            },
+        )
+        .expect("linked");
+        assert!(!entry.admin_dir.join("index").exists());
+        reachability_roots(&repo).expect("roots with missing linked index");
+        index_object_roots(&repo).expect("index roots with missing linked index");
     }
 
     #[test]
