@@ -194,6 +194,7 @@ fn diff_index_worktree_and_patch_parse_sweep() -> grit_lib::error::Result<()> {
         &index,
         Some(&cfg),
         Some(&rules),
+        grit_lib::diff::DiffTreeToWorktreeExtras::default(),
     )?;
     let patch = "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1 +1 @@\n-one\n+two\n";
     let _ = parse_patch(patch, 1, "p", false, None)?;

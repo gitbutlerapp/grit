@@ -595,6 +595,8 @@ mod diff_trees_renames;
 #[cfg(feature = "full-tests")]
 #[path = "diff_typechange_status_git_compat.rs"]
 mod diff_typechange_status_git_compat;
+#[path = "diff_unreadable_directory_2406.rs"]
+mod diff_unreadable_directory_2406;
 #[cfg(feature = "full-tests")]
 #[path = "diff_whitespace_git_compat.rs"]
 mod diff_whitespace_git_compat;

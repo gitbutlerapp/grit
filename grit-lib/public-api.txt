@@ -4838,6 +4838,22 @@ pub grit_lib::diff::DiffIndexToWorktreeOptions::cancel_watch: core::option::Opti
 pub grit_lib::diff::DiffIndexToWorktreeOptions::command_runner: core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::config: core::option::Option<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::diagnostics: core::option::Option<grit_lib::diagnostics::DiagnosticsHandle>
+pub grit_lib::diff::DiffIndexToWorktreeOptions::skip_inaccessible_paths: bool
+pub struct grit_lib::diff::DiffTreeToWorktreeExtras
+pub grit_lib::diff::DiffTreeToWorktreeExtras::diagnostics: core::option::Option<grit_lib::diagnostics::DiagnosticsHandle>
+pub grit_lib::diff::DiffTreeToWorktreeExtras::restrict_to_paths: core::option::Option<alloc::rcs::arc::Arc<alloc::collections::btree::set::BTreeSet<alloc::string::String>>>
+pub grit_lib::diff::DiffTreeToWorktreeExtras::skip_inaccessible_paths: bool
+impl core::clone::Clone for grit_lib::diff::DiffTreeToWorktreeExtras
+pub fn grit_lib::diff::DiffTreeToWorktreeExtras::clone(&self) -> Self
+impl core::default::Default for grit_lib::diff::DiffTreeToWorktreeExtras
+pub fn grit_lib::diff::DiffTreeToWorktreeExtras::default() -> Self
+impl core::marker::Freeze for grit_lib::diff::DiffTreeToWorktreeExtras
+impl core::marker::Send for grit_lib::diff::DiffTreeToWorktreeExtras
+impl core::marker::Sync for grit_lib::diff::DiffTreeToWorktreeExtras
+impl core::marker::Unpin for grit_lib::diff::DiffTreeToWorktreeExtras
+impl core::marker::UnsafeUnpin for grit_lib::diff::DiffTreeToWorktreeExtras
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffTreeToWorktreeExtras
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffTreeToWorktreeExtras
 pub grit_lib::diff::DiffIndexToWorktreeOptions::error_on_broken_gitlinks: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::for_status: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::fsmonitor_query_boundary: core::option::Option<grit_lib::worktree::fsmonitor::FsmonitorQueryBoundary>
@@ -5480,7 +5496,7 @@ pub fn grit_lib::diff::diff_slice_ops_compacted(&[&str], &[&str], similar::types
 pub fn grit_lib::diff::diff_tree_path_change_count(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<usize>
 pub fn grit_lib::diff::diff_tree_to_worktree(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, &std::path::Path, &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diff_tree_to_worktree_with_git_dir(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, &std::path::Path, &std::path::Path, &grit_lib::index::Index, core::option::Option<&grit_lib::config::ConfigSet>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
-pub fn grit_lib::diff::diff_tree_to_worktree_with_git_dir_and_rules(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, &std::path::Path, &std::path::Path, &grit_lib::index::Index, core::option::Option<&grit_lib::config::ConfigSet>, core::option::Option<&grit_lib::worktree::worktree_rules::WorktreeRules>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+pub fn grit_lib::diff::diff_tree_to_worktree_with_git_dir_and_rules(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, &std::path::Path, &std::path::Path, &grit_lib::index::Index, core::option::Option<&grit_lib::config::ConfigSet>, core::option::Option<&grit_lib::worktree::worktree_rules::WorktreeRules>, grit_lib::diff::DiffTreeToWorktreeExtras) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diff_trees(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diff_trees_show_tree_entries(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diff_trees_with_renames(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str, u32) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>

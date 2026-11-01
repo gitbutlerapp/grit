@@ -382,7 +382,7 @@ fn staging_path_matches(
     }
 }
 
-fn restricted_index_paths_for_pathspecs(
+pub(crate) fn restricted_index_paths_for_pathspecs(
     repo: &Repository,
     index: &Index,
     pathspecs: &[String],

@@ -21,7 +21,7 @@ grit stash clear [--force] [--dry-run]
 
 ## Description
 
-Shelve uncommitted changes and restore them later. With no subcommand, `grit stash` saves local changes (same as `grit stash push`), resets the working tree and index to `HEAD`, and records a stash entry compatible with Git's `refs/stash` format.
+Shelve uncommitted changes and restore them later. With no subcommand, `grit stash` saves local changes (same as `grit stash push`), resets the working tree and index to `HEAD`, and records a stash entry compatible with Git's `refs/stash` format. Unreadable worktree directories produce a warning naming the path; stash still saves readable changes and does not treat files under those directories as deleted.
 
 Like Git, stash never signs the commits it records, even when `commit.gpgsign` is true, so a configured signing program is not run on push.
 

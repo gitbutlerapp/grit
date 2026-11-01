@@ -23,7 +23,8 @@ use crate::diff::{
     index_mtime_for_diff, line_change_counts, load_worktree_side_for_diff,
     peer_scope_includes_path, read_submodule_head_oid, sort_entries_by_path,
     submodule_porcelain_flags, DiffEntry, DiffIndexToWorktreeOptions, DiffOptions, DiffSide,
-    DiffStatus, DiffTarget, LineStat, RenameDetection, RENAME_DETECTION_DISABLED,
+    DiffStatus, DiffTarget, DiffTreeToWorktreeExtras, LineStat, RenameDetection,
+    RENAME_DETECTION_DISABLED,
 };
 use crate::error::{Error, Result};
 use crate::index::write_tree::cache_tree_extension_valid;
@@ -258,6 +259,24 @@ fn worktree_gitlink_line(entry: &DiffEntry, work_tree: &Path) -> String {
     }
 }
 
+fn index_paths_for_pathspecs(
+    repo: &Repository,
+    index: &Index,
+    pathspecs: &[String],
+) -> Result<Option<Arc<BTreeSet<String>>>> {
+    if pathspecs.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(Arc::new(
+        crate::porcelain::add::restricted_index_paths_for_pathspecs(
+            repo,
+            index,
+            pathspecs,
+            repo.pathspec_match_context(),
+        )?,
+    )))
+}
+
 fn rename_threshold(renames: RenameDetection) -> u32 {
     renames
         .threshold_percent()
@@ -316,6 +335,8 @@ pub(crate) fn unstaged_entries_in(
         worktree_rules: Some(Arc::clone(rules)),
         command_runner: Some(repo.command_runner()),
         restrict_to_paths,
+        skip_inaccessible_paths: true,
+        diagnostics: Some(repo.diagnostics()),
         ..DiffIndexToWorktreeOptions::default()
     };
     let (mut entries, _) =
@@ -335,6 +356,7 @@ pub(crate) fn worktree_entries_in(
     rules: &Arc<Mutex<WorktreeRules>>,
     base_tree: Option<&ObjectId>,
     rename_threshold: u32,
+    restrict_to_paths: Option<Arc<BTreeSet<String>>>,
 ) -> Result<Vec<DiffEntry>> {
     let index_matches_base = match (base_tree, index.cache_tree_root.as_ref()) {
         (Some(base), Some(cached)) => base == cached,
@@ -342,7 +364,14 @@ pub(crate) fn worktree_entries_in(
         _ => false,
     };
     if index_matches_base && cache_tree_extension_valid(index.cache_tree.as_ref()) {
-        return unstaged_entries_in(repo, index, work_tree, rules, rename_threshold, None);
+        return unstaged_entries_in(
+            repo,
+            index,
+            work_tree,
+            rules,
+            rename_threshold,
+            restrict_to_paths,
+        );
     }
     let config = repo.config()?;
     let raw = {
@@ -355,6 +384,11 @@ pub(crate) fn worktree_entries_in(
             index,
             Some(config.as_ref()),
             Some(&rules),
+            DiffTreeToWorktreeExtras {
+                skip_inaccessible_paths: true,
+                diagnostics: Some(repo.diagnostics()),
+                restrict_to_paths: restrict_to_paths.clone(),
+            },
         )?
     };
     let mut entries = apply_rename_detection_to_diff_entries(
@@ -417,7 +451,20 @@ impl<'repo> UncommittedDiff<'repo> {
     ///
     /// Returns `HEAD` resolution, config, and object read errors.
     pub fn staged_entries(&self, renames: RenameDetection) -> Result<Vec<DiffEntry>> {
-        staged_entries_in(self.repo, &self.index, rename_threshold(renames), None)
+        self.staged_entries_for_paths(renames, None)
+    }
+
+    fn staged_entries_for_paths(
+        &self,
+        renames: RenameDetection,
+        restrict_to_paths: Option<Arc<BTreeSet<String>>>,
+    ) -> Result<Vec<DiffEntry>> {
+        staged_entries_in(
+            self.repo,
+            &self.index,
+            rename_threshold(renames),
+            restrict_to_paths.as_deref(),
+        )
     }
 
     /// Working tree against the index (`grit diff --unstaged`), sorted by path.
@@ -431,6 +478,14 @@ impl<'repo> UncommittedDiff<'repo> {
     /// Returns [`Error::RequiresWorkTree`] in a bare repository, plus worktree rule, I/O, and
     /// object read errors.
     pub fn unstaged_entries(&mut self, renames: RenameDetection) -> Result<Vec<DiffEntry>> {
+        self.unstaged_entries_for_paths(renames, None)
+    }
+
+    fn unstaged_entries_for_paths(
+        &mut self,
+        renames: RenameDetection,
+        restrict_to_paths: Option<Arc<BTreeSet<String>>>,
+    ) -> Result<Vec<DiffEntry>> {
         let work_tree = self.work_tree()?;
         let rules = self.rules()?;
         unstaged_entries_in(
@@ -439,7 +494,7 @@ impl<'repo> UncommittedDiff<'repo> {
             work_tree,
             &rules,
             rename_threshold(renames),
-            None,
+            restrict_to_paths,
         )
     }
 
@@ -460,6 +515,15 @@ impl<'repo> UncommittedDiff<'repo> {
         base_tree: Option<&ObjectId>,
         renames: RenameDetection,
     ) -> Result<Vec<DiffEntry>> {
+        self.worktree_entries_for_paths(base_tree, renames, None)
+    }
+
+    fn worktree_entries_for_paths(
+        &mut self,
+        base_tree: Option<&ObjectId>,
+        renames: RenameDetection,
+        restrict_to_paths: Option<Arc<BTreeSet<String>>>,
+    ) -> Result<Vec<DiffEntry>> {
         let work_tree = self.work_tree()?;
         let rules = self.rules()?;
         worktree_entries_in(
@@ -469,6 +533,7 @@ impl<'repo> UncommittedDiff<'repo> {
             &rules,
             base_tree,
             rename_threshold(renames),
+            restrict_to_paths,
         )
     }
 
@@ -496,14 +561,17 @@ impl<'repo> UncommittedDiff<'repo> {
         options: &DiffOptions,
     ) -> Result<Vec<DiffEntry>> {
         let renames = options.renames;
+        let restrict = index_paths_for_pathspecs(self.repo, &self.index, pathspecs)?;
         let entries = match target {
-            DiffTarget::IndexVsHead => self.staged_entries(renames)?,
-            DiffTarget::WorktreeVsIndex => self.unstaged_entries(renames)?,
+            DiffTarget::IndexVsHead => self.staged_entries_for_paths(renames, restrict)?,
+            DiffTarget::WorktreeVsIndex => self.unstaged_entries_for_paths(renames, restrict)?,
             DiffTarget::WorktreeVsHead => {
                 let head_tree = resolve_head_for_repository(self.repo)?.tree(self.repo.odb())?;
-                self.worktree_entries(head_tree.as_ref(), renames)?
+                self.worktree_entries_for_paths(head_tree.as_ref(), renames, restrict)?
             }
-            DiffTarget::WorktreeVsTree(tree) => self.worktree_entries(Some(tree), renames)?,
+            DiffTarget::WorktreeVsTree(tree) => {
+                self.worktree_entries_for_paths(Some(tree), renames, restrict)?
+            }
             DiffTarget::Commit(_) | DiffTarget::Trees { .. } => {
                 stored_target_entries(self.repo, target, options)?.unwrap_or_default()
             }
