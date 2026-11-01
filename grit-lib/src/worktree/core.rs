@@ -263,6 +263,19 @@ fn branch_checked_out_error(branch: &str, worktree_path: &Path) -> Error {
     }
 }
 
+/// Whether the main worktree row in [`list_worktrees`] is marked bare (matches `git worktree list`).
+///
+/// Git sets this when `core.bare` is true or the repository has no work tree, even if the current
+/// handle was opened from a linked checkout with a work tree.
+fn main_worktree_list_is_bare(repo: &Repository) -> bool {
+    let core_bare = repo
+        .config()
+        .ok()
+        .and_then(|cfg| cfg.get_bool("core.bare").and_then(|r| r.ok()))
+        .unwrap_or(false);
+    core_bare || repo.is_bare()
+}
+
 /// Enumerate the main and linked worktrees for `repo`.
 ///
 /// Order matches Git: main worktree first, then linked worktrees sorted by admin id.
@@ -272,11 +285,7 @@ pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
     let opened_from_linked = git_dir.starts_with(common.join("worktrees"));
     let mut entries = Vec::new();
 
-    let bare = if opened_from_linked {
-        is_bare_repository(&common)
-    } else {
-        repo.is_bare()
-    };
+    let bare = main_worktree_list_is_bare(repo);
     let main_path = if bare {
         path_for_disk_compare(&common)
     } else if let Some(wt) = repo.work_tree() {
@@ -1794,6 +1803,99 @@ mod tests {
             "../..\n"
         );
         assert!(wt.join(".git").is_file());
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn is_bare_matches_git_for_bare_repo_and_linked_worktree() {
+        use std::process::Command;
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let bare = root.join("b.git");
+        let wt = root.join("wt");
+        let git = |dir: &Path, args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .current_dir(dir)
+                    .args(args)
+                    .output()
+                    .unwrap()
+                    .status
+                    .success(),
+                "git {args:?} in {}",
+                dir.display()
+            );
+        };
+        git(root, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+        let tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        let commit = Command::new("git")
+            .current_dir(&bare)
+            .env("GIT_AUTHOR_NAME", "a")
+            .env("GIT_AUTHOR_EMAIL", "a@b")
+            .env("GIT_COMMITTER_NAME", "a")
+            .env("GIT_COMMITTER_EMAIL", "a@b")
+            .args(["commit-tree", tree, "-m", "root"])
+            .output()
+            .unwrap();
+        assert!(commit.status.success());
+        let oid = String::from_utf8(commit.stdout).unwrap().trim().to_owned();
+        git(&bare, &["update-ref", "refs/heads/main", oid.as_str()]);
+        git(
+            &bare,
+            &["worktree", "add", "-q", wt.to_str().unwrap(), "main"],
+        );
+
+        let git_is_bare = |dir: &Path| {
+            Command::new("git")
+                .current_dir(dir)
+                .args(["rev-parse", "--is-bare-repository"])
+                .output()
+                .unwrap()
+                .stdout
+        };
+        assert_eq!(git_is_bare(&wt), b"false\n");
+
+        let linked = Repository::discover(Some(wt.as_path()), &RepositoryOptions::empty()).unwrap();
+        assert!(!linked.is_bare());
+        assert!(linked.work_tree().is_some());
+        assert!(linked
+            .git_dir()
+            .starts_with(bare.join("worktrees").as_path()));
+
+        let list = list_worktrees(&linked).unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(
+            list[0].is_bare,
+            "main row stays bare when core.bare is true"
+        );
+        assert!(!list[1].is_bare);
+
+        let bare_repo = Repository::open(&bare, &RepositoryOptions::empty()).unwrap();
+        assert!(bare_repo.is_bare());
+        assert!(bare_repo.work_tree().is_none());
+        assert_eq!(git_is_bare(&bare), b"true\n");
+
+        let with_wt = Repository::open(
+            &bare,
+            &RepositoryOptions::empty().with_work_tree(wt.as_path()),
+        )
+        .unwrap();
+        assert!(!with_wt.is_bare());
+        assert_eq!(git_is_bare(&wt), b"false\n");
+
+        let non_bare_no_wt = tmp.path().join("nonbare.git");
+        fs::create_dir_all(non_bare_no_wt.join("objects")).unwrap();
+        fs::write(non_bare_no_wt.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            non_bare_no_wt.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
+        )
+        .unwrap();
+        let cfg_false = Repository::open(&non_bare_no_wt, &RepositoryOptions::empty()).unwrap();
+        assert!(!cfg_false.is_bare());
     }
 
     #[cfg_attr(
