@@ -170,6 +170,15 @@ fn guide_lib(err: &LibError) -> Option<Error> {
                 ..StructuredJsonError::new(err.to_string(), ErrorKind::DirtyWorktree)
             },
         })),
+        LibError::WouldOverwrite {
+            reason,
+            paths,
+            message,
+        } => Some(crate::json_error::would_overwrite_error(
+            *reason,
+            paths.clone(),
+            message.clone(),
+        )),
         LibError::RestorePathUnmerged { paths } => {
             let words = shell_words(paths);
             Some(guided(
