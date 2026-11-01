@@ -32,6 +32,8 @@ use super::error::{WorktreeError, WorktreeOperation};
 
 /// Why Git marks a linked worktree as `prunable` in `worktree list --porcelain`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum PrunableReason {
     /// Admin path is not a directory (`not a valid directory`).
     AdminNotValidDirectory,
@@ -64,6 +66,7 @@ impl PrunableReason {
 
 /// One row returned by [`list_worktrees`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct WorktreeEntry {
     /// Absolute path to the working tree (for bare main worktree, the common git dir).
     pub path: PathBuf,

@@ -28,6 +28,8 @@ use crate::diff_rename_parallel::parallel_map_indices;
 use crate::error::{Error, Result};
 use crate::hash::hash_object;
 use crate::ident::signature_timestamp_for_pretty;
+#[cfg(feature = "serde-models")]
+use crate::ident::Signature;
 use crate::objects::{parse_tag, serialize_tag, ObjectId, ObjectKind, TagData};
 use crate::parallel::ParallelOp;
 use crate::refs;
@@ -81,6 +83,8 @@ pub enum TagError {
 
 /// Whether a `refs/tags/*` ref is lightweight or an annotated tag object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum TagKind {
     /// The ref points directly at a commit (or other object).
     Lightweight,
@@ -114,6 +118,7 @@ pub struct TagAnnotation {
 
 /// One tag in the result of [`list_tags`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct TagSummary {
     /// Short tag name (without `refs/tags/`).
     pub name: String,
@@ -133,6 +138,23 @@ pub struct TagSummary {
 #[deprecated(note = "use TagSummary instead")]
 pub type TagInfo = TagSummary;
 
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for TagAnnotation {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let tagger = Signature::from_header_lossy(&self.tagger_ident);
+        let mut out = serializer.serialize_struct("TagAnnotation", 3)?;
+        out.serialize_field("subject", &self.subject)?;
+        out.serialize_field("message", &self.message)?;
+        out.serialize_field("tagger", &tagger)?;
+        out.end()
+    }
+}
+
 /// Amount of tag metadata requested from [`list_tags`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TagDetail {
@@ -147,6 +169,8 @@ pub enum TagDetail {
 
 /// Result rows returned by [`list_tags`] for the requested [`TagDetail`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum TagList {
     /// Short tag names requested with [`TagDetail::Names`].
     Names(Vec<String>),

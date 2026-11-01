@@ -796,6 +796,8 @@ impl fmt::Debug for ObjectIdPrefix {
 
 /// The four Git object types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum ObjectKind {
     /// A raw file snapshot.
     Blob,

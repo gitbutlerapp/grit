@@ -34,6 +34,16 @@ fn result_models_implement_serialize() {
     assert_serialize::<grit_lib::porcelain::log::LoadedCommit>();
     assert_serialize::<grit_lib::diff::DiffEntry>();
     assert_serialize::<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>();
+    assert_serialize::<grit_lib::porcelain::tag::TagSummary>();
+    assert_serialize::<grit_lib::porcelain::tag::TagList>();
+    assert_serialize::<grit_lib::revwalk::describe::DescribedCommit>();
+    assert_serialize::<grit_lib::blame::BlameResult>();
+    assert_serialize::<grit_lib::blame::BlameHunk>();
+    assert_serialize::<grit_lib::blame::BlameCommitInfo>();
+    assert_serialize::<grit_lib::blame::BlameAttributedLine>();
+    assert_serialize::<grit_lib::worktree::WorktreeEntry>();
+    assert_serialize::<grit_lib::refs::store::RefName>();
+    assert_serialize::<grit_lib::objects::ObjectKind>();
 }
 
 fn assert_deserialize<T: serde::de::DeserializeOwned>() {}
@@ -225,6 +235,24 @@ fn errors_serialize_with_kind_and_message() {
     };
     let json = serde_json::to_value(&err).expect("stash untracked");
     assert_eq!(json["path"], "u.txt");
+}
+
+#[test]
+fn commit_author_info_serializes_rfc3339_date() {
+    let info = grit_lib::porcelain::commit::CommitAuthorInfo {
+        name: "Ada Lovelace".into(),
+        email: "ada@example.com".into(),
+        date: "1700000000 -0800".into(),
+    };
+    let json = serde_json::to_value(&info).expect("CommitAuthorInfo");
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "name": "Ada Lovelace",
+            "email": "ada@example.com",
+            "date": "2023-11-14T14:13:20-08:00",
+        })
+    );
 }
 
 #[test]

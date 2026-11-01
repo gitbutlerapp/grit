@@ -160,7 +160,6 @@ pub(crate) fn run_commit_message_hooks(
 
 /// Author name, email, and date suffix from a written commit header line.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct CommitAuthorInfo {
     /// Author display name.
     pub name: String,
@@ -168,6 +167,29 @@ pub struct CommitAuthorInfo {
     pub email: String,
     /// Git timestamp suffix (`<unix> <+HHMM>`).
     pub date: String,
+}
+
+impl CommitAuthorInfo {
+    /// Parse [`Self::name`], [`Self::email`], and [`Self::date`] as a [`Signature`].
+    #[must_use]
+    pub fn signature(&self) -> Signature {
+        let line = if self.date.is_empty() {
+            format!("{} <{}>", self.name, self.email)
+        } else {
+            format!("{} <{}> {}", self.name, self.email, self.date)
+        };
+        Signature::from_header_lossy(&line)
+    }
+}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for CommitAuthorInfo {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.signature().serialize(serializer)
+    }
 }
 
 fn guard_incomplete_rewrite_apply(repo: &Repository) -> Result<()> {
@@ -905,6 +927,10 @@ pub struct CommitOutcome {
     pub parents: Vec<ObjectId>,
     /// Author recorded on the commit object.
     pub author: CommitAuthorInfo,
+    /// Committer recorded on the commit object.
+    pub committer: CommitAuthorInfo,
+    /// Full commit message body written to the object (including trailing newline).
+    pub message: String,
     /// Hooks that were installed and ran during this commit, in order: `pre-commit`,
     /// `prepare-commit-msg`, `commit-msg`, `post-commit`, and `post-rewrite` (with `amend`) when
     /// [`CommitRequest::amend`] is set.
@@ -1247,7 +1273,7 @@ fn finish_commit_dry_run(
     let config = repo.config()?;
     let now = repo.identity_now();
     let committer = commit_identity_line(repo, req.committer.as_ref(), IdentRole::Committer, now)?;
-    let _message_with_trailers = enrich_commit_message(
+    let message_with_trailers = enrich_commit_message(
         message,
         &req.trailers,
         req.signoff,
@@ -1279,6 +1305,7 @@ fn finish_commit_dry_run(
         }
     }
     let author_info = author_info_from_header_line(&author);
+    let committer_info = author_info_from_header_line(&committer);
     let changes = files.len();
 
     Ok(CommitOutcome {
@@ -1287,6 +1314,8 @@ fn finish_commit_dry_run(
         parent,
         parents: commit_parents,
         author: author_info,
+        committer: committer_info,
+        message: message_with_trailers,
         hooks_run: Vec::new(),
         changes,
         change_id: None,
@@ -1932,12 +1961,15 @@ fn create_commit_with_index(
     }
 
     let stored_change_id = change_id(&commit_data);
+    let committer_info = author_info_from_header_line(&commit_data.committer);
     Ok(CommitOutcome {
         oid,
         branch: short_name,
         parent,
         parents: commit_data.parents,
         author: author_info,
+        committer: committer_info,
+        message: commit_data.message.clone(),
         hooks_run,
         changes,
         change_id: stored_change_id,
