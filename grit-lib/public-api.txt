@@ -27375,6 +27375,19 @@ pub fn grit_lib::revwalk::graph::list_commits_for_log_graph(&grit_lib::repo::Rep
 pub fn grit_lib::revwalk::graph::log_graph_materialize(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], bool) -> grit_lib::error::Result<(std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, alloc::vec::Vec<grit_lib::objects::ObjectId>>, std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, alloc::string::String>)>
 pub fn grit_lib::revwalk::graph::rewrite_display_parents(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::graph::rewrite_display_parents_map(&grit_lib::repo::Repository, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, alloc::vec::Vec<grit_lib::objects::ObjectId>>>
+pub mod grit_lib::revwalk::describe
+pub struct grit_lib::revwalk::DescribeOptions
+pub grit_lib::revwalk::DescribeOptions::abbrev: core::option::Option<usize>
+pub grit_lib::revwalk::DescribeOptions::first_parent: bool
+pub grit_lib::revwalk::DescribeOptions::match_glob: core::option::Option<alloc::string::String>
+pub grit_lib::revwalk::DescribeOptions::tags: bool
+pub struct grit_lib::revwalk::DescribedCommit
+pub grit_lib::revwalk::DescribedCommit::abbrev: alloc::string::String
+pub grit_lib::revwalk::DescribedCommit::commit: grit_lib::objects::ObjectId
+pub grit_lib::revwalk::DescribedCommit::distance: usize
+pub grit_lib::revwalk::DescribedCommit::peeled: grit_lib::objects::ObjectId
+pub grit_lib::revwalk::DescribedCommit::tag: grit_lib::refs::store::RefName
+pub grit_lib::revwalk::DescribedCommit::tag_oid: grit_lib::objects::ObjectId
 pub mod grit_lib::revwalk::group_by
 pub struct grit_lib::revwalk::group_by::AuthorGroup
 pub grit_lib::revwalk::group_by::AuthorGroup::commits: alloc::vec::Vec<grit_lib::objects::ObjectId>
@@ -27421,6 +27434,7 @@ impl<'repo> grit_lib::revwalk::handle::RevWalk<'repo>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits(&self, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits_stream(&self, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::queries::RevWalkCommitStream<'repo>>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::count(&self, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<usize>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::describe(&self, &str, &grit_lib::revwalk::DescribeOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::DescribedCommit>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::is_ancestor(&self, &str, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::left_right_counts(&self, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<grit_lib::revwalk::queries::LeftRightCounts>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::merge_bases(&self, &str, &str, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
@@ -29953,6 +29967,7 @@ impl<'repo> grit_lib::revwalk::handle::RevWalk<'repo>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits(&self, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits_stream(&self, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::queries::RevWalkCommitStream<'repo>>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::count(&self, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<usize>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::describe(&self, &str, &grit_lib::revwalk::DescribeOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::DescribedCommit>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::is_ancestor(&self, &str, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::left_right_counts(&self, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<grit_lib::revwalk::queries::LeftRightCounts>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::merge_bases(&self, &str, &str, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>

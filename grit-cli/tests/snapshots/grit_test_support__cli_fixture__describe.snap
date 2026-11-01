@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "v0.1-1-g83352a6\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"tag\":\"refs/tags/v0.1\",\"tag_short\":\"v0.1\",\"tag_oid\":\"86b36f4c34c5b4ba062c069aac7a2730c6471ee0\",\"peeled\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\",\"distance\":1,\"commit\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"abbrev\":\"83352a6\",\"long_format\":\"v0.1-1-g83352a6\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "# Describe\n\n- **Tag:** `v0.1`\n- **Distance:** 1\n- **Commit:** `83352a6`\n- **Long:** `v0.1-1-g83352a6`\n",
+    "stderr": ""
+  }
+}

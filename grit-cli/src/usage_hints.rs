@@ -159,9 +159,6 @@ fn invalid_subcommand_hint(err: &clap::Error) -> Option<String> {
                 .to_owned()
         }
         "ls-files" => "there is no full index listing; use `grit status --json` for changed paths (not every tracked file)".to_owned(),
-        "describe" => {
-            "no describe command; nearest decorated commit is `grit log -n 1 --decorate`; tags containing HEAD are `grit tag --contains`".to_owned()
-        }
         "grep" => "no worktree grep; search commit messages with `grit log --grep <pattern>`"
             .to_owned(),
         _ => return None,

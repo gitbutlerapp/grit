@@ -204,6 +204,14 @@ const COMMAND_CONTRACTS: &[(&str, CommandContract)] = &[
         },
     ),
     (
+        "describe",
+        CommandContract {
+            kind: CommandKind::Query,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
         "diff",
         CommandContract {
             kind: CommandKind::Query,

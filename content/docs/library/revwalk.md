@@ -71,6 +71,10 @@ Bounded default-order filters inflate each visited commit once and reuse those b
 
 [`merge_bases_first_vs_rest`](rustdoc:grit_lib::revwalk::merge_base::merge_bases_first_vs_rest) finds minimal common ancestors between one commit and one or more others — the library equivalent of `git merge-base A B`. For diff-style “pick exactly one base or fail”, see [`merge_base_for_diff_two_commits`](rustdoc:grit_lib::revwalk::merge_base::merge_base_for_diff_two_commits).
 
+## Describe (nearest tag)
+
+[`RevWalk::describe`](rustdoc:grit_lib::revwalk::RevWalk::describe) picks the reachable tag with the smallest exact range count from the tag’s peeled commit to the target revision ([`DescribeOptions`](rustdoc:grit_lib::revwalk::DescribeOptions), [`DescribedCommit`](rustdoc:grit_lib::revwalk::DescribedCommit)). The distance matches `grit revs --count tag..rev`, not necessarily Git’s lazy `git describe` depth. Tag reachability uses one ancestry walk over all tag tips (same batch idea as `git tag --merged`), not per-tag `is_ancestor` probes.
+
 ## Example
 
 The program below opens a repository (created by system Git in tests), walks `main..feature`, prints each commit oid, then prints the merge base of the range tips:

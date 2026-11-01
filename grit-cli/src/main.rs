@@ -1096,6 +1096,12 @@ enum Command {
         #[arg(long, value_name = "FILE")]
         contents: Option<String>,
     },
+    /// Nearest reachable tag, exact commit distance, and abbreviated id for a revision.
+    #[command(name = "describe")]
+    Describe {
+        #[command(flatten)]
+        describe: commands::describe::DescribeCliArgs,
+    },
     /// Show changes as a diff. No argument: uncommitted changes; with a commit:
     /// the change that commit introduced; with two commits (or `A..B`) diff their trees.
     Diff {
@@ -3057,6 +3063,15 @@ fn dispatch(
                 ctx,
             )
         }
+        Command::Describe { describe } => match commands::describe::run(&describe)? {
+            Some(outcome) => emit_success(outcome, opts, ctx),
+            None => {
+                anyhow::bail!(
+                    "cannot describe '{}': no annotated tag is reachable",
+                    describe.rev
+                );
+            }
+        },
         Command::MergeBase {
             a,
             b,

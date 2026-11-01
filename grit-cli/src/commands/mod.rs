@@ -13,6 +13,7 @@ pub mod clone;
 pub mod commit;
 pub mod completions;
 pub mod config;
+pub mod describe;
 pub mod diff;
 pub mod fetch;
 pub mod fetch_args;

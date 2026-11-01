@@ -314,17 +314,6 @@ fn ls_files_points_at_status_json() {
 }
 
 #[test]
-fn describe_points_at_log_and_tag_contains() {
-    let (repo, home) = fresh_repo();
-    let failure = fails(repo.path(), home.path(), &["describe"]);
-    failure.assert_usage_hint("grit log -n 1 --decorate");
-    assert!(failure.json["hint"]
-        .as_str()
-        .unwrap()
-        .contains("tag --contains"));
-}
-
-#[test]
 fn grep_points_at_log_grep_not_repack() {
     let (repo, home) = fresh_repo();
     let failure = fails(repo.path(), home.path(), &["grep", "foo"]);

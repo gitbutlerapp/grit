@@ -363,6 +363,13 @@ fn snapshot_revs_count() {
 }
 
 #[test]
+fn snapshot_describe() {
+    snapshot_fresh("describe", &["describe"], |fixture| {
+        fixture.run_ok(&["tag", "-m", "release", "v0.1", "HEAD~1"]);
+    });
+}
+
+#[test]
 fn snapshot_merge_base() {
     snapshot_all_modes("merge_base", &["merge-base", "HEAD~1", "HEAD"]);
 }

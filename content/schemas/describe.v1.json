@@ -1,0 +1,53 @@
+{
+  "$id": "https://grit-scm.com/schemas/describe/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit describe`.",
+  "properties": {
+    "abbrev": {
+      "description": "Abbreviated described commit oid.",
+      "type": "string"
+    },
+    "commit": {
+      "description": "Described commit oid.",
+      "type": "string"
+    },
+    "distance": {
+      "description": "Exact commit count in `peeled..commit` (see library docs).",
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "long_format": {
+      "description": "Human long form: `tag-distance-gabbrev` (includes `-0-` on exact tag hits).",
+      "type": "string"
+    },
+    "peeled": {
+      "description": "Commit the tag peel chain resolves to.",
+      "type": "string"
+    },
+    "tag": {
+      "description": "Full `refs/tags/…` name of the chosen tag.",
+      "type": "string"
+    },
+    "tag_oid": {
+      "description": "Object id stored at the tag ref.",
+      "type": "string"
+    },
+    "tag_short": {
+      "description": "Short tag name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "abbrev",
+    "commit",
+    "distance",
+    "long_format",
+    "peeled",
+    "tag",
+    "tag_oid",
+    "tag_short"
+  ],
+  "title": "DescribeOutcome",
+  "type": "object"
+}
