@@ -75,6 +75,13 @@ pub fn storage_string(path: &[u8]) -> String {
     }
 }
 
+/// Canonical stored path for a sparse-directory index row (mode `040000`, trailing slash).
+#[must_use]
+pub fn sparse_directory_stored_path(dir: &str) -> String {
+    let trimmed = dir.strip_suffix('/').unwrap_or(dir);
+    format!("{trimmed}/")
+}
+
 /// Decode a path previously produced by [`storage_string`].
 #[must_use]
 pub fn storage_bytes(stored: &str) -> Cow<'_, [u8]> {

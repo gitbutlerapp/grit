@@ -350,20 +350,48 @@ fn prepare_sparse_rows(
         }
     }
     let mut keep = std::collections::BTreeMap::new();
+    let mut drop = BTreeSet::new();
     if !candidates.is_empty() {
         sparse_candidate_subtrees(repo, target, b"", &candidates, &mut keep, protect)?;
         match retarget {
-            SparseRetarget::Always => {}
+            SparseRetarget::Always => {
+                for path in candidates.keys() {
+                    if !keep.contains_key(path) {
+                        drop.insert(path.clone());
+                    }
+                }
+            }
             SparseRetarget::Never => keep.retain(|path, oid| candidates.get(path) == Some(oid)),
             SparseRetarget::FromHead(head) => {
+                let absent_from_target: std::collections::BTreeMap<_, _> = candidates
+                    .iter()
+                    .filter(|(path, _)| !keep.contains_key(*path))
+                    .map(|(path, oid)| (path.clone(), *oid))
+                    .collect();
                 let changed: std::collections::BTreeMap<_, _> = candidates
                     .iter()
                     .filter(|(path, oid)| keep.get(*path).is_some_and(|target| target != *oid))
                     .map(|(path, oid)| (path.clone(), *oid))
                     .collect();
+                let mut head_lookup = absent_from_target.clone();
+                for (path, oid) in changed {
+                    head_lookup.insert(path, oid);
+                }
                 let mut at_head = std::collections::BTreeMap::new();
-                if !changed.is_empty() {
-                    sparse_candidate_subtrees(repo, head, b"", &changed, &mut at_head, protect)?;
+                if !head_lookup.is_empty() {
+                    sparse_candidate_subtrees(
+                        repo,
+                        head,
+                        b"",
+                        &head_lookup,
+                        &mut at_head,
+                        protect,
+                    )?;
+                }
+                for (path, oid) in &absent_from_target {
+                    if at_head.get(path) == Some(oid) {
+                        drop.insert(path.clone());
+                    }
                 }
                 keep.retain(|path, oid| {
                     candidates
@@ -373,8 +401,14 @@ fn prepare_sparse_rows(
             }
         }
     }
+    if !drop.is_empty() {
+        index.remove_paths(drop.iter().map(|p| p.as_slice()));
+        for path in &drop {
+            index.invalidate_cache_tree_for_path(path.strip_suffix(b"/").unwrap_or(path));
+        }
+    }
     index.expand_sparse_directories_matching(repo.odb(), protect, |row| {
-        !keep.contains_key(&row.path)
+        !keep.contains_key(&row.path) && !drop.contains(&row.path)
     })?;
     let mut retargeted = Vec::new();
     for row in &mut index.entries {
@@ -1406,6 +1440,134 @@ mod tests {
         );
     }
 
+    fn assert_grit_sparse_index_matches_git(dir: &Path, head_label: &str) {
+        let git = |args: &[&str]| grit_test_support::git(dir, args);
+        let sparse_rows = git(&["ls-files", "--sparse", "-s"]);
+        for row in sparse_rows
+            .lines()
+            .filter(|line| line.starts_with("040000 "))
+        {
+            let path = row.split_once('\t').expect("row").1;
+            assert!(
+                path.ends_with('/'),
+                "sparse-directory rows must use a trailing slash: {path:?}"
+            );
+        }
+        assert_eq!(
+            git(&["write-tree"]).trim(),
+            git(&["rev-parse", &format!("{head_label}^{{tree}}")]).trim(),
+            "write-tree must match {head_label}'s tree"
+        );
+        assert!(
+            git(&["status", "--porcelain"]).is_empty(),
+            "git must read grit's index cleanly after switching to {head_label}"
+        );
+        git(&["fsck", "--strict"]);
+    }
+
+    fn create_absent_added_excluded_sparse_fixture(dir: &Path) -> std::io::Result<()> {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let run = |args: &[&str]| -> std::io::Result<()> {
+            let out = Command::new("git").args(args).current_dir(dir).output()?;
+            if !out.status.success() {
+                return Err(std::io::Error::other(
+                    String::from_utf8_lossy(&out.stderr).into_owned(),
+                ));
+            }
+            Ok(())
+        };
+        run(&["init", "-q", "-b", "main"])?;
+        run(&["config", "user.email", "d@x"])?;
+        run(&["config", "user.name", "d"])?;
+        let mut stream = String::from(
+            "commit refs/heads/main\ncommitter d <d@x> 1700000000 +0000\ndata 4\ninit\n",
+        );
+        for d in 0..6 {
+            let body = format!("x{d}\n");
+            stream.push_str(&format!(
+                "M 100644 inline pkg{d:03}/f.txt\ndata {}\n{body}",
+                body.len()
+            ));
+        }
+        stream.push_str(
+            "\ncommit refs/heads/kd\ncommitter d <d@x> 1700000300 +0000\ndata 2\nkd\nfrom refs/heads/main\n",
+        );
+        for d in 0..3 {
+            stream.push_str(&format!("D pkg{d:03}\n"));
+        }
+        for d in 0..3 {
+            let body = format!("n{d}\n");
+            stream.push_str(&format!(
+                "M 100644 inline newpkg{d:03}/f.txt\ndata {}\n{body}",
+                body.len()
+            ));
+        }
+        stream.push_str("\ndone\n");
+        let mut child = Command::new("git")
+            .args(["fast-import", "--quiet"])
+            .current_dir(dir)
+            .stdin(Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| std::io::Error::other("missing fast-import stdin"))?
+            .write_all(stream.as_bytes())?;
+        if !child.wait()?.success() {
+            return Err(std::io::Error::other("fast-import failed"));
+        }
+        run(&["checkout", "-q", "main"])?;
+        run(&["sparse-checkout", "init", "--cone", "--sparse-index"])?;
+        run(&["sparse-checkout", "set", "pkg004"])?;
+        run(&["tag", "sparse-main", "main"])?;
+        run(&["tag", "sparse-kd", "kd"])?;
+        Ok(())
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn sparse_switch_absent_added_excluded_directories_git_round_trip() {
+        use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+        use crate::progress::NeverCancel;
+        let dir = TempDir::new().expect("tempdir");
+        create_absent_added_excluded_sparse_fixture(dir.path()).expect("fixture");
+        let git = |args: &[&str]| grit_test_support::git(dir.path(), args);
+        let repo =
+            Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("repo");
+        for label in ["sparse-kd", "sparse-main", "sparse-kd"] {
+            let commit: ObjectId = git(&["rev-parse", label]).trim().parse().expect("oid");
+            switch_repository(
+                &repo,
+                &SwitchOptions {
+                    mode: SwitchMode::Detached {
+                        commit,
+                        reflog_to_label: label.to_string(),
+                    },
+                    dry_run: false,
+                    hooks: crate::PostOperationHooks::Skip,
+                },
+                &mut NullProgress,
+                &NeverCancel,
+            )
+            .expect("switch");
+            assert_eq!(repo.odb().hot_path_metrics().sparse_expanded_rows(), 0);
+            assert_grit_sparse_index_matches_git(dir.path(), label);
+        }
+        assert_eq!(
+            git(&["ls-files", "--sparse"])
+                .lines()
+                .filter(|l| l.contains("newpkg"))
+                .count(),
+            3,
+            "kd should materialize three new excluded directories as sparse rows"
+        );
+        git(&["switch", "-q", "--detach", "sparse-kd"]);
+    }
+
     #[cfg_attr(
         not(feature = "full-tests"),
         ignore = "starts system git or is heavy; run with --features full-tests"
@@ -1479,6 +1641,8 @@ mod tests {
             &index,
             Some(&t2),
             Some(&t1),
+            None,
+            false,
         )
         .expect("pruned diff");
         assert!(pruned.is_empty(), "only c/z changed, inside c/: {pruned:?}");
@@ -1493,6 +1657,8 @@ mod tests {
             &plain,
             Some(&t2),
             Some(&t1),
+            None,
+            false,
         )
         .expect("unpruned");
         assert_eq!(unpruned, full);
@@ -1508,6 +1674,8 @@ mod tests {
             &index,
             Some(&t2),
             Some(&t1),
+            None,
+            false,
         )
         .expect("no subtree reads")
         .is_empty());

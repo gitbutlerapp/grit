@@ -872,11 +872,19 @@ fn plan_allow_local_tree_transition_core(
     } else if snapshot.index.has_sparse_directory_placeholders() {
         // Only switch keeps sparse-directory rows here, and its preparation leaves each one
         // recording the target subtree, so nothing inside them changes.
+        let config = repo.config()?;
+        let index_sparse = config
+            .get_bool("index.sparse")
+            .and_then(|v| v.ok())
+            .unwrap_or(false);
+        let sparse = crate::sparse_checkout::SparseCheckout::load(repo)?;
         crate::diff::diff_trees_outside_sparse_directories(
             repo.odb(),
             &snapshot.index,
             from_tree_ref,
             Some(to_tree),
+            sparse.as_ref(),
+            index_sparse,
         )?
     } else if trust_index_for_old_tree {
         crate::diff::diff_trees_with_index(

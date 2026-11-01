@@ -980,6 +980,12 @@ fn checkout_hard_to_tree_journaled(
     let pre_reset_index_mtime = crate::diff::index_mtime_for_diff(&pre_reset_index, None);
     let mut index = pre_reset_index.clone();
     crate::porcelain::index_from_tree::prepare_index_for_hard_reset(repo, target_tree, &mut index)?;
+    let config = repo.config()?;
+    let index_sparse = config
+        .get_bool("index.sparse")
+        .and_then(|v| v.ok())
+        .unwrap_or(false);
+    let sparse = SparseCheckout::load(repo)?;
     let trees_differ = head_tree != target_tree;
     // Sparse-directory rows left by the load already record the target subtree.
     let changes = if trees_differ {
@@ -988,6 +994,8 @@ fn checkout_hard_to_tree_journaled(
             &index,
             Some(head_tree),
             Some(target_tree),
+            sparse.as_ref(),
+            index_sparse,
         )?
     } else {
         Vec::new()
@@ -1027,8 +1035,6 @@ fn checkout_hard_to_tree_journaled(
         .map(|entry| entry.path.clone())
         .collect();
     hard_reset_drop_unmerged_and_intent(&mut index);
-    let config = repo.config()?;
-    let sparse = SparseCheckout::load(repo)?;
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(config.as_ref()));
     let trust_filemode = config
         .get_bool("core.filemode")
@@ -1056,7 +1062,13 @@ fn checkout_hard_to_tree_journaled(
     let mut index_only_removed_paths: HashSet<Vec<u8>> = HashSet::new();
     let mut index_align_touched: BTreeSet<Vec<u8>> = BTreeSet::new();
     if trees_differ || !index_hard_reset_cache_matches_tree(&index, target_tree) {
-        let align_plan = crate::diff::plan_hard_reset_index_align(repo.odb(), &index, target_tree)?;
+        let align_plan = crate::diff::plan_hard_reset_index_align(
+            repo.odb(),
+            &index,
+            target_tree,
+            sparse.as_ref(),
+            index_sparse,
+        )?;
         for path in &align_plan.remove_paths {
             index_align_touched.insert(path.clone());
         }
@@ -1558,7 +1570,7 @@ pub(crate) fn checkout_diff_align_index_to_tree(
     index: &Index,
     target_tree: &ObjectId,
 ) -> Result<Vec<DiffEntry>> {
-    let plan = crate::diff::plan_hard_reset_index_align(odb, index, target_tree)?;
+    let plan = crate::diff::plan_hard_reset_index_align(odb, index, target_tree, None, false)?;
     Ok(hard_reset_align_plan_diff_entries(index, &plan))
 }
 
@@ -2790,6 +2802,13 @@ fn checkout_stored_index_path_bytes(stored_path: &str) -> Vec<u8> {
     crate::repo_relpath::storage_bytes(stored_path).into_owned()
 }
 
+fn sparse_directory_index_path_bytes(stored_path: &str) -> Vec<u8> {
+    crate::repo_relpath::storage_bytes(&crate::repo_relpath::sparse_directory_stored_path(
+        stored_path,
+    ))
+    .into_owned()
+}
+
 const BULK_ADD_CHECKOUT_MIN: usize = 32;
 /// Change count from which a checkout's index write skips the pre-write housekeeping.
 const BULK_INDEX_REWRITE_MIN: usize = 64;
@@ -3034,6 +3053,20 @@ fn split_sparse_tree_changes<'a>(
             }
             _ => None,
         }?;
+        if matches!(
+            change.status,
+            DiffStatus::Added | DiffStatus::Modified | DiffStatus::TypeChanged
+        ) && crate::index::is_tree_mode(change.new_mode.bits())
+        {
+            let lookup = path.strip_suffix('/').unwrap_or(path);
+            let mut dir = crate::repo_relpath::storage_bytes(lookup).into_owned();
+            if !dir.ends_with(b"/") {
+                dir.push(b'/');
+            }
+            if sparse.excludes_directory(&dir) {
+                return Some(path);
+            }
+        }
         sparse.checkout_skips(index, path).then_some(path)
     };
     let skipped: Vec<Option<&str>> = changes.iter().map(skipped_path).collect();
@@ -3052,10 +3085,17 @@ fn split_sparse_tree_changes<'a>(
                 .push(checkout_stored_index_path_bytes(path));
             continue;
         }
-        let mut entry = prospective_index_entry(path, change.new_oid, change.new_mode.bits());
-        entry.path = checkout_stored_index_path_bytes(path);
+        let mode = change.new_mode.bits();
+        let mut entry = prospective_index_entry(path, change.new_oid, mode);
+        entry.path = if crate::index::is_tree_mode(mode) {
+            sparse_directory_index_path_bytes(path)
+        } else {
+            checkout_stored_index_path_bytes(path)
+        };
+        entry.flags = entry.path.len().min(0xFFF) as u16;
+        let worktree_path = path.strip_suffix('/').unwrap_or(path);
         let untracked_file_present = index.get(&entry.path, 0).is_none()
-            && fs::symlink_metadata(checkout_stored_worktree_abs(work_tree, path)).is_ok();
+            && fs::symlink_metadata(checkout_stored_worktree_abs(work_tree, worktree_path)).is_ok();
         entry.set_skip_worktree(!untracked_file_present);
         apply.skip_worktree_rows.push(entry);
     }
@@ -4696,6 +4736,9 @@ fn validate_diff_changes_for_worktree(
         let Some(path) = &change.new_path else {
             continue;
         };
+        if path.ends_with('/') {
+            continue;
+        }
         let mode = change.new_mode.bits();
         validate_worktree_path(path.as_bytes(), mode, protect)?;
     }
