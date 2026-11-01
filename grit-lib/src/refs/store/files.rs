@@ -1740,15 +1740,14 @@ impl FilesRefStore {
             }
         };
         let verify_name = (!matches!(update.expected, Expected::Any)).then_some(&update.name);
-        let mut reflog_lock_names = Vec::new();
-        if update.reflog.is_some() {
-            reflog_lock_names.push(update.name.clone());
-            if let Ok(Some(target)) = ref_change_target(running, update) {
-                if target != update.name {
-                    reflog_lock_names.push(target);
-                }
-            }
-        }
+        let reflog_lock_names = if update.reflog.is_some() {
+            Self::reflog_appends_for_update(running, update)?
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
+        } else {
+            Vec::new()
+        };
         for name in targets
             .iter()
             .chain(verify_name)
@@ -4203,6 +4202,52 @@ mod tests {
             Some(RawRef::Direct(c3))
         );
         assert_git_reflog_matches_history(path, main);
+    }
+
+    #[test]
+    fn log_only_symref_reflog_mirror_holds_peeled_target_lock() {
+        let dir = git_dir();
+        let path = dir.path();
+        let writer = store(path);
+        set(&writer, "refs/heads/main", oid(1), Expected::Missing).expect("seed main");
+        fs::write(path.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+
+        let other = store(path);
+        let racer = std::rc::Rc::new(RefCell::new(None));
+        let racer_slot = racer.clone();
+        after_next_recheck(move || {
+            *racer_slot.borrow_mut() = Some(set(&other, "refs/heads/main", oid(9), Expected::Any));
+        });
+
+        let txn = RefTransaction::new()
+            .update(RefUpdate {
+                name: "HEAD".to_owned(),
+                new_value: Some(RawRef::Direct(oid(2))),
+                expected: Expected::Any,
+                reflog: Some(sample_reflog()),
+                flags: RefUpdateFlags {
+                    log_only: true,
+                    ..RefUpdateFlags::default()
+                },
+            })
+            .expect("txn");
+        writer
+            .prepare(txn)
+            .expect("prepare")
+            .commit()
+            .expect("commit");
+
+        let racer = racer.borrow_mut().take().expect("hook ran");
+        assert!(
+            matches!(racer, Err(RefStoreError::LockHeld { .. })),
+            "mirrored branch reflog must be written under the peeled target lock: {racer:?}"
+        );
+        assert_eq!(
+            writer.read_raw("refs/heads/main").expect("read"),
+            Some(RawRef::Direct(oid(1)))
+        );
+        assert_eq!(reflog_new_oids(&writer, "HEAD"), vec![oid(2)]);
+        assert_eq!(reflog_new_oids(&writer, "refs/heads/main"), vec![oid(2)]);
     }
 
     #[test]
