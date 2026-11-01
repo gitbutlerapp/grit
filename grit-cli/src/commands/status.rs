@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use grit_lib::diff::DiffEntry;
 use grit_lib::gitbutler::GitButlerWorkspace;
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::operation::{Conflict, ConflictKind};
 use grit_lib::porcelain::status::{
     short_status_lines, status, status_options_from_config, ConflictGroup, IgnoredMode,
@@ -867,11 +867,6 @@ impl StatusOutcome {
         outln!(w);
         Ok(())
     }
-}
-
-/// Abbreviate a full hex oid to the 7-char short form used in human output.
-fn short_hex(oid: &str) -> &str {
-    oid.get(..7).unwrap_or(oid)
 }
 
 fn kind_label(kind: &ConflictKind) -> &'static str {

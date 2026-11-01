@@ -7,7 +7,7 @@ use clap::ValueEnum;
 use grit_lib::command_runner::system_command_runner;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error as LibError;
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::operation::Conflict;
 use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError, HunkSelection};
 use grit_lib::repo::Repository;
@@ -500,8 +500,8 @@ impl HumanRender for RebaseCliOutcome {
                         w,
                         "  {} was moved during the rebase; reset {} → {} (the moved tip stays in its reflog)",
                         pair.ref_name,
-                        short(&pair.old),
-                        short(&pair.new)
+                        short_hex(&pair.old),
+                        short_hex(&pair.new)
                     );
                 }
             }
@@ -591,10 +591,6 @@ pub struct RebaseRunOptions<'a> {
     pub shared: &'a HistoryRewriteArgs,
 }
 
-fn short(hex: &str) -> &str {
-    hex.get(..7).unwrap_or(hex)
-}
-
 fn render_rewrite_rows(
     w: &mut dyn Write,
     rewritten: &[RewrittenPair],
@@ -607,18 +603,22 @@ fn render_rewrite_rows(
                     outln!(
                         w,
                         "  commit {} → {} ({subject})",
-                        short(&pair.old),
-                        short(new)
+                        short_hex(&pair.old),
+                        short_hex(new)
                     );
                 } else {
-                    outln!(w, "  commit {} → {}", short(&pair.old), short(new));
+                    outln!(w, "  commit {} → {}", short_hex(&pair.old), short_hex(new));
                 }
             }
             None => {
                 if let Some(subject) = pair.subject.as_deref() {
-                    outln!(w, "  commit {} → (dropped) ({subject})", short(&pair.old));
+                    outln!(
+                        w,
+                        "  commit {} → (dropped) ({subject})",
+                        short_hex(&pair.old)
+                    );
                 } else {
-                    outln!(w, "  commit {} → (dropped)", short(&pair.old));
+                    outln!(w, "  commit {} → (dropped)", short_hex(&pair.old));
                 }
             }
         }
@@ -628,8 +628,8 @@ fn render_rewrite_rows(
             w,
             "  {} {} → {}",
             update.ref_name,
-            short(&update.old),
-            short(&update.new)
+            short_hex(&update.old),
+            short_hex(&update.new)
         );
     }
     Ok(())
@@ -646,8 +646,8 @@ impl HumanRender for HistoryRewriteOutcome {
                 outln!(
                     w,
                     "Rebased branch tip from {} to {}",
-                    short(&head.old),
-                    short(&head.new)
+                    short_hex(&head.old),
+                    short_hex(&head.new)
                 );
                 return Ok(());
             }
@@ -731,7 +731,7 @@ impl HumanRender for HistoryUndoOutcome {
             outln!(
                 w,
                 "Staged edits from the undone command were not restored; they remain in commit {}",
-                short(oid)
+                short_hex(oid)
             );
         }
         Ok(())
@@ -823,7 +823,7 @@ pub fn run_move(
     )
     .map_err(on_err)?;
     if !shared.dry_run {
-        let message = format!("history move: {}", short(&commit_oid.to_hex()));
+        let message = format!("history move: {}", commit_oid.to_short_hex());
         apply_rewrite(
             &rewrite.repo,
             &plan,
@@ -1192,7 +1192,7 @@ impl HumanRender for HistoryAbsorbOutcome {
                 "  {} {} → {} {}",
                 row.path,
                 header,
-                short(&row.commit),
+                short_hex(&row.commit),
                 row.subject
             );
         }
@@ -1459,7 +1459,7 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
     }
 
     let effective_onto = onto_oid.unwrap_or(upstream_oid);
-    let apply_message = format!("rebase: onto {}", short(&effective_onto.to_hex()));
+    let apply_message = format!("rebase: onto {}", effective_onto.to_short_hex());
     let start_opts = StartRebaseOptions {
         request,
         rebase: rebase_opts.clone(),
@@ -1562,7 +1562,7 @@ fn map_rebase_session_error(repo: &Repository, err: RebaseSessionError) -> anyho
         }
         RebaseSessionError::ResolutionHeadChanged { expected } => anyhow::anyhow!(
             "HEAD moved away from the conflict resolution parent (expected {}); save commits on a branch or reset before `grit rebase --continue`",
-            short(&expected.to_hex())
+            expected.to_short_hex()
         ),
         RebaseSessionError::NotOnBranch => {
             anyhow::anyhow!("rebase session requires HEAD on a branch")
@@ -1574,8 +1574,8 @@ fn map_rebase_session_error(repo: &Repository, err: RebaseSessionError) -> anyho
         } => anyhow::anyhow!(
             "{name} moved to {} while the rebase was stopped, so it cannot be continued or skipped; \
              run `grit rebase --abort` to restore {name} to {} (the moved tip stays in its reflog)",
-            actual.map_or_else(|| "(deleted)".to_owned(), |oid| short(&oid.to_hex()).to_owned()),
-            short(&expected.to_hex())
+            actual.map_or_else(|| "(deleted)".to_owned(), |oid| oid.to_short_hex()),
+            expected.to_short_hex()
         ),
         RebaseSessionError::AbortRefMoved { name } => anyhow::anyhow!(
             "{name} moved while the rebase was being aborted; retry `grit rebase --abort`"
@@ -1752,7 +1752,7 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
             anyhow::anyhow!("nothing to {operation}: no staged changes")
         }
         HistoryError::FixupMakesTargetEmpty { commit } => {
-            let short = &commit.to_hex()[..7];
+            let short = commit.to_short_hex();
             anyhow::anyhow!("{operation} makes commit {short} empty")
         }
         HistoryError::Conflict {
@@ -1774,35 +1774,35 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
             anyhow::anyhow!("commit signing failed: {message}")
         }
         HistoryError::InsertBeforeOnMerge { commit } => {
-            let short = &commit.to_hex()[..7];
+            let short = commit.to_short_hex();
             anyhow::anyhow!("insert-before on merge commit {short} is not supported")
         }
         HistoryError::MergeCommitInReplay { commit } => {
-            let short = &commit.to_hex()[..7];
+            let short = commit.to_short_hex();
             anyhow::anyhow!(
                 "{short} is a merge commit — {operation} cannot drop or reorder merge commits yet"
             )
         }
         HistoryError::RootCommit { commit } => {
-            let short = &commit.to_hex()[..7];
+            let short = commit.to_short_hex();
             anyhow::anyhow!(
                 "{short} is a root commit and cannot be dropped or replayed without a parent"
             )
         }
         HistoryError::BecameEmpty { commit } => {
-            let short = &commit.to_hex()[..7];
+            let short = commit.to_short_hex();
             anyhow::anyhow!("replay of {short} would become empty — refusing rewrite")
         }
         HistoryError::NotInHistory { commit } => {
-            let short = &commit.to_hex()[..7];
+            let short = commit.to_short_hex();
             anyhow::anyhow!("{short} is not reachable from HEAD for this rewrite scope")
         }
         HistoryError::MoveTargetNotInHistory { commit } => {
-            let short = &commit.to_hex()[..7];
+            let short = commit.to_short_hex();
             anyhow::anyhow!("{short} is not on the linear first-parent history of HEAD")
         }
         HistoryError::NoOp { commit } => {
-            let short = &commit.to_hex()[..7];
+            let short = commit.to_short_hex();
             anyhow::anyhow!("{short} is already at the requested position")
         }
         HistoryError::NotLinear => anyhow::anyhow!(

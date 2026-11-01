@@ -10,6 +10,7 @@ use anyhow::{bail, Context, Error as AnyhowError, Result};
 use grit_lib::commit::signing::{should_sign_tag, GpgConfig, TrustLevel};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
+use grit_lib::objects::short_hex;
 use grit_lib::porcelain::tag::{
     create_tag, delete_tag, list_tags_with_detail, verify_tag_by_name, CreateTagRequest,
     TagAnnotation, TagDetail, TagError, TagKind, TagList, TagSummary,
@@ -288,7 +289,7 @@ impl MarkdownRender for TagOutcome {
                 dry_run,
                 ..
             } => {
-                let short = oid.get(..7).unwrap_or(oid.as_str());
+                let short = short_hex(oid);
                 let kind_note = match (*kind, *signed) {
                     (TagRefKind::Annotated, true) => " (annotated, signed)",
                     (TagRefKind::Annotated, false) => " (annotated)",
@@ -296,12 +297,12 @@ impl MarkdownRender for TagOutcome {
                 };
                 let peel = peeled
                     .as_ref()
-                    .map(|p| format!(" → `{}`", p.get(..7).unwrap_or(p.as_str())))
+                    .map(|p| format!(" → `{}`", short_hex(p)))
                     .unwrap_or_default();
                 let verb = if *dry_run { "Would create" } else { "Created" };
                 outln!(w, "{verb} tag `{name}`{kind_note} at `{short}`{peel}.");
                 if let Some(old) = replaced {
-                    let old_short = old.get(..7).unwrap_or(old.as_str());
+                    let old_short = short_hex(old);
                     outln!(w, "Replaced previous target `{old_short}`.");
                 }
             }

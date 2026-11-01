@@ -265,8 +265,7 @@ pub fn commit_rows_with(
     let cells: Vec<(String, String, String, String, &str)> = commits
         .iter()
         .map(|c| {
-            let full = c.oid.to_hex();
-            let sha = full.get(..7).unwrap_or(&full).to_owned();
+            let sha = c.oid.to_short_hex();
             let change = change_display_segment(&c.change_id);
             let author = truncate(&c.author, AUTHOR_MAX.min(columns.author.max(1)));
             let date = context::relative_date_from(c.timestamp, now);

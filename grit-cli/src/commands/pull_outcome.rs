@@ -8,7 +8,7 @@ use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::progress::summary::{stdout_color, TransferSummary};
 use anyhow::Result;
 use grit_lib::change_id::ChangeId;
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::operation::Conflict;
 use grit_lib::porcelain::pull::{
     PullCheck as LibPullCheck, PullOutcome as LibPullOutcome, PullResult as LibPullResult,
@@ -683,8 +683,4 @@ impl MarkdownRender for PullOutcome {
         markdown::print_pull_outcome(w, self)?;
         Ok(())
     }
-}
-
-fn short_hex(oid: &str) -> &str {
-    oid.get(..7).unwrap_or(oid)
 }

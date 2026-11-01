@@ -5,6 +5,7 @@ use std::io::Write;
 
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
+use grit_lib::objects::short_hex;
 use grit_lib::remote::snapshot_checkout::{
     CheckoutClient, CheckoutMarker, Ident, Slice, SliceChange, SliceDeleteRequest, SliceRequest,
     SLICES_PATH,
@@ -120,7 +121,7 @@ impl HumanRender for SliceChangeOutcome {
             "edit" => "Changed",
             _ => "Removed",
         };
-        let short = |s: &str| s.get(..7).unwrap_or(s).to_owned();
+        let short = |s: &str| short_hex(s).to_owned();
         if self.previous == self.head {
             outln!(w, "· slice {} is unchanged", self.name);
         } else {
