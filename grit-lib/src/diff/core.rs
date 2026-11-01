@@ -2979,6 +2979,8 @@ pub(crate) fn diff_trees_coalesced_for_checkout(
     index: &Index,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
+    sparse: Option<&SparseCheckout>,
+    index_sparse: bool,
 ) -> Result<Vec<DiffEntry>> {
     crate::trace::trace_span!("grit.diff.tree");
     let trust_index_for_old_tree = old_tree_oid.is_some()
@@ -2989,6 +2991,8 @@ pub(crate) fn diff_trees_coalesced_for_checkout(
         old_tree_matches: trust_index_for_old_tree,
         coalesce_subtrees_for_checkout: true,
         skip_sparse_directories: index.has_sparse_directory_placeholders(),
+        sparse,
+        index_sparse,
         ..DiffTreesWalkHint::default()
     };
     diff_trees_opts(odb, old_tree_oid, new_tree_oid, "", false, Some(&hint))
