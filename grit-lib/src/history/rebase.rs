@@ -246,7 +246,7 @@ pub fn plan_rebase_with_hook(
 ) -> Result<RebasePlan, HistoryError> {
     let fork = rebase_fork(repo, request.upstream, request.branch_tip)?;
     let effective_onto = request.onto.unwrap_or(request.upstream);
-    if request.branch_tip == effective_onto {
+    if rebase_keeps_branch(request, fork) {
         return Ok(RebasePlan::UpToDate);
     }
     let range = commits_in_rebase_range(repo, fork, &[request.branch_tip])?;
@@ -360,6 +360,14 @@ fn plan_rebase_fast_forward(
         ref_updates,
         head,
     })
+}
+
+/// Whether the rebase leaves the branch as it is, decided before the replay range is walked:
+/// the branch is already at the new base, or (without `--onto`) it already extends upstream,
+/// which [`is_rebase_up_to_date`] would accept for any non-empty range.
+fn rebase_keeps_branch(request: &RebaseRequest, fork: ObjectId) -> bool {
+    let effective_onto = request.onto.unwrap_or(request.upstream);
+    request.branch_tip == effective_onto || (request.onto.is_none() && fork == request.upstream)
 }
 
 fn is_rebase_up_to_date(
@@ -707,7 +715,7 @@ pub(crate) fn plan_rebase_resumable(
 ) -> Result<Result<ResumablePlanOutcome, RebasePlan>, HistoryError> {
     let fork = rebase_fork(repo, request.upstream, request.branch_tip)?;
     let effective_onto = request.onto.unwrap_or(request.upstream);
-    if request.branch_tip == effective_onto {
+    if rebase_keeps_branch(request, fork) {
         return Ok(Err(RebasePlan::UpToDate));
     }
     let range = commits_in_rebase_range(repo, fork, &[request.branch_tip])?;
@@ -1224,6 +1232,44 @@ mod tests {
         };
         let plan = plan_rebase(&repo, &request, &opts).expect("plan");
         assert_eq!(plan, RebasePlan::UpToDate);
+    }
+
+    #[test]
+    fn plan_rebase_up_to_date_when_branch_extends_upstream_through_a_merge() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let id = ident(1);
+        let tree_a = blob_tree(&repo, "f.txt", b"a\n").expect("tree");
+        let base = write_commit(&repo, tree_a, &[], "base", &id).expect("base");
+        let mut side = base;
+        for i in 0..20 {
+            let tree = blob_tree(&repo, "side.txt", format!("{i}\n").as_bytes()).expect("tree");
+            side = write_commit(&repo, tree, &[side], "side", &id).expect("side");
+        }
+        let upstream = write_commit(&repo, tree_a, &[base], "upstream", &id).expect("upstream");
+        let tip = write_commit(&repo, tree_a, &[upstream, side], "merge", &id).expect("merge");
+        let opts = RebaseOntoOptions::new(RewriteOptions {
+            scope: RefScope::Head,
+            empty: crate::revwalk::history::EmptyPolicy::Drop,
+            committer: id.parse().expect("signature"),
+            preserve_committer: false,
+            sign: false,
+        });
+        let request = RebaseRequest {
+            upstream,
+            onto: None,
+            branch_tip: tip,
+        };
+        assert_eq!(
+            plan_rebase(&repo, &request, &opts).expect("plan"),
+            RebasePlan::UpToDate
+        );
     }
 
     #[test]
