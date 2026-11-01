@@ -16,6 +16,8 @@ use grit_lib::PostOperationHooks;
 use grit_test_support::git;
 use grit_test_support::objects::git_supports_sha256;
 
+const TEST_IDENT: &str = "A <a@x.test> 1700000000 +0000";
+
 const EMPTY_BLOB_SHA1: &str = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
 const EMPTY_TREE_SHA1: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const EMPTY_BLOB_SHA256: &str = "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
@@ -90,7 +92,7 @@ fn rewrite_options() -> RewriteOptions {
     RewriteOptions {
         scope: RefScope::Head,
         empty: EmptyPolicy::Drop,
-        committer: "A <a@x.test>".parse().expect("signature"),
+        committer: TEST_IDENT.parse().expect("signature"),
         preserve_committer: false,
         sign: false,
     }
@@ -98,7 +100,7 @@ fn rewrite_options() -> RewriteOptions {
 
 fn apply_options() -> ApplyOptions {
     ApplyOptions {
-        identity: "A <a@x.test>".parse().expect("identity"),
+        identity: TEST_IDENT.parse().expect("identity"),
         reflog_message: "rebase".into(),
         record_operation: None,
         hooks: PostOperationHooks::Skip,
@@ -177,6 +179,7 @@ fn conflicted_merge_abort_leaves_no_dangling_empty_objects() {
     std::fs::write(root.join("a.txt"), "s").expect("write s");
     git(root, &["add", "a.txt"]);
     git(root, &["commit", "-m", "s"]);
+    git(root, &["switch", "main"]);
 
     let git_dir = root.join(".git");
     git_fsck_strict(root);
@@ -187,7 +190,7 @@ fn conflicted_merge_abort_leaves_no_dangling_empty_objects() {
         "refs/heads/main",
         oid(root, "main"),
         oid(root, "side"),
-        "main",
+        "side",
         &mut NullProgress,
         &NeverCancel,
     )
@@ -239,6 +242,7 @@ fn conflict_with_clean_auto_merge_keeps_stage0_blob_reachable() {
     let side_auto = git(root, &["rev-parse", "side:auto.txt"]).trim().to_owned();
     let main_auto = git(root, &["rev-parse", "main:auto.txt"]).trim().to_owned();
     assert_ne!(side_auto, main_auto);
+    git(root, &["switch", "main"]);
 
     let git_dir = root.join(".git");
     let repo = open(root);
@@ -254,9 +258,9 @@ fn conflict_with_clean_auto_merge_keeps_stage0_blob_reachable() {
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
 
-    let index = repo.load_index().expect("index");
+    let index = repo.index_handle().load().expect("index");
     let auto_entry = index
-        .entries
+        .entries()
         .iter()
         .find(|e| e.stage() == 0 && e.path == b"auto.txt")
         .expect("stage-0 auto.txt after conflict merge");
@@ -336,13 +340,14 @@ fn sha256_rebase_and_merge_abort_leave_no_dangling_empty_objects() {
     std::fs::write(root.join("a.txt"), "s").expect("write s");
     git(root, &["add", "a.txt"]);
     git(root, &["commit", "-m", "s2"]);
+    git(root, &["switch", "main"]);
 
     let outcome = integrate_branch(
         &repo,
         "refs/heads/main",
         oid(root, "main"),
         oid(root, "side"),
-        "main",
+        "side",
         &mut NullProgress,
         &NeverCancel,
     )

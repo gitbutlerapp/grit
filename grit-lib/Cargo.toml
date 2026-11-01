@@ -347,6 +347,11 @@ name = "hygiene"
 path = "tests/hygiene.rs"
 
 [[test]]
+name = "issue_2403_no_dangling_after_rebase_or_merge_abort"
+path = "tests/issue_2403_no_dangling_after_rebase_or_merge_abort.rs"
+required-features = ["full-tests"]
+
+[[test]]
 name = "init_filesystem_capabilities"
 path = "tests/init_filesystem_capabilities.rs"
 
