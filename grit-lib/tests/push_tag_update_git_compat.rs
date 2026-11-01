@@ -2,7 +2,7 @@
 
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::push_report::PushRefStatus;
-use grit_lib::remote::transfer::{push_local, PushOptions, PushRefSpec, PUSH_TAG_EXISTS_MESSAGE};
+use grit_lib::remote::transfer::{push_local, PushOptions, PushRefSpec};
 use grit_test_support::git;
 
 fn tag_push_fixture() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
@@ -48,7 +48,7 @@ fn push_local_rejects_moving_existing_lightweight_tag_without_force() {
     assert_eq!(outcome.results.len(), 1);
     let r = &outcome.results[0];
     assert_eq!(r.status, PushRefStatus::RejectAlreadyExists);
-    assert_eq!(r.message.as_deref(), Some(PUSH_TAG_EXISTS_MESSAGE));
+    assert_eq!(r.message.as_deref(), Some("tag already exists"));
     assert_eq!(
         git(&remote, &["rev-parse", "--short", "refs/tags/v1"]),
         before

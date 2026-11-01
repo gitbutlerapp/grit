@@ -3709,7 +3709,7 @@ fn ref_target_exists(local_odb: &Odb, remote_odb: &Odb, tag_oid: ObjectId) -> Re
 
 /// Message on [`PushRefStatus::RejectAlreadyExists`] when an existing remote tag
 /// would change without `--force`. Distinct from the create race message `"already exists"`.
-pub const PUSH_TAG_EXISTS_MESSAGE: &str = "tag already exists";
+pub(crate) const PUSH_TAG_EXISTS_MESSAGE: &str = "tag already exists";
 
 /// Outcome for updating a remote tag that already exists (Git never fast-forwards tags).
 pub(crate) enum ExistingTagPushDecision {
