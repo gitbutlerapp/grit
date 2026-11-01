@@ -16,10 +16,9 @@
 
 use anyhow::{Context, Result};
 use grit_lib::diff::{
-    apply_diff_filter, build_file_diffs, commit_diff_files, diff_commits_with_renames_and_policy,
-    diff_trees_with_renames_and_policy, for_each_tree_diff_structured,
+    build_file_diffs, commit_diff_files, for_each_tree_diff_structured,
     hunk_ids_with_duplicate_peers, load_object_changes, peer_hunks_by_primary_path,
-    peer_scope_includes_path, resolve_diff_request, sort_entries_by_path,
+    resolve_diff_request, sort_entries_by_path,
     structured::{format_hunk_range, StructuredLineKind},
     tree_diff_structured_parallel, write_commit_log_patch, write_commits_log_patch, write_patch,
     write_patch_resolved, DiffArguments, DiffDetail, DiffEntry, DiffFilesOutput, DiffMerges,
@@ -29,7 +28,6 @@ use grit_lib::diff::{
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::parallel::ParallelOp;
-use grit_lib::state::resolve_head_for_repository;
 use grit_lib::worktree::pathspec::pathdiff;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -901,7 +899,6 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let quiet = opts.quiet;
     let repo = context::discover()?;
     let config = repo.config().context("could not load config")?;
-    let thread_policy = repo.thread_policy();
     let DiffArguments { target, pathspecs } = resolve_diff_target(&repo, &opts)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
@@ -910,39 +907,26 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let format = opts.format;
     let (entries, changes) = match target {
         DiffTarget::IndexVsHead => {
-            let entries =
-                staged_entries(&uncommitted_diff(&repo)?, &repo, &diff_options, &pathspecs)?;
+            let entries = uncommitted_entries(
+                &mut uncommitted_diff(&repo)?,
+                &target,
+                &pathspecs,
+                &diff_options,
+            )?;
             let changes = load_object_changes(&repo, &entries)?;
             (entries, Some((changes, PatchSide::Blob)))
         }
-        DiffTarget::WorktreeVsIndex => {
+        DiffTarget::WorktreeVsIndex
+        | DiffTarget::WorktreeVsHead
+        | DiffTarget::WorktreeVsTree(_) => {
             let mut uncommitted = uncommitted_diff(&repo)?;
-            let entries = unstaged_entries(&mut uncommitted, &repo, &diff_options, &pathspecs)?;
-            let changes = uncommitted.load_worktree_changes(entries.clone())?;
-            (entries, Some((changes, PatchSide::Worktree)))
-        }
-        DiffTarget::WorktreeVsHead | DiffTarget::WorktreeVsTree(_) => {
-            let base_tree = worktree_base_tree(&repo, &target)?;
-            let mut uncommitted = uncommitted_diff(&repo)?;
-            let entries = worktree_entries(
-                &mut uncommitted,
-                &repo,
-                base_tree.as_ref(),
-                &diff_options,
-                &pathspecs,
-            )?;
+            let entries =
+                uncommitted_entries(&mut uncommitted, &target, &pathspecs, &diff_options)?;
             let changes = uncommitted.load_worktree_changes(entries.clone())?;
             (entries, Some((changes, PatchSide::Worktree)))
         }
         _ => (
-            target_tree_entries(
-                &repo,
-                &target,
-                &pathspecs,
-                &diff_options,
-                &config,
-                &thread_policy,
-            )?,
+            stored_entries(&repo, &target, &pathspecs, &diff_options)?,
             None,
         ),
     };
@@ -973,7 +957,8 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let outcome = match target {
         DiffTarget::IndexVsHead => {
             let mut uncommitted = uncommitted_diff(&repo)?;
-            let entries = staged_entries(&uncommitted, &repo, &diff_options, &pathspecs)?;
+            let entries =
+                uncommitted_entries(&mut uncommitted, &target, &pathspecs, &diff_options)?;
             match detail {
                 DiffDetail::Stat | DiffDetail::NameOnly | DiffDetail::NameStatus => {
                     drop(uncommitted);
@@ -982,13 +967,14 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 _ => {
                     let staged = load_object_changes(&repo, &entries)?;
                     let peer = if opts.emit_json_hunk_ids {
-                        peer_unstaged_changes_for_hunk_ids(
-                            &mut uncommitted,
-                            &repo,
-                            &diff_options,
-                            &pathspecs,
-                            staged.iter().map(|fc| fc.path.as_str()),
-                        )
+                        uncommitted
+                            .peer_changes(
+                                DiffSide::Staged,
+                                &pathspecs,
+                                diff_options.renames,
+                                staged.iter().map(|fc| fc.path.as_str()),
+                            )
+                            .unwrap_or_default()
                     } else {
                         Vec::new()
                     };
@@ -1008,7 +994,8 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         }
         DiffTarget::WorktreeVsIndex => {
             let mut uncommitted = uncommitted_diff(&repo)?;
-            let entries = unstaged_entries(&mut uncommitted, &repo, &diff_options, &pathspecs)?;
+            let entries =
+                uncommitted_entries(&mut uncommitted, &target, &pathspecs, &diff_options)?;
             match detail {
                 DiffDetail::Stat => {
                     let changes = uncommitted.load_worktree_changes(entries)?;
@@ -1022,13 +1009,14 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 _ => {
                     let unstaged = uncommitted.load_worktree_changes(entries)?;
                     let peer = if opts.emit_json_hunk_ids {
-                        peer_staged_changes_for_hunk_ids(
-                            &uncommitted,
-                            &repo,
-                            &diff_options,
-                            &pathspecs,
-                            unstaged.iter().map(|fc| fc.path.as_str()),
-                        )
+                        uncommitted
+                            .peer_changes(
+                                DiffSide::Unstaged,
+                                &pathspecs,
+                                diff_options.renames,
+                                unstaged.iter().map(|fc| fc.path.as_str()),
+                            )
+                            .unwrap_or_default()
                     } else {
                         Vec::new()
                     };
@@ -1047,15 +1035,9 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             }
         }
         DiffTarget::WorktreeVsHead | DiffTarget::WorktreeVsTree(_) => {
-            let base_tree = worktree_base_tree(&repo, &target)?;
             let mut uncommitted = uncommitted_diff(&repo)?;
-            let entries = worktree_entries(
-                &mut uncommitted,
-                &repo,
-                base_tree.as_ref(),
-                &diff_options,
-                &pathspecs,
-            )?;
+            let entries =
+                uncommitted_entries(&mut uncommitted, &target, &pathspecs, &diff_options)?;
             let changes = uncommitted.load_worktree_changes(entries)?;
             drop(uncommitted);
             match detail {
@@ -1077,14 +1059,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         }
         _ => tree_diff_outcome(
             &repo,
-            target_tree_entries(
-                &repo,
-                &target,
-                &pathspecs,
-                &diff_options,
-                &config,
-                &thread_policy,
-            )?,
+            stored_entries(&repo, &target, &pathspecs, &diff_options)?,
             detail,
             diff_options,
             format,
@@ -1121,42 +1096,6 @@ pub(crate) fn map_diff_arguments_error(err: ResolveDiffArgumentsError) -> anyhow
         }
         other => other.into(),
     }
-}
-
-/// Tree a working-tree target compares against: `HEAD`'s (none when unborn) or `--against`'s.
-fn worktree_base_tree(
-    repo: &grit_lib::repo::Repository,
-    target: &DiffTarget,
-) -> Result<Option<ObjectId>> {
-    if let DiffTarget::WorktreeVsTree(tree) = target {
-        return Ok(Some(*tree));
-    }
-    let head = resolve_head_for_repository(repo).context("could not resolve HEAD")?;
-    Ok(head.tree(repo.odb())?)
-}
-
-/// Path-limited tree entries for a commit or commit-range target.
-fn target_tree_entries(
-    repo: &grit_lib::repo::Repository,
-    target: &DiffTarget,
-    pathspecs: &[String],
-    diff_options: &DiffOptions,
-    config: &grit_lib::config::ConfigSet,
-    thread_policy: &grit_lib::parallel::ThreadPolicy,
-) -> Result<Vec<DiffEntry>> {
-    let entries = match target {
-        DiffTarget::Commit(oid)
-        | DiffTarget::Trees {
-            old: None,
-            new: oid,
-        } => commit_entries(repo, oid, diff_options, config, thread_policy)?,
-        DiffTarget::Trees {
-            old: Some(base),
-            new,
-        } => tree_commit_entries(repo, base, new, diff_options, config, thread_policy)?,
-        other => anyhow::bail!("unsupported diff target {other:?}"),
-    };
-    filter_diff_entries(entries, repo, pathspecs)
 }
 
 /// The diff a single commit introduced, as a [`DiffOutcome`]. Reused by `grit show`.
@@ -1383,113 +1322,34 @@ fn hunk_from_structured(h: grit_lib::diff::structured::StructuredHunk) -> Hunk {
     }
 }
 
-fn diff_entry_display_path(e: &DiffEntry) -> &str {
-    e.new_path
-        .as_deref()
-        .or(e.old_path.as_deref())
-        .unwrap_or("")
-}
-
-fn diff_entry_matches_primary(e: &DiffEntry, primary: &std::collections::HashSet<&str>) -> bool {
-    peer_scope_includes_path(diff_entry_display_path(e), e.old_path.as_deref(), primary)
-}
-
-fn filter_entries_to_primary_paths(
-    entries: Vec<DiffEntry>,
-    primary: &std::collections::HashSet<&str>,
-) -> Vec<DiffEntry> {
-    entries
-        .into_iter()
-        .filter(|e| diff_entry_matches_primary(e, primary))
-        .collect()
-}
-
 fn uncommitted_diff(repo: &grit_lib::repo::Repository) -> Result<UncommittedDiff<'_>> {
     repo.diff()
         .uncommitted()
         .context("could not load the index")
 }
 
-/// Staged diff entries (index vs `HEAD`'s tree) within `pathspecs`, without loading blobs.
-fn staged_entries(
-    uncommitted: &UncommittedDiff<'_>,
-    repo: &grit_lib::repo::Repository,
-    diff_options: &DiffOptions,
-    pathspecs: &[String],
-) -> Result<Vec<DiffEntry>> {
-    let entries = uncommitted
-        .staged_entries(diff_options.renames)
-        .context("could not diff the index against HEAD")?;
-    filter_diff_entries(entries, repo, pathspecs)
-}
-
-/// Unstaged diff entries (index vs working tree) within `pathspecs`, without loading blobs.
-fn unstaged_entries(
+/// Entries for a staged, unstaged or working-tree target, on the index `uncommitted` loaded.
+fn uncommitted_entries(
     uncommitted: &mut UncommittedDiff<'_>,
-    repo: &grit_lib::repo::Repository,
-    diff_options: &DiffOptions,
+    target: &DiffTarget,
     pathspecs: &[String],
+    diff_options: &DiffOptions,
 ) -> Result<Vec<DiffEntry>> {
-    let entries = uncommitted
-        .unstaged_entries(diff_options.renames)
-        .context("could not diff the index against the working tree")?;
-    filter_diff_entries(entries, repo, pathspecs)
-}
-
-/// Working tree and index against `base_tree`, within `pathspecs`, without loading blobs.
-fn worktree_entries(
-    uncommitted: &mut UncommittedDiff<'_>,
-    repo: &grit_lib::repo::Repository,
-    base_tree: Option<&ObjectId>,
-    diff_options: &DiffOptions,
-    pathspecs: &[String],
-) -> Result<Vec<DiffEntry>> {
-    let entries = uncommitted
-        .worktree_entries(base_tree, diff_options.renames)
-        .context("could not diff the working tree")?;
-    filter_diff_entries(entries, repo, pathspecs)
-}
-
-fn peer_unstaged_changes_for_hunk_ids<'a>(
-    uncommitted: &mut UncommittedDiff<'_>,
-    repo: &grit_lib::repo::Repository,
-    diff_options: &DiffOptions,
-    pathspecs: &[String],
-    primary_paths: impl IntoIterator<Item = &'a str>,
-) -> Vec<FileChange> {
-    use std::collections::HashSet;
-
-    let primary: HashSet<&str> = primary_paths.into_iter().collect();
-    if primary.is_empty() || repo.work_tree().is_none() {
-        return Vec::new();
-    }
-    let Ok(entries) = unstaged_entries(uncommitted, repo, diff_options, pathspecs) else {
-        return Vec::new();
-    };
-    let entries = filter_entries_to_primary_paths(entries, &primary);
     uncommitted
-        .load_worktree_changes(entries)
-        .unwrap_or_default()
+        .entries(target, pathspecs, diff_options)
+        .context("could not diff the index or working tree")
 }
 
-fn peer_staged_changes_for_hunk_ids<'a>(
-    uncommitted: &UncommittedDiff<'_>,
+/// Entries for a commit or commit-range target (no index read).
+fn stored_entries(
     repo: &grit_lib::repo::Repository,
-    diff_options: &DiffOptions,
+    target: &DiffTarget,
     pathspecs: &[String],
-    primary_paths: impl IntoIterator<Item = &'a str>,
-) -> Vec<FileChange> {
-    use std::collections::HashSet;
-
-    let primary: HashSet<&str> = primary_paths.into_iter().collect();
-    if primary.is_empty() {
-        return Vec::new();
-    }
-    let Ok(entries) = staged_entries(uncommitted, repo, diff_options, pathspecs) else {
-        return Vec::new();
-    };
-    let entries = filter_entries_to_primary_paths(entries, &primary);
-    load_object_changes(repo, &entries).unwrap_or_default()
+    diff_options: &DiffOptions,
+) -> Result<Vec<DiffEntry>> {
+    repo.diff()
+        .entries(target, pathspecs, diff_options)
+        .context("could not diff commits")
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -1576,25 +1436,6 @@ pub(crate) fn resolve_commit_diff_pathspecs(
         .map_err(map_diff_arguments_error)
 }
 
-fn filter_diff_entries(
-    entries: Vec<DiffEntry>,
-    repo: &grit_lib::repo::Repository,
-    specs: &[String],
-) -> Result<Vec<DiffEntry>> {
-    let matcher = repo.pathspec_matcher(specs)?;
-    Ok(entries
-        .into_iter()
-        .filter(|e| {
-            let path = e
-                .new_path
-                .as_deref()
-                .or(e.old_path.as_deref())
-                .unwrap_or("");
-            matcher.matches_change(path, e.old_path.as_deref())
-        })
-        .collect())
-}
-
 fn outcome_stat_from_changes(
     changes: Vec<FileChange>,
     diff_options: DiffOptions,
@@ -1640,55 +1481,6 @@ fn outcome_stat_from_changes(
         body_streamed: false,
         preserve_changed: false,
     }
-}
-
-fn tree_commit_entries(
-    repo: &grit_lib::repo::Repository,
-    base: &ObjectId,
-    tip: &ObjectId,
-    diff_options: &DiffOptions,
-    config: &grit_lib::config::ConfigSet,
-    thread_policy: &grit_lib::parallel::ThreadPolicy,
-) -> Result<Vec<DiffEntry>> {
-    let mut entries = diff_commits_with_renames_and_policy(
-        repo.odb(),
-        base,
-        tip,
-        diff_options.rename_threshold_u32(),
-        config,
-        thread_policy,
-    )
-    .context("could not diff commits")?;
-    entries = apply_diff_filter(entries, diff_options.filter);
-    sort_entries_by_path(&mut entries);
-    Ok(entries)
-}
-
-fn commit_entries(
-    repo: &grit_lib::repo::Repository,
-    oid: &ObjectId,
-    diff_options: &DiffOptions,
-    config: &grit_lib::config::ConfigSet,
-    thread_policy: &grit_lib::parallel::ThreadPolicy,
-) -> Result<Vec<DiffEntry>> {
-    let commit = context::read_commit(repo, oid)?;
-    let new_tree = commit.tree;
-    let old_tree = match commit.parents.first() {
-        Some(parent) => Some(context::commit_tree(repo, parent)?),
-        None => None,
-    };
-    let mut entries = diff_trees_with_renames_and_policy(
-        repo.odb(),
-        old_tree.as_ref(),
-        Some(&new_tree),
-        "",
-        diff_options.rename_threshold_u32(),
-        config,
-        thread_policy,
-    )
-    .context("could not diff the commit")?;
-    sort_entries_by_path(&mut entries);
-    Ok(entries)
 }
 
 fn tree_diff_outcome(

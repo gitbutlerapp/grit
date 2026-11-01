@@ -8,7 +8,7 @@ use std::path::Path;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{
     load_object_changes, name_status_line, resolve_diff_request, DiffOptions, DiffRequest,
-    DiffTarget, FileChange, RenameDetection, ResolveDiffArgumentsError, UncommittedDiff,
+    DiffSide, DiffTarget, FileChange, RenameDetection, ResolveDiffArgumentsError, UncommittedDiff,
 };
 use grit_lib::error::Error;
 use grit_lib::index::Index;
@@ -191,6 +191,140 @@ fn worktree_entries_match_git_diff_against_a_tree() {
     );
 }
 
+/// [`fixture`] with its staged state committed as a second commit, then a staged edit and an
+/// addition, and an unstaged edit on top of the staged `keep.txt`.
+fn history_fixture(root: &Path) {
+    fixture(root);
+    git(root, &["commit", "-q", "-m", "second"]);
+    write(root, "keep.txt", "a\nB\nc\n");
+    write(root, "new.txt", "n\n");
+    git(root, &["add", "keep.txt", "new.txt"]);
+    write(root, "keep.txt", "a\nB\nc\nd\n");
+}
+
+#[test]
+fn entries_for_every_target_match_git_name_status() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    history_fixture(dir.path());
+    let repo = open(dir.path());
+    let head = rev_parse(dir.path(), "HEAD");
+    let parent = rev_parse(dir.path(), "HEAD~1");
+    let parent_tree = rev_parse(dir.path(), "HEAD~1^{tree}");
+    let empty_tree = git(dir.path(), &["hash-object", "-t", "tree", "/dev/null"]);
+    let empty_tree = empty_tree.trim();
+    let parent_hex = parent.to_hex();
+
+    let targets: [(DiffTarget, Vec<&str>); 7] = [
+        (DiffTarget::IndexVsHead, vec!["--cached"]),
+        (DiffTarget::WorktreeVsIndex, vec![]),
+        (DiffTarget::WorktreeVsHead, vec!["HEAD"]),
+        (DiffTarget::WorktreeVsTree(parent_tree), vec![&parent_hex]),
+        (DiffTarget::Commit(head), vec![&parent_hex, "HEAD"]),
+        (
+            DiffTarget::Trees {
+                old: Some(parent),
+                new: head,
+            },
+            vec![&parent_hex, "HEAD"],
+        ),
+        (
+            DiffTarget::Trees {
+                old: None,
+                new: head,
+            },
+            vec![empty_tree, "HEAD"],
+        ),
+    ];
+    let limits: [(&[&str], Option<&str>); 4] = [
+        (&[], None),
+        (&["dir"], None),
+        (&[], Some("AD")),
+        (&["*.txt"], Some("m")),
+    ];
+    for (target, git_args) in &targets {
+        for (pathspecs, filter) in limits {
+            let mut options = DiffOptions::default().with_renames(RENAMES);
+            let mut args = vec!["diff", "--name-status", "-M"];
+            if let Some(letters) = filter {
+                options = options.with_filter(Some(letters.parse().expect("filter")));
+                args.extend(["--diff-filter", letters]);
+            }
+            args.extend(git_args.iter().copied());
+            args.push("--");
+            args.extend(pathspecs.iter().copied());
+            let expected = git_lines(dir.path(), &args);
+            let pathspecs: Vec<String> = pathspecs.iter().map(|p| (*p).to_owned()).collect();
+            let context = format!("{target:?} {pathspecs:?} {filter:?}");
+
+            let via_handle = repo
+                .diff()
+                .entries(target, &pathspecs, &options)
+                .expect("Diff::entries");
+            assert_eq!(names(&via_handle), expected, "Diff::entries {context}");
+
+            let mut uncommitted = repo.diff().uncommitted().expect("uncommitted");
+            let via_uncommitted = uncommitted
+                .entries(target, &pathspecs, &options)
+                .expect("UncommittedDiff::entries");
+            assert_eq!(names(&via_uncommitted), expected, "uncommitted {context}");
+        }
+    }
+}
+
+#[test]
+fn peer_changes_load_the_other_side_of_the_index() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    history_fixture(dir.path());
+    let repo = open(dir.path());
+    let mut diff = repo.diff().uncommitted().expect("uncommitted");
+
+    let unstaged_peers = diff
+        .peer_changes(DiffSide::Staged, &[], RENAMES, ["keep.txt", "new.txt"])
+        .expect("peers of staged changes");
+    assert_eq!(
+        unstaged_peers
+            .iter()
+            .map(|c| c.path.as_str())
+            .collect::<Vec<_>>(),
+        ["keep.txt"],
+        "new.txt has no unstaged change"
+    );
+    assert_eq!(unstaged_peers[0].old_bytes.data, b"a\nB\nc\n");
+    assert_eq!(unstaged_peers[0].new_bytes.data, b"a\nB\nc\nd\n");
+
+    let staged_peers = diff
+        .peer_changes(DiffSide::Unstaged, &[], RENAMES, ["keep.txt", "both.txt"])
+        .expect("peers of unstaged changes");
+    assert_eq!(
+        staged_peers
+            .iter()
+            .map(|c| c.path.as_str())
+            .collect::<Vec<_>>(),
+        ["keep.txt"],
+        "both.txt has no staged change"
+    );
+    assert_eq!(staged_peers[0].old_bytes.data, b"a\nb\nc\n");
+    assert_eq!(staged_peers[0].new_bytes.data, b"a\nB\nc\n");
+
+    let limited = diff
+        .peer_changes(
+            DiffSide::Staged,
+            &["other".to_owned()],
+            RENAMES,
+            ["keep.txt"],
+        )
+        .expect("pathspec-limited peers");
+    assert!(limited.is_empty());
+    assert!(diff
+        .peer_changes(DiffSide::Other, &[], RENAMES, ["keep.txt"])
+        .expect("other side")
+        .is_empty());
+    assert!(diff
+        .peer_changes(DiffSide::Staged, &[], RENAMES, [])
+        .expect("no primaries")
+        .is_empty());
+}
+
 #[test]
 fn index_accessor_reuses_the_loaded_index() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -248,6 +382,32 @@ fn bare_repository_rejects_working_tree_diffs() {
     let mut diff = UncommittedDiff::new(&repo, Index::default());
     assert!(matches!(
         diff.worktree_entries(Some(&ObjectId::zero()), RenameDetection::Off),
+        Err(Error::RequiresWorkTree)
+    ));
+
+    let head = rev_parse(&bare, "HEAD");
+    let options = DiffOptions::default();
+    let commit = repo
+        .diff()
+        .entries(&DiffTarget::Commit(head), &[], &options)
+        .expect("commit target needs no work tree");
+    assert_eq!(
+        names(&commit),
+        git_lines(
+            &bare,
+            &[
+                "diff-tree",
+                "-r",
+                "--root",
+                "--no-commit-id",
+                "--name-status",
+                "HEAD"
+            ]
+        )
+    );
+    assert!(matches!(
+        repo.diff()
+            .entries(&DiffTarget::WorktreeVsHead, &[], &options),
         Err(Error::RequiresWorkTree)
     ));
 }
