@@ -1975,6 +1975,8 @@ mod trailer_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "transfer_cargo_mirror.rs"]
 mod transfer_cargo_mirror;
+#[path = "transfer_custom_primary_contains.rs"]
+mod transfer_custom_primary_contains;
 #[cfg(feature = "full-tests")]
 #[path = "transfer_local_copy_perf.rs"]
 mod transfer_local_copy_perf;

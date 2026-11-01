@@ -1331,7 +1331,7 @@ fn copy_objects_for_local_fetch(
         }
     }
 
-    let mut still_missing = objects_missing_from_peer(local_odb, send);
+    let mut still_missing = objects_missing_from_peer(local_odb, send)?;
     if still_missing.is_empty() {
         copy.finish(progress);
         // Every object in `send` is stored locally now, and only packs were installed.
@@ -1485,7 +1485,7 @@ fn copy_objects_for_local_push(
         refresh_local_odb_after_link(dest_odb);
     }
 
-    let mut still_missing = objects_missing_from_peer(dest_odb, send);
+    let mut still_missing = objects_missing_from_peer(dest_odb, send)?;
     if still_missing.is_empty() {
         return Ok(());
     }
@@ -1547,12 +1547,19 @@ fn copy_objects_for_local_push(
 /// Uses the on-disk check rather than [`Odb::exists`], which reports the empty
 /// tree as present even without an object file: the result may be packed
 /// as-is, and the peer must end up with every object it references.
-fn objects_missing_from_peer(peer_odb: &Odb, send: &[ObjectId]) -> Vec<ObjectId> {
+fn objects_missing_from_peer(peer_odb: &Odb, send: &[ObjectId]) -> Result<Vec<ObjectId>> {
+    if !peer_odb.uses_files_primary() {
+        if peer_odb.custom_primary_is_empty()? {
+            return Ok(send.to_vec());
+        }
+        return peer_odb.missing_materialized_many(send);
+    }
     peer_odb.reprepare_local_packs();
-    send.iter()
+    Ok(send
+        .iter()
         .copied()
         .filter(|oid| !peer_odb.exists_materialized_local_without_rescan(oid))
-        .collect()
+        .collect())
 }
 
 /// Stream the pack that copies `missing` (a subset of `send_set`) into the peer to `w`.
@@ -1669,9 +1676,13 @@ fn collect_reachable_excluding_peer(
 
     // The peer is not written during the walk, so one pack-directory refresh is
     // enough; a stale miss only means sending an object the peer already has.
-    peer_odb.reprepare_local_packs();
+    let peer_is_files = peer_odb.uses_files_primary();
+    if peer_is_files {
+        peer_odb.reprepare_local_packs();
+    }
     let at_boundary = |oid: ObjectId| {
-        peer_boundary.contains(&oid) || peer_odb.exists_materialized_local_without_rescan(&oid)
+        peer_boundary.contains(&oid)
+            || (peer_is_files && peer_odb.exists_materialized_local_without_rescan(&oid))
     };
 
     // `visited` also remembers boundary objects so each object is probed once.
@@ -1781,15 +1792,23 @@ fn bitmap_send_set(
     else {
         return Ok(None);
     };
-    peer_odb.reprepare_local_packs();
     let mut objects: Vec<ObjectId> = Vec::new();
-    for oid in reachable
-        .iter_grouped_by_kind()
-        .filter(|oid| !peer_odb.exists_materialized_local_without_rescan(oid))
-    {
-        objects.push(oid);
-        let n = objects.len() as u64;
-        crate::progress::report_object_progress_stride(enum_sink, n, enum_last, None);
+    if peer_odb.uses_files_primary() {
+        peer_odb.reprepare_local_packs();
+        for oid in reachable
+            .iter_grouped_by_kind()
+            .filter(|oid| !peer_odb.exists_materialized_local_without_rescan(oid))
+        {
+            objects.push(oid);
+            let n = objects.len() as u64;
+            crate::progress::report_object_progress_stride(enum_sink, n, enum_last, None);
+        }
+    } else {
+        for oid in reachable.iter_grouped_by_kind() {
+            objects.push(oid);
+            let n = objects.len() as u64;
+            crate::progress::report_object_progress_stride(enum_sink, n, enum_last, None);
+        }
     }
     let name_hashes = crate::pack_object_select::name_hashes_for_send(
         reachable.bitmap_index(),
