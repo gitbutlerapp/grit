@@ -255,3 +255,70 @@ fn ignore_all_space_histogram_merged_group_rediff_matches_git() {
         "histogram -w rediff after compact must match system git"
     );
 }
+
+fn po_translation_fixture() -> (String, String) {
+    let mut old = String::new();
+    let mut new = String::new();
+    for i in 0..6000 {
+        use std::fmt::Write as _;
+        let _ = writeln!(old, "#: file{}.c:{}", i % 300, i % 97);
+        let _ = writeln!(old, "msgid \"message {i}\"");
+        let _ = writeln!(old, "msgstr \"\"");
+        old.push('\n');
+        let msg_new = if i % 7 == 0 { i + 100_000 } else { i };
+        let _ = writeln!(new, "#: file{}.c:{}", i % 300, i % 97);
+        let _ = writeln!(new, "msgid \"message {msg_new}\"");
+        let _ = writeln!(new, "msgstr \"\"");
+        new.push('\n');
+    }
+    (old, new)
+}
+
+/// Issue #2451: repeated-line po files — histogram numstat must match system git.
+#[test]
+fn repeated_line_po_histogram_numstat_matches_git() {
+    let (old, new) = po_translation_fixture();
+    let git = support::git_numstat(
+        old.as_bytes(),
+        new.as_bytes(),
+        "a.po",
+        support::LineDiffAlgo::Histogram,
+    );
+    let grit = support::grit_numstat(&old, &new, support::LineDiffAlgo::Histogram);
+    assert_eq!(grit, git, "histogram numstat must match git on po fixture");
+}
+
+#[test]
+fn repeated_line_file_histogram_numstat_matches_git() {
+    let old = (0..800)
+        .flat_map(|i| {
+            [
+                format!("#: x.c:{i}"),
+                format!("msgid \"{i}\""),
+                "msgstr \"\"".into(),
+                String::new(),
+            ]
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let new = (0..800)
+        .flat_map(|i| {
+            let v = if i % 11 == 0 { i + 999 } else { i };
+            [
+                format!("#: x.c:{i}"),
+                format!("msgid \"{v}\""),
+                "msgstr \"\"".into(),
+                String::new(),
+            ]
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let git = support::git_numstat(
+        old.as_bytes(),
+        new.as_bytes(),
+        "f.po",
+        support::LineDiffAlgo::Histogram,
+    );
+    let grit = support::grit_numstat(&old, &new, support::LineDiffAlgo::Histogram);
+    assert_eq!(grit, git);
+}
