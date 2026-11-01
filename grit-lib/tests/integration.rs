@@ -566,6 +566,8 @@ mod diff_parallel_symlinks_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "diff_rename_basename_over_limit.rs"]
 mod diff_rename_basename_over_limit;
+#[path = "diff_rename_disjoint_repeated_basenames.rs"]
+mod diff_rename_disjoint_repeated_basenames;
 #[cfg(feature = "full-tests")]
 #[path = "diff_rename_filter_git_compat.rs"]
 mod diff_rename_filter_git_compat;

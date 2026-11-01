@@ -26,6 +26,82 @@ mod tests {
     use crate::objects::{FileMode, ObjectId};
 
     #[test]
+    fn disjoint_repeated_basenames_skip_similarity_scoring() {
+        const N: usize = 2000;
+        let zero = ObjectId::zero();
+        let mut deleted = Vec::with_capacity(N);
+        let mut added = Vec::with_capacity(N);
+        for i in 0..N {
+            deleted.push(DiffEntry {
+                status: DiffStatus::Deleted,
+                old_path: Some(format!("a/d{}/f{}.txt", i / 50, i % 50)),
+                new_path: None,
+                old_mode: FileMode::REGULAR,
+                new_mode: FileMode::ABSENT,
+                old_oid: zero,
+                new_oid: zero,
+                score: None,
+            });
+            added.push(DiffEntry {
+                status: DiffStatus::Added,
+                old_path: None,
+                new_path: Some(format!("b/d{}/g{}.txt", i / 50, i % 50)),
+                old_mode: FileMode::ABSENT,
+                new_mode: FileMode::REGULAR,
+                old_oid: zero,
+                new_oid: zero,
+                score: None,
+            });
+        }
+        let used_deleted = vec![false; N];
+        let used_added = vec![false; N];
+        assert!(!basename_needs_similarity_scoring(
+            &deleted,
+            &added,
+            &used_deleted,
+            &used_added
+        ));
+    }
+
+    #[test]
+    fn shared_repeated_basenames_need_similarity_scoring() {
+        const N: usize = 200;
+        let zero = ObjectId::zero();
+        let mut deleted = Vec::with_capacity(N);
+        let mut added = Vec::with_capacity(N);
+        for i in 0..N {
+            deleted.push(DiffEntry {
+                status: DiffStatus::Deleted,
+                old_path: Some(format!("old/d{}/f{}.txt", i / 50, i % 50)),
+                new_path: None,
+                old_mode: FileMode::REGULAR,
+                new_mode: FileMode::ABSENT,
+                old_oid: zero,
+                new_oid: zero,
+                score: None,
+            });
+            added.push(DiffEntry {
+                status: DiffStatus::Added,
+                old_path: None,
+                new_path: Some(format!("new/d{}/f{}.txt", i / 50, i % 50)),
+                old_mode: FileMode::ABSENT,
+                new_mode: FileMode::REGULAR,
+                old_oid: zero,
+                new_oid: zero,
+                score: None,
+            });
+        }
+        let used_deleted = vec![false; N];
+        let used_added = vec![false; N];
+        assert!(basename_needs_similarity_scoring(
+            &deleted,
+            &added,
+            &used_deleted,
+            &used_added
+        ));
+    }
+
+    #[test]
     fn wide_unique_basename_matrix_needs_similarity_scoring() {
         const N: usize = 2000;
         let zero = ObjectId::zero();
@@ -172,15 +248,27 @@ fn is_regularish_mode(mode: FileMode) -> bool {
     mode == FileMode::REGULAR || mode == FileMode::EXECUTABLE
 }
 
-fn add_has_prefix_under_dir(add: &DiffEntry, dir: &str) -> bool {
-    let Some(path) = add.new_path.as_deref() else {
-        return false;
-    };
-    if path == dir {
-        return true;
+/// Add-side paths and every ancestor directory (stop once a prefix is already present).
+fn add_paths_and_ancestor_dirs(added: &[DiffEntry], used_added: &[bool]) -> HashSet<String> {
+    let mut set = HashSet::new();
+    for (j, add) in added.iter().enumerate() {
+        if used_added[j] {
+            continue;
+        }
+        let Some(path) = add.new_path.as_deref() else {
+            continue;
+        };
+        if set.insert(path.to_string()) {
+            let mut rest = path;
+            while let Some(pos) = rest.rfind('/') {
+                rest = &rest[..pos];
+                if !set.insert(rest.to_string()) {
+                    break;
+                }
+            }
+        }
     }
-    let prefix = format!("{dir}/");
-    path.starts_with(&prefix)
+    set
 }
 
 /// Directories that lost all files on the delete side without replacements under the same prefix.
@@ -190,6 +278,7 @@ fn dirs_removed_from_entries(
     used_deleted: &[bool],
     used_added: &[bool],
 ) -> HashSet<String> {
+    let add_dirs = add_paths_and_ancestor_dirs(added, used_added);
     let mut removed = HashSet::new();
     for (i, del) in deleted.iter().enumerate() {
         if used_deleted[i] {
@@ -202,11 +291,7 @@ fn dirs_removed_from_entries(
         if dir.is_empty() {
             continue;
         }
-        let still_has_add = added
-            .iter()
-            .enumerate()
-            .any(|(j, add)| !used_added[j] && add_has_prefix_under_dir(add, &dir));
-        if !still_has_add {
+        if !add_dirs.contains(&dir) {
             removed.insert(dir);
         }
     }
@@ -236,14 +321,14 @@ impl DirRenameGuess {
                 .or_default()
                 .entry(new_dir.clone())
                 .or_insert(0) += 1;
-        }
-        for (old_d, dest_counts) in &self.counts {
-            if let Some(best_new) = dest_counts
-                .iter()
-                .max_by_key(|(_, c)| *c)
-                .map(|(k, _)| k.clone())
-            {
-                self.guess.insert(old_d.clone(), best_new);
+            if let Some(dest_counts) = self.counts.get(&old_dir) {
+                if let Some(best_new) = dest_counts
+                    .iter()
+                    .max_by_key(|(_, c)| *c)
+                    .map(|(k, _)| k.clone())
+                {
+                    self.guess.insert(old_dir, best_new);
+                }
             }
         }
     }
@@ -313,6 +398,19 @@ pub(crate) fn basename_needs_similarity_scoring(
     used_deleted: &[bool],
     used_added: &[bool],
 ) -> bool {
+    let mut add_basenames = HashSet::new();
+    for (j, add) in added.iter().enumerate() {
+        if used_added[j] {
+            continue;
+        }
+        let Some(new_path) = add.new_path.as_deref() else {
+            continue;
+        };
+        let base = path_basename(new_path);
+        if !base.is_empty() {
+            add_basenames.insert(base);
+        }
+    }
     for (i, del) in deleted.iter().enumerate() {
         if used_deleted[i] {
             continue;
@@ -321,19 +419,8 @@ pub(crate) fn basename_needs_similarity_scoring(
             continue;
         };
         let base = path_basename(old_path);
-        if base.is_empty() {
-            continue;
-        }
-        for (j, add) in added.iter().enumerate() {
-            if used_added[j] {
-                continue;
-            }
-            let Some(new_path) = add.new_path.as_deref() else {
-                continue;
-            };
-            if path_basename(new_path) == base {
-                return true;
-            }
+        if !base.is_empty() && add_basenames.contains(base) {
+            return true;
         }
     }
     false
