@@ -9016,6 +9016,24 @@ impl core::marker::Unpin for grit_lib::notes::NotesRef
 impl core::marker::UnsafeUnpin for grit_lib::notes::NotesRef
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::notes::NotesRef
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::notes::NotesRef
+pub struct grit_lib::notes::NotesRewritePlan
+pub grit_lib::notes::NotesRewritePlan::mode: grit_lib::notes::NotesRewriteMode
+pub grit_lib::notes::NotesRewritePlan::refs: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::notes::NotesRewritePlan
+pub fn grit_lib::notes::NotesRewritePlan::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::notes::NotesRewritePlan
+impl core::cmp::PartialEq for grit_lib::notes::NotesRewritePlan
+pub fn grit_lib::notes::NotesRewritePlan::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::notes::NotesRewritePlan
+pub fn grit_lib::notes::NotesRewritePlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::notes::NotesRewritePlan
+impl core::marker::Freeze for grit_lib::notes::NotesRewritePlan
+impl core::marker::Send for grit_lib::notes::NotesRewritePlan
+impl core::marker::Sync for grit_lib::notes::NotesRewritePlan
+impl core::marker::Unpin for grit_lib::notes::NotesRewritePlan
+impl core::marker::UnsafeUnpin for grit_lib::notes::NotesRewritePlan
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::notes::NotesRewritePlan
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::notes::NotesRewritePlan
 pub struct grit_lib::notes::NotesTreeEntry
 pub grit_lib::notes::NotesTreeEntry::mode: u32
 pub grit_lib::notes::NotesTreeEntry::oid: grit_lib::objects::ObjectId
@@ -9035,9 +9053,11 @@ impl core::marker::Unpin for grit_lib::notes::NotesTreeEntry
 impl core::marker::UnsafeUnpin for grit_lib::notes::NotesTreeEntry
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::notes::NotesTreeEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::notes::NotesTreeEntry
+pub fn grit_lib::notes::apply_prepared_notes_rewrite(&grit_lib::repo::Repository, &grit_lib::notes::NotesRewritePlan, &[(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)]) -> grit_lib::error::Result<()>
 pub fn grit_lib::notes::copy_notes_for_rewrite(&grit_lib::repo::Repository, grit_lib::notes::NotesRewriteCommand, &[(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)]) -> grit_lib::error::Result<()>
 pub fn grit_lib::notes::note_object_name(&[u8]) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::notes::notes_merge_inner(&grit_lib::repo::Repository, &str, &str, grit_lib::notes::NotesMergeStrategy) -> grit_lib::error::Result<core::result::Result<grit_lib::objects::ObjectId, grit_lib::objects::ObjectId>>
+pub fn grit_lib::notes::prepare_notes_for_rewrite(&grit_lib::repo::Repository, grit_lib::notes::NotesRewriteCommand, &[(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)]) -> grit_lib::error::Result<core::option::Option<grit_lib::notes::NotesRewritePlan>>
 pub fn grit_lib::notes::read_notes_tree(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::notes::NotesTreeEntry>>
 pub fn grit_lib::notes::read_notes_tree_limited(&grit_lib::repo::Repository, &str, core::option::Option<usize>) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::notes::NotesTreeEntry>, bool)>
 pub fn grit_lib::notes::remove_note_entry(&mut alloc::vec::Vec<grit_lib::notes::NotesTreeEntry>, &str) -> bool

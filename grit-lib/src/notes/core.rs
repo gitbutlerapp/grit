@@ -1450,7 +1450,80 @@ fn copy_notes_for_rewrite_on_ref(
     if !changed {
         return Ok(());
     }
-    write_notes_commit(repo, notes_ref, &entries, message)
+    let (author, committer) = wall_clock_notes_idents(repo)?;
+    write_notes_commit_idents(
+        repo,
+        notes_ref,
+        snapshot.tip,
+        &entries,
+        message,
+        &author,
+        &committer,
+    )
+}
+
+/// Resolved settings for a notes copy during a rewrite (refs, mode, commit message).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotesRewritePlan {
+    /// Notes refs that will receive copied notes.
+    pub refs: Vec<String>,
+    /// How to combine blobs when several sources map to one target.
+    pub mode: NotesRewriteMode,
+    message: &'static str,
+}
+
+impl NotesRewritePlan {
+    fn message(&self) -> &str {
+        self.message
+    }
+}
+
+/// Validate notes-rewrite configuration for `command` when copies would run for `pairs`.
+///
+/// Returns [`None`] when `pairs` is empty, no refs are selected, or the command is disabled.
+/// Otherwise resolves refs and mode without reading or writing note trees.
+///
+/// # Errors
+///
+/// Returns [`Error::NotesRewriteMode`] when the configured rewrite mode is unknown.
+pub fn prepare_notes_for_rewrite(
+    repo: &Repository,
+    command: NotesRewriteCommand,
+    pairs: &[(ObjectId, ObjectId)],
+) -> Result<Option<NotesRewritePlan>> {
+    if pairs.is_empty() {
+        return Ok(None);
+    }
+    let config = repo.config()?;
+    let notes_refs = resolve_notes_rewrite_refs(repo, config.as_ref(), repo.environment())?;
+    if notes_refs.is_empty() {
+        return Ok(None);
+    }
+    if !notes_rewrite_command_enabled(config.as_ref(), command) {
+        return Ok(None);
+    }
+    let mode = resolve_notes_rewrite_mode(config.as_ref(), repo.environment())?;
+    Ok(Some(NotesRewritePlan {
+        refs: notes_refs,
+        mode,
+        message: notes_rewrite_commit_message(command),
+    }))
+}
+
+/// Apply a prepared plan from [`prepare_notes_for_rewrite`].
+///
+/// # Errors
+///
+/// Propagates notes read/write and ref compare-and-swap failures.
+pub fn apply_prepared_notes_rewrite(
+    repo: &Repository,
+    plan: &NotesRewritePlan,
+    pairs: &[(ObjectId, ObjectId)],
+) -> Result<()> {
+    for notes_ref in &plan.refs {
+        copy_notes_for_rewrite_on_ref(repo, notes_ref, pairs, plan.mode, plan.message())?;
+    }
+    Ok(())
 }
 
 /// Copy notes from rewritten commits to their replacements (Git `git notes copy --for-rewrite`).
@@ -1468,21 +1541,8 @@ pub fn copy_notes_for_rewrite(
     command: NotesRewriteCommand,
     pairs: &[(ObjectId, ObjectId)],
 ) -> Result<()> {
-    if pairs.is_empty() {
-        return Ok(());
-    }
-    let config = repo.config()?;
-    let notes_refs = resolve_notes_rewrite_refs(repo, config.as_ref(), repo.environment())?;
-    if notes_refs.is_empty() {
-        return Ok(());
-    }
-    if !notes_rewrite_command_enabled(config.as_ref(), command) {
-        return Ok(());
-    }
-    let mode = resolve_notes_rewrite_mode(config.as_ref(), repo.environment())?;
-    let message = notes_rewrite_commit_message(command);
-    for notes_ref in notes_refs {
-        copy_notes_for_rewrite_on_ref(repo, &notes_ref, pairs, mode, message)?;
+    if let Some(plan) = prepare_notes_for_rewrite(repo, command, pairs)? {
+        apply_prepared_notes_rewrite(repo, &plan, pairs)?;
     }
     Ok(())
 }
@@ -1921,6 +1981,45 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn notes_rewrite_write_fails_cas_when_ref_moves_after_snapshot() {
+        let tmp = TempDir::new().unwrap();
+        let repo = open_repo(tmp.path());
+        let head = Command::new("git")
+            .current_dir(tmp.path())
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let commit = ObjectId::from_hex(std::str::from_utf8(&head.stdout).unwrap().trim()).unwrap();
+        let blob = repo.odb().write(ObjectKind::Blob, b"note\n").unwrap();
+        upsert_note_entry(&mut vec![], &commit.to_hex(), blob);
+        write_notes_commit(&repo, "refs/notes/commits", &[], "seed").unwrap();
+        let snapshot = read_notes_snapshot(&repo, "refs/notes/commits").unwrap();
+        let other = repo.odb().write(ObjectKind::Blob, b"other\n").unwrap();
+        let mut entries = read_notes_tree(&repo, "refs/notes/commits").unwrap();
+        upsert_note_entry(&mut entries, &"ab".repeat(20), other);
+        write_notes_commit(&repo, "refs/notes/commits", &entries, "concurrent").unwrap();
+        let (author, committer) = wall_clock_notes_idents(&repo).unwrap();
+        let err = write_notes_commit_idents(
+            &repo,
+            "refs/notes/commits",
+            snapshot.tip,
+            &entries,
+            "stale",
+            &author,
+            &committer,
+        )
+        .expect_err("stale parent must not overwrite a newer notes tip");
+        assert!(
+            matches!(err, Error::RefStore(_)),
+            "expected ref compare-and-swap failure, got {err:?}"
+        );
+    }
+
     #[test]
     fn notes_rewrite_mode_parses_git_values() {
         assert_eq!(
@@ -1933,6 +2032,7 @@ mod tests {
         ));
     }
 
+    #[test]
     fn local_change_distinguishes_unchanged_deleted_and_set() {
         let base = ObjectId::from_hex(&"11".repeat(20)).unwrap();
         let other = ObjectId::from_hex(&"22".repeat(20)).unwrap();
