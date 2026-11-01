@@ -4433,7 +4433,9 @@ fn follow_path_into_parent(
         return Ok(Some(follow_path.to_owned()));
     }
     if !in_child {
-        return Ok(None);
+        // Path missing from both trees (e.g. HEAD after rename): keep walking with the same
+        // follow path so we reach the commit that removed/renamed it.
+        return Ok(Some(follow_path.to_owned()));
     }
     if threshold < 100 {
         let odb = repo.odb();

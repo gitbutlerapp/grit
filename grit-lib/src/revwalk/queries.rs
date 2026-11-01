@@ -105,7 +105,8 @@ pub struct RevWalkListOptions {
     pub first_parent: bool,
     /// Limit history to commits that touch these paths (same rules as `rev-list --`).
     pub paths: Vec<String>,
-    /// Follow renames for a single literal file path (Git `log --follow`).
+    /// Follow renames for a single literal file path (Git `log --follow`). History is still
+    /// walked when the path is absent at the start commit (for example after a rename away).
     pub follow: bool,
     /// Include merge commits on the followed path (`log --follow --full-history`).
     pub full_history: bool,

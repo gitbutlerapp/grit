@@ -62,7 +62,7 @@ With `--graph`, human output draws a commit graph in the left margin (Unicode bo
 | `--since`, `--after <date>` | Exclude commits older than this date (committer date). Accepts Git approxidate strings (for example `2024-01-01`, `1 week ago`, `yesterday`) as well as ISO/RFC forms. |
 | `--until`, `--before <date>` | Exclude commits newer than this date. |
 | `--first-parent` | Follow only the first parent at merges (disables cursor paging). |
-| `--follow` | With exactly one literal file path after `--`, include commits before a rename of that file (Git `log --follow`). |
+| `--follow` | With exactly one literal file path after `--`, include commits before a rename of that file (Git `log --follow`). Still walks when the path no longer exists at the start commit. |
 | `--merges` | Only merge commits (conflicts with `--no-merges`; disables cursor paging). |
 | `--no-merges` | Exclude merge commits (conflicts with `--merges`; disables cursor paging). |
 | `--reverse` | Print the selected window oldest-first. `-n`, `--skip`, and date filters choose the window (newest `N` commits after skip); `--reverse` only flips that window (disables cursor paging). |

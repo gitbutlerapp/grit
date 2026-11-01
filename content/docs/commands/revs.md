@@ -62,7 +62,7 @@ Author, committer, message, and pickaxe filters use the same rules as [`grit log
 | `--since`, `--after <date>` | Exclude commits older than this date (committer date). |
 | `--until`, `--before <date>` | Exclude commits newer than this date. |
 | `--first-parent` | Follow first parents only at merges. |
-| `--follow` | With exactly one literal file path after `--`, walk history across renames (Git `log --follow`). |
+| `--follow` | With exactly one literal file path after `--`, walk history across renames (Git `log --follow`). Still walks when the path no longer exists at the start commit. |
 | `--merges` | Only merge commits (conflicts with `--no-merges`). |
 | `--no-merges` | Exclude merge commits (conflicts with `--merges`). |
 | `--reverse` | Print the selected window oldest-first. `-n` and `--skip` choose the window (newest `N` commits after skip); `--reverse` only flips that window. |

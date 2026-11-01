@@ -93,6 +93,74 @@ fn init_rename_repro(wt: &Path) {
 
 use std::io::Write;
 
+/// Issue #2434: `--follow` on a path that no longer exists at HEAD (renamed away).
+#[test]
+fn follow_old_path_after_rename_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q", "-b", "main"]);
+    let initial: String = (1..=40)
+        .map(|n| n.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    commit_file(wt, "a.txt", &(initial + "\n"), "add a");
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(wt.join("a.txt"))
+        .expect("open")
+        .write_all(b"41\n")
+        .expect("append");
+    git(wt, &["add", "a.txt"]);
+    git(wt, &["commit", "-m", "edit a"]);
+    git(wt, &["mv", "a.txt", "b.txt"]);
+    git(wt, &["commit", "-m", "rename a to b"]);
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(wt.join("b.txt"))
+        .expect("open")
+        .write_all(b"42\n")
+        .expect("append");
+    git(wt, &["add", "b.txt"]);
+    git(wt, &["commit", "-m", "edit b"]);
+
+    let grit = grit_follow_commits(wt, "a.txt", None);
+    let git_oids = git_follow_commits(wt, "a.txt", None);
+    assert_eq!(
+        grit, git_oids,
+        "follow old path after rename must match git"
+    );
+    assert_eq!(grit.len(), 3, "rename, edit a, add a");
+}
+
+#[test]
+fn follow_path_after_plain_delete_then_unrelated_commits_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q"]);
+    commit_file(wt, "gone.txt", "v1\n", "add");
+    git(wt, &["rm", "gone.txt"]);
+    git(wt, &["commit", "-m", "del"]);
+    commit_file(wt, "other.txt", "x\n", "unrelated");
+
+    let grit = grit_follow_commits(wt, "gone.txt", None);
+    let git_oids = git_follow_commits(wt, "gone.txt", None);
+    assert_eq!(grit, git_oids, "follow deleted path must match git");
+    assert_eq!(grit.len(), 2, "del and add");
+}
+
+#[test]
+fn follow_never_existed_path_stays_empty() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q"]);
+    commit_file(wt, "real.txt", "v\n", "add");
+
+    let grit = grit_follow_commits(wt, "missing.txt", None);
+    let git_oids = git_follow_commits(wt, "missing.txt", None);
+    assert_eq!(grit, git_oids);
+    assert!(grit.is_empty(), "path that never existed has no history");
+}
+
 #[test]
 fn follow_rename_repro_lists_pre_rename_commits() {
     let hist = HistoryRepo::init();
