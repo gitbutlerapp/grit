@@ -2270,6 +2270,13 @@ pub(crate) fn fetch_local_into(
         prune_tracking_refs(local, &positive, &remote_refs, opts.dry_run, &mut updates)?;
     }
 
+    let tag_targets_ok = tag_refs_with_local_targets(
+        local_odb,
+        &remote_odb,
+        matched.iter().filter(|m| m.dest_is_tag).map(|m| m.oid),
+        &pack_oids,
+    )?;
+
     let mut store_batch: Vec<(String, crate::refs::store::RawRef)> =
         Vec::with_capacity(matched.len());
     for m in &matched {
@@ -2321,7 +2328,7 @@ pub(crate) fn fetch_local_into(
                 });
                 continue;
             }
-            if m.dest_is_tag && !ref_target_exists(local_odb, &remote_odb, m.oid)? {
+            if m.dest_is_tag && !tag_targets_ok.contains(&m.oid) {
                 updates.push(RefUpdate {
                     remote_ref: m.remote_ref.clone(),
                     local_ref: Some(local_ref.clone()),
@@ -3724,6 +3731,61 @@ fn ref_target_exists(local_odb: &Odb, remote_odb: &Odb, tag_oid: ObjectId) -> Re
         Ok((peeled, _)) => local_odb.contains(&peeled),
         Err(_) => Ok(false),
     }
+}
+
+/// Tag refs whose peeled targets (and annotated tag objects) exist locally after
+/// a local fetch.
+///
+/// Objects just copied are checked via `copied` without store probes. Custom
+/// primaries batch any remaining ids in one [`Odb::missing_materialized_many`]
+/// call instead of per-tag [`ref_target_exists`] scalar `contains` probes.
+fn tag_refs_with_local_targets(
+    local_odb: &Odb,
+    remote_odb: &Odb,
+    tag_oids: impl IntoIterator<Item = ObjectId>,
+    copied: &HashSet<ObjectId>,
+) -> Result<HashSet<ObjectId>> {
+    let mut ok = HashSet::new();
+    let mut pending: Vec<(ObjectId, ObjectId)> = Vec::new();
+
+    for tag_oid in tag_oids {
+        let Ok((peeled, _)) = remote_odb.peel_tags(tag_oid) else {
+            continue;
+        };
+        let peeled_copied = copied.contains(&peeled);
+        let tag_copied = tag_oid == peeled || copied.contains(&tag_oid);
+        if peeled_copied && tag_copied {
+            ok.insert(tag_oid);
+            continue;
+        }
+        if local_odb.uses_files_primary() {
+            if ref_target_exists(local_odb, remote_odb, tag_oid)? {
+                ok.insert(tag_oid);
+            }
+            continue;
+        }
+        pending.push((tag_oid, peeled));
+    }
+
+    for (tag_oid, peeled) in pending {
+        let peeled_ok =
+            copied.contains(&peeled) || tag_target_materialized_local(local_odb, peeled)?;
+        let tag_ok = tag_oid == peeled
+            || copied.contains(&tag_oid)
+            || tag_target_materialized_local(local_odb, tag_oid)?;
+        if peeled_ok && tag_ok {
+            ok.insert(tag_oid);
+        }
+    }
+    Ok(ok)
+}
+
+/// Whether `oid` is stored in the local primary without a scalar [`Odb::contains`] probe.
+fn tag_target_materialized_local(local_odb: &Odb, oid: ObjectId) -> Result<bool> {
+    if local_odb.uses_files_primary() {
+        return Ok(local_odb.exists_materialized_local_without_rescan(&oid));
+    }
+    Ok(local_odb.read_info_without_fetch(&oid).is_ok())
 }
 
 /// Message on [`PushRefStatus::RejectAlreadyExists`] when an existing remote tag

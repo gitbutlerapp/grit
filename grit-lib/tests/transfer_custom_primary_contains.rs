@@ -124,9 +124,14 @@ fn git_upstream() -> tempfile::TempDir {
     fs::write(dir.path().join("a.txt"), "one\n").expect("write");
     git(dir.path(), &["add", "a.txt"]);
     git(dir.path(), &["commit", "-q", "-m", "c1"]);
+    git(dir.path(), &["tag", "lightweight"]);
     fs::write(dir.path().join("b.txt"), "two\n").expect("write");
     git(dir.path(), &["add", "b.txt"]);
     git(dir.path(), &["commit", "-q", "-m", "c2"]);
+    git(
+        dir.path(),
+        &["tag", "-a", "annotated", "-m", "annotated tag"],
+    );
     dir
 }
 
@@ -154,7 +159,10 @@ fn memory_repo(store: Arc<CountingStore>) -> (tempfile::TempDir, Repository) {
 
 fn fetch_all() -> FetchOptions {
     let mut opts = FetchOptions::default();
-    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+    opts.refspecs = vec![
+        "+refs/heads/*:refs/remotes/origin/*".into(),
+        "+refs/tags/*:refs/tags/*".into(),
+    ];
     opts
 }
 
@@ -182,9 +190,10 @@ fn local_fetch_into_empty_custom_primary_skips_per_object_contains() {
         objects,
         "one write per stored object"
     );
-    assert!(
-        store.contains_many.load(Ordering::Relaxed) >= 1,
-        "ref-tip missing_oids batch uses contains_many"
+    assert_eq!(
+        store.contains_many.load(Ordering::Relaxed),
+        1,
+        "fresh fetch uses one missing_oids contains_many batch (heads and tags)"
     );
 }
 
@@ -217,9 +226,9 @@ fn incremental_local_fetch_uses_one_contains_many_batch() {
     );
     let contains_many_second_delta =
         store.contains_many.load(Ordering::Relaxed) - contains_many_before_second;
-    assert!(
-        (1..=2).contains(&contains_many_second_delta),
-        "incremental fetch uses batched probes (ref tips and/or send set), got {contains_many_second_delta}"
+    assert_eq!(
+        contains_many_second_delta, 2,
+        "incremental fetch: one missing_oids batch plus one send-set missing_materialized_many"
     );
     let new_writes = store.writes.load(Ordering::Relaxed) - writes_after_first;
     let new_objects = store.count_objects() - objects_after_first;
