@@ -151,7 +151,7 @@ impl<'repo> Diff<'repo> {
         pathspecs: &[String],
         options: &DiffOptions,
     ) -> Result<crate::diff::DiffEntriesResult> {
-        match stored_target_entries(self.repo, target, options)? {
+        match stored_target_entries(self.repo, target, pathspecs, options)? {
             Some(result) => limit_target_entries(self.repo, result, pathspecs, options),
             None => self.uncommitted()?.entries(target, pathspecs, options),
         }

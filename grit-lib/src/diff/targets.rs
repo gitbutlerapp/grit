@@ -471,6 +471,7 @@ pub(crate) fn collect_files_for_target(
             let items = commit_changes(
                 repo,
                 oid,
+                pathspecs,
                 &config,
                 &thread_policy,
                 opts.clone(),
@@ -484,6 +485,7 @@ pub(crate) fn collect_files_for_target(
                     repo,
                     base,
                     new,
+                    pathspecs,
                     &config,
                     &thread_policy,
                     opts.clone(),
@@ -493,6 +495,7 @@ pub(crate) fn collect_files_for_target(
                 empty_tree_to_side_changes(
                     repo,
                     new,
+                    pathspecs,
                     &config,
                     &thread_policy,
                     opts.clone(),
@@ -511,13 +514,21 @@ pub(crate) fn collect_files_for_target(
 pub(crate) fn stored_target_entries(
     repo: &Repository,
     target: &DiffTarget,
+    pathspecs: &[String],
     options: &DiffOptions,
 ) -> Result<Option<super::core::DiffEntriesResult>> {
     let rename_threshold = options.rename_threshold_u32();
     let entries = match target {
         DiffTarget::Commit(oid) => {
             let config = repo.config()?;
-            commit_diff_entries(repo, oid, &config, &repo.thread_policy(), rename_threshold)?
+            commit_diff_entries(
+                repo,
+                oid,
+                pathspecs,
+                &config,
+                &repo.thread_policy(),
+                rename_threshold,
+            )?
         }
         DiffTarget::Trees { old, new } => {
             let config = repo.config()?;
@@ -527,6 +538,7 @@ pub(crate) fn stored_target_entries(
                     repo,
                     base,
                     new,
+                    pathspecs,
                     &config,
                     &thread_policy,
                     rename_threshold,
@@ -534,6 +546,7 @@ pub(crate) fn stored_target_entries(
                 None => empty_tree_to_side_diff_entries(
                     repo,
                     new,
+                    pathspecs,
                     &config,
                     &thread_policy,
                     rename_threshold,
@@ -934,10 +947,22 @@ fn worktree_changes(
     load_changes(repo.odb(), entries, Some(&side))
 }
 
+fn pathspec_matcher_for_stored_diff<'a>(
+    repo: &'a Repository,
+    pathspecs: &'a [String],
+) -> Result<Option<crate::pathspec::PathspecMatcher<'a>>> {
+    if pathspecs.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(repo.pathspec_matcher(pathspecs)?))
+    }
+}
+
 fn tree_commit_diff_entries(
     repo: &Repository,
     base: &ObjectId,
     tip: &ObjectId,
+    pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     rename_threshold: u32,
@@ -945,11 +970,14 @@ fn tree_commit_diff_entries(
     let odb = repo.odb();
     let base_tree = super::core::tree_oid_for_diff_side(odb, base)?;
     let tip_tree = super::core::tree_oid_for_diff_side(odb, tip)?;
-    let mut result = super::core::diff_trees_with_renames_and_policy_result(
+    let pathspec_matcher = pathspec_matcher_for_stored_diff(repo, pathspecs)?;
+    let mut result = super::core::diff_trees_with_renames_for_pathspecs_and_policy_result(
         odb,
         Some(&base_tree),
         Some(&tip_tree),
         "",
+        pathspecs,
+        pathspec_matcher.as_ref(),
         rename_threshold,
         config,
         thread_policy,
@@ -958,17 +986,26 @@ fn tree_commit_diff_entries(
     Ok(result)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn tree_commit_changes(
     repo: &Repository,
     base: &ObjectId,
     tip: &ObjectId,
+    pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     diff_options: DiffOptions,
     rename_threshold: u32,
 ) -> Result<Vec<TreeDiffStructured>> {
-    let result =
-        tree_commit_diff_entries(repo, base, tip, config, thread_policy, rename_threshold)?;
+    let result = tree_commit_diff_entries(
+        repo,
+        base,
+        tip,
+        pathspecs,
+        config,
+        thread_policy,
+        rename_threshold,
+    )?;
     tree_diff_structured_parallel(
         repo.odb(),
         result.entries,
@@ -981,6 +1018,7 @@ fn tree_commit_changes(
 fn commit_diff_entries(
     repo: &Repository,
     oid: &ObjectId,
+    pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     rename_threshold: u32,
@@ -992,11 +1030,14 @@ fn commit_diff_entries(
         None => None,
     };
 
-    let mut result = super::core::diff_trees_with_renames_and_policy_result(
+    let pathspec_matcher = pathspec_matcher_for_stored_diff(repo, pathspecs)?;
+    let mut result = super::core::diff_trees_with_renames_for_pathspecs_and_policy_result(
         repo.odb(),
         old_tree.as_ref(),
         Some(&new_tree),
         "",
+        pathspecs,
+        pathspec_matcher.as_ref(),
         rename_threshold,
         config,
         thread_policy,
@@ -1005,15 +1046,24 @@ fn commit_diff_entries(
     Ok(result)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn commit_changes(
     repo: &Repository,
     oid: &ObjectId,
+    pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     diff_options: DiffOptions,
     rename_threshold: u32,
 ) -> Result<Vec<TreeDiffStructured>> {
-    let result = commit_diff_entries(repo, oid, config, thread_policy, rename_threshold)?;
+    let result = commit_diff_entries(
+        repo,
+        oid,
+        pathspecs,
+        config,
+        thread_policy,
+        rename_threshold,
+    )?;
     tree_diff_structured_parallel(
         repo.odb(),
         result.entries,
@@ -1026,16 +1076,20 @@ fn commit_changes(
 fn empty_tree_to_side_diff_entries(
     repo: &Repository,
     side: &ObjectId,
+    pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     rename_threshold: u32,
 ) -> Result<super::core::DiffEntriesResult> {
     let tip_tree = super::core::tree_oid_for_diff_side(repo.odb(), side)?;
-    let mut result = super::core::diff_trees_with_renames_and_policy_result(
+    let pathspec_matcher = pathspec_matcher_for_stored_diff(repo, pathspecs)?;
+    let mut result = super::core::diff_trees_with_renames_for_pathspecs_and_policy_result(
         repo.odb(),
         None,
         Some(&tip_tree),
         "",
+        pathspecs,
+        pathspec_matcher.as_ref(),
         rename_threshold,
         config,
         thread_policy,
@@ -1044,16 +1098,24 @@ fn empty_tree_to_side_diff_entries(
     Ok(result)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn empty_tree_to_side_changes(
     repo: &Repository,
     side: &ObjectId,
+    pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     diff_options: DiffOptions,
     rename_threshold: u32,
 ) -> Result<Vec<TreeDiffStructured>> {
-    let result =
-        empty_tree_to_side_diff_entries(repo, side, config, thread_policy, rename_threshold)?;
+    let result = empty_tree_to_side_diff_entries(
+        repo,
+        side,
+        pathspecs,
+        config,
+        thread_policy,
+        rename_threshold,
+    )?;
     tree_diff_structured_parallel(
         repo.odb(),
         result.entries,
@@ -1418,7 +1480,7 @@ mod tests {
             DiffTarget::IndexVsHead,
             DiffTarget::WorktreeVsIndex,
         ] {
-            let entries = stored_target_entries(&repo, &target, &DiffOptions::default())
+            let entries = stored_target_entries(&repo, &target, &[], &DiffOptions::default())
                 .expect("no object reads");
             assert_eq!(entries, None, "{target:?}");
         }

@@ -8,7 +8,7 @@ use crate::objects::{parse_commit, ObjectId};
 use crate::odb::Odb;
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp, ParallelOptions, ThreadPolicy};
 
-use super::core::diff_trees_with_renames_and_policy;
+use super::core::diff_trees_with_renames_for_pathspecs_and_policy;
 use super::detail::{DiffDetail, DiffTotals};
 use super::files::{build_file_diffs, DiffFilesOutput};
 use super::options::DiffOptions;
@@ -137,12 +137,20 @@ fn diff_one_commit(
         });
     }
 
-    let odb = diff.repository().odb();
-    let mut entries = diff_trees_with_renames_and_policy(
+    let repo = diff.repository();
+    let odb = repo.odb();
+    let pathspec_matcher = if pathspecs.is_empty() {
+        None
+    } else {
+        Some(repo.pathspec_matcher(pathspecs)?)
+    };
+    let mut entries = diff_trees_with_renames_for_pathspecs_and_policy(
         odb,
         work.parent_tree.as_ref(),
         Some(&work.tree),
         "",
+        pathspecs,
+        pathspec_matcher.as_ref(),
         rename_threshold(&opts.diff_options),
         config,
         thread_policy,
@@ -341,11 +349,13 @@ mod tests {
             .commit_files_many(&[child], &[], opts.clone(), &config, &policy)?;
         assert_eq!(many.len(), 1);
 
-        let entries = diff_trees_with_renames_and_policy(
+        let entries = diff_trees_with_renames_for_pathspecs_and_policy(
             repo.odb(),
             Some(&tree1),
             Some(&tree2),
             "",
+            &[],
+            None,
             101,
             &config,
             &policy,

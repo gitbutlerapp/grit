@@ -2609,8 +2609,13 @@ impl Index {
             self.entries = kept;
         }
 
-        for path in invalidated_paths {
-            self.invalidate_after_path_removal(&path);
+        const BULK_INDEX_EXTENSION_INVALIDATE_MIN: usize = 64;
+        if invalidated_paths.len() >= BULK_INDEX_EXTENSION_INVALIDATE_MIN {
+            self.drop_derived_index_extensions();
+        } else {
+            for path in invalidated_paths {
+                self.invalidate_after_path_removal(&path);
+            }
         }
         self.touch_fsmonitor_after_entry_change();
     }

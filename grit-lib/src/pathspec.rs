@@ -1469,7 +1469,7 @@ fn sorted_literal_lookup<S: AsRef<str>>(spec: &str, sorted_paths: &[S]) -> bool 
 
 /// The spelling of a plain literal `spec` that [`matches_pathspec_with_context`] compares paths
 /// against: NFC when the context precomposes paths, else `spec` itself.
-fn literal_spec_for_lookup(spec: &str, ctx: PathspecMatchContext) -> Cow<'_, str> {
+pub(crate) fn literal_spec_for_lookup(spec: &str, ctx: PathspecMatchContext) -> Cow<'_, str> {
     if ctx.precompose_paths {
         precompose_utf8_path(spec)
     } else {
@@ -1503,7 +1503,7 @@ pub(crate) fn exact_literal_pathspec_set(
 ///
 /// With [`PathspecMatchContext::precompose_paths`], "the path `spec`" means equality after NFC
 /// normalization of both sides; see [`literal_spec_for_lookup`].
-fn is_plain_literal_pathspec(spec: &str, ctx: PathspecMatchContext) -> bool {
+pub(crate) fn is_plain_literal_pathspec(spec: &str, ctx: PathspecMatchContext) -> bool {
     !ctx.is_directory
         && !ctx.is_git_submodule
         && !spec.is_empty()
