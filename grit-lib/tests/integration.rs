@@ -576,6 +576,8 @@ mod diff_rename_parallel;
 #[cfg(feature = "full-tests")]
 #[path = "diff_request.rs"]
 mod diff_request;
+#[path = "diff_skip_restrict_index_paths.rs"]
+mod diff_skip_restrict_index_paths;
 #[cfg(feature = "full-tests")]
 #[path = "diff_staged_renames.rs"]
 mod diff_staged_renames;

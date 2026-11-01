@@ -6488,7 +6488,31 @@ fn diff_index_to_worktree_inner(
         ..WorktreeBlobScanOptions::default()
     };
     let blob_dirs = if let Some(limit) = options.restrict_to_paths.as_ref() {
-        crate::worktree_scan::group_blob_entries_by_dir_for_paths(index, limit)
+        if let Some(skip) = options.skip_index_path.as_ref() {
+            let mut positions = Vec::new();
+            let mut cursor = 0;
+            for path in limit.iter() {
+                let Some(pos) = index.find_stage0_pos_from(path.as_bytes(), &mut cursor) else {
+                    continue;
+                };
+                let ie = &index.entries[pos];
+                if skip(&ie.path) {
+                    continue;
+                }
+                if !crate::worktree_scan::index_blob_scan_eligible(ie, index, honor_fsmonitor_valid)
+                {
+                    continue;
+                }
+                positions.push(pos);
+            }
+            crate::worktree_scan::plan_blob_entries_by_dir_for_positions(
+                index,
+                &positions,
+                honor_fsmonitor_valid,
+            )
+        } else {
+            crate::worktree_scan::group_blob_entries_by_dir_for_paths(index, limit)
+        }
     } else if let Some(skip) = options.skip_index_path.as_ref() {
         let positions: Vec<usize> = index
             .entries
