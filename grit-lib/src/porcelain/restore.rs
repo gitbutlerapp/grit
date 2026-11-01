@@ -23,7 +23,8 @@ use crate::porcelain::checkout::{
 };
 use crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths;
 use crate::porcelain::pathspec_match::{
-    positive_pathspec_matches_any_path, RepositoryPathspecFilter,
+    index_path_mode_for_pathspec, positive_pathspec_matches_any_path,
+    positive_spec_matches_any_entries, PathspecMatchEntry, RepositoryPathspecFilter,
 };
 use crate::porcelain::stash::{flat_tree_lookup, flatten_tree_full, FlatTreeEntry};
 use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressSink};
@@ -285,7 +286,7 @@ fn restore_conflict_paths(
     let pathspec_filter = RepositoryPathspecFilter::try_new(repo, &opts.pathspecs)?;
     let include_resolved_undo = opts.remerge.is_some();
     let matched = collect_conflict_matched_paths(&index, &pathspec_filter, include_resolved_undo);
-    validate_unmerged_pathspecs(repo, opts, &matched, pathspec_ctx)?;
+    validate_unmerged_pathspecs(repo, opts, &matched, &index, pathspec_ctx)?;
 
     let mut outcome = RestoreOutcome::default();
     let rules = WorktreeRules::from_repository(repo, &index)?;
@@ -347,7 +348,7 @@ fn collect_conflict_matched_paths(
             continue;
         }
         let path = String::from_utf8_lossy(&entry.path);
-        if matcher.matches(&path) {
+        if matcher.matches_entry(&path, entry.mode) {
             paths.insert(path.into_owned());
         }
     }
@@ -355,7 +356,10 @@ fn collect_conflict_matched_paths(
         if let Some(undo) = &index.resolve_undo {
             for path_bytes in undo.keys() {
                 let path = String::from_utf8_lossy(path_bytes);
-                if matcher.matches(&path) {
+                let mode = index.get(path_bytes, 0).map(|e| e.mode).unwrap_or(
+                    crate::porcelain::pathspec_match::index_stage0_mode_or_regular(index, &path),
+                );
+                if matcher.matches_entry(&path, mode) {
                     paths.insert(path.into_owned());
                 }
             }
@@ -368,6 +372,7 @@ fn validate_unmerged_pathspecs(
     repo: &Repository,
     opts: &RestoreOptions,
     matched: &BTreeSet<String>,
+    index: &Index,
     pathspec_ctx: PathspecMatchContext,
 ) -> Result<()> {
     let sources = if opts.pathspec_sources.is_empty() {
@@ -375,12 +380,19 @@ fn validate_unmerged_pathspecs(
     } else {
         &opts.pathspec_sources
     };
-    let matched_sorted: Vec<&str> = matched.iter().map(String::as_str).collect();
+    let matched_entries: Vec<PathspecMatchEntry<'_>> = matched
+        .iter()
+        .map(|path| PathspecMatchEntry {
+            path: path.as_str(),
+            mode: index_path_mode_for_pathspec(index, path),
+        })
+        .collect();
     for (label, resolved) in sources.iter().zip(opts.pathspecs.iter()) {
         if pathspec_is_exclude(label) {
             continue;
         }
-        if !positive_pathspec_matches_any_path(repo, resolved, &matched_sorted, pathspec_ctx)? {
+        if !positive_spec_matches_any_entries(repo, resolved, &matched_entries, pathspec_ctx, None)?
+        {
             return Err(Error::PathspecNoMatch {
                 spec: label.clone(),
             });
@@ -616,7 +628,14 @@ fn validate_pathspecs(
         let hits = if select_all_tracked && matches!(resolved.as_str(), "." | ":/.") {
             index.entries.iter().any(|e| e.stage() == 0)
         } else {
-            positive_pathspec_matches_any_path(repo, resolved, &matched_sorted, pathspec_ctx)?
+            positive_pathspec_matches_any_path(
+                repo,
+                resolved,
+                &matched_sorted,
+                Some(index),
+                pathspec_ctx,
+                None,
+            )?
         };
         if !hits {
             return Err(Error::PathspecNoMatch {

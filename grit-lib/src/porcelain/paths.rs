@@ -16,7 +16,9 @@ use crate::path_icase::{paths_equal, worktree_filesystem_case_insensitive};
 use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
 use crate::pathspec::pathspec_is_exclude;
 use crate::porcelain::checkout::remove_empty_parent_dirs;
-use crate::porcelain::pathspec_match::RepositoryPathspecFilter;
+use crate::porcelain::pathspec_match::{
+    index_stage0_path_modes, RepositoryPathspecFilter, REGULAR_FILE_MODE,
+};
 use crate::repo::Repository;
 
 /// Options for [`remove_paths`].
@@ -661,6 +663,9 @@ fn collect_removal_paths(
         &opts.pathspec_sources
     };
 
+    let index = repo.load_index()?;
+    let path_modes = index_stage0_path_modes(&index);
+
     let mut selected: BTreeSet<String> = BTreeSet::new();
     for (label, resolved) in sources.iter().zip(opts.pathspecs.iter()) {
         if pathspec_is_exclude(label) {
@@ -670,7 +675,13 @@ fn collect_removal_paths(
         let filter = RepositoryPathspecFilter::try_new(repo, std::slice::from_ref(resolved))?;
         let matches: Vec<String> = tracked
             .iter()
-            .filter(|path| filter.matches(path))
+            .filter(|path| {
+                let mode = path_modes
+                    .get(path.as_str())
+                    .copied()
+                    .unwrap_or(REGULAR_FILE_MODE);
+                filter.matches_entry(path, mode)
+            })
             .cloned()
             .collect();
 

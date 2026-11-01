@@ -134,6 +134,79 @@ fn stash_push_attr_pathspec() {
 }
 
 #[test]
+fn objectmode_attr_pathspec_restore_stash_rm() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "Test"]);
+    fs::write(root.join("run.sh"), "#!/bin/sh\n").unwrap();
+    fs::write(root.join("plain.txt"), "x\n").unwrap();
+    git(root, &["add", "--chmod=+x", "run.sh"]);
+    git(root, &["add", "plain.txt"]);
+    git(root, &["commit", "-qm", "init"]);
+    fs::write(root.join("run.sh"), "#!/bin/sh\necho\n").unwrap();
+    fs::write(root.join("plain.txt"), "x\ny\n").unwrap();
+
+    let repo = open_repo(root);
+    let spec = ":(attr:builtin_objectmode=100755)";
+
+    restore_paths(
+        &repo,
+        &restore_opts(spec, false, true),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("restore executable only");
+    assert_eq!(
+        fs::read_to_string(root.join("run.sh")).unwrap(),
+        "#!/bin/sh\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("plain.txt")).unwrap(),
+        "x\ny\n"
+    );
+
+    fs::write(root.join("run.sh"), "#!/bin/sh\necho\n").unwrap();
+    repo.stash()
+        .push(
+            &StashPushOptions {
+                message: Some("mode".into()),
+                include_untracked: false,
+                identity: "Test <t@example.com> 1000000000 +0000".parse().unwrap(),
+                selection: None,
+                pathspecs: vec![spec.into()],
+                dry_run: false,
+                mode: StashMode::All,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
+        )
+        .expect("stash executable");
+    assert_eq!(
+        git(root, &["stash", "show", "--name-only"]).trim(),
+        "run.sh"
+    );
+
+    git(root, &["stash", "drop"]);
+    fs::write(root.join("run.sh"), "#!/bin/sh\necho\n").unwrap();
+    git(root, &["add", "run.sh"]);
+    remove_paths(
+        &repo,
+        &RemoveOptions {
+            pathspecs: vec![spec.into()],
+            pathspec_sources: vec![spec.into()],
+            cached: true,
+            ..Default::default()
+        },
+    )
+    .expect("rm --cached executable");
+    let ls = git(root, &["ls-files"]);
+    assert!(ls.contains("plain.txt"));
+    assert!(!ls.contains("run.sh"));
+}
+
+#[test]
 fn rm_cached_attr_pathspec() {
     let dir = vendored_fixture();
     let root = dir.path();

@@ -60,7 +60,9 @@ use crate::porcelain::index_from_tree::{
     index_from_tree_with_worktree_stats,
 };
 use crate::porcelain::pathspec_match::{
-    positive_pathspec_matches_any_path, RepositoryPathspecFilter,
+    diff_entry_path_mode, index_stage0_mode_or_regular, pathspec_entries_from_paths,
+    positive_pathspec_matches_any_path, positive_spec_matches_any_entries, PathspecMatchEntry,
+    RepositoryPathspecFilter, REGULAR_FILE_MODE,
 };
 use crate::porcelain::restore::{restore_paths_with_lock, RestoreOptions, RestoreSource};
 use crate::porcelain::status::{
@@ -559,10 +561,17 @@ fn filter_paths_by_pathspecs(
     if pathspecs.is_empty() {
         return Ok(paths);
     }
+    let index = repo.load_index().ok();
     let filter = RepositoryPathspecFilter::try_new(repo, pathspecs)?;
     Ok(paths
         .into_iter()
-        .filter(|path| filter.matches(path))
+        .filter(|path| {
+            let mode = index
+                .as_ref()
+                .map(|idx| index_stage0_mode_or_regular(idx, path))
+                .unwrap_or(REGULAR_FILE_MODE);
+            filter.matches_entry(path, mode)
+        })
         .collect())
 }
 
@@ -1177,13 +1186,13 @@ fn validate_stash_push_pathspecs(
         if pathspec_is_exclude(spec) {
             continue;
         }
-        if positive_pathspec_matches_any_path(repo, spec, &index_paths, ctx)? {
+        if positive_pathspec_matches_any_path(repo, spec, &index_paths, Some(&index), ctx, None)? {
             continue;
         }
         if options.include_untracked {
             let untracked = collect_untracked_paths(repo, work_tree)?;
             let untracked_refs: Vec<&str> = untracked.iter().map(String::as_str).collect();
-            if positive_pathspec_matches_any_path(repo, spec, &untracked_refs, ctx)? {
+            if positive_pathspec_matches_any_path(repo, spec, &untracked_refs, None, ctx, None)? {
                 continue;
             }
             if !has_glob_chars(spec) && !spec.starts_with(':') && work_tree.join(spec).exists() {
@@ -1200,10 +1209,14 @@ fn filter_paths_by_pathspec(
     pathspecs: &[String],
     paths: Vec<String>,
 ) -> Result<Vec<String>> {
+    let index = repo.load_index()?;
     let matcher = pathspec_matcher(repo, pathspecs)?;
     Ok(paths
         .into_iter()
-        .filter(|path| matcher.matches(path))
+        .filter(|path| {
+            let mode = index_stage0_mode_or_regular(&index, path);
+            matcher.matches_entry(path, mode)
+        })
         .collect())
 }
 
@@ -1216,13 +1229,19 @@ fn has_stashable_changes_for_pathspecs(
     let matcher = pathspec_matcher(repo, &options.pathspecs)?;
     let mut index = repo.load_index()?;
     let staged = diff_index_to_tree(repo.odb(), &index, Some(head_tree), true)?;
-    if staged.iter().any(|e| matcher.matches(e.path())) {
+    if staged
+        .iter()
+        .any(|e| matcher.matches_entry(e.path(), diff_entry_path_mode(e)))
+    {
         return Ok(true);
     }
     let diff_opts = stash_worktree_diff_opts(repo, &index, Some(&options.pathspecs))?;
     let (unstaged, _) =
         diff_index_to_worktree_with_options(repo.odb(), &mut index, work_tree, diff_opts)?;
-    if unstaged.iter().any(|e| matcher.matches(e.path())) {
+    if unstaged
+        .iter()
+        .any(|e| matcher.matches_entry(e.path(), diff_entry_path_mode(e)))
+    {
         return Ok(true);
     }
     if options.include_untracked {
@@ -1262,7 +1281,8 @@ fn apply_worktree_diff_to_index_for_pathspecs(
         scope.poll()?;
         scope.sink().inc(1);
         let path = entry.path();
-        if !matcher.matches(path) {
+        let mode = index_stage0_mode_or_regular(index, path);
+        if !matcher.matches_entry(path, mode) {
             continue;
         }
         if entry.status == DiffStatus::Deleted {
@@ -1290,18 +1310,25 @@ fn pathspecs_for_push_reset(
 ) -> Result<Vec<String>> {
     let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
     let head_entries = flatten_tree_full(repo.odb(), head_tree, "", protect)?;
-    let head_paths: Vec<&str> = head_entries.iter().map(|e| e.path.as_str()).collect();
+    let head_match_entries: Vec<PathspecMatchEntry<'_>> = head_entries
+        .iter()
+        .map(|e| PathspecMatchEntry {
+            path: e.path.as_str(),
+            mode: e.mode,
+        })
+        .collect();
     let index = repo.load_index()?;
     let index_owned = index_stage0_paths(&index);
     let index_paths: Vec<&str> = index_owned.iter().map(String::as_str).collect();
+    let index_match_entries = pathspec_entries_from_paths(&index_paths, Some(&index));
     let ctx = repo.pathspec_match_context();
     let mut kept = Vec::new();
     for spec in pathspecs {
         if pathspec_is_exclude(spec) {
             continue;
         }
-        if positive_pathspec_matches_any_path(repo, spec, &head_paths, ctx)?
-            || positive_pathspec_matches_any_path(repo, spec, &index_paths, ctx)?
+        if positive_spec_matches_any_entries(repo, spec, &head_match_entries, ctx, None)?
+            || positive_spec_matches_any_entries(repo, spec, &index_match_entries, ctx, None)?
         {
             kept.push(spec.clone());
         }

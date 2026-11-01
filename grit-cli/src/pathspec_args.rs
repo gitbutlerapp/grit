@@ -4,8 +4,8 @@ use crate::rev_select::RevSelectArgs;
 use anyhow::{bail, Context, Result};
 use clap::Args;
 use grit_lib::error::PathspecFromFileParseError;
-use grit_lib::worktree::pathspec::is_long_magic_pathspec_token;
 use grit_lib::repo::Repository;
+use grit_lib::worktree::pathspec::is_long_magic_pathspec_token;
 use grit_lib::worktree::pathspec::{
     parse_pathspecs_from_source, PathspecInput, PathspecResolveError, ResolvedPathspecs,
 };
