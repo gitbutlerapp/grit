@@ -404,7 +404,6 @@ mod tests {
     #[test]
     fn describe_stable_after_commit_graph_write() -> Result<()> {
         use crate::maintenance::CommitGraphOptions;
-        use crate::objects::ObjectKind;
         use crate::refs;
 
         let (_dir, repo) = init_repo();
@@ -449,10 +448,7 @@ mod tests {
                 ..Default::default()
             },
         )?;
-        assert_eq!(
-            all.as_ref().map(tag_short_name),
-            Some("side-tag")
-        );
+        assert_eq!(all.as_ref().map(tag_short_name), Some("side-tag"));
         let fp = repo
             .rev_walk()
             .describe(
