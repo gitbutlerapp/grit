@@ -3673,14 +3673,45 @@ thread_local! {
 fn prefetch_promisor_blobs_for_checkout(repo: &Repository, changes: &[DiffEntry]) -> Result<()> {
     #[cfg(test)]
     PREFETCH_PROMISOR_FOR_CHECKOUT_CALLS.with(|c| *c.borrow_mut() += 1);
-    let oids = changes.iter().filter_map(|change| {
+    prefetch_promisor_blobs(repo, checkout_written_blobs(changes))
+}
+
+/// Blob ids a checkout of `changes` writes to the work tree.
+fn checkout_written_blobs(changes: &[DiffEntry]) -> impl Iterator<Item = ObjectId> + '_ {
+    changes.iter().filter_map(|change| {
         if change.status == DiffStatus::Deleted {
             return None;
         }
         let mode = change.new_mode.bits();
         matches!(mode, MODE_REGULAR | MODE_EXECUTABLE | MODE_SYMLINK).then_some(change.new_oid)
-    });
-    prefetch_promisor_blobs(repo, oids)
+    })
+}
+
+/// Before checkout rules are built from the `.gitattributes` blobs in `index`, fetch the missing
+/// ones in one batch with every blob `changes` writes, instead of one lazy fetch per attributes
+/// file ahead of the checkout's own batch; later passes then skip their prefetch.
+///
+/// A sparse checkout keeps the per-pass prefetch, which only fetches the paths it writes.
+fn prefetch_promisor_blobs_before_checkout_rules(
+    repo: &Repository,
+    index: &Index,
+    changes: &[DiffEntry],
+    apply: &mut CheckoutApplyOptions,
+) -> Result<()> {
+    if apply.skip_promisor_prefetch || SparseCheckout::load(repo)?.is_some() {
+        return Ok(());
+    }
+    #[cfg(test)]
+    PREFETCH_PROMISOR_FOR_CHECKOUT_CALLS.with(|c| *c.borrow_mut() += 1);
+    let attribute_blobs = index
+        .entries
+        .iter()
+        .filter(|entry| entry.stage() == 0 && entry.mode == MODE_REGULAR)
+        .filter(|entry| entry.path.rsplit(|&b| b == b'/').next() == Some(b".gitattributes"))
+        .map(|entry| entry.oid);
+    prefetch_promisor_blobs(repo, attribute_blobs.chain(checkout_written_blobs(changes)))?;
+    apply.skip_promisor_prefetch = true;
+    Ok(())
 }
 
 /// Prefetch only missing, distinct blobs, retaining lazy-read behavior when disabled.
@@ -3766,6 +3797,7 @@ fn apply_tree_changes_in_chunks(
     let config = repo.config()?;
     let attr_source = attribute_changes.unwrap_or(changes);
     if apply.precomputed_worktree_rules.is_none() {
+        prefetch_promisor_blobs_before_checkout_rules(repo, index_mut, changes, &mut apply)?;
         let rules = checkout_worktree_rules(repo, index_mut, attr_source, config.clone())?;
         apply.precomputed_worktree_rules = Some(Rc::new(rules));
     }
@@ -3820,8 +3852,10 @@ fn apply_tree_changes_in_chunks(
 
     let saved_result_tree = apply.checkout_result_tree.take();
     apply.defer_chunk_index_finalize = true;
+    if !apply.skip_promisor_prefetch {
+        prefetch_promisor_blobs_for_checkout(repo, changes)?;
+    }
     apply.skip_promisor_prefetch = true;
-    prefetch_promisor_blobs_for_checkout(repo, changes)?;
     if let Some(extra) = attribute_changes {
         let protect = ProtectOptions::from_config(config.as_ref());
         validate_diff_changes_for_worktree(extra, protect)?;
