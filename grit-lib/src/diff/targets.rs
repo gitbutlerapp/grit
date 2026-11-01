@@ -8,8 +8,8 @@ use thiserror::Error;
 
 use crate::config::ConfigSet;
 use crate::diff::changes::{
-    load_changes, load_object_changes, staged_entries_in, unstaged_entries_in, worktree_entries_in,
-    FileChange, WorktreeSide,
+    load_changes, load_object_changes, pathspec_restrict_paths_for_scan, staged_entries_in,
+    unstaged_entries_in, worktree_entries_in, FileChange, WorktreeSide,
 };
 use crate::diff::detail::LineStat;
 use crate::diff::structured::StructuredHunk;
@@ -433,7 +433,7 @@ pub(crate) fn collect_files_for_target(
         DiffTarget::WorktreeVsHead => {
             let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
             let changes = filter_file_changes(
-                worktree_changes(repo, head_tree.as_ref(), rename_threshold)?,
+                worktree_changes(repo, head_tree.as_ref(), rename_threshold, pathspecs)?,
                 repo,
                 pathspecs,
             )?;
@@ -441,14 +441,17 @@ pub(crate) fn collect_files_for_target(
         }
         DiffTarget::WorktreeVsTree(tree) => {
             let changes = filter_file_changes(
-                worktree_changes(repo, Some(tree), rename_threshold)?,
+                worktree_changes(repo, Some(tree), rename_threshold, pathspecs)?,
                 repo,
                 pathspecs,
             )?;
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::IndexVsHead => {
-            let restrict = pathspec_restrict_set(pathspecs);
+            let index = repo.index_handle().load()?;
+            let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
+            let restrict =
+                pathspec_restrict_paths_for_scan(repo, &index, pathspecs, head_tree.as_ref())?;
             let changes = filter_file_changes(
                 staged_changes(repo, rename_threshold, restrict)?,
                 repo,
@@ -457,8 +460,11 @@ pub(crate) fn collect_files_for_target(
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::WorktreeVsIndex => {
-            let changes =
-                filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs)?;
+            let changes = filter_file_changes(
+                unstaged_changes(repo, rename_threshold, pathspecs)?,
+                repo,
+                pathspecs,
+            )?;
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::Commit(oid) => {
@@ -789,17 +795,14 @@ fn filter_tree_diff(
         .collect())
 }
 
-fn pathspec_restrict_set(pathspecs: &[String]) -> Option<Arc<BTreeSet<String>>> {
-    if pathspecs.is_empty() {
-        None
-    } else {
-        Some(Arc::new(pathspecs.iter().cloned().collect()))
-    }
-}
-
-fn unstaged_changes(repo: &Repository, rename_threshold: u32) -> Result<Vec<FileChange>> {
+fn unstaged_changes(
+    repo: &Repository,
+    rename_threshold: u32,
+    pathspecs: &[String],
+) -> Result<Vec<FileChange>> {
     let mut index = repo.index_handle().load()?;
-    unstaged_changes_inner(repo, &mut index, rename_threshold, None)
+    let restrict = pathspec_restrict_paths_for_scan(repo, &index, pathspecs, None)?;
+    unstaged_changes_inner(repo, &mut index, rename_threshold, restrict)
 }
 
 fn unstaged_changes_inner(
@@ -908,9 +911,11 @@ fn worktree_changes(
     repo: &Repository,
     base_tree: Option<&ObjectId>,
     rename_threshold: u32,
+    pathspecs: &[String],
 ) -> Result<Vec<FileChange>> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let mut index = repo.index_handle().load()?;
+    let restrict = pathspec_restrict_paths_for_scan(repo, &index, pathspecs, base_tree)?;
     let rules = Arc::new(Mutex::new(WorktreeRules::from_repository(repo, &index)?));
     let entries = worktree_entries_in(
         repo,
@@ -919,7 +924,7 @@ fn worktree_changes(
         &rules,
         base_tree,
         rename_threshold,
-        None,
+        restrict,
     )?;
     let side = WorktreeSide {
         work_tree,
@@ -1267,7 +1272,11 @@ pub(crate) fn unstaged_file_diffs_with_peer_hunks(
             (fc.path.clone(), structured.hunks)
         })
         .collect();
-    let unstaged = filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs)?;
+    let unstaged = filter_file_changes(
+        unstaged_changes(repo, rename_threshold, pathspecs)?,
+        repo,
+        pathspecs,
+    )?;
     let files = file_diffs_from_worktree_changes(unstaged, &config, &thread_policy, opts)?;
     Ok((files, peer_hunks))
 }
