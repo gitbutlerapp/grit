@@ -108,6 +108,17 @@ impl ExecDetachedSession<'_> {
         self.active = false;
         restore_exec_prestate(self.repo, self.prestate, self.current_tree)
     }
+
+    /// Restore the saved `HEAD`, index, and tracked files, then drop only untracked
+    /// paths that appeared after the exec session snapshot (failed commands).
+    fn restore_after_failed_command(&mut self) -> Result<(), HistoryError> {
+        if !self.active {
+            return Ok(());
+        }
+        self.active = false;
+        restore_exec_prestate(self.repo, self.prestate, self.current_tree)?;
+        remove_untracked_created_during_exec(self.repo, self.prestate)
+    }
 }
 
 fn fail_exec_session(
@@ -115,7 +126,7 @@ fn fail_exec_session(
     err: HistoryError,
     preserve_grit_rebase: bool,
 ) -> HistoryError {
-    match session.restore() {
+    match session.restore_after_failed_command() {
         Ok(()) => {
             if !preserve_grit_rebase {
                 let _ = super::rebase_session::clear_rebase_state(session.repo.git_dir());
@@ -497,7 +508,6 @@ pub(super) fn run_exec_at_tip(
         if exit_code != 0 {
             let stdout = output.stdout.clone();
             let stderr = output.stderr.clone();
-            let signaled = exec_command_signaled(&output);
             let (completed_runs, stdout, stderr) = match runs.split_last() {
                 Some((failed, prior)) => {
                     (prior.to_vec(), failed.stdout.clone(), failed.stderr.clone())
@@ -511,9 +521,6 @@ pub(super) fn run_exec_at_tip(
                 stderr,
                 completed_runs,
             };
-            if signaled {
-                return Err(fail_exec_session(&mut session, exec_err, true));
-            }
             return Err(fail_exec_session(&mut session, exec_err, true));
         }
         let head = exec_head(repo, tip)?;
@@ -976,15 +983,9 @@ fn snapshot_untracked_paths(repo: &Repository) -> Result<HashSet<String>, Histor
     use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
     let worktree = repo.work_tree().ok_or(HistoryError::BareRepository)?;
     let mut index = repo.load_index().map_err(exec_io)?;
-    let (untracked, _) = collect_untracked_and_ignored(
-        repo,
-        &mut index,
-        worktree,
-        IgnoredMode::No,
-        false,
-        &[],
-    )
-    .map_err(exec_io)?;
+    let (untracked, _) =
+        collect_untracked_and_ignored(repo, &mut index, worktree, IgnoredMode::No, false, &[])
+            .map_err(exec_io)?;
     Ok(untracked.into_iter().collect())
 }
 
@@ -1047,7 +1048,6 @@ fn restore_exec_prestate(
     fs::write(repo.index_path(), &pre.index_bytes).map_err(|e| HistoryError::WorktreeApply {
         message: e.to_string(),
     })?;
-    remove_untracked_created_during_exec(repo, pre)?;
     Ok(())
 }
 
@@ -1082,6 +1082,9 @@ struct StoredExec {
     next_command: usize,
     head: String,
     pending_pick: bool,
+    /// Untracked paths present when the exec session started (for recovery metadata).
+    #[serde(default)]
+    untracked_paths: Vec<String>,
 }
 
 fn exec_io(err: impl std::fmt::Display) -> HistoryError {
@@ -1139,6 +1142,7 @@ fn store_exec_stop(
         next_command: stop.cursor.command,
         head: stop.head.to_hex(),
         pending_pick: stop.pending_pick,
+        untracked_paths: pre.untracked_paths.iter().cloned().collect(),
     };
     let dir = session.repo.git_dir().join("rebase-merge");
     let write = || -> Result<(), HistoryError> {
@@ -1185,7 +1189,7 @@ fn stored_prestate(state: &StoredExec) -> Result<ExecPrestate, HistoryError> {
         head_commit,
         head_tree: ObjectId::from_hex(&state.original_tree)?,
         index_bytes: state.index.clone(),
-        untracked_paths: HashSet::new(),
+        untracked_paths: state.untracked_paths.iter().cloned().collect(),
     })
 }
 

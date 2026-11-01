@@ -3270,6 +3270,41 @@ fn exec_abort_removes_staged_addition_and_restores_exact_index() {
 }
 
 #[test]
+fn exec_abort_and_continue_preserve_untracked_around_dirty_stop() {
+    use grit_lib::revwalk::history::HistoryError;
+
+    let (fixture, opts, plan) = exec_fixture();
+    let wt = fixture.worktree();
+    std::fs::write(wt.join("pre-existing.txt"), b"keep\n").expect("pre-existing");
+    let err = run_dirty_exec(wt, &plan, "echo hook-edit >> f");
+    assert!(matches!(err, HistoryError::ExecDirty { .. }), "{err:?}");
+    std::fs::write(wt.join("after-stop.txt"), b"keep\n").expect("after-stop");
+    abort_rebase(&open_grit(wt), &test_ident()).expect("abort");
+    assert!(wt.join("pre-existing.txt").is_file());
+    assert!(wt.join("after-stop.txt").is_file());
+    assert_git_fsck_strict(wt);
+
+    let (fixture, opts, plan) = exec_fixture();
+    let wt = fixture.worktree();
+    std::fs::write(wt.join("pre-existing.txt"), b"keep\n").expect("pre-existing");
+    run_dirty_exec(wt, &plan, "echo hook-edit >> f").unwrap_err();
+    std::fs::write(wt.join("after-stop.txt"), b"keep\n").expect("after-stop");
+    git(wt, &["stash", "push", "-m", "exec edits"]);
+    let RebaseOutcome::ExecDone { .. } = continue_rebase(
+        &open_grit(wt),
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("continue after stashing exec edits") else {
+        panic!("expected exec rebase to finish");
+    };
+    assert!(wt.join("pre-existing.txt").is_file());
+    assert!(wt.join("after-stop.txt").is_file());
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
 fn exec_recovery_can_stop_again_at_next_command_and_final_commit() {
     use grit_lib::revwalk::history::HistoryError;
     let (fixture, opts, plan) = exec_fixture();
