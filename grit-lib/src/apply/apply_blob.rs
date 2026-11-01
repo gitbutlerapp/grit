@@ -1,7 +1,5 @@
 //! Apply parsed unified-diff hunks to a single blob (no worktree or index I/O).
 
-use std::borrow::Cow;
-
 use super::{Hunk, HunkLine};
 use crate::error::ApplyError;
 
@@ -12,20 +10,16 @@ pub struct ApplyOptions {
     pub reverse: bool,
 }
 
-/// One logical line in the working blob (bytes include `\n` when the source line had one).
-///
-/// Untouched rows borrow from the original blob; only rows written by a hunk are owned.
-#[derive(Debug, Clone)]
-struct LineRecord<'a> {
-    raw: Cow<'a, [u8]>,
-    /// Set when an earlier hunk replaced this row (later hunks must not match through it).
-    consumed: bool,
-}
-
 /// Mutable line-split view of blob bytes while hunks are applied in order.
+///
+/// Each row is one line, with its `\n` when the source line had one. Untouched rows borrow from
+/// the original blob and rows written by a hunk borrow from that hunk's [`LineEdit`], so the
+/// view never copies line bytes.
 #[derive(Debug, Clone)]
 struct WorkingBlob<'a> {
-    rows: Vec<LineRecord<'a>>,
+    rows: Vec<&'a [u8]>,
+    /// Set for rows an earlier hunk wrote (later hunks must not match through them).
+    consumed: Vec<bool>,
 }
 
 impl<'a> WorkingBlob<'a> {
@@ -33,25 +27,20 @@ impl<'a> WorkingBlob<'a> {
         let mut rows = Vec::with_capacity(memchr::memchr_iter(b'\n', data).count() + 1);
         let mut start = 0usize;
         for i in memchr::memchr_iter(b'\n', data) {
-            rows.push(LineRecord {
-                raw: Cow::Borrowed(&data[start..=i]),
-                consumed: false,
-            });
+            rows.push(&data[start..=i]);
             start = i + 1;
         }
         if start < data.len() {
-            rows.push(LineRecord {
-                raw: Cow::Borrowed(&data[start..]),
-                consumed: false,
-            });
+            rows.push(&data[start..]);
         }
-        Self { rows }
+        let consumed = vec![false; rows.len()];
+        Self { rows, consumed }
     }
 
     fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(self.rows.iter().map(|row| row.raw.len()).sum());
+        let mut out = Vec::with_capacity(self.rows.iter().map(|row| row.len()).sum());
         for row in &self.rows {
-            out.extend_from_slice(&row.raw);
+            out.extend_from_slice(row);
         }
         out
     }
@@ -92,16 +81,19 @@ pub fn apply_hunks_to_blob(
     hunks: &[Hunk],
     opts: &ApplyOptions,
 ) -> Result<Vec<u8>, ApplyError> {
+    let edits: Vec<LineEdit> = hunks
+        .iter()
+        .map(|hunk| line_edit_from_hunk(hunk, opts.reverse))
+        .collect();
     let mut working = WorkingBlob::decode(original);
-    for (hunk_index, hunk) in hunks.iter().enumerate() {
-        let edit = line_edit_from_hunk(hunk, opts.reverse);
+    for (hunk_index, (hunk, edit)) in hunks.iter().zip(&edits).enumerate() {
         let insert_only = if opts.reverse {
             hunk.new_count == 0
         } else {
             hunk.old_count == 0
         };
-        let hint = scan_hint_for_hunk(hunk, &edit, opts.reverse);
-        let Some(at) = locate_and_apply(&mut working, &edit, hint, hunk, hunk_index, insert_only)?
+        let hint = scan_hint_for_hunk(hunk, edit, opts.reverse);
+        let Some(at) = locate_and_apply(&mut working, edit, hint, hunk, hunk_index, insert_only)?
         else {
             return Err(ApplyError::ContextMismatch {
                 hunk_index,
@@ -214,15 +206,49 @@ fn hunk_text_as_row(text: &str, with_newline: bool) -> Vec<u8> {
     row
 }
 
-fn locate_and_apply(
-    working: &mut WorkingBlob,
-    edit: &LineEdit,
+/// The rows of a [`LineEdit`] still in play after dropping context from its ends.
+#[derive(Debug, Clone)]
+struct EditWindow {
+    match_rows: std::ops::Range<usize>,
+    replace_rows: std::ops::Range<usize>,
+}
+
+impl EditWindow {
+    fn whole(edit: &LineEdit) -> Self {
+        Self {
+            match_rows: 0..edit.match_rows.len(),
+            replace_rows: 0..edit.replace_rows.len(),
+        }
+    }
+
+    fn trim_front(&mut self) {
+        if !self.match_rows.is_empty() {
+            self.match_rows.start += 1;
+        }
+        if !self.replace_rows.is_empty() {
+            self.replace_rows.start += 1;
+        }
+    }
+
+    fn trim_back(&mut self) {
+        if !self.match_rows.is_empty() {
+            self.match_rows.end -= 1;
+        }
+        if !self.replace_rows.is_empty() {
+            self.replace_rows.end -= 1;
+        }
+    }
+}
+
+fn locate_and_apply<'a>(
+    working: &mut WorkingBlob<'a>,
+    edit: &'a LineEdit,
     hint: ScanHint,
     hunk: &Hunk,
     _hunk_index: usize,
     insert_only: bool,
 ) -> Result<Option<usize>, ApplyError> {
-    let mut candidate = edit.clone();
+    let mut window = EditWindow::whole(edit);
     let mut hint = hint;
     let mut prefix = edit.stable_prefix;
     let mut suffix = edit.stable_suffix;
@@ -230,19 +256,19 @@ fn locate_and_apply(
     let mut pin_back = hint.only_at_back;
 
     loop {
-        if candidate.match_rows.is_empty() {
-            if insert_only && !candidate.replace_rows.is_empty() {
+        let match_rows = &edit.match_rows[window.match_rows.clone()];
+        let replace_rows = &edit.replace_rows[window.replace_rows.clone()];
+        if match_rows.is_empty() {
+            if insert_only && !replace_rows.is_empty() {
                 let row = insert_only_row(hint, working, hunk);
-                splice_edit(working, row, &candidate);
+                splice_edit(working, row, 0, replace_rows);
                 return Ok(Some(row));
             }
             if prefix == 0 && suffix == 0 {
                 return Ok(None);
             }
-        } else if let Some(row) =
-            search_outward(working, &candidate.match_rows, hint, pin_front, pin_back)
-        {
-            splice_edit(working, row, &candidate);
+        } else if let Some(row) = search_outward(working, match_rows, hint, pin_front, pin_back) {
+            splice_edit(working, row, match_rows.len(), replace_rows);
             return Ok(Some(row));
         }
 
@@ -255,32 +281,14 @@ fn locate_and_apply(
             return Ok(None);
         }
         if prefix >= suffix {
-            trim_edit_front(&mut candidate);
+            window.trim_front();
             prefix -= 1;
             hint.start_row = hint.start_row.saturating_sub(1);
         }
         if suffix > prefix {
-            trim_edit_back(&mut candidate);
+            window.trim_back();
             suffix -= 1;
         }
-    }
-}
-
-fn trim_edit_front(edit: &mut LineEdit) {
-    if !edit.match_rows.is_empty() {
-        edit.match_rows.remove(0);
-    }
-    if !edit.replace_rows.is_empty() {
-        edit.replace_rows.remove(0);
-    }
-}
-
-fn trim_edit_back(edit: &mut LineEdit) {
-    if !edit.match_rows.is_empty() {
-        edit.match_rows.pop();
-    }
-    if !edit.replace_rows.is_empty() {
-        edit.replace_rows.pop();
     }
 }
 
@@ -359,26 +367,27 @@ fn rows_equal_pattern(
     if at + pattern.len() > working.len() {
         return false;
     }
-    for (offset, expected) in pattern.iter().enumerate() {
-        let row = &working.rows[at + offset];
-        if row.consumed {
-            return false;
-        }
-        if row.raw.as_ref() != expected.as_slice() {
-            return false;
-        }
-    }
-    true
+    let rows = &working.rows[at..at + pattern.len()];
+    let consumed = &working.consumed[at..at + pattern.len()];
+    !consumed.contains(&true)
+        && rows
+            .iter()
+            .zip(pattern)
+            .all(|(row, expected)| *row == expected.as_slice())
 }
 
-fn splice_edit(working: &mut WorkingBlob, at: usize, edit: &LineEdit) {
-    let remove = edit
-        .match_rows
-        .len()
-        .min(working.rows.len().saturating_sub(at));
-    let new_rows = edit.replace_rows.iter().map(|raw| LineRecord {
-        raw: Cow::Owned(raw.clone()),
-        consumed: true,
-    });
-    working.rows.splice(at..at + remove, new_rows);
+/// Replace `remove` rows at `at` with `replace_rows`, marking the new rows consumed.
+fn splice_edit<'a>(
+    working: &mut WorkingBlob<'a>,
+    at: usize,
+    remove: usize,
+    replace_rows: &'a [Vec<u8>],
+) {
+    let end = at + remove.min(working.rows.len().saturating_sub(at));
+    working
+        .rows
+        .splice(at..end, replace_rows.iter().map(Vec::as_slice));
+    working
+        .consumed
+        .splice(at..end, std::iter::repeat_n(true, replace_rows.len()));
 }
