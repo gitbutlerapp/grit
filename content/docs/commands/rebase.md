@@ -98,8 +98,10 @@ anywhere else (switching branches, resetting the commit away) fails the rebase: 
 restores `HEAD`, the index, and the worktree without moving refs, and the commits the
 command made stay in the object database.
 
-If a later commit no longer applies on top of an amended one, replay stops with
-`result: "conflicts"` and conflict markers, like any rebase conflict, without
+If the first replayed commit conflicts before any `--exec` command runs, grit stops the same
+way as a plain rebase: conflict markers, `rebase-merge/grit-plan`, and the branch ref left at
+its pre-rebase tip. If a later commit no longer applies on top of an amended one, replay
+stops with `result: "conflicts"` and conflict markers, like any rebase conflict, without
 undoing the commits already rewritten. Resolve and stage the paths, then run
 `grit rebase --continue` (the exec commands run at the resolved commit), or use
 `--skip` to drop that commit (its exec commands still run, at the current `HEAD`, as

@@ -19,6 +19,13 @@ Resolve conflicts in the worktree, stage paths, then [`continue_rebase`](rustdoc
 
 On completion, [`RebaseOutcome::Done`](rustdoc:grit_lib::revwalk::history::RebaseOutcome::Done) exposes `head_change: Option<(ObjectId, ObjectId)>`. It compares `HEAD` at the start of that `start_rebase`, `continue_rebase`, or `skip_rebase` call with `applied.head` after completion and branch reattachment. For resume calls, the old OID is the stopped, detached `HEAD`, which can differ from the original branch tip in the plan's ref updates. `None` means the OID did not change, including a final skip that only reattaches `HEAD`. The plan retains its detached-HEAD metadata for apply validation; use `head_change` for the completed call's transition rather than deriving it from the plan. When [`ApplyOptions::record_operation`](rustdoc:grit_lib::revwalk::history::ApplyOptions::record_operation) is set, a finished `continue_rebase` or `skip_rebase` overwrites `.git/grit/history-last` after reattaching `HEAD` to the branch, using the pre-rebase branch tip and final tip (not the detached stop commit), so [`undo_last_rewrite`](rustdoc:grit_lib::revwalk::history::undo_last_rewrite) matches a one-shot rebase. The CLI exposes this same pair as `head: {old, new}` in completed JSON and as the HEAD row in Markdown.
 
+[`start_rebase_with_exec`](rustdoc:grit_lib::revwalk::history::start_rebase_with_exec)
+uses the same resumable planning as [`start_rebase`](rustdoc:grit_lib::revwalk::history::start_rebase).
+When the first replayed commit conflicts before any `--exec` command runs, grit stops with
+[`RebaseOutcome::Stopped`](rustdoc:grit_lib::revwalk::history::RebaseOutcome::Stopped) and
+persists the exec command list on `rebase-merge/grit-plan`. [`continue_rebase`](rustdoc:grit_lib::revwalk::history::continue_rebase)
+runs those commands at the resolved commit before replaying the rest.
+
 ## Exec verification and recovery
 
 [`verify_rebase_with_exec`](rustdoc:grit_lib::revwalk::history::verify_rebase_with_exec)

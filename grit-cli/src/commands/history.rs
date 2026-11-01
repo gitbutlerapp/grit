@@ -1284,20 +1284,6 @@ fn run_rebase_with_exec(
             RebaseCliOutcome::from_rewrite(HistoryRewriteOutcome::up_to_date("rebase", false))
         }
         Ok(outcome) => map_rebase_outcome(outcome)?,
-        Err(RebaseSessionError::History(HistoryError::Conflict {
-            commit,
-            subject,
-            conflicts,
-            refs,
-        })) => {
-            return Err(json_error::replay_conflict(
-                "rebase",
-                commit,
-                &subject,
-                conflict_paths(conflicts),
-                refs,
-            ));
-        }
         Err(RebaseSessionError::History(HistoryError::ExecDirty {
             commit,
             command,

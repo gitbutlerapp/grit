@@ -346,13 +346,66 @@ pub fn verify_rebase_with_exec(
     rewrite: &RewriteOptions,
     runner: &dyn CommandRunner,
 ) -> Result<ExecReport, HistoryError> {
+    verify_rebase_with_exec_inner(
+        repo,
+        plan,
+        spec,
+        rewrite,
+        runner,
+        ExecVerifyOptions {
+            clear_state_on_success: true,
+            allow_grit_rebase_stop: false,
+        },
+    )
+}
+
+/// Like [`verify_rebase_with_exec`], but keeps an in-progress grit rebase stop (`grit-plan`)
+/// and does not remove `rebase-merge/` on success so the caller can finish applying the plan.
+pub(super) fn verify_rebase_with_exec_resume(
+    repo: &Repository,
+    plan: &mut RewritePlan,
+    spec: &ExecSpec,
+    rewrite: &RewriteOptions,
+    runner: &dyn CommandRunner,
+) -> Result<ExecReport, HistoryError> {
+    verify_rebase_with_exec_inner(
+        repo,
+        plan,
+        spec,
+        rewrite,
+        runner,
+        ExecVerifyOptions {
+            clear_state_on_success: false,
+            allow_grit_rebase_stop: true,
+        },
+    )
+}
+
+struct ExecVerifyOptions {
+    clear_state_on_success: bool,
+    allow_grit_rebase_stop: bool,
+}
+
+fn verify_rebase_with_exec_inner(
+    repo: &Repository,
+    plan: &mut RewritePlan,
+    spec: &ExecSpec,
+    rewrite: &RewriteOptions,
+    runner: &dyn CommandRunner,
+    options: ExecVerifyOptions,
+) -> Result<ExecReport, HistoryError> {
     if spec.commands.is_empty() {
         return Ok(ExecReport::default());
     }
     if repo.is_bare() {
         return Err(HistoryError::BareRepository);
     }
-    if repo.git_dir().join("rebase-merge").exists() || repo.git_dir().join("rebase-apply").exists()
+    let merge = repo.git_dir().join("rebase-merge");
+    if repo.git_dir().join("rebase-apply").exists()
+        || (merge.exists()
+            && (!options.allow_grit_rebase_stop
+                || merge.join("grit-exec").is_file()
+                || !merge.join("grit-plan").is_file()))
     {
         return Err(exec_io("a rebase is already in progress"));
     }
@@ -382,7 +435,77 @@ pub fn verify_rebase_with_exec(
             command: 0,
             head: None,
         },
+        options.clear_state_on_success,
     )
+}
+
+/// Run `--exec` commands at a detached `tip` after resolving a grit rebase conflict stop.
+///
+/// Returns the resulting `HEAD` (which may differ when a command amends the commit).
+pub(super) fn run_exec_at_tip(
+    repo: &Repository,
+    spec: &ExecSpec,
+    runner: &dyn CommandRunner,
+    tip: ObjectId,
+) -> Result<(ObjectId, Vec<ExecRunRecord>), HistoryError> {
+    if spec.commands.is_empty() {
+        return Ok((tip, Vec::new()));
+    }
+    ensure_worktree_clean_for_rebase_exec(repo).map_err(map_clean_error)?;
+    let worktree = repo.work_tree().ok_or(HistoryError::BareRepository)?;
+    let mut tip = tip;
+    let mut runs = Vec::new();
+    update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &tip).map_err(exec_io)?;
+    let mut tip_tree = commit_tree_for_apply(repo, tip)?;
+    for command in &spec.commands {
+        let output = run_exec_command(runner, command, worktree)?;
+        let exit_code = output.status.code.unwrap_or(1);
+        runs.push(ExecRunRecord {
+            commit: tip,
+            command: command.clone(),
+            exit_code,
+            stdout: output.stdout.clone(),
+            stderr: output.stderr.clone(),
+        });
+        if exit_code != 0 {
+            return Err(HistoryError::ExecFailed {
+                commit: tip,
+                exit_code,
+                stdout: output.stdout,
+                stderr: output.stderr,
+                completed_runs: runs,
+            });
+        }
+        let head = exec_head(repo, tip)?;
+        if head != tip {
+            tip = head;
+            tip_tree = commit_tree_for_apply(repo, tip)?;
+        }
+        let clean = load_worktree_index(repo).and_then(|index| {
+            let mut snapshot = WorktreeSnapshot {
+                index,
+                head_tree: Some(tip_tree),
+            };
+            ensure_worktree_clean_from_snapshot(
+                repo,
+                &mut snapshot,
+                crate::error::WorktreeOperation::RebaseExec,
+                false,
+            )
+        });
+        if let Err(err) = clean {
+            return Err(match err {
+                Error::DirtyWorktree { paths, .. } => HistoryError::ExecDirty {
+                    commit: tip,
+                    command: command.clone(),
+                    paths,
+                    runs,
+                },
+                other => exec_io(other),
+            });
+        }
+    }
+    Ok((tip, runs))
 }
 
 /// Read the detached `HEAD` a successful command left behind.
@@ -396,6 +519,7 @@ fn exec_head(repo: &Repository, tip: ObjectId) -> Result<ObjectId, HistoryError>
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_plan(
     session: &mut ExecDetachedSession<'_>,
     plan: &mut RewritePlan,
@@ -404,6 +528,7 @@ fn execute_plan(
     rewrite: &RewriteOptions,
     runner: &dyn CommandRunner,
     start: ExecCursor,
+    clear_state_on_success: bool,
 ) -> Result<ExecReport, HistoryError> {
     let repo = session.repo;
     let mut runs = Vec::new();
@@ -589,11 +714,13 @@ fn execute_plan(
 
     rewrites.finish(repo, plan)?;
     session.restore()?;
-    super::rebase_session::clear_rebase_state(repo.git_dir()).map_err(|e| {
-        HistoryError::WorktreeApply {
-            message: e.to_string(),
-        }
-    })?;
+    if clear_state_on_success {
+        super::rebase_session::clear_rebase_state(repo.git_dir()).map_err(|e| {
+            HistoryError::WorktreeApply {
+                message: e.to_string(),
+            }
+        })?;
+    }
     Ok(ExecReport { runs })
 }
 
@@ -1165,6 +1292,7 @@ pub(super) fn resume_exec_rebase(
         rewrite,
         repo.command_runner().as_ref(),
         cursor,
+        true,
     ) {
         Ok(exec) => exec,
         // These errors are returned only after a successful rollback. The saved stop

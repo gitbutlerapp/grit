@@ -343,6 +343,60 @@ fn rebase_conflict_exits_1_and_changes_nothing() -> TestResult {
 }
 
 #[test]
+fn issue_2432_exec_replay_conflict_stops_resumably() -> TestResult {
+    let scratch = Scratch::new("issue-2432-exec-conflict")?;
+    let dir = scratch.path();
+    init_repo(dir)?;
+    fs::write(
+        dir.join("f"),
+        (1..=10)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n",
+    )?;
+    git(dir, &["add", "f"])?;
+    git(dir, &["commit", "-m", "base"])?;
+    git(dir, &["switch", "-c", "feat"])?;
+    for i in 1..=3 {
+        fs::write(dir.join("f"), format!("feat{i}\n"))?;
+        git(dir, &["add", "f"])?;
+        git(dir, &["commit", "-m", &format!("feat {i}")])?;
+    }
+    let tip = git(dir, &["rev-parse", "HEAD"])?.trim().to_string();
+    git(dir, &["switch", "main"])?;
+    fs::write(dir.join("f"), "1\nmain2\n3\n4\n5\n6\n7\n8\n9\n10\n")?;
+    git(dir, &["add", "f"])?;
+    git(dir, &["commit", "-m", "main 2"])?;
+    git(dir, &["switch", "feat"])?;
+    let out = gs(dir, ["rebase", "--exec", "true", "main", "--json"])?;
+    assert_eq!(out.status, Some(1));
+    assert!(
+        !out.stderr.contains("can't resolve conflicts yet"),
+        "stderr: {}",
+        out.stderr
+    );
+    let json = parse_json(&out.stdout)?;
+    assert_eq!(json["result"], "conflicts");
+    assert!(json.get("next_steps").is_some());
+    assert_eq!(
+        git(dir, &["rev-parse", "feat"])?.trim(),
+        tip,
+        "branch must stay at pre-rebase tip"
+    );
+    assert!(dir.join(".git/rebase-merge/grit-plan").is_file());
+    assert!(fs::read_to_string(dir.join("f"))?.contains("<<<<<<<"));
+
+    fs::write(dir.join("f"), "feat1\n")?;
+    git(dir, &["add", "f"])?;
+    let cont = gs(dir, ["rebase", "--continue", "--json"])?;
+    assert_eq!(cont.status, Some(0), "stderr: {}", cont.stderr);
+    assert_eq!(parse_json(&cont.stdout)?["result"], "completed");
+    assert_ne!(git(dir, &["rev-parse", "feat"])?.trim(), tip);
+    Ok(())
+}
+
+#[test]
 fn rebase_result_matches_git_rebase() -> TestResult {
     let scratch_g = Scratch::new("match-grit")?;
     let scratch_git = Scratch::new("match-git")?;
