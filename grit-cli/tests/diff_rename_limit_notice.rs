@@ -60,8 +60,7 @@ fn commit_diff_emits_inexact_rename_limit_notice_on_stderr() {
         .expect("git diff");
     let git_stderr = String::from_utf8_lossy(&git_out.stderr);
     assert!(
-        git_stderr.contains("rename detection was skipped")
-            || git_stderr.contains("renameLimit"),
+        git_stderr.contains("rename detection was skipped") || git_stderr.contains("renameLimit"),
         "git should warn for fixture: {git_stderr}"
     );
 }

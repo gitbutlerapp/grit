@@ -919,6 +919,7 @@ fn worktree_changes(
         &rules,
         base_tree,
         rename_threshold,
+        None,
     )?;
     let side = WorktreeSide {
         work_tree,

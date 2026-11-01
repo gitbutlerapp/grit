@@ -838,9 +838,7 @@ fn collect_untracked_collisions_for_added_path(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(Error::Io(e)),
         Ok(meta) if meta.is_dir() => {
-            collect_untracked_files_under_dir(
-                repo, index, matcher, work_tree, added, untracked,
-            )?;
+            collect_untracked_files_under_dir(repo, index, matcher, work_tree, added, untracked)?;
             return Ok(());
         }
         Ok(_) => {}

@@ -259,8 +259,12 @@ fn basename_duplicate_fixture(count: usize, rename_limit: i64) -> RenameBenchFix
         let old_readme = format!("readme body {i} line one\nline two\n").into_bytes();
         let mut new_readme = old_readme.clone();
         new_readme.extend_from_slice(b"line three edited\n");
-        let old_oid = odb.write(ObjectKind::Blob, &old_readme).expect("old readme");
-        let new_oid = odb.write(ObjectKind::Blob, &new_readme).expect("new readme");
+        let old_oid = odb
+            .write(ObjectKind::Blob, &old_readme)
+            .expect("old readme");
+        let new_oid = odb
+            .write(ObjectKind::Blob, &new_readme)
+            .expect("new readme");
 
         entries.push(DiffEntry {
             status: DiffStatus::Deleted,
@@ -307,7 +311,10 @@ fn bench_diff_renames_basename_duplicates(c: &mut Criterion) {
         .min_total_bytes_override(Some(0));
     let mut group = c.benchmark_group("diff_renames_basename_duplicates");
     group.sample_size(10);
-    for (name, count, limit) in [("limited_128", 128, 500_i64), ("unlimited_64", 64, 5000_i64)] {
+    for (name, count, limit) in [
+        ("limited_128", 128, 500_i64),
+        ("unlimited_64", 64, 5000_i64),
+    ] {
         let fx = basename_duplicate_fixture(count, limit);
         group.throughput(Throughput::Elements(
             u64::try_from(count * 4).expect("count"),

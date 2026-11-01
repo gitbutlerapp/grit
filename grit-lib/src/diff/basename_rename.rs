@@ -58,7 +58,10 @@ mod tests {
         let (sources, dests) = build_basename_maps(&deleted, &added, &used_deleted, &used_added);
         assert!(basename_maps_are_unambiguous(&sources, &dests));
         assert!(!basename_needs_similarity_scoring(
-            &deleted, &added, &used_deleted, &used_added
+            &deleted,
+            &added,
+            &used_deleted,
+            &used_added
         ));
     }
 }
@@ -231,7 +234,10 @@ fn build_basename_maps(
 }
 
 /// True when every basename appears at most once on the delete and add sides.
-fn basename_maps_are_unambiguous(sources: &HashMap<String, isize>, dests: &HashMap<String, isize>) -> bool {
+fn basename_maps_are_unambiguous(
+    sources: &HashMap<String, isize>,
+    dests: &HashMap<String, isize>,
+) -> bool {
     sources.values().all(|&idx| idx >= 0) && dests.values().all(|&idx| idx >= 0)
 }
 
@@ -432,9 +438,7 @@ pub(crate) fn apply_basename_rename_pairs(
     scores.sort_by(|a, b| {
         let a_same = same_basename_entry(&deleted[a.1], &added[a.2]);
         let b_same = same_basename_entry(&deleted[b.1], &added[b.2]);
-        b_same
-            .cmp(&a_same)
-            .then_with(|| b.0.cmp(&a.0))
+        b_same.cmp(&a_same).then_with(|| b.0.cmp(&a.0))
     });
 
     for (score, src_index, ai) in scores {

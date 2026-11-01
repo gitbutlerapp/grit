@@ -9372,11 +9372,9 @@ pub fn detect_renames_with_policy(
                     continue;
                 }
                 let di = remaining_deleted[row];
-                deleted_staging[row] = blob_cache.take_deleted_blob(di).or_else(|| {
-                    odb.read(&deleted[di].old_oid)
-                        .ok()
-                        .map(|obj| obj.data)
-                });
+                deleted_staging[row] = blob_cache
+                    .take_deleted_blob(di)
+                    .or_else(|| odb.read(&deleted[di].old_oid).ok().map(|obj| obj.data));
             }
             let mut added_staging: Vec<Option<Vec<u8>>> = vec![None; remaining_added.len()];
             for (col, &need) in load_added.iter().enumerate() {

@@ -635,12 +635,9 @@ impl<'repo> UncommittedDiff<'repo> {
                     inexact_rename_skipped: None,
                 }
             }
-            DiffTarget::Commit(_) | DiffTarget::Trees { .. } => stored_target_entries(
-                self.repo,
-                target,
-                options,
-            )?
-            .unwrap_or_default(),
+            DiffTarget::Commit(_) | DiffTarget::Trees { .. } => {
+                stored_target_entries(self.repo, target, options)?.unwrap_or_default()
+            }
         };
         limit_target_entries(self.repo, result, pathspecs, options)
     }
