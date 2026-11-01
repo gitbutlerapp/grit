@@ -2101,6 +2101,78 @@ mod tests {
         assert_git_sees_clean_repo(root);
     }
 
+    /// Back-to-back hard resets leave every rewritten file racy for the next one; hashing
+    /// proves them clean, which is far cheaper than spooling each one for rollback.
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn back_to_back_hard_resets_hash_racy_paths_instead_of_spooling() {
+        use crate::porcelain::checkout::{checkout_spool_probe_count, reset_checkout_spool_probe};
+
+        const FILES: usize = 100;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        git(root, &["init", "-q", "-b", "main", "."]);
+        git(root, &["config", "gc.auto", "0"]);
+        for i in 0..FILES {
+            std::fs::write(root.join(format!("f{i:03}.txt")), format!("base {i}\n"))
+                .expect("write");
+        }
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+        for i in 0..FILES {
+            std::fs::write(
+                root.join(format!("f{i:03}.txt")),
+                format!("base {i}\nedit\n"),
+            )
+            .expect("edit");
+        }
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "edited"]);
+        let older = ObjectId::from_hex(git(root, &["rev-parse", "HEAD~1"]).trim()).expect("older");
+        let newer = ObjectId::from_hex(git(root, &["rev-parse", "HEAD"]).trim()).expect("newer");
+        let repo = Repository::open(
+            &root.join(".git"),
+            &crate::environment::RepositoryOptions::empty().with_work_tree(root),
+        )
+        .expect("open");
+
+        reset_to_commit(
+            &repo,
+            &reset_opts(older, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("hard reset to older");
+        let index = repo.load_index().expect("index");
+        let index_mtime = crate::diff::index_mtime_for_diff(&index, None);
+        assert!(
+            index
+                .entries
+                .iter()
+                .any(|entry| crate::diff::entry_is_racy(entry, index_mtime)),
+            "the first reset must leave racy entries behind"
+        );
+
+        let _spool = reset_checkout_spool_probe();
+        reset_to_commit(
+            &repo,
+            &reset_opts(newer, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("hard reset to newer");
+        assert_eq!(
+            checkout_spool_probe_count(),
+            0,
+            "racily clean tree-diff paths must be hashed, not spooled"
+        );
+        assert_git_sees_clean_repo(root);
+    }
+
     #[cfg_attr(
         not(feature = "full-tests"),
         ignore = "starts system git or is heavy; run with --features full-tests"

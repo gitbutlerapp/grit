@@ -60,8 +60,13 @@ use checkout_parallel::{
 
 const PARALLEL_PER_FILE_DELETE_MIN: usize = 32;
 const POPULATED_TREE_CHECKOUT_CHUNK: usize = 2048;
-/// Above this tree-diff width, stat-clean rows rely on checkout journaling instead of racy hashing.
-const RACY_TREE_DIFF_CONTENT_VERIFY_MAX: usize = 64;
+/// Above this many racily clean tree-diff files, they are spooled for rollback unread instead of
+/// hashed. Up to it, parallel hashing is cheaper than moving every file aside and deleting it
+/// again (back-to-back checkouts leave every written file racy); wider sets avoid reading the
+/// whole diff back.
+const RACY_TREE_DIFF_CONTENT_VERIFY_MAX: usize = 1024;
+/// Racily clean tree-diff files totalling more bytes than this are spooled unread, however few.
+const RACY_TREE_DIFF_CONTENT_VERIFY_MAX_BYTES: u64 = 32 * 1024 * 1024;
 
 fn remove_checkout_files_parallel_cancellable(
     work_tree: &Path,
@@ -2016,7 +2021,9 @@ struct HardResetStatCheck {
 /// Rollback rebuilds tree-diff paths from the index, which is only right for clean files, so
 /// the reset spools these first. Paths sparse checkout leaves alone and gitlinks are skipped.
 /// A stat match proves nothing for a racy entry, so those are compared by content, in
-/// parallel, as status does.
+/// parallel, as status does, unless there are more than [`RACY_TREE_DIFF_CONTENT_VERIFY_MAX`]
+/// of them or they exceed [`RACY_TREE_DIFF_CONTENT_VERIFY_MAX_BYTES`]; then they are spooled
+/// unread.
 #[allow(clippy::too_many_arguments)]
 fn hard_reset_unrecorded_tree_diff_paths(
     repo: &Repository,
@@ -2070,7 +2077,10 @@ fn hard_reset_unrecorded_tree_diff_paths(
     if racy.is_empty() {
         return Ok(unrecorded);
     }
-    if racy.len() > RACY_TREE_DIFF_CONTENT_VERIFY_MAX {
+    let racy_bytes: u64 = racy.iter().map(|(_, _, _, meta)| meta.len()).sum();
+    if racy.len() > RACY_TREE_DIFF_CONTENT_VERIFY_MAX
+        || racy_bytes > RACY_TREE_DIFF_CONTENT_VERIFY_MAX_BYTES
+    {
         unrecorded.extend(racy.iter().map(|(_, path, _, _)| (*path).to_owned()));
         return Ok(unrecorded);
     }
