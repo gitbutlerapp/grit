@@ -81,6 +81,47 @@ Daily rows, mean of two alternating rounds of 30 runs each (`dist` builds, page 
 
 Peak RSS comparisons between two builds need the page cache in the same state. A binary that was just copied into place showed about 0.4 MiB more resident code and read-only data than the same file after `echo 3 > /proc/sys/vm/drop_caches`, on identical runs. Both builds above were measured after dropping the cache.
 
+## Restoring hunks of a large file (2026-11-01)
+
+`restore/hunks@large-file` discards 250 of 500 one-line hunks in a 50,000-line, 490 KB `large.txt` inside `synth-10k`. Git only applies a prebuilt patch (`git apply -R`), while grit has to diff the file to resolve the hunk ids, so some gap is inherent. The rest was memory and repeated work. A run faulted in about 3,200 more anonymous pages than a trivial command: the heap peaked at 13.2 MB, almost all of it short-lived line tables of the Myers diff. On top of that, the 490 KB file was hashed with SHA-1 three times.
+
+What changed:
+
+- The line diff keeps one 16-byte record per line (body plus newline) instead of a 24-byte body and ending pair, and the raw compare keys borrow those records instead of filling a second table. Compaction reads the same keys for its indentation measure. The interner is freed before the search, and the K-vectors are a fresh zeroed allocation, so diagonals the search never reaches are never touched. The heap peak falls to 8.3 MB.
+- Applying hunks to a blob keeps slices into the original and into the parsed hunks instead of a `Cow` per line.
+- A partial restore hashes the restored content only when the path has an `ident`, filter or line-ending conversion. It refreshes the index stat data only for files whose every hunk was restored, because a file that keeps a hunk can't match the index. The worktree rules are built once.
+
+Rows from `grit-bench daily` on `dist` builds against the system `git` in one sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0. "base" is `fce803fe8`. Values are medians over three alternating rounds of 30 runs (20 for the second group), in **milliseconds / MB**. Reports: `daily-restore-hunks-6274-before.json` → `daily-restore-hunks-6274-after.json` and `daily-restore-hunks-6274-related-before.json` → `daily-restore-hunks-6274-related-after.json` (first round).
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB |
+| --- | ---: | ---: | ---: |
+| `restore/hunks@large-file` | 7.05 / 8.6 | 15.18 / 24.3 | **11.22 / 18.4** |
+| `add/hunks@large-file` | 12.68 / 10.6 | 17.21 / 22.9 | **14.77 / 17.9** |
+| `add/lines@large-file` | 12.93 / 10.7 | 18.08 / 22.9 | **15.83 / 17.7** |
+| `log/stat-n50@git-git` | 95.43 / 40.7 | 149.92 / 83.2 | **138.25 / 74.4** |
+| `restore/paths@synth-10k` | 11.93 / 12.7 | 11.66 / 16.3 | 11.73 / 16.4 |
+| `add/patch-file@large-file` | 12.70 / 10.6 | 8.14 / 14.7 | 8.28 / 14.8 |
+| `add/patch-file@synth-10k` | 6.44 / 9.8 | 6.99 / 14.5 | 6.94 / 14.5 |
+| `diff/worktree@synth-10k` | 6.72 / 10.0 | 6.33 / 13.2 | 6.70 / 13.2 |
+| `diff/worktree@big-blobs` | 315.11 / 190.8 | 209.31 / 193.4 | 204.22 / 193.6 |
+| `diff/stat@synth-100k` | 104.60 / 30.3 | 76.02 / 52.1 | 78.14 / 52.2 |
+| `show/head@synth-10k` | 1.95 / 8.9 | 2.64 / 11.7 | 2.60 / 11.8 |
+| `show/head@big-blobs` | 1.50 / 7.7 | 1.99 / 9.7 | 2.00 / 9.6 |
+| `show/head@git-git` | 1.86 / 9.0 | 2.26 / 9.9 | 2.19 / 10.0 |
+| `patch-id/commit@git-git` | 2.13 / 13.5 | 2.27 / 9.5 | 2.15 / 9.5 |
+| `stash/push-paths@synth-10k` | 72.88 / 20.0 | 29.33 / 20.2 | 29.36 / 20.3 |
+| `stash/push-pop@synth-10k` | 198.24 / 18.6 | 118.29 / 18.3 | 119.29 / 18.6 |
+| `stash/pop-index@synth-10k` | 61.99 / 18.7 | 35.98 / 22.0 | 36.17 / 22.3 |
+
+The diff rows that moved are within noise, and Git's own times drift just as much between those rounds. Repeated directly (`perf stat`, 200 runs of `grit diff` and 40 of `grit diff --stat`, alternating), the base and the new build measure 5.87 vs 5.87 ms and 76.4 vs 75.9 ms, with identical output. The remaining `restore/hunks` gap is the diff itself (about a quarter of the run), the blob read and index load the hunk ids need, and the roughly 11 MB of binary pages every grit command maps (see [Status memory is code layout](#status-memory-is-code-layout-2026-10-31)).
+
+```bash
+./target/dist/grit-bench daily --only restore/hunks@large-file,restore/paths@synth-10k,add/hunks@large-file,add/lines@large-file,add/patch-file@large-file,add/patch-file@synth-10k,diff/worktree@synth-10k,show/head@synth-10k,stash/push-paths@synth-10k,stash/push-pop@synth-10k,stash/pop-index@synth-10k \
+  --min-runs 30 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-restore-hunks-6274-after.json
+./target/dist/grit-bench daily --only diff/worktree@big-blobs,show/head@big-blobs,diff/stat@synth-100k,show/head@git-git,log/stat-n50@git-git,patch-id/commit@git-git \
+  --min-runs 20 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-restore-hunks-6274-related-after.json
+```
+
 ## The CLI joins the hot text layout (2026-10-31)
 
 `branch/list@many-refs` lists the one local branch of a clone with 10,000 packed refs. The work is tiny: grit runs 1.70 million user-space instructions, Git 1.32 million. Yet grit took 1.86 ms against Git's 1.32 ms and 11.0 MB against 6.7 MB. Both gaps are page faults, 336 against Git's 170, and most of the time a short command spends in the kernel goes to mapping file pages on those faults.
