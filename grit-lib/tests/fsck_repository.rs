@@ -615,6 +615,13 @@ fn missing_blob_reported_as_missing_object() {
         .filter(|i| fsck::issue_msg_id(i) == "missingObject")
         .count();
     assert_eq!(missing_count, 1, "{:?}", report.issues);
+
+    let conn = grit_fsck(&repo, &FsckOptions::connectivity_and_refs(false));
+    assert!(
+        has_msg_id(&conn, "missingObject"),
+        "connectivity-only must still report missing blob: {:?}",
+        conn.issues
+    );
 }
 
 #[test]
@@ -1413,6 +1420,18 @@ fn commit_tree_wrong_kind_matches_git() {
         "wrong tree kind must be reported: {:?}",
         report.issues
     );
+
+    let conn = grit_fsck(&repo, &FsckOptions::connectivity_and_refs(false));
+    assert!(
+        conn.issues.iter().any(|i| {
+            matches!(
+                i,
+                FsckIssue::BrokenLink { target, .. } if target == &blob
+            )
+        }),
+        "connectivity-only must report wrong tree kind: {:?}",
+        conn.issues
+    );
 }
 
 #[test]
@@ -2027,4 +2046,237 @@ fn diagnostic_summary_matches_git_for_grit_objects_and_git_tag() {
         .expect("promoted tag diagnostic");
     assert_eq!(diagnostic.severity, fsck::FsckSeverity::Error);
     assert!(diagnostic.visible);
+}
+
+#[test]
+fn connectivity_only_dangling_excludes_reachable_blobs_in_bare_repo() {
+    let dir = TempDir::new().expect("tempdir");
+    let repo = Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main"),
+    )
+    .expect("init bare");
+    assert!(repo.work_tree().is_none());
+
+    let blob = repo
+        .odb()
+        .write(ObjectKind::Blob, b"hello\n")
+        .expect("blob");
+    let mut tree_body = b"100644 f.txt\0".to_vec();
+    tree_body.extend_from_slice(blob.as_bytes());
+    let tree = repo
+        .odb()
+        .write(ObjectKind::Tree, &tree_body)
+        .expect("tree");
+    let commit_body = format!(
+        "tree {}\nauthor T <t@example.com> 1 +0000\ncommitter T <t@example.com> 1 +0000\n\nm\n",
+        tree.to_hex()
+    );
+    let commit = repo
+        .odb()
+        .write(ObjectKind::Commit, commit_body.as_bytes())
+        .expect("commit");
+
+    let tag_body = format!(
+        "object {}\ntype blob\ntag v1.0\ntagger T <t@example.com> 1 +0000\n\nannotated\n",
+        blob.to_hex()
+    );
+    let tag = repo
+        .odb()
+        .write(ObjectKind::Tag, tag_body.as_bytes())
+        .expect("tag");
+
+    let ts = OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time");
+    let identity = "T <t@example.com>";
+    for (name, oid) in [("refs/heads/main", commit), ("refs/tags/v1.0", tag)] {
+        repo.refs()
+            .prepare(
+                RefTransaction::new()
+                    .update(RefUpdate {
+                        name: name.into(),
+                        new_value: Some(RawRef::Direct(oid)),
+                        expected: Expected::Missing,
+                        flags: Default::default(),
+                        reflog: Some(ReflogUpdate {
+                            identity: identity.into(),
+                            message: "test".into(),
+                            time: ts,
+                            old_oid: None,
+                            new_oid: None,
+                        }),
+                    })
+                    .expect("txn"),
+            )
+            .expect("prepare")
+            .commit()
+            .expect("commit ref");
+    }
+
+    let opts = FsckOptions::connectivity_and_refs(false).with_check_dangling(true);
+    let report = grit_fsck(&repo, &opts);
+    assert!(
+        report.dangling.is_empty(),
+        "reachable blobs must not be listed as dangling: {:?}",
+        report.dangling
+    );
+
+    let git_text = git(dir.path(), &["fsck", "--connectivity-only", "--dangling"]);
+    assert!(
+        !git_text.contains("dangling blob"),
+        "git baseline should not report reachable blob as dangling: {git_text}"
+    );
+}
+
+#[test]
+fn connectivity_only_does_not_inflate_reachable_blob_bodies() {
+    use std::ops::ControlFlow;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use grit_lib::objects::odb::{ObjectStore, WritableObjectStore, WriteOptions};
+    use grit_lib::objects::{Object, ObjectInfo};
+
+    #[derive(Debug)]
+    struct BlobReadCounter {
+        inner: MemoryStore,
+        blob_payload_reads: AtomicUsize,
+    }
+
+    impl BlobReadCounter {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                inner: MemoryStore::new(HashAlgo::Sha1),
+                blob_payload_reads: AtomicUsize::new(0),
+            })
+        }
+
+        fn note_payload(&self, kind: Option<ObjectKind>) {
+            if kind == Some(ObjectKind::Blob) {
+                self.blob_payload_reads.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    impl ObjectStore for BlobReadCounter {
+        fn hash_algo(&self) -> HashAlgo {
+            self.inner.hash_algo()
+        }
+
+        fn read(&self, oid: &ObjectId) -> grit_lib::error::Result<Option<Object>> {
+            let obj = self.inner.read(oid)?;
+            self.note_payload(obj.as_ref().map(|o| o.kind));
+            Ok(obj)
+        }
+
+        fn read_into(
+            &self,
+            oid: &ObjectId,
+            buf: &mut Vec<u8>,
+        ) -> grit_lib::error::Result<Option<ObjectKind>> {
+            let kind = self.inner.read_into(oid, buf)?;
+            self.note_payload(kind);
+            Ok(kind)
+        }
+
+        fn read_info(&self, oid: &ObjectId) -> grit_lib::error::Result<Option<ObjectInfo>> {
+            self.inner.read_info(oid)
+        }
+
+        fn for_each_object(
+            &self,
+            f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+        ) -> grit_lib::error::Result<()> {
+            self.inner.for_each_object(f)
+        }
+    }
+
+    impl WritableObjectStore for BlobReadCounter {
+        fn write(
+            &self,
+            kind: ObjectKind,
+            data: &[u8],
+            options: WriteOptions,
+        ) -> grit_lib::error::Result<ObjectId> {
+            self.inner.write(kind, data, options)
+        }
+
+        fn freshen(&self, oid: &ObjectId) -> grit_lib::error::Result<bool> {
+            self.inner.freshen(oid)
+        }
+    }
+
+    let tmp = TempDir::new().expect("tempdir");
+    let gd = tmp.path().join("repo.git");
+    fs::create_dir_all(&gd).expect("git dir");
+    let store = BlobReadCounter::new();
+    let mut tree_body = Vec::new();
+    for i in 0..32 {
+        let payload = format!("payload-{i}\n");
+        let blob = store
+            .write(
+                ObjectKind::Blob,
+                payload.as_bytes(),
+                WriteOptions::default(),
+            )
+            .expect("blob");
+        tree_body.extend_from_slice(format!("100644 f{i}.txt\0").as_bytes());
+        tree_body.extend_from_slice(blob.as_bytes());
+    }
+    let tree = store
+        .write(ObjectKind::Tree, &tree_body, WriteOptions::default())
+        .expect("tree");
+    let commit_body = format!(
+        "tree {}\nauthor T <t@example.com> 1 +0000\ncommitter T <t@example.com> 1 +0000\n\ninit\n",
+        tree.to_hex()
+    );
+    let commit = store
+        .write(
+            ObjectKind::Commit,
+            commit_body.as_bytes(),
+            WriteOptions::default(),
+        )
+        .expect("commit");
+
+    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
+        .odb_builder(
+            OdbBuilder::files(gd.join("objects"))
+                .primary(store.clone())
+                .alternates(false),
+        )
+        .ref_store(Arc::new(MemoryRefStore::new()))
+        .initial_branch("main")
+        .open(&gd, None)
+        .expect("open");
+
+    let ts = OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time");
+    repo.refs()
+        .prepare(
+            RefTransaction::new()
+                .update(RefUpdate {
+                    name: "refs/heads/main".into(),
+                    new_value: Some(RawRef::Direct(commit)),
+                    expected: Expected::Missing,
+                    flags: Default::default(),
+                    reflog: Some(ReflogUpdate {
+                        identity: "T <t@example.com>".into(),
+                        message: "init".into(),
+                        time: ts,
+                        old_oid: None,
+                        new_oid: None,
+                    }),
+                })
+                .expect("txn"),
+        )
+        .expect("prepare")
+        .commit()
+        .expect("commit ref");
+
+    let report = grit_fsck(&repo, &FsckOptions::connectivity_and_refs(false));
+    assert!(report.issues.is_empty(), "{:?}", report.issues);
+    assert_eq!(
+        store.blob_payload_reads.load(Ordering::Relaxed),
+        0,
+        "connectivity-only must not load blob bodies during the walk"
+    );
 }
