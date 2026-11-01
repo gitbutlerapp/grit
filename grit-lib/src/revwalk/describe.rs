@@ -3,12 +3,13 @@
 //! Chooses a reachable tag with minimum exact range count (`tag..commit`), not Git
 //! `describe`'s lazy depth estimate.
 
-use crate::commit_graph_file::CommitGraphChain;
 use crate::error::Result;
 use crate::merge_base::{
     branch_tips_merged_into, count_commits_reachable_excluding_ancestors_of, ReachableCountFilter,
 };
+use crate::objects::parse_commit;
 use crate::objects::ObjectId;
+use crate::objects::{oid_hash_set, OidHashSet};
 use crate::refs::listing::{
     creator_date, query_refs, RefKind, RefListing, RefNamespace, RefQuery, RefQueryError,
     RefQueryOptions,
@@ -19,8 +20,6 @@ use crate::rev_parse::{peel_to_commit_for_merge_base, resolve_revision};
 use crate::OidAbbrevBatch;
 
 use super::RevWalk;
-
-const UNRANKED_COMMIT: u64 = (1u64 << 63) - 1;
 
 /// Options for [`RevWalk::describe`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -80,7 +79,7 @@ impl<'repo> RevWalk<'repo> {
         }
 
         let peels: Vec<ObjectId> = candidates.iter().map(|c| c.peeled).collect();
-        let ancestor_tags = branch_tips_merged_into(repo, &[commit], &peels)?;
+        let ancestor_tags = tag_peels_reachable_from(repo, commit, &peels, opts.first_parent)?;
         let reachable: Vec<&TagCandidate> = candidates
             .iter()
             .filter(|c| c.peeled == commit || ancestor_tags.contains(&c.peeled))
@@ -93,19 +92,9 @@ impl<'repo> RevWalk<'repo> {
             first_parent_only: opts.first_parent,
             ..ReachableCountFilter::default()
         };
-        let graph = repo.odb().commit_graph_chain();
         let mut best: Option<(usize, &TagCandidate)> = None;
 
         for cand in reachable {
-            if let Some((best_dist, _)) = best {
-                if let Some(lower) =
-                    generation_distance_lower_bound(graph.as_deref(), cand.peeled, commit)
-                {
-                    if lower > best_dist {
-                        continue;
-                    }
-                }
-            }
             let dist = count_commits_reachable_excluding_ancestors_of(
                 repo,
                 &[commit],
@@ -202,25 +191,45 @@ fn tie_break_tag(a: &TagCandidate, b: &TagCandidate) -> bool {
     if a.sort_time != b.sort_time {
         return a.sort_time > b.sort_time;
     }
-    a.listing.short_name > b.listing.short_name
+    a.listing.short_name < b.listing.short_name
 }
 
-fn generation_distance_lower_bound(
-    graph: Option<&CommitGraphChain>,
-    tag_commit: ObjectId,
+/// Tag peeled commits that are ancestors of `head` (or equal), using all parents or first-parent
+/// chains only when `first_parent_only` is set.
+fn tag_peels_reachable_from(
+    repo: &Repository,
     head: ObjectId,
-) -> Option<usize> {
-    let graph = graph?;
-    let gen_tag = graph.commit_generation_for_walk(&tag_commit);
-    let gen_head = graph.commit_generation_for_walk(&head);
-    if gen_tag == UNRANKED_COMMIT || gen_head == UNRANKED_COMMIT {
-        return None;
-    }
-    if gen_head >= gen_tag {
-        Some((gen_head - gen_tag) as usize)
+    tag_peels: &[ObjectId],
+    first_parent_only: bool,
+) -> Result<OidHashSet> {
+    if first_parent_only {
+        first_parent_reachable_tag_peels(repo, head, tag_peels)
     } else {
-        None
+        branch_tips_merged_into(repo, &[head], tag_peels)
     }
+}
+
+fn first_parent_reachable_tag_peels(
+    repo: &Repository,
+    head: ObjectId,
+    tag_peels: &[ObjectId],
+) -> Result<OidHashSet> {
+    let tag_set: OidHashSet = tag_peels.iter().copied().collect();
+    let mut reachable = oid_hash_set();
+    let odb = repo.odb();
+    let mut cur = head;
+    let mut seen = oid_hash_set();
+    while seen.insert(cur) {
+        if tag_set.contains(&cur) {
+            reachable.insert(cur);
+        }
+        let commit = parse_commit(&odb.read(&cur)?.data)?;
+        let Some(parent) = commit.parents.first().copied() else {
+            break;
+        };
+        cur = parent;
+    }
+    Ok(reachable)
 }
 
 #[cfg(test)]
@@ -390,6 +399,116 @@ mod tests {
             .describe("HEAD", &DescribeOptions::default())?
             .is_none());
         Ok(())
+    }
+
+    #[test]
+    fn describe_stable_after_commit_graph_write() -> Result<()> {
+        use crate::maintenance::CommitGraphOptions;
+        use crate::objects::ObjectKind;
+        use crate::refs;
+
+        let (_dir, repo) = init_repo();
+        let odb = repo.odb();
+        let day = 86_400i64;
+        let c1 = write_commit_at(odb, &[], "c1", day)?;
+        let c2 = write_commit_at(odb, &[c1], "c2", day * 2)?;
+        let c3 = write_commit_at(odb, &[c2], "c3", day * 3)?;
+        let c4 = write_commit_at(odb, &[c3], "c4", day * 4)?;
+        refs::write_ref(repo.git_dir(), "refs/heads/main", &c4)?;
+        tag_annotated(&repo, "a-far", c1, "far");
+        tag_annotated(&repo, "z-near", c3, "near");
+        let opts = DescribeOptions::default();
+        let before = repo.rev_walk().describe("HEAD", &opts)?.expect("before");
+        assert_eq!(tag_short_name(&before), "z-near");
+        assert_eq!(before.distance, 1);
+        repo.write_commit_graph(&CommitGraphOptions::default())?;
+        let after = repo.rev_walk().describe("HEAD", &opts)?.expect("after");
+        assert_eq!(tag_short_name(&after), "z-near");
+        assert_eq!(after.distance, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn describe_first_parent_reachability() -> Result<()> {
+        use crate::refs;
+
+        let (_dir, repo) = init_repo();
+        let odb = repo.odb();
+        let root = write_commit_at(odb, &[], "root", 1)?;
+        let main1 = write_commit_at(odb, &[root], "main1", 2)?;
+        let main2 = write_commit_at(odb, &[main1], "main2", 3)?;
+        let side = write_commit_at(odb, &[root], "side", 4)?;
+        let merge = write_commit_at(odb, &[main2, side], "merge", 5)?;
+        refs::write_ref(repo.git_dir(), "refs/heads/main", &merge)?;
+        tag_annotated(&repo, "old", root, "old");
+        tag_annotated(&repo, "side-tag", side, "side");
+        let all = repo.rev_walk().describe(
+            "HEAD",
+            &DescribeOptions {
+                tags: true,
+                ..Default::default()
+            },
+        )?;
+        assert_eq!(
+            all.as_ref().map(tag_short_name),
+            Some("side-tag")
+        );
+        let fp = repo
+            .rev_walk()
+            .describe(
+                "HEAD",
+                &DescribeOptions {
+                    tags: true,
+                    first_parent: true,
+                    ..Default::default()
+                },
+            )?
+            .expect("first-parent");
+        assert_eq!(tag_short_name(&fp), "old");
+        assert_eq!(fp.distance, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn describe_tie_break_prefers_ascending_ref_name() -> Result<()> {
+        let (_dir, repo) = init_repo();
+        let c1 = empty_commit(&repo, "c1");
+        let c2 = empty_commit(&repo, "c2");
+        tag_annotated(&repo, "ztag", c1, "z");
+        tag_annotated(&repo, "atag", c1, "a");
+        let d = repo
+            .rev_walk()
+            .describe("HEAD", &DescribeOptions::default())?
+            .expect("described");
+        assert_eq!(tag_short_name(&d), "atag");
+        assert_eq!(d.distance, 1);
+        assert_eq!(d.peeled, c1);
+        assert_eq!(c2, repo.rev_walk().resolve("HEAD")?);
+        Ok(())
+    }
+
+    fn tag_short_name(d: &DescribedCommit) -> &str {
+        d.tag
+            .as_str()
+            .strip_prefix("refs/tags/")
+            .unwrap_or(d.tag.as_str())
+    }
+
+    fn write_commit_at(
+        odb: &crate::objects::odb::Odb,
+        parents: &[ObjectId],
+        msg: &str,
+        time: i64,
+    ) -> Result<ObjectId> {
+        let tree = odb.write_loose_materialize(ObjectKind::Tree, b"")?;
+        let mut body = format!("tree {tree}\n");
+        for p in parents {
+            body.push_str(&format!("parent {p}\n"));
+        }
+        body.push_str(&format!(
+            "author T <t@e.com> {time} +0000\ncommitter T <t@e.com> {time} +0000\n\n{msg}\n"
+        ));
+        odb.write_loose_materialize(ObjectKind::Commit, body.as_bytes())
     }
 
     #[test]

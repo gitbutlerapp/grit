@@ -30,7 +30,13 @@ fn describe_distance_matches_git_rev_list_count() {
     .expect("open");
     let described = repo
         .rev_walk()
-        .describe("HEAD", &DescribeOptions { tags: true, ..Default::default() })
+        .describe(
+            "HEAD",
+            &DescribeOptions {
+                tags: true,
+                ..Default::default()
+            },
+        )
         .expect("describe")
         .expect("some tag");
     let tag_short = described
@@ -38,16 +44,9 @@ fn describe_distance_matches_git_rev_list_count() {
         .as_str()
         .strip_prefix("refs/tags/")
         .unwrap_or(described.tag.as_str());
-    let git_count = git(
-        wt,
-        &[
-            "rev-list",
-            "--count",
-            &format!("{tag_short}..HEAD"),
-        ],
-    )
-    .trim()
-    .parse::<usize>()
-    .expect("count");
+    let git_count = git(wt, &["rev-list", "--count", &format!("{tag_short}..HEAD")])
+        .trim()
+        .parse::<usize>()
+        .expect("count");
     assert_eq!(described.distance, git_count);
 }
