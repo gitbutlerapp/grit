@@ -79,13 +79,11 @@ impl ProtectOptions {
     pub fn from_config(config: &ConfigSet) -> Self {
         let protect_ntfs = config
             .get_bool("core.protectNTFS")
-            .or_else(|| config.get_bool("core.protectntfs"))
             .and_then(|r| r.ok())
             .unwrap_or(true);
         let default_hfs = cfg!(target_os = "macos");
         let protect_hfs = config
             .get_bool("core.protectHFS")
-            .or_else(|| config.get_bool("core.protecthfs"))
             .and_then(|r| r.ok())
             .unwrap_or(default_hfs);
         Self {

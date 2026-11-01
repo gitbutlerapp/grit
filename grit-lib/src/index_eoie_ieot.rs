@@ -493,8 +493,7 @@ pub(crate) fn preload_index_enabled(config: Option<&ConfigSet>) -> bool {
     let Some(cfg) = config else {
         return true;
     };
-    cfg.get_bool("core.preloadindex")
-        .or_else(|| cfg.get_bool("core.preloadIndex"))
+    cfg.get_bool("core.preloadIndex")
         .and_then(|r| r.ok())
         .unwrap_or(true)
 }

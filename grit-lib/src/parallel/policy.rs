@@ -233,8 +233,7 @@ impl ParallelOptions {
 #[must_use]
 fn core_preload_index(config: &ConfigSet) -> bool {
     config
-        .get_bool("core.preloadindex")
-        .or_else(|| config.get_bool("core.preloadIndex"))
+        .get_bool("core.preloadIndex")
         .and_then(|r| r.ok())
         .unwrap_or(true)
 }

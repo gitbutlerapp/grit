@@ -76,8 +76,7 @@ pub fn warn_ambiguous_refs_from_config(repo: &Repository) -> bool {
         return true;
     };
     config
-        .get_bool("core.warnambiguousrefs")
-        .or_else(|| config.get_bool("core.warnAmbiguousRefs"))
+        .get_bool("core.warnAmbiguousRefs")
         .and_then(|r| r.ok())
         .unwrap_or(true)
 }

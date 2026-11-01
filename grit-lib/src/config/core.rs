@@ -2020,22 +2020,19 @@ impl ConfigSet {
 
     /// Whether pathnames in human-readable output should fully C-quote non-ASCII bytes as octal.
     ///
-    /// Maps to Git's `quote_path_fully` (`core.quotepath`, default true). When false, UTF-8 and
-    /// other high bytes are emitted literally; only ASCII specials are escaped. Also honors
-    /// `core.quotePath` as an alternate spelling.
+    /// Maps to Git's `quote_path_fully` (`core.quotePath`, default true). When false, UTF-8 and
+    /// other high bytes are emitted literally; only ASCII specials are escaped.
     #[must_use]
     pub fn quote_path_fully(&self) -> bool {
-        let from_key = |key: &str| self.get_bool(key).and_then(|r| r.ok());
-        from_key("core.quotepath")
-            .or_else(|| from_key("core.quotePath"))
+        self.get_bool("core.quotePath")
+            .and_then(|r| r.ok())
             .unwrap_or(true)
     }
 
     /// Default for `pack.writeBitmapHashCache` (Git default: true).
     #[must_use]
     pub fn pack_write_bitmap_hash_cache(&self) -> bool {
-        self.get_bool("pack.writebitmaphashcache")
-            .or_else(|| self.get_bool("pack.writeBitmapHashCache"))
+        self.get_bool("pack.writeBitmapHashCache")
             .and_then(|r| r.ok())
             .unwrap_or(true)
     }
@@ -2043,8 +2040,7 @@ impl ConfigSet {
     /// Default for `pack.writeBitmapLookupTable` (Git default: false).
     #[must_use]
     pub fn pack_write_bitmap_lookup_table(&self) -> bool {
-        self.get_bool("pack.writebitmaplookuptable")
-            .or_else(|| self.get_bool("pack.writeBitmapLookupTable"))
+        self.get_bool("pack.writeBitmapLookupTable")
             .and_then(|r| r.ok())
             .unwrap_or(false)
     }
@@ -2084,14 +2080,12 @@ impl ConfigSet {
             return false;
         }
         if self
-            .get("pack.writereverseindex")
-            .or_else(|| self.get("pack.writeReverseIndex"))
+            .get("pack.writeReverseIndex")
             .is_some_and(|v| v.trim().is_empty())
         {
             return false;
         }
-        self.get_bool("pack.writereverseindex")
-            .or_else(|| self.get_bool("pack.writeReverseIndex"))
+        self.get_bool("pack.writeReverseIndex")
             .and_then(|r| r.ok())
             .unwrap_or(true)
     }
@@ -2237,8 +2231,7 @@ impl ConfigSet {
     /// Default for `pack.readReverseIndex` / `pack.readreverseindex` (Git default: true).
     #[must_use]
     pub fn pack_read_reverse_index_default(&self) -> bool {
-        self.get_bool("pack.readreverseindex")
-            .or_else(|| self.get_bool("pack.readReverseIndex"))
+        self.get_bool("pack.readReverseIndex")
             .and_then(|r| r.ok())
             .unwrap_or(true)
     }
@@ -4875,6 +4868,17 @@ mod value_error_tests {
         ));
         assert!(matches!(Error::from(int_err), Error::Config(_)));
         assert!(set.get_bool("core.missing").is_none());
+    }
+
+    #[test]
+    fn typed_readers_match_any_casing_of_the_key() {
+        let set = set_from_snippet(
+            "[CORE]\n\tQUOTEPATH = false\n[pack]\n\twritebitmaphashcache = false\n\tREADREVERSEINDEX = false\n",
+        );
+        assert!(!set.quote_path_fully());
+        assert!(!set.pack_write_bitmap_hash_cache());
+        assert!(!set.pack_read_reverse_index_default());
+        assert_eq!(set.get_bool("Core.QuotePath"), Some(Ok(false)));
     }
 
     #[test]

@@ -136,9 +136,7 @@ pub struct StatusOptions {
 pub fn untracked_mode_from_config(
     config: &ConfigSet,
 ) -> std::result::Result<UntrackedMode, ConfigError> {
-    let raw = config
-        .get("status.showUntrackedFiles")
-        .or_else(|| config.get("status.showuntrackedfiles"));
+    let raw = config.get("status.showUntrackedFiles");
     match raw {
         None => Ok(UntrackedMode::Normal),
         Some(v) => untracked_mode_from_config_value(&v)
@@ -244,10 +242,7 @@ pub fn status_diff_entry_matches_pathspec(entry: &DiffEntry, pathspecs: &[String
 /// Apply `status.renameLimit` over `diff.renameLimit` for rename scoring (Git status precedence).
 fn config_for_status_rename_detection(config: &ConfigSet) -> ConfigSet {
     let mut out = config.clone();
-    if let Some(limit) = config
-        .get("status.renameLimit")
-        .or_else(|| config.get("status.renamelimit"))
-    {
+    if let Some(limit) = config.get("status.renameLimit") {
         let _ = out.add_command_override("diff.renameLimit", &limit);
     }
     out

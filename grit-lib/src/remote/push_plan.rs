@@ -284,7 +284,6 @@ pub fn resolve_push(
 pub fn push_follow_tags_config(config: &ConfigSet) -> bool {
     config
         .get("push.followTags")
-        .or_else(|| config.get("push.followtags"))
         .and_then(|v| parse_git_config_maybe_bool(&v))
         .unwrap_or(false)
 }
@@ -612,8 +611,7 @@ pub fn configured_remote_for_push(
         }
     }
     if let Some(remote) = config
-        .get("remote.pushdefault")
-        .or_else(|| config.get("remote.pushDefault"))
+        .get("remote.pushDefault")
         .filter(|r| !r.trim().is_empty())
     {
         return Ok(remote);

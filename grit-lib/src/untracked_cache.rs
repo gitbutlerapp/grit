@@ -601,7 +601,6 @@ pub fn untracked_cache_ident(work_tree: &Path) -> Vec<u8> {
 pub fn dir_flags_from_config(config: &ConfigSet) -> u32 {
     if config
         .get("status.showUntrackedFiles")
-        .or_else(|| config.get("status.showuntrackedfiles"))
         .is_some_and(|v| v.eq_ignore_ascii_case("all"))
     {
         0
@@ -612,10 +611,7 @@ pub fn dir_flags_from_config(config: &ConfigSet) -> u32 {
 
 fn global_excludes_path(repo: &Repository, config: &ConfigSet) -> Option<PathBuf> {
     let env = repo.environment();
-    if let Some(raw) = config
-        .get("core.excludesFile")
-        .or_else(|| config.get("core.excludesfile"))
-    {
+    if let Some(raw) = config.get("core.excludesFile") {
         let expanded = parse_path(env, &raw);
         let p = Path::new(&expanded);
         if p.is_absolute() {

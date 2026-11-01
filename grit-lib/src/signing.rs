@@ -450,14 +450,10 @@ pub fn should_sign_commit(config: &ConfigSet, sign_override: Option<bool>) -> Re
     if let Some(force) = sign_override {
         return Ok(force);
     }
-    match config
-        .get_bool("commit.gpgsign")
-        .or_else(|| config.get_bool("commit.gpgSign"))
-    {
-        Some(Ok(v)) => Ok(v),
-        Some(Err(e)) => Err(e.into()),
-        None => Ok(false),
-    }
+    Ok(config
+        .get_bool("commit.gpgSign")
+        .transpose()?
+        .unwrap_or(false))
 }
 
 /// Whether a new annotated tag object should be signed.
@@ -472,14 +468,7 @@ pub fn should_sign_tag(config: &ConfigSet, sign_override: Option<bool>) -> Resul
     if let Some(force) = sign_override {
         return Ok(force);
     }
-    match config
-        .get_bool("tag.gpgSign")
-        .or_else(|| config.get_bool("tag.gpgsign"))
-    {
-        Some(Ok(v)) => Ok(v),
-        Some(Err(e)) => Err(e.into()),
-        None => Ok(false),
-    }
+    Ok(config.get_bool("tag.gpgSign").transpose()?.unwrap_or(false))
 }
 
 /// Header name for an embedded commit signature for `hash_algo`.
@@ -1876,6 +1865,19 @@ mod tests {
         cfg.add_command_override("tag.gpgSign", "true").unwrap();
         assert!(should_sign_tag(&cfg, None).unwrap());
         assert!(!should_sign_tag(&cfg, Some(false)).unwrap());
+    }
+
+    #[test]
+    fn should_sign_rejects_a_non_boolean_naming_the_key() {
+        let mut cfg = ConfigSet::default();
+        cfg.add_command_override("tag.gpgsign", "sometimes")
+            .unwrap();
+        let err = should_sign_tag(&cfg, None).unwrap_err();
+        assert!(matches!(
+            err,
+            Error::Config(crate::error::ConfigError::InvalidValue { ref key, .. }) if key == "tag.gpgSign"
+        ));
+        assert!(should_sign_tag(&cfg, Some(true)).unwrap());
     }
 
     #[test]
