@@ -9378,7 +9378,7 @@ pub fn detect_renames_with_policy(
         &mut renames,
     );
 
-    let mut blob_cache = super::rename_blob_cache::RenameBlobCache::new(deleted.len(), added.len());
+    let mut blob_cache = None;
     if !detect_opts.skip_basename_heuristic
         && super::basename_rename::basename_needs_similarity_scoring(
             &deleted,
@@ -9387,6 +9387,7 @@ pub fn detect_renames_with_policy(
             &used_added,
         )
     {
+        let mut cache = super::rename_blob_cache::RenameBlobCache::new(deleted.len(), added.len());
         let par_opts = diff_rename_parallel_options(config, thread_policy);
         super::basename_rename::apply_basename_rename_pairs(
             odb,
@@ -9398,9 +9399,10 @@ pub fn detect_renames_with_policy(
             &mut renames,
             threshold,
             cancel_watch,
-            &mut blob_cache,
+            &mut cache,
             par_opts,
         )?;
+        blob_cache = Some(cache);
     }
 
     let remaining_deleted: Vec<usize> = used_deleted
@@ -9484,62 +9486,118 @@ pub fn detect_renames_with_policy(
         if !candidate_pairs.is_empty() {
             let loads_needed = load_deleted.iter().filter(|&&b| b).count()
                 + load_added.iter().filter(|&&b| b).count();
-            let mut deleted_staging: Vec<Option<Vec<u8>>> = vec![None; remaining_deleted.len()];
-            for (row, &need) in load_deleted.iter().enumerate() {
-                if !need {
-                    continue;
+            let (deleted_contents, added_contents) = if let Some(cache) = blob_cache.as_mut() {
+                let mut deleted_staging: Vec<Option<Vec<u8>>> = vec![None; remaining_deleted.len()];
+                for (row, &need) in load_deleted.iter().enumerate() {
+                    if !need {
+                        continue;
+                    }
+                    let di = remaining_deleted[row];
+                    deleted_staging[row] = cache
+                        .take_deleted_blob(di)
+                        .or_else(|| odb.read(&deleted[di].old_oid).ok().map(|obj| obj.data));
                 }
-                let di = remaining_deleted[row];
-                deleted_staging[row] = blob_cache
-                    .take_deleted_blob(di)
-                    .or_else(|| odb.read(&deleted[di].old_oid).ok().map(|obj| obj.data));
-            }
-            let mut added_staging: Vec<Option<Vec<u8>>> = vec![None; remaining_added.len()];
-            for (col, &need) in load_added.iter().enumerate() {
-                if !need {
-                    continue;
+                let mut added_staging: Vec<Option<Vec<u8>>> = vec![None; remaining_added.len()];
+                for (col, &need) in load_added.iter().enumerate() {
+                    if !need {
+                        continue;
+                    }
+                    let ai = remaining_added[col];
+                    added_staging[col] = cache
+                        .take_added_blob(ai)
+                        .or_else(|| read_added_entry_bytes(odb, &added[ai], work_root));
                 }
-                let ai = remaining_added[col];
-                added_staging[col] = blob_cache
-                    .take_added_blob(ai)
-                    .or_else(|| read_added_entry_bytes(odb, &added[ai], work_root));
-            }
-            let load_deleted_blob = |i: usize| -> Option<Vec<u8>> {
-                if !load_deleted[i] {
-                    return None;
+                let load_deleted_blob = |i: usize| -> Option<Vec<u8>> {
+                    if !load_deleted[i] {
+                        return None;
+                    }
+                    deleted_staging[i].clone()
+                };
+                let load_added_blob = |i: usize| -> Option<Vec<u8>> {
+                    if !load_added[i] {
+                        return None;
+                    }
+                    added_staging[i].clone()
+                };
+                if loads_needed <= 32 {
+                    (
+                        (0..remaining_deleted.len())
+                            .map(load_deleted_blob)
+                            .collect(),
+                        (0..remaining_added.len()).map(load_added_blob).collect(),
+                    )
+                } else {
+                    (
+                        parallel_load_optional_blobs(
+                            odb,
+                            remaining_deleted.len(),
+                            par_opts,
+                            0,
+                            load_deleted_blob,
+                        ),
+                        parallel_load_optional_blobs(
+                            odb,
+                            remaining_added.len(),
+                            par_opts,
+                            0,
+                            load_added_blob,
+                        ),
+                    )
                 }
-                deleted_staging[i].clone()
-            };
-            let load_added_blob = |i: usize| -> Option<Vec<u8>> {
-                if !load_added[i] {
-                    return None;
-                }
-                added_staging[i].clone()
-            };
-            let (deleted_contents, added_contents) = if loads_needed <= 32 {
-                (
-                    (0..remaining_deleted.len())
-                        .map(load_deleted_blob)
-                        .collect(),
-                    (0..remaining_added.len()).map(load_added_blob).collect(),
-                )
             } else {
-                (
-                    parallel_load_optional_blobs(
-                        odb,
-                        remaining_deleted.len(),
-                        par_opts,
-                        0,
-                        load_deleted_blob,
-                    ),
-                    parallel_load_optional_blobs(
-                        odb,
-                        remaining_added.len(),
-                        par_opts,
-                        0,
-                        load_added_blob,
-                    ),
-                )
+                let mut deleted_staging: Vec<Option<Vec<u8>>> = vec![None; remaining_deleted.len()];
+                for (row, &need) in load_deleted.iter().enumerate() {
+                    if !need {
+                        continue;
+                    }
+                    let di = remaining_deleted[row];
+                    deleted_staging[row] = odb.read(&deleted[di].old_oid).ok().map(|obj| obj.data);
+                }
+                let mut added_staging: Vec<Option<Vec<u8>>> = vec![None; remaining_added.len()];
+                for (col, &need) in load_added.iter().enumerate() {
+                    if !need {
+                        continue;
+                    }
+                    let ai = remaining_added[col];
+                    added_staging[col] = read_added_entry_bytes(odb, &added[ai], work_root);
+                }
+                let load_deleted_blob = |i: usize| -> Option<Vec<u8>> {
+                    if !load_deleted[i] {
+                        return None;
+                    }
+                    deleted_staging[i].clone()
+                };
+                let load_added_blob = |i: usize| -> Option<Vec<u8>> {
+                    if !load_added[i] {
+                        return None;
+                    }
+                    added_staging[i].clone()
+                };
+                if loads_needed <= 32 {
+                    (
+                        (0..remaining_deleted.len())
+                            .map(load_deleted_blob)
+                            .collect(),
+                        (0..remaining_added.len()).map(load_added_blob).collect(),
+                    )
+                } else {
+                    (
+                        parallel_load_optional_blobs(
+                            odb,
+                            remaining_deleted.len(),
+                            par_opts,
+                            0,
+                            load_deleted_blob,
+                        ),
+                        parallel_load_optional_blobs(
+                            odb,
+                            remaining_added.len(),
+                            par_opts,
+                            0,
+                            load_added_blob,
+                        ),
+                    )
+                }
             };
 
             let est_table_bytes: usize = deleted_contents

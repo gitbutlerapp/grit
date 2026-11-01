@@ -505,6 +505,65 @@ fn rename_limit_wide_tree_matches_git() {
 }
 
 #[test]
+fn all_unique_basename_inexact_renames_over_default_limit_match_git() {
+    let dr = DiffRepo::init();
+    let wt = &dr.worktree;
+    const N: usize = 1001;
+    for i in 0..N {
+        std::fs::create_dir_all(wt.join("old")).unwrap();
+        let mut body = format!("header {i}\n");
+        for line in 1..=400 {
+            body.push_str(&format!("line {line} file {i}\n"));
+        }
+        std::fs::write(wt.join(format!("old/file{i}.txt")), body).unwrap();
+    }
+    git_quiet(wt, &["add", "."]);
+    git_quiet(wt, &["commit", "-qm", "many"]);
+
+    for i in 0..N {
+        std::fs::remove_file(wt.join(format!("old/file{i}.txt"))).unwrap();
+        std::fs::create_dir_all(wt.join("new")).unwrap();
+        let mut body = format!("header {i}\n");
+        for line in 1..=400 {
+            body.push_str(&format!("line {line} file {i}\n"));
+        }
+        body.push_str("extra\n");
+        std::fs::write(wt.join(format!("new/file{i}.txt")), body).unwrap();
+    }
+    git_quiet(wt, &["add", "-A"]);
+    git_quiet(wt, &["commit", "-qm", "moved"]);
+
+    let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
+    let commit = rev_parse_tree(wt, "HEAD^{tree}");
+    let config = ConfigSet::new();
+    let opts = rename_opts(50);
+
+    let git_lines = git_raw_lines(
+        wt,
+        &[
+            "diff-tree",
+            "-r",
+            "-M50",
+            "--root",
+            "--raw",
+            &parent.to_hex(),
+            &commit.to_hex(),
+        ],
+    );
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    assert_eq!(
+        git_lines.len(),
+        N,
+        "git should report one rename line per moved file"
+    );
+    assert_raw_matches_git(
+        &grit_lines,
+        &git_lines,
+        "all unique basenames over renameLimit",
+    );
+}
+
+#[test]
 fn t4011_symlink_tree_raw_matches_git() {
     #[cfg(not(unix))]
     {

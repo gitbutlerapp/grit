@@ -562,6 +562,9 @@ mod diff_options_line_engine;
 #[path = "diff_parallel_symlinks_git_compat.rs"]
 mod diff_parallel_symlinks_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "diff_rename_basename_over_limit.rs"]
+mod diff_rename_basename_over_limit;
+#[cfg(feature = "full-tests")]
 #[path = "diff_rename_filter_git_compat.rs"]
 mod diff_rename_filter_git_compat;
 #[cfg(feature = "full-tests")]
@@ -595,6 +598,7 @@ mod diff_trees_renames;
 #[cfg(feature = "full-tests")]
 #[path = "diff_typechange_status_git_compat.rs"]
 mod diff_typechange_status_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "diff_unreadable_directory_2406.rs"]
 mod diff_unreadable_directory_2406;
 #[cfg(feature = "full-tests")]

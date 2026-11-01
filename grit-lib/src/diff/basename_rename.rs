@@ -26,7 +26,7 @@ mod tests {
     use crate::objects::{FileMode, ObjectId};
 
     #[test]
-    fn wide_matrix_fixture_basenames_are_unambiguous() {
+    fn wide_unique_basename_matrix_needs_similarity_scoring() {
         const N: usize = 2000;
         let zero = ObjectId::zero();
         let mut deleted = Vec::with_capacity(N);
@@ -55,14 +55,84 @@ mod tests {
         }
         let used_deleted = vec![false; N];
         let used_added = vec![false; N];
-        let (sources, dests) = build_basename_maps(&deleted, &added, &used_deleted, &used_added);
-        assert!(basename_maps_are_unambiguous(&sources, &dests));
-        assert!(!basename_needs_similarity_scoring(
+        assert!(basename_needs_similarity_scoring(
             &deleted,
             &added,
             &used_deleted,
             &used_added
         ));
+    }
+
+    #[test]
+    fn pairs_two_inexact_unique_basenames() {
+        use crate::objects::{ObjectId, ObjectKind};
+        use crate::odb::Odb;
+        use crate::parallel::ParallelOptions;
+        use std::num::NonZeroUsize;
+        use tempfile::TempDir;
+
+        let par_opts = ParallelOptions {
+            threads: NonZeroUsize::new(1).expect("non-zero"),
+            min_items: 0,
+            min_total_bytes: None,
+            signed_entry_threshold: None,
+        };
+
+        let root = TempDir::new().expect("tempdir");
+        let git_dir = root.path().join(".git");
+        std::fs::create_dir_all(git_dir.join("objects")).unwrap();
+        let odb = Odb::new(&git_dir.join("objects"));
+        let mut old_data = b"header 0\n".to_vec();
+        for line in 1..=400 {
+            old_data.extend_from_slice(format!("line {line} file 0\n").as_bytes());
+        }
+        let mut new_data = old_data.clone();
+        new_data.extend_from_slice(b"extra\n");
+        let old_oid = odb.write(ObjectKind::Blob, &old_data).expect("old");
+        let new_oid = odb.write(ObjectKind::Blob, &new_data).expect("new");
+        let deleted = vec![DiffEntry {
+            status: DiffStatus::Deleted,
+            old_path: Some("old/file0.txt".into()),
+            new_path: None,
+            old_mode: FileMode::REGULAR,
+            new_mode: FileMode::ABSENT,
+            old_oid,
+            new_oid: ObjectId::zero(),
+            score: None,
+        }];
+        let added = vec![DiffEntry {
+            status: DiffStatus::Added,
+            old_path: None,
+            new_path: Some("new/file0.txt".into()),
+            old_mode: FileMode::ABSENT,
+            new_mode: FileMode::REGULAR,
+            old_oid: ObjectId::zero(),
+            new_oid,
+            score: None,
+        }];
+        let mut used_deleted = vec![false];
+        let mut used_added = vec![false];
+        let mut renames = Vec::new();
+        let mut cache = RenameBlobCache::new(1, 1);
+        apply_basename_rename_pairs(
+            &odb,
+            None,
+            &deleted,
+            &added,
+            &mut used_deleted,
+            &mut used_added,
+            &mut renames,
+            50,
+            None,
+            &mut cache,
+            par_opts,
+        )
+        .expect("basename pass");
+        assert_eq!(
+            renames.len(),
+            1,
+            "expected one basename rename, got {renames:?}"
+        );
     }
 }
 
@@ -233,23 +303,40 @@ fn build_basename_maps(
     (sources, dests)
 }
 
-/// True when every basename appears at most once on the delete and add sides.
-fn basename_maps_are_unambiguous(
-    sources: &HashMap<String, isize>,
-    dests: &HashMap<String, isize>,
-) -> bool {
-    sources.values().all(|&idx| idx >= 0) && dests.values().all(|&idx| idx >= 0)
-}
-
 /// Whether the basename pre-pass may pair paths beyond exact OID matches.
+///
+/// Git runs this pass when a delete-side basename also appears on the add side (including
+/// duplicate basenames), even when each basename is unique within its side.
 pub(crate) fn basename_needs_similarity_scoring(
     deleted: &[DiffEntry],
     added: &[DiffEntry],
     used_deleted: &[bool],
     used_added: &[bool],
 ) -> bool {
-    let (sources, dests) = build_basename_maps(deleted, added, used_deleted, used_added);
-    !basename_maps_are_unambiguous(&sources, &dests)
+    for (i, del) in deleted.iter().enumerate() {
+        if used_deleted[i] {
+            continue;
+        }
+        let Some(old_path) = del.old_path.as_deref() else {
+            continue;
+        };
+        let base = path_basename(old_path);
+        if base.is_empty() {
+            continue;
+        }
+        for (j, add) in added.iter().enumerate() {
+            if used_added[j] {
+                continue;
+            }
+            let Some(new_path) = add.new_path.as_deref() else {
+                continue;
+            };
+            if path_basename(new_path) == base {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn blob_payload_size(odb: &Odb, oid: &crate::objects::ObjectId) -> Option<usize> {
@@ -320,11 +407,6 @@ pub(crate) fn apply_basename_rename_pairs(
     }
 
     let (sources, dests) = build_basename_maps(deleted, added, used_deleted, used_added);
-    // Git's basename pre-pass only reduces the inexact matrix when basenames collide
-    // (e.g. many `README.md` paths). Unique 1:1 basenames are handled by inexact detection.
-    if basename_maps_are_unambiguous(&sources, &dests) {
-        return Ok(());
-    }
 
     struct BasenameCandidate {
         src_index: usize,
