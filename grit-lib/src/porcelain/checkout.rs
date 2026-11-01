@@ -985,10 +985,8 @@ fn checkout_hard_to_tree_journaled(
     lock: &mut IndexLock,
     journal: &mut CheckoutJournal,
 ) -> Result<()> {
-    let pre_reset_index = repo.load_index_preserving_sparse()?;
-    let pre_reset_index_mtime = crate::diff::index_mtime_for_diff(&pre_reset_index, None);
-    let mut index = pre_reset_index;
-    crate::porcelain::index_from_tree::prepare_index_for_hard_reset(repo, target_tree, &mut index)?;
+    let mut index = repo.load_index_preserving_sparse()?;
+    let pre_reset_index_mtime = crate::diff::index_mtime_for_diff(&index, None);
     let config = repo.config()?;
     let index_sparse = config
         .get_bool("index.sparse")
@@ -1010,12 +1008,11 @@ fn checkout_hard_to_tree_journaled(
         Vec::new()
     };
     let tree_diff_touched = CoalescedSubtreeDiffPaths::from_changes(&changes);
-    let config = repo.config()?;
     let unstaged_tree_stable_paths = if trees_differ && !index.has_sparse_directory_placeholders() {
         hard_reset_unstaged_tree_stable_paths(
             repo,
             work_tree,
-            &index,
+            &mut index,
             pre_reset_index_mtime,
             &tree_diff_touched,
             config.as_ref(),
@@ -1023,6 +1020,7 @@ fn checkout_hard_to_tree_journaled(
     } else {
         BTreeSet::new()
     };
+    crate::porcelain::index_from_tree::prepare_index_for_hard_reset(repo, target_tree, &mut index)?;
     crate::porcelain::index_from_tree::expand_sparse_for_tree_changes(repo, &mut index, &changes)?;
     let tree_deleted: HashSet<Vec<u8>> = changes
         .iter()
@@ -1755,26 +1753,28 @@ fn hard_reset_tree_diff_filled_all_entries(
 fn hard_reset_unstaged_tree_stable_paths(
     repo: &Repository,
     work_tree: &Path,
-    pre_reset_index: &Index,
+    index: &mut Index,
     index_mtime: Option<(u32, u32)>,
     tree_diff_touched: &CoalescedSubtreeDiffPaths,
     config: &ConfigSet,
 ) -> Result<BTreeSet<Vec<u8>>> {
-    let restrict: BTreeSet<String> = pre_reset_index
+    let stable_count = index
         .entries
         .iter()
         .filter(|e| e.stage() == 0 && !tree_diff_touched.contains_path(&e.path))
-        .filter_map(|e| std::str::from_utf8(&e.path).ok())
-        .map(str::to_owned)
-        .collect();
-    if restrict.is_empty() {
+        .count();
+    if stable_count == 0 {
         return Ok(BTreeSet::new());
     }
-    let restrict_len = restrict.len();
-    let mut index = pre_reset_index.clone();
+    let tree_diff = Arc::new(tree_diff_touched.clone());
+    let skip = {
+        let tree_diff = Arc::clone(&tree_diff);
+        Arc::new(move |path: &[u8]| tree_diff.contains_path(path))
+            as crate::diff::IndexPathSkipPredicate
+    };
     let (entries, _) = crate::diff::diff_index_to_worktree_with_options(
         repo.odb(),
-        &mut index,
+        index,
         work_tree,
         crate::diff::DiffIndexToWorktreeOptions {
             index_mtime,
@@ -1783,8 +1783,8 @@ fn hard_reset_unstaged_tree_stable_paths(
             refresh_fsmonitor: false,
             repository_git_dir: Some(repo.git_dir().to_path_buf()),
             config: Some(Arc::new(config.clone())),
-            restrict_to_paths: Some(Arc::new(restrict)),
-            stat_parallel_threads: hard_reset_stat_parallel_threads(repo, config, restrict_len),
+            skip_index_path: Some(skip),
+            stat_parallel_threads: hard_reset_stat_parallel_threads(repo, config, stable_count),
             thread_policy: Some(repo.thread_policy()),
             simplify_gitlinks: true,
             ignore_submodule_untracked: true,
@@ -2452,7 +2452,7 @@ pub(crate) fn checkout_tree_changes_with_index_deferred(
 }
 
 /// Paths touched by a coalesced tree diff (whole subtrees as one entry each).
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct CoalescedSubtreeDiffPaths {
     deleted_prefixes: Vec<Vec<u8>>,
     added_prefixes: Vec<Vec<u8>>,
@@ -2528,6 +2528,70 @@ fn coalesced_delete_scheduled_paths(odb: &Odb, change: &DiffEntry) -> Result<Vec
         .collect())
 }
 
+/// Whether every file under `dir` on disk is tracked in the coalesced delete subtree `old_oid`.
+///
+/// Avoids flattening the old tree into memory when deciding wholesale directory removal.
+fn coalesced_subtree_wholesale_delete_safe(
+    odb: &Odb,
+    work_tree: &Path,
+    dir: &str,
+    old_oid: &ObjectId,
+    _ignorecase: bool,
+) -> Result<bool> {
+    let abs_dir = work_tree.join(dir);
+    let mut stack = vec![abs_dir];
+    let mut cache = crate::merge_trees::MergeTreeCache::default();
+    let dir_stored = crate::repo_relpath::storage_bytes(dir).into_owned();
+    let mut dir_prefix = dir_stored.clone();
+    dir_prefix.push(b'/');
+    while let Some(current) = stack.pop() {
+        let read_dir = match fs::read_dir(&current) {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Ok(false),
+        };
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(t) => t,
+                Err(_) => return Ok(false),
+            };
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !file_type.is_file() && !file_type.is_symlink() {
+                return Ok(false);
+            }
+            let Ok(rel) = path.strip_prefix(work_tree) else {
+                return Ok(false);
+            };
+            let rel_stored =
+                crate::repo_relpath::storage_bytes(&rel.to_string_lossy()).into_owned();
+            let within = if rel_stored.as_slice() == dir_stored.as_slice() {
+                continue;
+            } else if rel_stored.starts_with(dir_prefix.as_slice()) {
+                &rel_stored[dir_prefix.len()..]
+            } else {
+                return Ok(false);
+            };
+            if within.is_empty() {
+                return Ok(false);
+            }
+            let Some(entry) = crate::merge_trees::lookup_index_entry_at_path_cached(
+                &mut cache, odb, old_oid, within,
+            )?
+            else {
+                return Ok(false);
+            };
+            if entry.mode == MODE_TREE {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 /// Apply coalesced subtree add/delete entries; returns leaf-level diff rows for the rest.
 #[allow(clippy::too_many_arguments)]
 fn checkout_coalesced_subtree_changes(
@@ -2581,10 +2645,26 @@ fn checkout_coalesced_subtree_changes(
         let Some(dir) = &change.old_path else {
             continue;
         };
-        let tracked = coalesced_delete_scheduled_paths(repo.odb(), change)?;
-        let delete_set: HashSet<String> = tracked.iter().cloned().collect();
-        let wholesale_safe = !tracked.is_empty()
-            && wholesale_directory_safe_to_remove(work_tree, dir, &delete_set, ignorecase);
+        let wholesale_safe = if crate::index::is_tree_mode(change.old_mode.bits())
+            && !change.old_oid.is_zero()
+        {
+            if ignorecase {
+                let tracked = coalesced_delete_scheduled_paths(repo.odb(), change)?;
+                let delete_set: HashSet<String> = tracked.iter().cloned().collect();
+                !tracked.is_empty()
+                    && wholesale_directory_safe_to_remove(work_tree, dir, &delete_set, ignorecase)
+            } else {
+                coalesced_subtree_wholesale_delete_safe(
+                    repo.odb(),
+                    work_tree,
+                    dir,
+                    &change.old_oid,
+                    ignorecase,
+                )?
+            }
+        } else {
+            false
+        };
         if wholesale_safe {
             wholesale_dirs.insert(dir.clone());
             let abs = work_tree.join(dir);
@@ -2594,6 +2674,7 @@ fn checkout_coalesced_subtree_changes(
             progress.inc(1);
             continue;
         }
+        let tracked = coalesced_delete_scheduled_paths(repo.odb(), change)?;
         for rel in tracked {
             crate::progress::poll_cancel(progress, cancel)?;
             journal.spool_remove(&rel)?;

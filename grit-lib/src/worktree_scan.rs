@@ -375,7 +375,7 @@ impl BlobScanPlan {
     }
 }
 
-fn index_blob_scan_eligible(
+pub(crate) fn index_blob_scan_eligible(
     ie: &crate::index::IndexEntry,
     index: &Index,
     honor_fsmonitor_valid: bool,

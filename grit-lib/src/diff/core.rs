@@ -5314,6 +5314,9 @@ pub fn diff_index_to_worktree(
     .map(|(entries, _)| entries)
 }
 
+/// Predicate over stored index path bytes for [`DiffIndexToWorktreeOptions::skip_index_path`].
+pub type IndexPathSkipPredicate = std::sync::Arc<dyn Fn(&[u8]) -> bool + Send + Sync>;
+
 /// Additional inputs for [`diff_index_to_worktree_with_options`].
 #[derive(Clone)]
 pub struct DiffIndexToWorktreeOptions {
@@ -5376,6 +5379,8 @@ pub struct DiffIndexToWorktreeOptions {
     /// refuse the operation when the index has unmerged entries; this filter does not
     /// substitute for a full unmerged scan.
     pub restrict_to_paths: Option<std::sync::Arc<std::collections::BTreeSet<String>>>,
+    /// When set, index paths for which this returns true are omitted from the worktree diff.
+    pub skip_index_path: Option<IndexPathSkipPredicate>,
     /// When true with staging materialization, compute blob OIDs without writing loose objects.
     pub hash_blobs_without_write: bool,
     /// When set, long loops abort with [`crate::error::Error::Cancelled`] once the flag is raised
@@ -5409,6 +5414,7 @@ impl Default for DiffIndexToWorktreeOptions {
             command_runner: None,
             fsmonitor_query_boundary: None,
             restrict_to_paths: None,
+            skip_index_path: None,
             hash_blobs_without_write: false,
             cancel_watch: None,
             diagnostics: None,
@@ -6404,6 +6410,13 @@ fn diff_index_to_worktree_inner(
                 continue;
             };
             let ie = &index.entries[pos];
+            if options
+                .skip_index_path
+                .as_ref()
+                .is_some_and(|skip| skip(&ie.path))
+            {
+                continue;
+            }
             if !index_entry_needs_worktree_diff_pass1(ie) {
                 continue;
             }
@@ -6428,6 +6441,13 @@ fn diff_index_to_worktree_inner(
         for ie in &index.entries {
             poll_diff_cancel(&options, owner_poll.as_ref())?;
             if ie.stage() != 0 {
+                continue;
+            }
+            if options
+                .skip_index_path
+                .as_ref()
+                .is_some_and(|skip| skip(&ie.path))
+            {
                 continue;
             }
             if !index_entry_needs_worktree_diff_pass1(ie) {
@@ -6468,7 +6488,52 @@ fn diff_index_to_worktree_inner(
         ..WorktreeBlobScanOptions::default()
     };
     let blob_dirs = if let Some(limit) = options.restrict_to_paths.as_ref() {
-        crate::worktree_scan::group_blob_entries_by_dir_for_paths(index, limit)
+        if let Some(skip) = options.skip_index_path.as_ref() {
+            let mut positions = Vec::new();
+            let mut cursor = 0;
+            for path in limit.iter() {
+                let Some(pos) = index.find_stage0_pos_from(path.as_bytes(), &mut cursor) else {
+                    continue;
+                };
+                let ie = &index.entries[pos];
+                if skip(&ie.path) {
+                    continue;
+                }
+                if !crate::worktree_scan::index_blob_scan_eligible(ie, index, honor_fsmonitor_valid)
+                {
+                    continue;
+                }
+                positions.push(pos);
+            }
+            crate::worktree_scan::plan_blob_entries_by_dir_for_positions(
+                index,
+                &positions,
+                honor_fsmonitor_valid,
+            )
+        } else {
+            crate::worktree_scan::group_blob_entries_by_dir_for_paths(index, limit)
+        }
+    } else if let Some(skip) = options.skip_index_path.as_ref() {
+        let positions: Vec<usize> = index
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, ie)| {
+                ie.stage() == 0
+                    && !skip(&ie.path)
+                    && crate::worktree_scan::index_blob_scan_eligible(
+                        ie,
+                        index,
+                        honor_fsmonitor_valid,
+                    )
+            })
+            .map(|(pos, _)| pos)
+            .collect();
+        crate::worktree_scan::plan_blob_entries_by_dir_for_positions(
+            index,
+            &positions,
+            honor_fsmonitor_valid,
+        )
     } else {
         group_blob_entries_by_dir(index, honor_fsmonitor_valid)
     };

@@ -4837,6 +4837,7 @@ impl core::marker::Unpin for grit_lib::diff::DiffFilter
 impl core::marker::UnsafeUnpin for grit_lib::diff::DiffFilter
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffFilter
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffFilter
+pub type grit_lib::diff::IndexPathSkipPredicate = alloc::rcs::arc::Arc<dyn core::ops::function::Fn(&[u8]) -> bool + core::marker::Send + core::marker::Sync>
 pub struct grit_lib::diff::DiffIndexToWorktreeOptions
 pub grit_lib::diff::DiffIndexToWorktreeOptions::cancel_watch: core::option::Option<alloc::rcs::arc::Arc<core::sync::atomic::AtomicBool>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::command_runner: core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>>
@@ -4852,6 +4853,7 @@ pub grit_lib::diff::DiffIndexToWorktreeOptions::refresh_fsmonitor: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::refresh_index_stat_in_pass: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::repository_git_dir: core::option::Option<std::path::PathBuf>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::restrict_to_paths: core::option::Option<alloc::rcs::arc::Arc<alloc::collections::btree::set::BTreeSet<alloc::string::String>>>
+pub grit_lib::diff::DiffIndexToWorktreeOptions::skip_index_path: core::option::Option<grit_lib::diff::IndexPathSkipPredicate>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::simplify_gitlinks: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::size_change_proves_modified: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::skip_inaccessible_paths: bool
