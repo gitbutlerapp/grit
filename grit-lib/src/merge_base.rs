@@ -1686,7 +1686,7 @@ impl LazyHidePaint {
     fn expand_until(&mut self, cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<()> {
         let target_rank = commit_rank_for_walk(cache, oid);
         while !self.sides.contains_key(&oid) {
-            let Some(node) = self.heap.pop() else {
+            let Some(node) = self.heap.peek().copied() else {
                 break;
             };
             if target_rank != UNRANKED_COMMIT
@@ -1695,6 +1695,9 @@ impl LazyHidePaint {
             {
                 break;
             }
+            let Some(node) = self.heap.pop() else {
+                break;
+            };
             if !self.popped.insert(node.oid) {
                 continue;
             }
@@ -2984,7 +2987,7 @@ impl PaintWalk {
 
 /// [`PaintWalk`] heap order: highest generation, then newest committer date,
 /// then first queued (Git's priority queue is stable for ties).
-#[derive(Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 struct PaintKey {
     rank: u64,
     committed_at: i64,

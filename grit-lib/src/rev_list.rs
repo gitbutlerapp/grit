@@ -10571,6 +10571,8 @@ mod tests {
             .odb()
             .write_loose_materialize(ObjectKind::Tree, &tree_body)?;
         let tip = write_commit_on_tree(&repo, Some(root), path_tree, "branch-b touch", 500)?;
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/branch-a", &hide)?;
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/branch-b", &tip)?;
 
         let mut git_cg = std::process::Command::new("git");
         git_cg.arg("-C").arg(dir.path()).args([
@@ -10587,6 +10589,12 @@ mod tests {
         );
         write_commit_graph(&repo, &CommitGraphOptions::default())?;
         let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let hide_predicate =
+            RangeWalkHide::try_for_dense_path_hide(&repo, &[tip], &[hide], true, false)?;
+        assert!(
+            hide_predicate.uses_lazy_hide(),
+            "commit-graph must rank commits reachable from refs"
+        );
 
         let hide_hex = hide.to_hex();
         let tip_hex = tip.to_hex();
@@ -10607,6 +10615,115 @@ mod tests {
         };
         let result = rev_list(&repo, &[tip_hex], &[hide_hex], &opts)?;
         assert_eq!(result.commits, expected);
+        Ok(())
+    }
+
+    /// Ranked merge `A..B` with unchanged `watched.txt`: Git emits nothing; grit must not
+    /// resurrect the excluded shared root after lazy hide expansion stops by generation.
+    #[test]
+    fn bounded_range_path_limit_merge_range_empty_matches_git_with_commit_graph() -> Result<()> {
+        use crate::maintenance::{write_commit_graph, CommitGraphOptions};
+
+        let dir = tempdir()?;
+        Repository::init(
+            dir.path(),
+            &InitOptions {
+                bare: true,
+                ..InitOptions::default()
+            },
+        )?;
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let blob = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Blob, b"watched\n")?;
+        let mut tree_body = b"100644 watched.txt\0".to_vec();
+        tree_body.extend_from_slice(blob.as_bytes());
+        let path_tree = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Tree, &tree_body)?;
+        let root = write_commit_on_tree(&repo, None, path_tree, "root", 100)?;
+        let mut a_chain = vec![root];
+        for i in 0..12 {
+            let parent = *a_chain.last().expect("a chain");
+            let c = write_commit_on_tree(
+                &repo,
+                Some(parent),
+                path_tree,
+                &format!("branch-a {i}"),
+                200 + i,
+            )?;
+            a_chain.push(c);
+        }
+        let hide = *a_chain.last().expect("hide tip");
+        let mut c_tip = root;
+        for i in 0..11 {
+            c_tip = write_commit_on_tree(
+                &repo,
+                Some(c_tip),
+                path_tree,
+                &format!("branch-c {i}"),
+                300 + i,
+            )?;
+        }
+        let a_merge_parent = a_chain[a_chain.len() - 8];
+        let mut merge_body = format!("tree {path_tree}\nparent {c_tip}\nparent {a_merge_parent}\n");
+        merge_body.push_str(
+            "author T <t@e.com> 500 +0000\ncommitter T <t@e.com> 500 +0000\n\nmerge tip\n",
+        );
+        let tip = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Commit, merge_body.as_bytes())?;
+
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/branch-a", &hide)?;
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/branch-c", &c_tip)?;
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/branch-b", &tip)?;
+
+        let mut git_cg = std::process::Command::new("git");
+        git_cg.arg("-C").arg(dir.path()).args([
+            "commit-graph",
+            "write",
+            "--reachable",
+            "--changed-paths",
+        ]);
+        let cg_out = git_cg.output().expect("git commit-graph write");
+        assert!(
+            cg_out.status.success(),
+            "git commit-graph write: {}",
+            String::from_utf8_lossy(&cg_out.stderr)
+        );
+        write_commit_graph(&repo, &CommitGraphOptions::default())?;
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        assert!(
+            RangeWalkHide::try_for_dense_path_hide(&repo, &[tip], &[hide], true, false)?
+                .uses_lazy_hide()
+        );
+
+        let hide_hex = hide.to_hex();
+        let tip_hex = tip.to_hex();
+        let range = format!("{hide_hex}..{tip_hex}");
+        let expected = git_rev_list(
+            dir.path(),
+            &["-n", "1", range.as_str(), "--", "watched.txt"],
+        );
+        assert!(
+            expected.is_empty(),
+            "git oracle should emit no path-visible commit in this merge range"
+        );
+
+        let opts = RevListOptions {
+            max_count: Some(1),
+            paths: vec!["watched.txt".to_owned()],
+            use_commit_graph: true,
+            use_commit_graph_bloom: true,
+            commit_graph_read_changed_paths: true,
+            ..Default::default()
+        };
+        let result = rev_list(&repo, &[tip_hex], &[hide_hex], &opts)?;
+        assert_eq!(result.commits, expected);
+        assert!(
+            !result.commits.contains(&root),
+            "excluded shared root must stay hidden"
+        );
         Ok(())
     }
 
