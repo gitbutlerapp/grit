@@ -14,8 +14,11 @@ use crate::index::{index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE}
 use crate::objects::ObjectId;
 use crate::path_icase::{paths_equal, worktree_filesystem_case_insensitive};
 use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
-use crate::pathspec::pathspec_is_exclude;
-use crate::porcelain::checkout::remove_empty_parent_dirs;
+use crate::pathspec::{
+    is_plain_literal_pathspec, literal_spec_for_lookup, matches_pathspec_list_with_context,
+    pathspec_is_exclude, PathspecMatchContext,
+};
+use crate::porcelain::checkout::remove_empty_parent_dirs_batch;
 use crate::porcelain::pathspec_match::{
     index_stage0_path_modes, RepositoryPathspecFilter, REGULAR_FILE_MODE,
 };
@@ -194,9 +197,8 @@ pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOut
 
     let mut index = repo.load_index()?;
     let head_tree = repo.head_tree()?;
-    let tracked_paths = tracked_index_paths(&index);
 
-    let to_remove = collect_removal_paths(repo, &tracked_paths, work_tree, &opts)?;
+    let to_remove = collect_removal_paths(repo, &index, work_tree, &opts)?;
 
     if !opts.force {
         let blocked = blocked_removals(
@@ -232,9 +234,7 @@ pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOut
                 removed_worktree.push(abs);
             }
         }
-        for abs in removed_worktree {
-            remove_empty_parent_dirs(work_tree, &abs);
-        }
+        remove_empty_parent_dirs_batch(work_tree, &removed_worktree);
     }
 
     Ok(RemoveOutcome { removed: to_remove })
@@ -642,89 +642,46 @@ fn infer_remove_recursive(repo: &Repository, sources: &[String], specs: &[String
     Ok(false)
 }
 
-/// Stage-0 paths plus any path that appears in the index at any merge stage.
-fn tracked_index_paths(index: &Index) -> BTreeSet<String> {
-    index
-        .entries
-        .iter()
-        .map(|e| String::from_utf8_lossy(&e.path).into_owned())
-        .collect()
-}
-
 fn collect_removal_paths(
     repo: &Repository,
-    tracked: &BTreeSet<String>,
+    index: &Index,
     _work_tree: &Path,
     opts: &RemoveOptions,
 ) -> Result<Vec<String>> {
+    let pathspec_ctx = repo.pathspec_match_context();
+    let path_modes = index_stage0_path_modes(index);
     let sources = if opts.pathspec_sources.is_empty() {
         &opts.pathspecs
     } else {
         &opts.pathspec_sources
     };
 
-    let index = repo.load_index()?;
-    let path_modes = index_stage0_path_modes(&index);
-
     let mut selected: BTreeSet<String> = BTreeSet::new();
     for (label, resolved) in sources.iter().zip(opts.pathspecs.iter()) {
         if pathspec_is_exclude(label) {
             continue;
         }
-        let spec = resolved.trim_end_matches('/');
-        let filter = RepositoryPathspecFilter::try_new(repo, std::slice::from_ref(resolved))?;
-        let matches: Vec<String> = tracked
-            .iter()
-            .filter(|path| {
-                let mode = path_modes
-                    .get(path.as_str())
-                    .copied()
-                    .unwrap_or(REGULAR_FILE_MODE);
-                filter.matches_entry(path, mode)
-            })
-            .cloned()
-            .collect();
-
-        if matches.is_empty() {
-            let prefix = format!("{spec}/");
-            let under: Vec<String> = tracked
-                .iter()
-                .filter(|path| path.starts_with(&prefix))
-                .cloned()
-                .collect();
-            if under.is_empty() {
-                if opts.ignore_unmatch {
-                    continue;
-                }
-                return Err(Error::PathspecNoMatch {
-                    spec: label.clone(),
-                });
+        let matched = if is_plain_literal_pathspec(resolved, pathspec_ctx) && index.entries_sorted {
+            collect_plain_literal_removal(index, resolved, pathspec_ctx, opts, &mut selected)?
+        } else {
+            let filter = RepositoryPathspecFilter::try_new(repo, std::slice::from_ref(resolved))?;
+            collect_pathspec_matched_removal(
+                index,
+                &filter,
+                pathspec_ctx,
+                resolved,
+                &path_modes,
+                opts,
+                &mut selected,
+            )?
+        };
+        if !matched {
+            if opts.ignore_unmatch {
+                continue;
             }
-            if !opts.recursive {
-                return Err(Error::NotRemovingRecursively(resolved.clone()));
-            }
-            selected.extend(under);
-            continue;
-        }
-
-        if !opts.recursive && has_child_paths(spec, tracked) {
-            let prefix = format!("{spec}/");
-            if matches.iter().any(|path| path.starts_with(&prefix)) {
-                return Err(Error::NotRemovingRecursively(resolved.clone()));
-            }
-        }
-
-        for path in matches {
-            if has_child_paths(&path, tracked) && !opts.recursive {
-                return Err(Error::NotRemovingRecursively(path.clone()));
-            }
-            selected.insert(path.clone());
-            if opts.recursive {
-                let prefix = format!("{path}/");
-                for child in tracked.iter().filter(|p| p.starts_with(&prefix)) {
-                    selected.insert((*child).clone());
-                }
-            }
+            return Err(Error::PathspecNoMatch {
+                spec: label.clone(),
+            });
         }
     }
 
@@ -733,11 +690,195 @@ fn collect_removal_paths(
     Ok(out)
 }
 
-fn has_child_paths(prefix: &str, tracked: &BTreeSet<String>) -> bool {
-    let plen = prefix.len();
-    tracked
-        .iter()
-        .any(|p| p.len() > plen && p.starts_with(prefix) && p.as_bytes()[plen] == b'/')
+/// Collect removals for one plain literal pathspec using sorted-index range queries.
+fn collect_plain_literal_removal(
+    index: &Index,
+    resolved: &str,
+    ctx: PathspecMatchContext,
+    opts: &RemoveOptions,
+    selected: &mut BTreeSet<String>,
+) -> Result<bool> {
+    let spec = resolved.trim_end_matches('/');
+    let spec_lookup = literal_spec_for_lookup(spec, ctx);
+    let spec_bytes = spec_lookup.as_ref().as_bytes();
+    let mut matches: Vec<String> = Vec::new();
+
+    if index.sorted_contains_path(spec_bytes).unwrap_or(false) {
+        if let Some(stored) = sorted_index_exact_stored_path(index, spec_bytes) {
+            matches.push(stored);
+        }
+    }
+
+    let under = index.sorted_entries_under(spec_bytes).unwrap_or(&[]);
+
+    if matches.is_empty() && under.is_empty() && ctx.precompose_paths {
+        push_precompose_literal_alternate_matches(index, resolved, ctx, &mut matches);
+    }
+
+    if matches.is_empty() && under.is_empty() {
+        return Ok(false);
+    }
+
+    if matches.is_empty() {
+        if !opts.recursive {
+            return Err(Error::NotRemovingRecursively(resolved.to_string()));
+        }
+        for entry in under {
+            selected.insert(String::from_utf8_lossy(&entry.path).into_owned());
+        }
+        return Ok(true);
+    }
+
+    if !opts.recursive && index.has_stage0_descendant_under(spec_lookup.as_ref()) {
+        let prefix = format!("{}/", spec_lookup.as_ref());
+        if matches.iter().any(|path| path.starts_with(&prefix)) {
+            return Err(Error::NotRemovingRecursively(resolved.to_string()));
+        }
+    }
+
+    for path in matches {
+        insert_match_and_descendants(index, &path, opts, selected)?;
+    }
+    Ok(true)
+}
+
+fn sorted_index_exact_stored_path(index: &Index, path_bytes: &[u8]) -> Option<String> {
+    if !index.entries_sorted {
+        return None;
+    }
+    let at = index
+        .entries
+        .partition_point(|e| e.path.as_slice() < path_bytes);
+    index.entries.get(at).and_then(|e| {
+        (e.path.as_slice() == path_bytes).then(|| String::from_utf8_lossy(&e.path).into_owned())
+    })
+}
+
+/// Paths stored in a non-NFC spelling that still match a plain literal under precompose rules.
+fn push_precompose_literal_alternate_matches(
+    index: &Index,
+    resolved: &str,
+    ctx: PathspecMatchContext,
+    matches: &mut Vec<String>,
+) {
+    let spec_list = [resolved.to_string()];
+    let mut last_path: Option<Vec<u8>> = None;
+    for entry in &index.entries {
+        if last_path.as_deref() == Some(entry.path.as_slice()) {
+            continue;
+        }
+        last_path = Some(entry.path.clone());
+        let path = String::from_utf8_lossy(&entry.path);
+        if path.is_ascii() {
+            continue;
+        }
+        if matches_pathspec_list_with_context(path.as_ref(), &spec_list, ctx) {
+            matches.push(path.into_owned());
+        }
+    }
+}
+
+/// Collect removals for one pathspec by scanning the index once with a prepared filter.
+fn collect_pathspec_matched_removal(
+    index: &Index,
+    filter: &RepositoryPathspecFilter<'_>,
+    pathspec_ctx: PathspecMatchContext,
+    resolved: &str,
+    path_modes: &std::collections::HashMap<String, u32>,
+    opts: &RemoveOptions,
+    selected: &mut BTreeSet<String>,
+) -> Result<bool> {
+    let spec = resolved.trim_end_matches('/');
+    let mut matches: Vec<String> = Vec::new();
+    let mut last_path: Option<Vec<u8>> = None;
+    for entry in &index.entries {
+        if last_path.as_deref() == Some(entry.path.as_slice()) {
+            continue;
+        }
+        last_path = Some(entry.path.clone());
+        let path = String::from_utf8_lossy(&entry.path);
+        let mode = path_modes
+            .get(path.as_ref())
+            .copied()
+            .unwrap_or(REGULAR_FILE_MODE);
+        if filter.matches_entry(path.as_ref(), mode) {
+            matches.push(path.into_owned());
+        }
+    }
+
+    if matches.is_empty() {
+        let prefix = format!("{spec}/");
+        if index.entries_sorted {
+            let spec_lookup = literal_spec_for_lookup(spec, pathspec_ctx);
+            if let Some(under) = index.sorted_entries_under(spec_lookup.as_ref().as_bytes()) {
+                if under.is_empty() {
+                    return Ok(false);
+                }
+                if !opts.recursive {
+                    return Err(Error::NotRemovingRecursively(resolved.to_string()));
+                }
+                for entry in under {
+                    selected.insert(String::from_utf8_lossy(&entry.path).into_owned());
+                }
+                return Ok(true);
+            }
+        }
+        let mut under_prefix = false;
+        for entry in &index.entries {
+            let path = String::from_utf8_lossy(&entry.path);
+            if path.starts_with(&prefix) {
+                under_prefix = true;
+                if !opts.recursive {
+                    return Err(Error::NotRemovingRecursively(resolved.to_string()));
+                }
+                selected.insert(path.into_owned());
+            }
+        }
+        return Ok(under_prefix);
+    }
+
+    if !opts.recursive && index.has_stage0_descendant_under(spec) {
+        let prefix = format!("{spec}/");
+        if matches.iter().any(|path| path.starts_with(&prefix)) {
+            return Err(Error::NotRemovingRecursively(resolved.to_string()));
+        }
+    }
+
+    for path in matches {
+        insert_match_and_descendants(index, &path, opts, selected)?;
+    }
+    Ok(true)
+}
+
+fn insert_match_and_descendants(
+    index: &Index,
+    path: &str,
+    opts: &RemoveOptions,
+    selected: &mut BTreeSet<String>,
+) -> Result<()> {
+    if !opts.recursive && index.has_stage0_descendant_under(path) {
+        return Err(Error::NotRemovingRecursively(path.to_string()));
+    }
+    selected.insert(path.to_string());
+    if !opts.recursive {
+        return Ok(());
+    }
+    if index.entries_sorted {
+        if let Some(run) = index.sorted_entries_under(path.as_bytes()) {
+            for entry in run {
+                selected.insert(String::from_utf8_lossy(&entry.path).into_owned());
+            }
+        }
+        return Ok(());
+    }
+    let prefix = format!("{path}/");
+    for entry in &index.entries {
+        let p = String::from_utf8_lossy(&entry.path);
+        if p.starts_with(&prefix) {
+            selected.insert(p.into_owned());
+        }
+    }
+    Ok(())
 }
 
 /// Classify every path in `to_remove` and return the ones removal must refuse.
@@ -1527,6 +1668,274 @@ mod remove_block_reason_tests {
         assert!(!worktree_still_has_file(wt, "missing", MODE_REGULAR));
         assert!(!worktree_still_has_file(wt, "dir", MODE_REGULAR));
         assert!(worktree_still_has_file(wt, "dir", MODE_GITLINK));
+    }
+}
+
+#[cfg(test)]
+mod collect_removal_paths_tests {
+    use std::fs;
+
+    use crate::porcelain::add::{stage, StageOptions};
+    use crate::progress::{NeverCancel, NullProgress};
+    use crate::repo::{init_repository, Repository};
+
+    use crate::index::Index;
+    use crate::pathspec::{matches_pathspec_list_with_context, PathspecMatchContext};
+
+    use super::{remove_paths, RemoveOptions};
+
+    fn init_repo(root: &std::path::Path) -> Repository {
+        init_repository(root, false, "main", None, Default::default()).expect("init")
+    }
+
+    fn rm_collect(repo: &Repository, specs: &[&str], recursive: bool) -> Vec<String> {
+        remove_paths(
+            repo,
+            &RemoveOptions {
+                pathspecs: specs.iter().map(|s| (*s).to_string()).collect(),
+                pathspec_sources: specs.iter().map(|s| (*s).to_string()).collect(),
+                recursive,
+                dry_run: true,
+                force: true,
+                ..Default::default()
+            },
+        )
+        .expect("dry-run rm")
+        .removed
+    }
+
+    #[test]
+    fn literal_directory_removal_selects_all_tracked_descendants() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::create_dir_all(root.join("d000/s00")).unwrap();
+        fs::write(root.join("d000/s00/a.txt"), b"a\n").unwrap();
+        fs::write(root.join("d000/s00/b.txt"), b"b\n").unwrap();
+        fs::create_dir_all(root.join("d001")).unwrap();
+        fs::write(root.join("d001/x.txt"), b"x\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+
+        let mut removed = rm_collect(&repo, &["d000"], true);
+        removed.sort();
+        assert_eq!(
+            removed,
+            vec!["d000/s00/a.txt".to_string(), "d000/s00/b.txt".to_string()]
+        );
+    }
+
+    #[test]
+    fn literal_file_does_not_remove_prefix_collision_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("file"), b"1\n").unwrap();
+        fs::write(root.join("file2.txt"), b"2\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+
+        let removed = rm_collect(&repo, &["file"], false);
+        assert_eq!(removed, vec!["file".to_string()]);
+    }
+
+    #[test]
+    fn glob_pathspec_selects_matching_paths() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"a\n").unwrap();
+        fs::write(root.join("b.rs"), b"b\n").unwrap();
+        fs::write(root.join("c.rs"), b"c\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+
+        let mut removed = rm_collect(&repo, &["*.rs"], false);
+        removed.sort();
+        assert_eq!(removed, vec!["b.rs".to_string(), "c.rs".to_string()]);
+    }
+
+    #[test]
+    fn ignore_unmatch_skips_unknown_spec() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("keep.txt"), b"k\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+
+        let outcome = remove_paths(
+            &repo,
+            &RemoveOptions {
+                pathspecs: vec!["keep.txt".into(), "missing.txt".into()],
+                pathspec_sources: vec!["keep.txt".into(), "missing.txt".into()],
+                dry_run: true,
+                force: true,
+                ignore_unmatch: true,
+                ..Default::default()
+            },
+        )
+        .expect("ignore unmatch");
+        assert_eq!(outcome.removed, vec!["keep.txt".to_string()]);
+    }
+
+    fn bruteforce_literal_dir_removal(
+        index: &Index,
+        spec: &str,
+        ctx: PathspecMatchContext,
+        recursive: bool,
+    ) -> Vec<String> {
+        let mut tracked: std::collections::BTreeSet<String> = index
+            .entries
+            .iter()
+            .map(|e| String::from_utf8_lossy(&e.path).into_owned())
+            .collect();
+        let resolved = spec.to_string();
+        let spec_trim = resolved.trim_end_matches('/');
+        let matches: Vec<String> = tracked
+            .iter()
+            .filter(|path| {
+                matches_pathspec_list_with_context(path, std::slice::from_ref(&resolved), ctx)
+            })
+            .cloned()
+            .collect();
+        let mut selected: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        if matches.is_empty() {
+            let prefix = format!("{spec_trim}/");
+            let under: Vec<String> = tracked
+                .iter()
+                .filter(|path| path.starts_with(&prefix))
+                .cloned()
+                .collect();
+            assert!(!under.is_empty());
+            assert!(recursive);
+            selected.extend(under);
+        } else {
+            for path in matches {
+                selected.insert(path.clone());
+                if recursive {
+                    let prefix = format!("{path}/");
+                    for child in tracked.iter().filter(|p| p.starts_with(&prefix)) {
+                        selected.insert((*child).clone());
+                    }
+                }
+            }
+        }
+        let mut out: Vec<String> = selected.into_iter().collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn literal_directory_removal_matches_bruteforce_on_large_index() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        for d in 0..100 {
+            fs::create_dir_all(root.join(format!("d{d:03}"))).unwrap();
+            for f in 0..50 {
+                let rel = format!("d{d:03}/f{f:02}.txt");
+                fs::write(root.join(&rel), b"x\n").unwrap();
+            }
+        }
+        stage(
+            &repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+
+        let index = repo.load_index().expect("index");
+        let ctx = repo.pathspec_match_context();
+        let removed = rm_collect(&repo, &["d000"], true);
+        let expected = bruteforce_literal_dir_removal(&index, "d000", ctx, true);
+        assert_eq!(removed, expected);
+        assert_eq!(removed.len(), 50);
+        assert_eq!(index.entries.len(), 5000);
+    }
+
+    #[test]
+    fn precomposed_nfc_literal_removes_nfc_index_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        repo.force_pathspec_precompose_for_test();
+        let nfd = "cafe\u{301}.txt";
+        let nfc = "caf\u{e9}.txt";
+        fs::write(root.join(nfd), b"x\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+
+        let index = repo.load_index().expect("index");
+        let stored = String::from_utf8_lossy(
+            &index
+                .entries
+                .iter()
+                .find(|e| e.stage() == 0)
+                .expect("stage-0 entry")
+                .path,
+        )
+        .into_owned();
+
+        let removed = rm_collect(&repo, &[nfc], false);
+        assert_eq!(removed, vec![stored]);
+    }
+
+    #[test]
+    fn exclude_pathspec_label_does_not_select_paths() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"a\n").unwrap();
+        fs::write(root.join("b.txt"), b"b\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+
+        let outcome = remove_paths(
+            &repo,
+            &RemoveOptions {
+                pathspecs: vec!["*.txt".into(), ":(exclude)a.txt".into()],
+                pathspec_sources: vec!["*.txt".into(), ":(exclude)a.txt".into()],
+                dry_run: true,
+                force: true,
+                ..Default::default()
+            },
+        )
+        .expect("dry-run rm");
+        assert_eq!(outcome.removed.len(), 2);
+        assert!(outcome.removed.contains(&"a.txt".to_string()));
+        assert!(outcome.removed.contains(&"b.txt".to_string()));
     }
 }
 
