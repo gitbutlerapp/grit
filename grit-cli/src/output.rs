@@ -24,7 +24,8 @@ use time::OffsetDateTime;
 
 use crate::cli_messages::human_error_message;
 use crate::json_error::structured_json_payload;
-use crate::json_filter::{apply_json_filter, write_json_filter};
+use crate::json_filter::{apply_json_filter, write_json_filter_val};
+use crate::json_to_jaq;
 use crate::stdio;
 use crate::ui::entry_path;
 use grit_lib::porcelain::log::DecorationKind;
@@ -151,10 +152,9 @@ pub fn render_to_string<T: Serialize + HumanRender + MarkdownRender>(
 /// Serialize `value` to `w`, optionally applying a jq-like `filter`.
 fn write_json<T: Serialize>(w: &mut dyn Write, value: T, filter: Option<&str>) -> Result<()> {
     if let Some(expr) = filter {
-        let input_json = serde_json::to_vec(&value)
-            .map_err(|e| anyhow::anyhow!("serializing JSON output: {e}"))?;
-        drop(value);
-        write_json_filter(w, input_json, expr)?;
+        let input_val = json_to_jaq::serialize_value(value)
+            .map_err(|e| anyhow::anyhow!("serializing JSON for filter: {e}"))?;
+        write_json_filter_val(w, input_val, expr)?;
     } else {
         json_write(serde_json::to_writer(&mut *w, &value))?;
     }
