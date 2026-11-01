@@ -804,8 +804,7 @@ fn build_cache_tree_from_tree_named(
 /// (`entry_count + pos > cache_nr`), which yields the exact upstream message
 /// "corrupted cache-tree has entries not present in index".
 ///
-/// This is gated by callers behind `GIT_TEST_CHECK_CACHE_TREE`, matching upstream's
-/// `write_locked_index`.
+/// Every index write runs this check before persisting the `TREE` extension.
 pub fn verify_cache_tree(index: &Index) -> Result<()> {
     let Some(root) = index.cache_tree.as_ref() else {
         return Ok(());

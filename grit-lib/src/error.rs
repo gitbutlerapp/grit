@@ -925,10 +925,6 @@ pub enum Error {
     #[error("unsupported repository format version '{0}'")]
     UnsupportedRepositoryFormatVersion(u32),
 
-    /// Repository declares an unsupported extension.
-    #[error("unknown repository extension '{0}'")]
-    UnsupportedRepositoryExtension(String),
-
     /// `extensions.refStorage` names an unsupported backend.
     #[error("invalid value for 'extensions.refstorage': '{value}'")]
     InvalidRefStorageFormat {
@@ -1607,13 +1603,6 @@ pub enum Error {
     #[error("{0}")]
     FetchRefspec(#[from] crate::fetch_request::FetchRefspecError),
 
-    /// Fetch refused to overwrite a local branch with a non-fast-forward update.
-    #[error("non-fast-forward update for {local_ref}")]
-    FetchNonFastForward {
-        /// Local ref that would have been overwritten.
-        local_ref: String,
-    },
-
     /// Fetch refused to update the branch checked out in this or a linked worktree.
     #[error("cannot fetch into checked-out branch '{branch}'")]
     FetchIntoCheckedOutBranch {
@@ -1729,12 +1718,6 @@ pub enum Error {
         command: String,
     },
 
-    /// Legacy: abort no longer fails when `HEAD` moved;
-    /// [`abort_replay_sequence`](crate::porcelain::replay_sequence::abort_replay_sequence) returns
-    /// [`ReplayAbortOutcome::ClearedInPlace`](crate::porcelain::replay_sequence::ReplayAbortOutcome::ClearedInPlace) instead.
-    #[error("cannot abort replay: HEAD moved since replay started")]
-    ReplayAbortHeadMoved,
-
     /// [`continue_replay_sequence`](crate::porcelain::replay_sequence::continue_replay_sequence) refuses while unmerged index entries remain.
     #[error("cannot continue replay: unmerged index entries remain")]
     ReplayContinueUnmerged,
@@ -1771,29 +1754,6 @@ pub enum Error {
     /// [`list_branches`](crate::branch_tracking::list_branches) with [`BranchDetail::Names`](crate::branch_tracking::BranchDetail::Names) cannot use date sort.
     #[error("branch list with Names detail cannot use date sort (date sort reads commit objects)")]
     BranchListNamesDateSort,
-
-    /// [`delete_branch`](crate::porcelain::branch::delete_branch) refuses to delete the branch
-    /// `HEAD` points at.
-    #[error("cannot delete '{branch}' — it is the current branch")]
-    CannotDeleteCurrentBranch {
-        /// Short branch name (e.g. `main`).
-        branch: String,
-    },
-
-    /// [`delete_branch`](crate::porcelain::branch::delete_branch) without `force` found commits
-    /// on the branch that are not reachable from its upstream (or from `HEAD` when it has none).
-    #[error("the branch '{branch}' is not fully merged")]
-    BranchNotMerged {
-        /// Short branch name (e.g. `topic`).
-        branch: String,
-    },
-
-    /// `refs/tags/<tag>` does not exist.
-    #[error("no tag named '{tag}'")]
-    TagNotFound {
-        /// Short tag name (e.g. `v1.0`).
-        tag: String,
-    },
 
     /// Tag create/delete validation failure ([`crate::porcelain::tag::TagError`]).
     #[error(transparent)]
@@ -2134,7 +2094,6 @@ impl Error {
             Self::ForbiddenBareRepository(..) => "forbidden_bare_repository",
             Self::DubiousOwnership(..) => "dubious_ownership",
             Self::UnsupportedRepositoryFormatVersion(..) => "unsupported_repository_format_version",
-            Self::UnsupportedRepositoryExtension(..) => "unsupported_repository_extension",
             Self::InvalidRefStorageFormat { .. } => "invalid_ref_storage_format",
             Self::InitObjectFormatChange => "init_object_format_change",
             Self::InitBareWithSeparateGitDir => "init_bare_with_separate_git_dir",
@@ -2234,7 +2193,6 @@ impl Error {
             Self::LocalUploadPackPanicked => "local_upload_pack_panicked",
             Self::Resumable(..) => "resumable",
             Self::FetchRefspec(..) => "fetch_refspec",
-            Self::FetchNonFastForward { .. } => "fetch_non_fast_forward",
             Self::FetchIntoCheckedOutBranch { .. } => "fetch_into_checked_out_branch",
             Self::WouldOverwrite { .. } => "would_overwrite",
             Self::DirtyWorktree { .. } => "dirty_worktree",
@@ -2254,7 +2212,6 @@ impl Error {
             Self::MergeCommit { .. } => "merge_commit",
             Self::ReplaySourceAtHead => "replay_source_at_head",
             Self::SequencerUnknownCommand { .. } => "sequencer_unknown_command",
-            Self::ReplayAbortHeadMoved => "replay_abort_head_moved",
             Self::ReplayContinueUnmerged => "replay_continue_unmerged",
             Self::NoReplayInProgress => "no_replay_in_progress",
             Self::NoMergeInProgress => "no_merge_in_progress",
@@ -2262,9 +2219,6 @@ impl Error {
             Self::BranchCheckedOutInWorktree { .. } => "branch_checked_out_in_worktree",
             Self::BranchNotFound { .. } => "branch_not_found",
             Self::BranchListNamesDateSort => "branch_list_names_date_sort",
-            Self::CannotDeleteCurrentBranch { .. } => "cannot_delete_current_branch",
-            Self::BranchNotMerged { .. } => "branch_not_merged",
-            Self::TagNotFound { .. } => "tag_not_found",
             Self::Tag(..) => "tag",
             Self::Worktree(..) => "worktree",
             Self::CorruptStash(..) => "corrupt_stash",

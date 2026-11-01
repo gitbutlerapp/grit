@@ -126,17 +126,6 @@ pub fn protocol_from_user(raw: Option<&str>) -> bool {
     }
 }
 
-/// Explicit inputs for selecting the client-side Git wire protocol version.
-#[derive(Clone, Debug, Default)]
-pub struct ClientProtocolVersionInputs {
-    /// `protocol.version` from command-line config overrides such as `-c`.
-    pub config_param_version: Option<String>,
-    /// `protocol.version` from repository config.
-    pub repo_config_version: Option<String>,
-    /// `GIT_TEST_PROTOCOL_VERSION`, when set.
-    pub git_test_protocol_version: Option<String>,
-}
-
 /// Parse a protocol version digit (`0`, `1`, or `2`).
 #[must_use]
 pub fn parse_protocol_version_digit(s: &str) -> Option<u8> {
@@ -156,39 +145,14 @@ pub fn try_protocol_version_from_config_value(raw: &str) -> Result<u8, Error> {
         .ok_or_else(|| Error::Config(format!("bad protocol version '{raw}'").into()))
 }
 
-/// Select the effective client-side protocol version (strict).
+/// Effective client-side protocol version from `protocol.version` in `config`.
 ///
-/// Command-line config takes precedence over repository config, which takes precedence over
-/// `GIT_TEST_PROTOCOL_VERSION`; when none are set the default is `2`. Any configured value
-/// that is not `0`, `1`, or `2` is rejected.
-pub fn try_effective_client_protocol_version_from_inputs(
-    inputs: &ClientProtocolVersionInputs,
-) -> Result<u8, Error> {
-    if let Some(v) = inputs.config_param_version.as_deref() {
-        return try_protocol_version_from_config_value(v);
-    }
-    if let Some(v) = inputs.repo_config_version.as_deref() {
-        return try_protocol_version_from_config_value(v);
-    }
-    if let Some(raw) = inputs
-        .git_test_protocol_version
-        .as_deref()
-        .filter(|s| !s.is_empty())
-    {
-        return try_protocol_version_from_config_value(raw);
-    }
-    Ok(2)
-}
-
-/// Effective client-side protocol version from `protocol.version` in `config` only.
-///
-/// Does not read process environment; callers that honor `GIT_TEST_PROTOCOL_VERSION` must
-/// supply it via [`ClientProtocolVersionInputs`].
+/// Defaults to `2` when unset. A value that is not `0`, `1`, or `2` is rejected with
+/// [`Error::Config`].
 pub fn try_effective_client_protocol_version_from_config(config: &ConfigSet) -> Result<u8, Error> {
-    try_effective_client_protocol_version_from_inputs(&ClientProtocolVersionInputs {
-        repo_config_version: config.get("protocol.version"),
-        ..Default::default()
-    })
+    config
+        .get("protocol.version")
+        .map_or(Ok(2), |v| try_protocol_version_from_config_value(&v))
 }
 
 /// Value for the HTTP `Git-Protocol` request header for a client protocol version.
@@ -271,20 +235,18 @@ mod tests {
     }
 
     #[test]
-    fn protocol_version_inputs_honor_git_test_without_env_read_in_config_helper() {
-        let inputs = ClientProtocolVersionInputs {
-            git_test_protocol_version: Some("0".to_owned()),
-            ..Default::default()
-        };
-        assert_eq!(
-            try_effective_client_protocol_version_from_inputs(&inputs).expect("v0"),
-            0
-        );
-        let config = ConfigSet::new();
+    fn protocol_version_defaults_to_two_and_honors_config() {
+        let mut config = ConfigSet::new();
         assert_eq!(
             try_effective_client_protocol_version_from_config(&config).expect("default"),
-            2,
-            "config helper must not read GIT_TEST_PROTOCOL_VERSION from the environment"
+            2
+        );
+        config
+            .add_command_override("protocol.version", "0")
+            .expect("override");
+        assert_eq!(
+            try_effective_client_protocol_version_from_config(&config).expect("v0"),
+            0
         );
     }
 }

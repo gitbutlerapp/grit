@@ -555,9 +555,7 @@ impl Default for IndexLoadOptions {
     }
 }
 
-/// Version used after an invalid `GIT_INDEX_VERSION` value (matches Git stderr: "Using version 3").
-const INDEX_ENV_INVALID_FALLBACK: u32 = 3;
-/// Version used after an invalid `index.version` config value (same message as env).
+/// Version used after an invalid `index.version` config value.
 const INDEX_CONFIG_INVALID_FALLBACK: u32 = 3;
 /// Minimum supported index version.
 const INDEX_FORMAT_LB: u32 = 2;
@@ -740,19 +738,22 @@ fn dump_cache_tree_pair(
     }
 }
 
-/// Read `GIT_INDEX_VERSION` and return the requested version.
-///
-/// If the environment variable is unset, returns `None`.
-/// If it is set but invalid (non-numeric or out of range 2..=4), prints a
-/// warning to stderr and returns the default version.
-pub fn get_index_format_from_env() -> Option<u32> {
-    let val = crate::environment::Environment::empty().var("GIT_INDEX_VERSION")?;
-    if val.is_empty() {
-        return None;
-    }
-    match val.parse::<u32>() {
-        Ok(v) if (INDEX_FORMAT_LB..=INDEX_FORMAT_UB).contains(&v) => Some(v),
-        _ => Some(INDEX_ENV_INVALID_FALLBACK),
+/// Index format for a new index: `index.version` when valid, else 4 under `feature.manyFiles`,
+/// else 2. An invalid `index.version` falls back to [`INDEX_CONFIG_INVALID_FALLBACK`].
+fn version_from_config(index_version: Option<&str>, many_files: bool) -> u32 {
+    match index_version.map(str::trim).filter(|v| !v.is_empty()) {
+        None => {
+            if many_files {
+                4
+            } else {
+                2
+            }
+        }
+        Some(v) => v
+            .parse::<u32>()
+            .ok()
+            .filter(|v| (INDEX_FORMAT_LB..=INDEX_FORMAT_UB).contains(v))
+            .unwrap_or(INDEX_CONFIG_INVALID_FALLBACK),
     }
 }
 
@@ -830,36 +831,10 @@ pub(crate) fn apply_fsmonitor_dirty_to_entries(
 }
 
 impl Index {
-    /// Create a new, empty index.
-    ///
-    /// Respects `GIT_INDEX_VERSION` if set, otherwise defaults to version 2.
+    /// Create a new, empty index in format version 2.
     #[must_use]
     pub fn new() -> Self {
-        let version = get_index_format_from_env().unwrap_or(2);
-        Self {
-            version,
-            entries: Vec::new(),
-            entries_sorted: true,
-            sparse_directories: false,
-            untracked_cache: None,
-            fsmonitor_last_update: None,
-            fsmonitor_dirty: None,
-            fsmonitor_raw_extension: None,
-            resolve_undo: None,
-            split_link: None,
-            cache_tree_root: None,
-            cache_tree: None,
-            hash_algo: HashAlgo::Sha1,
-            source_mtime: None,
-            source_checksum: None,
-            source_file_len: None,
-            defer_untracked_cache_invalidation: false,
-            skip_racy_smudge_on_write: false,
-            content_verified: HashMap::new(),
-            fsmonitor_refresh_ran: false,
-            suppress_pre_write_index_housekeeping: false,
-            entry_modes_repaired_on_load: false,
-        }
+        Self::empty(2)
     }
 
     /// Normalize any legacy or non-canonical entry modes to Git index form.
@@ -900,13 +875,10 @@ impl Index {
         snap
     }
 
-    /// Create a new, empty index at a fixed version without consulting
-    /// `GIT_INDEX_VERSION` or config.
+    /// Create a new, empty index at a fixed version without consulting config.
     ///
-    /// Unlike [`Self::new`], this never reads the environment and therefore never
-    /// emits the "GIT_INDEX_VERSION set, but the value is invalid" warning. Use it
-    /// for throwaway baseline indexes (e.g. sparse-index diff references) where the
-    /// version is irrelevant and Git resolves the format only once per operation.
+    /// Use it for throwaway baseline indexes (e.g. sparse-index diff references)
+    /// where the version is irrelevant.
     #[must_use]
     pub fn empty(version: u32) -> Self {
         Self {
@@ -937,80 +909,14 @@ impl Index {
 
     /// Create a new empty index, respecting config values for version.
     ///
-    /// Priority matches Git's `prepare_repo_settings`: `GIT_INDEX_VERSION` env, then
-    /// `feature.manyFiles` (implies version 4), then `index.version` (overrides version).
+    /// Priority matches Git's `prepare_repo_settings`: `feature.manyFiles` (implies
+    /// version 4), then `index.version` (overrides version).
     pub fn new_with_config(
         config_index_version: Option<&str>,
         config_many_files: Option<&str>,
     ) -> Self {
-        if let Some(v) = get_index_format_from_env() {
-            return Self {
-                version: v,
-                entries: Vec::new(),
-                entries_sorted: true,
-                sparse_directories: false,
-                untracked_cache: None,
-                fsmonitor_last_update: None,
-                fsmonitor_dirty: None,
-                fsmonitor_raw_extension: None,
-                resolve_undo: None,
-                split_link: None,
-                cache_tree_root: None,
-                cache_tree: None,
-                hash_algo: HashAlgo::default(),
-                source_mtime: None,
-                source_checksum: None,
-                source_file_len: None,
-                defer_untracked_cache_invalidation: false,
-                skip_racy_smudge_on_write: false,
-                content_verified: HashMap::new(),
-                fsmonitor_refresh_ran: false,
-                suppress_pre_write_index_housekeeping: false,
-                entry_modes_repaired_on_load: false,
-            };
-        }
-
         let many_files = config_truthy(config_many_files);
-        let mut version = if many_files { 4 } else { 2 };
-
-        if let Some(val) = config_index_version {
-            let trimmed = val.trim();
-            if !trimmed.is_empty() {
-                match trimmed.parse::<u32>() {
-                    Ok(v) if (INDEX_FORMAT_LB..=INDEX_FORMAT_UB).contains(&v) => {
-                        version = v;
-                    }
-                    _ => {
-                        version = INDEX_CONFIG_INVALID_FALLBACK;
-                    }
-                }
-            }
-        }
-
-        Self {
-            version,
-            entries: Vec::new(),
-            entries_sorted: true,
-            sparse_directories: false,
-            untracked_cache: None,
-            fsmonitor_last_update: None,
-            fsmonitor_dirty: None,
-            fsmonitor_raw_extension: None,
-            resolve_undo: None,
-            split_link: None,
-            cache_tree_root: None,
-            cache_tree: None,
-            hash_algo: HashAlgo::default(),
-            source_mtime: None,
-            source_checksum: None,
-            source_file_len: None,
-            defer_untracked_cache_invalidation: false,
-            skip_racy_smudge_on_write: false,
-            content_verified: HashMap::new(),
-            fsmonitor_refresh_ran: false,
-            suppress_pre_write_index_housekeeping: false,
-            entry_modes_repaired_on_load: false,
-        }
+        Self::empty(version_from_config(config_index_version, many_files))
     }
 
     /// New empty index using a loaded [`ConfigSet`] (includes `-c` / `GIT_CONFIG_PARAMETERS`).
@@ -1019,77 +925,14 @@ impl Index {
     /// `index.version` from `config`.
     #[must_use]
     pub fn new_from_config(config: &ConfigSet) -> Self {
-        if let Some(v) = get_index_format_from_env() {
-            return Self {
-                version: v,
-                entries: Vec::new(),
-                entries_sorted: true,
-                sparse_directories: false,
-                untracked_cache: None,
-                fsmonitor_last_update: None,
-                fsmonitor_dirty: None,
-                fsmonitor_raw_extension: None,
-                resolve_undo: None,
-                split_link: None,
-                cache_tree_root: None,
-                cache_tree: None,
-                hash_algo: HashAlgo::default(),
-                source_mtime: None,
-                source_checksum: None,
-                source_file_len: None,
-                defer_untracked_cache_invalidation: false,
-                skip_racy_smudge_on_write: false,
-                content_verified: HashMap::new(),
-                fsmonitor_refresh_ran: false,
-                suppress_pre_write_index_housekeeping: false,
-                entry_modes_repaired_on_load: false,
-            };
-        }
-
         let many_files = config
             .get_bool("feature.manyFiles")
             .and_then(|r| r.ok())
             .unwrap_or(false);
-        let mut version = if many_files { 4 } else { 2 };
-
-        if let Some(val) = config.get("index.version") {
-            let trimmed = val.trim();
-            if !trimmed.is_empty() {
-                match trimmed.parse::<u32>() {
-                    Ok(v) if (INDEX_FORMAT_LB..=INDEX_FORMAT_UB).contains(&v) => {
-                        version = v;
-                    }
-                    _ => {
-                        version = INDEX_CONFIG_INVALID_FALLBACK;
-                    }
-                }
-            }
-        }
-
-        Self {
-            version,
-            entries: Vec::new(),
-            entries_sorted: true,
-            sparse_directories: false,
-            untracked_cache: None,
-            fsmonitor_last_update: None,
-            fsmonitor_dirty: None,
-            fsmonitor_raw_extension: None,
-            resolve_undo: None,
-            split_link: None,
-            cache_tree_root: None,
-            cache_tree: None,
-            hash_algo: HashAlgo::default(),
-            source_mtime: None,
-            source_checksum: None,
-            source_file_len: None,
-            defer_untracked_cache_invalidation: false,
-            skip_racy_smudge_on_write: false,
-            content_verified: HashMap::new(),
-            fsmonitor_refresh_ran: false,
-            suppress_pre_write_index_housekeeping: false,
-            entry_modes_repaired_on_load: false,
-        }
+        Self::empty(version_from_config(
+            config.get("index.version").as_deref(),
+            many_files,
+        ))
     }
 
     /// Load an index from the given file path without expanding sparse-directory placeholders.
@@ -6454,6 +6297,24 @@ mod tests {
         .unwrap();
         let idx = Index::new_from_config(&cfg);
         assert_eq!(idx.version, INDEX_CONFIG_INVALID_FALLBACK);
+    }
+
+    #[test]
+    fn version_from_config_prefers_valid_index_version_over_many_files() {
+        assert_eq!(version_from_config(None, false), 2);
+        assert_eq!(version_from_config(None, true), 4);
+        assert_eq!(version_from_config(Some("  "), true), 4);
+        assert_eq!(version_from_config(Some(" 3 "), true), 3);
+        assert_eq!(version_from_config(Some("2"), true), 2);
+        assert_eq!(
+            version_from_config(Some("5"), false),
+            INDEX_CONFIG_INVALID_FALLBACK
+        );
+        assert_eq!(
+            version_from_config(Some("x"), true),
+            INDEX_CONFIG_INVALID_FALLBACK
+        );
+        assert_eq!(Index::new().version, 2);
     }
 
     #[test]
