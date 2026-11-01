@@ -1637,6 +1637,9 @@ impl PackedRefsFileView {
         if !self.sorted {
             return self.for_each_record_fallback(path, prefix, keep, &BTreeSet::new(), &mut f);
         }
+        if keep.is_some() {
+            return self.for_each_kept_record(path, prefix, keep, f);
+        }
         let mut prove = |_: &str, _: ObjectId, _: PackedPeel| ControlFlow::Continue(());
         match self.walk_records(path, prefix, keep, false, &mut prove) {
             Err(StreamRecordsError::OutOfOrder) => {
@@ -1652,6 +1655,39 @@ impl PackedRefsFileView {
             }
             Err(StreamRecordsError::Packed(e)) => Err(e),
         }
+    }
+
+    /// [`Self::for_each_record`] for a filtered scan of a sorted file, in one strict pass.
+    ///
+    /// A filter usually rejects most records, so the ones it keeps are held (borrowed from
+    /// the file) until the whole range has parsed and proved in order, instead of parsing
+    /// the range a second time to emit them. `f` sees nothing when the range is corrupt or
+    /// out of order, as with the unfiltered two-pass walk.
+    fn for_each_kept_record(
+        &self,
+        path: &Path,
+        prefix: Option<&str>,
+        keep: Option<PackedRecordFilter<'_>>,
+        mut f: impl FnMut(&str, ObjectId, PackedPeel) -> ControlFlow<()>,
+    ) -> Result<ControlFlow<()>> {
+        let mut kept = Vec::new();
+        let mut hold = |name, oid, peel| {
+            kept.push((name, oid, peel));
+            ControlFlow::Continue(())
+        };
+        match self.walk_records(path, prefix, keep, true, &mut hold) {
+            Ok(_) => {}
+            Err(StreamRecordsError::OutOfOrder) => {
+                return self.for_each_record_fallback(path, prefix, keep, &BTreeSet::new(), &mut f);
+            }
+            Err(StreamRecordsError::Packed(e)) => return Err(e),
+        }
+        for (name, oid, peel) in kept {
+            if f(name, oid, peel).is_break() {
+                return Ok(ControlFlow::Break(()));
+            }
+        }
+        Ok(ControlFlow::Continue(()))
     }
 
     fn for_each_record_fallback(
@@ -1677,13 +1713,13 @@ impl PackedRefsFileView {
         Ok(ControlFlow::Continue(()))
     }
 
-    fn walk_records(
-        &self,
+    fn walk_records<'s>(
+        &'s self,
         path: &Path,
         prefix: Option<&str>,
         keep: Option<PackedRecordFilter<'_>>,
         emit: bool,
-        f: &mut impl FnMut(&str, ObjectId, PackedPeel) -> ControlFlow<()>,
+        f: &mut impl FnMut(&'s str, ObjectId, PackedPeel) -> ControlFlow<()>,
     ) -> std::result::Result<ControlFlow<()>, StreamRecordsError> {
         let prefix_trim = prefix.map(|p| p.trim_end_matches('/'));
         let prefix_upper = if self.sorted {
@@ -1699,8 +1735,8 @@ impl PackedRefsFileView {
         let (mut pos, end) = self.record_scan_range(prefix_trim, prefix_upper.as_deref());
         let mut prev_name = "";
         let mut expect_peel = false;
-        let mut pending: Option<(&str, ObjectId, Option<ObjectId>)> = None;
-        let mut flush = |pending: &mut Option<(&str, ObjectId, Option<ObjectId>)>| {
+        let mut pending: Option<(&'s str, ObjectId, Option<ObjectId>)> = None;
+        let mut flush = |pending: &mut Option<(&'s str, ObjectId, Option<ObjectId>)>| {
             let Some((refname, oid, peeled)) = pending.take() else {
                 return Ok(ControlFlow::Continue(()));
             };
@@ -6610,6 +6646,115 @@ mod packed_refs_parse_tests {
         assert!(view
             .for_each_record(&path, None, None, |_, _, _| ControlFlow::Continue(()))
             .is_err());
+    }
+
+    fn collect_records(
+        view: &PackedRefsFileView,
+        path: &Path,
+        keep: Option<PackedRecordFilter<'_>>,
+    ) -> Result<Vec<(String, ObjectId, PackedPeel)>> {
+        let mut out = Vec::new();
+        view.for_each_record(path, None, keep, |name, oid, peel| {
+            out.push((name.to_owned(), oid, peel));
+            ControlFlow::Continue(())
+        })?;
+        Ok(out)
+    }
+
+    #[test]
+    fn filtered_record_walk_emits_the_unfiltered_walk_minus_rejected_records() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let one = "1111111111111111111111111111111111111111";
+        let two = "2222222222222222222222222222222222222222";
+        let tag = "3333333333333333333333333333333333333333";
+        let body = format!(
+            "# pack-refs with: peeled fully-peeled sorted\n\
+             {one} refs/heads/a\n{two} refs/heads/b\n{tag} refs/tags/v1\n^{one}\n{two} refs/tags/v2\n"
+        );
+        let view =
+            PackedRefsFileView::from_bytes(&path, body.into_bytes(), HashAlgo::Sha1).unwrap();
+        let target: ObjectId = one.parse().unwrap();
+        let keep = |_: &str, oid: &ObjectId, peel: PackedPeel| match peel {
+            PackedPeel::Peeled(peeled) => peeled == target,
+            PackedPeel::NotTag | PackedPeel::Unknown => *oid == target,
+        };
+
+        let all = collect_records(&view, &path, None).unwrap();
+        let expected: Vec<_> = all
+            .into_iter()
+            .filter(|(name, oid, peel)| keep(name, oid, *peel))
+            .collect();
+        let kept = collect_records(&view, &path, Some(&keep)).unwrap();
+        assert_eq!(kept, expected);
+        let names: Vec<&str> = kept.iter().map(|(name, _, _)| name.as_str()).collect();
+        assert_eq!(names, ["refs/heads/a", "refs/tags/v1"]);
+        assert_eq!(kept[1].2, PackedPeel::Peeled(target));
+    }
+
+    #[test]
+    fn filtered_record_walk_emits_nothing_before_a_corrupt_line() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let oid = "1111111111111111111111111111111111111111";
+        let body = format!(
+            "# pack-refs with: peeled fully-peeled sorted\n\
+             {oid} refs/heads/good\n{oid} refs/heads/good2\n{oid} refs/heads/bad..name\n"
+        );
+        let view =
+            PackedRefsFileView::from_bytes(&path, body.into_bytes(), HashAlgo::Sha1).unwrap();
+        let keep_all = |_: &str, _: &ObjectId, _: PackedPeel| true;
+        let mut emitted = 0;
+        let result = view.for_each_record(&path, None, Some(&keep_all), |_, _, _| {
+            emitted += 1;
+            ControlFlow::Continue(())
+        });
+        assert!(matches!(
+            result,
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+        assert_eq!(emitted, 0);
+    }
+
+    #[test]
+    fn filtered_record_walk_stops_when_the_visitor_breaks() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let oid = "1111111111111111111111111111111111111111";
+        let body = format!(
+            "# pack-refs with: peeled fully-peeled sorted\n\
+             {oid} refs/heads/a\n{oid} refs/heads/b\n{oid} refs/heads/c\n"
+        );
+        let view =
+            PackedRefsFileView::from_bytes(&path, body.into_bytes(), HashAlgo::Sha1).unwrap();
+        let keep_all = |_: &str, _: &ObjectId, _: PackedPeel| true;
+        let mut seen = Vec::new();
+        let flow = view
+            .for_each_record(&path, None, Some(&keep_all), |name, _, _| {
+                seen.push(name.to_owned());
+                if seen.len() == 2 {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            })
+            .unwrap();
+        assert!(flow.is_break());
+        assert_eq!(seen, ["refs/heads/a", "refs/heads/b"]);
+    }
+
+    #[test]
+    fn filtered_record_walk_of_a_lying_sorted_file_returns_every_kept_ref() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let (lying, _) = lying_and_unsorted_views(&path);
+        let keep_all = |_: &str, _: &ObjectId, _: PackedPeel| true;
+        let names: Vec<String> = collect_records(&lying, &path, Some(&keep_all))
+            .unwrap()
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect();
+        assert_eq!(names, ["refs/heads/a", "refs/heads/b", "refs/tags/t"]);
     }
 
     #[test]
