@@ -8,7 +8,6 @@ use std::error::Error as StdError;
 
 use anyhow::Error;
 use grit_lib::error::{AuthFailure, Error as LibError, OverwriteReason, RemoteUnreadableReason};
-use grit_lib::revwalk::history::RebaseSessionError;
 use grit_lib::porcelain::branch::BranchError;
 use grit_lib::porcelain::merge::ContinueMergeError;
 use grit_lib::porcelain::pull::PullError;
@@ -16,6 +15,7 @@ use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::github_auth::is_github_https_url;
 use grit_lib::remote::push_plan::PushPlanError;
 use grit_lib::remote::{RemoteError, DEFAULT_REMOTE};
+use grit_lib::revwalk::history::RebaseSessionError;
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 
 use crate::error_kind::ErrorKind;

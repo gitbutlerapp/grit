@@ -1776,7 +1776,6 @@ mod serve_upload_pack_promisor;
 #[cfg(feature = "full-tests")]
 #[path = "serve_upload_pack_v2_fetch.rs"]
 mod serve_upload_pack_v2_fetch;
-#[cfg(feature = "full-tests")]
 #[path = "session_cancel.rs"]
 mod session_cancel;
 #[cfg(feature = "full-tests")]
