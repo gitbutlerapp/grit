@@ -103,6 +103,10 @@ pub const CASES: &[(&str, Case)] = &[
         "symref_head_deref_delete_recreate_branch",
         symref_head_deref_delete_recreate_branch,
     ),
+    (
+        "symref_head_deref_delete_recreate_branch_with_reflog",
+        symref_head_deref_delete_recreate_branch_with_reflog,
+    ),
     ("symref_no_deref_delete", symref_no_deref_delete),
     (
         "symref_unborn_referent_created",
@@ -855,6 +859,44 @@ pub fn symref_head_deref_delete_recreate_branch(store: Arc<dyn RefStore>) {
     assert_eq!(
         store.read_raw("refs/heads/main").expect("main"),
         Some(RawRef::Direct(oid(2)))
+    );
+}
+
+/// Same batch as [`symref_head_deref_delete_recreate_branch`], but the recreate carries a reflog.
+pub fn symref_head_deref_delete_recreate_branch_with_reflog(store: Arc<dyn RefStore>) {
+    let mut seed = update(
+        "refs/heads/main",
+        Some(RawRef::Direct(oid(1))),
+        Expected::Missing,
+    );
+    seed.reflog = Some(sample_log());
+    commit_txn(
+        store.as_ref(),
+        RefTransaction::new().update(seed).expect("seed"),
+    );
+    seed_symref(store.as_ref(), "HEAD", "refs/heads/main");
+    assert!(store.reflog_exists("refs/heads/main").expect("seed log"));
+
+    let mut recreate = update(
+        "refs/heads/main",
+        Some(RawRef::Direct(oid(2))),
+        Expected::Missing,
+    );
+    recreate.reflog = Some(sample_log());
+    let txn = RefTransaction::new()
+        .update(update("HEAD", None, Expected::Any))
+        .expect("delete head deref")
+        .update(recreate)
+        .expect("recreate main");
+    commit_txn(store.as_ref(), txn);
+
+    assert_eq!(
+        store.read_raw("refs/heads/main").expect("main"),
+        Some(RawRef::Direct(oid(2)))
+    );
+    assert!(
+        store.reflog_exists("refs/heads/main").expect("exists"),
+        "recreate reflog must survive after deref delete of HEAD in the same batch"
     );
 }
 

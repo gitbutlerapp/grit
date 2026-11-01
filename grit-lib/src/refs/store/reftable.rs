@@ -1,7 +1,7 @@
 //! Reftable-backed [`super::RefStore`] over [`crate::reftable::ReftableStack`].
 
 use std::borrow::ToOwned;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::fs;
 use std::ops::ControlFlow;
@@ -439,6 +439,22 @@ fn log_record_from_update(
     })
 }
 
+fn logical_reflog_names_touched(
+    git_dir: &Path,
+    refs: &BTreeMap<String, RawRef>,
+    update: &RefUpdate,
+) -> Vec<String> {
+    let mut names = vec![update.name.clone()];
+    if let Some(target_name) = deref_reflog_target(refs, update) {
+        let (target_store, _) = reftable_storage_location(git_dir, &target_name);
+        let (update_store, _) = reftable_storage_location(git_dir, &update.name);
+        if target_store == update_store {
+            names.push(target_name);
+        }
+    }
+    names
+}
+
 fn build_reftable_updates_for_stack(
     git_dir: &Path,
     refs: &BTreeMap<String, RawRef>,
@@ -448,7 +464,7 @@ fn build_reftable_updates_for_stack(
     let mut ref_values: BTreeMap<String, Option<RefValue>> = BTreeMap::new();
     let mut expected_old_for_ref: BTreeMap<String, Option<ObjectId>> = BTreeMap::new();
     let mut log_updates: Vec<ReftableTransactionUpdate> = Vec::new();
-    let mut deleted_reflogs: Vec<String> = Vec::new();
+    let mut clear_reflog: HashMap<String, bool> = HashMap::new();
 
     for update in updates {
         let ref_delete = !update.flags.log_only && update.new_value.is_none();
@@ -458,7 +474,12 @@ fn build_reftable_updates_for_stack(
                 reflogs: BTreeMap::new(),
             };
             if let Ok(Some(name)) = ref_change_target(&snapshot, update) {
-                deleted_reflogs.push(name);
+                clear_reflog.insert(name, true);
+            }
+        }
+        if update.reflog.is_some() {
+            for name in logical_reflog_names_touched(git_dir, &trial, update) {
+                clear_reflog.insert(name, false);
             }
         }
         let target = reftable_write_target(&trial, git_dir, update)?;
@@ -510,6 +531,11 @@ fn build_reftable_updates_for_stack(
         });
     }
     out.extend(log_updates);
+    let deleted_reflogs = clear_reflog
+        .into_iter()
+        .filter(|(_, clear)| *clear)
+        .map(|(name, _)| name)
+        .collect();
     Ok((out, deleted_reflogs))
 }
 
