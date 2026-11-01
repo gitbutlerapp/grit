@@ -22,7 +22,10 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
+
+use crate::progress::{Cancel, NeverCancel};
 
 /// Whether `err` means the OS would not execute the file as a program, so it must be run
 /// through a shell (`ENOEXEC` on Unix, `ERROR_BAD_EXE_FORMAT` on Windows).
@@ -115,6 +118,9 @@ pub enum HookError {
     /// Configuration or internal error while resolving hooks.
     #[error("{0}")]
     Internal(String),
+    /// The hook subprocess was stopped because the operation was cancelled.
+    #[error("hook run cancelled")]
+    Cancelled,
 }
 
 impl HookError {
@@ -123,7 +129,7 @@ impl HookError {
     pub fn output(&self) -> Option<&HookOutput> {
         match self {
             HookError::Failed { output, .. } | HookError::Spawn { output, .. } => Some(output),
-            HookError::Internal(_) => None,
+            HookError::Internal(_) | HookError::Cancelled => None,
         }
     }
 }
@@ -972,6 +978,135 @@ pub struct RunHookOptions<'a> {
 /// [`HookOutput`], or written by the child straight to this process's stderr. The library
 /// never re-emits what a hook (or an injected [`CommandRunner`]) produced.
 ///
+const HOOK_WAIT_POLL: Duration = Duration::from_millis(50);
+
+#[cfg(unix)]
+fn kill_pid_sigkill(pid: u32) {
+    if let Ok(pid) = libc::pid_t::try_from(pid) {
+        // SAFETY: `pid` is a hook child this process spawned.
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_pid_sigkill(_pid: u32) {}
+
+fn wait_hook_command(
+    child: RunningCommand,
+    capture: bool,
+    cancel: &dyn Cancel,
+    output: &mut HookOutput,
+) -> Result<crate::command_runner::CommandExit, HookError> {
+    use crate::command_runner::CommandOutput;
+
+    if cancel.is_cancelled() {
+        return stop_hook_child(child, capture, output);
+    }
+
+    if child.child_pid().is_none() {
+        return finish_hook_wait(child, capture, output);
+    }
+
+    let pid = child.child_pid();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let result = if capture {
+            child.wait_with_output()
+        } else {
+            child.wait().map(|status| CommandOutput {
+                status,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            })
+        };
+        let _ = tx.send(result);
+    });
+
+    loop {
+        if cancel.is_cancelled() {
+            if let Some(pid) = pid {
+                kill_pid_sigkill(pid);
+            }
+            if let Ok(Ok(out)) = rx.recv_timeout(HOOK_WAIT_POLL.saturating_mul(20)) {
+                if capture {
+                    output.stdout.extend_from_slice(&out.stdout);
+                    output.stderr.extend_from_slice(&out.stderr);
+                }
+            }
+            return Err(HookError::Cancelled);
+        }
+        match rx.try_recv() {
+            Ok(Ok(out)) => {
+                if capture {
+                    output.stdout.extend_from_slice(&out.stdout);
+                    output.stderr.extend_from_slice(&out.stderr);
+                }
+                return Ok(out.status);
+            }
+            Ok(Err(_)) => {
+                return Ok(crate::command_runner::CommandExit {
+                    success: false,
+                    code: Some(1),
+                });
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                std::thread::sleep(HOOK_WAIT_POLL);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                return Ok(crate::command_runner::CommandExit {
+                    success: false,
+                    code: Some(1),
+                });
+            }
+        }
+    }
+}
+
+fn stop_hook_child(
+    child: RunningCommand,
+    capture: bool,
+    output: &mut HookOutput,
+) -> Result<crate::command_runner::CommandExit, HookError> {
+    let pid = child.child_pid();
+    let mut child = child;
+    let _ = child.kill();
+    let _ = finish_hook_wait(child, capture, output);
+    if let Some(pid) = pid {
+        kill_pid_sigkill(pid);
+    }
+    Err(HookError::Cancelled)
+}
+
+fn finish_hook_wait(
+    child: RunningCommand,
+    capture: bool,
+    output: &mut HookOutput,
+) -> Result<crate::command_runner::CommandExit, HookError> {
+    if capture {
+        match child.wait_with_output() {
+            Ok(out) => {
+                output.stdout.extend_from_slice(&out.stdout);
+                output.stderr.extend_from_slice(&out.stderr);
+                Ok(out.status)
+            }
+            Err(_) => Ok(crate::command_runner::CommandExit {
+                success: false,
+                code: Some(1),
+            }),
+        }
+    } else {
+        match child.wait() {
+            Ok(status) => Ok(status),
+            Err(_) => Ok(crate::command_runner::CommandExit {
+                success: false,
+                code: Some(1),
+            }),
+        }
+    }
+}
+
 /// # Errors
 ///
 /// [`HookError::Spawn`] when a hook (or the shell that runs it) cannot be started, carrying the
@@ -983,6 +1118,17 @@ pub fn run_hook_opts(
     args: &[&str],
     config: &ConfigSet,
     opts: RunHookOptions<'_>,
+) -> Result<HookResult, HookError> {
+    run_hook_opts_with_cancel(repo, hook_name, args, config, opts, &NeverCancel)
+}
+
+fn run_hook_opts_with_cancel(
+    repo: Option<&Repository>,
+    hook_name: &str,
+    args: &[&str],
+    config: &ConfigSet,
+    opts: RunHookOptions<'_>,
+    cancel: &dyn Cancel,
 ) -> Result<HookResult, HookError> {
     let seq = match repo {
         Some(r) => resolve_hook_sequence(r, hook_name, config)?,
@@ -1100,18 +1246,10 @@ pub fn run_hook_opts(
             child.close_stdin();
         }
 
-        let waited = if capture {
-            child.wait_with_output().map(|o| {
-                output.stdout.extend_from_slice(&o.stdout);
-                output.stderr.extend_from_slice(&o.stderr);
-                o.status
-            })
-        } else {
-            child.wait()
-        };
-        let exit = match waited {
+        let exit = match wait_hook_command(child, capture, cancel, &mut output) {
             Ok(exit) => exit,
-            Err(_) => return Ok(HookResult::Failed { status: 1, output }),
+            Err(HookError::Cancelled) => return Err(HookError::Cancelled),
+            Err(other) => return Err(other),
         };
 
         if !exit.success {
@@ -1165,10 +1303,22 @@ pub fn run_commit_hook(
     stdin_data: Option<&[u8]>,
     commit_env: &CommitHookEnv<'_>,
 ) -> Result<HookResult, HookError> {
+    run_commit_hook_with_cancel(repo, hook_name, args, stdin_data, commit_env, &NeverCancel)
+}
+
+/// Like [`run_commit_hook`] but honours [`Cancel`] while hook subprocesses run.
+pub(crate) fn run_commit_hook_with_cancel(
+    repo: &Repository,
+    hook_name: &str,
+    args: &[&str],
+    stdin_data: Option<&[u8]>,
+    commit_env: &CommitHookEnv<'_>,
+    cancel: &dyn Cancel,
+) -> Result<HookResult, HookError> {
     let config = repo
         .config()
         .map_err(|e| HookError::Internal(e.to_string()))?;
-    run_hook_opts(
+    run_hook_opts_with_cancel(
         Some(repo),
         hook_name,
         args,
@@ -1178,6 +1328,7 @@ pub fn run_commit_hook(
             commit_env: Some(commit_env),
             ..repo_hook_options(repo, hook_name)
         },
+        cancel,
     )
 }
 
@@ -1448,6 +1599,7 @@ impl RefHookContext {
                 stdio: self.hook_stdio,
                 ..RunHookOptions::default()
             },
+            &NeverCancel,
         )?;
         if phase == ReferenceTransactionPhase::Prepared {
             result.check("reference-transaction")?;
@@ -1546,6 +1698,7 @@ fn run_hook_opts_for_ref_context(
     args: &[&str],
     config: &ConfigSet,
     opts: RunHookOptions<'_>,
+    cancel: &dyn Cancel,
 ) -> Result<HookResult, HookError> {
     let seq = resolve_hook_sequence_for_ref(ctx, hook_name, config)?;
     if seq.is_empty() {
@@ -1649,18 +1802,10 @@ fn run_hook_opts_for_ref_context(
             child.close_stdin();
         }
 
-        let waited = if capture {
-            child.wait_with_output().map(|o| {
-                output.stdout.extend_from_slice(&o.stdout);
-                output.stderr.extend_from_slice(&o.stderr);
-                o.status
-            })
-        } else {
-            child.wait()
-        };
-        let exit = match waited {
+        let exit = match wait_hook_command(child, capture, cancel, &mut output) {
             Ok(exit) => exit,
-            Err(_) => return Ok(HookResult::Failed { status: 1, output }),
+            Err(HookError::Cancelled) => return Err(HookError::Cancelled),
+            Err(other) => return Err(other),
         };
 
         if !exit.success {

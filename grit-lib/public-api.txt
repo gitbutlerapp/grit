@@ -1166,6 +1166,7 @@ pub fn grit_lib::change_id::set_change_id(&mut grit_lib::objects::CommitData, &g
 pub mod grit_lib::command_runner
 pub mod grit_lib::command_runner::hooks
 pub enum grit_lib::command_runner::hooks::HookError
+pub grit_lib::command_runner::hooks::HookError::Cancelled
 pub grit_lib::command_runner::hooks::HookError::Failed
 pub grit_lib::command_runner::hooks::HookError::Failed::hook_name: alloc::string::String
 pub grit_lib::command_runner::hooks::HookError::Failed::output: grit_lib::command_runner::hooks::HookOutput
@@ -1612,12 +1613,15 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::Recor
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::RecordingRunner
 pub struct grit_lib::command_runner::RunningCommand
 impl grit_lib::command_runner::RunningCommand
+pub fn grit_lib::command_runner::RunningCommand::child_pid(&self) -> core::option::Option<u32>
 pub fn grit_lib::command_runner::RunningCommand::close_stdin(&mut self)
 pub fn grit_lib::command_runner::RunningCommand::from_recording(grit_lib::command_runner::CommandExit, core::option::Option<alloc::vec::Vec<u8>>, alloc::vec::Vec<u8>, bool) -> Self
 pub fn grit_lib::command_runner::RunningCommand::from_system(std::process::Child, core::option::Option<std::process::ChildStdin>, core::option::Option<std::process::ChildStdout>, core::option::Option<std::process::ChildStderr>) -> Self
 pub fn grit_lib::command_runner::RunningCommand::into_system_parts(self) -> core::result::Result<(std::process::Child, core::option::Option<std::process::ChildStdin>, core::option::Option<std::process::ChildStdout>, core::option::Option<std::process::ChildStderr>), grit_lib::command_runner::CommandHandleError>
+pub fn grit_lib::command_runner::RunningCommand::kill(&mut self) -> core::io::error::Result<()>
 pub fn grit_lib::command_runner::RunningCommand::stdin_mut(&mut self) -> core::option::Option<&mut dyn core::io::write::Write>
 pub fn grit_lib::command_runner::RunningCommand::stdout_mut(&mut self) -> core::option::Option<&mut dyn alloc::io::read::Read>
+pub fn grit_lib::command_runner::RunningCommand::try_wait(&mut self) -> core::io::error::Result<core::option::Option<grit_lib::command_runner::CommandExit>>
 pub fn grit_lib::command_runner::RunningCommand::wait(self) -> core::io::error::Result<grit_lib::command_runner::CommandExit>
 pub fn grit_lib::command_runner::RunningCommand::wait_with_output(self) -> core::io::error::Result<grit_lib::command_runner::CommandOutput>
 impl core::marker::Freeze for grit_lib::command_runner::RunningCommand
@@ -1933,6 +1937,7 @@ pub fn grit_lib::commit::format_git_timestamp(time::offset_date_time::OffsetDate
 pub fn grit_lib::commit::normalize_commit_date_override(&str) -> core::result::Result<alloc::string::String, grit_lib::config::git_date::parse::DateParseError>
 pub fn grit_lib::commit::parse_date_to_git_timestamp(&str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::commit::parse_trailer_command_line_arg(&str) -> core::result::Result<(alloc::string::String, alloc::string::String), grit_lib::commit::TrailerArgParseError>
+pub fn grit_lib::commit::resolve_core_abbrev_len(&grit_lib::config::ConfigSet, &grit_lib::objects::odb::Odb) -> grit_lib::error::Result<usize>
 pub mod grit_lib::config
 pub mod grit_lib::config::dotfile
 pub fn grit_lib::config::dotfile::dotfile_matches(&str, &str) -> bool
@@ -32241,7 +32246,6 @@ impl core::marker::Unpin for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::marker::UnsafeUnpin for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::ref_storage::RefStorageFormat
-pub fn grit_lib::commit::resolve_core_abbrev_len(&grit_lib::config::ConfigSet, &grit_lib::objects::odb::Odb) -> grit_lib::error::Result<usize>
 pub struct grit_lib::OidAbbrevBatch
 impl grit_lib::OidAbbrevBatch
 pub fn grit_lib::OidAbbrevBatch::abbrev_known(&mut self, &grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::error::Result<alloc::string::String>

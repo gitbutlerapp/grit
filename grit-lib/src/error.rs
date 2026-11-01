@@ -1970,7 +1970,7 @@ pub enum Error {
 
     /// A Git hook subprocess failed or could not be started.
     #[error(transparent)]
-    Hook(#[from] crate::hooks::HookError),
+    Hook(crate::hooks::HookError),
 
     /// History rewrite planning failed ([`crate::history::HistoryError`]).
     #[error(transparent)]
@@ -2477,6 +2477,15 @@ impl Error {
             Error::WouldOverwrite { message, .. } => message.clone(),
             e if e.wants_fatal_prefix() => crate::diagnostics::fatal_line(&e.to_string()),
             other => other.to_string(),
+        }
+    }
+}
+
+impl From<crate::hooks::HookError> for Error {
+    fn from(err: crate::hooks::HookError) -> Self {
+        match err {
+            crate::hooks::HookError::Cancelled => Self::Cancelled,
+            other => Self::Hook(other),
         }
     }
 }

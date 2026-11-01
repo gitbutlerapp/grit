@@ -78,7 +78,7 @@ use crate::state::{
 use crate::stripspace::{process as stripspace_process, Mode as StripspaceMode};
 use thiserror::Error;
 
-use crate::hooks::{run_commit_hook, CommitHookEnv, HookName};
+use crate::hooks::{CommitHookEnv, HookName};
 use crate::porcelain::add::stage_for_commit_on_index;
 use crate::porcelain::commit::{
     create_commit_with_loaded_index, default_commit_scope_from_config, run_commit_message_hooks,
@@ -1275,6 +1275,7 @@ fn integrate_at_tip_without_hooks(
                 other_oid,
                 merged.result_tree,
                 merge_message_text(label, options.message.as_deref()),
+                cancel,
             )?;
             let mut commit = CommitData {
                 tree,
@@ -2017,6 +2018,7 @@ fn run_merge_commit_hooks(
     other_oid: ObjectId,
     tree: ObjectId,
     message: String,
+    cancel: &dyn Cancel,
 ) -> Result<(ObjectId, String)> {
     let git_dir = repo.git_dir();
     let index_path = repo.index_path();
@@ -2030,7 +2032,9 @@ fn run_merge_commit_hooks(
         let mut tree = tree;
         if verify != HookPolicy::SkipVerify {
             let name = HookName::PreMergeCommit.as_str();
-            if run_commit_hook(repo, name, &[], None, &env)?.check(name)? {
+            if crate::hooks::run_commit_hook_with_cancel(repo, name, &[], None, &env, cancel)?
+                .check(name)?
+            {
                 let index = repo.load_index()?;
                 if index.has_unmerged_entries() {
                     return Err(Error::IndexUnmerged);
@@ -2046,6 +2050,7 @@ fn run_merge_commit_hooks(
             verify,
             &env,
             &mut Vec::new(),
+            cancel,
         )?;
         Ok((tree, edited.unwrap_or_else(|| message.clone())))
     };

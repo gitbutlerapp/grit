@@ -395,6 +395,8 @@ mod commit_graph_shallow_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "commit_graph_write_coverage.rs"]
 mod commit_graph_write_coverage;
+#[path = "commit_hook_cancel.rs"]
+mod commit_hook_cancel;
 #[cfg(feature = "full-tests")]
 #[path = "commit_identity_create_git_compat.rs"]
 mod commit_identity_create_git_compat;
@@ -1809,6 +1811,7 @@ mod serve_upload_pack_promisor;
 #[cfg(feature = "full-tests")]
 #[path = "serve_upload_pack_v2_fetch.rs"]
 mod serve_upload_pack_v2_fetch;
+#[cfg(feature = "full-tests")]
 #[path = "session_cancel.rs"]
 mod session_cancel;
 #[cfg(feature = "full-tests")]

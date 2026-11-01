@@ -224,6 +224,7 @@ impl ReferenceTransactionHookErr {
             crate::hooks::HookError::Internal(msg) => {
                 crate::hooks::HookError::Internal(msg.clone())
             }
+            crate::hooks::HookError::Cancelled => crate::hooks::HookError::Cancelled,
         })
     }
 }

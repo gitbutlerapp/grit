@@ -77,6 +77,50 @@ fn ctrl_c_during_commit_leaves_no_lock_and_allows_retry() {
 
 #[cfg(unix)]
 #[test]
+fn sigterm_during_sleep_pre_commit_hook_exits_promptly_without_lock() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let base = tempfile::tempdir().expect("tempdir");
+    let repo = base.path().join("repo");
+    fs::create_dir_all(&repo).expect("mkdir");
+    grit_cmd(&["init"]).in_dir(&repo).suc();
+    fs::write(repo.join("a"), "a\n").expect("write");
+    grit_cmd(&["commit", "-m", "base"]).in_dir(&repo).suc();
+
+    let hook = repo.join(".git/hooks/pre-commit");
+    fs::create_dir_all(hook.parent().expect("hooks dir")).expect("mkdir");
+    fs::write(&hook, "#!/bin/sh\nsleep 25\n").expect("hook");
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    fs::write(repo.join("a"), "ab\n").expect("dirty");
+
+    let mut child = spawn_grit(&repo, &["commit", "-m", "two"]);
+    std::thread::sleep(Duration::from_secs(1));
+    interrupt_common::sigterm(&child);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while child.try_wait().expect("wait").is_none() {
+        assert!(
+            Instant::now() < deadline,
+            "grit stayed alive in pre-commit after SIGTERM"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let out = child.wait_with_output().expect("wait");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        git_dir_locks(&repo).is_empty(),
+        "locks after SIGTERM during hook: {:?}\n{stderr}",
+        git_dir_locks(&repo)
+    );
+    assert!(
+        stderr.contains("operation cancelled"),
+        "expected cancellation message, got: {stderr}"
+    );
+    grit_cmd(&["commit", "-m", "three"]).in_dir(&repo).suc();
+}
+
+#[cfg(unix)]
+#[test]
 fn sigterm_and_sighup_during_commit_leave_no_lock() {
     use interrupt_common::{sighup, sigterm};
 

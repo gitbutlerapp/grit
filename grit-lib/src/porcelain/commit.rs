@@ -25,8 +25,7 @@ use crate::history::{
     ensure_rewrite_apply_ready, persist_rebase_stopped_head_if_missing, HistoryError,
 };
 use crate::hooks::{
-    run_advisory_hook, run_commit_hook, run_post_rewrite, CommitHookEnv, HookError, HookName,
-    PostOperationHooks, RewriteKind,
+    run_advisory_hook, run_post_rewrite, CommitHookEnv, HookName, PostOperationHooks, RewriteKind,
 };
 use crate::ident::{
     fsck_commit_idents, parse_signature_times, prepare_commit_author_from_parent,
@@ -119,6 +118,7 @@ pub(crate) fn run_commit_message_hooks(
     verify: HookPolicy,
     commit_env: &CommitHookEnv<'_>,
     hooks_run: &mut Vec<HookName>,
+    cancel: &dyn Cancel,
 ) -> Result<Option<String>> {
     let path_arg = commit_editmsg_hook_argument(repo, msg_path);
     let source_oid;
@@ -138,11 +138,19 @@ pub(crate) fn run_commit_message_hooks(
         &prepare_args,
         None,
         commit_env,
+        cancel,
     )? {
         hooks_run.push(HookName::PrepareCommitMsg);
     }
     if verify != HookPolicy::SkipVerify
-        && run_commit_hook_recorded(repo, HookName::CommitMsg, &[&path_arg], None, commit_env)?
+        && run_commit_hook_recorded(
+            repo,
+            HookName::CommitMsg,
+            &[&path_arg],
+            None,
+            commit_env,
+            cancel,
+        )?
     {
         hooks_run.push(HookName::CommitMsg);
     }
@@ -832,8 +840,18 @@ fn run_commit_hook_recorded(
     args: &[&str],
     stdin_data: Option<&[u8]>,
     commit_env: &CommitHookEnv<'_>,
-) -> std::result::Result<bool, HookError> {
-    run_commit_hook(repo, hook.as_str(), args, stdin_data, commit_env)?.check(hook.as_str())
+    cancel: &dyn Cancel,
+) -> Result<bool> {
+    crate::hooks::run_commit_hook_with_cancel(
+        repo,
+        hook.as_str(),
+        args,
+        stdin_data,
+        commit_env,
+        cancel,
+    )?
+    .check(hook.as_str())
+    .map_err(Error::from)
 }
 
 fn author_info_from_header_line(line: &str) -> CommitAuthorInfo {
@@ -1539,9 +1557,9 @@ pub(crate) fn create_commit_with_loaded_index(
 /// compares against that same tip, so a commit landed by another process in between makes this
 /// one fail instead of silently reverting it.
 ///
-/// Cancellation is checked before anything is written and again after the pre-commit and
-/// commit-msg hooks, before the commit object; once the object is written the ref update always
-/// follows.
+/// Cancellation is checked before anything is written, while commit hooks run (including a
+/// long-running `pre-commit`), and again before the commit object is written; once the object is
+/// written the ref update always follows.
 #[allow(clippy::too_many_arguments)]
 fn create_commit_with_index(
     repo: &Repository,
@@ -1666,7 +1684,7 @@ fn create_commit_with_index(
     };
     let mut hooks_run = Vec::new();
     if req.hooks != HookPolicy::SkipVerify
-        && run_commit_hook_recorded(repo, HookName::PreCommit, &[], None, &commit_env)?
+        && run_commit_hook_recorded(repo, HookName::PreCommit, &[], None, &commit_env, cancel)?
     {
         hooks_run.push(HookName::PreCommit);
     }
@@ -1726,6 +1744,7 @@ fn create_commit_with_index(
         req.hooks,
         &commit_env,
         &mut hooks_run,
+        cancel,
     )? {
         message = edited;
     }

@@ -294,6 +294,44 @@ impl RunningCommand {
         }
     }
 
+    /// OS pid when this handle wraps a live child; `None` for synthetic recording handles.
+    #[must_use]
+    pub fn child_pid(&self) -> Option<u32> {
+        match &self.inner {
+            RunningCommandInner::System { child, .. } => Some(child.id()),
+            RunningCommandInner::Recording { .. } => None,
+        }
+    }
+
+    /// Poll whether the child has exited without blocking.
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O errors from [`Child::try_wait`].
+    pub fn try_wait(&mut self) -> io::Result<Option<CommandExit>> {
+        match &mut self.inner {
+            RunningCommandInner::System { child, .. } => {
+                child.try_wait().map(|opt| opt.map(Into::into))
+            }
+            RunningCommandInner::Recording { state, .. } => {
+                let guard = state.lock().unwrap_or_else(|e| e.into_inner());
+                Ok(Some(guard.exit))
+            }
+        }
+    }
+
+    /// Send `SIGKILL` to a live child (Unix) or terminate it (Windows).
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O errors from [`Child::kill`].
+    pub fn kill(&mut self) -> io::Result<()> {
+        match &mut self.inner {
+            RunningCommandInner::System { child, .. } => child.kill(),
+            RunningCommandInner::Recording { .. } => Ok(()),
+        }
+    }
+
     /// Readable stdout when the spec requested a pipe.
     pub fn stdout_mut(&mut self) -> Option<&mut dyn Read> {
         match &mut self.inner {
