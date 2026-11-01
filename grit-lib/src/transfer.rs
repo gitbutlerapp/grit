@@ -3175,6 +3175,39 @@ fn decide_push(
         });
     };
 
+    if let Some(tag_decision) = existing_tag_push_decision(spec, &spec.dst, old, src) {
+        return Ok(match tag_decision {
+            ExistingTagPushDecision::Reject => PushDecision {
+                result: PushRefResult {
+                    local_ref: push_spec_local_ref(spec),
+                    remote_ref: spec.dst.clone(),
+                    old_oid: Some(old),
+                    new_oid: Some(src),
+                    forced: false,
+                    deletion: false,
+                    status: PushRefStatus::RejectAlreadyExists,
+                    message: Some(PUSH_TAG_EXISTS_MESSAGE.to_owned()),
+                },
+                action: PushAction::None,
+                apply: false,
+            },
+            ExistingTagPushDecision::ForcedUpdate => PushDecision {
+                result: PushRefResult {
+                    local_ref: push_spec_local_ref(spec),
+                    remote_ref: spec.dst.clone(),
+                    old_oid: Some(old),
+                    new_oid: Some(src),
+                    forced: true,
+                    deletion: false,
+                    status: PushRefStatus::Ok,
+                    message: None,
+                },
+                action: PushAction::Update(src),
+                apply: true,
+            },
+        });
+    }
+
     // Existing ref: fast-forward when the remote's current commit is an ancestor
     // of the source. Otherwise it is a non-fast-forward update, allowed only with
     // force (reported as forced).
@@ -3672,6 +3705,34 @@ fn ref_target_exists(local_odb: &Odb, remote_odb: &Odb, tag_oid: ObjectId) -> Re
         Ok((peeled, _)) => local_odb.contains(&peeled),
         Err(_) => Ok(false),
     }
+}
+
+/// Message on [`PushRefStatus::RejectAlreadyExists`] when an existing remote tag
+/// would change without `--force`. Distinct from the create race message `"already exists"`.
+pub(crate) const PUSH_TAG_EXISTS_MESSAGE: &str = "tag already exists";
+
+/// Outcome for updating a remote tag that already exists (Git never fast-forwards tags).
+pub(crate) enum ExistingTagPushDecision {
+    Reject,
+    ForcedUpdate,
+}
+
+/// When `spec` updates `refs/tags/*` and the remote already has a different oid, Git rejects
+/// unless `spec.force` is set (even when peeled commits fast-forward).
+pub(crate) fn existing_tag_push_decision(
+    spec: &PushRefSpec,
+    dst: &str,
+    old: ObjectId,
+    src: ObjectId,
+) -> Option<ExistingTagPushDecision> {
+    if spec.delete || !dst.starts_with("refs/tags/") || old == src {
+        return None;
+    }
+    Some(if spec.force {
+        ExistingTagPushDecision::ForcedUpdate
+    } else {
+        ExistingTagPushDecision::Reject
+    })
 }
 
 /// Classify a single ref update into an [`UpdateMode`].

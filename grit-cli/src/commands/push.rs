@@ -172,10 +172,19 @@ impl HumanRender for PushOutcome {
                     PushRefStatus::RejectRemoteRefMissing => {
                         outln!(w, "  rejected {target}: remote ref does not exist")
                     }
-                    PushRefStatus::RejectAlreadyExists => outln!(
-                        w,
-                        "  rejected {target}: created on the remote meanwhile — run `grit fetch` and try again"
-                    ),
+                    PushRefStatus::RejectAlreadyExists => {
+                        if result.reason.as_deref() == Some("tag_exists") {
+                            outln!(
+                                w,
+                                "  rejected {target}: tag already exists (use `--force` to replace)"
+                            );
+                        } else {
+                            outln!(
+                                w,
+                                "  rejected {target}: created on the remote meanwhile — run `grit fetch` and try again"
+                            );
+                        }
+                    }
                     _ => {
                         let detail = result.reason.as_deref().unwrap_or("rejected");
                         outln!(w, "  rejected {target}: {detail}");
@@ -340,7 +349,13 @@ pub fn run(
                 ),
                 PushRefStatus::RejectStale => Some("stale".to_owned()),
                 PushRefStatus::RejectRemoteRefMissing => Some("remote_ref_missing".to_owned()),
-                PushRefStatus::RejectAlreadyExists => Some("already_exists".to_owned()),
+                PushRefStatus::RejectAlreadyExists => {
+                    if result.message.as_deref() == Some("tag already exists") {
+                        Some("tag_exists".to_owned())
+                    } else {
+                        Some("already_exists".to_owned())
+                    }
+                }
                 _ => Some(
                     result
                         .message

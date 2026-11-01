@@ -2107,7 +2107,12 @@ pub fn print_push_results(
                 result.ref_name
             ),
             crate::commands::push::PushRefOutcomeStatus::Rejected => {
-                let reason = result.reason.as_deref().unwrap_or("rejected");
+                let reason = match result.reason.as_deref() {
+                    Some("tag_exists") => {
+                        "tag already exists (use `--force` to replace)".to_owned()
+                    }
+                    other => other.unwrap_or("rejected").to_owned(),
+                };
                 outln!(
                     w,
                     "- **`{}`** · rejected `{target}`: {reason}",

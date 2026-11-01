@@ -1363,6 +1363,8 @@ mod push_packed_tag_regression;
 #[cfg(feature = "full-tests")]
 #[path = "push_plan_git_compat.rs"]
 mod push_plan_git_compat;
+#[path = "push_tag_update_git_compat.rs"]
+mod push_tag_update_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "quote_path_git_compat.rs"]
 mod quote_path_git_compat;
