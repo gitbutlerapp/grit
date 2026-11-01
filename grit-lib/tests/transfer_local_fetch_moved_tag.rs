@@ -8,6 +8,13 @@ use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode, UpdateMode};
 use grit_test_support::git;
 
+fn following_remote_heads() -> FetchOptions {
+    let mut opts = FetchOptions::new();
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    opts.tags = TagMode::Following;
+    opts
+}
+
 #[test]
 fn fetch_local_following_ignores_moved_tag_without_force() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -25,9 +32,7 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
     let local_git = local.join(".git");
     let remote_git = remote.join(".git");
 
-    let mut opts = FetchOptions::new();
-    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
-    opts.tags = TagMode::Following;
+    let opts = following_remote_heads();
     fetch_local(&local_git, &remote_git, &opts).expect("initial fetch");
 
     let tag_before = resolve_ref(&local_git, "refs/tags/newtag").expect("tag after first fetch");
@@ -71,10 +76,30 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
         .output()
         .expect("git rev-parse");
     assert!(out.status.success());
-    let mut git_tag = FetchOptions::new();
-    git_tag.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
-    git_tag.tags = TagMode::Following;
-    fetch_local(&local_git, &remote_git, &git_tag).expect("seed");
+    let git_tag =
+        ObjectId::from_hex(String::from_utf8_lossy(&out.stdout).trim()).expect("git tag oid");
+    assert_eq!(git_tag, tag_before);
+}
+
+#[test]
+fn fetch_local_all_tags_rejects_moved_tag_until_force() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote = tmp.path().join("remote");
+    std::fs::create_dir_all(&remote).unwrap();
+    git(&remote, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(remote.join("a.txt"), b"a\n").unwrap();
+    git(&remote, &["add", "a.txt"]);
+    git(&remote, &["commit", "-q", "-m", "a"]);
+    git(&remote, &["tag", "newtag"]);
+
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+    let remote_git = remote.join(".git");
+
+    let base = following_remote_heads();
+    fetch_local(&local_git, &remote_git, &base).expect("seed");
 
     let tag_before = resolve_ref(&local_git, "refs/tags/newtag").unwrap();
     std::fs::write(remote.join("b.txt"), b"b\n").unwrap();
@@ -83,7 +108,7 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
     git(&remote, &["tag", "-f", "newtag"]);
     let tag_after = rev_parse(&remote, "refs/tags/newtag");
 
-    let mut all_tags = FetchOptions::new();
+    let mut all_tags = base.clone();
     all_tags.tags = TagMode::All;
     let rejected = fetch_local(&local_git, &remote_git, &all_tags).expect("fetch --tags");
     assert!(rejected.has_rejections());
@@ -98,7 +123,7 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
         tag_before
     );
 
-    let mut forced = FetchOptions::new();
+    let mut forced = all_tags;
     forced.force = true;
     let applied = fetch_local(&local_git, &remote_git, &forced).expect("fetch --tags --force");
     assert!(!applied.has_rejections());

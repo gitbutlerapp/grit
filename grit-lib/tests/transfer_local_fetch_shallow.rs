@@ -330,6 +330,8 @@ fn shallow_tag_following_uses_requested_history_and_tag_mode() {
         git(&comparison, &git_args);
         let mut fetch_opts = FetchOptions::new();
         fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+        fetch_opts.fetch_depth = fetch_depth;
+        fetch_opts.tags = tags;
         fetch_local(&client.join(".git"), &source, &fetch_opts).unwrap();
         assert_tag_history_matches_git(&client, &comparison);
         if tags == TagMode::Following {
@@ -386,6 +388,9 @@ fn unshallow_preserves_negative_refspecs_and_existing_tags() {
             refspecs.push("^refs/tags/v1".into());
         }
         let mut fetch_opts = FetchOptions::new();
+        fetch_opts.refspecs = refspecs;
+        fetch_opts.tags = TagMode::Following;
+        fetch_opts.fetch_depth = Some(FetchDepth::Unshallow);
         let outcome = fetch_local(&client.join(".git"), &source, &fetch_opts).unwrap();
         if existing {
             assert!(

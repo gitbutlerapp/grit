@@ -575,6 +575,8 @@ fn commit_request(message: &str, amend: bool) -> CommitRequest {
         let mut req = CommitRequest::new(message);
         req.author = Some(IDENT.parse().expect("signature"));
         req.committer = Some(IDENT.parse().expect("signature"));
+        req.amend = amend;
+        req.allow_empty = true;
         req
     }
 }

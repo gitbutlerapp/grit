@@ -24,6 +24,7 @@ fn commit_req(message: &str, allow_empty: bool) -> CommitRequest {
         let mut req = CommitRequest::new(message.to_owned());
         req.author = Some(id.parse().expect("signature"));
         req.committer = Some(id.parse().expect("signature"));
+        req.allow_empty = allow_empty;
         req
     }
 }

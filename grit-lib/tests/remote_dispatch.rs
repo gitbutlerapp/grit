@@ -409,6 +409,132 @@ fn remote_push_local_file_url_matches_git() {
     git(Some(&bare), &["fsck", "--strict"]);
 }
 
+struct DaemonFixture {
+    _tmp: tempfile::TempDir,
+    _guard: ChildGuard,
+    url: String,
+    bare: PathBuf,
+}
+
+fn daemon_fixture() -> Option<DaemonFixture> {
+    let tmp = tempfile::tempdir().ok()?;
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).ok()?;
+    build_source(&work);
+    let base = tmp.path().join("daemon");
+    std::fs::create_dir_all(&base).ok()?;
+    let bare = base.join("r.git");
+    git(Some(&work), &["clone", "-q", "--bare", ".", bare.to_str()?]);
+    let port = free_port()?;
+    let child = spawn_daemon(&base, port)?;
+    let guard = ChildGuard(child);
+    if !wait_tcp(port) {
+        return None;
+    }
+    Some(DaemonFixture {
+        url: format!("git://127.0.0.1:{port}/r.git"),
+        bare,
+        _tmp: tmp,
+        _guard: guard,
+    })
+}
+
+#[test]
+fn list_refs_git_daemon_v0_matches_git() {
+    let Some(fixture) = daemon_fixture() else {
+        panic!("git daemon fixture unavailable in this environment");
+    };
+    let url = &fixture.url;
+    let remote = Remote::from_url(url).unwrap();
+    let opts = ListRefsOptions {
+        symrefs: true,
+        peel: false,
+        protocol_version: Some(0),
+        ..Default::default()
+    };
+    let refs = remote.list_refs(None, &opts, None).unwrap();
+    assert!(!refs.is_empty(), "v0 daemon list_refs must return refs");
+    assert_refs_match_git(url, &refs, &opts, &[]);
+}
+
+#[test]
+fn list_refs_git_daemon_v2_pattern_main_matches_git() {
+    let Some(fixture) = daemon_fixture() else {
+        panic!("git daemon fixture unavailable in this environment");
+    };
+    let url = &fixture.url;
+    let remote = Remote::from_url(url).unwrap();
+    let opts = ListRefsOptions {
+        prefixes: vec!["main".to_owned()],
+        protocol_version: Some(2),
+        ..Default::default()
+    };
+    let refs = remote.list_refs(None, &opts, None).unwrap();
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].name, "refs/heads/main");
+
+    let mut cmd = Command::new("git");
+    cmd.args(["ls-remote", url, "main"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null");
+    let out = cmd.output().expect("git ls-remote pattern");
+    assert!(out.status.success());
+    let git_out = String::from_utf8(out.stdout).expect("utf8");
+    assert!(git_out.contains("refs/heads/main"));
+}
+
+#[test]
+fn list_refs_git_daemon_v2_matches_git() {
+    let Some(fixture) = daemon_fixture() else {
+        panic!("git daemon fixture unavailable in this environment");
+    };
+    let url = &fixture.url;
+    let remote = Remote::from_url(url).unwrap();
+    let opts = ListRefsOptions {
+        symrefs: true,
+        peel: false,
+        protocol_version: Some(2),
+        ..Default::default()
+    };
+    let refs = remote.list_refs(None, &opts, None).unwrap();
+    assert!(!refs.is_empty(), "v2 daemon list_refs must return refs");
+    assert_refs_match_git(url, &refs, &opts, &[]);
+}
+
+#[test]
+fn remote_fetch_git_daemon_matches_git() {
+    let Some(fixture) = daemon_fixture() else {
+        panic!("git daemon fixture unavailable in this environment");
+    };
+    let url = &fixture.url;
+    let local = fixture._tmp.path().join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    git(Some(&local), &["init", "-q", "-b", "main", "."]);
+    let repo = Repository::open(
+        &local.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(&local),
+    )
+    .unwrap();
+    let remote = Remote::from_url(url).unwrap();
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    fetch_opts.tags = TagMode::Following;
+    remote
+        .fetch(
+            &repo,
+            fetch_opts,
+            &mut grit_lib::remote::fetch::NoProgress,
+            &grit_lib::progress::NeverCancel,
+            None,
+        )
+        .unwrap();
+    let main_git =
+        ObjectId::from_hex(git(Some(&fixture.bare), &["rev-parse", "refs/heads/main"]).trim())
+            .unwrap();
+    let main_grit = resolve_ref(repo.git_dir(), "refs/remotes/origin/main").unwrap();
+    assert_eq!(main_git, main_grit);
+}
+
 #[test]
 fn list_refs_ssh_matches_git_ls_remote() {
     let (_tmp, bare) = bare_fixture();

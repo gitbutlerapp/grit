@@ -694,6 +694,9 @@ fn v2_tag_modes_all_and_following() {
         };
         assert_eq!(conn.protocol_version(), 2);
         let mut opts = FetchOptions::new();
+        // Only fetch main; tags come via TagMode.
+        opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+        opts.tags = TagMode::All;
         fetch_remote(
             &local_git,
             &mut *conn,
