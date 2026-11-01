@@ -488,6 +488,7 @@ pub(super) fn run_exec_at_tip(
     }
     ensure_worktree_clean_for_rebase_exec(repo).map_err(map_clean_error)?;
     let worktree = repo.work_tree().ok_or(HistoryError::BareRepository)?;
+    repo.odb().flush_for_publish().map_err(exec_io)?;
     update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &tip).map_err(exec_io)?;
     let tip_tree = commit_tree_for_apply(repo, tip)?;
     let prestate = capture_exec_prestate(repo)?;
@@ -636,6 +637,11 @@ fn execute_plan(
                 pending_pick: false,
             },
         )?;
+        repo.odb()
+            .flush_for_publish()
+            .map_err(|e| HistoryError::WorktreeApply {
+                message: e.to_string(),
+            })?;
         update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &tip).map_err(|e| {
             HistoryError::WorktreeApply {
                 message: e.to_string(),
