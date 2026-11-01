@@ -4,8 +4,10 @@
 //! default merge-base selection, `--all`, `--octopus`, `--independent`,
 //! and `--is-ancestor`.
 
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, BinaryHeap, HashSet, VecDeque};
+use std::rc::Rc;
 
 use crate::error::{Error, Result};
 use crate::ewah_bitmap::Bitmap;
@@ -1595,10 +1597,110 @@ pub(crate) fn first_parent_hidden_frontier(
 ///
 /// Computes a two-sided paint once instead of closing every ancestor of `hide`, so bounded
 /// walks with pathspecs or commit filters stop at the merge-base frontier.
-#[derive(Clone, Debug, Default)]
+///
+/// [`Self::try_for_dense_path_hide`] seeds a lazy hide-side cursor instead of painting every
+/// commit on the included side of `A..B`, which matters for path-limited `-n` walks on large
+/// ranges when a commit-graph supplies generations.
+#[derive(Clone, Default)]
 pub(crate) struct RangeWalkHide {
     hide_tips: OidHashSet,
     paint: SidePaint,
+    lazy: Option<Rc<RefCell<LazyHidePaint>>>,
+}
+
+impl std::fmt::Debug for RangeWalkHide {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RangeWalkHide")
+            .field("hide_tips", &self.hide_tips)
+            .field("paint", &self.paint)
+            .field("lazy_hide", &self.lazy.is_some())
+            .finish()
+    }
+}
+
+/// Incremental hide-side paint for [`RangeWalkHide::try_for_dense_path_hide`].
+struct LazyHidePaint {
+    max_hide_rank: u64,
+    sides: OidHashMap<u8>,
+    heap: BinaryHeap<PaintKey>,
+    queued: OidHashSet,
+    popped: OidHashSet,
+    seq: u64,
+}
+
+impl LazyHidePaint {
+    fn seed(cache: &mut CommitGraphCache<'_>, hide: &[ObjectId]) -> Result<Self> {
+        let mut hide_tips = oid_hash_set();
+        let mut max_hide_rank = 0u64;
+        cache.prime_tips(hide);
+        for &tip in hide {
+            let Some(tip) = cache.peel_tip(tip)? else {
+                continue;
+            };
+            hide_tips.insert(tip);
+            max_hide_rank = max_hide_rank.max(commit_rank_for_walk(cache, tip));
+        }
+        let mut lazy = Self {
+            max_hide_rank,
+            sides: oid_hash_map(),
+            heap: BinaryHeap::new(),
+            queued: oid_hash_set(),
+            popped: oid_hash_set(),
+            seq: 0,
+        };
+        for tip in hide_tips {
+            lazy.enqueue_hide(cache, tip)?;
+        }
+        Ok(lazy)
+    }
+
+    fn enqueue_hide(&mut self, cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<()> {
+        self.sides.insert(oid, PAINT_RIGHT);
+        if self.queued.insert(oid) {
+            push_commit_heap_key(cache, &mut self.heap, &mut self.seq, oid)?;
+        }
+        Ok(())
+    }
+
+    fn is_hidden(
+        &mut self,
+        cache: &mut CommitGraphCache<'_>,
+        hide_tips: &OidHashSet,
+        oid: ObjectId,
+    ) -> Result<bool> {
+        if hide_tips.contains(&oid) {
+            return Ok(true);
+        }
+        let rank = commit_rank_for_walk(cache, oid);
+        if rank != UNRANKED_COMMIT && rank > self.max_hide_rank {
+            return Ok(false);
+        }
+        self.expand_until(cache, oid)?;
+        match self.sides.get(&oid) {
+            Some(side) => Ok(side & PAINT_RIGHT != 0),
+            None => Ok(true),
+        }
+    }
+
+    /// Walk hide-side ancestry in commit-graph generation order until `oid` is classified or
+    /// the frontier closes.
+    fn expand_until(&mut self, cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<()> {
+        while !self.sides.contains_key(&oid) {
+            let Some(node) = self.heap.pop() else {
+                break;
+            };
+            if !self.popped.insert(node.oid) {
+                continue;
+            }
+            for parent in cache.parents_of(node.oid)? {
+                if self.queued.insert(parent) {
+                    self.sides.insert(parent, PAINT_RIGHT);
+                    push_commit_heap_key(cache, &mut self.heap, &mut self.seq, parent)?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl RangeWalkHide {
@@ -1612,6 +1714,49 @@ impl RangeWalkHide {
     #[must_use]
     pub fn is_active(&self) -> bool {
         !self.hide_tips.is_empty()
+    }
+
+    /// Whether [`Self::is_hidden_with_cache`] needs a [`CommitGraphCache`].
+    #[must_use]
+    pub fn uses_lazy_hide(&self) -> bool {
+        self.lazy.is_some()
+    }
+
+    /// Hide predicate for dense path-limited range walks when a commit-graph can bound the paint.
+    ///
+    /// Falls back to [`Self::for_range_walk`] when generations are unavailable or parent lists
+    /// may be rewritten by grafts, replacements, or shallow boundaries.
+    ///
+    /// # Errors
+    ///
+    /// Propagates commit read and parse errors while seeding the lazy hide cursor.
+    pub fn try_for_dense_path_hide(
+        repo: &Repository,
+        include: &[ObjectId],
+        hide: &[ObjectId],
+        use_commit_graph: bool,
+        list_first_parent_only: bool,
+    ) -> Result<Self> {
+        if hide.is_empty() {
+            return Ok(Self::empty());
+        }
+        let mut cache = CommitGraphCache::with_commit_graph(repo, use_commit_graph);
+        if cache.graph.is_some() && !cache.has_parent_rewrites()? {
+            let lazy = LazyHidePaint::seed(&mut cache, hide)?;
+            Ok(Self {
+                hide_tips: hide.iter().copied().collect(),
+                paint: SidePaint::default(),
+                lazy: Some(Rc::new(RefCell::new(lazy))),
+            })
+        } else {
+            Self::for_range_walk(
+                repo,
+                include,
+                hide,
+                use_commit_graph,
+                list_first_parent_only,
+            )
+        }
     }
 
     /// Paint `tips` against `hide` for subsequent [`Self::is_hidden`] checks.
@@ -1644,12 +1789,44 @@ impl RangeWalkHide {
         Ok(Self {
             hide_tips: hide.iter().copied().collect(),
             paint,
+            lazy: None,
         })
     }
 
     /// Whether `oid` lies in hidden history and must not be listed or traversed.
+    ///
+    /// For lazy hide predicates, pass a [`CommitGraphCache`] via [`Self::is_hidden_with_cache`].
     #[must_use]
     pub fn is_hidden(&self, oid: ObjectId) -> bool {
+        self.is_hidden_eager(oid)
+    }
+
+    /// Like [`Self::is_hidden`], but supports lazy hide-side expansion when configured.
+    ///
+    /// # Errors
+    ///
+    /// Propagates commit read and parse errors from lazy hide expansion.
+    pub fn is_hidden_with_cache(
+        &self,
+        cache: &mut Option<CommitGraphCache<'_>>,
+        oid: ObjectId,
+    ) -> Result<bool> {
+        if !self.is_active() {
+            return Ok(false);
+        }
+        if self.hide_tips.contains(&oid) {
+            return Ok(true);
+        }
+        if let Some(lazy) = &self.lazy {
+            let cache = cache.as_mut().ok_or_else(|| {
+                Error::Message("lazy range hide requires a CommitGraphCache".into())
+            })?;
+            return lazy.borrow_mut().is_hidden(cache, &self.hide_tips, oid);
+        }
+        Ok(self.is_hidden_eager(oid))
+    }
+
+    fn is_hidden_eager(&self, oid: ObjectId) -> bool {
         if !self.is_active() {
             return false;
         }
@@ -2994,7 +3171,7 @@ fn reduce_to_best(
 /// front; merge-base and range walks start from one or two tips and keep the plain reads.
 const PRIME_TIPS_MIN: usize = 64;
 
-struct CommitGraphCache<'r> {
+pub(crate) struct CommitGraphCache<'r> {
     repo: &'r Repository,
     closures: OidHashMap<OidHashSet>,
     promisor_stop: OidHashSet,
@@ -3029,7 +3206,7 @@ impl<'r> CommitGraphCache<'r> {
     }
 
     /// `use_commit_graph: false` leaves [`Self::graph`] empty so every lookup parses the commit.
-    fn with_commit_graph(repo: &'r Repository, use_commit_graph: bool) -> Self {
+    pub(crate) fn with_commit_graph(repo: &'r Repository, use_commit_graph: bool) -> Self {
         let cfg = repo.config().unwrap_or_default();
         // Stop ancestry traversal only at genuinely-missing promisor objects, not
         // at every member of a promisor pack. The clone base commit lives in a

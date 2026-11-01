@@ -37,6 +37,20 @@ impl WalkExclude {
     fn is_excluded(&self, oid: ObjectId) -> bool {
         self.set.contains(&oid) || self.paint.as_ref().is_some_and(|hide| hide.is_hidden(oid))
     }
+
+    fn is_excluded_with_hide_cache(
+        &self,
+        cache: &mut Option<crate::merge_base::CommitGraphCache<'_>>,
+        oid: ObjectId,
+    ) -> Result<bool> {
+        if self.set.contains(&oid) {
+            return Ok(true);
+        }
+        if let Some(hide) = &self.paint {
+            return hide.is_hidden_with_cache(cache, oid);
+        }
+        Ok(false)
+    }
 }
 use crate::objects::{
     oid_hash_map, oid_hash_set, parse_commit, parse_tag, parse_tree, CommitData, CommitRef,
@@ -1229,6 +1243,17 @@ pub fn rev_list(
             .0,
             paint: None,
         }
+    } else if use_dense_path_limit {
+        WalkExclude {
+            set: HashSet::new(),
+            paint: Some(RangeWalkHide::try_for_dense_path_hide(
+                repo,
+                &include,
+                &exclude,
+                options.use_commit_graph,
+                options.first_parent && !options.exclude_first_parent_only,
+            )?),
+        }
     } else {
         WalkExclude {
             set: HashSet::new(),
@@ -1310,12 +1335,21 @@ pub fn rev_list(
             cwd: bloom_cwd.as_deref(),
         };
         let paths = RevPathspecCheck::build(repo, &options.paths)?;
+        let mut hide_cache = walk_exclude.paint.as_ref().and_then(|hide| {
+            hide.uses_lazy_hide().then(|| {
+                crate::merge_base::CommitGraphCache::with_commit_graph(
+                    repo,
+                    options.use_commit_graph,
+                )
+            })
+        });
         let (selected, walked, walk_order) = repo.odb().with_pack_read_context(|| {
             walk_dense_path_limited_closure(
                 repo,
                 &mut graph,
                 &include,
                 &walk_exclude,
+                &mut hide_cache,
                 &paths,
                 options.sparse,
                 options.show_pulls,
@@ -4538,6 +4572,7 @@ fn walk_dense_path_limited_closure(
     graph: &mut CommitGraph<'_>,
     tips: &[ObjectId],
     excluded: &WalkExclude,
+    hide_cache: &mut Option<crate::merge_base::CommitGraphCache<'_>>,
     paths: &RevPathspecCheck<'_>,
     sparse: bool,
     show_pulls: bool,
@@ -4556,7 +4591,7 @@ fn walk_dense_path_limited_closure(
         let mut queue: VecDeque<(ObjectId, String)> =
             tips.iter().map(|t| (*t, initial.clone())).collect();
         while let Some((oid, follow_path)) = queue.pop_front() {
-            if excluded.is_excluded(oid) || !walked.insert(oid) {
+            if excluded.is_excluded_with_hide_cache(hide_cache, oid)? || !walked.insert(oid) {
                 continue;
             }
             walk_order.push(oid);
@@ -4588,7 +4623,7 @@ fn walk_dense_path_limited_closure(
     } else {
         let mut queue: VecDeque<ObjectId> = tips.iter().copied().collect();
         while let Some(oid) = queue.pop_front() {
-            if excluded.is_excluded(oid) || !walked.insert(oid) {
+            if excluded.is_excluded_with_hide_cache(hide_cache, oid)? || !walked.insert(oid) {
                 continue;
             }
             walk_order.push(oid);
@@ -4601,7 +4636,9 @@ fn walk_dense_path_limited_closure(
             }
 
             for parent in action.parents_to_walk {
-                if !excluded.is_excluded(parent) && !walked.contains(&parent) {
+                if !excluded.is_excluded_with_hide_cache(hide_cache, parent)?
+                    && !walked.contains(&parent)
+                {
                     queue.push_back(parent);
                 }
             }
@@ -7029,13 +7066,16 @@ fn try_bounded_path_limit_list(
     };
     let mut graph =
         CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
-    let excluded = RangeWalkHide::for_range_walk(
+    let excluded = RangeWalkHide::try_for_dense_path_hide(
         repo,
         include,
         exclude,
         options.use_commit_graph,
         options.first_parent,
     )?;
+    let mut hide_cache = excluded.uses_lazy_hide().then(|| {
+        crate::merge_base::CommitGraphCache::with_commit_graph(repo, options.use_commit_graph)
+    });
 
     let (bloom_chain, bloom_read_changed, bloom_version, bloom_cwd) =
         dense_bloom_context_for_paths(repo, repo_config, options);
@@ -7072,7 +7112,7 @@ fn try_bounded_path_limit_list(
     let mut queued = HashSet::new();
     let mut next_seq = 0u64;
     for &tip in include {
-        if excluded.is_hidden(tip) || !queued.insert(tip) {
+        if excluded.is_hidden_with_cache(&mut hide_cache, tip)? || !queued.insert(tip) {
             continue;
         }
         heap.push(CommitDateKey {
@@ -7090,7 +7130,7 @@ fn try_bounded_path_limit_list(
     let mut ordered = Vec::with_capacity(max_count.min(64));
     while let Some(item) = heap.pop() {
         let oid = item.oid;
-        if excluded.is_hidden(oid) {
+        if excluded.is_hidden_with_cache(&mut hide_cache, oid)? {
             continue;
         }
 
@@ -10473,16 +10513,41 @@ mod tests {
             t += 1;
         }
         let tip = write_commit_on_tree(&repo, parent, path_tree, "touch path", t)?;
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &tip)?;
         Ok((dir, repo, hide, tip))
     }
 
     #[test]
+    fn bounded_range_path_limit_lazy_hide_with_commit_graph() -> Result<()> {
+        use crate::maintenance::{write_commit_graph, CommitGraphOptions};
+
+        let (dir, repo, hide, tip) = seed_hide_chain_range_path_repo(300, 8)?;
+        write_commit_graph(&repo, &CommitGraphOptions::default())?;
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let hide_predicate =
+            RangeWalkHide::try_for_dense_path_hide(&repo, &[tip], &[hide], true, false)?;
+        assert!(hide_predicate.uses_lazy_hide());
+        let opts = RevListOptions {
+            max_count: Some(1),
+            paths: vec!["tracked.txt".to_owned()],
+            use_commit_graph: true,
+            ..Default::default()
+        };
+        let result = rev_list(&repo, &[tip.to_hex()], &[hide.to_hex()], &opts)?;
+        assert_eq!(result.commits, vec![tip]);
+        Ok(())
+    }
+
+    #[test]
     fn bounded_range_path_limit_parent_lookups_stay_in_range() -> Result<()> {
+        use crate::maintenance::{write_commit_graph, CommitGraphOptions};
         use crate::merge_base::intersect_walk_test_hooks::{
             commit_parent_lookups, reset_commit_parent_lookups,
         };
 
-        let (_dir, repo, hide, tip) = seed_hide_chain_range_path_repo(300, 8)?;
+        let (dir, repo, hide, tip) = seed_hide_chain_range_path_repo(300, 8)?;
+        write_commit_graph(&repo, &CommitGraphOptions::default())?;
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
         let opts = RevListOptions {
             max_count: Some(1),
             paths: vec!["tracked.txt".to_owned()],
