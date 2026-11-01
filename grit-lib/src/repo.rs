@@ -2713,12 +2713,17 @@ impl Repository {
         Some(s)
     }
 
-    /// Whether this is a bare repository (no working tree).
+    /// Whether this handle has no working tree, matching `git rev-parse --is-bare-repository`.
+    ///
+    /// When `core.bare` is explicitly `false`, this is always `false` (even without a work tree).
+    /// Otherwise it is `true` only when [`Repository::work_tree`](Self::work_tree) is `None`.
+    /// A linked checkout of a bare repository therefore returns `false` while the bare git dir
+    /// opened without a work tree stays `true`.
     #[must_use]
     pub fn is_bare(&self) -> bool {
         if let Ok(cfg) = self.config() {
-            if let Some(Ok(bare)) = cfg.get_bool("core.bare") {
-                return bare;
+            if matches!(cfg.get_bool("core.bare"), Some(Ok(false))) {
+                return false;
             }
         }
         self.work_tree.is_none()
