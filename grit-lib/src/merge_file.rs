@@ -3536,5 +3536,4 @@ mod tests {
             "{rendered}"
         );
     }
-
 }
