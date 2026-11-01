@@ -305,6 +305,82 @@ fn basename_duplicate_fixture(count: usize, rename_limit: i64) -> RenameBenchFix
     }
 }
 
+/// Issue #2436: repeated but disjoint basenames (`f*` delete vs `g*` add).
+fn basename_disjoint_duplicate_fixture(count: usize) -> RenameBenchFixture {
+    let root = TempDir::new().expect("tempdir");
+    let git_dir = root.path().join(".git");
+    std::fs::create_dir_all(git_dir.join("objects")).expect("objects");
+    let odb = Odb::new(&git_dir.join("objects"));
+    let mut entries: Vec<DiffEntry> = Vec::with_capacity(count * 2);
+    for i in 0..count {
+        let old_oid = odb
+            .write(ObjectKind::Blob, format!("old payload {i}\n").as_bytes())
+            .expect("write old");
+        let new_oid = odb
+            .write(ObjectKind::Blob, format!("new payload {i}\n").as_bytes())
+            .expect("write new");
+        entries.push(DiffEntry {
+            status: DiffStatus::Deleted,
+            old_path: Some(format!("a/d{}/f{}.txt", i / 50, i % 50)),
+            new_path: None,
+            old_mode: FileMode::REGULAR,
+            new_mode: FileMode::ABSENT,
+            old_oid,
+            new_oid: zero_oid(),
+            score: None,
+        });
+        entries.push(DiffEntry {
+            status: DiffStatus::Added,
+            old_path: None,
+            new_path: Some(format!("b/d{}/g{}.txt", i / 50, i % 50)),
+            old_mode: FileMode::ABSENT,
+            new_mode: FileMode::REGULAR,
+            old_oid: zero_oid(),
+            new_oid,
+            score: None,
+        });
+    }
+    RenameBenchFixture {
+        _root: root,
+        odb,
+        entries,
+        config: bench_config(),
+    }
+}
+
+fn bench_diff_renames_basename_disjoint_duplicates(c: &mut Criterion) {
+    let policy = ThreadPolicy::with_threads_override(Some(1))
+        .min_items_override(Some(0))
+        .min_total_bytes_override(Some(0));
+    let mut group = c.benchmark_group("diff_renames_basename_disjoint_duplicates");
+    group.sample_size(10);
+    for count in [512_usize, 2048] {
+        let fx = basename_disjoint_duplicate_fixture(count);
+        group.throughput(Throughput::Elements(
+            u64::try_from(count * 2).expect("count"),
+        ));
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, _| {
+            b.iter(|| {
+                black_box(
+                    detect_renames_with_policy(
+                        &fx.odb,
+                        None,
+                        fx.entries.clone(),
+                        50,
+                        &fx.config,
+                        &policy,
+                        None,
+                        DetectRenamesOptions::default(),
+                    )
+                    .expect("detect renames")
+                    .entries,
+                );
+            });
+        });
+    }
+    group.finish();
+}
+
 fn bench_diff_renames_basename_duplicates(c: &mut Criterion) {
     let policy = ThreadPolicy::with_threads_override(Some(1))
         .min_items_override(Some(0))
@@ -345,6 +421,7 @@ criterion_group!(
     diff_renames,
     bench_diff_renames,
     bench_diff_renames_adoc_similar,
+    bench_diff_renames_basename_disjoint_duplicates,
     bench_diff_renames_basename_duplicates
 );
 criterion_main!(diff_renames);
