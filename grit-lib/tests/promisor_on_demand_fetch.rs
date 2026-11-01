@@ -1080,3 +1080,88 @@ fn hard_reset_with_every_path_sparse_skipped_does_not_fetch_attributes() {
     }
     git_in(dest.path(), &["fsck", "--strict"]);
 }
+
+/// A hard reset in a blobless clone with no checkout writes every file in chunks; reading the
+/// `.gitattributes` blobs for its checkout rules must not lazily fetch them one at a time
+/// ahead of the batched prefetch.
+#[test]
+fn chunked_hard_reset_fetches_attribute_blobs_with_the_batch() {
+    use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+    use grit_lib::progress::NullProgress;
+
+    let layout = TempDir::new().expect("layout");
+    let upstream = layout.path().join("upstream");
+    git_in(layout.path(), &["init", "-q", "-b", "main", "upstream"]);
+    git_in(&upstream, &["config", "user.email", "t@t"]);
+    fs::create_dir_all(upstream.join("docs")).expect("docs dir");
+    fs::write(upstream.join(".gitattributes"), "*.bin binary\n").expect("attrs");
+    fs::write(upstream.join("docs/.gitattributes"), "*.txt text\n").expect("nested attrs");
+    for i in 0..2100 {
+        fs::write(
+            upstream.join(format!("docs/f{i:04}.txt")),
+            format!("file {i}\n"),
+        )
+        .expect("write");
+    }
+    git_in(&upstream, &["add", "."]);
+    git_in(&upstream, &["commit", "-m", "base", "-q"]);
+    let bare = layout.path().join("remote.git");
+    git_in(
+        layout.path(),
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            upstream.to_str().unwrap(),
+            "remote.git",
+        ],
+    );
+    git_in(&bare, &["config", "uploadpack.allowFilter", "true"]);
+
+    let url = format!("file://{}", bare.canonicalize().unwrap().display());
+    let dest = TempDir::new().expect("dest");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let fetcher = Arc::new(CountingFetcher {
+        calls: Arc::clone(&calls),
+        inner: DefaultPromisorFetcher::new(Arc::new(DefaultHttpClientFactory::new())),
+    });
+    let repo = grit_blobless_clone(&url, dest.path(), Some(fetcher));
+    let packs_after_clone = pack_file_count(&repo.git_dir().join("objects"));
+    let head = git_cmd(&["rev-parse", "HEAD"])
+        .in_dir(dest.path())
+        .exec()
+        .stdout;
+    let head = ObjectId::from_hex(head.trim()).expect("head");
+
+    reset_to_commit(
+        &repo,
+        &ResetOptions::new(
+            head,
+            ResetMode::Hard,
+            "T <t@t> 0 +0000".parse().expect("sig"),
+            "reset",
+        ),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("hard reset");
+
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "attribute blobs must come with the one batched checkout fetch"
+    );
+    assert_eq!(
+        pack_file_count(&repo.git_dir().join("objects")),
+        packs_after_clone + 1
+    );
+    assert_eq!(
+        fs::read_to_string(dest.path().join("docs/f0042.txt")).expect("checked out"),
+        "file 42\n"
+    );
+    let status = git_cmd(&["status", "--porcelain"])
+        .in_dir(dest.path())
+        .exec()
+        .stdout;
+    assert!(status.is_empty(), "{status}");
+}

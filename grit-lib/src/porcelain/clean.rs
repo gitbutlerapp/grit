@@ -358,7 +358,7 @@ fn highest_empty_untracked_dir(
     if !rel.is_empty() && is_nested_git_worktree(abs) {
         return Ok(None);
     }
-    if !rel.is_empty() && has_tracked_under_index(index, rel) {
+    if !rel.is_empty() && index.has_stage0_descendant_under(rel) {
         return Ok(None);
     }
     if !rel.is_empty() && index_gitlink_at(index, rel) {
@@ -617,18 +617,10 @@ fn removable_untracked_path(
     Ok(!ignored)
 }
 
-fn has_tracked_under_index(index: &Index, rel_dir: &str) -> bool {
-    let prefix = format!("{rel_dir}/");
-    index
-        .entries
-        .iter()
-        .any(|e| e.stage() == 0 && String::from_utf8_lossy(&e.path).starts_with(&prefix))
-}
-
 fn index_gitlink_at(index: &Index, rel: &str) -> bool {
-    index.entries.iter().any(|e| {
-        e.stage() == 0 && e.mode == MODE_GITLINK && String::from_utf8_lossy(&e.path) == rel
-    })
+    index
+        .find_entry_pos(rel.as_bytes(), 0)
+        .is_some_and(|pos| index.entries()[pos].mode == MODE_GITLINK)
 }
 
 /// True when `abs` is a directory containing a nested `.git` (embedded repository).

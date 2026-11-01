@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Result;
-use grit_lib::notes::NotesRef;
+use grit_lib::notes::{
+    apply_prepared_notes_rewrite, prepare_notes_for_rewrite, NotesRef, NotesRewriteCommand,
+};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::refs::commit_ref_update_on_store;
 use grit_lib::refs::reflog::ReflogEntry;
@@ -247,6 +249,34 @@ fn remove_racing_another_writer_fails_and_keeps_its_note() {
     assert!(
         result.is_err(),
         "remove based on a stale notes tip must fail, got {result:?}"
+    );
+    assert_eq!(fx.store.resolve(NOTES).expect("tip"), fx.second);
+    let mut expected = vec![fx.objects[0], fx.objects[1]];
+    expected.sort();
+    assert_eq!(annotated(&fx), expected);
+}
+
+#[test]
+fn notes_rewrite_copy_racing_another_writer_fails() {
+    let fx = fixture();
+    git(
+        fx._dir.path(),
+        &["config", "notes.rewriteRef", "refs/notes/commits"],
+    );
+    let plan = prepare_notes_for_rewrite(
+        &fx.repo,
+        NotesRewriteCommand::Rebase,
+        &[(fx.objects[0], fx.objects[2])],
+    )
+    .expect("prepare")
+    .expect("plan");
+    fx.store.arm(fx.second);
+
+    let result = apply_prepared_notes_rewrite(&fx.repo, &plan, &[(fx.objects[0], fx.objects[2])]);
+
+    assert!(
+        result.is_err(),
+        "notes rewrite based on a stale snapshot must fail, got {result:?}"
     );
     assert_eq!(fx.store.resolve(NOTES).expect("tip"), fx.second);
     let mut expected = vec![fx.objects[0], fx.objects[1]];

@@ -1924,6 +1924,75 @@ fn prune_rejects_missing_root_with_empty_loose_store() {
 }
 
 #[test]
+fn prune_keeps_aged_loose_blob_staged_in_main_index() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    std::fs::write(dir.path().join("a"), b"base\n").expect("write a");
+    git(dir.path(), &["add", "a"]);
+    git(dir.path(), &["commit", "-qm", "base"]);
+    std::fs::write(dir.path().join("s"), b"staged\n").expect("write s");
+    git(dir.path(), &["add", "s"]);
+    let blob_hex = git_stdout(dir.path(), &["rev-parse", ":s"]);
+    let blob: ObjectId = blob_hex.trim().parse().expect("blob id");
+    let loose = dir
+        .path()
+        .join(".git/objects")
+        .join(&blob_hex.trim()[..2])
+        .join(&blob_hex.trim()[2..]);
+    let old = FileTime::from_unix_time(OffsetDateTime::now_utc().unix_timestamp() - 30 * 86400, 0);
+    filetime::set_file_mtime(&loose, old).expect("age staged blob");
+
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+    let stats = prune_loose_objects(
+        &repo,
+        &PruneOptions::with_older_than(Some(std::time::SystemTime::now())),
+    )
+    .expect("prune");
+    assert!(
+        repo.odb().read(&blob).is_ok(),
+        "staged blob must survive prune (stats={stats:?})"
+    );
+    git_fsck(dir.path(), true);
+}
+
+#[test]
+fn prune_keeps_aged_loose_blob_staged_only_in_linked_worktree_index() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    std::fs::write(dir.path().join("a"), b"base\n").expect("write a");
+    git(dir.path(), &["add", "a"]);
+    git(dir.path(), &["commit", "-qm", "base"]);
+    let linked = dir.path().join("linked");
+    git(
+        dir.path(),
+        &["worktree", "add", "-q", "-b", "wt", "linked", "HEAD"],
+    );
+    std::fs::write(linked.join("s"), b"staged in linked\n").expect("write s");
+    git(&linked, &["add", "s"]);
+    let blob_hex = git_stdout(&linked, &["rev-parse", ":s"]);
+    let blob: ObjectId = blob_hex.trim().parse().expect("blob id");
+    let loose = dir
+        .path()
+        .join(".git/objects")
+        .join(&blob_hex.trim()[..2])
+        .join(&blob_hex.trim()[2..]);
+    let old = FileTime::from_unix_time(OffsetDateTime::now_utc().unix_timestamp() - 30 * 86400, 0);
+    filetime::set_file_mtime(&loose, old).expect("age staged blob");
+
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+    let stats = prune_loose_objects(
+        &repo,
+        &PruneOptions::with_older_than(Some(std::time::SystemTime::now())),
+    )
+    .expect("prune");
+    assert!(
+        repo.odb().read(&blob).is_ok(),
+        "linked-worktree staged blob must survive prune from main (stats={stats:?})"
+    );
+    git_fsck(dir.path(), true);
+}
+
+#[test]
 fn prune_rejects_missing_reachable_blob() {
     let dir = TempDir::new().expect("tempdir");
     git(dir.path(), &["init", "-b", "main"]);
@@ -1942,7 +2011,7 @@ fn prune_rejects_missing_reachable_blob() {
     std::fs::remove_file(repo.odb().objects_dir().join(&hex[..2]).join(&hex[2..]))
         .expect("drop blob");
 
-    let roots = grit_lib::refs::gc::collect_referenced_object_roots(repo.git_dir()).expect("roots");
+    let roots = grit_lib::maintenance::collect_maintenance_object_roots(&repo).expect("roots");
     let err = grit_lib::refs::gc::prune_loose_unreachable(repo.odb(), &roots, None)
         .expect_err("missing blob");
     assert!(

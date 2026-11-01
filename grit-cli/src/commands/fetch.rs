@@ -7,11 +7,12 @@ use crate::progress::summary::{stdout_color, transfer_header, TransferSummary};
 use crate::progress::TerminalProgress;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
+use grit_lib::objects::short_hex;
 use grit_lib::progress::Cancel;
 use grit_lib::remote::fetch_request::{resolve_fetch_invocation, resolve_remote_argument};
 use grit_lib::remote::transfer::{
     resolve_fetch_prune, resolve_fetch_tags, FetchDepth, FetchOptions,
-    FetchOutcome as LibFetchOutcome, TagMode, TransferStats, UpdateMode,
+    FetchOutcome as LibFetchOutcome, TagMode, TransferStats, UpdateKind, UpdateMode,
 };
 use grit_lib::remote::{DefaultHttpClientFactory, RemoteError};
 use grit_lib::state::{resolve_head_for_repository, HeadState};
@@ -54,6 +55,10 @@ pub struct FetchOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     pub transfer: TransferSummary,
+    /// Refs this fetch changed, or on a dry run would change.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub changed: usize,
 }
 
 /// Shallow boundaries added or removed by this fetch (`--json` only).
@@ -84,6 +89,33 @@ pub struct FetchAllRemoteOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Refs this remote's fetch changed, or on a dry run would change.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub changed: usize,
+    /// True when any of this remote's ref updates was rejected.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub rejected: bool,
+}
+
+impl FetchAllRemoteOutcome {
+    /// This remote's result in the single-remote shape, for rendering.
+    fn as_single(&self, dry_run: bool) -> FetchOutcome {
+        FetchOutcome {
+            remote: self.remote.clone(),
+            updates: self.updates.clone(),
+            updated: self.updated,
+            dry_run,
+            rejected: self.rejected,
+            shallow: None,
+            promisor_remotes: Vec::new(),
+            stored_fields: Vec::new(),
+            promisor_warnings: Vec::new(),
+            transfer: TransferSummary::default(),
+            changed: self.changed,
+        }
+    }
 }
 
 /// Human / JSON output for either single-remote or `--all` fetch.
@@ -97,12 +129,7 @@ impl FetchRunOutcome {
     pub fn exit_nonzero(&self) -> bool {
         match self {
             Self::One(o) => o.rejected,
-            Self::All(o) => o.remotes.iter().any(|r| {
-                r.error.is_some()
-                    || r.updates
-                        .iter()
-                        .any(|u| u.status == FetchUpdateStatus::Rejected)
-            }),
+            Self::All(o) => o.remotes.iter().any(|r| r.error.is_some() || r.rejected),
         }
     }
 }
@@ -115,22 +142,7 @@ impl HumanRender for FetchAllOutcome {
                 outln!(w, "  error: {err}");
                 continue;
             }
-            let one = FetchOutcome {
-                remote: remote.remote.clone(),
-                updates: remote.updates.clone(),
-                updated: remote.updated,
-                dry_run: self.dry_run,
-                rejected: remote
-                    .updates
-                    .iter()
-                    .any(|u| u.status == FetchUpdateStatus::Rejected),
-                shallow: None,
-                promisor_remotes: Vec::new(),
-                stored_fields: Vec::new(),
-                promisor_warnings: Vec::new(),
-                transfer: TransferSummary::default(),
-            };
-            one.render_human(w, ctx)?;
+            remote.as_single(self.dry_run).render_human(w, ctx)?;
         }
         render_transfer(&self.transfer, w)
     }
@@ -144,22 +156,7 @@ impl MarkdownRender for FetchAllOutcome {
                 outln!(w, "- error: {err}");
                 continue;
             }
-            let one = FetchOutcome {
-                remote: remote.remote.clone(),
-                updates: remote.updates.clone(),
-                updated: remote.updated,
-                dry_run: self.dry_run,
-                rejected: remote
-                    .updates
-                    .iter()
-                    .any(|u| u.status == FetchUpdateStatus::Rejected),
-                shallow: None,
-                promisor_remotes: Vec::new(),
-                stored_fields: Vec::new(),
-                promisor_warnings: Vec::new(),
-                transfer: TransferSummary::default(),
-            };
-            one.render_markdown(w, ctx)?;
+            remote.as_single(self.dry_run).render_markdown(w, ctx)?;
         }
         Ok(())
     }
@@ -177,20 +174,15 @@ pub enum FetchUpdateStatus {
     UpToDate,
 }
 
-impl From<UpdateMode> for FetchUpdateStatus {
-    fn from(mode: UpdateMode) -> Self {
-        match mode {
-            UpdateMode::New => Self::New,
-            UpdateMode::FastForward => Self::FastForward,
-            UpdateMode::Forced => Self::Forced,
-            UpdateMode::DeletedMissing => Self::Pruned,
-            UpdateMode::NonFastForwardRejected
-            | UpdateMode::TagUpdateRejected
-            | UpdateMode::RefLockRejected => Self::Rejected,
-            UpdateMode::UpToDate | UpdateMode::NoChangeNeeded | UpdateMode::Unborn => {
-                Self::UpToDate
-            }
-            UpdateMode::SourceObjectNotFound => Self::Rejected,
+impl From<UpdateKind> for FetchUpdateStatus {
+    fn from(kind: UpdateKind) -> Self {
+        match kind {
+            UpdateKind::New => Self::New,
+            UpdateKind::FastForward => Self::FastForward,
+            UpdateKind::Forced => Self::Forced,
+            UpdateKind::Pruned => Self::Pruned,
+            UpdateKind::Rejected => Self::Rejected,
+            UpdateKind::UpToDate => Self::UpToDate,
         }
     }
 }
@@ -232,26 +224,21 @@ impl HumanRender for FetchOutcome {
                 );
             }
         }
-        let pending = pending_update_count(&self.updates);
-        let summary_count = if self.dry_run { pending } else { self.updated };
         if self.rejected {
             outln!(w, "Some ref updates from {} were rejected.", self.remote);
-        } else if summary_count == 0 {
+        } else if self.changed == 0 {
             outln!(w, "Already up to date with {}.", self.remote);
-        } else if self.dry_run {
-            outln!(
-                w,
-                "Would fetch {} update{} from {}.",
-                summary_count,
-                plural(summary_count),
-                self.remote
-            );
         } else {
             outln!(
                 w,
-                "Fetched {} update{} from {}.",
-                self.updated,
-                plural(self.updated),
+                "{} {} update{} from {}.",
+                if self.dry_run {
+                    "Would fetch"
+                } else {
+                    "Fetched"
+                },
+                self.changed,
+                plural(self.changed),
                 self.remote
             );
         }
@@ -278,7 +265,7 @@ fn render_transfer(transfer: &TransferSummary, w: &mut dyn Write) -> Result<()> 
 
 impl MarkdownRender for FetchOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_fetch_updates(w, &self.remote, &self.updates, self.updated, self.dry_run)?;
+        markdown::print_fetch_updates(w, &self.remote, &self.updates, self.changed, self.dry_run)?;
         if let Some(line) = crate::commands::promisor_json::markdown_line(&self.promisor_remotes) {
             outln!(w, "{line}");
         }
@@ -291,10 +278,6 @@ impl MarkdownRender for FetchOutcome {
         }
         Ok(())
     }
-}
-
-fn short_hex(oid: &str) -> &str {
-    oid.get(..7).unwrap_or(oid)
 }
 
 pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchRunOutcome> {
@@ -384,7 +367,7 @@ fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
         }
     };
 
-    let (updates, updated, rejected) = map_updates(&result, args.dry_run);
+    let refs = remote_outcome(remote_name, &result, args.dry_run);
     let shallow = shallow_json(&result, fetch_depth.is_some());
     let transfer = TransferSummary::new(
         result.transfer,
@@ -393,11 +376,12 @@ fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
     );
 
     Ok(FetchOutcome {
-        remote: remote_name,
-        updates,
-        updated,
+        remote: refs.remote,
+        updates: refs.updates,
+        updated: refs.updated,
         dry_run: args.dry_run,
-        rejected,
+        rejected: refs.rejected,
+        changed: refs.changed,
         shallow,
         promisor_remotes: crate::commands::promisor_json::promisor_remotes(
             result.promisor.as_ref(),
@@ -454,14 +438,9 @@ fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
         match result {
             Ok(outcome) => {
                 received += outcome.transfer;
-                let (updates, updated, _rejected) = map_updates(&outcome, args.dry_run);
-                total_updated += updated;
-                remotes.push(FetchAllRemoteOutcome {
-                    remote: name,
-                    updates,
-                    updated,
-                    error: None,
-                });
+                let remote = remote_outcome(name, &outcome, args.dry_run);
+                total_updated += remote.updated;
+                remotes.push(remote);
             }
             Err(err) => {
                 remotes.push(FetchAllRemoteOutcome {
@@ -469,6 +448,8 @@ fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
                     updates: Vec::new(),
                     updated: 0,
                     error: Some(err.to_string()),
+                    changed: 0,
+                    rejected: false,
                 });
             }
         }
@@ -481,15 +462,11 @@ fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
     })
 }
 
-/// Refs that would change on a live fetch (everything except `up_to_date`).
-fn pending_update_count(updates: &[FetchUpdate]) -> usize {
-    updates
-        .iter()
-        .filter(|u| u.status != FetchUpdateStatus::UpToDate)
-        .count()
-}
-
-fn map_updates(outcome: &LibFetchOutcome, dry_run: bool) -> (Vec<FetchUpdate>, usize, bool) {
+fn remote_outcome(
+    remote: String,
+    outcome: &LibFetchOutcome,
+    dry_run: bool,
+) -> FetchAllRemoteOutcome {
     let updates = outcome
         .reported_updates()
         .map(|update| {
@@ -505,19 +482,22 @@ fn map_updates(outcome: &LibFetchOutcome, dry_run: bool) -> (Vec<FetchUpdate>, u
             FetchUpdate {
                 ref_name,
                 remote_ref,
-                status: FetchUpdateStatus::from(update.mode),
+                status: update.mode.kind().into(),
                 old_oid: update.old_oid.as_ref().map(|o| o.to_hex()),
                 new_oid: update.new_oid.as_ref().map(|o| o.to_hex()),
                 reason: rejection_reason(update.mode, &update.note),
             }
         })
         .collect();
-    let updated = if dry_run {
-        0
-    } else {
-        outcome.changed_ref_count()
-    };
-    (updates, updated, outcome.has_rejections())
+    let changed = outcome.changed_ref_count();
+    FetchAllRemoteOutcome {
+        remote,
+        updates,
+        updated: if dry_run { 0 } else { changed },
+        error: None,
+        changed,
+        rejected: outcome.has_rejections(),
+    }
 }
 
 fn rejection_reason(mode: UpdateMode, note: &Option<String>) -> Option<String> {
@@ -643,52 +623,104 @@ mod map_remote_error_tests {
         assert_eq!(payload.oid.as_deref(), Some(oid.to_hex().as_str()));
     }
 
-    #[test]
-    fn pending_update_count_ignores_up_to_date() {
-        use super::{pending_update_count, FetchUpdate, FetchUpdateStatus};
+    fn lib_outcome(
+        modes: &[(&str, grit_lib::remote::transfer::UpdateMode)],
+    ) -> grit_lib::remote::transfer::FetchOutcome {
+        use grit_lib::remote::transfer::RefUpdate;
 
-        let updates = vec![
-            FetchUpdate {
-                ref_name: "refs/remotes/origin/main".into(),
-                remote_ref: "refs/heads/main".into(),
-                status: FetchUpdateStatus::UpToDate,
-                old_oid: None,
-                new_oid: None,
-                reason: None,
-            },
-            FetchUpdate {
-                ref_name: "refs/remotes/origin/x".into(),
-                remote_ref: "refs/heads/x".into(),
-                status: FetchUpdateStatus::New,
-                old_oid: None,
-                new_oid: Some("abc".into()),
-                reason: None,
-            },
-        ];
-        assert_eq!(pending_update_count(&updates), 1);
+        let oid = ObjectId::from_hex("a8e620a111111111111111111111111111111111").expect("oid");
+        grit_lib::remote::transfer::FetchOutcome {
+            updates: modes
+                .iter()
+                .map(|(name, mode)| RefUpdate {
+                    remote_ref: format!("refs/heads/{name}"),
+                    local_ref: Some(format!("refs/remotes/origin/{name}")),
+                    old_oid: None,
+                    new_oid: Some(oid),
+                    mode: *mode,
+                    note: None,
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn render(outcome: &super::FetchOutcome) -> (String, String) {
+        use crate::output::{HumanRender, MarkdownRender, OutputMode, RenderContext};
+
+        let ctx = RenderContext {
+            now: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("timestamp"),
+            mode: OutputMode::Human,
+        };
+        let mut human = Vec::new();
+        outcome.render_human(&mut human, &ctx).expect("human");
+        let mut markdown = Vec::new();
+        outcome
+            .render_markdown(&mut markdown, &ctx)
+            .expect("markdown");
+        (
+            String::from_utf8(human).expect("utf8"),
+            String::from_utf8(markdown).expect("utf8"),
+        )
     }
 
     #[test]
-    fn map_updates_dry_run_leaves_updated_at_zero() {
-        use grit_lib::objects::ObjectId;
-        use grit_lib::remote::transfer::{RefUpdate, UpdateMode};
+    fn dry_run_summary_counts_only_refs_that_would_change() {
+        use grit_lib::remote::transfer::UpdateMode;
 
-        let oid = ObjectId::from_hex("a8e620a111111111111111111111111111111111").expect("oid");
-        let raw = grit_lib::remote::transfer::FetchOutcome {
-            updates: vec![RefUpdate {
-                remote_ref: "refs/heads/main".into(),
-                local_ref: Some("refs/remotes/origin/main".into()),
-                old_oid: None,
-                new_oid: Some(oid),
-                mode: UpdateMode::New,
-                note: None,
-            }],
-            ..Default::default()
-        };
-        let (_, updated, _) = super::map_updates(&raw, true);
-        assert_eq!(updated, 0);
-        let (_, updated, _) = super::map_updates(&raw, false);
-        assert_eq!(updated, 1);
+        let raw = lib_outcome(&[("main", UpdateMode::UpToDate), ("x", UpdateMode::New)]);
+        let remote = super::remote_outcome("origin".into(), &raw, true);
+        assert_eq!(remote.updated, 0, "a dry run writes nothing");
+        assert_eq!(remote.changed, 1);
+        assert_eq!(remote.updates.len(), 1, "up-to-date refs are not listed");
+        assert!(!remote.rejected);
+
+        let (human, markdown) = render(&remote.as_single(true));
+        assert!(
+            human.contains("Would fetch 1 update from origin."),
+            "{human}"
+        );
+        assert!(
+            markdown.contains("Would fetch **1** update from `origin`."),
+            "{markdown}"
+        );
+    }
+
+    #[test]
+    fn live_fetch_counts_changed_refs_and_rejections() {
+        use super::FetchUpdateStatus;
+        use grit_lib::remote::transfer::UpdateMode;
+
+        let raw = lib_outcome(&[("main", UpdateMode::New), ("ff", UpdateMode::FastForward)]);
+        let remote = super::remote_outcome("origin".into(), &raw, false);
+        assert_eq!((remote.updated, remote.changed), (2, 2));
+        let (human, markdown) = render(&remote.as_single(false));
+        assert!(human.contains("Fetched 2 updates from origin."), "{human}");
+        assert!(markdown.contains("Fetched **2** updates."), "{markdown}");
+
+        let raw = lib_outcome(&[
+            ("main", UpdateMode::New),
+            ("lock", UpdateMode::RefLockRejected),
+            ("gone", UpdateMode::SourceObjectNotFound),
+        ]);
+        let remote = super::remote_outcome("origin".into(), &raw, false);
+        assert!(remote.rejected);
+        assert_eq!(remote.changed, 1);
+        let statuses: Vec<_> = remote.updates.iter().map(|u| u.status).collect();
+        assert_eq!(
+            statuses,
+            [
+                FetchUpdateStatus::New,
+                FetchUpdateStatus::Rejected,
+                FetchUpdateStatus::Rejected
+            ]
+        );
+        let (human, markdown) = render(&remote.as_single(false));
+        assert!(
+            human.contains("Some ref updates from origin were rejected."),
+            "{human}"
+        );
+        assert!(markdown.contains("were **rejected**"), "{markdown}");
     }
 
     #[test]

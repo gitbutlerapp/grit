@@ -1469,7 +1469,7 @@ fn sorted_literal_lookup<S: AsRef<str>>(spec: &str, sorted_paths: &[S]) -> bool 
 
 /// The spelling of a plain literal `spec` that [`matches_pathspec_with_context`] compares paths
 /// against: NFC when the context precomposes paths, else `spec` itself.
-fn literal_spec_for_lookup(spec: &str, ctx: PathspecMatchContext) -> Cow<'_, str> {
+pub(crate) fn literal_spec_for_lookup(spec: &str, ctx: PathspecMatchContext) -> Cow<'_, str> {
     if ctx.precompose_paths {
         precompose_utf8_path(spec)
     } else {
@@ -1503,7 +1503,7 @@ pub(crate) fn exact_literal_pathspec_set(
 ///
 /// With [`PathspecMatchContext::precompose_paths`], "the path `spec`" means equality after NFC
 /// normalization of both sides; see [`literal_spec_for_lookup`].
-fn is_plain_literal_pathspec(spec: &str, ctx: PathspecMatchContext) -> bool {
+pub(crate) fn is_plain_literal_pathspec(spec: &str, ctx: PathspecMatchContext) -> bool {
     !ctx.is_directory
         && !ctx.is_git_submodule
         && !spec.is_empty()
@@ -2100,6 +2100,12 @@ pub fn resolve_magic_pathspec(spec: &str, cwd_prefix: &str) -> Option<String> {
     let magic_prefix = &spec[..=close_idx];
     let tail = &spec[close_idx + 1..];
     Some(resolve_magic_pathspec_parts(magic_prefix, tail, cwd_prefix))
+}
+
+/// Whether `token` is a long-form magic pathspec (`:(...)`) rather than a revision name.
+#[must_use]
+pub fn is_long_magic_pathspec_token(token: &str) -> bool {
+    resolve_magic_pathspec(token, "").is_some()
 }
 
 fn resolve_magic_pathspec_parts(magic_prefix: &str, tail: &str, cwd_prefix: &str) -> String {
@@ -3100,6 +3106,13 @@ mod resolved_pathspecs_tests {
 #[cfg(test)]
 mod resolve_magic_pathspec_tests {
     use super::*;
+
+    #[test]
+    fn long_magic_token_predicate() {
+        assert!(is_long_magic_pathspec_token(":(attr:rust)"));
+        assert!(!is_long_magic_pathspec_token(":0:file"));
+        assert!(!is_long_magic_pathspec_token("main"));
+    }
 
     #[test]
     fn top_magic_does_not_inject_cwd_prefix() {

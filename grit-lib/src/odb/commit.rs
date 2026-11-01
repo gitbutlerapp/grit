@@ -4,7 +4,9 @@
 //! [`Odb`] methods instead of reading the object, checking its kind and parsing it by hand.
 
 use crate::error::{Error, Result};
-use crate::objects::{parse_commit, CommitData, CommitRef, ObjectId, ObjectKind};
+use crate::objects::{
+    commit_through_subject_len, parse_commit, CommitData, CommitRef, ObjectId, ObjectKind,
+};
 
 use super::Odb;
 
@@ -50,6 +52,51 @@ impl Odb {
         expect_commit(oid, object.kind)?;
         Ok(CommitRef::parse(&object.data)?.tree())
     }
+
+    /// The leading part of commit `oid`'s payload that one-line listings need: every header
+    /// and the message up to and including its first non-blank line.
+    ///
+    /// [`parse_commit`] and [`crate::objects::read_commit_subject_line`] give the same tree,
+    /// parents, author, committer, extra headers and subject for these bytes as for the whole
+    /// commit; only the message after the subject line is missing. A commit with no such
+    /// prefix (for example one that declares a non-UTF-8 `encoding`, or has no message) is
+    /// returned whole.
+    ///
+    /// When the commit is stored whole in a pack, inflation stops at the subject line, so a
+    /// long message body costs nothing. The skipped tail is not checked for corruption;
+    /// [`Self::read`] the commit to check all of it.
+    ///
+    /// # Parameters
+    ///
+    /// - `oid`: the commit to read.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::ObjectNotFound`] when `oid` is missing.
+    /// - [`Error::UnexpectedObjectKind`] when `oid` names a tree, blob or tag.
+    /// - Any other error [`Self::read`] reports.
+    pub fn read_commit_through_subject(&self, oid: &ObjectId) -> Result<Vec<u8>> {
+        if self.custom_primary.is_none() {
+            if let Some(data) =
+                crate::pack::pack_cache::try_read_commit_through_subject_via_single_pack_reader(
+                    &self.objects_dir,
+                    oid,
+                )?
+            {
+                return Ok(through_subject(data));
+            }
+        }
+        let object = self.read(oid)?;
+        expect_commit(oid, object.kind)?;
+        Ok(through_subject(object.data))
+    }
+}
+
+fn through_subject(mut data: Vec<u8>) -> Vec<u8> {
+    if let Some(len) = commit_through_subject_len(&data) {
+        data.truncate(len);
+    }
+    data
 }
 
 fn expect_commit(oid: &ObjectId, actual: ObjectKind) -> Result<()> {
@@ -92,6 +139,201 @@ mod tests {
         assert_eq!(read.tree, tree);
         assert_eq!(read.parents, vec![root]);
         assert_eq!(odb.commit_tree(&child).unwrap(), tree);
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str], stdin: Option<&[u8]>) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut child = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(stdin.unwrap_or_default())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        out.stdout
+    }
+
+    /// Commits git writes with awkward messages, each with the prefix
+    /// [`Odb::read_commit_through_subject`] must return.
+    fn git_commits_with_prefixes(dir: &std::path::Path) -> Vec<(ObjectId, Vec<u8>)> {
+        git(dir, &["init", "-q", "--bare", "."], None);
+        let tree = String::from_utf8(git(dir, &["mktree"], Some(b""))).unwrap();
+        let head = format!(
+            "tree {}\nauthor A U Thor <a@example.com> 1700000000 +0100\ncommitter C O Mitter <c@example.com> 1700000001 -0700\n",
+            tree.trim()
+        );
+        let body: String = (0..200)
+            .map(|i| format!("Body line {i} with some words.\n"))
+            .collect();
+        let signed_head = format!(
+            "{head}gpgsig -----BEGIN PGP SIGNATURE-----\n \n {}\n -----END PGP SIGNATURE-----\nchange-id kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\n",
+            "A".repeat(64)
+        );
+        let cases: Vec<(Vec<u8>, usize)> = vec![
+            {
+                let prefix = format!("{head}\nSubject line\n");
+                (format!("{prefix}\n{body}").into_bytes(), prefix.len())
+            },
+            {
+                let prefix = format!("{head}\n\n  \n\t  Indented subject\n");
+                (
+                    format!("{prefix}second line\n\n{body}").into_bytes(),
+                    prefix.len(),
+                )
+            },
+            {
+                let prefix = format!("{signed_head}\nSigned subject\n");
+                (format!("{prefix}\n{body}").into_bytes(), prefix.len())
+            },
+            {
+                let prefix = format!("{head}\n\u{65e5}\u{672c}\n\u{a0}\nascii line\n");
+                (format!("{prefix}{body}").into_bytes(), prefix.len())
+            },
+            {
+                let mut raw = format!("{head}encoding ISO-8859-1\n\n").into_bytes();
+                raw.extend_from_slice(b"S\xe9ance\n\ncaf\xe9\n");
+                raw.extend_from_slice(body.as_bytes());
+                let len = raw.len();
+                (raw, len)
+            },
+            {
+                let raw = format!("{head}\nno trailing newline").into_bytes();
+                let len = raw.len();
+                (raw, len)
+            },
+            {
+                let raw = head.clone().into_bytes();
+                let len = raw.len();
+                (raw, len)
+            },
+        ];
+        cases
+            .into_iter()
+            .map(|(raw, prefix_len)| {
+                let hex = git(
+                    dir,
+                    &[
+                        "hash-object",
+                        "-t",
+                        "commit",
+                        "-w",
+                        "--literally",
+                        "--stdin",
+                    ],
+                    Some(&raw),
+                );
+                let oid = ObjectId::from_hex(std::str::from_utf8(&hex).unwrap().trim()).unwrap();
+                (oid, raw[..prefix_len].to_vec())
+            })
+            .collect()
+    }
+
+    fn assert_prefixes(odb: &Odb, dir: &std::path::Path, cases: &[(ObjectId, Vec<u8>)]) {
+        use crate::objects::read_commit_subject_line;
+        for (oid, expected) in cases {
+            let full = git(dir, &["cat-file", "commit", &oid.to_hex()], None);
+            let prefix = odb
+                .with_pack_read_context(|| odb.read_commit_through_subject(oid))
+                .unwrap();
+            assert_eq!(prefix, *expected, "{oid}");
+            assert!(full.starts_with(&prefix), "{oid}");
+            assert_eq!(
+                read_commit_subject_line(&prefix).unwrap(),
+                read_commit_subject_line(&full).unwrap(),
+                "{oid}"
+            );
+            let (short, whole) = (parse_commit(&prefix).unwrap(), parse_commit(&full).unwrap());
+            assert_eq!(
+                (short.tree, &short.parents, &short.author, &short.committer),
+                (whole.tree, &whole.parents, &whole.author, &whole.committer),
+                "{oid}"
+            );
+            assert_eq!(
+                (&short.encoding, &short.extra_headers),
+                (&whole.encoding, &whole.extra_headers),
+                "{oid}"
+            );
+        }
+    }
+
+    #[test]
+    fn read_commit_through_subject_matches_git_loose_and_packed() {
+        let dir = TempDir::new().unwrap();
+        let cases = git_commits_with_prefixes(dir.path());
+        let odb = Odb::new(&dir.path().join("objects"));
+        assert_prefixes(&odb, dir.path(), &cases);
+
+        git(
+            dir.path(),
+            &["update-ref", "refs/heads/a", &cases[0].0.to_hex()],
+            None,
+        );
+        for (i, (oid, _)) in cases.iter().enumerate() {
+            git(
+                dir.path(),
+                &["update-ref", &format!("refs/tags/t{i}"), &oid.to_hex()],
+                None,
+            );
+        }
+        git(dir.path(), &["repack", "-a", "-d", "-q"], None);
+        git(dir.path(), &["prune-packed"], None);
+        let odb = Odb::new(&dir.path().join("objects"));
+        assert_prefixes(&odb, dir.path(), &cases);
+
+        // Commits the pack stores whole come from the bounded pack read (deltas fall back to
+        // a whole read); git deltifies these similar commits, so only some are whole.
+        let objects = dir.path().join("objects");
+        let mut cut_short = 0;
+        for (oid, expected) in &cases {
+            let read = odb.with_pack_read_context(|| {
+                crate::pack::pack_cache::try_read_commit_through_subject_via_single_pack_reader(
+                    &objects, oid,
+                )
+            });
+            let Some(prefix) = read.unwrap() else {
+                continue;
+            };
+            let full = git(dir.path(), &["cat-file", "commit", &oid.to_hex()], None);
+            if prefix.len() < full.len() {
+                assert_eq!(prefix, *expected, "{oid}");
+                cut_short += 1;
+            } else {
+                assert_eq!(prefix, full, "{oid}");
+            }
+        }
+        assert!(cut_short > 0, "no commit was read only through its subject");
+    }
+
+    #[test]
+    fn read_commit_through_subject_rejects_other_kinds() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob = odb.write(ObjectKind::Blob, b"data").unwrap();
+        assert!(matches!(
+            odb.read_commit_through_subject(&blob),
+            Err(Error::UnexpectedObjectKind {
+                actual: ObjectKind::Blob,
+                ..
+            })
+        ));
+        let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
+        assert!(matches!(
+            odb.read_commit_through_subject(&missing),
+            Err(Error::ObjectNotFound(_))
+        ));
     }
 
     #[test]

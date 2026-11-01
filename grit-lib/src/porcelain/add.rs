@@ -382,7 +382,35 @@ fn staging_path_matches(
     }
 }
 
-fn restricted_index_paths_for_pathspecs(
+/// Whether a blob path (tree or index entry) is selected by `pathspecs`, including `:(attr:...)`
+/// magic and `:(exclude)` semantics.
+pub(crate) fn blob_path_matches_restrict_pathspecs(
+    path: &str,
+    mode: u32,
+    pathspecs: &[String],
+    base_ctx: PathspecMatchContext,
+    attr_matcher: Option<&PathspecMatcher<'_>>,
+) -> Result<bool> {
+    if pathspecs.is_empty() {
+        return Ok(true);
+    }
+    if pathspecs.iter().any(|s| pathspec_has_attr_magic(s)) {
+        let matcher = attr_matcher.ok_or_else(|| {
+            Error::Message(
+                "internal error: attr pathspec matcher missing for tree path filter".into(),
+            )
+        })?;
+        return Ok(matcher.matches_entry(path, mode));
+    }
+    if staging_pathspecs_need_entry_mode_context(pathspecs) {
+        return Ok(index_path_matches_staging_pathspecs(
+            path, mode, pathspecs, base_ctx,
+        ));
+    }
+    Ok(PathspecListMatcher::new(pathspecs, base_ctx).matches(path))
+}
+
+pub(crate) fn restricted_index_paths_for_pathspecs(
     repo: &Repository,
     index: &Index,
     pathspecs: &[String],
@@ -1756,9 +1784,9 @@ fn validate_pathspecs(
         let matches_repo = checker.matches(resolved)?
             || pathspec_matches_unmerged_index_entries(index, &unmerged_paths, resolved, ctx);
         if !matches_repo {
-            return Err(Error::Message(format!(
-                "pathspec '{label}' did not match any files"
-            )));
+            return Err(Error::PathspecNoMatch {
+                spec: (*label).to_owned(),
+            });
         }
         if opts.force_ignored || opts.skip_pathspec_ignore_check {
             continue;
@@ -2635,7 +2663,7 @@ mod tests {
             )
             .unwrap_err();
             assert!(
-                matches!(&err, Error::Message(msg) if msg.contains(&format!("'{missing}'"))),
+                matches!(&err, Error::PathspecNoMatch { spec } if spec == missing),
                 "{missing}: {err:?}"
             );
         }

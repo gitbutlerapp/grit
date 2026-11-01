@@ -99,6 +99,27 @@ impl UpdateMode {
         self.modified_repo() || self.is_rejected()
     }
 
+    /// Returns the coarse outcome a user sees for this update.
+    ///
+    /// Folds the detailed modes into one [`UpdateKind`]: every refusal becomes
+    /// [`UpdateKind::Rejected`], and the up-to-date, no-op and unborn modes become
+    /// [`UpdateKind::UpToDate`]. [`UpdateKind::changes_ref`] agrees with
+    /// [`Self::modified_repo`] and [`UpdateKind::Rejected`] with [`Self::is_rejected`].
+    #[must_use]
+    pub fn kind(self) -> UpdateKind {
+        match self {
+            Self::New => UpdateKind::New,
+            Self::FastForward => UpdateKind::FastForward,
+            Self::Forced => UpdateKind::Forced,
+            Self::DeletedMissing => UpdateKind::Pruned,
+            Self::NonFastForwardRejected
+            | Self::TagUpdateRejected
+            | Self::SourceObjectNotFound
+            | Self::RefLockRejected => UpdateKind::Rejected,
+            Self::UpToDate | Self::NoChangeNeeded | Self::Unborn => UpdateKind::UpToDate,
+        }
+    }
+
     pub(crate) fn fetch_reflog_reason(self) -> Option<&'static str> {
         match self {
             Self::New => Some("storing head"),
@@ -106,6 +127,36 @@ impl UpdateMode {
             Self::Forced => Some("forced-update"),
             _ => None,
         }
+    }
+}
+
+/// What a fetch did to one local ref, as reported to a user ([`UpdateMode::kind`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+pub enum UpdateKind {
+    /// The local ref was created.
+    New,
+    /// The local ref advanced along its history.
+    FastForward,
+    /// The local ref was rewound or replaced because force was allowed.
+    Forced,
+    /// The local ref was deleted because the remote no longer has it.
+    Pruned,
+    /// The update was refused and the local ref left as it was.
+    Rejected,
+    /// The local ref already matched; nothing changed.
+    UpToDate,
+}
+
+impl UpdateKind {
+    /// Returns whether the local ref was (or, on a dry run, would be) changed.
+    #[must_use]
+    pub fn changes_ref(self) -> bool {
+        matches!(
+            self,
+            Self::New | Self::FastForward | Self::Forced | Self::Pruned
+        )
     }
 }
 
@@ -495,10 +546,10 @@ pub fn resolve_fetch_prune(
         return Ok(enabled);
     }
     let remote_key = format!("remote.{remote}.prune");
-    if let Some(value) = optional_config_bool(config, &remote_key)? {
+    if let Some(value) = config.get_bool(&remote_key).transpose()? {
         return Ok(value);
     }
-    if let Some(value) = optional_config_bool(config, "fetch.prune")? {
+    if let Some(value) = config.get_bool("fetch.prune").transpose()? {
         return Ok(value);
     }
     Ok(false)
@@ -524,16 +575,6 @@ pub fn resolve_fetch_tags(
         Some("--tags") | Some("tags") | Some("all") => TagMode::All,
         Some("--no-tags") | Some("no-tags") | Some("no") | Some("never") => TagMode::None,
         _ => TagMode::Following,
-    }
-}
-
-fn optional_config_bool(config: &crate::config::ConfigSet, key: &str) -> Result<Option<bool>> {
-    match config.get_bool(key) {
-        None => Ok(None),
-        Some(Ok(value)) => Ok(Some(value)),
-        Some(Err(message)) => Err(Error::Config(crate::error::ConfigError::Other(format!(
-            "invalid boolean for '{key}': {message}"
-        )))),
     }
 }
 
@@ -986,6 +1027,22 @@ pub struct PushOutcome {
     /// For a local-path or `file://` push, the output of the destination's receive hooks.
     /// Empty when the server did not use side-band or no hook wrote anything.
     pub remote_messages: Vec<String>,
+}
+
+impl PushOutcome {
+    /// Whether any remote ref was updated, or on a dry run would be
+    /// ([`PushRefStatus::Ok`]).
+    #[must_use]
+    pub fn has_updates(&self) -> bool {
+        self.results.iter().any(|r| r.status == PushRefStatus::Ok)
+    }
+
+    /// Whether any ref update was refused, locally or by the remote
+    /// ([`PushRefStatus::is_error`]).
+    #[must_use]
+    pub fn has_rejections(&self) -> bool {
+        self.results.iter().any(|r| r.status.is_error())
+    }
 }
 
 pub use crate::pack_objects::{
@@ -3118,6 +3175,39 @@ fn decide_push(
         });
     };
 
+    if let Some(tag_decision) = existing_tag_push_decision(spec, &spec.dst, old, src) {
+        return Ok(match tag_decision {
+            ExistingTagPushDecision::Reject => PushDecision {
+                result: PushRefResult {
+                    local_ref: push_spec_local_ref(spec),
+                    remote_ref: spec.dst.clone(),
+                    old_oid: Some(old),
+                    new_oid: Some(src),
+                    forced: false,
+                    deletion: false,
+                    status: PushRefStatus::RejectAlreadyExists,
+                    message: Some(PUSH_TAG_EXISTS_MESSAGE.to_owned()),
+                },
+                action: PushAction::None,
+                apply: false,
+            },
+            ExistingTagPushDecision::ForcedUpdate => PushDecision {
+                result: PushRefResult {
+                    local_ref: push_spec_local_ref(spec),
+                    remote_ref: spec.dst.clone(),
+                    old_oid: Some(old),
+                    new_oid: Some(src),
+                    forced: true,
+                    deletion: false,
+                    status: PushRefStatus::Ok,
+                    message: None,
+                },
+                action: PushAction::Update(src),
+                apply: true,
+            },
+        });
+    }
+
     // Existing ref: fast-forward when the remote's current commit is an ancestor
     // of the source. Otherwise it is a non-fast-forward update, allowed only with
     // force (reported as forced).
@@ -3615,6 +3705,34 @@ fn ref_target_exists(local_odb: &Odb, remote_odb: &Odb, tag_oid: ObjectId) -> Re
         Ok((peeled, _)) => local_odb.contains(&peeled),
         Err(_) => Ok(false),
     }
+}
+
+/// Message on [`PushRefStatus::RejectAlreadyExists`] when an existing remote tag
+/// would change without `--force`. Distinct from the create race message `"already exists"`.
+pub(crate) const PUSH_TAG_EXISTS_MESSAGE: &str = "tag already exists";
+
+/// Outcome for updating a remote tag that already exists (Git never fast-forwards tags).
+pub(crate) enum ExistingTagPushDecision {
+    Reject,
+    ForcedUpdate,
+}
+
+/// When `spec` updates `refs/tags/*` and the remote already has a different oid, Git rejects
+/// unless `spec.force` is set (even when peeled commits fast-forward).
+pub(crate) fn existing_tag_push_decision(
+    spec: &PushRefSpec,
+    dst: &str,
+    old: ObjectId,
+    src: ObjectId,
+) -> Option<ExistingTagPushDecision> {
+    if spec.delete || !dst.starts_with("refs/tags/") || old == src {
+        return None;
+    }
+    Some(if spec.force {
+        ExistingTagPushDecision::ForcedUpdate
+    } else {
+        ExistingTagPushDecision::Reject
+    })
 }
 
 /// Classify a single ref update into an [`UpdateMode`].
@@ -4874,5 +4992,65 @@ mod tests {
         assert!(rejected.has_rejections());
         assert_eq!(rejected.reported_updates().count(), 1);
         assert!(FetchOutcome::default().reported_updates().next().is_none());
+    }
+
+    #[test]
+    fn update_mode_kind_covers_every_mode() {
+        use UpdateMode::*;
+        for (mode, kind) in [
+            (New, UpdateKind::New),
+            (FastForward, UpdateKind::FastForward),
+            (Forced, UpdateKind::Forced),
+            (DeletedMissing, UpdateKind::Pruned),
+            (NonFastForwardRejected, UpdateKind::Rejected),
+            (TagUpdateRejected, UpdateKind::Rejected),
+            (SourceObjectNotFound, UpdateKind::Rejected),
+            (RefLockRejected, UpdateKind::Rejected),
+            (UpToDate, UpdateKind::UpToDate),
+            (NoChangeNeeded, UpdateKind::UpToDate),
+            (Unborn, UpdateKind::UpToDate),
+        ] {
+            assert_eq!(mode.kind(), kind, "{mode:?}");
+            assert_eq!(kind.changes_ref(), mode.modified_repo(), "{mode:?}");
+            assert_eq!(kind == UpdateKind::Rejected, mode.is_rejected(), "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn push_outcome_reports_updates_and_rejections() {
+        let result = |status| PushRefResult {
+            local_ref: Some("refs/heads/main".into()),
+            remote_ref: "refs/heads/main".into(),
+            old_oid: None,
+            new_oid: None,
+            forced: false,
+            deletion: false,
+            status,
+            message: None,
+        };
+        let outcome = |statuses: Vec<PushRefStatus>| PushOutcome {
+            results: statuses.into_iter().map(result).collect(),
+            remote_messages: Vec::new(),
+        };
+
+        let empty = PushOutcome::default();
+        assert!(!empty.has_updates());
+        assert!(!empty.has_rejections());
+
+        let up_to_date = outcome(vec![PushRefStatus::UpToDate]);
+        assert!(!up_to_date.has_updates());
+        assert!(!up_to_date.has_rejections());
+
+        let pushed = outcome(vec![PushRefStatus::UpToDate, PushRefStatus::Ok]);
+        assert!(pushed.has_updates());
+        assert!(!pushed.has_rejections());
+
+        let mixed = outcome(vec![PushRefStatus::Ok, PushRefStatus::RemoteRejected]);
+        assert!(mixed.has_updates());
+        assert!(mixed.has_rejections());
+
+        let refused = outcome(vec![PushRefStatus::AtomicPushFailed]);
+        assert!(!refused.has_updates());
+        assert!(refused.has_rejections());
     }
 }

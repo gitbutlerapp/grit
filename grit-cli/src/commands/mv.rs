@@ -84,7 +84,7 @@ pub fn run(sources: &[String], force: bool, dry_run: bool) -> Result<MvOutcome> 
             dry_run,
         },
     )
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    .map_err(anyhow::Error::new)?;
 
     Ok(MvOutcome {
         moves: lib_outcome
@@ -108,5 +108,5 @@ fn resolve_one(repo: &Repository, sel: &str) -> Result<String> {
     let cwd = std::env::current_dir().context("could not read the current directory")?;
     let prefix = pathdiff(&cwd, work_tree);
     repo.resolve_worktree_pathspec(sel, prefix.as_deref())
-        .map_err(|e| anyhow::anyhow!("{e}"))
+        .map_err(anyhow::Error::new)
 }

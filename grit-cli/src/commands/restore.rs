@@ -205,6 +205,6 @@ pub fn run(
 fn map_restore_error(err: LibError) -> anyhow::Error {
     match err {
         unmerged @ LibError::RestorePathUnmerged { .. } => anyhow::Error::from(unmerged),
-        other => anyhow::anyhow!("{other}"),
+        other => anyhow::Error::new(other),
     }
 }

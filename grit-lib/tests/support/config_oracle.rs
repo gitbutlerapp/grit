@@ -476,7 +476,7 @@ pub fn grit_path_optional(env: &Environment, raw: &str) -> Option<String> {
     parse_path_optional(env, raw)
 }
 
-pub fn grit_color(raw: &str) -> Result<String, String> {
+pub fn grit_color(raw: &str) -> Result<String, grit_lib::error::ConfigValueError> {
     parse_color(raw)
 }
 

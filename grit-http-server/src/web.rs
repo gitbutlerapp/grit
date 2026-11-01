@@ -865,11 +865,6 @@ pub(crate) async fn repository_page(
     page(&repo.name, Some(&viewer), &body)
 }
 
-fn short_hex(oid: &grit_lib::objects::ObjectId) -> String {
-    let hex = oid.to_hex();
-    hex.get(..7).unwrap_or(&hex).to_owned()
-}
-
 /// Read the branches and the first-parent history of `HEAD`.
 fn summarize(
     path: &Path,
@@ -879,7 +874,7 @@ fn summarize(
     let branches = list_branches(&repo)?
         .branches
         .into_iter()
-        .map(|b| (b.name, short_hex(&b.oid), b.current))
+        .map(|b| (b.name, b.oid.to_short_hex(), b.current))
         .collect();
     let (head, mut next) = match resolve_head_for_repository(&repo)? {
         HeadState::Branch {
@@ -900,7 +895,7 @@ fn summarize(
         let commit = parse_commit(&object.data)?;
         let (author, date) = split_signature(&commit.author);
         commits.push(CommitLine {
-            oid: short_hex(&oid),
+            oid: oid.to_short_hex(),
             subject: commit.message.lines().next().unwrap_or_default().to_owned(),
             author,
             date,

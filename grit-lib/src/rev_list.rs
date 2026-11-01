@@ -4414,8 +4414,14 @@ fn follow_path_into_parent_at_merge(
         return Ok(None);
     }
     let odb = repo.odb();
-    let entries =
-        diff_trees_for_pathspecs(odb, Some(&parent_tree), Some(&commit_tree), &path_specs)?;
+    let pathspec_matcher = repo.pathspec_matcher(&path_specs)?;
+    let entries = diff_trees_for_pathspecs(
+        odb,
+        Some(&parent_tree),
+        Some(&commit_tree),
+        &path_specs,
+        Some(&pathspec_matcher),
+    )?;
     let entries = if threshold >= 100 {
         entries
     } else {
@@ -5939,6 +5945,21 @@ pub struct CommitStreamParams {
     pub first_parent: bool,
     /// Keep raw commit object bytes for each yielded commit when the walk already read them.
     pub retain_commit_bytes: bool,
+    /// How much of each commit [`Self::retain_commit_bytes`] keeps.
+    pub retained_commit_extent: CommitExtent,
+}
+
+/// How much of each commit object a walk reads and hands back to its caller.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CommitExtent {
+    /// The whole commit object payload.
+    #[default]
+    Whole,
+    /// Every header and the message through its first non-blank line, as
+    /// [`Odb::read_commit_through_subject`](crate::odb::Odb::read_commit_through_subject)
+    /// returns: enough for one-line listings (author, dates, change id, subject), and much
+    /// cheaper to read than a commit with a long message body.
+    ThroughSubject,
 }
 
 /// One commit from [`CommitStream`]: its id and optional bytes read during the walk.
@@ -6061,7 +6082,7 @@ pub fn open_commit_stream<'repo>(
     let pack = repo.odb().pack_read_context_guard();
     let mut graph = CommitGraph::with_commit_graph(repo, params.first_parent, true);
     if params.retain_commit_bytes {
-        graph.keep_unreleased_commit_bytes();
+        graph.keep_unreleased_commit_bytes(params.retained_commit_extent);
     }
     let excluded =
         RangeWalkHide::for_range_walk(repo, include, exclude, true, params.first_parent)?;
@@ -6164,7 +6185,7 @@ fn try_bounded_commit_filter_limit_list(
                 )?;
                 // Reuse traversal bytes for filters and output, without keeping every
                 // nonmatching commit when a selective filter scans a long history.
-                graph.keep_unreleased_commit_bytes();
+                graph.keep_unreleased_commit_bytes(CommitExtent::Whole);
 
                 let author_dates = options.ordering == OrderingMode::AuthorDateWalk;
                 let mut matched_seen = 0usize;
@@ -7322,6 +7343,8 @@ pub(crate) struct CommitGraph<'r> {
     /// bytes until the visit lets filters and output reuse them instead of inflating again.
     /// Only the queued frontier is held, not every visited commit.
     unreleased_bytes: Option<OidHashMap<Vec<u8>>>,
+    /// How much of each commit [`Self::unreleased_bytes`] holds.
+    unreleased_extent: CommitExtent,
     /// Commit whose bytes [`Self::commit_bytes`] last read into `read_buf`.
     read_buf_oid: Option<ObjectId>,
 }
@@ -7376,6 +7399,7 @@ impl<'r> CommitGraph<'r> {
             retained: None,
             read_buf: Vec::new(),
             unreleased_bytes: None,
+            unreleased_extent: CommitExtent::Whole,
             read_buf_oid: None,
         }
     }
@@ -7515,10 +7539,12 @@ impl<'r> CommitGraph<'r> {
         Ok(())
     }
 
-    /// Keep raw commits that traversal reads from here on until [`Self::release_commit_bytes`].
-    fn keep_unreleased_commit_bytes(&mut self) {
+    /// Keep `extent` of the raw commits that traversal reads from here on until
+    /// [`Self::release_commit_bytes`].
+    fn keep_unreleased_commit_bytes(&mut self, extent: CommitExtent) {
         self.unreleased_bytes
             .get_or_insert_with(|| crate::objects::oid_hash_map_with_capacity(16));
+        self.unreleased_extent = extent;
     }
 
     /// Raw bytes of commit `oid`.
@@ -7542,13 +7568,26 @@ impl<'r> CommitGraph<'r> {
     /// Read commit `oid` for traversal and keep its bytes until it is released.
     fn read_and_keep_commit_bytes(&mut self, oid: ObjectId) -> Result<&[u8]> {
         let repo = self.repo;
+        let extent = self.unreleased_extent;
         let unreleased = self
             .unreleased_bytes
             .get_or_insert_with(crate::objects::oid_hash_map);
         match unreleased.entry(oid) {
             hashbrown::hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
             hashbrown::hash_map::Entry::Vacant(entry) => {
-                Ok(entry.insert(read_commit_bytes(repo, oid)?))
+                let bytes = match extent {
+                    CommitExtent::Whole => read_commit_bytes(repo, oid)?,
+                    CommitExtent::ThroughSubject => repo
+                        .odb()
+                        .read_commit_through_subject(&oid)
+                        .map_err(|err| match err {
+                            Error::UnexpectedObjectKind { .. } => {
+                                rev_list_unexpected_kind(oid, "commit")
+                            }
+                            other => other,
+                        })?,
+                };
+                Ok(entry.insert(bytes))
             }
         }
     }
@@ -11819,7 +11858,7 @@ mod line_coverage_tests {
         let _scope = crate::hot_path_test_metrics::HotPathMetricsScope::install(metrics.clone());
 
         let mut graph = CommitGraph::new(&repo, false);
-        graph.keep_unreleased_commit_bytes();
+        graph.keep_unreleased_commit_bytes(CommitExtent::Whole);
         let parents = graph.parents_of(tip)?;
         let opens = metrics.loose_path_open_attempts();
         assert!(opens > 0, "traversal must read the loose commit");

@@ -1081,9 +1081,7 @@ fn tracked_comparison(
 /// Whether status should compute ahead/behind counts (`status.aheadBehind`, default true).
 #[must_use]
 pub fn status_ahead_behind_enabled(config: &ConfigSet) -> bool {
-    let raw = config
-        .get("status.aheadBehind")
-        .or_else(|| config.get("status.aheadbehind"));
+    let raw = config.get("status.aheadBehind");
     match raw {
         None => true,
         Some(value) => parse_git_config_maybe_bool(&value).unwrap_or(true),

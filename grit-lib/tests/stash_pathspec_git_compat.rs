@@ -450,3 +450,37 @@ fn grit_apply_index_on_git_stash() {
         ls_files_stage(git_dir.path())
     );
 }
+
+#[test]
+fn stash_push_attr_pathspec_stashes_only_matching_paths() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join(".gitattributes"), "*.rs vendored\n").expect("attrs");
+    std::fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+    std::fs::write(dir.path().join("src/a.rs"), "1\n").expect("write");
+    std::fs::write(dir.path().join("src/b.txt"), "1\n").expect("write");
+    git_cmd(dir.path(), &["add", "-A"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+    std::fs::write(dir.path().join("src/a.rs"), "1\n2\n").expect("modify");
+    std::fs::write(dir.path().join("src/b.txt"), "1\n2\n").expect("modify");
+
+    let repo = open_grit(dir.path());
+    repo.stash()
+        .push(
+            &stash_opts(false, vec![":(attr:vendored)src".into()]),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
+        )
+        .expect("stash push attr");
+
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("src/a.rs")).unwrap(),
+        "1\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("src/b.txt")).unwrap(),
+        "1\n2\n"
+    );
+    let show = git_cmd(dir.path(), &["stash", "show", "--name-only"]);
+    assert_eq!(show.trim(), "src/a.rs");
+}

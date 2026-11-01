@@ -87,6 +87,24 @@ pub enum ErrorKind {
     NothingStaged,
     /// Genuinely nothing to commit (clean tree or auto-stage cancel-out).
     NothingToCommit,
+    /// Not inside a Git repository (or any parent directory is one).
+    NotARepository,
+    /// `grit commit` without `-m`, `-F`, amend/reuse, or a pending merge message.
+    CommitMessageRequired,
+    /// Commit or tag message empty after trim (including `-m ''` / empty `-F`).
+    EmptyCommitMessage,
+    /// Author or committer identity could not be resolved (`hint` names `grit config`).
+    IdentityUnknown,
+    /// Annotated or lightweight tag name already exists.
+    TagAlreadyExists,
+    /// `merge --abort`, `rebase --continue`, `pick --continue`, or similar with nothing paused.
+    NoOperationInProgress,
+    /// Pathspec matched no tracked or known files.
+    PathspecNoMatch,
+    /// No stash entry at the requested index (including an empty stash list).
+    StashNotFound,
+    /// Path not present in the named revision (and not on disk where required).
+    PathNotFound,
     /// Nested git checkout has no commit on its current branch (`paths`).
     EmbeddedRepoWithoutCommit,
     /// `HEAD` is on a GitButler workspace, which GitButler rewrites; commit with `but commit`.
@@ -155,6 +173,15 @@ impl ErrorKind {
             Self::GitDirPathIo,
             Self::NothingStaged,
             Self::NothingToCommit,
+            Self::NotARepository,
+            Self::CommitMessageRequired,
+            Self::EmptyCommitMessage,
+            Self::IdentityUnknown,
+            Self::TagAlreadyExists,
+            Self::NoOperationInProgress,
+            Self::PathspecNoMatch,
+            Self::StashNotFound,
+            Self::PathNotFound,
             Self::EmbeddedRepoWithoutCommit,
             Self::GitButlerWorkspace,
         ]

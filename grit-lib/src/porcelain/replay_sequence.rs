@@ -1545,15 +1545,11 @@ fn write_sequencer_todo(git_dir: &Path, todo: &[TodoEntry]) -> Result<()> {
             TodoVerb::Pick => "pick",
             TodoVerb::Revert => "revert",
         };
-        let abbrev = abbrev_oid(entry.oid);
+        let abbrev = entry.oid.to_short_hex();
         lines.push_str(&format!("{cmd} {abbrev} {}\n", entry.subject));
     }
     fs::write(git_dir.join("sequencer").join("todo"), lines).map_err(Error::Io)?;
     Ok(())
-}
-
-fn abbrev_oid(oid: ObjectId) -> String {
-    oid.to_hex()[..7].to_owned()
 }
 
 fn write_persisted_options(git_dir: &Path, req: &ReplaySequenceRequest) -> Result<()> {

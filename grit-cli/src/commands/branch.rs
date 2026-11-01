@@ -648,7 +648,7 @@ fn summary_to_entry(row: BranchSummary, full_detail: bool) -> BranchEntry {
         full_ref: None,
         remote: None,
         oid: Some(oid_hex.clone()),
-        short_oid: Some(short_hex(&oid_hex)),
+        short_oid: Some(row.oid.to_short_hex()),
         subject: None,
         date: None,
         upstream: row.upstream.as_ref().map(upstream_to_entry),
@@ -748,7 +748,7 @@ fn create(
     };
     let created = create_branch(repo, &create_opts).map_err(map_branch_error)?;
     let oid = created.oid.to_hex();
-    let short_oid = short_hex(&oid);
+    let short_oid = created.oid.to_short_hex();
     Ok(BranchOutcome::Create {
         name: created.name,
         oid,
@@ -771,7 +771,7 @@ fn remove(
     };
     let deleted = delete_branch(repo, name, mode, dry_run).map_err(map_branch_error)?;
     let oid = deleted.oid.to_hex();
-    let short_oid = short_hex(&oid);
+    let short_oid = deleted.oid.to_short_hex();
     Ok(BranchOutcome::Delete {
         name: deleted.name,
         oid,
@@ -801,7 +801,7 @@ fn rename(
         old: outcome.old,
         new: outcome.new,
         oid: outcome.oid.map(|o| o.to_hex()),
-        short_oid: outcome.oid.map(|o| short_hex(&o.to_hex())),
+        short_oid: outcome.oid.map(|o| o.to_short_hex()),
         replaced: outcome.replaced.map(|o| o.to_hex()),
         dry_run: outcome.dry_run,
     })
@@ -829,10 +829,6 @@ fn unset(repo: &Repository, branch: &str, dry_run: bool) -> Result<BranchOutcome
         branch: branch.to_owned(),
         dry_run,
     })
-}
-
-fn short_hex(full: &str) -> String {
-    full[..7.min(full.len())].to_owned()
 }
 
 fn branch_error_message(err: &grit_lib::porcelain::branch::BranchError) -> String {

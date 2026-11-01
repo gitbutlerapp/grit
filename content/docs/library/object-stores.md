@@ -197,6 +197,8 @@ For a lower-level hook, [`fetch_remote_into`](rustdoc:grit_lib::remote::fetch::f
 
 Resolving a short id and abbreviating an id (for example [`abbreviate_object_id`](rustdoc:grit_lib::revwalk::rev_parse::abbreviate_object_id)) both call [`ObjectStore::lookup_prefix`](rustdoc:grit_lib::objects::odb::store::ObjectStore::lookup_prefix) once per id. A backend only has to implement `for_each_object`: the default `lookup_prefix` parses the prefix once into an [`ObjectIdPrefix`](rustdoc:grit_lib::objects::ObjectIdPrefix) and compares raw id bytes without allocating, so each call is one pass over the whole store (about 1 ms per 200 000 ids on the factory VM).
 
+For a label that does not need to resolve back to the id (log lines, conflict markers, status rows), [`ObjectId::to_short_hex`](rustdoc:grit_lib::objects::ObjectId::to_short_hex) returns the first seven hex digits without touching the store, and [`short_hex`](rustdoc:grit_lib::objects::short_hex) does the same for a hex string you already hold.
+
 If your backend keeps ids sorted (a B-tree, an ordered key-value store, an SQL index on the raw id), override `lookup_prefix` with a range scan. Every id that starts with the prefix lies between [`ObjectIdPrefix::lowest`](rustdoc:grit_lib::objects::ObjectIdPrefix::lowest) and [`ObjectIdPrefix::highest`](rustdoc:grit_lib::objects::ObjectIdPrefix::highest), inclusive, and nothing else does:
 
 ```rust

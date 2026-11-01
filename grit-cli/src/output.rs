@@ -24,7 +24,7 @@ use time::OffsetDateTime;
 
 use crate::cli_messages::human_error_message;
 use crate::json_error::structured_json_payload;
-use crate::json_filter::apply_json_filter;
+use crate::json_filter::{apply_json_filter, write_json_filter};
 use crate::stdio;
 use crate::ui::entry_path;
 use grit_lib::porcelain::log::DecorationKind;
@@ -98,24 +98,26 @@ pub trait MarkdownRender: Serialize {
 /// Generic (rather than `Box<dyn …>`) because `serde::Serialize` is not
 /// object-safe; each dispatch arm calls this with its concrete outcome type.
 pub fn emit<T: Serialize + HumanRender + MarkdownRender>(
-    value: &T,
+    value: T,
     opts: &OutputOptions,
     ctx: &RenderContext,
 ) -> Result<()> {
     opts.validate()?;
     let stdout = std::io::stdout();
     let mut lock = stdout.lock();
-    let render = |w: &mut dyn Write| -> Result<()> {
-        match opts.mode {
+    let mode = opts.mode;
+    let filter = opts.filter.clone();
+    let render = move |w: &mut dyn Write| -> Result<()> {
+        match mode {
             OutputMode::Human => value.render_human(w, ctx),
-            OutputMode::Json => write_json(w, value, opts.filter.as_deref()),
+            OutputMode::Json => write_json(w, value, filter.as_deref()),
             OutputMode::Markdown => value.render_markdown(w, ctx),
         }
     };
     // Rust's stdout flushes every line, so a large single-line JSON document, or a long list,
     // costs a write per kilobyte or per line. Buffer like C stdio does: always for the single
     // JSON value, and for text unless a terminal is watching it appear.
-    if opts.mode != OutputMode::Json && lock.is_terminal() {
+    if mode != OutputMode::Json && lock.is_terminal() {
         return render(&mut lock);
     }
     let mut buffered = std::io::BufWriter::with_capacity(OUTPUT_BUFFER_BYTES, lock);
@@ -136,21 +138,25 @@ pub fn render_to_string<T: Serialize + HumanRender + MarkdownRender>(
     let mut buf = Vec::new();
     match mode {
         OutputMode::Human => value.render_human(&mut buf, ctx)?,
-        OutputMode::Json => write_json(&mut buf, value, None)?,
+        OutputMode::Json => {
+            json_write(serde_json::to_writer(&mut buf, value))?;
+            stdio::io_result(writeln!(&mut buf))
+                .map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+        }
         OutputMode::Markdown => value.render_markdown(&mut buf, ctx)?,
     }
     Ok(String::from_utf8(buf)?)
 }
 
 /// Serialize `value` to `w`, optionally applying a jq-like `filter`.
-fn write_json<T: Serialize>(w: &mut dyn Write, value: &T, filter: Option<&str>) -> Result<()> {
+fn write_json<T: Serialize>(w: &mut dyn Write, value: T, filter: Option<&str>) -> Result<()> {
     if let Some(expr) = filter {
-        let full = serde_json::to_value(value)
+        let input_json = serde_json::to_vec(&value)
             .map_err(|e| anyhow::anyhow!("serializing JSON output: {e}"))?;
-        let filtered = apply_json_filter(&full, expr)?;
-        json_write(serde_json::to_writer(&mut *w, &filtered))?;
+        drop(value);
+        write_json_filter(w, input_json, expr)?;
     } else {
-        json_write(serde_json::to_writer(&mut *w, value))?;
+        json_write(serde_json::to_writer(&mut *w, &value))?;
     }
     stdio::io_result(writeln!(w)).map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
     Ok(())

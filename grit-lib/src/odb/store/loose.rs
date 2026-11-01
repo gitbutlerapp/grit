@@ -1,10 +1,13 @@
 //! Loose-object storage under `objects/xx/<suffix>` (zlib-compressed Git objects).
 
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -22,22 +25,145 @@ use crate::zlib_inflate::{
 /// Payload bytes read from a source stream per step when writing a loose object.
 const STREAM_CHUNK: usize = 128 * 1024;
 
+fn objects_dir_mtime(objects_dir: &Path) -> SystemTime {
+    fs::metadata(objects_dir)
+        .and_then(|m| m.modified())
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+}
+
+fn fanout_dir_mtime(objects_dir: &Path, prefix: &str) -> SystemTime {
+    fs::metadata(objects_dir.join(prefix))
+        .and_then(|m| m.modified())
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+}
+
+fn loose_fanout_prefix(objects_dir: &Path, path: &Path) -> Option<String> {
+    path.strip_prefix(objects_dir)
+        .ok()
+        .and_then(|rel| rel.components().next())
+        .and_then(|c| c.as_os_str().to_str())
+        .filter(|s| s.len() == 2 && s.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .map(str::to_owned)
+}
+
+/// Per-`objects/` negative cache for loose read misses (owned by [`LooseStore`] / [`crate::odb::Odb`]).
+#[derive(Debug)]
+pub(crate) struct LooseNegativeCache {
+    root_mtime: SystemTime,
+    fanout_mtime: HashMap<String, SystemTime>,
+    absent_paths: HashSet<PathBuf>,
+    absent_fanout: HashSet<String>,
+}
+
+impl Default for LooseNegativeCache {
+    fn default() -> Self {
+        Self {
+            root_mtime: SystemTime::UNIX_EPOCH,
+            fanout_mtime: HashMap::new(),
+            absent_paths: HashSet::new(),
+            absent_fanout: HashSet::new(),
+        }
+    }
+}
+
+impl LooseNegativeCache {
+    fn sync_root(&mut self, objects_dir: &Path) {
+        let mt = objects_dir_mtime(objects_dir);
+        if self.root_mtime != mt {
+            *self = Self {
+                root_mtime: mt,
+                ..Self::default()
+            };
+        }
+    }
+
+    fn sync_fanout(&mut self, objects_dir: &Path, prefix: &str) {
+        let mt = fanout_dir_mtime(objects_dir, prefix);
+        if self.fanout_mtime.get(prefix) != Some(&mt) {
+            self.fanout_mtime.insert(prefix.to_owned(), mt);
+            let fanout_dir = objects_dir.join(prefix);
+            self.absent_paths.retain(|p| !p.starts_with(&fanout_dir));
+            self.absent_fanout.remove(prefix);
+        }
+    }
+
+    fn may_skip_open(&mut self, objects_dir: &Path, path: &Path) -> bool {
+        self.sync_root(objects_dir);
+        if let Some(prefix) = loose_fanout_prefix(objects_dir, path) {
+            self.sync_fanout(objects_dir, &prefix);
+            if self.absent_fanout.contains(&prefix) {
+                return true;
+            }
+        }
+        self.absent_paths.contains(path)
+    }
+
+    fn record_absent(&mut self, objects_dir: &Path, path: &Path) {
+        self.sync_root(objects_dir);
+        self.absent_paths.insert(path.to_path_buf());
+        if let Some(prefix) = loose_fanout_prefix(objects_dir, path) {
+            self.sync_fanout(objects_dir, &prefix);
+            let fanout_dir = objects_dir.join(&prefix);
+            if !fanout_dir.is_dir() {
+                self.absent_fanout.insert(prefix);
+            }
+        }
+    }
+}
+
+pub(crate) type SharedLooseNegativeCache = Arc<Mutex<LooseNegativeCache>>;
+
 /// On-disk loose object store for one `objects/` directory.
 #[derive(Debug, Clone)]
 pub struct LooseStore {
     objects_dir: PathBuf,
     hash_algo: HashAlgo,
     compression: Compression,
+    negative_cache: SharedLooseNegativeCache,
 }
 
 impl LooseStore {
     /// Open a loose store at `objects_dir` using `hash_algo` and zlib `compression`.
     #[must_use]
     pub fn new(objects_dir: PathBuf, hash_algo: HashAlgo, compression: Compression) -> Self {
+        Self::new_with_negative_cache(
+            objects_dir,
+            hash_algo,
+            compression,
+            Arc::new(Mutex::new(LooseNegativeCache::default())),
+        )
+    }
+
+    pub(crate) fn new_with_negative_cache(
+        objects_dir: PathBuf,
+        hash_algo: HashAlgo,
+        compression: Compression,
+        negative_cache: SharedLooseNegativeCache,
+    ) -> Self {
         Self {
             objects_dir,
             hash_algo,
             compression,
+            negative_cache,
+        }
+    }
+
+    fn invalidate_negative_cache(&self) {
+        if let Ok(mut guard) = self.negative_cache.lock() {
+            *guard = LooseNegativeCache::default();
+        }
+    }
+
+    fn open_may_be_absent(&self, path: &Path) -> bool {
+        self.negative_cache
+            .lock()
+            .ok()
+            .is_some_and(|mut guard| guard.may_skip_open(&self.objects_dir, path))
+    }
+
+    fn record_absent_path(&self, path: &Path) {
+        if let Ok(mut guard) = self.negative_cache.lock() {
+            guard.record_absent(&self.objects_dir, path);
         }
     }
 
@@ -131,6 +257,7 @@ impl LooseStore {
                 )
             })
         })?;
+        self.invalidate_negative_cache();
         Ok(*oid)
     }
 
@@ -171,6 +298,7 @@ impl LooseStore {
                 })
             },
         )?;
+        self.invalidate_negative_cache();
         Ok(*oid)
     }
 
@@ -205,6 +333,7 @@ impl LooseStore {
             options.loose_prefix_dirs_ready,
             |file| deflate_object_into(file, kind, data, self.compression),
         )?;
+        self.invalidate_negative_cache();
         Ok(*oid)
     }
 
@@ -277,9 +406,15 @@ impl ObjectStore for LooseStore {
 
     fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
         let path = self.object_path(oid);
+        if self.open_may_be_absent(&path) {
+            return Ok(None);
+        }
         let file = match fs::File::open(&path) {
             Ok(f) => f,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                self.record_absent_path(&path);
+                return Ok(None);
+            }
             Err(err) => return Err(Error::Io(err)),
         };
         read_zlib_loose_payload_into(file, buf)?;
@@ -289,9 +424,15 @@ impl ObjectStore for LooseStore {
 
     fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
         let path = self.object_path(oid);
+        if self.open_may_be_absent(&path) {
+            return Ok(None);
+        }
         let mut file = match fs::File::open(&path) {
             Ok(f) => f,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                self.record_absent_path(&path);
+                return Ok(None);
+            }
             Err(err) => return Err(Error::Io(err)),
         };
         match loose_object_info_from_file(&mut file) {
@@ -302,9 +443,15 @@ impl ObjectStore for LooseStore {
 
     fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
         let path = self.object_path(oid);
+        if self.open_may_be_absent(&path) {
+            return Ok(None);
+        }
         let file = match fs::File::open(&path) {
             Ok(f) => f,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                self.record_absent_path(&path);
+                return Ok(None);
+            }
             Err(err) => return Err(Error::Io(err)),
         };
         let reader = LoosePayloadReader::open(file)?;
@@ -354,6 +501,7 @@ impl WritableObjectStore for LooseStore {
         publish_loose_object(&self.objects_dir, &path, prefix_dir, false, |file| {
             deflate_object_into(file, kind, data, self.compression)
         })?;
+        self.invalidate_negative_cache();
         Ok(oid)
     }
 
@@ -1415,5 +1563,46 @@ mod tests {
             peak < 1024 * 1024,
             "peak in-flight buffer {peak} must stay under 1 MiB"
         );
+    }
+
+    #[test]
+    fn external_loose_write_in_fanout_visible_after_negative_cache() {
+        use std::process::{Command, Stdio};
+
+        use crate::odb::Odb;
+
+        let dir = tempfile::tempdir().unwrap();
+        let objects = dir.path().join("objects");
+        fs::create_dir_all(&objects).unwrap();
+        let odb = Odb::new(&objects);
+        let payload = b"written externally into an existing fanout dir\n";
+        let oid = odb.hash(ObjectKind::Blob, payload).unwrap();
+        assert!(matches!(odb.read(&oid), Err(Error::ObjectNotFound(_))));
+
+        let mut child = Command::new("git")
+            .args(["hash-object", "-w", "--stdin"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .env("GIT_OBJECT_DIRECTORY", &objects)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .spawn()
+            .expect("git hash-object");
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(payload).unwrap();
+        }
+        let out = child.wait_with_output().expect("git wait");
+        assert!(
+            out.status.success(),
+            "git hash-object: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), oid.to_hex());
+
+        let obj = odb
+            .read(&oid)
+            .expect("external loose write must be visible");
+        assert_eq!(obj.data, payload);
     }
 }

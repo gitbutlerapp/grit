@@ -3929,17 +3929,22 @@ fn find_best_contiguous_copy_match(
 }
 
 /// Contiguous `current_idx` groups for copy/move suspect chunks.
+///
+/// Several [`TrackedLine`] values may share one file line index after move/copy
+/// detection hands the same parent line to multiple final lines. Group by unique
+/// sorted indices so each file range is scored once and every tracked line is
+/// handled in exactly one group.
 fn group_contiguous_tracked(pending: &[TrackedLine]) -> Vec<(usize, usize)> {
     if pending.is_empty() {
         return Vec::new();
     }
-    let mut order: Vec<usize> = (0..pending.len()).collect();
-    order.sort_by_key(|&i| pending[i].current_idx);
+    let mut indices: Vec<usize> = pending.iter().map(|t| t.current_idx).collect();
+    indices.sort_unstable();
+    indices.dedup();
     let mut groups = Vec::new();
-    let mut start = pending[order[0]].current_idx;
+    let mut start = indices[0];
     let mut end = start + 1;
-    for &i in order.iter().skip(1) {
-        let idx = pending[i].current_idx;
+    for &idx in indices.iter().skip(1) {
         if idx == end {
             end += 1;
         } else {
@@ -5057,6 +5062,39 @@ fn blame_revision_label(start: Option<ObjectId>, start_oid: ObjectId) -> String 
     }
 }
 
+/// Worktree path absent on disk: blame the revision when the path still exists at `start_oid`.
+fn blame_worktree_missing_path(
+    repo: &Repository,
+    odb: &Odb,
+    start_oid: ObjectId,
+    revision_label: &str,
+    file_path: &str,
+    path_bytes: &[u8],
+    index: &mut Option<Index>,
+) -> Result<Option<BlameOverlay>> {
+    let start_tree = get_blame_commit(odb, start_oid, &mut BlameCommitCache::default(), None)?.tree;
+    if resolve_path_in_tree_entry(odb, &start_tree, file_path)?.is_some() {
+        return Ok(None);
+    }
+    let staged = loaded_index(repo, index)?;
+    let mut known = (0..=3).any(|stage| staged.get(path_bytes, stage).is_some());
+    if !known {
+        let mut parents = vec![start_oid];
+        parents.extend(crate::state::read_merge_heads(repo.git_dir())?);
+        for parent in &parents[1..] {
+            if known {
+                break;
+            }
+            let tree = get_blame_commit(odb, *parent, &mut BlameCommitCache::default(), None)?.tree;
+            known = resolve_path_in_tree_entry(odb, &tree, file_path)?.is_some();
+        }
+    }
+    if !known {
+        return Err(blame_path_missing_in_revision(file_path, revision_label));
+    }
+    Ok(None)
+}
+
 /// Load the uncommitted final text `source` selects as an overlay on `start_oid`.
 ///
 /// Returns `None` for [`BlameFinalSource::Revision`] and when the text hashes to the blob
@@ -5088,13 +5126,27 @@ fn load_blame_overlay(
     let bytes = match (supplied, repo.work_tree(), attrs.as_ref()) {
         (None, Some(work_tree), Some(attrs)) => {
             let abs = crate::repo_relpath::worktree_abs(work_tree, file_path);
-            let meta = std::fs::symlink_metadata(&abs).map_err(|source| {
-                crate::worktree::map_worktree_io(
-                    rel_match.as_ref(),
-                    crate::worktree::WorktreePathOperation::Metadata,
-                    source,
-                )
-            })?;
+            let meta = match std::fs::symlink_metadata(&abs) {
+                Ok(meta) => meta,
+                Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                    return blame_worktree_missing_path(
+                        repo,
+                        odb,
+                        start_oid,
+                        revision_label,
+                        file_path,
+                        &path_bytes,
+                        &mut index,
+                    );
+                }
+                Err(source) => {
+                    return Err(crate::worktree::map_worktree_io(
+                        rel_match.as_ref(),
+                        crate::worktree::WorktreePathOperation::Metadata,
+                        source,
+                    ));
+                }
+            };
             let index_entry = if crate::crlf::clean_uses_autocrlf_index_guard(attrs, &conv) {
                 loaded_index(repo, &mut index)?.get(&path_bytes, 0)
             } else {
@@ -5249,6 +5301,41 @@ fn author_epoch_from_identity(identity: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn group_contiguous_tracked_dedupes_shared_current_idx() {
+        let pending = vec![
+            TrackedLine {
+                final_lineno: 1,
+                current_idx: 0,
+                ignored: false,
+                source_path: None,
+                origin: 0,
+            },
+            TrackedLine {
+                final_lineno: 2,
+                current_idx: 0,
+                ignored: false,
+                source_path: None,
+                origin: 0,
+            },
+            TrackedLine {
+                final_lineno: 3,
+                current_idx: 1,
+                ignored: false,
+                source_path: None,
+                origin: 0,
+            },
+            TrackedLine {
+                final_lineno: 4,
+                current_idx: 1,
+                ignored: false,
+                source_path: None,
+                origin: 0,
+            },
+        ];
+        assert_eq!(group_contiguous_tracked(&pending), vec![(0, 2)]);
+    }
 
     #[test]
     fn blob_lines_preserves_interior_and_trailing_blank_lines() {

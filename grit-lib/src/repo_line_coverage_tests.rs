@@ -12,11 +12,15 @@ use crate::ref_storage::RefStorageFormat;
 use crate::repo::{
     init_bare_with_env_worktree, init_repository, init_repository_separate_git_dir,
     init_worktree_config, repository_format_warning, resolve_git_directory_arg,
-    trace_repo_setup_if_requested, validate_repo_format, InitOptions, Repository,
-    RepositoryBuilder,
+    validate_repo_format, InitOptions, Repository, RepositoryBuilder,
 };
 use crate::write_tree::write_tree_from_index;
 use tempfile::tempdir;
+
+fn canonical(path: &std::path::Path) -> std::path::PathBuf {
+    path.canonicalize_simplified()
+        .unwrap_or_else(|_| path.to_path_buf())
+}
 
 fn index_entry(path: &str, oid: crate::objects::ObjectId) -> IndexEntry {
     IndexEntry {
@@ -81,7 +85,6 @@ fn repository_open_discover_and_index_roundtrip() -> crate::error::Result<()> {
     let _ = write_tree_from_index(discovered.odb(), &index, "")?;
     discovered.write_index(&mut index)?;
     let _ = discovered.try_write_index(&mut index)?;
-    let _ = trace_repo_setup_if_requested(&discovered);
     let with_policy = discovered.with_thread_policy(ThreadPolicy::default());
     let _ = with_policy.network_trace_enabled();
     Ok(())
@@ -184,14 +187,10 @@ fn open_for_serving_and_bare_worktree_at_path() -> crate::error::Result<()> {
 }
 
 #[test]
-fn setup_trace_and_replace_ref_read_paths() -> crate::error::Result<()> {
+fn discover_from_nested_dir_and_replace_ref_read_paths() -> crate::error::Result<()> {
     let dir = tempdir().map_err(crate::error::Error::Io)?;
     std::fs::create_dir_all(dir.path().join("nested/deep")).map_err(crate::error::Error::Io)?;
-    let trace = dir.path().join("setup-trace.txt");
-    std::fs::write(&trace, b"").map_err(crate::error::Error::Io)?;
-    let trace_abs = trace.canonicalize_simplified().unwrap_or(trace);
     let mut env = Environment::empty();
-    env.git_trace_setup = Some(trace_abs.to_string_lossy().into_owned());
     env.cwd = dir.path().join("nested/deep");
     let mut opts = RepositoryOptions::empty();
     opts.environment = env;
@@ -217,9 +216,11 @@ fn setup_trace_and_replace_ref_read_paths() -> crate::error::Result<()> {
     )
     .map_err(crate::error::Error::Io)?;
     let discovered = Repository::discover(Some(dir.path()), &opts)?;
-    trace_repo_setup_if_requested(&discovered).map_err(crate::error::Error::Io)?;
-    let contents = std::fs::read_to_string(&trace_abs).map_err(crate::error::Error::Io)?;
-    assert!(contents.contains("setup:"));
+    assert_eq!(canonical(discovered.git_dir()), canonical(&git_dir));
+    assert_eq!(
+        discovered.work_tree().map(canonical),
+        Some(canonical(dir.path()))
+    );
     let replaced = discovered.read_replaced(&tip)?;
     assert_eq!(replaced.kind, ObjectKind::Blob);
     let _oid: ObjectId = tip;
@@ -273,7 +274,7 @@ fn discover_honors_git_dir_and_ceiling_env() -> crate::error::Result<()> {
 }
 
 #[test]
-fn setup_trace_bare_layout_and_relative_git_dir() -> crate::error::Result<()> {
+fn discover_bare_layout_and_relative_git_dir() -> crate::error::Result<()> {
     let layout = tempdir().map_err(crate::error::Error::Io)?;
     let parent = layout.path().join("parent");
     std::fs::create_dir_all(&parent).map_err(crate::error::Error::Io)?;
@@ -302,19 +303,14 @@ fn setup_trace_bare_layout_and_relative_git_dir() -> crate::error::Result<()> {
 
     let sub = parent.join("sub");
     std::fs::create_dir_all(&sub).map_err(crate::error::Error::Io)?;
-    let trace_bare = layout.path().join("trace-bare.txt");
-    std::fs::write(&trace_bare, b"").map_err(crate::error::Error::Io)?;
-    let trace_bare_abs = trace_bare.canonicalize_simplified().unwrap_or(trace_bare);
     let mut env = Environment::empty();
-    env.git_trace_setup = Some(trace_bare_abs.to_string_lossy().into_owned());
     env.cwd = sub.clone();
     env.git_dir = Some("../repo.git".into());
     let mut opts = RepositoryOptions::empty();
     opts.environment = env;
     let bare_repo = Repository::discover(None, &opts)?;
-    trace_repo_setup_if_requested(&bare_repo).map_err(crate::error::Error::Io)?;
-    let bare_trace = std::fs::read_to_string(&trace_bare_abs).map_err(crate::error::Error::Io)?;
-    assert!(bare_trace.contains("setup:"));
+    assert!(bare_repo.is_bare());
+    assert_eq!(canonical(bare_repo.git_dir()), canonical(&bare_git));
 
     let wt_root = tempdir().map_err(crate::error::Error::Io)?;
     let wt_repo = init_repository(wt_root.path(), false, "main", None, RefStorageFormat::Files)?;
@@ -333,33 +329,29 @@ fn setup_trace_bare_layout_and_relative_git_dir() -> crate::error::Result<()> {
         .map_err(crate::error::Error::Io)?;
     let nested = wt_root.path().join("nested");
     std::fs::create_dir_all(&nested).map_err(crate::error::Error::Io)?;
-    let trace_rel = layout.path().join("trace-rel.txt");
-    std::fs::write(&trace_rel, b"").map_err(crate::error::Error::Io)?;
-    let trace_rel_abs = trace_rel.canonicalize_simplified().unwrap_or(trace_rel);
     let mut env_rel = Environment::empty();
-    env_rel.git_trace_setup = Some(trace_rel_abs.to_string_lossy().into_owned());
     env_rel.cwd = nested.clone();
     env_rel.git_dir = Some("../.git".into());
     let mut opts_rel = RepositoryOptions::empty();
     opts_rel.environment = env_rel;
     let rel_repo = Repository::discover(None, &opts_rel)?;
-    trace_repo_setup_if_requested(&rel_repo).map_err(crate::error::Error::Io)?;
-    let rel_trace = std::fs::read_to_string(&trace_rel_abs).map_err(crate::error::Error::Io)?;
-    assert!(rel_trace.contains("setup:"));
+    assert_eq!(canonical(rel_repo.git_dir()), canonical(&git_dir));
+    assert_eq!(
+        rel_repo.work_tree().map(canonical),
+        Some(canonical(&nested))
+    );
 
     let mut env_wt = Environment::empty();
     env_wt.cwd = wt_root.path().join("nested");
     env_wt.git_work_tree = Some(wt_root.path().to_string_lossy().into_owned());
     env_wt.git_dir = Some(wt_root.path().join(".git").to_string_lossy().into_owned());
-    let trace_wt = layout.path().join("trace-wt.txt");
-    std::fs::write(&trace_wt, b"").map_err(crate::error::Error::Io)?;
-    let trace_wt_abs = trace_wt.canonicalize_simplified().unwrap_or(trace_wt);
-    env_wt.git_trace_setup = Some(trace_wt_abs.to_string_lossy().into_owned());
     let mut opts_wt = RepositoryOptions::empty();
     opts_wt.environment = env_wt;
     let wt_discovered = Repository::discover(None, &opts_wt)?;
-    trace_repo_setup_if_requested(&wt_discovered).map_err(crate::error::Error::Io)?;
-    let wt_trace = std::fs::read_to_string(&trace_wt_abs).map_err(crate::error::Error::Io)?;
-    assert!(wt_trace.contains("setup:"));
+    assert_eq!(canonical(wt_discovered.git_dir()), canonical(&git_dir));
+    assert_eq!(
+        wt_discovered.work_tree().map(canonical),
+        Some(canonical(wt_root.path()))
+    );
     Ok(())
 }

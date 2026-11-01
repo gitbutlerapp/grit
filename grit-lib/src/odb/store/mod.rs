@@ -18,6 +18,7 @@ mod packs;
 pub use composite::CompositeStore;
 pub use files::FilesSource;
 pub use loose::LooseStore;
+pub(crate) use loose::{LooseNegativeCache, SharedLooseNegativeCache};
 pub use midx::{MidxObjects, MidxObjectsStatus};
 pub(crate) use packs::touch_pack_mtime;
 pub use packs::{PackFilter, PackedObjects};

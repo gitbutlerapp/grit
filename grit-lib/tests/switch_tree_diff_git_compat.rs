@@ -2330,6 +2330,164 @@ fn switch_refuses_staged_gitlink_that_differs_from_target_like_git() {
     );
 }
 
+#[test]
+fn switch_tracked_symlink_to_dir_with_wholesale_deletes_matches_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "m", "."]);
+    git(tmp.path(), &["config", "user.email", "t@example.com"]);
+    git(tmp.path(), &["config", "user.name", "Test"]);
+    git(tmp.path(), &["config", "gc.auto", "0"]);
+
+    std::fs::create_dir_all(tmp.path().join("t/z.in")).expect("mkdir z.in");
+    std::fs::create_dir_all(tmp.path().join("t/inv/in")).expect("mkdir inv/in");
+    std::fs::write(tmp.path().join("t/z.in/Cargo.toml"), "r\n").expect("write z");
+    std::fs::write(tmp.path().join("t/inv/in/Cargo.toml"), "new\n").expect("write inv");
+    std::fs::write(tmp.path().join("t/inv/mod.rs"), "m\n").expect("write mod");
+    git(tmp.path(), &["add", "-A"]);
+    git(tmp.path(), &["commit", "-qm", "m"]);
+
+    git(tmp.path(), &["switch", "-q", "-c", "s"]);
+    git(tmp.path(), &["rm", "-rq", "t/inv/in"]);
+    std::os::unix::fs::symlink("../z.in", tmp.path().join("t/inv/in")).expect("symlink");
+    std::fs::write(tmp.path().join("t/z.in/Cargo.toml"), "changed\n").expect("change z");
+    std::fs::create_dir_all(tmp.path().join("bulk")).expect("mkdir bulk");
+    for i in 1..=40 {
+        std::fs::write(tmp.path().join(format!("bulk/f{i}")), format!("{i}\n")).expect("bulk");
+    }
+    git(tmp.path(), &["add", "-A"]);
+    git(tmp.path(), &["commit", "-qm", "s"]);
+    git(tmp.path(), &["switch", "-q", "m"]);
+
+    git(tmp.path(), &["switch", "-q", "s"]);
+    git(tmp.path(), &["switch", "-q", "m"]);
+    assert!(
+        tmp.path().join("t/inv/in/Cargo.toml").is_file(),
+        "git must materialize directory t/inv/in"
+    );
+    let git_cargo = std::fs::read_to_string(tmp.path().join("t/inv/in/Cargo.toml")).expect("read");
+    assert_eq!(git_cargo, "new\n");
+
+    git(tmp.path(), &["switch", "-q", "s"]);
+    git(tmp.path(), &["switch", "-q", "m"]);
+
+    let grit_repo = Repository::open(
+        &tmp.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(tmp.path()),
+    )
+    .expect("open grit repo");
+    let s_oid = ObjectId::from_hex(git(tmp.path(), &["rev-parse", "s"]).trim()).expect("s oid");
+    let m_oid = ObjectId::from_hex(git(tmp.path(), &["rev-parse", "m"]).trim()).expect("m oid");
+
+    switch_repository(
+        &grit_repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "s".into(),
+                oid: s_oid,
+            },
+            dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
+        },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("grit switch to s");
+    switch_repository(
+        &grit_repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "m".into(),
+                oid: m_oid,
+            },
+            dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
+        },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("grit switch to m must not false-positive through tracked symlink");
+
+    assert!(
+        tmp.path().join("t/inv/in").is_dir(),
+        "t/inv/in must be a directory after switch"
+    );
+    let grit_cargo = std::fs::read_to_string(tmp.path().join("t/inv/in/Cargo.toml")).expect("read");
+    assert_eq!(grit_cargo, "new\n");
+    assert!(
+        git_porcelain(tmp.path()).trim().is_empty(),
+        "git status must be clean after grit switch, got:\n{}",
+        git_porcelain(tmp.path())
+    );
+    git_fsck(tmp.path());
+}
+
+#[test]
+fn switch_wholesale_fast_path_still_blocks_genuine_untracked_at_added_path() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main", "."]);
+    git(tmp.path(), &["config", "user.email", "t@example.com"]);
+    git(tmp.path(), &["config", "user.name", "Test"]);
+    git(tmp.path(), &["config", "gc.auto", "0"]);
+
+    for i in 0..40 {
+        std::fs::write(
+            tmp.path().join(format!("bulk/del{i}.txt")),
+            format!("{i}\n"),
+        )
+        .expect("seed");
+    }
+    std::fs::write(tmp.path().join("keep.txt"), "stay\n").expect("keep");
+    git(tmp.path(), &["add", "-A"]);
+    git(tmp.path(), &["commit", "-qm", "main"]);
+
+    git(tmp.path(), &["checkout", "-q", "-b", "target"]);
+    for i in 0..40 {
+        let _ = std::fs::remove_file(tmp.path().join(format!("bulk/del{i}.txt")));
+    }
+    std::fs::create_dir_all(tmp.path().join("slot")).expect("mkdir slot");
+    std::fs::write(tmp.path().join("slot/new.txt"), "added\n").expect("added path");
+    git(tmp.path(), &["add", "-A"]);
+    git(tmp.path(), &["commit", "-qm", "target"]);
+    git(tmp.path(), &["checkout", "-q", "main"]);
+
+    std::fs::write(tmp.path().join("slot/new.txt"), "untracked blocks\n").expect("untracked");
+
+    let grit_repo = Repository::open(
+        &tmp.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(tmp.path()),
+    )
+    .expect("open grit repo");
+    let target_oid =
+        ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
+    let err = switch_repository(
+        &grit_repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            },
+            dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
+        },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("untracked at added path must block switch");
+    match err {
+        Error::WouldOverwrite {
+            reason: OverwriteReason::Untracked,
+            paths,
+            ..
+        } => {
+            assert!(
+                paths.iter().any(|p| p == "slot/new.txt"),
+                "expected slot/new.txt in {paths:?}"
+            );
+        }
+        other => panic!("expected WouldOverwrite Untracked, got {other:?}"),
+    }
+}
+
 /// [`GitlinkAhead`] with `sub` deinitialized (no `.git`) and an untracked `sub/local.txt`.
 fn gitlink_uninitialized_with_local_file() -> GitlinkAhead {
     let fixture = GitlinkAhead::new(1, false);

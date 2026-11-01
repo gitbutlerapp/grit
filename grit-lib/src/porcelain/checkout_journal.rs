@@ -510,7 +510,7 @@ fn spool_entry_name(rel: &str) -> String {
     while !file_name.is_char_boundary(start) {
         start += 1;
     }
-    format!("{}_{seq}_{}", std::process::id(), &file_name[start..])
+    format!("{seq}_{}", &file_name[start..])
 }
 
 fn move_directory_tree(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -645,9 +645,7 @@ fn move_worktree_entry_to_spool(
     stash: &Path,
     kind: SpooledPathKind,
 ) -> std::io::Result<()> {
-    if let Some(parent) = stash.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    // `stash` sits directly in the spool directory: entry names never contain a separator.
     match fs::rename(abs, stash) {
         Ok(()) => {
             #[cfg(test)]

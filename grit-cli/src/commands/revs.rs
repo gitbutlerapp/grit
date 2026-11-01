@@ -3,7 +3,7 @@
 use anyhow::{bail, Result};
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_list::RevListResult;
-use grit_lib::revwalk::LeftRightCounts;
+use grit_lib::revwalk::{CommitExtent, LeftRightCounts};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -11,7 +11,7 @@ use std::io::Write;
 use crate::commits_json::{fetch_limit_plus_one, truncate_oid_list, CommitJsonLoader};
 use crate::context;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, OutputMode, RenderContext};
-use crate::pathspec_args::TrailingPathspecArgs;
+use crate::pathspec_args::{promote_long_magic_pathspecs_from_revs, TrailingPathspecArgs};
 use crate::rev_select::RevSelectArgs;
 use crate::stream_commit_list::{
     begin_commits_json_document, finish_commits_json_document, flush_or_broken_pipe,
@@ -250,6 +250,9 @@ pub fn listing_can_stream(
     }
     let repo = context::discover()?;
     let env = repo.environment();
+    let mut rev = rev.clone();
+    let mut pathspecs = pathspecs.clone();
+    promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
     let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
     let opts = rev.to_rev_walk_options(&repo, env, &[], &walk_paths)?;
     Ok(crate::stream_commit_list::plain_walk_streamable(&opts))
@@ -261,8 +264,8 @@ pub fn listing_can_stream(
 ///
 /// Propagates walk, load, and write errors other than a closed stdout pipe.
 pub fn stream_listing(
-    rev: RevSelectArgs,
-    pathspecs: TrailingPathspecArgs,
+    mut rev: RevSelectArgs,
+    mut pathspecs: TrailingPathspecArgs,
     output_mode: OutputMode,
     _ctx: &RenderContext,
     w: &mut dyn Write,
@@ -272,11 +275,17 @@ pub fn stream_listing(
     }
     let repo = context::discover()?;
     let env = repo.environment();
+    promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
     let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
     let opts = rev.to_rev_walk_options(&repo, env, &[], &walk_paths)?;
     let token_refs = rev.rev_tokens(&[]);
     let fetch_cap = fetch_limit_plus_one(rev.max_count());
-    let mut stream = open_plain_stream(&repo, &token_refs, &opts, fetch_cap)?;
+    let extent = if output_mode == OutputMode::Json {
+        CommitExtent::Whole
+    } else {
+        CommitExtent::ThroughSubject
+    };
+    let mut stream = open_plain_stream(&repo, &token_refs, &opts, fetch_cap, extent)?;
     let loader = CommitJsonLoader::for_listed_commits();
     let now = context::wall_clock_now(env).unix_timestamp();
     let max = rev.max_count();
@@ -374,8 +383,8 @@ fn write_empty_streaming_document(w: &mut dyn Write, output_mode: OutputMode) ->
 }
 
 pub fn run(
-    rev: RevSelectArgs,
-    pathspecs: TrailingPathspecArgs,
+    mut rev: RevSelectArgs,
+    mut pathspecs: TrailingPathspecArgs,
     mode: RevsMode,
     output_mode: OutputMode,
 ) -> Result<RevsOutcome> {
@@ -392,6 +401,7 @@ pub fn run(
     }
     let repo = context::discover()?;
     let env = repo.environment();
+    promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
     let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
     let opts = rev.to_rev_walk_options(&repo, env, &[], &walk_paths)?;
     let walk = repo.rev_walk();

@@ -93,12 +93,6 @@ pub struct Environment {
     pub pwd: Option<String>,
     /// Override for `GIT_TEST_ASSUME_DIFFERENT_OWNER` when set (see Git environment variable of the same name).
     pub git_test_assume_different_owner: Option<String>,
-    /// When true, relaxes safe-directory checks for debugging.
-    pub grit_debug_safe_dir: bool,
-    /// Override for `GIT_TRACE_SETUP` when set (see Git environment variable of the same name).
-    pub git_trace_setup: Option<String>,
-    /// Override for `GIT_TRACE2_PERF` when set (see Git environment variable of the same name).
-    pub git_trace2_perf: Option<String>,
     /// Original working directory of the `grit` invocation (for messages).
     pub grit_invocation_cwd: Option<String>,
     /// Override for `SUDO_UID` when set (see Git environment variable of the same name).
@@ -176,9 +170,6 @@ impl Environment {
             git_exec_path: None,
             pwd: None,
             git_test_assume_different_owner: None,
-            grit_debug_safe_dir: false,
-            git_trace_setup: None,
-            git_trace2_perf: None,
             grit_invocation_cwd: None,
             sudo_uid: None,
             git_test_utf8_nfd_to_nfc: None,
@@ -236,9 +227,6 @@ impl Environment {
             && self.git_exec_path == e.git_exec_path
             && self.pwd == e.pwd
             && self.git_test_assume_different_owner == e.git_test_assume_different_owner
-            && self.grit_debug_safe_dir == e.grit_debug_safe_dir
-            && self.git_trace_setup == e.git_trace_setup
-            && self.git_trace2_perf == e.git_trace2_perf
             && self.grit_invocation_cwd == e.grit_invocation_cwd
             && self.sudo_uid == e.sudo_uid
             && self.git_test_utf8_nfd_to_nfc == e.git_test_utf8_nfd_to_nfc
@@ -314,9 +302,6 @@ impl Environment {
             git_exec_path: get_os("GIT_EXEC_PATH"),
             pwd: get("PWD"),
             git_test_assume_different_owner: get("GIT_TEST_ASSUME_DIFFERENT_OWNER"),
-            grit_debug_safe_dir: map.contains_key("GRIT_DEBUG_SAFE_DIR"),
-            git_trace_setup: get("GIT_TRACE_SETUP"),
-            git_trace2_perf: get("GIT_TRACE2_PERF"),
             grit_invocation_cwd: get("GRIT_INVOCATION_CWD"),
             sudo_uid: get("SUDO_UID"),
             git_test_utf8_nfd_to_nfc: get("GIT_TEST_UTF8_NFD_TO_NFC"),
@@ -804,8 +789,6 @@ impl Environment {
             "GIT_TEST_ASSUME_DIFFERENT_OWNER",
             self.git_test_assume_different_owner.as_deref(),
         );
-        subprocess_push_str(&mut set, "GIT_TRACE_SETUP", self.git_trace_setup.as_deref());
-        subprocess_push_str(&mut set, "GIT_TRACE2_PERF", self.git_trace2_perf.as_deref());
         subprocess_push_str(
             &mut set,
             "GRIT_INVOCATION_CWD",
@@ -863,9 +846,6 @@ impl Environment {
         }
         if !self.git_optional_locks {
             set.push((OsString::from("GIT_OPTIONAL_LOCKS"), OsString::from("0")));
-        }
-        if self.grit_debug_safe_dir {
-            set.push((OsString::from("GRIT_DEBUG_SAFE_DIR"), OsString::new()));
         }
         set
     }
@@ -1033,9 +1013,6 @@ const TYPED_ENVIRONMENT_VARS: &[&str] = &[
     "GIT_EXEC_PATH",
     "PWD",
     "GIT_TEST_ASSUME_DIFFERENT_OWNER",
-    "GRIT_DEBUG_SAFE_DIR",
-    "GIT_TRACE_SETUP",
-    "GIT_TRACE2_PERF",
     "GRIT_INVOCATION_CWD",
     "SUDO_UID",
     "GIT_TEST_UTF8_NFD_TO_NFC",

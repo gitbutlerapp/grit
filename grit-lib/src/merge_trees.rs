@@ -270,7 +270,7 @@ pub(crate) struct ReplayConflictLabels {
 impl ReplayConflictLabels {
     /// Labels for replaying `commit`, whose message subject line is `subject`.
     pub(crate) fn new(commit: ObjectId, subject: &str) -> Self {
-        let theirs = format!("{} ({subject})", &commit.to_hex()[..7]);
+        let theirs = format!("{} ({subject})", commit.to_short_hex());
         let base = format!("parent of {theirs}");
         Self { theirs, base }
     }
@@ -304,7 +304,8 @@ impl ReplayConflictLabels {
 /// - `ours_tree` — current branch tree (HEAD during pick/revert).
 /// - `theirs_tree` — tree being applied (picked commit for cherry-pick, parent of reverted commit for revert).
 /// - `favor` / `ws` — merge strategy favour and whitespace options for textual merges.
-/// - `diff_algorithm` — optional line diff algorithm name used for textual merges.
+/// - `diff_algorithm` — optional line diff algorithm for textual merges; [`None`] uses
+///   histogram, matching Git merge-ort (see `merge_file::TREE_MERGE_DIFF_ALGORITHM`).
 /// - `presentation` — conflict marker labels and style (`label_base` is the diff3 "base" name).
 /// - `directory_renames` — whether files one side added inside a directory the other side
 ///   renamed follow the rename ([`DirectoryRenameMode`]; callers usually pass
@@ -472,7 +473,10 @@ pub(crate) fn merge_trees_at_depth(
     call_depth: usize,
     replay_upstream: Option<ReplayUpstreamRenames<'_>>,
 ) -> crate::error::Result<TreeMergeOutput> {
+    use crate::merge_file::tree_merge_diff_algorithm;
     use crate::porcelain::cherry_pick::directory_renames_from_file_renames;
+
+    let diff_algorithm = Some(tree_merge_diff_algorithm(diff_algorithm));
 
     let directory_renames = if call_depth > 0 {
         DirectoryRenameMode::Off
@@ -2141,6 +2145,95 @@ mod tests {
     use crate::index::{IndexEntry, MODE_REGULAR};
     use crate::objects::{parse_commit, ObjectId};
     use crate::repo::Repository;
+
+    /// Issue #2431: cargo `workspaces.md` — histogram tree merge is clean; Myers `merge()` conflicts.
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn issue_2431_cargo_workspaces_md_tree_merge_clean() {
+        let base_bytes = include_bytes!("../tests/fixtures/cargo_workspaces_md_merge/base.md");
+        let ours_bytes = include_bytes!("../tests/fixtures/cargo_workspaces_md_merge/ours.md");
+        let theirs_bytes = include_bytes!("../tests/fixtures/cargo_workspaces_md_merge/theirs.md");
+        let expected =
+            include_bytes!("../tests/fixtures/cargo_workspaces_md_merge/expected_merged.md");
+        let path = "src/doc/src/reference/workspaces.md";
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let git = |args: &[&str]| grit_test_support::git(tmp.path(), args);
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "core.autocrlf", "false"]);
+        let write_commit = |content: &[u8], msg: &str| -> ObjectId {
+            let full = tmp.path().join(path);
+            if let Some(parent) = full.parent() {
+                std::fs::create_dir_all(parent).expect("mkdir");
+            }
+            std::fs::write(&full, content).expect("write");
+            git(&["add", path]);
+            git(&["commit", "-m", msg]);
+            git(&["rev-parse", "HEAD"]).trim().parse().expect("oid")
+        };
+        let base = write_commit(base_bytes, "base");
+        git(&["switch", "-c", "ours-side"]);
+        let ours = write_commit(ours_bytes, "ours");
+        git(&["switch", "-c", "theirs-side", &base.to_hex()]);
+        let theirs = write_commit(theirs_bytes, "theirs");
+        let repo =
+            Repository::discover(Some(tmp.path()), &RepositoryOptions::empty()).expect("repo");
+        let tree_of = |commit: &ObjectId| -> ObjectId {
+            let obj = repo.odb().read(commit).expect("read");
+            parse_commit(&obj.data).expect("parse").tree
+        };
+        let ours_label = ours.to_hex();
+        let theirs_label = theirs.to_hex();
+        let presentation = TreeMergeConflictPresentation {
+            label_ours: &ours_label,
+            label_theirs: TheirsConflictLabel::Fixed(&theirs_label),
+            ..TreeMergeConflictPresentation::default()
+        };
+        let out = merge_trees_three_way(
+            &repo,
+            tree_of(&base),
+            tree_of(&ours),
+            tree_of(&theirs),
+            MergeFavor::None,
+            WhitespaceMergeOptions::default(),
+            None,
+            presentation,
+            DirectoryRenameMode::default(),
+        )
+        .expect("merge");
+        assert!(
+            out.conflict_content.is_empty(),
+            "expected clean merge, conflicts: {:?}",
+            out.conflict_content.keys().collect::<Vec<_>>()
+        );
+        let merged_oid = out.index.get(path.as_bytes(), 0).expect("merged entry").oid;
+        let merged = repo.odb().read(&merged_oid).expect("blob");
+        assert_eq!(merged.data.as_slice(), expected.as_slice());
+
+        let merge_file = merge(&MergeInput {
+            base: base_bytes,
+            ours: ours_bytes,
+            theirs: theirs_bytes,
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: None,
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .expect("merge-file");
+        assert!(
+            merge_file.conflicts > 0,
+            "Myers merge-file path must still conflict on this fixture"
+        );
+    }
 
     #[cfg_attr(
         not(feature = "full-tests"),

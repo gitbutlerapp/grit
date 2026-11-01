@@ -23,7 +23,7 @@ Verifies repository integrity without invoking the system `git` binary:
 
 - Full run: loose and packed object validation, connectivity from ref roots, refs, multi-pack-index, and commit-graph checks when present.
 - With `--connectivity-only`: walk reachability from refs and validate linked objects only (faster; skips store-wide object scans).
-- With `--dangling` (or by default on a full run): list objects present in the object database but not reachable from refs.
+- With `--dangling` (or by default on a full run): list **dangling** objects — present in the object database (including alternates), not reachable from refs, and not referenced by another object (matches Git’s default dangling tips, not the full unreachable closure).
 
 In a shallow clone, the commits listed in `.git/shallow` count as having no parents, as in `git fsck`. Their missing parents are not reported. If a parent is present anyway, it is listed as dangling.
 
@@ -77,7 +77,7 @@ Pass `--json` for stable, scripting-friendly output:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `ok` | boolean | `true` when no error-severity issues were found (warnings and info alone still yield `true`). |
-| `objects_checked` | integer | Loose and packed objects examined during store validation (0 with `--connectivity-only`). |
+| `objects_checked` | integer | Loose and packed objects examined during store validation in the primary `objects/` directory and any alternates (0 with `--connectivity-only`). |
 | `issues` | array | Each entry has `kind` (camelCase msg-id), `severity` (`error`, `warning`, or `info`), optional `oid` and `path`, and `detail`. Known kinds include `missingObject`, `hasSha1`, and `sha1Collision` (optional sha1dc signal; default severity is **warning**, matching Git’s tolerance for SHAttered objects). |
 | `dangling` | array | Unreachable objects as `{kind, oid}` (`kind` is `commit`, `tree`, `blob`, or `tag`). |
 

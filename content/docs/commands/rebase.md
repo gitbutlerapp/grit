@@ -32,6 +32,8 @@ Rebased 1 commit(s)
 
 When the rebase moves the branch, grit runs the `post-checkout` hook with Git's arguments, `<old tip> <onto> 1`: Git checks out the onto commit before replaying, and the hook names that commit even though grit applies the rebase in one step. This also happens when a rebase stops on conflicts. When the rebase finishes, grit runs `post-rewrite rebase` with one `<old> <new>` line per replayed commit on stdin, oldest first. Dropped commits, commits already upstream, and fast-forwards are not listed, so a fast-forward rebase runs only `post-checkout`. Unlike Git, grit does not run `post-commit` for each replayed commit. Hook exit statuses never change the result. See [`grit hooks`](hooks.md).
 
+When `notes.rewriteRef` is configured, grit copies notes from each replayed commit to its replacement (same rules as Git's `git notes copy --for-rewrite`) before `post-rewrite` runs. See the [notes library guide](../library/notes.md).
+
 A commit whose patch is already upstream (for example one you cherry-picked from the upstream branch) is skipped, as `git rebase` skips it. The commits before and after it are still replayed in order on top of the new base, and a branch that pointed at the skipped commit moves to the replayed commit before it, or to the new base when nothing came before. In the output and the `rewritten` JSON rows, the skipped commit maps to the upstream commit that carries its patch.
 
 When `<upstream>` is omitted, grit uses `@{upstream}` of the current branch. If no upstream is configured, the command fails with a hint to run [`grit branch -u`](branch.md).

@@ -915,6 +915,34 @@ fn decide_push_wire(
         });
     };
 
+    if let Some(tag_decision) =
+        crate::transfer::existing_tag_push_decision(spec, &spec.dst, old, src)
+    {
+        return Ok(match tag_decision {
+            crate::transfer::ExistingTagPushDecision::Reject => no_op(
+                PushRefStatus::RejectAlreadyExists,
+                Some(old),
+                Some(src),
+                false,
+                Some(crate::transfer::PUSH_TAG_EXISTS_MESSAGE.to_owned()),
+            ),
+            crate::transfer::ExistingTagPushDecision::ForcedUpdate => PushDecision {
+                result: PushRefResult {
+                    local_ref: crate::transfer::push_spec_local_ref(spec),
+                    remote_ref: spec.dst.clone(),
+                    old_oid: Some(old),
+                    new_oid: Some(src),
+                    forced: true,
+                    deletion: false,
+                    status: PushRefStatus::Ok,
+                    message: None,
+                },
+                new_tip: Some(src),
+                send: true,
+            },
+        });
+    }
+
     if !spec.force && !local_odb.contains(&old)? {
         return Ok(no_op(
             PushRefStatus::RejectFetchFirst,
@@ -1458,6 +1486,83 @@ mod tests {
         flaky.fail_contains(true);
         let err = push_pack_bytes(&plan, &repo, &adv).unwrap_err();
         assert!(crate::odb::store::flaky::is_injected(&err), "{err:?}");
+    }
+
+    #[test]
+    fn decide_push_wire_rejects_existing_tag_without_force() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default()).unwrap();
+        let c1 = repo
+            .odb()
+            .write(ObjectKind::Commit, b"fake commit 1")
+            .unwrap();
+        let c2 = repo
+            .odb()
+            .write(ObjectKind::Commit, b"fake commit 2")
+            .unwrap();
+        let mut remote_refs = HashMap::new();
+        remote_refs.insert("refs/tags/v1".to_owned(), c1);
+        let spec = PushRefSpec {
+            src: Some(c2),
+            dst: "refs/tags/v1".to_owned(),
+            ..Default::default()
+        };
+        let decision = decide_push_wire(&spec, &repo, &remote_refs).unwrap();
+        assert_eq!(decision.result.status, PushRefStatus::RejectAlreadyExists);
+        assert_eq!(
+            decision.result.message.as_deref(),
+            Some(crate::transfer::PUSH_TAG_EXISTS_MESSAGE)
+        );
+        assert!(!decision.send);
+    }
+
+    #[test]
+    fn decide_push_wire_rejects_existing_tag_when_advertised_oid_missing_locally() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default()).unwrap();
+        let src = repo
+            .odb()
+            .write(ObjectKind::Commit, b"local tag tip")
+            .unwrap();
+        let remote_only = ObjectId::from_hex(&"a".repeat(40)).unwrap();
+        assert!(
+            !repo.odb().contains(&remote_only).unwrap(),
+            "fixture: remote tag oid must be absent locally"
+        );
+        let mut remote_refs = HashMap::new();
+        remote_refs.insert("refs/tags/v1".to_owned(), remote_only);
+        let spec = PushRefSpec {
+            src: Some(src),
+            dst: "refs/tags/v1".to_owned(),
+            ..Default::default()
+        };
+        let decision = decide_push_wire(&spec, &repo, &remote_refs).unwrap();
+        assert_eq!(decision.result.status, PushRefStatus::RejectAlreadyExists);
+        assert_eq!(
+            decision.result.message.as_deref(),
+            Some(crate::transfer::PUSH_TAG_EXISTS_MESSAGE)
+        );
+        assert!(!decision.send);
+    }
+
+    #[test]
+    fn decide_push_wire_force_tag_update_marks_forced_even_when_ff() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default()).unwrap();
+        let parent = repo.odb().write(ObjectKind::Commit, b"parent").unwrap();
+        let child = repo.odb().write(ObjectKind::Commit, b"child").unwrap();
+        let mut remote_refs = HashMap::new();
+        remote_refs.insert("refs/tags/v1".to_owned(), parent);
+        let spec = PushRefSpec {
+            src: Some(child),
+            dst: "refs/tags/v1".to_owned(),
+            force: true,
+            ..Default::default()
+        };
+        let decision = decide_push_wire(&spec, &repo, &remote_refs).unwrap();
+        assert_eq!(decision.result.status, PushRefStatus::Ok);
+        assert!(decision.result.forced);
+        assert!(decision.send);
     }
 
     #[test]

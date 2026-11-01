@@ -264,6 +264,67 @@ fn merge_continue_with_markers_lists_paths_and_next_steps() {
     assert!(!failure.stderr.contains("[\""), "{}", failure.stderr);
 }
 
+fn git(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_AUTHOR_NAME", "T")
+        .env("GIT_AUTHOR_EMAIL", "t@example.com")
+        .env("GIT_COMMITTER_NAME", "T")
+        .env("GIT_COMMITTER_EMAIL", "t@example.com")
+        .output()
+        .expect("run git");
+    assert!(
+        out.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn pull_over_local_changes_names_files_and_suggests_stash() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let home = tempfile::tempdir().expect("home");
+    let base = tmp.path();
+    git(base, &["init", "-q", "--bare", "-b", "main", "srv.git"]);
+
+    let clone_a = base.join("a");
+    ok(base, home.path(), &["clone", "srv.git", "a"]);
+    git(&clone_a, &["config", "user.name", "A"]);
+    git(&clone_a, &["config", "user.email", "a@a"]);
+    fs::write(clone_a.join("f"), "1\n").expect("write");
+    ok(&clone_a, home.path(), &["commit", "-m", "c1"]);
+    ok(&clone_a, home.path(), &["push"]);
+
+    let clone_b = base.join("b");
+    ok(base, home.path(), &["clone", "srv.git", "b"]);
+    fs::write(clone_a.join("f"), "1\n2\n").expect("write");
+    ok(&clone_a, home.path(), &["commit", "-m", "c2"]);
+    ok(&clone_a, home.path(), &["push"]);
+
+    fs::write(clone_b.join("f"), "dirty\n").expect("write");
+    let tip_before = git(&clone_b, &["rev-parse", "main"]);
+
+    let failure = fails(&clone_b, home.path(), &["pull"]);
+    assert_eq!(
+        failure.json["would_overwrite"]["paths"],
+        serde_json::json!(["f"])
+    );
+    assert_eq!(failure.json["would_overwrite"]["reason"], "local_changes");
+    failure.assert_kind_and_hint("would_overwrite", "grit stash");
+    assert!(failure.stderr.contains("grit commit"), "{}", failure.stderr);
+    assert!(failure.stderr.contains("\n  f\n"), "{}", failure.stderr);
+    assert_eq!(git(&clone_b, &["rev-parse", "main"]), tip_before);
+
+    let rebase = fails(&clone_b, home.path(), &["pull", "--rebase"]);
+    assert_eq!(rebase.json["kind"], "would_overwrite");
+    assert_eq!(
+        rebase.json["would_overwrite"]["paths"],
+        serde_json::json!(["f"])
+    );
+}
+
 #[test]
 fn switch_over_local_changes_names_files_and_suggests_stash() {
     let (repo, home) = fresh_repo();

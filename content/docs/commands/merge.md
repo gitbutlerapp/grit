@@ -82,6 +82,8 @@ With a **detached `HEAD`**, grit merges into `HEAD` like Git: a fast-forward or 
 
 **`--conflict diff3|zdiff3|merge`** — Conflict marker style in the worktree. When omitted, grit reads `merge.conflictStyle` (default `merge`).
 
+Textual merges during a three-way tree merge use the histogram diff algorithm, matching Git's merge-ort strategy (distinct from `git merge-file`, which uses Myers).
+
 **`--allow-unrelated-histories`** — Merge branches that share no commits, using the empty tree as the merge base (Git-compatible). Without this flag, grit refuses unrelated histories.
 
 On an interactive terminal (human output, not `--json` or `--markdown`), a live **Checkout** line on stderr counts the files the merge writes, and `--continue` shows a **Staging** line while it auto-stages; nothing is drawn when stderr is not a TTY.

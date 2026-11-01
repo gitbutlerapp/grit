@@ -80,6 +80,18 @@ pub struct MergeInput<'a> {
     pub ignore_cr_at_eol: bool,
 }
 
+/// Default line diff algorithm for ort-style tree merges (matches Git `merge-ort`).
+pub(crate) const TREE_MERGE_DIFF_ALGORITHM: &str = "histogram";
+
+/// Resolve the line diff algorithm for a three-way tree merge.
+///
+/// [`None`] selects [`TREE_MERGE_DIFF_ALGORITHM`]; explicit names are passed through.
+/// [`merge`] alone keeps Myers when `diff_algorithm` is [`None`] (Git `merge-file`).
+#[must_use]
+pub(crate) fn tree_merge_diff_algorithm(explicit: Option<&str>) -> &str {
+    explicit.unwrap_or(TREE_MERGE_DIFF_ALGORITHM)
+}
+
 /// Result of a three-way merge.
 pub struct MergeOutput {
     /// Merged file content.

@@ -27,6 +27,8 @@ grit push --remote <name>   # hidden alias for one release
 
 Pushes refs to a remote over SSH, smart HTTP, or the `file://` transport. With no refspecs, grit pushes the current branch using the same remote-selection rules as Git (`branch.<name>.pushRemote`, `remote.pushDefault`, `branch.<name>.remote`, then `origin`) and applies `remote.<name>.push` refspecs when configured.
 
+When you pass refspecs, the optional `<remote>` may be a configured remote name, a URL, an scp-style `host:path`, or a filesystem path (including relative paths such as `../bare`), the same as [`grit fetch`](../fetch/) and [`grit pull`](../pull/). A lone positional that is not one of those is still a refspec pushed to the default remote. With several positionals, the first must name a remote, URL, or path; anything else fails with `unknown remote`.
+
 A remote written as `<owner>/<project>` and followed by at least one refspec is a repository on the default grit host: `grit push me/app main` pushes to `https://grithub.dev/me/app.git`, or to that path under `$GRIT_DEFAULT_HOST` when it is set. A configured remote with the same name takes precedence. After a push like this from a repository with no remotes yet, grit saves the URL as `origin`, so later `grit push` and `grit fetch` go there. A lone `<owner>/<project>` argument is still a refspec, so `grit push topic/x` pushes a branch to the default remote.
 
 Incremental SSH and HTTP pushes stop exploring advertised commit history once the new commit frontier is exhausted. A one-commit push does not need to walk every advertised branch and tag back to its root. Annotated tags targeting blobs or trees may be advertised alongside commit refs without preventing a push.
@@ -74,7 +76,7 @@ For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offe
 
 | Option | Description |
 | --- | --- |
-| `<remote>` | Remote name (optional; defaults from branch / config). |
+| `<remote>` | Remote name, URL, or filesystem path (optional; defaults from branch / config). |
 | `<refspec>...` | Push refspecs (`feature`, `HEAD:refs/heads/x`, `+main:main`, `:gone`, …). |
 | `-t`, `--tags` | Push all local tags instead of the current branch. |
 | `--delete` | Delete the remote refs named by the positionals instead of pushing (plain names only). |
@@ -203,7 +205,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `kind` | string | `branch`, `tags`, `delete`, or `refspecs`. |
 | `branch` | string or null | Short branch name when `kind` is `branch`, or the deleted branch’s short name when `kind` is `delete` and exactly one branch is deleted. Omitted for tag and other explicit refspec pushes (`kind`: `refspecs`). |
 | `dry_run` | boolean | `true` when `--dry-run` was used (no refs or objects written). |
-| `results` | array | Per-ref outcomes; each object has `ref`, `status` (`ok`, `up_to_date`, or `rejected`), optional `reason` (`stale` for a failed lease or a ref another push moved meanwhile, `already_exists` when another push created the new ref first, `remote_ref_missing` when `--delete` targets a ref absent on the remote), optional `deleted` (`true` when the ref was removed), `old_oid`, `new_oid`, `src`, and `forced`. |
+| `results` | array | Per-ref outcomes; each object has `ref`, `status` (`ok`, `up_to_date`, or `rejected`), optional `reason` (`stale` for a failed lease or a ref another push moved meanwhile, `already_exists` when another push created the new ref first, `tag_exists` when the remote already has that tag and the push did not use `--force`, `remote_ref_missing` when `--delete` targets a ref absent on the remote), optional `deleted` (`true` when the ref was removed), `old_oid`, `new_oid`, `src`, and `forced`. |
 | `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |
 | `upstream_set` | array of strings | Branch short names whose upstream config was written (`-u` only; omitted when empty). |
 | `origin_added` | string | URL saved as `origin` after an `<owner>/<project>` push from a repository with no remotes (omitted otherwise). |

@@ -188,6 +188,35 @@ fn rm_clean_file_staged_deletion() {
 }
 
 #[test]
+fn rm_cached_attr_pathspec_unstages_only_matching() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    fs::write(repo_dir.join(".gitattributes"), "*.rs vendored\n").unwrap();
+    fs::create_dir_all(repo_dir.join("src")).unwrap();
+    fs::write(repo_dir.join("src/a.rs"), "1\n").unwrap();
+    fs::write(repo_dir.join("src/b.txt"), "1\n").unwrap();
+    commit_all(repo_dir, "init");
+
+    let repo = grit_repo(repo_dir);
+    remove_paths(
+        &repo,
+        &RemoveOptions {
+            pathspecs: vec![":(attr:vendored)src".into()],
+            pathspec_sources: vec![":(attr:vendored)src".into()],
+            cached: true,
+            ..Default::default()
+        },
+    )
+    .expect("rm --cached attr");
+
+    let ls = git(repo_dir, &["ls-files"]);
+    assert!(ls.contains("src/b.txt"));
+    assert!(!ls.contains("src/a.rs"));
+    assert!(repo_dir.join("src/a.rs").is_file());
+}
+
+#[test]
 fn rm_cached_leaves_untracked_file() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo_dir = tmp.path();
@@ -263,6 +292,69 @@ fn rm_recursive_directory() {
     let status = git_porcelain(repo_dir);
     assert!(status.contains("D  tree/sub/a.txt") || status.contains("D tree/sub/a.txt"));
     assert!(status.contains("tree/sub/b.txt"));
+}
+
+#[test]
+fn mv_into_existing_directory_with_trailing_slash_matches_without() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    std::fs::create_dir_all(repo_dir.join("dir")).unwrap();
+    std::fs::write(repo_dir.join("c"), "c\n").unwrap();
+    std::fs::write(repo_dir.join("dir/d"), "d\n").unwrap();
+    commit_all(repo_dir, "base");
+
+    let repo = grit_repo(repo_dir);
+    move_path(&repo, "c", "dir/", false).expect("mv with trailing slash");
+    assert!(repo_dir.join("dir/c").is_file());
+    assert!(!repo_dir.join("c").exists());
+    fsck_strict(repo_dir);
+
+    let tmp2 = tempfile::tempdir().expect("tempdir");
+    let repo_dir2 = tmp2.path();
+    git(repo_dir2, &["init", "-q", "-b", "main"]);
+    std::fs::create_dir_all(repo_dir2.join("dir")).unwrap();
+    std::fs::write(repo_dir2.join("c"), "c\n").unwrap();
+    std::fs::write(repo_dir2.join("dir/d"), "d\n").unwrap();
+    commit_all(repo_dir2, "base");
+    let repo2 = grit_repo(repo_dir2);
+    move_path(&repo2, "c", "dir", false).expect("mv without trailing slash");
+    assert!(repo_dir2.join("dir/c").is_file());
+    fsck_strict(repo_dir2);
+}
+
+#[test]
+fn mv_file_to_missing_directory_with_trailing_slash_refused() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo_dir.join("c"), "c\n").unwrap();
+    commit_all(repo_dir, "init");
+
+    let repo = grit_repo(repo_dir);
+    let err = move_path(&repo, "c", "missing/", false).expect_err("mv file missing/");
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::MoveDestinationNotDirectory { .. }
+    ));
+    assert!(repo_dir.join("c").is_file());
+    assert!(git_porcelain(repo_dir).trim().is_empty());
+}
+
+#[test]
+fn mv_directory_to_missing_directory_with_trailing_slash_renames() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    std::fs::create_dir_all(repo_dir.join("src/nested")).unwrap();
+    std::fs::write(repo_dir.join("src/nested/file"), "x\n").unwrap();
+    commit_all(repo_dir, "init");
+
+    let repo = grit_repo(repo_dir);
+    move_path(&repo, "src", "dest/", false).expect("mv directory to dest/");
+    assert!(repo_dir.join("dest/nested/file").is_file());
+    assert!(!repo_dir.join("src").exists());
+    fsck_strict(repo_dir);
 }
 
 #[test]
@@ -447,7 +539,13 @@ fn mv_rejects_destination_outside_work_tree() {
 
     let repo = grit_repo(repo_dir);
     let err = move_path(&repo, "tracked", "../escaped", false).expect_err("mv outside repo");
-    assert!(matches!(err, grit_lib::error::Error::InvalidPath(_)));
+    assert!(matches!(err, grit_lib::error::Error::PathOutsideRepo(_)));
+    let msg = err.to_string();
+    assert!(
+        msg.contains("'../escaped' is outside repository at '"),
+        "{msg}"
+    );
+    assert!(!msg.contains("invalid path"), "{msg}");
     assert!(repo_dir.join("tracked").is_file());
     let index = repo.index_handle().load().expect("index");
     assert!(index.get("tracked".as_bytes(), 0).is_some());
@@ -576,7 +674,7 @@ fn mv_rejects_parent_component_in_source() {
 
     let repo = grit_repo(repo_dir);
     let err = move_path(&repo, "dir/../source", "moved", false).expect_err(".. source");
-    assert!(matches!(err, grit_lib::error::Error::InvalidPath(_)));
+    assert!(matches!(err, grit_lib::error::Error::PathOutsideRepo(_)));
 
     assert!(repo_dir.join("source").is_file());
     assert!(!repo_dir.join("moved").exists());

@@ -19,7 +19,7 @@ use grit_lib::object_inspect::{
     format_tree_entries_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p,
     RevisionLabel,
 };
-use grit_lib::objects::ObjectKind;
+use grit_lib::objects::{short_hex, ObjectKind};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -599,7 +599,7 @@ impl MarkdownRender for ShowOutcome {
             }
         }
 
-        let short = self.commit.oid.get(..7).unwrap_or(self.commit.oid.as_str());
+        let short = short_hex(&self.commit.oid);
         outln!(w, "# Commit `{short}`");
         outln!(w);
         outln!(w, "**Oid:** `{}`", self.commit.oid);
@@ -608,7 +608,7 @@ impl MarkdownRender for ShowOutcome {
                 .commit
                 .parents
                 .iter()
-                .map(|p| format!("`{}`", p.get(..7).unwrap_or(p.as_str())))
+                .map(|p| format!("`{}`", short_hex(p)))
                 .collect();
             outln!(w, "**Merge parents:** {}", parents.join(", "));
         }
@@ -673,7 +673,7 @@ impl HumanRender for ShowOutcome {
                 .commit
                 .parents
                 .iter()
-                .map(|p| p.get(..7).unwrap_or(p).to_owned())
+                .map(|p| short_hex(p).to_owned())
                 .collect();
             outln!(w, "Merge:  {}", abbrev.join(" "));
         }

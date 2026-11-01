@@ -186,6 +186,70 @@ fn save_state(path: &Path, state: &DownloadState) -> Result<()> {
     Ok(())
 }
 
+/// Where to download when several processes share one resumable cache slot.
+#[derive(Debug)]
+pub enum ResumableDownloadDest {
+    /// The shared `dest`; hold `lock` until [`discard_download`] on it finishes.
+    Shared {
+        /// Path passed to [`download_resumable`].
+        dest: PathBuf,
+        /// Exclusive lock on the sibling `.lock` file for `dest`.
+        lock: File,
+    },
+    /// A one-off path in the cache directory; safe to use without locking.
+    Private(PathBuf),
+}
+
+/// Pick a resumable download path under a shared bundle cache.
+///
+/// Creates `cache_dir` when missing, then tries an exclusive lock on a sibling
+/// `.lock` file next to `shared_dest`. While that lock is held, only this
+/// process may use `shared_dest` and its `.part`/`.json` sidecars. When another
+/// process already holds the lock, returns a unique private path in `cache_dir`
+/// so parallel clones do not clobber the shared partial download.
+///
+/// # Errors
+///
+/// I/O errors opening or locking the lock file, or creating `cache_dir`.
+pub fn claim_resumable_download(
+    cache_dir: &Path,
+    shared_dest: &Path,
+) -> std::io::Result<ResumableDownloadDest> {
+    std::fs::create_dir_all(cache_dir)?;
+    let lock_path = shared_download_lock_path(shared_dest);
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)?;
+    match file.try_lock() {
+        Ok(()) => Ok(ResumableDownloadDest::Shared {
+            dest: shared_dest.to_path_buf(),
+            lock: file,
+        }),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(ResumableDownloadDest::Private(
+            private_resumable_download_dest(cache_dir, shared_dest),
+        )),
+        Err(std::fs::TryLockError::Error(e)) => Err(e),
+    }
+}
+
+fn shared_download_lock_path(dest: &Path) -> PathBuf {
+    dest.with_extension("lock")
+}
+
+fn private_resumable_download_dest(cache_dir: &Path, shared_dest: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SUFFIX: AtomicU64 = AtomicU64::new(0);
+    let stem = shared_dest
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("bundle");
+    let n = SUFFIX.fetch_add(1, Ordering::Relaxed);
+    cache_dir.join(format!("{stem}.{}.{n}.private.bundle", std::process::id()))
+}
+
 /// Remove `dest` and everything [`download_resumable`] keeps for it.
 ///
 /// # Errors
@@ -217,7 +281,10 @@ pub fn discard_download(dest: &Path) -> std::io::Result<()> {
 ///
 /// - `client`: sends the requests ([`HttpClient::send`]).
 /// - `url`: what to download.
-/// - `dest`: where the finished file goes; its directory must exist.
+/// - `dest`: where the finished file goes; its directory must exist. When
+///   several processes share a cache directory, callers must use
+///   [`claim_resumable_download`] first so only one process uses a given
+///   `dest` at a time.
 /// - `progress`: receives [`ResumableEvent`]s.
 /// - `cancel`: checked before each request and between body chunks.
 ///
@@ -964,6 +1031,29 @@ mod tests {
         let outcome = download_resumable(&srv, "http://h/b", &dest, &mut NoProgress, &NeverCancel);
         assert_eq!(outcome.ok().map(|o| o.resumed_from), Some(kept));
         assert_eq!(std::fs::read(&dest).ok(), Some(srv.data.clone()));
+    }
+
+    #[test]
+    fn claim_resumable_download_serializes_the_shared_slot() {
+        let dir = tempdir();
+        let shared = dir.path().join("abc.bundle");
+        let first = claim_resumable_download(dir.path(), &shared).expect("first claim");
+        let (first_dest, first_lock) = match first {
+            ResumableDownloadDest::Shared { dest, lock } => (dest, lock),
+            ResumableDownloadDest::Private(_) => panic!("first claim should be shared"),
+        };
+        assert_eq!(first_dest, shared);
+        let second = claim_resumable_download(dir.path(), &shared).expect("second claim");
+        assert!(
+            matches!(second, ResumableDownloadDest::Private(_)),
+            "second claim must not touch the shared partial files"
+        );
+        let other = std::fs::File::open(shared_download_lock_path(&shared)).expect("lock file");
+        assert!(
+            matches!(other.try_lock(), Err(std::fs::TryLockError::WouldBlock)),
+            "lock file stays held until the first guard drops"
+        );
+        drop(first_lock);
     }
 
     #[test]

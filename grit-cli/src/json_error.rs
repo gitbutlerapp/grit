@@ -317,6 +317,15 @@ pub fn operation_in_progress_for_repo(
     operation_in_progress(action, kind, operation.as_ref())
 }
 
+/// Structured failure when merge/rebase/pick/revert `--continue` or `--abort` has nothing paused.
+pub fn no_operation_in_progress(human: impl Into<String>) -> Error {
+    let human = human.into();
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError::new(human.clone(), ErrorKind::NoOperationInProgress),
+        human,
+    })
+}
+
 pub fn operation_in_progress(
     action: &str,
     kind: InProgressOperation,
@@ -399,6 +408,15 @@ fn revision_not_found_payload_from_chain(err: &Error) -> Option<StructuredJsonEr
                     ErrorKind::RevisionNotFound,
                 ));
             }
+            LibError::RevParse(
+                RevParseError::PathNotInRevision { .. }
+                | RevParseError::PathMissingFromWorktreeAndIndex { .. },
+            ) => {
+                return Some(StructuredJsonError::new(
+                    lib.to_string(),
+                    ErrorKind::PathNotFound,
+                ));
+            }
             _ => {}
         }
     }
@@ -477,7 +495,29 @@ fn hash_collision_from_chain(err: &Error) -> Option<ObjectId> {
 }
 
 /// Wrap [`LibError::HashCollision`] anywhere in the chain as [`StructuredCliError`].
+fn would_overwrite_from_pull(err: &PullError) -> Option<Error> {
+    if let PullError::Repository(LibError::WouldOverwrite {
+        reason,
+        paths,
+        message,
+    }) = err
+    {
+        Some(would_overwrite_error(
+            *reason,
+            paths.clone(),
+            message.clone(),
+        ))
+    } else {
+        None
+    }
+}
+
 fn would_overwrite_from_chain(err: &Error) -> Option<Error> {
+    if let Some(pull) = err.downcast_ref::<PullError>() {
+        if let Some(structured) = would_overwrite_from_pull(pull) {
+            return Some(structured);
+        }
+    }
     if let Some(LibError::WouldOverwrite {
         reason,
         paths,
@@ -491,6 +531,11 @@ fn would_overwrite_from_chain(err: &Error) -> Option<Error> {
         ));
     }
     for cause in err.chain() {
+        if let Some(pull) = cause.downcast_ref::<PullError>() {
+            if let Some(structured) = would_overwrite_from_pull(pull) {
+                return Some(structured);
+            }
+        }
         if let Some(LibError::WouldOverwrite {
             reason,
             paths,

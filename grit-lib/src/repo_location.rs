@@ -124,10 +124,6 @@ type Located = (RepositoryLocation, ConfigSet);
 /// Resolve the plain `.git` directory layout, or `Ok(None)` to defer to full discovery.
 fn locate_dot_git_dir(options: &RepositoryOptions) -> Result<Option<Located>> {
     let env = &options.environment;
-    let traces_setup = env
-        .git_trace_setup
-        .as_deref()
-        .is_some_and(|p| !p.is_empty() && p != "0");
     let has_ceilings = env
         .git_ceiling_directories
         .as_deref()
@@ -136,7 +132,6 @@ fn locate_dot_git_dir(options: &RepositoryOptions) -> Result<Option<Located>> {
         || env.git_work_tree.is_some()
         || env.git_object_directory.is_some()
         || has_ceilings
-        || traces_setup
         || options.test_assume_different_owner
         || env.test_assume_different_owner()
     {

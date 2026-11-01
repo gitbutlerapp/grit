@@ -35,7 +35,23 @@ HEAVY_BODY = re.compile(r"heavy_disk_serial_guard\(")
 
 FN = re.compile(r"\bfn\s+([a-z_][a-z0-9_]*)\s*(?:<[^>{]*>)?\s*\(")
 # Names too generic to treat as git helpers when seen in another file.
-GENERIC = {"run", "new", "setup", "repo", "open", "init", "main", "write", "read", "out", "cmd", "exec", "ok", "check"}
+GENERIC = {
+    "run",
+    "new",
+    "setup",
+    "repo",
+    "open",
+    "init",
+    "main",
+    "write",
+    "read",
+    "out",
+    "cmd",
+    "exec",
+    "ok",
+    "check",
+    "start",
+}
 
 
 def functions(text: str) -> dict[str, str]:
@@ -161,7 +177,20 @@ def mark_unit_tests(path: Path, shared: set[str]) -> int:
     return n
 
 
+def regression_checks() -> None:
+    """False positives that must stay in the default integration suite."""
+    shared = shared_git_helpers()
+    assert "start" not in shared, "start must not be treated as a git helper name"
+    session_cancel = REPO / "grit-lib/tests/session_cancel.rs"
+    reason = file_is_full(session_cancel, shared)
+    assert reason is None, f"session_cancel.rs wrongly classified as full ({reason})"
+
+
 def main(argv: list[str]) -> int:
+    if "--regression" in argv:
+        regression_checks()
+        print("classify_tests regression checks ok")
+        return 0
     shared = shared_git_helpers()
     if "--mark-unit-tests" in argv:
         total = 0
@@ -178,6 +207,7 @@ def main(argv: list[str]) -> int:
         kinds = [file_is_full(p, shared) for p in files]
         print(f"{crate}: {len(files)} files, fast {kinds.count(None)}, git {kinds.count('git')}, heavy {kinds.count('heavy')}")
     print(f"shared git helpers: {len(shared)}")
+    regression_checks()
     return 0
 
 

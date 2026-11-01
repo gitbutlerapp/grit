@@ -15,7 +15,7 @@ grit pick --continue | --abort | --skip
 
 ## Description
 
-Replays commits from another branch (or arbitrary revisions) onto the current branch, like `git cherry-pick`. Each new commit keeps the original **author** and message (unless you pass `--message` / `--message-file` for a single commit), gets a fresh **`change-id`**, and records a normal reflog entry.
+Replays commits from another branch (or arbitrary revisions) onto the current branch, like `git cherry-pick`. Each new commit keeps the original **author** and message (unless you pass `--message` / `--message-file` for a single commit), gets a fresh **`change-id`**, and records a normal reflog entry. Textual merges use the histogram diff algorithm, matching Git merge-ort (same as [`grit merge`](../merge/)).
 
 Positional arguments are applied **oldest first**. Each argument is either:
 

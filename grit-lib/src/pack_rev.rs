@@ -3,7 +3,7 @@
 //! Maps pack-file order (sorted by object offset) to index positions in the `.idx` OID table.
 
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use crate::config::ConfigSet;
@@ -148,17 +148,27 @@ fn shared_repo_from_pack_index_path(idx_path: &Path) -> i32 {
         .unwrap_or(PERM_UMASK)
 }
 
+fn read_pack_trailer(pack_path: &Path, hash_len: usize) -> Result<Vec<u8>> {
+    let mut file = fs::File::open(pack_path).map_err(Error::Io)?;
+    let len = file.metadata().map_err(Error::Io)?.len();
+    let hash_len_u64 = u64::try_from(hash_len).unwrap_or(u64::MAX);
+    if len < hash_len_u64 {
+        return Err(Error::CorruptObject("pack file too short for rev".into()));
+    }
+    file.seek(SeekFrom::End(-(hash_len as i64)))
+        .map_err(Error::Io)?;
+    let mut trailer = vec![0u8; hash_len];
+    file.read_exact(&mut trailer).map_err(Error::Io)?;
+    Ok(trailer)
+}
+
 fn write_pack_rev_sidecar_with_shared(index: &PackIndex, shared_repo: i32) -> Result<()> {
     let rev_path = rev_path_for_index(&index.idx_path);
     if rev_path.is_file() && verify_pack_rev_file(&rev_path, index).is_ok() {
         return Ok(());
     }
     let hash_len = index.hash_bytes();
-    let pack_data = fs::read(&index.pack_path).map_err(Error::Io)?;
-    if pack_data.len() < hash_len {
-        return Err(Error::CorruptObject("pack file too short for rev".into()));
-    }
-    let pack_checksum = pack_data[pack_data.len() - hash_len..].to_vec();
+    let pack_checksum = read_pack_trailer(&index.pack_path, hash_len)?;
     let offsets: Vec<u64> = (0..index.len())
         .map(|i| index.offset_at(i))
         .collect::<Result<Vec<_>>>()?;
@@ -440,6 +450,46 @@ mod coverage_tests {
 
         let msgs = pack_rev_fsck_messages(&[], &index, "empty");
         assert!(!msgs.is_empty());
+    }
+
+    #[test]
+    fn rev_sidecar_takes_the_pack_trailer_checksum() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let idx_path = tmp.path().join("pack-x.idx");
+        let pack_checksum = [7u8; 20];
+        let a = ObjectId::from_hex("0102030405060708090a0b0c0d0e0f1011121314").expect("oid");
+        let b = ObjectId::from_hex("1102030405060708090a0b0c0d0e0f1011121314").expect("oid");
+        write_v2_pack_index_with_trailer(
+            &idx_path,
+            &[(a, 40, 0), (b, 12, 0)],
+            &pack_checksum,
+            20,
+            None,
+        )
+        .expect("write idx");
+        let pack_path = tmp.path().join("pack-x.pack");
+        let mut pack = b"PACK".to_vec();
+        pack.resize(4096, 0x55);
+        pack.extend_from_slice(&pack_checksum);
+        std::fs::write(&pack_path, &pack).expect("write pack");
+
+        write_pack_rev_sidecar_for_index_path_with_shared(&idx_path, PERM_UMASK)
+            .expect("write rev");
+        let index = read_pack_index(&idx_path).expect("load idx");
+        let rev_path = rev_path_for_index(&idx_path);
+        let rev = std::fs::read(&rev_path).expect("read rev");
+        assert_eq!(
+            rev,
+            build_pack_rev_bytes_from_index_order_offsets_and_checksum(&[40, 12], &pack_checksum)
+        );
+        assert!(verify_pack_rev_file(&rev_path, &index).is_ok());
+
+        std::fs::remove_file(&rev_path).expect("remove rev");
+        std::fs::write(&pack_path, [0u8; 10]).expect("truncate pack");
+        assert!(matches!(
+            write_pack_rev_sidecar_for_index_path_with_shared(&idx_path, PERM_UMASK),
+            Err(Error::CorruptObject(_))
+        ));
     }
 
     #[test]

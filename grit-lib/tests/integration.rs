@@ -261,6 +261,8 @@ mod checkout_replaced_top_level_dir_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "checkout_switch_away_invalid_index.rs"]
 mod checkout_switch_away_invalid_index;
+#[path = "clean_dir_mode_clean_tree_perf_git_compat.rs"]
+mod clean_dir_mode_clean_tree_perf_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "clean_untracked.rs"]
 mod clean_untracked;
@@ -562,6 +564,9 @@ mod diff_options_line_engine;
 #[path = "diff_parallel_symlinks_git_compat.rs"]
 mod diff_parallel_symlinks_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "diff_rename_basename_over_limit.rs"]
+mod diff_rename_basename_over_limit;
+#[cfg(feature = "full-tests")]
 #[path = "diff_rename_filter_git_compat.rs"]
 mod diff_rename_filter_git_compat;
 #[cfg(feature = "full-tests")]
@@ -595,6 +600,9 @@ mod diff_trees_renames;
 #[cfg(feature = "full-tests")]
 #[path = "diff_typechange_status_git_compat.rs"]
 mod diff_typechange_status_git_compat;
+#[cfg(feature = "full-tests")]
+#[path = "diff_unreadable_directory_2406.rs"]
+mod diff_unreadable_directory_2406;
 #[cfg(feature = "full-tests")]
 #[path = "diff_whitespace_git_compat.rs"]
 mod diff_whitespace_git_compat;
@@ -1087,6 +1095,9 @@ mod notes_git_compat;
 #[path = "notes_plan_dry_run.rs"]
 mod notes_plan_dry_run;
 #[cfg(feature = "full-tests")]
+#[path = "notes_rewrite.rs"]
+mod notes_rewrite;
+#[cfg(feature = "full-tests")]
 #[path = "notes_roundtrip.rs"]
 mod notes_roundtrip;
 #[cfg(feature = "full-tests")]
@@ -1265,6 +1276,8 @@ mod patch_text_roundtrip;
 mod path_validate_fsck_parity;
 #[path = "pathspec_api_sweep.rs"]
 mod pathspec_api_sweep;
+#[path = "pathspec_attr_porcelain.rs"]
+mod pathspec_attr_porcelain;
 #[cfg(feature = "full-tests")]
 #[path = "pathspec_attr_repo.rs"]
 mod pathspec_attr_repo;
@@ -1350,6 +1363,8 @@ mod push_packed_tag_regression;
 #[cfg(feature = "full-tests")]
 #[path = "push_plan_git_compat.rs"]
 mod push_plan_git_compat;
+#[path = "push_tag_update_git_compat.rs"]
+mod push_tag_update_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "quote_path_git_compat.rs"]
 mod quote_path_git_compat;
@@ -1370,6 +1385,9 @@ mod ref_target_verification;
 #[cfg(feature = "full-tests")]
 #[path = "ref_target_verification_git_compat.rs"]
 mod ref_target_verification_git_compat;
+#[cfg(feature = "full-tests")]
+#[path = "ref_update_kinds_git_compat.rs"]
+mod ref_update_kinds_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "reference_transaction_hook.rs"]
 mod reference_transaction_hook;

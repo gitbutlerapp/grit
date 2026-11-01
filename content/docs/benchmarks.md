@@ -9,6 +9,154 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds. The daily census behind the [Performance overview](performance-overview.md) measures the shipped **`dist`** build since 2026-10-28; see [Benchmarking](benchmarking.md#grit-bench-daily-factory-census) for what that switch did to every baseline.
 
+## One-line log reads commits only through their subject (2026-11-01)
+
+`log/oneline-100@git-git` lists the last 100 commits of git.git one line each (`grit log --limit 100`), against `git log --oneline -100`. On the `dist` build grit took 3.50 ms against Git's 2.94 ms. The walk reads about 140 commits from the pack to order them by date, and inflated every one in full, keeping the bytes for the output rows. Those commits hold 115 KB of text, but a one-line row needs only the headers (parents and dates for the walk; author, date and change id for the row) and the subject: 40 KB. The other two thirds were message bodies inflated and then dropped.
+
+[`Odb::read_commit_through_subject`](rustdoc:grit_lib::objects::odb::Odb::read_commit_through_subject) returns just that prefix. For a commit the pack stores whole, it feeds the inflater 128 compressed bytes at a time and stops as soon as the first non-blank message line is complete. Stepping through the input rather than the output keeps zlib in its fast decoding loop, which needs 258 bytes of output room; an earlier cut that stepped the output 512 bytes at a time decoded half of every step on the slow path and was slower than inflating everything. The commit stream takes the extent to keep ([`CommitExtent::ThroughSubject`](rustdoc:grit_lib::revwalk::CommitExtent)), and human and Markdown `log` and `revs` listings ask for it. JSON rows, decorations and diff formats still read whole commits. The new functions joined the [hot text layout](benchmarking.md#hot-text-layout), which was regenerated; without that they faulted in about 390 KiB more code on this listing.
+
+Per commit, grit's walk now costs less than Git's: from `--limit 1` to `--limit 100` grit adds 1.35 ms and Git 1.51 ms. What remains of the gap is process start-up: `grit --version` takes 1.24 ms against Git's 0.88 ms, mostly loader relocations and the copy-on-write faults on `.data.rel.ro` described in [the start-up relocation study](benchmarking.md#startup-relocation-comparison). Measured directly with 600 alternating spawns, the median goes from 3.29 ms to 2.94 ms against Git's 2.70–2.85 ms, and `/usr/bin/time` peak RSS from 14.45 MB to 14.26 MB (Git 12.6 MB).
+
+Rows from `grit-bench daily` on `dist` builds against the system `git` in one sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0. "base" is `3edaa6f42`. Times are medians of all samples from two alternating rounds (20 runs per round), and peak RSS is the median of the rounds' peaks. Values are **milliseconds / MB**. Reports (first round): `daily-log-oneline-100-6310-before.json` → `daily-log-oneline-100-6310-after.json`; the headline census with the base build as `baseline_grit` is `daily-log-oneline-100-6310-headlines.json`.
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB | time vs git | RSS vs git |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `log/all@git-git` | 45.14 / 20.9 | 46.58 / 27.5 | 39.41 / 26.7 | 1.03 → 0.87 | 1.31× → 1.28× |
+| `log/author-n50@deep-history` | 1.73 / 9.1 | 2.87 / 13.6 | 2.96 / 13.6 | 1.66 → 1.71 | 1.50× → 1.50× |
+| `log/author-n50@deep-history-cg` | 2.00 / 11.7 | 2.96 / 16.2 | 3.01 / 16.3 | 1.48 → 1.51 | 1.38× → 1.39× |
+| `log/author@git-git` | 2.41 / 12.0 | 3.79 / 16.8 | 4.06 / 17.1 | 1.57 → 1.68 | 1.40× → 1.42× |
+| `log/json-100@git-git` | 2.91 / 15.1 | 3.82 / 17.4 | 3.71 / 17.2 | 1.31 → 1.28 | 1.15× → 1.14× |
+| `log/json-filter@git-git` | 2.28 / 12.2 | 3.78 / 17.0 | 4.01 / 17.2 | 1.66 → 1.75 | 1.39× → 1.41× |
+| `log/json-n10-loose-tags@git-git` | 12.31 / 17.4 | 12.08 / 20.0 | 12.24 / 19.9 | 0.98 → 0.99 | 1.15× → 1.14× |
+| `log/json-n10-packed-tags@git-git` | 10.06 / 17.4 | 2.56 / 11.2 | 2.50 / 10.8 | 0.25 → 0.25 | 0.64× → 0.62× |
+| `log/limit-path@git-git` | 19.04 / 33.6 | 14.19 / 33.6 | 15.46 / 33.7 | 0.75 → 0.81 | 1.00× → 1.00× |
+| `log/oneline-100@git-git` | 2.94 / 14.9 | 3.50 / 16.8 | 3.20 / 16.8 | 1.19 → 1.09 | 1.13× → 1.13× |
+| `log/oneline-100@synth-100k` | 2.19 / 10.0 | 2.54 / 11.5 | 2.48 / 11.9 | 1.16 → 1.13 | 1.16× → 1.19× |
+| `log/path@git-git` | 349.61 / 261.9 | 377.69 / 277.6 | 353.77 / 277.7 | 1.08 → 1.01 | 1.06× → 1.06× |
+| `log/stat-n50@git-git` | 99.34 / 40.6 | 161.24 / 77.0 | 168.51 / 77.0 | 1.62 → 1.70 | 1.89× → 1.90× |
+| `revs/author-n50@deep-history` | 1.62 / 9.0 | 2.49 / 11.6 | 2.62 / 12.2 | 1.53 → 1.61 | 1.29× → 1.36× |
+| `show/head@git-git` | 1.88 / 9.0 | 2.27 / 10.5 | 2.31 / 10.3 | 1.21 → 1.23 | 1.16× → 1.14× |
+
+Only `log/oneline-100` takes the new path; `log/oneline-100@synth-100k` has short messages, so there is little body to skip. The other rows run code this change does not touch apart from one branch on the retained extent. Their swings are run-to-run noise: re-run with 200 to 300 alternating spawns each, `log --author=. -n 50 --json`, `log --json --filter` and `log --limit 100 --json` stay within 2% of the base build with identical page-fault counts, `perf stat` puts `log --author` on either side of the base build from round to round, and `log -n 200 -- Documentation` and `log --stat` land within 0.5%. The headline census (status, diff, add, commit, switch, branch, merge, pick, stash, fetch, pull, push, clone, show, blame) moved within noise; peak RSS of `status`, `diff`, `show` and `branch` is flat or lower with the regenerated layout.
+
+```bash
+./target/release/grit-bench daily --only log/all@git-git,log/author-n50@deep-history,log/author-n50@deep-history-cg,log/author@git-git,log/json-100@git-git,log/json-filter@git-git,log/json-n10-loose-tags@git-git,log/json-n10-packed-tags@git-git,log/limit-path@git-git,log/oneline-100@git-git,log/oneline-100@synth-100k,log/path@git-git,log/stat-n50@git-git,revs/author-n50@deep-history,show/head@git-git \
+  --min-runs 20 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-log-oneline-100-6310-after.json
+```
+
+## Streamed JSON log listing (2026-11-01)
+
+`log/json-100@git-git` lists the last 100 commits of git.git as JSON (`grit log --limit 100 --json`), against `git log -100` with a verbose `--format`. Git ran in 2.97 ms and 15.0 MB on the `dist` build, grit in 4.43 ms and 18.7 MB. Inflating the 131 commits the walk reads costs both tools about the same. The rest of the gap was work grit repeated and code it ran from scattered pages:
+
+- **Decorations parsed `packed-refs` twice.** The JSON rows carry ref decorations, so grit scans the 1,909 packed refs for the ones naming a listed commit. The filtered scan validated the whole file once to prove it well-formed and sorted, then parsed it again to emit records, about 12% of the run. It now makes one strict pass, holds the few records the filter keeps (borrowed from the mapped file) and emits them once the pass succeeds. A corrupt or out-of-order file still emits nothing.
+- **The streamed listing was set up twice.** Deciding whether a non-terminal listing can stream discovered the repository, loaded config and built the walk options, and then the listing did it all again (about 7%). The check now hands its repository and walk to the listing, and runs only after the cheap page-size check.
+- **Rows were written in fragments.** serde_json wrote each row as dozens of small pieces to the line-buffered stdout, which scanned every piece for a newline (about 5%). Each row is now serialized into memory and written once.
+- **The hot code path missed release builds and streamed listings.** The [hot text layout](benchmarking.md#hot-text-layout) was profiled on the fat-LTO `dist` build only. ThinLTO in the `release` build renames functions shared between codegen units to `name.llvm.<n>`, which the bare patterns did not match, and keeps functions apart that `dist` inlines (clap's command construction, repository open, config loading). On a `release` build this listing faulted in 122 windows of plain `.text`, about 7.6 MB resident. Every pattern now also matches the suffixed name, the generator profiles the `dist` and `release` builds and merges them, and a streamed `--json` listing joins the log workloads. Code faults in plain `.text` drop from 122 to 17 on the `release` build.
+
+The 178 copy-on-write faults on `.data.rel.ro` and the pack index pages (which Git touches too) remain.
+
+Rows from `grit-bench daily` on `dist` builds against the system `git` in one sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0. "base" is `d2551aef4`. Times are medians of all samples from two alternating rounds (20 runs per round for the log rows, 15 for the related rows), and peak RSS is the median of the rounds' peaks. Values are **milliseconds / MB**. Reports (first round): `daily-log-json-100-6206-before.json` → `daily-log-json-100-6206-after.json` and `daily-log-json-100-6206-related-before.json` → `daily-log-json-100-6206-related-after.json`.
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB | time vs git | RSS vs git |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `log/json-100@git-git` | 2.97 / 15.0 | 4.43 / 18.7 | **3.79** / **17.0** | 1.49 → 1.27 | 1.24× → 1.13× |
+| `log/oneline-100@git-git` | 2.96 / 15.0 | 3.78 / 18.3 | 3.40 / 16.6 | 1.28 → 1.15 | 1.22× → 1.11× |
+| `log/oneline-100@synth-100k` | 2.19 / 9.7 | 2.99 / 13.6 | 2.58 / 11.0 | 1.37 → 1.18 | 1.40× → 1.13× |
+| `log/json-n10-packed-tags@git-git` | 9.97 / 17.5 | 3.00 / 12.8 | 2.60 / 12.0 | 0.30 → 0.26 | 0.73× → 0.69× |
+| `log/json-n10-loose-tags@git-git` | 12.13 / 17.5 | 12.58 / 20.5 | 11.94 / 19.7 | 1.04 → 0.98 | 1.17× → 1.13× |
+| `log/json-filter@git-git` | 2.40 / 12.0 | 4.29 / 18.0 | 4.24 / 17.4 | 1.79 → 1.77 | 1.50× → 1.45× |
+| `log/author@git-git` | 2.43 / 11.8 | 3.96 / 17.4 | 3.90 / 16.7 | 1.63 → 1.60 | 1.47× → 1.41× |
+| `log/author-n50@deep-history` | 1.75 / 9.1 | 2.95 / 14.0 | 2.92 / 13.4 | 1.69 → 1.67 | 1.54× → 1.47× |
+| `log/author-n50@deep-history-cg` | 1.98 / 12.2 | 3.08 / 16.5 | 3.05 / 16.1 | 1.55 → 1.54 | 1.36× → 1.33× |
+| `log/all@git-git` | 44.72 / 21.0 | 48.92 / 28.8 | 46.15 / 27.3 | 1.09 → 1.03 | 1.37× → 1.30× |
+| `log/stat-n50@git-git` | 98.36 / 40.7 | 163.59 / 84.1 | 158.22 / 82.8 | 1.66 → 1.61 | 2.07× → 2.03× |
+| `log/path@git-git` | 337.61 / 261.0 | 353.58 / 277.6 | 347.59 / 276.8 | 1.05 → 1.03 | 1.06× → 1.06× |
+| `log/limit-path@git-git` | 20.43 / 33.9 | 14.85 / 34.3 | 16.58 / 33.7 | 0.73 → 0.81 | 1.01× → 1.00× |
+| `show/head@synth-10k` | 2.04 / 8.9 | 2.80 / 11.7 | 2.68 / 11.4 | 1.37 → 1.31 | 1.31× → 1.27× |
+| `revs/author-n50@deep-history` | 1.70 / 8.9 | 2.73 / 13.6 | 2.65 / 13.0 | 1.60 → 1.56 | 1.53× → 1.45× |
+| `branch/list-json@many-refs` | 1.55 / 7.7 | 2.04 / 9.4 | 1.88 / 9.6 | 1.31 → 1.21 | 1.22× → 1.24× |
+| `tag/list@many-refs` | 3.32 / 8.2 | 3.49 / 10.2 | 3.23 / 10.1 | 1.05 → 0.97 | 1.24× → 1.24× |
+| `status/clean@small` | 1.91 / 7.6 | 2.57 / 9.6 | 2.55 / 9.8 | 1.34 → 1.33 | 1.27× → 1.29× |
+
+`log/limit-path` lists through the path-limited walk, where both builds do the same work; `perf stat` over 3 × 30 alternating runs puts it at 14.0 → 14.1 ms of CPU with 6 fewer page faults, so the row's swing is run-to-run noise. The other related rows (status, diff, add, commit, switch, config, blame, `revs/count`) moved within noise; `status/dirty@synth-10k`'s peak RSS is the largest of its runs and swings between 11.4 and 15.3 MB for either build depending on whether a run takes the threaded index refresh.
+
+On `release` builds `log/json-100@git-git` goes from 4.64 ms / 24.8 MB to 4.17 ms / 19.0 MB (git 2.96 ms / 15.0 MB): the layout fix matters most there, because release builds matched far fewer patterns.
+
+```bash
+./target/release/grit-bench daily --only log/all@git-git,log/author-n50@deep-history,log/author-n50@deep-history-cg,log/author@git-git,log/json-100@git-git,log/json-filter@git-git,log/json-n10-loose-tags@git-git,log/json-n10-packed-tags@git-git,log/limit-path@git-git,log/oneline-100@git-git,log/oneline-100@synth-100k,log/path@git-git,log/stat-n50@git-git \
+  --min-runs 20 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-log-json-100-6206-after.json
+```
+
+## Small commit diffs stay on one thread (2026-10-31)
+
+`show`, `diff A B` and `log --stat` load and diff each changed file of a commit as one unit of work. With `core.preloadIndex` on (Git's default), any commit touching two or more files sent those units to the worker pool. On `show/head@synth-10k`, a commit of eight two-line files, that meant three new threads, each with its own stack, allocator arena and pack inflater, to do less work than starting them cost: about 0.3 ms more wall time and 30% more CPU than running serially.
+
+Timing `grit show` on git.git commits with the pool on and off (`core.preloadIndex=false`) put the crossover at about 18 files. Up to 17 files the serial run was as fast or faster (by 0.1–0.35 ms); from 18 files the pool won, taking less than half the serial time at 225 files. Commits with few but very large files gain nothing from the pool either, since each file is diffed by one thread. `grit-lib` now uses the pool for 16 or more entries (or from the caller's `ThreadPolicy::min_items_override`). Starting it two files early costs a few tenths of a millisecond on 16- and 17-file commits, while starting it late would give up larger wins.
+
+Daily rows, mean of two alternating rounds of 30 runs each (`dist` builds, page cache dropped before the session), on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0. "Base" is `d2551aef4`, which already links the CLI hot-text layout (next section). Reports: `daily-show-diff-pool-5993-before.json` → `daily-show-diff-pool-5993-after.json` (round one).
+
+| Scenario | git ms / MiB | base | + change |
+| --- | ---: | ---: | ---: |
+| `show/head@synth-10k` | 2.00 / 8.5 | 2.66 / 10.8 | **2.38** / **9.5** |
+| `show/head@git-git` | 1.94 / 8.4 | 2.21 / 9.6 | 2.26 / 9.8 |
+| `show/head@big-blobs` | 1.59 / 7.1 | 2.00 / 9.3 | 1.92 / 9.3 |
+| `log/stat-n50@git-git` | 96.36 / 38.8 | 154.48 / 77.0 | 158.29 / **74.6** |
+| `diff/worktree@synth-10k` | 7.19 / 9.4 | 7.23 / 11.8 | 6.93 / 12.4 |
+
+`git-git` and `big-blobs` show one-file commits, which were already serial; their rows are noise. `log --stat -n 50` on git.git is mostly merges and one-file commits (three of the fifty touch two files); it peaks about 2.4 MiB lower, and its time is within noise: four interleaved hyperfine series of 40 runs read 158.3 and 151.2 ms for the base against 154.7 and 158.5 ms with the change. `patch-id/commit@git-git` measured 1.8–1.9 ms for both binaries in 300 interleaved hyperfine runs. Commit sizes from git.git (`show` medians of 40 runs, ms, measured on the earlier base `b19e946fe`):
+
+| Files changed | base | + change | git |
+| ---: | ---: | ---: | ---: |
+| 8 | 4.71 | **4.52** | 4.37 |
+| 12 | 6.95 | **6.55** | 7.46 |
+| 16 | 8.66 | 8.46 | 9.13 |
+| 28 | 8.55 | 8.58 | 14.85 |
+| 109 | 8.80 | 8.61 | 18.81 |
+| 225 | 19.43 | 19.19 | 37.28 |
+
+Peak RSS comparisons between two builds need the page cache in the same state. A binary that was just copied into place showed about 0.4 MiB more resident code and read-only data than the same file after `echo 3 > /proc/sys/vm/drop_caches`, on identical runs. Both builds above were measured after dropping the cache.
+
+## Restoring hunks of a large file (2026-11-01)
+
+`restore/hunks@large-file` discards 250 of 500 one-line hunks in a 50,000-line, 490 KB `large.txt` inside `synth-10k`. Git only applies a prebuilt patch (`git apply -R`), while grit has to diff the file to resolve the hunk ids, so some gap is inherent. The rest was memory and repeated work. A run faulted in about 3,200 more anonymous pages than a trivial command: the heap peaked at 13.2 MB, almost all of it short-lived line tables of the Myers diff. On top of that, the 490 KB file was hashed with SHA-1 three times.
+
+What changed:
+
+- The line diff keeps one 16-byte record per line (body plus newline) instead of a 24-byte body and ending pair, and the raw compare keys borrow those records instead of filling a second table. Compaction reads the same keys for its indentation measure. The interner is freed before the search, and the K-vectors are a fresh zeroed allocation, so diagonals the search never reaches are never touched. The heap peak falls to 8.3 MB.
+- Applying hunks to a blob keeps slices into the original and into the parsed hunks instead of a `Cow` per line.
+- A partial restore hashes the restored content only when the path has an `ident`, filter or line-ending conversion. It refreshes the index stat data only for files whose every hunk was restored, because a file that keeps a hunk can't match the index. The worktree rules are built once.
+
+Rows from `grit-bench daily` on `dist` builds against the system `git` in one sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0. "base" is `fce803fe8`. Values are medians over three alternating rounds of 30 runs (20 for the second group), in **milliseconds / MB**. Reports: `daily-restore-hunks-6274-before.json` → `daily-restore-hunks-6274-after.json` and `daily-restore-hunks-6274-related-before.json` → `daily-restore-hunks-6274-related-after.json` (first round).
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB |
+| --- | ---: | ---: | ---: |
+| `restore/hunks@large-file` | 7.05 / 8.6 | 15.18 / 24.3 | **11.22 / 18.4** |
+| `add/hunks@large-file` | 12.68 / 10.6 | 17.21 / 22.9 | **14.77 / 17.9** |
+| `add/lines@large-file` | 12.93 / 10.7 | 18.08 / 22.9 | **15.83 / 17.7** |
+| `log/stat-n50@git-git` | 95.43 / 40.7 | 149.92 / 83.2 | **138.25 / 74.4** |
+| `restore/paths@synth-10k` | 11.93 / 12.7 | 11.66 / 16.3 | 11.73 / 16.4 |
+| `add/patch-file@large-file` | 12.70 / 10.6 | 8.14 / 14.7 | 8.28 / 14.8 |
+| `add/patch-file@synth-10k` | 6.44 / 9.8 | 6.99 / 14.5 | 6.94 / 14.5 |
+| `diff/worktree@synth-10k` | 6.72 / 10.0 | 6.33 / 13.2 | 6.70 / 13.2 |
+| `diff/worktree@big-blobs` | 315.11 / 190.8 | 209.31 / 193.4 | 204.22 / 193.6 |
+| `diff/stat@synth-100k` | 104.60 / 30.3 | 76.02 / 52.1 | 78.14 / 52.2 |
+| `show/head@synth-10k` | 1.95 / 8.9 | 2.64 / 11.7 | 2.60 / 11.8 |
+| `show/head@big-blobs` | 1.50 / 7.7 | 1.99 / 9.7 | 2.00 / 9.6 |
+| `show/head@git-git` | 1.86 / 9.0 | 2.26 / 9.9 | 2.19 / 10.0 |
+| `patch-id/commit@git-git` | 2.13 / 13.5 | 2.27 / 9.5 | 2.15 / 9.5 |
+| `stash/push-paths@synth-10k` | 72.88 / 20.0 | 29.33 / 20.2 | 29.36 / 20.3 |
+| `stash/push-pop@synth-10k` | 198.24 / 18.6 | 118.29 / 18.3 | 119.29 / 18.6 |
+| `stash/pop-index@synth-10k` | 61.99 / 18.7 | 35.98 / 22.0 | 36.17 / 22.3 |
+
+The diff rows that moved are within noise, and Git's own times drift just as much between those rounds. Repeated directly (`perf stat`, 200 runs of `grit diff` and 40 of `grit diff --stat`, alternating), the base and the new build measure 5.87 vs 5.87 ms and 76.4 vs 75.9 ms, with identical output. The remaining `restore/hunks` gap is the diff itself (about a quarter of the run), the blob read and index load the hunk ids need, and the roughly 11 MB of binary pages every grit command maps (see [Status memory is code layout](#status-memory-is-code-layout-2026-10-31)).
+
+```bash
+./target/dist/grit-bench daily --only restore/hunks@large-file,restore/paths@synth-10k,add/hunks@large-file,add/lines@large-file,add/patch-file@large-file,add/patch-file@synth-10k,diff/worktree@synth-10k,show/head@synth-10k,stash/push-paths@synth-10k,stash/push-pop@synth-10k,stash/pop-index@synth-10k \
+  --min-runs 30 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-restore-hunks-6274-after.json
+./target/dist/grit-bench daily --only diff/worktree@big-blobs,show/head@big-blobs,diff/stat@synth-100k,show/head@git-git,log/stat-n50@git-git,patch-id/commit@git-git \
+  --min-runs 20 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-restore-hunks-6274-related-after.json
+```
+
 ## The CLI joins the hot text layout (2026-10-31)
 
 `branch/list@many-refs` lists the one local branch of a clone with 10,000 packed refs. The work is tiny: grit runs 1.70 million user-space instructions, Git 1.32 million. Yet grit took 1.86 ms against Git's 1.32 ms and 11.0 MB against 6.7 MB. Both gaps are page faults, 336 against Git's 170, and most of the time a short command spends in the kernel goes to mapping file pages on those faults.

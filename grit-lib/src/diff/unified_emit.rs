@@ -21,50 +21,86 @@ pub struct SourceLine<'a> {
     pub ending: LineEnding,
 }
 
+impl<'a> SourceLine<'a> {
+    /// The line held by `record`, a line with its `\n` when it has one.
+    fn from_record(record: &'a str) -> Self {
+        match record.strip_suffix('\n') {
+            Some(body) => Self {
+                body,
+                ending: if body.ends_with('\r') {
+                    LineEnding::CrLf
+                } else {
+                    LineEnding::Lf
+                },
+            },
+            None => Self {
+                body: record,
+                ending: LineEnding::Missing,
+            },
+        }
+    }
+}
+
 /// All logical lines of one file version, borrowed from its text.
+///
+/// Each line is kept as its record: the body followed by the `\n` that ends it, if any. Git
+/// compares whole records, so they double as compare keys without a second table.
 #[derive(Clone, Debug)]
 pub struct LineSide<'a> {
-    pub lines: Vec<SourceLine<'a>>,
+    records: Vec<&'a str>,
 }
 
 impl<'a> LineSide<'a> {
     /// Split `text` into lines, preserving `\r` in bodies and final incomplete lines.
     #[must_use]
     pub fn from_text(text: &'a str) -> Self {
-        let mut lines = Vec::with_capacity(memchr::memchr_iter(b'\n', text.as_bytes()).count() + 1);
+        let bytes = text.as_bytes();
+        let mut records = Vec::with_capacity(memchr::memchr_iter(b'\n', bytes).count() + 1);
         let mut start = 0usize;
-        for i in memchr::memchr_iter(b'\n', text.as_bytes()) {
-            lines.push(parse_line_segment(&text[start..i], true));
+        for i in memchr::memchr_iter(b'\n', bytes) {
+            records.push(&text[start..=i]);
             start = i + 1;
         }
         if start < text.len() {
-            lines.push(parse_line_segment(&text[start..], false));
+            records.push(&text[start..]);
         }
-        Self { lines }
+        Self { records }
     }
 
     #[must_use]
     pub fn len(&self) -> usize {
-        self.lines.len()
+        self.records.len()
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.lines.is_empty()
+        self.records.is_empty()
     }
 
-    pub fn line(&self, index: usize) -> &SourceLine<'a> {
-        &self.lines[index]
+    #[must_use]
+    pub fn line(&self, index: usize) -> SourceLine<'a> {
+        SourceLine::from_record(self.records[index])
+    }
+
+    /// Every line in order.
+    pub fn lines(&self) -> impl ExactSizeIterator<Item = SourceLine<'a>> + '_ {
+        self.records
+            .iter()
+            .map(|record| SourceLine::from_record(record))
+    }
+
+    /// Every line with its `\n`, when it has one: the bytes Git compares lines by, so a line
+    /// ending in a newline never matches the same body at EOF without one.
+    #[must_use]
+    pub fn records(&self) -> &[&'a str] {
+        &self.records
     }
 
     /// Index of the last line that lacks a trailing line separator, if any.
     #[must_use]
     pub fn incomplete_last_line_index(&self) -> Option<usize> {
-        if self.lines.is_empty() {
-            return None;
-        }
-        let last = self.lines.len() - 1;
-        (self.lines[last].ending == LineEnding::Missing).then_some(last)
+        let last = self.records.len().checked_sub(1)?;
+        (!self.records[last].ends_with('\n')).then_some(last)
     }
 }
 
@@ -85,17 +121,6 @@ pub(crate) fn line_diff_token(line: &SourceLine) -> String {
             s
         }
     }
-}
-
-fn parse_line_segment(raw: &str, had_line_break: bool) -> SourceLine<'_> {
-    let ending = if !had_line_break {
-        LineEnding::Missing
-    } else if raw.ends_with('\r') {
-        LineEnding::CrLf
-    } else {
-        LineEnding::Lf
-    };
-    SourceLine { body: raw, ending }
 }
 
 /// When line-based diff finds no edits but the raw texts differ, Git still emits
@@ -184,10 +209,10 @@ pub fn emit_unified_body_from_edits(
     let max_ignorable = ctxlen;
 
     let before_body = |i: i64| -> &str {
-        if i < 0 || i as usize >= before.lines.len() {
+        if i < 0 || i as usize >= before.len() {
             return "";
         }
-        before.lines[i as usize].body
+        before.line(i as usize).body
     };
     let next_hunk = |start: usize| -> Option<(usize, usize)> {
         let mut scr = start;
@@ -302,7 +327,7 @@ pub fn emit_unified_body_from_edits(
 
         let mut a_cur = a_start;
         while a_cur < first.after_start {
-            write_patch_line(&mut out, ' ', after.line(a_cur as usize));
+            write_patch_line(&mut out, ' ', &after.line(a_cur as usize));
             a_cur += 1;
         }
 
@@ -312,18 +337,18 @@ pub fn emit_unified_body_from_edits(
         loop {
             let e = &edits[k];
             while b_cur < e.before_start && a_cur < e.after_start {
-                write_patch_line(&mut out, ' ', after.line(a_cur as usize));
+                write_patch_line(&mut out, ' ', &after.line(a_cur as usize));
                 b_cur += 1;
                 a_cur += 1;
             }
             let mut r = e.before_start;
             while r < e.before_start + e.before_len {
-                write_patch_line(&mut out, '-', before.line(r as usize));
+                write_patch_line(&mut out, '-', &before.line(r as usize));
                 r += 1;
             }
             let mut a = e.after_start;
             while a < e.after_start + e.after_len {
-                write_patch_line(&mut out, '+', after.line(a as usize));
+                write_patch_line(&mut out, '+', &after.line(a as usize));
                 a += 1;
             }
             if k == last_idx {
@@ -336,7 +361,7 @@ pub fn emit_unified_body_from_edits(
 
         let mut a_tail = last.after_start + last.after_len;
         while a_tail < a_end {
-            write_patch_line(&mut out, ' ', after.line(a_tail as usize));
+            write_patch_line(&mut out, ' ', &after.line(a_tail as usize));
             a_tail += 1;
         }
 
@@ -353,11 +378,12 @@ mod tests {
     #[test]
     fn split_preserves_crlf_in_body() {
         let side = LineSide::from_text("a\r\nb");
-        assert_eq!(side.lines.len(), 2);
-        assert_eq!(side.lines[0].body, "a\r");
-        assert_eq!(side.lines[0].ending, LineEnding::CrLf);
-        assert_eq!(side.lines[1].body, "b");
-        assert_eq!(side.lines[1].ending, LineEnding::Missing);
+        assert_eq!(side.len(), 2);
+        assert_eq!(side.line(0).body, "a\r");
+        assert_eq!(side.line(0).ending, LineEnding::CrLf);
+        assert_eq!(side.line(1).body, "b");
+        assert_eq!(side.line(1).ending, LineEnding::Missing);
+        assert_eq!(side.records(), ["a\r\n", "b"]);
     }
 
     #[test]
@@ -398,8 +424,8 @@ mod tests {
         let no_nl = LineSide::from_text("a\nb");
         let with_nl = LineSide::from_text("a\nb\n");
         assert_ne!(
-            line_diff_token(no_nl.line(1)),
-            line_diff_token(with_nl.line(1))
+            line_diff_token(&no_nl.line(1)),
+            line_diff_token(&with_nl.line(1))
         );
     }
 }

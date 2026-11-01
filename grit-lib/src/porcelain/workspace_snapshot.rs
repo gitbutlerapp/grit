@@ -905,7 +905,8 @@ mod tests {
 
     #[test]
     fn pinned_worktree_tree_survives_git_gc_and_grit_prune() {
-        use crate::refs::gc::{collect_referenced_object_roots, prune_loose_unreachable};
+        use crate::maintenance::collect_maintenance_object_roots;
+        use crate::refs::gc::prune_loose_unreachable;
 
         let (_tmp, repo) = setup_merge_conflict();
         let root = repo.work_tree().unwrap();
@@ -916,7 +917,7 @@ mod tests {
         git(root, &["gc", "--prune=now", "-q"]);
         assert_eq!(git(root, &["cat-file", "-t", &tree_hex]).trim(), "tree");
 
-        let roots = collect_referenced_object_roots(repo.git_dir()).unwrap();
+        let roots = collect_maintenance_object_roots(&repo).unwrap();
         prune_loose_unreachable(repo.odb(), &roots, None).unwrap();
         assert_eq!(git(root, &["cat-file", "-t", &tree_hex]).trim(), "tree");
 

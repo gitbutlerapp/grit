@@ -5,7 +5,8 @@ use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::log_walk::WalkedCommits;
 use grit_lib::revwalk::{
-    rev_walk_list_supports_stream, RevWalkCommitStream, RevWalkCommitStreamItem, RevWalkListOptions,
+    rev_walk_list_supports_stream, CommitExtent, RevWalkCommitStream, RevWalkCommitStreamItem,
+    RevWalkListOptions,
 };
 use std::io::Write;
 
@@ -85,17 +86,22 @@ pub fn finish_commits_json_document(
 }
 
 /// Serialize one commit value into a JSON array, with a leading comma when `first` is false.
+///
+/// The element is serialized into memory and written at once: serde emits many small
+/// fragments, and a line-buffered stdout scans each one for a newline.
 pub fn write_json_array_element<T: serde::Serialize>(
     w: &mut dyn Write,
     first: &mut bool,
     value: &T,
 ) -> Result<()> {
+    let mut buf = Vec::with_capacity(1024);
     if !*first {
-        stdio::io_result(write!(w, ",")).map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+        buf.push(b',');
     } else {
         *first = false;
     }
-    json_write(serde_json::to_writer(&mut *w, value))
+    json_write(serde_json::to_writer(&mut buf, value))?;
+    stdio::io_result(w.write_all(&buf)).map_err(|e| anyhow::anyhow!("writing output: {e}"))
 }
 
 /// Load human summaries for one batch, reusing walk bytes when present.
@@ -126,16 +132,19 @@ pub fn write_all_or_broken_pipe(w: &mut dyn Write, buf: &[u8]) -> Result<bool> {
     }
 }
 
-/// Open a commit stream for `tokens`/`walk`, applying `limit_plus_one` when set.
+/// Open a commit stream for `tokens`/`walk`, applying `limit_plus_one` when set and keeping
+/// `extent` of each listed commit for rendering.
 pub fn open_plain_stream<'repo>(
     repo: &'repo Repository,
     tokens: &[&str],
     walk: &RevWalkListOptions,
     limit_plus_one: Option<usize>,
+    extent: CommitExtent,
 ) -> Result<RevWalkCommitStream<'repo>> {
     let mut stream_opts = walk.clone();
     stream_opts.limit = limit_plus_one;
     stream_opts.retain_commit_data = true;
+    stream_opts.retained_commit_extent = extent;
     repo.rev_walk()
         .commits_stream(tokens, &stream_opts)?
         .context("plain walk should stream")

@@ -58,15 +58,15 @@ impl PathDisplayContext {
     }
 }
 
-/// Whether human path output should octal-escape all non-ASCII bytes (`core.quotepath`).
+/// Whether human path output should octal-escape all non-ASCII bytes (`core.quotePath`).
 ///
 /// Grit's modern CLI defaults to `false` (UTF-8 names print literally). An explicit
-/// `core.quotepath` or `core.quotePath` setting is still honored.
+/// `core.quotePath` setting is still honored.
 fn quote_path_fully_for_modern_cli(repo: &Repository) -> Result<bool> {
     let config = repo.config()?;
-    let from_key = |key: &str| config.get_bool(key).and_then(|r| r.ok());
-    Ok(from_key("core.quotepath")
-        .or_else(|| from_key("core.quotePath"))
+    Ok(config
+        .get_bool("core.quotePath")
+        .and_then(Result::ok)
         .unwrap_or(false))
 }
 
@@ -265,8 +265,7 @@ pub fn commit_rows_with(
     let cells: Vec<(String, String, String, String, &str)> = commits
         .iter()
         .map(|c| {
-            let full = c.oid.to_hex();
-            let sha = full.get(..7).unwrap_or(&full).to_owned();
+            let sha = c.oid.to_short_hex();
             let change = change_display_segment(&c.change_id);
             let author = truncate(&c.author, AUTHOR_MAX.min(columns.author.max(1)));
             let date = context::relative_date_from(c.timestamp, now);

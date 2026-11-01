@@ -41,6 +41,8 @@ pub fn hook_stdio_for_repo() -> HookStdio {
 }
 
 use crate::diagnostics;
+use crate::error_kind::ErrorKind;
+use crate::json_error::{StructuredCliError, StructuredJsonError};
 
 static PROCESS_ENVIRONMENT: OnceLock<Environment> = OnceLock::new();
 
@@ -301,14 +303,26 @@ pub fn committer_reflog_signature(
     }
 }
 
+const IDENTITY_SETUP_HINT: &str = "Tell grit who you are:\n  grit config --global user.name \"Your Name\"\n  grit config --global user.email \"you@example.com\"";
+
 fn identity_error(err: IdentityError) -> anyhow::Error {
-    let setup = "\n\nTell grit who you are:\n  grit config --global user.name \"Your Name\"\n  grit config --global user.email \"you@example.com\"";
-    match err {
+    let (short, extra) = match &err {
         IdentityError::MissingConfiguredEmail { role }
-        | IdentityError::AutoDetectionDisabled { role } => anyhow::anyhow!(
-            "{}\n\nunable to auto-detect email address{setup}",
-            role.missing_email_hint()
+        | IdentityError::AutoDetectionDisabled { role } => (
+            role.missing_email_hint().to_owned(),
+            Some("\n\nunable to auto-detect email address".to_owned()),
         ),
-        other => anyhow::anyhow!("{other}{setup}"),
-    }
+        other => (other.to_string(), None),
+    };
+    let human = match extra {
+        Some(extra) => format!("{short}{extra}\n\n{IDENTITY_SETUP_HINT}"),
+        None => format!("{short}\n\n{IDENTITY_SETUP_HINT}"),
+    };
+    anyhow::Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            hint: Some(IDENTITY_SETUP_HINT.to_owned()),
+            ..StructuredJsonError::new(short, ErrorKind::IdentityUnknown)
+        },
+        human,
+    })
 }

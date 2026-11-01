@@ -3,7 +3,6 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
-use std::path::Path as StdPath;
 use std::str::FromStr;
 
 use thiserror::Error;
@@ -13,6 +12,7 @@ use crate::apply::{
     apply_hunks_to_blob, apply_patch_to_index, apply_patch_to_index_and_write, ApplyOptions,
     FilePatch, Hunk, HunkLine, IndexApplyOptions, IndexApplyOutcome,
 };
+use crate::crlf::worktree_conversion_is_identity;
 use crate::diff::hunk_id::{hunk_ids, hunk_ids_with_duplicate_peers, DiffSide, HunkId};
 use crate::diff::structured::{
     structured_file_diff, SideBytes, StructuredHunk, StructuredLine, StructuredLineKind,
@@ -262,6 +262,9 @@ pub(crate) struct ResolvedSelection {
     pub(crate) selected_hunks: BTreeMap<String, Vec<HunkId>>,
     /// Line range labels (`start` or `start-end`) per path.
     pub(crate) selected_lines: BTreeMap<String, Vec<String>>,
+    /// Paths whose every hunk was selected by id, so reversing the patch can bring the file back
+    /// to the content it was diffed against. Any other selected path keeps a difference.
+    pub(crate) whole_files: BTreeSet<String>,
 }
 
 /// Resolve `selection` on the unstaged side, keeping the per-path ids and line labels that
@@ -286,6 +289,7 @@ fn merge_resolved(into: &mut ResolvedSelection, other: ResolvedSelection) {
     for (path, ranges) in other.selected_lines {
         into.selected_lines.entry(path).or_default().extend(ranges);
     }
+    into.whole_files.extend(other.whole_files);
     for patch in other.patches {
         if let Some(existing) = into
             .patches
@@ -398,6 +402,7 @@ fn resolve_unstaged(
 ) -> std::result::Result<ResolvedSelection, HunkSelectError> {
     let mut patches = Vec::new();
     let mut staged_hunks = BTreeMap::new();
+    let mut whole_files = BTreeSet::new();
     let mut found = HashSet::new();
 
     for change in changes {
@@ -408,18 +413,21 @@ fn resolve_unstaged(
             .get(&change.path)
             .map(|h| h.as_slice())
             .unwrap_or(&[]);
-        let (file_patches, staged, matched) = resolve_file_change_by_unified_body(
+        let resolved = resolve_file_change_by_unified_body(
             DiffSide::Unstaged,
             change,
             peer,
             requested,
             &opts,
         )?;
-        found.extend(matched);
-        if let Some(staged) = staged {
+        found.extend(resolved.matched);
+        if let Some(staged) = resolved.selected_ids {
             staged_hunks.insert(change.path.clone(), staged);
         }
-        patches.extend(file_patches);
+        if resolved.whole_file {
+            whole_files.insert(change.path.clone());
+        }
+        patches.extend(resolved.patches);
     }
 
     let missing: Vec<HunkId> = requested
@@ -458,6 +466,7 @@ fn resolve_unstaged(
         patches,
         selected_hunks: staged_hunks,
         selected_lines: BTreeMap::new(),
+        whole_files,
     })
 }
 
@@ -480,7 +489,17 @@ fn line_count(text: &str) -> usize {
     }
 }
 
-type UnifiedHunkResolve = (Vec<FilePatch>, Option<Vec<HunkId>>, HashSet<HunkId>);
+/// One file's hunks matched against the requested ids.
+struct UnifiedHunkResolve {
+    /// The patch of the selected hunks (empty when none matched).
+    patches: Vec<FilePatch>,
+    /// Selected ids in hunk order, when any matched.
+    selected_ids: Option<Vec<HunkId>>,
+    /// Requested ids found on this file.
+    matched: HashSet<HunkId>,
+    /// Whether every hunk of the file was selected.
+    whole_file: bool,
+}
 
 fn resolve_file_change_by_unified_body(
     side: DiffSide,
@@ -519,10 +538,21 @@ fn resolve_file_change_by_unified_body(
         }
     }
     if selected_slices.is_empty() {
-        return Ok((Vec::new(), None, matched));
+        return Ok(UnifiedHunkResolve {
+            patches: Vec::new(),
+            selected_ids: None,
+            matched,
+            whole_file: false,
+        });
     }
+    let whole_file = selected_slices.len() == slices.len();
     let patch = file_patch_from_unified_slices(change, &selected_slices)?;
-    Ok((vec![patch], Some(staged_ids), matched))
+    Ok(UnifiedHunkResolve {
+        patches: vec![patch],
+        selected_ids: Some(staged_ids),
+        matched,
+        whole_file,
+    })
 }
 
 fn file_patch_from_unified_slices(
@@ -687,6 +717,7 @@ fn resolve_on_files(
         patches,
         selected_hunks: staged_by_path,
         selected_lines: BTreeMap::new(),
+        whole_files: BTreeSet::new(),
     })
 }
 
@@ -1048,6 +1079,7 @@ fn resolve_line_ranges_unstaged(
         patches,
         selected_hunks: BTreeMap::new(),
         selected_lines: staged_lines,
+        whole_files: BTreeSet::new(),
     })
 }
 
@@ -1154,9 +1186,18 @@ pub fn restore_hunks(
             pathspecs,
             diff_opts,
         )?;
-        let planned = plan_worktree_reverse(repo, &index, &resolved.patches)?;
+        let rules = WorktreeRules::from_repository(repo, &index).map_err(HunkSelectError::from)?;
+        let planned = plan_worktree_reverse(
+            repo,
+            &index,
+            &rules,
+            &resolved.patches,
+            &resolved.whole_files,
+        )?;
         match lock {
-            Some(lock) => commit_worktree_reverse(repo, lock, index, &planned, &mut outcome)?,
+            Some(lock) => {
+                commit_worktree_reverse(repo, lock, index, &rules, &planned, &mut outcome)?
+            }
             None => {
                 for plan in &planned {
                     push_restored_path(&mut outcome.restored, &plan.path);
@@ -1197,15 +1238,24 @@ struct WorktreeReversePlan {
     path: String,
     clean_bytes: Vec<u8>,
     mode: u32,
+    /// Whether the restored file can match its index entry again, which is the only case where
+    /// refreshing the entry's stat data changes anything. A file that keeps some unstaged hunk
+    /// stays different from the index, and leaving its stat data alone is what `git apply` does.
+    may_match_index: bool,
 }
 
+/// Reverse-apply each patch to the clean worktree content of its path.
+///
+/// `whole_files` lists the paths whose every unstaged hunk is in `patches`
+/// ([`ResolvedSelection::whole_files`]).
 fn plan_worktree_reverse(
     repo: &Repository,
     index: &Index,
+    rules: &WorktreeRules,
     patches: &[FilePatch],
+    whole_files: &BTreeSet<String>,
 ) -> std::result::Result<Vec<WorktreeReversePlan>, HunkSelectError> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
-    let rules = WorktreeRules::from_repository(repo, index).map_err(HunkSelectError::from)?;
     let config = repo.config().map_err(HunkSelectError::from)?;
     let mut out = Vec::with_capacity(patches.len());
     for patch in patches {
@@ -1232,16 +1282,18 @@ fn plan_worktree_reverse(
                 mode,
                 config.as_ref(),
                 entry,
-                Some(&rules),
+                Some(rules),
             )
             .map_err(HunkSelectError::from)?
         };
         let new_clean = apply_hunks_to_blob(&clean, &patch.hunks, &ApplyOptions { reverse: true })
             .map_err(HunkSelectError::Apply)?;
+        let may_match_index = whole_files.contains(&path);
         out.push(WorktreeReversePlan {
             path,
             clean_bytes: new_clean,
             mode,
+            may_match_index,
         });
     }
     Ok(out)
@@ -1249,66 +1301,71 @@ fn plan_worktree_reverse(
 
 /// Write the planned worktree files, then refresh their index stat data.
 ///
-/// `index` must have been loaded while holding `lock`. It is only written when the refresh
-/// changed an entry (a restore that leaves the file different from the index changes nothing,
-/// as with `git apply`); otherwise the lock is released untouched.
+/// `index` must have been loaded while holding `lock`, and `rules` built from it. It is only
+/// written when the refresh changed an entry (a restore that leaves the file different from the
+/// index changes nothing, as with `git apply`); otherwise the lock is released untouched.
 fn commit_worktree_reverse(
     repo: &Repository,
     mut lock: IndexLock,
     mut index: Index,
+    rules: &WorktreeRules,
     planned: &[WorktreeReversePlan],
     outcome: &mut RestoreHunksOutcome,
 ) -> std::result::Result<(), HunkSelectError> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
-    let rules = WorktreeRules::from_repository(repo, &index).map_err(HunkSelectError::from)?;
     let config = repo.config().map_err(HunkSelectError::from)?;
     let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
     let has_symlinks = dir_cache.has_symlinks();
     for plan in planned {
-        // The restored content only lives in the worktree, so it is hashed (for `ident` and
-        // filter metadata) but not stored.
-        let oid = repo
-            .odb()
-            .hash_algo()
-            .hash_object(ObjectKind::Blob, &plan.clean_bytes)
+        let attrs = rules.file_attrs(&plan.path, false);
+        let smudged;
+        let worktree_bytes = if worktree_conversion_is_identity(rules.conversion(), &attrs) {
+            plan.clean_bytes.as_slice()
+        } else {
+            // The restored content only lives in the worktree, so it is hashed (for `ident` and
+            // filter metadata) but not stored.
+            let oid = repo
+                .odb()
+                .hash_algo()
+                .hash_object(ObjectKind::Blob, &plan.clean_bytes)
+                .map_err(HunkSelectError::from)?;
+            smudged = smudge_bytes_for_worktree_path(
+                repo,
+                rules,
+                &plan.path,
+                plan.mode,
+                &plan.clean_bytes,
+                &oid,
+            )
             .map_err(HunkSelectError::from)?;
-        let worktree_bytes = smudge_bytes_for_worktree_path(
-            repo,
-            &rules,
-            &plan.path,
-            plan.mode,
-            &plan.clean_bytes,
-            &oid,
-        )
-        .map_err(HunkSelectError::from)?;
+            smudged.as_slice()
+        };
         write_to_worktree_cached(
             work_tree,
             &plan.path,
-            &worktree_bytes,
+            worktree_bytes,
             plan.mode,
             &mut dir_cache,
             has_symlinks,
         )?;
         push_restored_path(&mut outcome.restored, &plan.path);
     }
-    if refresh_partial_restore_index_stats(repo, work_tree, &mut index, &outcome.restored)? {
+    let still_different: BTreeSet<&str> = planned
+        .iter()
+        .filter(|plan| !plan.may_match_index)
+        .map(|plan| plan.path.as_str())
+        .collect();
+    let touched: BTreeSet<&str> = outcome
+        .restored
+        .iter()
+        .map(String::as_str)
+        .filter(|path| !still_different.contains(path))
+        .collect();
+    if refresh_stage0_index_stats_for_paths(repo, work_tree, &mut index, &touched)? {
         repo.index_handle()
             .commit_update(&mut lock, &mut index, false)?;
     }
     Ok(())
-}
-
-/// Returns whether any index entry changed.
-fn refresh_partial_restore_index_stats(
-    repo: &Repository,
-    work_tree: &StdPath,
-    index: &mut Index,
-    restored: &[String],
-) -> std::result::Result<bool, HunkSelectError> {
-    let touched: BTreeSet<&str> = restored.iter().map(String::as_str).collect();
-    Ok(refresh_stage0_index_stats_for_paths(
-        repo, work_tree, index, &touched,
-    )?)
 }
 
 /// Options for [`reverse_apply_patches_to_worktree`].
@@ -1995,6 +2052,15 @@ mod tests {
             .unwrap()
     }
 
+    fn plan_without_selection(
+        repo: &Repository,
+        patches: &[FilePatch],
+    ) -> std::result::Result<Vec<WorktreeReversePlan>, HunkSelectError> {
+        let index = Index::new();
+        let rules = WorktreeRules::from_repository(repo, &index)?;
+        plan_worktree_reverse(repo, &index, &rules, patches, &BTreeSet::new())
+    }
+
     #[test]
     fn restore_plan_requires_work_tree() {
         let dir = tempfile::tempdir().unwrap();
@@ -2006,7 +2072,7 @@ mod tests {
             },
         )
         .unwrap();
-        let err = plan_worktree_reverse(&repo, &Index::new(), &[one_line_patch("f.txt")])
+        let err = plan_without_selection(&repo, &[one_line_patch("f.txt")])
             .err()
             .unwrap();
         match err {
@@ -2024,9 +2090,7 @@ mod tests {
 
         let mut gitlink = one_line_patch("sub");
         gitlink.new_mode = Some("160000".into());
-        let err = plan_worktree_reverse(&repo, &Index::new(), &[gitlink])
-            .err()
-            .unwrap();
+        let err = plan_without_selection(&repo, &[gitlink]).err().unwrap();
         assert!(
             matches!(&err, HunkSelectError::Gitlink { path } if path == "sub"),
             "{err:?}"
@@ -2035,9 +2099,7 @@ mod tests {
         let mut pathless = one_line_patch("f.txt");
         pathless.old_path = None;
         pathless.new_path = None;
-        let err = plan_worktree_reverse(&repo, &Index::new(), &[pathless])
-            .err()
-            .unwrap();
+        let err = plan_without_selection(&repo, &[pathless]).err().unwrap();
         assert!(matches!(err, HunkSelectError::MissingPath), "{err:?}");
     }
 

@@ -15,9 +15,11 @@ use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::github_auth::is_github_https_url;
 use grit_lib::remote::push_plan::PushPlanError;
 use grit_lib::remote::{RemoteError, DEFAULT_REMOTE};
+use grit_lib::revwalk::history::RebaseSessionError;
+use grit_lib::revwalk::rev_parse_error::RevParseError;
 
 use crate::error_kind::ErrorKind;
-use crate::json_error::{StructuredCliError, StructuredJsonError};
+use crate::json_error::{would_overwrite_error, StructuredCliError, StructuredJsonError};
 use crate::usage_hints;
 
 /// Paths shown in human messages and hints before the rest are summarized as a count.
@@ -80,6 +82,9 @@ fn guide_cause(cause: &(dyn StdError + 'static)) -> Option<Error> {
     if let Some(err) = cause.downcast_ref::<ContinueMergeError>() {
         return guide_continue_merge(err);
     }
+    if let Some(err) = cause.downcast_ref::<RebaseSessionError>() {
+        return guide_rebase_session(err);
+    }
     if let Some(err) = cause.downcast_ref::<CloneError>() {
         return match err {
             CloneError::Library(lib) => guide_lib(lib),
@@ -124,6 +129,7 @@ fn guide_pull(err: &PullError) -> Option<Error> {
 
 fn guide_continue_merge(err: &ContinueMergeError) -> Option<Error> {
     match err {
+        ContinueMergeError::NoMergeInProgress => Some(no_operation_in_progress(err.to_string())),
         ContinueMergeError::UnmergedPaths { paths } => Some(guided(
             ErrorKind::UnmergedPaths,
             err.to_string(),
@@ -147,8 +153,64 @@ fn guide_continue_merge(err: &ContinueMergeError) -> Option<Error> {
     }
 }
 
+fn guide_rebase_session(err: &RebaseSessionError) -> Option<Error> {
+    match err {
+        RebaseSessionError::NoRebaseInProgress => {
+            Some(no_operation_in_progress(err.to_string()))
+        }
+        RebaseSessionError::UnmergedPaths => Some(guided(
+            ErrorKind::UnmergedPaths,
+            err.to_string(),
+            Some(
+                "resolve conflicts and stage with `grit add`, then run `grit rebase --continue` (or `grit rebase --abort` to start over)".to_owned(),
+            ),
+            None,
+        )),
+        _ => None,
+    }
+}
+
 fn guide_lib(err: &LibError) -> Option<Error> {
     match err {
+        LibError::NotARepository(_) => Some(guided(
+            ErrorKind::NotARepository,
+            err.to_string(),
+            None,
+            None,
+        )),
+        LibError::PathspecNoMatch { .. } => Some(guided(
+            ErrorKind::PathspecNoMatch,
+            err.to_string(),
+            None,
+            None,
+        )),
+        LibError::EmptyCommitMessage => Some(guided(
+            ErrorKind::EmptyCommitMessage,
+            err.to_string(),
+            None,
+            None,
+        )),
+        LibError::IndexUnmerged => Some(guided(
+            ErrorKind::UnmergedPaths,
+            "cannot commit: unresolved merge conflicts remain — resolve each conflicted path (grit add or grit rm), then try again".to_owned(),
+            Some(
+                "resolve conflicts with `grit add` or `grit rm`, then commit, or finish with `grit merge --continue` / `grit merge --abort`".to_owned(),
+            ),
+            None,
+        )),
+        LibError::NoMergeInProgress | LibError::NoReplayInProgress => {
+            Some(no_operation_in_progress(err.to_string()))
+        }
+        LibError::StashNotFound { .. } => Some(stash_not_found(err)),
+        LibError::RevParse(
+            RevParseError::PathNotInRevision { .. }
+            | RevParseError::PathMissingFromWorktreeAndIndex { .. },
+        ) => Some(guided(
+            ErrorKind::PathNotFound,
+            err.to_string(),
+            None,
+            None,
+        )),
         LibError::Auth { url, reason } => Some(auth_error(err, url, reason)),
         LibError::RemoteUnreadable {
             reason:
@@ -166,11 +228,7 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             reason,
             paths,
             message,
-        } => Some(crate::json_error::would_overwrite_error(
-            *reason,
-            paths.clone(),
-            message.clone(),
-        )),
+        } => Some(would_overwrite_error(*reason, paths.clone(), message.clone())),
         LibError::DirtyWorktree { paths, .. } => Some(Error::new(StructuredCliError {
             human: format!("{err}{}", indented_paths(paths)),
             payload: StructuredJsonError {
@@ -236,6 +294,20 @@ fn guide_lib(err: &LibError) -> Option<Error> {
                 .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
         ),
         LibError::Branch(branch_err) => guide_branch(branch_err),
+        LibError::MoveDestinationExists { destination, .. } => Some(guided(
+            ErrorKind::BranchError,
+            err.to_string(),
+            Some(format!(
+                "remove or rename '{destination}' first, or run `grit mv --force` to replace it"
+            )),
+            Some(vec![destination.clone()]),
+        )),
+        LibError::MoveSourceNotTracked { src } => Some(guided(
+            ErrorKind::BranchError,
+            err.to_string(),
+            Some(format!("track '{src}' with `grit add` before moving it")),
+            Some(vec![src.clone()]),
+        )),
         _ => None,
     }
 }
@@ -409,6 +481,28 @@ fn git_dir_path_io_hint(path: &str) -> String {
          after running as root, fix ownership with `chown -R` for your user"
             .to_owned()
     }
+}
+
+fn no_operation_in_progress(human: String) -> Error {
+    guided(ErrorKind::NoOperationInProgress, human, None, None)
+}
+
+fn stash_not_found(err: &LibError) -> Error {
+    let LibError::StashNotFound { n } = err else {
+        unreachable!("stash_not_found called for {:?}", err);
+    };
+    let (human, hint) = if *n == 0 {
+        (
+            "no stash entries".to_owned(),
+            Some("save local changes with `grit stash push`".to_owned()),
+        )
+    } else {
+        (
+            format!("no stash entry at index {n}"),
+            Some("run `grit stash list` to see valid indexes".to_owned()),
+        )
+    };
+    guided(ErrorKind::StashNotFound, human, hint, None)
 }
 
 fn guided(
@@ -691,6 +785,22 @@ mod tests {
     }
 
     #[test]
+    fn would_overwrite_from_pull_repository_is_guided() {
+        let err = Error::new(PullError::Repository(LibError::WouldOverwrite {
+            reason: OverwriteReason::LocalChanges,
+            paths: strings(&["f"]),
+            message: "local changes would be overwritten by merge".into(),
+        }));
+        let p = payload(err);
+        assert_eq!(p.kind, ErrorKind::WouldOverwrite);
+        assert_eq!(
+            p.would_overwrite.as_ref().expect("wo").paths,
+            strings(&["f"])
+        );
+        assert!(p.hint.expect("hint").contains("grit stash"));
+    }
+
+    #[test]
     fn dirty_worktree_lists_paths_and_suggests_stash() {
         let err = Error::new(LibError::dirty_worktree(
             grit_lib::error::WorktreeOperation::Switch,
@@ -702,6 +812,31 @@ mod tests {
         assert_eq!(p.kind, ErrorKind::DirtyWorktree);
         assert_eq!(p.paths, Some(strings(&["a", "b"])));
         assert!(p.hint.expect("hint").contains("grit stash"));
+    }
+
+    #[test]
+    fn not_a_repository_has_kind() {
+        use grit_lib::error::NotARepositoryReason;
+        let p = payload(Error::new(LibError::NotARepository(
+            NotARepositoryReason::NoRepositoryAt {
+                path: "/tmp".into(),
+            },
+        )));
+        assert_eq!(p.kind, ErrorKind::NotARepository);
+    }
+
+    #[test]
+    fn pathspec_no_match_has_kind() {
+        let p = payload(Error::new(LibError::PathspecNoMatch {
+            spec: "nosuch".into(),
+        }));
+        assert_eq!(p.kind, ErrorKind::PathspecNoMatch);
+    }
+
+    #[test]
+    fn no_operation_in_progress_for_merge_abort() {
+        let p = payload(Error::new(LibError::NoMergeInProgress));
+        assert_eq!(p.kind, ErrorKind::NoOperationInProgress);
     }
 
     #[test]

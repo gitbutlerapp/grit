@@ -6,7 +6,7 @@ use anyhow::{bail, Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::notes::{resolve_configured_notes_ref, NotesRef};
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::{NoteAddOutcome, NoteAddPlan, NotesWriteOptions};
 use grit_lib::revwalk::rev_parse::resolve_revision;
@@ -110,7 +110,7 @@ impl HumanRender for NotesOutcome {
                 dry_run,
                 ..
             } => {
-                let short = object.get(..7).unwrap_or(object.as_str());
+                let short = short_hex(object);
                 if dry_run == &Some(true) {
                     if *replaced {
                         outln!(w, "Would replace note for {short}");
@@ -139,7 +139,7 @@ impl HumanRender for NotesOutcome {
                         "Removed note for "
                     };
                     for object in objects {
-                        let short = object.get(..7).unwrap_or(object.as_str());
+                        let short = short_hex(object);
                         outln!(w, "{prefix}{short}");
                     }
                 }
@@ -162,7 +162,7 @@ impl MarkdownRender for NotesOutcome {
                 object,
                 body,
             } => {
-                let short = object.get(..7).unwrap_or(object.as_str());
+                let short = short_hex(object);
                 outln!(w, "Note on `{short}` (`{notes_ref}`):");
                 outln!(w);
                 outln!(w, "```text");
@@ -179,7 +179,7 @@ impl MarkdownRender for NotesOutcome {
                 dry_run,
                 ..
             } => {
-                let short = object.get(..7).unwrap_or(object.as_str());
+                let short = short_hex(object);
                 let verb = match (dry_run == &Some(true), *replaced) {
                     (true, true) => "Would replace",
                     (true, false) => "Would add",
@@ -205,7 +205,7 @@ impl MarkdownRender for NotesOutcome {
                     let verb = if dry_run { "Would remove" } else { "Removed" };
                     outln!(w, "{verb} notes on `{notes_ref}`:");
                     for object in objects {
-                        let short = object.get(..7).unwrap_or(object.as_str());
+                        let short = short_hex(object);
                         outln!(w, "- `{short}`");
                     }
                 }

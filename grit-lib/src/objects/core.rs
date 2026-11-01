@@ -126,6 +126,28 @@ impl TryFrom<u8> for HashAlgo {
 /// Maximum raw digest length across supported hash algorithms (SHA-256).
 const MAX_OID_LEN: usize = 32;
 
+/// Number of hex digits in the fixed-width short form of an object id.
+pub const SHORT_HEX_LEN: usize = 7;
+
+/// The first [`SHORT_HEX_LEN`] characters of a hex object id, or all of `hex`
+/// when it is shorter.
+///
+/// Use this for display labels when only the hex string is at hand; with an
+/// [`ObjectId`], call [`ObjectId::to_short_hex`]. The result is not guaranteed to
+/// be unique in the repository.
+///
+/// # Parameters
+///
+/// - `hex`: a full or partial hex object id.
+///
+/// # Returns
+///
+/// A prefix borrowed from `hex`; never panics, even on non-ASCII input.
+#[must_use]
+pub fn short_hex(hex: &str) -> &str {
+    hex.get(..SHORT_HEX_LEN).unwrap_or(hex)
+}
+
 /// Canonical SHA-1 empty tree digest (`4b825dc642cb6eb9a060e54bf8d69288fbee4904`).
 const WELL_KNOWN_EMPTY_TREE_CANON: [u8; 20] = [
     0x4b, 0x82, 0x5d, 0xc6, 0x42, 0xcb, 0x6e, 0xb9, 0xa0, 0x60, 0xe5, 0x4b, 0xf8, 0xd6, 0x92, 0x88,
@@ -323,6 +345,16 @@ impl ObjectId {
     #[must_use]
     pub fn to_hex(&self) -> String {
         self.hex_digits().as_str().to_owned()
+    }
+
+    /// The first [`SHORT_HEX_LEN`] lowercase hex digits, for human-facing labels.
+    ///
+    /// This is a fixed-width prefix and is not guaranteed to be unique in the
+    /// repository; use [`crate::rev_parse::abbreviate_object_id`] when the
+    /// abbreviation must resolve back to this id.
+    #[must_use]
+    pub fn to_short_hex(&self) -> String {
+        short_hex(self.hex_digits().as_str()).to_owned()
     }
 
     /// The lowercase hex digits of this id, without allocating.
@@ -1365,6 +1397,37 @@ pub fn read_commit_subject_line(data: &[u8]) -> Result<String> {
     Ok("(no subject)".to_owned())
 }
 
+/// Length of the leading part of commit payload `data` that holds every header and the
+/// message up to and including its first non-blank line.
+///
+/// [`read_commit_subject_line`] and [`parse_commit`] give the same headers and subject for that
+/// prefix as for the whole of `data`. `data` may itself be a truncated prefix of the payload:
+/// `None` means it does not yet provably hold such a prefix. A commit that declares a
+/// non-UTF-8 `encoding` never yields one, since its line structure is only known after
+/// decoding; neither does a commit whose message has no line with a printable ASCII
+/// character, since only such a line is certain to be non-blank before decoding.
+pub(crate) fn commit_through_subject_len(data: &[u8]) -> Option<usize> {
+    let header_end = memchr::memmem::find(data, b"\n\n")? + 2;
+    let declares_other_encoding = data[..header_end]
+        .split(|&b| b == b'\n')
+        .filter_map(|line| line.strip_prefix(b"encoding "))
+        .any(|label| {
+            let label = label.trim_ascii();
+            !label.eq_ignore_ascii_case(b"utf-8") && !label.eq_ignore_ascii_case(b"utf8")
+        });
+    if declares_other_encoding {
+        return None;
+    }
+    let mut pos = header_end;
+    loop {
+        let line_end = pos + memchr::memchr(b'\n', data.get(pos..)?)?;
+        if data[pos..line_end].iter().any(u8::is_ascii_graphic) {
+            return Some(line_end + 1);
+        }
+        pos = line_end + 1;
+    }
+}
+
 pub(crate) fn parse_oid_field(value: &[u8]) -> Result<ObjectId> {
     let s = std::str::from_utf8(value)
         .map_err(|_| Error::CorruptObject("commit header object id is not UTF-8".to_owned()))?;
@@ -1686,6 +1749,35 @@ pub fn serialize_commit(c: &CommitData) -> Vec<u8> {
         out.extend_from_slice(c.message.as_bytes());
     }
     out
+}
+
+#[cfg(test)]
+mod short_hex_tests {
+    use super::*;
+
+    #[test]
+    fn short_hex_takes_seven_digits_or_the_whole_shorter_input() {
+        assert_eq!(
+            short_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904"),
+            "4b825dc"
+        );
+        assert_eq!(short_hex("4b825dc"), "4b825dc");
+        assert_eq!(short_hex("4b8"), "4b8");
+        assert_eq!(short_hex(""), "");
+        assert_eq!(short_hex("ééééé"), "ééééé");
+    }
+
+    #[test]
+    fn object_id_short_hex_matches_the_hex_prefix_for_both_algorithms() {
+        let digest: Vec<u8> = (0x9a..=0xff).take(32).collect();
+        for len in [HashAlgo::Sha1.len(), HashAlgo::Sha256.len()] {
+            let id = ObjectId::from_bytes(&digest[..len]).unwrap();
+            let short = id.to_short_hex();
+            assert_eq!(short.len(), SHORT_HEX_LEN);
+            assert_eq!(short, id.to_hex()[..SHORT_HEX_LEN]);
+            assert_eq!(short, short_hex(&id.to_hex()));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2342,5 +2434,72 @@ mod commit_parse_tests {
         assert_eq!(found.oid, oid);
         assert_eq!(found.mode, 0o100644);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HEAD: &str = "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\nauthor A <a@example.com> 1 +0000\ncommitter C <c@example.com> 2 +0000\n";
+
+    fn len_of(message: &[u8]) -> Option<usize> {
+        let mut data = HEAD.as_bytes().to_vec();
+        data.extend_from_slice(message);
+        commit_through_subject_len(&data).map(|len| len - HEAD.len())
+    }
+
+    #[test]
+    fn commit_through_subject_len_ends_after_the_first_non_blank_line() {
+        assert_eq!(len_of(b"\nsubject\n\nbody\n"), Some(9));
+        assert_eq!(len_of(b"\n\n \t\r\n  subject\r\nmore\n"), Some(17));
+        assert_eq!(len_of(b"\nx\n"), Some(3));
+        let signed = b"gpgsig -----BEGIN-----\n \n abc\n -----END-----\n\nsigned\nbody\n";
+        assert_eq!(len_of(signed), Some(signed.len() - 5));
+    }
+
+    #[test]
+    fn commit_through_subject_len_skips_lines_that_may_decode_blank() {
+        let message = "\n\u{a0}\u{3000}\n\u{65e5}\u{672c}\nascii\nbody\n";
+        assert_eq!(
+            len_of(message.as_bytes()),
+            Some(message.len() - "body\n".len())
+        );
+    }
+
+    #[test]
+    fn commit_through_subject_len_needs_a_complete_prefix() {
+        assert_eq!(len_of(b""), None);
+        assert_eq!(len_of(b"\n"), None);
+        assert_eq!(len_of(b"\n\n   \n"), None);
+        assert_eq!(len_of(b"\nsubject without newline"), None);
+        assert_eq!(commit_through_subject_len(b"tree 4b82"), None);
+        assert_eq!(commit_through_subject_len(HEAD.as_bytes()), None);
+    }
+
+    #[test]
+    fn commit_through_subject_len_gives_up_on_other_encodings() {
+        assert_eq!(len_of(b"encoding ISO-8859-1\n\nS\xe9ance\n\nbody\n"), None);
+        assert_eq!(len_of(b"encoding ISO-2022-JP\n\nsubject\n"), None);
+        assert_eq!(len_of(b"encoding UTF-8\n\nsubject\nbody\n"), Some(24));
+        assert_eq!(len_of(b"encoding utf8 \n\nsubject\nbody\n"), Some(24));
+    }
+
+    #[test]
+    fn commit_through_subject_prefix_parses_like_the_whole_commit() {
+        let whole = format!("{HEAD}change-id zzzz\n\n\n  Subject here  \n\nlong body\n");
+        let len = commit_through_subject_len(whole.as_bytes()).unwrap();
+        let prefix = &whole.as_bytes()[..len];
+        assert_eq!(
+            read_commit_subject_line(prefix).unwrap(),
+            read_commit_subject_line(whole.as_bytes()).unwrap()
+        );
+        let (short, full) = (
+            parse_commit(prefix).unwrap(),
+            parse_commit(whole.as_bytes()).unwrap(),
+        );
+        assert_eq!(short.extra_headers, full.extra_headers);
+        assert_eq!(short.author, full.author);
+        assert_eq!(short.message, "\n  Subject here  \n");
     }
 }

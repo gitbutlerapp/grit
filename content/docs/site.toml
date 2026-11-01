@@ -104,6 +104,19 @@ label = "Harness (make bench-lib / bench-scenarios)"
 # Baseline JSON paths are repo-root-relative; add entries when roadmap item 2 commits them on main.
 [benchmarks]
 baseline = [
+  "grit-utils/baselines/daily-log-oneline-100-6310-before.json",
+  "grit-utils/baselines/daily-log-oneline-100-6310-after.json",
+  "grit-utils/baselines/daily-log-oneline-100-6310-headlines.json",
+  "grit-utils/baselines/daily-log-json-100-6206-before.json",
+  "grit-utils/baselines/daily-log-json-100-6206-after.json",
+  "grit-utils/baselines/daily-log-json-100-6206-related-before.json",
+  "grit-utils/baselines/daily-log-json-100-6206-related-after.json",
+  "grit-utils/baselines/daily-perf-6204-before.json",
+  "grit-utils/baselines/daily-perf-6204-after.json",
+  "grit-utils/baselines/daily-restore-hunks-6274-before.json",
+  "grit-utils/baselines/daily-restore-hunks-6274-after.json",
+  "grit-utils/baselines/daily-restore-hunks-6274-related-before.json",
+  "grit-utils/baselines/daily-restore-hunks-6274-related-after.json",
   "grit-utils/baselines/daily-pick-index-stream-before.json",
   "grit-utils/baselines/daily-pick-index-stream-after.json",
   "grit-utils/baselines/daily-diff-worktree-memory-before.json",
@@ -117,6 +130,8 @@ baseline = [
   "grit-utils/baselines/daily-status-hot-text-after.json",
   "grit-utils/baselines/daily-hot-text-related-before.json",
   "grit-utils/baselines/daily-hot-text-related-after.json",
+  "grit-utils/baselines/daily-show-diff-pool-5993-before.json",
+  "grit-utils/baselines/daily-show-diff-pool-5993-after.json",
   "grit-utils/baselines/daily-config-parse-5571-before.json",
   "grit-utils/baselines/daily-config-parse-5571-after.json",
   "grit-utils/baselines/daily-config-set-before.json",

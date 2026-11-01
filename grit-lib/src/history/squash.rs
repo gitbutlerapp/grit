@@ -1,6 +1,6 @@
 //! Squash a connected revision range into the oldest commit and replay descendants.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::merge_base::is_ancestor;
 use crate::objects::ObjectId;
@@ -109,7 +109,33 @@ pub fn squash(
             edits.insert(oid, CommitEdit::Drop);
         }
     }
-    plan_rewrite(repo, &edits, &opts.rewrite)
+    let mut plan = plan_rewrite(repo, &edits, &opts.rewrite)?;
+    attach_squash_folded_pairs(&mut plan, &resolved.commits, resolved.oldest);
+    Ok(plan)
+}
+
+/// Squash drops non-oldest commits but their notes should follow the survivor, like the
+/// [`plan_fold_range_at_head`](super::plan::plan_fold_range_at_head) fast path.
+fn attach_squash_folded_pairs(
+    plan: &mut RewritePlan,
+    range_commits: &[ObjectId],
+    oldest: ObjectId,
+) {
+    let Some(survivor) = plan
+        .commits
+        .iter()
+        .find(|row| row.old == oldest)
+        .and_then(|row| row.new)
+        .filter(|new| *new != oldest)
+    else {
+        return;
+    };
+    let in_range: BTreeSet<_> = range_commits.iter().copied().collect();
+    for row in &mut plan.commits {
+        if row.old != oldest && in_range.contains(&row.old) && row.new.is_none() {
+            row.new = Some(survivor);
+        }
+    }
 }
 
 fn resolve_squash_range(

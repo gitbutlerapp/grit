@@ -476,6 +476,31 @@ impl FilesRefStore {
             .collect())
     }
 
+    /// Re-read `start` and every symbolic target in its peel chain from disk.
+    fn reload_symref_peel_chain(
+        &self,
+        refs: &mut BTreeMap<String, RawRef>,
+        start: &str,
+    ) -> Result<()> {
+        let mut name = start.to_owned();
+        for _ in 0..crate::refs::SYMREF_MAXDEPTH {
+            let Some(raw) = self.read_raw(&name)? else {
+                refs.remove(&name);
+                break;
+            };
+            let advance = match &raw {
+                RawRef::Symbolic(next) => Some(next.clone()),
+                RawRef::Direct(_) => None,
+            };
+            refs.insert(name.clone(), raw);
+            match advance {
+                Some(next) => name = next,
+                None => break,
+            }
+        }
+        Ok(())
+    }
+
     /// Load `start` and any further symbolic targets into `refs` (up to [`crate::refs::SYMREF_MAXDEPTH`]).
     fn insert_symref_peel_chain(
         &self,
@@ -549,6 +574,87 @@ impl FilesRefStore {
             }
         }
         Ok(RefBatchState { refs, reflogs })
+    }
+
+    /// Re-read ref values the batch touches while its prepare locks are held.
+    ///
+    /// Call after [`Self::take_prepare_locks`] so compare-and-swap checks see concurrent
+    /// writers, not the snapshot from [`Self::load_batch_state_for_prepare`].
+    fn refresh_batch_ref_snapshot_under_lock(
+        &self,
+        state: &mut RefBatchState,
+        updates: &[RefUpdate],
+        case_only_renames: &[super::RefCaseOnlyRename],
+    ) -> Result<()> {
+        for update in updates {
+            match self.read_raw(&update.name)? {
+                Some(raw) => {
+                    state.refs.insert(update.name.clone(), raw);
+                }
+                None => {
+                    state.refs.remove(&update.name);
+                }
+            }
+        }
+        for rename in case_only_renames {
+            if state.refs.contains_key(&rename.from) {
+                continue;
+            }
+            if let Some(raw) = self.read_raw(&rename.from)? {
+                state.refs.insert(rename.from.clone(), raw);
+            }
+        }
+        self.insert_head_for_batch_state(&mut state.refs)?;
+        for update in updates {
+            if matches!(state.refs.get(&update.name), Some(RawRef::Symbolic(_))) {
+                self.reload_symref_peel_chain(&mut state.refs, &update.name)?;
+            }
+        }
+        if matches!(state.refs.get("HEAD"), Some(RawRef::Symbolic(_))) {
+            self.reload_symref_peel_chain(&mut state.refs, "HEAD")?;
+        }
+        Ok(())
+    }
+
+    /// Reflog lines one update adds on top of `running`, keyed by ref name.
+    fn reflog_appends_for_update(
+        running: &RefBatchState,
+        update: &RefUpdate,
+    ) -> StoreResult<Vec<(String, Vec<ReflogEntry>)>> {
+        let mut trial = running.clone();
+        apply_update(&mut trial, update)?;
+        let mut out = Vec::new();
+        for (name, entries) in &trial.reflogs {
+            let old_len = running.reflogs.get(name).map_or(0, Vec::len);
+            if entries.len() > old_len {
+                out.push((name.clone(), entries[old_len..].to_vec()));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Append the reflog lines `update` would add on `running`, under the held lock for `name`.
+    fn persist_reflog_appends_for_update(
+        &self,
+        running: &RefBatchState,
+        update: &RefUpdate,
+        persisted_reflogs: &mut HashSet<String>,
+    ) -> Result<()> {
+        if update.reflog.is_none() {
+            return Ok(());
+        }
+        for (name, entries) in Self::reflog_appends_for_update(running, update)? {
+            if entries.is_empty() {
+                continue;
+            }
+            if !self.append_reflog_entries(&name, &entries)? {
+                let mut full = running.reflogs.get(&name).cloned().unwrap_or_default();
+                full.extend(entries);
+                self.persist_reflog_atomic(&name, &full)?;
+            }
+            persisted_reflogs.insert(name);
+        }
+        Ok(())
     }
 
     /// Make room for a new reflog of `name`: an empty directory tree at its path is removed,
@@ -1607,6 +1713,7 @@ impl FilesRefStore {
         touched: Option<&str>,
         ctx: CommitContext<'_>,
         persisted_refs: &mut HashSet<String>,
+        persisted_reflogs: &mut HashSet<String>,
         writes_ref: bool,
         carried: &mut Option<(String, PathBuf)>,
     ) -> Result<()> {
@@ -1633,7 +1740,19 @@ impl FilesRefStore {
             }
         };
         let verify_name = (!matches!(update.expected, Expected::Any)).then_some(&update.name);
-        for name in targets.iter().chain(verify_name) {
+        let reflog_lock_names = if update.reflog.is_some() {
+            Self::reflog_appends_for_update(running, update)?
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        for name in targets
+            .iter()
+            .chain(verify_name)
+            .chain(reflog_lock_names.iter())
+        {
             if held.contains_key(name) {
                 continue;
             }
@@ -1658,6 +1777,8 @@ impl FilesRefStore {
         }
         #[cfg(test)]
         tests::run_after_recheck_hook();
+
+        self.persist_reflog_appends_for_update(running, update, persisted_reflogs)?;
 
         for name in &targets {
             let Some(lock_path) = held.remove(name) else {
@@ -1705,8 +1826,28 @@ impl FilesRefStore {
             emptied_dirs,
         };
 
+        let mut persisted_refs = HashSet::new();
+        let mut persisted_reflogs = HashSet::new();
+        let persisted = self.persist_batch_refs(
+            batch,
+            &batch_extras,
+            ctx,
+            &mut persisted_refs,
+            &mut persisted_reflogs,
+            carried,
+        );
+        if persisted.is_err() {
+            // Keep the error that stopped the batch; a failed restore cannot be reported
+            // alongside it.
+            let _ = self.restore_unprocessed_packed_records(&pruned, &persisted_refs);
+        }
+        persisted?;
+
         let names: BTreeSet<&String> = before.reflogs.keys().chain(after.reflogs.keys()).collect();
         for name in names {
+            if persisted_reflogs.contains(name.as_str()) {
+                continue;
+            }
             let (old, new) = (before.reflogs.get(name), after.reflogs.get(name));
             if old == new {
                 continue;
@@ -1736,15 +1877,6 @@ impl FilesRefStore {
             write_result?;
         }
 
-        let mut persisted_refs = HashSet::new();
-        let persisted =
-            self.persist_batch_refs(batch, &batch_extras, ctx, &mut persisted_refs, carried);
-        if persisted.is_err() {
-            // Keep the error that stopped the batch; a failed restore cannot be reported
-            // alongside it.
-            let _ = self.restore_unprocessed_packed_records(&pruned, &persisted_refs);
-        }
-        persisted?;
         self.invalidate_packed_cache_after_write();
         Ok(())
     }
@@ -1757,6 +1889,7 @@ impl FilesRefStore {
         batch_extras: &BTreeSet<&str>,
         ctx: CommitContext<'_>,
         persisted_refs: &mut HashSet<String>,
+        persisted_reflogs: &mut HashSet<String>,
         carried: &mut Option<(String, PathBuf)>,
     ) -> Result<()> {
         let before = &batch.before_commit;
@@ -1770,6 +1903,18 @@ impl FilesRefStore {
         let mut running = before.clone();
         for (idx, update) in updates.iter().enumerate() {
             if update.flags.log_only {
+                self.persist_update_locked(
+                    update,
+                    batch_extras,
+                    before,
+                    &running,
+                    None,
+                    ctx,
+                    persisted_refs,
+                    persisted_reflogs,
+                    false,
+                    carried,
+                )?;
                 apply_update(&mut running, update).map_err(Error::from)?;
                 continue;
             }
@@ -1797,6 +1942,7 @@ impl FilesRefStore {
                 touched.as_deref(),
                 ctx,
                 persisted_refs,
+                persisted_reflogs,
                 writes_ref,
                 carried,
             )?;
@@ -1972,8 +2118,21 @@ impl RefStore for FilesRefStore {
             .iter()
             .find(|u| !u.flags.log_only)
             .map(|u| u.name.as_str());
+        #[cfg(test)]
+        tests::run_after_prepare_load_hook();
+
         let mut ref_locks: HashMap<String, PathBuf> = HashMap::new();
         self.take_prepare_locks(&lock_names, carried, ref_lock_wait, &mut ref_locks)?;
+
+        if let Err(err) = self
+            .refresh_batch_ref_snapshot_under_lock(&mut preliminary, &updates, &case_only_renames)
+            .map_err(|e| RefStoreError::Corrupt(e.to_string()))
+        {
+            for acquired in ref_locks.values() {
+                let _ = fs::remove_file(acquired);
+            }
+            return Err(err);
+        }
 
         if let Err(err) =
             simulate_batch_apply(&preliminary, &updates, &reflog_renames, &case_only_renames)
@@ -2042,8 +2201,8 @@ impl RefStore for FilesRefStore {
                 changed.insert(&update.name);
             }
         }
-        // Commit writes reflogs before refs, so a directory where a new log goes must stop
-        // the batch here, not after some of it is written.
+        // Each update appends its reflog only after its commit-time recheck; still verify
+        // every new reflog path here so a blocking directory fails before any write.
         for name in after_commit.reflogs.keys() {
             if before_commit.reflogs.contains_key(name) {
                 continue;
@@ -2591,6 +2750,7 @@ mod tests {
     // hygiene: test-only commit interleaving hook
     thread_local! {
         static AFTER_RECHECK: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
+        static AFTER_PREPARE_LOAD: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
     }
 
     /// Runs (once) the hook installed by [`after_next_recheck`] on this thread.
@@ -2600,10 +2760,23 @@ mod tests {
         }
     }
 
+    /// Runs (once) the hook installed by [`after_prepare_load_before_locks`] on this thread.
+    pub(super) fn run_after_prepare_load_hook() {
+        if let Some(hook) = AFTER_PREPARE_LOAD.with(|slot| slot.borrow_mut().take()) {
+            hook();
+        }
+    }
+
     /// Run `hook` inside the next commit on this thread, right after an update passed its
     /// on-disk compare-and-swap recheck and before the ref is written.
     fn after_next_recheck(hook: impl FnOnce() + 'static) {
         AFTER_RECHECK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+    }
+
+    /// Run `hook` during the next `prepare`, after the unlocked batch snapshot is loaded and
+    /// before prepare locks are taken.
+    fn after_prepare_load_before_locks(hook: impl FnOnce() + 'static) {
+        AFTER_PREPARE_LOAD.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
     }
 
     fn oid(byte: u8) -> ObjectId {
@@ -2640,6 +2813,17 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         fs::create_dir_all(dir.path().join("refs/heads")).expect("refs");
         fs::write(dir.path().join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+        dir
+    }
+
+    fn bare_git_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let status = std::process::Command::new("git")
+            .args(["init", "-q", "--bare", "-b", "main"])
+            .arg(dir.path())
+            .status()
+            .expect("git init --bare");
+        assert!(status.success());
         dir
     }
 
@@ -3814,6 +3998,312 @@ mod tests {
             "not a ref\n"
         );
         assert!(!dir.path().join("refs/heads/first.lock").exists());
+    }
+
+    fn sample_reflog() -> super::super::ReflogUpdate {
+        super::super::ReflogUpdate {
+            identity: "T <t@example.com>".into(),
+            message: "cas".into(),
+            time: time::OffsetDateTime::UNIX_EPOCH,
+            old_oid: None,
+            new_oid: None,
+        }
+    }
+
+    fn reflog_chain_intact(store: &FilesRefStore, name: &str) -> bool {
+        let mut entries = Vec::new();
+        store
+            .for_each_reflog_entry(name, false, &mut |entry| {
+                entries.push(entry.clone());
+                ControlFlow::Continue(())
+            })
+            .expect("reflog");
+        entries
+            .windows(2)
+            .all(|pair| pair[0].new_oid == pair[1].old_oid)
+    }
+
+    fn reflog_new_oids(store: &FilesRefStore, name: &str) -> Vec<ObjectId> {
+        let mut oids = Vec::new();
+        store
+            .for_each_reflog_entry(name, false, &mut |entry| {
+                oids.push(entry.new_oid);
+                ControlFlow::Continue(())
+            })
+            .expect("reflog");
+        oids
+    }
+
+    fn git_empty_tree(git_dir: &Path) -> String {
+        let git_dir = git_dir.to_string_lossy();
+        let out = std::process::Command::new("git")
+            .args(["--git-dir", git_dir.as_ref(), "mktree"])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("mktree");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    fn git_commit(git_dir: &Path, parent: Option<&str>, message: &str) -> ObjectId {
+        let tree = git_empty_tree(git_dir);
+        let git_dir = git_dir.to_string_lossy();
+        let mut args = vec![
+            "--git-dir",
+            git_dir.as_ref(),
+            "commit-tree",
+            "-m",
+            message,
+            &tree,
+        ];
+        if let Some(parent) = parent {
+            args.push("-p");
+            args.push(parent);
+        }
+        let out = std::process::Command::new("git")
+            .args(&args)
+            .output()
+            .expect("commit-tree");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let hex = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        ObjectId::from_hex(&hex).expect("commit oid")
+    }
+
+    fn git_phantom_reflog_commits(git_dir: &Path, refname: &str) -> usize {
+        let git_dir = git_dir.to_string_lossy();
+        let log = std::process::Command::new("git")
+            .args(["--git-dir", &git_dir, "log", "-g", "--format=%H", refname])
+            .output()
+            .expect("git log -g");
+        assert!(
+            log.status.success(),
+            "{}",
+            String::from_utf8_lossy(&log.stderr)
+        );
+        let rev = std::process::Command::new("git")
+            .args(["--git-dir", &git_dir, "rev-list", refname])
+            .output()
+            .expect("git rev-list");
+        assert!(
+            rev.status.success(),
+            "{}",
+            String::from_utf8_lossy(&rev.stderr)
+        );
+        let log_h: BTreeSet<_> = String::from_utf8_lossy(&log.stdout)
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect();
+        let rev_h: BTreeSet<_> = String::from_utf8_lossy(&rev.stdout)
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect();
+        log_h.difference(&rev_h).count()
+    }
+
+    fn assert_git_reflog_matches_history(git_dir: &Path, refname: &str) {
+        assert_eq!(git_phantom_reflog_commits(git_dir, refname), 0);
+        let status = std::process::Command::new("git")
+            .args(["--git-dir", &git_dir.to_string_lossy(), "fsck", "--strict"])
+            .status()
+            .expect("git fsck");
+        assert!(status.success(), "git fsck --strict");
+    }
+
+    #[test]
+    fn stale_prepare_snapshot_rejected_without_phantom_reflog() {
+        let dir = bare_git_repo();
+        let path = dir.path();
+        let name = "refs/heads/main";
+        let c1 = git_commit(path, None, "root");
+        let c2 = git_commit(path, Some(&c1.to_hex()), "two");
+        let c3 = git_commit(path, Some(&c1.to_hex()), "three");
+        set(&store(path), name, c1, Expected::Missing).expect("seed");
+
+        let racing = store(path);
+        after_prepare_load_before_locks(move || {
+            set(&racing, name, c3, Expected::Oid(c1)).expect("concurrent winner");
+        });
+
+        let txn = RefTransaction::new()
+            .update(RefUpdate {
+                name: name.to_owned(),
+                new_value: Some(RawRef::Direct(c2)),
+                expected: Expected::Oid(c1),
+                reflog: Some(sample_reflog()),
+                flags: RefUpdateFlags::default(),
+            })
+            .expect("txn");
+        let err = match store(path).prepare(txn) {
+            Err(err) => err,
+            Ok(_) => panic!("stale expected should fail in prepare"),
+        };
+        assert!(
+            matches!(err, RefStoreError::ExpectedMismatch { ref name, .. } if name == "refs/heads/main"),
+            "{err:?}"
+        );
+        assert_eq!(
+            store(path).read_raw(name).expect("read"),
+            Some(RawRef::Direct(c3))
+        );
+        let reader = store(path);
+        assert!(reflog_chain_intact(&reader, name));
+        assert!(
+            !reflog_new_oids(&reader, name).contains(&c2),
+            "losers must not append a reflog for the ref value they never stored"
+        );
+        assert_git_reflog_matches_history(path, name);
+    }
+
+    #[test]
+    fn stale_prepare_reloads_symref_peel_before_cas_check() {
+        let dir = bare_git_repo();
+        let path = dir.path();
+        let main = "refs/heads/main";
+        let c1 = git_commit(path, None, "root");
+        let c2 = git_commit(path, Some(&c1.to_hex()), "two");
+        let c3 = git_commit(path, Some(&c1.to_hex()), "three");
+        set(&store(path), main, c1, Expected::Missing).expect("seed main");
+        fs::write(path.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+
+        let racing = store(path);
+        after_prepare_load_before_locks(move || {
+            set(&racing, main, c3, Expected::Oid(c1)).expect("concurrent winner");
+        });
+
+        let txn = RefTransaction::new()
+            .update(RefUpdate {
+                name: "HEAD".to_owned(),
+                new_value: Some(RawRef::Direct(c2)),
+                expected: Expected::Oid(c1),
+                reflog: Some(sample_reflog()),
+                flags: RefUpdateFlags::default(),
+            })
+            .expect("txn");
+        let err = match store(path).prepare(txn) {
+            Err(err) => err,
+            Ok(_) => panic!("stale peeled expected should fail in prepare"),
+        };
+        assert!(
+            matches!(err, RefStoreError::ExpectedMismatch { ref name, .. } if name == "HEAD"),
+            "{err:?}"
+        );
+        assert_eq!(
+            store(path).read_raw(main).expect("read main"),
+            Some(RawRef::Direct(c3))
+        );
+        assert_git_reflog_matches_history(path, main);
+    }
+
+    #[test]
+    fn log_only_symref_reflog_mirror_holds_peeled_target_lock() {
+        let dir = git_dir();
+        let path = dir.path();
+        let writer = store(path);
+        set(&writer, "refs/heads/main", oid(1), Expected::Missing).expect("seed main");
+        fs::write(path.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+
+        let other = store(path);
+        let racer = std::rc::Rc::new(RefCell::new(None));
+        let racer_slot = racer.clone();
+        after_next_recheck(move || {
+            *racer_slot.borrow_mut() = Some(set(&other, "refs/heads/main", oid(9), Expected::Any));
+        });
+
+        let txn = RefTransaction::new()
+            .update(RefUpdate {
+                name: "HEAD".to_owned(),
+                new_value: Some(RawRef::Direct(oid(2))),
+                expected: Expected::Any,
+                reflog: Some(sample_reflog()),
+                flags: RefUpdateFlags {
+                    log_only: true,
+                    ..RefUpdateFlags::default()
+                },
+            })
+            .expect("txn");
+        writer
+            .prepare(txn)
+            .expect("prepare")
+            .commit()
+            .expect("commit");
+
+        let racer = racer.borrow_mut().take().expect("hook ran");
+        assert!(
+            matches!(racer, Err(RefStoreError::LockHeld { .. })),
+            "mirrored branch reflog must be written under the peeled target lock: {racer:?}"
+        );
+        assert_eq!(
+            writer.read_raw("refs/heads/main").expect("read"),
+            Some(RawRef::Direct(oid(1)))
+        );
+        assert_eq!(reflog_new_oids(&writer, "HEAD"), vec![oid(2)]);
+        assert_eq!(reflog_new_oids(&writer, "refs/heads/main"), vec![oid(2)]);
+    }
+
+    #[test]
+    fn commit_time_mismatch_on_later_ref_skips_its_reflog() {
+        let dir = bare_git_repo();
+        let path = dir.path();
+        set(&store(path), "refs/heads/main", oid(1), Expected::Missing).expect("seed main");
+        set(&store(path), "refs/heads/topic", oid(10), Expected::Missing).expect("seed topic");
+
+        let other = store(path);
+        after_next_recheck(move || {
+            set(&other, "refs/heads/topic", oid(11), Expected::Oid(oid(10)))
+                .expect("move topic under batch");
+        });
+
+        let txn = RefTransaction::from_updates(vec![
+            RefUpdate {
+                name: "refs/heads/main".to_owned(),
+                new_value: Some(RawRef::Direct(oid(2))),
+                expected: Expected::Oid(oid(1)),
+                reflog: Some(sample_reflog()),
+                flags: RefUpdateFlags::default(),
+            },
+            RefUpdate {
+                name: "refs/heads/topic".to_owned(),
+                new_value: Some(RawRef::Direct(oid(12))),
+                expected: Expected::Oid(oid(10)),
+                reflog: Some(sample_reflog()),
+                flags: RefUpdateFlags::default(),
+            },
+        ])
+        .expect("txn");
+        let err = store(path)
+            .prepare(txn)
+            .expect("prepare")
+            .commit()
+            .expect_err("topic moved");
+        assert!(
+            matches!(err, RefStoreError::ExpectedMismatch { ref name, .. } if name == "refs/heads/topic"),
+            "{err:?}"
+        );
+        assert_eq!(
+            store(path).read_raw("refs/heads/main").expect("read"),
+            Some(RawRef::Direct(oid(2)))
+        );
+        assert_eq!(
+            store(path).read_raw("refs/heads/topic").expect("read"),
+            Some(RawRef::Direct(oid(11)))
+        );
+        let reader = store(path);
+        assert!(reflog_chain_intact(&reader, "refs/heads/main"));
+        assert!(reflog_chain_intact(&reader, "refs/heads/topic"));
+        assert!(
+            !reflog_new_oids(&reader, "refs/heads/topic").contains(&oid(12)),
+            "failed update must not leave a reflog line for its new oid"
+        );
     }
 
     #[cfg(windows)]

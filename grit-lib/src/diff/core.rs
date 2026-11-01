@@ -46,41 +46,29 @@ use crate::userdiff::FuncnameMatcher;
 
 use super::rename_lines::RenameLineTable;
 use super::unified_emit::{
-    emit_unified_body_from_edits, line_ending_only_edits, EditSpan, LineEnding, LineSide,
-    UnifiedEmitOptions,
+    emit_unified_body_from_edits, line_ending_only_edits, EditSpan, LineSide, UnifiedEmitOptions,
 };
 
-/// Comparison keys for every line of `side`, which must be [`LineSide::from_text`] of `text`.
+/// Comparison keys for every line of `side`.
 ///
 /// Without whitespace normalization a key is the raw line including its `\n` (the same bytes as
-/// `line_diff_token`), borrowed from `text`. Under `-w`/`-b`/`--ignore-space-at-eol` the keys
-/// are normalized line bodies, kept in `normalized` so the returned slices can borrow them.
+/// `line_diff_token`), borrowed from the side's records. Under `-w`/`-b`/`--ignore-space-at-eol`
+/// the keys are normalized line bodies, kept in `normalized` so the returned slices can borrow
+/// them.
 fn line_compare_keys<'a>(
-    text: &'a str,
-    side: &LineSide<'a>,
+    side: &'a LineSide<'a>,
     ws: super::WhitespaceMode,
     normalized: &'a mut Vec<Cow<'a, str>>,
-) -> Vec<&'a str> {
-    if ws.normalizes_line_compare() {
-        // Git -w/-b compare normalized bodies only; EOF newline is whitespace.
-        normalized.extend(
-            side.lines
-                .iter()
-                .map(|line| ws.normalize_line_for_compare(line.body)),
-        );
-        return normalized.iter().map(Cow::as_ref).collect();
+) -> Cow<'a, [&'a str]> {
+    if !ws.normalizes_line_compare() {
+        return Cow::Borrowed(side.records());
     }
-    // Each body is a subslice of `text` that stops just before its `\n`, so the key is the body
-    // widened by that one byte.
-    let base = text.as_ptr() as usize;
-    side.lines
-        .iter()
-        .map(|line| {
-            let start = line.body.as_ptr() as usize - base;
-            let end = start + line.body.len() + usize::from(line.ending != LineEnding::Missing);
-            &text[start..end]
-        })
-        .collect()
+    // Git -w/-b compare normalized bodies only; EOF newline is whitespace.
+    normalized.extend(
+        side.lines()
+            .map(|line| ws.normalize_line_for_compare(line.body)),
+    );
+    Cow::Owned(normalized.iter().map(Cow::as_ref).collect())
 }
 
 #[path = "../structured_diff.rs"]
@@ -107,13 +95,13 @@ pub(crate) fn histogram_compacted_line_ops(
 ) -> Vec<similar::DiffOp> {
     let before = LineSide::from_text(old_content);
     let after = LineSide::from_text(new_content);
-    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
-    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+    let old_lines: Vec<&str> = before.lines().map(|l| l.body).collect();
+    let new_lines: Vec<&str> = after.lines().map(|l| l.body).collect();
     let old_len = old_lines.len();
     let new_len = new_lines.len();
     let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-    let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
-    let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+    let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
+    let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
 
     let (changed1, changed2) = git_xdiff::histogram_changed_flags(&old_compare, &new_compare);
 
@@ -268,8 +256,8 @@ where
 {
     let before = LineSide::from_text(old_content);
     let after = LineSide::from_text(new_content);
-    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
-    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+    let old_lines: Vec<&str> = before.lines().map(|l| l.body).collect();
+    let new_lines: Vec<&str> = after.lines().map(|l| l.body).collect();
     let ops = histogram_compacted_line_ops(old_content, new_content, indent_heuristic, ws);
     if ops.is_empty() {
         return String::new();
@@ -290,7 +278,7 @@ where
 
 /// Line bodies of `side`, as the change compaction reads them.
 fn line_bodies<'a>(side: &LineSide<'a>) -> Vec<&'a str> {
-    side.lines.iter().map(|l| l.body).collect()
+    side.lines().map(|l| l.body).collect()
 }
 
 /// Count insertions and deletions from compacted line diff ops (patch/stat alignment).
@@ -334,11 +322,11 @@ pub(crate) fn compacted_line_ops_for_options(
             if before.is_empty() && after.is_empty() {
                 return Vec::new();
             }
-            let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
-            let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+            let old_refs: Vec<&str> = before.lines().map(|l| l.body).collect();
+            let new_refs: Vec<&str> = after.lines().map(|l| l.body).collect();
             let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-            let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
-            let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+            let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
+            let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
             let (changed1, changed2) =
                 git_xdiff::patience_changed_flags(&old_compare, &new_compare);
             let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
@@ -366,13 +354,14 @@ pub(crate) fn compacted_line_ops_for_options(
                 return Vec::new();
             }
             let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-            let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
-            let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+            let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
+            let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
             git_xdiff_compacted_line_ops(
                 &old_compare,
                 &new_compare,
                 &before,
                 &after,
+                ws,
                 options.indent_heuristic,
                 options.algorithm == DiffAlgorithm::Minimal,
             )
@@ -423,6 +412,10 @@ fn xdiff_changed_flags_trimmed_ids(
     let mut interner = LineInterner::with_capacity(nrec1 + nrec2);
     let ids1_full = interner.intern_all(old_compare);
     let ids2_full = interner.intern_all(new_compare);
+    let nclasses = interner.len();
+    // Only the ids are needed from here on; freeing the table before the search keeps it out of
+    // the diff's peak memory.
+    drop(interner);
 
     let lim = nrec1.min(nrec2);
     let mut head = 0usize;
@@ -440,11 +433,6 @@ fn xdiff_changed_flags_trimmed_ids(
     } else {
         let cut_ids1 = &ids1_full[head..nrec1 - tail];
         let cut_ids2 = &ids2_full[head..nrec2 - tail];
-        let nclasses = ids1_full
-            .iter()
-            .chain(&ids2_full)
-            .max()
-            .map_or(0, |&max| max as usize + 1);
         let mut shared_counts = vec![0u32; nclasses];
         for &id in &ids1_full[..head] {
             shared_counts[id as usize] += 1;
@@ -671,28 +659,40 @@ pub(crate) fn merge_file_compacted_line_ops(
     }
 }
 
+/// Myers (or minimal) line alignment with Git's change compaction and indent heuristic.
+///
+/// `old_compare` / `new_compare` must be [`line_compare_keys`] of `before` / `after` under `ws`.
 pub(crate) fn git_xdiff_compacted_line_ops(
     old_compare: &[&str],
     new_compare: &[&str],
     before: &LineSide<'_>,
     after: &LineSide<'_>,
+    ws: super::WhitespaceMode,
     indent_heuristic: bool,
     need_min: bool,
 ) -> Vec<similar::DiffOp> {
     let ((changed1, changed2), old_key_ids, new_key_ids) =
         xdiff_changed_flags_trimmed_ids(old_compare, new_compare, need_min);
-    let old_lines = line_bodies(before);
-    let new_lines = line_bodies(after);
+    // Compaction reads line bodies only to measure indentation. A raw key is the body plus its
+    // newline, which that measure skips as trailing whitespace, so only normalized keys need
+    // the bodies collected separately.
+    let bodies;
+    let (old_lines, new_lines): (&[&str], &[&str]) = if ws.normalizes_line_compare() {
+        bodies = (line_bodies(before), line_bodies(after));
+        (&bodies.0, &bodies.1)
+    } else {
+        (old_compare, new_compare)
+    };
     diff_indent_heuristic::apply_change_compact_to_masks(
         changed1,
         changed2,
         diff_indent_heuristic::CompactSide {
-            lines: &old_lines,
+            lines: old_lines,
             keys: old_compare,
             compare_ids: Some(&old_key_ids),
         },
         diff_indent_heuristic::CompactSide {
-            lines: &new_lines,
+            lines: new_lines,
             keys: new_compare,
             compare_ids: Some(&new_key_ids),
         },
@@ -787,13 +787,14 @@ where
         return String::new();
     }
     let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-    let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
-    let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+    let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
+    let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
     let ops = git_xdiff_compacted_line_ops(
         &old_compare,
         &new_compare,
         &before,
         &after,
+        ws,
         indent_heuristic,
         need_min,
     );
@@ -846,11 +847,11 @@ where
     if before.is_empty() && after.is_empty() {
         return String::new();
     }
-    let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
-    let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+    let old_refs: Vec<&str> = before.lines().map(|l| l.body).collect();
+    let new_refs: Vec<&str> = after.lines().map(|l| l.body).collect();
     let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-    let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
-    let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+    let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
+    let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
     let (changed1, changed2) = git_xdiff::patience_changed_flags(&old_compare, &new_compare);
     let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
     let ops = diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
@@ -1067,12 +1068,12 @@ fn git_patience_unified_body_raw(
     if before.is_empty() && after.is_empty() {
         return String::new();
     }
-    let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
-    let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+    let old_refs: Vec<&str> = before.lines().map(|l| l.body).collect();
+    let new_refs: Vec<&str> = after.lines().map(|l| l.body).collect();
     let ws = super::WhitespaceMode::default();
     let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-    let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
-    let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
+    let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
+    let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
     let (changed1, changed2) = git_xdiff::patience_changed_flags(&old_compare, &new_compare);
     let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
     let ops = diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
@@ -1734,8 +1735,8 @@ mod git_xdiff {
     }
 
     struct XdiffScratch {
-        count1: Vec<i64>,
-        count2: Vec<i64>,
+        count1: Vec<u32>,
+        count2: Vec<u32>,
         action1: Vec<u8>,
         action2: Vec<u8>,
         kvd: Vec<i64>,
@@ -1767,8 +1768,11 @@ mod git_xdiff {
         }
 
         fn prepare_kvd(&mut self, kvd_len: usize) {
+            // The search reads only diagonals it has written, so the contents never need
+            // clearing. A fresh zeroed allocation leaves the pages a small diff never reaches
+            // untouched, where growing in place would write every one of them.
             if self.kvd.len() < kvd_len {
-                self.kvd.resize(kvd_len, 0);
+                self.kvd = vec![0; kvd_len];
             }
         }
     }
@@ -2194,8 +2198,8 @@ mod git_xdiff {
             work.count2[id as usize] += 1;
         }
         for (id, &shared) in shared_counts.iter().enumerate().take(nclasses) {
-            work.count1[id] += i64::from(shared);
-            work.count2[id] += i64::from(shared);
+            work.count1[id] += shared;
+            work.count2[id] += shared;
         }
 
         let mut xdf1 = XdFile {
@@ -2235,6 +2239,11 @@ mod git_xdiff {
 
         // xdl_cleanup_records: classify and reduce to effective records.
         work.prepare_actions(nrec1, nrec2);
+        for xdf in [&mut xdf1, &mut xdf2] {
+            let span = usize::try_from(xdf.dend - xdf.dstart + 1).unwrap_or(0);
+            xdf.reference_index.reserve_exact(span);
+            xdf.effective_ids.reserve_exact(span);
+        }
 
         let mlim1 = if need_min {
             i64::MAX
@@ -2248,7 +2257,7 @@ mod git_xdiff {
         let mut idx = xdf1.dstart;
         while idx <= xdf1.dend {
             let id = ids1[idx as usize];
-            let nm = work.count2[id as usize];
+            let nm = i64::from(work.count2[id as usize]);
             work.action1[idx as usize] = if nm == 0 {
                 DISCARD
             } else if nm >= mlim1 {
@@ -2271,7 +2280,7 @@ mod git_xdiff {
         let mut idx = xdf2.dstart;
         while idx <= xdf2.dend {
             let id = ids2[idx as usize];
-            let nm = work.count1[id as usize];
+            let nm = i64::from(work.count1[id as usize]);
             work.action2[idx as usize] = if nm == 0 {
                 DISCARD
             } else if nm >= mlim2 {
@@ -2958,14 +2967,48 @@ pub(crate) fn diff_trees_outside_sparse_directories(
     diff_trees_opts(odb, old_tree_oid, new_tree_oid, "", false, hint.as_ref())
 }
 
+/// Whether directory `dir` may contain paths selected by `pathspecs` during a tree walk.
+fn tree_walk_directory_relevant(
+    dir: &str,
+    pathspecs: &[String],
+    pathspec_matcher: Option<&crate::pathspec::PathspecMatcher<'_>>,
+) -> bool {
+    if pathspecs.is_empty() {
+        return true;
+    }
+    if let Some(matcher) = pathspec_matcher {
+        return matcher.matches_entry(dir, 0o040000)
+            || crate::pathspec::pathspec_wants_descent_for_rev_tree(dir, pathspecs);
+    }
+    crate::pathspec::pathspec_entry_is_relevant(dir, true, pathspecs)
+}
+
+fn diff_entry_matches_pathspecs(
+    entry: &DiffEntry,
+    pathspecs: &[String],
+    pathspec_matcher: Option<&crate::pathspec::PathspecMatcher<'_>>,
+) -> bool {
+    let path = entry.path();
+    if path.is_empty() {
+        return false;
+    }
+    if let Some(matcher) = pathspec_matcher {
+        return matcher.matches_change(path, entry.old_path.as_deref());
+    }
+    crate::pathspec::matches_pathspec_list(path, pathspecs)
+}
+
 /// Like [`diff_trees`], but only paths `pathspecs` select (Git's pathspec-limited tree diff).
 ///
 /// Directories no pathspec can reach are not read. An empty list selects every path.
+/// When `pathspec_matcher` is set, matching uses the repository attribute stack (required for
+/// `:(attr:...)` magic).
 pub(crate) fn diff_trees_for_pathspecs(
     odb: &Odb,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
     pathspecs: &[String],
+    pathspec_matcher: Option<&crate::pathspec::PathspecMatcher<'_>>,
 ) -> Result<Vec<DiffEntry>> {
     if pathspecs.is_empty() {
         return diff_trees(odb, old_tree_oid, new_tree_oid, "");
@@ -2973,13 +3016,11 @@ pub(crate) fn diff_trees_for_pathspecs(
     crate::trace::trace_span!("grit.diff.tree");
     let hint = DiffTreesWalkHint {
         pathspecs,
+        pathspec_matcher,
         ..DiffTreesWalkHint::default()
     };
     let mut entries = diff_trees_opts(odb, old_tree_oid, new_tree_oid, "", false, Some(&hint))?;
-    entries.retain(|entry| {
-        let path = entry.path();
-        !path.is_empty() && crate::pathspec::matches_pathspec_list(path, pathspecs)
-    });
+    entries.retain(|entry| diff_entry_matches_pathspecs(entry, pathspecs, pathspec_matcher));
     Ok(entries)
 }
 
@@ -2993,6 +3034,7 @@ struct DiffTreesWalkHint<'a> {
     skip_sparse_directories: bool,
     /// When non-empty, do not descend into directories these pathspecs cannot match inside.
     pathspecs: &'a [String],
+    pathspec_matcher: Option<&'a crate::pathspec::PathspecMatcher<'a>>,
 }
 
 impl DiffTreesWalkHint<'_> {
@@ -3002,7 +3044,7 @@ impl DiffTreesWalkHint<'_> {
             return false;
         }
         if !self.pathspecs.is_empty()
-            && !crate::pathspec::pathspec_entry_is_relevant(dir, true, self.pathspecs)
+            && !tree_walk_directory_relevant(dir, self.pathspecs, self.pathspec_matcher)
         {
             return true;
         }
@@ -3088,9 +3130,99 @@ pub fn diff_trees_with_renames_and_policy(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
 ) -> Result<Vec<DiffEntry>> {
-    let mut entries = diff_trees(odb, old_tree_oid, new_tree_oid, prefix)?;
+    Ok(diff_trees_with_renames_and_policy_result(
+        odb,
+        old_tree_oid,
+        new_tree_oid,
+        prefix,
+        rename_threshold,
+        config,
+        thread_policy,
+    )?
+    .entries)
+}
+
+/// Like [`diff_trees_with_renames_and_policy`], but also returns rename-limit skip metadata.
+///
+/// # Errors
+///
+/// Propagates errors from [`diff_trees`] and rename detection.
+pub fn diff_trees_with_renames_and_policy_result(
+    odb: &Odb,
+    old_tree_oid: Option<&ObjectId>,
+    new_tree_oid: Option<&ObjectId>,
+    prefix: &str,
+    rename_threshold: u32,
+    config: &ConfigSet,
+    thread_policy: &ThreadPolicy,
+) -> Result<DiffEntriesResult> {
+    diff_trees_with_renames_for_pathspecs_and_policy_result(
+        odb,
+        old_tree_oid,
+        new_tree_oid,
+        prefix,
+        &[],
+        None,
+        rename_threshold,
+        config,
+        thread_policy,
+    )
+}
+
+/// Like [`diff_trees_with_renames_and_policy`], but limits the tree walk to `pathspecs` before
+/// rename detection (Git's pathspec-limited tree diff).
+///
+/// An empty `pathspecs` list diffs every path under `prefix`.
+///
+/// # Errors
+///
+/// Propagates errors from [`diff_trees`] and [`detect_renames_with_policy`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn diff_trees_with_renames_for_pathspecs_and_policy(
+    odb: &Odb,
+    old_tree_oid: Option<&ObjectId>,
+    new_tree_oid: Option<&ObjectId>,
+    prefix: &str,
+    pathspecs: &[String],
+    pathspec_matcher: Option<&crate::pathspec::PathspecMatcher<'_>>,
+    rename_threshold: u32,
+    config: &ConfigSet,
+    thread_policy: &ThreadPolicy,
+) -> Result<Vec<DiffEntry>> {
+    Ok(diff_trees_with_renames_for_pathspecs_and_policy_result(
+        odb,
+        old_tree_oid,
+        new_tree_oid,
+        prefix,
+        pathspecs,
+        pathspec_matcher,
+        rename_threshold,
+        config,
+        thread_policy,
+    )?
+    .entries)
+}
+
+/// Pathspec-limited tree diff with rename detection and rename-limit skip metadata.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn diff_trees_with_renames_for_pathspecs_and_policy_result(
+    odb: &Odb,
+    old_tree_oid: Option<&ObjectId>,
+    new_tree_oid: Option<&ObjectId>,
+    prefix: &str,
+    pathspecs: &[String],
+    pathspec_matcher: Option<&crate::pathspec::PathspecMatcher<'_>>,
+    rename_threshold: u32,
+    config: &ConfigSet,
+    thread_policy: &ThreadPolicy,
+) -> Result<DiffEntriesResult> {
+    let entries = if pathspecs.is_empty() {
+        diff_trees(odb, old_tree_oid, new_tree_oid, prefix)?
+    } else {
+        diff_trees_for_pathspecs(odb, old_tree_oid, new_tree_oid, pathspecs, pathspec_matcher)?
+    };
     if rename_threshold <= 100 {
-        entries = detect_renames_with_policy(
+        let out = detect_renames_with_policy(
             odb,
             None,
             entries,
@@ -3098,9 +3230,17 @@ pub fn diff_trees_with_renames_and_policy(
             config,
             thread_policy,
             None,
+            DetectRenamesOptions::default(),
         )?;
+        return Ok(DiffEntriesResult {
+            entries: out.entries,
+            inexact_rename_skipped: out.inexact_skipped,
+        });
     }
-    Ok(entries)
+    Ok(DiffEntriesResult {
+        entries,
+        inexact_rename_skipped: None,
+    })
 }
 
 /// Return the tree OID stored in a commit object.
@@ -3825,6 +3965,7 @@ pub fn apply_rename_detection_to_diff_entries(
             config,
             thread_policy,
             &opts,
+            None,
         )
     } else {
         detect_renames_with_policy(
@@ -3835,7 +3976,9 @@ pub fn apply_rename_detection_to_diff_entries(
             config,
             thread_policy,
             None,
+            DetectRenamesOptions::default(),
         )
+        .map(|r| r.entries)
     }
 }
 
@@ -5103,6 +5246,14 @@ pub struct DiffIndexToWorktreeOptions {
     /// entries are not hashed. Content diffs must leave this off so a content change always
     /// carries a null worktree `new_oid` (`old_oid != new_oid`).
     pub for_status: bool,
+    /// Report a tracked file as modified without reading it when its size differs from the
+    /// index entry and its clean conversion is the identity (default `false`, implied by
+    /// [`Self::for_status`]).
+    ///
+    /// The entry carries a null worktree `new_oid`, so `old_oid != new_oid` still marks a
+    /// content change. Set this when the caller reads the worktree file afterwards anyway (a
+    /// patch or diffstat), so hashing it here would only repeat that read.
+    pub size_change_proves_modified: bool,
     /// When true (default), query `core.fsmonitor` before scanning the worktree.
     pub refresh_fsmonitor: bool,
     /// Injectable subprocess runner for fsmonitor hooks; defaults to the system runner.
@@ -5124,6 +5275,10 @@ pub struct DiffIndexToWorktreeOptions {
     /// When set, work-tree access failures during status emit [`crate::diagnostics::Warning`]
     /// values here instead of aborting the diff.
     pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+    /// When true with [`Self::diagnostics`], permission-denied worktree paths warn and are omitted
+    /// from the diff (not reported as deleted). Used by content diffs and stash; status sets
+    /// [`Self::for_status`] instead.
+    pub skip_inaccessible_paths: bool,
 }
 
 impl Default for DiffIndexToWorktreeOptions {
@@ -5140,6 +5295,7 @@ impl Default for DiffIndexToWorktreeOptions {
             thread_policy: None,
             worktree_rules: None,
             for_status: false,
+            size_change_proves_modified: false,
             refresh_fsmonitor: true,
             command_runner: None,
             fsmonitor_query_boundary: None,
@@ -5147,8 +5303,29 @@ impl Default for DiffIndexToWorktreeOptions {
             hash_blobs_without_write: false,
             cancel_watch: None,
             diagnostics: None,
+            skip_inaccessible_paths: false,
         }
     }
+}
+
+/// Optional worktree access policy for [`diff_tree_to_worktree_with_git_dir_and_rules`]'s slow path.
+#[derive(Clone, Default)]
+pub struct DiffTreeToWorktreeExtras {
+    /// When true with [`Self::diagnostics`], skip permission-denied paths with a warning.
+    pub skip_inaccessible_paths: bool,
+    /// Warning sink paired with [`Self::skip_inaccessible_paths`].
+    pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+    /// Limit the walk to these index paths (expanded pathspecs).
+    pub restrict_to_paths: Option<std::sync::Arc<std::collections::BTreeSet<String>>>,
+}
+
+#[inline]
+fn worktree_diff_skips_inaccessible_paths(
+    for_status: bool,
+    skip_inaccessible_paths: bool,
+    materialize_dirty_blobs: bool,
+) -> bool {
+    (for_status || skip_inaccessible_paths) && !materialize_dirty_blobs
 }
 
 #[inline]
@@ -5216,6 +5393,7 @@ fn parallel_process_blob_worktree_jobs(
     materialize_dirty_blobs: bool,
     hash_blobs_without_write: bool,
     for_status: bool,
+    skip_inaccessible_paths: bool,
     diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
     conv: &crate::crlf::ConversionConfig,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
@@ -5271,6 +5449,7 @@ fn parallel_process_blob_worktree_jobs(
                     if status_skips_inaccessible_worktree_error(
                         &err,
                         for_status,
+                        skip_inaccessible_paths,
                         materialize_dirty_blobs,
                     ) =>
                 {
@@ -5374,13 +5553,23 @@ fn blob_disk_lookup_io_result(
     path: &str,
     err: std::io::Error,
     for_status: bool,
+    skip_inaccessible_paths: bool,
     materialize_dirty_blobs: bool,
 ) -> Result<()> {
-    if for_status && !materialize_dirty_blobs {
+    if worktree_diff_skips_inaccessible_paths(
+        for_status,
+        skip_inaccessible_paths,
+        materialize_dirty_blobs,
+    ) && io_err_is_permission_denied(&err)
+    {
         warn_worktree_access_failed(diagnostics, path, &err);
         return Ok(());
     }
-    Err(Error::Io(err))
+    Err(Error::WorktreePathIo {
+        operation: crate::worktree::WorktreePathOperation::Metadata,
+        path: path.to_owned(),
+        source: err,
+    })
 }
 
 fn io_err_is_permission_denied(err: &std::io::Error) -> bool {
@@ -5390,9 +5579,14 @@ fn io_err_is_permission_denied(err: &std::io::Error) -> bool {
 fn status_skips_inaccessible_worktree_error(
     err: &Error,
     for_status: bool,
+    skip_inaccessible_paths: bool,
     materialize_dirty_blobs: bool,
 ) -> bool {
-    if !for_status || materialize_dirty_blobs {
+    if !worktree_diff_skips_inaccessible_paths(
+        for_status,
+        skip_inaccessible_paths,
+        materialize_dirty_blobs,
+    ) {
         return false;
     }
     match err {
@@ -5428,30 +5622,69 @@ fn warn_and_skip_status_inaccessible(
     true
 }
 
+enum WorktreeSymlinkMetadata {
+    Found(fs::Metadata),
+    Absent,
+    Inaccessible,
+}
+
+fn probe_worktree_symlink_metadata(
+    file_path: &Path,
+    path_str: &str,
+    diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
+    for_status: bool,
+    skip_inaccessible_paths: bool,
+    materialize_dirty_blobs: bool,
+) -> Result<WorktreeSymlinkMetadata> {
+    match fs::symlink_metadata(file_path) {
+        Ok(meta) => Ok(WorktreeSymlinkMetadata::Found(meta)),
+        Err(e)
+            if e.kind() == std::io::ErrorKind::NotFound
+                || e.raw_os_error() == Some(20) /* ENOTDIR */ =>
+        {
+            Ok(WorktreeSymlinkMetadata::Absent)
+        }
+        Err(e) => {
+            if worktree_diff_skips_inaccessible_paths(
+                for_status,
+                skip_inaccessible_paths,
+                materialize_dirty_blobs,
+            ) && io_err_is_permission_denied(&e)
+            {
+                warn_worktree_access_failed(diagnostics, path_str, &e);
+                Ok(WorktreeSymlinkMetadata::Inaccessible)
+            } else {
+                Err(Error::WorktreePathIo {
+                    operation: crate::worktree::WorktreePathOperation::Metadata,
+                    path: path_str.to_owned(),
+                    source: e,
+                })
+            }
+        }
+    }
+}
+
 fn symlink_metadata_worktree_diff(
     file_path: &Path,
     path_str: &str,
     diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
     for_status: bool,
+    skip_inaccessible_paths: bool,
     materialize_dirty_blobs: bool,
 ) -> Result<Option<fs::Metadata>> {
-    match fs::symlink_metadata(file_path) {
-        Ok(meta) => Ok(Some(meta)),
-        Err(e)
-            if e.kind() == std::io::ErrorKind::NotFound
-                || e.raw_os_error() == Some(20) /* ENOTDIR */ =>
-        {
-            Ok(None)
-        }
-        Err(e) => {
-            if for_status && !materialize_dirty_blobs && io_err_is_permission_denied(&e) {
-                warn_worktree_access_failed(diagnostics, path_str, &e);
-                Ok(None)
-            } else {
-                Err(Error::Io(e))
-            }
-        }
-    }
+    Ok(
+        match probe_worktree_symlink_metadata(
+            file_path,
+            path_str,
+            diagnostics,
+            for_status,
+            skip_inaccessible_paths,
+            materialize_dirty_blobs,
+        )? {
+            WorktreeSymlinkMetadata::Found(meta) => Some(meta),
+            WorktreeSymlinkMetadata::Absent | WorktreeSymlinkMetadata::Inaccessible => None,
+        },
+    )
 }
 
 /// Whether status may report `ie` modified because the worktree size (already munged to the
@@ -5524,6 +5757,8 @@ fn push_index_blob_worktree_diff(
     materialize_dirty_blobs: bool,
     hash_blobs_without_write: bool,
     for_status: bool,
+    size_change_proves_modified: bool,
+    skip_inaccessible_paths: bool,
     diagnostics: Option<&crate::diagnostics::DiagnosticsHandle>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
     icase_collisions: Option<&crate::path_icase::IcaseCheckoutCollisionMap>,
@@ -5586,7 +5821,7 @@ fn push_index_blob_worktree_diff(
             crate::index::munge_index_size(meta.len()),
             worktree_mode,
             meta.len(),
-            for_status,
+            size_change_proves_modified,
             || crate::crlf::git_conversion_is_identity(conv, &file_attrs),
             result,
         )?
@@ -5617,6 +5852,7 @@ fn push_index_blob_worktree_diff(
             if status_skips_inaccessible_worktree_error(
                 &err,
                 for_status,
+                skip_inaccessible_paths,
                 materialize_dirty_blobs,
             ) =>
         {
@@ -5938,6 +6174,9 @@ fn diff_index_to_worktree_inner(
 
     let ignore_submodule_untracked = options.ignore_submodule_untracked;
     let simplify_gitlinks = options.simplify_gitlinks;
+    // Staging stores the worktree blob, so it always needs the file's object id.
+    let size_change_proves_modified =
+        !materialize_dirty_blobs && (options.for_status || options.size_change_proves_modified);
 
     let rules_lock = options
         .worktree_rules
@@ -6050,10 +6289,12 @@ fn diff_index_to_worktree_inner(
     }
 
     if let Some(limit) = options.restrict_to_paths.as_ref() {
+        let mut cursor = 0;
         for path in limit.iter() {
-            let Some(ie) = index.get(path.as_bytes(), 0) else {
+            let Some(pos) = index.find_stage0_pos_from(path.as_bytes(), &mut cursor) else {
                 continue;
             };
+            let ie = &index.entries[pos];
             if !index_entry_needs_worktree_diff_pass1(ie) {
                 continue;
             }
@@ -6266,6 +6507,7 @@ fn diff_index_to_worktree_inner(
                     path_str_ref,
                     e,
                     options.for_status,
+                    options.skip_inaccessible_paths,
                     materialize_dirty_blobs,
                 )?;
             }
@@ -6359,7 +6601,7 @@ fn diff_index_to_worktree_inner(
                         stat.worktree_size(),
                         worktree_mode,
                         stat.raw_size,
-                        options.for_status,
+                        size_change_proves_modified,
                         || conversion_is_identity(entry_index, path_str_ref),
                         &mut result,
                     )? {
@@ -6420,6 +6662,7 @@ fn diff_index_to_worktree_inner(
                         path_str_ref,
                         options.diagnostics.as_ref(),
                         options.for_status,
+                        options.skip_inaccessible_paths,
                         materialize_dirty_blobs,
                     )?
                     else {
@@ -6439,6 +6682,8 @@ fn diff_index_to_worktree_inner(
                         materialize_dirty_blobs,
                         hash_blobs_without_write,
                         options.for_status,
+                        size_change_proves_modified,
+                        options.skip_inaccessible_paths,
                         options.diagnostics.as_ref(),
                         filter_fp,
                         icase_collisions.as_ref(),
@@ -6464,6 +6709,7 @@ fn diff_index_to_worktree_inner(
             materialize_dirty_blobs,
             hash_blobs_without_write,
             options.for_status,
+            options.skip_inaccessible_paths,
             options.diagnostics.as_ref(),
             &conv,
             filter_fp,
@@ -6474,16 +6720,14 @@ fn diff_index_to_worktree_inner(
 
     for (path, (_, base_entry)) in unmerged_base {
         let file_path = index_entry_worktree_abs(work_tree, &path, precompose_unicode, ignorecase);
-        let wt_meta = match fs::symlink_metadata(&file_path) {
-            Ok(meta) => Some(meta),
-            Err(e)
-                if e.kind() == std::io::ErrorKind::NotFound
-                    || e.raw_os_error() == Some(20) /* ENOTDIR */ =>
-            {
-                None
-            }
-            Err(e) => return Err(Error::Io(e)),
-        };
+        let wt_meta = symlink_metadata_worktree_diff(
+            &file_path,
+            &path,
+            options.diagnostics.as_ref(),
+            options.for_status,
+            options.skip_inaccessible_paths,
+            materialize_dirty_blobs,
+        )?;
 
         let new_mode = wt_meta.as_ref().map_or_else(
             || FileMode::ABSENT,
@@ -8451,6 +8695,30 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
     config: Option<&ConfigSet>,
     worktree_rules: Option<&crate::worktree_rules::WorktreeRules>,
 ) -> Result<Vec<DiffEntry>> {
+    diff_tree_to_worktree_with_git_dir_and_rules_extras(
+        odb,
+        tree_oid,
+        work_tree,
+        repository_git_dir,
+        index,
+        config,
+        worktree_rules,
+        DiffTreeToWorktreeExtras::default(),
+    )
+}
+
+/// Like [`diff_tree_to_worktree_with_git_dir_and_rules`], with worktree access policy for the slow path.
+#[allow(clippy::too_many_arguments)]
+pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
+    odb: &Odb,
+    tree_oid: Option<&ObjectId>,
+    work_tree: &Path,
+    repository_git_dir: &Path,
+    index: &Index,
+    config: Option<&ConfigSet>,
+    worktree_rules: Option<&crate::worktree_rules::WorktreeRules>,
+    extras: DiffTreeToWorktreeExtras,
+) -> Result<Vec<DiffEntry>> {
     use crate::config::ConfigSet;
     use crate::crlf;
 
@@ -8566,6 +8834,13 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
     let mut result = Vec::new();
 
     for path in &all_paths {
+        if extras
+            .restrict_to_paths
+            .as_ref()
+            .is_some_and(|limit| !limit.contains(path))
+        {
+            continue;
+        }
         if index_entries
             .get(path.as_bytes())
             .is_some_and(|ie| ie.skip_worktree())
@@ -8669,10 +8944,17 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
 
         let file_path = work_tree.join(path);
 
-        let wt_meta = match fs::symlink_metadata(&file_path) {
-            Ok(m) => Some(m),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(Error::Io(e)),
+        let wt_meta = match probe_worktree_symlink_metadata(
+            &file_path,
+            path,
+            extras.diagnostics.as_ref(),
+            false,
+            extras.skip_inaccessible_paths,
+            false,
+        )? {
+            WorktreeSymlinkMetadata::Found(m) => Some(m),
+            WorktreeSymlinkMetadata::Inaccessible => continue,
+            WorktreeSymlinkMetadata::Absent => None,
         };
 
         if unmerged_only_paths.contains(path) {
@@ -8864,6 +9146,44 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
 
 // ── Rename detection ────────────────────────────────────────────────
 
+/// Emitted when unmatched rename candidates exceed [`diff.renameLimit`](https://git-scm.com/docs/git-config#Documentation/git-config.txt-diffrenameLimit) after exact and basename pairing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InexactRenameDetectionSkipped {
+    /// Unmatched delete-side candidates still eligible for inexact pairing.
+    pub unmatched_sources: usize,
+    /// Unmatched add-side candidates still eligible for inexact pairing.
+    pub unmatched_destinations: usize,
+    /// Configured `diff.renameLimit`, if any (`None` means unlimited).
+    pub configured_limit: Option<usize>,
+    /// Smallest limit that would allow the remaining matrix (`max(sources, destinations)`).
+    pub suggested_limit: usize,
+}
+
+/// Tree or commit diff entries after rename detection, with an optional limit notice.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DiffEntriesResult {
+    /// Flat diff entries in path order.
+    pub entries: Vec<DiffEntry>,
+    /// Set when inexact rename detection was skipped due to `diff.renameLimit`.
+    pub inexact_rename_skipped: Option<InexactRenameDetectionSkipped>,
+}
+
+/// Result of [`detect_renames_with_policy`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameDetectionResult {
+    /// Diff entries after rename pairing.
+    pub entries: Vec<DiffEntry>,
+    /// Set when inexact rename detection was skipped due to `diff.renameLimit`.
+    pub inexact_skipped: Option<InexactRenameDetectionSkipped>,
+}
+
+/// Options for [`detect_renames_with_policy`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DetectRenamesOptions {
+    /// Skip Git's basename pre-pass (break-rewrite and copy detection paths).
+    pub skip_basename_heuristic: bool,
+}
+
 fn read_added_entry_bytes(
     odb: &Odb,
     entry: &DiffEntry,
@@ -8899,8 +9219,18 @@ pub fn detect_renames(
 ) -> Vec<DiffEntry> {
     let config = ConfigSet::new();
     let policy = ThreadPolicy::default();
-    detect_renames_with_policy(odb, work_root, entries, threshold, &config, &policy, None)
-        .expect("rename detection")
+    detect_renames_with_policy(
+        odb,
+        work_root,
+        entries,
+        threshold,
+        &config,
+        &policy,
+        None,
+        DetectRenamesOptions::default(),
+    )
+    .expect("rename detection")
+    .entries
 }
 
 #[inline]
@@ -8923,6 +9253,7 @@ fn poll_rename_cancel(
 ///
 /// Returns object database errors from reading candidate blobs, and the cancellation
 /// error when `cancel_watch` is set.
+#[allow(clippy::too_many_arguments)]
 pub fn detect_renames_with_policy(
     odb: &Odb,
     work_root: Option<&Path>,
@@ -8931,13 +9262,17 @@ pub fn detect_renames_with_policy(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     cancel_watch: Option<&std::sync::atomic::AtomicBool>,
-) -> Result<Vec<DiffEntry>> {
+    detect_opts: DetectRenamesOptions,
+) -> Result<RenameDetectionResult> {
     poll_rename_cancel(cancel_watch)?;
     let has_deleted = entries.iter().any(|e| e.status == DiffStatus::Deleted);
     let has_added = entries.iter().any(|e| e.status == DiffStatus::Added);
     if (!has_deleted || !has_added) && entries_strictly_sorted_by_path(&entries) {
         // With unique sorted paths, regrouping and re-sorting would rebuild the same list.
-        return Ok(entries);
+        return Ok(RenameDetectionResult {
+            entries,
+            inexact_skipped: None,
+        });
     }
     // Split entries into deleted, added, and others.
     let mut deleted: Vec<DiffEntry> = Vec::new();
@@ -8958,7 +9293,10 @@ pub fn detect_renames_with_policy(
         result.extend(deleted);
         result.extend(added);
         sort_entries_by_path(&mut result);
-        return Ok(result);
+        return Ok(RenameDetectionResult {
+            entries: result,
+            inexact_skipped: None,
+        });
     }
 
     fn is_regularish_mode(mode: FileMode) -> bool {
@@ -9025,11 +9363,16 @@ pub fn detect_renames_with_policy(
     let mut renames: Vec<DiffEntry> = Vec::new();
 
     // Git always runs exact rename detection, regardless of renameLimit.
+    let mut added_by_oid: std::collections::HashMap<ObjectId, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (ai, add) in added.iter().enumerate() {
+        added_by_oid.entry(add.new_oid).or_default().push(ai);
+    }
     let mut exact_scores: Vec<(u32, usize, usize)> = Vec::new();
     for (di, del) in deleted.iter().enumerate() {
         poll_rename_cancel(cancel_watch)?;
-        for (ai, add) in added.iter().enumerate() {
-            if del.old_oid == add.new_oid {
+        if let Some(ais) = added_by_oid.get(&del.old_oid) {
+            for &ai in ais {
                 exact_scores.push((100, di, ai));
             }
         }
@@ -9044,6 +9387,33 @@ pub fn detect_renames_with_policy(
         &mut renames,
     );
 
+    let mut blob_cache = None;
+    if !detect_opts.skip_basename_heuristic
+        && super::basename_rename::basename_needs_similarity_scoring(
+            &deleted,
+            &added,
+            &used_deleted,
+            &used_added,
+        )
+    {
+        let mut cache = super::rename_blob_cache::RenameBlobCache::new(deleted.len(), added.len());
+        let par_opts = diff_rename_parallel_options(config, thread_policy);
+        super::basename_rename::apply_basename_rename_pairs(
+            odb,
+            work_root,
+            &deleted,
+            &added,
+            &mut used_deleted,
+            &mut used_added,
+            &mut renames,
+            threshold,
+            cancel_watch,
+            &mut cache,
+            par_opts,
+        )?;
+        blob_cache = Some(cache);
+    }
+
     let remaining_deleted: Vec<usize> = used_deleted
         .iter()
         .enumerate()
@@ -9056,14 +9426,23 @@ pub fn detect_renames_with_policy(
         .collect();
 
     let rename_limit = parse_rename_limit(config);
+    let mut inexact_skipped = None;
     if !remaining_deleted.is_empty()
         && !remaining_added.is_empty()
-        && !inexact_matrix_exceeds_limit(
+        && inexact_matrix_exceeds_limit(
             remaining_added.len(),
             remaining_deleted.len(),
             rename_limit,
         )
     {
+        let suggested = remaining_deleted.len().max(remaining_added.len());
+        inexact_skipped = Some(InexactRenameDetectionSkipped {
+            unmatched_sources: remaining_deleted.len(),
+            unmatched_destinations: remaining_added.len(),
+            configured_limit: rename_limit.configured_max(),
+            suggested_limit: suggested,
+        });
+    } else if !remaining_deleted.is_empty() && !remaining_added.is_empty() {
         let par_opts = diff_rename_parallel_options(config, thread_policy);
 
         let mut prefetch_entries: Vec<DiffEntry> =
@@ -9116,44 +9495,118 @@ pub fn detect_renames_with_policy(
         if !candidate_pairs.is_empty() {
             let loads_needed = load_deleted.iter().filter(|&&b| b).count()
                 + load_added.iter().filter(|&&b| b).count();
-            let load_deleted_blob = |i: usize| -> Option<Vec<u8>> {
-                if !load_deleted[i] {
-                    return None;
+            let (deleted_contents, added_contents) = if let Some(cache) = blob_cache.as_mut() {
+                let mut deleted_staging: Vec<Option<Vec<u8>>> = vec![None; remaining_deleted.len()];
+                for (row, &need) in load_deleted.iter().enumerate() {
+                    if !need {
+                        continue;
+                    }
+                    let di = remaining_deleted[row];
+                    deleted_staging[row] = cache
+                        .take_deleted_blob(di)
+                        .or_else(|| odb.read(&deleted[di].old_oid).ok().map(|obj| obj.data));
                 }
-                odb.read(&deleted[remaining_deleted[i]].old_oid)
-                    .ok()
-                    .map(|obj| obj.data)
-            };
-            let load_added_blob = |i: usize| -> Option<Vec<u8>> {
-                if !load_added[i] {
-                    return None;
+                let mut added_staging: Vec<Option<Vec<u8>>> = vec![None; remaining_added.len()];
+                for (col, &need) in load_added.iter().enumerate() {
+                    if !need {
+                        continue;
+                    }
+                    let ai = remaining_added[col];
+                    added_staging[col] = cache
+                        .take_added_blob(ai)
+                        .or_else(|| read_added_entry_bytes(odb, &added[ai], work_root));
                 }
-                read_added_entry_bytes(odb, &added[remaining_added[i]], work_root)
-            };
-            let (deleted_contents, added_contents) = if loads_needed <= 32 {
-                (
-                    (0..remaining_deleted.len())
-                        .map(load_deleted_blob)
-                        .collect(),
-                    (0..remaining_added.len()).map(load_added_blob).collect(),
-                )
+                let load_deleted_blob = |i: usize| -> Option<Vec<u8>> {
+                    if !load_deleted[i] {
+                        return None;
+                    }
+                    deleted_staging[i].clone()
+                };
+                let load_added_blob = |i: usize| -> Option<Vec<u8>> {
+                    if !load_added[i] {
+                        return None;
+                    }
+                    added_staging[i].clone()
+                };
+                if loads_needed <= 32 {
+                    (
+                        (0..remaining_deleted.len())
+                            .map(load_deleted_blob)
+                            .collect(),
+                        (0..remaining_added.len()).map(load_added_blob).collect(),
+                    )
+                } else {
+                    (
+                        parallel_load_optional_blobs(
+                            odb,
+                            remaining_deleted.len(),
+                            par_opts,
+                            0,
+                            load_deleted_blob,
+                        ),
+                        parallel_load_optional_blobs(
+                            odb,
+                            remaining_added.len(),
+                            par_opts,
+                            0,
+                            load_added_blob,
+                        ),
+                    )
+                }
             } else {
-                (
-                    parallel_load_optional_blobs(
-                        odb,
-                        remaining_deleted.len(),
-                        par_opts,
-                        0,
-                        load_deleted_blob,
-                    ),
-                    parallel_load_optional_blobs(
-                        odb,
-                        remaining_added.len(),
-                        par_opts,
-                        0,
-                        load_added_blob,
-                    ),
-                )
+                let mut deleted_staging: Vec<Option<Vec<u8>>> = vec![None; remaining_deleted.len()];
+                for (row, &need) in load_deleted.iter().enumerate() {
+                    if !need {
+                        continue;
+                    }
+                    let di = remaining_deleted[row];
+                    deleted_staging[row] = odb.read(&deleted[di].old_oid).ok().map(|obj| obj.data);
+                }
+                let mut added_staging: Vec<Option<Vec<u8>>> = vec![None; remaining_added.len()];
+                for (col, &need) in load_added.iter().enumerate() {
+                    if !need {
+                        continue;
+                    }
+                    let ai = remaining_added[col];
+                    added_staging[col] = read_added_entry_bytes(odb, &added[ai], work_root);
+                }
+                let load_deleted_blob = |i: usize| -> Option<Vec<u8>> {
+                    if !load_deleted[i] {
+                        return None;
+                    }
+                    deleted_staging[i].clone()
+                };
+                let load_added_blob = |i: usize| -> Option<Vec<u8>> {
+                    if !load_added[i] {
+                        return None;
+                    }
+                    added_staging[i].clone()
+                };
+                if loads_needed <= 32 {
+                    (
+                        (0..remaining_deleted.len())
+                            .map(load_deleted_blob)
+                            .collect(),
+                        (0..remaining_added.len()).map(load_added_blob).collect(),
+                    )
+                } else {
+                    (
+                        parallel_load_optional_blobs(
+                            odb,
+                            remaining_deleted.len(),
+                            par_opts,
+                            0,
+                            load_deleted_blob,
+                        ),
+                        parallel_load_optional_blobs(
+                            odb,
+                            remaining_added.len(),
+                            par_opts,
+                            0,
+                            load_added_blob,
+                        ),
+                    )
+                }
             };
 
             let est_table_bytes: usize = deleted_contents
@@ -9248,7 +9701,10 @@ pub fn detect_renames_with_policy(
 
     result = prune_break_deletions_obviated_by_renames(result);
     sort_entries_by_path(&mut result);
-    Ok(result)
+    Ok(RenameDetectionResult {
+        entries: result,
+        inexact_skipped,
+    })
 }
 
 /// Detect copies among diff entries.
@@ -9868,6 +10324,7 @@ pub fn postprocess_diff_entries(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     opts: &DiffPostprocessOptions,
+    inexact_notice: Option<&mut Option<InexactRenameDetectionSkipped>>,
 ) -> Result<Vec<DiffEntry>> {
     let mut entries = entries;
     if let Some(break_score) = opts.break_score {
@@ -9908,7 +10365,8 @@ pub fn postprocess_diff_entries(
             thread_policy,
         )
     } else if opts.rename_threshold < 100 {
-        detect_renames_with_policy(
+        let skip_basename = opts.break_score.is_some();
+        let out = detect_renames_with_policy(
             odb,
             work_root,
             entries,
@@ -9916,7 +10374,16 @@ pub fn postprocess_diff_entries(
             config,
             thread_policy,
             None,
-        )
+            DetectRenamesOptions {
+                skip_basename_heuristic: skip_basename,
+            },
+        )?;
+        if let Some(slot) = inexact_notice {
+            if out.inexact_skipped.is_some() {
+                *slot = out.inexact_skipped;
+            }
+        }
+        Ok(out.entries)
     } else {
         Ok(entries)
     }
@@ -9985,7 +10452,9 @@ pub fn status_apply_rename_copy_detection(
             config,
             thread_policy,
             cancel_watch,
-        );
+            DetectRenamesOptions::default(),
+        )
+        .map(|r| r.entries);
     }
     let source_tree_entries: Vec<(String, FileMode, ObjectId)> = match head_tree {
         Some(oid) => flatten_tree(odb, oid, "")?
@@ -12509,7 +12978,8 @@ fn read_submodule_head(sub_dir: &Path) -> Option<ObjectId> {
 #[must_use]
 pub fn submodule_embedded_git_dir(sub_dir: &Path) -> Option<PathBuf> {
     let gitfile = sub_dir.join(".git");
-    if gitfile.is_file() {
+    let meta = fs::metadata(&gitfile).ok()?;
+    if meta.is_file() {
         let content = fs::read_to_string(&gitfile).ok()?;
         let gitdir = content
             .lines()
@@ -12520,7 +12990,7 @@ pub fn submodule_embedded_git_dir(sub_dir: &Path) -> Option<PathBuf> {
         } else {
             sub_dir.join(gitdir)
         })
-    } else if gitfile.is_dir() {
+    } else if meta.is_dir() {
         Some(gitfile)
     } else {
         None
@@ -12534,14 +13004,7 @@ pub fn submodule_embedded_git_dir(sub_dir: &Path) -> Option<PathBuf> {
 /// `.git` directory placeholder.
 #[must_use]
 pub(crate) fn is_unregistered_embedded_git_repo(index: &Index, rel: &str, abs: &Path) -> bool {
-    if rel.is_empty() {
-        return false;
-    }
-    if index
-        .entries
-        .iter()
-        .any(|e| e.path.as_slice() == rel.as_bytes() && e.mode == crate::index::MODE_GITLINK)
-    {
+    if rel.is_empty() || index.has_gitlink_at(rel.as_bytes()) {
         return false;
     }
     let Some(git_dir) = submodule_embedded_git_dir(abs) else {
@@ -12890,8 +13353,8 @@ mod line_compare_key_tests {
         for text in texts {
             let side = LineSide::from_text(text);
             let mut normalized = Vec::new();
-            let keys = line_compare_keys(text, &side, WhitespaceMode::default(), &mut normalized);
-            let expected: Vec<String> = side.lines.iter().map(line_diff_token).collect();
+            let keys = line_compare_keys(&side, WhitespaceMode::default(), &mut normalized);
+            let expected: Vec<String> = side.lines().map(|l| line_diff_token(&l)).collect();
             assert_eq!(keys, expected, "text {text:?}");
             let source = text.as_bytes().as_ptr_range();
             assert!(
@@ -12911,7 +13374,7 @@ mod line_compare_key_tests {
             ..WhitespaceMode::default()
         };
         let mut normalized = Vec::new();
-        let keys = line_compare_keys(text, &side, ws, &mut normalized);
+        let keys = line_compare_keys(&side, ws, &mut normalized);
         assert_eq!(keys, vec!["ab", "ab"]);
     }
 
@@ -13000,8 +13463,18 @@ mod entry_order_tests {
         let policy = ThreadPolicy::default();
         let odb = Odb::new(Path::new("/nonexistent-objects"));
         let run = |entries: Vec<DiffEntry>| {
-            detect_renames_with_policy(&odb, None, entries, 50, &config, &policy, None)
-                .expect("no blob is read without both adds and deletes")
+            detect_renames_with_policy(
+                &odb,
+                None,
+                entries,
+                50,
+                &config,
+                &policy,
+                None,
+                DetectRenamesOptions::default(),
+            )
+            .expect("no blob is read without both adds and deletes")
+            .entries
         };
         let sorted = vec![
             entry(DiffStatus::Deleted, "a", None),
@@ -15567,6 +16040,134 @@ mod line_coverage_tests {
     }
 
     #[test]
+    fn exact_rename_detection_pairs_only_equal_blobs_among_many() -> Result<()> {
+        let temp = TempDir::new().expect("tempdir");
+        let odb = Odb::new(temp.path());
+        const N: usize = 200;
+        let shared = odb.write(ObjectKind::Blob, b"shared\n").expect("blob");
+        let mut old_names = Vec::with_capacity(N + 1);
+        let mut old_oids = Vec::with_capacity(N + 1);
+        for i in 0..N {
+            old_names.push(format!("old/{i:03}.txt"));
+            old_oids.push(
+                odb.write(ObjectKind::Blob, format!("old {i}\n").as_bytes())
+                    .expect("blob"),
+            );
+        }
+        old_names.push("shared-old.txt".to_owned());
+        old_oids.push(shared);
+        let old_pairs: Vec<(&str, ObjectId)> = old_names
+            .iter()
+            .zip(old_oids.iter().copied())
+            .map(|(name, oid)| (name.as_str(), oid))
+            .collect();
+
+        let mut new_names = Vec::with_capacity(N + 1);
+        let mut new_oids = Vec::with_capacity(N + 1);
+        for i in 0..N {
+            new_names.push(format!("new/{i:03}.txt"));
+            new_oids.push(
+                odb.write(ObjectKind::Blob, format!("new {i}\n").as_bytes())
+                    .expect("blob"),
+            );
+        }
+        new_names.push("shared-new.txt".to_owned());
+        new_oids.push(shared);
+        let new_pairs: Vec<(&str, ObjectId)> = new_names
+            .iter()
+            .zip(new_oids.iter().copied())
+            .map(|(name, oid)| (name.as_str(), oid))
+            .collect();
+
+        let old_tree = write_tree(&odb, &old_pairs);
+        let new_tree = write_tree(&odb, &new_pairs);
+        let raw = diff_trees(&odb, Some(&old_tree), Some(&new_tree), "")?;
+        assert_eq!(raw.len(), (N + 1) * 2);
+        let config = ConfigSet::new();
+        let policy = ThreadPolicy::default();
+        let renamed = detect_renames_with_policy(
+            &odb,
+            None,
+            raw,
+            50,
+            &config,
+            &policy,
+            None,
+            DetectRenamesOptions::default(),
+        )?;
+        assert_eq!(
+            renamed
+                .entries
+                .iter()
+                .filter(|e| e.status == DiffStatus::Renamed)
+                .count(),
+            1
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pathspec_limited_diff_does_not_pair_outside_pathspec() -> Result<()> {
+        let temp = TempDir::new().expect("tempdir");
+        let odb = Odb::new(temp.path());
+        let shared = odb.write(ObjectKind::Blob, b"payload\n").expect("blob");
+        let mut old_names = Vec::new();
+        let mut old_oids = Vec::new();
+        for i in 0..50 {
+            old_names.push(format!("bulk/old/{i:02}.txt"));
+            old_oids.push(
+                odb.write(ObjectKind::Blob, format!("bulk old {i}\n").as_bytes())
+                    .expect("blob"),
+            );
+        }
+        old_names.push("target.txt".to_owned());
+        old_oids.push(shared);
+        let old_pairs: Vec<(&str, ObjectId)> = old_names
+            .iter()
+            .zip(old_oids.iter().copied())
+            .map(|(name, oid)| (name.as_str(), oid))
+            .collect();
+
+        let mut new_names = Vec::new();
+        let mut new_oids = Vec::new();
+        for i in 0..50 {
+            new_names.push(format!("bulk/new/{i:02}.txt"));
+            new_oids.push(
+                odb.write(ObjectKind::Blob, format!("bulk new {i}\n").as_bytes())
+                    .expect("blob"),
+            );
+        }
+        new_names.push("elsewhere.txt".to_owned());
+        new_oids.push(shared);
+        let new_pairs: Vec<(&str, ObjectId)> = new_names
+            .iter()
+            .zip(new_oids.iter().copied())
+            .map(|(name, oid)| (name.as_str(), oid))
+            .collect();
+
+        let old_tree = write_tree(&odb, &old_pairs);
+        let new_tree = write_tree(&odb, &new_pairs);
+        let config = ConfigSet::new();
+        let policy = ThreadPolicy::default();
+        let pathspecs = vec!["target.txt".to_owned()];
+        let entries = diff_trees_with_renames_for_pathspecs_and_policy(
+            &odb,
+            Some(&old_tree),
+            Some(&new_tree),
+            "",
+            &pathspecs,
+            None,
+            50,
+            &config,
+            &policy,
+        )?;
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].status, DiffStatus::Deleted);
+        assert_eq!(entries[0].path(), "target.txt");
+        Ok(())
+    }
+
+    #[test]
     fn detect_copies_keeps_modifications_as_modifications() {
         // `git diff -C` reports `b` as modified even though its new content equals the
         // old content of the also-modified `a`: only created paths become copies.
@@ -15617,8 +16218,17 @@ mod line_coverage_tests {
         assert!(!with_renames.is_empty());
         let config = ConfigSet::new();
         let policy = ThreadPolicy::default();
-        let detected =
-            detect_renames_with_policy(&odb, None, raw.clone(), 50, &config, &policy, None)?;
+        let detected = detect_renames_with_policy(
+            &odb,
+            None,
+            raw.clone(),
+            50,
+            &config,
+            &policy,
+            None,
+            DetectRenamesOptions::default(),
+        )?
+        .entries;
         let source_flat = flatten_tree_entries(&odb, &old_tree)?;
         let _ = detect_copies_with_policy(
             &odb,
@@ -15646,6 +16256,7 @@ mod line_coverage_tests {
             &config,
             &policy,
             &opts,
+            None,
         )?;
         assert!(!processed.is_empty());
         let _ = status_apply_rename_copy_detection(
@@ -16035,6 +16646,7 @@ mod line_coverage_tests {
                 &config,
                 &policy,
                 &opts,
+                None,
             )?;
         }
         Ok(())

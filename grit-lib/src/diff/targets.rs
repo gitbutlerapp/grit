@@ -8,11 +8,10 @@ use thiserror::Error;
 
 use crate::config::ConfigSet;
 use crate::diff::changes::{
-    load_changes, load_object_changes, staged_entries_in, unstaged_entries_in, worktree_entries_in,
-    FileChange, WorktreeSide,
+    load_changes, load_object_changes, pathspec_restrict_paths_for_scan, staged_entries_in,
+    unstaged_entries_in, worktree_entries_in, FileChange, WorktreeSide,
 };
 use crate::diff::detail::LineStat;
-use crate::diff::diff_trees_with_renames_and_policy;
 use crate::diff::structured::StructuredHunk;
 use crate::diff::{
     apply_diff_filter, sort_entries_by_path, tree_diff_structured_parallel,
@@ -434,7 +433,7 @@ pub(crate) fn collect_files_for_target(
         DiffTarget::WorktreeVsHead => {
             let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
             let changes = filter_file_changes(
-                worktree_changes(repo, head_tree.as_ref(), rename_threshold)?,
+                worktree_changes(repo, head_tree.as_ref(), rename_threshold, pathspecs)?,
                 repo,
                 pathspecs,
             )?;
@@ -442,14 +441,17 @@ pub(crate) fn collect_files_for_target(
         }
         DiffTarget::WorktreeVsTree(tree) => {
             let changes = filter_file_changes(
-                worktree_changes(repo, Some(tree), rename_threshold)?,
+                worktree_changes(repo, Some(tree), rename_threshold, pathspecs)?,
                 repo,
                 pathspecs,
             )?;
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::IndexVsHead => {
-            let restrict = pathspec_restrict_set(pathspecs);
+            let index = repo.index_handle().load()?;
+            let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
+            let restrict =
+                pathspec_restrict_paths_for_scan(repo, &index, pathspecs, head_tree.as_ref())?;
             let changes = filter_file_changes(
                 staged_changes(repo, rename_threshold, restrict)?,
                 repo,
@@ -458,14 +460,18 @@ pub(crate) fn collect_files_for_target(
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::WorktreeVsIndex => {
-            let changes =
-                filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs)?;
+            let changes = filter_file_changes(
+                unstaged_changes(repo, rename_threshold, pathspecs)?,
+                repo,
+                pathspecs,
+            )?;
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::Commit(oid) => {
             let items = commit_changes(
                 repo,
                 oid,
+                pathspecs,
                 &config,
                 &thread_policy,
                 opts.clone(),
@@ -479,6 +485,7 @@ pub(crate) fn collect_files_for_target(
                     repo,
                     base,
                     new,
+                    pathspecs,
                     &config,
                     &thread_policy,
                     opts.clone(),
@@ -488,6 +495,7 @@ pub(crate) fn collect_files_for_target(
                 empty_tree_to_side_changes(
                     repo,
                     new,
+                    pathspecs,
                     &config,
                     &thread_policy,
                     opts.clone(),
@@ -506,13 +514,21 @@ pub(crate) fn collect_files_for_target(
 pub(crate) fn stored_target_entries(
     repo: &Repository,
     target: &DiffTarget,
+    pathspecs: &[String],
     options: &DiffOptions,
-) -> Result<Option<Vec<DiffEntry>>> {
+) -> Result<Option<super::core::DiffEntriesResult>> {
     let rename_threshold = options.rename_threshold_u32();
     let entries = match target {
         DiffTarget::Commit(oid) => {
             let config = repo.config()?;
-            commit_diff_entries(repo, oid, &config, &repo.thread_policy(), rename_threshold)?
+            commit_diff_entries(
+                repo,
+                oid,
+                pathspecs,
+                &config,
+                &repo.thread_policy(),
+                rename_threshold,
+            )?
         }
         DiffTarget::Trees { old, new } => {
             let config = repo.config()?;
@@ -522,6 +538,7 @@ pub(crate) fn stored_target_entries(
                     repo,
                     base,
                     new,
+                    pathspecs,
                     &config,
                     &thread_policy,
                     rename_threshold,
@@ -529,6 +546,7 @@ pub(crate) fn stored_target_entries(
                 None => empty_tree_to_side_diff_entries(
                     repo,
                     new,
+                    pathspecs,
                     &config,
                     &thread_policy,
                     rename_threshold,
@@ -546,20 +564,22 @@ pub(crate) fn stored_target_entries(
 /// Keep the entries within `pathspecs` whose status passes `options.filter` (`--diff-filter`).
 pub(crate) fn limit_target_entries(
     repo: &Repository,
-    entries: Vec<DiffEntry>,
+    mut result: super::core::DiffEntriesResult,
     pathspecs: &[String],
     options: &DiffOptions,
-) -> Result<Vec<DiffEntry>> {
+) -> Result<super::core::DiffEntriesResult> {
     let entries = if pathspecs.is_empty() {
-        entries
+        result.entries
     } else {
         let matcher = repo.pathspec_matcher(pathspecs)?;
-        entries
+        result
+            .entries
             .into_iter()
             .filter(|entry| diff_entry_matches(&matcher, entry))
             .collect()
     };
-    Ok(apply_diff_filter(entries, options.filter))
+    result.entries = apply_diff_filter(entries, options.filter);
+    Ok(result)
 }
 
 fn filter_and_map_tree_structured(
@@ -788,17 +808,14 @@ fn filter_tree_diff(
         .collect())
 }
 
-fn pathspec_restrict_set(pathspecs: &[String]) -> Option<Arc<BTreeSet<String>>> {
-    if pathspecs.is_empty() {
-        None
-    } else {
-        Some(Arc::new(pathspecs.iter().cloned().collect()))
-    }
-}
-
-fn unstaged_changes(repo: &Repository, rename_threshold: u32) -> Result<Vec<FileChange>> {
+fn unstaged_changes(
+    repo: &Repository,
+    rename_threshold: u32,
+    pathspecs: &[String],
+) -> Result<Vec<FileChange>> {
     let mut index = repo.index_handle().load()?;
-    unstaged_changes_inner(repo, &mut index, rename_threshold, None)
+    let restrict = pathspec_restrict_paths_for_scan(repo, &index, pathspecs, None)?;
+    unstaged_changes_inner(repo, &mut index, rename_threshold, restrict)
 }
 
 fn unstaged_changes_inner(
@@ -907,9 +924,11 @@ fn worktree_changes(
     repo: &Repository,
     base_tree: Option<&ObjectId>,
     rename_threshold: u32,
+    pathspecs: &[String],
 ) -> Result<Vec<FileChange>> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let mut index = repo.index_handle().load()?;
+    let restrict = pathspec_restrict_paths_for_scan(repo, &index, pathspecs, base_tree)?;
     let rules = Arc::new(Mutex::new(WorktreeRules::from_repository(repo, &index)?));
     let entries = worktree_entries_in(
         repo,
@@ -918,6 +937,7 @@ fn worktree_changes(
         &rules,
         base_tree,
         rename_threshold,
+        restrict,
     )?;
     let side = WorktreeSide {
         work_tree,
@@ -927,51 +947,82 @@ fn worktree_changes(
     load_changes(repo.odb(), entries, Some(&side))
 }
 
+fn pathspec_matcher_for_stored_diff<'a>(
+    repo: &'a Repository,
+    pathspecs: &'a [String],
+) -> Result<Option<crate::pathspec::PathspecMatcher<'a>>> {
+    if pathspecs.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(repo.pathspec_matcher(pathspecs)?))
+    }
+}
+
 fn tree_commit_diff_entries(
     repo: &Repository,
     base: &ObjectId,
     tip: &ObjectId,
+    pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     rename_threshold: u32,
-) -> Result<Vec<DiffEntry>> {
+) -> Result<super::core::DiffEntriesResult> {
     let odb = repo.odb();
     let base_tree = super::core::tree_oid_for_diff_side(odb, base)?;
     let tip_tree = super::core::tree_oid_for_diff_side(odb, tip)?;
-    let mut entries = diff_trees_with_renames_and_policy(
+    let pathspec_matcher = pathspec_matcher_for_stored_diff(repo, pathspecs)?;
+    let mut result = super::core::diff_trees_with_renames_for_pathspecs_and_policy_result(
         odb,
         Some(&base_tree),
         Some(&tip_tree),
         "",
+        pathspecs,
+        pathspec_matcher.as_ref(),
         rename_threshold,
         config,
         thread_policy,
     )?;
-    sort_entries_by_path(&mut entries);
-    Ok(entries)
+    sort_entries_by_path(&mut result.entries);
+    Ok(result)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn tree_commit_changes(
     repo: &Repository,
     base: &ObjectId,
     tip: &ObjectId,
+    pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     diff_options: DiffOptions,
     rename_threshold: u32,
 ) -> Result<Vec<TreeDiffStructured>> {
-    let entries =
-        tree_commit_diff_entries(repo, base, tip, config, thread_policy, rename_threshold)?;
-    tree_diff_structured_parallel(repo.odb(), entries, config, thread_policy, diff_options)
+    let result = tree_commit_diff_entries(
+        repo,
+        base,
+        tip,
+        pathspecs,
+        config,
+        thread_policy,
+        rename_threshold,
+    )?;
+    tree_diff_structured_parallel(
+        repo.odb(),
+        result.entries,
+        config,
+        thread_policy,
+        diff_options,
+    )
 }
 
 fn commit_diff_entries(
     repo: &Repository,
     oid: &ObjectId,
+    pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     rename_threshold: u32,
-) -> Result<Vec<DiffEntry>> {
+) -> Result<super::core::DiffEntriesResult> {
     let commit = repo.odb().read_commit(oid)?;
     let new_tree = commit.tree;
     let old_tree = match commit.parents.first() {
@@ -979,63 +1030,99 @@ fn commit_diff_entries(
         None => None,
     };
 
-    let mut entries = diff_trees_with_renames_and_policy(
+    let pathspec_matcher = pathspec_matcher_for_stored_diff(repo, pathspecs)?;
+    let mut result = super::core::diff_trees_with_renames_for_pathspecs_and_policy_result(
         repo.odb(),
         old_tree.as_ref(),
         Some(&new_tree),
         "",
+        pathspecs,
+        pathspec_matcher.as_ref(),
         rename_threshold,
         config,
         thread_policy,
     )?;
-    sort_entries_by_path(&mut entries);
-    Ok(entries)
+    sort_entries_by_path(&mut result.entries);
+    Ok(result)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn commit_changes(
     repo: &Repository,
     oid: &ObjectId,
+    pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     diff_options: DiffOptions,
     rename_threshold: u32,
 ) -> Result<Vec<TreeDiffStructured>> {
-    let entries = commit_diff_entries(repo, oid, config, thread_policy, rename_threshold)?;
-    tree_diff_structured_parallel(repo.odb(), entries, config, thread_policy, diff_options)
+    let result = commit_diff_entries(
+        repo,
+        oid,
+        pathspecs,
+        config,
+        thread_policy,
+        rename_threshold,
+    )?;
+    tree_diff_structured_parallel(
+        repo.odb(),
+        result.entries,
+        config,
+        thread_policy,
+        diff_options,
+    )
 }
 
 fn empty_tree_to_side_diff_entries(
     repo: &Repository,
     side: &ObjectId,
+    pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     rename_threshold: u32,
-) -> Result<Vec<DiffEntry>> {
+) -> Result<super::core::DiffEntriesResult> {
     let tip_tree = super::core::tree_oid_for_diff_side(repo.odb(), side)?;
-    let mut entries = diff_trees_with_renames_and_policy(
+    let pathspec_matcher = pathspec_matcher_for_stored_diff(repo, pathspecs)?;
+    let mut result = super::core::diff_trees_with_renames_for_pathspecs_and_policy_result(
         repo.odb(),
         None,
         Some(&tip_tree),
         "",
+        pathspecs,
+        pathspec_matcher.as_ref(),
         rename_threshold,
         config,
         thread_policy,
     )?;
-    sort_entries_by_path(&mut entries);
-    Ok(entries)
+    sort_entries_by_path(&mut result.entries);
+    Ok(result)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn empty_tree_to_side_changes(
     repo: &Repository,
     side: &ObjectId,
+    pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     diff_options: DiffOptions,
     rename_threshold: u32,
 ) -> Result<Vec<TreeDiffStructured>> {
-    let entries =
-        empty_tree_to_side_diff_entries(repo, side, config, thread_policy, rename_threshold)?;
-    tree_diff_structured_parallel(repo.odb(), entries, config, thread_policy, diff_options)
+    let result = empty_tree_to_side_diff_entries(
+        repo,
+        side,
+        pathspecs,
+        config,
+        thread_policy,
+        rename_threshold,
+    )?;
+    tree_diff_structured_parallel(
+        repo.odb(),
+        result.entries,
+        config,
+        thread_policy,
+        diff_options,
+    )
 }
 
 fn peel_diff_commit(repo: &Repository, oid: ObjectId) -> ResolveResult<ObjectId> {
@@ -1247,7 +1334,11 @@ pub(crate) fn unstaged_file_diffs_with_peer_hunks(
             (fc.path.clone(), structured.hunks)
         })
         .collect();
-    let unstaged = filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs)?;
+    let unstaged = filter_file_changes(
+        unstaged_changes(repo, rename_threshold, pathspecs)?,
+        repo,
+        pathspecs,
+    )?;
     let files = file_diffs_from_worktree_changes(unstaged, &config, &thread_policy, opts)?;
     Ok((files, peer_hunks))
 }
@@ -1389,7 +1480,7 @@ mod tests {
             DiffTarget::IndexVsHead,
             DiffTarget::WorktreeVsIndex,
         ] {
-            let entries = stored_target_entries(&repo, &target, &DiffOptions::default())
+            let entries = stored_target_entries(&repo, &target, &[], &DiffOptions::default())
                 .expect("no object reads");
             assert_eq!(entries, None, "{target:?}");
         }
@@ -1410,11 +1501,14 @@ mod tests {
             new_oid: ObjectId::zero(),
             score: None,
         };
-        let entries = vec![
-            entry(DiffStatus::Added, "a.txt"),
-            entry(DiffStatus::Deleted, "dir/b.txt"),
-            entry(DiffStatus::Modified, "dir/c.rs"),
-        ];
+        let entries = crate::diff::DiffEntriesResult {
+            entries: vec![
+                entry(DiffStatus::Added, "a.txt"),
+                entry(DiffStatus::Deleted, "dir/b.txt"),
+                entry(DiffStatus::Modified, "dir/c.rs"),
+            ],
+            inexact_rename_skipped: None,
+        };
         let paths = |kept: Vec<DiffEntry>| -> Vec<String> {
             kept.iter()
                 .map(|e| {
@@ -1427,20 +1521,20 @@ mod tests {
         };
         let all = DiffOptions::default();
         let kept = limit_target_entries(&repo, entries.clone(), &[], &all).expect("limit");
-        assert_eq!(paths(kept), ["a.txt", "dir/b.txt", "dir/c.rs"]);
+        assert_eq!(paths(kept.entries), ["a.txt", "dir/b.txt", "dir/c.rs"]);
 
         let kept =
             limit_target_entries(&repo, entries.clone(), &["dir".to_owned()], &all).expect("dir");
-        assert_eq!(paths(kept), ["dir/b.txt", "dir/c.rs"]);
+        assert_eq!(paths(kept.entries), ["dir/b.txt", "dir/c.rs"]);
 
         let added_or_deleted = all.with_filter(Some("AD".parse().expect("filter")));
         let kept =
             limit_target_entries(&repo, entries.clone(), &[], &added_or_deleted).expect("filter");
-        assert_eq!(paths(kept), ["a.txt", "dir/b.txt"]);
+        assert_eq!(paths(kept.entries), ["a.txt", "dir/b.txt"]);
 
         let kept = limit_target_entries(&repo, entries, &["dir".to_owned()], &added_or_deleted)
             .expect("both");
-        assert_eq!(paths(kept), ["dir/b.txt"]);
+        assert_eq!(paths(kept.entries), ["dir/b.txt"]);
     }
 
     #[test]

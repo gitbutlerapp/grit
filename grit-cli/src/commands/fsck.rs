@@ -153,7 +153,7 @@ impl HumanRender for FsckOutcome {
         }
 
         if !self.dangling.is_empty() {
-            outln!(w, "\nUnreachable objects ({}):", self.dangling.len());
+            outln!(w, "\nDangling objects ({}):", self.dangling.len());
             for d in &self.dangling {
                 outln!(w, "  {} {}", d.kind, d.oid);
             }

@@ -13,7 +13,8 @@ use crate::diff::core::diff_trees_for_pathspecs;
 use crate::diff::posix_ere::PosixEre;
 use crate::diff::structured::SideBytes;
 use crate::diff::{
-    detect_renames_with_policy, renames_from_config, DiffEntry, DiffStatus, RenameDetection,
+    detect_renames_with_policy, renames_from_config, DetectRenamesOptions, DiffEntry, DiffStatus,
+    RenameDetection,
 };
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, FileMode, ObjectId};
@@ -215,7 +216,18 @@ impl Pickaxe {
     ) -> Result<bool> {
         let diff_options = crate::diff::DiffOptions::from_config(renames.config());
         let odb = repo.odb();
-        let entries = diff_trees_for_pathspecs(odb, parent_tree, Some(commit_tree), paths)?;
+        let pathspec_matcher = if paths.is_empty() {
+            None
+        } else {
+            Some(repo.pathspec_matcher(paths)?)
+        };
+        let entries = diff_trees_for_pathspecs(
+            odb,
+            parent_tree,
+            Some(commit_tree),
+            paths,
+            pathspec_matcher.as_ref(),
+        )?;
         // Rename pairing only ever combines an added path with a deleted one, so every other
         // entry can be tested (and can end the search) before paying for it.
         let mut unpaired = Vec::new();
@@ -246,15 +258,19 @@ impl Pickaxe {
             return Ok(false);
         }
         let pairs = match renames.threshold {
-            Some(threshold) => detect_renames_with_policy(
-                odb,
-                None,
-                unpaired,
-                threshold,
-                renames.config,
-                &ThreadPolicy::default(),
-                None,
-            )?,
+            Some(threshold) => {
+                detect_renames_with_policy(
+                    odb,
+                    None,
+                    unpaired,
+                    threshold,
+                    renames.config,
+                    &ThreadPolicy::default(),
+                    None,
+                    DetectRenamesOptions::default(),
+                )?
+                .entries
+            }
             None => unpaired,
         };
         for entry in &pairs {
@@ -472,8 +488,8 @@ fn line_grep_match(
 
     let before = LineSide::from_text(old_text);
     let after = LineSide::from_text(new_text);
-    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
-    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
+    let old_lines: Vec<&str> = before.lines().map(|l| l.body).collect();
+    let new_lines: Vec<&str> = after.lines().map(|l| l.body).collect();
     for op in compacted_line_ops_for_options(old_text, new_text, diff_options) {
         match op {
             DiffOp::Equal { .. } => {}

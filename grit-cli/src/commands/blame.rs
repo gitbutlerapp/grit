@@ -103,7 +103,7 @@ struct BlameDisplayLine {
 impl HumanRender for BlameOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         for line in &self.display_lines {
-            let short = short_oid(&line.commit.to_hex());
+            let short = line.commit.to_short_hex();
             let prefix = if line.marker == ' ' {
                 String::new()
             } else {
@@ -136,7 +136,7 @@ impl MarkdownRender for BlameOutcome {
         );
         outln!(w, "| ---: | :---: | --- | --- | --- | ---: | --- |");
         for line in &self.display_lines {
-            let short = short_oid(&line.commit.to_hex());
+            let short = line.commit.to_short_hex();
             let content = markdown::escape_table_cell(&line.content);
             let mark = match line.marker {
                 ' ' => String::new(),
@@ -157,10 +157,6 @@ impl MarkdownRender for BlameOutcome {
         outln!(w);
         Ok(())
     }
-}
-
-fn short_oid(full: &str) -> String {
-    full.chars().take(7).collect()
 }
 
 fn blame_line_marker(unblamable: bool, ignored: bool) -> char {

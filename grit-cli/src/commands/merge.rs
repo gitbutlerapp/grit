@@ -17,7 +17,7 @@ use anyhow::{bail, Context, Result};
 use grit_lib::change_id::ChangeId;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::operation::Conflict;
 use grit_lib::porcelain::commit::HookPolicy;
 use grit_lib::porcelain::merge::{
@@ -520,10 +520,6 @@ impl MarkdownRender for MergeOutcome {
         markdown::print_merge_outcome(w, self)?;
         Ok(())
     }
-}
-
-fn short_hex(oid: &str) -> &str {
-    oid.get(..7).unwrap_or(oid)
 }
 
 pub fn run(

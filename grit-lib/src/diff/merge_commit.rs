@@ -116,10 +116,11 @@ pub fn commit_diff_files(
             None => None,
         };
         let entries = tree_diff_entries(
-            repo.odb(),
+            repo,
             old_tree.as_ref(),
             Some(&commit.tree),
             "",
+            pathspecs,
             config,
             thread_policy,
         )?;
@@ -190,10 +191,11 @@ pub(crate) fn commit_first_parent_diff_entries(
         None => None,
     };
     let entries = tree_diff_entries(
-        odb,
+        repo,
         old_tree.as_ref(),
         Some(&commit.tree),
         "",
+        pathspecs,
         config,
         thread_policy,
     )?;
@@ -201,21 +203,29 @@ pub(crate) fn commit_first_parent_diff_entries(
 }
 
 fn tree_diff_entries(
-    odb: &Odb,
+    repo: &Repository,
     old_tree: Option<&ObjectId>,
     new_tree: Option<&ObjectId>,
     prefix: &str,
+    pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
 ) -> Result<Vec<DiffEntry>> {
     let threshold = crate::diff::renames_from_config(config)
         .threshold_percent()
         .unwrap_or(crate::diff::RENAME_DETECTION_DISABLED);
-    crate::diff::diff_trees_with_renames_and_policy(
-        odb,
+    let pathspec_matcher = if pathspecs.is_empty() {
+        None
+    } else {
+        Some(repo.pathspec_matcher(pathspecs)?)
+    };
+    crate::diff::core::diff_trees_with_renames_for_pathspecs_and_policy(
+        repo.odb(),
         old_tree,
         new_tree,
         prefix,
+        pathspecs,
+        pathspec_matcher.as_ref(),
         threshold,
         config,
         thread_policy,
@@ -270,6 +280,7 @@ fn combined_commit_diff_files(
         return Ok(DiffFilesOutput {
             files,
             totals: None,
+            inexact_rename_skipped: None,
         });
     }
     if detail == DiffDetail::NameStatus {
@@ -280,6 +291,7 @@ fn combined_commit_diff_files(
         return Ok(DiffFilesOutput {
             files,
             totals: None,
+            inexact_rename_skipped: None,
         });
     }
 
@@ -324,7 +336,11 @@ fn combined_commit_diff_files(
     } else {
         None
     };
-    Ok(DiffFilesOutput { files, totals })
+    Ok(DiffFilesOutput {
+        files,
+        totals,
+        inexact_rename_skipped: None,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

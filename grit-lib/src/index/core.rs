@@ -2239,6 +2239,38 @@ impl Index {
             .position(|e| Self::entry_matches(e, path, stage))
     }
 
+    /// Position of the stage-0 entry for `path`, for callers looking up many paths in index
+    /// order.
+    ///
+    /// On a sorted index this gallops forward from `*cursor`, so paths that arrive in index order
+    /// (a sorted set of plain paths) cost about one comparison each when they are dense; a path
+    /// sorting before the cursor restarts from the beginning. `*cursor` is left at `path`'s
+    /// position. Unsorted indexes fall back to [`Self::find_entry_pos`].
+    pub(crate) fn find_stage0_pos_from(&self, path: &[u8], cursor: &mut usize) -> Option<usize> {
+        if !self.entries_sorted {
+            return self.find_entry_pos(path, 0);
+        }
+        let entries = &self.entries;
+        let cmp = |e: &IndexEntry| Self::cmp_paths(e.path.as_slice(), path).then(e.stage().cmp(&0));
+        let start = (*cursor).min(entries.len());
+        let start = match start.checked_sub(1).map(|prev| cmp(&entries[prev])) {
+            Some(order) if !order.is_lt() => 0,
+            _ => start,
+        };
+        let tail = &entries[start..];
+        let mut bound = 1;
+        while bound < tail.len() && cmp(&tail[bound - 1]).is_lt() {
+            bound = bound.saturating_mul(2);
+        }
+        let window = &tail[..bound.min(tail.len())];
+        let pos = start + window.partition_point(|e| cmp(e).is_lt());
+        *cursor = pos;
+        entries
+            .get(pos)
+            .is_some_and(|e| Self::entry_matches(e, path, 0))
+            .then_some(pos)
+    }
+
     /// Inclusive start and exclusive end of all entries sharing `path` (sorted indexes only).
     fn path_run_range_sorted(&self, path: &[u8]) -> (usize, usize) {
         debug_assert!(self.entries_sorted);
@@ -2297,6 +2329,20 @@ impl Index {
                 .binary_search_by(|e| Self::cmp_paths(e.path.as_slice(), path))
                 .is_ok()
         })
+    }
+
+    /// Whether some entry (at any stage) records `path` as a gitlink (mode `160000`).
+    ///
+    /// Binary search on sorted indexes; a linear scan otherwise.
+    pub(crate) fn has_gitlink_at(&self, path: &[u8]) -> bool {
+        let is_gitlink = |e: &IndexEntry| e.mode == MODE_GITLINK;
+        if self.entries_sorted {
+            let (start, end) = self.path_run_range_sorted(path);
+            return self.entries[start..end].iter().any(is_gitlink);
+        }
+        self.entries
+            .iter()
+            .any(|e| e.path.as_slice() == path && is_gitlink(e))
     }
 
     /// Inclusive start and exclusive end of entries strictly under `path/` (sorted indexes only).
@@ -2609,8 +2655,13 @@ impl Index {
             self.entries = kept;
         }
 
-        for path in invalidated_paths {
-            self.invalidate_after_path_removal(&path);
+        const BULK_INDEX_EXTENSION_INVALIDATE_MIN: usize = 64;
+        if invalidated_paths.len() >= BULK_INDEX_EXTENSION_INVALIDATE_MIN {
+            self.drop_derived_index_extensions();
+        } else {
+            for path in invalidated_paths {
+                self.invalidate_after_path_removal(&path);
+            }
         }
         self.touch_fsmonitor_after_entry_change();
     }
@@ -5913,6 +5964,117 @@ mod tests {
         idx.remove_directory_prefixes(&BTreeSet::from(["d005".to_owned(), "d0050".to_owned()]));
         assert!(idx.get(b"d005/f0.txt", 0).is_none());
         assert!(idx.get(b"d005/f1.txt", 0).is_none());
+    }
+
+    #[test]
+    fn find_stage0_pos_from_matches_find_entry_pos_in_any_order() {
+        let mut idx = Index::new();
+        let names: Vec<String> = (0..200).map(|i| format!("d{}/f{i:03}", i % 7)).collect();
+        for name in &names {
+            idx.add_or_replace(make_entry(name));
+        }
+        let mut conflicted = make_entry("d3/conflict");
+        conflicted.flags |= 2 << 12;
+        idx.add_or_replace(conflicted);
+        assert!(idx.entries_sorted);
+
+        let sorted: BTreeSet<&str> = names.iter().map(String::as_str).collect();
+        let mut cursor = 0;
+        index_path_cmp::reset();
+        let found: Vec<Option<usize>> = sorted
+            .iter()
+            .map(|path| idx.find_stage0_pos_from(path.as_bytes(), &mut cursor))
+            .collect();
+        // A constant ~5 comparisons per dense in-order path, against log2(entries) for a binary
+        // search (8 here, 16 on a 48k-entry index).
+        let cmps = index_path_cmp::take();
+        assert!(cmps <= names.len() * 6, "{cmps} comparisons");
+        for (path, found) in sorted.iter().zip(found) {
+            assert!(found.is_some());
+            assert_eq!(found, idx.find_entry_pos(path.as_bytes(), 0));
+        }
+
+        let mut cursor = 0;
+        for path in [
+            "d6/f200",
+            "d0/f000",
+            "missing",
+            "d3/conflict",
+            "d5/f005",
+            "a",
+            "zzz",
+        ] {
+            assert_eq!(
+                idx.find_stage0_pos_from(path.as_bytes(), &mut cursor),
+                idx.find_entry_pos(path.as_bytes(), 0),
+                "{path}"
+            );
+        }
+
+        let mut unsorted = idx.clone();
+        unsorted.entries.reverse();
+        unsorted.entries_sorted = false;
+        let mut cursor = 0;
+        assert_eq!(
+            unsorted.find_stage0_pos_from(b"d0/f000", &mut cursor),
+            unsorted.find_entry_pos(b"d0/f000", 0)
+        );
+    }
+
+    #[test]
+    fn has_gitlink_at_matches_any_stage_sorted_and_unsorted() {
+        let gitlink = |path: &str, stage: u16| {
+            let mut e = make_entry(path);
+            e.mode = MODE_GITLINK;
+            e.flags |= stage << 12;
+            e
+        };
+        let entries = vec![
+            make_entry("a"),
+            gitlink("sub", 0),
+            make_entry("sub.txt"),
+            gitlink("theirs", 3),
+            make_entry("theirs/inner"),
+            make_entry("z"),
+        ];
+        let sorted = sorted_index(entries.clone());
+        let mut unsorted = Index::new();
+        unsorted.entries = entries.into_iter().rev().collect();
+        unsorted.entries_sorted = false;
+        for idx in [&sorted, &unsorted] {
+            assert!(idx.has_gitlink_at(b"sub"));
+            assert!(idx.has_gitlink_at(b"theirs"));
+            assert!(!idx.has_gitlink_at(b"a"));
+            assert!(!idx.has_gitlink_at(b"sub.txt"));
+            assert!(!idx.has_gitlink_at(b"su"));
+            assert!(!idx.has_gitlink_at(b"theirs/inner"));
+            assert!(!idx.has_gitlink_at(b"missing"));
+        }
+    }
+
+    /// Status and add probe every untracked path for an embedded repository; a linear index scan
+    /// per probe made `status`/`add -A` quadratic on large worktrees.
+    #[test]
+    fn has_gitlink_at_sorted_is_sublinear() {
+        const N: usize = 100_000;
+        const M: usize = 1_000;
+        let mut idx = Index::new();
+        for i in 0..N {
+            idx.add_or_replace(make_entry(&format!("file/{i:06}.txt")));
+        }
+        assert!(idx.entries_sorted);
+        let probes: Vec<Vec<u8>> = (0..M)
+            .map(|i| format!("untracked/{i:06}.txt").into_bytes())
+            .collect();
+        index_path_cmp::reset();
+        assert!(probes.iter().all(|p| !idx.has_gitlink_at(p)));
+        let cmps = index_path_cmp::take();
+        let log_n = (N as f64).log2().ceil() as usize;
+        let bound = 4 * M * log_n;
+        assert!(
+            cmps < bound,
+            "gitlink probe comparisons {cmps} should stay under {bound} (N={N}, M={M})"
+        );
     }
 
     #[test]

@@ -43,9 +43,8 @@ use crate::merge_trees::{
 use crate::objects::{parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::operation::{conflicts_from_index, Conflict};
-use crate::pathspec::{
-    has_glob_chars, matches_pathspec_list, pathspec_is_exclude, PathspecListMatcher,
-};
+use crate::pathspec::{has_glob_chars, pathspec_is_exclude};
+use crate::porcelain::add::restricted_index_paths_for_pathspecs;
 use crate::porcelain::branch_error::BranchError;
 use crate::porcelain::checkout::is_eligible_for_parallel_checkout;
 use crate::porcelain::checkout::smudge_bytes_for_worktree_path;
@@ -59,6 +58,11 @@ use crate::porcelain::hunk_select::{
 use crate::porcelain::index_from_tree::{
     index_from_tree_with_seeded_stats, index_from_tree_with_seeded_worktree_stats,
     index_from_tree_with_worktree_stats,
+};
+use crate::porcelain::pathspec_match::{
+    diff_entry_path_mode, index_stage0_mode_or_regular, pathspec_entries_from_paths,
+    positive_pathspec_matches_any_path, positive_spec_matches_any_entries, PathspecMatchEntry,
+    RepositoryPathspecFilter, REGULAR_FILE_MODE,
 };
 use crate::porcelain::restore::{restore_paths_with_lock, RestoreOptions, RestoreSource};
 use crate::porcelain::status::{
@@ -419,17 +423,7 @@ impl StashPushOptions {
         if staged.is_empty() {
             return Ok(());
         }
-        let index_mtime = index_file_mtime(&repo.index_path());
-        let worktree_rules = WorktreeRules::from_repository(repo, &index)?;
-        let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(worktree_rules));
-        let diff_opts = DiffIndexToWorktreeOptions {
-            index_mtime,
-            ignore_submodule_untracked: true,
-            repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            config: repo.config().ok(),
-            worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
-            ..Default::default()
-        };
+        let diff_opts = stash_worktree_diff_opts(repo, &index, None)?;
         let (unstaged, _) =
             diff_index_to_worktree_with_options(repo.odb(), &mut index, work_tree, diff_opts)?;
         for entry in unstaged {
@@ -512,19 +506,42 @@ fn head_commit_subject(repo: &Repository, head_oid: &ObjectId) -> Result<String>
         .to_owned())
 }
 
-fn abbrev_head_oid(oid: &ObjectId) -> String {
-    oid.to_hex()[..7.min(oid.to_hex().len())].to_owned()
-}
-
 fn stash_context_message(
     repo: &Repository,
     head: &HeadState,
     head_oid: &ObjectId,
 ) -> Result<String> {
     let branch = head_branch_label(head);
-    let short = abbrev_head_oid(head_oid);
+    let short = head_oid.to_short_hex();
     let subject = head_commit_subject(repo, head_oid)?;
     Ok(format!("{branch}: {short} {subject}"))
+}
+
+fn stash_worktree_diff_opts(
+    repo: &Repository,
+    index: &Index,
+    pathspecs: Option<&[String]>,
+) -> Result<DiffIndexToWorktreeOptions> {
+    let index_mtime = index_file_mtime(&repo.index_path());
+    let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, index)?;
+    let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(worktree_rules));
+    let restrict_to_paths = match pathspecs {
+        Some(ps) if !ps.is_empty() => Some(std::sync::Arc::new(
+            restricted_index_paths_for_pathspecs(repo, index, ps, repo.pathspec_match_context())?,
+        )),
+        _ => None,
+    };
+    Ok(DiffIndexToWorktreeOptions {
+        index_mtime,
+        ignore_submodule_untracked: true,
+        repository_git_dir: Some(repo.git_dir().to_path_buf()),
+        config: repo.config().ok(),
+        worktree_rules: Some(rules_arc),
+        skip_inaccessible_paths: true,
+        diagnostics: Some(repo.diagnostics()),
+        restrict_to_paths,
+        ..DiffIndexToWorktreeOptions::default()
+    })
 }
 
 fn staged_change_paths(
@@ -536,14 +553,26 @@ fn staged_change_paths(
     Ok(staged.into_iter().map(|e| e.path().to_string()).collect())
 }
 
-fn filter_paths_by_pathspecs(paths: Vec<String>, pathspecs: &[String]) -> Vec<String> {
+fn filter_paths_by_pathspecs(
+    repo: &Repository,
+    paths: Vec<String>,
+    pathspecs: &[String],
+) -> Result<Vec<String>> {
     if pathspecs.is_empty() {
-        return paths;
+        return Ok(paths);
     }
-    paths
+    let index = repo.load_index().ok();
+    let filter = RepositoryPathspecFilter::try_new(repo, pathspecs)?;
+    Ok(paths
         .into_iter()
-        .filter(|path| matches_pathspec_list(path, pathspecs))
-        .collect()
+        .filter(|path| {
+            let mode = index
+                .as_ref()
+                .map(|idx| index_stage0_mode_or_regular(idx, path))
+                .unwrap_or(REGULAR_FILE_MODE);
+            filter.matches_entry(path, mode)
+        })
+        .collect())
 }
 
 fn staged_change_paths_for_options(
@@ -553,7 +582,7 @@ fn staged_change_paths_for_options(
     options: &StashPushOptions,
 ) -> Result<Vec<String>> {
     let paths = staged_change_paths(repo, index, head_tree)?;
-    Ok(filter_paths_by_pathspecs(paths, &options.pathspecs))
+    filter_paths_by_pathspecs(repo, paths, &options.pathspecs)
 }
 
 /// What [`has_stashable_changes`] found.
@@ -599,17 +628,7 @@ fn has_stashable_changes(
     }
     let plain = index_is_plain_for_stash(&index);
     let include_untracked = options.include_untracked;
-    let index_mtime = index_file_mtime(&repo.index_path());
-    let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, &index)?;
-    let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(worktree_rules));
-    let diff_opts = DiffIndexToWorktreeOptions {
-        index_mtime,
-        ignore_submodule_untracked: true,
-        repository_git_dir: Some(repo.git_dir().to_path_buf()),
-        config: repo.config().ok(),
-        worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
-        ..Default::default()
-    };
+    let diff_opts = stash_worktree_diff_opts(repo, &index, None)?;
     let (unstaged, _) =
         diff_index_to_worktree_with_options(repo.odb(), &mut index, work_tree, diff_opts)?;
     if !unstaged.is_empty() {
@@ -618,9 +637,7 @@ fn has_stashable_changes(
     if !include_untracked {
         return Ok(StashableChanges::Nothing);
     }
-    let worktree_rules = rules_arc
-        .lock()
-        .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))?;
+    let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, &index)?;
     let (untracked, _, _) = collect_untracked_and_ignored_inner(
         repo,
         &mut index,
@@ -685,14 +702,7 @@ fn apply_worktree_diff_to_index(
     let unstaged = match precomputed {
         Some(unstaged) => unstaged,
         None => {
-            let diff_opts = DiffIndexToWorktreeOptions {
-                index_mtime,
-                ignore_submodule_untracked: true,
-                repository_git_dir: Some(repo.git_dir().to_path_buf()),
-                config: repo.config().ok(),
-                worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
-                ..Default::default()
-            };
+            let diff_opts = stash_worktree_diff_opts(repo, index, None)?;
             diff_index_to_worktree_with_options(repo.odb(), index, work_tree, diff_opts)?.0
         }
     };
@@ -1063,17 +1073,7 @@ fn tracked_stash_preview_paths(
     let mut index = repo.load_index()?;
     let mut paths: BTreeSet<String> = BTreeSet::new();
     if options.mode != StashMode::StagedOnly {
-        let index_mtime = index_file_mtime(&repo.index_path());
-        let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, &index)?;
-        let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(worktree_rules));
-        let diff_opts = DiffIndexToWorktreeOptions {
-            index_mtime,
-            ignore_submodule_untracked: true,
-            repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            config: repo.config().ok(),
-            worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
-            ..Default::default()
-        };
+        let diff_opts = stash_worktree_diff_opts(repo, &index, None)?;
         let (unstaged, _) =
             diff_index_to_worktree_with_options(repo.odb(), &mut index, work_tree, diff_opts)?;
         for entry in unstaged {
@@ -1151,8 +1151,11 @@ fn stash_push_pathspecs_active(options: &StashPushOptions) -> bool {
     !options.pathspecs.is_empty() && !selection_is_active(options)
 }
 
-fn pathspec_matcher<'a>(repo: &'a Repository, pathspecs: &'a [String]) -> PathspecListMatcher<'a> {
-    PathspecListMatcher::new(pathspecs, repo.pathspec_match_context())
+fn pathspec_matcher<'a>(
+    repo: &Repository,
+    pathspecs: &'a [String],
+) -> Result<RepositoryPathspecFilter<'a>> {
+    RepositoryPathspecFilter::try_new(repo, pathspecs)
 }
 
 fn index_stage0_paths(index: &Index) -> Vec<String> {
@@ -1183,13 +1186,13 @@ fn validate_stash_push_pathspecs(
         if pathspec_is_exclude(spec) {
             continue;
         }
-        if crate::pathspec::sorted_paths_match_pathspec(spec, &index_paths, ctx) {
+        if positive_pathspec_matches_any_path(repo, spec, &index_paths, Some(&index), ctx, None)? {
             continue;
         }
         if options.include_untracked {
             let untracked = collect_untracked_paths(repo, work_tree)?;
             let untracked_refs: Vec<&str> = untracked.iter().map(String::as_str).collect();
-            if crate::pathspec::sorted_paths_match_pathspec(spec, &untracked_refs, ctx) {
+            if positive_pathspec_matches_any_path(repo, spec, &untracked_refs, None, ctx, None)? {
                 continue;
             }
             if !has_glob_chars(spec) && !spec.starts_with(':') && work_tree.join(spec).exists() {
@@ -1205,12 +1208,16 @@ fn filter_paths_by_pathspec(
     repo: &Repository,
     pathspecs: &[String],
     paths: Vec<String>,
-) -> Vec<String> {
-    let matcher = pathspec_matcher(repo, pathspecs);
-    paths
+) -> Result<Vec<String>> {
+    let index = repo.load_index()?;
+    let matcher = pathspec_matcher(repo, pathspecs)?;
+    Ok(paths
         .into_iter()
-        .filter(|path| matcher.matches(path))
-        .collect()
+        .filter(|path| {
+            let mode = index_stage0_mode_or_regular(&index, path);
+            matcher.matches_entry(path, mode)
+        })
+        .collect())
 }
 
 fn has_stashable_changes_for_pathspecs(
@@ -1219,26 +1226,22 @@ fn has_stashable_changes_for_pathspecs(
     head_tree: &ObjectId,
     options: &StashPushOptions,
 ) -> Result<bool> {
-    let matcher = pathspec_matcher(repo, &options.pathspecs);
+    let matcher = pathspec_matcher(repo, &options.pathspecs)?;
     let mut index = repo.load_index()?;
     let staged = diff_index_to_tree(repo.odb(), &index, Some(head_tree), true)?;
-    if staged.iter().any(|e| matcher.matches(e.path())) {
+    if staged
+        .iter()
+        .any(|e| matcher.matches_entry(e.path(), diff_entry_path_mode(e)))
+    {
         return Ok(true);
     }
-    let index_mtime = index_file_mtime(&repo.index_path());
-    let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, &index)?;
-    let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(worktree_rules));
-    let diff_opts = DiffIndexToWorktreeOptions {
-        index_mtime,
-        ignore_submodule_untracked: true,
-        repository_git_dir: Some(repo.git_dir().to_path_buf()),
-        config: repo.config().ok(),
-        worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
-        ..Default::default()
-    };
+    let diff_opts = stash_worktree_diff_opts(repo, &index, Some(&options.pathspecs))?;
     let (unstaged, _) =
         diff_index_to_worktree_with_options(repo.odb(), &mut index, work_tree, diff_opts)?;
-    if unstaged.iter().any(|e| matcher.matches(e.path())) {
+    if unstaged
+        .iter()
+        .any(|e| matcher.matches_entry(e.path(), diff_entry_path_mode(e)))
+    {
         return Ok(true);
     }
     if options.include_untracked {
@@ -1246,7 +1249,7 @@ fn has_stashable_changes_for_pathspecs(
             repo,
             &options.pathspecs,
             collect_untracked_paths(repo, work_tree)?,
-        );
+        )?;
         if !untracked.is_empty() {
             return Ok(true);
         }
@@ -1261,23 +1264,12 @@ fn apply_worktree_diff_to_index_for_pathspecs(
     pathspecs: &[String],
     scope: &mut ProgressScope<'_>,
 ) -> Result<()> {
-    let matcher = pathspec_matcher(repo, pathspecs);
+    let matcher = pathspec_matcher(repo, pathspecs)?;
     let index_mtime = index_file_mtime(&repo.index_path());
-    let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, index)?;
-    let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(worktree_rules));
-    let diff_opts = DiffIndexToWorktreeOptions {
-        index_mtime,
-        ignore_submodule_untracked: true,
-        repository_git_dir: Some(repo.git_dir().to_path_buf()),
-        config: repo.config().ok(),
-        worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
-        ..Default::default()
-    };
+    let diff_opts = stash_worktree_diff_opts(repo, index, Some(pathspecs))?;
     let (unstaged, _) =
         diff_index_to_worktree_with_options(repo.odb(), index, work_tree, diff_opts)?;
-    let mut worktree_rules = rules_arc
-        .lock()
-        .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))?;
+    let mut worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, index)?;
     let precompose = crate::precompose_config::effective_core_precomposeunicode_with_config(
         Some(repo.git_dir()),
         Some(&worktree_rules.config_arc()),
@@ -1289,7 +1281,8 @@ fn apply_worktree_diff_to_index_for_pathspecs(
         scope.poll()?;
         scope.sink().inc(1);
         let path = entry.path();
-        if !matcher.matches(path) {
+        let mode = index_stage0_mode_or_regular(index, path);
+        if !matcher.matches_entry(path, mode) {
             continue;
         }
         if entry.status == DiffStatus::Deleted {
@@ -1317,22 +1310,30 @@ fn pathspecs_for_push_reset(
 ) -> Result<Vec<String>> {
     let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
     let head_entries = flatten_tree_full(repo.odb(), head_tree, "", protect)?;
-    let head_paths: Vec<&str> = head_entries.iter().map(|e| e.path.as_str()).collect();
+    let head_match_entries: Vec<PathspecMatchEntry<'_>> = head_entries
+        .iter()
+        .map(|e| PathspecMatchEntry {
+            path: e.path.as_str(),
+            mode: e.mode,
+        })
+        .collect();
     let index = repo.load_index()?;
     let index_owned = index_stage0_paths(&index);
     let index_paths: Vec<&str> = index_owned.iter().map(String::as_str).collect();
+    let index_match_entries = pathspec_entries_from_paths(&index_paths, Some(&index));
     let ctx = repo.pathspec_match_context();
-    Ok(pathspecs
-        .iter()
-        .filter(|spec| {
-            if pathspec_is_exclude(spec) {
-                return false;
-            }
-            crate::pathspec::sorted_paths_match_pathspec(spec, &head_paths, ctx)
-                || crate::pathspec::sorted_paths_match_pathspec(spec, &index_paths, ctx)
-        })
-        .cloned()
-        .collect())
+    let mut kept = Vec::new();
+    for spec in pathspecs {
+        if pathspec_is_exclude(spec) {
+            continue;
+        }
+        if positive_spec_matches_any_entries(repo, spec, &head_match_entries, ctx, None)?
+            || positive_spec_matches_any_entries(repo, spec, &index_match_entries, ctx, None)?
+        {
+            kept.push(spec.clone());
+        }
+    }
+    Ok(kept)
 }
 
 fn reset_stash_push_pathspecs_to_head(
@@ -1472,7 +1473,7 @@ fn build_stash_commit(
     let untracked_paths = if options.include_untracked {
         let all = collect_untracked_paths(repo, work_tree)?;
         if pathspec_push {
-            filter_paths_by_pathspec(repo, &options.pathspecs, all)
+            filter_paths_by_pathspec(repo, &options.pathspecs, all)?
         } else {
             all
         }
@@ -2700,7 +2701,9 @@ fn apply_stash_commit(
                 )?;
             } else {
                 // Both sides changed differently — try content merge
-                use crate::merge_file::{merge, ConflictStyle, MergeFavor, MergeInput};
+                use crate::merge_file::{
+                    merge, ConflictStyle, MergeFavor, MergeInput, TREE_MERGE_DIFF_ALGORITHM,
+                };
                 let input = MergeInput {
                     base: &base_content,
                     ours: &ours_content,
@@ -2711,7 +2714,7 @@ fn apply_stash_commit(
                     favor: MergeFavor::None,
                     style: ConflictStyle::Merge,
                     marker_size: 7,
-                    diff_algorithm: None,
+                    diff_algorithm: Some(TREE_MERGE_DIFF_ALGORITHM.to_string()),
                     ignore_all_space: false,
                     ignore_space_change: false,
                     ignore_space_at_eol: false,

@@ -37,7 +37,7 @@ $ grit push --json
 | --- | --- |
 | `conflict` | Merge, pick, rebase, or similar would introduce conflicts (`conflicts`, optional `commit`). A `grit history` rewrite or `grit rebase` that fails replaying another branch it would move also sets `refs` (full branch names) and a `hint` to pass `--update-refs head`. |
 | `hash_collision` | Refusing to store content that triggers SHA-1 collision detection (`oid`). |
-| `would_overwrite` | Checkout / switch / merge / pull would overwrite local or untracked files (`would_overwrite.reason`, `would_overwrite.paths`). The hint suggests `grit commit` or `grit stash` for local changes. |
+| `would_overwrite` | Checkout, switch, merge, or pull would overwrite local or untracked files (`would_overwrite.reason`, `would_overwrite.paths`). The hint suggests `grit commit` or `grit stash` for local changes. |
 | `operation_in_progress` | `grit switch` refused while a merge, rebase, pick or revert is paused (grit's or one `git` started); finish or abort it first. |
 | `invalid_pattern` | Invalid filter pattern (exit 129). |
 | `usage` | Subcommand usage mistake (exit 2), e.g. `grit branch` flag combinations. |
@@ -71,4 +71,13 @@ $ grit push --json
 | `git_dir_path_io` | Commit, gc, or ref update could not write under `.git/` (`paths`, often one path such as `.git/objects` or `.git/refs/heads/main`). Typical causes: read-only or root-owned `.git` metadata, or another thread/process updating the same index or ref (Windows often reports this as the file being in use). Hint: for permission problems check `ls -l .git` and fix ownership; when the message says the file is in use, retry after the other updater finishes. |
 | `nothing_staged` | `grit commit` with `commit.autoStage=false` or `--staged` while the index matches `HEAD` but the work tree has unstaged or untracked paths. Hint: `grit add` or `grit commit -- <path>`. |
 | `nothing_to_commit` | `grit commit` on a genuinely clean tree (or after auto-staging cancels out against `HEAD`). |
+| `not_a_repository` | Command run outside any Git repository (or parent directory). |
+| `commit_message_required` | `grit commit` without `-m`, `-F`, amend/reuse, or a pending merge message. |
+| `empty_commit_message` | `grit commit -m ''`, empty `-F`, or a hook that cleared the message. |
+| `identity_unknown` | Author or committer identity could not be resolved (`hint` names `grit config --global user.name` / `user.email`). |
+| `tag_already_exists` | Create tag when the name already exists (hint mentions `--force`). |
+| `no_operation_in_progress` | `merge --abort`, `rebase --continue`, `pick --continue`, or similar when nothing is paused; the `error` text names the operation. |
+| `pathspec_no_match` | `grit add`, `rm`, `restore`, `commit -- <paths>`, or stash path selection with no matching files. |
+| `stash_not_found` | `grit stash pop` / `apply` / `drop` with an empty stash or an invalid index (`hint` for empty stash). |
+| `path_not_found` | `grit blame` (or similar) when the path is absent from the named revision and not on disk. |
 | `gitbutler_workspace` | `grit commit` while `HEAD` is on a GitButler workspace (`gitbutler/workspace`, topped by GitButler's workspace commit). GitButler rewrites that branch, so a commit there would be lost. Hint: commit with `but commit`, or switch to a branch first. |

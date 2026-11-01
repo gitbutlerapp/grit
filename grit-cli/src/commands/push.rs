@@ -115,6 +115,10 @@ pub struct PushRefResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub deleted: Option<bool>,
+    /// The library's status, which [`Self::status`] and [`Self::reason`] summarize.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub detail: PushRefStatus,
 }
 
 /// Short display name for a pushed remote ref (`refs/heads/foo` → `foo`).
@@ -160,24 +164,32 @@ impl HumanRender for PushOutcome {
                     }
                 }
                 PushRefOutcomeStatus::UpToDate => outln!(w, "  {target} already up to date"),
-                PushRefOutcomeStatus::Rejected => {
-                    let detail = result.reason.as_deref().unwrap_or("rejected");
-                    if detail == "stale" {
-                        outln!(
-                            w,
-                            "  rejected {target}: stale remote ref — run `grit fetch` and try again"
-                        );
-                    } else if detail == "remote_ref_missing" {
-                        outln!(w, "  rejected {target}: remote ref does not exist");
-                    } else if detail == "already_exists" {
-                        outln!(
-                            w,
-                            "  rejected {target}: created on the remote meanwhile — run `grit fetch` and try again"
-                        );
-                    } else {
+                PushRefOutcomeStatus::Rejected => match result.detail {
+                    PushRefStatus::RejectStale => outln!(
+                        w,
+                        "  rejected {target}: stale remote ref — run `grit fetch` and try again"
+                    ),
+                    PushRefStatus::RejectRemoteRefMissing => {
+                        outln!(w, "  rejected {target}: remote ref does not exist")
+                    }
+                    PushRefStatus::RejectAlreadyExists => {
+                        if result.reason.as_deref() == Some("tag_exists") {
+                            outln!(
+                                w,
+                                "  rejected {target}: tag already exists (use `--force` to replace)"
+                            );
+                        } else {
+                            outln!(
+                                w,
+                                "  rejected {target}: created on the remote meanwhile — run `grit fetch` and try again"
+                            );
+                        }
+                    }
+                    _ => {
+                        let detail = result.reason.as_deref().unwrap_or("rejected");
                         outln!(w, "  rejected {target}: {detail}");
                     }
-                }
+                },
             }
         }
         if let Some(url) = &self.origin_added {
@@ -311,12 +323,8 @@ pub fn run(
     )
     .map_err(|e| anyhow::Error::msg(e.to_string()))?;
 
-    let pushed = report
-        .results
-        .iter()
-        .any(|r| matches!(r.status, PushRefStatus::Ok));
     let origin_added = match shorthand_url {
-        Some(url) if pushed && !dry_run => repo
+        Some(url) if report.has_updates() && !dry_run => repo
             .remotes()
             .add_origin_if_none(&url)
             .map_err(map_remote_error)?
@@ -324,7 +332,7 @@ pub fn run(
         _ => None,
     };
 
-    let mut rejected = false;
+    let rejected = report.has_rejections();
     let results = report
         .results
         .iter()
@@ -333,37 +341,27 @@ pub fn run(
             let reason = match result.status {
                 PushRefStatus::Ok | PushRefStatus::UpToDate => None,
                 PushRefStatus::RejectNonFastForward => {
-                    rejected = true;
                     Some("not a fast-forward — run `grit pull` first".to_owned())
                 }
-                PushRefStatus::RejectNeedsForce => {
-                    rejected = true;
-                    Some(
-                        "not a fast-forward — run `grit push --force-with-lease` after integrating, or `grit pull` first"
-                            .to_owned(),
-                    )
-                }
-                PushRefStatus::RejectStale => {
-                    rejected = true;
-                    Some("stale".to_owned())
-                }
-                PushRefStatus::RejectRemoteRefMissing => {
-                    rejected = true;
-                    Some("remote_ref_missing".to_owned())
-                }
+                PushRefStatus::RejectNeedsForce => Some(
+                    "not a fast-forward — run `grit push --force-with-lease` after integrating, or `grit pull` first"
+                        .to_owned(),
+                ),
+                PushRefStatus::RejectStale => Some("stale".to_owned()),
+                PushRefStatus::RejectRemoteRefMissing => Some("remote_ref_missing".to_owned()),
                 PushRefStatus::RejectAlreadyExists => {
-                    rejected = true;
-                    Some("already_exists".to_owned())
+                    if result.message.as_deref() == Some("tag already exists") {
+                        Some("tag_exists".to_owned())
+                    } else {
+                        Some("already_exists".to_owned())
+                    }
                 }
-                _ => {
-                    rejected = true;
-                    Some(
-                        result
-                            .message
-                            .clone()
-                            .unwrap_or_else(|| "rejected".to_owned()),
-                    )
-                }
+                _ => Some(
+                    result
+                        .message
+                        .clone()
+                        .unwrap_or_else(|| "rejected".to_owned()),
+                ),
             };
             PushRefResult {
                 ref_name: result.remote_ref.clone(),
@@ -374,6 +372,7 @@ pub fn run(
                 forced: result.forced,
                 src: result.local_ref.clone(),
                 deleted: result.deletion.then_some(true),
+                detail: result.status.clone(),
             }
         })
         .collect();
@@ -431,23 +430,78 @@ mod tests {
 
     #[test]
     fn push_status_serializes_snake_case() {
-        for (status, expected) in [
-            (PushRefOutcomeStatus::Ok, "ok"),
-            (PushRefOutcomeStatus::UpToDate, "up_to_date"),
-            (PushRefOutcomeStatus::Rejected, "rejected"),
+        for (detail, expected) in [
+            (PushRefStatus::Ok, "ok"),
+            (PushRefStatus::UpToDate, "up_to_date"),
+            (PushRefStatus::RejectFetchFirst, "rejected"),
         ] {
-            let result = PushRefResult {
-                ref_name: "refs/heads/main".to_owned(),
-                status,
-                reason: None,
-                old_oid: None,
-                new_oid: None,
-                forced: false,
-                src: None,
-                deleted: None,
-            };
+            let result = result_with(detail, None);
             let value = serde_json::to_value(&result).expect("json");
             assert_eq!(value["status"].as_str(), Some(expected));
+            assert!(value.get("detail").is_none(), "{value}");
         }
+    }
+
+    fn result_with(detail: PushRefStatus, reason: Option<&str>) -> PushRefResult {
+        PushRefResult {
+            ref_name: "refs/heads/main".to_owned(),
+            status: PushRefOutcomeStatus::from(&detail),
+            reason: reason.map(str::to_owned),
+            old_oid: None,
+            new_oid: None,
+            forced: false,
+            src: None,
+            deleted: None,
+            detail,
+        }
+    }
+
+    #[test]
+    fn human_rejection_wording_follows_the_library_status() {
+        let ctx = RenderContext {
+            now: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("timestamp"),
+            mode: OutputMode::Human,
+        };
+        let render = |result: PushRefResult| {
+            let outcome = PushOutcome {
+                remote: "origin".to_owned(),
+                kind: PushKind::Branch,
+                branch: Some("main".to_owned()),
+                results: vec![result],
+                rejected: true,
+                dry_run: false,
+                upstream_set: None,
+                origin_added: None,
+                remote_messages: Vec::new(),
+            };
+            let mut out = Vec::new();
+            outcome.render_human(&mut out, &ctx).expect("render");
+            String::from_utf8(out).expect("utf8")
+        };
+
+        let stale = render(result_with(PushRefStatus::RejectStale, Some("stale")));
+        assert!(
+            stale.contains("stale remote ref — run `grit fetch`"),
+            "{stale}"
+        );
+        let missing = render(result_with(
+            PushRefStatus::RejectRemoteRefMissing,
+            Some("remote_ref_missing"),
+        ));
+        assert!(missing.contains("remote ref does not exist"), "{missing}");
+        let exists = render(result_with(
+            PushRefStatus::RejectAlreadyExists,
+            Some("already_exists"),
+        ));
+        assert!(
+            exists.contains("created on the remote meanwhile"),
+            "{exists}"
+        );
+
+        let declined = render(result_with(PushRefStatus::RemoteRejected, Some("stale")));
+        assert!(
+            declined.contains("rejected origin refs/heads/main: stale"),
+            "a remote's own message is shown as given: {declined}"
+        );
     }
 }

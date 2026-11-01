@@ -57,6 +57,42 @@ fn sections(elf: &[u8]) -> Option<Vec<Section>> {
         .collect()
 }
 
+/// The input-section globs of every `*(...)` entry in a hot-text fragment.
+fn fragment_entries(fragment: &str) -> Vec<Vec<&str>> {
+    fragment
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("*(")?.strip_suffix(')'))
+        .map(|entry| entry.split_whitespace().collect())
+        .collect()
+}
+
+/// ThinLTO (the `release` profile) renames functions shared between codegen units to
+/// `name.llvm.<n>` while the `dist` build keeps them bare, so an entry that matched only one
+/// form would leave the function in `.text` in the other build.
+#[test]
+fn hot_text_entries_match_with_and_without_a_local_suffix() -> Result<(), Box<dyn Error>> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for fragment in ["../grit-lib/hot-text.ld", "hot-text.ld"] {
+        let text = std::fs::read_to_string(root.join(fragment))?;
+        let entries = fragment_entries(&text);
+        assert!(!entries.is_empty(), "{fragment} lists no functions");
+        for globs in entries {
+            for glob in &globs {
+                if glob.ends_with('*') {
+                    continue;
+                }
+                let suffixed = format!("{glob}.*");
+                assert!(
+                    globs.contains(&suffixed.as_str()),
+                    "{fragment}: `{glob}` has no `{suffixed}` companion; \
+                     regenerate it with scripts/gen_hot_text_layout.py"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(not(grit_hot_text_layout_disabled))]
 #[test]
 fn grit_binary_has_hot_text_section_ahead_of_text() -> Result<(), Box<dyn Error>> {
