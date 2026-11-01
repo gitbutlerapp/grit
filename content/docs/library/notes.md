@@ -16,6 +16,8 @@ Writes take an explicit committer and optional author ([`Signature`](rustdoc:gri
 
 A notes ref that points at something other than a notes commit or tree fails with `Error::NotesRefNotCommit`, and a malformed notes tree fails with `Error::NotesObjectKind`.
 
+When `notes.rewriteRef` (or `GIT_NOTES_REWRITE_REF`) lists one or more refs under `refs/notes/`, grit copies notes from old commits to their replacements after a rebase or other history rewrite, and after amend when post-rewrite hooks run. Enable or disable each command with `notes.rewrite.rebase` and `notes.rewrite.amend` (both default to true). Combine colliding notes with `notes.rewriteMode` (`concatenate`, `cat_sort_uniq`, `overwrite`, or `ignore`; default `concatenate`). The library entry point is [`copy_notes_for_rewrite`](rustdoc:grit_lib::notes::copy_notes_for_rewrite).
+
 ## Example
 
 <!-- include: grit-examples/src/bin/guide_notes.rs -->

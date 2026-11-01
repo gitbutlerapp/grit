@@ -33,6 +33,7 @@ use crate::ident::{
     prepare_commit_identity_line, replace_identity_date_suffix, Signature,
 };
 use crate::index::{Index, IndexLock, MODE_GITLINK};
+use crate::notes::{copy_notes_for_rewrite, NotesRewriteCommand};
 use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, serialize_commit, CommitData, FileMode, ObjectId, ObjectKind};
 use crate::pathspec::{matches_pathspec_list_with_context, pathspec_is_exclude, ResolvedPathspecs};
@@ -1913,6 +1914,7 @@ fn create_commit_with_index(
         hooks_run.push(HookName::PostCommit);
     }
     if let Some(old_tip) = replaced_tip.filter(|_| req.post_rewrite.enabled()) {
+        copy_notes_for_rewrite(repo, NotesRewriteCommand::Amend, &[(old_tip, oid)])?;
         if run_post_rewrite(repo, RewriteKind::Amend, &[(old_tip, oid)]) {
             hooks_run.push(HookName::PostRewrite);
         }

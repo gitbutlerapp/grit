@@ -1844,6 +1844,10 @@ pub enum Error {
     #[error("notes ref '{0}' must start with 'refs/notes/'")]
     InvalidNotesRef(String),
 
+    /// Unknown `notes.rewriteMode` or `GIT_NOTES_REWRITE_MODE` value.
+    #[error("unknown notes rewrite mode '{0}'")]
+    NotesRewriteMode(String),
+
     /// A notes ref resolves to an object that cannot hold notes (notes reads accept a commit or
     /// a tree; notes merges require a commit).
     #[error("notes ref '{notes_ref}' points to a {found}, not a notes commit")]
@@ -2211,6 +2215,7 @@ impl Error {
             Self::AmendUnborn => "amend_unborn",
             Self::NoteAlreadyExists { .. } => "note_already_exists",
             Self::InvalidNotesRef(..) => "invalid_notes_ref",
+            Self::NotesRewriteMode(..) => "notes_rewrite_mode",
             Self::NotesRefNotCommit { .. } => "notes_ref_not_commit",
             Self::NotesObjectKind { .. } => "notes_object_kind",
             Self::NotesMergeBothEmpty { .. } => "notes_merge_both_empty",

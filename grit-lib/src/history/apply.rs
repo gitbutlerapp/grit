@@ -10,6 +10,7 @@ use crate::diff::{mode_from_metadata, DiffEntry, DiffStatus};
 use crate::hooks::{run_post_checkout, run_post_rewrite, HookName, RewriteKind};
 use crate::index::MODE_REGULAR;
 use crate::lockfile::LockWait;
+use crate::notes::{copy_notes_for_rewrite, NotesRewriteCommand};
 use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
 use crate::porcelain::checkout::{
@@ -84,6 +85,8 @@ fn complete_applied_rewrite(
         }
         return Err(record_err);
     }
+    copy_notes_for_rewrite(repo, NotesRewriteCommand::Rebase, &plan.rewritten_pairs())
+        .map_err(HistoryError::from)?;
     let hooks_run = if opts.hooks.enabled() {
         run_rewrite_hooks(repo, plan)
     } else {

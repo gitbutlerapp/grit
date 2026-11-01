@@ -1089,6 +1089,9 @@ mod notes_git_compat;
 #[path = "notes_plan_dry_run.rs"]
 mod notes_plan_dry_run;
 #[cfg(feature = "full-tests")]
+#[path = "notes_rewrite.rs"]
+mod notes_rewrite;
+#[cfg(feature = "full-tests")]
 #[path = "notes_roundtrip.rs"]
 mod notes_roundtrip;
 #[cfg(feature = "full-tests")]
