@@ -1968,10 +1968,8 @@ fn walk_worktree_files_under(
 }
 
 fn pathdiff_worktree(work_tree: &Path, abs: &Path) -> Result<String> {
-    let rel = abs
-        .strip_prefix(work_tree)
-        .map_err(|_| Error::Message("path escaped the work tree during force-add walk".into()))?;
-    Ok(rel.to_string_lossy().replace('\\', "/"))
+    crate::repo_relpath::strip_worktree_prefix_stored(abs, work_tree)
+        .ok_or_else(|| Error::Message("path escaped the work tree during force-add walk".into()))
 }
 
 #[allow(clippy::too_many_arguments)]

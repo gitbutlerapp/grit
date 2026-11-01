@@ -918,7 +918,7 @@ pub fn expand_untracked_for_staging_with_rules(
                 precompose_unicode,
                 &tracked_paths,
                 dir,
-                &work_tree.join(dir),
+                &crate::repo_relpath::worktree_abs(work_tree, dir),
                 pathspecs,
                 Some(rules),
                 &mut expanded,
@@ -1963,13 +1963,13 @@ fn traditional_normal_directory_only(
         let mut sorted: Vec<_> = entries.filter_map(|e| e.ok()).collect();
         sorted.sort_by_key(|e| e.file_name());
         for entry in sorted {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name == ".git" {
+            let name = dir_entry_name_bytes(&entry);
+            if name == b".git" {
                 continue;
             }
             let path = entry.path();
-            let rel_child = crate::git_path::strip_worktree_prefix(&path, work_tree)
-                .unwrap_or_else(|| name.clone());
+            let rel_child = crate::repo_relpath::strip_worktree_prefix_stored(&path, work_tree)
+                .unwrap_or_else(|| crate::repo_relpath::storage_string(&name));
             if !pathspec_may_match_directory(&rel_child, pathspecs)
                 && !(entry.file_type().map(|ft| ft.is_file()).unwrap_or(false)
                     && status_path_matches_worktree_with_rules(

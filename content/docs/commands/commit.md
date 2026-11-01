@@ -199,7 +199,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `dry_run` | boolean | `true` when `--dry-run` was used |
 | `scope` | string | `auto_stage`, `staged`, `paths`, or `patch` — how the index was prepared |
 | `dry_run` | boolean | `true` when `--dry-run` was passed |
-| `files` | array | Path-level changes (`path`, `status`, optional `old_path` for renames) |
+| `files` | array | Path-level changes (`path`, `status`, optional `old_path` for renames). Each `path` uses the same stored encoding as [`grit status`](status.md) JSON (UTF-8 when valid, else `grit+pathhex:`). |
 | `change_id` | string or null | Stored `change-id` header on the new commit, or null when absent or dry-run (see [Change ids](../library/change-ids/)) |
 | `parents` | array of strings | Parent commit OIDs that would be stored |
 | `author` | object | `name`, `email`, and `date` (RFC 3339, same shape as [`grit log`](../log/) / [`grit show`](../show/)) |
