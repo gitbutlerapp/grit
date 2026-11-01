@@ -1,9 +1,6 @@
 //! Histogram-based line alignment for diff: index repeated lines on the old side, pick stable
 //! anchors in the new side, subdivide unmatched bands, and delegate ambiguous bands to Myers.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
 const BUCKET_CHAIN_LIMIT: u32 = 64;
 const MAX_REGION_SPLITS: u64 = 4096;
 
@@ -51,18 +48,20 @@ struct ClassNode {
 
 /// Index of old-window lines for histogram matching.
 struct OldWindowIndex {
+    old_start: usize,
     table_mask: usize,
     heads: Vec<Option<usize>>,
     nodes: Vec<ClassNode>,
-    /// For absolute old line index: previous line with identical text when scanning backward.
+    /// Window-local: previous old line (absolute) with identical text when scanning backward.
     prior_same: Vec<Option<usize>>,
-    /// For absolute old line index: node in `nodes` that owns the line.
+    /// Window-local: node in `nodes` that owns the line at `old_start + local`.
     owner: Vec<Option<usize>>,
 }
 
 impl OldWindowIndex {
     fn try_build(
         old: &[&[u8]],
+        old_hashes: &[u64],
         old_start: usize,
         old_len: usize,
         work: &mut HistogramWork,
@@ -71,13 +70,14 @@ impl OldWindowIndex {
         let table_size = 1usize << table_bits;
         let mask = table_size - 1;
         let old_end = old_start + old_len;
-        let mut prior_same = vec![None; old.len()];
-        let mut owner = vec![None; old.len()];
+        let mut prior_same = vec![None; old_len];
+        let mut owner = vec![None; old_len];
         let mut heads: Vec<Option<usize>> = vec![None; table_size];
         let mut nodes: Vec<ClassNode> = Vec::new();
 
         for line in (old_start..old_end).rev() {
-            let bucket = hash_line_bytes(old[line]) as usize & mask;
+            let local = line - old_start;
+            let bucket = old_hashes[line] as usize & mask;
             let mut chain = 0u32;
             let mut cursor = heads[bucket];
             let mut merged = false;
@@ -85,10 +85,10 @@ impl OldWindowIndex {
                 work.step_chain();
                 let head = nodes[ni].head_line;
                 if old[head] == old[line] {
-                    prior_same[line] = Some(head);
+                    prior_same[local] = Some(head);
                     nodes[ni].head_line = line;
                     nodes[ni].weight = nodes[ni].weight.saturating_add(1);
-                    owner[line] = Some(ni);
+                    owner[local] = Some(ni);
                     merged = true;
                     break;
                 }
@@ -108,9 +108,10 @@ impl OldWindowIndex {
                 next_in_bucket: heads[bucket],
             });
             heads[bucket] = Some(ni);
-            owner[line] = Some(ni);
+            owner[local] = Some(ni);
         }
         Ok(Self {
+            old_start,
             table_mask: mask,
             heads,
             nodes,
@@ -122,17 +123,42 @@ impl OldWindowIndex {
     fn lines_equal(&self, old: &[&[u8]], o: usize, new: &[&[u8]], n: usize) -> bool {
         old[o] == new[n]
     }
+
+    fn prior_same_abs(&self, old_line: usize) -> Option<usize> {
+        let local = old_line.checked_sub(self.old_start)?;
+        self.prior_same.get(local).copied().flatten()
+    }
+
+    fn weight_at(&self, old_line: usize) -> u32 {
+        let Some(local) = old_line.checked_sub(self.old_start) else {
+            return 1;
+        };
+        if local >= self.owner.len() {
+            return 1;
+        };
+        self.owner[local]
+            .map(|ni| self.nodes[ni].weight)
+            .unwrap_or(1)
+    }
 }
 
 fn hash_line_bytes(text: &[u8]) -> u64 {
-    let mut h = DefaultHasher::new();
-    text.hash(&mut h);
-    h.finish()
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in text {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+fn hash_lines(lines: &[&[u8]]) -> Vec<u64> {
+    lines.iter().map(|line| hash_line_bytes(line)).collect()
 }
 
 struct AnchorSearch<'a> {
     old: &'a [&'a [u8]],
     new: &'a [&'a [u8]],
+    new_hashes: &'a [u64],
     old_start: usize,
     old_end: usize,
     new_start: usize,
@@ -149,16 +175,17 @@ impl AnchorSearch<'_> {
         self.ambiguity_floor = BUCKET_CHAIN_LIMIT + 1;
         self.best = None;
         self.saw_match = false;
-        for new_line in self.new_start..self.new_end {
+        let mut new_line = self.new_start;
+        while new_line < self.new_end {
             self.work.step_anchor_scan();
-            self.consider_new_line(new_line);
+            new_line = self.consider_new_line(new_line);
         }
         let myers = self.saw_match && BUCKET_CHAIN_LIMIT < self.ambiguity_floor;
         Ok((myers, self.best))
     }
 
-    fn consider_new_line(&mut self, new_line: usize) {
-        let bucket = hash_line_bytes(self.new[new_line]) as usize & self.index.table_mask;
+    fn consider_new_line(&mut self, new_line: usize) -> usize {
+        let bucket = self.new_hashes[new_line] as usize & self.index.table_mask;
         let mut node_idx = self.index.heads[bucket];
         let mut next_new_hint = new_line + 1;
         while let Some(ni) = node_idx {
@@ -198,7 +225,7 @@ impl AnchorSearch<'_> {
                     o_lo -= 1;
                     n_lo -= 1;
                     if weight > 1 {
-                        weight = weight.min(self.weight_at(o_lo));
+                        weight = weight.min(self.index.weight_at(o_lo));
                     }
                 }
                 while o_hi + 1 < self.old_end
@@ -210,7 +237,7 @@ impl AnchorSearch<'_> {
                     o_hi += 1;
                     n_hi += 1;
                     if weight > 1 {
-                        weight = weight.min(self.weight_at(o_hi));
+                        weight = weight.min(self.index.weight_at(o_hi));
                     }
                 }
                 if next_new_hint <= n_hi {
@@ -230,12 +257,12 @@ impl AnchorSearch<'_> {
                     });
                     self.ambiguity_floor = weight;
                 }
-                let mut next_anchor = self.index.prior_same.get(anchor_old).copied().flatten();
+                let mut next_anchor = self.index.prior_same_abs(anchor_old);
                 while let Some(p) = next_anchor {
                     if p > o_hi {
                         break;
                     }
-                    next_anchor = self.index.prior_same.get(p).copied().flatten();
+                    next_anchor = self.index.prior_same_abs(p);
                 }
                 let Some(next_anchor) = next_anchor else {
                     break;
@@ -247,17 +274,7 @@ impl AnchorSearch<'_> {
             }
             node_idx = node.next_in_bucket;
         }
-        let _ = next_new_hint;
-    }
-
-    fn weight_at(&self, old_line: usize) -> u32 {
-        self.index
-            .owner
-            .get(old_line)
-            .copied()
-            .flatten()
-            .map(|ni| self.index.nodes[ni].weight)
-            .unwrap_or(1)
+        next_new_hint.max(new_line + 1)
     }
 }
 
@@ -306,124 +323,132 @@ struct TextRange {
     new_len: usize,
 }
 
+#[derive(Clone, Copy)]
+struct LineSide<'a> {
+    lines: &'a [&'a [u8]],
+    hashes: &'a [u64],
+}
+
 fn align_region<F>(
-    old: &[&[u8]],
-    new: &[&[u8]],
+    old: LineSide<'_>,
+    new: LineSide<'_>,
     changed1: &mut [bool],
     changed2: &mut [bool],
     fallback: &mut F,
-    range: TextRange,
+    mut range: TextRange,
     work: &mut HistogramWork,
 ) where
     F: FnMut(&mut [bool], &mut [bool], usize, usize, usize, usize),
 {
-    let TextRange {
-        old_start,
-        old_len,
-        new_start,
-        new_len,
-    } = range;
-    work.step_region();
-    if work.regions > MAX_REGION_SPLITS {
-        mark_myers(
-            changed1, changed2, fallback, old_start, old_len, new_start, new_len,
-        );
-        return;
-    }
-    if old_len == 0 && new_len == 0 {
-        return;
-    }
-    if old_len == 0 {
-        mark_all_changed(changed1, changed2, old_start, 0, new_start, new_len);
-        return;
-    }
-    if new_len == 0 {
-        mark_all_changed(changed1, changed2, old_start, old_len, new_start, 0);
-        return;
-    }
-
-    let index = match OldWindowIndex::try_build(old, old_start, old_len, work) {
-        Ok(idx) => idx,
-        Err(()) => {
+    let old_lines = old.lines;
+    let new_lines = new.lines;
+    let old_hashes = old.hashes;
+    let new_hashes = new.hashes;
+    let sides = (old, new);
+    loop {
+        let TextRange {
+            old_start,
+            old_len,
+            new_start,
+            new_len,
+        } = range;
+        work.step_region();
+        if work.regions > MAX_REGION_SPLITS {
             mark_myers(
                 changed1, changed2, fallback, old_start, old_len, new_start, new_len,
             );
             return;
         }
-    };
+        if old_len == 0 && new_len == 0 {
+            return;
+        }
+        if old_len == 0 {
+            mark_all_changed(changed1, changed2, old_start, 0, new_start, new_len);
+            return;
+        }
+        if new_len == 0 {
+            mark_all_changed(changed1, changed2, old_start, old_len, new_start, 0);
+            return;
+        }
 
-    let old_end = old_start + old_len;
-    let new_end = new_start + new_len;
-    let mut search = AnchorSearch {
-        old,
-        new,
-        old_start,
-        old_end,
-        new_start,
-        new_end,
-        index: &index,
-        work,
-        best: None,
-        ambiguity_floor: 0,
-        saw_match: false,
-    };
-    let (myers, band) = match search.run() {
-        Ok(v) => v,
-        Err(()) => {
+        let index = match OldWindowIndex::try_build(old_lines, old_hashes, old_start, old_len, work)
+        {
+            Ok(idx) => idx,
+            Err(()) => {
+                mark_myers(
+                    changed1, changed2, fallback, old_start, old_len, new_start, new_len,
+                );
+                return;
+            }
+        };
+
+        let old_end = old_start + old_len;
+        let new_end = new_start + new_len;
+        let mut search = AnchorSearch {
+            old: old_lines,
+            new: new_lines,
+            new_hashes,
+            old_start,
+            old_end,
+            new_start,
+            new_end,
+            index: &index,
+            work,
+            best: None,
+            ambiguity_floor: 0,
+            saw_match: false,
+        };
+        let (myers, band) = match search.run() {
+            Ok(v) => v,
+            Err(()) => {
+                mark_myers(
+                    changed1, changed2, fallback, old_start, old_len, new_start, new_len,
+                );
+                return;
+            }
+        };
+
+        if myers {
             mark_myers(
                 changed1, changed2, fallback, old_start, old_len, new_start, new_len,
             );
             return;
         }
-    };
 
-    if myers {
-        mark_myers(
-            changed1, changed2, fallback, old_start, old_len, new_start, new_len,
-        );
-        return;
-    }
+        let Some(band) = band else {
+            mark_all_changed(changed1, changed2, old_start, old_len, new_start, new_len);
+            return;
+        };
 
-    let Some(band) = band else {
-        mark_all_changed(changed1, changed2, old_start, old_len, new_start, new_len);
-        return;
-    };
-
-    if band.new_lo > new_start || band.old_lo > old_start {
-        align_region(
-            old,
-            new,
-            changed1,
-            changed2,
-            fallback,
-            TextRange {
-                old_start,
-                old_len: band.old_lo.saturating_sub(old_start),
-                new_start,
-                new_len: band.new_lo.saturating_sub(new_start),
-            },
-            work,
-        );
-    }
-    let tail_old_start = band.old_hi + 1;
-    let tail_old_len = old_end.saturating_sub(tail_old_start);
-    let tail_new_start = band.new_hi + 1;
-    let tail_new_len = new_end.saturating_sub(tail_new_start);
-    if tail_old_len > 0 || tail_new_len > 0 {
-        align_region(
-            old,
-            new,
-            changed1,
-            changed2,
-            fallback,
-            TextRange {
-                old_start: tail_old_start,
-                old_len: tail_old_len,
-                new_start: tail_new_start,
-                new_len: tail_new_len,
-            },
-            work,
-        );
+        if band.new_lo > new_start || band.old_lo > old_start {
+            align_region(
+                sides.0,
+                sides.1,
+                changed1,
+                changed2,
+                fallback,
+                TextRange {
+                    old_start,
+                    old_len: band.old_lo.saturating_sub(old_start),
+                    new_start,
+                    new_len: band.new_lo.saturating_sub(new_start),
+                },
+                work,
+            );
+        }
+        let tail_old_start = band.old_hi + 1;
+        let tail_old_len = old_end.saturating_sub(tail_old_start);
+        let tail_new_start = band.new_hi + 1;
+        let tail_new_len = new_end.saturating_sub(tail_new_start);
+        if tail_old_len == 0 && tail_new_len == 0 {
+            return;
+        }
+        range = TextRange {
+            old_start: tail_old_start,
+            old_len: tail_old_len,
+            new_start: tail_new_start,
+            new_len: tail_new_len,
+        };
     }
 }
 
@@ -485,9 +510,17 @@ where
     if old.is_empty() && new.is_empty() {
         return (changed1, changed2);
     }
+    let old_hashes = hash_lines(old);
+    let new_hashes = hash_lines(new);
     align_region(
-        old,
-        new,
+        LineSide {
+            lines: old,
+            hashes: &old_hashes,
+        },
+        LineSide {
+            lines: new,
+            hashes: &new_hashes,
+        },
         &mut changed1,
         &mut changed2,
         myers_fallback,
@@ -510,6 +543,23 @@ mod tests {
     const FROBNITZ_MAX_CHAIN_STEPS: u64 = 8_000_000;
     const FROBNITZ_MAX_REGIONS: u64 = 50_000;
     const FROBNITZ_MAX_ANCHOR_SCANS: u64 = 2_000_000;
+
+    fn po_fixture_pair(blocks: usize) -> (Vec<String>, Vec<String>) {
+        let mut old_lines = Vec::new();
+        let mut new_lines = Vec::new();
+        for i in 0..blocks {
+            old_lines.push(format!("#: file{}.c:{}", i % 300, i % 97));
+            old_lines.push(format!("msgid \"message {i}\""));
+            old_lines.push("msgstr \"\"".to_owned());
+            old_lines.push(String::new());
+            let msg_new = if i % 7 == 0 { i + 100_000 } else { i };
+            new_lines.push(format!("#: file{}.c:{}", i % 300, i % 97));
+            new_lines.push(format!("msgid \"message {msg_new}\""));
+            new_lines.push("msgstr \"\"".to_owned());
+            new_lines.push(String::new());
+        }
+        (old_lines, new_lines)
+    }
 
     #[test]
     fn frobnitz_histogram_work_bounded() {
@@ -545,6 +595,46 @@ mod tests {
             work.anchor_scans < FROBNITZ_MAX_ANCHOR_SCANS,
             "anchor_scans={}",
             work.anchor_scans
+        );
+    }
+
+    /// Issue #2451: repeated-line po files must not scan anchors quadratically.
+    /// Each region is one forward pass over its new window (with b_next skipping); total
+    /// scans stay O(n × splits), not O(n²) (~576M for n=24k).
+    const PO_6K_MAX_ANCHOR_SCANS: u64 = 2_500_000;
+    const PO_6K_MAX_REGIONS: u64 = 20_000;
+    const PO_6K_MAX_CHAIN_STEPS: u64 = 12_000_000;
+
+    #[test]
+    fn po_6000_block_histogram_work_bounded() {
+        let (old_lines, new_lines) = po_fixture_pair(6000);
+        let ol: Vec<&str> = old_lines.iter().map(String::as_str).collect();
+        let nl: Vec<&str> = new_lines.iter().map(String::as_str).collect();
+        let mut work = HistogramWork::default();
+        let _ = histogram_changed_flags_with_work(
+            &ol,
+            &nl,
+            &mut |c1, c2, o0, o1, n0, n1| {
+                for i in o0..o1 {
+                    c1[i] = true;
+                }
+                for j in n0..n1 {
+                    c2[j] = true;
+                }
+            },
+            &mut work,
+        );
+        assert!(
+            work.anchor_scans < PO_6K_MAX_ANCHOR_SCANS,
+            "anchor_scans={} regions={}",
+            work.anchor_scans,
+            work.regions
+        );
+        assert!(work.regions < PO_6K_MAX_REGIONS, "regions={}", work.regions);
+        assert!(
+            work.chain_steps < PO_6K_MAX_CHAIN_STEPS,
+            "chain_steps={}",
+            work.chain_steps
         );
     }
 }
