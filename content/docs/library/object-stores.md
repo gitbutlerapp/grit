@@ -103,7 +103,7 @@ Hooks still run, but there is nothing on disk for another program to open. They 
 
 ## What works with a custom primary
 
-Object reads and writes go through your store, so commits, staging (`porcelain::add::stage` and auto-staging commits), log, diff, merge, stash, notes, bundle creation and unbundling all work.
+Object reads and writes go through your store, so commits, staging (`porcelain::add::stage` and auto-staging commits), log, diff, merge (including cherry-pick and revert), stash, notes, bundle creation and unbundling all work.
 
 [`Repository::fsck`](rustdoc:grit_lib::repo::Repository::fsck) works too: it lists the store's objects with `ObjectStore::for_each_object`, re-hashes each one against its id and runs the usual object and connectivity checks. Read or hash failures are reported as `FsckIssue::BadObject`, since there is no loose file path to name.
 

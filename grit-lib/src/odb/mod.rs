@@ -4850,6 +4850,29 @@ mod tests {
     }
 
     #[test]
+    fn persist_mem_overlay_writes_through_custom_primary() {
+        use crate::objects::HashAlgo;
+        use std::sync::Arc;
+
+        let dir = TempDir::new().unwrap();
+        let objects = dir.path().join("objects");
+        fs::create_dir_all(&objects).unwrap();
+        let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
+        let odb = OdbBuilder::files(&objects)
+            .primary(store.clone())
+            .alternates(false)
+            .build();
+        odb.enable_mem_overlay();
+        let payload = b"overlay blob";
+        let oid = odb.write(ObjectKind::Blob, payload).unwrap();
+        assert!(!store.contains(&oid).unwrap());
+        odb.persist_mem_overlay().unwrap();
+        assert!(store.contains(&oid).unwrap());
+        assert_eq!(odb.read(&oid).unwrap().data, payload);
+        assert!(!odb.object_path(&oid).exists());
+    }
+
+    #[test]
     fn read_alternates_relative_path_and_symlinked_objects_dir() {
         use crate::pack::read_alternates_recursive;
 

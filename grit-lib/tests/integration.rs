@@ -506,7 +506,6 @@ mod create_commit_git_compat;
 mod crlf_utf_worktree_git_compat;
 #[path = "cross_pack_ref_delta_odb.rs"]
 mod cross_pack_ref_delta_odb;
-#[cfg(feature = "full-tests")]
 #[path = "custom_odb_porcelain.rs"]
 mod custom_odb_porcelain;
 #[cfg(feature = "full-tests")]
