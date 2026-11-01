@@ -136,10 +136,24 @@ fn parse_ack(line: &str) -> Option<(ObjectId, AckKind)> {
     Some((oid, kind))
 }
 
+/// What one v0/v1 ACK round told the client.
+#[derive(Default)]
+struct AckRound {
+    /// Commits acknowledged as `common` that were not common before, in order.
+    /// A stateless client must restate them as `have`s on every later request.
+    new_common: Vec<ObjectId>,
+    /// The server answered `ACK <oid> ready`: more haves would not shrink the pack.
+    ready: bool,
+}
+
 /// Read one ACK round, feeding `common`/`continue`/`ready` acks to the
-/// negotiator. Lifted from `read_ack_round_with_negotiator`.
-fn read_ack_round(reader: &mut dyn Read, negotiator: &mut SkippingNegotiator<'_>) -> Result<()> {
+/// negotiator.
+fn read_ack_round(
+    reader: &mut dyn Read,
+    negotiator: &mut SkippingNegotiator<'_>,
+) -> Result<AckRound> {
     let mut reader = reader;
+    let mut round = AckRound::default();
     while let Some(pkt) = pkt_line::read_packet(&mut reader)? {
         match pkt {
             pkt_line::Packet::Flush => break,
@@ -156,9 +170,75 @@ fn read_ack_round(reader: &mut dyn Read, negotiator: &mut SkippingNegotiator<'_>
                 if kind == AckKind::Bare {
                     break;
                 }
-                let _ = negotiator.ack(ack_oid)?;
+                let was_common = negotiator.ack(ack_oid)?;
+                match kind {
+                    AckKind::Common if !was_common => round.new_common.push(ack_oid),
+                    AckKind::Ready => round.ready = true,
+                    _ => {}
+                }
             }
             _ => {}
+        }
+    }
+    Ok(round)
+}
+
+/// Read the server's answer to `done`: `NAK` when nothing was common, else the
+/// final bare `ACK <oid>`, after any `ACK <oid> common`/`ready` lines for the
+/// haves sent along with `done` (or restated on a stateless request).
+fn read_final_ack(reader: &mut dyn Read) -> Result<()> {
+    let mut reader = reader;
+    loop {
+        match pkt_line::read_packet(&mut reader)? {
+            None => return Err(Error::Message("unexpected EOF after done".to_owned())),
+            Some(pkt_line::Packet::Flush) => {
+                return Err(Error::Message("unexpected flush after done".to_owned()))
+            }
+            Some(pkt_line::Packet::Data(ln)) => {
+                let ln = ln.trim_end();
+                if ln == "NAK" {
+                    return Ok(());
+                }
+                match parse_ack(ln) {
+                    Some((_, AckKind::Bare)) => return Ok(()),
+                    Some(_) => {}
+                    None => {
+                        pkt_line::reject_err_line(ln)?;
+                        return Ok(());
+                    }
+                }
+            }
+            Some(_) => return Ok(()),
+        }
+    }
+}
+
+/// Mark advertised refs that we already track at the same peeled commit as
+/// `known_common`, excluding `wants`.
+///
+/// Unchanged refs avoid walking parent chains for every server tip during an
+/// incremental fetch; moved refs are discovered via `have`s.
+fn seed_known_common(
+    negotiator: &mut SkippingNegotiator<'_>,
+    advertised: &[(String, ObjectId)],
+    wants: &HashSet<ObjectId>,
+) -> Result<()> {
+    let local = negotiator.repo();
+    let mut local_by_name: std::collections::HashMap<String, ObjectId> =
+        std::collections::HashMap::new();
+    for prefix in ["refs/heads/", "refs/tags/"] {
+        if let Ok(entries) = crate::refs::list_refs_in(local, prefix) {
+            for (name, oid) in entries {
+                local_by_name.insert(name, oid);
+            }
+        }
+    }
+    for (name, oid) in advertised {
+        if wants.contains(oid) || local_by_name.get(name) != Some(oid) {
+            continue;
+        }
+        if let Ok(Some(c)) = local.odb().peel_to_commit(*oid) {
+            negotiator.known_common(c)?;
         }
     }
     Ok(())
@@ -215,14 +295,13 @@ fn append_shallow_request_v0(
     for oid in local_shallow {
         pkt_line::write_line_to_vec(req, &format!("shallow {}", oid.to_hex()))?;
     }
+    // v0/v1 carry `deepen-relative` only as a capability on the first `want`
+    // line; Git's upload-pack rejects it as a standalone request line.
     if let Some((depth, relative)) = opts.wire_deepen() {
         if relative && !server_caps.contains("deepen-relative") {
             return Err(Error::FetchDeepenRelativeUnsupported);
         }
         pkt_line::write_line_to_vec(req, &format!("deepen {depth}"))?;
-        if relative {
-            pkt_line::write_line_to_vec(req, "deepen-relative")?;
-        }
     }
     if let Some(since) = opts
         .deepen_since
@@ -250,14 +329,17 @@ fn append_shallow_request_v0(
 /// the server reported (`shallow`/`unshallow`).
 ///
 /// Drives the [`SkippingNegotiator`] over the connection: sends `want` lines
-/// (with v0/v1 capabilities) and the advertised refs as `known_common`, batches
-/// local `have`s with flushes (reading interleaved ACK rounds), sends `done`,
-/// consumes the final ACK/NAK, then demuxes the side-band pack.
+/// (with v0/v1 capabilities), seeds the advertised refs we already have as
+/// `known_common`, batches local `have`s with flushes (reading interleaved ACK
+/// rounds until the server is ready), sends `done`, consumes the final ACK/NAK,
+/// then demuxes the side-band pack. Over stateless RPC every request restates
+/// the want block and the haves acknowledged as common so far.
 ///
 /// When `opts` requests a deepen (or the repo is already shallow), the `want`
 /// block carries the client's `shallow <oid>` grafts and the `deepen*` args, and
-/// the server precedes the pack with a `shallow-info` section that this reads
-/// into the returned [`ShallowUpdate`].
+/// the server precedes its replies with a `shallow-info` section that this reads
+/// into the returned [`ShallowUpdate`]. Such a request still offers haves (the
+/// wanted tips included), but seeds no `known_common`.
 #[allow(clippy::too_many_arguments)]
 fn negotiate_pack(
     local: &Repository,
@@ -277,12 +359,14 @@ fn negotiate_pack(
         return Ok((None, ShallowUpdate::default()));
     };
 
-    // A deepen/shallow request changes the negotiation: the server precedes the
-    // pack with a `shallow-info` section, and the client's local history is not a
-    // usable negotiation base (its objects bottom out at grafts), so we skip
-    // offering `have`s. Mirrors `fetch-pack.c`'s shallow handling.
+    // A deepen/shallow request makes the server precede its replies with a
+    // `shallow-info` section, but it still negotiates: the walk stops at local
+    // shallow commits and the server bounds the haves by our `shallow` lines, so
+    // a deepen only ships history the client lacks. Its wants are usually local
+    // already (the tips being deepened) and are offered as haves too, and
+    // advertised tips are not pre-marked common, as in Git.
     let shallow_request = opts.has_deepen_request() || !local_shallow.is_empty();
-    let skip_haves = shallow_request || skip_local_haves;
+    let stateless = conn.stateless_rpc();
 
     // Capture the advertised refs before borrowing the writer (avoids aliasing
     // the connection's reader/writer with its accessors). v0/v1 shallow servers
@@ -319,7 +403,7 @@ fn negotiate_pack(
     // Match `git fetch-pack`: with a single unique OID, repeat the bare want.
     // git-daemon expects this. (Not done for shallow requests, which append
     // shallow/deepen lines instead.)
-    if wants.len() == 1 && !skip_haves {
+    if wants.len() == 1 && !shallow_request && !skip_local_haves {
         pkt_line::write_line_to_vec(&mut req, &format!("want {}", first_want.to_hex()))?;
     }
     if let Some(spec) = wire_filter {
@@ -327,40 +411,31 @@ fn negotiate_pack(
     }
     append_shallow_request_v0(&mut req, &server_caps, local_shallow, opts)?;
     req.extend_from_slice(b"0000");
-    conn.writer().write_all(&req)?;
-    conn.writer().flush()?;
+
+    // A stateless server keeps nothing between POSTs, so every request restates
+    // the want block followed by each have it has acknowledged as common. A
+    // duplex stream sends the want block once. Stateless requests without a
+    // deepen carry the want block in the first have round instead of a POST of
+    // their own; a deepen posts it alone first to learn the new shallow list.
+    let mut state = req;
+    if !stateless || shallow_request {
+        conn.writer().write_all(&state)?;
+        conn.writer().flush()?;
+    }
+    if !stateless {
+        state.clear();
+    }
 
     // Build the negotiator from local ref tips (heads, tags, HEAD), peeled to
-    // commits, excluding the wants. Advertised tips we already have become
-    // `known_common`.
+    // commits, excluding the wants unless deepening. Advertised tips we already
+    // have become `known_common` for a plain fetch.
     let mut negotiator = SkippingNegotiator::new(local);
-    if !skip_haves {
-        add_negotiation_tips(&mut negotiator, &want_set)?;
-        // Seed `known_common` only for advertised refs we already track at the same
-        // peeled commit. Unchanged refs avoid walking parent chains for every server
-        // tip during incremental fetch; moved refs are discovered via `have`s.
-        let mut local_by_name: std::collections::HashMap<String, ObjectId> =
-            std::collections::HashMap::new();
-        for prefix in ["refs/heads/", "refs/tags/"] {
-            if let Ok(entries) = crate::refs::list_refs_in(local, prefix) {
-                for (name, oid) in entries {
-                    local_by_name.insert(name, oid);
-                }
-            }
-        }
-        for (name, oid) in &advertised {
-            if want_set.contains(oid) {
-                continue;
-            }
-            let Some(local_oid) = local_by_name.get(name) else {
-                continue;
-            };
-            if local_oid != oid {
-                continue;
-            }
-            if let Ok(Some(c)) = negotiator.repo().odb().peel_to_commit(*oid) {
-                negotiator.known_common(c)?;
-            }
+    if !skip_local_haves {
+        if shallow_request {
+            add_negotiation_tips(&mut negotiator, &HashSet::new())?;
+        } else {
+            add_negotiation_tips(&mut negotiator, &want_set)?;
+            seed_known_common(&mut negotiator, &advertised, &want_set)?;
         }
     }
 
@@ -373,84 +448,77 @@ fn negotiate_pack(
         let (sh, unsh) = crate::shallow::read_shallow_info_section(&mut conn.reader())?;
         shallow_update.shallow = sh;
         shallow_update.unshallow = unsh;
-    } else if skip_local_haves && conn.stateless_rpc() {
-        read_ack_round(conn.reader(), &mut negotiator)?;
-    } else if conn.stateless_rpc() {
-        // Stateless HTTP completes a POST for the want block; consume its response
-        // before the first have round posts again (otherwise the next POST drains it).
-        read_ack_round(conn.reader(), &mut negotiator)?;
     }
 
-    // Have/ACK exchange: batch haves, flush, read interleaved ACK rounds.
+    // Have/ACK exchange: batch haves, flush, read interleaved ACK rounds, and
+    // stop once the server says it is ready to send the pack.
     let mut count: usize = 0;
     let mut flush_at: usize = INITIAL_FLUSH;
     let mut pending: Vec<u8> = Vec::new();
     let mut flushes: i32 = 0;
-    if !skip_haves {
+    if !skip_local_haves {
         while let Some(oid) = negotiator.next_have()? {
             poll_cancel(progress, cancel)?;
             pkt_line::write_line_to_vec(&mut pending, &format!("have {}", oid.to_hex()))?;
             count += 1;
-            if flush_at <= count {
-                pending.extend_from_slice(b"0000");
+            if count < flush_at {
+                continue;
+            }
+            pending.extend_from_slice(b"0000");
+            if stateless {
+                let mut body = state.clone();
+                body.extend_from_slice(&pending);
+                conn.writer().write_all(&body)?;
+                flush_at = next_v2_flush_count(count);
+            } else {
                 conn.writer().write_all(&pending)?;
-                conn.writer().flush()?;
-                pending.clear();
                 flush_at = next_flush_count(count);
-                flushes += 1;
-                // Duplex: keep one window ahead. Stateless: every POST must be read
-                // before the next POST replaces the response.
-                if count == INITIAL_FLUSH && !conn.stateless_rpc() {
-                    continue;
+            }
+            conn.writer().flush()?;
+            pending.clear();
+            flushes += 1;
+            // Duplex: keep one window ahead. Stateless: every POST must be read
+            // before the next POST replaces the response.
+            if count == INITIAL_FLUSH && !stateless {
+                continue;
+            }
+            if stateless && shallow_request {
+                // Every stateless reply to a deepen repeats the shallow list.
+                crate::shallow::read_shallow_info_section(&mut conn.reader())?;
+            }
+            let round = read_ack_round(conn.reader(), &mut negotiator)?;
+            flushes -= 1;
+            if stateless {
+                for oid in round.new_common {
+                    pkt_line::write_line_to_vec(&mut state, &format!("have {}", oid.to_hex()))?;
                 }
-                read_ack_round(conn.reader(), &mut negotiator)?;
-                flushes -= 1;
+            }
+            if round.ready {
+                break;
             }
         }
-    }
-    if !pending.is_empty() {
-        pending.extend_from_slice(b"0000");
-        conn.writer().write_all(&pending)?;
-        conn.writer().flush()?;
-        flushes += 1;
     }
     while flushes > 0 {
         read_ack_round(conn.reader(), &mut negotiator)?;
         flushes -= 1;
     }
 
-    // Send `done` (single pkt-line, no trailing flush) and read the ACK/NAK.
-    let mut tail = Vec::new();
+    // Haves not yet flushed go out with `done` (single pkt-line, no trailing
+    // flush); a stateless request restates the want block and common haves.
+    let mut tail = state;
+    tail.extend_from_slice(&pending);
     pkt_line::write_line_to_vec(&mut tail, "done")?;
     conn.writer().write_all(&tail)?;
     conn.writer().flush()?;
 
     // Stateless v0 repeats shallow/unshallow lines after `done` before NAK/pack.
-    if shallow_request && conn.stateless_rpc() {
+    if shallow_request && stateless {
         let (sh, unsh) = crate::shallow::read_shallow_info_section(&mut conn.reader())?;
         shallow_update.shallow.extend(sh);
         shallow_update.unshallow.extend(unsh);
     }
 
-    match pkt_line::read_packet(&mut conn.reader())? {
-        None => return Err(Error::Message("unexpected EOF after done".to_owned())),
-        Some(pkt_line::Packet::Flush) => {
-            return Err(Error::Message("unexpected flush after done".to_owned()))
-        }
-        Some(pkt_line::Packet::Data(ln)) => {
-            let ln = ln.trim_end();
-            if ln != "NAK" {
-                if let Some((ack_oid, kind)) = parse_ack(ln) {
-                    if kind != AckKind::Bare {
-                        let _ = negotiator.ack(ack_oid)?;
-                    }
-                } else {
-                    pkt_line::reject_err_line(ln)?;
-                }
-            }
-        }
-        Some(_) => {}
-    }
+    read_final_ack(conn.reader())?;
 
     let mut pack_receive = crate::pack_receive::TempPackReceive::create(local.odb().objects_dir())?;
     pack_receive.read_sideband(conn.reader(), progress, cancel)?;

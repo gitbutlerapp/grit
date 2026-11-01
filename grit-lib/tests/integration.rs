@@ -690,6 +690,9 @@ mod fetch_tag_refspec_git_compat;
 #[path = "fetch_tags_resolve.rs"]
 mod fetch_tags_resolve;
 #[cfg(feature = "full-tests")]
+#[path = "fetch_v0_http_git_compat.rs"]
+mod fetch_v0_http_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "fetch_v2_negotiation_rounds.rs"]
 mod fetch_v2_negotiation_rounds;
 #[cfg(feature = "full-tests")]

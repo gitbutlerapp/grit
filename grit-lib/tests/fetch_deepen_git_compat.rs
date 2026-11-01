@@ -109,16 +109,13 @@ fn grit_fetch_local(
     fetch_depth: Option<FetchDepth>,
 ) -> grit_lib::error::Result<()> {
     let git_dir = work.join(".git");
-    fetch_local(
-        &git_dir,
-        bare,
-        &FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-            tags: TagMode::Following,
-            fetch_depth,
-            ..Default::default()
-        },
-    )
+    fetch_local(&git_dir, bare, &{
+        let mut opts = FetchOptions::new();
+        opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        opts.tags = TagMode::Following;
+        opts.fetch_depth = fetch_depth;
+        opts
+    })
     .map(|_| ())
 }
 
@@ -198,15 +195,12 @@ fn unshallow_on_complete_repo_errors_typed() {
             wt.to_str().unwrap(),
         ],
     );
-    let err = fetch_local(
-        &wt.join(".git"),
-        &bare,
-        &FetchOptions {
-            refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-            fetch_depth: Some(FetchDepth::Unshallow),
-            ..Default::default()
-        },
-    )
+    let err = fetch_local(&wt.join(".git"), &bare, &{
+        let mut opts = FetchOptions::new();
+        opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+        opts.fetch_depth = Some(FetchDepth::Unshallow);
+        opts
+    })
     .expect_err("unshallow on full repo");
     assert!(matches!(err, Error::FetchUnshallowNotShallow));
 }
@@ -285,11 +279,12 @@ fn grit_fetch_daemon_refspec(
     let mut conn = transport
         .connect(url, Service::UploadPack, &connect_opts)
         .expect("connect git daemon");
-    let mut opts = FetchOptions {
-        refspecs: vec![refspec.to_owned()],
-        tags: TagMode::Following,
-        fetch_depth,
-        ..Default::default()
+    let mut opts = {
+        let mut opts = FetchOptions::new();
+        opts.refspecs = vec![refspec.to_owned()];
+        opts.tags = TagMode::Following;
+        opts.fetch_depth = fetch_depth;
+        opts
     };
     fetch_remote(
         &git_dir,
@@ -342,63 +337,75 @@ fn serve_with_daemon(tmp: &Path, bare: &Path) -> ServedRepo {
 }
 
 /// A depth-1 clone deepened by 3 receives only the new commits' objects, the same
-/// ones git receives.
+/// ones git receives, over protocol v0 and v2.
 #[test]
-fn deepen_over_system_git_daemon_v2_sends_only_new_history() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let bare = build_linear_bare(tmp.path(), 12);
-    let srv = serve_with_daemon(tmp.path(), &bare);
+fn deepen_over_system_git_daemon_sends_only_new_history() {
+    for protocol in [0u8, 2] {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let bare = build_linear_bare(tmp.path(), 12);
+        let srv = serve_with_daemon(tmp.path(), &bare);
 
-    let git_client = init_shallow_client_from_daemon(tmp.path(), &srv.url, "git-deepen");
-    let grit_client = init_shallow_client_from_daemon(tmp.path(), &srv.url, "grit-deepen");
-    let git_before = loose_object_count(&git_client);
-    git_fetch(&git_client, &["fetch", "--deepen", "3", "origin"]);
-    let git_received = loose_object_count(&git_client) - git_before;
+        let git_client = init_shallow_client_from_daemon(tmp.path(), &srv.url, "git-deepen");
+        let grit_client = init_shallow_client_from_daemon(tmp.path(), &srv.url, "grit-deepen");
+        let git_before = loose_object_count(&git_client);
+        let version = format!("protocol.version={protocol}");
+        git_fetch(
+            &git_client,
+            &["-c", &version, "fetch", "--deepen", "3", "origin"],
+        );
+        let git_received = loose_object_count(&git_client) - git_before;
 
-    let outcome = grit_fetch_daemon(&grit_client, &srv.url, FetchDepth::deepen(3), 2);
-    assert_twin_matches(&git_client, &grit_client);
-    assert_eq!(rev_list_count(&grit_client), 4);
-    // Three new commits, each with its own tree and blob; the tip is not resent.
-    assert_eq!(git_received, 9, "git baseline");
-    assert_eq!(outcome.transfer.objects, git_received);
+        let outcome = grit_fetch_daemon(&grit_client, &srv.url, FetchDepth::deepen(3), protocol);
+        assert_twin_matches(&git_client, &grit_client);
+        assert_eq!(rev_list_count(&grit_client), 4);
+        // Three new commits, each with its own tree and blob; the tip is not resent.
+        assert_eq!(git_received, 9, "git baseline v{protocol}");
+        assert_eq!(outcome.transfer.objects, git_received, "v{protocol}");
+    }
 }
 
 /// The benchmark shape: a full clone made shallow by `fetch --depth 1`, then
 /// deepened. Another branch's complete history covers most of what the deepen
-/// reaches, so only the commit above it is transferred.
+/// reaches, so only the commit above it is transferred, over protocol v0 and v2.
 #[test]
 fn deepen_of_refetched_shallow_tip_uses_other_branches_as_haves() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let bare = build_linear_bare(tmp.path(), 12);
-    git(&bare, &["branch", "old", "main~2"]);
-    let srv = serve_with_daemon(tmp.path(), &bare);
+    for protocol in [0u8, 2] {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let bare = build_linear_bare(tmp.path(), 12);
+        git(&bare, &["branch", "old", "main~2"]);
+        let srv = serve_with_daemon(tmp.path(), &bare);
 
-    let mut clients = Vec::new();
-    for name in ["git-refetch", "grit-refetch"] {
-        let dest = tmp.path().join(name);
-        git(
-            tmp.path(),
-            &["clone", "-q", &srv.url, dest.to_str().unwrap()],
+        let mut clients = Vec::new();
+        for name in ["git-refetch", "grit-refetch"] {
+            let dest = tmp.path().join(name);
+            git(
+                tmp.path(),
+                &["clone", "-q", &srv.url, dest.to_str().unwrap()],
+            );
+            git(&dest, &["fetch", "-q", "--depth", "1", "origin", "main"]);
+            assert_eq!(read_shallow_set(&dest.join(".git")).len(), 1);
+            clients.push(dest);
+        }
+        let (git_client, grit_client) = (&clients[0], &clients[1]);
+        let tip = git_out(&srv.served, &["rev-parse", "main"]);
+
+        let version = format!("protocol.version={protocol}");
+        git_fetch(
+            git_client,
+            &["-c", &version, "fetch", "--deepen", "3", "origin", "main"],
         );
-        git(&dest, &["fetch", "-q", "--depth", "1", "origin", "main"]);
-        assert_eq!(read_shallow_set(&dest.join(".git")).len(), 1);
-        clients.push(dest);
+        let outcome = grit_fetch_daemon_refspec(
+            grit_client,
+            &srv.url,
+            "+refs/heads/main:refs/remotes/origin/main",
+            FetchDepth::deepen(3),
+            protocol,
+        );
+        assert_twin_matches(git_client, grit_client);
+        assert!(!read_shallow_set(&grit_client.join(".git")).contains(&tip));
+        // main~1's commit, tree and blob: main~2 and below are held through `old`.
+        assert_eq!(outcome.transfer.objects, 3, "v{protocol}");
     }
-    let (git_client, grit_client) = (&clients[0], &clients[1]);
-    let tip = git_out(&srv.served, &["rev-parse", "main"]);
-
-    git_fetch(git_client, &["fetch", "--deepen", "3", "origin", "main"]);
-    let outcome = grit_fetch_daemon_refspec(
-        grit_client,
-        &srv.url,
-        "+refs/heads/main:refs/remotes/origin/main",
-        FetchDepth::deepen(3),
-        2,
-    );
-    assert_twin_matches(git_client, grit_client);
-    assert!(!read_shallow_set(&grit_client.join(".git")).contains(&tip));
-    // main~1's commit, tree and blob: main~2 and below are held through `old`.
-    assert_eq!(outcome.transfer.objects, 3);
 }
 
 fn init_shallow_client_from_daemon(tmp: &Path, url: &str, name: &str) -> PathBuf {
@@ -544,11 +551,12 @@ mod http {
 
         git_fetch(&git_client, &["fetch", "--deepen", "3", "origin"]);
         let client = http_client_arc(UreqHttpClient::new());
-        let mut opts = FetchOptions {
-            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-            tags: TagMode::Following,
-            fetch_depth: FetchDepth::deepen(3),
-            ..Default::default()
+        let mut opts = {
+            let mut opts = FetchOptions::new();
+            opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+            opts.tags = TagMode::Following;
+            opts.fetch_depth = FetchDepth::deepen(3);
+            opts
         };
         http_fetch(
             client,
@@ -618,11 +626,12 @@ mod http {
                 &git_client,
                 &["fetch", "--depth", &depth.to_string(), "origin"],
             );
-            let mut opts = FetchOptions {
-                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
-                tags: TagMode::Following,
-                fetch_depth: FetchDepth::depth(depth),
-                ..Default::default()
+            let mut opts = {
+                let mut opts = FetchOptions::new();
+                opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+                opts.tags = TagMode::Following;
+                opts.fetch_depth = FetchDepth::depth(depth);
+                opts
             };
             http_fetch(
                 client.clone(),
