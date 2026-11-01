@@ -66,7 +66,8 @@ pub trait PreparedRefTransaction: Send {
     /// Apply queued updates and release locks.
     ///
     /// Every update becomes visible to readers, or (on error) none does where the backend
-    /// can guarantee it.
+    /// can guarantee it. On the files backend, a compare-and-swap failure writes neither the
+    /// ref nor its reflog entry.
     ///
     /// # Errors
     ///
