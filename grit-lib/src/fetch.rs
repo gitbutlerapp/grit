@@ -213,6 +213,13 @@ fn read_final_ack(reader: &mut dyn Read) -> Result<()> {
     }
 }
 
+/// True when the space-separated v0/v1 capability string `caps` lists `name`
+/// (bare or as `name=<value>`).
+fn server_caps_has(caps: &str, name: &str) -> bool {
+    caps.split_ascii_whitespace()
+        .any(|cap| cap == name || cap.strip_prefix(name).is_some_and(|v| v.starts_with('=')))
+}
+
 /// Mark advertised refs that we already track at the same peeled commit as
 /// `known_common`, excluding `wants`.
 ///
@@ -393,6 +400,14 @@ fn negotiate_pack(
     if wire_filter.is_some() {
         caps.push_str(" filter");
     }
+    // Over stateless RPC a `no-done` server sends the pack right after its
+    // `ready`, saving the request that would only carry `done`.
+    let no_done = stateless
+        && server_caps_has(&server_caps, "multi_ack_detailed")
+        && server_caps_has(&server_caps, "no-done");
+    if no_done {
+        caps.push_str(" no-done");
+    }
 
     let mut req: Vec<u8> = Vec::new();
     let w0 = format!("want {}{}", first_want.to_hex(), caps);
@@ -456,6 +471,7 @@ fn negotiate_pack(
     let mut flush_at: usize = INITIAL_FLUSH;
     let mut pending: Vec<u8> = Vec::new();
     let mut flushes: i32 = 0;
+    let mut got_ready = false;
     if !skip_local_haves {
         while let Some(oid) = negotiator.next_have()? {
             poll_cancel(progress, cancel)?;
@@ -494,6 +510,7 @@ fn negotiate_pack(
                 }
             }
             if round.ready {
+                got_ready = true;
                 break;
             }
         }
@@ -503,19 +520,21 @@ fn negotiate_pack(
         flushes -= 1;
     }
 
-    // Haves not yet flushed go out with `done` (single pkt-line, no trailing
-    // flush); a stateless request restates the want block and common haves.
-    let mut tail = state;
-    tail.extend_from_slice(&pending);
-    pkt_line::write_line_to_vec(&mut tail, "done")?;
-    conn.writer().write_all(&tail)?;
-    conn.writer().flush()?;
+    if !(got_ready && no_done) {
+        // Haves not yet flushed go out with `done` (single pkt-line, no trailing
+        // flush); a stateless request restates the want block and common haves.
+        let mut tail = state;
+        tail.extend_from_slice(&pending);
+        pkt_line::write_line_to_vec(&mut tail, "done")?;
+        conn.writer().write_all(&tail)?;
+        conn.writer().flush()?;
 
-    // Stateless v0 repeats shallow/unshallow lines after `done` before NAK/pack.
-    if shallow_request && stateless {
-        let (sh, unsh) = crate::shallow::read_shallow_info_section(&mut conn.reader())?;
-        shallow_update.shallow.extend(sh);
-        shallow_update.unshallow.extend(unsh);
+        // Stateless v0 repeats shallow/unshallow lines after `done` before NAK/pack.
+        if shallow_request && stateless {
+            let (sh, unsh) = crate::shallow::read_shallow_info_section(&mut conn.reader())?;
+            shallow_update.shallow.extend(sh);
+            shallow_update.unshallow.extend(unsh);
+        }
     }
 
     read_final_ack(conn.reader())?;
@@ -3543,6 +3562,52 @@ mod fetch_advertised_ref_tests {
             let names: Vec<&str> = matched.iter().map(|m| m.remote_ref.as_str()).collect();
             assert_eq!(names, expect, "{mode:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod v0_negotiation_tests {
+    use super::*;
+
+    #[test]
+    fn server_caps_has_matches_whole_capability_names() {
+        let caps = "multi_ack_detailed no-done side-band-64k agent=git/2.43.0";
+        assert!(server_caps_has(caps, "no-done"));
+        assert!(server_caps_has(caps, "multi_ack_detailed"));
+        assert!(server_caps_has(caps, "agent"));
+        assert!(!server_caps_has(caps, "multi_ack"));
+        assert!(!server_caps_has(caps, "side-band"));
+        assert!(!server_caps_has("", "no-done"));
+    }
+
+    #[test]
+    fn final_ack_reads_past_common_acks_to_the_bare_ack() {
+        let oid = "777489f9e09c8d0dd6b12f9d90de6376330577a2";
+        let mut reply = Vec::new();
+        for line in [
+            format!("ACK {oid} common"),
+            format!("ACK {oid} ready"),
+            format!("ACK {oid}"),
+        ] {
+            pkt_line::write_line_to_vec(&mut reply, &line).unwrap();
+        }
+        reply.extend_from_slice(b"PACK");
+        let mut cursor = std::io::Cursor::new(reply);
+        read_final_ack(&mut cursor).unwrap();
+        let mut rest = Vec::new();
+        cursor.read_to_end(&mut rest).unwrap();
+        assert_eq!(rest, b"PACK");
+    }
+
+    #[test]
+    fn final_ack_accepts_nak_and_reports_eof_and_err() {
+        let mut nak = Vec::new();
+        pkt_line::write_line_to_vec(&mut nak, "NAK").unwrap();
+        read_final_ack(&mut std::io::Cursor::new(nak)).unwrap();
+        assert!(read_final_ack(&mut std::io::Cursor::new(Vec::new())).is_err());
+        let mut err = Vec::new();
+        pkt_line::write_line_to_vec(&mut err, "ERR upload-pack: not our ref").unwrap();
+        assert!(read_final_ack(&mut std::io::Cursor::new(err)).is_err());
     }
 }
 
