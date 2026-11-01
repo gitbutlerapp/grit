@@ -270,7 +270,7 @@ pub(crate) struct ReplayConflictLabels {
 impl ReplayConflictLabels {
     /// Labels for replaying `commit`, whose message subject line is `subject`.
     pub(crate) fn new(commit: ObjectId, subject: &str) -> Self {
-        let theirs = format!("{} ({subject})", &commit.to_hex()[..7]);
+        let theirs = format!("{} ({subject})", commit.to_short_hex());
         let base = format!("parent of {theirs}");
         Self { theirs, base }
     }

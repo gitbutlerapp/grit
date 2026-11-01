@@ -126,6 +126,28 @@ impl TryFrom<u8> for HashAlgo {
 /// Maximum raw digest length across supported hash algorithms (SHA-256).
 const MAX_OID_LEN: usize = 32;
 
+/// Number of hex digits in the fixed-width short form of an object id.
+pub const SHORT_HEX_LEN: usize = 7;
+
+/// The first [`SHORT_HEX_LEN`] characters of a hex object id, or all of `hex`
+/// when it is shorter.
+///
+/// Use this for display labels when only the hex string is at hand; with an
+/// [`ObjectId`], call [`ObjectId::to_short_hex`]. The result is not guaranteed to
+/// be unique in the repository.
+///
+/// # Parameters
+///
+/// - `hex`: a full or partial hex object id.
+///
+/// # Returns
+///
+/// A prefix borrowed from `hex`; never panics, even on non-ASCII input.
+#[must_use]
+pub fn short_hex(hex: &str) -> &str {
+    hex.get(..SHORT_HEX_LEN).unwrap_or(hex)
+}
+
 /// Canonical SHA-1 empty tree digest (`4b825dc642cb6eb9a060e54bf8d69288fbee4904`).
 const WELL_KNOWN_EMPTY_TREE_CANON: [u8; 20] = [
     0x4b, 0x82, 0x5d, 0xc6, 0x42, 0xcb, 0x6e, 0xb9, 0xa0, 0x60, 0xe5, 0x4b, 0xf8, 0xd6, 0x92, 0x88,
@@ -323,6 +345,16 @@ impl ObjectId {
     #[must_use]
     pub fn to_hex(&self) -> String {
         self.hex_digits().as_str().to_owned()
+    }
+
+    /// The first [`SHORT_HEX_LEN`] lowercase hex digits, for human-facing labels.
+    ///
+    /// This is a fixed-width prefix and is not guaranteed to be unique in the
+    /// repository; use [`crate::rev_parse::abbreviate_object_id`] when the
+    /// abbreviation must resolve back to this id.
+    #[must_use]
+    pub fn to_short_hex(&self) -> String {
+        short_hex(self.hex_digits().as_str()).to_owned()
     }
 
     /// The lowercase hex digits of this id, without allocating.
@@ -1686,6 +1718,35 @@ pub fn serialize_commit(c: &CommitData) -> Vec<u8> {
         out.extend_from_slice(c.message.as_bytes());
     }
     out
+}
+
+#[cfg(test)]
+mod short_hex_tests {
+    use super::*;
+
+    #[test]
+    fn short_hex_takes_seven_digits_or_the_whole_shorter_input() {
+        assert_eq!(
+            short_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904"),
+            "4b825dc"
+        );
+        assert_eq!(short_hex("4b825dc"), "4b825dc");
+        assert_eq!(short_hex("4b8"), "4b8");
+        assert_eq!(short_hex(""), "");
+        assert_eq!(short_hex("ééééé"), "ééééé");
+    }
+
+    #[test]
+    fn object_id_short_hex_matches_the_hex_prefix_for_both_algorithms() {
+        let digest: Vec<u8> = (0x9a..=0xff).take(32).collect();
+        for len in [HashAlgo::Sha1.len(), HashAlgo::Sha256.len()] {
+            let id = ObjectId::from_bytes(&digest[..len]).unwrap();
+            let short = id.to_short_hex();
+            assert_eq!(short.len(), SHORT_HEX_LEN);
+            assert_eq!(short, id.to_hex()[..SHORT_HEX_LEN]);
+            assert_eq!(short, short_hex(&id.to_hex()));
+        }
+    }
 }
 
 #[cfg(test)]

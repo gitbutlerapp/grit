@@ -512,17 +512,13 @@ fn head_commit_subject(repo: &Repository, head_oid: &ObjectId) -> Result<String>
         .to_owned())
 }
 
-fn abbrev_head_oid(oid: &ObjectId) -> String {
-    oid.to_hex()[..7.min(oid.to_hex().len())].to_owned()
-}
-
 fn stash_context_message(
     repo: &Repository,
     head: &HeadState,
     head_oid: &ObjectId,
 ) -> Result<String> {
     let branch = head_branch_label(head);
-    let short = abbrev_head_oid(head_oid);
+    let short = head_oid.to_short_hex();
     let subject = head_commit_subject(repo, head_oid)?;
     Ok(format!("{branch}: {short} {subject}"))
 }

@@ -780,7 +780,7 @@ pub(crate) fn merge_base_for_commits(
 fn single_merge_base(repo: &Repository, base: ObjectId) -> Result<MergeBase> {
     Ok(MergeBase {
         tree: repo.odb().commit_tree(&base)?,
-        label: Cow::Owned(crate::commit_pretty::abbrev_hex(&base, 7)),
+        label: Cow::Owned(base.to_short_hex()),
     })
 }
 
