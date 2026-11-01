@@ -12,8 +12,8 @@ use crate::repo::Repository;
 use std::sync::Arc;
 
 use crate::rev_list::{
-    open_commit_stream, rev_list, split_revision_token, CommitStream, CommitStreamItem,
-    CommitStreamParams, OrderingMode, RevListOptions, RevListResult,
+    open_commit_stream, rev_list, split_revision_token, CommitExtent, CommitStream,
+    CommitStreamItem, CommitStreamParams, OrderingMode, RevListOptions, RevListResult,
 };
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{
@@ -118,6 +118,10 @@ pub struct RevWalkListOptions {
     /// Return the commits the walk parses in [`RevListResult::commit_data`] (see
     /// [`RevListOptions::retain_commit_data`]), for callers that render the listed commits.
     pub retain_commit_data: bool,
+    /// How much of each commit [`RevWalk::commits_stream`] reads and keeps for
+    /// [`Self::retain_commit_data`]. [`CommitExtent::ThroughSubject`] suits one-line listings
+    /// and skips inflating message bodies; other walks always keep whole commits.
+    pub retained_commit_extent: CommitExtent,
     /// Classify each listed commit as left or right of the symmetric range (`--left-right`)
     /// in [`RevListResult::left_right_map`]. Requires exactly one `A...B` token.
     pub left_right: bool,
@@ -496,6 +500,7 @@ impl<'repo> RevWalk<'repo> {
             until: walk.until,
             first_parent: walk.first_parent,
             retain_commit_bytes: walk.retain_commit_data,
+            retained_commit_extent: walk.retained_commit_extent,
         };
         Ok(Some(open_commit_stream(
             self.repository(),
@@ -796,6 +801,59 @@ mod tests {
             .map(|item| item.expect("walk").oid)
             .collect();
         assert_eq!(streamed, listed);
+    }
+
+    #[test]
+    fn commits_stream_keeps_commits_through_their_subjects() {
+        use crate::ident::Signature;
+        use crate::porcelain::commit::{create_commit, CommitRequest};
+        use crate::progress::{NeverCancel, NullProgress};
+        use crate::repo::InitOptions;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        for i in 0..4 {
+            let mut req =
+                CommitRequest::new(format!("subject {i}\n\n{}", "body line\n".repeat(50)));
+            req.allow_empty = true;
+            req.author =
+                Some(Signature::new("A", "a@example.com", repo.identity_now()).expect("author"));
+            req.committer =
+                Some(Signature::new("C", "c@example.com", repo.identity_now()).expect("committer"));
+            create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
+        }
+        let stream = |extent| -> Vec<(ObjectId, Vec<u8>)> {
+            let walk = RevWalkListOptions {
+                retain_commit_data: true,
+                retained_commit_extent: extent,
+                ..RevWalkListOptions::default()
+            };
+            repo.rev_walk()
+                .commits_stream(&["HEAD"], &walk)
+                .expect("stream")
+                .expect("some")
+                .map(|item| {
+                    let item = item.expect("walk");
+                    (item.oid, item.commit_bytes.expect("kept bytes"))
+                })
+                .collect()
+        };
+        let whole = stream(CommitExtent::Whole);
+        let short = stream(CommitExtent::ThroughSubject);
+        assert_eq!(whole.len(), 4);
+        for ((oid, full), (short_oid, prefix)) in whole.iter().zip(&short) {
+            assert_eq!(oid, short_oid);
+            assert_eq!(*full, repo.odb().read(oid).expect("read").data);
+            assert!(prefix.len() < full.len() && full.starts_with(prefix));
+            assert_eq!(
+                *prefix,
+                repo.odb().read_commit_through_subject(oid).expect("prefix")
+            );
+            assert!(!prefix.windows(9).any(|w| w == b"body line"));
+            assert_eq!(
+                crate::objects::read_commit_subject_line(prefix).expect("subject"),
+                crate::objects::read_commit_subject_line(full).expect("subject")
+            );
+        }
     }
 
     #[test]

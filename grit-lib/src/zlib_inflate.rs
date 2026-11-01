@@ -24,6 +24,10 @@ const MAX_HEADER_SIZE_RESERVE: usize = 16 * 1024 * 1024;
 /// Bytes of inflated output inspected for a loose object's `"<type> <size>\0"` header.
 const LOOSE_HEADER_MAX: usize = 128;
 
+/// Output room added at a time by [`ZlibInflateScratch::decompress_prefix_until`], so a
+/// payload that is mostly skipped is never allocated or zeroed in full.
+const PREFIX_OUTPUT_GROWTH: usize = 4096;
+
 // hygiene: per-thread reusable inflate scratch; holds no state between objects
 thread_local! {
     static LOOSE_SCRATCH: std::cell::RefCell<ZlibInflateScratch> =
@@ -606,6 +610,98 @@ impl ZlibInflateScratch {
         Ok(())
     }
 
+    /// Inflate the zlib stream at the start of `input`, which holds `expected_size` bytes,
+    /// into `out`, feeding it `input_step` compressed bytes at a time and stopping early once
+    /// `prefix_len` finds a usable prefix of the bytes inflated so far.
+    ///
+    /// Stepping through the input rather than the output keeps the inflater in its fast
+    /// decoding loop, which needs 258 bytes of output room, for all but the last few bytes of
+    /// each step.
+    ///
+    /// `prefix_len` gets every inflated byte so far and returns the length of the prefix to
+    /// keep, or `None` to keep inflating. `out` ends up holding that prefix, or the whole
+    /// payload when `prefix_len` never accepts one.
+    ///
+    /// # Returns
+    ///
+    /// `true` when `out` holds the whole payload and the stream was checked to its end,
+    /// `false` when it holds only a prefix (the rest of the stream is not inflated or checked).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptObject`] when the stream does not inflate to exactly
+    /// `expected_size` bytes, and [`Error::Zlib`] for invalid or truncated zlib data.
+    pub(crate) fn decompress_prefix_until(
+        &mut self,
+        input: &[u8],
+        expected_size: u64,
+        input_step: usize,
+        out: &mut Vec<u8>,
+        prefix_len: impl Fn(&[u8]) -> Option<usize>,
+    ) -> Result<bool> {
+        let expected = usize::try_from(expected_size).map_err(|_| {
+            Error::CorruptObject(format!("pack object size overflow: {expected_size}"))
+        })?;
+        self.reset();
+        out.clear();
+        let mut in_off = 0usize;
+        let mut out_pos = 0usize;
+        loop {
+            if out_pos == out.len() {
+                out.resize(
+                    out_pos.saturating_add(PREFIX_OUTPUT_GROWTH).min(expected),
+                    0,
+                );
+            }
+            let in_end = in_off.saturating_add(input_step.max(1)).min(input.len());
+            let flush = if in_end == input.len() {
+                FlushDecompress::Finish
+            } else {
+                FlushDecompress::None
+            };
+            let before_in = self.dec.total_in();
+            let before_out = self.dec.total_out();
+            let status = self
+                .dec
+                .decompress(&input[in_off..in_end], &mut out[out_pos..], flush)
+                .map_err(|e| Error::Zlib(e.to_string()))?;
+            let consumed = (self.dec.total_in() - before_in) as usize;
+            let produced = (self.dec.total_out() - before_out) as usize;
+            in_off += consumed;
+            out_pos += produced;
+            if status == Status::StreamEnd {
+                if out_pos != expected {
+                    return Err(Error::CorruptObject(format!(
+                        "pack object size mismatch: expected {expected}, got {out_pos}"
+                    )));
+                }
+                return Ok(true);
+            }
+            if out_pos == expected {
+                let mut tail_off = 0usize;
+                self.finish_zlib_without_extra_output(&input[in_off..], &mut tail_off)?;
+                return Ok(true);
+            }
+            if produced > 0 {
+                if let Some(len) = prefix_len(&out[..out_pos]) {
+                    out.truncate(len.min(out_pos));
+                    return Ok(false);
+                }
+            }
+            if out_pos == out.len() {
+                continue;
+            }
+            if in_off >= input.len() {
+                return Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
+            }
+            if consumed == 0 && produced == 0 {
+                return Err(Error::CorruptObject(
+                    "zlib stream stalled before declared object size".to_owned(),
+                ));
+            }
+        }
+    }
+
     /// Advance past a zlib stream without retaining inflated bytes (for pack skipping).
     ///
     /// # Errors
@@ -800,6 +896,64 @@ mod tests {
         let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
         enc.write_all(data).unwrap();
         enc.finish().unwrap()
+    }
+
+    fn through_marker(data: &[u8]) -> Option<usize> {
+        memchr::memmem::find(data, b"MARK\n").map(|at| at + 5)
+    }
+
+    #[test]
+    fn prefix_until_stops_at_the_accepted_prefix() {
+        let mut scratch = ZlibInflateScratch::default();
+        let mut plain = noise(20_000);
+        plain.extend_from_slice(b"MARK\n");
+        let marker_end = plain.len();
+        plain.extend_from_slice(&noise(200_000));
+        let mut input = deflate(&plain);
+        input.extend_from_slice(&deflate(b"next member"));
+        for step in [1, 7, 128, 4096, 1 << 20] {
+            let mut out = Vec::new();
+            let whole = scratch
+                .decompress_prefix_until(&input, plain.len() as u64, step, &mut out, through_marker)
+                .unwrap();
+            assert!(!whole, "step {step}");
+            assert_eq!(out, plain[..marker_end], "step {step}");
+        }
+    }
+
+    #[test]
+    fn prefix_until_checks_whole_payloads_it_inflates() {
+        let mut scratch = ZlibInflateScratch::default();
+        for plain in [Vec::new(), b"no marker".to_vec(), noise(70_000)] {
+            let mut input = deflate(&plain);
+            input.extend_from_slice(b"trailing pack bytes");
+            let mut out = vec![1, 2, 3];
+            let whole = scratch
+                .decompress_prefix_until(&input, plain.len() as u64, 128, &mut out, through_marker)
+                .unwrap();
+            assert!(whole);
+            assert_eq!(out, plain);
+
+            let longer = plain.len() as u64 + 1;
+            assert!(matches!(
+                scratch.decompress_prefix_until(&input, longer, 128, &mut out, through_marker),
+                Err(Error::CorruptObject(_))
+            ));
+            if !plain.is_empty() {
+                let shorter = plain.len() as u64 - 1;
+                assert!(scratch
+                    .decompress_prefix_until(&input, shorter, 128, &mut out, through_marker)
+                    .is_err());
+            }
+        }
+        let truncated = deflate(&noise(10_000));
+        let truncated = &truncated[..truncated.len() / 2];
+        assert!(scratch
+            .decompress_prefix_until(truncated, 10_000, 128, &mut Vec::new(), through_marker)
+            .is_err());
+        assert!(scratch
+            .decompress_prefix_until(b"not zlib", 10, 128, &mut Vec::new(), through_marker)
+            .is_err());
     }
 
     #[test]

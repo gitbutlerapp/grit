@@ -11442,6 +11442,7 @@ pub fn grit_lib::objects::odb::Odb::zlib_compress_loose_store(&self, &[u8]) -> g
 impl grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::commit_tree(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::read_commit(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::CommitData>
+pub fn grit_lib::objects::odb::Odb::read_commit_through_subject(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 impl grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::files_objects_dir(&self) -> core::option::Option<&std::path::Path>
 pub fn grit_lib::objects::odb::Odb::gc(&self) -> grit_lib::error::Result<()>
@@ -18492,6 +18493,7 @@ pub fn grit_lib::objects::odb::Odb::zlib_compress_loose_store(&self, &[u8]) -> g
 impl grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::commit_tree(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::read_commit(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::CommitData>
+pub fn grit_lib::objects::odb::Odb::read_commit_through_subject(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 impl grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::files_objects_dir(&self) -> core::option::Option<&std::path::Path>
 pub fn grit_lib::objects::odb::Odb::gc(&self) -> grit_lib::error::Result<()>
@@ -28993,6 +28995,7 @@ pub grit_lib::revwalk::queries::RevWalkListOptions::paths: alloc::vec::Vec<alloc
 pub grit_lib::revwalk::queries::RevWalkListOptions::pickaxe: core::option::Option<alloc::rcs::arc::Arc<grit_lib::diff::pickaxe::Pickaxe>>
 pub grit_lib::revwalk::queries::RevWalkListOptions::refs: alloc::vec::Vec<grit_lib::revwalk::queries::RefSelection>
 pub grit_lib::revwalk::queries::RevWalkListOptions::retain_commit_data: bool
+pub grit_lib::revwalk::queries::RevWalkListOptions::retained_commit_extent: grit_lib::revwalk::rev_list::CommitExtent
 pub grit_lib::revwalk::queries::RevWalkListOptions::reverse: bool
 pub grit_lib::revwalk::queries::RevWalkListOptions::since: core::option::Option<i64>
 pub grit_lib::revwalk::queries::RevWalkListOptions::skip: usize
@@ -29041,6 +29044,27 @@ pub fn grit_lib::revwalk::queries::validate_follow_pathspecs(&[alloc::string::St
 pub type grit_lib::revwalk::queries::RevWalkCommitStream<'repo> = grit_lib::revwalk::rev_list::CommitStream<'repo>
 pub type grit_lib::revwalk::queries::RevWalkCommitStreamItem = grit_lib::revwalk::rev_list::CommitStreamItem
 pub mod grit_lib::revwalk::rev_list
+pub enum grit_lib::revwalk::rev_list::CommitExtent
+pub grit_lib::revwalk::rev_list::CommitExtent::ThroughSubject
+pub grit_lib::revwalk::rev_list::CommitExtent::Whole
+impl core::clone::Clone for grit_lib::revwalk::rev_list::CommitExtent
+pub fn grit_lib::revwalk::rev_list::CommitExtent::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::revwalk::rev_list::CommitExtent
+impl core::cmp::PartialEq for grit_lib::revwalk::rev_list::CommitExtent
+pub fn grit_lib::revwalk::rev_list::CommitExtent::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::revwalk::rev_list::CommitExtent
+pub fn grit_lib::revwalk::rev_list::CommitExtent::default() -> Self
+impl core::fmt::Debug for grit_lib::revwalk::rev_list::CommitExtent
+pub fn grit_lib::revwalk::rev_list::CommitExtent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::revwalk::rev_list::CommitExtent
+impl core::marker::StructuralPartialEq for grit_lib::revwalk::rev_list::CommitExtent
+impl core::marker::Freeze for grit_lib::revwalk::rev_list::CommitExtent
+impl core::marker::Send for grit_lib::revwalk::rev_list::CommitExtent
+impl core::marker::Sync for grit_lib::revwalk::rev_list::CommitExtent
+impl core::marker::Unpin for grit_lib::revwalk::rev_list::CommitExtent
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::rev_list::CommitExtent
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::rev_list::CommitExtent
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::rev_list::CommitExtent
 pub enum grit_lib::revwalk::rev_list::FilterObjectKind
 pub grit_lib::revwalk::rev_list::FilterObjectKind::Blob
 pub grit_lib::revwalk::rev_list::FilterObjectKind::Commit
@@ -29186,6 +29210,7 @@ pub struct grit_lib::revwalk::rev_list::CommitStreamParams
 pub grit_lib::revwalk::rev_list::CommitStreamParams::first_parent: bool
 pub grit_lib::revwalk::rev_list::CommitStreamParams::limit: core::option::Option<usize>
 pub grit_lib::revwalk::rev_list::CommitStreamParams::retain_commit_bytes: bool
+pub grit_lib::revwalk::rev_list::CommitStreamParams::retained_commit_extent: grit_lib::revwalk::rev_list::CommitExtent
 pub grit_lib::revwalk::rev_list::CommitStreamParams::since: core::option::Option<i64>
 pub grit_lib::revwalk::rev_list::CommitStreamParams::skip: usize
 pub grit_lib::revwalk::rev_list::CommitStreamParams::until: core::option::Option<i64>
@@ -29605,6 +29630,27 @@ impl core::marker::Unpin for grit_lib::revwalk::rev_parse_error::AmbiguousObject
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::rev_parse_error::AmbiguousObjectHint
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::rev_parse_error::AmbiguousObjectHint
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::rev_parse_error::AmbiguousObjectHint
+pub enum grit_lib::revwalk::CommitExtent
+pub grit_lib::revwalk::CommitExtent::ThroughSubject
+pub grit_lib::revwalk::CommitExtent::Whole
+impl core::clone::Clone for grit_lib::revwalk::rev_list::CommitExtent
+pub fn grit_lib::revwalk::rev_list::CommitExtent::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::revwalk::rev_list::CommitExtent
+impl core::cmp::PartialEq for grit_lib::revwalk::rev_list::CommitExtent
+pub fn grit_lib::revwalk::rev_list::CommitExtent::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::revwalk::rev_list::CommitExtent
+pub fn grit_lib::revwalk::rev_list::CommitExtent::default() -> Self
+impl core::fmt::Debug for grit_lib::revwalk::rev_list::CommitExtent
+pub fn grit_lib::revwalk::rev_list::CommitExtent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::revwalk::rev_list::CommitExtent
+impl core::marker::StructuralPartialEq for grit_lib::revwalk::rev_list::CommitExtent
+impl core::marker::Freeze for grit_lib::revwalk::rev_list::CommitExtent
+impl core::marker::Send for grit_lib::revwalk::rev_list::CommitExtent
+impl core::marker::Sync for grit_lib::revwalk::rev_list::CommitExtent
+impl core::marker::Unpin for grit_lib::revwalk::rev_list::CommitExtent
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::rev_list::CommitExtent
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::rev_list::CommitExtent
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::rev_list::CommitExtent
 pub enum grit_lib::revwalk::CommitFilterError
 pub grit_lib::revwalk::CommitFilterError::InvalidPattern
 pub grit_lib::revwalk::CommitFilterError::InvalidPattern::detail: alloc::string::String
@@ -30027,6 +30073,7 @@ pub grit_lib::revwalk::RevWalkListOptions::paths: alloc::vec::Vec<alloc::string:
 pub grit_lib::revwalk::RevWalkListOptions::pickaxe: core::option::Option<alloc::rcs::arc::Arc<grit_lib::diff::pickaxe::Pickaxe>>
 pub grit_lib::revwalk::RevWalkListOptions::refs: alloc::vec::Vec<grit_lib::revwalk::queries::RefSelection>
 pub grit_lib::revwalk::RevWalkListOptions::retain_commit_data: bool
+pub grit_lib::revwalk::RevWalkListOptions::retained_commit_extent: grit_lib::revwalk::rev_list::CommitExtent
 pub grit_lib::revwalk::RevWalkListOptions::reverse: bool
 pub grit_lib::revwalk::RevWalkListOptions::since: core::option::Option<i64>
 pub grit_lib::revwalk::RevWalkListOptions::skip: usize

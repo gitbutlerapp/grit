@@ -4,7 +4,7 @@ use crate::object_inspect::{ResolveError, ResolvedObject};
 use crate::objects::ObjectId;
 use crate::repo::Repository;
 use crate::rev_list::{
-    open_commit_stream, rev_list, CommitStreamParams, RevListOptions, RevListResult,
+    open_commit_stream, rev_list, CommitExtent, CommitStreamParams, RevListOptions, RevListResult,
 };
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::resolve_revision;
@@ -150,6 +150,7 @@ impl<'repo> RevWalk<'repo> {
             until: options.until,
             first_parent: options.first_parent,
             retain_commit_bytes: false,
+            retained_commit_extent: CommitExtent::Whole,
         };
         Ok(RevWalkCommitIter {
             inner: open_commit_stream(self.repo, &include, &exclude, &params)?,

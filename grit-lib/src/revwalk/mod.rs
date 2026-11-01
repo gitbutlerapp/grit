@@ -19,6 +19,7 @@ pub mod handle;
 pub mod queries;
 
 pub use crate::diff::{Pickaxe, PickaxeError, PickaxeKind};
+pub use crate::rev_list::CommitExtent;
 pub use filter::{CommitFilter, CommitFilterBuilder, CommitFilterError, Pattern};
 pub use graph::{
     display_parents_for_graph, list_commits_for_log_graph, log_graph_materialize,

@@ -230,6 +230,7 @@ impl RevSelectArgs {
             pickaxe,
             graph: false,
             retain_commit_data: false,
+            retained_commit_extent: grit_lib::revwalk::CommitExtent::Whole,
             left_right: false,
             cherry_mark: false,
         })

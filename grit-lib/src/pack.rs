@@ -275,6 +275,23 @@ pub(crate) mod pack_cache {
         }
     }
 
+    /// Commit `oid` through its subject line from the single local pack (see
+    /// [`super::SingleLocalPackReader::read_commit_through_subject`]); `None` when that reader
+    /// is not in use or cannot serve `oid` that way.
+    pub(crate) fn try_read_commit_through_subject_via_single_pack_reader(
+        objects_dir: &Path,
+        oid: &crate::objects::ObjectId,
+    ) -> Result<Option<Vec<u8>>> {
+        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+            return Ok(None);
+        }
+        sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
+        let Some(mut reader) = super::SingleLocalPackReader::open_allow_loose(objects_dir)? else {
+            return Ok(None);
+        };
+        reader.read_commit_through_subject(oid)
+    }
+
     pub(crate) fn try_read_object_via_single_pack_reader_into(
         objects_dir: &Path,
         oid: &crate::objects::ObjectId,
@@ -3765,6 +3782,12 @@ thread_local! {
 /// Max uncompressed bytes to inflate when only commit headers (e.g. author) are needed.
 pub(crate) const COMMIT_HEADER_READ_PREFIX: usize = 512;
 
+/// Compressed bytes per inflate step when reading a commit only through its subject line.
+///
+/// Commit text inflates to roughly three times this, so the step is small enough that most of
+/// a long message body is never inflated.
+const COMMIT_SUBJECT_READ_STEP: usize = 128;
+
 /// Select one entry for random reads; ordinary readers keep their zero-copy fast path.
 fn pack_entry_bytes<'a>(
     idx: &PackIndex,
@@ -4482,6 +4505,54 @@ impl SingleLocalPackReader {
             }
         }
         read_object_from_pack_at_offset(&self.idx, offset)
+    }
+
+    /// Commit `oid`'s headers and message through its first non-blank line, inflating no
+    /// further than that, when this pack stores the commit whole.
+    ///
+    /// The bytes are a prefix of the commit payload as described by
+    /// [`crate::objects::commit_through_subject_len`], or the whole payload when it has no such
+    /// prefix.
+    ///
+    /// # Returns
+    ///
+    /// `None` when the pack does not hold `oid` as a whole commit entry (absent, a delta, or
+    /// another kind) or the entry does not inflate cleanly; read it the ordinary way then,
+    /// which also reports any corruption.
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack index lookup errors.
+    pub(crate) fn read_commit_through_subject(
+        &mut self,
+        oid: &ObjectId,
+    ) -> Result<Option<Vec<u8>>> {
+        let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
+            return Ok(None);
+        };
+        let mut compressed = Vec::new();
+        let Ok((pack_bytes, mut pos)) =
+            pack_entry_bytes(&self.idx, offset, &self.pack_bytes, &mut compressed)
+        else {
+            return Ok(None);
+        };
+        let Ok((PackedType::Commit, size)) = parse_pack_object_header(pack_bytes, &mut pos) else {
+            return Ok(None);
+        };
+        let Some(input) = pack_bytes.get(pos..) else {
+            return Ok(None);
+        };
+        let mut out = Vec::new();
+        let inflated = WHOLE_OBJECT_ZLIB.with(|slot| {
+            slot.borrow_mut().decompress_prefix_until(
+                input,
+                size,
+                COMMIT_SUBJECT_READ_STEP,
+                &mut out,
+                crate::objects::commit_through_subject_len,
+            )
+        });
+        Ok(inflated.is_ok().then_some(out))
     }
 
     /// Like [`Self::read_object`], but skip an object the pack stores whole with a payload
