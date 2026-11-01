@@ -9,6 +9,60 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds. The daily census behind the [Performance overview](performance-overview.md) measures the shipped **`dist`** build since 2026-10-28; see [Benchmarking](benchmarking.md#grit-bench-daily-factory-census) for what that switch did to every baseline.
 
+## Status code layout by workload set (2026-11-01)
+
+`status/clean@synth-10k` runs `grit status` on a clean 10,000-file clone. Grit took as long as Git but peaked 2 to 6 MB higher. Its heap peaks at only 1.7 MB; most of the rest is the binary's own pages, and on a `release` build `grit status` left 6.9 MB of code and read-only data resident. Three things kept the [hot text layout](benchmarking.md#hot-text-layout) from doing its job, and a fourth cost only the first status after a checkout:
+
+- **The lists had drifted.** Commits since the morning's profile renamed or added functions on the status path (the Odb-owned loose negative cache, config override handling, the stat scan's thread count). Their patterns no longer matched, so on a `release` build status ran about 70 functions from plain `.text`, each in its own 64 KB fault-around window: 29 windows, about 1.9 MB.
+- **Merged functions kept the wrong name.** LLVM merges functions with identical code (`RawVec<T>::grow_one` for every same-sized `T`) into one body and keeps the other names as aliases. The body's input section is named after one of them, while callgrind reports whichever name it picks for the address, so 15 such bodies stayed in `.text` even with fresh lists. The generator now lists every symbol at an executed function's address.
+- **Each command's code was sliced by sharing count.** The lists were sorted by how many workloads run a function, which cut one command's code into a slice per count spread over the whole section: status touched 22 of the library section's 55 windows to run 5% of its code. The library list now groups functions by the exact set of workloads that run them and orders the groups in reflected binary (Gray code) order over the workloads, so neighbouring groups differ in as few workloads as possible. On the profile, the four status workloads touch 16 to 19 library windows instead of 22 to 26, and all 20 workloads together 469 instead of 546; commit and stash, late in the list, touch one to five more. The CLI list keeps the sort by sharing count with the Gray order as tie-break (281 → 258 windows, only stash one more): the full Gray order there cost `grit config` and `grit tag` a window each, 2 to 4% of their run time.
+- **The first status after a checkout copied attributes for every file.** When every entry is racy, the stat refresh hashes them all and resolved each entry's attributes into its job first, a few hundred bytes per file. That list peaked at 3.9 MB for 10,000 files. Jobs now point into the distinct attribute sets seen, and that run's heap peak drops from 7.7 to 4.1 MB; on a fresh clone the first `grit status` peaks at 12.9 MB instead of 15.0 MB (Git: 9.4 MB).
+
+On a `release` build `grit status` on the clone now keeps 4.8 MB of its binary resident instead of 6.9 MB, with no function it runs left in plain `.text`; the stripped `dist` build drops from 4.7 to 4.0 MB.
+
+A daily row reports the largest peak of its runs, and the first runs after the harness recreates a fixture take the racy path above, so `status/clean@synth-10k` and `status/renamed@synth-10k` peaks are bimodal for either build. Over the three rounds below, the base peaked at 11.4–11.5 MB or 15.0–15.5 MB and the change at 10.8–11.3 MB or 13.2–13.3 MB; the medians in the table depend on which mode each round hit.
+
+Rows from `grit-bench daily` on `dist` builds against the system `git` in one sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0, page cache dropped before the session. "base" is `0fef76aed`. Times are medians of all samples from three alternating rounds of 20 runs (the related rows: two rounds of 15), and peak RSS is the median of the rounds' peaks. Values are **milliseconds / MB**. Reports (first round): `daily-status-clean-10k-6351-before.json` → `daily-status-clean-10k-6351-after.json` and `daily-status-clean-10k-6351-related-before.json` → `daily-status-clean-10k-6351-related-after.json`.
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB | time vs git | RSS vs git |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `status/clean@synth-10k` | 6.91 / 9.6 | 6.65 / 11.5 | **6.64** / **11.3** | 0.96 → 0.96 | 1.20× → 1.18× |
+| `status/clean@deep-tree` | 1069.54 / 40.5 | 499.02 / 39.3 | 504.52 / 39.2 | 0.47 → 0.47 | 0.97× → 0.97× |
+| `status/clean@small` | 1.93 / 7.4 | 2.60 / 9.7 | 2.56 / 9.2 | 1.35 → 1.33 | 1.31× → 1.23× |
+| `status/clean@synth-100k` | 60.17 / 30.3 | 48.13 / 31.8 | 45.83 / 31.7 | 0.80 → 0.76 | 1.05× → 1.05× |
+| `status/dirty@deep-tree` | 1128.15 / 41.3 | 537.27 / 46.7 | 543.83 / 46.2 | 0.48 → 0.48 | 1.13× → 1.12× |
+| `status/dirty@small` | 1.86 / 7.4 | 2.68 / 9.8 | 2.51 / 9.2 | 1.44 → 1.35 | 1.31× → 1.24× |
+| `status/dirty@synth-100k` | 95.48 / 30.2 | 52.86 / 31.8 | 48.37 / 31.7 | 0.55 → 0.51 | 1.05× → 1.05× |
+| `status/dirty@synth-10k` | 10.39 / 9.7 | 7.01 / 11.6 | 6.93 / 10.9 | 0.68 → 0.67 | 1.20× → 1.13× |
+| `status/paths@synth-100k` | 44.70 / 30.2 | 42.77 / 32.1 | 41.73 / 31.9 | 0.96 → 0.93 | 1.06× → 1.06× |
+| `status/renamed@synth-10k` | 6.88 / 9.6 | 6.80 / 15.0 | 6.38 / 10.8 | 0.99 → 0.93 | 1.55× → 1.12× |
+| `add/modified@synth-10k` | 16.39 / 12.4 | 9.77 / 17.5 | 9.69 / 17.0 | 0.60 → 0.59 | 1.41× → 1.37× |
+| `blame/file@git-git` | 272.33 / 243.8 | 228.11 / 264.8 | 227.22 / 264.8 | 0.84 → 0.83 | 1.09× → 1.09× |
+| `branch/create@many-refs` | 1.58 / 7.9 | 2.17 / 9.9 | 2.18 / 9.7 | 1.37 → 1.37 | 1.25× → 1.23× |
+| `branch/list@many-refs` | 1.33 / 6.8 | 1.75 / 9.0 | 1.77 / 8.8 | 1.32 → 1.33 | 1.33× → 1.29× |
+| `commit/small@synth-10k` | 26.48 / 13.8 | 15.47 / 16.2 | 15.29 / 17.0 | 0.58 → 0.58 | 1.18× → 1.23× |
+| `config/get@small` | 1.17 / 6.8 | 1.56 / 7.7 | 1.58 / 7.9 | 1.34 → 1.35 | 1.13× → 1.16× |
+| `diff/worktree@synth-10k` | 6.69 / 9.9 | 6.12 / 12.4 | 5.96 / 12.4 | 0.91 → 0.89 | 1.26× → 1.26× |
+| `log/json-100@git-git` | 2.87 / 14.9 | 3.77 / 17.3 | 3.71 / 16.7 | 1.32 → 1.29 | 1.16× → 1.12× |
+| `log/oneline-100@git-git` | 2.81 / 14.9 | 3.22 / 16.8 | 3.21 / 16.3 | 1.14 → 1.14 | 1.13× → 1.09× |
+| `merge/clean@synth-10k` | 98.25 / 14.2 | 49.92 / 18.3 | 50.31 / 17.8 | 0.51 → 0.51 | 1.29× → 1.26× |
+| `notes/list@synth-10k` | 1.27 / 6.8 | 1.90 / 9.4 | 1.93 / 9.4 | 1.50 → 1.52 | 1.39× → 1.39× |
+| `reset/mixed@synth-10k` | 7.93 / 9.7 | 9.64 / 16.2 | 9.32 / 12.6 | 1.22 → 1.18 | 1.67× → 1.31× |
+| `resolve/head-n@git-git` | 1.18 / 6.8 | 1.81 / 8.9 | 1.80 / 8.7 | 1.53 → 1.52 | 1.31× → 1.28× |
+| `revs/count@git-git` | 493.27 / 62.8 | 618.11 / 124.1 | 620.05 / 123.9 | 1.25 → 1.26 | 1.98× → 1.97× |
+| `show/head@synth-10k` | 2.01 / 8.9 | 2.36 / 10.1 | 2.40 / 10.2 | 1.17 → 1.19 | 1.14× → 1.16× |
+| `stash/push-pop@synth-10k` | 192.48 / 18.4 | 115.99 / 18.4 | 115.28 / 17.8 | 0.60 → 0.60 | 1.00× → 0.97× |
+| `switch/branch@synth-10k` | 21.47 / 10.7 | 15.27 / 13.5 | 15.30 / 13.0 | 0.71 → 0.71 | 1.26× → 1.22× |
+| `tag/list@many-refs` | 3.21 / 8.1 | 3.16 / 9.9 | 3.23 / 9.7 | 0.98 → 1.01 | 1.22× → 1.20× |
+| `worktree/list@synth-10k` | 1.55 / 6.8 | 2.31 / 8.3 | 2.31 / 8.4 | 1.48 → 1.49 | 1.22× → 1.23× |
+
+Run time moved within noise. Interleaved direct runs (prepare-free, 200 to 500 pairs each) put `grit status` on the synth-10k clone at 5.75 → 5.67 ms, `grit tag` on many-refs at 2.59 → 2.57 ms, `grit branch` at 1.16 → 1.14 ms and `grit config core.repositoryformatversion` at 0.989 → 0.992 ms. `config/get@small` keeps one more library window resident (about 60 KB of its 3.2 MB of binary pages); its row's peak is the largest of runs that spread from 6.4 to 7.6 MB for either build. `commit/small` peaks are bimodal the same way as status, from 14.5 to 17.7 MB for either build across sessions.
+
+```bash
+./target/release/grit-bench daily --only status/clean@synth-10k,status/clean@deep-tree,status/clean@small,status/clean@synth-100k,status/dirty@deep-tree,status/dirty@small,status/dirty@synth-100k,status/dirty@synth-10k,status/paths@synth-100k,status/renamed@synth-10k \
+  --min-runs 20 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-status-clean-10k-6351-after.json
+```
+
 ## One-line log reads commits only through their subject (2026-11-01)
 
 `log/oneline-100@git-git` lists the last 100 commits of git.git one line each (`grit log --limit 100`), against `git log --oneline -100`. On the `dist` build grit took 3.50 ms against Git's 2.94 ms. The walk reads about 140 commits from the pack to order them by date, and inflated every one in full, keeping the bytes for the output rows. Those commits hold 115 KB of text, but a one-line row needs only the headers (parents and dates for the walk; author, date and change id for the row) and the subject: 40 KB. The other two thirds were message bodies inflated and then dropped.

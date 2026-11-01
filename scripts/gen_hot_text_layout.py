@@ -25,8 +25,18 @@ staging, committing, switching, stashing), profiled with callgrind on a clone th
 `grit` binaries built like the ones that run them, so inlining matches what is linked: the
 shipped `dist` build (fat LTO, one codegen unit) and the `release` build that development
 and local benchmarking use (ThinLTO over many codegen units, which inlines less and keeps
-more functions apart). Functions are ordered by how many workloads run them, so the core
-every operation shares comes first and stays dense.
+more functions apart). Functions that the same set of workloads runs are kept together, and
+those groups follow each other in reflected binary (Gray code) order over the workloads in
+`WORKLOADS` order: neighbouring groups differ in as few workloads as possible, so each
+workload's code forms a few long runs instead of one slice per sharing count. The first two
+workloads' code is one contiguous run each, and later workloads split into more runs the
+further down the list they are. Against a sort by sharing count, the four status workloads
+touch 16 to 19 of the library section's windows instead of 22 to 26 and all workloads
+together 14% fewer, while commit and stash touch one to five more. The CLI section keeps
+the sort by sharing count and uses the Gray order only between equally shared functions:
+every command runs the CLI's start-up and argument parsing, so that shared core stays
+dense, and the full Gray order there cost the later commands (config, refs, branch) a
+window each.
 
 Each function's input section (`.text.<v0 symbol>`, or `.text.unlikely.<v0 symbol>` for
 `#[cold]` functions) is matched with the crate disambiguators (`Cs<hash>_`), back-references
@@ -60,7 +70,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections import Counter
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -229,16 +238,23 @@ def executed_functions(
     return list(names)
 
 
-def defined_text_symbols(grit: Path) -> set[str]:
+def defined_text_symbols(grit: Path) -> dict[str, list[str]]:
+    """Every function symbol, mapped to all the function symbols at its address.
+
+    LLVM merges functions whose code is identical into one body and keeps the other names
+    as aliases of it. The body's input section is named after one of them, while callgrind
+    reports any one name for the address, so a function only lands in the hot section if
+    the list names every alias.
+    """
     out = subprocess.run(
         ["nm", "--defined-only", str(grit)], check=True, capture_output=True, text=True
     ).stdout
-    symbols = set()
+    by_address: dict[str, list[str]] = {}
     for line in out.splitlines():
         parts = line.split(" ", 2)
         if len(parts) == 3 and parts[1] in "tTwW":
-            symbols.add(parts[2])
-    return symbols
+            by_address.setdefault(parts[0], []).append(parts[2])
+    return {name: names for names in by_address.values() for name in names}
 
 
 def crate_libs(package: str, features: str = "") -> set[str]:
@@ -304,18 +320,19 @@ def section_pattern(symbol: str) -> str:
 
 LIB_HEADER = [
     " * grit-lib's hot code path (library, runtime and dependency functions its common",
-    " * operations run) in one output section ahead of .text, ordered by how many",
-    " * workloads share them, so an operation faults in a few contiguous code windows",
-    " * instead of scattered ones. Linked through grit-lib's `hot-text-layout` feature",
-    " * (grit-lib/build.rs). Patterns that stop matching are harmless: the function stays",
-    " * in .text. */",
+    " * operations run) in one output section ahead of .text, grouped by the set of",
+    " * workloads that run them, the groups in Gray code order over the workloads, so an",
+    " * operation faults in a few contiguous code windows instead of scattered ones.",
+    " * Linked through grit-lib's `hot-text-layout` feature (grit-lib/build.rs). Patterns",
+    " * that stop matching are harmless: the function stays in .text. */",
 ]
 CLI_HEADER = [
     " * The rest of the `grit` binary's hot code path (the CLI, clap, and library generics",
     " * the CLI instantiates) in one output section ahead of .text, ordered by how many",
-    " * workloads share them. grit-lib/hot-text.ld holds the library's own functions; this",
-    " * fragment is linked into the `grit` binary only (grit-cli/build.rs). Patterns that",
-    " * stop matching are harmless: the function stays in .text. */",
+    " * workloads share them, ties in Gray code order over the workloads that run them.",
+    " * grit-lib/hot-text.ld holds the library's own functions; this fragment is linked",
+    " * into the `grit` binary only (grit-cli/build.rs). Patterns that stop matching are",
+    " * harmless: the function stays in .text. */",
 ]
 
 
@@ -328,10 +345,32 @@ def render(section: str, header: list[str], patterns: list[str]) -> str:
     return "\n".join(lines)
 
 
-def ordered(first_seen: dict[str, None], shared: Counter[str]) -> list[str]:
-    """Patterns most workloads share first, ties in first-seen order."""
+def ordered(
+    first_seen: dict[str, None], workloads: list[set[str]], sharing_first: bool
+) -> list[str]:
+    """Patterns in reflected binary order of the workloads that run them, ties first-seen.
+
+    A pattern's key reads its membership in each workload, earliest workload first, and
+    inverts every digit after one the pattern is a member of. Sorting by that key is the
+    reflected Gray code order with members ahead of non-members: the first workload's
+    patterns lead, and among patterns that agree on every earlier workload, a later
+    workload's members are contiguous. With `sharing_first`, patterns run by more workloads
+    come first and the Gray order only breaks ties between equally shared ones.
+    """
     order = {p: i for i, p in enumerate(first_seen)}
-    return sorted(first_seen, key=lambda p: (-shared[p], order[p]))
+
+    def key(pattern: str) -> tuple[int, tuple[int, ...], int]:
+        digits = []
+        flip = 0
+        sharing = 0
+        for seen in workloads:
+            member = int(pattern in seen)
+            digits.append(1 - (member ^ flip))
+            flip ^= member
+            sharing += member
+        return -sharing if sharing_first else 0, tuple(digits), order[pattern]
+
+    return sorted(first_seen, key=key)
 
 
 def main() -> int:
@@ -359,10 +398,10 @@ def main() -> int:
         if not any(s.startswith("_R") for s in symbols):
             print(f"{grit} has no Rust symbols; build it with strip = false", file=sys.stderr)
             return 1
-        builds.append((grit, symbols, library_symbols(symbols, crates)))
+        builds.append((grit, symbols, library_symbols(set(symbols), crates)))
 
-    # Dict order is first-seen order; `shared` counts the workloads that ran each pattern,
-    # in any of the builds.
+    # Dict order is first-seen order; `seen_by_workload` holds the patterns each workload
+    # ran, in any of the builds.
     lib_seen: dict[str, None] = {}
     cli_seen: dict[str, None] = {}
     seen_by_workload: dict[str, set[str]] = {name: set() for name, _, _ in WORKLOADS}
@@ -378,28 +417,27 @@ def main() -> int:
                     # the usual config cascade.
                     env = run_env(isolated=i == 0)
                     out = root / f"{b}-{name}-{i}.callgrind"
-                    for n in executed_functions(grit, repo, argv, out, env):
-                        if n not in symbols:
-                            continue
-                        p = section_pattern(n)
-                        (lib_seen if n in library else cli_seen).setdefault(p, None)
-                        seen.add(p)
+                    for executed in executed_functions(grit, repo, argv, out, env):
+                        for n in symbols.get(executed, []):
+                            p = section_pattern(n)
+                            (lib_seen if n in library else cli_seen).setdefault(p, None)
+                            seen.add(p)
                 print(
                     f"{grit} {name}: {len(seen)} functions, {len(lib_seen)} "
                     f"library and {len(cli_seen)} CLI total",
                     file=sys.stderr,
                 )
-    shared: Counter[str] = Counter()
-    for seen in seen_by_workload.values():
-        shared.update(seen)
+    workload_sets = [seen_by_workload[name] for name, _, _ in WORKLOADS]
 
     # Wildcarded patterns can coincide; the library's fragment keeps a shared one.
     cli_seen = {p: None for p in cli_seen if p not in lib_seen}
-    for section, header, seen_patterns, output in [
-        (".text.grit_hot", LIB_HEADER, lib_seen, args.lib_output),
-        (".text.grit_cli_hot", CLI_HEADER, cli_seen, args.cli_output),
+    # Every command runs the CLI's start-up and argument parsing first, so its shared core
+    # stays dense at the front of that section; the library's code differs most by command.
+    for section, header, seen_patterns, output, sharing_first in [
+        (".text.grit_hot", LIB_HEADER, lib_seen, args.lib_output, False),
+        (".text.grit_cli_hot", CLI_HEADER, cli_seen, args.cli_output, True),
     ]:
-        patterns = ordered(seen_patterns, shared)
+        patterns = ordered(seen_patterns, workload_sets, sharing_first)
         output.write_text(render(section, header, patterns))
         print(f"wrote {len(patterns)} patterns to {output}", file=sys.stderr)
     return 0
