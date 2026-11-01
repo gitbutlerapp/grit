@@ -2504,6 +2504,30 @@ fn json_filter_selects_fields() -> TestResult {
 }
 
 #[test]
+fn json_filter_rejects_non_json_filter_output() -> TestResult {
+    let scratch = Scratch::new("filter-nonjson")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("a.txt"), "hi\n");
+    gs_ok(&repo, &["commit", "first"]);
+
+    for filter in ["nan", "infinite", "{(1): 2}"] {
+        let out = gs(&repo, ["--json", "--filter", filter, "status"]);
+        assert_eq!(out.status, Some(1), "filter={filter}: {}", out.dump());
+        let v: Value = serde_json::from_str(out.stdout.trim()).unwrap_or_else(|_| {
+            panic!("filter={filter}: stdout is not JSON: {}", out.dump());
+        });
+        assert!(
+            v.get("error").and_then(Value::as_str).is_some(),
+            "filter={filter}: {}",
+            out.dump()
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn json_filter_maps_commit_subjects() -> TestResult {
     let scratch = Scratch::new("filter-log")?;
     let repo = scratch.child("repo");

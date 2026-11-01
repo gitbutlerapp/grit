@@ -2668,7 +2668,7 @@ fn is_broken_pipe(err: &anyhow::Error) -> bool {
 }
 
 fn emit_success<T: output::HumanRender + output::MarkdownRender + serde::Serialize>(
-    value: &T,
+    value: T,
     opts: &OutputOptions,
     ctx: &RenderContext,
 ) -> Result<ExitStatus> {
@@ -2678,7 +2678,7 @@ fn emit_success<T: output::HumanRender + output::MarkdownRender + serde::Seriali
 
 /// Like [`emit_success`], but renders nothing in human mode under `--quiet`.
 fn emit_success_quiet<T: output::HumanRender + output::MarkdownRender + serde::Serialize>(
-    value: &T,
+    value: T,
     quiet: &quiet_args::QuietArgs,
     opts: &OutputOptions,
     ctx: &RenderContext,
@@ -2699,12 +2699,13 @@ fn finish_hunk_error(err: &anyhow::Error, opts: &OutputOptions, code: i32) -> Ex
 }
 
 fn emit_rebase_outcome(
-    outcome: &commands::history::RebaseRunOutcome,
+    outcome: commands::history::RebaseRunOutcome,
     opts: &OutputOptions,
     ctx: &RenderContext,
 ) -> Result<ExitStatus> {
+    let status = ExitStatus::from_rebase_run(&outcome);
     emit(outcome, opts, ctx)?;
-    Ok(ExitStatus::from_rebase_run(outcome))
+    Ok(status)
 }
 
 fn dispatch(
@@ -2724,7 +2725,7 @@ fn dispatch(
             separate_git_dir,
             object_format,
         } => emit_success(
-            &commands::init::run(
+            commands::init::run(
                 path,
                 bare,
                 ref_format,
@@ -2743,7 +2744,7 @@ fn dispatch(
             paths,
             into: None,
         } if paths.is_empty() && !url.contains("://") => emit_success(
-            &commands::switch::run(Some(url), None, false, false, false)?,
+            commands::switch::run(Some(url), None, false, false, false)?,
             opts,
             ctx,
         ),
@@ -2753,28 +2754,30 @@ fn dispatch(
             paths,
             into,
         } => emit_success(
-            &commands::checkout::run(&url, slice.as_deref(), &paths, into.as_deref(), opts.mode)?,
+            commands::checkout::run(&url, slice.as_deref(), &paths, into.as_deref(), opts.mode)?,
             opts,
             ctx,
         ),
         Command::Checkin { branches, force } => {
             let outcome = commands::checkin::run(&branches, force, opts.mode)?;
-            emit_success(&outcome, opts, ctx)?;
-            Ok(ExitStatus::from_push_rejected(outcome.refused))
+            let status = ExitStatus::from_push_rejected(outcome.refused);
+            emit_success(outcome, opts, ctx)?;
+            Ok(status)
         }
         Command::Integrate { branch } => {
             let outcome = commands::checkin::integrate(&branch, opts.mode)?;
-            emit_success(&outcome, opts, ctx)?;
-            Ok(ExitStatus::from_integrate(&outcome))
+            let status = ExitStatus::from_integrate(&outcome);
+            emit_success(outcome, opts, ctx)?;
+            Ok(status)
         }
         Command::Slice { action, url } => match action {
-            SliceAction::List => emit_success(&commands::slice::list(url.as_deref())?, opts, ctx),
+            SliceAction::List => emit_success(commands::slice::list(url.as_deref())?, opts, ctx),
             SliceAction::New {
                 name,
                 paths,
                 description,
             } => emit_success(
-                &commands::slice::new(url.as_deref(), &name, &paths, description.as_deref())?,
+                commands::slice::new(url.as_deref(), &name, &paths, description.as_deref())?,
                 opts,
                 ctx,
             ),
@@ -2784,7 +2787,7 @@ fn dispatch(
                 remove,
                 description,
             } => emit_success(
-                &commands::slice::edit(
+                commands::slice::edit(
                     url.as_deref(),
                     &name,
                     &add,
@@ -2795,7 +2798,7 @@ fn dispatch(
                 ctx,
             ),
             SliceAction::Delete { name } => {
-                emit_success(&commands::slice::delete(url.as_deref(), &name)?, opts, ctx)
+                emit_success(commands::slice::delete(url.as_deref(), &name)?, opts, ctx)
             }
         },
         Command::Clone {
@@ -2839,18 +2842,14 @@ fn dispatch(
                 mode: opts.mode,
             })?;
             if show_outcome {
-                emit_success(&outcome, opts, ctx)?;
+                emit_success(outcome, opts, ctx)?;
             }
             Ok(ExitStatus::Success)
         }
         Command::Remote { verbose, action } => match action {
-            None => emit_success(
-                &commands::remote::run_list_or_add(None, verbose)?,
-                opts,
-                ctx,
-            ),
+            None => emit_success(commands::remote::run_list_or_add(None, verbose)?, opts, ctx),
             Some(RemoteAction::Add { name, url, fetch }) => emit_success(
-                &commands::remote::run_list_or_add(Some((name, url, fetch)), false)?,
+                commands::remote::run_list_or_add(Some((name, url, fetch)), false)?,
                 opts,
                 ctx,
             ),
@@ -2860,15 +2859,15 @@ fn dispatch(
                 push,
                 dry_run,
             }) => emit_success(
-                &commands::remote::run_set_url(&name, &url, push, dry_run)?,
+                commands::remote::run_set_url(&name, &url, push, dry_run)?,
                 opts,
                 ctx,
             ),
             Some(RemoteAction::Remove { name, dry_run }) => {
-                emit_success(&commands::remote::run_remove(&name, dry_run)?, opts, ctx)
+                emit_success(commands::remote::run_remove(&name, dry_run)?, opts, ctx)
             }
             Some(RemoteAction::Prune { name, dry_run }) => {
-                emit_success(&commands::remote::run_prune(&name, dry_run)?, opts, ctx)
+                emit_success(commands::remote::run_prune(&name, dry_run)?, opts, ctx)
             }
             Some(RemoteAction::SetHead {
                 name,
@@ -2889,7 +2888,7 @@ fn dispatch(
                         .context("set-head requires --auto, --delete, or a branch name"));
                 };
                 emit_success(
-                    &commands::remote::run_set_head(&name, mode, dry_run)?,
+                    commands::remote::run_set_head(&name, mode, dry_run)?,
                     opts,
                     ctx,
                 )
@@ -2899,7 +2898,7 @@ fn dispatch(
                 no_query,
                 limit,
             }) => emit_success(
-                &commands::remote::run_show(
+                commands::remote::run_show(
                     &name,
                     &commands::remote::RemoteShowCliOptions {
                         query: !no_query,
@@ -2910,7 +2909,7 @@ fn dispatch(
                 ctx,
             ),
             Some(RemoteAction::Rename { old, new, dry_run }) => emit_success(
-                &commands::remote::run_rename(&old, &new, dry_run)?,
+                commands::remote::run_rename(&old, &new, dry_run)?,
                 opts,
                 ctx,
             ),
@@ -2932,7 +2931,7 @@ fn dispatch(
                     prefixes,
                 };
                 emit_success(
-                    &commands::remote::run_refs(&remote_or_url, &refs_cli, opts.mode)?,
+                    commands::remote::run_refs(&remote_or_url, &refs_cli, opts.mode)?,
                     opts,
                     ctx,
                 )
@@ -2996,7 +2995,7 @@ fn dispatch(
                 let page = commands::log::LogPage::Paged;
                 let outcome =
                     commands::log::run(rev, pathspecs, cursor, format, display, opts.mode, page)?;
-                return emit_success(&outcome, opts, ctx);
+                return emit_success(outcome, opts, ctx);
             }
             // With no `-n` or `--cursor`, the whole history, walked a batch at a time.
             let view = if cursor.is_none() && rev.max_count().is_none() {
@@ -3051,7 +3050,7 @@ fn dispatch(
                 }
             }
             emit_success(
-                &commands::revs::run(rev, pathspecs, mode, opts.mode)?,
+                commands::revs::run(rev, pathspecs, mode, opts.mode)?,
                 opts,
                 ctx,
             )
@@ -3063,11 +3062,13 @@ fn dispatch(
             is_ancestor,
         } => {
             let outcome = commands::merge_base_cmd::run(&a, &b, all, is_ancestor)?;
-            emit_success(&outcome, opts, ctx)?;
-            if is_ancestor {
-                return Ok(ExitStatus::from_merge_base(&outcome));
-            }
-            Ok(ExitStatus::Success)
+            let status = if is_ancestor {
+                ExitStatus::from_merge_base(&outcome)
+            } else {
+                ExitStatus::Success
+            };
+            emit_success(outcome, opts, ctx)?;
+            Ok(status)
         }
         Command::Reflog {
             reference,
@@ -3080,7 +3081,7 @@ fn dispatch(
             action,
         } => match action {
             None => emit_success(
-                &commands::reflog::run_show(
+                commands::reflog::run_show(
                     reference,
                     commands::reflog::ReflogListOptions {
                         max_count,
@@ -3095,7 +3096,7 @@ fn dispatch(
                 ctx,
             ),
             Some(ReflogAction::Delete { specs }) => {
-                emit_success(&commands::reflog::run_delete(specs)?, opts, ctx)
+                emit_success(commands::reflog::run_delete(specs)?, opts, ctx)
             }
             Some(ReflogAction::Expire {
                 all,
@@ -3103,12 +3104,12 @@ fn dispatch(
                 expire_unreachable,
                 dry_run,
             }) => emit_success(
-                &commands::reflog::run_expire(all, expire, expire_unreachable, dry_run)?,
+                commands::reflog::run_expire(all, expire, expire_unreachable, dry_run)?,
                 opts,
                 ctx,
             ),
             Some(ReflogAction::List { limit }) => {
-                emit_success(&commands::reflog::run_list_refs(limit)?, opts, ctx)
+                emit_success(commands::reflog::run_list_refs(limit)?, opts, ctx)
             }
         },
         Command::Blame {
@@ -3125,7 +3126,7 @@ fn dispatch(
             move_detection,
             contents,
         } => emit_success(
-            &commands::blame::run(
+            commands::blame::run(
                 rev_pos,
                 file,
                 rev,
@@ -3184,13 +3185,15 @@ fn dispatch(
             let run_result = commands::diff::run(run_opts);
             match run_result {
                 Ok(outcome) => {
+                    let status = if no_index || wants_exit_code {
+                        ExitStatus::from_diff_outcome(&outcome)
+                    } else {
+                        ExitStatus::Success
+                    };
                     if !quiet && !format.patch_text {
-                        emit_success(&outcome, opts, ctx)?;
+                        emit_success(outcome, opts, ctx)?;
                     }
-                    if no_index || wants_exit_code {
-                        return Ok(ExitStatus::from_diff_outcome(&outcome));
-                    }
-                    Ok(ExitStatus::Success)
+                    Ok(status)
                 }
                 Err(err) => {
                     output::emit_error(&err, opts);
@@ -3210,7 +3213,7 @@ fn dispatch(
             let diff_merges =
                 grit_lib::diff::DiffMerges::parse(&diff_merges).map_err(|e| anyhow::anyhow!(e))?;
             emit_success(
-                &commands::show::run(commands::show::ShowRunOptions {
+                commands::show::run(commands::show::ShowRunOptions {
                     objects,
                     pathspecs,
                     format,
@@ -3223,9 +3226,9 @@ fn dispatch(
                 ctx,
             )
         }
-        Command::Status { status } => emit_success(&commands::status::run(&status)?, opts, ctx),
+        Command::Status { status } => emit_success(commands::status::run(&status)?, opts, ctx),
         Command::Shortlog { shortlog } => {
-            emit_success(&commands::shortlog::run(&shortlog)?, opts, ctx)
+            emit_success(commands::shortlog::run(&shortlog)?, opts, ctx)
         }
         Command::Add {
             pathspecs,
@@ -3262,7 +3265,7 @@ fn dispatch(
                 if !pathspecs.paths.is_empty() || pathspecs.pathspec_from_file.is_some() {
                     bail!("--patch-file cannot be used with path arguments");
                 }
-                emit_success(&commands::add::run_patch_file(&file, dry_run)?, opts, ctx)
+                emit_success(commands::add::run_patch_file(&file, dry_run)?, opts, ctx)
             } else if !hunks.is_empty() || !lines.is_empty() {
                 if executable || non_executable {
                     bail!(
@@ -3280,7 +3283,7 @@ fn dispatch(
                 }
                 match commands::add::run_hunks(&pathspecs, &hunks, &lines, unified_context, dry_run)
                 {
-                    Ok(outcome) => emit_success(&outcome, opts, ctx),
+                    Ok(outcome) => emit_success(outcome, opts, ctx),
                     Err(err) => Ok(finish_hunk_error(
                         &err,
                         opts,
@@ -3289,7 +3292,7 @@ fn dispatch(
                 }
             } else {
                 emit_success(
-                    &commands::add::run(
+                    commands::add::run(
                         &pathspecs,
                         update,
                         dry_run,
@@ -3311,7 +3314,7 @@ fn dispatch(
             dry_run,
             ignore_unmatch,
         } => emit_success(
-            &commands::rm::run(&pathspecs, cached, force, dry_run, ignore_unmatch)?,
+            commands::rm::run(&pathspecs, cached, force, dry_run, ignore_unmatch)?,
             opts,
             ctx,
         ),
@@ -3319,7 +3322,7 @@ fn dispatch(
             paths,
             force,
             dry_run,
-        } => emit_success(&commands::mv::run(&paths, force, dry_run)?, opts, ctx),
+        } => emit_success(commands::mv::run(&paths, force, dry_run)?, opts, ctx),
         Command::Clean {
             pathspecs,
             force,
@@ -3329,7 +3332,7 @@ fn dispatch(
             exclude,
             files_only,
         } => emit_success(
-            &commands::clean::run(
+            commands::clean::run(
                 &pathspecs,
                 force,
                 dry_run,
@@ -3345,7 +3348,7 @@ fn dispatch(
             force,
             dry_run,
             quiet,
-        } => emit_success(&commands::repack::run(force, dry_run, quiet)?, opts, ctx),
+        } => emit_success(commands::repack::run(force, dry_run, quiet)?, opts, ctx),
         Command::Gc {
             dry_run,
             auto,
@@ -3410,7 +3413,7 @@ fn dispatch(
                     ctx.now,
                 )?,
             };
-            emit_success(&outcome, opts, ctx)
+            emit_success(outcome, opts, ctx)
         }
         Command::Fsck {
             connectivity_only,
@@ -3427,31 +3430,34 @@ fn dispatch(
                 verbose,
                 mode: opts.mode,
             })?;
-            emit_success(&outcome, opts, ctx)?;
-            Ok(ExitStatus::from_fsck(&outcome))
+            let status = ExitStatus::from_fsck(&outcome);
+            emit_success(outcome, opts, ctx)?;
+            Ok(status)
         }
         Command::Ignore { action } => match action {
             IgnoreAction::Check { paths, all } => {
                 let outcome = commands::ignore::run(&paths, all)?;
-                emit_success(&outcome, opts, ctx)?;
-                Ok(ExitStatus::from_ignore_check(&outcome))
+                let status = ExitStatus::from_ignore_check(&outcome);
+                emit_success(outcome, opts, ctx)?;
+                Ok(status)
             }
         },
         Command::Hooks { limit, action } => match action {
-            None => emit_success(&commands::hooks::run_list(limit.get())?, opts, ctx),
+            None => emit_success(commands::hooks::run_list(limit.get())?, opts, ctx),
             Some(HooksAction::List { limit: sub_limit }) => emit_success(
-                &commands::hooks::run_list(sub_limit.get().or(limit.get()))?,
+                commands::hooks::run_list(sub_limit.get().or(limit.get()))?,
                 opts,
                 ctx,
             ),
             Some(HooksAction::Run { name, hook_args }) => {
                 let outcome = commands::hooks::run_hook_by_name(&name, &hook_args)?;
-                emit_success(&outcome, opts, ctx)?;
-                Ok(ExitStatus::from_hooks(&outcome))
+                let status = ExitStatus::from_hooks(&outcome);
+                emit_success(outcome, opts, ctx)?;
+                Ok(status)
             }
         },
         Command::PatchId { revs, unstable } => {
-            emit_success(&commands::patch_id::run(&revs, unstable)?, opts, ctx)
+            emit_success(commands::patch_id::run(&revs, unstable)?, opts, ctx)
         }
         Command::Resolve {
             specs,
@@ -3468,7 +3474,7 @@ fn dispatch(
                 if quiet {
                     std::process::exit(code);
                 }
-                emit_success(&outcome?, opts, ctx)
+                emit_success(outcome?, opts, ctx)
             } else {
                 if quiet {
                     anyhow::bail!("--quiet requires --verify");
@@ -3480,14 +3486,10 @@ fn dispatch(
                 } else {
                     RefNameOutput::ObjectIds
                 };
-                emit_success(
-                    &commands::resolve::run(specs, short, ref_output)?,
-                    opts,
-                    ctx,
-                )
+                emit_success(commands::resolve::run(specs, short, ref_output)?, opts, ctx)
             }
         }
-        Command::Cat { spec } => emit_success(&commands::cat::run(spec, opts.mode)?, opts, ctx),
+        Command::Cat { spec } => emit_success(commands::cat::run(spec, opts.mode)?, opts, ctx),
         Command::Commit {
             commit_message,
             message_input,
@@ -3522,7 +3524,7 @@ fn dispatch(
             )?;
             if let Some(file) = patch_file {
                 emit_success_quiet(
-                    &commands::commit::run_patch_file(
+                    commands::commit::run_patch_file(
                         message.or(message_flag),
                         message_file,
                         author_override,
@@ -3563,7 +3565,7 @@ fn dispatch(
                     &hunks,
                     &lines,
                 ) {
-                    Ok(outcome) => emit_success_quiet(&outcome, &quiet, opts, ctx),
+                    Ok(outcome) => emit_success_quiet(outcome, &quiet, opts, ctx),
                     Err(err) => Ok(finish_hunk_error(
                         &err,
                         opts,
@@ -3572,7 +3574,7 @@ fn dispatch(
                 }
             } else {
                 emit_success_quiet(
-                    &commands::commit::run(
+                    commands::commit::run(
                         message.or(message_flag),
                         message_file,
                         author_override,
@@ -3613,7 +3615,7 @@ fn dispatch(
             list,
             dry_run,
         } => emit_success(
-            &commands::branch::run(commands::branch::BranchRunOptions {
+            commands::branch::run(commands::branch::BranchRunOptions {
                 name,
                 start,
                 force,
@@ -3639,22 +3641,23 @@ fn dispatch(
                 all,
                 dry_run,
             } => emit_success(
-                &commands::bundle::run_create(file.into(), revs, all, dry_run)?,
+                commands::bundle::run_create(file.into(), revs, all, dry_run)?,
                 opts,
                 ctx,
             ),
             BundleAction::Verify { file } => {
                 let outcome = commands::bundle::run_verify(file.into())?;
-                emit_success(&outcome, opts, ctx)?;
-                Ok(ExitStatus::from_bundle_verify_ok(outcome.ok))
+                let ok = outcome.ok;
+                emit_success(outcome, opts, ctx)?;
+                Ok(ExitStatus::from_bundle_verify_ok(ok))
             }
             BundleAction::List { file, limit } => emit_success(
-                &commands::bundle::run_list(file.into(), limit.get())?,
+                commands::bundle::run_list(file.into(), limit.get())?,
                 opts,
                 ctx,
             ),
             BundleAction::Unbundle { file, dry_run } => emit_success(
-                &commands::bundle::run_unbundle(file.into(), dry_run)?,
+                commands::bundle::run_unbundle(file.into(), dry_run)?,
                 opts,
                 ctx,
             ),
@@ -3690,7 +3693,7 @@ fn dispatch(
                 Some(NotesAction::Remove { revs }) => (Remove { revs }, None),
             };
             emit_success(
-                &commands::notes::run(notes_ref, run_action, dry_run, list_limit, ctx.now)?,
+                commands::notes::run(notes_ref, run_action, dry_run, list_limit, ctx.now)?,
                 opts,
                 ctx,
             )
@@ -3760,14 +3763,16 @@ fn dispatch(
                     grit_lib::porcelain::tag::TagDetail::Annotation
                 },
             })?;
-            emit_success(&outcome, opts, ctx)?;
-            if verify {
-                return Ok(ExitStatus::from_tag_verify(&outcome));
-            }
-            Ok(ExitStatus::Success)
+            let status = if verify {
+                ExitStatus::from_tag_verify(&outcome)
+            } else {
+                ExitStatus::Success
+            };
+            emit_success(outcome, opts, ctx)?;
+            Ok(status)
         }
         Command::Worktree { action } => match action {
-            WorktreeAction::List => emit_success(&commands::worktree::run_list()?, opts, ctx),
+            WorktreeAction::List => emit_success(commands::worktree::run_list()?, opts, ctx),
             WorktreeAction::Add {
                 path,
                 start_point,
@@ -3780,7 +3785,7 @@ fn dispatch(
                 no_checkout,
                 track,
             } => emit_success(
-                &commands::worktree::run_add(
+                commands::worktree::run_add(
                     path,
                     start_point,
                     branch,
@@ -3796,16 +3801,16 @@ fn dispatch(
                 ctx,
             ),
             WorktreeAction::Remove { path, force } => {
-                emit_success(&commands::worktree::run_remove(path, force)?, opts, ctx)
+                emit_success(commands::worktree::run_remove(path, force)?, opts, ctx)
             }
             WorktreeAction::Prune { dry_run } => {
-                emit_success(&commands::worktree::run_prune(dry_run)?, opts, ctx)
+                emit_success(commands::worktree::run_prune(dry_run)?, opts, ctx)
             }
             WorktreeAction::Lock { path, reason } => {
-                emit_success(&commands::worktree::run_lock(path, reason)?, opts, ctx)
+                emit_success(commands::worktree::run_lock(path, reason)?, opts, ctx)
             }
             WorktreeAction::Unlock { path } => {
-                emit_success(&commands::worktree::run_unlock(path)?, opts, ctx)
+                emit_success(commands::worktree::run_unlock(path)?, opts, ctx)
             }
             WorktreeAction::Move {
                 worktree,
@@ -3813,12 +3818,12 @@ fn dispatch(
                 force,
                 dry_run,
             } => emit_success(
-                &commands::worktree::run_move(worktree, new_path, force, dry_run)?,
+                commands::worktree::run_move(worktree, new_path, force, dry_run)?,
                 opts,
                 ctx,
             ),
             WorktreeAction::Repair { paths, dry_run } => {
-                emit_success(&commands::worktree::run_repair(paths, dry_run)?, opts, ctx)
+                emit_success(commands::worktree::run_repair(paths, dry_run)?, opts, ctx)
             }
         },
         Command::Switch {
@@ -3830,7 +3835,7 @@ fn dispatch(
         } => {
             let outcome = commands::switch::run(branch, start_point, create, detach, dry_run)?;
             commands::clone::emit_path_collision_warning(opts.mode, &outcome.path_collisions);
-            emit_success(&outcome, opts, ctx)
+            emit_success(outcome, opts, ctx)
         }
         Command::Reset {
             rev,
@@ -3841,7 +3846,7 @@ fn dispatch(
             dry_run,
             orphan_limit,
         } => emit_success(
-            &commands::reset::run(rev, soft, mixed, hard, keep, dry_run, orphan_limit)?,
+            commands::reset::run(rev, soft, mixed, hard, keep, dry_run, orphan_limit)?,
             opts,
             ctx,
         ),
@@ -3878,8 +3883,9 @@ fn dispatch(
                 },
                 &mut progress::TerminalProgress::new(opts.mode),
             )?;
-            emit_success(&outcome, opts, ctx)?;
-            Ok(ExitStatus::from_merge_outcome(&outcome))
+            let status = ExitStatus::from_merge_outcome(&outcome);
+            emit_success(outcome, opts, ctx)?;
+            Ok(status)
         }
         Command::Pick {
             commits,
@@ -3909,8 +3915,9 @@ fn dispatch(
                 dry_run,
                 replay_merge,
             })?;
-            emit_success(&outcome, opts, ctx)?;
-            Ok(ExitStatus::from_pick_result(outcome.result))
+            let result = outcome.result;
+            emit_success(outcome, opts, ctx)?;
+            Ok(ExitStatus::from_pick_result(result))
         }
         Command::Revert {
             commits,
@@ -3938,12 +3945,13 @@ fn dispatch(
                 dry_run,
                 replay_merge,
             })?;
-            emit_success(&outcome, opts, ctx)?;
-            Ok(ExitStatus::from_revert_result(outcome.result))
+            let result = outcome.result;
+            emit_success(outcome, opts, ctx)?;
+            Ok(ExitStatus::from_revert_result(result))
         }
         Command::History { action } => match action {
             HistoryAction::Drop { commit, shared } => {
-                emit_success(&commands::history::run_drop(&commit, &shared)?, opts, ctx)
+                emit_success(commands::history::run_drop(&commit, &shared)?, opts, ctx)
             }
             HistoryAction::Move {
                 commit,
@@ -3951,7 +3959,7 @@ fn dispatch(
                 after,
                 shared,
             } => emit_success(
-                &commands::history::run_move(&commit, before, after, &shared)?,
+                commands::history::run_move(&commit, before, after, &shared)?,
                 opts,
                 ctx,
             ),
@@ -3961,7 +3969,7 @@ fn dispatch(
                 author,
                 shared,
             } => emit_success(
-                &commands::history::run_reword(&commit, &message, &author, &shared)?,
+                commands::history::run_reword(&commit, &message, &author, &shared)?,
                 opts,
                 ctx,
             ),
@@ -3977,7 +3985,7 @@ fn dispatch(
                     &commit, &message, &hunks, &lines, &pathspecs, &shared,
                 );
                 match outcome {
-                    Ok(out) => emit_success(&out, opts, ctx),
+                    Ok(out) => emit_success(out, opts, ctx),
                     Err(err) => Ok(finish_hunk_error(
                         &err,
                         opts,
@@ -4004,15 +4012,15 @@ fn dispatch(
                         flags: &rebase_flags,
                         shared: &shared,
                     })?;
-                emit_rebase_outcome(&outcome, opts, ctx)
+                emit_rebase_outcome(outcome, opts, ctx)
             }
             HistoryAction::Absorb { base, shared } => emit_success(
-                &commands::history::run_absorb(base.as_deref(), &shared)?,
+                commands::history::run_absorb(base.as_deref(), &shared)?,
                 opts,
                 ctx,
             ),
             HistoryAction::Undo { shared } => {
-                emit_success(&commands::history::run_undo(&shared)?, opts, ctx)
+                emit_success(commands::history::run_undo(&shared)?, opts, ctx)
             }
             HistoryAction::Squash {
                 range,
@@ -4020,7 +4028,7 @@ fn dispatch(
                 combine,
                 shared,
             } => emit_success(
-                &commands::history::run_squash(&range, &message, combine, &shared)?,
+                commands::history::run_squash(&range, &message, combine, &shared)?,
                 opts,
                 ctx,
             ),
@@ -4031,7 +4039,7 @@ fn dispatch(
                 paths,
                 shared,
             } => emit_success(
-                &commands::history::run_split(&commit, &message, rest_message, &paths, &shared)?,
+                commands::history::run_split(&commit, &message, rest_message, &paths, &shared)?,
                 opts,
                 ctx,
             ),
@@ -4062,7 +4070,7 @@ fn dispatch(
                     progress: &mut progress::TerminalProgress::new(opts.mode),
                 });
                 match outcome {
-                    Ok(o) => emit_success(&o, opts, ctx),
+                    Ok(o) => emit_success(o, opts, ctx),
                     Err(err) => Ok(finish_hunk_error(
                         &err,
                         opts,
@@ -4110,7 +4118,7 @@ fn dispatch(
                     progress: &mut progress::TerminalProgress::new(opts.mode),
                 });
                 match outcome {
-                    Ok(o) => emit_success(&o, opts, ctx),
+                    Ok(o) => emit_success(o, opts, ctx),
                     Err(err) => Ok(finish_hunk_error(
                         &err,
                         opts,
@@ -4118,25 +4126,26 @@ fn dispatch(
                     )),
                 }
             }
-            Some(StashAction::List) => emit_success(&commands::stash::run_list()?, opts, ctx),
+            Some(StashAction::List) => emit_success(commands::stash::run_list()?, opts, ctx),
             Some(StashAction::Show {
                 index,
                 stat: _,
                 patch,
                 include_untracked,
             }) => emit_success(
-                &commands::stash::run_show(index, patch, include_untracked)?,
+                commands::stash::run_show(index, patch, include_untracked)?,
                 opts,
                 ctx,
             ),
             Some(StashAction::Branch { name, index }) => {
                 let outcome = commands::stash::run_branch(index, &name)?;
-                emit_success(&outcome, opts, ctx)?;
-                Ok(ExitStatus::from_stash_conflicts(outcome.conflicts))
+                let status = ExitStatus::from_stash_conflicts(outcome.conflicts);
+                emit_success(outcome, opts, ctx)?;
+                Ok(status)
             }
             Some(StashAction::Clear { force, dry_run }) => {
                 let outcome = commands::stash::run_clear(force, dry_run)?;
-                emit_success(&outcome, opts, ctx)?;
+                emit_success(outcome, opts, ctx)?;
                 if !force {
                     Ok(ExitStatus::Failure)
                 } else {
@@ -4152,8 +4161,9 @@ fn dispatch(
                     restore_index,
                     &mut progress::TerminalProgress::new(opts.mode),
                 )?;
-                emit_success(&outcome, opts, ctx)?;
-                Ok(ExitStatus::from_stash_conflicts(outcome.conflicts))
+                let status = ExitStatus::from_stash_conflicts(outcome.conflicts);
+                emit_success(outcome, opts, ctx)?;
+                Ok(status)
             }
             Some(StashAction::Pop {
                 index,
@@ -4164,11 +4174,12 @@ fn dispatch(
                     restore_index,
                     &mut progress::TerminalProgress::new(opts.mode),
                 )?;
-                emit_success(&outcome, opts, ctx)?;
-                Ok(ExitStatus::from_stash_conflicts(outcome.conflicts))
+                let status = ExitStatus::from_stash_conflicts(outcome.conflicts);
+                emit_success(outcome, opts, ctx)?;
+                Ok(status)
             }
             Some(StashAction::Drop { index }) => {
-                emit_success(&commands::stash::run_drop(index)?, opts, ctx)
+                emit_success(commands::stash::run_drop(index)?, opts, ctx)
             }
         },
         Command::Restore {
@@ -4199,7 +4210,7 @@ fn dispatch(
                 match commands::restore::run_hunks(
                     &pathspecs, &hunks, &lines, staged, worktree, dry_run,
                 ) {
-                    Ok(outcome) => emit_success(&outcome, opts, ctx),
+                    Ok(outcome) => emit_success(outcome, opts, ctx),
                     Err(err) => Ok(finish_hunk_error(
                         &err,
                         opts,
@@ -4211,7 +4222,7 @@ fn dispatch(
                     bail!("--dry-run requires --hunks or --lines");
                 }
                 emit_success(
-                    &commands::restore::run(
+                    commands::restore::run(
                         &pathspecs,
                         staged,
                         worktree,
@@ -4227,8 +4238,9 @@ fn dispatch(
         }
         Command::Fetch { fetch } => {
             let outcome = commands::fetch::run(&fetch, opts.mode)?;
+            let status = ExitStatus::from_fetch(&outcome);
             if fetch.quiet.shows_outcome(opts.mode) {
-                match &outcome {
+                match outcome {
                     commands::fetch::FetchRunOutcome::One(one) => {
                         emit_success(one, opts, ctx)?;
                     }
@@ -4237,7 +4249,7 @@ fn dispatch(
                     }
                 }
             }
-            Ok(ExitStatus::from_fetch(&outcome))
+            Ok(status)
         }
         Command::Pull {
             fetch,
@@ -4256,10 +4268,11 @@ fn dispatch(
                 check,
             };
             let outcome = commands::pull::run(&args, opts.mode)?;
+            let status = ExitStatus::from_pull(&outcome);
             if args.fetch.quiet.shows_outcome(opts.mode) {
-                emit_success(&outcome, opts, ctx)?;
+                emit_success(outcome, opts, ctx)?;
             }
-            Ok(ExitStatus::from_pull(&outcome))
+            Ok(status)
         }
         Command::Rebase {
             upstream,
@@ -4279,7 +4292,7 @@ fn dispatch(
                 flags: &rebase_flags,
                 shared: &shared,
             })?;
-            emit_rebase_outcome(&outcome, opts, ctx)
+            emit_rebase_outcome(outcome, opts, ctx)
         }
         Command::Push {
             tags,
@@ -4318,12 +4331,13 @@ fn dispatch(
                 opts.mode,
                 no_verify,
             )?;
-            if outcome.rejected || quiet.shows_outcome(opts.mode) {
-                emit_success(&outcome, opts, ctx)?;
+            let rejected = outcome.rejected;
+            if rejected || quiet.shows_outcome(opts.mode) {
+                emit_success(outcome, opts, ctx)?;
             }
             // The outcome (per-ref results) is reported in both modes; a rejected
             // push is still a failure, so mirror Git and exit non-zero.
-            Ok(ExitStatus::from_push_rejected(outcome.rejected))
+            Ok(ExitStatus::from_push_rejected(rejected))
         }
         Command::Auth {
             url,
@@ -4363,7 +4377,7 @@ fn dispatch(
                         },
                     }
                 };
-                emit_success(&outcome, opts, ctx)
+                emit_success(outcome, opts, ctx)
             }
             Some(AuthAction::Logout { url, dry_run }) => {
                 let server = match url.as_deref() {
@@ -4373,15 +4387,11 @@ fn dispatch(
                         commands::auth::DefaultHost::GitHub => None,
                     },
                 };
-                emit_success(
-                    &commands::auth::logout(server.as_ref(), dry_run)?,
-                    opts,
-                    ctx,
-                )
+                emit_success(commands::auth::logout(server.as_ref(), dry_run)?, opts, ctx)
             }
         },
-        Command::Update => emit_success(&commands::update::run(opts.mode)?, opts, ctx),
-        Command::Skill => emit_success(&commands::skill::run()?, opts, ctx),
+        Command::Update => emit_success(commands::update::run(opts.mode)?, opts, ctx),
+        Command::Skill => emit_success(commands::skill::run()?, opts, ctx),
         Command::Completions { shell } => {
             commands::completions::run(shell)?;
             Ok(ExitStatus::Success)
@@ -4435,7 +4445,7 @@ fn dispatch(
                 opts.mode,
             )?;
             let code = commands::config::exit_code(&outcome);
-            emit(&outcome, opts, ctx)?;
+            emit(outcome, opts, ctx)?;
             if code != 0 {
                 std::process::exit(code);
             }
@@ -4461,31 +4471,31 @@ fn dispatch(
                 Some(ServeAction::AddUser { email, admin }) => {
                     let password = commands::serve_http::read_new_password(&email)?;
                     emit_success(
-                        &commands::serve_http::add_user(&root, db, &email, admin, password)?,
+                        commands::serve_http::add_user(&root, db, &email, admin, password)?,
                         opts,
                         ctx,
                     )
                 }
                 Some(ServeAction::Token { email }) => {
-                    emit_success(&commands::serve_http::token(&root, db, &email)?, opts, ctx)
+                    emit_success(commands::serve_http::token(&root, db, &email)?, opts, ctx)
                 }
                 Some(ServeAction::Grant {
                     user,
                     repository,
                     write,
                 }) => emit_success(
-                    &commands::serve_http::grant(&root, db, &user, &repository, write)?,
+                    commands::serve_http::grant(&root, db, &user, &repository, write)?,
                     opts,
                     ctx,
                 ),
                 Some(ServeAction::Users) => {
-                    emit_success(&commands::serve_http::users(&root, db)?, opts, ctx)
+                    emit_success(commands::serve_http::users(&root, db)?, opts, ctx)
                 }
                 None if setup => {
                     let email = commands::serve_http::read_admin_email(email)?;
                     let password = commands::serve_http::read_new_password(&email)?;
                     emit_success(
-                        &commands::serve_http::setup(&root, db, &email, password)?,
+                        commands::serve_http::setup(&root, db, &email, password)?,
                         opts,
                         ctx,
                     )
