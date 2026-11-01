@@ -104,6 +104,67 @@ fn log_on_terminal(dir: &Path, args: &[&str], pager: &str) -> String {
     String::from_utf8_lossy(&out).replace("\r\n", "\n")
 }
 
+/// Like [`log_on_terminal`], but with a `PATH` that has no pager and no pager env vars.
+fn log_on_terminal_without_pager_in_path(dir: &Path, args: &[&str], path: &str) -> String {
+    let mut master = 0;
+    let mut slave = 0;
+    let mut size = libc::winsize {
+        ws_row: 40,
+        ws_col: COLUMNS,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    // SAFETY: `openpty` writes two fds into the provided integers; the name and termios
+    // arguments may be null.
+    let rc = unsafe {
+        libc::openpty(
+            &mut master,
+            &mut slave,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut size,
+        )
+    };
+    assert_eq!(rc, 0, "openpty failed");
+    // SAFETY: both fds were just opened by `openpty` and are owned here.
+    let (master, slave) = unsafe { (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) };
+    let child = Command::new(GRIT)
+        .arg("log")
+        .args(args)
+        .current_dir(dir)
+        .env_remove("GRIT_PAGER")
+        .env_remove("PAGER")
+        .env("PATH", path)
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(slave))
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn grit log");
+    // Drain the terminal while grit runs so it never blocks on a full pty buffer.
+    let reader = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let mut master = File::from(master);
+        let mut buf = [0u8; 4096];
+        // Reads fail with EIO once grit (the last holder of the slave side) exits.
+        while let Ok(n) = master.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            out.extend_from_slice(&buf[..n]);
+        }
+        out
+    });
+    let output = child.wait_with_output().expect("wait for grit log");
+    assert!(
+        output.status.success(),
+        "grit log {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let out = reader.join().expect("terminal reader");
+    String::from_utf8_lossy(&out).replace("\r\n", "\n")
+}
+
 fn commit_lines(text: &str) -> Vec<&str> {
     text.lines().filter(|l| l.contains("commit ")).collect()
 }
@@ -158,6 +219,35 @@ fn terminal_log_no_pager() {
         rows.iter()
             .all(|row| row.chars().count() <= usize::from(COLUMNS)),
         "rows fit the terminal: {direct}"
+    );
+}
+
+#[test]
+fn terminal_log_missing_pager_falls_back_to_terminal() {
+    let dir = repo_with_commits(3);
+    let direct = log_on_terminal(
+        dir.path(),
+        &[],
+        "definitely-not-a-pager-binary-6231",
+    );
+    assert_eq!(
+        commit_lines(&direct).len(),
+        3,
+        "missing GRIT_PAGER writes commits to the terminal: {direct}"
+    );
+}
+
+#[test]
+fn terminal_log_default_less_missing_falls_back_to_terminal() {
+    let dir = repo_with_commits(3);
+    let empty_path = dir.path().join("empty-path");
+    std::fs::create_dir(&empty_path).unwrap();
+    let path = empty_path.display().to_string();
+    let direct = log_on_terminal_without_pager_in_path(dir.path(), &[], &path);
+    assert_eq!(
+        commit_lines(&direct).len(),
+        3,
+        "default less missing from PATH writes commits to the terminal: {direct}"
     );
 }
 
