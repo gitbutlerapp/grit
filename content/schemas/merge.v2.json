@@ -48,6 +48,22 @@
           "type": "string"
         }
       ]
+    },
+    "RerereEventJson": {
+      "description": "One rerere status line in `--json` output.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
     }
   },
   "description": "Result of `grit merge` (and the merge half of `grit pull`).",
@@ -120,6 +136,13 @@
         "array",
         "null"
       ]
+    },
+    "rerere": {
+      "description": "Rerere replay or record events when `rerere.enabled` is active.",
+      "items": {
+        "$ref": "#/definitions/RerereEventJson"
+      },
+      "type": "array"
     },
     "result": {
       "$ref": "#/definitions/MergeResult"

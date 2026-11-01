@@ -1872,6 +1872,8 @@ fn create_commit_with_index(
 
     if concluding_merge {
         let _ = finish_merge_state(repo)?;
+    } else if grit_rebase_conflict_stop_active(repo.git_dir()) {
+        let _ = crate::rerere::finish_merge_rerere(repo)?;
     }
     if concluding_replay {
         finish_replay_commit_state(repo, oid)?;

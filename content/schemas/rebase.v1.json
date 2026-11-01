@@ -104,6 +104,22 @@
       ],
       "type": "object"
     },
+    "RerereEventJson": {
+      "description": "One rerere status line in `--json` output.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
     "RewrittenPair": {
       "description": "One commit OID before and after rewrite.",
       "properties": {
@@ -220,6 +236,13 @@
       "description": "Ref tip updates. For `aborted`, branches something else moved during the stop that the abort reset: `old` is the overwritten tip, `new` the restored pre-rebase tip.",
       "items": {
         "$ref": "#/definitions/RefPair"
+      },
+      "type": "array"
+    },
+    "rerere": {
+      "description": "Rerere replay or record events when `rerere.enabled` is active.",
+      "items": {
+        "$ref": "#/definitions/RerereEventJson"
       },
       "type": "array"
     },

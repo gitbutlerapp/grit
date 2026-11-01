@@ -873,6 +873,8 @@ pub enum IntegrateBranchOutcome {
         paths: Vec<String>,
         /// Per-path conflict classification (same order as `paths` after sorting).
         details: Vec<Conflict>,
+        /// Rerere replay or preimage events when `rerere.enabled` is set.
+        rerere: Vec<crate::rerere::RerereEvent>,
     },
     /// A `--squash` merge applied the merged tree and wrote `SQUASH_MSG`.
     Squashed,
@@ -1212,7 +1214,12 @@ fn integrate_at_tip_without_hooks(
         } else {
             record_merge_in_progress(repo.git_dir(), other_oid, merge_msg)?;
         }
-        return Ok(IntegrateBranchOutcome::Conflicts { paths, details });
+        let rerere = crate::rerere::repo_rerere(repo, crate::rerere::RerereAutoupdate::FromConfig)?;
+        return Ok(IntegrateBranchOutcome::Conflicts {
+            paths,
+            details,
+            rerere,
+        });
     }
 
     repo.odb().persist_mem_overlay()?;
@@ -1673,6 +1680,7 @@ pub fn abort_branch_merge(repo: &Repository) -> Result<()> {
     if !in_merge && !squash_conflict {
         return Err(Error::NoMergeInProgress);
     }
+    crate::rerere::rerere_clear(git_dir)?;
     restore_pre_merge_state(repo)
 }
 

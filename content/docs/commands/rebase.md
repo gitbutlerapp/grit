@@ -230,6 +230,7 @@ Pass `--json` on `grit rebase` or `grit history rebase`:
 | `command` | string | Successful command that left edits, for `exec_dirty`. |
 | `paths` | array of strings | Changed tracked paths at an exec stop. |
 | `conflicts` | array | `{path,kind,summary?}` when `result` is `conflicts`; `kind` is a [conflict kind](../status/#conflict-kinds). |
+| `rerere` | array | Rerere events when `rerere.enabled` is active at a conflict stop (`path`, `kind` as for [`grit merge`](../merge/#json)). Omitted when empty. |
 | `next_steps` | array | Ordered `grit` commands after a stop. |
 | `alternatives` | array | `grit rebase --abort` and `grit rebase --skip` when paused. |
 

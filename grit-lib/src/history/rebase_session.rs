@@ -72,6 +72,8 @@ pub struct RebaseStop {
     pub done: Vec<ObjectId>,
     /// Source commits not yet replayed (including `commit`).
     pub remaining: Vec<ObjectId>,
+    /// Rerere replay or preimage events when `rerere.enabled` is set.
+    pub rerere: Vec<crate::rerere::RerereEvent>,
 }
 
 /// Result of starting or advancing a rebase session.
@@ -655,6 +657,7 @@ pub fn continue_rebase(
     if repo.load_index()?.has_unmerged_entries() {
         return Err(RebaseSessionError::UnmergedPaths);
     }
+    let _ = crate::rerere::finish_merge_rerere(repo).map_err(map_lib)?;
     let current = state
         .stopped_commit
         .or_else(|| state.remaining.first().copied())
@@ -1390,11 +1393,15 @@ fn install_stopped_rebase(
     let message = load_commit(repo, conflict.commit)?.message;
     fs::write(repo.git_dir().join("MERGE_MSG"), &message).map_err(map_lib)?;
 
+    let rerere = crate::rerere::repo_rerere(repo, crate::rerere::RerereAutoupdate::FromConfig)
+        .map_err(map_lib)?;
+
     Ok(RebaseStop {
         commit: conflict.commit,
         conflicts: conflicts_from_tree_merge(&conflict.merge),
         done,
         remaining,
+        rerere,
     })
 }
 

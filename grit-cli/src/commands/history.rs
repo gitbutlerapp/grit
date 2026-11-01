@@ -397,6 +397,9 @@ pub struct RebaseCliOutcome {
     /// `--exec` subprocess results through completion or a dirty exec stop.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exec: Vec<ExecResultJson>,
+    /// Rerere replay or record events when `rerere.enabled` is active.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rerere: Vec<crate::operation_output::RerereEventJson>,
 }
 
 impl RebaseCliOutcome {
@@ -415,6 +418,7 @@ impl RebaseCliOutcome {
             next_steps: None,
             alternatives: None,
             exec: Vec::new(),
+            rerere: Vec::new(),
         }
     }
 
@@ -433,6 +437,7 @@ impl RebaseCliOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
+            rerere: Vec::new(),
         }
     }
 
@@ -465,12 +470,16 @@ impl RebaseCliOutcome {
         conflicts: &[Conflict],
         runs: &[ExecRunRecord],
     ) -> Self {
-        let mut outcome = Self::from_stop(commit, conflicts);
+        let mut outcome = Self::from_stop(commit, conflicts, &[]);
         outcome.exec = exec_rows(runs);
         outcome
     }
 
-    fn from_stop(commit: ObjectId, conflicts: &[Conflict]) -> Self {
+    fn from_stop(
+        commit: ObjectId,
+        conflicts: &[Conflict],
+        rerere: &[grit_lib::diff::rerere::RerereEvent],
+    ) -> Self {
         let block = OperationConflictBlock::for_rebase(conflicts);
         Self {
             command: None,
@@ -486,6 +495,7 @@ impl RebaseCliOutcome {
             next_steps: Some(block.next_steps),
             alternatives: block.alternatives,
             exec: Vec::new(),
+            rerere: crate::operation_output::rerere_events_json(rerere),
         }
     }
 }
@@ -528,6 +538,7 @@ impl HumanRender for RebaseCliOutcome {
                 if let Some(details) = &self.conflicts {
                     render_conflicts_human(details, w)?;
                 }
+                crate::operation_output::render_rerere_human(&self.rerere);
                 render_rebase_conflict_footer_human();
             }
             RebaseResult::Completed => {
@@ -1521,9 +1532,11 @@ fn map_rebase_outcome(outcome: RebaseOutcome) -> Result<RebaseCliOutcome> {
             omit_identity_rewrite_rows(&mut outcome);
             Ok(RebaseCliOutcome::from_rewrite(outcome))
         }
-        RebaseOutcome::Stopped(stop) => {
-            Ok(RebaseCliOutcome::from_stop(stop.commit, &stop.conflicts))
-        }
+        RebaseOutcome::Stopped(stop) => Ok(RebaseCliOutcome::from_stop(
+            stop.commit,
+            &stop.conflicts,
+            &stop.rerere,
+        )),
     }
 }
 

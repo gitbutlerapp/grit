@@ -207,6 +207,8 @@ pub enum SequenceOutcome {
         created_so_far: Vec<ReplayCreated>,
         /// Remaining todo oids (including `current`).
         remaining: Vec<ObjectId>,
+        /// Rerere replay or preimage events when `rerere.enabled` is set.
+        rerere: Vec<crate::rerere::RerereEvent>,
     },
     /// The current step is empty relative to `HEAD` and `empty` is [`ReplayEmptyPolicy::Stop`].
     Empty {
@@ -340,6 +342,7 @@ pub fn continue_replay_sequence(
     if index.has_unmerged_entries() {
         return Err(Error::ReplayContinueUnmerged);
     }
+    let _ = crate::rerere::finish_merge_rerere(repo)?;
     let (refname, head_oid) = branch_head(repo)?;
     let git_dir = repo.git_dir();
     let step_head_present =
@@ -570,6 +573,7 @@ pub enum ReplayAbortOutcome {
 ///
 /// Propagates I/O, object read, and sequencer record failures.
 pub(crate) fn finish_replay_commit_state(repo: &Repository, new_oid: ObjectId) -> Result<()> {
+    let _ = crate::rerere::finish_merge_rerere(repo)?;
     let git_dir = repo.git_dir();
     let cherry = read_cherry_pick_head(git_dir)?;
     let revert = read_revert_head(git_dir)?;
@@ -619,9 +623,11 @@ pub fn abort_replay_sequence(repo: &Repository) -> Result<ReplayAbortOutcome> {
     let active = load_active_replay(repo)?;
     let (refname, head_oid) = branch_head(repo)?;
     if head_oid != active.abort_safety {
+        crate::rerere::rerere_clear(repo.git_dir())?;
         clear_replay_state(repo.git_dir())?;
         return Ok(ReplayAbortOutcome::ClearedInPlace);
     }
+    crate::rerere::rerere_clear(repo.git_dir())?;
     let restore_oid = read_sequencer_head(repo.git_dir())
         .or(read_orig_head_for_repository(repo).ok().flatten())
         .unwrap_or(active.abort_safety);
@@ -830,7 +836,7 @@ fn run_sequence(
                 dropped.push(entry.oid);
                 continue;
             }
-            StepResult::Conflicts { conflicts } => {
+            StepResult::Conflicts { conflicts, rerere } => {
                 let remaining: Vec<ObjectId> = todo.iter().map(|t| t.oid).collect();
                 write_sequencer_state(
                     repo,
@@ -858,6 +864,7 @@ fn run_sequence(
                     conflicts,
                     created_so_far: created_records.clone(),
                     remaining,
+                    rerere,
                 });
             }
             StepResult::EmptyStop => {
@@ -899,10 +906,18 @@ fn run_sequence(
 }
 
 enum StepResult {
-    Committed { oid: ObjectId, tree: ObjectId },
-    AppliedNoCommit { tree: ObjectId },
+    Committed {
+        oid: ObjectId,
+        tree: ObjectId,
+    },
+    AppliedNoCommit {
+        tree: ObjectId,
+    },
     DroppedEmpty,
-    Conflicts { conflicts: Vec<Conflict> },
+    Conflicts {
+        conflicts: Vec<Conflict>,
+        rerere: Vec<crate::rerere::RerereEvent>,
+    },
     EmptyStop,
 }
 
@@ -1158,8 +1173,10 @@ fn apply_one_step(
 
     if crate::operation::tree_merge_has_conflicts(&merged) {
         apply_conflict_merge_worktree(repo, &ours_tree, &merged, progress, cancel)?;
+        let rerere = crate::rerere::repo_rerere(repo, crate::rerere::RerereAutoupdate::FromConfig)?;
         return Ok(StepResult::Conflicts {
             conflicts: crate::operation::conflicts_from_tree_merge(&merged),
+            rerere,
         });
     }
 

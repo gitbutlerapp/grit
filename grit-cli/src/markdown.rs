@@ -737,6 +737,7 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
             if let Some(details) = &outcome.conflicts {
                 crate::operation_output::render_conflicts_markdown(details, w)?;
             }
+            crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
             if outcome.next_steps.is_some() || outcome.alternatives.is_some() {
                 crate::operation_output::render_operation_guidance_markdown(
                     outcome.next_steps.as_deref().unwrap_or(&[]),
@@ -1154,6 +1155,7 @@ pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::R
                 if let Some(details) = &outcome.conflicts {
                     crate::operation_output::render_conflicts_markdown(details, w)?;
                 }
+                crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
                 crate::operation_output::render_operation_guidance_markdown(
                     outcome.next_steps.as_deref().unwrap_or(&[]),
                     outcome.alternatives.as_deref(),
@@ -1213,6 +1215,7 @@ pub fn print_revert_outcome(w: &mut dyn Write, outcome: &RevertOutcome) -> anyho
                 if let Some(details) = &outcome.conflicts {
                     crate::operation_output::render_conflicts_markdown(details, w)?;
                 }
+                crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
                 crate::operation_output::render_operation_guidance_markdown(
                     outcome.next_steps.as_deref().unwrap_or(&[]),
                     outcome.alternatives.as_deref(),
@@ -1305,6 +1308,7 @@ pub fn print_rebase_outcome(
             if let Some(details) = &outcome.conflicts {
                 crate::operation_output::render_conflicts_markdown(details, w)?;
             }
+            crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
             if let Some(commit) = &outcome.commit {
                 outln!(
                     w,

@@ -54,7 +54,7 @@ fn modify_delete_conflict_materializes_incoming_version_and_resolves_with_add_or
         &grit_lib::progress::NeverCancel,
     )
     .expect("merge");
-    let IntegrateBranchOutcome::Conflicts { paths, details } = outcome else {
+    let IntegrateBranchOutcome::Conflicts { paths, details, .. } = outcome else {
         panic!("expected conflicts");
     };
     assert_eq!(paths, vec!["f".to_owned()]);

@@ -28,6 +28,8 @@ pub enum RerereAutoupdate {
 
 /// Outcome of rerere handling one path (replaces stderr status lines).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum RerereEventKind {
     /// Returned when recorded preimage.
     RecordedPreimage,
@@ -47,6 +49,7 @@ pub enum RerereEventKind {
 
 /// One rerere status event for a path.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct RerereEvent {
     /// Repository-relative or filesystem path related to the failure.
     pub path: String,

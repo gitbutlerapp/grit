@@ -84,6 +84,9 @@ pub struct MergeOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub conflicts: Option<Vec<ConflictJson>>,
+    /// Rerere replay or record events when `rerere.enabled` is active.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rerere: Vec<crate::operation_output::RerereEventJson>,
     /// Suggested `grit` commands when `result` is `conflicts`.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
@@ -145,6 +148,7 @@ impl MergeOutcome {
             dry_run: None,
             parents: None,
             updated_branch: None,
+            rerere: Vec::new(),
             detached_head: false,
         }
     }
@@ -179,6 +183,7 @@ impl MergeOutcome {
             dry_run: None,
             parents: None,
             updated_branch: fast_forward_updated_branch(head_short, label),
+            rerere: Vec::new(),
             detached_head: false,
         }
     }
@@ -201,6 +206,7 @@ impl MergeOutcome {
             dry_run: None,
             parents: None,
             updated_branch: fast_forward_updated_branch(head_short, label),
+            rerere: Vec::new(),
             detached_head: false,
         }
     }
@@ -229,6 +235,7 @@ impl MergeOutcome {
             dry_run: None,
             parents: None,
             updated_branch: None,
+            rerere: Vec::new(),
             detached_head: false,
         }
     }
@@ -246,6 +253,7 @@ impl MergeOutcome {
             dry_run: Some(true),
             parents: Some(parents.iter().map(ObjectId::to_hex).collect()),
             updated_branch: None,
+            rerere: Vec::new(),
             detached_head: false,
         }
     }
@@ -263,6 +271,7 @@ impl MergeOutcome {
             dry_run: None,
             parents: None,
             updated_branch: None,
+            rerere: Vec::new(),
             detached_head: false,
         }
     }
@@ -286,6 +295,7 @@ impl MergeOutcome {
             dry_run: None,
             parents: None,
             updated_branch: None,
+            rerere: Vec::new(),
             detached_head: false,
         }
     }
@@ -297,7 +307,11 @@ impl MergeOutcome {
         o
     }
 
-    fn conflicts(label: &str, details: Vec<Conflict>) -> Self {
+    fn conflicts(
+        label: &str,
+        details: Vec<Conflict>,
+        rerere: Vec<grit_lib::diff::rerere::RerereEvent>,
+    ) -> Self {
         let block = OperationConflictBlock::for_merge(&details, label);
         Self {
             result: MergeResult::Conflicts,
@@ -305,6 +319,7 @@ impl MergeOutcome {
             oid: None,
             change_id: None,
             conflicts: Some(block.conflicts),
+            rerere: crate::operation_output::rerere_events_json(&rerere),
             next_steps: Some(block.next_steps),
             alternatives: block.alternatives,
             check: false,
@@ -331,6 +346,7 @@ impl MergeOutcome {
             dry_run: None,
             parents: None,
             updated_branch: None,
+            rerere: Vec::new(),
             detached_head: false,
         }
     }
@@ -348,6 +364,7 @@ impl MergeOutcome {
             dry_run: None,
             parents: None,
             updated_branch: None,
+            rerere: Vec::new(),
             detached_head: false,
         }
     }
@@ -365,6 +382,7 @@ impl MergeOutcome {
             dry_run: None,
             parents: None,
             updated_branch: None,
+            rerere: Vec::new(),
             detached_head: false,
         }
     }
@@ -388,6 +406,7 @@ impl MergeOutcome {
             dry_run: None,
             parents: None,
             updated_branch: None,
+            rerere: Vec::new(),
             detached_head: false,
         }
     }
@@ -507,6 +526,7 @@ impl HumanRender for MergeOutcome {
                 if let Some(details) = &self.conflicts {
                     render_conflicts_human(details, w)?;
                 }
+                crate::operation_output::render_rerere_human(&self.rerere);
                 crate::operation_output::render_merge_conflict_footer_human();
             }
             MergeResult::Aborted => outln!(w, "Merge aborted."),
@@ -838,9 +858,9 @@ fn map_integrate_outcome(
         }
         IntegrateBranchOutcome::Squashed => MergeOutcome::squashed(label),
         IntegrateBranchOutcome::Stopped => MergeOutcome::stopped(label),
-        IntegrateBranchOutcome::Conflicts { details, .. } => {
-            MergeOutcome::conflicts(label, details)
-        }
+        IntegrateBranchOutcome::Conflicts {
+            details, rerere, ..
+        } => MergeOutcome::conflicts(label, details, rerere),
     }
 }
 
@@ -871,6 +891,7 @@ mod tests {
                         path: "a.txt".into(),
                         kind: ConflictKind::BothModified,
                     }],
+                    Vec::new(),
                 ),
                 "conflicts",
             ),

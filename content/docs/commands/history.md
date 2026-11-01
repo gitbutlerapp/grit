@@ -259,6 +259,7 @@ Pass `--json` on `grit history drop`, `grit history move`, `grit history reword`
 | `dry_run` | boolean | `true` when `--dry-run` was set. |
 | `commit` | string | `rebase` when paused: source commit for `conflicts`, or `HEAD` after the command for `exec_dirty` (full hex). |
 | `conflicts` | array | `rebase` when `result` is `conflicts`: `{path,kind,summary?}`. |
+| `rerere` | array | `rebase` when `rerere.enabled` is active at a conflict stop (`path`, `kind` as for [`grit merge`](../merge/#json)). Omitted when empty. |
 | `next_steps` | array | `rebase` when paused: ordered follow-up `grit` commands. |
 | `alternatives` | array | `rebase` when paused: `grit rebase --abort` and `grit rebase --skip`. |
 

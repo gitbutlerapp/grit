@@ -282,3 +282,63 @@ pub fn render_rebase_conflict_footer_human() {
         "\nRebase stopped on conflicts; fix them and run `grit rebase --continue`, or `grit rebase --abort` / `grit rebase --skip`."
     );
 }
+
+/// One rerere status line in `--json` output.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct RerereEventJson {
+    pub path: String,
+    pub kind: String,
+}
+
+/// Convert library rerere events for CLI output.
+#[must_use]
+pub fn rerere_events_json(events: &[grit_lib::diff::rerere::RerereEvent]) -> Vec<RerereEventJson> {
+    use grit_lib::diff::rerere::RerereEventKind;
+    events
+        .iter()
+        .map(|e| {
+            let kind = match e.kind {
+                RerereEventKind::RecordedPreimage => "recorded_preimage",
+                RerereEventKind::RecordedResolution => "recorded_resolution",
+                RerereEventKind::ResolvedFromPrevious => "resolved_from_previous",
+                RerereEventKind::StagedFromPrevious => "staged_from_previous",
+                RerereEventKind::UpdatedPreimage => "updated_preimage",
+                RerereEventKind::Forgot => "forgot",
+                RerereEventKind::NoRemembered => "no_remembered",
+            };
+            RerereEventJson {
+                path: e.path.clone(),
+                kind: kind.into(),
+            }
+        })
+        .collect()
+}
+
+fn rerere_human_line(event: &RerereEventJson) -> String {
+    match event.kind.as_str() {
+        "resolved_from_previous" => format!("Resolved `{}` from a previous resolution", event.path),
+        "staged_from_previous" => {
+            format!("Staged `{}` from a previous resolution", event.path)
+        }
+        "recorded_preimage" => format!("Recorded rerere preimage for `{}`", event.path),
+        "recorded_resolution" => format!("Recorded rerere resolution for `{}`", event.path),
+        "updated_preimage" => format!("Updated rerere preimage for `{}`", event.path),
+        "forgot" => format!("Forgot rerere resolution for `{}`", event.path),
+        _ => format!("Rerere: `{}` ({})", event.path, event.kind),
+    }
+}
+
+/// Human stderr lines for rerere events (after conflicts, before footers).
+pub fn render_rerere_human(events: &[RerereEventJson]) {
+    for event in events {
+        eprintln!("{}", rerere_human_line(event));
+    }
+}
+
+/// Markdown bullets for rerere events.
+pub fn render_rerere_markdown(events: &[RerereEventJson], w: &mut dyn Write) -> Result<()> {
+    for event in events {
+        outln!(w, "- {}", rerere_human_line(event));
+    }
+    Ok(())
+}

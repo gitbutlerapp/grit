@@ -100,6 +100,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `commits` | array | Each revert commit created in this invocation (newest first). |
 | `dropped` | array | Source commits skipped as empty per `--empty drop`. |
 | `conflicts` | array or null | Conflicted paths when `result` is `conflicts`, each `{path, kind}` with a [conflict kind](../status/#conflict-kinds). |
+| `rerere` | array | Rerere events when `rerere.enabled` is active and the revert stops on conflicts (`path`, `kind` as for [`grit merge`](../merge/#json)). Omitted when empty. |
 | `next_steps` | array or null | Suggested follow-up commands when paused. |
 | `alternatives` | array or null | `--abort` / `--skip` when paused. |
 | `dry_run` | boolean or null | True when `--dry-run` was used. |

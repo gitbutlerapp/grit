@@ -97,6 +97,9 @@ pub struct RevertOutcome {
     /// True when this outcome is from `grit revert --check` (nothing was reverted).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub check: bool,
+    /// Rerere replay or record events when `rerere.enabled` is active.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rerere: Vec<crate::operation_output::RerereEventJson>,
 }
 
 impl RevertOutcome {
@@ -114,6 +117,7 @@ impl RevertOutcome {
             alternatives: None,
             dry_run: None,
             check: false,
+            rerere: Vec::new(),
         }
     }
 
@@ -157,6 +161,7 @@ impl HumanRender for RevertOutcome {
                         crate::operation_output::render_revert_check_conflicts_human(details, w)?;
                     } else {
                         render_conflicts_human(details, w)?;
+                        crate::operation_output::render_rerere_human(&self.rerere);
                         render_revert_conflict_footer_human();
                     }
                 }
@@ -339,12 +344,14 @@ fn map_sequence_outcome(outcome: SequenceOutcome) -> RevertOutcome {
         SequenceOutcome::Conflicts {
             conflicts,
             created_so_far,
+            rerere,
             ..
         } => {
             let block = OperationConflictBlock::for_revert(&conflicts);
             RevertOutcome {
                 commits: created_so_far.iter().map(RevertCommitEntry::from).collect(),
                 conflicts: Some(block.conflicts),
+                rerere: crate::operation_output::rerere_events_json(&rerere),
                 next_steps: Some(block.next_steps),
                 alternatives: block.alternatives,
                 ..RevertOutcome::new(RevertResult::Conflicts)
