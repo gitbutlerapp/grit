@@ -2,7 +2,7 @@
 
 use super::super::helpers::{
     blame_file_bench, cat_blob_bench, ctx, finish_git_git_matrix_ctx, headline_spec, log_all_bench,
-    log_json_bench, log_json_filter_bench, log_json_n10_decorations_bench,
+    log_group_by_author_bench, log_json_bench, log_json_filter_bench, log_json_n10_decorations_bench,
     log_limit_documentation_git_git_bench, log_oneline_bench, log_path_bench, log_stat_n50_bench,
     merge_base_bench, patch_id_head_bench, prepare_history_rewrite_reset, prepare_none,
     reflog_list_bench, resolve_change_id_bench, resolve_head_bench, revs_count_bench,
@@ -117,6 +117,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             correctness: None,
             build_git: |c| log_all_bench(c).1,
             build_grit: |c| log_all_bench(c).0,
+        },
+        DailyHeadlinePlan {
+            spec: scenario_spec("log/group-by-author@git-git"),
+            pending: false,
+            setup: setup_git_git_history,
+            prepare: prepare_none,
+            correctness: None,
+            build_git: |c| log_group_by_author_bench(c).1,
+            build_grit: |c| log_group_by_author_bench(c).0,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("log/path@git-git"),

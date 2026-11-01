@@ -764,6 +764,14 @@ pub fn log_all_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     )
 }
 
+/// Author counts for all reachable commits: grit log --group-by author vs git shortlog -sne.
+pub fn log_group_by_author_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["log", "--group-by", "author"]),
+        sh_devnull(&ctx.git, &["shortlog", "-sne", "HEAD"]),
+    )
+}
+
 pub fn log_path_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     let path = ctx.matrix_path.as_deref().unwrap_or("README.md");
     (

@@ -346,9 +346,12 @@ fn count_authors_at_pack_rows(
         return Ok(AuthorCounter::new());
     }
 
-    let threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
+    let config = repo.config()?;
+    let threads = repo
+        .thread_policy()
+        .resolve(crate::parallel::ParallelOp::DiffContent, config.as_ref())
+        .threads
+        .get()
         .clamp(1, 8);
     if entries.len() < PARALLEL_AUTHOR_COUNT_MIN || threads <= 1 {
         let mut reader =
@@ -449,7 +452,7 @@ fn shortlog_stack_walk_compatible(walk: &RevWalkListOptions, parsed: &RevWalkPar
         && parsed.symmetric_right.is_none()
 }
 
-fn load_commit_bytes_and_count_author(
+fn load_commit_prefix_and_count_author(
     repo: &Repository,
     objects_dir: &Path,
     pack_reader: &mut Option<SingleLocalPackReader>,
@@ -457,7 +460,7 @@ fn load_commit_bytes_and_count_author(
     mailmap: Option<&MailmapTable>,
     counter: &mut AuthorCounter,
     monotonic_pack_probe: bool,
-) -> Result<Vec<u8>> {
+) -> Result<Option<Vec<u8>>> {
     for _ in 0..3 {
         if pack_reader.is_none() {
             *pack_reader = SingleLocalPackReader::open_allow_loose_for_commits(objects_dir, &oid)?;
@@ -473,7 +476,7 @@ fn load_commit_bytes_and_count_author(
         };
         if let Some(prefix) = prefix {
             if accumulate_author_count(prefix, mailmap, counter).is_ok() {
-                return Ok(prefix.to_vec());
+                return Ok(None);
             }
             reader.clear_commit_header_prefix();
         } else if !reader.contains_oid(&oid)? {
@@ -487,7 +490,7 @@ fn load_commit_bytes_and_count_author(
             Ok(obj) => {
                 reader.clear_commit_header_prefix();
                 accumulate_author_count(&obj.data, mailmap, counter)?;
-                return Ok(obj.data);
+                return Ok(Some(obj.data));
             }
             Err(Error::ObjectNotFound(_)) => {
                 reader.clear_commit_header_prefix();
@@ -503,7 +506,7 @@ fn load_commit_bytes_and_count_author(
     *pack_reader = None;
     let obj = repo.odb().read(&oid)?;
     accumulate_author_count(&obj.data, mailmap, counter)?;
-    Ok(obj.data)
+    Ok(Some(obj.data))
 }
 
 fn accumulate_author_for_oid(
@@ -515,7 +518,7 @@ fn accumulate_author_for_oid(
     counter: &mut AuthorCounter,
     monotonic_pack_probe: bool,
 ) -> Result<()> {
-    load_commit_bytes_and_count_author(
+    load_commit_prefix_and_count_author(
         repo,
         objects_dir,
         pack_reader,
@@ -556,7 +559,7 @@ fn count_authors_stack_walk(
         if excluded.is_hidden(oid) || !seen.insert(oid) {
             continue;
         }
-        let commit_bytes = load_commit_bytes_and_count_author(
+        let full_commit = load_commit_prefix_and_count_author(
             repo,
             objects_dir,
             &mut pack_reader,
@@ -568,7 +571,18 @@ fn count_authors_stack_walk(
         let parents = if let Some(graph) = graph.as_mut() {
             graph.parents_of(oid)?
         } else {
-            parent_oids_from_commit_bytes(&commit_bytes, first_parent)?
+            let prefix = full_commit
+                .as_deref()
+                .or_else(|| {
+                    pack_reader
+                        .as_ref()
+                        .filter(|r| !r.commit_header_prefix().is_empty())
+                        .map(SingleLocalPackReader::commit_header_prefix)
+                })
+                .ok_or_else(|| {
+                    Error::CorruptObject("commit missing parent header after author count".into())
+                })?;
+            parent_oids_from_commit_bytes(prefix, first_parent)?
         };
         stack.extend(parents);
     }
@@ -644,7 +658,7 @@ fn author_identity_key(name: &str, email: &str) -> u128 {
 
 fn hash_ascii_insensitive(s: &str, hasher: &mut impl Hasher) {
     for b in s.bytes() {
-        hasher.write(&[b.to_ascii_lowercase()]);
+        hasher.write_u8(b.to_ascii_lowercase());
     }
 }
 

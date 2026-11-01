@@ -421,6 +421,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Full reachable history: grit log (paged) vs git log --oneline",
     },
     ScenarioSpec {
+        id: "log/group-by-author@git-git",
+        area: Area::Revwalk,
+        headline: false,
+        name: None,
+        description: "Author shortlog: grit log --group-by author vs git shortlog -sne HEAD",
+    },
+    ScenarioSpec {
         id: "log/path@git-git",
         area: Area::Revwalk,
         headline: false,

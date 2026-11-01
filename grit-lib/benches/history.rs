@@ -15,7 +15,8 @@ use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
 use grit_lib::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_lib::revwalk::{
-    group_commits_by_author, mailmap_for_grouping, GroupByAuthorOptions, RevWalkListOptions,
+    group_commits_by_author_from_rev, mailmap_for_grouping, GroupByAuthorOptions,
+    RevWalkListOptions,
 };
 use similar::Algorithm;
 use std::sync::Arc;
@@ -130,25 +131,27 @@ fn bench_log_group_by_author(c: &mut Criterion) {
     let fx = HistoryBenchFixtures::global();
     let mut group = c.benchmark_group("log-group-by-author");
     group.throughput(Throughput::Elements(fx.commit_count as u64));
-    fx.ensure_commit_graph();
-    group.bench_function("group_head", |b| {
-        b.iter(|| {
-            let walk = fx.repo.rev_walk();
-            let oids = walk
-                .commits(&["HEAD"], &RevWalkListOptions::default())
-                .expect("commits");
-            let mailmap = mailmap_for_grouping(&fx.repo, true).expect("mailmap");
-            black_box(
-                group_commits_by_author(
-                    &fx.repo,
-                    &oids,
-                    mailmap.as_ref(),
-                    GroupByAuthorOptions::default(),
+    let walk = RevWalkListOptions::default();
+    let mailmap = mailmap_for_grouping(&fx.repo, true).expect("mailmap");
+    for (label, use_graph) in [("no_commit_graph", false), ("commit_graph", true)] {
+        if use_graph {
+            fx.ensure_commit_graph();
+        }
+        group.bench_with_input(BenchmarkId::new("count_only", label), &use_graph, |b, _| {
+            b.iter(|| {
+                black_box(
+                    group_commits_by_author_from_rev(
+                        &fx.repo,
+                        &["HEAD"],
+                        &walk,
+                        mailmap.as_ref(),
+                        GroupByAuthorOptions { count_only: true },
+                    )
+                    .expect("group"),
                 )
-                .expect("group"),
-            )
+            });
         });
-    });
+    }
     group.finish();
 }
 

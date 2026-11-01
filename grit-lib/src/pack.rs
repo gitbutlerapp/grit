@@ -15,7 +15,7 @@ use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use crate::odb::BoundedRead;
 pub use crate::pack_map::PackData;
 use crate::pack_map::ResidentBudget;
-use crate::unpack_objects::apply_delta_into;
+use crate::unpack_objects::{apply_delta_into, apply_delta_prefix_into};
 use crate::zlib_inflate::ZlibInflateScratch;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -2948,6 +2948,146 @@ fn apply_delta_chain_forward_into(
     Ok(())
 }
 
+fn commit_prefix_has_author(data: &[u8]) -> bool {
+    let mut pos = 0usize;
+    while pos < data.len() {
+        let line_start = pos;
+        let mut line_end = pos;
+        while line_end < data.len() && data[line_end] != b'\n' {
+            line_end += 1;
+        }
+        let line = &data[line_start..line_end];
+        let after_nl = line_end.saturating_add(1);
+        if line.is_empty() {
+            return false;
+        }
+        if line.first() == Some(&b' ') {
+            return false;
+        }
+        let Some(key_end) = line.iter().position(|&b| b == b' ') else {
+            return false;
+        };
+        if &line[..key_end] == b"author" {
+            return true;
+        }
+        pos = after_nl;
+    }
+    false
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_delta_chain_forward_prefix_into(
+    out: &mut Vec<u8>,
+    kind: ObjectKind,
+    base_data: &[u8],
+    whole_base: Option<(u32, u64)>,
+    pending: &[PendingDeltaFrame],
+    result_pack_id: u32,
+    result_offset: u64,
+    populate_delta_lru: bool,
+    state: &mut DeltaChainState,
+    max_out: usize,
+) -> Result<()> {
+    if pending.is_empty() {
+        out.clear();
+        let take = base_data.len().min(max_out);
+        out.extend_from_slice(&base_data[..take]);
+        return Ok(());
+    }
+
+    let caching = populate_delta_lru && pack_cache::delta_base_caching_enabled();
+    let mut cache_inserts: Vec<(u32, u64, Arc<[u8]>)> =
+        Vec::with_capacity(if caching { pending.len() + 1 } else { 0 });
+    if caching {
+        if let Some((pid, off)) = whole_base {
+            cache_inserts.push((pid, off, Arc::from(base_data.to_vec())));
+        }
+    }
+
+    let chain_a = &mut state.chain_a;
+    let chain_b = &mut state.chain_b;
+    let mut rev: Vec<&PendingDeltaFrame> = pending.iter().rev().collect();
+    let last = rev
+        .pop()
+        .ok_or_else(|| Error::CorruptObject("empty delta chain".to_owned()))?;
+    let prefix_ok = |buf: &[u8]| commit_prefix_has_author(buf);
+    if rev.is_empty() {
+        apply_delta_prefix_into(out, base_data, &last.delta, max_out, prefix_ok)?;
+        if caching && (last.pack_id != result_pack_id || last.offset != result_offset) {
+            cache_inserts.push((last.pack_id, last.offset, Arc::from(out.as_slice())));
+        }
+        if caching {
+            pack_cache::put_delta_bases(kind, &cache_inserts);
+        }
+        return Ok(());
+    }
+
+    let Some(first) = rev.first().copied() else {
+        return Err(Error::CorruptObject(
+            "delta chain missing base-adjacent frame".to_owned(),
+        ));
+    };
+    apply_delta_into(chain_a, base_data, &first.delta)?;
+    if caching && (first.pack_id != result_pack_id || first.offset != result_offset) {
+        cache_inserts.push((first.pack_id, first.offset, Arc::from(chain_a.as_slice())));
+    }
+    let mut src_is_a = true;
+    for frame in rev.iter().skip(1) {
+        if src_is_a {
+            apply_delta_into(chain_b, chain_a.as_slice(), &frame.delta)?;
+            if caching && (frame.pack_id != result_pack_id || frame.offset != result_offset) {
+                cache_inserts.push((frame.pack_id, frame.offset, Arc::from(chain_b.as_slice())));
+            }
+        } else {
+            apply_delta_into(chain_a, chain_b.as_slice(), &frame.delta)?;
+            if caching && (frame.pack_id != result_pack_id || frame.offset != result_offset) {
+                cache_inserts.push((frame.pack_id, frame.offset, Arc::from(chain_a.as_slice())));
+            }
+        }
+        src_is_a = !src_is_a;
+    }
+    let penultimate_base = if src_is_a {
+        chain_a.as_slice()
+    } else {
+        chain_b.as_slice()
+    };
+    apply_delta_prefix_into(out, penultimate_base, &last.delta, max_out, prefix_ok)?;
+    if caching && (last.pack_id != result_pack_id || last.offset != result_offset) {
+        cache_inserts.push((last.pack_id, last.offset, Arc::from(out.as_slice())));
+    }
+    if caching {
+        pack_cache::put_delta_bases(kind, &cache_inserts);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_pack_read_prefix_with_pending(
+    out: &mut Vec<u8>,
+    kind: ObjectKind,
+    base: &[u8],
+    whole_base: Option<(u32, u64)>,
+    result_pack_id: u32,
+    result_offset: u64,
+    populate_delta_lru: bool,
+    state: &mut DeltaChainState,
+) -> Result<ObjectKind> {
+    let pending = std::mem::take(&mut state.pending);
+    apply_delta_chain_forward_prefix_into(
+        out,
+        kind,
+        base,
+        whole_base,
+        &pending,
+        result_pack_id,
+        result_offset,
+        populate_delta_lru,
+        state,
+        COMMIT_HEADER_READ_PREFIX,
+    )?;
+    Ok(kind)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn finish_pack_read_with_pending(
     out: &mut Vec<u8>,
@@ -4395,36 +4535,183 @@ impl SingleLocalPackReader {
     }
 
     fn read_commit_author_prefix_at_pack_offset(&mut self, offset: u64) -> Result<Option<&[u8]>> {
-        let mut compressed = Vec::new();
-        let (pack_bytes, mut pos) =
-            pack_entry_bytes(&self.idx, offset, &self.pack_bytes, &mut compressed)?;
-        if pos >= pack_bytes.len() {
-            return Ok(None);
-        }
-        let (packed_type, _) = match parse_pack_object_header(pack_bytes, &mut pos) {
-            Ok(v) => v,
-            Err(_) => return Ok(None),
-        };
-        if !matches!(packed_type, PackedType::Commit) {
-            return Ok(None);
-        }
         self.commit_header_buf.clear();
-        self.delta_scratch
-            .get_or_insert_with(ZlibInflateScratch::default)
-            .decompress_prefix_into(
-                &pack_bytes[pos..],
-                COMMIT_HEADER_READ_PREFIX,
-                &mut self.commit_header_buf,
-            )?;
-        if self.commit_header_buf.is_empty() {
+        let filled = with_pack_read_delta_state(0, |state| {
+            self.resolve_commit_author_prefix_at_pack_offset(offset, state)
+        })?;
+        if !filled || self.commit_header_buf.is_empty() {
             return Ok(None);
         }
         Ok(Some(&self.commit_header_buf))
     }
 
+    fn resolve_commit_author_prefix_at_pack_offset(
+        &mut self,
+        start_offset: u64,
+        state: &mut DeltaChainState,
+    ) -> Result<bool> {
+        let pack_bytes = self.pack_bytes.as_ref();
+        let mut cur_offset = start_offset;
+        let result_offset = start_offset;
+        let result_pack_id = self.pack_id;
+        state.pending.clear();
+
+        let mut compressed = Vec::new();
+        loop {
+            state.visit(self.pack_id, cur_offset)?;
+            let (bytes, mut pos) =
+                pack_entry_bytes(&self.idx, cur_offset, pack_bytes, &mut compressed)?;
+            let object_start = cur_offset;
+            let (packed_type, size) = match parse_pack_object_header(bytes, &mut pos) {
+                Ok(v) => v,
+                Err(_) => return Ok(false),
+            };
+            match packed_type {
+                PackedType::Commit => {
+                    let kind = ObjectKind::Commit;
+                    if state.pending.is_empty() {
+                        self.delta_scratch
+                            .get_or_insert_with(ZlibInflateScratch::default)
+                            .decompress_prefix_into(
+                                &bytes[pos..],
+                                COMMIT_HEADER_READ_PREFIX,
+                                &mut self.commit_header_buf,
+                            )?;
+                        return Ok(!self.commit_header_buf.is_empty());
+                    }
+                    if let Some((base_kind, base_data)) =
+                        pack_cache::get_delta_base(self.pack_id, cur_offset)
+                    {
+                        if base_kind != ObjectKind::Commit {
+                            return Ok(false);
+                        }
+                        finish_pack_read_prefix_with_pending(
+                            &mut self.commit_header_buf,
+                            kind,
+                            base_data.as_ref(),
+                            None,
+                            result_pack_id,
+                            result_offset,
+                            true,
+                            state,
+                        )?;
+                        return Ok(commit_prefix_has_author(&self.commit_header_buf));
+                    }
+                    state.whole_object.clear();
+                    decompress_pack_data_into(
+                        bytes,
+                        &mut pos,
+                        size,
+                        &mut state.inflate,
+                        &mut state.whole_object,
+                    )?;
+                    let whole = std::mem::take(&mut state.whole_object);
+                    finish_pack_read_prefix_with_pending(
+                        &mut self.commit_header_buf,
+                        kind,
+                        &whole,
+                        Some((self.pack_id, cur_offset)),
+                        result_pack_id,
+                        result_offset,
+                        true,
+                        state,
+                    )?;
+                    return Ok(commit_prefix_has_author(&self.commit_header_buf));
+                }
+                PackedType::Tree | PackedType::Blob | PackedType::Tag => return Ok(false),
+                PackedType::OfsDelta => {
+                    state.next_hop()?;
+                    let base_offset = parse_ofs_delta_base(bytes, &mut pos, object_start)?;
+                    state.delta_decompress.clear();
+                    decompress_pack_data_into(
+                        bytes,
+                        &mut pos,
+                        size,
+                        &mut state.inflate,
+                        &mut state.delta_decompress,
+                    )?;
+                    state.pending.push(PendingDeltaFrame {
+                        pack_id: self.pack_id,
+                        offset: object_start,
+                        delta: std::mem::take(&mut state.delta_decompress),
+                    });
+                    if let Some((base_kind, base_data)) =
+                        pack_cache::get_delta_base(self.pack_id, base_offset)
+                    {
+                        if base_kind != ObjectKind::Commit {
+                            return Ok(false);
+                        }
+                        finish_pack_read_prefix_with_pending(
+                            &mut self.commit_header_buf,
+                            base_kind,
+                            base_data.as_ref(),
+                            None,
+                            result_pack_id,
+                            result_offset,
+                            true,
+                            state,
+                        )?;
+                        return Ok(commit_prefix_has_author(&self.commit_header_buf));
+                    }
+                    cur_offset = base_offset;
+                }
+                PackedType::RefDelta => {
+                    state.next_hop()?;
+                    let hb = self.idx.hash_bytes();
+                    if pos + hb > bytes.len() {
+                        return Ok(false);
+                    }
+                    let base_raw = &bytes[pos..pos + hb];
+                    pos += hb;
+                    state.delta_decompress.clear();
+                    decompress_pack_data_into(
+                        bytes,
+                        &mut pos,
+                        size,
+                        &mut state.inflate,
+                        &mut state.delta_decompress,
+                    )?;
+                    state.pending.push(PendingDeltaFrame {
+                        pack_id: self.pack_id,
+                        offset: object_start,
+                        delta: std::mem::take(&mut state.delta_decompress),
+                    });
+                    let base_oid = ObjectId::from_bytes(base_raw)?;
+                    let Some(base_offset) = self.idx.find_offset(&base_oid)? else {
+                        return Ok(false);
+                    };
+                    if let Some((base_kind, base_data)) =
+                        pack_cache::get_delta_base(self.pack_id, base_offset)
+                    {
+                        if base_kind != ObjectKind::Commit {
+                            return Ok(false);
+                        }
+                        finish_pack_read_prefix_with_pending(
+                            &mut self.commit_header_buf,
+                            base_kind,
+                            base_data.as_ref(),
+                            None,
+                            result_pack_id,
+                            result_offset,
+                            true,
+                            state,
+                        )?;
+                        return Ok(commit_prefix_has_author(&self.commit_header_buf));
+                    }
+                    cur_offset = base_offset;
+                }
+            }
+        }
+    }
+
     /// Drop any cached commit header prefix (required before delta / ODB fallbacks).
     pub(crate) fn clear_commit_header_prefix(&mut self) {
         self.commit_header_buf.clear();
+    }
+
+    /// Prefix from the last successful [`Self::read_commit_author_prefix`] call.
+    pub(crate) fn commit_header_prefix(&self) -> &[u8] {
+        &self.commit_header_buf
     }
 
     fn read_info_at_pack_offset(&mut self, start_offset: u64) -> Result<ObjectInfo> {
