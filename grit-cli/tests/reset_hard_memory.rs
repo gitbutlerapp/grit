@@ -218,6 +218,16 @@ fn hard_reset_tree_transition_peak_rss_stays_near_git() {
         .status()
         .unwrap()
         .success());
+    let grit_porcelain = git_in(grit_root.path())
+        .args(["status", "--porcelain"])
+        .output()
+        .expect("status")
+        .stdout;
+    assert!(
+        grit_porcelain.is_empty(),
+        "grit index/worktree must be clean after transition resets, got: {}",
+        String::from_utf8_lossy(&grit_porcelain)
+    );
 }
 
 fn reset_peak_rss_kib_with_target(tool: &str, root: &Path, grit: &Path, target: &str) -> u64 {

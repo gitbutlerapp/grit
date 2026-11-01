@@ -210,13 +210,17 @@ fn reset_hard_preserves_nested_untracked_under_coalesced_deleted_directory() {
 
     git(dir.path(), &["reset", "--hard", &drop_oid_hex]);
     assert!(
+        !dir.path().join("tracked-dir/tracked.txt").exists(),
+        "git must remove tracked.txt on hard reset to deletion commit"
+    );
+    assert!(
         std::fs::read(dir.path().join("tracked-dir/nested/untracked.txt")).is_ok(),
         "system git must keep nested untracked under coalesced-deleted directory"
     );
     let git_porcelain = git(dir.path(), &["status", "--porcelain"]);
     assert!(
         git_porcelain.contains("tracked-dir/nested/untracked.txt")
-            || git_porcelain.contains("tracked-dir/"),
+            || git_porcelain.contains("?? tracked-dir/"),
         "git should report preserved untracked: {git_porcelain}"
     );
 
@@ -243,12 +247,23 @@ fn reset_hard_preserves_nested_untracked_under_coalesced_deleted_directory() {
     )
     .expect("grit hard reset");
     assert!(
+        !dir.path().join("tracked-dir/tracked.txt").exists(),
+        "grit must remove tracked.txt like git"
+    );
+    assert!(
         std::fs::read(dir.path().join("tracked-dir/nested/untracked.txt")).is_ok(),
         "grit must preserve nested untracked like git"
     );
     let porcelain = git(dir.path(), &["status", "--porcelain"]);
+    let git_porcelain = git(dir.path(), &["status", "--porcelain"]);
+    assert_eq!(
+        porcelain.trim(),
+        git_porcelain.trim(),
+        "grit reset must match git status"
+    );
     assert!(
-        porcelain.contains("tracked-dir/nested/untracked.txt") || porcelain.contains("tracked-dir/"),
-        "status after grit reset must match git: {porcelain}"
+        porcelain.contains("tracked-dir/nested/untracked.txt")
+            || porcelain.contains("?? tracked-dir/"),
+        "status after grit reset must report untracked: {porcelain}"
     );
 }

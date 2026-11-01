@@ -2510,20 +2510,22 @@ fn diff_entry_is_coalesced_subtree(change: &DiffEntry) -> bool {
         || matches!(change.status, DiffStatus::Added if crate::index::is_tree_mode(change.new_mode.bits()))
 }
 
-/// Stage-0 index paths removed by a coalesced tree delete at `dir_prefix` (stored form).
-fn index_paths_under_coalesced_delete_prefix(index: &Index, dir_prefix: &str) -> Vec<String> {
-    let prefix = crate::repo_relpath::storage_bytes(dir_prefix).into_owned();
-    let mut prefix_slash = prefix.clone();
-    prefix_slash.push(b'/');
-    index
-        .entries
-        .iter()
-        .filter(|entry| entry.stage() == 0)
-        .filter(|entry| {
-            entry.path.as_slice() == prefix.as_slice() || entry.path.starts_with(&prefix_slash)
-        })
-        .map(|entry| crate::repo_relpath::storage_string(&entry.path))
-        .collect()
+/// Worktree paths scheduled for removal by a coalesced tree delete (from the old subtree OID).
+fn coalesced_delete_scheduled_paths(odb: &Odb, change: &DiffEntry) -> Result<Vec<String>> {
+    let Some(root) = change.old_path.as_deref() else {
+        return Ok(Vec::new());
+    };
+    if !crate::index::is_tree_mode(change.old_mode.bits()) {
+        return Ok(vec![root.to_owned()]);
+    }
+    if change.old_oid.is_zero() {
+        return Ok(Vec::new());
+    }
+    let blobs = crate::diff::flatten_tree_entries(odb, &change.old_oid)?;
+    Ok(blobs
+        .into_iter()
+        .map(|(rel, _, _)| crate::repo_relpath::format_path_stored(root, rel.as_ref()))
+        .collect())
 }
 
 /// Apply coalesced subtree add/delete entries; returns leaf-level diff rows for the rest.
@@ -2579,7 +2581,7 @@ fn checkout_coalesced_subtree_changes(
         let Some(dir) = &change.old_path else {
             continue;
         };
-        let tracked = index_paths_under_coalesced_delete_prefix(index_mut, dir);
+        let tracked = coalesced_delete_scheduled_paths(repo.odb(), change)?;
         let delete_set: HashSet<String> = tracked.iter().cloned().collect();
         let wholesale_safe = !tracked.is_empty()
             && wholesale_directory_safe_to_remove(work_tree, dir, &delete_set, ignorecase);
