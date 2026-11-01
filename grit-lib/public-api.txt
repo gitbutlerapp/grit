@@ -2974,8 +2974,8 @@ pub fn grit_lib::config::ConfigSet::get(&self, &str) -> core::option::Option<all
 pub fn grit_lib::config::ConfigSet::get_all(&self, &str) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::config::ConfigSet::get_all_raw(&self, &str) -> alloc::vec::Vec<core::option::Option<alloc::string::String>>
 pub fn grit_lib::config::ConfigSet::get_all_with_origin(&self, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::config::ConfigValueOrigin>>
-pub fn grit_lib::config::ConfigSet::get_bool(&self, &str) -> core::option::Option<core::result::Result<bool, alloc::string::String>>
-pub fn grit_lib::config::ConfigSet::get_i64(&self, &str) -> core::option::Option<core::result::Result<i64, alloc::string::String>>
+pub fn grit_lib::config::ConfigSet::get_bool(&self, &str) -> core::option::Option<core::result::Result<bool, grit_lib::error::ConfigError>>
+pub fn grit_lib::config::ConfigSet::get_i64(&self, &str) -> core::option::Option<core::result::Result<i64, grit_lib::error::ConfigError>>
 pub fn grit_lib::config::ConfigSet::get_last_entry(&self, &str) -> core::option::Option<grit_lib::config::ConfigEntry>
 pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, alloc::string::String>
 pub fn grit_lib::config::ConfigSet::get_with_origin(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigValueOrigin>>
@@ -3111,14 +3111,14 @@ pub fn grit_lib::config::get_urlmatch_entries<'a>(&'a [grit_lib::config::ConfigE
 pub fn grit_lib::config::git_config_parameters_last_value(&str, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::global_config_paths_pub(&grit_lib::config::environment::Environment) -> alloc::vec::Vec<std::path::PathBuf>
 pub fn grit_lib::config::global_config_write_path(&grit_lib::config::environment::Environment) -> grit_lib::error::Result<std::path::PathBuf>
-pub fn grit_lib::config::parse_bool(&str) -> core::result::Result<bool, alloc::string::String>
-pub fn grit_lib::config::parse_color(&str) -> core::result::Result<alloc::string::String, alloc::string::String>
+pub fn grit_lib::config::parse_bool(&str) -> core::result::Result<bool, grit_lib::error::ConfigValueError>
+pub fn grit_lib::config::parse_color(&str) -> core::result::Result<alloc::string::String, grit_lib::error::ConfigValueError>
 pub fn grit_lib::config::parse_config_parameters(&str) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::config::parse_git_config_int(&str) -> core::result::Result<i32, grit_lib::config::GitConfigIntStrictError>
 pub fn grit_lib::config::parse_git_config_int_strict(&str) -> core::result::Result<i64, grit_lib::config::GitConfigIntStrictError>
 pub fn grit_lib::config::parse_git_config_maybe_bool(&str) -> core::option::Option<bool>
 pub fn grit_lib::config::parse_git_signed_config(&str, i64) -> core::result::Result<i64, grit_lib::config::GitConfigIntStrictError>
-pub fn grit_lib::config::parse_i64(&str) -> core::result::Result<i64, alloc::string::String>
+pub fn grit_lib::config::parse_i64(&str) -> core::result::Result<i64, grit_lib::error::ConfigValueError>
 pub fn grit_lib::config::parse_path(&grit_lib::config::environment::Environment, &str) -> alloc::string::String
 pub fn grit_lib::config::parse_path_optional(&grit_lib::config::environment::Environment, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::parse_typed_value(&str, grit_lib::config::ConfigValueType, &str, &grit_lib::config::environment::Environment) -> grit_lib::error::Result<grit_lib::config::TypedConfigValue>
@@ -5741,6 +5741,9 @@ pub grit_lib::error::ConfigError::InvalidDirectoryRenames
 pub grit_lib::error::ConfigError::InvalidDirectoryRenames::value: alloc::string::String
 pub grit_lib::error::ConfigError::InvalidUntrackedFilesMode
 pub grit_lib::error::ConfigError::InvalidUntrackedFilesMode::value: alloc::string::String
+pub grit_lib::error::ConfigError::InvalidValue
+pub grit_lib::error::ConfigError::InvalidValue::key: alloc::string::String
+pub grit_lib::error::ConfigError::InvalidValue::source: grit_lib::error::ConfigValueError
 pub grit_lib::error::ConfigError::KeyNotSet
 pub grit_lib::error::ConfigError::KeyNotSet::key: alloc::string::String
 pub grit_lib::error::ConfigError::MissingValue
@@ -5769,6 +5772,7 @@ pub fn grit_lib::error::ConfigError::from(alloc::string::String) -> Self
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::ConfigError) -> Self
 impl core::error::Error for grit_lib::error::ConfigError
+pub fn grit_lib::error::ConfigError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::error::ConfigError
 pub fn grit_lib::error::ConfigError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::error::ConfigError
@@ -5781,6 +5785,36 @@ impl core::marker::Unpin for grit_lib::error::ConfigError
 impl core::marker::UnsafeUnpin for grit_lib::error::ConfigError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::ConfigError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::ConfigError
+#[non_exhaustive] pub enum grit_lib::error::ConfigValueError
+pub grit_lib::error::ConfigValueError::EmptyInteger
+pub grit_lib::error::ConfigValueError::IntegerOverflow
+pub grit_lib::error::ConfigValueError::IntegerOverflow::value: alloc::string::String
+pub grit_lib::error::ConfigValueError::InvalidBool
+pub grit_lib::error::ConfigValueError::InvalidBool::value: alloc::string::String
+pub grit_lib::error::ConfigValueError::InvalidColor
+pub grit_lib::error::ConfigValueError::InvalidColor::value: alloc::string::String
+pub grit_lib::error::ConfigValueError::InvalidInteger
+pub grit_lib::error::ConfigValueError::InvalidInteger::value: alloc::string::String
+impl grit_lib::error::ConfigValueError
+pub fn grit_lib::error::ConfigValueError::for_key(self, impl core::convert::Into<alloc::string::String>) -> grit_lib::error::ConfigError
+impl core::clone::Clone for grit_lib::error::ConfigValueError
+pub fn grit_lib::error::ConfigValueError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::ConfigValueError
+impl core::cmp::PartialEq for grit_lib::error::ConfigValueError
+pub fn grit_lib::error::ConfigValueError::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::error::ConfigValueError
+impl core::fmt::Debug for grit_lib::error::ConfigValueError
+pub fn grit_lib::error::ConfigValueError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::error::ConfigValueError
+pub fn grit_lib::error::ConfigValueError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::error::ConfigValueError
+impl core::marker::Freeze for grit_lib::error::ConfigValueError
+impl core::marker::Send for grit_lib::error::ConfigValueError
+impl core::marker::Sync for grit_lib::error::ConfigValueError
+impl core::marker::Unpin for grit_lib::error::ConfigValueError
+impl core::marker::UnsafeUnpin for grit_lib::error::ConfigValueError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::ConfigValueError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::ConfigValueError
 #[non_exhaustive] pub enum grit_lib::error::Error
 pub grit_lib::error::Error::AmendUnborn
 pub grit_lib::error::Error::Apply(grit_lib::error::ApplyError)
@@ -17943,8 +17977,8 @@ pub fn grit_lib::config::ConfigSet::get(&self, &str) -> core::option::Option<all
 pub fn grit_lib::config::ConfigSet::get_all(&self, &str) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::config::ConfigSet::get_all_raw(&self, &str) -> alloc::vec::Vec<core::option::Option<alloc::string::String>>
 pub fn grit_lib::config::ConfigSet::get_all_with_origin(&self, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::config::ConfigValueOrigin>>
-pub fn grit_lib::config::ConfigSet::get_bool(&self, &str) -> core::option::Option<core::result::Result<bool, alloc::string::String>>
-pub fn grit_lib::config::ConfigSet::get_i64(&self, &str) -> core::option::Option<core::result::Result<i64, alloc::string::String>>
+pub fn grit_lib::config::ConfigSet::get_bool(&self, &str) -> core::option::Option<core::result::Result<bool, grit_lib::error::ConfigError>>
+pub fn grit_lib::config::ConfigSet::get_i64(&self, &str) -> core::option::Option<core::result::Result<i64, grit_lib::error::ConfigError>>
 pub fn grit_lib::config::ConfigSet::get_last_entry(&self, &str) -> core::option::Option<grit_lib::config::ConfigEntry>
 pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, alloc::string::String>
 pub fn grit_lib::config::ConfigSet::get_with_origin(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigValueOrigin>>

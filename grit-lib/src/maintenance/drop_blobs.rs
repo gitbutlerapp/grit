@@ -240,11 +240,7 @@ impl DropExpiry {
 ///
 /// [`Error::Config`] when the value is not a boolean.
 pub fn drop_large_blobs_enabled(config: &ConfigSet) -> Result<bool> {
-    match config.get_bool(ENABLED_KEY) {
-        None => Ok(false),
-        Some(Ok(value)) => Ok(value),
-        Some(Err(err)) => Err(Error::Config(err.into())),
-    }
+    Ok(config.get_bool(ENABLED_KEY).transpose()?.unwrap_or(false))
 }
 
 /// `expire`, or [`DEFAULT_DROP_EXPIRE`] when unset or empty.

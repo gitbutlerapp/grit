@@ -1231,16 +1231,6 @@ fn apply_gc_prune_policy_to_repack(repack: &mut RepackOptions, policy: &GcLooseP
     }
 }
 
-fn config_bool_or_error(config: &ConfigSet, key: &str) -> Result<Option<bool>> {
-    match config.get_bool(key) {
-        None => Ok(None),
-        Some(Ok(v)) => Ok(Some(v)),
-        Some(Err(e)) => Err(Error::Config(ConfigError::Other(format!(
-            "bad config value for '{key}': {e}"
-        )))),
-    }
-}
-
 /// Last `repack.writeBitmaps` or `pack.writeBitmaps` entry in load order (Git synonym).
 fn gc_repack_writes_bitmap(repo: &Repository, config: &ConfigSet) -> Result<bool> {
     let repack_key = canonical_key("repack.writeBitmaps").ok();
@@ -1250,11 +1240,7 @@ fn gc_repack_writes_bitmap(repo: &Repository, config: &ConfigSet) -> Result<bool
         let key = entry.key.as_str();
         if repack_key.as_deref() == Some(key) || pack_key.as_deref() == Some(key) {
             let raw = entry.value.as_deref().unwrap_or("true").trim().to_owned();
-            last = Some(parse_bool(&raw).map_err(|_| {
-                Error::Config(ConfigError::Other(format!(
-                    "bad config value '{raw}' for '{key}'"
-                )))
-            })?);
+            last = Some(parse_bool(&raw).map_err(|e| e.for_key(key))?);
         }
     }
     Ok(last.unwrap_or_else(|| repo.work_tree().is_none()))
@@ -1267,18 +1253,14 @@ fn gc_should_pack_refs(repo: &Repository, config: &ConfigSet) -> Result<bool> {
     if spec.eq_ignore_ascii_case("notbare") {
         return Ok(repo.work_tree().is_some());
     }
-    parse_bool(&spec).map_err(|e| {
-        Error::Config(ConfigError::Other(format!(
-            "bad config value '{spec}' for 'gc.packRefs': {e}"
-        )))
-    })
+    Ok(parse_bool(&spec).map_err(|e| e.for_key("gc.packRefs"))?)
 }
 
 fn gc_should_write_commit_graph(config: &ConfigSet) -> Result<bool> {
-    if config_bool_or_error(config, "gc.writeCommitGraph")? == Some(false) {
+    if config.get_bool("gc.writeCommitGraph").transpose()? == Some(false) {
         return Ok(false);
     }
-    Ok(config_bool_or_error(config, "core.commitGraph")? != Some(false))
+    Ok(config.get_bool("core.commitGraph").transpose()? != Some(false))
 }
 
 /// Loose objects reachable from the maintenance roots: what Git's incremental `repack -d`

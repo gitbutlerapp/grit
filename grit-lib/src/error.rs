@@ -410,6 +410,78 @@ pub enum ConfigError {
         /// Raw config value that could not be parsed.
         value: String,
     },
+
+    /// The value of `key` is not valid for the type the key requires (a boolean, an integer
+    /// or a color).
+    #[error("{source} for '{key}'")]
+    InvalidValue {
+        /// Config key whose value was rejected, as the caller spelled it.
+        key: String,
+        /// Why the value was rejected.
+        #[source]
+        source: ConfigValueError,
+    },
+}
+
+/// Why a raw config value could not be read as a boolean, integer or color.
+///
+/// Returned by [`crate::config::parse_bool`], [`crate::config::parse_i64`] and
+/// [`crate::config::parse_color`], which see only the value. Readers that also know the key
+/// ([`crate::config::ConfigSet::get_bool`], [`crate::config::ConfigSet::get_i64`]) wrap it in
+/// [`ConfigError::InvalidValue`].
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ConfigValueError {
+    /// Not one of the boolean words (`true`/`yes`/`on`, `false`/`no`/`off`) or an integer.
+    #[error("bad boolean config value '{value}'")]
+    InvalidBool {
+        /// Raw config value that could not be parsed.
+        value: String,
+    },
+
+    /// An integer was required but the value is empty or only whitespace.
+    #[error("empty integer value")]
+    EmptyInteger,
+
+    /// Not a decimal integer with an optional `k`/`m`/`g` suffix.
+    #[error("invalid integer: '{value}'")]
+    InvalidInteger {
+        /// Raw config value (trimmed) that could not be parsed.
+        value: String,
+    },
+
+    /// The integer does not fit in an `i64` once its `k`/`m`/`g` suffix is applied.
+    #[error("integer overflow: '{value}'")]
+    IntegerOverflow {
+        /// Raw config value (trimmed) that overflowed.
+        value: String,
+    },
+
+    /// Not a color specification (color names, numbers or `#rrggbb`, plus attributes).
+    #[error("bad color value '{value}'")]
+    InvalidColor {
+        /// Raw config value (trimmed) that could not be parsed.
+        value: String,
+    },
+}
+
+impl ConfigValueError {
+    /// Attach the config `key` whose value was rejected.
+    ///
+    /// # Parameters
+    ///
+    /// - `key`: the config key as the caller spelled it (for example `core.bare`).
+    ///
+    /// # Returns
+    ///
+    /// [`ConfigError::InvalidValue`] carrying `key` and this error as its source.
+    #[must_use]
+    pub fn for_key(self, key: impl Into<String>) -> ConfigError {
+        ConfigError::InvalidValue {
+            key: key.into(),
+            source: self,
+        }
+    }
 }
 
 impl From<String> for ConfigError {

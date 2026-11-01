@@ -495,10 +495,10 @@ pub fn resolve_fetch_prune(
         return Ok(enabled);
     }
     let remote_key = format!("remote.{remote}.prune");
-    if let Some(value) = optional_config_bool(config, &remote_key)? {
+    if let Some(value) = config.get_bool(&remote_key).transpose()? {
         return Ok(value);
     }
-    if let Some(value) = optional_config_bool(config, "fetch.prune")? {
+    if let Some(value) = config.get_bool("fetch.prune").transpose()? {
         return Ok(value);
     }
     Ok(false)
@@ -524,16 +524,6 @@ pub fn resolve_fetch_tags(
         Some("--tags") | Some("tags") | Some("all") => TagMode::All,
         Some("--no-tags") | Some("no-tags") | Some("no") | Some("never") => TagMode::None,
         _ => TagMode::Following,
-    }
-}
-
-fn optional_config_bool(config: &crate::config::ConfigSet, key: &str) -> Result<Option<bool>> {
-    match config.get_bool(key) {
-        None => Ok(None),
-        Some(Ok(value)) => Ok(Some(value)),
-        Some(Err(message)) => Err(Error::Config(crate::error::ConfigError::Other(format!(
-            "invalid boolean for '{key}': {message}"
-        )))),
     }
 }
 

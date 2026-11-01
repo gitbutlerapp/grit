@@ -2228,7 +2228,7 @@ impl Repository {
         crate::trace::trace_span!("grit.index.read");
         let cfg = self.config().unwrap_or_else(|_| Arc::new(ConfigSet::new()));
         if let Some(res) = cfg.as_ref().get_bool("index.sparse") {
-            res.map_err(|s| Error::Config(s.into()))?;
+            res?;
         }
         let mut idx = Index::load_preserving_sparse_optional_with_context(
             path,

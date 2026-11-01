@@ -455,7 +455,7 @@ pub fn should_sign_commit(config: &ConfigSet, sign_override: Option<bool>) -> Re
         .or_else(|| config.get_bool("commit.gpgSign"))
     {
         Some(Ok(v)) => Ok(v),
-        Some(Err(e)) => Err(Error::Config(format!("commit.gpgsign: {e}").into())),
+        Some(Err(e)) => Err(e.into()),
         None => Ok(false),
     }
 }
@@ -477,7 +477,7 @@ pub fn should_sign_tag(config: &ConfigSet, sign_override: Option<bool>) -> Resul
         .or_else(|| config.get_bool("tag.gpgsign"))
     {
         Some(Ok(v)) => Ok(v),
-        Some(Err(e)) => Err(Error::Config(format!("tag.gpgSign: {e}").into())),
+        Some(Err(e)) => Err(e.into()),
         None => Ok(false),
     }
 }

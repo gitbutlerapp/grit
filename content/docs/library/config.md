@@ -9,6 +9,10 @@ Configuration in grit-lib follows Git’s cascade (system, global, local, worktr
 
 [`ConfigSet::load`](rustdoc:grit_lib::config::ConfigSet) parses the cascade from disk given an [`Environment`](rustdoc:grit_lib::config::environment::Environment) and optional git directory. The library does not read `std::env` during load — embedders pass variables explicitly (see [Embedding](../embedding/) and [Repository](../repository/)).
 
+## Typed values
+
+[`ConfigSet::get_bool`](rustdoc:grit_lib::config::ConfigSet::get_bool) and [`ConfigSet::get_i64`](rustdoc:grit_lib::config::ConfigSet::get_i64) return `None` for an unset key. A value of the wrong type is a [`ConfigError::InvalidValue`](rustdoc:grit_lib::error::ConfigError) carrying the key and a [`ConfigValueError`](rustdoc:grit_lib::error::ConfigValueError) that says what was wrong: not a boolean, an empty or malformed integer, an integer that overflows `i64` once its `k`/`m`/`g` suffix is applied, or a bad color. `get_bool(key).transpose()?` reads an optional boolean and propagates a bad value as `grit_lib::error::Error::Config`. The key-less parsers [`parse_bool`](rustdoc:grit_lib::config::parse_bool), [`parse_i64`](rustdoc:grit_lib::config::parse_i64) and [`parse_color`](rustdoc:grit_lib::config::parse_color) return the bare `ConfigValueError`; call `for_key` on it to attach the key.
+
 ## Local writes
 
 `ConfigHandle::set_local` writes one key to the repository-local config (or `commondir/config` for linked worktrees without a per-worktree config file), then reloads the in-memory snapshot on the open `Repository`.

@@ -46,7 +46,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::error::{BadNumericSource, ConfigError, Error, Result};
+use crate::error::{BadNumericSource, ConfigError, ConfigValueError, Error, Result};
 
 /// Test-only counters for config cascade load activity (see `porcelain_ops_load_config_cascade_once`).
 #[cfg(test)]
@@ -1999,7 +1999,15 @@ impl ConfigSet {
     ///
     /// `pack.allowPackReuse` may be `single` or `multi` (Git enum, not a bool). Those values are
     /// treated as unset for boolean lookup so `get_bool` does not error during broad config scans.
-    pub fn get_bool(&self, key: &str) -> Option<std::result::Result<bool, String>> {
+    ///
+    /// # Returns
+    ///
+    /// `None` when `key` is unset, otherwise the parsed value.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::InvalidValue`] naming `key` when the value is not a Git boolean.
+    pub fn get_bool(&self, key: &str) -> Option<std::result::Result<bool, ConfigError>> {
         let v = self.get(key)?;
         if canonical_key(key).ok().as_deref() == Some("pack.allowpackreuse") {
             let lower = v.trim().to_ascii_lowercase();
@@ -2007,7 +2015,7 @@ impl ConfigSet {
                 return None;
             }
         }
-        Some(parse_bool(&v))
+        Some(parse_bool(&v).map_err(|e| e.for_key(key)))
     }
 
     /// Whether pathnames in human-readable output should fully C-quote non-ASCII bytes as octal.
@@ -2272,8 +2280,18 @@ impl ConfigSet {
     }
 
     /// Get an integer value, supporting Git's `k`/`m`/`g` suffixes.
-    pub fn get_i64(&self, key: &str) -> Option<std::result::Result<i64, String>> {
-        self.get(key).map(|v| parse_i64(&v))
+    ///
+    /// # Returns
+    ///
+    /// `None` when `key` is unset, otherwise the parsed value.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::InvalidValue`] naming `key` when the value is not an integer or
+    /// overflows `i64`.
+    pub fn get_i64(&self, key: &str) -> Option<std::result::Result<i64, ConfigError>> {
+        self.get(key)
+            .map(|v| parse_i64(&v).map_err(|e| e.for_key(key)))
     }
 
     /// Parse `core.compression` / `core.looseCompression` style zlib level integers.
@@ -3225,22 +3243,32 @@ fn command_override_entries(params: &str) -> Vec<ConfigEntry> {
 /// An explicit empty assignment (`key =` with no value) is stored as `""` and
 /// is treated as false for `--bool` / [`parse_bool`]. Bare keys are represented
 /// as `None` and normalized to `"true"` by callers before reaching this parser.
-pub fn parse_bool(s: &str) -> std::result::Result<bool, String> {
+///
+/// # Errors
+///
+/// [`ConfigValueError::InvalidBool`] when `s` is neither a boolean word nor an integer.
+pub fn parse_bool(s: &str) -> std::result::Result<bool, ConfigValueError> {
     match s.to_lowercase().as_str() {
         "true" | "yes" | "on" => Ok(true),
         "" => Ok(false),
         "false" | "no" | "off" => Ok(false),
-        _ => {
-            parse_git_config_maybe_bool(s).ok_or_else(|| format!("bad boolean config value '{s}'"))
-        }
+        _ => parse_git_config_maybe_bool(s).ok_or_else(|| ConfigValueError::InvalidBool {
+            value: s.to_owned(),
+        }),
     }
 }
 
 /// Parse a Git integer value with optional `k`/`m`/`g` suffix.
-pub fn parse_i64(s: &str) -> std::result::Result<i64, String> {
+///
+/// # Errors
+///
+/// [`ConfigValueError::EmptyInteger`] for an empty value,
+/// [`ConfigValueError::InvalidInteger`] when it is not a number, and
+/// [`ConfigValueError::IntegerOverflow`] when the scaled value does not fit in `i64`.
+pub fn parse_i64(s: &str) -> std::result::Result<i64, ConfigValueError> {
     let s = s.trim();
     if s.is_empty() {
-        return Err("empty integer value".to_owned());
+        return Err(ConfigValueError::EmptyInteger);
     }
 
     let (num_str, multiplier) = match s.as_bytes().last() {
@@ -3252,9 +3280,13 @@ pub fn parse_i64(s: &str) -> std::result::Result<i64, String> {
 
     let base: i64 = num_str
         .parse()
-        .map_err(|_| format!("invalid integer: '{s}'"))?;
+        .map_err(|_| ConfigValueError::InvalidInteger {
+            value: s.to_owned(),
+        })?;
     base.checked_mul(multiplier)
-        .ok_or_else(|| format!("integer overflow: '{s}'"))
+        .ok_or_else(|| ConfigValueError::IntegerOverflow {
+            value: s.to_owned(),
+        })
 }
 
 /// Why [`parse_git_config_int_strict`] failed (mirrors Git `errno` after `git_parse_signed`).
@@ -3525,7 +3557,12 @@ pub fn resolve_diff_context_lines(cfg: &ConfigSet) -> Result<Option<usize>> {
 /// optional leading `reset`, up to two color tokens (foreground then background),
 /// then graphic rendition attributes. Attribute codes are accumulated as a
 /// bitmask keyed by SGR number (so `bold` sets bit 1, `nobold` sets bit 22).
-pub fn parse_color(s: &str) -> std::result::Result<String, String> {
+///
+/// # Errors
+///
+/// [`ConfigValueError::InvalidColor`] when a word is neither a color nor an attribute, more
+/// than two colors are given, or nothing usable is left.
+pub fn parse_color(s: &str) -> std::result::Result<String, ConfigValueError> {
     const COLOR_BACKGROUND_OFFSET: i32 = 10;
     const COLOR_FOREGROUND_ANSI: i32 = 30;
     const COLOR_FOREGROUND_RGB: i32 = 38;
@@ -3740,6 +3777,9 @@ pub fn parse_color(s: &str) -> std::result::Result<String, String> {
     }
 
     let s = s.trim();
+    let bad_color = || ConfigValueError::InvalidColor {
+        value: s.to_owned(),
+    };
     if s.is_empty() {
         return Ok(String::new());
     }
@@ -3766,7 +3806,7 @@ pub fn parse_color(s: &str) -> std::result::Result<String, String> {
                 bg = c;
                 continue;
             }
-            return Err(format!("bad color value '{s}'"));
+            return Err(bad_color());
         }
 
         if let Some(code) = parse_attr(word) {
@@ -3774,11 +3814,11 @@ pub fn parse_color(s: &str) -> std::result::Result<String, String> {
             continue;
         }
 
-        return Err(format!("bad color value '{s}'"));
+        return Err(bad_color());
     }
 
     if !has_reset && attr == 0 && color_empty(&fg) && color_empty(&bg) {
-        return Err(format!("bad color value '{s}'"));
+        return Err(bad_color());
     }
 
     let mut out = String::from("\x1b[");
@@ -4744,6 +4784,105 @@ mod pack_object_config_tests {
             set_from_snippet("[gc]\n\tautoDetach = false\n[maintenance]\n\tauto = false\n");
         assert!(!foreground.gc_auto_detach());
         assert!(!foreground.maintenance_auto());
+    }
+}
+
+#[cfg(test)]
+mod value_error_tests {
+    use super::{parse_bool, parse_color, parse_i64, ConfigFile, ConfigScope, ConfigSet};
+    use crate::error::{ConfigError, ConfigValueError, Error};
+    use std::path::Path;
+
+    fn set_from_snippet(text: &str) -> ConfigSet {
+        let file = ConfigFile::parse(Path::new(".git/config"), text, ConfigScope::Local)
+            .expect("parse config snippet");
+        let mut set = ConfigSet::new();
+        set.merge(&file);
+        set
+    }
+
+    #[test]
+    fn parse_bool_rejects_non_boolean_with_the_value() {
+        assert_eq!(
+            parse_bool("maybe"),
+            Err(ConfigValueError::InvalidBool {
+                value: "maybe".to_owned()
+            })
+        );
+        assert_eq!(parse_bool("2"), Ok(true));
+        assert_eq!(parse_bool(""), Ok(false));
+    }
+
+    #[test]
+    fn parse_i64_distinguishes_empty_invalid_and_overflow() {
+        assert_eq!(parse_i64("  "), Err(ConfigValueError::EmptyInteger));
+        assert_eq!(
+            parse_i64(" 12x "),
+            Err(ConfigValueError::InvalidInteger {
+                value: "12x".to_owned()
+            })
+        );
+        assert_eq!(
+            parse_i64("9223372036854775807k"),
+            Err(ConfigValueError::IntegerOverflow {
+                value: "9223372036854775807k".to_owned()
+            })
+        );
+        assert_eq!(parse_i64("2m"), Ok(2 * 1024 * 1024));
+    }
+
+    #[test]
+    fn parse_color_reports_the_trimmed_value() {
+        let bad = ConfigValueError::InvalidColor {
+            value: "red green blue".to_owned(),
+        };
+        assert_eq!(parse_color(" red green blue "), Err(bad));
+        assert_eq!(
+            parse_color("nonsense").map_err(|e| e.to_string()),
+            Err("bad color value 'nonsense'".to_owned())
+        );
+        assert_eq!(parse_color("  "), Ok(String::new()));
+    }
+
+    #[test]
+    fn get_bool_and_get_i64_name_the_key() {
+        let set = set_from_snippet("[core]\n\tbare = sometimes\n[pack]\n\tthreads = many\n");
+        let bool_err = set
+            .get_bool("core.bare")
+            .and_then(Result::err)
+            .expect("invalid bool");
+        assert_eq!(
+            bool_err,
+            ConfigError::InvalidValue {
+                key: "core.bare".to_owned(),
+                source: ConfigValueError::InvalidBool {
+                    value: "sometimes".to_owned()
+                },
+            }
+        );
+        assert_eq!(
+            bool_err.to_string(),
+            "bad boolean config value 'sometimes' for 'core.bare'"
+        );
+        let int_err = set
+            .get_i64("pack.threads")
+            .and_then(Result::err)
+            .expect("invalid int");
+        assert!(matches!(
+            &int_err,
+            ConfigError::InvalidValue { key, source: ConfigValueError::InvalidInteger { value } }
+                if key == "pack.threads" && value == "many"
+        ));
+        assert!(matches!(Error::from(int_err), Error::Config(_)));
+        assert!(set.get_bool("core.missing").is_none());
+    }
+
+    #[test]
+    fn for_key_keeps_the_source_error() {
+        let err = ConfigValueError::EmptyInteger.for_key("gc.auto");
+        assert_eq!(err.to_string(), "empty integer value for 'gc.auto'");
+        let source = std::error::Error::source(&err).map(ToString::to_string);
+        assert_eq!(source.as_deref(), Some("empty integer value"));
     }
 }
 

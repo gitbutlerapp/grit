@@ -69,11 +69,9 @@ pub fn parse_typed_value(
     env: &Environment,
 ) -> Result<TypedConfigValue> {
     match ty {
-        ConfigValueType::Bool => parse_bool(value).map(TypedConfigValue::Bool).map_err(|_| {
-            Error::Config(ConfigError::Other(format!(
-                "bad boolean config value '{value}' for '{key}'"
-            )))
-        }),
+        ConfigValueType::Bool => parse_bool(value)
+            .map(TypedConfigValue::Bool)
+            .map_err(|e| e.for_key(key).into()),
         ConfigValueType::Int => parse_git_config_int_strict(value)
             .map(TypedConfigValue::Int)
             .map_err(|e| int_parse_error(key, value, e)),

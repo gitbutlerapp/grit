@@ -128,3 +128,37 @@ fn effective_log_refs_config_and_i64_errors() {
     );
     assert!(set.get_i64("invalid.i").unwrap().is_err());
 }
+
+#[test]
+fn invalid_typed_values_are_typed_errors_naming_the_key() {
+    use grit_lib::error::{ConfigError, ConfigValueError, Error};
+    use grit_lib::remote::transfer::resolve_fetch_prune;
+
+    let text = "[fetch]\n\tprune = often\n[core]\n\tcompressionLevel = 3q\n";
+    let file = ConfigFile::parse(Path::new("a"), text, ConfigScope::Local).expect("parse");
+    let mut set = ConfigSet::new();
+    set.merge(&file);
+
+    match resolve_fetch_prune(&set, "origin", None) {
+        Err(Error::Config(ConfigError::InvalidValue { key, source })) => {
+            assert_eq!(key, "fetch.prune");
+            assert_eq!(
+                source,
+                ConfigValueError::InvalidBool {
+                    value: "often".to_owned()
+                }
+            );
+        }
+        other => panic!("expected an invalid fetch.prune value, got {other:?}"),
+    }
+    assert!(resolve_fetch_prune(&set, "origin", Some(true)).expect("override wins"));
+
+    let err = set
+        .get_i64("core.compressionLevel")
+        .expect("set")
+        .expect_err("not an integer");
+    assert_eq!(
+        err.to_string(),
+        "invalid integer: '3q' for 'core.compressionLevel'"
+    );
+}

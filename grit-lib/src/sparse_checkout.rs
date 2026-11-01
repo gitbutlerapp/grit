@@ -596,11 +596,7 @@ impl SparseCheckout {
         warnings: &mut Vec<String>,
     ) -> crate::error::Result<Option<Self>> {
         let get_bool = |key: &str| -> crate::error::Result<bool> {
-            config
-                .get_bool(key)
-                .transpose()
-                .map(|v| v.unwrap_or(false))
-                .map_err(|e| crate::error::Error::Config(e.into()))
+            Ok(config.get_bool(key).transpose()?.unwrap_or(false))
         };
         if !get_bool("core.sparsecheckout")? {
             return Ok(None);
