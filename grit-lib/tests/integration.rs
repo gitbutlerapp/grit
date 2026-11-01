@@ -1295,6 +1295,8 @@ mod pick_stash_apply_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "pickaxe_git_compat.rs"]
 mod pickaxe_git_compat;
+#[path = "porcelain_custom_primary_merge.rs"]
+mod porcelain_custom_primary_merge;
 #[cfg(feature = "full-tests")]
 #[path = "porcelain_injected_ref_store.rs"]
 mod porcelain_injected_ref_store;

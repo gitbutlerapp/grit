@@ -3017,6 +3017,62 @@ mod tests {
     }
 
     #[test]
+    fn persist_referenced_stage0_merge_objects_flushes_custom_primary_overlay_blobs() {
+        use crate::objects::odb::store::{MemoryStore, ObjectStore};
+        use crate::objects::odb::OdbBuilder;
+        use crate::objects::HashAlgo;
+        use std::fs;
+        use std::sync::Arc;
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().expect("tempdir");
+        let objects = dir.path().join("objects");
+        fs::create_dir_all(&objects).expect("mkdir objects");
+        let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
+        let odb = OdbBuilder::files(&objects)
+            .primary(store.clone())
+            .alternates(false)
+            .build();
+        odb.enable_mem_overlay();
+        let stage0_blob = odb
+            .write(ObjectKind::Blob, b"auto-merged")
+            .expect("overlay blob");
+        assert!(!store.contains(&stage0_blob).expect("contains"));
+        let marker_blob = odb.write(ObjectKind::Blob, b"<<<<").expect("marker");
+
+        let conflict_path = b"conflict.txt".to_vec();
+        let auto_path = b"auto.txt".to_vec();
+        let mut merge_index = Index::new();
+        merge_index.push_entry_unsorted(sparse_merge_test_entry("auto.txt", stage0_blob, 0));
+        merge_index.push_entry_unsorted(sparse_merge_test_entry("conflict.txt", zero_oid(), 2));
+        merge_index.push_entry_unsorted(sparse_merge_test_entry("conflict.txt", zero_oid(), 3));
+        merge_index.sort();
+        let mut conflict_content = BTreeMap::new();
+        conflict_content.insert(conflict_path.clone(), marker_blob);
+        let mut touched = HashSet::new();
+        touched.insert(conflict_path);
+        touched.insert(auto_path);
+        let merged = TreeMergeOutput {
+            index: merge_index,
+            conflict_content,
+            result_tree: zero_oid(),
+            touched_paths: touched,
+            rename_conflicts: Vec::new(),
+            directory_rename_conflicts: Vec::new(),
+        };
+
+        persist_referenced_stage0_merge_objects(&odb, &merged).expect("persist stage-0");
+        assert!(store.contains(&stage0_blob).expect("stage-0 in primary"));
+        assert!(!store.contains(&marker_blob).expect("marker not in primary"));
+        assert_eq!(
+            fs::read_dir(&objects).expect("read objects dir").count(),
+            0,
+            "no loose shards beside a custom primary"
+        );
+        assert!(odb.read(&stage0_blob).expect("read stage-0").data == b"auto-merged");
+    }
+
+    #[test]
     fn apply_tree_merge_output_to_index_sparse_updates_keep_sorted() {
         let oid = zero_oid();
         let changed_oid =

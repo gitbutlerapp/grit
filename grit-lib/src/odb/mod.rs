@@ -1032,7 +1032,7 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// Propagates overlay iteration and [`Self::write_local`] failures.
+    /// Propagates overlay iteration and [`Self::write_into_primary`] failures.
     pub(crate) fn persist_mem_overlay(&self) -> Result<()> {
         use std::ops::ControlFlow;
 
@@ -1056,8 +1056,12 @@ impl Odb {
         if let Ok(mut guard) = self.mem_overlay.write() {
             *guard = None;
         }
+        let custom_primary = self.custom_primary.is_some();
         for (kind, data) in payloads {
-            self.write_local(kind, &data)?;
+            self.write_into_primary(kind, &data)?;
+        }
+        if custom_primary {
+            self.flush()?;
         }
         Ok(())
     }
@@ -1068,7 +1072,7 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// Propagates overlay read and [`Self::write_local`] failures.
+    /// Propagates overlay read and [`Self::write_into_primary`] failures.
     pub(crate) fn persist_mem_overlay_objects(
         &self,
         oids: impl IntoIterator<Item = ObjectId>,
@@ -1084,7 +1088,10 @@ impl Odb {
             let Some(obj) = store.read(&oid)? else {
                 continue;
             };
-            self.write_local(obj.kind, &obj.data)?;
+            self.write_into_primary(obj.kind, &obj.data)?;
+        }
+        if self.custom_primary.is_some() {
+            self.flush()?;
         }
         Ok(())
     }
@@ -3717,6 +3724,20 @@ impl Odb {
             .write(kind, data, WriteOptions::default())?;
         self.note_commit_object_written(kind);
         Ok(oid)
+    }
+
+    /// Persist one object to the repository primary (custom store or loose files).
+    ///
+    /// Unlike [`Self::write`], never routes through the mem overlay, so callers can
+    /// flush overlay contents after disabling it.
+    fn write_into_primary(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
+        if let Some(primary) = &self.custom_primary {
+            let oid =
+                WritableObjectStore::write(primary.as_ref(), kind, data, WriteOptions::default())?;
+            self.note_commit_object_written(kind);
+            return Ok(oid);
+        }
+        self.write_local(kind, data)
     }
 
     /// Like [`Self::write_local`], but stores payload bytes supplied chunk-by-chunk (pack unpack).
