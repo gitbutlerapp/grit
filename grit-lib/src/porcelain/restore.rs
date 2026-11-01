@@ -509,6 +509,7 @@ fn restore_conflict_remerge(
         return Ok(());
     }
 
+    use crate::merge_file::TREE_MERGE_DIFF_ALGORITHM;
     let input = MergeInput {
         base: &base_bytes,
         ours: &ours_blob.data,
@@ -519,7 +520,7 @@ fn restore_conflict_remerge(
         favor: MergeFavor::None,
         style,
         marker_size: 7,
-        diff_algorithm: None,
+        diff_algorithm: Some(TREE_MERGE_DIFF_ALGORITHM.to_string()),
         ignore_all_space: false,
         ignore_space_change: false,
         ignore_space_at_eol: false,

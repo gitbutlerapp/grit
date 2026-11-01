@@ -2701,7 +2701,9 @@ fn apply_stash_commit(
                 )?;
             } else {
                 // Both sides changed differently — try content merge
-                use crate::merge_file::{merge, ConflictStyle, MergeFavor, MergeInput};
+                use crate::merge_file::{
+                    merge, ConflictStyle, MergeFavor, MergeInput, TREE_MERGE_DIFF_ALGORITHM,
+                };
                 let input = MergeInput {
                     base: &base_content,
                     ours: &ours_content,
@@ -2712,7 +2714,7 @@ fn apply_stash_commit(
                     favor: MergeFavor::None,
                     style: ConflictStyle::Merge,
                     marker_size: 7,
-                    diff_algorithm: None,
+                    diff_algorithm: Some(TREE_MERGE_DIFF_ALGORITHM.to_string()),
                     ignore_all_space: false,
                     ignore_space_change: false,
                     ignore_space_at_eol: false,
