@@ -754,6 +754,7 @@ fn collect_untracked_for_added_tree_changes_lstat(
             index,
             work_tree,
             trimmed,
+            tree_changes,
             &mut matcher,
             &mut untracked,
         )?;
@@ -780,14 +781,70 @@ fn push_untracked_collision_if_present(
     Ok(())
 }
 
+fn existing_worktree_path_for_untracked_scan(work_tree: &Path, rel: &str) -> Option<String> {
+    let mut candidate = rel.to_owned();
+    loop {
+        if work_tree.join(&candidate).symlink_metadata().is_ok() {
+            return Some(candidate);
+        }
+        candidate = candidate
+            .rsplit_once('/')
+            .map(|(prefix, _)| prefix.to_owned())
+            .unwrap_or_default();
+        if candidate.is_empty() {
+            return None;
+        }
+    }
+}
+
+fn tree_change_removes_or_replaces_path(path: &str, tree_changes: &[DiffEntry]) -> bool {
+    for change in tree_changes {
+        match change.status {
+            DiffStatus::Deleted => {
+                if change.old_path.as_deref() == Some(path) {
+                    return true;
+                }
+            }
+            DiffStatus::Added | DiffStatus::Modified | DiffStatus::TypeChanged
+                if change.old_path.as_deref() == Some(path) =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 fn collect_untracked_collisions_for_added_path(
     repo: &Repository,
     index: &Index,
     work_tree: &Path,
     added: &str,
+    tree_changes: &[DiffEntry],
     matcher: &mut crate::ignore::IgnoreMatcher,
     untracked: &mut Vec<String>,
 ) -> Result<()> {
+    match fs::symlink_metadata(work_tree.join(added)) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => {
+            if let Some(existing) = existing_worktree_path_for_untracked_scan(work_tree, added) {
+                if tree_change_removes_or_replaces_path(&existing, tree_changes) {
+                    return Ok(());
+                }
+                push_untracked_collision_if_present(repo, index, matcher, &existing, untracked)?;
+            }
+            return Ok(());
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(Error::Io(e)),
+        Ok(meta) if meta.is_dir() => {
+            collect_untracked_files_under_dir(
+                repo, index, matcher, work_tree, added, untracked,
+            )?;
+            return Ok(());
+        }
+        Ok(_) => {}
+    }
     let mut prefix_len = 0usize;
     for component in added.split('/') {
         if prefix_len == 0 {
@@ -801,6 +858,9 @@ fn collect_untracked_collisions_for_added_path(
             continue;
         };
         if meta.file_type().is_symlink() {
+            if tree_change_removes_or_replaces_path(rel, tree_changes) {
+                return Ok(());
+            }
             push_untracked_collision_if_present(repo, index, matcher, rel, untracked)?;
             return Ok(());
         }
@@ -811,6 +871,9 @@ fn collect_untracked_collisions_for_added_path(
             continue;
         }
         if meta.is_file() {
+            if tree_change_removes_or_replaces_path(rel, tree_changes) {
+                continue;
+            }
             push_untracked_collision_if_present(repo, index, matcher, rel, untracked)?;
         }
     }
@@ -1825,6 +1888,35 @@ mod tests {
         assert!(!specs.contains(&"dir/sub/new.txt".to_owned()));
         assert!(specs.contains(&"top".to_owned()));
         assert!(!specs.contains(&"tracked.txt".to_owned()));
+    }
+
+    #[test]
+    fn added_lstat_untracked_skips_file_replaced_by_tree_add() {
+        let (dir, repo) = init_repo();
+        let work_tree = repo.work_tree().expect("work tree");
+        std::fs::write(dir.path().join("dir0"), "file\n").expect("write dir0 file");
+        let index = load_worktree_index(&repo).expect("index");
+        let changes = vec![
+            DiffEntry {
+                status: DiffStatus::Deleted,
+                old_path: Some("dir0".into()),
+                new_path: None,
+                old_mode: FileMode::REGULAR,
+                new_mode: FileMode::ABSENT,
+                old_oid: ObjectId::zero(),
+                new_oid: ObjectId::zero(),
+                score: None,
+            },
+            added_entry("dir0/sub/f"),
+        ];
+        let hits = super::collect_untracked_for_added_tree_changes_lstat(
+            &repo, &index, work_tree, &changes,
+        )
+        .expect("scan");
+        assert!(
+            hits.is_empty(),
+            "tracked file dir0 removed by diff: {hits:?}"
+        );
     }
 
     #[test]
