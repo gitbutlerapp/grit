@@ -3029,7 +3029,9 @@ impl Odb {
         }
     }
 
-    fn try_read_info_once(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    /// Header-only [`Self::try_read_once`]: kind and size from available storage, without
+    /// consulting the promisor fetcher. Missing objects return `None`.
+    pub(crate) fn try_read_info_once(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
         if self.is_empty_tree(oid) {
             return Ok(Some(ObjectInfo {
                 kind: ObjectKind::Tree,

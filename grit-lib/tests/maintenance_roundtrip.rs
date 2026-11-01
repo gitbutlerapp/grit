@@ -450,6 +450,101 @@ fn pack_refs_peeled_tags() {
     git_cmd(dir.path(), &["show-ref", "--tags"]);
 }
 
+/// A repository whose tags git has already packed (with peel lines), plus new loose tags
+/// sorting before, inside and after the packed range, loose tags replacing packed ones, and
+/// a loose branch that a tags-only pack must leave alone.
+fn seed_packed_tags_with_loose_updates(root: &Path) {
+    git_cmd(root, &["init", "-q", "-b", "main"]);
+    fs::write(root.join("a.txt"), b"a\n").unwrap();
+    git_cmd(root, &["add", "a.txt"]);
+    git_cmd(root, &["commit", "-q", "-m", "one"]);
+    for i in 0..40 {
+        let name = format!("t{i:02}");
+        if i % 5 == 0 {
+            git_cmd(root, &["tag", "-a", &name, "-m", &name]);
+        } else {
+            git_cmd(root, &["tag", &name]);
+        }
+    }
+    git_cmd(root, &["branch", "packed-branch"]);
+    git_cmd(root, &["pack-refs", "--all"]);
+
+    git_cmd(root, &["commit", "-q", "--allow-empty", "-m", "two"]);
+    git_cmd(root, &["tag", "a-first"]);
+    git_cmd(root, &["tag", "-a", "t25a", "-m", "between"]);
+    git_cmd(root, &["tag", "zz-last"]);
+    git_cmd(root, &["tag", "-f", "t10"]);
+    git_cmd(root, &["tag", "-f", "-a", "t11", "-m", "now annotated"]);
+    git_cmd(root, &["tag", "-a", "nested-outer", "-m", "outer", "t05"]);
+    git_cmd(root, &["branch", "loose-branch"]);
+}
+
+/// The record and peel lines of `packed-refs`, without the header comment.
+fn packed_refs_records(git_dir: &Path) -> String {
+    fs::read_to_string(git_dir.join("packed-refs"))
+        .expect("packed-refs")
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .map(|line| format!("{line}\n"))
+        .collect()
+}
+
+fn loose_ref_files(git_dir: &Path) -> Vec<String> {
+    fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) {
+        for entry in fs::read_dir(dir).expect("read_dir").flatten() {
+            let name = format!("{prefix}{}", entry.file_name().to_string_lossy());
+            if entry.path().is_dir() {
+                walk(&entry.path(), &format!("{name}/"), out);
+            } else {
+                out.push(name);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&git_dir.join("refs"), "refs/", &mut out);
+    out.sort();
+    out
+}
+
+#[test]
+fn pack_refs_merges_into_git_packed_refs_like_git() {
+    if !git_available() {
+        eprintln!("SKIP: git unavailable");
+        return;
+    }
+    let grit_dir = tempfile::tempdir().expect("tempdir");
+    let git_dir = tempfile::tempdir().expect("tempdir");
+    seed_packed_tags_with_loose_updates(grit_dir.path());
+    seed_packed_tags_with_loose_updates(git_dir.path());
+
+    let repo =
+        Repository::discover(Some(grit_dir.path()), &RepositoryOptions::empty()).expect("open");
+    let report = repo
+        .references()
+        .pack(&PackRefsOptions::with_all(false))
+        .expect("pack");
+    assert_eq!(report.refs_packed, 6, "the six loose tags");
+    assert_eq!(report.refs_pruned, 6);
+
+    git_cmd(git_dir.path(), &["pack-refs"]);
+    let grit_git_dir = grit_dir.path().join(".git");
+    let git_git_dir = git_dir.path().join(".git");
+    assert_eq!(
+        packed_refs_records(&grit_git_dir),
+        packed_refs_records(&git_git_dir),
+        "packed records and peel lines must match git pack-refs"
+    );
+    assert_eq!(
+        loose_ref_files(&grit_git_dir),
+        loose_ref_files(&git_git_dir)
+    );
+    assert_eq!(
+        git_out(grit_dir.path(), &["show-ref", "-d"]),
+        git_out(git_dir.path(), &["show-ref", "-d"])
+    );
+    git_cmd(grit_dir.path(), &["fsck", "--strict", "--no-dangling"]);
+}
+
 #[test]
 fn commit_graph_write_reftable_includes_reachable_commits() {
     if !git_available() {

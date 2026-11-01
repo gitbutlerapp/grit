@@ -347,6 +347,11 @@ impl ObjectId {
         self.hex_digits().as_str().to_owned()
     }
 
+    /// Append the lowercase hex representation to `out` without an intermediate [`String`].
+    pub(crate) fn push_hex_to(&self, out: &mut String) {
+        out.push_str(self.hex_digits().as_str());
+    }
+
     /// The first [`SHORT_HEX_LEN`] lowercase hex digits, for human-facing labels.
     ///
     /// This is a fixed-width prefix and is not guaranteed to be unique in the

@@ -2107,11 +2107,62 @@ fn parse_packed_refs_to_map_with_prefix(
 }
 
 /// Validate every scanned record, passing borrowed names to a caller that need not keep them.
-fn visit_packed_refs_with_prefix(
+fn visit_packed_refs_with_prefix<'a>(
     path: &Path,
-    data: &[u8],
+    data: &'a [u8],
     prefix_filter: Option<&str>,
-    mut visit: impl FnMut(&str, ObjectId),
+    mut visit: impl FnMut(&'a str, ObjectId),
+) -> Result<()> {
+    scan_packed_refs(path, data, prefix_filter, |line| {
+        if let PackedLine::Record(name, oid) = line {
+            visit(name, oid);
+        }
+    })
+}
+
+/// A line of a `packed-refs` file reported by [`scan_packed_refs`].
+enum PackedLine<'a> {
+    /// A record: the ref name and its object id.
+    Record(&'a str, ObjectId),
+    /// The `^` peeled id of the record reported just before it.
+    Peel(ObjectId),
+}
+
+/// A validated `packed-refs` record borrowing its name from the file bytes.
+#[derive(Clone, Copy)]
+struct PackedEntry<'a> {
+    name: &'a str,
+    oid: ObjectId,
+    peel: Option<ObjectId>,
+}
+
+/// Every record of `data` with its `^` peel line, in file order.
+///
+/// Validates the whole file exactly as a full [`visit_packed_refs_with_prefix`] scan does.
+fn packed_entries_with_peel<'a>(path: &Path, data: &'a [u8]) -> Result<Vec<PackedEntry<'a>>> {
+    let mut entries: Vec<PackedEntry<'a>> = Vec::with_capacity(data.len() / 64);
+    scan_packed_refs(path, data, None, |line| match line {
+        PackedLine::Record(name, oid) => entries.push(PackedEntry {
+            name,
+            oid,
+            peel: None,
+        }),
+        PackedLine::Peel(peel) => {
+            if let Some(entry) = entries.last_mut() {
+                entry.peel = Some(peel);
+            }
+        }
+    })?;
+    Ok(entries)
+}
+
+/// The full validating scan behind [`visit_packed_refs_with_prefix`]. Peel lines are reported
+/// only after a record that was reported, never after one the prefix filter skipped.
+fn scan_packed_refs<'a>(
+    path: &Path,
+    data: &'a [u8],
+    prefix_filter: Option<&str>,
+    mut visit: impl FnMut(PackedLine<'a>),
 ) -> Result<()> {
     if data.is_empty() {
         return Ok(());
@@ -2138,6 +2189,7 @@ fn visit_packed_refs_with_prefix(
     };
 
     let mut expect_peel = false;
+    let mut peel_follows_visited = false;
     let prefix_trim = prefix_filter.map(|p| p.trim_end_matches('/'));
     let packed_sorted = packed_refs_file_declares_sorted(text);
     let prefix_upper = if packed_sorted {
@@ -2158,10 +2210,15 @@ fn visit_packed_refs_with_prefix(
             continue;
         }
         if line.starts_with('^') {
-            parse_packed_ref_peel_line(path, line, expect_peel)?;
+            let peel = parse_packed_ref_peel_line(path, line, expect_peel)?;
+            if peel_follows_visited {
+                visit(PackedLine::Peel(peel));
+            }
             expect_peel = false;
+            peel_follows_visited = false;
             continue;
         }
+        peel_follows_visited = false;
 
         if let Some(prefix) = prefix_trim {
             let Some(refname) = packed_ref_data_line_refname(line) else {
@@ -2184,8 +2241,9 @@ fn visit_packed_refs_with_prefix(
             }
         }
         let (refname, oid) = parse_packed_ref_data_line_borrowed(path, line, &ref_opts)?;
-        visit(refname, oid);
+        visit(PackedLine::Record(refname, oid));
         expect_peel = true;
+        peel_follows_visited = true;
     }
     Ok(())
 }
@@ -2395,17 +2453,24 @@ fn packed_refs_peel_trait(text: &str) -> PackedPeelTrait {
     peel_trait
 }
 
+/// Take `git_dir`'s `packed-refs.lock`, waiting per `wait`. A held lock is reported by
+/// its absolute path.
 fn acquire_packed_refs_lock(
     git_dir: &Path,
-    lock: &Path,
-    lock_display: &Path,
+    wait: crate::lockfile::LockWait,
 ) -> Result<crate::lockfile::LockFile> {
-    use crate::lockfile::{LockError, LockFile, LockWait};
-    let wait = LockWait::packed_refs_for_git_dir(git_dir);
-    LockFile::acquire(lock, wait).map_err(|err| match err {
-        LockError::Held { .. } => Error::from(RefLockError::PackedRefsLockHeld {
-            lock_path: lock_display.display().to_string(),
-        }),
+    use crate::lockfile::{LockError, LockFile};
+    let lock = lock_path_for_ref(&store::paths::packed_refs_path(git_dir));
+    LockFile::acquire(&lock, wait).map_err(|err| match err {
+        LockError::Held { .. } => {
+            let lock_path = git_dir
+                .canonicalize_simplified()
+                .map(|d| d.join("packed-refs.lock"))
+                .unwrap_or(lock);
+            Error::from(RefLockError::PackedRefsLockHeld {
+                lock_path: lock_path.display().to_string(),
+            })
+        }
         LockError::Io { source, .. } => Error::Io(source),
     })
 }
@@ -3243,17 +3308,20 @@ fn replace_packed_refs_file(
     // `update-ref -d` fails cleanly — leaving the reference intact — when either file is
     // already present (t0600 "delete fails cleanly if packed-refs file is locked / .new
     // write fails").
-    let lock = lock_path_for_ref(packed_path); // packed-refs.lock
     let _packed_lock = if !lock_already_held {
-        let abs_lock = git_dir
-            .canonicalize_simplified()
-            .map(|d| d.join("packed-refs.lock"))
-            .unwrap_or_else(|_| lock.clone());
-        Some(acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?)
+        Some(acquire_packed_refs_lock(
+            git_dir,
+            crate::lockfile::LockWait::packed_refs_for_git_dir(git_dir),
+        )?)
     } else {
         None
     };
+    write_packed_refs_tmp_and_rename(packed_path, body)
+}
 
+/// Publish `body` as `packed_path` through the `packed-refs.new` tempfile. The caller holds
+/// `packed-refs.lock`.
+fn write_packed_refs_tmp_and_rename(packed_path: &Path, body: &str) -> Result<()> {
     let tmp = packed_path.with_extension("new");
     let mut created_tmp = false;
     let write_result = (|| -> Result<()> {
@@ -3663,57 +3731,68 @@ fn collect_loose_ref_files(
         let name = entry.file_name().to_string_lossy().to_string();
         let refname = format!("{prefix}{name}");
         let path = entry.path();
-        if path.is_dir() {
+        // The directory entry's type needs no stat; symlinks are followed like `is_dir`.
+        let file_type = match entry.file_type() {
+            Ok(ft) if ft.is_symlink() => fs::metadata(&path).map(|m| m.file_type()),
+            other => other,
+        };
+        let Ok(file_type) = file_type else {
+            continue;
+        };
+        if file_type.is_dir() {
             collect_loose_ref_files(&path, &format!("{refname}/"), out)?;
-        } else if path.is_file() {
+        } else if file_type.is_file() {
             out.push((refname, path));
         }
     }
     Ok(())
 }
 
-fn load_packed_refs_with_peel(
-    packed_path: &Path,
-    merged: &mut HashMap<String, (ObjectId, Option<ObjectId>)>,
-) -> Result<()> {
+/// The bytes of `packed_path`, or nothing when it is not a regular file.
+fn read_packed_refs_bytes(packed_path: &Path) -> Result<Vec<u8>> {
     if !packed_path.is_file() {
-        return Ok(());
+        return Ok(Vec::new());
     }
-    let data = fs::read(packed_path)?;
-    parse_packed_refs_to_map(packed_path, &data)?;
-    let content = String::from_utf8(data)
-        .map_err(|_| packed_refs_unexpected_line(packed_path, "<invalid utf-8>"))?;
-    let mut last_name: Option<String> = None;
-    for line in content.lines() {
-        if line.starts_with('#') {
-            continue;
-        }
-        if let Some(hex) = line.strip_prefix('^') {
-            let Ok(peel_oid) = ObjectId::from_hex(hex.trim()) else {
-                continue;
-            };
-            if let Some(name) = &last_name {
-                if let Some(entry) = merged.get_mut(name) {
-                    entry.1 = Some(peel_oid);
-                }
+    Ok(fs::read(packed_path)?)
+}
+
+/// `existing` (validated `packed-refs` records in file order) with `loose` (sorted by name,
+/// unique) merged in, as a complete sorted `packed-refs` body. A loose ref replaces the
+/// packed record of the same name; when the file repeats a name, its last record wins.
+fn merged_packed_refs_body(
+    mut existing: Vec<PackedEntry<'_>>,
+    loose: &[(String, ObjectId, Option<ObjectId>)],
+) -> String {
+    if !existing.windows(2).all(|w| w[0].name < w[1].name) {
+        existing.sort_by(|a, b| a.name.cmp(b.name));
+        existing.dedup_by(|later, earlier| {
+            if later.name != earlier.name {
+                return false;
             }
-            continue;
-        }
-        let mut parts = line.splitn(2, ' ');
-        let Some(hex) = parts.next() else {
-            continue;
-        };
-        let Some(name) = parts.next() else {
-            continue;
-        };
-        let name = name.trim();
-        let Ok(oid) = ObjectId::from_hex(hex) else {
-            continue;
-        };
-        merged.insert(name.to_owned(), (oid, None));
-        last_name = Some(name.to_owned());
+            *earlier = *later;
+            true
+        });
     }
-    Ok(())
+    // Each record line is an id, a space, a name and a newline; peel lines are rare.
+    let estimate = |name: &str| name.len() + 2 + HashAlgo::Sha256.hex_len();
+    let capacity = PACKED_REFS_HEADER.len()
+        + existing.iter().map(|e| estimate(e.name)).sum::<usize>()
+        + loose.iter().map(|(name, ..)| estimate(name)).sum::<usize>();
+    let mut body = String::with_capacity(capacity);
+    body.push_str(PACKED_REFS_HEADER);
+
+    let mut packed = existing.iter().peekable();
+    for (name, oid, peel) in loose {
+        while let Some(entry) = packed.next_if(|e| e.name < name.as_str()) {
+            push_packed_record(&mut body, entry.name, &entry.oid, entry.peel.as_ref());
+        }
+        packed.next_if(|e| e.name == name.as_str());
+        push_packed_record(&mut body, name, oid, peel.as_ref());
+    }
+    for entry in packed {
+        push_packed_record(&mut body, entry.name, &entry.oid, entry.peel.as_ref());
+    }
+    body
 }
 
 /// Pack loose refs for `repo` (files `packed-refs` or reftable compaction).
@@ -3726,7 +3805,8 @@ pub(crate) fn pack_refs_for_repository(
     if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return pack_refs_reftable(git_dir, dry_run);
     }
-    pack_refs_files(git_dir, repo.odb(), all, dry_run)
+    let config = repo.config().ok();
+    pack_refs_files(git_dir, repo.odb(), config.as_deref(), all, dry_run)
 }
 
 fn pack_refs_reftable(git_dir: &Path, dry_run: bool) -> Result<(PathBuf, usize, usize)> {
@@ -3751,37 +3831,39 @@ fn pack_refs_reftable(git_dir: &Path, dry_run: bool) -> Result<(PathBuf, usize, 
 fn pack_refs_files(
     git_dir: &Path,
     odb: &crate::odb::Odb,
+    config: Option<&crate::config::ConfigSet>,
     all: bool,
     dry_run: bool,
 ) -> Result<(PathBuf, usize, usize)> {
     pack_refs_files_matching(
         git_dir,
         odb,
+        config,
         |name| ref_matches_pack_include(name, all),
         dry_run,
         false,
     )
 }
 
+/// Pack the loose refs `include` accepts into `packed-refs` and prune them. `config` supplies
+/// the `packed-refs` and ref lock timeouts (Git's defaults when `None`).
 fn pack_refs_files_matching(
     git_dir: &Path,
     odb: &crate::odb::Odb,
+    config: Option<&crate::config::ConfigSet>,
     include: impl Fn(&str) -> bool,
     dry_run: bool,
     allow_missing: bool,
 ) -> Result<(PathBuf, usize, usize)> {
+    use crate::lockfile::LockWait;
+
     let storage_git_dir = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
     let packed_path = store::paths::packed_refs_path(&storage_git_dir);
-
-    let mut merged: HashMap<String, (ObjectId, Option<ObjectId>)> = HashMap::new();
-    load_packed_refs_with_peel(&packed_path, &mut merged)?;
 
     let mut loose_files = Vec::new();
     collect_loose_ref_files(&storage_git_dir.join("refs"), "refs/", &mut loose_files)?;
 
-    let mut packed_loose = 0usize;
-    let mut to_prune: Vec<(String, ObjectId)> = Vec::new();
-
+    let mut loose: Vec<(String, ObjectId, Option<ObjectId>)> = Vec::new();
     for (refname, path) in loose_files {
         if crate::worktree_ref::is_per_worktree_ref(&refname) {
             continue;
@@ -3792,57 +3874,49 @@ fn pack_refs_files_matching(
         let Ok(Ref::Direct(oid)) = read_ref_file(&path) else {
             continue;
         };
-        let object = odb.try_read_once(&oid).ok().flatten();
-        if object.is_none() && !allow_missing {
+        // Only the kind is needed (to peel tags), so the object body is never inflated.
+        let kind = odb
+            .try_read_info_once(&oid)
+            .ok()
+            .flatten()
+            .map(|info| info.kind);
+        if kind.is_none() && !allow_missing {
             continue;
         }
-        let peel = if object.is_some_and(|object| object.kind == crate::objects::ObjectKind::Tag) {
+        let peel = if kind == Some(crate::objects::ObjectKind::Tag) {
             packed_ref_peel(odb, oid)
         } else {
             None
         };
-        merged.insert(refname.clone(), (oid, peel));
-        to_prune.push((refname, oid));
-        let _ = path;
-        packed_loose += 1;
+        loose.push((refname, oid, peel));
+    }
+    loose.sort_by(|a, b| a.0.cmp(&b.0));
+    let packed_loose = loose.len();
+
+    if packed_loose == 0 || dry_run {
+        // Still reject a malformed `packed-refs`, as a real pack would.
+        let data = read_packed_refs_bytes(&packed_path)?;
+        visit_packed_refs_with_prefix(&packed_path, &data, None, |_, _| {})?;
+        return Ok((packed_path, packed_loose, packed_loose));
     }
 
-    if packed_loose == 0 {
-        return Ok((packed_path, 0, 0));
+    {
+        // Read under the lock so a concurrent `packed-refs` rewrite is not lost.
+        let _packed_lock =
+            acquire_packed_refs_lock(&storage_git_dir, LockWait::packed_refs(config))?;
+        let data = read_packed_refs_bytes(&packed_path)?;
+        let existing = packed_entries_with_peel(&packed_path, &data)?;
+        let body = merged_packed_refs_body(existing, &loose);
+        write_packed_refs_tmp_and_rename(&packed_path, &body)?;
     }
-
-    if dry_run {
-        return Ok((packed_path, packed_loose, to_prune.len()));
-    }
-
-    let mut names: Vec<String> = merged.keys().cloned().collect();
-    names.sort();
-
-    let mut body = String::from("# pack-refs with: peeled fully-peeled sorted\n");
-    for name in &names {
-        let Some((oid, peel)) = merged.get(name) else {
-            continue;
-        };
-        body.push_str(&oid.to_hex());
-        body.push(' ');
-        body.push_str(name);
-        body.push('\n');
-        if let Some(p) = peel {
-            body.push('^');
-            body.push_str(&p.to_hex());
-            body.push('\n');
-        }
-    }
-
-    atomic_rewrite_packed_refs(&storage_git_dir, &body)?;
 
     #[cfg(test)]
     pack_refs_test_hooks::run_before_prune();
 
     let mut pruned = 0usize;
     let mut parents = HashSet::new();
-    let wait = crate::lockfile::LockWait::files_ref_lock_for_git_dir(git_dir);
-    for (refname, expected) in &to_prune {
+    let wait = LockWait::files_ref_lock(config);
+    for (refname, expected, _) in &loose {
         match prune_loose_ref_cas(git_dir, refname, *expected, wait) {
             Ok(true) => {
                 pruned += 1;
@@ -4714,10 +4788,17 @@ pub(crate) fn pack_imported_refs_for_clone(git_dir: &Path, remote: Option<&str>)
     let storage_git_dir = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
     let odb = crate::odb::Odb::new(&storage_git_dir.join("objects"))
         .with_config_git_dir(git_dir.to_path_buf());
+    let config = crate::config::ConfigSet::load(
+        &crate::environment::Environment::empty(),
+        Some(git_dir),
+        true,
+    )
+    .ok();
     odb.with_pack_read_context(|| {
         pack_refs_files_matching(
             git_dir,
             &odb,
+            config.as_ref(),
             |name| {
                 name.starts_with("refs/tags/")
                     || prefix
@@ -4732,37 +4813,17 @@ pub(crate) fn pack_imported_refs_for_clone(git_dir: &Path, remote: Option<&str>)
     Ok(())
 }
 
-/// Rewrite `packed-refs` under the packed-refs lock (tempfile + rename).
-fn atomic_rewrite_packed_refs(git_dir: &Path, body: &str) -> Result<()> {
-    let packed_path = store::paths::packed_refs_path(git_dir);
-    let lock = lock_path_for_ref(&packed_path);
-    let abs_lock = git_dir
-        .canonicalize_simplified()
-        .map(|d| d.join("packed-refs.lock"))
-        .unwrap_or_else(|_| lock.clone());
-    let _packed_lock = acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?;
-
-    let tmp = packed_path.with_extension("new");
-    let mut created_tmp = false;
-    let write_result = (|| -> Result<()> {
-        // Staged packed-refs body (not a lock file); exclusive create avoids clobber.
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)
-            .map_err(Error::Io)?;
-        created_tmp = true;
-        use std::io::Write as _;
-        file.write_all(body.as_bytes()).map_err(Error::Io)?;
-        drop(file);
-        fs::rename(&tmp, &packed_path).map_err(Error::Io)?;
-        created_tmp = false;
-        Ok(())
-    })();
-    if write_result.is_err() && created_tmp {
-        let _ = fs::remove_file(&tmp);
+/// Append one `packed-refs` record line, and its `^` peel line when `peel` is set.
+fn push_packed_record(body: &mut String, name: &str, oid: &ObjectId, peel: Option<&ObjectId>) {
+    oid.push_hex_to(body);
+    body.push(' ');
+    body.push_str(name);
+    body.push('\n');
+    if let Some(peel) = peel {
+        body.push('^');
+        peel.push_hex_to(body);
+        body.push('\n');
     }
-    write_result
 }
 
 /// One reference line (and optional peel) for [`write_packed_refs_file`].
@@ -4791,19 +4852,12 @@ pub fn write_packed_refs_file(git_dir: &Path, records: &[PackedRefRecord]) -> Re
     for rec in &sorted {
         ensure_refname_safe_for_storage(&rec.refname)?;
     }
-    let mut body = String::from("# pack-refs with: peeled fully-peeled sorted\n");
+    let mut body = String::from(PACKED_REFS_HEADER);
     for rec in &sorted {
-        body.push_str(&rec.oid.to_hex());
-        body.push(' ');
-        body.push_str(&rec.refname);
-        body.push('\n');
-        if let Some(peeled) = rec.peeled {
-            body.push('^');
-            body.push_str(&peeled.to_hex());
-            body.push('\n');
-        }
+        push_packed_record(&mut body, &rec.refname, &rec.oid, rec.peeled.as_ref());
     }
-    atomic_rewrite_packed_refs(git_dir, &body)?;
+    let packed_path = store::paths::packed_refs_path(git_dir);
+    replace_packed_refs_file(git_dir, &packed_path, &body, false)?;
     for rec in &sorted {
         let storage_dir = ref_storage_dir(git_dir, &rec.refname);
         let stor = crate::ref_namespace::storage_ref_name(&rec.refname);
@@ -6998,7 +7052,7 @@ mod pack_refs_tests {
         })));
 
         let (_path, packed, pruned) =
-            pack_refs_files(&git_dir, repo.odb(), true, false).expect("pack");
+            pack_refs_files(&git_dir, repo.odb(), None, true, false).expect("pack");
         pack_refs_test_hooks::set_before_prune(None);
         assert!(packed >= 1);
         assert_eq!(pruned, 0, "stale CAS must not delete the updated loose ref");
@@ -7116,7 +7170,7 @@ mod pack_refs_tests {
             .expect("outer tag");
         write_ref(repo.git_dir(), "refs/tags/outer", &outer).expect("tag ref");
 
-        pack_refs_files(repo.git_dir(), repo.odb(), false, false).expect("pack");
+        pack_refs_files(repo.git_dir(), repo.odb(), None, false, false).expect("pack");
         let body =
             fs::read_to_string(store::paths::packed_refs_path(repo.git_dir())).expect("packed");
         let mut lines = body.lines();
@@ -7153,7 +7207,7 @@ mod pack_refs_tests {
             .expect("tag");
         write_ref(repo.git_dir(), "refs/tags/tree-tag", &tag).expect("tag ref");
 
-        pack_refs_files(repo.git_dir(), repo.odb(), true, false).expect("pack");
+        pack_refs_files(repo.git_dir(), repo.odb(), None, true, false).expect("pack");
         let body =
             fs::read_to_string(store::paths::packed_refs_path(repo.git_dir())).expect("packed");
         assert!(body.contains("refs/tags/tree-tag"));
@@ -7161,6 +7215,236 @@ mod pack_refs_tests {
             body.contains(&format!("^{}", tree.to_hex())),
             "expected peel to tree: {body}"
         );
+    }
+
+    fn packed_entry<'a>(name: &'a str, hex: &str, peel: Option<&str>) -> PackedEntry<'a> {
+        PackedEntry {
+            name,
+            oid: ObjectId::from_hex(hex).expect("oid"),
+            peel: peel.map(|p| ObjectId::from_hex(p).expect("peel")),
+        }
+    }
+
+    const OID_A: &str = "1111111111111111111111111111111111111111";
+    const OID_B: &str = "2222222222222222222222222222222222222222";
+    const OID_C: &str = "3333333333333333333333333333333333333333";
+
+    #[test]
+    fn merged_packed_refs_body_interleaves_loose_and_replaces_by_name() {
+        let existing = vec![
+            packed_entry("refs/tags/b", OID_A, Some(OID_B)),
+            packed_entry("refs/tags/d", OID_A, None),
+        ];
+        let loose = vec![
+            (
+                "refs/tags/a".to_owned(),
+                ObjectId::from_hex(OID_C).unwrap(),
+                None,
+            ),
+            (
+                "refs/tags/b".to_owned(),
+                ObjectId::from_hex(OID_C).unwrap(),
+                None,
+            ),
+            (
+                "refs/tags/c".to_owned(),
+                ObjectId::from_hex(OID_B).unwrap(),
+                Some(ObjectId::from_hex(OID_A).unwrap()),
+            ),
+            (
+                "refs/tags/e".to_owned(),
+                ObjectId::from_hex(OID_A).unwrap(),
+                None,
+            ),
+        ];
+        let body = merged_packed_refs_body(existing, &loose);
+        assert_eq!(
+            body,
+            format!(
+                "{PACKED_REFS_HEADER}\
+                 {OID_C} refs/tags/a\n\
+                 {OID_C} refs/tags/b\n\
+                 {OID_B} refs/tags/c\n^{OID_A}\n\
+                 {OID_A} refs/tags/d\n\
+                 {OID_A} refs/tags/e\n"
+            ),
+            "a loose ref replaces the packed record and its old peel line"
+        );
+    }
+
+    #[test]
+    fn merged_packed_refs_body_sorts_unsorted_input_and_keeps_last_duplicate() {
+        let existing = vec![
+            packed_entry("refs/tags/z", OID_A, None),
+            packed_entry("refs/tags/m", OID_A, Some(OID_C)),
+            packed_entry("refs/tags/m", OID_B, None),
+        ];
+        let loose = vec![(
+            "refs/tags/n".to_owned(),
+            ObjectId::from_hex(OID_C).unwrap(),
+            None,
+        )];
+        let body = merged_packed_refs_body(existing, &loose);
+        assert_eq!(
+            body,
+            format!(
+                "{PACKED_REFS_HEADER}\
+                 {OID_B} refs/tags/m\n\
+                 {OID_C} refs/tags/n\n\
+                 {OID_A} refs/tags/z\n"
+            )
+        );
+    }
+
+    #[test]
+    fn packed_entries_with_peel_attaches_peels_and_rejects_orphans() {
+        let path = Path::new("packed-refs");
+        let upper = OID_A.to_ascii_uppercase();
+        let data = format!(
+            "# pack-refs with: peeled fully-peeled sorted \n\
+             {upper} refs/tags/a\n^{OID_B}\n{OID_C} refs/tags/b\n"
+        );
+        let entries = packed_entries_with_peel(path, data.as_bytes()).expect("parse");
+        let got: Vec<_> = entries.iter().map(|e| (e.name, e.oid, e.peel)).collect();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    "refs/tags/a",
+                    ObjectId::from_hex(OID_A).unwrap(),
+                    Some(ObjectId::from_hex(OID_B).unwrap())
+                ),
+                ("refs/tags/b", ObjectId::from_hex(OID_C).unwrap(), None),
+            ]
+        );
+        let body = merged_packed_refs_body(entries, &[]);
+        assert!(
+            body.contains(&format!("{OID_A} refs/tags/a\n")),
+            "ids are rewritten in lowercase: {body}"
+        );
+
+        let orphan = format!("^{OID_B}\n{OID_C} refs/tags/b\n");
+        assert!(matches!(
+            packed_entries_with_peel(path, orphan.as_bytes()),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+    }
+
+    fn files_repo() -> (tempfile::TempDir, crate::repo::Repository) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        (dir, repo)
+    }
+
+    #[test]
+    fn pack_refs_merges_loose_tags_into_existing_packed_refs() {
+        let (_dir, repo) = files_repo();
+        let git_dir = repo.git_dir().to_path_buf();
+        let c1 = write_commit(&repo, vec![]);
+        let c2 = write_commit(&repo, vec![c1]);
+        let tag = repo
+            .odb()
+            .write(
+                ObjectKind::Tag,
+                format!("object {c1}\ntype commit\ntag v2\n\nv2\n").as_bytes(),
+            )
+            .expect("tag object");
+        fs::write(
+            store::paths::packed_refs_path(&git_dir),
+            format!(
+                "{PACKED_REFS_HEADER}{c1} refs/heads/old\n{c1} refs/tags/v1\n{c1} refs/tags/v3\n"
+            ),
+        )
+        .expect("seed packed-refs");
+        write_ref(&git_dir, "refs/tags/v1", &c2).expect("replace v1");
+        write_ref(&git_dir, "refs/tags/v2", &tag).expect("v2");
+        write_ref(&git_dir, "refs/heads/main", &c2).expect("branch");
+
+        let (path, packed, pruned) =
+            pack_refs_files(&git_dir, repo.odb(), None, false, false).expect("pack");
+        assert_eq!((packed, pruned), (2, 2));
+        assert_eq!(
+            fs::read_to_string(path).expect("packed-refs"),
+            format!(
+                "{PACKED_REFS_HEADER}{c1} refs/heads/old\n{c2} refs/tags/v1\n\
+                 {tag} refs/tags/v2\n^{c1}\n{c1} refs/tags/v3\n"
+            )
+        );
+        assert!(!git_dir.join("refs/tags/v1").exists());
+        assert!(!git_dir.join("refs/tags/v2").exists());
+        assert!(git_dir.join("refs/heads/main").exists(), "tags-only pack");
+        assert_eq!(resolve_ref(&git_dir, "refs/tags/v1").expect("v1"), c2);
+    }
+
+    #[test]
+    fn pack_refs_dry_run_and_noop_leave_packed_refs_untouched() {
+        let (_dir, repo) = files_repo();
+        let git_dir = repo.git_dir().to_path_buf();
+        let c1 = write_commit(&repo, vec![]);
+        let packed_path = store::paths::packed_refs_path(&git_dir);
+        let seed = format!("# hand written\n{c1} refs/tags/v1\n");
+        fs::write(&packed_path, &seed).expect("seed");
+
+        assert_eq!(
+            pack_refs_files(&git_dir, repo.odb(), None, false, false)
+                .expect("noop")
+                .1,
+            0
+        );
+        write_ref(&git_dir, "refs/tags/v2", &c1).expect("v2");
+        let (_, packed, pruned) =
+            pack_refs_files(&git_dir, repo.odb(), None, false, true).expect("dry run");
+        assert_eq!((packed, pruned), (1, 1));
+        assert_eq!(fs::read_to_string(&packed_path).expect("read"), seed);
+        assert!(git_dir.join("refs/tags/v2").exists());
+
+        fs::write(&packed_path, format!("^{c1}\n")).expect("corrupt");
+        assert!(matches!(
+            pack_refs_files(&git_dir, repo.odb(), None, false, true),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+    }
+
+    #[test]
+    fn pack_refs_reports_held_packed_refs_lock_and_keeps_loose_refs() {
+        let (_dir, repo) = files_repo();
+        let git_dir = repo.git_dir().to_path_buf();
+        let c1 = write_commit(&repo, vec![]);
+        write_ref(&git_dir, "refs/tags/v1", &c1).expect("v1");
+        fs::write(
+            git_dir.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tpackedRefsTimeout = 0\n",
+        )
+        .expect("config");
+        let lock = git_dir.join("packed-refs.lock");
+        fs::write(&lock, b"").expect("foreign lock");
+        let config = crate::config::ConfigSet::load(
+            &crate::environment::Environment::empty(),
+            Some(&git_dir),
+            true,
+        )
+        .expect("config");
+
+        let err = pack_refs_files(&git_dir, repo.odb(), Some(&config), false, false)
+            .expect_err("lock held");
+        assert!(
+            matches!(
+                &err,
+                Error::RefLock(RefLockError::PackedRefsLockHeld { lock_path })
+                    if lock_path.ends_with("packed-refs.lock")
+            ),
+            "{err:?}"
+        );
+        assert!(lock.exists(), "a foreign lock is never removed");
+        assert!(git_dir.join("refs/tags/v1").exists());
+        assert!(!store::paths::packed_refs_path(&git_dir).exists());
     }
 
     #[test]
@@ -7273,7 +7557,7 @@ mod pack_refs_tests {
         let blob = repo.odb().write(ObjectKind::Blob, b"x").expect("blob");
         write_ref(repo.git_dir(), "refs/stash", &blob).expect("stash");
         let refs = repo.git_dir().join("refs");
-        pack_refs_files(repo.git_dir(), repo.odb(), true, false).expect("pack");
+        pack_refs_files(repo.git_dir(), repo.odb(), None, true, false).expect("pack");
         assert!(!refs.join("stash").exists());
         assert!(refs.is_dir(), "refs/ must remain");
     }
