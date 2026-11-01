@@ -1104,6 +1104,37 @@ pub enum Error {
     #[error("zlib error: {0}")]
     Zlib(String),
 
+    /// A loose object file is present but its stored bytes could not be decoded.
+    #[error("loose object {oid} at {} is unreadable: {source}", path.display())]
+    #[non_exhaustive]
+    CorruptLooseObject {
+        /// Object id implied by the loose object path.
+        oid: crate::objects::ObjectId,
+        /// Path to the loose object file (often under `.git/objects/`).
+        path: std::path::PathBuf,
+        /// Underlying zlib, header, or I/O failure.
+        #[source]
+        source: Box<Error>,
+    },
+
+    /// A pack entry names the object but its stored bytes could not be decoded.
+    #[error(
+        "packed object {oid} in {} (offset {offset}) is unreadable: {source}",
+        pack.display()
+    )]
+    #[non_exhaustive]
+    CorruptPackedObject {
+        /// Object id from the pack index.
+        oid: crate::objects::ObjectId,
+        /// Path to the `.pack` file.
+        pack: std::path::PathBuf,
+        /// Byte offset of the object record in the pack.
+        offset: u64,
+        /// Underlying zlib, header, or I/O failure.
+        #[source]
+        source: Box<Error>,
+    },
+
     /// Loose object bytes hash to a different OID than the file path implies (`git fsck` / `read_loose_object`).
     #[error("{real_oid}: hash-path mismatch, found at: {path}")]
     LooseHashMismatch {
@@ -2118,6 +2149,8 @@ impl Error {
             Self::Io(..) => "io",
             Self::LockHeld { .. } => "lock_held",
             Self::Zlib(..) => "zlib",
+            Self::CorruptLooseObject { .. } => "corrupt_loose_object",
+            Self::CorruptPackedObject { .. } => "corrupt_packed_object",
             Self::LooseHashMismatch { .. } => "loose_hash_mismatch",
             Self::LooseObjectWrite { .. } => "loose_object_write",
             Self::WorktreePathIo { .. } => "worktree_path_io",
@@ -2345,6 +2378,70 @@ impl Error {
             Self::History(e) => e.is_cancelled(),
             Self::CheckoutRollbackIncomplete { source, .. } => source.is_cancelled(),
             _ => false,
+        }
+    }
+
+    /// Whether an object read failed because a stored copy is damaged (zlib/header/truncation),
+    /// so composite stores may consult the next backend.
+    #[must_use]
+    pub fn is_damaged_object(&self) -> bool {
+        match self {
+            Self::Zlib(_) | Self::CorruptObject(_) => true,
+            Self::CorruptLooseObject { .. } | Self::CorruptPackedObject { .. } => true,
+            Self::Io(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn is_object_read_wrap_source(&self) -> bool {
+        match self {
+            Self::Zlib(_) | Self::CorruptObject(_) => true,
+            Self::Io(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => true,
+            _ => false,
+        }
+    }
+
+    /// Attach loose-object path context to low-level read failures at the ODB boundary.
+    #[must_use]
+    pub(crate) fn wrap_loose_read_failure(
+        oid: crate::objects::ObjectId,
+        path: std::path::PathBuf,
+        err: Error,
+    ) -> Error {
+        if matches!(err, Self::CorruptLooseObject { .. }) {
+            return err;
+        }
+        if err.is_object_read_wrap_source() {
+            Self::CorruptLooseObject {
+                oid,
+                path,
+                source: Box::new(err),
+            }
+        } else {
+            err
+        }
+    }
+
+    /// Attach pack location context to low-level read failures at the ODB boundary.
+    #[must_use]
+    pub(crate) fn wrap_packed_read_failure(
+        oid: crate::objects::ObjectId,
+        pack: std::path::PathBuf,
+        offset: u64,
+        err: Error,
+    ) -> Error {
+        if matches!(err, Self::CorruptPackedObject { .. }) {
+            return err;
+        }
+        if err.is_object_read_wrap_source() {
+            Self::CorruptPackedObject {
+                oid,
+                pack,
+                offset,
+                source: Box::new(err),
+            }
+        } else {
+            err
         }
     }
 

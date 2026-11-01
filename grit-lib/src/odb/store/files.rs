@@ -148,7 +148,10 @@ impl FilesSource {
         }
         matches!(
             err,
-            Error::CorruptObject(_) | Error::LooseHashMismatch { .. } | Error::Zlib(_)
+            Error::CorruptObject(_)
+                | Error::CorruptLooseObject { .. }
+                | Error::LooseHashMismatch { .. }
+                | Error::Zlib(_)
         )
     }
 
@@ -157,7 +160,7 @@ impl FilesSource {
     }
 
     fn midx_read_should_fallback_to_packs(err: &Error) -> bool {
-        matches!(err, Error::CorruptObject(_) | Error::Zlib(_))
+        err.is_damaged_object()
     }
 
     fn try_read_object_into(

@@ -2330,8 +2330,7 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::Zlib`] — decompression failed.
-    /// - [`Error::CorruptObject`] — header is malformed.
+    /// - [`Error::CorruptLooseObject`] — stored bytes could not be decoded (wraps zlib/header/EOF).
     /// - [`Error::LooseHashMismatch`] — payload OID does not match `expected_oid`.
     pub fn read_loose_verify_oid(path: &Path, expected_oid: &ObjectId) -> Result<Object> {
         LooseStore::read_verify_oid(path, expected_oid)
@@ -2361,8 +2360,7 @@ impl Odb {
     /// # Errors
     ///
     /// - [`Error::ObjectNotFound`] — no file at the expected path.
-    /// - [`Error::Zlib`] — decompression failed.
-    /// - [`Error::CorruptObject`] — header is malformed.
+    /// - [`Error::CorruptLooseObject`] / [`Error::CorruptPackedObject`] — stored copy is damaged.
     pub fn read(&self, oid: &ObjectId) -> Result<Object> {
         self.read_impl(oid, true)
     }
@@ -2842,8 +2840,7 @@ impl Odb {
     /// # Errors
     ///
     /// - [`Error::ObjectNotFound`] — no object with this id in any consulted store.
-    /// - [`Error::Zlib`] — decompression failed while reading a loose or pack header.
-    /// - [`Error::CorruptObject`] — malformed object or pack headers.
+    /// - [`Error::CorruptLooseObject`] / [`Error::CorruptPackedObject`] — stored copy is damaged.
     pub fn read_info(&self, oid: &ObjectId) -> Result<ObjectInfo> {
         if self.is_empty_tree(oid) {
             return Ok(ObjectInfo {

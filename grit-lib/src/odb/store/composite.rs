@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 
 use super::{ObjectStore, ObjectStream};
@@ -14,7 +14,7 @@ use super::{ObjectStore, ObjectStream};
 /// # Errors
 ///
 /// Reads ([`ObjectStore::read`], `read_into`, `read_info`, `open_stream`) skip past a backend
-/// whose copy is damaged ([`Error::Zlib`] or [`Error::CorruptObject`]) and return a later
+/// whose copy is damaged ([`crate::error::Error::is_damaged_object`]) and return a later
 /// backend's good copy. When no backend returns the object, the first such corruption error is
 /// returned instead of `Ok(None)`. Any other backend error is returned immediately.
 #[derive(Debug)]
@@ -40,7 +40,7 @@ impl CompositeStore {
 
     /// Ask each child in order and return the first hit.
     ///
-    /// A child that reports a damaged copy ([`Error::Zlib`] or [`Error::CorruptObject`]) does not
+    /// A child that reports a damaged copy ([`crate::error::Error::is_damaged_object`]) does not
     /// stop the lookup, since a later child may hold a good copy. If none does, the first such
     /// error is returned so a damaged object is never reported as missing. Any other error stops
     /// the lookup immediately.
@@ -53,7 +53,7 @@ impl CompositeStore {
             match lookup(store.as_ref()) {
                 Ok(Some(found)) => return Ok(Some(found)),
                 Ok(None) => {}
-                Err(err @ (Error::Zlib(_) | Error::CorruptObject(_))) => {
+                Err(err) if err.is_damaged_object() => {
                     damaged.get_or_insert(err);
                 }
                 Err(err) => return Err(err),
@@ -162,6 +162,7 @@ impl ObjectStore for CompositeStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Error;
     use crate::objects::ObjectKind;
     use crate::odb::store::{MemoryStore, WritableObjectStore};
     use crate::odb::WriteOptions;

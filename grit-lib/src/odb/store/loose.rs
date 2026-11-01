@@ -346,8 +346,26 @@ impl LooseStore {
     /// - [`Error::LooseHashMismatch`] — payload OID does not match `expected_oid`.
     pub fn read_verify_oid(path: &Path, expected_oid: &ObjectId) -> Result<Object> {
         let file = fs::File::open(path).map_err(Error::Io)?;
-        let raw = read_zlib_loose_payload(file)?;
-        let obj = parse_object_bytes_with_oid(&raw, expected_oid)?;
+        let raw = match read_zlib_loose_payload(file) {
+            Ok(raw) => raw,
+            Err(err) => {
+                return Err(Error::wrap_loose_read_failure(
+                    *expected_oid,
+                    path.to_path_buf(),
+                    err,
+                ));
+            }
+        };
+        let obj = match parse_object_bytes_with_oid(&raw, expected_oid) {
+            Ok(obj) => obj,
+            Err(err) => {
+                return Err(Error::wrap_loose_read_failure(
+                    *expected_oid,
+                    path.to_path_buf(),
+                    err,
+                ));
+            }
+        };
         let computed = hash::hash_object(expected_oid.algo(), obj.kind, &obj.data)?;
         if computed != *expected_oid {
             return Err(Error::LooseHashMismatch {
@@ -417,8 +435,13 @@ impl ObjectStore for LooseStore {
             }
             Err(err) => return Err(Error::Io(err)),
         };
-        read_zlib_loose_payload_into(file, buf)?;
-        let kind = strip_decompressed_object_header(buf, Some(oid))?;
+        if let Err(err) = read_zlib_loose_payload_into(file, buf) {
+            return Err(Error::wrap_loose_read_failure(*oid, path, err));
+        }
+        let kind = match strip_decompressed_object_header(buf, Some(oid)) {
+            Ok(kind) => kind,
+            Err(err) => return Err(Error::wrap_loose_read_failure(*oid, path, err)),
+        };
         Ok(Some(kind))
     }
 
@@ -437,7 +460,8 @@ impl ObjectStore for LooseStore {
         };
         match loose_object_info_from_file(&mut file) {
             Err(Error::Io(err)) if err.kind() == io::ErrorKind::IsADirectory => Ok(None),
-            other => other.map(Some),
+            Err(err) => Err(Error::wrap_loose_read_failure(*oid, path, err)),
+            Ok(info) => Ok(Some(info)),
         }
     }
 
@@ -454,7 +478,10 @@ impl ObjectStore for LooseStore {
             }
             Err(err) => return Err(Error::Io(err)),
         };
-        let reader = LoosePayloadReader::open(file)?;
+        let reader = match LoosePayloadReader::open(file) {
+            Ok(reader) => reader,
+            Err(err) => return Err(Error::wrap_loose_read_failure(*oid, path, err)),
+        };
         Ok(Some(ObjectStream {
             kind: reader.kind,
             size: reader.payload_size,
@@ -656,7 +683,29 @@ pub(crate) fn strip_decompressed_object_header(
 /// Read kind and size from a loose object file without loading the full payload.
 pub fn read_loose_object_info(path: &Path) -> Result<ObjectInfo> {
     let mut file = fs::File::open(path).map_err(Error::Io)?;
-    loose_object_info_from_file(&mut file)
+    match loose_object_info_from_file(&mut file) {
+        Ok(info) => Ok(info),
+        Err(err) => {
+            if let Some(oid) = oid_from_loose_object_path(path) {
+                Err(Error::wrap_loose_read_failure(oid, path.to_path_buf(), err))
+            } else {
+                Err(err)
+            }
+        }
+    }
+}
+
+fn oid_from_loose_object_path(path: &Path) -> Option<ObjectId> {
+    let file_name = path.file_name()?.to_str()?;
+    if !ObjectId::is_loose_suffix_len(file_name.len()) {
+        return None;
+    }
+    let parent = path.parent()?.file_name()?.to_str()?;
+    if parent.len() != 2 {
+        return None;
+    }
+    let hex = format!("{parent}{file_name}");
+    ObjectId::from_hex(&hex).ok()
 }
 
 fn loose_object_info_from_file(file: &mut File) -> Result<ObjectInfo> {

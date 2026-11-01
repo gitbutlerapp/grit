@@ -81,6 +81,32 @@ pub fn read_local_pack_indexes(objects_dir: &Path) -> Result<Vec<PackIndex>> {
 /// SHA-1 verification of the index trailer is **not** performed on cached reads: Git only
 /// verifies pack indexes during `fsck`/`verify-pack`, not on every object lookup. Use
 /// [`read_pack_index`] when verification is required.
+struct PackReadDamage {
+    pack: PathBuf,
+    offset: u64,
+    err: Error,
+}
+
+fn finish_pack_object_lookup(oid: &ObjectId, last: Option<PackReadDamage>) -> Error {
+    match last {
+        Some(d) => Error::wrap_packed_read_failure(*oid, d.pack, d.offset, d.err),
+        None => Error::ObjectNotFound(oid.to_hex()),
+    }
+}
+
+fn wrap_pack_cache_read_err(
+    objects_dir: &Path,
+    idx: &PackIndex,
+    oid: &ObjectId,
+    err: Error,
+) -> Error {
+    let offset = pack_cache::find_offset_in_pack_read_context(objects_dir, idx, oid)
+        .ok()
+        .flatten()
+        .unwrap_or(0);
+    Error::wrap_packed_read_failure(*oid, idx.pack_path.clone(), offset, err)
+}
+
 pub(crate) mod pack_cache {
     use super::{read_pack_index_no_verify, Error, ObjectKind, PackIndex, Result};
     use crate::pack_map::{fingerprint_from_file, PackData, PackFingerprint};
@@ -250,7 +276,12 @@ pub(crate) mod pack_cache {
         match reader.read_object(oid) {
             Ok(obj) => Ok(Some(obj)),
             Err(Error::ObjectNotFound(_)) => Ok(None),
-            Err(err) => Err(err),
+            Err(err) => Err(super::wrap_pack_cache_read_err(
+                objects_dir,
+                reader.idx.as_ref(),
+                oid,
+                err,
+            )),
         }
     }
 
@@ -271,7 +302,12 @@ pub(crate) mod pack_cache {
         match reader.read_object_unless_whole_larger(oid, limit) {
             Ok(read) => Ok(Some(read)),
             Err(Error::ObjectNotFound(_)) => Ok(None),
-            Err(err) => Err(err),
+            Err(err) => Err(super::wrap_pack_cache_read_err(
+                objects_dir,
+                reader.idx.as_ref(),
+                oid,
+                err,
+            )),
         }
     }
 
@@ -307,7 +343,12 @@ pub(crate) mod pack_cache {
         match reader.read_object_into_with_delta_policy(oid, populate_delta_lru, buf) {
             Ok(kind) => Ok(Some(kind)),
             Err(Error::ObjectNotFound(_)) => Ok(None),
-            Err(err) => Err(err),
+            Err(err) => Err(super::wrap_pack_cache_read_err(
+                objects_dir,
+                reader.idx.as_ref(),
+                oid,
+                err,
+            )),
         }
     }
 
@@ -512,6 +553,7 @@ pub(crate) mod pack_cache {
         match super::read_object_from_pack_at_offset(&idx, offset) {
             Ok(obj) => Ok(Some(obj)),
             Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(err) if err.is_object_read_wrap_source() => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -531,6 +573,7 @@ pub(crate) mod pack_cache {
         match super::read_object_at_depth_into(&idx, offset, 0, populate_delta_lru, buf) {
             Ok(kind) => Ok(Some(kind)),
             Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(err) if err.is_object_read_wrap_source() => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -4775,6 +4818,7 @@ pub(crate) fn try_read_object_from_packs_with_options(
         }
     }
     let indexes = pack_indexes_for_lookup(objects_dir, opts)?;
+    let mut last_damage: Option<PackReadDamage> = None;
     let mut last_err: Option<Error> = None;
     for idx in &indexes {
         let Some(offset) = pack_cache::find_offset_in_pack_read_context(objects_dir, idx, oid)?
@@ -4791,10 +4835,20 @@ pub(crate) fn try_read_object_from_packs_with_options(
             Err(Error::ObjectNotFound(_)) => {}
             // The pack copy is unreadable (corrupt delta/zlib/header). A redundant
             // pack may still hold an intact copy, so remember the error and retry.
+            Err(err) if err.is_object_read_wrap_source() => {
+                last_damage = Some(PackReadDamage {
+                    pack: idx.pack_path.clone(),
+                    offset,
+                    err,
+                });
+            }
             Err(err) => last_err = Some(err),
         }
     }
-    Err(last_err.unwrap_or_else(|| Error::ObjectNotFound(oid.to_hex())))
+    if let Some(err) = last_err {
+        return Err(err);
+    }
+    Err(finish_pack_object_lookup(oid, last_damage))
 }
 
 /// Like [`try_read_object_from_packs_with_options`], writing the payload into `buf`.
@@ -4827,6 +4881,7 @@ pub(crate) fn try_read_object_from_packs_with_options_into(
         }
     }
     let indexes = pack_indexes_for_lookup(objects_dir, opts)?;
+    let mut last_damage: Option<PackReadDamage> = None;
     let mut last_err: Option<Error> = None;
     for idx in &indexes {
         let Some(offset) = pack_cache::find_offset_in_pack_read_context(objects_dir, idx, oid)?
@@ -4839,10 +4894,20 @@ pub(crate) fn try_read_object_from_packs_with_options_into(
                 return Ok(kind);
             }
             Err(Error::ObjectNotFound(_)) => {}
+            Err(err) if err.is_object_read_wrap_source() => {
+                last_damage = Some(PackReadDamage {
+                    pack: idx.pack_path.clone(),
+                    offset,
+                    err,
+                });
+            }
             Err(err) => last_err = Some(err),
         }
     }
-    Err(last_err.unwrap_or_else(|| Error::ObjectNotFound(oid.to_hex())))
+    if let Some(err) = last_err {
+        return Err(err);
+    }
+    Err(finish_pack_object_lookup(oid, last_damage))
 }
 
 /// Whether `idx_path` uses the legacy v1 pack-index format (no `PACK` signature).
@@ -6300,6 +6365,126 @@ mod tests {
         clear_pack_cache();
         let idx = read_pack_index(&pack_path.with_extension("idx")).ok()?;
         Some((tmp, idx, tip, odb))
+    }
+
+    #[test]
+    fn warm_hinted_pack_damage_returns_corrupt_packed_object_via_full_lookup() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        if !git_try(dir, &["init", "-q"]) {
+            return;
+        }
+        std::fs::write(dir.join("big.txt"), vec![0u8; 20_000]).expect("big");
+        git(dir, &["add", "big.txt"]);
+        git(dir, &["commit", "-qm", "one"]);
+        git(dir, &["repack", "-adq"]);
+        std::fs::write(dir.join("more.txt"), b"second pack\n").expect("more");
+        git(dir, &["add", "more.txt"]);
+        git(dir, &["commit", "-qm", "two"]);
+        git(dir, &["repack"]);
+        let objects = dir.join(".git/objects");
+        let pack_dir = objects.join("pack");
+        let pack_count = std::fs::read_dir(&pack_dir)
+            .expect("pack dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+            .count();
+        assert!(
+            pack_count >= 2,
+            "expected multiple packs for warm-hint regression, got {pack_count}"
+        );
+        let odb = Odb::new(&objects);
+        let oid_hex = Command::new("git")
+            .current_dir(dir)
+            .args(["rev-parse", "HEAD~1:big.txt"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("rev-parse")
+            .stdout;
+        let oid =
+            ObjectId::from_hex(std::str::from_utf8(&oid_hex).unwrap().trim()).expect("parse oid");
+        let indexes = read_local_pack_indexes(&objects).expect("indexes");
+        let (idx_arc, offset) = indexes
+            .iter()
+            .find_map(|idx| {
+                idx.find_offset(&oid)
+                    .ok()
+                    .flatten()
+                    .map(|offset| (Arc::new(idx.clone()), offset))
+            })
+            .expect("oid in a pack");
+        let corrupt_pack = |pack_path: &Path| {
+            let mut bytes = std::fs::read(pack_path).expect("read pack");
+            let flip_at = (offset as usize + 8).min(bytes.len().saturating_sub(1));
+            bytes[flip_at] ^= 0x55;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(pack_path, std::fs::Permissions::from_mode(0o644))
+                    .expect("chmod pack");
+            }
+            std::fs::write(pack_path, &bytes).expect("corrupt pack");
+        };
+        let assert_warm_hint = |label: &str| {
+            let hint = pack_cache::hinted_pack_index(&objects)
+                .unwrap_or_else(|| panic!("{label}: pack hint must be warm"));
+            assert_eq!(
+                hint.pack_path, idx_arc.pack_path,
+                "{label}: hint must target the corrupted pack"
+            );
+        };
+        let reseed_hint = || pack_cache::remember_pack_hit(&objects, &idx_arc);
+
+        odb.with_pack_read_context(|| {
+            odb.read(&oid).expect("warm pack hint");
+            assert_warm_hint("after warm read");
+
+            corrupt_pack(&idx_arc.pack_path);
+            assert!(
+                pack_cache::revalidate_stale_pack_bytes(&idx_arc.pack_path).expect("revalidate"),
+                "corrupt pack bytes must be observable in cache"
+            );
+            reseed_hint();
+            assert_warm_hint("before try_read_from_hinted_pack");
+
+            let hinted = pack_cache::try_read_from_hinted_pack(&objects, &oid)
+                .expect("hinted pack read must not propagate raw zlib");
+            assert!(
+                hinted.is_none(),
+                "damaged hinted read must fall through to full lookup"
+            );
+            assert_warm_hint("before odb.read after hinted shortcut");
+
+            let err = odb.read(&oid).expect_err("read after corrupt hinted miss");
+            assert!(
+                matches!(err, Error::CorruptPackedObject { .. }),
+                "read: {err:?}"
+            );
+
+            reseed_hint();
+            assert_warm_hint("before try_read_from_hinted_pack_into");
+
+            let mut buf = Vec::new();
+            let hinted_into =
+                pack_cache::try_read_from_hinted_pack_into(&objects, &oid, true, &mut buf)
+                    .expect("hinted pack read_into must not propagate raw zlib");
+            assert!(
+                hinted_into.is_none(),
+                "damaged hinted read_into must fall through to full lookup"
+            );
+            assert_warm_hint("before odb.read_into after hinted shortcut");
+
+            let err = odb
+                .read_into(&oid, &mut Vec::new())
+                .expect_err("read_into after corrupt hinted miss");
+            assert!(
+                matches!(err, Error::CorruptPackedObject { .. }),
+                "read_into: {err:?}"
+            );
+        });
     }
 
     #[test]
