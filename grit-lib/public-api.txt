@@ -2001,10 +2001,7 @@ pub grit_lib::config::environment::Environment::git_test_assume_different_owner:
 pub grit_lib::config::environment::Environment::git_test_no_write_rev_index: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::git_test_reftable_autocompaction: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::git_test_utf8_nfd_to_nfc: core::option::Option<alloc::string::String>
-pub grit_lib::config::environment::Environment::git_trace2_perf: core::option::Option<alloc::string::String>
-pub grit_lib::config::environment::Environment::git_trace_setup: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::git_work_tree: core::option::Option<alloc::string::String>
-pub grit_lib::config::environment::Environment::grit_debug_safe_dir: bool
 pub grit_lib::config::environment::Environment::grit_invocation_cwd: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::home: core::option::Option<std::ffi::os_str::OsString>
 pub grit_lib::config::environment::Environment::homedrive: core::option::Option<std::ffi::os_str::OsString>
@@ -17964,10 +17961,7 @@ pub grit_lib::prelude::Environment::git_test_assume_different_owner: core::optio
 pub grit_lib::prelude::Environment::git_test_no_write_rev_index: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::git_test_reftable_autocompaction: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::git_test_utf8_nfd_to_nfc: core::option::Option<alloc::string::String>
-pub grit_lib::prelude::Environment::git_trace2_perf: core::option::Option<alloc::string::String>
-pub grit_lib::prelude::Environment::git_trace_setup: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::git_work_tree: core::option::Option<alloc::string::String>
-pub grit_lib::prelude::Environment::grit_debug_safe_dir: bool
 pub grit_lib::prelude::Environment::grit_invocation_cwd: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::home: core::option::Option<std::ffi::os_str::OsString>
 pub grit_lib::prelude::Environment::homedrive: core::option::Option<std::ffi::os_str::OsString>
