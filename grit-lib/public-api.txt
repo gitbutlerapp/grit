@@ -3155,41 +3155,15 @@ pub grit_lib::diagnostics::Warning::AmbiguousRefname::spec: alloc::string::Strin
 pub grit_lib::diagnostics::Warning::BadBooleanConfig
 pub grit_lib::diagnostics::Warning::BadBooleanConfig::key: alloc::string::String
 pub grit_lib::diagnostics::Warning::BadBooleanConfig::value: alloc::string::String
-pub grit_lib::diagnostics::Warning::CommitGraphBloomDisabled
-pub grit_lib::diagnostics::Warning::CommitGraphBloomDisabled::layer: alloc::string::String
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathChunkTooSmall
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathChunkTooSmall::actual: usize
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathChunkTooSmall::minimum: usize
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathIndexTooSmall
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathOffsetOutOfRange
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathOffsetOutOfRange::chunk_size: usize
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathOffsetOutOfRange::graph: alloc::string::String
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathOffsetOutOfRange::offset: usize
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathOffsetOutOfRange::position: usize
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathOffsetsDecreasing
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathOffsetsDecreasing::end: usize
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathOffsetsDecreasing::graph: alloc::string::String
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathOffsetsDecreasing::position_end: usize
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathOffsetsDecreasing::position_start: usize
-pub grit_lib::diagnostics::Warning::CommitGraphChangedPathOffsetsDecreasing::start: usize
-pub grit_lib::diagnostics::Warning::CommitGraphChunkTooSmall
-pub grit_lib::diagnostics::Warning::CommitGraphChunkTooSmall::chunk: alloc::string::String
-pub grit_lib::diagnostics::Warning::CommitGraphChunkTooSmall::layer: alloc::string::String
 pub grit_lib::diagnostics::Warning::CoreBareWithWorktree
 pub grit_lib::diagnostics::Warning::DanglingSymref
 pub grit_lib::diagnostics::Warning::DanglingSymref::name: alloc::string::String
-pub grit_lib::diagnostics::Warning::GitmodulesBadConfig
-pub grit_lib::diagnostics::Warning::GitmodulesBadConfig::message: alloc::string::String
 pub grit_lib::diagnostics::Warning::HookNotRun
 pub grit_lib::diagnostics::Warning::HookNotRun::detail: alloc::string::String
 pub grit_lib::diagnostics::Warning::HookNotRun::hook_name: alloc::string::String
 pub grit_lib::diagnostics::Warning::IgnoredGitDir
 pub grit_lib::diagnostics::Warning::IgnoredGitDir::path: std::path::PathBuf
 pub grit_lib::diagnostics::Warning::IgnoredGitDir::reason: alloc::string::String
-pub grit_lib::diagnostics::Warning::IndexVersionConfigInvalid
-pub grit_lib::diagnostics::Warning::IndexVersionConfigInvalid::fallback: u32
-pub grit_lib::diagnostics::Warning::IndexVersionEnvInvalid
-pub grit_lib::diagnostics::Warning::IndexVersionEnvInvalid::fallback: u32
 pub grit_lib::diagnostics::Warning::MailmapUnreadable
 pub grit_lib::diagnostics::Warning::MailmapUnreadable::kind: grit_lib::objects::ObjectKind
 pub grit_lib::diagnostics::Warning::MailmapUnreadable::spec: alloc::string::String
@@ -3215,17 +3189,6 @@ pub grit_lib::diagnostics::Warning::ReflogDateBeforeOldestEntry::ref_display: al
 pub grit_lib::diagnostics::Warning::ReflogNotWritten
 pub grit_lib::diagnostics::Warning::ReflogNotWritten::detail: alloc::string::String
 pub grit_lib::diagnostics::Warning::ReflogNotWritten::refname: alloc::string::String
-pub grit_lib::diagnostics::Warning::SplitIndexDisabledWhileConfigEnabled
-pub grit_lib::diagnostics::Warning::SplitIndexEnabledWhileConfigDisabled
-pub grit_lib::diagnostics::Warning::SubmoduleConfigLooksLikeOption
-pub grit_lib::diagnostics::Warning::SubmoduleConfigLooksLikeOption::key: alloc::string::String
-pub grit_lib::diagnostics::Warning::SubmoduleConfigLooksLikeOption::value: alloc::string::String
-pub grit_lib::diagnostics::Warning::SubmoduleMultipleConfigs
-pub grit_lib::diagnostics::Warning::SubmoduleMultipleConfigs::commit: alloc::string::String
-pub grit_lib::diagnostics::Warning::SubmoduleMultipleConfigs::name: alloc::string::String
-pub grit_lib::diagnostics::Warning::SubmoduleMultipleConfigs::option: alloc::string::String
-pub grit_lib::diagnostics::Warning::SuspiciousSubmoduleName
-pub grit_lib::diagnostics::Warning::SuspiciousSubmoduleName::name: alloc::string::String
 pub grit_lib::diagnostics::Warning::WorktreeAccessFailed
 pub grit_lib::diagnostics::Warning::WorktreeAccessFailed::detail: alloc::string::String
 pub grit_lib::diagnostics::Warning::WorktreeAccessFailed::path: alloc::string::String
@@ -5918,13 +5881,9 @@ pub grit_lib::error::Error::BranchCheckedOutInWorktree::worktree_path: alloc::st
 pub grit_lib::error::Error::BranchListNamesDateSort
 pub grit_lib::error::Error::BranchNotFound
 pub grit_lib::error::Error::BranchNotFound::branch: alloc::string::String
-pub grit_lib::error::Error::BranchNotMerged
-pub grit_lib::error::Error::BranchNotMerged::branch: alloc::string::String
 pub grit_lib::error::Error::BundleMissingPrerequisites
 pub grit_lib::error::Error::CacheTreeCorrupt
 pub grit_lib::error::Error::Cancelled
-pub grit_lib::error::Error::CannotDeleteCurrentBranch
-pub grit_lib::error::Error::CannotDeleteCurrentBranch::branch: alloc::string::String
 pub grit_lib::error::Error::CheckoutRollbackIncomplete
 pub grit_lib::error::Error::CheckoutRollbackIncomplete::source: alloc::boxed::Box<grit_lib::error::Error>
 pub grit_lib::error::Error::CheckoutRollbackIncomplete::unrestored: alloc::vec::Vec<alloc::string::String>
@@ -5950,8 +5909,6 @@ pub grit_lib::error::Error::EmptyCommitMessage
 pub grit_lib::error::Error::FetchDeepenRelativeUnsupported
 pub grit_lib::error::Error::FetchIntoCheckedOutBranch
 pub grit_lib::error::Error::FetchIntoCheckedOutBranch::branch: alloc::string::String
-pub grit_lib::error::Error::FetchNonFastForward
-pub grit_lib::error::Error::FetchNonFastForward::local_ref: alloc::string::String
 pub grit_lib::error::Error::FetchRefspec(grit_lib::remote::fetch_request::FetchRefspecError)
 pub grit_lib::error::Error::FetchShallowUnsupported
 pub grit_lib::error::Error::FetchUnshallowNotShallow
@@ -6127,7 +6084,6 @@ pub grit_lib::error::Error::RemoteUnreadable::url: core::option::Option<alloc::s
 pub grit_lib::error::Error::RemoveBlocked
 pub grit_lib::error::Error::RemoveBlocked::paths: alloc::vec::Vec<grit_lib::porcelain::paths::BlockedRemoval>
 pub grit_lib::error::Error::RemovePathsRequired
-pub grit_lib::error::Error::ReplayAbortHeadMoved
 pub grit_lib::error::Error::ReplayContinueDirtyIndex
 pub grit_lib::error::Error::ReplayContinueUnmerged
 pub grit_lib::error::Error::ReplaySkipAlreadyCommitted
@@ -6164,8 +6120,6 @@ pub grit_lib::error::Error::StashSymlinkNotUtf8
 pub grit_lib::error::Error::StashWouldOverwriteLocalChanges
 pub grit_lib::error::Error::StashWouldOverwriteLocalChanges::paths: alloc::string::String
 pub grit_lib::error::Error::Tag(grit_lib::porcelain::tag::TagError)
-pub grit_lib::error::Error::TagNotFound
-pub grit_lib::error::Error::TagNotFound::tag: alloc::string::String
 pub grit_lib::error::Error::TagVerifyDuplicateTreeSha256Header
 pub grit_lib::error::Error::TagVerifyMissingObjectHeader
 pub grit_lib::error::Error::TagVerifyNotTag
@@ -6192,7 +6146,6 @@ pub grit_lib::error::Error::UnresolvedDeltas
 pub grit_lib::error::Error::UnresolvedDeltas::count: u64
 pub grit_lib::error::Error::UnsupportedObjectStore
 pub grit_lib::error::Error::UnsupportedObjectStore::operation: &'static str
-pub grit_lib::error::Error::UnsupportedRepositoryExtension(alloc::string::String)
 pub grit_lib::error::Error::UnsupportedRepositoryFormatVersion(u32)
 pub grit_lib::error::Error::Worktree(grit_lib::worktree::WorktreeError)
 pub grit_lib::error::Error::WorktreeFileChanged
@@ -17408,13 +17361,9 @@ pub grit_lib::prelude::Error::BranchCheckedOutInWorktree::worktree_path: alloc::
 pub grit_lib::prelude::Error::BranchListNamesDateSort
 pub grit_lib::prelude::Error::BranchNotFound
 pub grit_lib::prelude::Error::BranchNotFound::branch: alloc::string::String
-pub grit_lib::prelude::Error::BranchNotMerged
-pub grit_lib::prelude::Error::BranchNotMerged::branch: alloc::string::String
 pub grit_lib::prelude::Error::BundleMissingPrerequisites
 pub grit_lib::prelude::Error::CacheTreeCorrupt
 pub grit_lib::prelude::Error::Cancelled
-pub grit_lib::prelude::Error::CannotDeleteCurrentBranch
-pub grit_lib::prelude::Error::CannotDeleteCurrentBranch::branch: alloc::string::String
 pub grit_lib::prelude::Error::CheckoutRollbackIncomplete
 pub grit_lib::prelude::Error::CheckoutRollbackIncomplete::source: alloc::boxed::Box<grit_lib::error::Error>
 pub grit_lib::prelude::Error::CheckoutRollbackIncomplete::unrestored: alloc::vec::Vec<alloc::string::String>
@@ -17440,8 +17389,6 @@ pub grit_lib::prelude::Error::EmptyCommitMessage
 pub grit_lib::prelude::Error::FetchDeepenRelativeUnsupported
 pub grit_lib::prelude::Error::FetchIntoCheckedOutBranch
 pub grit_lib::prelude::Error::FetchIntoCheckedOutBranch::branch: alloc::string::String
-pub grit_lib::prelude::Error::FetchNonFastForward
-pub grit_lib::prelude::Error::FetchNonFastForward::local_ref: alloc::string::String
 pub grit_lib::prelude::Error::FetchRefspec(grit_lib::remote::fetch_request::FetchRefspecError)
 pub grit_lib::prelude::Error::FetchShallowUnsupported
 pub grit_lib::prelude::Error::FetchUnshallowNotShallow
@@ -17617,7 +17564,6 @@ pub grit_lib::prelude::Error::RemoteUnreadable::url: core::option::Option<alloc:
 pub grit_lib::prelude::Error::RemoveBlocked
 pub grit_lib::prelude::Error::RemoveBlocked::paths: alloc::vec::Vec<grit_lib::porcelain::paths::BlockedRemoval>
 pub grit_lib::prelude::Error::RemovePathsRequired
-pub grit_lib::prelude::Error::ReplayAbortHeadMoved
 pub grit_lib::prelude::Error::ReplayContinueDirtyIndex
 pub grit_lib::prelude::Error::ReplayContinueUnmerged
 pub grit_lib::prelude::Error::ReplaySkipAlreadyCommitted
@@ -17654,8 +17600,6 @@ pub grit_lib::prelude::Error::StashSymlinkNotUtf8
 pub grit_lib::prelude::Error::StashWouldOverwriteLocalChanges
 pub grit_lib::prelude::Error::StashWouldOverwriteLocalChanges::paths: alloc::string::String
 pub grit_lib::prelude::Error::Tag(grit_lib::porcelain::tag::TagError)
-pub grit_lib::prelude::Error::TagNotFound
-pub grit_lib::prelude::Error::TagNotFound::tag: alloc::string::String
 pub grit_lib::prelude::Error::TagVerifyDuplicateTreeSha256Header
 pub grit_lib::prelude::Error::TagVerifyMissingObjectHeader
 pub grit_lib::prelude::Error::TagVerifyNotTag
@@ -17682,7 +17626,6 @@ pub grit_lib::prelude::Error::UnresolvedDeltas
 pub grit_lib::prelude::Error::UnresolvedDeltas::count: u64
 pub grit_lib::prelude::Error::UnsupportedObjectStore
 pub grit_lib::prelude::Error::UnsupportedObjectStore::operation: &'static str
-pub grit_lib::prelude::Error::UnsupportedRepositoryExtension(alloc::string::String)
 pub grit_lib::prelude::Error::UnsupportedRepositoryFormatVersion(u32)
 pub grit_lib::prelude::Error::Worktree(grit_lib::worktree::WorktreeError)
 pub grit_lib::prelude::Error::WorktreeFileChanged
@@ -17932,41 +17875,15 @@ pub grit_lib::prelude::Warning::AmbiguousRefname::spec: alloc::string::String
 pub grit_lib::prelude::Warning::BadBooleanConfig
 pub grit_lib::prelude::Warning::BadBooleanConfig::key: alloc::string::String
 pub grit_lib::prelude::Warning::BadBooleanConfig::value: alloc::string::String
-pub grit_lib::prelude::Warning::CommitGraphBloomDisabled
-pub grit_lib::prelude::Warning::CommitGraphBloomDisabled::layer: alloc::string::String
-pub grit_lib::prelude::Warning::CommitGraphChangedPathChunkTooSmall
-pub grit_lib::prelude::Warning::CommitGraphChangedPathChunkTooSmall::actual: usize
-pub grit_lib::prelude::Warning::CommitGraphChangedPathChunkTooSmall::minimum: usize
-pub grit_lib::prelude::Warning::CommitGraphChangedPathIndexTooSmall
-pub grit_lib::prelude::Warning::CommitGraphChangedPathOffsetOutOfRange
-pub grit_lib::prelude::Warning::CommitGraphChangedPathOffsetOutOfRange::chunk_size: usize
-pub grit_lib::prelude::Warning::CommitGraphChangedPathOffsetOutOfRange::graph: alloc::string::String
-pub grit_lib::prelude::Warning::CommitGraphChangedPathOffsetOutOfRange::offset: usize
-pub grit_lib::prelude::Warning::CommitGraphChangedPathOffsetOutOfRange::position: usize
-pub grit_lib::prelude::Warning::CommitGraphChangedPathOffsetsDecreasing
-pub grit_lib::prelude::Warning::CommitGraphChangedPathOffsetsDecreasing::end: usize
-pub grit_lib::prelude::Warning::CommitGraphChangedPathOffsetsDecreasing::graph: alloc::string::String
-pub grit_lib::prelude::Warning::CommitGraphChangedPathOffsetsDecreasing::position_end: usize
-pub grit_lib::prelude::Warning::CommitGraphChangedPathOffsetsDecreasing::position_start: usize
-pub grit_lib::prelude::Warning::CommitGraphChangedPathOffsetsDecreasing::start: usize
-pub grit_lib::prelude::Warning::CommitGraphChunkTooSmall
-pub grit_lib::prelude::Warning::CommitGraphChunkTooSmall::chunk: alloc::string::String
-pub grit_lib::prelude::Warning::CommitGraphChunkTooSmall::layer: alloc::string::String
 pub grit_lib::prelude::Warning::CoreBareWithWorktree
 pub grit_lib::prelude::Warning::DanglingSymref
 pub grit_lib::prelude::Warning::DanglingSymref::name: alloc::string::String
-pub grit_lib::prelude::Warning::GitmodulesBadConfig
-pub grit_lib::prelude::Warning::GitmodulesBadConfig::message: alloc::string::String
 pub grit_lib::prelude::Warning::HookNotRun
 pub grit_lib::prelude::Warning::HookNotRun::detail: alloc::string::String
 pub grit_lib::prelude::Warning::HookNotRun::hook_name: alloc::string::String
 pub grit_lib::prelude::Warning::IgnoredGitDir
 pub grit_lib::prelude::Warning::IgnoredGitDir::path: std::path::PathBuf
 pub grit_lib::prelude::Warning::IgnoredGitDir::reason: alloc::string::String
-pub grit_lib::prelude::Warning::IndexVersionConfigInvalid
-pub grit_lib::prelude::Warning::IndexVersionConfigInvalid::fallback: u32
-pub grit_lib::prelude::Warning::IndexVersionEnvInvalid
-pub grit_lib::prelude::Warning::IndexVersionEnvInvalid::fallback: u32
 pub grit_lib::prelude::Warning::MailmapUnreadable
 pub grit_lib::prelude::Warning::MailmapUnreadable::kind: grit_lib::objects::ObjectKind
 pub grit_lib::prelude::Warning::MailmapUnreadable::spec: alloc::string::String
@@ -17992,17 +17909,6 @@ pub grit_lib::prelude::Warning::ReflogDateBeforeOldestEntry::ref_display: alloc:
 pub grit_lib::prelude::Warning::ReflogNotWritten
 pub grit_lib::prelude::Warning::ReflogNotWritten::detail: alloc::string::String
 pub grit_lib::prelude::Warning::ReflogNotWritten::refname: alloc::string::String
-pub grit_lib::prelude::Warning::SplitIndexDisabledWhileConfigEnabled
-pub grit_lib::prelude::Warning::SplitIndexEnabledWhileConfigDisabled
-pub grit_lib::prelude::Warning::SubmoduleConfigLooksLikeOption
-pub grit_lib::prelude::Warning::SubmoduleConfigLooksLikeOption::key: alloc::string::String
-pub grit_lib::prelude::Warning::SubmoduleConfigLooksLikeOption::value: alloc::string::String
-pub grit_lib::prelude::Warning::SubmoduleMultipleConfigs
-pub grit_lib::prelude::Warning::SubmoduleMultipleConfigs::commit: alloc::string::String
-pub grit_lib::prelude::Warning::SubmoduleMultipleConfigs::name: alloc::string::String
-pub grit_lib::prelude::Warning::SubmoduleMultipleConfigs::option: alloc::string::String
-pub grit_lib::prelude::Warning::SuspiciousSubmoduleName
-pub grit_lib::prelude::Warning::SuspiciousSubmoduleName::name: alloc::string::String
 pub grit_lib::prelude::Warning::WorktreeAccessFailed
 pub grit_lib::prelude::Warning::WorktreeAccessFailed::detail: alloc::string::String
 pub grit_lib::prelude::Warning::WorktreeAccessFailed::path: alloc::string::String

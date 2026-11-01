@@ -166,7 +166,7 @@ Each refusal is an `Error::Branch(BranchError::...)`: `NotFound` for a missing b
 
 The current-branch check reads `HEAD` through the repository's store, including injected stores, even when the on-disk `HEAD` differs. `DeleteMode::Force` skips only the merge-state check; both it and dry runs retain the checked-out safety checks and leave HEAD and refs unchanged on refusal. The CLI maps both checked-out variants to the JSON kind `branch_checked_out`.
 
-[`delete_tag`](rustdoc:grit_lib::porcelain::tag::delete_tag) returns the object the tag pointed at, or `TagNotFound`. Both deletes run on the repository's ref store (so an injected store is honoured), compare-and-swap against the commit they checked, and remove the ref's reflog.
+[`delete_tag`](rustdoc:grit_lib::porcelain::tag::delete_tag) returns the object the tag pointed at, or `Error::Tag(`[`TagError::NotFound`](rustdoc:grit_lib::porcelain::tag::TagError::NotFound)`)` when the tag does not exist. Both deletes run on the repository's ref store (so an injected store is honoured), compare-and-swap against the commit they checked, and remove the ref's reflog.
 
 ```rust
 use grit_lib::error::Error;
