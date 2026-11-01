@@ -754,7 +754,7 @@ pub enum AttrPathspecError {
 #[non_exhaustive]
 pub enum PathOutsideRepoError {
     /// A resolved path escapes the repository work tree or git directory.
-    #[error("{path}: '{subpath}' is outside repository at '{repo_root}'")]
+    #[error("'{subpath}' is outside repository at '{repo_root}'")]
     OutsideRepository {
         /// Repository-relative or filesystem path related to the failure.
         path: String,
@@ -1421,18 +1421,25 @@ pub enum Error {
     CommitPathsRequired,
 
     /// [`crate::porcelain::paths::move_path`] / [`crate::porcelain::paths::move_paths`] source is not tracked.
-    #[error("not under version control, source={src}")]
+    #[error("'{src}' is not under version control")]
     MoveSourceNotTracked {
         /// Untracked or missing source path.
         src: String,
     },
 
     /// Move refused because the destination already exists without `--force`.
-    #[error("destination exists, source={src}, destination={destination}")]
+    #[error("destination '{destination}' already exists")]
     MoveDestinationExists {
         /// Source path in the move request.
         src: String,
         /// Existing destination path.
+        destination: String,
+    },
+
+    /// Move refused because a trailing slash named a destination that is not a directory.
+    #[error("destination '{destination}' is not a directory")]
+    MoveDestinationNotDirectory {
+        /// Destination path (trailing slash already removed).
         destination: String,
     },
 
@@ -1446,7 +1453,7 @@ pub enum Error {
     },
 
     /// Move refused because source and destination are the same path.
-    #[error("cannot move into itself, source={src}, destination={destination}")]
+    #[error("cannot move '{src}' into itself")]
     MoveIntoSelf {
         /// Source path.
         src: String,
@@ -1455,21 +1462,21 @@ pub enum Error {
     },
 
     /// Move refused because the source has no index entries.
-    #[error("nothing to move, source={src}")]
+    #[error("nothing to move from '{src}'")]
     MoveNothingToMove {
         /// Source path with no index entries.
         src: String,
     },
 
     /// Multi-source move would write more than one source to the same destination path.
-    #[error("multiple sources for the same target, destination={destination}")]
+    #[error("multiple sources would move to '{destination}'")]
     MoveDuplicateDestination {
         /// Destination path that would receive more than one source.
         destination: String,
     },
 
     /// A worktree source path is missing or not a file, directory, or symlink.
-    #[error("bad source, source={src}, destination={destination}")]
+    #[error("cannot move '{src}' to '{destination}': bad source path")]
     MoveBadSource {
         /// Source path.
         src: String,
@@ -2138,6 +2145,7 @@ impl Error {
             Self::CommitPathsRequired => "commit_paths_required",
             Self::MoveSourceNotTracked { .. } => "move_source_not_tracked",
             Self::MoveDestinationExists { .. } => "move_destination_exists",
+            Self::MoveDestinationNotDirectory { .. } => "move_destination_not_directory",
             Self::MoveIntoSubdirectory { .. } => "move_into_subdirectory",
             Self::MoveIntoSelf { .. } => "move_into_self",
             Self::MoveNothingToMove { .. } => "move_nothing_to_move",

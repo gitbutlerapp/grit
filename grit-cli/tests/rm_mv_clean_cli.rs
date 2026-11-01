@@ -113,6 +113,64 @@ fn rm_ignore_unmatch_json() {
 }
 
 #[test]
+#[test]
+fn mv_trailing_slash_directory_destination() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+    std::fs::write(dir.path().join("report.txt"), b"r\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-q", "-m", "init"]);
+    let v = grit_json(dir.path(), &["mv", "report.txt", "docs/"]);
+    assert_eq!(v["moves"][0]["to"], "docs/report.txt");
+    assert!(dir.path().join("docs/report.txt").is_file());
+}
+
+fn grit_failure_json(dir: &std::path::Path, args: &[&str]) -> Value {
+    let mut full = vec!["--json"];
+    full.extend_from_slice(args);
+    let out = Command::new(env!("CARGO_BIN_EXE_grit"))
+        .current_dir(dir)
+        .args(&full)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("grit");
+    assert_eq!(out.status.code(), Some(1), "grit {full:?} should fail");
+    serde_json::from_slice(&out.stdout).expect("json")
+}
+
+#[test]
+fn mv_untracked_source_json_hint() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    git(dir.path(), &["commit", "-q", "--allow-empty", "-m", "init"]);
+    let stderr = grit_failure(dir.path(), &["mv", "nothere", "x"]);
+    assert!(stderr.contains("not under version control"), "{stderr}");
+    assert!(stderr.contains("hint:"), "{stderr}");
+    assert!(stderr.contains("grit add"), "{stderr}");
+    let v = grit_failure_json(dir.path(), &["mv", "nothere", "x"]);
+    assert!(v["error"]
+        .as_str()
+        .is_some_and(|s| s.contains("not under version control")));
+    assert!(v["hint"].as_str().is_some_and(|h| h.contains("grit add")));
+}
+
+#[test]
+fn mv_destination_exists_hint() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    std::fs::write(dir.path().join("a.txt"), b"a\n").unwrap();
+    std::fs::write(dir.path().join("b.txt"), b"b\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-q", "-m", "init"]);
+    let stderr = grit_failure(dir.path(), &["mv", "a.txt", "b.txt"]);
+    assert!(stderr.contains("already exists"), "{stderr}");
+    assert!(stderr.contains("hint:"), "{stderr}");
+    assert!(stderr.contains("--force"), "{stderr}");
+}
+
+#[test]
 fn mv_dry_run_json_moves_array() {
     let dir = tempfile::tempdir().expect("tempdir");
     git(dir.path(), &["init", "-q", "-b", "main"]);

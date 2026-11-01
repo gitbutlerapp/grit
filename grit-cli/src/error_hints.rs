@@ -227,6 +227,20 @@ fn guide_lib(err: &LibError) -> Option<Error> {
                 .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
         ),
         LibError::Branch(branch_err) => guide_branch(branch_err),
+        LibError::MoveDestinationExists { destination, .. } => Some(guided(
+            ErrorKind::BranchError,
+            err.to_string(),
+            Some(format!(
+                "remove or rename '{destination}' first, or run `grit mv --force` to replace it"
+            )),
+            Some(vec![destination.clone()]),
+        )),
+        LibError::MoveSourceNotTracked { src } => Some(guided(
+            ErrorKind::BranchError,
+            err.to_string(),
+            Some(format!("track '{src}' with `grit add` before moving it")),
+            Some(vec![src.clone()]),
+        )),
         _ => None,
     }
 }

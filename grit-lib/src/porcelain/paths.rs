@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 use crate::diff::{
     diff_index_to_tree, diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions, DiffStatus,
 };
-use crate::error::{Error, Result};
+use crate::error::{Error, PathOutsideRepoError, Result};
+use crate::git_path::CanonicalizeExt;
 use crate::index::{index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE};
 use crate::objects::ObjectId;
 use crate::path_icase::{paths_equal, worktree_filesystem_case_insensitive};
@@ -283,6 +284,7 @@ pub fn move_paths(repo: &Repository, opts: &MoveOptions) -> Result<MoveOutcome> 
         .unwrap_or(false);
 
     let mut index = repo.load_index()?;
+    let dst_had_trailing_slash = destination_had_trailing_separator(&opts.destination);
     let dst = normalize_and_validate_repo_relative(repo, work_tree, &opts.destination)?;
 
     let mut planned: Vec<SingleMovePlan> = Vec::new();
@@ -296,6 +298,7 @@ pub fn move_paths(repo: &Repository, opts: &MoveOptions) -> Result<MoveOutcome> 
             index: &simulated,
             src: &src,
             dst: &dst,
+            dst_had_trailing_slash,
             multi_source: opts.sources.len() > 1,
             force: opts.force,
             ignorecase,
@@ -506,6 +509,7 @@ struct PlanSingleMoveParams<'a> {
     index: &'a Index,
     src: &'a str,
     dst: &'a str,
+    dst_had_trailing_slash: bool,
     multi_source: bool,
     force: bool,
     ignorecase: bool,
@@ -518,6 +522,7 @@ fn plan_single_move(params: PlanSingleMoveParams<'_>) -> Result<SingleMovePlan> 
         index,
         src,
         dst,
+        dst_had_trailing_slash,
         multi_source,
         force,
         ignorecase,
@@ -529,8 +534,15 @@ fn plan_single_move(params: PlanSingleMoveParams<'_>) -> Result<SingleMovePlan> 
         });
     }
 
-    let (final_dst, dst_is_dir_target) =
-        resolve_move_destination(work_tree, index, src, dst, ignorecase)?;
+    let (final_dst, dst_is_dir_target) = resolve_move_destination(
+        work_tree,
+        index,
+        src,
+        dst,
+        dst_had_trailing_slash,
+        !multi_source,
+        ignorecase,
+    )?;
     let final_dst = normalize_and_validate_repo_relative(repo, work_tree, &final_dst)?;
 
     if multi_source && !dst_is_dir_target {
@@ -950,9 +962,36 @@ fn restore_worktree_backups(work_tree: &Path, backups: &[WorktreePathBackup]) ->
 /// # Errors
 ///
 /// Returns [`Error::InvalidPath`] when `path` is empty, absolute, or contains `..`.
+fn destination_had_trailing_separator(path: &str) -> bool {
+    let trimmed = path.trim_end_matches([' ', '\t']);
+    trimmed.ends_with('/') || trimmed.ends_with('\\')
+}
+
+fn normalize_repo_relative_slashes(raw: &str) -> String {
+    let with_slashes = raw.replace('\\', "/");
+    let trimmed = with_slashes.trim_start_matches("./");
+    trimmed
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn path_outside_work_tree(path: &str, work_tree: &Path) -> Error {
+    let repo_root = work_tree
+        .canonicalize_simplified()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| work_tree.display().to_string());
+    Error::PathOutsideRepo(PathOutsideRepoError::OutsideRepository {
+        path: path.to_owned(),
+        subpath: path.to_owned(),
+        repo_root,
+    })
+}
+
 fn normalize_and_validate_repo_relative(
     repo: &Repository,
-    _work_tree: &Path,
+    work_tree: &Path,
     path: &str,
 ) -> Result<String> {
     if path.is_empty() {
@@ -965,18 +1004,14 @@ fn normalize_and_validate_repo_relative(
     }
     let with_slashes = path.replace('\\', "/");
     if with_slashes.starts_with('/') {
-        return Err(Error::InvalidPath(format!(
-            "'{path}' is outside repository"
-        )));
+        return Err(path_outside_work_tree(path, work_tree));
     }
     for component in Path::new(&with_slashes).components() {
         if matches!(component, Component::ParentDir) {
-            return Err(Error::InvalidPath(format!(
-                "'{path}' is outside repository"
-            )));
+            return Err(path_outside_work_tree(path, work_tree));
         }
     }
-    let rel = with_slashes.trim_start_matches("./");
+    let rel = normalize_repo_relative_slashes(path);
     if rel.is_empty() {
         return Err(Error::InvalidPath("empty path".into()));
     }
@@ -987,8 +1022,8 @@ fn normalize_and_validate_repo_relative(
         opts,
         PathValidationKind::Worktree,
     )
-    .map_err(|reason| Error::invalid_path_component(rel, reason))?;
-    Ok(rel.to_string())
+    .map_err(|reason| Error::invalid_path_component(rel.clone(), reason))?;
+    Ok(rel)
 }
 
 fn index_paths_under(index: &Index, prefix: &str, include_exact: bool) -> Vec<String> {
@@ -1018,6 +1053,8 @@ fn resolve_move_destination(
     index: &Index,
     src: &str,
     dst: &str,
+    dst_had_trailing_slash: bool,
+    single_source: bool,
     _ignorecase: bool,
 ) -> Result<(String, bool)> {
     let src_is_dir = worktree_dentry_is_directory(work_tree, src)
@@ -1039,6 +1076,15 @@ fn resolve_move_destination(
             || index
                 .get(dst.as_bytes(), 0)
                 .is_some_and(|e| e.mode == MODE_TREE));
+
+    if dst_had_trailing_slash && !dst_is_dir {
+        if single_source && src_is_dir {
+            return Ok((dst.to_string(), false));
+        }
+        return Err(Error::MoveDestinationNotDirectory {
+            destination: dst.to_owned(),
+        });
+    }
 
     Ok(resolve_move_destination_path(
         src,
@@ -1504,7 +1550,7 @@ mod path_validation_tests {
         let (_dir, repo) = test_repo();
         let wt = repo.work_tree().expect("worktree");
         let err = normalize_and_validate_repo_relative(&repo, wt, "dir/../source").expect_err("..");
-        assert!(matches!(err, Error::InvalidPath(_)));
+        assert!(matches!(err, Error::PathOutsideRepo(_)));
     }
 
     #[test]
@@ -1515,6 +1561,19 @@ mod path_validation_tests {
             normalize_and_validate_repo_relative(&repo, wt, "./nested/file.txt").expect("ok"),
             "nested/file.txt"
         );
+    }
+
+    #[test]
+    fn strips_trailing_directory_separators_before_validation() {
+        let (_dir, repo) = test_repo();
+        let wt = repo.work_tree().expect("worktree");
+        for path in ["dir/", "dir//", "./dir/"] {
+            assert_eq!(
+                normalize_and_validate_repo_relative(&repo, wt, path).expect("ok"),
+                "dir",
+                "path {path}"
+            );
+        }
     }
 }
 
@@ -1952,5 +2011,69 @@ mod index_lock_transaction_tests {
         assert!(matches!(err, crate::error::Error::Io(_)));
         assert!(root.join("a.txt").is_file());
         assert!(!root.join("b.txt").exists());
+    }
+}
+
+#[cfg(test)]
+mod trailing_slash_move_tests {
+    use std::fs;
+
+    use crate::error::Error;
+    use crate::porcelain::add::{stage, StageOptions};
+    use crate::progress::NullProgress;
+    use crate::repo::{init_repository, Repository};
+
+    use super::move_path;
+
+    fn init_repo(root: &std::path::Path) -> Repository {
+        init_repository(root, false, "main", None, Default::default()).expect("init")
+    }
+
+    fn stage_all(repo: &Repository) {
+        stage(
+            repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("stage");
+    }
+
+    #[test]
+    fn move_file_into_existing_directory_with_trailing_slash() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::create_dir_all(root.join("dir")).unwrap();
+        fs::write(root.join("c"), b"c\n").unwrap();
+        stage_all(&repo);
+        move_path(&repo, "c", "dir/", false).expect("mv");
+        assert!(root.join("dir/c").is_file());
+        assert!(!root.join("c").exists());
+    }
+
+    #[test]
+    fn move_file_to_missing_directory_with_trailing_slash_refused() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("c"), b"c\n").unwrap();
+        stage_all(&repo);
+        let err = move_path(&repo, "c", "missing/", false).expect_err("mv");
+        assert!(matches!(err, Error::MoveDestinationNotDirectory { .. }));
+        assert!(root.join("c").is_file());
+    }
+
+    #[test]
+    fn move_directory_to_missing_directory_with_trailing_slash_renames() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::create_dir_all(root.join("src/nested")).unwrap();
+        fs::write(root.join("src/nested/file"), b"x\n").unwrap();
+        stage_all(&repo);
+        move_path(&repo, "src", "dest/", false).expect("mv");
+        assert!(root.join("dest/nested/file").is_file());
+        assert!(!root.join("src").exists());
     }
 }
