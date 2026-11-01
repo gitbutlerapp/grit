@@ -28798,11 +28798,11 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::queries::RevWalkParsedSpec
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::queries::RevWalkParsedSpecs
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::queries::RevWalkParsedSpecs
 pub fn grit_lib::revwalk::queries::committer_cutoff_from_date(&str, i64) -> core::result::Result<i64, grit_lib::config::git_date::parse::DateParseError>
-pub fn grit_lib::revwalk::queries::validate_follow_pathspecs(&[alloc::string::String]) -> grit_lib::error::Result<()>
 pub fn grit_lib::revwalk::queries::parse_rev_walk_tokens(&grit_lib::repo::Repository, &[&str]) -> grit_lib::error::Result<grit_lib::revwalk::queries::RevWalkParsedSpecs>
 pub fn grit_lib::revwalk::queries::resolve_log_walk_tips_and_hide(&grit_lib::repo::Repository, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::objects::ObjectId>, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
 pub fn grit_lib::revwalk::queries::rev_list_commits_for_author_group(&grit_lib::repo::Repository, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::queries::rev_walk_list_supports_stream(&grit_lib::revwalk::queries::RevWalkListOptions) -> bool
+pub fn grit_lib::revwalk::queries::validate_follow_pathspecs(&[alloc::string::String]) -> grit_lib::error::Result<()>
 pub type grit_lib::revwalk::queries::RevWalkCommitStream<'repo> = grit_lib::revwalk::rev_list::CommitStream<'repo>
 pub type grit_lib::revwalk::queries::RevWalkCommitStreamItem = grit_lib::revwalk::rev_list::CommitStreamItem
 pub mod grit_lib::revwalk::rev_list
@@ -29782,6 +29782,8 @@ pub struct grit_lib::revwalk::RevWalkListOptions
 pub grit_lib::revwalk::RevWalkListOptions::cherry_mark: bool
 pub grit_lib::revwalk::RevWalkListOptions::commit_filter: core::option::Option<alloc::rcs::arc::Arc<grit_lib::revwalk::filter::CommitFilter>>
 pub grit_lib::revwalk::RevWalkListOptions::first_parent: bool
+pub grit_lib::revwalk::RevWalkListOptions::follow: bool
+pub grit_lib::revwalk::RevWalkListOptions::full_history: bool
 pub grit_lib::revwalk::RevWalkListOptions::graph: bool
 pub grit_lib::revwalk::RevWalkListOptions::left_right: bool
 pub grit_lib::revwalk::RevWalkListOptions::limit: core::option::Option<usize>
