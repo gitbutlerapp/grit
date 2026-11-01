@@ -3767,25 +3767,37 @@ fn tag_refs_with_local_targets(
         pending.push((tag_oid, peeled));
     }
 
+    if pending.is_empty() {
+        return Ok(ok);
+    }
+
+    let mut probe_ids = Vec::new();
+    for (tag_oid, peeled) in &pending {
+        if !copied.contains(peeled) {
+            probe_ids.push(*peeled);
+        }
+        if *tag_oid != *peeled && !copied.contains(tag_oid) {
+            probe_ids.push(*tag_oid);
+        }
+    }
+    probe_ids.sort_unstable();
+    probe_ids.dedup();
+    let missing: HashSet<ObjectId> = if probe_ids.is_empty() {
+        HashSet::new()
+    } else {
+        local_odb
+            .missing_materialized_many(&probe_ids)?
+            .into_iter()
+            .collect()
+    };
     for (tag_oid, peeled) in pending {
-        let peeled_ok =
-            copied.contains(&peeled) || tag_target_materialized_local(local_odb, peeled)?;
-        let tag_ok = tag_oid == peeled
-            || copied.contains(&tag_oid)
-            || tag_target_materialized_local(local_odb, tag_oid)?;
+        let peeled_ok = copied.contains(&peeled) || !missing.contains(&peeled);
+        let tag_ok = tag_oid == peeled || copied.contains(&tag_oid) || !missing.contains(&tag_oid);
         if peeled_ok && tag_ok {
             ok.insert(tag_oid);
         }
     }
     Ok(ok)
-}
-
-/// Whether `oid` is stored in the local primary without a scalar [`Odb::contains`] probe.
-fn tag_target_materialized_local(local_odb: &Odb, oid: ObjectId) -> Result<bool> {
-    if local_odb.uses_files_primary() {
-        return Ok(local_odb.exists_materialized_local_without_rescan(&oid));
-    }
-    Ok(local_odb.read_info_without_fetch(&oid).is_ok())
 }
 
 /// Message on [`PushRefStatus::RejectAlreadyExists`] when an existing remote tag

@@ -24,6 +24,7 @@ struct CountingStore {
     inner: MemoryStore,
     contains: AtomicUsize,
     contains_many: AtomicUsize,
+    read_info: AtomicUsize,
     writes: AtomicUsize,
     fail_contains_many: bool,
 }
@@ -34,6 +35,7 @@ impl CountingStore {
             inner: MemoryStore::new(HashAlgo::Sha1),
             contains: AtomicUsize::new(0),
             contains_many: AtomicUsize::new(0),
+            read_info: AtomicUsize::new(0),
             writes: AtomicUsize::new(0),
             fail_contains_many: false,
         })
@@ -44,6 +46,7 @@ impl CountingStore {
             inner: MemoryStore::new(HashAlgo::Sha1),
             contains: AtomicUsize::new(0),
             contains_many: AtomicUsize::new(0),
+            read_info: AtomicUsize::new(0),
             writes: AtomicUsize::new(0),
             fail_contains_many: true,
         })
@@ -71,6 +74,7 @@ impl ObjectStore for CountingStore {
     }
 
     fn read_info(&self, oid: &ObjectId) -> grit_lib::error::Result<Option<ObjectInfo>> {
+        self.read_info.fetch_add(1, Ordering::Relaxed);
         self.inner.read_info(oid)
     }
 
@@ -118,6 +122,18 @@ impl WritableObjectStore for CountingStore {
     }
 }
 
+fn git_upstream_no_tags() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init", "-q", "-b", "main", "."]);
+    fs::write(dir.path().join("a.txt"), "one\n").expect("write");
+    git(dir.path(), &["add", "a.txt"]);
+    git(dir.path(), &["commit", "-q", "-m", "c1"]);
+    fs::write(dir.path().join("b.txt"), "two\n").expect("write");
+    git(dir.path(), &["add", "b.txt"]);
+    git(dir.path(), &["commit", "-q", "-m", "c2"]);
+    dir
+}
+
 fn git_upstream() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
     git(dir.path(), &["init", "-q", "-b", "main", "."]);
@@ -157,13 +173,53 @@ fn memory_repo(store: Arc<CountingStore>) -> (tempfile::TempDir, Repository) {
     (dir, repo)
 }
 
-fn fetch_all() -> FetchOptions {
+fn fetch_heads_only() -> FetchOptions {
     let mut opts = FetchOptions::default();
-    opts.refspecs = vec![
-        "+refs/heads/*:refs/remotes/origin/*".into(),
-        "+refs/tags/*:refs/tags/*".into(),
-    ];
+    opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
     opts
+}
+
+fn fetch_all() -> FetchOptions {
+    let mut opts = fetch_heads_only();
+    opts.refspecs.push("+refs/tags/*:refs/tags/*".into());
+    opts
+}
+
+fn incremental_second_fetch_read_info(upstream: &tempfile::TempDir, with_tags: bool) -> usize {
+    let store = CountingStore::new();
+    let (_dir, repo) = memory_repo(store.clone());
+    let remote = Remote::from_url(upstream.path().to_str().expect("utf8")).expect("remote");
+    let opts = if with_tags {
+        fetch_all()
+    } else {
+        fetch_heads_only()
+    };
+    repo.remotes()
+        .fetch(&remote, opts.clone(), &mut NoProgress, &NeverCancel, None)
+        .expect("first fetch");
+    let read_info_after_first = store.read_info.load(Ordering::Relaxed);
+    fs::write(upstream.path().join("c.txt"), "three\n").expect("write");
+    git(upstream.path(), &["add", "c.txt"]);
+    git(upstream.path(), &["commit", "-q", "-m", "c3"]);
+    repo.remotes()
+        .fetch(&remote, opts, &mut NoProgress, &NeverCancel, None)
+        .expect("second fetch");
+    store.read_info.load(Ordering::Relaxed) - read_info_after_first
+}
+
+fn fresh_fetch_read_info(upstream: &tempfile::TempDir, with_tags: bool) -> usize {
+    let store = CountingStore::new();
+    let (_dir, repo) = memory_repo(store.clone());
+    let remote = Remote::from_url(upstream.path().to_str().expect("utf8")).expect("remote");
+    let opts = if with_tags {
+        fetch_all()
+    } else {
+        fetch_heads_only()
+    };
+    repo.remotes()
+        .fetch(&remote, opts, &mut NoProgress, &NeverCancel, None)
+        .expect("fetch");
+    store.read_info.load(Ordering::Relaxed)
 }
 
 #[test]
@@ -227,8 +283,8 @@ fn incremental_local_fetch_uses_one_contains_many_batch() {
     let contains_many_second_delta =
         store.contains_many.load(Ordering::Relaxed) - contains_many_before_second;
     assert_eq!(
-        contains_many_second_delta, 2,
-        "incremental fetch: one missing_oids batch plus one send-set missing_materialized_many"
+        contains_many_second_delta, 3,
+        "incremental fetch: missing_oids, send-set missing_materialized_many, and one tag batch"
     );
     let new_writes = store.writes.load(Ordering::Relaxed) - writes_after_first;
     let new_objects = store.count_objects() - objects_after_first;
@@ -240,6 +296,27 @@ fn incremental_local_fetch_uses_one_contains_many_batch() {
     assert!(
         new_writes < objects_after_first,
         "incremental fetch must not rewrite the whole history"
+    );
+}
+
+#[test]
+fn tag_validation_does_not_add_scalar_read_info_beyond_no_tag_fetch() {
+    let tagged = git_upstream();
+    let plain = git_upstream_no_tags();
+    assert_eq!(
+        incremental_second_fetch_read_info(&tagged, true),
+        incremental_second_fetch_read_info(&plain, false),
+        "incremental fetch: tag validation must not add read_info beyond the no-tag path"
+    );
+}
+
+#[test]
+fn fresh_tagged_fetch_does_not_add_read_info_beyond_heads_only_on_same_upstream() {
+    let upstream = git_upstream();
+    assert_eq!(
+        fresh_fetch_read_info(&upstream, true),
+        fresh_fetch_read_info(&upstream, false),
+        "same upstream: explicit tag refspec must not add read_info beyond heads-only fetch"
     );
 }
 
