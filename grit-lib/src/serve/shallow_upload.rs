@@ -5,9 +5,8 @@ use std::collections::{HashMap, HashSet};
 use crate::objects::{ObjectId, ObjectKind};
 use crate::repo::Repository;
 use crate::rev_list::{
-    shallow_boundary_oids, shallow_grafts_for_upload_pack_deepen,
-    shallow_grafts_for_upload_pack_rev_list, shallow_grafts_for_upload_pack_target_depth,
-    shallow_grafts_for_upload_pack_target_depth_with_policy,
+    shallow_boundary_oids, upload_pack_shallow_depth_state, upload_pack_shallow_rev_list_state,
+    UploadPackDepthShallowState,
 };
 use crate::shallow::INFINITE_DEPTH;
 
@@ -74,7 +73,8 @@ pub(crate) fn compute_shallow_response(
         return Ok(out);
     }
 
-    let mut new_shallow = Vec::new();
+    let deepening = req.depth.is_some() || req.deepen_since.is_some() || !req.deepen_not.is_empty();
+    let mut depth_state = UploadPackDepthShallowState::default();
     if let Some(depth) = req.depth.filter(|d| *d > 0 && *d != INFINITE_DEPTH) {
         let depth = usize::try_from(depth).unwrap_or(usize::MAX);
         let depth = if req.deepen_relative {
@@ -85,61 +85,33 @@ pub(crate) fn compute_shallow_response(
         } else {
             depth
         };
-        // Relative vs absolute deepen stay split so `FetchDepth::Deepen` and `FetchDepth::Depth`
-        // can diverge without another call-site audit.
-        if req.deepen_relative {
-            new_shallow = shallow_grafts_for_upload_pack_target_depth(
-                repo,
-                wants,
-                &req.client_shallow,
-                depth,
-            );
-        } else {
-            new_shallow =
-                shallow_grafts_for_upload_pack_deepen(repo, wants, &req.client_shallow, depth);
+        let tips = crate::rev_list::peel_to_commit_tips(repo, wants);
+        depth_state = upload_pack_shallow_depth_state(repo, &tips, depth, &server_shallow);
+        for oid in &depth_state.border_commits {
+            if !client_set.contains(oid) {
+                out.shallow.push(*oid);
+            }
         }
     } else if req.deepen_since.is_some() || !req.deepen_not.is_empty() {
-        new_shallow = shallow_grafts_for_upload_pack_rev_list(
-            repo,
-            wants,
-            &req.client_shallow,
-            req.deepen_since,
-            &req.deepen_not,
-        )?;
+        depth_state =
+            upload_pack_shallow_rev_list_state(repo, wants, req.deepen_since, &req.deepen_not)?;
+        for oid in &depth_state.border_commits {
+            if !client_set.contains(oid) {
+                out.shallow.push(*oid);
+            }
+        }
     } else if !server_shallow.is_empty() {
-        new_shallow = crate::rev_list::shallow_borders_reachable_from_wants(repo, wants);
-    }
-
-    for oid in &new_shallow {
-        if !client_set.contains(oid) {
-            out.shallow.push(*oid);
+        let new_shallow = crate::rev_list::shallow_borders_reachable_from_wants(repo, wants);
+        for oid in &new_shallow {
+            if !client_set.contains(oid) {
+                out.shallow.push(*oid);
+            }
         }
     }
 
-    let deepening = req.depth.is_some() || req.deepen_since.is_some() || !req.deepen_not.is_empty();
-    let new_shallow_set: HashSet<ObjectId> = if deepening && !req.deepen_relative {
-        if let Some(depth) = req.depth.filter(|d| *d > 0 && *d != INFINITE_DEPTH) {
-            let depth = usize::try_from(depth).unwrap_or(usize::MAX);
-            shallow_grafts_for_upload_pack_target_depth_with_policy(
-                repo,
-                wants,
-                &req.client_shallow,
-                depth,
-                false,
-            )
-            .into_iter()
-            .collect()
-        } else {
-            out.shallow.iter().copied().collect()
-        }
-    } else if deepening {
-        out.shallow.iter().copied().collect()
-    } else {
-        HashSet::new()
-    };
     if deepening {
         for oid in &req.client_shallow {
-            if new_shallow_set.contains(oid) {
+            if !depth_state.interior_commits.contains(oid) {
                 continue;
             }
             if parents_in_repo(repo, *oid)? {
