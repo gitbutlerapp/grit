@@ -8549,6 +8549,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
 }
 
 /// Like [`diff_tree_to_worktree_with_git_dir_and_rules`], with worktree access policy for the slow path.
+#[allow(clippy::too_many_arguments)]
 pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
     odb: &Odb,
     tree_oid: Option<&ObjectId>,
