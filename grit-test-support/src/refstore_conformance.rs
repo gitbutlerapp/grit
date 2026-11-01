@@ -724,7 +724,17 @@ pub fn direct_update_reflog_oids(store: Arc<dyn RefStore>) {
 
 /// A delete with a reflog update still removes the ref's reflog (matching Git).
 pub fn delete_with_reflog_oids(store: Arc<dyn RefStore>) {
-    seed_direct(store.as_ref(), "refs/heads/del", oid(5));
+    let mut seed = update(
+        "refs/heads/del",
+        Some(RawRef::Direct(oid(5))),
+        Expected::Missing,
+    );
+    seed.reflog = Some(sample_log());
+    commit_txn(
+        store.as_ref(),
+        RefTransaction::new().update(seed).expect("seed"),
+    );
+    assert!(store.reflog_exists("refs/heads/del").expect("seed log"));
 
     let mut upd = update("refs/heads/del", None, Expected::Any);
     upd.reflog = Some(sample_log());

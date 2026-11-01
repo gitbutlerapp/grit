@@ -477,7 +477,7 @@ fn build_reftable_updates_for_stack(
                 clear_reflog.insert(name, true);
             }
         }
-        if update.reflog.is_some() {
+        if update.reflog.is_some() && !ref_delete {
             for name in logical_reflog_names_touched(git_dir, &trial, update) {
                 clear_reflog.insert(name, false);
             }
