@@ -33,6 +33,9 @@ use crate::ident::{
     prepare_commit_identity_line, replace_identity_date_suffix, Signature,
 };
 use crate::index::{Index, IndexLock, MODE_GITLINK};
+use crate::notes::{
+    apply_prepared_notes_rewrite, prepare_notes_for_rewrite, NotesRewriteCommand, NotesRewritePlan,
+};
 use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, serialize_commit, CommitData, FileMode, ObjectId, ObjectKind};
 use crate::pathspec::{matches_pathspec_list_with_context, pathspec_is_exclude, ResolvedPathspecs};
@@ -1776,6 +1779,13 @@ fn create_commit_with_index(
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
     repo.odb().flush()?;
 
+    let amend_notes_rewrite: Option<NotesRewritePlan> =
+        if let Some(old_tip) = replaced_tip.filter(|_| req.amend && req.post_rewrite.enabled()) {
+            prepare_notes_for_rewrite(repo, NotesRewriteCommand::Amend, &[(old_tip, oid)])?
+        } else {
+            None
+        };
+
     let concluding_replay = read_cherry_pick_head(repo.git_dir())?.is_some()
         || read_revert_head(repo.git_dir())?.is_some();
     let previous_tip = replaced_tip.or(parent);
@@ -1913,6 +1923,9 @@ fn create_commit_with_index(
         hooks_run.push(HookName::PostCommit);
     }
     if let Some(old_tip) = replaced_tip.filter(|_| req.post_rewrite.enabled()) {
+        if let Some(notes_plan) = amend_notes_rewrite.as_ref() {
+            apply_prepared_notes_rewrite(repo, notes_plan, &[(old_tip, oid)])?;
+        }
         if run_post_rewrite(repo, RewriteKind::Amend, &[(old_tip, oid)]) {
             hooks_run.push(HookName::PostRewrite);
         }

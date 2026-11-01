@@ -10,6 +10,9 @@ use crate::diff::{mode_from_metadata, DiffEntry, DiffStatus};
 use crate::hooks::{run_post_checkout, run_post_rewrite, HookName, RewriteKind};
 use crate::index::MODE_REGULAR;
 use crate::lockfile::LockWait;
+use crate::notes::{
+    apply_prepared_notes_rewrite, prepare_notes_for_rewrite, NotesRewriteCommand, NotesRewritePlan,
+};
 use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
 use crate::porcelain::checkout::{
@@ -67,6 +70,7 @@ fn complete_applied_rewrite(
     index_snapshot: Option<&IndexSnapshot>,
     worktree_snapshot: Option<&HashMap<String, WorktreePathSnapshot>>,
     work: Option<&UndoWork>,
+    notes_rewrite: Option<&NotesRewritePlan>,
 ) -> Result<AppliedRewrite, HistoryError> {
     if let Err(record_err) = maybe_record_history_last(repo, opts, plan, work) {
         if opts.record_operation.is_some() {
@@ -83,6 +87,10 @@ fn complete_applied_rewrite(
             }
         }
         return Err(record_err);
+    }
+    if let Some(notes_plan) = notes_rewrite {
+        apply_prepared_notes_rewrite(repo, notes_plan, &plan.rewritten_pairs())
+            .map_err(HistoryError::from)?;
     }
     let hooks_run = if opts.hooks.enabled() {
         run_rewrite_hooks(repo, plan)
@@ -1157,6 +1165,11 @@ where
         )?;
     }
 
+    let rewritten_pairs = plan.rewritten_pairs();
+    let notes_rewrite =
+        prepare_notes_for_rewrite(repo, NotesRewriteCommand::Rebase, &rewritten_pairs)
+            .map_err(HistoryError::from)?;
+
     if !plan.ref_updates.is_empty() {
         commit_planned_ref_updates(repo, &plan.ref_updates, opts)?;
     }
@@ -1207,6 +1220,7 @@ where
         index_snapshot.as_ref(),
         worktree_snapshot.as_ref(),
         work.as_ref(),
+        notes_rewrite.as_ref(),
     );
     if applied.is_ok() {
         let _ = rewrite_journal::clear_rewrite_apply_journal(repo);
@@ -2072,6 +2086,153 @@ mod inject_and_apply_tests {
         ) -> crate::error::Result<()> {
             self.inner.for_each_reflog_ref(f)
         }
+    }
+
+    fn git_config(dir: &std::path::Path, args: &[&str]) {
+        use std::process::Command;
+        assert!(
+            Command::new("git")
+                .current_dir(dir)
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .expect("git")
+                .success(),
+            "git config {:?}",
+            args
+        );
+    }
+
+    #[test]
+    fn apply_rewrite_invalid_notes_rewrite_mode_leaves_branch_tip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
+            .expect("init");
+        let blob = repo.odb().write(ObjectKind::Blob, b"file\n").expect("blob");
+        let mut index = crate::index::Index::new();
+        index.hash_algo = repo.odb().hash_algo();
+        index.add_or_replace(crate::index::IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: crate::index::MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 5,
+            oid: blob,
+            flags: 8,
+            flags_extended: None,
+            path: b"file.txt".to_vec(),
+            base_index_pos: 0,
+        });
+        let tree =
+            crate::index::write_tree::write_tree_from_index(repo.odb(), &index, "").expect("tree");
+        repo.write_index(&mut index).expect("write index");
+        fs::write(dir.path().join("file.txt"), "file\n").expect("write");
+        let commit = crate::objects::serialize_commit(&crate::objects::CommitData {
+            tree,
+            parents: vec![],
+            author: "T <t@t> 0 +0000".into(),
+            committer: "T <t@t> 0 +0000".into(),
+            author_raw: vec![],
+            committer_raw: vec![],
+            encoding: None,
+            message: "root\n".into(),
+            raw_message: None,
+            extra_headers: vec![],
+        });
+        let root = repo
+            .odb()
+            .write(ObjectKind::Commit, &commit)
+            .expect("commit");
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &root).expect("ref");
+        crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("head");
+
+        let child_tree = crate::index::write_tree::write_tree_from_index(
+            repo.odb(),
+            &{
+                let mut idx = index.clone();
+                let blob2 = repo.odb().write(ObjectKind::Blob, b"two\n").expect("blob");
+                idx.add_or_replace(crate::index::IndexEntry {
+                    ctime_sec: 0,
+                    ctime_nsec: 0,
+                    mtime_sec: 0,
+                    mtime_nsec: 0,
+                    dev: 0,
+                    ino: 0,
+                    mode: crate::index::MODE_REGULAR,
+                    uid: 0,
+                    gid: 0,
+                    size: 4,
+                    oid: blob2,
+                    flags: 8,
+                    flags_extended: None,
+                    path: b"two.txt".to_vec(),
+                    base_index_pos: 0,
+                });
+                idx
+            },
+            "",
+        )
+        .expect("child tree");
+        git_config(
+            dir.path(),
+            &["config", "notes.rewriteRef", "refs/notes/commits"],
+        );
+        git_config(dir.path(), &["config", "notes.rewriteMode", "invalid-mode"]);
+        let mut edits = HistoryEdits::new();
+        edits.insert(
+            root,
+            CommitEdit::Rewrite {
+                tree: Some(child_tree),
+                message: Some("rewritten\n".into()),
+                author: None,
+                parents: None,
+            },
+        );
+        let plan = plan_rewrite(
+            &repo,
+            &edits,
+            &RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: "T <t@t> 1 +0000".parse().expect("signature"),
+                preserve_committer: false,
+                sign: false,
+            },
+        )
+        .expect("plan");
+
+        let err = apply_rewrite(
+            &repo,
+            &plan,
+            &ApplyOptions {
+                identity: "T <t@t> 1 +0000".parse().expect("identity"),
+                reflog_message: "rewrite".into(),
+                record_operation: None,
+                hooks: crate::hooks::PostOperationHooks::Skip,
+            },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect_err("invalid notes rewrite mode");
+        assert!(
+            matches!(
+                &err,
+                HistoryError::Library(e)
+                    if matches!(e.as_ref(), crate::error::Error::NotesRewriteMode(_))
+            ),
+            "unexpected error: {err:?}"
+        );
+        assert_eq!(
+            crate::refs::resolve_ref(repo.git_dir(), "refs/heads/main").expect("main"),
+            root,
+            "branch tip must stay put when notes rewrite config is invalid"
+        );
     }
 
     #[test]
