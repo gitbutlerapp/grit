@@ -1835,6 +1835,9 @@ mod sparse_checkout_checkout;
 #[cfg(feature = "full-tests")]
 #[path = "sparse_checkout_git_compat.rs"]
 mod sparse_checkout_git_compat;
+
+#[path = "skip_worktree_porcelain_2466.rs"]
+mod skip_worktree_porcelain_2466;
 #[cfg(feature = "full-tests")]
 #[path = "sparse_index_collapse_git_compat.rs"]
 mod sparse_index_collapse_git_compat;

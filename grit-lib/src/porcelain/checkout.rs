@@ -13,7 +13,7 @@
 //! and make no presentation decisions — no colour, pager, tty, or stdout.
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -986,6 +986,12 @@ fn checkout_hard_to_tree_journaled(
     journal: &mut CheckoutJournal,
 ) -> Result<()> {
     let mut index = repo.load_index_preserving_sparse()?;
+    let skip_worktree_snapshot: BTreeMap<Vec<u8>, ObjectId> = index
+        .entries
+        .iter()
+        .filter(|entry| entry.stage() == 0 && entry.skip_worktree())
+        .map(|entry| (entry.path.clone(), entry.oid))
+        .collect();
     let pre_reset_index_mtime = crate::diff::index_mtime_for_diff(&index, None);
     let config = repo.config()?;
     let index_sparse = config
@@ -1102,6 +1108,16 @@ fn checkout_hard_to_tree_journaled(
         crate::diff::apply_hard_reset_index_plan(&mut index, align_plan);
         deleted_abs_paths =
             hard_reset_journal_index_only_removals(work_tree, &index_only_removals, journal)?;
+    }
+    if !skip_worktree_snapshot.is_empty() {
+        hard_reset_abort_if_skip_worktree_dirty(
+            repo,
+            work_tree,
+            &skip_worktree_snapshot,
+            &index,
+            sparse.as_ref(),
+            &config,
+        )?;
     }
     let sparse = SparseCheckout::load(repo)?;
     deleted_abs_paths.extend(hard_reset_journal_conflict_only_unmerged_paths(
@@ -1261,6 +1277,28 @@ fn checkout_hard_to_tree_journaled(
         .map(|&pos| {
             let path = &index.entries[pos].path;
             let te = &index.entries[pos];
+            if let Some(&before_oid) = skip_worktree_snapshot.get(path.as_slice()) {
+                if sparse
+                    .as_ref()
+                    .is_some_and(|sparse| !sparse.includes_index_path(path))
+                {
+                    return HardResetEntryAction::SkipWorktree;
+                }
+                if !trees_differ {
+                    return HardResetEntryAction::SkipWorktree;
+                }
+                let after_oid = index.get(path.as_slice(), 0).map(|entry| entry.oid);
+                if after_oid == Some(before_oid)
+                    && !tree_diff_touched.contains_path(path)
+                    && !index_align_touched.contains(path)
+                {
+                    return HardResetEntryAction::SkipWorktree;
+                }
+                if after_oid != Some(before_oid) {
+                    return HardResetEntryAction::Write;
+                }
+                return HardResetEntryAction::SkipWorktree;
+            }
             if sparse
                 .as_ref()
                 .is_some_and(|sparse| !sparse.includes_index_path(path))
@@ -1411,7 +1449,9 @@ fn checkout_hard_to_tree_journaled(
     );
     for (pos, action) in plan_positions.into_iter().zip(actions) {
         crate::progress::poll_cancel(progress, cancel)?;
-        let path = &index.entries[pos].path;
+        let path_bytes = index.entries[pos].path.clone();
+        let preserve_skip = skip_worktree_snapshot.contains_key(path_bytes.as_slice());
+        let path = &path_bytes;
         let (oid, mode) = {
             let entry = &index.entries[pos];
             (entry.oid, entry.mode)
@@ -1424,11 +1464,18 @@ fn checkout_hard_to_tree_journaled(
                 continue;
             }
             HardResetEntryAction::Keep => {
-                index.entries[pos] = index_entry_with_recorded_stat(&index.entries[pos]);
+                index.entries[pos] = hard_reset_keep_index_row(
+                    &index.entries[pos],
+                    skip_worktree_snapshot.contains_key(path),
+                );
                 continue;
             }
             HardResetEntryAction::Written(Some(keep_pos)) => {
-                index.entries[keep_pos] = index_entry_with_recorded_stat(&index.entries[keep_pos]);
+                let keep_path = index.entries[keep_pos].path.clone();
+                index.entries[keep_pos] = hard_reset_keep_index_row(
+                    &index.entries[keep_pos],
+                    skip_worktree_snapshot.contains_key(keep_path.as_slice()),
+                );
                 continue;
             }
             HardResetEntryAction::Written(None) | HardResetEntryAction::VerifiedUpToDate => {
@@ -1516,6 +1563,9 @@ fn checkout_hard_to_tree_journaled(
             &mut dir_cache,
             oid,
         )?;
+        if preserve_skip {
+            index.entries[pos].set_skip_worktree(true);
+        }
         progress.inc(1);
     }
 
@@ -2001,6 +2051,70 @@ fn hard_reset_normalize_index_row(entry: &mut IndexEntry) {
     entry.flags = entry.path.len().min(0xFFF) as u16;
     entry.flags_extended = None;
     entry.base_index_pos = 0;
+}
+
+/// Stage-0 row after hard reset when the worktree file is left unchanged.
+fn hard_reset_keep_index_row(entry: &IndexEntry, preserve_skip_worktree: bool) -> IndexEntry {
+    let mut row = index_entry_with_recorded_stat(entry);
+    if preserve_skip_worktree {
+        row.set_skip_worktree(true);
+    }
+    row
+}
+
+/// Abort when a skip-worktree path's worktree edit would be lost to a target-tree blob change.
+fn hard_reset_abort_if_skip_worktree_dirty(
+    repo: &Repository,
+    work_tree: &Path,
+    snapshot: &BTreeMap<Vec<u8>, ObjectId>,
+    index: &Index,
+    sparse: Option<&SparseCheckout>,
+    config: &Arc<ConfigSet>,
+) -> Result<()> {
+    use crate::error::OverwriteReason;
+    let rules = WorktreeRules::from_parts(repo, index, Arc::clone(config))?;
+    let mut blocked = Vec::new();
+    for (path, &index_oid) in snapshot {
+        if sparse.is_some_and(|s| !s.includes_index_path(path)) {
+            continue;
+        }
+        let Some(current) = index.get(path, 0) else {
+            continue;
+        };
+        if current.oid == index_oid {
+            continue;
+        }
+        let rel = crate::repo_relpath::storage_string(path);
+        let abs = crate::index::worktree_path_from_index_rel(work_tree, path);
+        let Ok(meta) = fs::symlink_metadata(&abs) else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let attrs = rules.file_attrs(&rel, false);
+        let worktree_oid = crate::diff::hash_worktree_file(
+            repo.odb(),
+            &abs,
+            &meta,
+            rules.conversion(),
+            &attrs,
+            &rel,
+            None,
+            Some(rules.filter_process()),
+        )?;
+        if worktree_oid != index_oid {
+            blocked.push(rel);
+        }
+    }
+    if blocked.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::would_overwrite(
+            OverwriteReason::LocalChanges,
+            blocked,
+        ))
+    }
 }
 
 fn hard_reset_finish_cache_tree(repo: &Repository, index: &mut Index, target_tree: &ObjectId) {
