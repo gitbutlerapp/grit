@@ -35,13 +35,14 @@ use crate::diff_rename_parallel::{
     parallel_map_indices, parse_rename_limit,
 };
 use crate::error::{Error, Result};
-use crate::index::{CacheTreeNode, Index, IndexEntry, MODE_SYMLINK};
+use crate::index::{CacheTreeNode, Index, IndexEntry, MODE_SYMLINK, MODE_TREE};
 use crate::objects::{
     parse_commit, CommitData, FileMode, ObjectId, ObjectKind, TreeEntry, TreeEntryRef, TreeRefIter,
 };
 use crate::odb::{Odb, SessionTree};
 use crate::parallel::ThreadPolicy;
 use crate::repo::Repository;
+use crate::sparse_checkout::SparseCheckout;
 use crate::userdiff::FuncnameMatcher;
 
 use super::rename_lines::RenameLineTable;
@@ -2955,6 +2956,8 @@ pub(crate) fn diff_trees_outside_sparse_directories(
     index: &Index,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
+    sparse: Option<&SparseCheckout>,
+    index_sparse: bool,
 ) -> Result<Vec<DiffEntry>> {
     crate::trace::trace_span!("grit.diff.tree");
     let hint = index
@@ -2962,6 +2965,8 @@ pub(crate) fn diff_trees_outside_sparse_directories(
         .then_some(DiffTreesWalkHint {
             index: Some(index),
             skip_sparse_directories: true,
+            sparse,
+            index_sparse,
             ..DiffTreesWalkHint::default()
         });
     diff_trees_opts(odb, old_tree_oid, new_tree_oid, "", false, hint.as_ref())
@@ -3032,12 +3037,29 @@ struct DiffTreesWalkHint<'a> {
     old_tree_matches: bool,
     /// Do not descend into directories `index` holds as sparse-directory rows.
     skip_sparse_directories: bool,
+    sparse: Option<&'a SparseCheckout>,
+    index_sparse: bool,
     /// When non-empty, do not descend into directories these pathspecs cannot match inside.
     pathspecs: &'a [String],
     pathspec_matcher: Option<&'a crate::pathspec::PathspecMatcher<'a>>,
 }
 
 impl DiffTreesWalkHint<'_> {
+    /// Cone sparse checkout keeps `dir` (no trailing slash) as one opaque tree row.
+    fn sparse_excludes_tree(&self, dir: &str) -> bool {
+        if !self.index_sparse {
+            return false;
+        }
+        let Some(sparse) = self.sparse else {
+            return false;
+        };
+        let mut path = crate::repo_relpath::storage_bytes(dir).into_owned();
+        if !path.ends_with(b"/") {
+            path.push(b'/');
+        }
+        sparse.excludes_directory(&path)
+    }
+
     /// Whether the walk must not enter directory `dir` (stored form, no trailing slash).
     fn skips(&self, dir: &str) -> bool {
         if dir.is_empty() {
@@ -3776,6 +3798,9 @@ fn emit_deleted_opts(
 ) -> Result<()> {
     let path = crate::repo_relpath::format_path_stored(prefix, entry.name);
     if is_tree_mode(entry.mode) {
+        if index_hint.is_some_and(|hint| hint.sparse_excludes_tree(&path)) {
+            return Ok(());
+        }
         if show_trees {
             result.push(DiffEntry {
                 status: DiffStatus::Deleted,
@@ -3830,6 +3855,19 @@ fn emit_added_opts(
 ) -> Result<()> {
     let path = crate::repo_relpath::format_path_stored(prefix, entry.name);
     if is_tree_mode(entry.mode) {
+        if index_hint.is_some_and(|hint| hint.sparse_excludes_tree(&path)) {
+            result.push(DiffEntry {
+                status: DiffStatus::Added,
+                old_path: None,
+                new_path: Some(crate::repo_relpath::sparse_directory_stored_path(&path)),
+                old_mode: FileMode::ABSENT,
+                new_mode: FileMode::new(MODE_TREE),
+                old_oid: zero_oid(),
+                new_oid: entry.oid,
+                score: None,
+            });
+            return Ok(());
+        }
         if show_trees {
             result.push(DiffEntry {
                 status: DiffStatus::Added,
@@ -4699,6 +4737,8 @@ pub(crate) fn plan_hard_reset_index_align(
     odb: &Odb,
     index: &Index,
     target_tree: &ObjectId,
+    sparse: Option<&SparseCheckout>,
+    index_sparse: bool,
 ) -> Result<HardResetIndexPlan> {
     let mut plan = HardResetIndexPlan::default();
     let mut idx_cursor = 0usize;
@@ -4715,6 +4755,8 @@ pub(crate) fn plan_hard_reset_index_align(
             index,
             idx_cursor: &mut idx_cursor,
             ignore_submodules: false,
+            sparse,
+            index_sparse,
             plan: &mut plan,
             retry_without_cache: false,
         };
@@ -4729,6 +4771,8 @@ pub(crate) fn plan_hard_reset_index_align(
             index,
             idx_cursor: &mut idx_cursor,
             ignore_submodules: false,
+            sparse,
+            index_sparse,
             plan: &mut plan,
             retry_without_cache: false,
         };
@@ -4941,6 +4985,8 @@ struct HardResetAlignWalk<'a, 'b> {
     index: &'a Index,
     idx_cursor: &'b mut usize,
     ignore_submodules: bool,
+    sparse: Option<&'a SparseCheckout>,
+    index_sparse: bool,
     plan: &'b mut HardResetIndexPlan,
     retry_without_cache: bool,
 }
@@ -5106,18 +5152,47 @@ fn hard_reset_plan_tree_only(
     }
     let path = join_index_path(dir_prefix, &entry.name);
     if is_tree_mode(entry.mode) {
-        hard_reset_append_entries_from_tree(
-            walk.odb,
-            &entry.oid,
-            &path,
-            &mut walk.plan.insert_entries,
-        )?;
+        if hard_reset_sparse_excludes_tree(walk, &path) {
+            walk.plan
+                .insert_entries
+                .push(hard_reset_sparse_directory_row(path, entry.oid));
+        } else {
+            hard_reset_append_entries_from_tree(
+                walk.odb,
+                &entry.oid,
+                &path,
+                &mut walk.plan.insert_entries,
+            )?;
+        }
     } else {
         walk.plan
             .insert_entries
             .push(hard_reset_index_tree_row(path, entry.mode, entry.oid));
     }
     Ok(())
+}
+
+fn hard_reset_sparse_excludes_tree(walk: &HardResetAlignWalk<'_, '_>, path: &[u8]) -> bool {
+    if !walk.index_sparse {
+        return false;
+    }
+    let Some(sparse) = walk.sparse else {
+        return false;
+    };
+    let mut dir = path.to_vec();
+    if !dir.ends_with(b"/") {
+        dir.push(b'/');
+    }
+    sparse.excludes_directory(&dir)
+}
+
+fn hard_reset_sparse_directory_row(mut path: Vec<u8>, oid: ObjectId) -> IndexEntry {
+    if !path.ends_with(b"/") {
+        path.push(b'/');
+    }
+    let mut row = hard_reset_index_tree_row(path, MODE_TREE, oid);
+    row.set_skip_worktree(true);
+    row
 }
 
 fn hard_reset_index_tree_row(path: Vec<u8>, mode: u32, oid: ObjectId) -> IndexEntry {

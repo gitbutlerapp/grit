@@ -677,7 +677,8 @@ impl SparseCheckout {
     /// already materialized, or that is conflicted, is checked out normally.
     #[must_use]
     pub(crate) fn checkout_skips(&self, index: &crate::index::Index, path: &str) -> bool {
-        if self.includes(path) {
+        let lookup = path.strip_suffix('/').unwrap_or(path);
+        if self.includes(lookup) {
             return false;
         }
         let bytes = crate::repo_relpath::storage_bytes(path);
