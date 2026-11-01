@@ -1,6 +1,6 @@
 //! Run `rebase --exec` hooks after planning and before ref updates.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -90,6 +90,7 @@ struct ExecPrestate {
     head_commit: ObjectId,
     index_bytes: Vec<u8>,
     head_tree: ObjectId,
+    untracked_paths: HashSet<String>,
 }
 
 struct ExecDetachedSession<'a> {
@@ -109,10 +110,16 @@ impl ExecDetachedSession<'_> {
     }
 }
 
-fn fail_exec_session(session: &mut ExecDetachedSession<'_>, err: HistoryError) -> HistoryError {
+fn fail_exec_session(
+    session: &mut ExecDetachedSession<'_>,
+    err: HistoryError,
+    preserve_grit_rebase: bool,
+) -> HistoryError {
     match session.restore() {
         Ok(()) => {
-            let _ = super::rebase_session::clear_rebase_state(session.repo.git_dir());
+            if !preserve_grit_rebase {
+                let _ = super::rebase_session::clear_rebase_state(session.repo.git_dir());
+            }
             err
         }
         Err(restore_err) => restore_err,
@@ -386,6 +393,12 @@ struct ExecVerifyOptions {
     allow_grit_rebase_stop: bool,
 }
 
+impl ExecVerifyOptions {
+    fn preserve_grit_rebase(&self) -> bool {
+        self.allow_grit_rebase_stop
+    }
+}
+
 fn verify_rebase_with_exec_inner(
     repo: &Repository,
     plan: &mut RewritePlan,
@@ -436,12 +449,15 @@ fn verify_rebase_with_exec_inner(
             head: None,
         },
         options.clear_state_on_success,
+        options.preserve_grit_rebase(),
     )
 }
 
 /// Run `--exec` commands at a detached `tip` after resolving a grit rebase conflict stop.
 ///
 /// Returns the resulting `HEAD` (which may differ when a command amends the commit).
+/// On failure, restores the pre-exec `HEAD`, index, and worktree and leaves any grit
+/// rebase stop (`grit-plan`) in place.
 pub(super) fn run_exec_at_tip(
     repo: &Repository,
     spec: &ExecSpec,
@@ -453,12 +469,23 @@ pub(super) fn run_exec_at_tip(
     }
     ensure_worktree_clean_for_rebase_exec(repo).map_err(map_clean_error)?;
     let worktree = repo.work_tree().ok_or(HistoryError::BareRepository)?;
+    update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &tip).map_err(exec_io)?;
+    let tip_tree = commit_tree_for_apply(repo, tip)?;
+    let prestate = capture_exec_prestate(repo)?;
+    let mut session = ExecDetachedSession {
+        repo,
+        prestate: &prestate,
+        current_tree: tip_tree,
+        active: true,
+    };
     let mut tip = tip;
     let mut runs = Vec::new();
-    update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &tip).map_err(exec_io)?;
-    let mut tip_tree = commit_tree_for_apply(repo, tip)?;
+    let mut tip_tree = tip_tree;
     for command in &spec.commands {
-        let output = run_exec_command(runner, command, worktree)?;
+        let output = match run_exec_command(runner, command, worktree) {
+            Ok(output) => output,
+            Err(err) => return Err(fail_exec_session(&mut session, err, true)),
+        };
         let exit_code = output.status.code.unwrap_or(1);
         runs.push(ExecRunRecord {
             commit: tip,
@@ -468,18 +495,32 @@ pub(super) fn run_exec_at_tip(
             stderr: output.stderr.clone(),
         });
         if exit_code != 0 {
-            return Err(HistoryError::ExecFailed {
+            let stdout = output.stdout.clone();
+            let stderr = output.stderr.clone();
+            let signaled = exec_command_signaled(&output);
+            let (completed_runs, stdout, stderr) = match runs.split_last() {
+                Some((failed, prior)) => {
+                    (prior.to_vec(), failed.stdout.clone(), failed.stderr.clone())
+                }
+                None => (Vec::new(), stdout, stderr),
+            };
+            let exec_err = HistoryError::ExecFailed {
                 commit: tip,
                 exit_code,
-                stdout: output.stdout,
-                stderr: output.stderr,
-                completed_runs: runs,
-            });
+                stdout,
+                stderr,
+                completed_runs,
+            };
+            if signaled {
+                return Err(fail_exec_session(&mut session, exec_err, true));
+            }
+            return Err(fail_exec_session(&mut session, exec_err, true));
         }
         let head = exec_head(repo, tip)?;
         if head != tip {
             tip = head;
             tip_tree = commit_tree_for_apply(repo, tip)?;
+            session.current_tree = tip_tree;
         }
         let clean = load_worktree_index(repo).and_then(|index| {
             let mut snapshot = WorktreeSnapshot {
@@ -529,6 +570,7 @@ fn execute_plan(
     runner: &dyn CommandRunner,
     start: ExecCursor,
     clear_state_on_success: bool,
+    preserve_grit_rebase: bool,
 ) -> Result<ExecReport, HistoryError> {
     let repo = session.repo;
     let mut runs = Vec::new();
@@ -541,10 +583,18 @@ fn execute_plan(
                     if rewrites.replays_single_parent(repo, row) =>
                 {
                     stop_on_replay_conflict(
-                        session, plan, rewrites, spec, rewrite, row, conflicts, runs,
+                        session,
+                        plan,
+                        rewrites,
+                        spec,
+                        rewrite,
+                        row,
+                        conflicts,
+                        runs,
+                        preserve_grit_rebase,
                     )
                 }
-                err => fail_exec_session(session, err),
+                err => fail_exec_session(session, err, preserve_grit_rebase),
             });
         }
         let fallback = start.head.filter(|_| row == start.row);
@@ -577,7 +627,7 @@ fn execute_plan(
         if let Err(err) =
             checkout_exec_tree_transition(repo, Some(&session.current_tree), &tip_tree)
         {
-            return Err(fail_exec_session(session, err));
+            return Err(fail_exec_session(session, err, preserve_grit_rebase));
         }
         session.current_tree = tip_tree;
 
@@ -600,7 +650,7 @@ fn execute_plan(
             )?;
             let output = match run_exec_command(runner, command, worktree) {
                 Ok(output) => output,
-                Err(err) => return Err(fail_exec_session(session, err)),
+                Err(err) => return Err(fail_exec_session(session, err, preserve_grit_rebase)),
             };
             let signaled = exec_command_signaled(&output);
             let exit_code = output.status.code.unwrap_or(1);
@@ -628,10 +678,9 @@ fn execute_plan(
                     completed_runs,
                 };
                 if signaled {
-                    session.active = false;
-                    return Err(exec_err);
+                    return Err(fail_exec_session(session, exec_err, preserve_grit_rebase));
                 }
-                return Err(fail_exec_session(session, exec_err));
+                return Err(fail_exec_session(session, exec_err, preserve_grit_rebase));
             }
             match adopt_exec_head(repo, plan, rewrites, row, tip) {
                 Ok(Some(head)) => {
@@ -648,7 +697,7 @@ fn execute_plan(
                     {
                         session.current_tree = tree;
                     }
-                    return Err(fail_exec_session(session, err));
+                    return Err(fail_exec_session(session, err, preserve_grit_rebase));
                 }
             }
             // Reload the subprocess-written index and compare against the resulting HEAD,
@@ -769,6 +818,7 @@ fn stop_on_replay_conflict(
     row: usize,
     conflicts: Vec<crate::operation::Conflict>,
     runs: Vec<ExecRunRecord>,
+    preserve_grit_rebase: bool,
 ) -> HistoryError {
     let repo = session.repo;
     let mut checkout = || -> Result<ObjectId, HistoryError> {
@@ -815,7 +865,7 @@ fn stop_on_replay_conflict(
     };
     let parent = match checkout() {
         Ok(parent) => parent,
-        Err(err) => return fail_exec_session(session, err),
+        Err(err) => return fail_exec_session(session, err, preserve_grit_rebase),
     };
     let stop = ExecStop {
         cursor: ExecCursor {
@@ -827,7 +877,7 @@ fn stop_on_replay_conflict(
         pending_pick: true,
     };
     if let Err(err) = store_exec_stop(session, plan, rewrites, spec, rewrite, stop) {
-        return fail_exec_session(session, err);
+        return fail_exec_session(session, err, preserve_grit_rebase);
     }
     session.active = false;
     HistoryError::ExecConflict {
@@ -912,12 +962,50 @@ fn capture_exec_prestate(repo: &Repository) -> Result<ExecPrestate, HistoryError
     let index_bytes = fs::read(repo.index_path()).map_err(|e| HistoryError::WorktreeApply {
         message: e.to_string(),
     })?;
+    let untracked_paths = snapshot_untracked_paths(repo)?;
     Ok(ExecPrestate {
         head,
         head_commit,
         index_bytes,
         head_tree,
+        untracked_paths,
     })
+}
+
+fn snapshot_untracked_paths(repo: &Repository) -> Result<HashSet<String>, HistoryError> {
+    use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
+    let worktree = repo.work_tree().ok_or(HistoryError::BareRepository)?;
+    let mut index = repo.load_index().map_err(exec_io)?;
+    let (untracked, _) = collect_untracked_and_ignored(
+        repo,
+        &mut index,
+        worktree,
+        IgnoredMode::No,
+        false,
+        &[],
+    )
+    .map_err(exec_io)?;
+    Ok(untracked.into_iter().collect())
+}
+
+fn remove_untracked_created_during_exec(
+    repo: &Repository,
+    pre: &ExecPrestate,
+) -> Result<(), HistoryError> {
+    let worktree = repo.work_tree().ok_or(HistoryError::BareRepository)?;
+    let current = snapshot_untracked_paths(repo)?;
+    for path in current {
+        if pre.untracked_paths.contains(&path) {
+            continue;
+        }
+        let full = worktree.join(&path);
+        if full.is_file() || full.is_symlink() {
+            fs::remove_file(&full).map_err(exec_io)?;
+        } else if full.is_dir() {
+            fs::remove_dir_all(&full).map_err(exec_io)?;
+        }
+    }
+    Ok(())
 }
 
 fn restore_exec_prestate(
@@ -959,6 +1047,7 @@ fn restore_exec_prestate(
     fs::write(repo.index_path(), &pre.index_bytes).map_err(|e| HistoryError::WorktreeApply {
         message: e.to_string(),
     })?;
+    remove_untracked_created_during_exec(repo, pre)?;
     Ok(())
 }
 
@@ -1096,6 +1185,7 @@ fn stored_prestate(state: &StoredExec) -> Result<ExecPrestate, HistoryError> {
         head_commit,
         head_tree: ObjectId::from_hex(&state.original_tree)?,
         index_bytes: state.index.clone(),
+        untracked_paths: HashSet::new(),
     })
 }
 
@@ -1293,6 +1383,7 @@ pub(super) fn resume_exec_rebase(
         repo.command_runner().as_ref(),
         cursor,
         true,
+        false,
     ) {
         Ok(exec) => exec,
         // These errors are returned only after a successful rollback. The saved stop

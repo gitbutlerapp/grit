@@ -1048,6 +1048,134 @@ fn exec_replay_conflict_stops_resumably_and_continue_runs_command() {
 }
 
 #[test]
+fn exec_single_commit_conflict_continue_completes() {
+    let (repo, upstream, onto, tip, orig_tip) = conflict_rebase_fixture();
+    let wt = repo.worktree();
+    git(wt, &["switch", "topic"]);
+    let grit = open_grit(wt);
+    let opts = start_opts(upstream, Some(onto), tip);
+    let spec = ExecSpec {
+        commands: vec!["true".into()],
+    };
+    let runner = grit_lib::command_runner::system_command_runner();
+    let RebaseOutcome::Stopped(_) = start_rebase_with_exec(
+        &grit,
+        &opts,
+        &spec,
+        runner.as_ref(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("stop") else {
+        panic!("expected stop");
+    };
+    std::fs::write(wt.join("f.txt"), "resolved\n").expect("resolve");
+    git(wt, &["add", "f.txt"]);
+    let RebaseOutcome::Done { .. } = continue_rebase(
+        &grit,
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("continue single-commit exec rebase") else {
+        panic!("expected done");
+    };
+    assert_ne!(git_oid(wt, "topic"), orig_tip);
+    assert!(!grit.git_dir().join("rebase-merge").exists());
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn exec_failed_after_resolution_rolls_back_and_keeps_grit_plan() {
+    let (repo, upstream, onto, tip, _orig_tip) = conflict_rebase_fixture();
+    let wt = repo.worktree();
+    git(wt, &["switch", "topic"]);
+    let grit = open_grit(wt);
+    let opts = start_opts(upstream, Some(onto), tip);
+    let spec = ExecSpec {
+        commands: vec!["printf dirty > exec-dirty; false".into()],
+    };
+    let runner = grit_lib::command_runner::system_command_runner();
+    let RebaseOutcome::Stopped(_) = start_rebase_with_exec(
+        &grit,
+        &opts,
+        &spec,
+        runner.as_ref(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("stop") else {
+        panic!("expected stop");
+    };
+    std::fs::write(wt.join("f.txt"), "resolved\n").expect("resolve");
+    git(wt, &["add", "f.txt"]);
+    let err = continue_rebase(
+        &grit,
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        RebaseSessionError::History(grit_lib::revwalk::history::HistoryError::ExecFailed { .. })
+    ));
+    assert!(!wt.join("exec-dirty").exists());
+    assert!(wt.join(".git/rebase-merge/grit-plan").is_file());
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn exec_failed_on_later_replay_preserves_grit_session() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "f.txt", "base\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "topic"]);
+    commit_file(wt, "f.txt", "one\n", "one");
+    commit_file(wt, "g", "g\n", "two");
+    let tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "f.txt", "main\n", "main");
+    let onto = git_oid(wt, "HEAD");
+    git(wt, &["switch", "topic"]);
+    let grit = open_grit(wt);
+    let opts = start_opts(upstream, Some(onto), tip);
+    let spec = ExecSpec {
+        commands: vec!["test ! -f g".into()],
+    };
+    let runner = grit_lib::command_runner::system_command_runner();
+    let RebaseOutcome::Stopped(_) = start_rebase_with_exec(
+        &grit,
+        &opts,
+        &spec,
+        runner.as_ref(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("first stop") else {
+        panic!("expected stop on first commit");
+    };
+    std::fs::write(wt.join("f.txt"), "one\n").expect("resolve");
+    git(wt, &["add", "f.txt"]);
+    let err = continue_rebase(
+        &grit,
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        RebaseSessionError::History(grit_lib::revwalk::history::HistoryError::ExecFailed { .. })
+    ));
+    assert!(wt.join(".git/rebase-merge/grit-plan").is_file());
+    abort_rebase(&grit, &test_ident()).expect("abort after failed exec");
+    assert!(!grit.git_dir().join("rebase-merge").exists());
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
 fn exec_replay_conflict_abort_restores_branch() {
     let (repo, upstream, onto, tip, orig_tip) = conflict_rebase_fixture();
     let wt = repo.worktree();

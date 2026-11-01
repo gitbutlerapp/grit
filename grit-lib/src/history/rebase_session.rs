@@ -567,7 +567,7 @@ fn run_exec_after_resolution(
     let spec = super::ExecSpec {
         commands: state.exec_commands.clone(),
     };
-    let runner = crate::command_runner::system_command_runner();
+    let runner = repo.command_runner();
     let (tip, _) = super::exec::run_exec_at_tip(repo, &spec, runner.as_ref(), head_oid)?;
     Ok(tip)
 }
@@ -699,6 +699,24 @@ pub fn continue_rebase(
     // recorded as a real commit before resuming; a single-commit stop can plan the staged
     // tree directly (matches the linear `git rebase --continue` path).
     if state.remaining.len() > 1 {
+        let stopped_head = stopped_head_for_continue(&state, repo)?;
+        if head_oid != stopped_head {
+            return Err(RebaseSessionError::ResolutionHeadChanged {
+                expected: stopped_head,
+            });
+        }
+        let resolved =
+            write_rebase_staged_resolution(repo, &state.rewrite, current, new_tree, &parents)
+                .map_err(RebaseSessionError::from)?;
+        refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &resolved)
+            .map_err(map_lib)?;
+        ensure_worktree_clean_for_rebase_exec(repo).map_err(map_lib)?;
+        return advance_after_user_resolution_commit(
+            repo, &state, opts, current, resolved, progress, cancel,
+        );
+    }
+
+    if !state.exec_commands.is_empty() && new_tree != head_tree {
         let stopped_head = stopped_head_for_continue(&state, repo)?;
         if head_oid != stopped_head {
             return Err(RebaseSessionError::ResolutionHeadChanged {
@@ -1394,7 +1412,7 @@ fn advance_after_plan(
                 let spec = super::ExecSpec {
                     commands: prev.exec_commands.clone(),
                 };
-                let runner = crate::command_runner::system_command_runner();
+                let runner = repo.command_runner();
                 super::exec::verify_rebase_with_exec_resume(
                     repo,
                     &mut plan,
