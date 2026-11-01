@@ -186,3 +186,69 @@ fn hard_reset_at_head_restores_chmod_only_change() {
         "repo must be clean: {porcelain}"
     );
 }
+
+#[test]
+fn reset_hard_preserves_nested_untracked_under_coalesced_deleted_directory() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["config", "user.email", "t@t.com"]);
+    git(dir.path(), &["config", "user.name", "T"]);
+    std::fs::create_dir_all(dir.path().join("tracked-dir")).expect("mkdir");
+    std::fs::write(dir.path().join("tracked-dir/tracked.txt"), b"tracked\n").expect("write");
+    git(dir.path(), &["add", "tracked-dir/tracked.txt"]);
+    git(dir.path(), &["commit", "-m", "add dir"]);
+    git(dir.path(), &["rm", "-r", "tracked-dir"]);
+    git(dir.path(), &["commit", "-m", "drop dir"]);
+    let drop_oid_hex = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    git(dir.path(), &["reset", "--hard", "HEAD~1"]);
+    std::fs::create_dir_all(dir.path().join("tracked-dir/nested")).expect("nested");
+    std::fs::write(
+        dir.path().join("tracked-dir/nested/untracked.txt"),
+        b"precious\n",
+    )
+    .expect("untracked");
+
+    git(dir.path(), &["reset", "--hard", &drop_oid_hex]);
+    assert!(
+        std::fs::read(dir.path().join("tracked-dir/nested/untracked.txt")).is_ok(),
+        "system git must keep nested untracked under coalesced-deleted directory"
+    );
+    let git_porcelain = git(dir.path(), &["status", "--porcelain"]);
+    assert!(
+        git_porcelain.contains("tracked-dir/nested/untracked.txt")
+            || git_porcelain.contains("tracked-dir/"),
+        "git should report preserved untracked: {git_porcelain}"
+    );
+
+    git(dir.path(), &["reset", "--hard", "HEAD~1"]);
+    std::fs::create_dir_all(dir.path().join("tracked-dir/nested")).expect("nested again");
+    std::fs::write(
+        dir.path().join("tracked-dir/nested/untracked.txt"),
+        b"precious\n",
+    )
+    .expect("untracked again");
+
+    let repo = crate::support::open_grit_repo(dir.path());
+    let drop_oid = grit_lib::objects::ObjectId::from_hex(&drop_oid_hex).expect("drop oid");
+    reset_to_commit(
+        &repo,
+        &ResetOptions::new(
+            drop_oid,
+            ResetMode::Hard,
+            support::parse_reflog_signature("T <t@t.com> 0 +0000"),
+            "reset",
+        ),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("grit hard reset");
+    assert!(
+        std::fs::read(dir.path().join("tracked-dir/nested/untracked.txt")).is_ok(),
+        "grit must preserve nested untracked like git"
+    );
+    let porcelain = git(dir.path(), &["status", "--porcelain"]);
+    assert!(
+        porcelain.contains("tracked-dir/nested/untracked.txt") || porcelain.contains("tracked-dir/"),
+        "status after grit reset must match git: {porcelain}"
+    );
+}

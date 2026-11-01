@@ -1012,17 +1012,17 @@ fn checkout_hard_to_tree_journaled(
     let tree_diff_touched = CoalescedSubtreeDiffPaths::from_changes(&changes);
     let config = repo.config()?;
     let unstaged_tree_stable_paths = if trees_differ && !index.has_sparse_directory_placeholders() {
-            hard_reset_unstaged_tree_stable_paths(
-                repo,
-                work_tree,
-                &index,
-                pre_reset_index_mtime,
-                &tree_diff_touched,
-                config.as_ref(),
-            )?
-        } else {
-            BTreeSet::new()
-        };
+        hard_reset_unstaged_tree_stable_paths(
+            repo,
+            work_tree,
+            &index,
+            pre_reset_index_mtime,
+            &tree_diff_touched,
+            config.as_ref(),
+        )?
+    } else {
+        BTreeSet::new()
+    };
     crate::porcelain::index_from_tree::expand_sparse_for_tree_changes(repo, &mut index, &changes)?;
     let tree_deleted: HashSet<Vec<u8>> = changes
         .iter()
@@ -2510,6 +2510,22 @@ fn diff_entry_is_coalesced_subtree(change: &DiffEntry) -> bool {
         || matches!(change.status, DiffStatus::Added if crate::index::is_tree_mode(change.new_mode.bits()))
 }
 
+/// Stage-0 index paths removed by a coalesced tree delete at `dir_prefix` (stored form).
+fn index_paths_under_coalesced_delete_prefix(index: &Index, dir_prefix: &str) -> Vec<String> {
+    let prefix = crate::repo_relpath::storage_bytes(dir_prefix).into_owned();
+    let mut prefix_slash = prefix.clone();
+    prefix_slash.push(b'/');
+    index
+        .entries
+        .iter()
+        .filter(|entry| entry.stage() == 0)
+        .filter(|entry| {
+            entry.path.as_slice() == prefix.as_slice() || entry.path.starts_with(&prefix_slash)
+        })
+        .map(|entry| crate::repo_relpath::storage_string(&entry.path))
+        .collect()
+}
+
 /// Apply coalesced subtree add/delete entries; returns leaf-level diff rows for the rest.
 #[allow(clippy::too_many_arguments)]
 fn checkout_coalesced_subtree_changes(
@@ -2556,21 +2572,33 @@ fn checkout_coalesced_subtree_changes(
     let conv = rules.conversion().clone();
 
     let mut wholesale_dirs = BTreeSet::new();
+    let mut paths_to_remove_index = Vec::new();
     let mut deleted_abs_paths = Vec::new();
     for change in coalesced.iter().filter(|c| c.status == DiffStatus::Deleted) {
         crate::progress::poll_cancel(progress, cancel)?;
-        let Some(path) = &change.old_path else {
+        let Some(dir) = &change.old_path else {
             continue;
         };
-        wholesale_dirs.insert(path.clone());
-        let abs = work_tree.join(path);
-        if abs.is_dir() {
-            journal.spool_remove(path)?;
-            if remove_wholesale_dir(&abs) {
+        let tracked = index_paths_under_coalesced_delete_prefix(index_mut, dir);
+        let delete_set: HashSet<String> = tracked.iter().cloned().collect();
+        let wholesale_safe = !tracked.is_empty()
+            && wholesale_directory_safe_to_remove(work_tree, dir, &delete_set, ignorecase);
+        if wholesale_safe {
+            wholesale_dirs.insert(dir.clone());
+            let abs = work_tree.join(dir);
+            if abs.is_dir() && remove_wholesale_dir(&abs) {
                 deleted_abs_paths.push(abs);
             }
+            progress.inc(1);
+            continue;
         }
-        progress.inc(1);
+        for rel in tracked {
+            crate::progress::poll_cancel(progress, cancel)?;
+            journal.spool_remove(&rel)?;
+            deleted_abs_paths.push(checkout_stored_worktree_abs(work_tree, &rel));
+            paths_to_remove_index.push(checkout_stored_index_path_bytes(&rel));
+            progress.inc(1);
+        }
     }
     remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
 
@@ -2625,7 +2653,7 @@ fn checkout_coalesced_subtree_changes(
         repo,
         index_mut,
         &wholesale_dirs,
-        Vec::new(),
+        paths_to_remove_index,
         new_entries,
         true,
         &apply,
