@@ -1261,6 +1261,90 @@ struct RepeatedAnchorEofConflict {
     hunk: Hunk,
 }
 
+fn merge_hunk_base_ranges(hunks: &[Hunk]) -> Vec<std::ops::Range<usize>> {
+    let mut pos = 0usize;
+    hunks
+        .iter()
+        .map(|hunk| {
+            let len = match hunk {
+                Hunk::Unchanged(lines) => lines.len(),
+                Hunk::OnlyOurs { base, .. }
+                | Hunk::OnlyTheirs { base, .. }
+                | Hunk::Conflict { base, .. } => base.len(),
+            };
+            let start = pos;
+            pos += len;
+            start..pos
+        })
+        .collect()
+}
+
+fn hunk_is_one_sided_tail_change(hunk: &Hunk) -> bool {
+    match hunk {
+        Hunk::OnlyOurs { base, .. } if !base.is_empty() => true,
+        Hunk::OnlyTheirs { base, theirs } if !base.is_empty() && theirs.is_empty() => true,
+        _ => false,
+    }
+}
+
+/// Smallest base index touched by one-sided hunks in the EOF tail cluster (insert + anchor + deletions).
+fn one_sided_eof_tail_min_base(hunks: &[Hunk], ranges: &[std::ops::Range<usize>]) -> Option<usize> {
+    let last_idx = hunks.len().checked_sub(1)?;
+    let Hunk::OnlyTheirs {
+        base: ins_base,
+        theirs: ins,
+    } = &hunks[last_idx]
+    else {
+        return None;
+    };
+    if !ins_base.is_empty() || ins.is_empty() {
+        return None;
+    }
+    let anchor_idx = last_idx.checked_sub(1)?;
+    let Hunk::Unchanged(anchor) = &hunks[anchor_idx] else {
+        return None;
+    };
+    if anchor.len() != 1 {
+        return None;
+    }
+    let mut min = ranges[anchor_idx].start;
+    let mut idx = anchor_idx;
+    loop {
+        if idx == 0 {
+            break;
+        }
+        match &hunks[idx - 1] {
+            h if hunk_is_one_sided_tail_change(h) => {
+                min = min.min(ranges[idx - 1].start);
+                idx -= 1;
+            }
+            Hunk::Unchanged(_) if idx >= 2 && hunk_is_one_sided_tail_change(&hunks[idx - 2]) => {
+                idx -= 1;
+            }
+            _ => break,
+        }
+    }
+    Some(min)
+}
+
+fn anchor_line_repeats_in_base_suffix(
+    base_lines: &[Vec<u8>],
+    from_base: usize,
+    anchor_key: &[u8],
+    ws: &WhitespaceMode,
+) -> bool {
+    let mut matches = 0usize;
+    for line in base_lines.iter().skip(from_base) {
+        if line_content_for_merge_compare(line, ws) == anchor_key {
+            matches += 1;
+            if matches >= 2 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn try_repeated_anchor_eof_insert_conflict(
     hunks: &[Hunk],
     base_lines: &[Vec<u8>],
@@ -1290,6 +1374,10 @@ fn try_repeated_anchor_eof_insert_conflict(
             break;
         };
         if anchor.len() != 1 {
+            if idx >= 2 && hunk_is_one_sided_tail_change(&hunks[idx - 2]) {
+                idx -= 1;
+                continue;
+            }
             break;
         }
         if idx < 2 {
@@ -1319,11 +1407,11 @@ fn try_repeated_anchor_eof_insert_conflict(
         return None;
     }
     let anchor_line = &anchors[anchors.len() - 1];
-    let anchor_occurrences = base_lines
-        .iter()
-        .filter(|line| line.as_slice() == anchor_line.as_slice())
-        .count();
-    if anchor_occurrences < 2 {
+    let ws = WhitespaceMode::default();
+    let anchor_key = line_content_for_merge_compare(anchor_line, &ws);
+    let ranges = merge_hunk_base_ranges(hunks);
+    let tail_min_base = one_sided_eof_tail_min_base(hunks, &ranges)?;
+    if !anchor_line_repeats_in_base_suffix(base_lines, tail_min_base, &anchor_key, &ws) {
         return None;
     }
 
@@ -2359,6 +2447,44 @@ mod tests {
         })
         .unwrap();
         assert_eq!(out_replace.conflicts, 0);
+    }
+
+    #[test]
+    fn issue_2397_early_anchor_outside_tail_stays_clean_like_merge_tree() {
+        let mut base = String::from("anchor\nprefix\n");
+        for i in 0..20 {
+            base.push_str(&format!("base {i}\n"));
+        }
+        base.push_str("anchor\n");
+        let ours = "anchor\nprefix\nanchor\n".to_string();
+        let theirs = format!("{base}appended\n");
+        assert_git_merge_tree_clean(
+            base.as_bytes(),
+            ours.as_bytes(),
+            theirs.as_bytes(),
+            "leading anchor outside deleted tail + EOF append",
+        );
+        let out = merge(&MergeInput {
+            base: base.as_bytes(),
+            ours: ours.as_bytes(),
+            theirs: theirs.as_bytes(),
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: None,
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .unwrap();
+        assert_eq!(
+            out.conflicts, 0,
+            "must not treat a leading anchor as tail-alignment repeat"
+        );
     }
 
     #[test]
@@ -3410,4 +3536,5 @@ mod tests {
             "{rendered}"
         );
     }
+
 }
