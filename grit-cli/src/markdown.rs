@@ -521,21 +521,16 @@ pub fn print_tag_list(
     Ok(())
 }
 
-/// Fetch ref updates as bullets (`ref` · old → new).
+/// Fetch ref updates as bullets (`ref` · old → new). `changed` counts the refs
+/// the fetch changed, or on a dry run would change.
 pub fn print_fetch_updates(
     w: &mut dyn Write,
     remote: &str,
     updates: &[crate::commands::fetch::FetchUpdate],
-    updated: usize,
+    changed: usize,
     dry_run: bool,
 ) -> anyhow::Result<()> {
-    use crate::commands::fetch::FetchUpdateStatus;
-    let pending = updates
-        .iter()
-        .filter(|u| u.status != FetchUpdateStatus::UpToDate)
-        .count();
-    let summary_count = if dry_run { pending } else { updated };
-    if updates.is_empty() && summary_count == 0 {
+    if updates.is_empty() && changed == 0 {
         outln!(w, "Already up to date with `{remote}`.");
         return Ok(());
     }
@@ -568,19 +563,19 @@ pub fn print_fetch_updates(
     if any_rejected {
         outln!(w);
         outln!(w, "Some ref updates from `{remote}` were **rejected**.");
-    } else if dry_run && pending > 0 {
+    } else if dry_run && changed > 0 {
         outln!(w);
         outln!(
             w,
-            "Would fetch **{pending}** update{} from `{remote}`.",
-            if pending == 1 { "" } else { "s" }
+            "Would fetch **{changed}** update{} from `{remote}`.",
+            if changed == 1 { "" } else { "s" }
         );
-    } else if updated > 0 {
+    } else if changed > 0 {
         outln!(w);
         outln!(
             w,
-            "Fetched **{updated}** update{}.",
-            if updated == 1 { "" } else { "s" }
+            "Fetched **{changed}** update{}.",
+            if changed == 1 { "" } else { "s" }
         );
     }
     Ok(())
