@@ -27,8 +27,5 @@ fn open_stream_corrupt_local_loose_returns_error_not_none() {
     }
 
     let result = odb.open_stream(&oid);
-    assert!(matches!(
-        result,
-        Err(Error::Zlib(_)) | Err(Error::CorruptObject(_))
-    ));
+    assert!(matches!(result, Err(Error::CorruptLooseObject { .. })));
 }

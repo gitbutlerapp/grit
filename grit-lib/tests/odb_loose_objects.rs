@@ -236,6 +236,25 @@ fn large_blob_round_trip_grit_then_git_and_git_then_grit() {
     }
 }
 
+fn assert_corrupt_loose(err: Error, oid: &ObjectId, path: &std::path::Path) {
+    match err {
+        Error::CorruptLooseObject {
+            oid: got_oid,
+            path: got_path,
+            source,
+            ..
+        } => {
+            assert_eq!(got_oid, *oid);
+            assert_eq!(got_path, path);
+            assert!(
+                matches!(*source, Error::Zlib(_) | Error::CorruptObject(_)),
+                "source: {source:?}"
+            );
+        }
+        other => panic!("expected CorruptLooseObject, got {other:?}"),
+    }
+}
+
 #[test]
 fn t1060_loose_zlib_bit_flip_returns_zlib_error() {
     let repo = init_repo(HashAlgo::Sha1);
@@ -245,7 +264,11 @@ fn t1060_loose_zlib_bit_flip_returns_zlib_error() {
     make_loose_object_mutable(&path);
     flip_byte_at(&path, 4).expect("flip");
     let err = odb.read(&oid).unwrap_err();
-    assert!(matches!(err, Error::Zlib(_)), "{err:?}");
+    assert_corrupt_loose(err, &oid, &path);
+    let info = odb
+        .read_info(&oid)
+        .expect("header still readable after mid-file flip");
+    assert_eq!(info.size, 7);
 }
 
 #[test]
@@ -267,7 +290,89 @@ fn t1060_loose_truncated_returns_zlib_error() {
             .expect("truncate");
     }
     let err = odb.read(&oid).unwrap_err();
-    assert!(matches!(err, Error::Zlib(_)), "{err:?}");
+    assert_corrupt_loose(err, &oid, &path);
+}
+
+#[test]
+fn t1060_loose_empty_file_returns_corrupt_loose_with_io_source() {
+    let repo = init_repo(HashAlgo::Sha1);
+    let odb = Odb::new(&repo.objects_dir());
+    let oid = odb.write(ObjectKind::Blob, b"empty-file").expect("write");
+    let path = odb.object_path(&oid);
+    make_loose_object_mutable(&path);
+    std::fs::write(&path, []).expect("empty loose");
+    let err = odb.read(&oid).unwrap_err();
+    match err {
+        Error::CorruptLooseObject { source, .. } => {
+            assert!(
+                matches!(*source, Error::Io(_) | Error::Zlib(_)),
+                "{source:?}"
+            );
+        }
+        other => panic!("expected CorruptLooseObject, got {other:?}"),
+    }
+    let err = odb.read_info(&oid).unwrap_err();
+    assert_corrupt_loose(err, &oid, &path);
+    let Err(err) = odb.open_stream(&oid) else {
+        panic!("open_stream must fail on empty loose object");
+    };
+    assert_corrupt_loose(err, &oid, &path);
+}
+
+#[test]
+fn t1060_packed_zlib_bit_flip_names_pack_and_offset() {
+    let repo = init_repo(HashAlgo::Sha1);
+    let odb = Odb::new(&repo.objects_dir());
+    let payload = vec![0u8; 20_000];
+    let oid = odb.write(ObjectKind::Blob, &payload).expect("write");
+    git_in(repo.path(), &["add", "-A"]);
+    git_in(repo.path(), &["commit", "-m", "c"]);
+    git_in(repo.path(), &["repack", "-adq"]);
+    odb.invalidate_packs();
+    let pack_path = std::fs::read_dir(repo.path().join(".git/objects/pack"))
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "pack"))
+        .expect("pack file");
+    let mut bytes = std::fs::read(&pack_path).expect("read pack");
+    let flip_at = 300.min(bytes.len().saturating_sub(1));
+    bytes[flip_at] ^= 0x55;
+    make_loose_object_mutable(&pack_path);
+    std::fs::write(&pack_path, &bytes).expect("write pack");
+    odb.invalidate_packs();
+    let err = odb.read(&oid).unwrap_err();
+    match err {
+        Error::CorruptPackedObject {
+            oid: got_oid,
+            pack,
+            offset,
+            source,
+            ..
+        } => {
+            assert_eq!(got_oid, oid);
+            assert_eq!(pack, pack_path);
+            assert!(offset > 0);
+            assert!(
+                matches!(*source, Error::Zlib(_) | Error::CorruptObject(_)),
+                "{source:?}"
+            );
+        }
+        other => panic!("expected CorruptPackedObject, got {other:?}"),
+    }
+}
+
+fn git_in(dir: &std::path::Path, args: &[&str]) {
+    let out = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .expect("git");
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 #[test]

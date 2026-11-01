@@ -100,6 +100,7 @@ pub fn map_resolve_error(spec: &str, err: ResolveError) -> AnyhowError {
             object_kind_label(found),
             object_kind_label(expected)
         ),
+        ResolveError::DamagedObject(err) => AnyhowError::new(err),
         _ => anyhow::anyhow!("could not resolve '{spec}'"),
     }
 }

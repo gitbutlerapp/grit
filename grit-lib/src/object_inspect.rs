@@ -102,6 +102,10 @@ pub enum ResolveError {
         /// Text inside `@{...}` that was treated as a date selector.
         date: String,
     },
+
+    /// The spec resolved to an object id but its stored copy could not be read.
+    #[error("{0}")]
+    DamagedObject(#[source] Error),
 }
 
 impl From<RevParseError> for ResolveError {
@@ -281,11 +285,15 @@ impl Repository {
             }
         };
 
-        let info = self
-            .read_info_replaced(&oid)
-            .map_err(|_| ResolveError::UnknownRevision {
-                spec: spec.to_owned(),
-            })?;
+        let info = self.read_info_replaced(&oid).map_err(|e| {
+            if e.is_damaged_object() {
+                ResolveError::DamagedObject(e)
+            } else {
+                ResolveError::UnknownRevision {
+                    spec: spec.to_owned(),
+                }
+            }
+        })?;
         let ref_names = infer_ref_names(self, spec, oid);
         Ok(ResolvedObject {
             oid,
@@ -351,11 +359,15 @@ impl Repository {
             }
         };
 
-        let info = self
-            .read_info_replaced(&oid)
-            .map_err(|_| ResolveError::UnknownRevision {
-                spec: spec.to_owned(),
-            })?;
+        let info = self.read_info_replaced(&oid).map_err(|e| {
+            if e.is_damaged_object() {
+                ResolveError::DamagedObject(e)
+            } else {
+                ResolveError::UnknownRevision {
+                    spec: spec.to_owned(),
+                }
+            }
+        })?;
 
         if let Some(want) = expected {
             if info.kind != want {

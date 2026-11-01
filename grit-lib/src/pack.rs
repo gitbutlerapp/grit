@@ -81,6 +81,32 @@ pub fn read_local_pack_indexes(objects_dir: &Path) -> Result<Vec<PackIndex>> {
 /// SHA-1 verification of the index trailer is **not** performed on cached reads: Git only
 /// verifies pack indexes during `fsck`/`verify-pack`, not on every object lookup. Use
 /// [`read_pack_index`] when verification is required.
+struct PackReadDamage {
+    pack: PathBuf,
+    offset: u64,
+    err: Error,
+}
+
+fn finish_pack_object_lookup(oid: &ObjectId, last: Option<PackReadDamage>) -> Error {
+    match last {
+        Some(d) => Error::wrap_packed_read_failure(*oid, d.pack, d.offset, d.err),
+        None => Error::ObjectNotFound(oid.to_hex()),
+    }
+}
+
+fn wrap_pack_cache_read_err(
+    objects_dir: &Path,
+    idx: &PackIndex,
+    oid: &ObjectId,
+    err: Error,
+) -> Error {
+    let offset = pack_cache::find_offset_in_pack_read_context(objects_dir, idx, oid)
+        .ok()
+        .flatten()
+        .unwrap_or(0);
+    Error::wrap_packed_read_failure(*oid, idx.pack_path.clone(), offset, err)
+}
+
 pub(crate) mod pack_cache {
     use super::{read_pack_index_no_verify, Error, ObjectKind, PackIndex, Result};
     use crate::pack_map::{fingerprint_from_file, PackData, PackFingerprint};
@@ -250,7 +276,12 @@ pub(crate) mod pack_cache {
         match reader.read_object(oid) {
             Ok(obj) => Ok(Some(obj)),
             Err(Error::ObjectNotFound(_)) => Ok(None),
-            Err(err) => Err(err),
+            Err(err) => Err(super::wrap_pack_cache_read_err(
+                objects_dir,
+                reader.idx.as_ref(),
+                oid,
+                err,
+            )),
         }
     }
 
@@ -271,7 +302,12 @@ pub(crate) mod pack_cache {
         match reader.read_object_unless_whole_larger(oid, limit) {
             Ok(read) => Ok(Some(read)),
             Err(Error::ObjectNotFound(_)) => Ok(None),
-            Err(err) => Err(err),
+            Err(err) => Err(super::wrap_pack_cache_read_err(
+                objects_dir,
+                reader.idx.as_ref(),
+                oid,
+                err,
+            )),
         }
     }
 
@@ -307,7 +343,12 @@ pub(crate) mod pack_cache {
         match reader.read_object_into_with_delta_policy(oid, populate_delta_lru, buf) {
             Ok(kind) => Ok(Some(kind)),
             Err(Error::ObjectNotFound(_)) => Ok(None),
-            Err(err) => Err(err),
+            Err(err) => Err(super::wrap_pack_cache_read_err(
+                objects_dir,
+                reader.idx.as_ref(),
+                oid,
+                err,
+            )),
         }
     }
 
@@ -4775,6 +4816,7 @@ pub(crate) fn try_read_object_from_packs_with_options(
         }
     }
     let indexes = pack_indexes_for_lookup(objects_dir, opts)?;
+    let mut last_damage: Option<PackReadDamage> = None;
     let mut last_err: Option<Error> = None;
     for idx in &indexes {
         let Some(offset) = pack_cache::find_offset_in_pack_read_context(objects_dir, idx, oid)?
@@ -4791,10 +4833,20 @@ pub(crate) fn try_read_object_from_packs_with_options(
             Err(Error::ObjectNotFound(_)) => {}
             // The pack copy is unreadable (corrupt delta/zlib/header). A redundant
             // pack may still hold an intact copy, so remember the error and retry.
+            Err(err) if err.is_object_read_wrap_source() => {
+                last_damage = Some(PackReadDamage {
+                    pack: idx.pack_path.clone(),
+                    offset,
+                    err,
+                });
+            }
             Err(err) => last_err = Some(err),
         }
     }
-    Err(last_err.unwrap_or_else(|| Error::ObjectNotFound(oid.to_hex())))
+    if let Some(err) = last_err {
+        return Err(err);
+    }
+    Err(finish_pack_object_lookup(oid, last_damage))
 }
 
 /// Like [`try_read_object_from_packs_with_options`], writing the payload into `buf`.
@@ -4827,6 +4879,7 @@ pub(crate) fn try_read_object_from_packs_with_options_into(
         }
     }
     let indexes = pack_indexes_for_lookup(objects_dir, opts)?;
+    let mut last_damage: Option<PackReadDamage> = None;
     let mut last_err: Option<Error> = None;
     for idx in &indexes {
         let Some(offset) = pack_cache::find_offset_in_pack_read_context(objects_dir, idx, oid)?
@@ -4839,10 +4892,20 @@ pub(crate) fn try_read_object_from_packs_with_options_into(
                 return Ok(kind);
             }
             Err(Error::ObjectNotFound(_)) => {}
+            Err(err) if err.is_object_read_wrap_source() => {
+                last_damage = Some(PackReadDamage {
+                    pack: idx.pack_path.clone(),
+                    offset,
+                    err,
+                });
+            }
             Err(err) => last_err = Some(err),
         }
     }
-    Err(last_err.unwrap_or_else(|| Error::ObjectNotFound(oid.to_hex())))
+    if let Some(err) = last_err {
+        return Err(err);
+    }
+    Err(finish_pack_object_lookup(oid, last_damage))
 }
 
 /// Whether `idx_path` uses the legacy v1 pack-index format (no `PACK` signature).
