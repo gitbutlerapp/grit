@@ -232,9 +232,25 @@ pub fn remove_paths(
     if !opts.cached {
         for path in &to_remove {
             poll_remove_cancel(work_tree, &worktree_backups, cancel)?;
-            if let Some(backup) = snapshot_worktree_path(work_tree, path)? {
-                remove_backed_up_worktree_path(work_tree, &backup)?;
-                worktree_backups.push(backup);
+            match snapshot_worktree_path(work_tree, path) {
+                Ok(Some(backup)) => {
+                    if let Err(err) = remove_backed_up_worktree_path(work_tree, &backup) {
+                        return Err(abort_failed_remove_worktree(
+                            work_tree,
+                            &worktree_backups,
+                            err,
+                        ));
+                    }
+                    worktree_backups.push(backup);
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    return Err(abort_failed_remove_worktree(
+                        work_tree,
+                        &worktree_backups,
+                        err,
+                    ));
+                }
             }
         }
         let removed_abs: Vec<PathBuf> = worktree_backups
@@ -246,7 +262,13 @@ pub fn remove_paths(
 
     index.remove_paths(path_bytes);
     poll_remove_cancel(work_tree, &worktree_backups, cancel)?;
-    repo.commit_index_update(&mut lock, &mut index, !opts.cached)?;
+    if let Err(err) = repo.commit_index_update(&mut lock, &mut index, !opts.cached) {
+        return Err(abort_failed_remove_worktree(
+            work_tree,
+            &worktree_backups,
+            err,
+        ));
+    }
 
     Ok(RemoveOutcome { removed: to_remove })
 }
@@ -439,10 +461,44 @@ fn poll_remove_cancel(
     cancel: &dyn Cancel,
 ) -> Result<()> {
     if let Err(err) = poll_cancel(&mut NullProgress, cancel) {
-        let _ = restore_worktree_backups(work_tree, backups);
-        return Err(err);
+        return Err(abort_failed_remove_worktree(work_tree, backups, err));
     }
     Ok(())
+}
+
+/// Put work-tree files back after a failed [`remove_paths`] once some paths were deleted.
+fn abort_failed_remove_worktree(
+    work_tree: &Path,
+    backups: &[WorktreePathBackup],
+    original: Error,
+) -> Error {
+    if backups.is_empty() {
+        return original;
+    }
+    let unrestored = restore_worktree_backups_best_effort(work_tree, backups);
+    if unrestored.is_empty() {
+        original
+    } else {
+        Error::CheckoutRollbackIncomplete {
+            source: Box::new(original),
+            unrestored,
+        }
+    }
+}
+
+fn restore_worktree_backups_best_effort(
+    work_tree: &Path,
+    backups: &[WorktreePathBackup],
+) -> Vec<String> {
+    let mut unrestored = Vec::new();
+    for backup in backups {
+        if restore_worktree_backups(work_tree, std::slice::from_ref(backup)).is_err() {
+            unrestored.push(backup.rel().to_string());
+        }
+    }
+    unrestored.sort_unstable();
+    unrestored.dedup();
+    unrestored
 }
 
 fn validate_unique_move_destinations(moves: &[PathMove]) -> Result<()> {
@@ -2445,6 +2501,68 @@ mod cancel_regression_tests {
 
     fn init_repo(root: &std::path::Path) -> Repository {
         init_repository(root, false, "main", None, Default::default()).expect("init")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_paths_worktree_failure_on_second_path_restores_first_and_index() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::create_dir_all(root.join("locked")).unwrap();
+        fs::write(root.join("a.txt"), b"a\n").unwrap();
+        fs::write(root.join("locked/b.txt"), b"b\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions::default(),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+        fs::set_permissions(root.join("locked"), fs::Permissions::from_mode(0o555)).unwrap();
+        let index_before = fs::read(repo.index_path()).expect("read index");
+
+        let err = remove_paths(
+            &repo,
+            &RemoveOptions {
+                pathspecs: vec!["a.txt".into(), "locked/b.txt".into()],
+                force: true,
+                ..RemoveOptions::default()
+            },
+            &crate::progress::NeverCancel,
+        )
+        .expect_err("unlink under read-only directory must fail");
+
+        assert!(
+            !matches!(err, Error::Cancelled),
+            "unexpected cancel: {err:?}"
+        );
+        assert_eq!(
+            fs::read(repo.index_path()).expect("read index"),
+            index_before,
+            "index must still list every path"
+        );
+        assert!(root.join("a.txt").is_file(), "first path must be restored");
+        assert!(
+            root.join("locked/b.txt").is_file(),
+            "second path must remain"
+        );
+        assert!(
+            repo.load_index()
+                .expect("load index")
+                .get(b"a.txt", 0)
+                .is_some(),
+            "index must still track a.txt"
+        );
+        assert!(
+            repo.load_index()
+                .expect("load index")
+                .get(b"locked/b.txt", 0)
+                .is_some(),
+            "index must still track locked/b.txt"
+        );
     }
 
     #[test]
