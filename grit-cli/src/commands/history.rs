@@ -14,13 +14,13 @@ use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     abort_rebase, absorb, apply_absorb_rewrite_with_cancel, apply_fixup_hunk_selection_with_cancel,
     apply_fixup_rewrite_with_cancel, apply_rewrite, continue_rebase, drop as history_drop, fixup,
-    format_hunk_range_header, move_commit, plan_rebase, plan_rebase_check, reword_with,
-    skip_rebase, split, squash, staged_fixup_paths, start_rebase, start_rebase_with_exec,
-    undo_last_rewrite_with_cancel, verify_rewrite_plan, AbsorbOptions, ApplyOptions, EmptyPolicy,
-    ExecRunRecord, ExecSpec, FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement,
-    PreRebase, RebaseCheckPlan, RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest,
-    RebaseSessionError, RefScope, RewordOptions, RewriteOptions, RewritePlan, SplitOptions,
-    SquashMessage, SquashOptions, StartRebaseOptions, UnassignedHunk,
+    format_hunk_range_header, move_commit, plan_rebase, plan_rebase_check, rebase_run_request,
+    reword_with, skip_rebase, split, squash, staged_fixup_paths, start_rebase,
+    start_rebase_with_exec, undo_last_rewrite_with_cancel, verify_rewrite_plan, AbsorbOptions,
+    ApplyOptions, EmptyPolicy, ExecRunRecord, ExecSpec, FixupOptions, HistoryError, HunkAssignment,
+    HunkRange, Placement, PreRebase, RebaseCheckPlan, RebaseOntoOptions, RebaseOutcome, RebasePlan,
+    RebaseRequest, RebaseSessionError, RefScope, RewordOptions, RewriteOptions, RewritePlan,
+    SplitOptions, SquashMessage, SquashOptions, StartRebaseOptions, UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::revwalk::rev_parse_error::RevParseError;
