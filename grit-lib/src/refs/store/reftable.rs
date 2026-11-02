@@ -985,7 +985,9 @@ mod tests {
             Some(detached.clone())
         );
         assert_eq!(
-            crate::reftable::reftable_resolve_ref(&store.git_dir, "HEAD").expect("resolve"),
+            ReftableRefStore::open(store.git_dir.clone())
+                .and_then(|fresh| fresh.resolve("HEAD"))
+                .expect("resolve"),
             oid
         );
         assert!(store

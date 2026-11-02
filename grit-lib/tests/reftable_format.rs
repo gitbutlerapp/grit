@@ -9,14 +9,15 @@ use std::time::{Duration, Instant};
 
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
+use grit_lib::refs::read_symbolic_ref;
+use grit_lib::refs::reflog::{list_reflog_refs, read_reflog, reflog_exists};
 use grit_lib::refs::reftable::{
-    dump_reftable_blocks, read_write_options, reftable_append_reflog, reftable_create_reflog,
-    reftable_delete_ref, reftable_delete_reflog, reftable_list_reflog_refs, reftable_list_refs,
-    reftable_read_reflog, reftable_read_symbolic_ref, reftable_reflog_exists,
-    reftable_replace_reflog, reftable_resolve_ref, reftable_write_ref, reftable_write_symref,
-    reftable_write_transaction, LogRecord, RefRecord, RefValue, ReftableError, ReftableReader,
-    ReftableStack, ReftableTransactionUpdate, ReftableWriter, WriteOptions,
+    dump_reftable_blocks, read_write_options, reftable_append_reflog, reftable_delete_ref,
+    reftable_list_refs, reftable_write_ref, reftable_write_symref, LogRecord, RefRecord, RefValue,
+    ReftableError, ReftableReader, ReftableStack, ReftableTransactionUpdate, ReftableWriter,
+    WriteOptions,
 };
+use grit_lib::refs::store::{RefStore, ReftableRefStore};
 
 fn oid(byte: u8) -> ObjectId {
     ObjectId::from_bytes(&[byte; 20]).expect("oid")
@@ -621,7 +622,9 @@ fn reftable_stack_write_resolve_list_and_delete() {
     reftable_write_symref(&git_dir, "refs/heads/other", "refs/heads/main", None, None)
         .expect("sym");
     assert_eq!(
-        reftable_resolve_ref(&git_dir, "refs/heads/main").expect("resolve"),
+        ReftableRefStore::open(git_dir.to_path_buf())
+            .and_then(|store| store.resolve("refs/heads/main"))
+            .expect("resolve"),
         oid
     );
     let listed = reftable_list_refs(&git_dir, "refs/heads/").expect("list");
@@ -710,8 +713,8 @@ fn reftable_reflog_create_append_replace_and_list() {
         Some("init"),
     )
     .expect("write");
-    assert!(reftable_reflog_exists(&git_dir, "refs/heads/main"));
-    let entries = reftable_read_reflog(&git_dir, "refs/heads/main").expect("read");
+    assert!(reflog_exists(&git_dir, "refs/heads/main"));
+    let entries = read_reflog(&git_dir, "refs/heads/main").expect("read");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].message, "init");
 
@@ -727,21 +730,27 @@ fn reftable_reflog_create_append_replace_and_list() {
     )
     .expect("append");
     assert_eq!(
-        reftable_read_reflog(&git_dir, "refs/heads/main")
+        read_reflog(&git_dir, "refs/heads/main")
             .expect("read2")
             .len(),
         2
     );
 
-    reftable_create_reflog(&git_dir, "refs/heads/empty").expect("create marker");
-    let listed = reftable_list_reflog_refs(&git_dir).expect("list reflogs");
+    ReftableRefStore::open(git_dir.to_path_buf())
+        .and_then(|store| store.create_reflog("refs/heads/empty"))
+        .expect("create marker");
+    let listed = list_reflog_refs(&git_dir).expect("list reflogs");
     assert!(listed.iter().any(|r| r == "refs/heads/main"));
 
-    reftable_replace_reflog(&git_dir, "refs/heads/main", &[]).expect("clear");
-    assert!(reftable_read_reflog(&git_dir, "refs/heads/main")
+    ReftableRefStore::open(git_dir.to_path_buf())
+        .and_then(|store| store.replace_reflog("refs/heads/main", Vec::new()))
+        .expect("clear");
+    assert!(read_reflog(&git_dir, "refs/heads/main")
         .expect("read cleared")
         .is_empty());
-    reftable_delete_reflog(&git_dir, "refs/heads/empty").expect("delete marker");
+    ReftableRefStore::open(git_dir.to_path_buf())
+        .and_then(|store| store.delete_reflog("refs/heads/empty"))
+        .expect("delete marker");
 }
 
 #[test]
@@ -749,9 +758,9 @@ fn reftable_write_transaction_batch() {
     let (_dir, git_dir) = setup_reftable_git_dir();
     let o1 = oid(0x0a);
     let o2 = oid(0x0b);
-    reftable_write_transaction(
-        &git_dir,
-        vec![
+    ReftableRefStore::open(git_dir.to_path_buf())
+        .expect("open store")
+        .write_reftable_updates(vec![
             ReftableTransactionUpdate {
                 refname: "refs/heads/a".into(),
                 value: Some(RefValue::Val1(o1)),
@@ -764,15 +773,16 @@ fn reftable_write_transaction_batch() {
                 log: None,
                 expected_old: None,
             },
-        ],
-    )
-    .expect("txn");
+        ])
+        .expect("txn");
     assert_eq!(
-        reftable_resolve_ref(&git_dir, "refs/heads/a").expect("a"),
+        ReftableRefStore::open(git_dir.to_path_buf())
+            .and_then(|store| store.resolve("refs/heads/a"))
+            .expect("a"),
         o1
     );
     assert_eq!(
-        reftable_read_symbolic_ref(&git_dir, "refs/heads/b").expect("sym"),
+        read_symbolic_ref(&git_dir, "refs/heads/b").expect("sym"),
         None
     );
 }

@@ -20502,22 +20502,13 @@ pub fn grit_lib::refs::reftable::dump_reftable_blocks(&std::path::Path) -> grit_
 pub fn grit_lib::refs::reftable::read_write_options(&std::path::Path) -> grit_lib::refs::reftable::WriteOptions
 pub fn grit_lib::refs::reftable::read_write_options_with_environment(&std::path::Path, &grit_lib::config::environment::Environment) -> grit_lib::refs::reftable::WriteOptions
 pub fn grit_lib::refs::reftable::reftable_append_reflog(&std::path::Path, &str, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &str, &str, bool) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::reftable::reftable_create_reflog(&std::path::Path, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reftable::reftable_delete_ref(&std::path::Path, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reftable::reftable_delete_ref_with_write_options(&std::path::Path, &str, &grit_lib::refs::reftable::WriteOptions) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::reftable::reftable_delete_reflog(&std::path::Path, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::reftable::reftable_list_reflog_refs(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::refs::reftable::reftable_list_refs(&std::path::Path, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::refs::reftable::reftable_log_record_for_commit(&std::path::Path, &str, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &str, &str) -> grit_lib::error::Result<grit_lib::refs::reftable::LogRecord>
-pub fn grit_lib::refs::reftable::reftable_read_reflog(&std::path::Path, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>
-pub fn grit_lib::refs::reftable::reftable_read_symbolic_ref(&std::path::Path, &str) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
-pub fn grit_lib::refs::reftable::reftable_reflog_exists(&std::path::Path, &str) -> bool
-pub fn grit_lib::refs::reftable::reftable_replace_reflog(&std::path::Path, &str, &[grit_lib::refs::reflog::ReflogEntry]) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::reftable::reftable_resolve_ref(&std::path::Path, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::reftable::reftable_write_ref(&std::path::Path, &str, &grit_lib::objects::ObjectId, core::option::Option<&str>, core::option::Option<&str>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reftable::reftable_write_ref_with_write_options(&std::path::Path, &str, &grit_lib::objects::ObjectId, core::option::Option<&str>, core::option::Option<&str>, &grit_lib::refs::reftable::WriteOptions) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reftable::reftable_write_symref(&std::path::Path, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::reftable::reftable_write_transaction(&std::path::Path, alloc::vec::Vec<grit_lib::refs::reftable::ReftableTransactionUpdate>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reftable::verify_ref_transaction_batch_reftable(&std::path::Path, &[grit_lib::refs::RefBatchItem]) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
 pub mod grit_lib::refs::shorten
 pub fn grit_lib::refs::shorten::expand_ref_dwim_full_name(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<(usize, core::option::Option<alloc::string::String>)>

@@ -29,7 +29,7 @@ use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::fs_publish::publish_no_clobber;
 use crate::objects::ObjectId;
-use crate::refs::store::RefStoreError;
+use crate::refs::store::{RefStore as _, RefStoreError};
 use memmap2::Mmap;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -3456,12 +3456,6 @@ impl ReftableStack {
 // Integration helpers — used by refs.rs and commands
 // ---------------------------------------------------------------------------
 
-/// Resolve a ref in a reftable repo, following symbolic refs.
-pub fn reftable_resolve_ref(git_dir: &Path, refname: &str) -> Result<ObjectId> {
-    use crate::refs::store::RefStore;
-    crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?.resolve(refname)
-}
-
 pub(crate) fn reftable_storage_location(git_dir: &Path, refname: &str) -> (PathBuf, String) {
     if let Some(rest) = refname.strip_prefix("worktrees/") {
         if let Some((worktree_id, per_worktree_ref)) = rest.split_once('/') {
@@ -3680,20 +3674,6 @@ pub fn verify_ref_transaction_batch_reftable(
     Ok(())
 }
 
-/// Write multiple reftable ref updates as one transaction per backing store.
-///
-/// Ref names are routed through the same worktree/common-dir rules as the
-/// single-ref helpers. Updates targeting different reftable stacks are grouped
-/// by stack; each group is written with one shared update index.
-pub fn reftable_write_transaction(
-    git_dir: &Path,
-    updates: Vec<ReftableTransactionUpdate>,
-) -> Result<()> {
-    crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?
-        .write_reftable_updates(updates)
-        .map_err(Into::into)
-}
-
 #[cfg(test)]
 mod reftable_tx_fail_inject {
     use std::cell::RefCell;
@@ -3780,17 +3760,14 @@ pub fn reftable_delete_ref_with_write_options(
     stack.write_ref(&storage_refname, RefValue::Deletion, None, opts)
 }
 
-/// Read the symbolic target of a ref in a reftable repo.
-pub fn reftable_read_symbolic_ref(git_dir: &Path, refname: &str) -> Result<Option<String>> {
-    crate::refs::read_symbolic_ref(git_dir, refname)
-}
-
 fn push_list_ref_entry(git_dir: &Path, rec: &RefRecord, out: &mut Vec<(String, ObjectId)>) {
     match &rec.value {
         RefValue::Val1(oid) => out.push((rec.name.clone(), *oid)),
         RefValue::Val2(oid, _) => out.push((rec.name.clone(), *oid)),
         RefValue::Symref(target) => {
-            if let Ok(oid) = reftable_resolve_ref(git_dir, target) {
+            let resolved = crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())
+                .and_then(|store| store.resolve(target));
+            if let Ok(oid) = resolved {
                 out.push((rec.name.clone(), oid));
             }
         }
@@ -3804,32 +3781,6 @@ pub fn reftable_list_refs(git_dir: &Path, prefix: &str) -> Result<Vec<(String, O
     stack.list_refs_under_prefix(git_dir, prefix)
 }
 
-/// Read reflog entries for a ref from the reftable stack.
-pub fn reftable_read_reflog(
-    git_dir: &Path,
-    refname: &str,
-) -> Result<Vec<crate::reflog::ReflogEntry>> {
-    use crate::refs::store::RefStore as _;
-    let store = crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?;
-    let mut entries = Vec::new();
-    store.for_each_reflog_entry(refname, false, &mut |entry| {
-        entries.push(entry.clone());
-        std::ops::ControlFlow::Continue(())
-    })?;
-    Ok(entries)
-}
-
-/// Replace the reflog entries for a ref in a reftable repo.
-pub fn reftable_replace_reflog(
-    git_dir: &Path,
-    refname: &str,
-    entries: &[crate::reflog::ReflogEntry],
-) -> Result<()> {
-    use crate::refs::store::RefStore as _;
-    crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?
-        .replace_reflog(refname, entries.to_vec())
-}
-
 /// Whether a reflog entry should be written for `storage_refname`, mirroring
 /// git's reftable-backend `should_write_log`.
 ///
@@ -3838,7 +3789,9 @@ pub fn reftable_replace_reflog(
 fn reftable_should_write_log(git_dir: &Path, storage_refname: &str) -> bool {
     let mode = crate::refs::effective_log_refs_config(git_dir);
     crate::refs::should_autocreate_reflog_for_mode(storage_refname, mode)
-        || reftable_reflog_exists(git_dir, storage_refname)
+        || crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())
+            .and_then(|store| store.reflog_exists(storage_refname))
+            .unwrap_or(false)
 }
 
 /// Append a reflog entry for a reftable repo.
@@ -3898,40 +3851,6 @@ pub fn reftable_append_reflog(
         }
     }
     Ok(())
-}
-
-/// Check whether a reftable repo has reflogs for the given ref.
-pub fn reftable_reflog_exists(git_dir: &Path, refname: &str) -> bool {
-    use crate::refs::store::RefStore as _;
-    crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())
-        .ok()
-        .and_then(|store| store.reflog_exists(refname).ok())
-        .unwrap_or(false)
-}
-
-/// List refs that have reflogs in a reftable repo.
-pub fn reftable_list_reflog_refs(git_dir: &Path) -> Result<Vec<String>> {
-    use crate::refs::store::RefStore as _;
-    let store = crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?;
-    let mut refs = Vec::new();
-    store.for_each_reflog_ref(&mut |name| {
-        refs.push(name.to_owned());
-        std::ops::ControlFlow::Continue(())
-    })?;
-    refs.sort();
-    Ok(refs)
-}
-
-/// Create an empty reflog marker in a reftable repo.
-pub fn reftable_create_reflog(git_dir: &Path, refname: &str) -> Result<()> {
-    use crate::refs::store::RefStore as _;
-    crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?.create_reflog(refname)
-}
-
-/// Delete all reflog records and empty-log marker for a ref in a reftable repo.
-pub fn reftable_delete_reflog(git_dir: &Path, refname: &str) -> Result<()> {
-    use crate::refs::store::RefStore as _;
-    crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?.delete_reflog(refname)
 }
 
 // ---------------------------------------------------------------------------
@@ -4392,7 +4311,9 @@ mod tests {
 
         let (_dir, git_dir) = reftable_repo_with_config("[core]\n\tlogAllRefUpdates = false\n");
         assert!(!reftable_should_write_log(&git_dir, "refs/heads/topic"));
-        reftable_create_reflog(&git_dir, "refs/heads/topic").expect("create reflog");
+        crate::refs::store::ReftableRefStore::open(git_dir.clone())
+            .and_then(|store| store.create_reflog("refs/heads/topic"))
+            .expect("create reflog");
         assert!(reftable_should_write_log(&git_dir, "refs/heads/topic"));
     }
 

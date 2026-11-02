@@ -20,8 +20,7 @@ use grit_lib::refs::reflog::{
     read_reflog_dwim, reflog_exists, truncate_last_reflog_line, ReflogEntry, ReflogExpireParams,
     ReflogSelector,
 };
-use grit_lib::refs::reftable::{reftable_create_reflog, reftable_replace_reflog};
-use grit_lib::refs::store::RefName;
+use grit_lib::refs::store::{RefName, RefStore, ReftableRefStore};
 use grit_lib::refs::{
     append_reflog, append_reflog_with_config, effective_log_refs_config, read_log_refs_config,
     reflog_file_path, write_ref, write_symbolic_ref,
@@ -73,7 +72,9 @@ fn open_repo(worktree: &Path) -> Repository {
 fn write_controlled_reflog(repo: &TestRepo, refname: &str, entries: &[ReflogEntry]) {
     let git_dir = repo.git_dir();
     if repo.backend() == Backend::Reftable {
-        reftable_replace_reflog(&git_dir, refname, entries).expect("replace reftable reflog");
+        ReftableRefStore::open(git_dir.to_path_buf())
+            .and_then(|store| store.replace_reflog(refname, entries.to_vec()))
+            .expect("replace reftable reflog");
         return;
     }
     let body = entries
@@ -876,7 +877,9 @@ fn reflog_exists_list_and_path_match_git() {
         write_ref(&git_dir, sibling, &oid).expect("sibling");
         let sib_log = reflog_file_path(&git_dir, sibling);
         if backend == Backend::Reftable {
-            reftable_create_reflog(&git_dir, sibling).expect("empty reftable reflog");
+            ReftableRefStore::open(git_dir.to_path_buf())
+                .and_then(|store| store.create_reflog(sibling))
+                .expect("empty reftable reflog");
         } else {
             if let Some(p) = sib_log.parent() {
                 fs::create_dir_all(p).expect("mkdir");
